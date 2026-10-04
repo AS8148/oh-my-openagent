@@ -83,7 +83,7 @@ export class StoreExtensions {
     return this.registered.get(descriptor.name)?.descriptor === descriptor
   }
 
-  async ensure(descriptor: Pick<StoreExtensionRegistration, "name" | "migrations">, now: number): Promise<number> {
+  private async ensure(descriptor: Pick<StoreExtensionRegistration, "name" | "migrations">, now: number): Promise<number> {
     const { name, migrations } = descriptor
     // Like core `migrate`, a current extension costs no write lock: read its version lock-free and
     // take the lock only when a step is pending or the version is unknown.
