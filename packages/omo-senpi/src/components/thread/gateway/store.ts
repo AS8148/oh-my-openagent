@@ -28,6 +28,7 @@ export type GatewayStoreOptions = {
     readonly busyTimeoutMs?: number
     readonly lockWaitMaxMs?: number
     readonly moduleUrl?: string | URL
+    readonly onAwaitArmed?: (awaitRequestId: string) => void
     readonly onWorkerStarted?: (worker: Worker) => void
     /** A shorter idle interval than `GATEWAY_STORE_IDLE_RETIRE_MS`. */
     readonly idleRetireMs?: number
@@ -252,7 +253,7 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
     })
   }
 
-  const extensions = createExtensionFacade({ agentDir: options.agentDir, now, call, registrations })
+  const extensions = createExtensionFacade({ agentDir: options.agentDir, now, call, registrations, ...(options._test?.onAwaitArmed === undefined ? {} : { onAwaitArmed: options._test.onAwaitArmed }) })
 
   return {
     ...extensions,
