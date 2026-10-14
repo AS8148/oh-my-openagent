@@ -81,10 +81,38 @@ function expandedSkillBlockNames(text: string): readonly string[] {
 }
 const PLAN_ARTIFACT_PATH_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit"])
 
+type PlanTouch = { count: number; lastTouchedAt: number }
+
+// session_shutdown reasons that retire THIS extension generation while the conversation lives on:
+// a reload rebuilds the runner for the same session, and new/resume/fork set this session aside for
+// another one the user can switch back to (same session file, same id). "quit" retires the session
+// itself, and a host that reports no reason is treated as a retirement, so both drop the state.
+const SESSION_SURVIVING_SHUTDOWN_REASONS: ReadonlySet<string> = new Set(["reload", "new", "resume", "fork"])
+// Session-keyed handoffs survive replacement extension factories, like config-reload's registry in
+// the host: a reload or session replacement rebuilds this extension generation - and with it this
+// tracker - while the conversation keeps its sessionId, so instance-local maps alone lose the proof
+// that the human asked and deny plan review for the rest of the session. Only real input events
+// ever write a channel, so carrying a session's own record forward cannot launder provenance.
+const sessionHandoffs = new Map<string, SessionHandoff>()
+
+type SessionHandoff = {
+  readonly invoked: readonly string[]
+  readonly requested: readonly string[]
+  readonly planTouches: readonly (readonly [string, PlanTouch])[]
+  readonly planTouchSequence: number
+}
+
+function shutdownKeepsSession(payload: unknown): boolean {
+  if (!isRecord(payload)) return false
+  const reason = payload["reason"]
+  return typeof reason === "string" && SESSION_SURVIVING_SHUTDOWN_REASONS.has(reason)
+}
+
 export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvocationTracker {
   const invokedBySession = new Map<string, Set<string>>()
   const requestedBySession = new Map<string, Set<string>>()
-  const planTouchesBySession = new Map<string, Map<string, { count: number; lastTouchedAt: number }>>()
+  const planTouchesBySession = new Map<string, Map<string, PlanTouch>>()
+  const adoptedSessions = new Set<string>()
   let planTouchSequence = 0
 
   const record = (target: Map<string, Set<string>>, sessionId: string | undefined, skill: string | undefined): void => {
@@ -97,10 +125,41 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
     target.set(sessionId, new Set([skill]))
   }
 
+  // Adopt the session's handoff once per session per generation, before this generation records
+  // anything for it, so the rebuilt tracker starts from what the retired one observed.
+  const adoptHandoff = (sessionId: string | undefined): void => {
+    if (sessionId === undefined || adoptedSessions.has(sessionId)) return
+    adoptedSessions.add(sessionId)
+    const handoff = sessionHandoffs.get(sessionId)
+    if (handoff === undefined) return
+    for (const skill of handoff.invoked) record(invokedBySession, sessionId, skill)
+    for (const skill of handoff.requested) record(requestedBySession, sessionId, skill)
+    if (handoff.planTouches.length > 0) {
+      const touches = planTouchesBySession.get(sessionId) ?? new Map<string, PlanTouch>()
+      for (const [path, touch] of handoff.planTouches) if (!touches.has(path)) touches.set(path, { ...touch })
+      planTouchesBySession.set(sessionId, touches)
+    }
+    planTouchSequence = Math.max(planTouchSequence, handoff.planTouchSequence)
+  }
+
+  const depositHandoff = (sessionId: string): void => {
+    const invoked = [...(invokedBySession.get(sessionId) ?? [])]
+    const requested = [...(requestedBySession.get(sessionId) ?? [])]
+    const planTouches = [...(planTouchesBySession.get(sessionId) ?? [])].map(
+      ([path, touch]) => [path, { ...touch }] as const,
+    )
+    if (invoked.length === 0 && requested.length === 0 && planTouches.length === 0) {
+      sessionHandoffs.delete(sessionId)
+      return
+    }
+    sessionHandoffs.set(sessionId, { invoked, requested, planTouches, planTouchSequence })
+  }
+
   pi.on("tool_result", (payload, eventCtx) => {
     const event = asToolResultEvent(payload)
     if (event === undefined || event.isError) return
     const sessionId = extractSessionId(eventCtx)
+    adoptHandoff(sessionId)
     if (event.toolName === "read") record(invokedBySession, sessionId, skillNameFromPath(event.path))
     if (sessionId === undefined) return
     const touched = planArtifactPathsTouched(event)
@@ -125,6 +184,7 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
     if (event.source === AGENT_MANUFACTURABLE_INPUT_SOURCE) return
     const text = event.text
     const sessionId = extractSessionId(eventCtx)
+    adoptHandoff(sessionId)
     if (text.startsWith(SKILL_COMMAND_PREFIX)) {
       // Mirror senpi's parse (see the ultrawork component): the skill name runs to the first space.
       const spaceIndex = text.indexOf(" ")
@@ -148,27 +208,33 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
     if (isOwnWordsPlanRequest(visible)) record(requestedBySession, sessionId, "ulw-plan")
   })
 
-  pi.on("session_shutdown", (_payload, eventCtx) => {
+  pi.on("session_shutdown", (payload, eventCtx) => {
     const sessionId = extractSessionId(eventCtx)
     if (sessionId === undefined) return
+    if (shutdownKeepsSession(payload)) depositHandoff(sessionId)
+    else sessionHandoffs.delete(sessionId)
     invokedBySession.delete(sessionId)
     requestedBySession.delete(sessionId)
     planTouchesBySession.delete(sessionId)
+    adoptedSessions.delete(sessionId)
   })
 
   return {
-    stateFor: (sessionId) => ({
-      hasInvoked: (skill) => invokedBySession.get(sessionId)?.has(skill) ?? false,
-      hasUserRequested: (skill) => requestedBySession.get(sessionId)?.has(skill) ?? false,
-      hasPlanArtifact: () => (planTouchesBySession.get(sessionId)?.size ?? 0) > 0,
-      planArtifactReferences: () => {
-        const touches = planTouchesBySession.get(sessionId)
-        if (touches === undefined) return []
-        return [...touches.entries()]
-          .map(([path, touch]) => ({ path, count: touch.count, lastTouchedAt: touch.lastTouchedAt }))
-          .sort((a, b) => b.count - a.count || b.lastTouchedAt - a.lastTouchedAt)
-      },
-    }),
+    stateFor: (sessionId) => {
+      adoptHandoff(sessionId)
+      return {
+        hasInvoked: (skill) => invokedBySession.get(sessionId)?.has(skill) ?? false,
+        hasUserRequested: (skill) => requestedBySession.get(sessionId)?.has(skill) ?? false,
+        hasPlanArtifact: () => (planTouchesBySession.get(sessionId)?.size ?? 0) > 0,
+        planArtifactReferences: () => {
+          const touches = planTouchesBySession.get(sessionId)
+          if (touches === undefined) return []
+          return [...touches.entries()]
+            .map(([path, touch]) => ({ path, count: touch.count, lastTouchedAt: touch.lastTouchedAt }))
+            .sort((a, b) => b.count - a.count || b.lastTouchedAt - a.lastTouchedAt)
+        },
+      }
+    },
   }
 }
 
