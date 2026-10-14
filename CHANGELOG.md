@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The thread tools' socket client loads on first use.** The thread component still registers its tools, store and lifecycle handlers at startup, but the client that talks to session hosts now ships as its own `omo-thread-client.js` and loads with the first thread or gateway call, so about 11 KB leave the main extension bundle. Thanks to @Dante-dan. ([#9624](https://github.com/code-yeongyu/oh-my-openagent/pull/9624))
+
 **macOS computer use shows a display-only virtual cursor by default.** The overlay follows the agent's pointer actions without moving your real cursor or changing input permissions; set `computer.showCursor: false` to hide it. ([#9887](https://github.com/code-yeongyu/oh-my-openagent/issues/9887), [#9889](https://github.com/code-yeongyu/oh-my-openagent/pull/9889))
 
 **Internal: the model-version migration skip bookkeeping is cleaned up.** The set of already-migrated models is now built once per run, and the comment describes the source-keyed rule; behaviour is unchanged. ([#10145](https://github.com/code-yeongyu/oh-my-openagent/pull/10145))
