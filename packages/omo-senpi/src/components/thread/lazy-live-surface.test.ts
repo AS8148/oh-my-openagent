@@ -21,14 +21,28 @@ describe("lazy live thread client", () => {
     expect(host.socket).toBe("/tmp/thread-before.sock")
     expect(loads).toBe(1)
   })
-  it("shares a failed runtime load without constructing a second client", async () => {
+  it("#given a failed runtime load #when concurrent callers then a later caller arrive #then the batch shares one load and the later call loads again", async () => {
     let loads = 0
     const host = createLazyLiveThreadSurface(undefined, {
       env: { OMO_RPC_SOCKET_PATH: "/tmp/thread-lazy.sock" },
-      loadRuntime: async () => { loads++; throw new Error("runtime unavailable") },
+      exists: () => false, registry: async () => [], statusAll: async () => [],
+      loadRuntime: async () => { loads++; if (loads === 1) throw new Error("runtime unavailable"); return { createLiveThreadSurface } },
     })
     const results = await Promise.allSettled([host.listSessions(), host.listView()])
     expect(results.map(result => result.status)).toEqual(["rejected", "rejected"])
     expect(loads).toBe(1)
+    const view = await host.listView({ offline: true })
+    expect(view.sessions).toEqual([])
+    expect(loads).toBe(2)
+  })
+  it("#given the runtime cannot load #when a thread operation runs #then it fails as host_unavailable for the registered socket, which the thread tools classify", async () => {
+    const host = createLazyLiveThreadSurface(undefined, {
+      env: { OMO_RPC_SOCKET_PATH: "/tmp/thread-lazy.sock" },
+      loadRuntime: async () => { throw new Error("Cannot find module '#omo-thread-client-runtime'") },
+    })
+    const failed = await host.listSessions().then(() => undefined, (error: unknown) => error)
+    expect(failed).toBeInstanceOf(Error)
+    expect((failed as Error).message).toBe("host_unavailable:/tmp/thread-lazy.sock")
+    expect((failed as Error).cause).toBeInstanceOf(Error)
   })
 })

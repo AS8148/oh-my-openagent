@@ -7,12 +7,20 @@ export type LazyLiveThreadSurfaceOptions = LiveThreadSurfaceOptions & {
   readonly loadRuntime?: () => Promise<Pick<typeof import("./live-surface"), "createLiveThreadSurface">>
 }
 
-/** Registration stays synchronous; the RPC client is constructed on the first async operation. */
+/** Registration stays synchronous; the RPC client is constructed on the first async operation and rebuilt after a failed one. */
 export function createLazyLiveThreadSurface(pi: SenpiExtensionAPI | undefined, options: LazyLiveThreadSurfaceOptions = {}): LiveThreadSurface {
   const socket = options.socket ?? resolveThreadSocket(options.env)
   let runtime: Promise<LiveThreadSurface> | undefined
   const loadRuntime = options.loadRuntime ?? (() => import("#omo-thread-client-runtime"))
-  const load = () => runtime ??= loadRuntime().then(({ createLiveThreadSurface }) => createLiveThreadSurface(pi, { ...options, socket }))
+  // Concurrent callers share one attempt. A failed attempt is not cached: the next call loads again,
+  // so a transient import or construction failure does not last until restart. The failure reads as
+  // host_unavailable for this socket, which the thread tools already classify.
+  const load = () => runtime ??= loadRuntime()
+    .then(({ createLiveThreadSurface }) => createLiveThreadSurface(pi, { ...options, socket }))
+    .catch((error: unknown) => {
+      runtime = undefined
+      throw new Error(`host_unavailable:${socket}`, { cause: error })
+    })
   const sessionPort = (endpoint?: string): ThreadSessionPort => {
     const target = async () => {
       const host = await load()
