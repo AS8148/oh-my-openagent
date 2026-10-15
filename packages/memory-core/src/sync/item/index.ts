@@ -1,2 +1,6 @@
+export { CaptureBaselineError, captureItem } from "./capture"
 export { caseFold } from "./casefold"
+export { createItemDoc, deleteItem, isLive, itemFrontier } from "./document"
+export type { ItemFrontier } from "./document"
 export { normalizeItemKey } from "./key"
+export { renderItem } from "./render"
