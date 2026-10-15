@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { EventTelemetryProperties } from "@oh-my-opencode/telemetry-core"
@@ -213,6 +213,22 @@ describe("session_summary review findings", () => {
     writeFileSync(join(rollupDir(dir), "s8.json.claimed-999993"), "{}")
     recorder({ dir, alive: false }).summary.recordTurn("s2", turn())
     expect(readdirSync(rollupDir(dir)).filter((name) => name.includes(".tmp") || name.includes(".claimed-"))).toEqual([])
+  })
+
+  // #10229: a rollup written before consent was recorded (or by an opted-out session) carries no
+  // opted-in mark, so nothing proves its session agreed to be sent: recovery deletes it unsent.
+  test("#given a dead process's rollup without a consent mark #when recovery runs #then it is deleted and never sent", () => {
+    const dir = stateDir()
+    recorder({ dir, pid: 999_995 }).summary.recordTurn("legacy", turn())
+    const path = join(rollupDir(dir), "legacy.json")
+    const unmarked: Record<string, unknown> = JSON.parse(readFileSync(path, "utf8"))
+    Reflect.deleteProperty(unmarked, "consent")
+    writeFileSync(path, JSON.stringify(unmarked))
+    const next = recorder({ dir, alive: false })
+    next.summary.recordTurn("s2", turn())
+    next.summary.finish("s2", "quit")
+    expect(next.captured.filter(({ properties }) => properties.$session_id === "legacy")).toEqual([])
+    expect(readdirSync(rollupDir(dir))).toEqual([])
   })
 
   test("#given an orphan with no window and nothing sent #when its session resumes #then seq starts at 0", () => {
