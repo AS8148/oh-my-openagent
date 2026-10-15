@@ -96,11 +96,7 @@ export class GitMemoryRepo {
       }
     }
 
-    await withGitLockRetry(() =>
-      withStrandedGitLockRecovery(this.dir, () =>
-        this.git([...authorFlags(author), "commit", "--allow-empty", "-m", EMPTY_INITIAL_COMMIT]),
-      ),
-    )
+    await withStrandedGitLockRecovery(this.dir, () => this.git([...authorFlags(author), "commit", "--allow-empty", "-m", EMPTY_INITIAL_COMMIT]))
     return this.requireHead()
   }
 
@@ -170,14 +166,10 @@ export class GitMemoryRepo {
     const tracked = normalized.filter((path) => atHead.has(path))
     const untracked = normalized.filter((path) => !atHead.has(path))
     if (tracked.length > 0) {
-      await withGitLockRetry(() =>
-        withStrandedGitLockRecovery(this.dir, () => this.git(["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked])),
-      )
+      await withStrandedGitLockRecovery(this.dir, () => this.git(["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked]))
     }
     for (const path of untracked) {
-      await withGitLockRetry(() =>
-        withStrandedGitLockRecovery(this.dir, () => this.git(["rm", "-q", "--cached", "--ignore-unmatch", "--", path])),
-      )
+      await withStrandedGitLockRecovery(this.dir, () => this.git(["rm", "-q", "--cached", "--ignore-unmatch", "--", path]))
       await rm(join(this.dir, path), { force: true })
     }
   }
@@ -242,19 +234,11 @@ export class GitMemoryRepo {
   }
 
   private async ensureIdentity(authorName: string): Promise<void> {
-    if ((await this.configGet("omo.agentId")) !== this.agentId) {
-      await this.configSet("omo.agentId", this.agentId)
-    }
-    if (!(await this.configGet("user.email"))) {
-      await this.configSet("user.email", `${this.agentId}@omo.local`)
-    }
+    if ((await this.configGet("omo.agentId")) !== this.agentId) await this.configSet("omo.agentId", this.agentId)
+    if (!(await this.configGet("user.email"))) await this.configSet("user.email", `${this.agentId}@omo.local`)
     if (!(await this.configGet("user.name"))) await this.configSet("user.name", authorName)
-    if ((await this.configGet("commit.gpgsign")) === null) {
-      await this.configSet("commit.gpgsign", "false")
-    }
-    if ((await this.configGet("gc.auto")) === null) {
-      await this.configSet("gc.auto", "0")
-    }
+    if ((await this.configGet("commit.gpgsign")) === null) await this.configSet("commit.gpgsign", "false")
+    if ((await this.configGet("gc.auto")) === null) await this.configSet("gc.auto", "0")
   }
 
   private async stage(paths: readonly string[]): Promise<void> {
@@ -269,6 +253,8 @@ export class GitMemoryRepo {
     reason: string,
     author: GitCommitAuthor,
   ): Promise<GitCommitResult> {
+    // Every index/ref mutation on the commit path runs through transient-lock retry plus stranded
+    // lock recovery, so a SIGKILLed writer's debris never wedges or corrupts the repo (omo #10177).
     await withStrandedGitLockRecovery(this.dir, () => this.git([...authorFlags(author), "commit", "-m", reason]))
     return { committed: true, sha: await this.requireHead() }
   }
