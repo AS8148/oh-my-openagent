@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
 
 import {
   CHECKPOINT_MAX_TURNS,
@@ -110,6 +111,22 @@ describe("session_summary windows", () => {
     await resumed.summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
     await resumed.summary.finish("s1", "quit")
     expect(rows(resumed.published)).toEqual([[1, "shutdown", 1]])
+  })
+
+  test("#given a dead owner's window that another process claims first #when this process records a turn #then it keeps its own copy and never writes the shared file", async () => {
+    const dir = stateDirs.make()
+    const dead = createTestRecorder({ dir, pid: 111 })
+    await dead.summary.recordTurn("s1", summaryTurn())
+    const shared = join(summaryDir(dir), "s1.json")
+    const before = readFileSync(shared, "utf8")
+
+    const live = createTestRecorder({ dir, pid: 222 })
+    // The race: this process read the dead owner's file, but a third process renamed it away first.
+    Object.assign(live.storage, { claimWindow: () => undefined })
+    await live.summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
+
+    expect(readFileSync(shared, "utf8")).toBe(before)
+    expect(existsSync(join(summaryDir(dir), "s1@boot-222.json"))).toBe(true)
   })
 })
 

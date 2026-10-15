@@ -142,7 +142,8 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     }
     if (storage.isOwnerAlive(stored.owner)) return fresh(stored.seq, storage.windowKey(sessionHash, true))
     const claimed = storage.claimWindow(key)
-    if (claimed === undefined) return fresh(stored.seq)
+    // Another process won the claim and now continues the shared file: this one keeps its own copy beside it.
+    if (claimed === undefined) return fresh(stored.seq, storage.windowKey(sessionHash, true))
     const record = claimed.record
     if (record === undefined || record === CORRUPT) {
       removeFile(claimed.claimPath)
