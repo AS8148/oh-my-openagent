@@ -62,6 +62,19 @@ describe("installEngineCaTrust", () => {
     expect(touched).toBe(false)
   })
 
+  // Diagnostics contract (#10236): the report must show what NODE_EXTRA_CA_CERTS contributed.
+  test("#given NODE_EXTRA_CA_CERTS loaded one CA #then the report counts it as ambient and installs it", () => {
+    let installed: string[] = []
+    const tls = {
+      getCACertificates: (kind: string) => ({ bundled: ["B"], system: ["S"], extra: ["A"] })[kind] ?? [],
+      setDefaultCACertificates: (certificates: string[]) => {
+        installed = certificates
+      },
+    }
+    expect(installEngineCaTrust({}, tls as never)).toEqual({ installed: true, bundled: 1, system: 1, ambient: 1, extra: 0 })
+    expect(installed).toEqual(["B", "S", "A"])
+  })
+
   test("#given a runtime without the trust APIs #then leaves it alone and still sets NODE_USE_SYSTEM_CA", () => {
     const env: NodeJS.ProcessEnv = {}
     expect(installEngineCaTrust(env, {} as never).installed).toBe(false)
@@ -72,15 +85,29 @@ describe("installEngineCaTrust", () => {
 // The bug is specific to `bun build --compile`: a compiled binary ignores --use-system-ca, so this
 // compiles a real probe and connects to a local TLS server whose leaf chains to a private CA.
 describe("engine entry", () => {
-  test("#given an invalid OMO_EXTRA_CA_CERTIFICATES #then omo refuses to start, even for --version", () => {
-    const entry = join(import.meta.dir, "..", "compile-entry.ts")
-    const run = spawnSync(process.execPath, [entry, "--version"], {
+  const entry = join(import.meta.dir, "..", "compile-entry.ts")
+  const runEntry = (args: string[]) =>
+    spawnSync(process.execPath, [entry, ...args], {
       env: { ...process.env, OMO_EXTRA_CA_CERTIFICATES: "junk" },
       encoding: "utf8",
     })
+
+  test("#given an invalid OMO_EXTRA_CA_CERTIFICATES #then a working command refuses to start", () => {
+    const run = runEntry(["doctor"])
     expect(run.status).toBe(78)
     expect(run.stderr).toContain("OMO_EXTRA_CA_CERTIFICATES")
   })
+
+  // `--version` and `--help` open no connection, so a bad trust value must not hide them (#10236).
+  test.each([["--version"], ["-v"], ["--help"], ["-h"]])(
+    "#given an invalid OMO_EXTRA_CA_CERTIFICATES #then %s still answers and names the problem",
+    (flag) => {
+      const run = runEntry([flag])
+      expect({ status: run.status, warned: run.stderr.includes("OMO_EXTRA_CA_CERTIFICATES") }).toEqual({ status: 0, warned: true })
+      expect(run.stdout.trim().length).toBeGreaterThan(0)
+    },
+    60_000,
+  )
 })
 
 describe("compiled binary", () => {

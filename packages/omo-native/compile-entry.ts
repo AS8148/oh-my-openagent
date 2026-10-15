@@ -231,15 +231,22 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
 
 export { reexecProvisionedRuntime } from "./provisioned-handoff"
 
+const INFORMATIONAL_FLAGS = new Set(["--version", "-v", "--help", "-h"])
+const isInformationalInvocation = (args: string[]): boolean => args.length === 1 && INFORMATIONAL_FLAGS.has(args[0] ?? "")
+
 async function main(): Promise<void> {
   // Before anything opens TLS, and on every start: `host ensure`, the host daemon and the
-  // provisioned handoff all re-enter here (#10215). A bad value refuses to start (exit 78).
+  // provisioned handoff all re-enter here (#10215). A bad value refuses to start (exit 78), except
+  // for `--version` and `--help`, which open no connection and still answer with a warning (#10236).
   try {
     installEngineCaTrust()
   } catch (error) {
     if (!(error instanceof ExtraCaCertificatesError)) throw error
-    process.stderr.write(`omo: ${error.message}; not starting with a trust set the caller did not intend\n`)
-    process.exit(78)
+    if (!isInformationalInvocation(process.argv.slice(2))) {
+      process.stderr.write(`omo: ${error.message}; not starting with a trust set the caller did not intend\n`)
+      process.exit(78)
+    }
+    process.stderr.write(`omo: ${error.message}; every other command refuses to start until it is fixed\n`)
   }
   const embedded = (globalThis as typeof globalThis & { Bun?: { embeddedFiles?: EmbeddedFile[] } }).Bun?.embeddedFiles as EmbeddedFile[] | undefined
   if (!embedded?.length) {

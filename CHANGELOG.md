@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**`omo --version` and `omo --help` still answer when `OMO_EXTRA_CA_CERTIFICATES` is invalid.** The compiled binary refuses to start (exit 78) when that value is not a valid CA bundle, and it used to refuse these two as well. They open no connection, so they now print their usual output plus a warning that names the problem; every other command still refuses. The engine's trust report also counts the certificates `NODE_EXTRA_CA_CERTS` added.
+
 **Team-mode panes open in the worktree path exactly as written.** The member's worktree path was passed to tmux `split-window -c`, which expands its argument as a tmux format, so `#{...}` in a model-supplied `team_create` path changed the directory a pane opened in, and `#(...)` is tmux's shell-exec format. The path now has every `#` doubled, the same escaping the subagent pane titles use. ([#10233](https://github.com/code-yeongyu/oh-my-openagent/issues/10233))
 
 **The tmux subagent placeholder pane prints the task description exactly as written, and never runs it.** The "OMO subagent pane ready" banner was escaped for one shell level while tmux runs it through two, so backticks, `$(...)` and `$VAR` in a model-written description were evaluated in your pane, `"` vanished, and `; | & # ( )` showed stray backslashes. Both banner arguments now use the same nested quoting as the attach command. Thanks to @cynkai. ([#10228](https://github.com/code-yeongyu/oh-my-openagent/issues/10228), [#9867](https://github.com/code-yeongyu/oh-my-openagent/pull/9867))
