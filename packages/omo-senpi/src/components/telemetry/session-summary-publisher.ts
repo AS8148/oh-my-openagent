@@ -5,7 +5,8 @@ import type { PendingRecord, SummaryStorage } from "./session-summary-storage"
 import { summaryProperties, type EndedBy, type SummaryWindow } from "./session-summary-window"
 import { isSessionSampled } from "./session-summary-sampling"
 
-export type SummaryPublication = { readonly uuid: string; readonly properties: EventTelemetryProperties }
+/** `timestamp` is the window's close time (the pending record's createdAt), the same on every re-send. */
+export type SummaryPublication = { readonly uuid: string; readonly properties: EventTelemetryProperties; readonly timestamp: number }
 
 /** Resolves true only when the transport acknowledged the event (collector 200, PostHog flush resolved). */
 export type PublishSummary = (publication: SummaryPublication) => Promise<boolean>
@@ -62,7 +63,7 @@ export function createSummaryPublisher(input: {
 
   const send = async (record: PendingRecord): Promise<void> => {
     try {
-      if (await input.publish({ uuid: record.uuid, properties: record.properties })) input.storage.removePending(record.uuid)
+      if (await input.publish({ uuid: record.uuid, properties: record.properties, timestamp: record.createdAt })) input.storage.removePending(record.uuid)
     } catch (error) {
       report("telemetry_capture_failed", error)
     } finally {

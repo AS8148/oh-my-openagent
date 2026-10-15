@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
@@ -79,10 +79,18 @@ describe("session_summary acknowledgment through the native transport", () => {
       expect(firstUuid).toBeString()
       expect(pendingOf(agentDir)).toEqual([`${firstUuid}.json`])
 
+      const pending: unknown = JSON.parse(readFileSync(join(summaryDir(join(agentDir, "omo-senpi", "omo-native")), "pending", `${firstUuid}.json`), "utf8"))
+
       const recorder = createTransportRecorder()
       await runSession(agentDir, recorder.factory, false)
-      expect(summariesOf(recorder.messages).map(({ uuid }) => uuid)).toEqual([firstUuid])
+      const resent = summariesOf(recorder.messages)
+      expect(resent.map(({ uuid }) => uuid)).toEqual([firstUuid])
       expect(pendingOf(agentDir)).toEqual([])
+
+      // The re-send keeps the original event time, so PostHog's (uuid, day) dedup key stays the same.
+      const createdAt = Reflect.get(pending as object, "createdAt")
+      expect(summariesOf(failed)[0]?.timestamp?.getTime()).toBe(createdAt)
+      expect(resent[0]?.timestamp?.getTime()).toBe(createdAt)
     })
   })
 })

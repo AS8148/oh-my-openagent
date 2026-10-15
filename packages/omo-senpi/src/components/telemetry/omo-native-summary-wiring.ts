@@ -59,7 +59,7 @@ export function createNativeSummaryRecorder(input: {
 async function publishThroughState(state: NativeCaptureState, publication: SummaryPublication): Promise<boolean> {
   const capture = state.capture
   if (capture === undefined) return false
-  capture("session_summary", publication.properties, { uuid: publication.uuid })
+  capture("session_summary", publication.properties, { uuid: publication.uuid, timestamp: new Date(publication.timestamp) })
   if (!state.delivered.delete(publication.uuid)) return false
   await state.flush?.()
   return true

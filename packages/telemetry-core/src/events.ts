@@ -13,8 +13,11 @@ import type {
 
 export type EventPropertyAllowlist = Readonly<Record<string, readonly string[]>>
 export type EventTelemetryProperties = Readonly<Record<string, unknown>>
-/** `uuid` makes a re-sent event idempotent: PostHog keeps one row per uuid. */
-export type EventTelemetryCaptureOptions = { readonly uuid?: string }
+/**
+ * `uuid` makes a re-sent event idempotent: PostHog keeps one row per uuid. `timestamp` is the event's own
+ * time; a re-send passes the original one so the event lands on the same day it first did.
+ */
+export type EventTelemetryCaptureOptions = { readonly uuid?: string; readonly timestamp?: Date }
 export type EventTelemetrySetTimeout = (callback: () => void, delay: number) => unknown
 
 export type CreateEventTelemetryClientInput = {
@@ -145,6 +148,7 @@ export function createEventTelemetryClient(
         event: name,
         properties: { ...projected, ...sharedProperties },
         ...(uuid !== undefined && EVENT_UUID.test(uuid) ? { uuid } : {}),
+        ...(isValidDate(options?.timestamp) ? { timestamp: options.timestamp } : {}),
       }
       try {
         transport.capture(payload)
@@ -215,4 +219,8 @@ function isEventPropertyValue(value: unknown): value is string | number | boolea
     typeof value === "boolean" ||
     (typeof value === "number" && Number.isFinite(value))
   )
+}
+
+function isValidDate(value: Date | undefined): value is Date {
+  return value instanceof Date && Number.isFinite(value.getTime())
 }
