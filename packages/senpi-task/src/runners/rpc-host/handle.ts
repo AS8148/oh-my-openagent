@@ -3,6 +3,7 @@ import { log } from "@oh-my-opencode/utils"
 import type { RunnerOutcome } from "../in-process/child-handle"
 import { exitTurnOutcome, promptFailureOutcome } from "../rpc/turn-outcome"
 import { createTurnSettlement, sessionIsIdle } from "../rpc/turn-settlement"
+import { createTurnWakeSources } from "../rpc/turn-wake-sources"
 import type { ChildEventListener, ChildExitOutcome, RpcTerminalAssistantMessage } from "../types"
 import {
   classifySessionExit,
@@ -62,6 +63,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   let intent: SessionCloseIntent = "running"
   let parked = false
   let detached = false
+  let tornDown = false
 
   const settleTurn = (settled: RunnerOutcome): void => {
     if (turnOutcome !== undefined) return
@@ -70,11 +72,16 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     waiters.settleTurn(settled)
   }
 
+  const wakeSources = createTurnWakeSources()
   const settlement = createTurnSettlement({
     settle: settleTurn,
     abortedByUser: () => abortedByUser,
     baseline: () => turnBaseline,
     finalText: () => finalText,
+    probe: () => client.getState(),
+    settleConfirmMs: heartbeatIntervalMs,
+    wakeSourcesLive: () => wakeSources.hasLiveWakeSources(),
+    disposed: () => tornDown,
   })
   let continuationState: "none" | "pending_delivery" | "awaiting_start" = "none"
   const reconciliation = createHandleReconciliation({
@@ -101,6 +108,12 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
       }
     }
     settlement.observe(event)
+    // The host's loose boundary parse fans every tagged record - raw `extension_event` records
+    // included - into this same funnel (see `session-wire.ts` isAgentSessionEvent).
+    if ((event as { readonly type?: string }).type === "extension_event") {
+      wakeSources.observe(event)
+      settlement.reconfirmHeld()
+    }
   }
 
   const stopHeartbeat = startHostHeartbeat({
@@ -222,6 +235,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     terminalAssistantMessage = undefined
     abortedByUser = false
     turnBaseline = finalText
+    wakeSources.resetTurn()
   }
 
   const delivery = createHostDelivery({ beginTurn, issue: recovery.issue, settle: settleTurn })
@@ -237,6 +251,10 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     clearActive: listeners.clearActive,
     stopHeartbeat,
     settle: settleClassified,
+    onTornDown: () => {
+      tornDown = true
+      settlement.cancelConfirmation()
+    },
   })
 
   return {
