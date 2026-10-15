@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { deleteItem, isLive, itemFrontier, renderItem } from "../item/index"
 import { renderDocContent } from "../item/render"
+import { splitItem } from "../item/frontmatter"
 import { captureInto, newDoc } from "../item/test-support"
 import { planAdoption, type AdoptionPlan, type ItemState } from "./index"
 
@@ -108,7 +109,7 @@ describe("planAdoption (sync-design §3 insert-only adoption)", () => {
     doc.free()
   })
 
-  test("frontmatter keys the space lacks are added; existing keys are never overwritten", async () => {
+  test("frontmatter keys are added and existing text values are merged without loss", async () => {
     const doc = await newDoc("1")
     captureInto(doc, "", [], "---\ntitle: space title\n---\nbody\n")
     const current = renderDocContent(doc)
@@ -120,7 +121,8 @@ describe("planAdoption (sync-design §3 insert-only adoption)", () => {
     if (plan.action !== "capture") return
     applyPlan(doc, current, plan)
     const rendered = renderItem(doc)
-    expect(rendered).toContain("title: space title")
+    expect(splitItem(rendered ?? "").fm?.find((entry) => entry.key === "title")?.value)
+      .toEqual({ kind: "text", text: "space title\nlocal title" })
     expect(rendered).toContain("mood: reflective")
     expect(rendered).toContain("plus")
     doc.free()

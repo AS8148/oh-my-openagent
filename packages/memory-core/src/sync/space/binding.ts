@@ -43,8 +43,8 @@ export function canonicalRemoteUrl(url: string): string {
     if (port !== "" && DEFAULT_PORTS[parsed.protocol.replace(/:$/, "")] === port) port = ""
     path = parsed.pathname.replace(/^\/+/, "")
   }
-  path = path.replace(/\/+$/, "")
-  if (path.endsWith(".git")) path = path.slice(0, -".git".length)
+  path = path.replace(/^\/+|\/+$/g, "")
+  if (/\.git$/i.test(path)) path = path.slice(0, -".git".length)
   path = path.replace(/\/+$/, "")
   const authority = port === "" ? host.toLowerCase() : `${host.toLowerCase()}:${port}`
   return path === "" ? authority : `${authority}/${path}`
@@ -57,11 +57,18 @@ export function namedBinding(profile: string): BindingKey {
 }
 
 export function repoBinding(remotes: readonly Remote[]): BindingKey | null {
-  if (remotes.length === 0) return null
-  const origin = remotes.find((r) => r.name === "origin")
-  const chosen = origin ?? [...remotes].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))[0]
-  if (chosen === undefined) return null
-  return `repo:${canonicalRemoteUrl(chosen.url)}`
+  const ordered = [...remotes].sort((a, b) =>
+    a.name === b.name ? 0 : a.name === "origin" ? -1 : b.name === "origin" ? 1 : a.name < b.name ? -1 : 1,
+  )
+  for (const remote of ordered) {
+    try {
+      return `repo:${canonicalRemoteUrl(remote.url)}`
+    } catch (error) {
+      // A malformed remote is not a project identity; try the next one or local:.
+      if (!(error instanceof TypeError)) throw error
+    }
+  }
+  return null
 }
 
 export function localBinding(randomHex128: string): BindingKey {

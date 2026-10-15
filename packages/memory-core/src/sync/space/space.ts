@@ -5,11 +5,9 @@
 // remote-less project, so restarts keep one space. The git-backed store reads and writes
 // the memory repo's LOCAL config only.
 
-import { getRandomValues } from "node:crypto"
-
 import { AUTO_AGENT_VALUE } from "../../identity/resolve"
 import type { BindingKey, Remote } from "./binding"
-import { localBinding, namedBinding, parseBinding, repoBinding, spaceIdForBinding } from "./binding"
+import { localBinding, mintLocalBinding, namedBinding, parseBinding, repoBinding, spaceIdForBinding } from "./binding"
 
 export const SYNC_BINDING_CONFIG_KEY = "omo.sync.binding"
 export const SYNC_SPACE_CONFIG_KEY = "omo.sync.space"
@@ -34,12 +32,8 @@ export interface ResolveSpaceOptions {
   readonly randomHex?: () => string
 }
 
-function defaultRandomHex(): string {
-  return Buffer.from(getRandomValues(new Uint8Array(16))).toString("hex")
-}
-
 export function resolveSpace(store: SpaceConfigStore, opts: ResolveSpaceOptions): SpaceResolution {
-  const randomHex = opts.randomHex ?? defaultRandomHex
+  const wrote: { binding?: string; space?: string } = {}
   const storedSpace = store.get(SYNC_SPACE_CONFIG_KEY)
   const profile = typeof opts.profile === "string" ? opts.profile.trim() : ""
   let computed: BindingKey
@@ -54,16 +48,15 @@ export function resolveSpace(store: SpaceConfigStore, opts: ResolveSpaceOptions)
       if (storedBinding !== null && parseBinding(storedBinding)?.kind === "local") {
         computed = storedBinding
       } else {
-        computed = localBinding(randomHex())
+        computed = opts.randomHex === undefined ? mintLocalBinding() : localBinding(opts.randomHex())
         store.set(SYNC_BINDING_CONFIG_KEY, computed)
+        wrote.binding = computed
       }
     }
   }
   const computedId = spaceIdForBinding(computed)
   const aliasOfStoredSpace = storedSpace !== null && storedSpace !== computedId
   const spaceId = storedSpace ?? computedId
-  const wrote: { binding?: string; space?: string } = {}
-  if (computed.startsWith("local:")) wrote.binding = computed
   if (storedSpace === null) {
     store.set(SYNC_SPACE_CONFIG_KEY, spaceId)
     wrote.space = spaceId

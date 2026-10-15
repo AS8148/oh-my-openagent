@@ -63,6 +63,7 @@ describe("resolveSpace (sync-design §3 binding keys)", () => {
     expect(first.wrote.binding).toBe(first.bindingKey)
     const second = resolveSpace(store, { randomHex })
     expect(second.bindingKey).toBe(first.bindingKey)
+    expect(second.wrote).toEqual({})
     expect(second.spaceId).toBe(first.spaceId)
     expect(mints).toBe(1)
     expect(sets.filter(([k]) => k === SYNC_BINDING_CONFIG_KEY)).toHaveLength(1)
@@ -197,5 +198,15 @@ describe("resolveSpaceInRepo / git-backed config", () => {
     expect(first.bindingKey).toMatch(/^local:[0-9a-f]{32}$/)
     expect(git(dir, ["config", "--local", "--get", "omo.sync.binding"]).trim()).toBe(first.bindingKey)
     expect(resolveSpaceInRepo(dir, {}).bindingKey).toBe(first.bindingKey)
+  })
+
+  test("a malformed remote falls back to a persistent local binding", () => {
+    const dir = tmpRepo()
+    git(dir, ["remote", "add", "origin", "https://[bad"])
+    const first = resolveSpaceInRepo(dir, { randomHex: () => "a".repeat(32) })
+    expect(first.bindingKey).toBe(`local:${"a".repeat(32)}`)
+    const second = resolveSpaceInRepo(dir, {})
+    expect(second.bindingKey).toBe(first.bindingKey)
+    expect(second.wrote).toEqual({})
   })
 })

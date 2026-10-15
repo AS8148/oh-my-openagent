@@ -23,11 +23,11 @@ describe("mergeInsertions (sync-design §3 insert-only adoption)", () => {
     ["abc", "abc", "abc"],
     ["", "hello\n", "hello\n"],
     ["hello\n", "", "hello\n"],
-    ["abc", "abXc", "abXc"],
-    ["abXc", "abc", "abXc"],
-    ["a c", "a b c", "a b c"],
-    ["a x c", "a y c", "a xy c"],
-    ["alpha beta\nlast\n", "alpha gamma beta\nlast\n", "alpha gamma beta\nlast\n"],
+    ["abc", "abXc", "abc\nabXc"],
+    ["abXc", "abc", "abXc\nabc"],
+    ["a c", "a b c", "a c\na b c"],
+    ["a x c", "a y c", "a x c\na y c"],
+    ["alpha beta\nlast\n", "alpha gamma beta\nlast\n", "alpha beta\nalpha gamma beta\nlast\n"],
     ["one\ntwo\n", "zero\none\ntwo\n", "zero\none\ntwo\n"],
   ]
   for (const [base, incoming, want] of cases) {

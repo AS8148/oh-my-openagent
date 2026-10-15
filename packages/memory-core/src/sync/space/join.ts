@@ -25,6 +25,7 @@ export function joinDirection(aId: string, bId: string): JoinDirection | null {
   return aId < bId ? { target: aId, absorbed: bId } : { target: bId, absorbed: aId }
 }
 
+/** Caller must establish a shared binding key before joining distinct spaces. */
 export function joinSpaces(aDoc: LoroDoc, aId: string, bDoc: LoroDoc, bId: string): JoinResult {
   const dir = joinDirection(aId, bId)
   if (dir === null) return { targetId: aId, absorbedId: aId, changed: false }

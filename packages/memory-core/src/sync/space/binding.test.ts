@@ -14,6 +14,8 @@ import {
 describe("canonicalRemoteUrl (sync-design §3)", () => {
   const table: readonly (readonly [string, string])[] = [
     ["git@github.com:a/b.git", "github.com/a/b"],
+    ["git@github.com:/a/b.git", "github.com/a/b"],
+    ["https://github.com/a/b.GIT/", "github.com/a/b"],
     ["ssh://git@github.com/a/b", "github.com/a/b"],
     ["https://github.com/a/b", "github.com/a/b"],
     ["https://github.com/a/b.git", "github.com/a/b"],
@@ -106,6 +108,17 @@ describe("spaceIdForBinding", () => {
 })
 
 describe("repoBinding", () => {
+  test("skips invalid origin URLs and uses another usable remote", () => {
+    expect(repoBinding([
+      { name: "origin", url: "https://[bad" },
+      { name: "upstream", url: "https://github.com/a/b.git" },
+    ])).toBe("repo:github.com/a/b")
+  })
+
+  test("all invalid URLs mean no repo binding", () => {
+    expect(repoBinding([{ name: "origin", url: "https://[bad" }])).toBeNull()
+  })
+
   test("prefers origin", () => {
     const remotes = [
       { name: "upstream", url: "git@github.com:x/y.git" },
