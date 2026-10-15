@@ -16,6 +16,7 @@ import { realpathSync } from "node:fs"
 
 const writerChildPath = fileURLToPath(new URL("./writer-child.ts", import.meta.url))
 const reflectionChildPath = fileURLToPath(new URL("./reflection-child.ts", import.meta.url))
+const crashCommitChildPath = fileURLToPath(new URL("./crash-commit-child.ts", import.meta.url))
 const temporaryDirectories: string[] = []
 const liveChildren = new Set<ChildProcessWithoutNullStreams>()
 
@@ -158,10 +159,30 @@ async function expectSuccessful(child: ChildHarness): Promise<void> {
   expect(exit, child.failureContext()).toEqual({ code: 0, signal: null })
 }
 
-async function assertTwentyLinearCommits(identity: MemoryIdentity): Promise<void> {
-  expect(Number.parseInt((await git(identity.paths.repo, ["rev-list", "--count", "HEAD"])).trim(), 10)).toBe(20)
+// `git fsck --full --strict` is the integrity oracle for omo #10177: any error/fatal line, any
+// missing or corrupt object, or a non-zero exit fails. A commit interrupted by SIGKILL can leave
+// the objects it wrote unreachable (dangling); those are the normal debris of a killed write, not
+// corruption, so they are reported but never fail the check.
+async function assertRepoIntegrity(repoPath: string): Promise<void> {
+  const child = Bun.spawn(["git", "-C", repoPath, "fsck", "--full", "--strict"], { stdout: "pipe", stderr: "pipe" })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  const report = `${stdout}\n${stderr}`
+  const broken = report.split("\n").filter((line) => /^(error|fatal):/.test(line) || /missing|corrupt/i.test(line))
+  expect({ exitCode, broken }, report).toEqual({ exitCode: 0, broken: [] })
+}
+
+async function assertLinearCommits(identity: MemoryIdentity, expectedCount: number): Promise<void> {
+  expect(Number.parseInt((await git(identity.paths.repo, ["rev-list", "--count", "HEAD"])).trim(), 10)).toBe(expectedCount)
   expect(Number.parseInt((await git(identity.paths.repo, ["rev-list", "--count", "--merges", "HEAD"])).trim(), 10)).toBe(0)
-  expect(await git(identity.paths.repo, ["fsck", "--full"])).toBe("")
+  await assertRepoIntegrity(identity.paths.repo)
+}
+
+async function assertTwentyLinearCommits(identity: MemoryIdentity): Promise<void> {
+  await assertLinearCommits(identity, 20)
 }
 
 // Bun's fs.rm accepts maxRetries/retryDelay but never retries (bun-v1.4.2 node_fs.rs), so the wait
@@ -282,11 +303,59 @@ describe("one memory identity across real Bun processes", () => {
     const holderRecord = parseLockRecord(await readFile(memoryWriterLockPath(shared.identity.paths.locks), "utf8"))
     if (holderRecord === null || holderRecord.pid !== holder.child.pid) throw new Error(`unexpected lock owner: ${JSON.stringify(holderRecord)}`)
     expect(await probeUntil(() => isLockOwnerProvenDead(holderRecord), DEATH_PROOF_BOUND_MS)).toBe(true)
+    await assertRepoIntegrity(shared.identity.paths.repo)
     survivor.send("begin-recovery")
     await survivor.waitForPrefix("done:")
     await expectSuccessful(survivor)
 
     // #then
     await assertTwentyLinearCommits(shared.identity)
+  }, 30_000)
+
+  test("#given a writer SIGKILLed inside its git commit #when its peer takes over #then every reachable object survives and twenty follow-up commits land", async () => {
+    // #given
+    const shared = await fixture()
+    const killer = new ChildHarness(crashCommitChildPath, [
+      "kill-mid-commit",
+      shared.identity.paths.repo,
+      shared.identity.paths.locks,
+      "killer",
+      "0",
+      "30",
+    ])
+
+    // #when
+    const killReady = killer.waitForLine("kill-ready")
+    await killReady
+    const killerExit = await killer.exit
+    // SIGKILL is the interleaving under test; a clean exit means the self-kill timer missed the
+    // commit window entirely, which is still a valid (normal-completion) sample.
+    expect(killerExit.signal === "SIGKILL" || killerExit.code === 0, killer.failureContext()).toBe(true)
+    const killerCommitted = killerExit.code === 0
+    if (!killerCommitted) {
+      const killerRecord = parseLockRecord(await readFile(memoryWriterLockPath(shared.identity.paths.locks), "utf8"))
+      if (killerRecord === null || killerRecord.pid !== killer.child.pid) throw new Error(`unexpected lock owner: ${JSON.stringify(killerRecord)}`)
+      expect(await probeUntil(() => isLockOwnerProvenDead(killerRecord), DEATH_PROOF_BOUND_MS)).toBe(true)
+    }
+    await assertRepoIntegrity(shared.identity.paths.repo)
+
+    const peer = new ChildHarness(crashCommitChildPath, [
+      "peer",
+      shared.identity.paths.repo,
+      shared.identity.paths.locks,
+      "peer",
+      "20",
+    ])
+    await peer.waitForPrefix("done:")
+    await expectSuccessful(peer)
+
+    // #then
+    // git's ref transaction makes the orphan's commit CAS-fail once the peer has committed, so
+    // history is always linear and the orphan contributes at most its one in-flight commit.
+    const commitCount = Number.parseInt((await git(shared.identity.paths.repo, ["rev-list", "--count", "HEAD"])).trim(), 10)
+    expect(commitCount).toBeGreaterThanOrEqual(20)
+    expect(commitCount).toBeLessThanOrEqual(21)
+    expect(Number.parseInt((await git(shared.identity.paths.repo, ["rev-list", "--count", "--merges", "HEAD"])).trim(), 10)).toBe(0)
+    await assertRepoIntegrity(shared.identity.paths.repo)
   }, 30_000)
 })
