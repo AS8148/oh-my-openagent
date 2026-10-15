@@ -35,8 +35,18 @@ fn main() -> ExitCode {
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--cursor-overlay")) {
         return cursor_overlay();
     }
-    match Cli::parse().mode() {
+    let mode = Cli::parse().mode();
+    if !matches!(mode, Mode::Schema) {
+        if let Err(refusal) = check_launch() {
+            return fail(&refusal);
+        }
+    }
+    match mode {
         Mode::Schema => print_schema(),
+        Mode::DaemonDisabled { flag } => {
+            eprintln!("senpi-desktop-engine: {flag} is off by default; pass --enable-daemon to use it");
+            ExitCode::from(USAGE_ERROR)
+        }
         Mode::Oneshot { endpoint, serve_args } => match endpoint.map_or_else(client::default_endpoint, Ok) {
             Ok(endpoint) => {
                 match oneshot::run(|request| client::exchange_or_start(&endpoint, &serve_args, request)) {
@@ -95,6 +105,16 @@ fn main() -> ExitCode {
                 .map_err(|error| format!("--serve {endpoint}: {error}"))
         }),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn check_launch() -> Result<(), String> {
+    senpi_desktop_backend_macos::check_launch()
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn check_launch() -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
