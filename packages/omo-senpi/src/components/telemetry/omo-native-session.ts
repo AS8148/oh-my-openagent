@@ -16,6 +16,7 @@ import { deferUntilAfterFirstPaint } from "../../extension/startup-deferral"
 import type { OmoSenpiComponent } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { loadSenpiOmoConfig } from "../config-resolution"
+import { TIMEZONE_PATTERN } from "./event-schema-constraints"
 import { getSenpiTelemetryStateDir, recordSenpiDailyActive } from "./index"
 import { createCategoryConfigCapture } from "./omo-native-category-config"
 import { captureProcessCrashes } from "./omo-native-crash"
@@ -109,7 +110,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           memory_bucket: memoryBucket(osProvider.totalmem()),
           provider_count: inventory.providerCount,
           model_count: inventory.modelCount,
-          providers: inventory.providers,
+          ...(inventory.providers === "" ? {} : { providers: inventory.providers }),
           reason,
           session_role: resolveTelemetrySessionRole(pi, env),
           ...(timezone === undefined ? {} : { timezone }),
@@ -201,10 +202,14 @@ function loadCategoryConfig(
 }
 
 // A runtime without ICU data (or a host that refuses the lookup) simply ships no timezone.
+// The artifact's syntax bound for a zone name (event-schema-constraints.ts): a zone outside it is
+// dropped here rather than sent and rejected at the collector.
+const TIMEZONE = new RegExp(TIMEZONE_PATTERN)
+
 function readTimeZone(provider: (() => string) | undefined): string | undefined {
   try {
     const zone = (provider ?? (() => Intl.DateTimeFormat().resolvedOptions().timeZone))()
-    return zone.length > 0 && zone.length <= 64 ? zone : undefined
+    return TIMEZONE.test(zone) ? zone : undefined
   } catch {
     return undefined
   }

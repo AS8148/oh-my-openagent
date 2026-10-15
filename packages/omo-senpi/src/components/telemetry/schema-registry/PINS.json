@@ -1,0 +1,9 @@
+{
+  "source": "sisyphuslabs/omo-telemetry packages/schema-registry",
+  "source_commit": "6fe0cabbf193ce736117ce5594cd3f5c99efcfe1",
+  "note": "Vendored byte-identical. Update by copying both files from the collector and refreshing these hashes; telemetry-artifact.test.ts fails on any difference.",
+  "files": {
+    "artifact.schema.json": "2f1e4b3556272e3c939877e8a9073e3fc844cbffbac7c336e00df83cb4a88670",
+    "semconv-map.json": "ac50ef26f3b1bfbc7acb7a1fee1505558d171bcff7bc610def43ef200a068633"
+  }
+}

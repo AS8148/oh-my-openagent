@@ -53,7 +53,7 @@ export function readOmoNativeInventory(
     return {
       providerCount: providerIds.length,
       modelCount,
-      providers: providerIds.filter((id) => isKnownProvider(id)).sort().join(","),
+      providers: joinProviders(providerIds),
       ...(masked === undefined ? {} : {
         defaultProvider: masked.provider,
         defaultModel: masked.model_id,
@@ -63,6 +63,24 @@ export function readOmoNativeInventory(
     diagnostics?.({ event: "omo_native_inventory_read_failed", error, source: "omo-native-session" })
     return { providerCount: 0, modelCount: 0, providers: "" }
   }
+}
+
+const PROVIDERS_MAX_LENGTH = 64
+
+/**
+ * Known provider ids verbatim, every other id as `custom`, deduplicated and sorted, joined by commas
+ * and cut at a token boundary so the value stays within the 64-char wire limit and always matches the
+ * artifact's `providers` pattern (no half token ever ships).
+ */
+export function joinProviders(providerIds: readonly string[]): string {
+  const tokens = [...new Set(providerIds.map((id) => (isKnownProvider(id) ? id : "custom")))].sort()
+  let joined = ""
+  for (const token of tokens) {
+    const next = joined === "" ? token : `${joined},${token}`
+    if (next.length > PROVIDERS_MAX_LENGTH) break
+    joined = next
+  }
+  return joined
 }
 
 function readObject(path: string): Record<string, unknown> {

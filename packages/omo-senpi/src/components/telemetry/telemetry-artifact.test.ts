@@ -154,6 +154,8 @@ describe("telemetry schema artifacts", () => {
     expect(SENPI.resource_projections["omo.session_started"]).toEqual({ $os: "os.type", $os_version: "os.version", arch: "host.arch" })
     expect(SENPI.events["omo.process_crashed"]).toHaveProperty(["process.exit.code"])
     expect(SENPI.events["omo.session_summary"]).toHaveProperty(["omo.input_tokens"])
+    // `omo.is_real_user_prompt` would hit the forbidden `_prompt` suffix rule: the map renames it.
+    expect(SENPI.events["omo.prompt_submitted"]?.["omo.prompt.is_real_user"]?.posthog_name).toBe("is_real_user_prompt")
     for (const attributes of Object.values(SENPI.events)) {
       for (const [key, spec] of Object.entries(attributes)) {
         if (spec.posthog_name !== undefined && key.startsWith("omo.") && !key.includes(".", 4)) {

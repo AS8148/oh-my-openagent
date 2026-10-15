@@ -9,6 +9,7 @@ import { resolveCategory } from "@oh-my-opencode/senpi-task/category-resolver"
 import { CATEGORY_FALLBACK_CHAINS } from "../../../../senpi-task/src/category/fallback-chains"
 import type { TaskModelRegistry } from "../task/planner"
 import { categoryPropertyName } from "./category-config-schema"
+import { DELEGATION_REASONING_EFFORTS } from "./delegation-schema"
 import { maskProviderAndModel, type OmoNativeEventName } from "./product-identity"
 
 const BUILTIN_CATEGORY_NAMES: readonly string[] = BUILTIN_CATEGORY_DEFAULTS.map(({ name }) => name)
@@ -74,10 +75,9 @@ function encodeCategory(name: string, omoConfig: OmoConfig, registry: TaskModelR
   switch (resolution.kind) {
     case "resolved": {
       const masked = maskProviderAndModel(resolution.spec.provider, resolution.spec.modelId)
-      const reasoning = resolution.spec.reasoning
-        ?? resolution.spec.reasoningEffort
-        ?? resolution.spec.variant
-        ?? "none"
+      const reasoning = maskReasoning(
+        resolution.spec.reasoning ?? resolution.spec.reasoningEffort ?? resolution.spec.variant,
+      )
       const depth = chainDepth(name, resolution.modelSelection.fallbackEntry?.model)
       return `${masked.provider}/${masked.model_id}/${reasoning}${depth === 0 ? "" : `+${depth}`}`
     }
@@ -90,6 +90,15 @@ function encodeCategory(name: string, omoConfig: OmoConfig, registry: TaskModelR
     default:
       return assertNever(resolution)
   }
+}
+
+const REASONING_EFFORTS: ReadonlySet<string> = new Set(DELEGATION_REASONING_EFFORTS)
+
+// Same rule as delegation_completed's reasoning_effort: a harness-native preset is real but unbounded,
+// so it exports as `other`; absent exports as `none`. Keeps every `cat_*` value inside its pattern.
+function maskReasoning(level: string | undefined): string {
+  if (level === undefined) return "none"
+  return REASONING_EFFORTS.has(level) ? level : "other"
 }
 
 type Resolution = ReturnType<typeof resolveCategory<SenpiModelPort>>

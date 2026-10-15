@@ -1,0 +1,321 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omo.dev/schemas/telemetry-artifact.schema.json",
+  "title": "OmO telemetry product schema artifact",
+  "description": "The per-product allowlist the collector pins (plan D-A, D-I, D-P). Every wire key matches keyPattern and none is forbidden; every string has values or pattern; every number has min and max.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_format",
+    "product",
+    "schema_version",
+    "proto_tag",
+    "identity",
+    "relay",
+    "semconv_map_sha256",
+    "resource",
+    "scope",
+    "events",
+    "spans",
+    "values",
+    "sha256"
+  ],
+  "properties": {
+    "artifact_format": {
+      "const": 1
+    },
+    "product": {
+      "type": "string",
+      "enum": ["omo-senpi", "omo-cloud", "omo-desktop", "omo-service"]
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "proto_tag": {
+      "type": "string",
+      "pattern": "^v1\\.(?:[7-9]|[1-9][0-9])\\.[0-9]+$"
+    },
+    "identity": {
+      "enum": ["install", "none"]
+    },
+    "relay": {
+      "type": "boolean"
+    },
+    "semconv_map_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "resource": {
+      "$ref": "#/$defs/attributeMap",
+      "required": [
+        "service.name",
+        "service.version",
+        "service.instance.id",
+        "os.type",
+        "host.arch",
+        "telemetry.sdk.name",
+        "telemetry.sdk.language",
+        "telemetry.sdk.version",
+        "omo.schema.version",
+        "omo.surface",
+        "omo.ci"
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["omo-senpi", "omo-desktop", "omo-service", "omo-cloud"]
+          }
+        },
+        "version": {
+          "$ref": "#/$defs/anchoredPattern"
+        }
+      }
+    },
+    "events": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/eventName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/attributeMap",
+        "required": ["log.record.uid"]
+      }
+    },
+    "spans": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/eventName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/attributeMap"
+      }
+    },
+    "values": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["rows"],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "wire"],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "wire": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "resource_projections": {
+      "description": "Per event: PostHog properties today's client sends on the event that the wire carries in the Resource (the relay copies them back).",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/eventName"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/$defs/keyPattern"
+        }
+      }
+    },
+    "derived_properties": {
+      "description": "Per event: PostHog properties the relay derives from a wire attribute instead of reading one (cost_usd = omo.cost.usd_1e4 / 1e4).",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/eventName"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": ["from", "divide_by"],
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/keyPattern"
+            },
+            "divide_by": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "keyPattern": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,5}$"
+    },
+    "forbiddenKeys": {
+      "enum": [
+        "omo.install_id",
+        "install_id",
+        "exception.message",
+        "exception.stacktrace",
+        "exception.type",
+        "code.file.path",
+        "code.filepath",
+        "code.function.name",
+        "code.stacktrace",
+        "url.full",
+        "url.path",
+        "url.query",
+        "client.address",
+        "server.address",
+        "network.peer.address",
+        "gen_ai.input.messages",
+        "gen_ai.output.messages",
+        "gen_ai.prompt",
+        "gen_ai.completion",
+        "gen_ai.system_instructions",
+        "gen_ai.tool.call.arguments",
+        "gen_ai.tool.call.result"
+      ]
+    },
+    "forbiddenKeyPatterns": {
+      "anyOf": [
+        {
+          "pattern": "_(?:text|path|prompt)$"
+        },
+        {
+          "pattern": "^\\$"
+        },
+        {
+          "pattern": "^(?:user|enduser|omo\\.collector)\\."
+        }
+      ]
+    },
+    "wireKey": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/keyPattern"
+        },
+        {
+          "not": {
+            "$ref": "#/$defs/forbiddenKeys"
+          }
+        },
+        {
+          "not": {
+            "$ref": "#/$defs/forbiddenKeyPatterns"
+          }
+        }
+      ]
+    },
+    "eventName": {
+      "type": "string",
+      "pattern": "^omo\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,4}$"
+    },
+    "anchoredPattern": {
+      "type": "string",
+      "pattern": "^\\^.*\\$$"
+    },
+    "attributeMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/wireKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/attribute"
+      }
+    },
+    "attribute": {
+      "type": "object",
+      "required": ["type", "required"],
+      "properties": {
+        "type": {
+          "enum": ["boolean", "number", "string"]
+        },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "pattern": {
+          "$ref": "#/$defs/anchoredPattern"
+        },
+        "integer": {
+          "type": "boolean"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "relay_only": {
+          "type": "boolean"
+        },
+        "posthog_name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "string"
+              }
+            }
+          },
+          "then": {
+            "oneOf": [
+              {
+                "required": ["values"]
+              },
+              {
+                "required": ["pattern"]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "number"
+              }
+            }
+          },
+          "then": {
+            "required": ["min", "max"]
+          }
+        }
+      ]
+    }
+  }
+}
