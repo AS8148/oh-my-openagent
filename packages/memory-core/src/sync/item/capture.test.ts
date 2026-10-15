@@ -204,7 +204,7 @@ describe("captureItem", () => {
         markers.push(mkA, mkB)
       }
       const rendered = renderItem(docA) ?? ""
-      expect(rendered).toBe(renderItem(docB))
+      expect(rendered).toBe(renderItem(docB) ?? "")
       for (const marker of markers) expect(rendered, `trial ${trial} lost edit ${marker}`).toContain(marker)
       docA.free()
       docB.free()

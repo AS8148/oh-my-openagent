@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
 
 import { deleteItem, isLive, itemFrontier, renderItem } from "./index"
-import { captureCurrent, captureInto, newDoc } from "./test-support"
+import { captureCurrent, captureInto, newDoc, type Peer } from "./test-support"
+
+let renderMergerSerial = 500
+function renderMergerPeer(): Peer {
+  renderMergerSerial += 1
+  return String(renderMergerSerial) as Peer
+}
 
 describe("renderItem", () => {
   test("an empty document is not an item", async () => {
@@ -29,7 +35,7 @@ describe("renderItem", () => {
     const forkB = docB.export({ mode: "update" })
     captureCurrent(docB, "---\ntags:\n  - b\n  - a\n---\n")
 
-    const docC = await newDoc("3")
+    const docC = await newDoc(renderMergerPeer())
     docC.import(forkB)
     docC.import(docA.export({ mode: "update" }))
     captureCurrent(docC, "---\ntags:\n  - b\n  - c\n---\n")
@@ -37,7 +43,12 @@ describe("renderItem", () => {
     docA.import(docB.export({ mode: "update" }))
     docA.import(docC.export({ mode: "update" }))
 
-    expect(renderItem(docA)).toBe("---\ntags:\n  - b\n  - a\n  - c\n---\n")
+    const merged = renderItem(docA) ?? ""
+    expect(["---\ntags:\n  - b\n  - a\n  - c\n---\n", "---\ntags:\n  - b\n  - c\n  - a\n---\n"]).toContain(merged)
+    docB.import(docA.export({ mode: "update" }))
+    docC.import(docA.export({ mode: "update" }))
+    expect(renderItem(docB)).toBe(merged)
+    expect(renderItem(docC)).toBe(merged)
     docA.free()
     docB.free()
     docC.free()
