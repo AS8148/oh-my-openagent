@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import type { LoroDoc } from "loro-crdt"
+import type { LoroDoc } from "../../crdt/loro-runtime"
 
 import { captureItem, itemFrontier, renderItem, splitItem } from "./index"
 import { captureInto, newDoc, type Peer } from "./test-support"

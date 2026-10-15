@@ -1,9 +1,7 @@
 // Shared helpers for the item-model tests: deterministic doc factory, capture/import
 // plumbing, and a seeded PRNG for the property tests. Not a test file itself.
 
-import type { LoroDoc } from "loro-crdt"
-
-import { loadLoroRuntime } from "../../crdt/loro-runtime"
+import { loadLoroRuntime, type LoroDoc } from "../../crdt/loro-runtime"
 import type { ItemFrontier } from "./index"
 import { captureItem, itemFrontier, renderItem } from "./index"
 

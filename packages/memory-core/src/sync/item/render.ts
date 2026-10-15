@@ -2,7 +2,7 @@
 // (Lamport, peer) order, values combined per the kind rule, then the body exactly as
 // stored. A dead item (isLive false) is absent from disk and renders null.
 
-import type { LoroDoc } from "loro-crdt"
+import type { LoroDoc } from "../../crdt/loro-runtime"
 
 import { isLive } from "./document"
 import { renderEntry } from "./frontmatter"

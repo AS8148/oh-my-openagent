@@ -6,7 +6,7 @@
 // the store doc's peer would hand out op ids the store already knows, so a second capture
 // from the same device on a stale baseline would be discarded on import (review r1 #1).
 
-import type { LoroDoc } from "loro-crdt"
+import type { LoroDoc } from "../../crdt/loro-runtime"
 
 import type { ItemFrontier } from "./document"
 import type { FmValue } from "./frontmatter"
@@ -15,7 +15,7 @@ import type { ItemHistory } from "./history"
 import { analyzeHistory } from "./history"
 import { renderDocContent } from "./render"
 import type { KeyState } from "./state"
-import { activeReg, combineKey, fmName, orderedSetElements, readKeyState } from "./state"
+import { activeReg, combineKey, fmName, orderedSetElements, readKeyState, regText } from "./state"
 
 export class CaptureBaselineError extends Error {
   override readonly name = "CaptureBaselineError"
@@ -85,7 +85,10 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
     clearLosers(fork, key, state, "set")
     return
   }  const target = toRegister(value)
-  if (combined?.kind === "reg" && combined.text === target) return
+  const combinedReg = combined?.kind === "reg" ? combined.text : undefined
+  // A re-parsed text scalar that equals the current join is a no-op even when renderScalar
+  // quoted it ("q: r / true" parses back as bare text); compare the dequoted forms.
+  if (combinedReg !== undefined && (combinedReg === target || combinedReg === regText(target))) return
   const active = activeReg(state.reg)
   const entry = { v: target, s: active.map((e) => e.tag) }
   fork.getMap(fmName(key, "reg")).set(newTag(fork, target), entry)

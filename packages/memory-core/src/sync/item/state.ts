@@ -9,7 +9,7 @@
 // Both render.ts and capture.ts read state through here so capture's no-op detection
 // compares against exactly what render would emit.
 
-import type { ContainerID, ContainerType, LoroDoc } from "loro-crdt"
+import type { ContainerID, ContainerType, LoroDoc } from "../../crdt/loro-runtime"
 
 import { parseDocument, isScalar } from "yaml"
 
@@ -175,7 +175,7 @@ export function combineKey(state: KeyState, key: string, kh: KeyHistory, history
     if (elements.length === 0) return null
     return { kind: "set", elements }
   }
-  const values = regValues.map((entry) => entry.value)
+  const values = regTexts.slice()
   if (state.text !== null && state.text !== "") values.push(state.text)
   for (const { element } of state.set) values.push(element)
   values.sort()
