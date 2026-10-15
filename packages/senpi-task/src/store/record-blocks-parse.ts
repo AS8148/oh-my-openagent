@@ -8,7 +8,6 @@ import {
   type EffectiveModelChangeKind,
   type EffectiveModelRecord,
   type EffectiveModelSource,
-  type HostSessionIdentity,
   type PendingSteeringEntry,
   type ResolvedModelRecord,
   type RunnerKind,
@@ -28,6 +27,7 @@ import {
 } from "./scalar-read"
 import { IsolationBackendKindSchema } from "@oh-my-opencode/omo-config-core"
 import type { IsolationMergeResult, IsolationRecord, TaskIsolationSpec } from "../state"
+export { parseOptionalHostSession, validateHostSessionConsistency } from "./host-session-parse"
 
 function parseIsolationSpec(value: unknown): TaskIsolationSpec {
   if (!isRecord(value)) throw new Error("isolation is not an object")
@@ -116,37 +116,6 @@ export function readOptionalSuspensionReason(
   record: Record<string, unknown>,
 ): SuspensionReason | undefined {
   return readOptionalLiteral(record, "suspension_reason", SUSPENSION_REASONS) as SuspensionReason | undefined
-}
-
-export function parseOptionalHostSession(
-  record: Record<string, unknown>,
-): HostSessionIdentity | undefined {
-  const value = record["host_session"]
-  if (value === undefined) return undefined
-  if (!isRecord(value)) throw new Error("host_session is not an object")
-
-  const socket = readString(value, "socket")
-  const routingId = readString(value, "routing_id")
-  const sessionPath = readString(value, "session_path")
-  const instanceId = readString(value, "instance_id")
-  const daemonPid = readOptionalNumber(value, "daemon_pid")
-
-  return {
-    socket,
-    routing_id: routingId,
-    session_path: sessionPath,
-    instance_id: instanceId,
-    ...(daemonPid === undefined ? {} : { daemon_pid: daemonPid }),
-  }
-}
-
-export function validateHostSessionConsistency(
-  runnerKind: RunnerKind | undefined,
-  hostSession: HostSessionIdentity | undefined,
-): void {
-  if (hostSession !== undefined && runnerKind !== "host-session") {
-    throw new Error("host_session present but runner_kind is not 'host-session'")
-  }
 }
 
 export function parseOptionalOwner(record: Record<string, unknown>): DagTaskOwner | undefined {

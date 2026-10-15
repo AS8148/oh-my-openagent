@@ -133,6 +133,7 @@ export type TaskAwaitingInput = {
 }
 
 export type HostSessionIdentity = {
+  readonly effect_seq?: number
   readonly socket: string
   readonly routing_id: string
   readonly session_path: string
