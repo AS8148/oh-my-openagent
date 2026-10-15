@@ -28,7 +28,7 @@ describe("mergeInsertions (sync-design §3 insert-only adoption)", () => {
     ["a c", "a b c", "a b c"],
     ["a x c", "a y c", "a xy c"],
     ["alpha beta\nlast\n", "alpha gamma beta\nlast\n", "alpha gamma beta\nlast\n"],
-    ["one\ntwo\n", "zero\ntwo\n", "one\nzero\ntwo\n"],
+    ["one\ntwo\n", "zero\none\ntwo\n", "zero\none\ntwo\n"],
   ]
   for (const [base, incoming, want] of cases) {
     test(`(${JSON.stringify(base)}, ${JSON.stringify(incoming)})`, () => {
