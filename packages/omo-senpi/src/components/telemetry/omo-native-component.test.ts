@@ -13,7 +13,7 @@ import type {
   ComputerUseTelemetryObservers,
 } from "./omo-native-computer-use"
 import { createOmoNativeTelemetryComponent } from "./omo-native-component"
-import { OMO_NATIVE_PROPERTY_ALLOWLISTS, OMO_NATIVE_SCHEMA_VERSION } from "./product-identity"
+import { OMO_NATIVE_COMMON_PROPERTY_SCHEMAS, OMO_NATIVE_PROPERTY_ALLOWLISTS, OMO_NATIVE_SCHEMA_VERSION } from "./product-identity"
 import {
   FIXED_NOW,
   createEnabledEnv,
@@ -23,15 +23,7 @@ import {
   withTempAgentDir,
 } from "./telemetry.test-support"
 
-const SHARED_KEYS = [
-  "$process_person_profile",
-  "install_id",
-  "package_version",
-  "platform",
-  "product_name",
-  "schema_version",
-  "surface",
-] as const
+const SHARED_KEYS = Object.keys(OMO_NATIVE_COMMON_PROPERTY_SCHEMAS)
 
 function context(sessionId: string): Record<string, unknown> {
   return {

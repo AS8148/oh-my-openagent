@@ -7,8 +7,13 @@ export type TelemetryCaptureProperties = Record<string, unknown>;
 export type TelemetryCaptureMessage = {
   readonly distinctId: string;
   readonly event: string;
-  readonly properties?: TelemetryCaptureProperties;
   readonly uuid?: string;
+  readonly properties?: TelemetryCaptureProperties;
+};
+
+export type UuidV7Source = {
+  readonly now?: () => number;
+  readonly randomBytes?: (size: number) => Uint8Array;
 };
 
 export type TelemetryDiagnosticEvent =
@@ -95,7 +100,7 @@ export type TelemetryClient = {
 
 export type EventPropertyAllowlist = Readonly<Record<string, readonly string[]>>;
 export type EventTelemetryProperties = Readonly<Record<string, unknown>>;
-/** `uuid` makes a re-sent event idempotent: PostHog keeps one row per uuid. */
+/** `uuid` makes a re-sent event idempotent: PostHog keeps one row per uuid, and it doubles as `event_id`. */
 export type EventTelemetryCaptureOptions = { readonly uuid?: string };
 export type EventTelemetrySetTimeout = (callback: () => void, delay: number) => unknown;
 
@@ -191,6 +196,8 @@ export declare function shouldDisableTelemetry(input: {
 }): boolean;
 export declare function getTelemetryApiKey(env?: TelemetryEnv, defaultApiKey?: string): string;
 export declare function isConfiguredTelemetryApiKey(apiKey: string): boolean;
+export declare function createUuidV7Generator(source?: UuidV7Source): () => string;
+export declare function createEventId(): string;
 export declare function hasTelemetryApiKey(env?: TelemetryEnv, defaultApiKey?: string): boolean;
 export declare function getTelemetryHost(env?: TelemetryEnv, defaultHost?: string): string;
 export declare function getDefaultTelemetryOsProvider(): TelemetryOsProvider;
