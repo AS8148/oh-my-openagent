@@ -17,6 +17,7 @@ export function resumeMigrationJournal(input: {
 
   input.renewLock()
   const target = targetDocument(journal.targetPath, input.fileSystem)
+  let writtenBackupPath: string | undefined
   if (!hasMigrationMarker(target, journal.migrationId)) {
     const prepared = journal.targetWrite.mode === "replace-target"
       ? prepareTargetReplacement({
@@ -31,7 +32,7 @@ export function resumeMigrationJournal(input: {
         target,
         targetPath: journal.targetPath,
       })
-    writePreparedTarget({
+    writtenBackupPath = writePreparedTarget({
       ...(journal.targetBackupPath === undefined ? {} : { backupPath: journal.targetBackupPath }),
       env: input.env,
       fileSystem: input.fileSystem,
@@ -59,8 +60,7 @@ export function resumeMigrationJournal(input: {
   }
   removeMigrationJournal(input.fileSystem, input.env)
   // Named whether this resume wrote the target or the crashed run already had: the path was fixed in the journal.
-  const targetBackupPath = journal.targetBackupPath !== undefined && input.fileSystem.existsSync(journal.targetBackupPath)
-    ? journal.targetBackupPath
-    : undefined
+  const targetBackupPath = writtenBackupPath
+    ?? (journal.targetBackupPath !== undefined && input.fileSystem.existsSync(journal.targetBackupPath) ? journal.targetBackupPath : undefined)
   return targetBackupPath === undefined ? { resumed: true } : { resumed: true, targetBackupPath }
 }

@@ -151,7 +151,7 @@ function startupToastBody(input: {
   const diagnostics = input.diagnostics.length === 0 ? "" : ` ${input.diagnostics.join(" ")}`
   const backups = input.targetBackupPaths.length === 0 ? "" : ` Previous config saved as ${input.targetBackupPaths.join(", ")}.`
   if (input.error !== undefined) {
-    return { title: "Configuration migration failed", message: `${input.error}${diagnostics}`, variant: "error" }
+    return { title: "Configuration migration failed", message: `${input.error}${backups}${diagnostics}`, variant: "error" }
   }
   if (summary.length > 0 || backups.length > 0) return { title: "Configuration migrated", message: `${summary}${conflicts}${backups}${diagnostics}`.trim(), variant: "success" }
   if (diagnostics.length > 0) return { title: "Configuration diagnostics", message: input.diagnostics.join(" "), variant: "warning" }

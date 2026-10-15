@@ -204,4 +204,43 @@ describe("runConfigMigrate", () => {
       expect(readFileSync(fixture.targetPath, "utf8")).toContain("anthropic/MINE")
     })
   }
+  for (const leftover of ["same", "different"] as const) {
+    test(`#given a crash after the backup write but before the target write (${leftover} leftover) #when migrate runs twice #then it finishes, names a backup holding the original, and never gets stuck (#8187)`, () => {
+      // given
+      const fixture = createFixture()
+      const omoDir = join(fixture.homeDir, ".omo")
+      mkdirSync(omoDir, { recursive: true })
+      const original = '{"agents":{"oracle":{"model":"anthropic/MINE"}}}\n'
+      writeFileSync(fixture.targetPath, original)
+      const backupPath = join(omoDir, "omo.jsonc.bak.planned")
+      writeFileSync(backupPath, leftover === "same" ? original : '{"unrelated":true}\n')
+      const journalPath = join(omoDir, ".migration-journal.json")
+      writeFileSync(journalPath, JSON.stringify({
+        backupMoves: [{ from: fixture.sourcePath, to: join(omoDir, "backup.json") }],
+        completedMoves: [],
+        migrationId: "recovery",
+        targetBackupPath: backupPath,
+        targetPath: fixture.targetPath,
+        targetWrite: { additions: { task: { default_concurrency: 3 } } },
+        targetWritten: false,
+        version: 1,
+      }))
+      const environment = { HOME: fixture.homeDir, XDG_CONFIG_HOME: join(fixture.homeDir, ".config") }
+
+      // when
+      const lines: string[] = []
+      const first = runConfigMigrate({ cwd: fixture.root, environment, output: (line) => lines.push(line) })
+      const second = runConfigMigrate({ cwd: fixture.root, environment, output: () => {} })
+
+      // then
+      expect(first).toBe(0)
+      expect(second).toBe(0)
+      expect(existsSync(journalPath)).toBe(false)
+      expect(readFileSync(fixture.targetPath, "utf8")).toContain("_migrations")
+      const named = lines.flatMap((line) => line.startsWith("backup: ") ? [line.slice("backup: ".length)] : [])
+      expect(named.length).toBeGreaterThan(0)
+      expect(named.some((path) => readFileSync(path, "utf8") === original)).toBe(true)
+      if (leftover === "different") expect(readFileSync(backupPath, "utf8")).toBe('{"unrelated":true}\n')
+    })
+  }
 })
