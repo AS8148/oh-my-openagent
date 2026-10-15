@@ -11,9 +11,9 @@ export function resumeMigrationJournal(input: {
   readonly process: MigrationProcess
   readonly renewLock: () => void
   readonly writeTarget: MigrationTargetWriter
-}): boolean {
+}): { readonly resumed: boolean; readonly targetBackupPath?: string } {
   const journal = readMigrationJournal(input.fileSystem, input.env)
-  if (journal === null) return false
+  if (journal === null) return { resumed: false }
 
   input.renewLock()
   const target = targetDocument(journal.targetPath, input.fileSystem)
@@ -32,6 +32,7 @@ export function resumeMigrationJournal(input: {
         targetPath: journal.targetPath,
       })
     writePreparedTarget({
+      ...(journal.targetBackupPath === undefined ? {} : { backupPath: journal.targetBackupPath }),
       env: input.env,
       fileSystem: input.fileSystem,
       prepared,
@@ -57,5 +58,9 @@ export function resumeMigrationJournal(input: {
     writeMigrationJournal(targetRecorded, input.fileSystem, input.env, input.process, input.clock)
   }
   removeMigrationJournal(input.fileSystem, input.env)
-  return true
+  // Named whether this resume wrote the target or the crashed run already had: the path was fixed in the journal.
+  const targetBackupPath = journal.targetBackupPath !== undefined && input.fileSystem.existsSync(journal.targetBackupPath)
+    ? journal.targetBackupPath
+    : undefined
+  return targetBackupPath === undefined ? { resumed: true } : { resumed: true, targetBackupPath }
 }

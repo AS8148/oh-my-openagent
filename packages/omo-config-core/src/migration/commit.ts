@@ -108,6 +108,7 @@ export const writeOmoMigrationTarget: MigrationTargetWriter = (input) => {
   const options = writerInput(input.targetPath, input.env)
   const result = updateOmoConfig({
     ...options,
+    ...(input.backupPath === undefined ? {} : { backupPath: input.backupPath }),
     edits: input.edits,
     env: input.env,
     fileSystem: input.fileSystem,
@@ -177,6 +178,7 @@ export function prepareTargetReplacement(input: {
 }
 
 export function writePreparedTarget(input: {
+  readonly backupPath?: string
   readonly env: MigrationEnvironment
   readonly fileSystem: MigrationFileSystem
   readonly prepared: PreparedTargetWrite
@@ -184,6 +186,7 @@ export function writePreparedTarget(input: {
   readonly writeTarget: MigrationTargetWriter
 }): string | undefined {
   const written = input.writeTarget({
+    ...(input.backupPath === undefined ? {} : { backupPath: input.backupPath }),
     edits: input.prepared.edits,
     env: input.env,
     fileSystem: input.fileSystem,

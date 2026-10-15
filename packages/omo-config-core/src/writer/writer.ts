@@ -138,7 +138,11 @@ export function updateOmoConfig(options: UpdateOmoConfigOptions): UpdateOmoConfi
   if (existed) {
     try {
       assertConfigPathIsSafe(path, fileSystem)
-      backupPath = writeBackup(path, content, fileSystem)
+      if (options.backupPath === undefined) backupPath = writeBackup(path, content, fileSystem)
+      else {
+        fileSystem.writeFileExclusiveSync(options.backupPath, content)
+        backupPath = options.backupPath
+      }
     } catch (error) {
       if (error instanceof OmoConfigWriteError) throw error
       throw new OmoConfigWriteError(path, "backup", error)

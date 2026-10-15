@@ -59,6 +59,7 @@ export function runConfigMigrate(options: ConfigMigrateOptions = {}): number {
     migratedFrom: result.migratedFrom,
     migrations: report,
     skippedConflictCount: result.skippedConflictCount,
+    targetBackupPaths: result.targetBackupPaths,
   }
 
   if (options.json) {
@@ -67,6 +68,7 @@ export function runConfigMigrate(options: ConfigMigrateOptions = {}): number {
     output(`Configuration migration failed: ${result.error}`)
   } else {
     if (result.journalResumed) output("Recovered pending migration journal.")
+    if (result.resumedTargetBackupPath !== undefined) output(`backup: ${result.resumedTargetBackupPath}`)
     printText(report, output)
     if (report.every((entry) => entry.status === "skipped")) output("Nothing to migrate.")
   }

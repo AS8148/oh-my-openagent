@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**`omo config migrate` names every backup it wrote.** Before rewriting an existing `~/.omo/omo.jsonc`, the migration keeps a timestamped copy (`omo.jsonc.bak.<time>`), and now prints `backup: <path>` for it (`targetBackupPath` in `--json`), so a user who disagrees with a rewrite can find the previous file. Edits in `omo.jsonc` survive the migration, and when there is nothing to migrate the file is not touched at all (same bytes, same modification time). Both are now pinned by a regression test. ([#8187](https://github.com/code-yeongyu/oh-my-openagent/issues/8187))
+**`omo config migrate` names every backup it wrote.** Before rewriting an existing `~/.omo/omo.jsonc`, the migration keeps a timestamped copy (`omo.jsonc.bak.<time>`), and now prints `backup: <path>` for it (`targetBackupPath` in `--json`), including after recovering an interrupted migration. The startup toast names the backup too ("Previous config saved as ..."), so a user who disagrees with a rewrite can find the previous file. Edits in `omo.jsonc` survive the migration, and when there is nothing to migrate the file is not touched at all (same bytes, same modification time). Both are now pinned by a regression test. ([#8187](https://github.com/code-yeongyu/oh-my-openagent/issues/8187))
 
 **Thread tool results carry a link to the thread.** `thread_list`, `thread_create`, `thread_read`, `thread_send` and `thread_handoff` now return `link`, a ready `[title](omo-thread://v1/<thread_id>)` the agent pastes when it mentions a thread, so a client can render it as something the user clicks to open that thread. ([omo-desktop-app#1868](https://github.com/code-yeongyu/omo-desktop-app/issues/1868))
 

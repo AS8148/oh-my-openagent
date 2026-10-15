@@ -38,6 +38,7 @@ export type MigrationTransform = (
 ) => Readonly<Record<string, unknown>> | MigrationTransformResult
 
 export type MigrationTargetWriter = (input: {
+  readonly backupPath?: string
   readonly edits: readonly OmoConfigEdit[]
   readonly env: MigrationEnvironment
   readonly fileSystem: MigrationFileSystem
@@ -111,6 +112,8 @@ export type RunMigrationsOptions = Omit<
 
 export type MigrationBatchRunResult = {
   readonly journalResumed: boolean
+  /** The pre-write copy a resumed journal's target write kept, when it rewrote an existing target. */
+  readonly resumedTargetBackupPath?: string
   readonly results: readonly MigrationRunResult[]
   readonly status: "completed" | "locked"
 }

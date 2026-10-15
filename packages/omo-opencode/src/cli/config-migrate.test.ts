@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -148,6 +148,8 @@ describe("runConfigMigrate", () => {
     expect(migrated).toContain("// my notes")
     const named = lines.flatMap((line) => line.startsWith("backup: ") ? [line.slice("backup: ".length)] : [])
     expect(named.length).toBeGreaterThan(0)
+    const onDisk = readdirSync(join(fixture.homeDir, ".omo")).filter((name) => name.startsWith("omo.jsonc.bak."))
+    expect(onDisk.map((name) => join(fixture.homeDir, ".omo", name)).sort()).toEqual([...named].sort())
     for (const backup of named) {
       expect(existsSync(backup)).toBe(true)
       expect(readFileSync(backup, "utf8")).toContain("anthropic/MINE")
@@ -163,4 +165,43 @@ describe("runConfigMigrate", () => {
     expect(readFileSync(fixture.targetPath, "utf8")).toBe(migrated)
     expect(statSync(fixture.targetPath).mtimeMs).toBe(before)
   })
+  for (const crashedAfterWrite of [false, true]) {
+    test(`#given a pending journal for an existing target ${crashedAfterWrite ? "whose write already happened" : "not yet written"} #when recovery runs #then it names the backup it kept (#8187)`, () => {
+      // given
+      const fixture = createFixture()
+      const omoDir = join(fixture.homeDir, ".omo")
+      mkdirSync(omoDir, { recursive: true })
+      const original = '{"agents":{"oracle":{"model":"anthropic/MINE"}}}\n'
+      writeFileSync(fixture.targetPath, original)
+      const backupPath = join(omoDir, "omo.jsonc.bak.planned")
+      if (crashedAfterWrite) {
+        writeFileSync(backupPath, original)
+        writeFileSync(fixture.targetPath, '{"agents":{"oracle":{"model":"anthropic/MINE"}},"_migrations":["recovery"]}\n')
+      }
+      writeFileSync(join(omoDir, ".migration-journal.json"), JSON.stringify({
+        backupMoves: [{ from: fixture.sourcePath, to: join(omoDir, "backup.json") }],
+        completedMoves: [],
+        migrationId: "recovery",
+        targetBackupPath: backupPath,
+        targetPath: fixture.targetPath,
+        targetWrite: { additions: { task: { default_concurrency: 3 } } },
+        targetWritten: false,
+        version: 1,
+      }))
+      const lines: string[] = []
+
+      // when
+      runConfigMigrate({
+        cwd: fixture.root,
+        dryRun: true,
+        environment: { HOME: fixture.homeDir, XDG_CONFIG_HOME: join(fixture.homeDir, ".config") },
+        output: (line) => lines.push(line),
+      })
+
+      // then
+      expect(lines).toContain(`backup: ${backupPath}`)
+      expect(readFileSync(backupPath, "utf8")).toBe(original)
+      expect(readFileSync(fixture.targetPath, "utf8")).toContain("anthropic/MINE")
+    })
+  }
 })
