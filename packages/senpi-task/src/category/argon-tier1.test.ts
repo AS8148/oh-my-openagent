@@ -15,10 +15,11 @@ import type { SenpiModelPort, SenpiModelRegistryPort } from "./types"
 // has no Argon row both categories keep today's head; a registry that serves it gets Argon first.
 
 const ARGON_RUNG = { providers: ["google", "google-vertex", "opencode"], model: "gemini-4-argon", variant: "low" }
-const ARGON_CATEGORIES = ["visual-engineering", "writing"] as const
+type ArgonCategory = "visual-engineering" | "writing"
+const ARGON_CATEGORIES: readonly ArgonCategory[] = ["visual-engineering", "writing"]
 
 function model(provider: string, id: string): SenpiModelPort {
-  return { provider, id, name: id }
+  return { provider, id }
 }
 
 function registry(models: readonly SenpiModelPort[]): SenpiModelRegistryPort<SenpiModelPort> {
@@ -34,13 +35,13 @@ function expectResolved(result: ReturnType<typeof resolveCategory<SenpiModelPort
 }
 
 describe("Gemini 4 Argon leads visual-engineering and writing (#10187)", () => {
-  test.each(ARGON_CATEGORIES)("#given the builtin %s chain #then its head is the Argon low rung and the rest is the previous chain", (name) => {
+  test.each<ArgonCategory>([...ARGON_CATEGORIES])("#given the builtin %s chain #then its head is the Argon low rung and the rest is the previous chain", (name) => {
     const chain = CATEGORY_FALLBACK_CHAINS[name]
     expect(chain[0]).toEqual(ARGON_RUNG)
     expect(DEFAULT_CATEGORIES[name]).toMatchObject({ model: "google/gemini-4-argon", variant: "low" })
   })
 
-  test.each(ARGON_CATEGORIES)("#given a registry serving google/gemini-4-argon #when %s resolves #then Argon low is a primary hit", (name) => {
+  test.each<ArgonCategory>([...ARGON_CATEGORIES])("#given a registry serving google/gemini-4-argon #when %s resolves #then Argon low is a primary hit", (name) => {
     const models = registry([model("google", "gemini-4-argon"), model("anthropic", "claude-fable-5-1"), model("anthropic", "claude-opus-5-5")])
 
     const resolved = expectResolved(resolveCategory(name, {}, models))
