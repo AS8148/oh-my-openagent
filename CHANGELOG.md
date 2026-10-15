@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Turning telemetry off now also stops the session summary from being kept on disk.** Since the session summary arrived on dev, a session with telemetry off still recorded its per-turn totals locally, and if it crashed, a later session with telemetry on could send them. A session with telemetry off now writes nothing, a mid-session opt-out deletes what it wrote within seconds, and a leftover file is sent only if its own project still has telemetry on when it is recovered. No published release contained the earlier behavior. ([#10229](https://github.com/code-yeongyu/oh-my-openagent/issues/10229))
+
 **Thread link labels escape `&` and backticks.** A session name holding an entity (`&#x5D;`) now displays as typed, and a backtick in a name can no longer open a code span that swallows the thread link; omo and the desktop app escape the same set. Internal: an unused `agentDir` option left on the thread tools by the skills change is removed.
 
 **Task inputs keep their identity when an acknowledgement is lost.** Every task RPC prompt, steer, and follow-up carries a persisted `clientMessageId`. A timed-out send reports `uncertain` with that id and asks callers not to resend the text; one background retry uses the same id and payload, and unresolved inputs are retried on reconciliation. An identity bound to different text is a failure with an action, never a delivery receipt. ([#10015](https://github.com/code-yeongyu/oh-my-openagent/issues/10015))
