@@ -231,6 +231,25 @@ describe("session_summary review findings", () => {
     expect(readdirSync(rollupDir(dir))).toEqual([])
   })
 
+  test("#given a session that sent seq 0, opted out, and opted back in #when it sends again #then it never reuses a sent seq", () => {
+    const captured: Captured[] = []
+    let consent = true
+    const summary = createSessionSummaryRecorder({
+      captureEvent: (name, properties) => captured.push({ name, properties }),
+      store: createSummaryStore({ stateDir: stateDir() }),
+      isConsented: () => consent,
+      sampleRate: 0,
+    })
+    summary.recordTurn("s1", turn())
+    summary.finish("s1", "reload")
+    consent = false
+    summary.recordTurn("s1", turn({ turnIndex: 1 }))
+    consent = true
+    summary.recordTurn("s1", turn({ turnIndex: 2 }))
+    summary.finish("s1", "quit")
+    expect(seqs(captured)).toEqual([[0, "reload", 1], [1, "shutdown", 1]])
+  })
+
   test("#given an orphan with no window and nothing sent #when its session resumes #then seq starts at 0", () => {
     const dir = stateDir()
     createSummaryStore({ stateDir: dir, pid: 999_994 }).write({ sessionHash: "s1", sessionRole: "main", nextSeq: 0, window: null, consent: "enabled" })

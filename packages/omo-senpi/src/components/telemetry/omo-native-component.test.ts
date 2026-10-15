@@ -520,6 +520,8 @@ describe("OmO Native telemetry component integration", () => {
   for (const [label, optOut] of [
     ["DO_NOT_TRACK=1", { env: { DO_NOT_TRACK: "1" }, configEnabled: true }],
     ["config telemetry disabled", { env: {}, configEnabled: false }],
+    ["OMO_DISABLE_POSTHOG=1", { env: { OMO_DISABLE_POSTHOG: "1" }, configEnabled: true }],
+    ["OMO_SENPI_SEND_ANONYMOUS_TELEMETRY=0", { env: { OMO_SENPI_SEND_ANONYMOUS_TELEMETRY: "0" }, configEnabled: true }],
   ] as const) {
     test(`#given an opted-out session (${label}) killed after two turns #when an opted-in session records a turn #then nothing of the opted-out session is sent or left on disk`, async () => {
       await withTempAgentDir(async (agentDir) => {
@@ -606,6 +608,144 @@ describe("OmO Native telemetry component integration", () => {
       await later.dispatch("session_start", { type: "session_start", reason: "startup" }, context("later"))
       await later.dispatch("turn_end", turnEnd(), context("later"))
       expect(recorder.messages.filter(({ event, properties }) => event === "session_summary" && properties?.$session_id === "hashed:midway")).toEqual([])
+    })
+  })
+
+  // M1 on #10232: opting out mid-session and being killed before the next turn left the opted-in window
+  // on disk, marked enabled, for the next opted-in process to send.
+  for (const nextProcessOptedIn of [true, false]) {
+    test(`#given opted-in turns then an opt-out and a kill before the next turn #when the next process is opted ${nextProcessOptedIn ? "in" : "out"} #then no event of the earlier window is sent and no file is left`, async () => {
+      await withTempAgentDir(async (agentDir) => {
+        writeInventory(agentDir)
+        const stateDir = join(agentDir, "omo-senpi", "omo-native")
+        const recorder = createTransportRecorder()
+        let consent = true
+        const ticks: Array<() => void> = []
+        const register = () => {
+          const pi = new FakeExtensionAPI()
+          createOmoNativeTelemetryComponent({
+            rawTurnSampleRate: 0,
+            env: createEnabledEnv(agentDir),
+            hashSessionId: (raw) => `hashed:${raw}`,
+            isConfigEnabled: () => consent,
+            now: FIXED_NOW,
+            osProvider: createOsProvider("kill-host"),
+            scheduleConsentCheck: (check: () => void) => {
+              ticks.push(check)
+              return () => undefined
+            },
+            stateDir,
+            transportFactory: recorder.factory,
+          }).register(pi, { config: pi, logger: createSilentLogger() })
+          return pi
+        }
+
+        // given: two opted-in turns are on disk, then telemetry is turned off and the timer ticks once
+        const first = register()
+        await first.dispatch("session_start", { type: "session_start", reason: "startup" }, context("killed"))
+        await first.dispatch("turn_end", turnEnd(), context("killed"))
+        await first.dispatch("turn_end", turnEnd(), context("killed"))
+        expect(rollupFiles(stateDir)).toHaveLength(1)
+        consent = false
+        for (const tick of ticks) tick()
+
+        // then: the window left disk before any further turn
+        expect(rollupFiles(stateDir)).toEqual([])
+
+        // when: the process dies and the next one starts
+        killWithoutShutdown(stateDir)
+        consent = nextProcessOptedIn
+        const next = register()
+        await next.dispatch("session_start", { type: "session_start", reason: "startup" }, context("next"))
+        await next.dispatch("turn_end", turnEnd(), context("next"))
+        await next.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, context("next"))
+
+        // then
+        expect(recorder.messages.filter(({ event, properties }) => event === "session_summary" && properties?.$session_id === "hashed:killed")).toEqual([])
+        expect(rollupFiles(stateDir)).toEqual([])
+      })
+    })
+  }
+
+  test("#given a session in project A that opts out and is killed before any check #when a process in project B recovers #then A's window is dropped unsent", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      writeInventory(agentDir)
+      const stateDir = join(agentDir, "omo-senpi", "omo-native")
+      const recorder = createTransportRecorder()
+      let projectAEnabled = true
+      const register = (cwd: string) => {
+        const pi = new FakeExtensionAPI()
+        pi.cwd = cwd
+        createOmoNativeTelemetryComponent({
+          rawTurnSampleRate: 0,
+          env: createEnabledEnv(agentDir),
+          hashSessionId: (raw) => `hashed:${raw}`,
+          isConfigEnabled: (configCwd) => configCwd !== "/project-a" || projectAEnabled,
+          now: FIXED_NOW,
+          osProvider: createOsProvider("project-host"),
+          scheduleConsentCheck: () => () => undefined,
+          stateDir,
+          transportFactory: recorder.factory,
+        }).register(pi, { config: pi, logger: createSilentLogger() })
+        return pi
+      }
+      const inProject = (sessionId: string, cwd: string) => ({ cwd, sessionManager: { getSessionId: () => sessionId } })
+
+      // given: project A records two turns, opts out in its project config, and dies with no turn or tick after
+      const a = register("/project-a")
+      await a.dispatch("session_start", { type: "session_start", reason: "startup" }, inProject("a", "/project-a"))
+      await a.dispatch("turn_end", turnEnd(), inProject("a", "/project-a"))
+      await a.dispatch("turn_end", turnEnd(), inProject("a", "/project-a"))
+      projectAEnabled = false
+      killWithoutShutdown(stateDir)
+
+      // when: an opted-in session in project B recovers orphans
+      const b = register("/project-b")
+      await b.dispatch("session_start", { type: "session_start", reason: "startup" }, inProject("b", "/project-b"))
+      await b.dispatch("turn_end", turnEnd(), inProject("b", "/project-b"))
+
+      // then
+      expect(recorder.messages.filter(({ event, properties }) => event === "session_summary" && properties?.$session_id === "hashed:a")).toEqual([])
+      expect(rollupFiles(stateDir).filter((name) => name.includes("_a") || name === "hashed_a.json")).toEqual([])
+    })
+  })
+
+  test("#given many turns inside the consent cache window #when they end #then the omo config is read once, and again only after the window", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      writeInventory(agentDir)
+      const recorder = createTransportRecorder()
+      let clock = 1_000_000
+      const reads: Array<string | undefined> = []
+      const pi = new FakeExtensionAPI()
+      pi.cwd = "/cached"
+      createOmoNativeTelemetryComponent({
+        rawTurnSampleRate: 0,
+        consentNow: () => clock,
+        env: createEnabledEnv(agentDir),
+        hashSessionId: (raw) => `hashed:${raw}`,
+        isConfigEnabled: (cwd) => {
+          reads.push(cwd)
+          return true
+        },
+        now: FIXED_NOW,
+        osProvider: createOsProvider("cache-host"),
+        scheduleConsentCheck: () => () => undefined,
+        stateDir: join(agentDir, "omo-senpi", "omo-native"),
+        transportFactory: recorder.factory,
+      }).register(pi, { config: pi, logger: createSilentLogger() })
+      const ctx = { cwd: "/cached", sessionManager: { getSessionId: () => "cached" } }
+      await pi.dispatch("session_start", { type: "session_start", reason: "startup" }, ctx)
+
+      // when: five turns end at the same instant
+      const before = reads.length
+      for (let index = 0; index < 5; index += 1) await pi.dispatch("turn_end", turnEnd(), ctx)
+      const duringWindow = reads.length - before
+      clock += 60_000
+      await pi.dispatch("turn_end", turnEnd(), ctx)
+
+      // then
+      expect(duringWindow).toBeLessThanOrEqual(1)
+      expect(reads.length - before - duringWindow).toBe(1)
     })
   })
 
