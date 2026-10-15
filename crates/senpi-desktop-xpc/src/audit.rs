@@ -48,7 +48,7 @@ impl AuditToken {
 
     pub(crate) fn bytes(&self) -> [u8; 32] {
         let mut bytes = [0_u8; 32];
-        for (word, chunk) in self.words.iter().zip(bytes.chunks_exact_mut(4)) {
+        for (word, chunk) in self.words.iter().zip(bytes.as_chunks_mut::<4>().0) {
             chunk.copy_from_slice(&word.to_ne_bytes());
         }
         bytes
