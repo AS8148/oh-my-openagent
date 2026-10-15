@@ -26,6 +26,17 @@ describe("parseExtraCaCertificates", () => {
     expect(parseExtraCaCertificates(`${ca}\r\n${ca.replaceAll("\n", "\r\n")}`)).toHaveLength(1)
   })
 
+  test("#given LF, CRLF, CR-CR-LF and mixed endings #then every form parses to the identical certificate set", () => {
+    const ca = fixture("ca.pem")
+    const lf = parseExtraCaCertificates(ca)
+    const forms = [
+      ca.replaceAll("\n", "\r\n"),
+      ca.replaceAll("\n", "\r\r\n"),
+      ca.split("\n").map((line, index) => line + (index % 2 === 0 ? "\r\n" : "\n")).join(""),
+    ]
+    for (const form of forms) expect(parseExtraCaCertificates(form)).toEqual(lf)
+  })
+
   test.each([
     ["plain text", "hello"],
     ["a private key", fixture("leaf.key")],
