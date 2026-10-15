@@ -114,6 +114,12 @@ function readText(path: string): string | undefined {
   }
 }
 
+function isWindowShape(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false
+  const shape = value as Record<string, unknown>
+  return Array.isArray(shape["models"]) && Array.isArray(shape["totals"]) && typeof shape["sums"] === "object" && shape["sums"] !== null
+}
+
 function parseRollup(text: string | undefined): StoredRollup | undefined {
   if (text === undefined) return undefined
   try {
@@ -123,7 +129,7 @@ function parseRollup(text: string | undefined): StoredRollup | undefined {
     if (record["v"] !== 1 || typeof record["pid"] !== "number" || typeof record["sessionHash"] !== "string") return undefined
     if (typeof record["nextSeq"] !== "number" || typeof record["sessionRole"] !== "string" || typeof record["updatedAt"] !== "number") return undefined
     const window = record["window"]
-    if (window !== null && (typeof window !== "object" || !Array.isArray((window as Record<string, unknown>)["models"]))) return undefined
+    if (window !== null && !isWindowShape(window)) return undefined
     return value as StoredRollup
   } catch {
     return undefined

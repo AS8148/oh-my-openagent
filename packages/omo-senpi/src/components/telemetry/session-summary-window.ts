@@ -19,36 +19,51 @@ export type SummaryTurn = {
   readonly toolErrorCount: number
 }
 
-export type ModelTotals = {
-  provider: string
-  modelId: string
-  turns: number
-  inputTokens: number
-  outputTokens: number
-  totalTokens: number
-  costUsd: number
-}
+type NumericTurnField = { [K in keyof SummaryTurn]: SummaryTurn[K] extends number ? K : never }[keyof SummaryTurn]
+
+// Each summed property and the turn field it adds up; the schema is derived from these tables.
+const SUMMED: ReadonlyArray<readonly [string, NumericTurnField]> = [
+  ["input_tokens", "inputTokens"],
+  ["output_tokens", "outputTokens"],
+  ["cache_read_tokens", "cacheReadTokens"],
+  ["cache_write_tokens", "cacheWriteTokens"],
+  ["reasoning_tokens", "reasoningTokens"],
+  ["total_tokens", "totalTokens"],
+  ["cost_usd", "costUsd"],
+  ["tool_result_count", "toolResultCount"],
+  ["tool_error_count", "toolErrorCount"],
+]
+const COUNTED: ReadonlyArray<readonly [string, (turn: SummaryTurn) => boolean]> = [
+  ["invalid_usage_turns", (turn) => !turn.usageValid],
+  ["error_turns", (turn) => turn.stopReason === "error"],
+  ["aborted_turns", (turn) => turn.stopReason === "aborted"],
+  ["custom_model_turns", (turn) => turn.modelId === "custom"],
+]
+const PER_MODEL: ReadonlyArray<readonly [string, NumericTurnField]> = [
+  ["input_tokens", "inputTokens"],
+  ["output_tokens", "outputTokens"],
+  ["total_tokens", "totalTokens"],
+  ["cost_usd", "costUsd"],
+]
+
+export const SUMMARY_NUMBER_KEYS: readonly string[] = [
+  "summary_seq", "sample_rate", "turns", "first_turn_index", "last_turn_index", "window_ms",
+  "total_tokens_p50", "total_tokens_p95", "total_tokens_max", "model_count",
+  "other_turns", "other_total_tokens", "other_cost_usd",
+  ...SUMMED.map(([key]) => key),
+  ...COUNTED.map(([key]) => key),
+]
+export const MODEL_SLOT_NUMBER_KEYS: readonly string[] = ["turns", ...PER_MODEL.map(([key]) => key)]
+
+export type ModelTotals = { provider: string; model: string; sums: Record<string, number> }
 
 export type SummaryWindow = {
   startedAt: number
   lastAt: number
   firstTurnIndex: number
   lastTurnIndex: number
-  turns: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  reasoningTokens: number
-  totalTokens: number
-  costUsd: number
-  invalidUsageTurns: number
-  errorTurns: number
-  abortedTurns: number
-  toolResultCount: number
-  toolErrorCount: number
-  customModelTurns: number
-  perTurnTotals: number[]
+  sums: Record<string, number>
+  totals: number[]
   models: ModelTotals[]
 }
 
@@ -64,44 +79,34 @@ export type SummaryMeta = {
 }
 
 export function openWindow(at: number, turnIndex: number): SummaryWindow {
-  return {
-    startedAt: at, lastAt: at, firstTurnIndex: turnIndex, lastTurnIndex: turnIndex, turns: 0,
-    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0,
-    totalTokens: 0, costUsd: 0, invalidUsageTurns: 0, errorTurns: 0, abortedTurns: 0,
-    toolResultCount: 0, toolErrorCount: 0, customModelTurns: 0, perTurnTotals: [], models: [],
-  }
+  return { startedAt: at, lastAt: at, firstTurnIndex: turnIndex, lastTurnIndex: turnIndex, sums: {}, totals: [], models: [] }
+}
+
+const add = (sums: Record<string, number>, key: string, value: number): void => {
+  sums[key] = (sums[key] ?? 0) + value
 }
 
 export function addTurn(window: SummaryWindow, turn: SummaryTurn, at: number): void {
   window.lastAt = at
   window.lastTurnIndex = turn.turnIndex
-  window.turns += 1
-  window.inputTokens += turn.inputTokens
-  window.outputTokens += turn.outputTokens
-  window.cacheReadTokens += turn.cacheReadTokens
-  window.cacheWriteTokens += turn.cacheWriteTokens
-  window.reasoningTokens += turn.reasoningTokens
-  window.totalTokens += turn.totalTokens
-  window.costUsd += turn.costUsd
-  if (!turn.usageValid) window.invalidUsageTurns += 1
-  if (turn.stopReason === "error") window.errorTurns += 1
-  if (turn.stopReason === "aborted") window.abortedTurns += 1
-  window.toolResultCount += turn.toolResultCount
-  window.toolErrorCount += turn.toolErrorCount
-  if (turn.modelId === "custom") window.customModelTurns += 1
-  window.perTurnTotals.push(turn.totalTokens)
-  const existing = window.models.find((entry) => entry.provider === turn.provider && entry.modelId === turn.modelId)
-  const entry = existing ?? { provider: turn.provider, modelId: turn.modelId, turns: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 }
-  entry.turns += 1
-  entry.inputTokens += turn.inputTokens
-  entry.outputTokens += turn.outputTokens
-  entry.totalTokens += turn.totalTokens
-  entry.costUsd += turn.costUsd
-  if (existing === undefined) window.models.push(entry)
+  window.totals.push(turn.totalTokens)
+  for (const [key, field] of SUMMED) add(window.sums, key, turn[field])
+  for (const [key, applies] of COUNTED) if (applies(turn)) add(window.sums, key, 1)
+  let entry = window.models.find((model) => model.provider === turn.provider && model.model === turn.modelId)
+  if (entry === undefined) {
+    entry = { provider: turn.provider, model: turn.modelId, sums: {} }
+    window.models.push(entry)
+  }
+  add(entry.sums, "turns", 1)
+  for (const [key, field] of PER_MODEL) add(entry.sums, key, turn[field])
 }
 
 export function summaryProperties(sessionHash: string, window: SummaryWindow, meta: SummaryMeta): EventTelemetryProperties {
-  return {
+  const ranked = [...window.models].sort((left, right) =>
+    (right.sums["turns"] ?? 0) - (left.sums["turns"] ?? 0) || (right.sums["total_tokens"] ?? 0) - (left.sums["total_tokens"] ?? 0))
+  const rest = ranked.slice(MODEL_SLOTS)
+  const restSum = (key: string) => rest.reduce((sum, model) => sum + (model.sums[key] ?? 0), 0)
+  const properties: Record<string, string | number | boolean> = {
     $session_id: sessionHash,
     summary_seq: meta.seq,
     is_final: meta.endedBy === "shutdown",
@@ -109,49 +114,28 @@ export function summaryProperties(sessionHash: string, window: SummaryWindow, me
     session_role: meta.sessionRole,
     sample_rate: meta.sampleRate,
     raw_turns_sampled: meta.sampled,
-    turns: window.turns,
+    turns: window.totals.length,
     first_turn_index: window.firstTurnIndex,
     last_turn_index: window.lastTurnIndex,
     window_ms: window.lastAt - window.startedAt,
-    input_tokens: window.inputTokens,
-    output_tokens: window.outputTokens,
-    cache_read_tokens: window.cacheReadTokens,
-    cache_write_tokens: window.cacheWriteTokens,
-    reasoning_tokens: window.reasoningTokens,
-    total_tokens: window.totalTokens,
-    total_tokens_p50: percentile(window.perTurnTotals, 0.5),
-    total_tokens_p95: percentile(window.perTurnTotals, 0.95),
-    total_tokens_max: window.perTurnTotals.reduce((max, value) => Math.max(max, value), 0),
-    cost_usd: roundCost(window.costUsd),
-    invalid_usage_turns: window.invalidUsageTurns,
-    error_turns: window.errorTurns,
-    aborted_turns: window.abortedTurns,
-    tool_result_count: window.toolResultCount,
-    tool_error_count: window.toolErrorCount,
+    total_tokens_p50: percentile(window.totals, 0.5),
+    total_tokens_p95: percentile(window.totals, 0.95),
+    total_tokens_max: Math.max(0, ...window.totals),
     model_count: window.models.length,
-    custom_model_turns: window.customModelTurns,
-    ...modelSlots(window.models),
+    other_turns: restSum("turns"),
+    other_total_tokens: restSum("total_tokens"),
+    other_cost_usd: roundCost(restSum("cost_usd")),
   }
-}
-
-function modelSlots(models: readonly ModelTotals[]): EventTelemetryProperties {
-  const ranked = [...models].sort((left, right) => right.turns - left.turns || right.totalTokens - left.totalTokens)
-  const slots: Record<string, string | number> = {}
+  for (const [key] of [...SUMMED, ...COUNTED]) properties[key] = window.sums[key] ?? 0
+  properties["cost_usd"] = roundCost(window.sums["cost_usd"] ?? 0)
   for (let slot = 1; slot <= MODEL_SLOTS; slot += 1) {
-    const entry = ranked[slot - 1]
-    slots[`m${slot}_provider`] = entry?.provider ?? "none"
-    slots[`m${slot}_model`] = entry?.modelId ?? "none"
-    slots[`m${slot}_turns`] = entry?.turns ?? 0
-    slots[`m${slot}_input_tokens`] = entry?.inputTokens ?? 0
-    slots[`m${slot}_output_tokens`] = entry?.outputTokens ?? 0
-    slots[`m${slot}_total_tokens`] = entry?.totalTokens ?? 0
-    slots[`m${slot}_cost_usd`] = roundCost(entry?.costUsd ?? 0)
+    const model = ranked[slot - 1]
+    properties[`m${slot}_provider`] = model?.provider ?? "none"
+    properties[`m${slot}_model`] = model?.model ?? "none"
+    for (const key of MODEL_SLOT_NUMBER_KEYS) properties[`m${slot}_${key}`] = model?.sums[key] ?? 0
+    properties[`m${slot}_cost_usd`] = roundCost(model?.sums["cost_usd"] ?? 0)
   }
-  const rest = ranked.slice(MODEL_SLOTS)
-  slots["other_turns"] = rest.reduce((sum, entry) => sum + entry.turns, 0)
-  slots["other_total_tokens"] = rest.reduce((sum, entry) => sum + entry.totalTokens, 0)
-  slots["other_cost_usd"] = roundCost(rest.reduce((sum, entry) => sum + entry.costUsd, 0))
-  return slots
+  return properties
 }
 
 function roundCost(value: number): number {

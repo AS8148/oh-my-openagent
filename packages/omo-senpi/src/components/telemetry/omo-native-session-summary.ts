@@ -125,7 +125,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
       const at = now()
       entry.window ??= openWindow(at, turn.turnIndex)
       addTurn(entry.window, turn, at)
-      if (entry.window.turns >= CHECKPOINT_MAX_TURNS || at - entry.window.startedAt >= CHECKPOINT_MAX_WINDOW_MS) {
+      if (entry.window.totals.length >= CHECKPOINT_MAX_TURNS || at - entry.window.startedAt >= CHECKPOINT_MAX_WINDOW_MS) {
         flush(sessionHash, entry, "checkpoint")
       } else {
         persist(sessionHash, entry)
