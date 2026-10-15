@@ -116,6 +116,22 @@ describe("event telemetry client", () => {
     expect(diagnostics.map((input) => input.event)).toEqual(["telemetry_event_property_dropped"])
   })
 
+  // Protocol contract: a caller-supplied uuid reaches the wire so a re-sent event (session_summary's ack-gated
+  // pending file) deduplicates in PostHog; a malformed uuid is dropped with a diagnostic, never sent.
+  test("#given an event uuid #when captured #then a valid uuid reaches the transport and a malformed one is dropped", () => {
+    const recorder = createRecorder()
+    const diagnostics: TelemetryDiagnosticInput[] = []
+    const client = createClient(recorder, diagnostics)
+    const uuid = "0b6c5d3e-2f1a-4c8b-9d7e-6a5b4c3d2e1f"
+
+    client.captureEvent("session_started", { reason: "a" }, { uuid })
+    client.captureEvent("session_started", { reason: "b" }, { uuid: "not-a-uuid" })
+    client.captureEvent("session_started", { reason: "c" })
+
+    expect(recorder.messages.map((message) => message.uuid)).toEqual([uuid, undefined, undefined])
+    expect(diagnostics.map((input) => input.event)).toEqual(["telemetry_event_property_rejected"])
+  })
+
   test("#given a product with additionalProperties #when any event is captured #then they ride on the shared block without overriding fixed keys", () => {
     // given
     const recorder = createRecorder()

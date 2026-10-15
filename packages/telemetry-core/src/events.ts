@@ -13,6 +13,8 @@ import type {
 
 export type EventPropertyAllowlist = Readonly<Record<string, readonly string[]>>
 export type EventTelemetryProperties = Readonly<Record<string, unknown>>
+/** `uuid` makes a re-sent event idempotent: PostHog keeps one row per uuid. */
+export type EventTelemetryCaptureOptions = { readonly uuid?: string }
 export type EventTelemetrySetTimeout = (callback: () => void, delay: number) => unknown
 
 export type CreateEventTelemetryClientInput = {
@@ -30,7 +32,7 @@ export type CreateEventTelemetryClientInput = {
 
 export type EventTelemetryClient = {
   readonly enabled: boolean
-  readonly captureEvent: (name: string, properties: EventTelemetryProperties) => void
+  readonly captureEvent: (name: string, properties: EventTelemetryProperties, options?: EventTelemetryCaptureOptions) => void
   readonly flush: () => Promise<void>
   readonly shutdown: () => Promise<void>
 }
@@ -53,6 +55,7 @@ const ALLOWED_DOLLAR_KEYS = new Set([
   "$session_id",
 ])
 const FORBIDDEN_SUFFIX = /_(?:text|path|prompt)$/
+const EVENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const NO_OP_EVENT_CLIENT: EventTelemetryClient = {
   enabled: false,
@@ -109,7 +112,7 @@ export function createEventTelemetryClient(
 
   return {
     enabled: true,
-    captureEvent(name, properties) {
+    captureEvent(name, properties, options) {
       const allowlist = allowlists.get(name)
       if (name.length === 0 || allowlist === undefined) {
         report("telemetry_event_rejected", new Error("event name is empty or not allowlisted"))
@@ -133,10 +136,15 @@ export function createEventTelemetryClient(
         projected[key] = typeof value === "string" ? value.slice(0, 64) : value
       }
 
+      const uuid = options?.uuid
+      if (uuid !== undefined && !EVENT_UUID.test(uuid)) {
+        report("telemetry_event_property_rejected", new Error("invalid event uuid"))
+      }
       const payload: TelemetryCaptureMessage = {
         distinctId: input.distinctId,
         event: name,
         properties: { ...projected, ...sharedProperties },
+        ...(uuid !== undefined && EVENT_UUID.test(uuid) ? { uuid } : {}),
       }
       try {
         transport.capture(payload)

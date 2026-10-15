@@ -103,6 +103,7 @@ export const OMO_NATIVE_EVENT_SCHEMAS = Object.freeze({
     "$session_id": STRING_PROPERTY,
     cache_read_tokens: NUMBER_PROPERTY,
     cache_write_tokens: NUMBER_PROPERTY,
+    cost_1e4: NUMBER_PROPERTY,
     cost_usd: NUMBER_PROPERTY,
     input_tokens: NUMBER_PROPERTY,
     model_id: enumProperty([...new Set(Object.values(KNOWN_MODELS).flat()), "custom"] as const),

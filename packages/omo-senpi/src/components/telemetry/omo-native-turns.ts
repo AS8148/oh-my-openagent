@@ -9,6 +9,7 @@ import {
 } from "./product-identity"
 import type { SessionSummaryRecorder } from "./omo-native-session-summary"
 import type { TelemetrySessionRole } from "./session-role"
+import { usdOf } from "./session-summary-window"
 
 export type OmoNativeTurnHandlerOptions = {
   readonly client: Pick<EventTelemetryClient, "captureEvent">
@@ -37,6 +38,7 @@ export function createOmoNativeTurnHandler(
     const total = nonNegativeNumber(usage?.["totalTokens"])
     const costTotal = nonNegativeNumber(cost?.["total"])
     const masked = maskProviderAndModel(event.message.provider, event.message.model)
+    const cost1e4 = toCost1e4(costTotal.value)
     const properties = {
       $session_id: options.sessionId,
       provider: masked.provider,
@@ -47,14 +49,15 @@ export function createOmoNativeTurnHandler(
       cache_write_tokens: cacheWrite.value,
       reasoning_tokens: reasoning.value,
       total_tokens: total.value,
-      cost_usd: roundToFourDecimals(costTotal.value),
+      cost_1e4: cost1e4,
+      cost_usd: usdOf(cost1e4),
       turn_index: event.turnIndex,
       sample_rate: options.summary.sampleRate,
       session_role: options.sessionRole,
     } satisfies Record<TurnCompletedProperty, string | number>
 
     const usageValid = [input, output, cacheRead, cacheWrite, reasoning, total, costTotal].every(({ valid }) => valid)
-    options.summary.recordTurn(options.sessionId, {
+    void options.summary.recordTurn(options.sessionId, {
       turnIndex: event.turnIndex,
       provider: masked.provider,
       modelId: masked.model_id,
@@ -64,7 +67,7 @@ export function createOmoNativeTurnHandler(
       cacheWriteTokens: cacheWrite.value,
       reasoningTokens: reasoning.value,
       totalTokens: total.value,
-      costUsd: costTotal.value,
+      cost1e4,
       usageValid,
       stopReason: stopReasonOf(event.message),
       toolResultCount: Array.isArray(event.toolResults) ? event.toolResults.length : 0,
@@ -101,8 +104,10 @@ function optionalNonNegativeNumber(value: unknown): NumberResult {
   return value === undefined ? { value: 0, valid: true } : nonNegativeNumber(value)
 }
 
-function roundToFourDecimals(value: number): number {
-  return Math.round((value + Number.EPSILON) * 10_000) / 10_000
+// The ONLY rounding step for cost: every downstream total adds these integers, so a summary and the sum of
+// its raw turns agree exactly, in any summation order, and cost_usd can never disagree with cost_1e4.
+export function toCost1e4(costUsd: number): number {
+  return Math.round(costUsd * 10_000)
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {

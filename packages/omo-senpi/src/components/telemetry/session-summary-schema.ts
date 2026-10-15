@@ -35,8 +35,10 @@ function buildSchema(): Readonly<Record<string, SummaryPropertySchema>> {
 /**
  * `session_summary`: the assistant turns of one window, summed. Windows never overlap and a session keeps
  * one `summary_seq` sequence across reloads and crash recovery, so summing every row of a session
- * reproduces its per-turn totals; the percentiles describe only their own window. Raw `turn_completed`
- * rows ship only for sessions sampled at `sample_rate`, so their counts must be weighted by
- * `1 / sample_rate`. Per-model totals keep the top three models; the rest are folded into `other_*`.
+ * reproduces its per-turn totals; the percentiles describe only their own window. The event's uuid is the
+ * window id, so a re-sent window is deduplicated rather than counted twice. Cost is summed in integer
+ * `cost_1e4` units and `cost_usd` is derived from it. Raw `turn_completed` rows ship only for sessions
+ * sampled at `sample_rate`, so their counts must be weighted by `1 / sample_rate`. Per-model totals keep
+ * the top three models; the rest are folded into `other_*`.
  */
 export const SESSION_SUMMARY_SCHEMA = buildSchema()

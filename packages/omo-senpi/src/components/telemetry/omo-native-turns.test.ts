@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import type { TurnEndEvent } from "@code-yeongyu/senpi"
 import type {
   EventTelemetryClient,
@@ -10,9 +10,12 @@ import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
 } from "./product-identity"
 import { createOmoNativeTurnHandler } from "./omo-native-turns"
-import { createSessionSummaryRecorder } from "./omo-native-session-summary"
+import { createTempStateDirs, createTestRecorder } from "./session-summary.test-support"
 
 type CapturedEvent = { readonly name: string; readonly properties: EventTelemetryProperties }
+
+const stateDirs = createTempStateDirs()
+afterEach(() => stateDirs.cleanup())
 
 function createRecorder(): {
   readonly captured: CapturedEvent[]
@@ -34,30 +37,61 @@ function createRecorder(): {
       diagnostics: (input) => diagnostics.push(input),
       sessionId: "hashed-session",
       sessionRole: "root",
-      summary: createSessionSummaryRecorder({
-        captureEvent: () => undefined,
-        sampleRate: 1,
-        sessionRole: "root",
-        store: { read: () => undefined, write: () => undefined, remove: () => undefined, claimOrphans: () => [] },
-      }),
+      summary: createTestRecorder({ dir: stateDirs.make(), sampleRate: 1 }).summary,
     }),
   }
 }
 
-test("#given a known model routed through an unknown provider #when the summary records it #then the model stays named and only the provider is custom", () => {
-  const rows: EventTelemetryProperties[] = []
-  const summary = createSessionSummaryRecorder({
-    captureEvent: (_name, properties) => rows.push(properties),
-    sampleRate: 0,
-    sessionRole: "root",
-    store: { read: () => undefined, write: () => undefined, remove: () => undefined, claimOrphans: () => [] },
-  })
-  const handle = createOmoNativeTurnHandler({ client: { captureEvent: () => undefined }, sessionId: "s", sessionRole: "root", summary })
+test("#given a known model routed through an unknown provider #when the summary records it #then the model stays named and only the provider is custom", async () => {
+  const recorder = createTestRecorder({ dir: stateDirs.make(), sampleRate: 0 })
+  const handle = createOmoNativeTurnHandler({ client: { captureEvent: () => undefined }, sessionId: "s", sessionRole: "root", summary: recorder.summary })
 
   handle(turnEvent({ provider: "my-private-gateway", model: "gpt-5.6-sol" }))
-  summary.finish("s", "quit")
+  await recorder.summary.finish("s", "quit")
 
-  expect(rows[0]).toMatchObject({ m1_provider: "custom", m1_model: "gpt-5.6-sol", custom_model_turns: 0 })
+  expect(recorder.published[0]?.properties).toMatchObject({ m1_provider: "custom", m1_model: "gpt-5.6-sol", custom_model_turns: 0 })
+})
+
+// Cost contract (plan todo 8): cost_1e4 = round(cost * 1e4) is the only rounding step, cost_usd is derived
+// from it, and the summary adds integers, so raw rows and the summary agree exactly in any order.
+describe("integer cost accounting", () => {
+  async function costsOf(costs: readonly number[]): Promise<{ turns: unknown[][]; summary: EventTelemetryProperties | undefined; summaryTotal: number }> {
+    const captured: CapturedEvent[] = []
+    const recorder = createTestRecorder({ dir: stateDirs.make(), sampleRate: 1 })
+    const handle = createOmoNativeTurnHandler({
+      client: { captureEvent: (name, properties) => captured.push({ name, properties }) },
+      sessionId: "s",
+      sessionRole: "root",
+      summary: recorder.summary,
+    })
+    costs.forEach((total, index) => handle(turnEvent({ turnIndex: index, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total } } })))
+    await recorder.summary.finish("s", "quit")
+    return {
+      turns: captured.map(({ properties }) => [properties.cost_1e4, properties.cost_usd]),
+      summary: recorder.published.at(-1)?.properties,
+      summaryTotal: recorder.published.reduce((sum, { properties }) => sum + Number(properties.cost_1e4), 0),
+    }
+  }
+
+  test.each([
+    [[0.00006, 0.00006], [[1, 0.0001], [1, 0.0001]], 2, 0.0002],
+    [[0.1, 0.2], [[1000, 0.1], [2000, 0.2]], 3000, 0.3],
+    [[0.00005], [[1, 0.0001]], 1, 0.0001],
+    [[0.000049], [[0, 0]], 0, 0],
+  ])("#given turn costs %p #when summed #then turns report %p and the summary %p / %p", async (costs, turns, summary1e4, summaryUsd) => {
+    const result = await costsOf(costs)
+    expect(result.turns).toEqual(turns)
+    expect(result.summary).toMatchObject({ cost_1e4: summary1e4, cost_usd: summaryUsd })
+  })
+
+  test("#given 1,000 turns #when they arrive in two different orders #then the summary rows add up to the same integer as the raw turns", async () => {
+    const costs = Array.from({ length: 1_000 }, (_, index) => ((index * 7_919) % 1_000) / 100_003)
+    const forward = await costsOf(costs)
+    const backward = await costsOf([...costs].reverse())
+    const sumOfTurns = forward.turns.reduce((sum, [cost1e4]) => sum + Number(cost1e4), 0)
+    expect(forward.summaryTotal).toBe(sumOfTurns)
+    expect(backward.summaryTotal).toBe(sumOfTurns)
+  })
 })
 
 function turnEvent(input: {
@@ -126,6 +160,7 @@ describe("OmO Native turn telemetry", () => {
         cache_write_tokens: 4,
         reasoning_tokens: 5,
         total_tokens: 40,
+        cost_1e4: 1235,
         cost_usd: 0.1235,
         turn_index: 7,
         sample_rate: 1,

@@ -1,150 +1,229 @@
-import { createHash } from "node:crypto"
+import { randomUUID } from "node:crypto"
+import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
-import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
-
-import type { OmoNativeEventName } from "./product-identity"
-import type { SummaryStore } from "./session-summary-store"
 import type { TelemetrySessionRole } from "./session-role"
-import {
-  addTurn,
-  openWindow,
-  summaryProperties,
-  type EndedBy,
-  type SummaryTurn,
-  type SummaryWindow,
-} from "./session-summary-window"
+import { CORRUPT, removeFile } from "./session-summary-files"
+import { createSummaryPublisher, type PublishSummary } from "./session-summary-publisher"
+import { createSummaryRecovery } from "./session-summary-recovery"
+import { isSessionSampled } from "./session-summary-sampling"
+import type { SummaryStorage, WindowRecord } from "./session-summary-storage"
+import { addTurn, openWindow, type EndedBy, type SummaryTurn, type SummaryWindow } from "./session-summary-window"
 
 export type { SummaryTurn } from "./session-summary-window"
+export type { SummaryPublication } from "./session-summary-publisher"
+export { RAW_TURN_SAMPLE_RATE, isSessionSampled } from "./session-summary-sampling"
 
-// Share of sessions whose raw turn_completed rows go to PostHog. Turns are sampled here only because
-// PostHog is today's only sink; the first-party collector receives every turn through its own path.
-export const RAW_TURN_SAMPLE_RATE = 0.05
 export const CHECKPOINT_MAX_TURNS = 50
 export const CHECKPOINT_MAX_WINDOW_MS = 30 * 60_000
+export const HEARTBEAT_INTERVAL_MS = 60_000
+
+export type ScheduleHeartbeat = (tick: () => void, intervalMs: number) => () => void
 
 export type SessionSummaryOptions = {
-  readonly captureEvent: (name: OmoNativeEventName, properties: EventTelemetryProperties) => void
-  readonly store: SummaryStore
-  readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
+  readonly storage: SummaryStorage
+  readonly publish: PublishSummary
   readonly sessionRole: TelemetrySessionRole
+  /** Read when a window opens; the component resolves config, env and sink lazily behind it. */
+  readonly sampleRate: () => number
   readonly now?: () => number
-  readonly sampleRate?: number
+  readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
+  readonly scheduleHeartbeat?: ScheduleHeartbeat
+  /** Events the transport knows it dropped since the last call (todo 21 wires the OTLP sender's counter). */
+  readonly droppedEvents?: () => number
 }
 
 export type SessionSummaryRecorder = {
-  readonly isRawTurnSampled: (sessionHash: string) => boolean
   readonly sampleRate: number
-  readonly recordTurn: (sessionHash: string, turn: SummaryTurn) => void
-  /** `reload` keeps the session's sequence and file so the next registration continues it. */
-  readonly finish: (sessionHash: string, reason: string | undefined) => void
+  readonly isRawTurnSampled: (sessionHash: string) => boolean
+  /** Re-sends unacknowledged events (this process's and dead ones') and recovers abandoned windows. */
+  readonly recover: () => Promise<void>
+  /** Resolves when every publication this call started has been acknowledged or given up. */
+  readonly recordTurn: (sessionHash: string, turn: SummaryTurn) => Promise<void>
+  /** `reload` keeps the session's sequence so the next registration continues it. */
+  readonly finish: (sessionHash: string, reason: string | undefined) => Promise<void>
 }
 
-type Live = { nextSeq: number; window: SummaryWindow | null }
-
-export function isSessionSampled(sessionHash: string, sampleRate: number): boolean {
-  if (sampleRate >= 1) return true
-  if (sampleRate <= 0) return false
-  const bucket = createHash("sha256").update(`turn-sample:${sessionHash}`).digest().readUInt32BE(0)
-  return bucket / 0x1_0000_0000 < sampleRate
+type Live = {
+  key: string
+  seq: number
+  sampleRate: number
+  windowId: string | null
+  window: SummaryWindow | null
 }
 
 export function createSessionSummaryRecorder(options: SessionSummaryOptions): SessionSummaryRecorder {
-  const now = options.now ?? Date.now
-  const sampleRate = options.sampleRate ?? RAW_TURN_SAMPLE_RATE
-  const sessionRole = options.sessionRole
+  const { storage } = options
+  const now = options.now ?? storage.now
+  const publisher = createSummaryPublisher({
+    storage,
+    publish: options.publish,
+    ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
+    ...(options.droppedEvents === undefined ? {} : { transportDropped: options.droppedEvents }),
+  })
+  const recovery = createSummaryRecovery({
+    storage,
+    publisher,
+    ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
+  })
   const live = new Map<string, Live>()
-  let recovered = false
+  let swept = false
+  let stopHeartbeat: (() => void) | undefined
 
-  const emit = (sessionHash: string, window: SummaryWindow, seq: number, endedBy: EndedBy, role: string): void => {
-    options.captureEvent("session_summary", summaryProperties(sessionHash, window, {
-      endedBy,
-      seq,
-      sampleRate,
-      sampled: isSessionSampled(sessionHash, sampleRate),
-      sessionRole: role,
-    }))
+  const report = (error: unknown): void => {
+    options.diagnostics?.({
+      event: "telemetry_activity_state_write_failed",
+      source: "omo-native-session-summary",
+      error: error instanceof Error ? error : new Error(String(error)),
+      errorKind: error instanceof Error ? "error" : "non_error",
+    })
   }
 
-  // Rollups a crashed or killed process left behind are sent once, from the first live event, so the
-  // capture path is already installed and only one of several racing processes claims each file. The
-  // claimer leaves a window-less placeholder carrying the next seq (and the orphan's age, so it expires),
-  // because the user may resume that session in any other process.
-  const recoverOrphans = (): void => {
-    if (recovered) return
-    recovered = true
-    for (const orphan of options.store.claimOrphans()) {
-      const nextSeq = orphan.window === null ? orphan.nextSeq : orphan.nextSeq + 1
-      if (nextSeq > 0) {
-        writeSafely({ sessionHash: orphan.sessionHash, sessionRole: orphan.sessionRole, nextSeq, window: null, updatedAt: orphan.updatedAt })
-      }
-      if (orphan.window !== null) emit(orphan.sessionHash, orphan.window, orphan.nextSeq, "recovered", orphan.sessionRole)
+  const recordOf = (sessionHash: string, entry: Live): WindowRecord => ({
+    sessionHash,
+    sessionRole: options.sessionRole,
+    owner: storage.owner,
+    heartbeatAt: now(),
+    seq: entry.seq,
+    sampleRate: entry.sampleRate,
+    windowId: entry.windowId,
+    window: entry.window,
+  })
+
+  const persist = (sessionHash: string, entry: Live): void => {
+    try {
+      storage.writeWindow(entry.key, recordOf(sessionHash, entry))
+    } catch (error) {
+      report(error)
     }
+  }
+
+  const heartbeat = (): void => {
+    for (const [sessionHash, entry] of live) if (entry.window !== null) persist(sessionHash, entry)
+    runSweep()
+  }
+
+  const runSweep = (): void => {
+    try {
+      recovery.sweep()
+    } catch (error) {
+      report(error)
+    }
+  }
+
+  const sweepOnce = (): void => {
+    if (swept) return
+    swept = true
+    runSweep()
+  }
+
+  const ensureHeartbeat = (): void => {
+    if (stopHeartbeat !== undefined) return
+    stopHeartbeat = (options.scheduleHeartbeat ?? scheduleUnrefInterval)(heartbeat, HEARTBEAT_INTERVAL_MS)
   }
 
   const liveFor = (sessionHash: string): Live => {
     const cached = live.get(sessionHash)
     if (cached !== undefined) return cached
-    const stored = options.store.read(sessionHash)
-    const entry: Live = stored === undefined ? { nextSeq: 0, window: null } : { nextSeq: stored.nextSeq, window: stored.window }
+    const entry = adopt(sessionHash)
     live.set(sessionHash, entry)
     return entry
   }
 
-  const persist = (sessionHash: string, entry: Live): void => {
-    writeSafely({ sessionHash, sessionRole, nextSeq: entry.nextSeq, window: entry.window })
-  }
-
-  function writeSafely(rollup: Parameters<SummaryStore["write"]>[0]): void {
-    try {
-      options.store.write(rollup)
-    } catch (error) {
-      options.diagnostics?.({
-        event: "telemetry_activity_state_write_failed",
-        source: "omo-native-session-summary",
-        error: error instanceof Error ? error : new Error(String(error)),
-        errorKind: "error",
-      })
+  // A session's file is continued by whoever records its next turn: this process's own file, or the file
+  // of a dead owner (claimed first, so two resuming processes never both continue it). A file a LIVE
+  // process still owns is left alone; this process keeps its own copy beside it.
+  const adopt = (sessionHash: string): Live => {
+    const key = storage.windowKey(sessionHash)
+    const fresh = (seq: number, entryKey = key): Live => ({ key: entryKey, seq, sampleRate: options.sampleRate(), windowId: null, window: null })
+    const stored = storage.readWindow(key)
+    if (stored === undefined || stored === CORRUPT) return fresh(0)
+    if (stored.owner.pid === storage.owner.pid && stored.owner.bootId === storage.owner.bootId) {
+      return { key, seq: stored.seq, sampleRate: stored.sampleRate, windowId: stored.windowId, window: stored.window }
     }
+    if (storage.isOwnerAlive(stored.owner)) return fresh(stored.seq, storage.windowKey(sessionHash, true))
+    const claimed = storage.claimWindow(key)
+    if (claimed === undefined) return fresh(stored.seq)
+    const record = claimed.record
+    if (record === undefined || record === CORRUPT) {
+      removeFile(claimed.claimPath)
+      return fresh(stored.seq)
+    }
+    const published = record.windowId !== null && storage.hasPending(record.windowId)
+    const entry: Live = published || record.window === null
+      ? fresh(published ? record.seq + 1 : record.seq)
+      : { key, seq: record.seq, sampleRate: record.sampleRate, windowId: record.windowId, window: record.window }
+    persist(sessionHash, entry)
+    removeFile(claimed.claimPath)
+    return entry
   }
 
-  // The closed window leaves disk BEFORE it is sent: a crash in between loses one window instead of
-  // sending it twice, so summed totals can only undercount, never double count.
-  const flush = (sessionHash: string, entry: Live, endedBy: EndedBy): void => {
+  const close = (sessionHash: string, entry: Live, endedBy: EndedBy, keepFile: boolean): void => {
     const window = entry.window ?? openWindow(now(), 0)
-    const seq = entry.nextSeq
-    entry.nextSeq += 1
-    entry.window = null
-    if (endedBy === "shutdown") options.store.remove(sessionHash)
-    else persist(sessionHash, entry)
-    emit(sessionHash, window, seq, endedBy, sessionRole)
+    const windowId = entry.windowId ?? randomUUID()
+    const seq = entry.seq
+    void publisher.publishWindow({
+      sessionHash, sessionRole: options.sessionRole, sampleRate: entry.sampleRate, seq, windowId, window, endedBy,
+    }, () => {
+      entry.seq = seq + 1
+      entry.window = null
+      entry.windowId = null
+      if (keepFile) persist(sessionHash, entry)
+      else storage.removeWindow(entry.key)
+    })
   }
 
   return {
-    sampleRate,
-    isRawTurnSampled: (sessionHash) => isSessionSampled(sessionHash, sampleRate),
-    recordTurn(sessionHash, turn) {
-      recoverOrphans()
+    get sampleRate() {
+      return options.sampleRate()
+    },
+    isRawTurnSampled: (sessionHash) => isSessionSampled(sessionHash, options.sampleRate()),
+    async recover() {
+      swept = true
+      runSweep()
+      await publisher.settled()
+    },
+    async recordTurn(sessionHash, turn) {
+      sweepOnce()
+      ensureHeartbeat()
       const entry = liveFor(sessionHash)
       const at = now()
-      entry.window ??= openWindow(at, turn.turnIndex)
+      if (entry.window === null) {
+        entry.window = openWindow(at, turn.turnIndex)
+        entry.windowId = randomUUID()
+        entry.sampleRate = options.sampleRate()
+      }
       addTurn(entry.window, turn, at)
       if (entry.window.totals.length >= CHECKPOINT_MAX_TURNS || at - entry.window.startedAt >= CHECKPOINT_MAX_WINDOW_MS) {
-        flush(sessionHash, entry, "checkpoint")
+        close(sessionHash, entry, "checkpoint", true)
       } else {
         persist(sessionHash, entry)
       }
+      await publisher.settled()
     },
-    finish(sessionHash, reason) {
-      recoverOrphans()
+    async finish(sessionHash, reason) {
+      sweepOnce()
       const entry = liveFor(sessionHash)
       live.delete(sessionHash)
-      if (reason === "reload") {
-        if (entry.window !== null) flush(sessionHash, entry, "reload")
-        else if (entry.nextSeq > 0) persist(sessionHash, entry)
-        return
+      if (live.size === 0) {
+        stopHeartbeat?.()
+        stopHeartbeat = undefined
       }
-      if (entry.window !== null || entry.nextSeq > 0) flush(sessionHash, entry, "shutdown")
-      else options.store.remove(sessionHash)
+      const ownCopy = entry.key !== storage.windowKey(sessionHash)
+      if (reason === "reload") {
+        if (entry.window !== null) close(sessionHash, entry, "reload", !ownCopy)
+        else if (entry.seq > 0 && !ownCopy) persist(sessionHash, entry)
+      } else if (entry.window !== null || entry.seq > 0) {
+        close(sessionHash, entry, "shutdown", !ownCopy)
+      } else {
+        storage.removeWindow(entry.key)
+      }
+      await publisher.settled()
     },
   }
+}
+
+function scheduleUnrefInterval(tick: () => void, intervalMs: number): () => void {
+  const timer = setInterval(tick, intervalMs)
+  timer.unref?.()
+  return () => clearInterval(timer)
 }

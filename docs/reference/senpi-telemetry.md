@@ -48,6 +48,7 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `turn_completed` | `$session_id` | `string` | - |
 | `turn_completed` | `cache_read_tokens` | `number` | - |
 | `turn_completed` | `cache_write_tokens` | `number` | - |
+| `turn_completed` | `cost_1e4` | `number` | - |
 | `turn_completed` | `cost_usd` | `number` | - |
 | `turn_completed` | `input_tokens` | `number` | - |
 | `turn_completed` | `model_id` | `string` | `qwen3.6-flash`, `qwen3.8-max-preview`, `claude-fable-5`, `claude-fable-5-1`, `claude-haiku-4-5`, `claude-haiku-5-5`, `claude-opus-4-6`, `claude-opus-5`, `claude-opus-5-5`, `claude-sonnet-5`, `claude-sonnet-5-5`, `gpt-5.6-luna-fast`, `gpt-5.6-sol`, `gpt-5.6-sol-fast`, `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-luna`, `gpt-6-luna-fast`, `gpt-6-sol`, `gpt-6-sol-fast`, `gpt-6.1-sol`, `gpt-6.1-sol-fast`, `deepseek-flash`, `deepseek-v4-flash`, `deepseek-v4-pro`, `gemini-3.1-pro`, `gemini-3.6-flash`, `grok-4.6`, `grok-4.7`, `k3`, `kimi-for-coding-highspeed`, `kimi-k3`, `glm-5.2`, `glm-5.3`, `mimo-v2.5-pro`, `mimo-v2.6-pro`, `minimax-m2.7`, `minimax-m3`, `grok-4.20-0309-non-reasoning`, `mimo-v2.6-flash`, `glm-5.3-flash`, `custom` |
@@ -62,8 +63,10 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `session_summary` | `aborted_turns` | `number` | - |
 | `session_summary` | `cache_read_tokens` | `number` | - |
 | `session_summary` | `cache_write_tokens` | `number` | - |
+| `session_summary` | `cost_1e4` | `number` | - |
 | `session_summary` | `cost_usd` | `number` | - |
 | `session_summary` | `custom_model_turns` | `number` | - |
+| `session_summary` | `dropped_events` | `number` | - |
 | `session_summary` | `ended_by` | `string` | `checkpoint`, `shutdown`, `reload`, `recovered` |
 | `session_summary` | `error_turns` | `number` | - |
 | `session_summary` | `first_turn_index` | `number` | - |
@@ -286,9 +289,11 @@ counts when evaluating rollout coverage.
 
 ### Session summaries and raw-turn sampling
 
-`session_summary` carries a session's assistant turns, summed per window. A window closes every 50 turns or 30 minutes (`ended_by: checkpoint`), on a reload (`ended_by: reload`, not final) and when the session ends (`ended_by: shutdown`). The open window is kept in `<state>/rollups/<session>.json` after every turn; if the process dies, the next OmO process to record a turn sends it once with `ended_by: recovered` and leaves a placeholder so the session, resumed in any process, continues its numbering. Only `ended_by: shutdown` rows have `is_final: true`; a recovered row is not final because the session may be resumed, and a session that is never resumed has no final row. Leftover rollup, temporary and claim files of dead processes are removed, and rollups older than 14 days are dropped. A session keeps one `summary_seq` sequence across reloads and recovery, so `($session_id, summary_seq)` is unique and summing every row of a session gives its exact totals. The three most used models get their own `m1_*` to `m3_*` totals and the rest are summed into `other_*`. `session_role` is `main` for a user's session and `child`, `dag_child` or `member` for omo-spawned work, whose cost `delegation_completed` already counts; filter on it to avoid counting delegated work twice.
+`session_summary` carries a session's assistant turns, summed per window. A window closes every 50 turns or 30 minutes (`ended_by: checkpoint`), on a reload (`ended_by: reload`, not final) and when the session ends (`ended_by: shutdown`). Each window has its own id, which is the event's `uuid`, so a window that is sent twice is stored once. The open window is written to `<state>/session-summary/<session>.json` after every turn and at least once a minute while the process lives. Sending a closed window first writes the exact event to `<state>/session-summary/pending/<window id>.json`, then advances the session's sequence on disk, then sends; the pending file is deleted only once the transport confirms delivery, and any OmO process that starts later re-sends a pending file whose process is gone, under the same `uuid`. If a process dies with a window open, a later OmO process sends that window once with `ended_by: recovered`, but only after its owner is gone and its last heartbeat is more than 5 minutes old; resuming the same session sooner simply continues the window. Only `ended_by: shutdown` rows have `is_final: true`; a recovered row is not final because the session may be resumed. Windows and pending events older than 14 days are deleted unsent and counted in the next row's `dropped_events`.
 
-Raw `turn_completed` rows go to PostHog only for a fixed share of sessions (`sample_rate` 0.05), chosen from the session hash so a sampled session sends every one of its turns. PostHog is today's only sink, so this sample is what keeps per-turn events from dominating its volume, while `session_summary` carries exact totals for every session. When the first-party collector ships, every turn goes to the collector through its own path and only this direct PostHog path stays sampled. Weight raw PostHog rows by `1 / sample_rate`, or use `session_summary` for exact totals. Rows from clients older than this change have no `sample_rate` and were never sampled.
+Cost is carried as `cost_1e4`, an integer number of 1/10,000 USD, rounded once per turn; `cost_usd` is always `cost_1e4 / 10000`. Sum `cost_1e4` when comparing raw turns with summaries: the two then agree exactly, in any order.
+
+Raw `turn_completed` rows go to PostHog only for a fixed share of sessions, chosen from the session hash so a sampled session sends every one of its turns. Each row carries `sample_rate`. The share is `0.05` unless `telemetry.rawTurnSampleRate` in `omo.json` or the `OMO_TELEMETRY_RAW_TURN_SAMPLE_RATE` environment variable (which wins) sets another value between 0 and 1. PostHog is today's only sink, so this sample is what keeps per-turn events from dominating its volume, while `session_summary` carries exact totals for every session; turns a session does not send are never recoverable, so the share is lowered only on purpose. When the first-party collector ships, every turn goes to the collector and only this direct PostHog path stays sampled. Weight raw PostHog rows by `1 / sample_rate`, or use `session_summary` for exact totals. Rows from clients older than this change have no `sample_rate` and were never sampled.
 
 ### Delegation and category config events
 
@@ -398,5 +403,5 @@ A structural allowlist enforces this rather than relying on discipline: any prop
 ## Local retention
 
 OmO Native does not retain a local history or preview file of sent telemetry payloads.
-The only telemetry file it keeps is the open `session_summary` window of each live session under `<state>/rollups/`: numbers and masked model names only, rewritten after every turn and deleted when the session ends or once a later process has sent it as `recovered`.
+The only telemetry files it keeps are under `<state>/session-summary/`: the open `session_summary` window of each session, events waiting for delivery confirmation under `pending/`, and one small file per running OmO process under `owners/` holding a random id that tells a live process from a reused process id. They hold numbers, masked model names and hashed session ids only, and are deleted once sent, or after 14 days.
 The event schema and opt-out controls above are the public audit surface.

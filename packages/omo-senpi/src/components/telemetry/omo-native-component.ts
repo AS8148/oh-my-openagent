@@ -5,7 +5,6 @@ import {
 } from "@oh-my-opencode/telemetry-core"
 import type {
   EventTelemetryClient,
-  EventTelemetryProperties,
   TelemetryCaptureMessage,
   TelemetryTransport,
   TelemetryTransportFactory,
@@ -31,8 +30,12 @@ import {
 } from "./omo-native-session"
 import { registerOmoNativeToolTelemetry } from "./omo-native-tools"
 import { createOmoNativeTurnHandler } from "./omo-native-turns"
-import { createSessionSummaryRecorder } from "./omo-native-session-summary"
-import { createSummaryStore } from "./session-summary-store"
+import {
+  SUMMARY_SHUTDOWN_WAIT_MS,
+  createNativeSummaryRecorder,
+  settleWithin,
+  type NativeCaptureState,
+} from "./omo-native-summary-wiring"
 import { isTelemetryHostWarmup, resolveTelemetrySessionRole } from "./session-role-resolver"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
@@ -44,10 +47,7 @@ import {
   type OmoNativeEventName,
 } from "./product-identity"
 
-type SharedState = {
-  capture?: (name: OmoNativeEventName, properties: EventTelemetryProperties) => void
-  sessionHash?: string
-}
+type SharedState = NativeCaptureState
 
 export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
   readonly stateDir?: string
@@ -59,15 +59,17 @@ export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
   readonly computerUseTelemetryObservers?: ComputerUseTelemetryObservers
   /** Share of sessions that also send every raw `turn_completed`; tests pin it to 0 or 1. */
   readonly rawTurnSampleRate?: number
+  /** Liveness probe for summary-window owners; injected by tests that simulate dead processes. */
+  readonly isPidAlive?: (pid: number) => boolean
 }
 
 export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryComponentOptions = {}): OmoSenpiComponent {
   const env = options.env ?? process.env
   const stateDir = options.stateDir ?? getOmoNativeStateDir(env)
-  const state: SharedState = {}
+  const state: SharedState = { delivered: new Set() }
   const client: Pick<EventTelemetryClient, "captureEvent"> = {
-    captureEvent(name, properties) {
-      if (isOmoNativeEventName(name)) state.capture?.(name, properties)
+    captureEvent(name, properties, captureOptions) {
+      if (isOmoNativeEventName(name)) state.capture?.(name, properties, captureOptions)
     },
   }
   const transportFactory = sharedTransportFactory(
@@ -104,16 +106,19 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       // Same ordering constraint again: the final summary window must be captured before the session
       // component's shutdown handler clears `state.capture`.
       const sessionRole = resolveTelemetrySessionRole(pi, env)
-      const summary = createSessionSummaryRecorder({
-        captureEvent: client.captureEvent,
-        store: createSummaryStore({ stateDir }),
+      const summary = createNativeSummaryRecorder({
+        state,
+        stateDir,
+        env,
+        cwd: typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : undefined,
         sessionRole,
+        ...(options.rawTurnSampleRate === undefined ? {} : { rawTurnSampleRate: options.rawTurnSampleRate }),
+        ...(options.isPidAlive === undefined ? {} : { isPidAlive: options.isPidAlive }),
         ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
-        ...(options.rawTurnSampleRate === undefined ? {} : { sampleRate: options.rawTurnSampleRate }),
       })
-      pi.on("session_shutdown", (payload, eventCtx) => {
+      pi.on("session_shutdown", async (payload, eventCtx) => {
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
-        summary.finish(state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId), reason)
+        await settleWithin(summary.finish(state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId), reason), SUMMARY_SHUTDOWN_WAIT_MS)
       })
 
       createOmoNativePromptComponent({
@@ -189,8 +194,10 @@ function sharedTransportFactory(
 
     const wrapped: TelemetryTransport = {
       capture(message) {
+        const firstCapture = state.capture === undefined
         installCaptureFacade(state, transport, message, options)
         forwardValidatedCapture(transport, message)
+        if (firstCapture) state.onCaptureReady?.()
       },
       flush: transport.flush === undefined ? undefined : () => transport.flush?.() ?? Promise.resolve(),
       async shutdown() {
@@ -199,6 +206,7 @@ function sharedTransportFactory(
         } finally {
           if (state.capture !== undefined) {
             state.capture = undefined
+            state.flush = undefined
             state.sessionHash = undefined
           }
         }
@@ -229,6 +237,9 @@ function installCaptureFacade(
     propertyAllowlist: OMO_NATIVE_PROPERTY_ALLOWLISTS,
     schemaVersion: OMO_NATIVE_SCHEMA_VERSION,
     source: "omo-native-component",
+    onCapture(payload) {
+      if (typeof payload.uuid === "string") state.delivered.add(payload.uuid)
+    },
     transportFactory: () => ({
       capture(message) {
         forwardValidatedCapture(transport, message)
@@ -237,7 +248,9 @@ function installCaptureFacade(
     }),
   })
   state.capture = privacyClient.captureEvent
+  state.flush = () => transport.flush?.() ?? Promise.resolve()
 }
+
 
 // This is the sole native transport boundary. Every message reaching it has already passed through
 // telemetry-core's captureEvent privacy wrapper; keeping the raw transport call here makes the
