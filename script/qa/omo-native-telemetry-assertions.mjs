@@ -27,9 +27,11 @@ const expectedNativeEvents = new Set([
 
 // Session-conditional events the scripted scenario cannot produce: `kibitzer_summary` is emitted only
 // when the memory sidecar actually woke, which needs recall enabled and a committed memory corpus, and
-// `process_crashed` only when an earlier process left a crash record on disk, and `session_summary` only
-// when a summary window closes (session shutdown, 50 turns or 30 minutes), which the three-prompt drive
-// never reaches before it stops the process with SIGTERM, so its flush is not guaranteed to land. They
+// `process_crashed` only when an earlier process left a crash record on disk. `session_summary` is held
+// here only until a live capture proves it: by the code it is flushed at the drive's clean shutdown (after
+// the third settled turn the drive ends stdin, and session_shutdown flushes the open window, registered
+// ahead of the session client the same way `parallelism_summary` is), so it should become required once a
+// real capture shows it. They
 // stay in the coverage check above (a dropped or misspelled event still fails) but are not required to
 // appear in a capture, because demanding one here would only be satisfiable by faking the emission.
 const conditionalNativeEvents = new Set([
