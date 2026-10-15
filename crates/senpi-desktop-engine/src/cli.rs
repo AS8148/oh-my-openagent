@@ -29,6 +29,10 @@ pub struct Cli {
     /// Serve MCP (tools) on stdio over the --serve daemon, starting it when needed.
     #[arg(long)]
     mcp: bool,
+    /// Allow `--serve`, `--oneshot` and `--mcp`. Off by default; the flag only prevents an
+    /// accidental daemon, the self-responsible refusal is the protection (#10207).
+    #[arg(long)]
+    enable_daemon: bool,
     /// Lift a stop latched in the daemon (the desktop user's reset).
     #[arg(long)]
     resume: bool,
@@ -83,7 +87,7 @@ impl DaemonArgs {
 
     /// The same options as `--serve` flags, for an auto-started daemon.
     fn serve_args(&self) -> Vec<String> {
-        let mut args = Vec::new();
+        let mut args = vec!["--enable-daemon".to_owned()];
         let mut push = |flag: &str, value: Option<String>| {
             if let Some(value) = value {
                 args.extend([flag.to_owned(), value]);
@@ -111,6 +115,10 @@ impl DaemonArgs {
 
 pub enum Mode {
     Stdio,
+    /// `--serve`, `--oneshot` or `--mcp` without `--enable-daemon`.
+    DaemonDisabled {
+        flag: &'static str,
+    },
     Serve {
         endpoint: String,
         idle: Duration,
@@ -134,6 +142,16 @@ pub enum Mode {
 
 impl Cli {
     pub fn mode(self) -> Mode {
+        if !self.enable_daemon {
+            let disabled = [
+                (self.serve.is_some(), "--serve"),
+                (self.oneshot, "--oneshot"),
+                (self.mcp, "--mcp"),
+            ];
+            if let Some((_, flag)) = disabled.into_iter().find(|(requested, _)| *requested) {
+                return Mode::DaemonDisabled { flag };
+            }
+        }
         if let Some(endpoint) = self.serve {
             Mode::Serve {
                 endpoint,
