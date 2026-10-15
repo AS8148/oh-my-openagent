@@ -28,6 +28,8 @@ senpi-desktop-backend-macos = { path = "../senpi-desktop-backend-macos" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 core-graphics.workspace = true
+libc.workspace = true
+tempfile.workspace = true
 objc2-app-kit.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

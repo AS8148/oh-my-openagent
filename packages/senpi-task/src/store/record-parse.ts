@@ -26,6 +26,7 @@ import {
 } from "./start-failure-parse"
 import { parseRunStats } from "./run-stats-parse"
 import { parseOptionalProvisionalExit } from "./provisional-exit-parse"
+import { parseUncertainInputs } from "./input-effects-parse"
 import {
   isRecord,
   readNumber,
@@ -101,6 +102,8 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const provisionalExit = parseOptionalProvisionalExit(value)
 
   return {
+    ...(value.effect_seq === undefined ? {} : { effect_seq: readNumber(value, "effect_seq") }),
+    ...(value.uncertain_inputs === undefined ? {} : { uncertain_inputs: parseUncertainInputs(value.uncertain_inputs) }),
     task_id: parseTaskId(readString(value, "task_id")),
     status,
     residency_state: readResidencyState(value),
