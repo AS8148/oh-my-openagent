@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { CaptureBaselineError, captureItem, itemFrontier, renderItem } from "./index"
-import { captureCurrent, captureInto, newDoc } from "./test-support"
+import { captureCurrent, captureInto, mulberry32, newDoc } from "./test-support"
 
 describe("captureItem", () => {
   test("creates a new item from an empty baseline", async () => {
@@ -158,5 +158,56 @@ describe("captureItem", () => {
     captureInto(doc, "---\nkey: \"7\"\n---\n", itemFrontier(doc), v3)
     expect(renderItem(doc)).toBe("---\nkey: \"8\"\n---\n")
     doc.free()
+  })
+
+  test("N sequential captures from one device on one stale baseline lose no edit", async () => {
+    const rand = mulberry32(7)
+    for (let trial = 0; trial < 40; trial++) {
+      const doc = await newDoc("1")
+      captureInto(doc, "", [], "hello\n")
+      const f1 = itemFrontier(doc)
+      const base = renderItem(doc) ?? ""
+      const count = 2 + Math.floor(rand() * 4)
+      const markers: string[] = []
+      for (let i = 0; i < count; i++) {
+        const marker = `E${trial}_${i}_${Math.floor(rand() * 1e6)}`
+        markers.push(marker)
+        const update = captureItem(doc, base, f1, `hello ${marker}\n`)
+        if (update !== null) doc.import(update)
+      }
+      const rendered = renderItem(doc) ?? ""
+      for (const marker of markers) expect(rendered, `trial ${trial} lost edit ${marker}`).toContain(marker)
+      doc.free()
+    }
+  })
+
+  test("interleaved captures from two devices on one baseline lose no edit", async () => {
+    const rand = mulberry32(11)
+    for (let trial = 0; trial < 30; trial++) {
+      const docA = await newDoc("1")
+      const docB = await newDoc("2")
+      captureInto(docA, "", [], "seed\n")
+      docB.import(docA.export({ mode: "update" }))
+      const f1 = itemFrontier(docA)
+      const base = renderItem(docA) ?? ""
+      const rounds = 2 + Math.floor(rand() * 3)
+      const markers: string[] = []
+      for (let round = 0; round < rounds; round++) {
+        const mkA = `A${trial}_${round}_${Math.floor(rand() * 1e6)}`
+        const mkB = `B${trial}_${round}_${Math.floor(rand() * 1e6)}`
+        const updA = captureItem(docA, base, f1, `seed ${mkA}\n`)
+        if (updA !== null) docA.import(updA)
+        const updB = captureItem(docB, base, f1, `seed ${mkB}\n`)
+        if (updB !== null) docB.import(updB)
+        if (updA !== null) docB.import(updA)
+        if (updB !== null) docA.import(updB)
+        markers.push(mkA, mkB)
+      }
+      const rendered = renderItem(docA) ?? ""
+      expect(rendered).toBe(renderItem(docB))
+      for (const marker of markers) expect(rendered, `trial ${trial} lost edit ${marker}`).toContain(marker)
+      docA.free()
+      docB.free()
+    }
   })
 })

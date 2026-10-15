@@ -7,6 +7,13 @@ const KEY_POOL = ["description", "title", "count", "flag", "due", "tags", "meta"
 const WORD_POOL = ["plain", "héllo", "한글", "🙂🙂", "two words", "with: colon", "42", "true", "2026-01-07"] as const
 const PLAIN_SAFE = /^[A-Za-z0-9._-]+( [A-Za-z0-9._-]+)*$/
 
+function multilineScalar(rand: () => number): string {
+  const lines = Array.from({ length: 2 + Math.floor(rand() * 2) }, () => pick(rand, WORD_POOL))
+  const text = lines.join("\n")
+  if (rand() < 0.5) return `|\n    ${lines.join("\n    ")}`
+  return JSON.stringify(text)
+}
+
 function scalarSource(rand: () => number): string {
   const roll = rand()
   if (roll < 0.2) return String(Math.floor(rand() * 1000))
@@ -20,11 +27,12 @@ function scalarSource(rand: () => number): string {
 function fmEntry(rand: () => number, key: string): string {
   const roll = rand()
   if (roll < 0.15) return `${key}:\n    a: ${Math.floor(rand() * 10)}`
-  if (roll < 0.4) {
+  if (roll < 0.3) {
     const n = 1 + Math.floor(rand() * 3)
     const els = Array.from({ length: n }, () => `  - ${scalarSource(rand)}`)
     return `${key}:\n${els.join("\n")}`
   }
+  if (roll < 0.45) return `${key}: ${multilineScalar(rand)}`
   return `${key}: ${scalarSource(rand)}`
 }
 

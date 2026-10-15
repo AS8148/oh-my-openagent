@@ -47,4 +47,28 @@ describe("normalizeItemKey", () => {
     expect(normalizeItemKey(".hidden/file.md")).toBe(".hidden/file.md")
     expect(normalizeItemKey("a.../b....md")).toBe("a.../b....md")
   })
+
+  test("rejects spellings that would split one file into several keys", () => {
+    expect(normalizeItemKey("a//b.md")).toBeNull()
+    expect(normalizeItemKey("./a.md")).toBeNull()
+    expect(normalizeItemKey("a/./b.md")).toBeNull()
+    expect(normalizeItemKey("a/")).toBeNull()
+    expect(normalizeItemKey(".")).toBeNull()
+    expect(normalizeItemKey("a/b/.")).toBeNull()
+  })
+
+  test("rejects backslash and Windows drive paths", () => {
+    expect(normalizeItemKey("a\\b.md")).toBeNull()
+    expect(normalizeItemKey("C:\\x.md")).toBeNull()
+    expect(normalizeItemKey("C:/x.md")).toBeNull()
+  })
+
+  test("the folded key is itself NFC-stable", () => {
+    // ǰ (U+01F0) folds to j + U+030C; the stored key must equal its own re-normalization.
+    const folded = normalizeItemKey("ǰ.md")
+    expect(folded).not.toBeNull()
+    if (folded === null) return
+    expect(folded).toBe(folded.normalize("NFC"))
+    expect(normalizeItemKey("J̌.md")).toBe(folded)
+  })
 })
