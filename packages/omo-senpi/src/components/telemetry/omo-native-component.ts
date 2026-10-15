@@ -13,7 +13,7 @@ import type {
 } from "@oh-my-opencode/telemetry-core"
 
 import type { OmoSenpiComponent } from "../../extension/types"
-import { isHostWarmupSession, readSessionRole, resolveStateDir } from "@oh-my-opencode/senpi-task"
+import { resolveStateDir } from "@oh-my-opencode/senpi-task"
 
 import { sharedTaskTerminalObservers, type TaskTerminalObservers } from "../task/terminal-observers"
 import {
@@ -33,6 +33,7 @@ import { registerOmoNativeToolTelemetry } from "./omo-native-tools"
 import { createOmoNativeTurnHandler } from "./omo-native-turns"
 import { createSessionSummaryRecorder } from "./omo-native-session-summary"
 import { createSummaryStore } from "./session-summary-store"
+import { isTelemetryHostWarmup, resolveTelemetrySessionRole } from "./session-role-resolver"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
   OMO_NATIVE_SCHEMA_VERSION,
@@ -80,7 +81,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
     register(pi, ctx) {
       // The throwaway session that warms a fresh task host is no session of anyone's: it must not be
       // counted as one, nor report the crashes and daily activity the real session reports.
-      if (isHostWarmupSession(pi)) return
+      if (isTelemetryHostWarmup(pi)) return
 
       // Must precede the session component: its `session_shutdown` handler shuts the client down,
       // which clears `state.capture`, after which `parallelism_summary` would capture nothing.
@@ -102,10 +103,11 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
 
       // Same ordering constraint again: the final summary window must be captured before the session
       // component's shutdown handler clears `state.capture`.
+      const sessionRole = resolveTelemetrySessionRole(pi, env)
       const summary = createSessionSummaryRecorder({
         captureEvent: client.captureEvent,
         store: createSummaryStore({ stateDir }),
-        sessionRole: readSessionRole(pi, env) ?? "main",
+        sessionRole,
         ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
         ...(options.rawTurnSampleRate === undefined ? {} : { sampleRate: options.rawTurnSampleRate }),
       })
@@ -154,6 +156,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
           client,
           diagnostics: options.diagnostics,
           sessionId: sessionHash,
+          sessionRole,
           summary,
         })(payload)
       })

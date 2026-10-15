@@ -8,6 +8,7 @@ import { KIBITZER_SUMMARY_SCHEMA } from "./kibitzer-schema"
 import { KNOWN_MODELS, KNOWN_PROVIDERS } from "./model-vocabulary"
 import { PARALLELISM_SUMMARY_SCHEMA } from "./parallelism-schema"
 import { SESSION_SUMMARY_SCHEMA } from "./session-summary-schema"
+import { TELEMETRY_SESSION_ROLES } from "./session-role"
 
 export type OmoNativePropertyType = "boolean" | "number" | "string"
 
@@ -74,6 +75,7 @@ export const OMO_NATIVE_EVENT_SCHEMAS = Object.freeze({
     provider_count: NUMBER_PROPERTY,
     providers: STRING_PROPERTY,
     reason: enumProperty(["startup", "reload", "new", "resume", "fork"] as const),
+    session_role: enumProperty(TELEMETRY_SESSION_ROLES),
     // Device-reported IANA zone. A timezone signal, never a country signal: countries share zones,
     // span zones, and users override them. Country comes from PostHog's server-side GeoIP.
     timezone: STRING_PROPERTY,
@@ -108,6 +110,7 @@ export const OMO_NATIVE_EVENT_SCHEMAS = Object.freeze({
     provider: enumProperty([...KNOWN_PROVIDERS, "custom"] as const),
     reasoning_tokens: NUMBER_PROPERTY,
     sample_rate: NUMBER_PROPERTY,
+    session_role: enumProperty(TELEMETRY_SESSION_ROLES),
     total_tokens: NUMBER_PROPERTY,
     turn_index: NUMBER_PROPERTY,
   }),

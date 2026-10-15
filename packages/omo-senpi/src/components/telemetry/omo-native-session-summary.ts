@@ -4,6 +4,7 @@ import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-
 
 import type { OmoNativeEventName } from "./product-identity"
 import type { SummaryStore } from "./session-summary-store"
+import type { TelemetrySessionRole } from "./session-role"
 import {
   addTurn,
   openWindow,
@@ -25,7 +26,7 @@ export type SessionSummaryOptions = {
   readonly captureEvent: (name: OmoNativeEventName, properties: EventTelemetryProperties) => void
   readonly store: SummaryStore
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
-  readonly sessionRole?: string
+  readonly sessionRole: TelemetrySessionRole
   readonly now?: () => number
   readonly sampleRate?: number
 }
@@ -50,7 +51,7 @@ export function isSessionSampled(sessionHash: string, sampleRate: number): boole
 export function createSessionSummaryRecorder(options: SessionSummaryOptions): SessionSummaryRecorder {
   const now = options.now ?? Date.now
   const sampleRate = options.sampleRate ?? RAW_TURN_SAMPLE_RATE
-  const sessionRole = options.sessionRole ?? "main"
+  const sessionRole = options.sessionRole
   const live = new Map<string, Live>()
   let recovered = false
 

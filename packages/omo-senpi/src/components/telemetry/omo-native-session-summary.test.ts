@@ -45,6 +45,7 @@ function recorder(input: { readonly dir?: string; readonly sampleRate?: number; 
     store: createSummaryStore({ stateDir: dir, pid: input.pid ?? process.pid, isAlive: () => input.alive ?? true }),
     now: () => clock,
     sampleRate: input.sampleRate ?? 0.05,
+    sessionRole: "root",
   })
   return { captured, summary, dir, advance: (ms: number) => { clock += ms } }
 }
@@ -64,7 +65,7 @@ describe("session_summary windows", () => {
 
     expect(captured).toHaveLength(1)
     expect(captured[0]?.properties).toMatchObject({
-      $session_id: "s1", summary_seq: 0, is_final: true, ended_by: "shutdown", session_role: "main", turns: 3,
+      $session_id: "s1", summary_seq: 0, is_final: true, ended_by: "shutdown", session_role: "root", turns: 3,
       window_ms: 1_000, total_tokens: 60, total_tokens_p50: 20, total_tokens_p95: 30, total_tokens_max: 30,
       cost_usd: 0.6, error_turns: 1, tool_result_count: 6, tool_error_count: 1, model_count: 2,
       m1_provider: "openai", m1_model: "gpt-5.5", m1_turns: 2, m1_total_tokens: 40, m1_cost_usd: 0.3,
@@ -184,6 +185,7 @@ describe("session_summary review findings", () => {
       captureEvent: (name, properties) => bCaptured.push({ name, properties }),
       store: createSummaryStore({ stateDir: dir, pid: 222_222, isAlive: (pid) => pid !== deadPid }),
       sampleRate: 0.05,
+      sessionRole: "root",
     })
     b.recordTurn("s1", turn({ turnIndex: 1 }))
     b.finish("s1", "quit")
@@ -201,6 +203,7 @@ describe("session_summary review findings", () => {
       captureEvent: () => order.push(`emit:${store.read("s1")?.window === null ? "persisted" : "stale"}`),
       store,
       sampleRate: 0,
+      sessionRole: "root",
     })
     for (let index = 0; index < CHECKPOINT_MAX_TURNS; index += 1) summary.recordTurn("s1", turn({ turnIndex: index }))
     expect(order).toEqual(["emit:persisted"])
@@ -217,7 +220,7 @@ describe("session_summary review findings", () => {
 
   test("#given an orphan with no window and nothing sent #when its session resumes #then seq starts at 0", () => {
     const dir = stateDir()
-    createSummaryStore({ stateDir: dir, pid: 999_994 }).write({ sessionHash: "s1", sessionRole: "main", nextSeq: 0, window: null })
+    createSummaryStore({ stateDir: dir, pid: 999_994 }).write({ sessionHash: "s1", sessionRole: "root", nextSeq: 0, window: null })
     const resumed = recorder({ dir, alive: false })
     resumed.summary.recordTurn("s1", turn())
     resumed.summary.finish("s1", "quit")

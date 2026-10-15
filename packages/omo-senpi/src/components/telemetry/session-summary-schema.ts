@@ -1,5 +1,6 @@
 import { KNOWN_MODELS, KNOWN_PROVIDERS } from "./model-vocabulary"
 import { ENDED_BY, MODEL_SLOTS, MODEL_SLOT_NUMBER_KEYS, SUMMARY_NUMBER_KEYS } from "./session-summary-window"
+import { TELEMETRY_SESSION_ROLES } from "./session-role"
 
 const BOOLEAN_PROPERTY = Object.freeze({ type: "boolean" } as const)
 const NUMBER_PROPERTY = Object.freeze({ type: "number" } as const)
@@ -20,7 +21,7 @@ function buildSchema(): Readonly<Record<string, SummaryPropertySchema>> {
     ended_by: enumProperty(ENDED_BY),
     is_final: BOOLEAN_PROPERTY,
     raw_turns_sampled: BOOLEAN_PROPERTY,
-    session_role: enumProperty(["main", "child", "dag_child", "member"]),
+    session_role: enumProperty(TELEMETRY_SESSION_ROLES),
   }
   for (const key of SUMMARY_NUMBER_KEYS) schema[key] = NUMBER_PROPERTY
   for (let slot = 1; slot <= MODEL_SLOTS; slot += 1) {

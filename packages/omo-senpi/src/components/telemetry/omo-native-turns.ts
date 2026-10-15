@@ -10,11 +10,13 @@ import {
   maskProviderAndModel,
 } from "./product-identity"
 import type { SessionSummaryRecorder } from "./omo-native-session-summary"
+import type { TelemetrySessionRole } from "./session-role"
 
 export type OmoNativeTurnHandlerOptions = {
   readonly client: Pick<EventTelemetryClient, "captureEvent">
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly sessionId: string
+  readonly sessionRole: TelemetrySessionRole
   readonly summary: SessionSummaryRecorder
 }
 
@@ -50,6 +52,7 @@ export function createOmoNativeTurnHandler(
       cost_usd: roundToFourDecimals(costTotal.value),
       turn_index: event.turnIndex,
       sample_rate: options.summary.sampleRate,
+      session_role: options.sessionRole,
     } satisfies Record<TurnCompletedProperty, string | number>
 
     const usageValid = [input, output, cacheRead, cacheWrite, reasoning, total, costTotal].every(({ valid }) => valid)

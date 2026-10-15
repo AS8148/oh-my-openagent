@@ -28,6 +28,7 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `session_started` | `provider_count` | `number` | - |
 | `session_started` | `providers` | `string` | - |
 | `session_started` | `reason` | `string` | `startup`, `reload`, `new`, `resume`, `fork` |
+| `session_started` | `session_role` | `string` | `root`, `child`, `unknown` |
 | `session_started` | `timezone` | `string` | - |
 | `prompt_submitted` | `$session_id` | `string` | - |
 | `prompt_submitted` | `input_source` | `string` | `interactive`, `rpc`, `extension` |
@@ -54,6 +55,7 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `turn_completed` | `provider` | `string` | `alibaba-token-plan`, `alibaba-token-plan-cn`, `anthropic`, `anthropic-api`, `anthropic-subscription`, `bailian-coding-plan`, `chatgpt-subscription`, `claude-sdk-oauth`, `deepseek`, `google`, `github-copilot`, `kimi-coding`, `kimi-for-coding`, `moonshotai`, `openai`, `openai-codex`, `opencode`, `opencode-go`, `qwen-token-plan`, `qwen-token-plan-cn`, `vercel`, `xai`, `xiaomi`, `zai`, `zai-coding-cn`, `zai-coding-plan`, `custom` |
 | `turn_completed` | `reasoning_tokens` | `number` | - |
 | `turn_completed` | `sample_rate` | `number` | - |
+| `turn_completed` | `session_role` | `string` | `root`, `child`, `unknown` |
 | `turn_completed` | `total_tokens` | `number` | - |
 | `turn_completed` | `turn_index` | `number` | - |
 | `session_summary` | `$session_id` | `string` | - |
@@ -98,7 +100,7 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `session_summary` | `raw_turns_sampled` | `boolean` | - |
 | `session_summary` | `reasoning_tokens` | `number` | - |
 | `session_summary` | `sample_rate` | `number` | - |
-| `session_summary` | `session_role` | `string` | `main`, `child`, `dag_child`, `member` |
+| `session_summary` | `session_role` | `string` | `root`, `child`, `unknown` |
 | `session_summary` | `summary_seq` | `number` | - |
 | `session_summary` | `tool_error_count` | `number` | - |
 | `session_summary` | `tool_result_count` | `number` | - |
@@ -277,6 +279,10 @@ counts when evaluating rollout coverage.
 ### Reasoning tokens caveat
 
 `turn_completed` reports `reasoning_tokens`. That field is optional and is a subset of `output_tokens`, not an addition to it. Never add `reasoning_tokens` to `output_tokens` when computing totals, or you double count.
+
+### Session role
+
+`session_started`, `turn_completed` and `session_summary` carry `session_role`: `root` for a session a person opened, `child` for a session OmO spawned to do delegated work (a task child, a DAG node or a team member), and `unknown` when the host could not report it. A delegated child's tokens also appear in its parent's `delegation_completed` cost, so totals that add `child` rows to their root double count them; filter on `session_role = 'root'` for user-session totals.
 
 ### Session summaries and raw-turn sampling
 
