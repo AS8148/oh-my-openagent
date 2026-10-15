@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, setSystemTime, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -14,12 +14,8 @@ import { teardownRoots } from "./teardown.test-support"
 
 const SOURCE_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)))
 const roots: string[] = []
-// One Bun home for this file, off the host's: auto-install fills its cache once and every case reuses it.
-const bunHome = mkdtempSync(join(tmpdir(), "omo-providers-bun-home-"))
-const bunCache = join(bunHome, "install", "cache")
 
 afterEach(() => teardownRoots(roots))
-afterAll(() => teardownRoots([bunHome]))
 
 function write(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true })
@@ -54,7 +50,8 @@ function opencode(item: Fixture, config: unknown, auth?: unknown): void {
 // The launcher runs from a copied app with no node_modules, so Bun auto-installs the engine's dependencies
 // on first import and extracts them under the temp dir. On Windows those extraction directories outlive the
 // child (#9766 guard: `.typebox`, `.openai`, `.client-bedrock-runtime`), so the child gets its own temp dir
-// inside the fixture root, which teardown removes, and this file's own Bun home and install cache instead of the host's.
+// inside the fixture root, which teardown removes. The Bun install cache stays the host's: it is a cache, not a temp
+// leak, and a fresh per-file cache would make the first engine-importing case install cold (#10210's timeout).
 function childEnv(item: Fixture): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -62,8 +59,6 @@ function childEnv(item: Fixture): NodeJS.ProcessEnv {
     TEMP: item.tmp,
     TMP: item.tmp,
     BUN_TMPDIR: item.tmp,
-    BUN_INSTALL: bunHome,
-    BUN_INSTALL_CACHE_DIR: bunCache,
     HOME: item.home,
     USERPROFILE: item.home,
     SENPI_CODING_AGENT_DIR: item.agentDir,
@@ -520,8 +515,12 @@ describe("omo setup e2e temp isolation (#9766)", () => {
 
     expect(child.status).toBe(0)
     expect(realpathSync(child.stdout.trim())).toBe(realpathSync(item.tmp))
-    const env = childEnv(item)
-    expect([env.BUN_TMPDIR, env.BUN_INSTALL, env.BUN_INSTALL_CACHE_DIR]).toEqual([item.tmp, bunHome, bunCache])
+  })
+
+  test("#given a setup run #when the child is spawned #then it keeps the host's warm Bun install cache instead of a cold per-file one (#10210)", () => {
+    const env = childEnv(fixture())
+
+    expect([env.BUN_INSTALL, env.BUN_INSTALL_CACHE_DIR]).toEqual([process.env.BUN_INSTALL, process.env.BUN_INSTALL_CACHE_DIR])
   })
 })
 
