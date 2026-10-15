@@ -107,6 +107,7 @@ impl MacosBackend {
             display_count,
             focus_guard: true,
             stop_reason: canary_failed.then(|| CANARY_STOP_REASON.to_string()),
+            legacy_capture: self.capture.legacy_capture(),
             ..DesktopCapabilities::unavailable()
         }
     }
@@ -153,8 +154,13 @@ impl Backend for MacosBackend {
         self.capture.windows()
     }
 
-    fn capture(&mut self, target: &Target, _caps: &CaptureCaps) -> CoreResult<(RgbaImage, FrameGeometry)> {
-        self.capture.capture(target)
+    fn capture(
+        &mut self,
+        target: &Target,
+        _caps: &CaptureCaps,
+        exclude_window_titles: &[String],
+    ) -> CoreResult<(RgbaImage, FrameGeometry)> {
+        self.capture.capture_with_exclusions(target, exclude_window_titles)
     }
 
     fn pointer(

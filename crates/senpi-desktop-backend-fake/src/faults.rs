@@ -34,11 +34,13 @@ impl std::fmt::Debug for Fault {
 impl Faults {
     /// Makes the next call of `method` fail with `code`.
     pub fn fail_next(&self, method: FakeMethod, code: ErrorCode) {
-        self.queues
-            .lock()
-            .entry(method)
-            .or_default()
-            .push_back(Fault::Fail(DesktopError::new(code, format!("injected {method:?} failure"))));
+        self.fail_next_with(method, DesktopError::new(code, format!("injected {method:?} failure")));
+    }
+
+    /// Queues one exact error for the next call of `method`, so a scenario
+    /// can pin structured data (e.g. `CaptureUnavailable`/`minimized`).
+    pub fn fail_next_with(&self, method: FakeMethod, error: DesktopError) {
+        self.queues.lock().entry(method).or_default().push_back(Fault::Fail(error));
     }
 
     /// Panic after `calls` preceding calls have returned normally.
