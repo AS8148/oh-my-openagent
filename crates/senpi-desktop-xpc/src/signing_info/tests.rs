@@ -135,3 +135,34 @@ fn rejects_mistyped_signed_epoch() {
     // then
     assert_eq!(result, Err(RejectReason::MalformedSecurityEpoch));
 }
+
+#[test]
+fn missing_or_mistyped_identity_metadata_is_malformed() {
+    // given
+    for key in [security::info_keys().team, security::info_keys().identifier] {
+        for mistyped in [false, true] {
+            let info = fixture();
+            info.remove(key);
+            if mistyped {
+                info.set(key, CFNumber::new_i64(1).as_ref());
+            }
+            // when
+            let result = resolve(info.as_ref()).and_then(|p| evaluate(p, Role::NativeController));
+            // then
+            assert_eq!(result, Err(RejectReason::MalformedSigningInformation));
+        }
+    }
+}
+
+#[test]
+fn real_signing_information_contains_identifier_and_live_valid_status() {
+    // given: no injected CF dictionary or requirement outcome.
+    let token = crate::audit::AuditToken::current().unwrap();
+    let code = security::audit_identity(&token).unwrap();
+    // when
+    let info = security::signing_information(&code).unwrap();
+    let resolved = resolve(&info).unwrap();
+    // then
+    assert!(matches!(resolved.identifier, Field::Value(id) if !id.is_empty()));
+    assert!(matches!(resolved.dynamic_status, Field::Value(bits) if bits & 1 != 0));
+}

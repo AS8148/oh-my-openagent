@@ -82,10 +82,17 @@ pub(crate) fn check_requirement(code: &CFType, role: Role) -> Result<(), RejectR
     // SAFETY: code is a retained SecCode from one of the resolution APIs;
     // requirement is a retained SecRequirement from the creation API.
     let status = unsafe { SecCodeCheckValidity(code, 0, &*requirement) };
-    if status == 0 {
-        Ok(())
-    } else {
-        Err(RejectReason::RequirementRejected)
+    requirement_result(status)
+}
+
+fn requirement_result(status: i32) -> Result<(), RejectReason> {
+    match status {
+        0 => Ok(()),
+        -67050 => Err(RejectReason::RequirementRejected), // errSecCSReqFailed
+        status => Err(RejectReason::SecurityFramework {
+            operation: SecurityOperation::RequirementCheck,
+            status,
+        }),
     }
 }
 
@@ -150,5 +157,23 @@ mod tests {
         let result = created(operation, |_| 0);
         // then
         assert!(matches!(result, Err(RejectReason::MissingSecurityObject)));
+    }
+
+    #[test]
+    fn only_requirement_mismatch_is_reported_as_requirement_rejected() {
+        // given: errSecCSReqFailed, a parameter error, and a validity error.
+        for status in [-67050, -50, -67061] {
+            // when
+            let result = requirement_result(status);
+            // then
+            if status == -67050 {
+                assert_eq!(result, Err(RejectReason::RequirementRejected));
+            } else {
+                assert!(matches!(result,
+                    Err(RejectReason::SecurityFramework {
+                        operation: SecurityOperation::RequirementCheck, status: actual
+                    }) if actual == status));
+            }
+        }
     }
 }

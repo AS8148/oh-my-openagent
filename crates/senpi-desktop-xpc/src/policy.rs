@@ -11,6 +11,7 @@ pub enum SecurityOperation {
     MessageIdentity,
     AuditIdentity,
     RequirementCreation,
+    RequirementCheck,
     SigningInformation,
     SelfAuditToken,
 }
@@ -40,7 +41,16 @@ pub enum RejectReason {
 }
 
 /// Authentication eligibility only; never an approval or operation capability.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Valid for one received message only. Do not cache or reuse this result:
+/// verify the actual sender and its live status again for every request.
+///
+/// A verified result must not be cloned for reuse on another message.
+/// ```compile_fail
+/// use senpi_desktop_xpc::VerifiedPeer;
+/// fn duplicate(peer: VerifiedPeer) -> VerifiedPeer { peer.clone() }
+/// ```
+#[derive(Debug, PartialEq, Eq)]
 pub struct VerifiedPeer {
     role: Role,
     team: String,
@@ -81,13 +91,21 @@ pub(crate) struct ResolvedPeer {
     // None means no entitlement slot. Some(empty) is a valid empty dictionary.
     pub entitlements: Result<Option<Vec<String>>, RejectReason>,
     pub security_epoch: Field<String>,
-    pub team: String,
-    pub identifier: String,
+    pub team: Field<String>,
+    pub identifier: Field<String>,
 }
 
 pub(crate) fn evaluate(peer: ResolvedPeer, expected: Role) -> Result<VerifiedPeer, RejectReason> {
     peer.requirement?;
-    let role = match peer.identifier.as_str() {
+    let identifier = match peer.identifier {
+        Field::Value(identifier) => identifier,
+        Field::Missing | Field::Malformed => return Err(RejectReason::MalformedSigningInformation),
+    };
+    let team = match peer.team {
+        Field::Value(team) => team,
+        Field::Missing | Field::Malformed => return Err(RejectReason::MalformedSigningInformation),
+    };
+    let role = match identifier.as_str() {
         id if id == Role::NativeController.identifier() => Role::NativeController,
         id if id == Role::EngineServer.identifier() => Role::EngineServer,
         _ => return Err(RejectReason::UnknownRole),
@@ -95,7 +113,7 @@ pub(crate) fn evaluate(peer: ResolvedPeer, expected: Role) -> Result<VerifiedPee
     if role != expected {
         return Err(RejectReason::RoleMismatch);
     }
-    if peer.team != TEAM_IDENTIFIER {
+    if team != TEAM_IDENTIFIER {
         return Err(RejectReason::WrongTeam);
     }
     let status = match peer.dynamic_status {
@@ -122,6 +140,7 @@ pub(crate) fn evaluate(peer: ResolvedPeer, expected: Role) -> Result<VerifiedPee
                     | "com.apple.security.get-task-allow"
                     | "com.apple.security.cs.allow-jit"
                     | "com.apple.security.cs.allow-unsigned-executable-memory"
+                    | "com.apple.security.cs.disable-executable-page-protection"
             )
         }) {
             return Err(RejectReason::ForbiddenEntitlement);
@@ -137,8 +156,8 @@ pub(crate) fn evaluate(peer: ResolvedPeer, expected: Role) -> Result<VerifiedPee
     }
     Ok(VerifiedPeer {
         role,
-        team: peer.team,
-        identifier: peer.identifier,
+        team,
+        identifier,
         security_epoch: epoch,
         dynamic_status: status,
     })

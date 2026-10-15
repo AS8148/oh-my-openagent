@@ -85,21 +85,13 @@ pub(crate) fn resolve(info: &CFType) -> Result<ResolvedPeer, RejectReason> {
             string(get(plist, &CFString::from_str(SECURITY_EPOCH_KEY)))
         }
     };
-    let team = match string(get(dict, keys.team)) {
-        Field::Value(team) => team,
-        Field::Missing | Field::Malformed => return Err(RejectReason::WrongTeam),
-    };
-    let identifier = match string(get(dict, keys.identifier)) {
-        Field::Value(identifier) => identifier,
-        Field::Missing | Field::Malformed => return Err(RejectReason::UnknownRole),
-    };
     Ok(ResolvedPeer {
         requirement: Ok(()), // Caller checked the exact role requirement first.
         dynamic_status: status(get(dict, keys.status)),
         entitlements: entitlements(get(dict, keys.entitlements)),
         security_epoch: epoch,
-        team,
-        identifier,
+        team: string(get(dict, keys.team)),
+        identifier: string(get(dict, keys.identifier)),
     })
 }
 

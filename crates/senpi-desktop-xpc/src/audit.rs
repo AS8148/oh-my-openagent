@@ -2,6 +2,12 @@ use crate::{RejectReason, SecurityOperation};
 
 /// Kernel process identity, including pidversion. Never accept this from JSON or
 /// another caller's payload; XPC callers must use the actual received message.
+///
+/// Raw words cannot be promoted into a kernel identity by another crate.
+/// ```compile_fail
+/// use senpi_desktop_xpc::identity::AuditToken;
+/// let _forged = AuditToken::from_kernel_token([0; 8]);
+/// ```
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct AuditToken {
@@ -15,7 +21,7 @@ unsafe extern "C" {
 
 impl AuditToken {
     /// Wrap a token already obtained from a kernel peer-identity API.
-    pub const fn from_kernel_token(words: [u32; 8]) -> Self {
+    pub(crate) const fn from_kernel_token(words: [u32; 8]) -> Self {
         Self { words }
     }
 
@@ -37,7 +43,7 @@ impl AuditToken {
         if count != 8 {
             return Err(RejectReason::MalformedSigningInformation);
         }
-        Ok(Self { words })
+        Ok(Self::from_kernel_token(words))
     }
 
     pub(crate) fn bytes(&self) -> [u8; 32] {

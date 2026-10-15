@@ -8,8 +8,15 @@ mod sealed {
     pub trait Sealed {}
 }
 
+/// External callers cannot select an arbitrary role.
+/// ```compile_fail
+/// use senpi_desktop_xpc::{identity::{AuditToken, PeerVerifier, SecurityVerifier}, roles::Role};
+/// let verifier = SecurityVerifier::from_audit_token(AuditToken::current().unwrap());
+/// let _ = verifier.verify(Role::EngineServer);
+/// ```
 pub trait PeerVerifier: sealed::Sealed {
-    fn verify(&self, role: Role) -> Result<VerifiedPeer, RejectReason>;
+    fn verify_privileged_client(&self) -> Result<VerifiedPeer, RejectReason>;
+    fn verify_server(&self) -> Result<VerifiedPeer, RejectReason>;
 }
 
 /// Borrow of the actual dictionary delivered by an XPC event handler.
@@ -63,11 +70,6 @@ impl<'a> SecurityVerifier<'a> {
     pub fn verify_server(&self) -> Result<VerifiedPeer, RejectReason> {
         self.verify(Role::EngineServer)
     }
-}
-
-impl sealed::Sealed for SecurityVerifier<'_> {}
-
-impl PeerVerifier for SecurityVerifier<'_> {
     fn verify(&self, role: Role) -> Result<VerifiedPeer, RejectReason> {
         let code = match &self.source {
             Source::Message(message) => security::message_identity(message)?,
@@ -79,29 +81,46 @@ impl PeerVerifier for SecurityVerifier<'_> {
     }
 }
 
+impl sealed::Sealed for SecurityVerifier<'_> {}
+
+impl PeerVerifier for SecurityVerifier<'_> {
+    fn verify_privileged_client(&self) -> Result<VerifiedPeer, RejectReason> {
+        SecurityVerifier::verify_privileged_client(self)
+    }
+
+    fn verify_server(&self) -> Result<VerifiedPeer, RejectReason> {
+        SecurityVerifier::verify_server(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::policy::{evaluate, tests::eligible};
 
-    struct FakeVerifier(Result<VerifiedPeer, RejectReason>);
+    use std::cell::Cell;
+
+    struct FakeVerifier(Cell<Option<Result<VerifiedPeer, RejectReason>>>);
     impl sealed::Sealed for FakeVerifier {}
     impl PeerVerifier for FakeVerifier {
-        fn verify(&self, _role: Role) -> Result<VerifiedPeer, RejectReason> {
-            self.0.clone()
+        fn verify_privileged_client(&self) -> Result<VerifiedPeer, RejectReason> {
+            self.0.take().expect("fake result is consumed exactly once")
+        }
+        fn verify_server(&self) -> Result<VerifiedPeer, RejectReason> {
+            self.0.take().expect("fake result is consumed exactly once")
         }
     }
 
     #[test]
     fn boundary_preserves_verified_role() {
         // given
-        let verifier = FakeVerifier(evaluate(
+        let verifier = FakeVerifier(Cell::new(Some(evaluate(
             eligible(Role::NativeController),
             Role::NativeController,
-        ));
+        ))));
         let boundary: &dyn PeerVerifier = &verifier;
         // when
-        let peer = boundary.verify(Role::NativeController).unwrap();
+        let peer = boundary.verify_privileged_client().unwrap();
         // then
         assert_eq!(peer.role(), Role::NativeController);
     }
@@ -109,10 +128,10 @@ mod tests {
     #[test]
     fn boundary_preserves_rejection() {
         // given
-        let verifier = FakeVerifier(Err(RejectReason::RequirementRejected));
+        let verifier = FakeVerifier(Cell::new(Some(Err(RejectReason::RequirementRejected))));
         let boundary: &dyn PeerVerifier = &verifier;
         // when
-        let result = boundary.verify(Role::NativeController);
+        let result = boundary.verify_privileged_client();
         // then
         assert_eq!(result, Err(RejectReason::RequirementRejected));
     }

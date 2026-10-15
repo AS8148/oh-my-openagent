@@ -7,8 +7,8 @@ pub(crate) fn eligible(role: Role) -> ResolvedPeer {
         dynamic_status: Field::Value(CS_VALID | CS_RUNTIME | CS_HARD | CS_KILL),
         entitlements: Ok(None),
         security_epoch: Field::Value(SECURITY_EPOCH.into()),
-        team: TEAM_IDENTIFIER.into(),
-        identifier: role.identifier().into(),
+        team: Field::Value(TEAM_IDENTIFIER.into()),
+        identifier: Field::Value(role.identifier().into()),
     }
 }
 
@@ -95,12 +95,12 @@ rejects!(
 );
 rejects!(
     wrong_team,
-    |p: &mut ResolvedPeer| p.team = "OTHERTEAM".into(),
+    |p: &mut ResolvedPeer| p.team = Field::Value("OTHERTEAM".into()),
     RejectReason::WrongTeam
 );
 rejects!(
     unknown_role,
-    |p: &mut ResolvedPeer| p.identifier = "unknown".into(),
+    |p: &mut ResolvedPeer| p.identifier = Field::Value("unknown".into()),
     RejectReason::UnknownRole
 );
 rejects!(
@@ -123,6 +123,7 @@ fn rejects_forbidden_entitlement_presence() {
         "com.apple.security.get-task-allow",
         "com.apple.security.cs.allow-jit",
         "com.apple.security.cs.allow-unsigned-executable-memory",
+        "com.apple.security.cs.disable-executable-page-protection",
     ] {
         let mut peer = eligible(Role::NativeController);
         peer.entitlements = Ok(Some(vec![name.into()]));
@@ -149,7 +150,7 @@ fn rejects_all_non_controller_clients() {
         Role::EngineServer.identifier(),
     ] {
         let mut peer = eligible(Role::NativeController);
-        peer.identifier = identifier.into();
+        peer.identifier = Field::Value(identifier.into());
         // when
         let result = evaluate(peer, Role::NativeController);
         // then
@@ -169,6 +170,7 @@ fn propagates_every_security_framework_failure() {
         SecurityOperation::MessageIdentity,
         SecurityOperation::AuditIdentity,
         SecurityOperation::RequirementCreation,
+        SecurityOperation::RequirementCheck,
         SecurityOperation::SigningInformation,
         SecurityOperation::SelfAuditToken,
     ] {
