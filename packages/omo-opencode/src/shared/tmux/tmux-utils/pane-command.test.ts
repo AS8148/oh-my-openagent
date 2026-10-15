@@ -155,7 +155,6 @@ describe("buildTmuxPlaceholderCommand", () => {
           `first line\nsecond line $(touch ${canary})`,
           `ends in a backslash \\`,
           `expands \${OMO_TMUX_CANARY_VAR} and $OMO_TMUX_CANARY_VAR`,
-          `${"x".repeat(20_000)} $(touch ${canary})`,
         ]
         for (const description of cases) {
           const lines = runPlaceholderUntilLoop(buildTmuxPlaceholderCommand(description), tempDir, { OMO_TMUX_CANARY_VAR: "LEAKED" })
@@ -167,6 +166,40 @@ describe("buildTmuxPlaceholderCommand", () => {
       }
     },
   )
+
+  itWithUnixShell(
+    "#given a description far over tmux's command limit #when the placeholder is built #then the banner is capped so tmux accepts it and nothing is evaluated",
+    () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "omo-tmux-placeholder-"))
+      const canary = join(tempDir, "canary")
+
+      try {
+        const description = `$(touch ${canary}) `.repeat(2_000)
+        const command = buildTmuxPlaceholderCommand(description)
+        const [banner, hint] = runPlaceholderUntilLoop(command, tempDir)
+
+        expect(command.length).toBeLessThan(12_000)
+        expect(banner).toBe(`OMO subagent pane ready: ${description.slice(0, 2_000)}…`)
+        expect(hint).toBe("Focus this pane to attach.")
+        expect(existsSync(canary)).toBe(false)
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  itWithUnixShell("#given a NUL byte in the description #when the placeholder runs #then it prints without the NUL instead of failing the spawn", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "omo-tmux-placeholder-"))
+
+    try {
+      expect(runPlaceholderUntilLoop(buildTmuxPlaceholderCommand("before\0after"), tempDir)).toEqual([
+        "OMO subagent pane ready: beforeafter",
+        "Focus this pane to attach.",
+      ])
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
 })
 
 function runPlaceholderUntilLoop(command: string, tempDir: string, extraEnv: Record<string, string> = {}): readonly string[] {
