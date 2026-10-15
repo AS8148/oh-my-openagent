@@ -10,7 +10,7 @@ import {
 } from "@oh-my-opencode/telemetry-core"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { getSenpiTelemetryStateDir, SENPI_TELEMETRY_EVENT_NAME } from "./index"
-import { OMO_NATIVE_PROPERTY_ALLOWLISTS, getOmoNativeStateDir } from "./product-identity"
+import { OMO_NATIVE_COMMON_PROPERTY_SCHEMAS, OMO_NATIVE_PROPERTY_ALLOWLISTS, getOmoNativeStateDir } from "./product-identity"
 import { createOmoNativeSessionComponent } from "./omo-native-session"
 import {
   FIXED_NOW,
@@ -105,9 +105,7 @@ function registryCtx(sessionId: string): unknown {
   }
 }
 
-const SHARED_KEYS = [
-  "$process_person_profile", "install_id", "package_version", "platform", "product_name", "schema_version", "surface",
-]
+const SHARED_KEYS = Object.keys(OMO_NATIVE_COMMON_PROPERTY_SCHEMAS)
 
 describe("OmO Native session telemetry", () => {
   it.each([

@@ -1,6 +1,7 @@
 import {
   KNOWN_MODELS,
   KNOWN_PROVIDERS,
+  OMO_NATIVE_COMMON_PROPERTY_SCHEMAS,
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
 } from "../../packages/omo-senpi/src/components/telemetry/product-identity.ts"
 
@@ -48,7 +49,7 @@ export function assertAllowlistCoverage(allowlists) {
 
 assertAllowlistCoverage(OMO_NATIVE_PROPERTY_ALLOWLISTS)
 const nativeEvents = new Set(Object.keys(OMO_NATIVE_PROPERTY_ALLOWLISTS))
-const sharedKeys = new Set(["$process_person_profile", "package_version", "platform", "product_name", "schema_version", "surface", "install_id"])
+const sharedKeys = new Set(Object.keys(OMO_NATIVE_COMMON_PROPERTY_SCHEMAS))
 const sdkAddedKeys = new Set(["$lib", "$lib_version", "$geoip_disable", "$is_server"])
 const sdkWireKeys = new Set(["distinct_id", "uuid"])
 const knownModels = new Set(Object.values(KNOWN_MODELS).flat())

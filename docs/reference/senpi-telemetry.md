@@ -191,6 +191,21 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `process_crashed` | `signal` | `string` | `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGTRAP`, `SIGABRT`, `SIGFPE`, `SIGKILL`, `SIGTERM`, `SIGHUP`, `SIGINT`, `SIGQUIT`, `SIGSYS`, `other`, `none`, `unknown` |
 | `process_crashed` | `uptime_bucket` | `string` | `lt_1m`, `1_10m`, `10_60m`, `1_6h`, `6_24h`, `24h_plus` |
 | `process_crashed` | `uptime_ms` | `number` | - |
+
+## Common properties
+
+Every event above also carries these properties.
+
+| Property | Type | Allowed values |
+|----------|------|----------------|
+| `$process_person_profile` | `boolean` | - |
+| `event_id` | `string` | - |
+| `install_id` | `string` | - |
+| `package_version` | `string` | - |
+| `platform` | `string` | `omo-senpi` |
+| `product_name` | `string` | `omo-native` |
+| `schema_version` | `number` | - |
+| `surface` | `string` | `cli`, `desktop` |
 <!-- END GENERATED SCHEMA -->
 
 ### Computer-use events
@@ -285,6 +300,10 @@ Every event carries two shared attribution properties as of schema version 3:
 - `install_id` is a random 64-hex value stored (like the session-id salt) under the agent home at `omo-senpi/omo-native/install-id`, created with mode 0600 on first use. It is generated locally and derived from nothing: not the hostname, not hardware, not accounts. The standalone CLI and the Desktop-bundled runtime on one machine converge on the same file, which is what joins the two surfaces without fingerprinting the machine. A valid `OMO_NATIVE_INSTALL_ID` env value overrides the file, so a Desktop host can pin a remote (SSH/WSL) runtime to the local installation's id; a malformed override is ignored.
 
 Rows written before schema version 3 carry neither property. Segment on `schema_version` when mixing eras.
+
+### Event ids
+
+Every event carries `event_id`, a UUIDv7 minted on the client at capture time from a monotonic clock and random bits; it is derived from nothing in the event. PostHog's top-level `uuid` is set to the same value, so a delivery that is retried or relayed through a second path deduplicates to one row. Rows written before this field existed carry no `event_id`.
 
 ## SDK-added properties
 

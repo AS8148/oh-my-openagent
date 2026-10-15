@@ -7,7 +7,13 @@ export type TelemetryCaptureProperties = Record<string, unknown>;
 export type TelemetryCaptureMessage = {
   readonly distinctId: string;
   readonly event: string;
+  readonly uuid?: string;
   readonly properties?: TelemetryCaptureProperties;
+};
+
+export type UuidV7Source = {
+  readonly now?: () => number;
+  readonly randomBytes?: (size: number) => Uint8Array;
 };
 
 export type TelemetryDiagnosticEvent =
@@ -184,6 +190,8 @@ export declare function shouldDisableTelemetry(input: {
 }): boolean;
 export declare function getTelemetryApiKey(env?: TelemetryEnv, defaultApiKey?: string): string;
 export declare function isConfiguredTelemetryApiKey(apiKey: string): boolean;
+export declare function createUuidV7Generator(source?: UuidV7Source): () => string;
+export declare function createEventId(): string;
 export declare function hasTelemetryApiKey(env?: TelemetryEnv, defaultApiKey?: string): boolean;
 export declare function getTelemetryHost(env?: TelemetryEnv, defaultHost?: string): string;
 export declare function getDefaultTelemetryOsProvider(): TelemetryOsProvider;
