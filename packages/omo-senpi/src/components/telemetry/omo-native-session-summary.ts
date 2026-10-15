@@ -15,7 +15,7 @@ import {
 
 export type { SummaryTurn } from "./session-summary-window"
 
-export const RAW_TURN_SAMPLE_RATE = 0.05
+export const RAW_TURN_SAMPLE_RATE = 1
 export const CHECKPOINT_MAX_TURNS = 50
 export const CHECKPOINT_MAX_WINDOW_MS = 30 * 60_000
 
