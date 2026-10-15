@@ -571,9 +571,11 @@ describe("OmO Native telemetry component integration", () => {
       const stateDir = join(agentDir, "omo-senpi", "omo-native")
       const recorder = createTransportRecorder()
       let consent = true
+      let clock = 1_000_000
       const pi = new FakeExtensionAPI()
       createOmoNativeTelemetryComponent({
         rawTurnSampleRate: 0,
+        consentNow: () => clock,
         env: createEnabledEnv(agentDir),
         hashSessionId: (raw) => `hashed:${raw}`,
         isConfigEnabled: () => consent,
@@ -587,8 +589,9 @@ describe("OmO Native telemetry component integration", () => {
       await pi.dispatch("turn_end", turnEnd(), context("midway"))
       expect(rollupFiles(stateDir)).toHaveLength(1)
 
-      // when: telemetry is turned off, one more turn ends, and the process dies
+      // when: telemetry is turned off, one more turn ends after the consent cache expired, and the process dies
       consent = false
+      clock += 60_000
       await pi.dispatch("turn_end", turnEnd(), context("midway"))
 
       // then: the session deleted its own rollup on the first write after opting out

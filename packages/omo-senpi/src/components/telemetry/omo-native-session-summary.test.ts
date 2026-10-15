@@ -252,7 +252,7 @@ describe("session_summary review findings", () => {
 
   test("#given an orphan with no window and nothing sent #when its session resumes #then seq starts at 0", () => {
     const dir = stateDir()
-    createSummaryStore({ stateDir: dir, pid: 999_994 }).write({ sessionHash: "s1", sessionRole: "main", nextSeq: 0, window: null, consent: "enabled" })
+    createSummaryStore({ stateDir: dir, pid: 999_994 }).write({ sessionHash: "s1", sessionRole: "main", nextSeq: 0, window: null, consent: "enabled", scope: {} })
     const resumed = recorder({ dir, alive: false })
     resumed.summary.recordTurn("s1", turn())
     resumed.summary.finish("s1", "quit")
