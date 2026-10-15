@@ -37,6 +37,10 @@ export type {
 const GIT_TIMEOUT_MS = 30_000
 const INITIAL_COMMIT = "chore: initialize local memory"
 const EMPTY_INITIAL_COMMIT = "chore: initialize empty local memory"
+// git commit/merge end with `git maintenance run --auto --detach`, which can start a background
+// gc (cruft pack + prune of loose objects) that races the next writer and readers outside every
+// memory lock (omo #10177). Packing belongs to `maintain()` under the maintenance lock only.
+const NO_AUTO_MAINTENANCE = ["-c", "maintenance.auto=false", "-c", "gc.auto=0"] as const
 
 export class GitMemoryRepo {
   readonly dir: string
@@ -96,7 +100,7 @@ export class GitMemoryRepo {
       }
     }
 
-    await withStrandedGitLockRecovery(this.dir, () => this.git([...authorFlags(author), "commit", "--allow-empty", "-m", EMPTY_INITIAL_COMMIT]))
+    await withStrandedGitLockRecovery(this.dir, () => this.git([...NO_AUTO_MAINTENANCE, ...authorFlags(author), "commit", "--allow-empty", "-m", EMPTY_INITIAL_COMMIT]))
     return this.requireHead()
   }
 
@@ -212,7 +216,7 @@ export class GitMemoryRepo {
   }
 
   async merge(ref: string, options: GitMergeOptions = {}): Promise<string> {
-    const argv = ["merge"]
+    const argv: string[] = [...NO_AUTO_MAINTENANCE, "merge"]
     if (options.noFF ?? true) argv.push("--no-ff")
     if (options.message) argv.push("-m", options.message)
     argv.push(ref)
@@ -255,7 +259,7 @@ export class GitMemoryRepo {
   ): Promise<GitCommitResult> {
     // Every index/ref mutation on the commit path runs through transient-lock retry plus stranded
     // lock recovery, so a SIGKILLed writer's debris never wedges or corrupts the repo (omo #10177).
-    await withStrandedGitLockRecovery(this.dir, () => this.git([...authorFlags(author), "commit", "-m", reason]))
+    await withStrandedGitLockRecovery(this.dir, () => this.git([...NO_AUTO_MAINTENANCE, ...authorFlags(author), "commit", "-m", reason]))
     return { committed: true, sha: await this.requireHead() }
   }
 
