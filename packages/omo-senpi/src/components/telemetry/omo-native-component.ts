@@ -251,7 +251,6 @@ function installCaptureFacade(
   state.flush = () => transport.flush?.() ?? Promise.resolve()
 }
 
-
 // This is the sole native transport boundary. Every message reaching it has already passed through
 // telemetry-core's captureEvent privacy wrapper; keeping the raw transport call here makes the
 // source-scanning invariant precise and prevents native event producers from bypassing validation.
