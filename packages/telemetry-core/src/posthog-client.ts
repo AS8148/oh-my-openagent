@@ -46,6 +46,12 @@ class PostHogTelemetryTransport implements TelemetryTransport {
     this.#client.capture(message)
   }
 
+  // capture() only queues the event after an async prepare step that flush() does not wait for, so a
+  // resolved flush() proves nothing about one specific event. captureImmediate resolves after the request.
+  async captureImmediate(message: Parameters<PostHog["capture"]>[0]): Promise<void> {
+    await this.#client.captureImmediate(message)
+  }
+
   async flush(): Promise<void> {
     await this.#client.flush()
   }

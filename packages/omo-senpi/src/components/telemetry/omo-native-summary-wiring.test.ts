@@ -55,6 +55,29 @@ function pendingOf(agentDir: string): string[] {
   return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".json")) : []
 }
 
+// Delivers only what was enqueued; `capture` enqueues asynchronously, after this test is over, the way
+// posthog-node prepares an event before queueing it. `captureImmediate` resolves once the event was sent.
+function createLateEnqueueTransport(): { readonly sent: TelemetryCaptureMessage[]; readonly factory: TelemetryTransportFactory } {
+  const sent: TelemetryCaptureMessage[] = []
+  const queue: TelemetryCaptureMessage[] = []
+  const never = new Promise<void>(() => undefined)
+  return {
+    sent,
+    factory: () => ({
+      capture(message) {
+        void never.then(() => queue.push(message))
+      },
+      captureImmediate: async (message) => {
+        sent.push(message)
+      },
+      flush: async () => {
+        sent.push(...queue.splice(0))
+      },
+      shutdown: async () => undefined,
+    }),
+  }
+}
+
 const summariesOf = (messages: readonly TelemetryCaptureMessage[]) => messages.filter(({ event }) => event === "session_summary")
 
 describe("session_summary acknowledgment through the native transport", () => {
@@ -91,6 +114,17 @@ describe("session_summary acknowledgment through the native transport", () => {
       const createdAt = Reflect.get(pending as object, "createdAt")
       expect(summariesOf(failed)[0]?.timestamp?.getTime()).toBe(createdAt)
       expect(resent[0]?.timestamp?.getTime()).toBe(createdAt)
+    })
+  })
+
+  test("#given a transport that enqueues a capture only later #when the session quits #then the summary is retired only after it was really sent", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const transport = createLateEnqueueTransport()
+      await runSession(agentDir, transport.factory, true)
+
+      const sentUuids = summariesOf(transport.sent).map(({ uuid }) => uuid)
+      const retired = pendingOf(agentDir).length === 0
+      expect({ sent: sentUuids.length, retired }).toEqual({ sent: 1, retired: true })
     })
   })
 })

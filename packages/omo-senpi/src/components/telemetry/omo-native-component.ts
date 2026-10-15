@@ -66,7 +66,7 @@ export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
 export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryComponentOptions = {}): OmoSenpiComponent {
   const env = options.env ?? process.env
   const stateDir = options.stateDir ?? getOmoNativeStateDir(env)
-  const state: SharedState = { delivered: new Set() }
+  const state: SharedState = { delivered: new Set(), acks: new Map() }
   const client: Pick<EventTelemetryClient, "captureEvent"> = {
     captureEvent(name, properties, captureOptions) {
       if (isOmoNativeEventName(name)) state.capture?.(name, properties, captureOptions)
@@ -196,7 +196,7 @@ function sharedTransportFactory(
       capture(message) {
         const firstCapture = state.capture === undefined
         installCaptureFacade(state, transport, message, options)
-        forwardValidatedCapture(transport, message)
+        forwardValidatedCapture(transport, message)?.catch((error: unknown) => reportCaptureFailure(options, error))
         if (firstCapture) state.onCaptureReady?.()
       },
       flush: transport.flush === undefined ? undefined : () => transport.flush?.() ?? Promise.resolve(),
@@ -242,7 +242,8 @@ function installCaptureFacade(
     },
     transportFactory: () => ({
       capture(message) {
-        forwardValidatedCapture(transport, message)
+        const ack = forwardValidatedCapture(transport, message)
+        if (ack !== undefined && message.uuid !== undefined) state.acks.set(message.uuid, ack)
       },
       shutdown: async () => undefined,
     }),
@@ -254,8 +255,23 @@ function installCaptureFacade(
 // This is the sole native transport boundary. Every message reaching it has already passed through
 // telemetry-core's captureEvent privacy wrapper; keeping the raw transport call here makes the
 // source-scanning invariant precise and prevents native event producers from bypassing validation.
-function forwardValidatedCapture(transport: TelemetryTransport, message: TelemetryCaptureMessage): void {
+// An ack-gated event (session_summary, carrying its uuid) is sent immediately and its promise returned, so
+// its pending file is retired only once the server accepted it; everything else is batched.
+function forwardValidatedCapture(transport: TelemetryTransport, message: TelemetryCaptureMessage): Promise<void> | undefined {
+  if (message.event === "session_summary" && message.uuid !== undefined && transport.captureImmediate !== undefined) {
+    return transport.captureImmediate(message)
+  }
   transport.capture(message)
+  return undefined
+}
+
+function reportCaptureFailure(options: OmoNativeTelemetryComponentOptions, error: unknown): void {
+  options.diagnostics?.({
+    event: "telemetry_capture_failed",
+    source: "omo-native-component",
+    error,
+    errorKind: error instanceof Error ? "error" : "non_error",
+  })
 }
 
 // The task engine anchors its state dir to the session's project directory; the follow-up counters
