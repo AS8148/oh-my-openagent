@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Thread link labels escape `&` and backticks.** A session name holding an entity (`&#x5D;`) now displays as typed, and a backtick in a name can no longer open a code span that swallows the thread link; omo and the desktop app escape the same set. Internal: an unused `agentDir` option left on the thread tools by the skills change is removed.
+
 **Task inputs keep their identity when an acknowledgement is lost.** Every task RPC prompt, steer, and follow-up carries a persisted `clientMessageId`. A timed-out send reports `uncertain` with that id and asks callers not to resend the text; one background retry uses the same id and payload, and unresolved inputs are retried on reconciliation. An identity bound to different text is a failure with an action, never a delivery receipt. ([#10015](https://github.com/code-yeongyu/oh-my-openagent/issues/10015))
 
 **Internal: a macOS code-identity verifier for the desktop engine's coming XPC service.** The new `senpi-desktop-xpc` crate checks who sent a message from the kernel-stamped sender of that message, not from a process id: Developer ID requirement, live hardened-runtime status, no debugger, no code-injection entitlements, and a signed security epoch. Nothing uses it yet. ([#10207](https://github.com/code-yeongyu/oh-my-openagent/issues/10207))
