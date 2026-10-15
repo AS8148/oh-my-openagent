@@ -7,7 +7,6 @@
 import type { LoroDoc, PeerID } from "loro-crdt"
 
 import { loadLoroRuntime } from "../../crdt/loro-runtime"
-import { cidRoot } from "../item/state"
 
 const BINDINGS_NAME = "bindings"
 const NAME_NAME = "name"
@@ -30,18 +29,16 @@ export function manifestAddBinding(doc: LoroDoc, key: string): boolean {
 }
 
 export function manifestHasBinding(doc: LoroDoc, key: string): boolean {
-  if (!doc.hasContainer(cidRoot(BINDINGS_NAME, "Map"))) return false
   return doc.getMap(BINDINGS_NAME).get(key) !== undefined
 }
 
 export function manifestBindings(doc: LoroDoc): string[] {
-  if (!doc.hasContainer(cidRoot(BINDINGS_NAME, "Map"))) return []
   return doc.getMap(BINDINGS_NAME).keys().sort()
 }
 
 export function manifestDisplayName(doc: LoroDoc): string | null {
-  if (!doc.hasContainer(cidRoot(NAME_NAME, "Text"))) return null
-  return doc.getText(NAME_NAME).toString()
+  const text = doc.getText(NAME_NAME).toString()
+  return text === "" ? null : text
 }
 
 export function manifestSetDisplayName(doc: LoroDoc, name: string): void {
@@ -52,7 +49,6 @@ export function manifestSetDisplayName(doc: LoroDoc, name: string): void {
 }
 
 export function manifestAbsorbedInto(doc: LoroDoc): string | null {
-  if (!doc.hasContainer(cidRoot(ABSORBED_NAME, "MovableList"))) return null
   const value = doc.getMovableList(ABSORBED_NAME).toArray()
   const first = value[0]
   return typeof first === "string" ? first : null
