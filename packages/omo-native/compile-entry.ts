@@ -32,9 +32,11 @@ import { isInternalSupervisorLaunch, runInternalSupervisor } from "./supervisor-
 import { registerEngineRuntimeModules } from "./engine-runtime-modules"
 import { applyCachedClaudeCode } from "../omo-senpi/src/components/claude-code/index"
 import { buildSenpiArgs, shouldPrintCompiledBanner } from "./compile-args"
+import { runLoroSmoke } from "./loro-smoke"
 import { spawnSync } from "node:child_process"
 import { compiledRollbackMigration } from "./compiled-rollback"
 import { refuseRetiredCommand } from "./bin/lib/retired-command.js"
+import { ExtraCaCertificatesError, installEngineCaTrust } from "./compiled-ca-trust"
 
 // The engine is imported via a RELATIVE string LITERAL, inlined at both import
 // sites, and both properties are load-bearing:
@@ -128,6 +130,10 @@ export function compiledBannerLines(manifest: Pick<EmbeddedManifest, "omoAiVersi
 type CompiledLauncherSeams = { readonly threadSdk?: (options: Record<string, unknown>) => Promise<{ sdk?: unknown; error?: string }> }
 
 export async function runCompiledLauncher(args: string[], execDir: string, enginePin = "unknown", compiledPackageRoot?: string, migration: CompiledLauncherOptions = {}, seams: CompiledLauncherSeams = {}): Promise<boolean> {
+  if (args[0] === "loro-smoke") {
+    process.exitCode = await runLoroSmoke()
+    return true
+  }
   if (["login", "logout", "whoami"].includes(args[0] ?? "")) {
     await runServiceAuthCommand(args)
     return true
@@ -231,6 +237,15 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
 export { reexecProvisionedRuntime } from "./provisioned-handoff"
 
 async function main(): Promise<void> {
+  // Before anything opens TLS, and on every start: `host ensure`, the host daemon and the
+  // provisioned handoff all re-enter here (#10215). A bad value refuses to start (exit 78).
+  try {
+    installEngineCaTrust()
+  } catch (error) {
+    if (!(error instanceof ExtraCaCertificatesError)) throw error
+    process.stderr.write(`omo: ${error.message}; not starting with a trust set the caller did not intend\n`)
+    process.exit(78)
+  }
   const embedded = (globalThis as typeof globalThis & { Bun?: { embeddedFiles?: EmbeddedFile[] } }).Bun?.embeddedFiles as EmbeddedFile[] | undefined
   if (!embedded?.length) {
     const execDir = dirname(fileURLToPath(import.meta.url))
