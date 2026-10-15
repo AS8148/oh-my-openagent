@@ -147,15 +147,21 @@ export async function waitOwnerDead(lockPath, holderPid) {
   }
 }
 
+// Before the peer's first write, a killed writer's orphaned `git commit` may still hold (or have
+// stranded) refs/heads/main.lock, which fsck reports as badRefContent. That one line is tolerated
+// at the after-takeover stage only; the after-commits stage is always strict.
+const TAKEOVER_DEBRIS = /^error: refs\/heads\/main\.lock: badRefContent/
+
 export async function fsckCheck(repoPath, stage) {
   const result = await run("git", ["-C", repoPath, "fsck", "--full", "--strict"])
   const report = `${result.stdout}\n${result.stderr}`
   const broken = report
     .split("\n")
     .filter((line) => /^(error|fatal):/.test(line) || /missing|corrupt/i.test(line))
+    .filter((line) => !(stage === "after-takeover" && TAKEOVER_DEBRIS.test(line)))
   return {
     stage,
-    ok: result.code === 0 && broken.length === 0,
+    ok: (result.code === 0 || (stage === "after-takeover" && broken.length === 0)) && broken.length === 0,
     exitCode: result.code,
     broken,
     dangling: report.split("\n").filter((line) => line.startsWith("dangling")).length,

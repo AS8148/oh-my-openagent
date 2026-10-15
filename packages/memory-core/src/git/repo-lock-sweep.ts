@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process"
 import { join } from "node:path"
 
 import { lstat, readdir, unlink } from "../fs/resilient"
@@ -23,11 +24,21 @@ async function collectRefLockPaths(gitDir: string): Promise<string[]> {
 // A git process killed mid-transaction (a SIGKILLed memory writer, or the exec timeout's kill) can
 // never remove the lock files it created. Every later writer then wedges on "...lock: File exists",
 // and `git fsck --strict` reports a stranded ref lock as badRefContent (omo #10177). Unlinking a
-// lock a LIVE writer holds would publish its torn transaction instead, so a file is removed only
-// when it is provably idle: the same inode with the same mtime across a settle window. A live
-// writer mutates the lock's content or renames it away inside that window; only a dead one leaves
-// it untouched. Memory-repo mutations from our own processes are additionally serialized by the
-// memory-write domain lock, so the settle check is what the unlink's safety rests on.
+// lock a LIVE writer holds would publish its torn transaction instead (the facts pipeline writes
+// index.lock outside the memory-write lock), so a file is removed only when no process on this
+// host has it open - git keeps the lock fd open from create until rename, so an unheld lock has a
+// dead creator - and it kept the same inode and mtime across a settle window. Where open handles
+// cannot be enumerated (Windows, no lsof) the lock counts as held and the command fails loud.
+function hasOpenHolder(path: string): Promise<boolean> {
+  if (process.platform === "win32") return Promise.resolve(true)
+  return new Promise((resolve) => {
+    execFile("lsof", ["-t", "--", path], { windowsHide: true, timeout: 5_000 }, (error, stdout) => {
+      if (stdout.trim().length > 0) return resolve(true)
+      resolve(!(error !== null && (error as { code?: unknown }).code === 1))
+    })
+  })
+}
+
 export async function sweepStrandedGitLockFiles(dir: string, settleMs = GIT_LOCK_SETTLE_MS): Promise<string[]> {
   const gitDir = join(dir, ".git")
   const candidates = [
@@ -48,6 +59,7 @@ export async function sweepStrandedGitLockFiles(dir: string, settleMs = GIT_LOCK
   for (const [candidate, before] of idle) {
     const status = await lstat(candidate).catch(() => undefined)
     if (status === undefined || status.ino !== before.ino || status.mtimeMs !== before.mtimeMs) continue
+    if (await hasOpenHolder(candidate)) continue
     try {
       await unlink(candidate)
       removed.push(candidate)
