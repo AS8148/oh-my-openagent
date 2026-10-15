@@ -106,6 +106,18 @@ describe("omo-native category config capture", () => {
     expect(captured[0]?.cat_quick).toBe("custom/custom/low")
   })
 
+  test("#given a harness-native reasoning preset outside the reasoning enum #when encoded #then it exports as other", () => {
+    // given
+    const config: OmoConfig = { categories: { quick: { model: "my-gateway/my-finetune", variant: "turbo-preset" } } }
+
+    // when
+    const { captured, observe } = harness(config, registry([{ provider: "my-gateway", id: "my-finetune" }]))
+    observe("new")
+
+    // then
+    expect(captured[0]?.cat_quick).toBe("custom/custom/other")
+  })
+
   test("#given an unchanged effective map #when observed twice #then only one row ships with a reused generation, and a changed map ships a new generation", () => {
     // given
     const config: OmoConfig = { categories: {} }

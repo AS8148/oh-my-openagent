@@ -325,7 +325,7 @@ describe("OmO Native session telemetry", () => {
         memory_bucket: "64_plus_gb",
         model_count: 3,
         provider_count: 2,
-        providers: "anthropic",
+        providers: "anthropic,custom",
         reason: "fork",
       })
       expect(Object.keys(captured?.properties ?? {}).sort()).toEqual([
@@ -438,7 +438,8 @@ describe("OmO Native session telemetry", () => {
 
       // then
       const properties = recorder.messages.find(({ event }) => event === "session_started")?.properties
-      expect(properties).toMatchObject({ model_count: 0, provider_count: 0, providers: "" })
+      expect(properties).toMatchObject({ model_count: 0, provider_count: 0 })
+      expect(properties).not.toHaveProperty("providers")
       expect(properties).not.toHaveProperty("default_provider")
       expect(properties).not.toHaveProperty("default_model")
       expect(diagnostics.filter(({ event }) => event === "omo_native_inventory_read_failed")).toHaveLength(1)
@@ -457,11 +458,9 @@ describe("OmO Native session telemetry", () => {
       await pi.dispatch("session_start", { type: "session_start", reason: "reload" }, sessionCtx())
 
       // then
-      expect(recorder.messages.find(({ event }) => event === "session_started")?.properties).toMatchObject({
-        model_count: 0,
-        provider_count: 0,
-        providers: "",
-      })
+      const started = recorder.messages.find(({ event }) => event === "session_started")?.properties
+      expect(started).toMatchObject({ model_count: 0, provider_count: 0 })
+      expect(started).not.toHaveProperty("providers")
       expect(diagnostics).toEqual([])
     })
   })
