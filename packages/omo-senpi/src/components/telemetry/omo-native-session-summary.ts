@@ -15,7 +15,9 @@ import {
 
 export type { SummaryTurn } from "./session-summary-window"
 
-export const RAW_TURN_SAMPLE_RATE = 1
+// Share of sessions whose raw turn_completed rows go to PostHog. Turns are sampled here only because
+// PostHog is today's only sink; the first-party collector receives every turn through its own path.
+export const RAW_TURN_SAMPLE_RATE = 0.05
 export const CHECKPOINT_MAX_TURNS = 50
 export const CHECKPOINT_MAX_WINDOW_MS = 30 * 60_000
 
