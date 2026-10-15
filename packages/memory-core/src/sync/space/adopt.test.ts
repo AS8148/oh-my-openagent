@@ -1,0 +1,148 @@
+import { describe, expect, test } from "bun:test"
+
+import { deleteItem, isLive, itemFrontier, renderItem } from "../item/index"
+import { renderDocContent } from "../item/render"
+import { captureInto, newDoc } from "../item/test-support"
+import { planAdoption, type AdoptionPlan, type ItemState } from "./index"
+
+function applyPlan(doc: Parameters<typeof captureInto>[0], base: string, plan: AdoptionPlan): Uint8Array | null {
+  if (plan.action !== "capture") return null
+  return captureInto(doc, base, itemFrontier(doc), plan.workingText)
+}
+
+const live = (currentText: string | null, lastMaterialised: string | null = null): ItemState => ({
+  currentText,
+  tombstoned: false,
+  lastMaterialised,
+})
+
+describe("planAdoption (sync-design §3 insert-only adoption)", () => {
+  test("a device enabling sync adopts a pre-existing memory file into a fresh item", async () => {
+    const doc = await newDoc("1")
+    const text = "---\ntitle: Daily log\n---\nwoke up, built the thing\n"
+    const plan = planAdoption([{ path: "notes/daily.md", text }], live(null))
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    expect(plan.workingText).toBe(text)
+    applyPlan(doc, "", plan)
+    expect(renderItem(doc)).toBe(text)
+    doc.free()
+  })
+
+  test("identical adoption adds nothing: two devices seeding the same file stay identical", async () => {
+    const doc = await newDoc("1")
+    const text = "---\ndescription: hello\n---\nbody\n"
+    captureInto(doc, "", [], text)
+    const plan = planAdoption([{ path: "system/persona.md", text }], live(renderDocContent(doc)))
+    expect(plan.action).toBe("none")
+    expect(renderItem(doc)).toBe(text)
+    doc.free()
+  })
+
+  test("a file identical to the last materialised text is skipped; the space state is taken", async () => {
+    const doc = await newDoc("1")
+    const text = "alpha\nbeta\n"
+    captureInto(doc, "", [], text)
+    const plan = planAdoption([{ path: "n.md", text }], live(renderDocContent(doc), text))
+    expect(plan.action).toBe("none")
+    doc.free()
+  })
+
+  test("QA failure case: an unchanged file whose item is tombstoned is removed, not revived", async () => {
+    const doc = await newDoc("1")
+    const text = "alpha\nbeta\n"
+    captureInto(doc, "", [], text)
+    deleteItem(doc)
+    expect(isLive(doc)).toBe(false)
+    const plan = planAdoption([{ path: "n.md", text }], {
+      currentText: renderDocContent(doc),
+      tombstoned: true,
+      lastMaterialised: text,
+    })
+    expect(plan.action).toBe("remove")
+    expect(isLive(doc)).toBe(false)
+    doc.free()
+  })
+
+  test("a changed file is adopted insert-only; nothing the space holds is deleted", async () => {
+    const doc = await newDoc("1")
+    captureInto(doc, "", [], "alpha beta gamma\n")
+    const current = renderDocContent(doc)
+    const plan = planAdoption([{ path: "n.md", text: "alpha beta CHANGED gamma\n" }], live(current, "alpha beta gamma\n"))
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    applyPlan(doc, current, plan)
+    const merged = renderItem(doc)
+    expect(merged).toContain("alpha beta")
+    expect(merged).toContain("CHANGED")
+    expect(merged).toContain("gamma\n")
+    doc.free()
+  })
+
+  test("a pure deletion in the working file applies nothing (insert-only)", async () => {
+    const doc = await newDoc("1")
+    captureInto(doc, "", [], "alpha beta\n")
+    const current = renderDocContent(doc)
+    const plan = planAdoption([{ path: "n.md", text: "alpha\n" }], live(current, "alpha beta\n"))
+    expect(plan.action).toBe("none")
+    expect(renderItem(doc)).toBe("alpha beta\n")
+    doc.free()
+  })
+
+  test("a changed file over a tombstone is an edit concurrent with the delete: the item stays", async () => {
+    const doc = await newDoc("1")
+    captureInto(doc, "", [], "alpha beta\n")
+    deleteItem(doc)
+    expect(isLive(doc)).toBe(false)
+    const current = renderDocContent(doc)
+    const plan = planAdoption([{ path: "n.md", text: "alpha beta\ngamma\n" }], {
+      currentText: current,
+      tombstoned: true,
+      lastMaterialised: "alpha beta\n",
+    })
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    applyPlan(doc, current, plan)
+    expect(isLive(doc)).toBe(true)
+    expect(renderItem(doc)).toBe("alpha beta\ngamma\n")
+    doc.free()
+  })
+
+  test("frontmatter keys the space lacks are added; existing keys are never overwritten", async () => {
+    const doc = await newDoc("1")
+    captureInto(doc, "", [], "---\ntitle: space title\n---\nbody\n")
+    const current = renderDocContent(doc)
+    const plan = planAdoption(
+      [{ path: "n.md", text: "---\ntitle: local title\nmood: reflective\n---\nbody\nplus\n" }],
+      live(current, null),
+    )
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    applyPlan(doc, current, plan)
+    const rendered = renderItem(doc)
+    expect(rendered).toContain("title: space title")
+    expect(rendered).toContain("mood: reflective")
+    expect(rendered).toContain("plus")
+    doc.free()
+  })
+
+  test("case-fold collision: two paths folding to one key are both adopted", async () => {
+    const doc = await newDoc("1")
+    const plan = planAdoption(
+      [
+        { path: "Notes.md", text: "---\ntitle: upper\n---\nalpha one\n" },
+        { path: "notes.md", text: "---\nmood: calm\n---\nbeta two\n" },
+      ],
+      live(null),
+    )
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    applyPlan(doc, "", plan)
+    const rendered = renderItem(doc)
+    expect(rendered).toContain("title: upper")
+    expect(rendered).toContain("mood: calm")
+    expect(rendered).toContain("alpha one\n")
+    expect(rendered).toContain("beta two\n")
+    doc.free()
+  })
+})
