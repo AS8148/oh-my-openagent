@@ -1,4 +1,5 @@
-import { existsSync } from "../fs/resilient"
+import { existsSync, writeFileSync } from "../fs/resilient"
+import { dirname } from "node:path"
 import { spawn } from "node:child_process"
 
 import { GitMemoryRepo } from "../git"
@@ -38,19 +39,34 @@ if (
 const mode: Mode = modeValue
 const lockPath = memoryWriterLockPath(locksPath)
 
+// The kill arms only once the `git commit` process exists, so the writer always dies with its
+// commit in flight; the orphan's pid goes to `<repo>/../killer-git.pid` so the parent can wait for
+// the orphan to finish before the peer's takeover, instead of racing it.
+export function orphanPidPath(repo: string): string {
+  return `${dirname(repo)}/killer-git.pid`
+}
+
 function createInCommitKillExec(minDelayMs: number, maxDelayMs: number): GitExec {
   const real = createNodeGitExec()
   return {
-    async run(argv, options) {
+    run(argv, options) {
       // authorFlags prefix the command (`-c user.name=... commit -m ...`), so the literal
       // argument "commit" marks exactly the commit invocation; no other path command carries it.
-      if (argv.includes("commit")) {
-        const delayMs = minDelayMs + Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1))
-        setTimeout(() => {
-          process.kill(process.pid, "SIGKILL")
-        }, delayMs)
-      }
-      return real.run(argv, options)
+      if (!argv.includes("commit")) return real.run(argv, options)
+      return new Promise<GitExecResult>((resolve, reject) => {
+        const child = spawn("git", [...argv], { cwd: options.cwd, env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true })
+        let stdout = ""
+        let stderr = ""
+        child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8") })
+        child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8") })
+        child.once("error", reject)
+        child.once("spawn", () => {
+          writeFileSync(orphanPidPath(repoPath), String(child.pid))
+          const delayMs = minDelayMs + Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1))
+          setTimeout(() => process.kill(process.pid, "SIGKILL"), delayMs)
+        })
+        child.once("exit", (code) => resolve({ code: code ?? 1, stdout, stderr }))
+      })
     },
   }
 }

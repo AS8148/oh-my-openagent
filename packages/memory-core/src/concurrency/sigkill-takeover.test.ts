@@ -4,13 +4,13 @@ import { fileURLToPath } from "node:url"
 
 import { memoryWriterLockPath, parseLockRecord } from "../locks"
 import { isLockOwnerProvenDead } from "../locks/acquire"
-import { probeUntil } from "../locks/process-liveness.test-support"
+import { pidAlive, probeUntil } from "../locks/process-liveness.test-support"
+import { dirname, join } from "node:path"
 import {
   DEATH_PROOF_BOUND_MS,
   assertLinearCommits,
   assertRepoIntegrity,
   createConcurrencyKit,
-  git,
   type ChildHarness,
 } from "./two-process-kit.test-support"
 
@@ -84,10 +84,13 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
     // #when
     await killer.waitForLine("kill-ready")
     const killerExit = await killer.exit
-    // SIGKILL is the interleaving under test; a clean exit means the self-kill timer missed the
-    // commit window entirely, which is still a valid (normal-completion) sample.
+    // SIGKILL is the interleaving under test; a clean exit means the self-kill timer fired after the
+    // commit finished, which is still a valid (normal-completion) sample.
     expect(killerExit.signal === "SIGKILL" || killerExit.code === 0, killer.failureContext()).toBe(true)
     if (killerExit.code !== 0) await expectTakeoverOwnerProvenDead(shared.identity, killer.child.pid)
+    // The killed writer's `git commit` runs on as an orphan; the takeover waits for it like for the owner.
+    const orphanPid = Number.parseInt(await readFile(join(dirname(shared.identity.paths.repo), "killer-git.pid"), "utf8"), 10)
+    expect(await probeUntil(() => !pidAlive(orphanPid), DEATH_PROOF_BOUND_MS)).toBe(true)
     await assertRepoIntegrity(shared.identity.paths.repo)
 
     const peer = kit.harnessFor(crashCommitChildPath, [
@@ -100,14 +103,8 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
     await peer.waitForPrefix("done:")
     await kit.expectSuccessful(peer)
 
-    // #then
-    // git's ref transaction makes the orphan's commit CAS-fail once the peer has committed, so
-    // history is always linear and the orphan contributes at most its one in-flight commit.
-    const commitCount = Number.parseInt((await git(shared.identity.paths.repo, ["rev-list", "--count", "HEAD"])).trim(), 10)
-    expect(commitCount).toBeGreaterThanOrEqual(20)
-    expect(commitCount).toBeLessThanOrEqual(21)
-    expect(Number.parseInt((await git(shared.identity.paths.repo, ["rev-list", "--count", "--merges", "HEAD"])).trim(), 10)).toBe(0)
-    await assertRepoIntegrity(shared.identity.paths.repo)
+    // #then: the killed writer's commit always lands through its orphan, then the peer's twenty
+    await assertLinearCommits(shared.identity, 21)
   }, 30_000)
 
   // One row per point a killed `git commit` can strand its own lock file (git lockfile protocol:

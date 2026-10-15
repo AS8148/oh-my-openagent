@@ -147,10 +147,21 @@ export async function waitOwnerDead(lockPath, holderPid) {
   }
 }
 
-// Before the peer's first write, a killed writer's orphaned `git commit` may still hold (or have
-// stranded) refs/heads/main.lock, which fsck reports as badRefContent. That one line is tolerated
-// at the after-takeover stage only; the after-commits stage is always strict.
-const TAKEOVER_DEBRIS = /^error: refs\/heads\/main\.lock: badRefContent/
+// The killed writer's in-flight `git commit` keeps running as an orphan; the takeover starts only
+// after it exits, exactly as the takeover waits for the dead owner.
+async function waitOrphanGone(pidPath) {
+  let pid
+  try {
+    pid = Number.parseInt(await readFile(pidPath, "utf8"), 10)
+  } catch {
+    return
+  }
+  const deadline = Date.now() + DEATH_PROOF_BOUND_MS
+  while (!pidGone(pid)) {
+    if (Date.now() >= deadline) throw new Error(`orphan git ${pid} still alive after ${DEATH_PROOF_BOUND_MS}ms`)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+}
 
 export async function fsckCheck(repoPath, stage) {
   const result = await run("git", ["-C", repoPath, "fsck", "--full", "--strict"])
@@ -158,10 +169,9 @@ export async function fsckCheck(repoPath, stage) {
   const broken = report
     .split("\n")
     .filter((line) => /^(error|fatal):/.test(line) || /missing|corrupt/i.test(line))
-    .filter((line) => !(stage === "after-takeover" && TAKEOVER_DEBRIS.test(line)))
   return {
     stage,
-    ok: (result.code === 0 || (stage === "after-takeover" && broken.length === 0)) && broken.length === 0,
+    ok: result.code === 0 && broken.length === 0,
     exitCode: result.code,
     broken,
     dangling: report.split("\n").filter((line) => line.startsWith("dangling")).length,
@@ -202,6 +212,7 @@ export async function inCommitIteration(fix) {
     throw new Error(`killer exit was ${JSON.stringify(killerExit)}: ${killer.output()}`)
   }
   if (killerExit.code !== 0) await waitOwnerDead(join(fix.locks, "memory-write.lock"), killer.child.pid)
+  await waitOrphanGone(join(fix.root, "killer-git.pid"))
   const afterTakeover = await fsckCheck(fix.repo, "after-takeover")
   const peer = spawnChild(crashChildPath, ["peer", fix.repo, fix.locks, "peer", "20"])
   const peerExit = await peer.exit
@@ -217,7 +228,7 @@ export async function inCommitIteration(fix) {
 }
 
 export function expectedRange(caseKind) {
-  // The in-commit killer's orphaned git child can complete its one commit post-mortem; the sigkill
-  // case kills a parked writer with no git child, so its count is exact.
-  return caseKind === "in-commit" ? { min: 20, max: 21 } : { min: 20, max: 20 }
+  // The in-commit killer's commit always lands (its orphan finishes before the takeover), so that
+  // case has exactly 21 commits; the sigkill case kills a parked writer with no git child: 20.
+  return caseKind === "in-commit" ? { min: 21, max: 21 } : { min: 20, max: 20 }
 }
