@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -8,7 +8,7 @@ import {
   isSessionSampled,
 } from "./omo-native-session-summary"
 import { OMO_NATIVE_PROPERTY_ALLOWLISTS } from "./product-identity"
-import { summaryDir } from "./session-summary-storage"
+import { OWNER_STALE_MS, summaryDir } from "./session-summary-storage"
 import { createTempStateDirs, createTestRecorder, rows, summaryTurn } from "./session-summary.test-support"
 import { percentile } from "./session-summary-window"
 
@@ -127,6 +127,35 @@ describe("session_summary windows", () => {
 
     expect(readFileSync(shared, "utf8")).toBe(before)
     expect(existsSync(join(summaryDir(dir), "s1@boot-222.json"))).toBe(true)
+  })
+
+  // #10229: a window written before consent was recorded (or by an opted-out session) carries no opted-in
+  // mark, so nothing proves its session agreed to be sent: recovery deletes it unsent.
+  test("#given a dead process's window without a consent mark #when recovery runs #then it is deleted and never sent", async () => {
+    const dir = stateDirs.make()
+    await createTestRecorder({ dir, pid: 111 }).summary.recordTurn("legacy", summaryTurn())
+    const path = join(summaryDir(dir), "legacy.json")
+    const unmarked: Record<string, unknown> = JSON.parse(readFileSync(path, "utf8"))
+    Reflect.deleteProperty(unmarked, "consent")
+    writeFileSync(path, JSON.stringify({ ...unmarked, heartbeatAt: 0 }))
+    const next = createTestRecorder({ dir, pid: 222, startAt: 1_000_000 + OWNER_STALE_MS + 1 })
+    await next.summary.recordTurn("s2", summaryTurn())
+    await next.summary.finish("s2", "quit")
+    expect(next.published.filter(({ properties }) => properties.$session_id === "legacy")).toEqual([])
+    expect(existsSync(path)).toBe(false)
+  })
+
+  test("#given a session that sent seq 0, opted out, and opted back in #when it sends again #then it never reuses a sent seq", async () => {
+    let consent = true
+    const { published, summary } = createTestRecorder({ dir: stateDirs.make(), isConsented: () => consent })
+    await summary.recordTurn("s1", summaryTurn())
+    await summary.finish("s1", "reload")
+    consent = false
+    await summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
+    consent = true
+    await summary.recordTurn("s1", summaryTurn({ turnIndex: 2 }))
+    await summary.finish("s1", "quit")
+    expect(rows(published)).toEqual([[0, "reload", 1], [1, "shutdown", 1]])
   })
 })
 

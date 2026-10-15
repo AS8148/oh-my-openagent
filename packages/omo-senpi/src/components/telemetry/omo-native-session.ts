@@ -66,7 +66,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
         if (sessionClosed) return
         const env = options.env ?? process.env
         const product = createOmoNativeProductConfig()
-        if (!hasNativeTelemetryConsent(options, eventCtx, env)) return
+        if (!isOmoNativeTelemetryEnabled(options, eventCtx, env)) return
 
         const osProvider = options.osProvider ?? getDefaultTelemetryOsProvider()
         const sessionId = extractSessionId(eventCtx) ?? "unknown"
@@ -210,12 +210,20 @@ function readTimeZone(provider: (() => string) | undefined): string | undefined 
   }
 }
 
-/** The one consent decision for OmO Native telemetry: the full env opt-out matrix, an API key, and omo.json. */
-export function hasNativeTelemetryConsent(options: OmoNativeSessionOptions, eventCtx: unknown, env: TelemetryEnv): boolean {
+/** The one enablement decision: the env opt-out matrix plus the omo config gate for the event's cwd. */
+export function isOmoNativeTelemetryEnabled(
+  options: Pick<OmoNativeSessionOptions, "diagnostics" | "isConfigEnabled">,
+  eventCtx: unknown,
+  env: TelemetryEnv,
+): boolean {
   return isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }) && configEnabled(options, eventCtx, env)
 }
 
-function configEnabled(options: OmoNativeSessionOptions, eventCtx: unknown, env: TelemetryEnv): boolean {
+function configEnabled(
+  options: Pick<OmoNativeSessionOptions, "diagnostics" | "isConfigEnabled">,
+  eventCtx: unknown,
+  env: TelemetryEnv,
+): boolean {
   const cwd = extractString(eventCtx, "cwd")
   if (options.isConfigEnabled !== undefined) return options.isConfigEnabled(cwd, env)
   try {

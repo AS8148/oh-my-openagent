@@ -6,12 +6,17 @@ import type {
 } from "@oh-my-opencode/telemetry-core"
 
 import { loadSenpiOmoConfig } from "../config-resolution"
-import { createSessionSummaryRecorder, type SessionSummaryRecorder, type SummaryPublication } from "./omo-native-session-summary"
+import {
+  createSessionSummaryRecorder,
+  type SessionSummaryOptions,
+  type SessionSummaryRecorder,
+  type SummaryPublication,
+} from "./omo-native-session-summary"
 import type { OmoNativeEventName } from "./product-identity"
 import type { TelemetrySessionRole } from "./session-role"
 import { currentProcessOwner } from "./session-summary-owner"
 import { resolveRawTurnSampleRate } from "./session-summary-sampling"
-import { createSummaryStorage, type RecordConsent } from "./session-summary-storage"
+import { createSummaryStorage } from "./session-summary-storage"
 
 /** What the component's transport facade shares with every registration of one loaded extension. */
 export type NativeCaptureState = {
@@ -29,7 +34,7 @@ export const SUMMARY_SHUTDOWN_WAIT_MS = 1_000
 
 export function createNativeSummaryRecorder(input: {
   readonly state: NativeCaptureState
-  readonly consent: RecordConsent
+  readonly consent: Pick<SessionSummaryOptions, "isConsented" | "consentScope" | "isScopeConsented" | "scheduleConsentCheck">
   readonly stateDir: string
   readonly env: TelemetryEnv
   readonly cwd: string | undefined
@@ -41,7 +46,7 @@ export function createNativeSummaryRecorder(input: {
   const { state, env } = input
   let sampleRate = input.rawTurnSampleRate
   return createSessionSummaryRecorder({
-    consent: input.consent,
+    ...input.consent,
     storage: createSummaryStorage({
       stateDir: input.stateDir,
       owner: currentProcessOwner(),

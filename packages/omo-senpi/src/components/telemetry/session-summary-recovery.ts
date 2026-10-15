@@ -5,7 +5,9 @@ import type { SummaryPublisher } from "./session-summary-publisher"
 import {
   OWNER_STALE_MS,
   SUMMARY_TTL_MS,
+  isRecordSendable,
   type Claimed,
+  type ConsentScope,
   type PendingRecord,
   type ReadResult,
   type SummaryStorage,
@@ -23,8 +25,11 @@ export function createSummaryRecovery(input: {
   readonly storage: SummaryStorage
   readonly publisher: SummaryPublisher
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
+  /** Consent re-read for a record's originating scope before it is sent or continued; defaults to consented. */
+  readonly isScopeConsented?: (scope: ConsentScope) => boolean
 }): SummaryRecovery {
   const { storage, publisher } = input
+  const isScopeConsented = input.isScopeConsented ?? (() => true)
   const isExpired = (at: number) => storage.now() - at > SUMMARY_TTL_MS
   const isSelf = (record: PendingRecord) =>
     record.owner.pid === storage.owner.pid && record.owner.bootId === storage.owner.bootId
@@ -50,7 +55,8 @@ export function createSummaryRecovery(input: {
       if (record === CORRUPT) reportCorrupt("window")
       return undefined
     }
-    if (record.consent !== "enabled") {
+    // No consent mark, or its project opted out since it was written: dropped unsent (fail closed).
+    if (!isRecordSendable(record, isScopeConsented)) {
       removeFile(claimed.claimPath)
       return undefined
     }
@@ -67,6 +73,7 @@ export function createSummaryRecovery(input: {
     }
     void publisher.publishWindow({
       consent: record.consent,
+      scope: record.scope,
       sessionHash: record.sessionHash,
       sessionRole: record.sessionRole,
       sampleRate: record.sampleRate,
@@ -90,7 +97,7 @@ export function createSummaryRecovery(input: {
       if (record === CORRUPT) reportCorrupt("pending event")
       return
     }
-    if (record.consent !== "enabled") {
+    if (!isRecordSendable(record, isScopeConsented)) {
       removeFile(claimed.claimPath)
       return
     }

@@ -1,7 +1,7 @@
 import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import type { TelemetrySessionRole } from "./session-role"
-import type { PendingRecord, RecordConsent, SummaryStorage } from "./session-summary-storage"
+import { isRecordSendable, type ConsentScope, type PendingRecord, type RecordConsent, type SummaryStorage } from "./session-summary-storage"
 import { summaryProperties, type EndedBy, type SummaryWindow } from "./session-summary-window"
 import { isSessionSampled } from "./session-summary-sampling"
 
@@ -13,6 +13,7 @@ export type PublishSummary = (publication: SummaryPublication) => Promise<boolea
 
 export type ClosedWindow = {
   readonly consent: RecordConsent
+  readonly scope: ConsentScope | undefined
   readonly sessionHash: string
   readonly sessionRole: TelemetrySessionRole
   readonly sampleRate: number
@@ -42,7 +43,10 @@ export function createSummaryPublisher(input: {
   readonly publish: PublishSummary
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly transportDropped?: () => number
+  /** Consent for the scope a record came from, read now; defaults to consented. */
+  readonly isScopeConsented?: (scope: ConsentScope) => boolean
 }): SummaryPublisher {
+  const isScopeConsented = input.isScopeConsented ?? (() => true)
   const inFlight = new Set<string>()
   const running = new Set<Promise<void>>()
   let dropped = 0
@@ -73,8 +77,9 @@ export function createSummaryPublisher(input: {
   }
 
   const deliver = (record: PendingRecord): Promise<void> => {
-    // The one place an event leaves for the transport: a record without consent is deleted, never sent.
-    if (record.consent !== "enabled") {
+    // The one place an event leaves for the transport: a record without the consent mark, or whose
+    // originating scope has opted out since it was written, is deleted, never sent.
+    if (!isRecordSendable(record, isScopeConsented)) {
       input.storage.removePending(record.uuid)
       return Promise.resolve()
     }
@@ -99,6 +104,7 @@ export function createSummaryPublisher(input: {
       if (closed.consent !== "enabled") return
       const record: PendingRecord = {
         consent: closed.consent,
+        scope: closed.scope,
         uuid: closed.windowId,
         sessionHash: closed.sessionHash,
         owner: input.storage.owner,

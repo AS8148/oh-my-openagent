@@ -24,7 +24,6 @@ const storage: SummaryStorage = mode === "die-before-pending"
   : realStorage
 
 const summary = createSessionSummaryRecorder({
-  consent: "enabled",
   storage,
   sessionRole: "root",
   sampleRate: () => 0.05,
