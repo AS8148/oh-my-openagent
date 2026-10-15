@@ -162,8 +162,10 @@ async function expectSuccessful(child: ChildHarness): Promise<void> {
 // `git fsck --full --strict` is the integrity oracle for omo #10177: any error/fatal line, any
 // missing or corrupt object, or a non-zero exit fails. A commit interrupted by SIGKILL can leave
 // the objects it wrote unreachable (dangling); those are the normal debris of a killed write, not
-// corruption, so they are reported but never fail the check.
-async function assertRepoIntegrity(repoPath: string): Promise<void> {
+// corruption, so they are reported but never fail the check. `allowedDebris` names fsck complaints
+// a killed writer's stranded lock files produce BEFORE the peer's first mutation sweeps them; the
+// final assertions never pass an allowance, which is what proves the sweep ran.
+async function assertRepoIntegrity(repoPath: string, allowedDebris: readonly RegExp[] = []): Promise<void> {
   const child = Bun.spawn(["git", "-C", repoPath, "fsck", "--full", "--strict"], { stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(),
@@ -171,8 +173,12 @@ async function assertRepoIntegrity(repoPath: string): Promise<void> {
     child.exited,
   ])
   const report = `${stdout}\n${stderr}`
-  const broken = report.split("\n").filter((line) => /^(error|fatal):/.test(line) || /missing|corrupt/i.test(line))
-  expect({ exitCode, broken }, report).toEqual({ exitCode: 0, broken: [] })
+  const broken = report
+    .split("\n")
+    .filter((line) => /^(error|fatal):/.test(line) || /missing|corrupt/i.test(line))
+    .filter((line) => !allowedDebris.some((allowed) => allowed.test(line)))
+  const expectedExit = allowedDebris.length > 0 && broken.length === 0 ? exitCode : 0
+  expect({ exitCode, broken }, report).toEqual({ exitCode: expectedExit, broken: [] })
 }
 
 async function assertLinearCommits(identity: MemoryIdentity, expectedCount: number): Promise<void> {
@@ -358,4 +364,56 @@ describe("one memory identity across real Bun processes", () => {
     expect(Number.parseInt((await git(shared.identity.paths.repo, ["rev-list", "--count", "--merges", "HEAD"])).trim(), 10)).toBe(0)
     await assertRepoIntegrity(shared.identity.paths.repo)
   }, 30_000)
+
+  // One row per point a killed `git commit` can strand its own lock file (git lockfile protocol:
+  // the lock exists from create until rename, so a git process SIGKILLed while its lock exists can
+  // never remove it). omo #10177: after such a kill, the peer's takeover must still leave a repo
+  // whose every reachable object exists (fsck --strict clean) and whose history stays linear.
+  const killTriggers = [
+    { trigger: "index-lock", name: "index.lock" },
+    { trigger: "ref-lock", name: "refs/heads/main.lock" },
+  ] as const
+
+  for (const { trigger, name } of killTriggers) {
+    test(`#given a writer SIGKILLed with a stranded .git/${name} #when its peer takes over #then every reachable object survives and twenty follow-up commits land`, async () => {
+      // #given
+      const shared = await fixture()
+      const killer = new ChildHarness(crashCommitChildPath, [
+        "kill-at-git-lock",
+        shared.identity.paths.repo,
+        shared.identity.paths.locks,
+        "killer",
+        trigger,
+      ])
+
+      // #when
+      await killer.waitForLine("kill-ready")
+      const killerExit = await killer.exit
+      expect(killerExit, killer.failureContext()).toEqual({ code: null, signal: "SIGKILL" })
+      const killerRecord = parseLockRecord(await readFile(memoryWriterLockPath(shared.identity.paths.locks), "utf8"))
+      if (killerRecord === null || killerRecord.pid !== killer.child.pid) throw new Error(`unexpected lock owner: ${JSON.stringify(killerRecord)}`)
+      expect(await probeUntil(() => isLockOwnerProvenDead(killerRecord), DEATH_PROOF_BOUND_MS)).toBe(true)
+      // fsck reads a stranded ref lock as badRefContent; that line is the debris under test, and
+      // nothing else may be wrong. The strict (no-allowance) check after the peer's commits then
+      // proves the sweep removed it.
+      await assertRepoIntegrity(shared.identity.paths.repo, [
+        new RegExp(`^error: refs/heads/main\\.lock: badRefContent`),
+      ].filter(() => trigger === "ref-lock"))
+
+      const peer = new ChildHarness(crashCommitChildPath, [
+        "peer",
+        shared.identity.paths.repo,
+        shared.identity.paths.locks,
+        "peer",
+        "20",
+      ])
+      await peer.waitForPrefix("done:")
+      await expectSuccessful(peer)
+
+      // #then: the stranded commit dies with its git process, so history is the peer's twenty
+      // linear commits plus, for the ref-lock row, the killer's completed root commit; the orphan
+      // can never publish a ref past a stranded refs lock.
+      await assertLinearCommits(shared.identity, trigger === "ref-lock" ? 21 : 20)
+    }, 30_000)
+  }
 })

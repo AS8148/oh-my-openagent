@@ -2,6 +2,7 @@ import { existsSync } from "../fs/resilient"
 import { mkdir, rm, writeFile } from "../fs/resilient"
 import { dirname, join } from "node:path"
 import { withGitLockRetry, withSerializedGitConfigMutation } from "./config-lock"
+import { withStrandedGitLockRecovery, sweepStrandedGitLockFilesIfPresent } from "./repo-lock-sweep"
 import { DirtyRepoError, NoEffectiveChangesError } from "./errors"
 import { createNodeGitExec, type GitExec, type GitExecResult } from "./exec"
 import { describeDirtyMarkdownEncodingIssues } from "./porcelain"
@@ -96,7 +97,9 @@ export class GitMemoryRepo {
     }
 
     await withGitLockRetry(() =>
-      this.git([...authorFlags(author), "commit", "--allow-empty", "-m", EMPTY_INITIAL_COMMIT]),
+      withStrandedGitLockRecovery(this.dir, () =>
+        this.git([...authorFlags(author), "commit", "--allow-empty", "-m", EMPTY_INITIAL_COMMIT]),
+      ),
     )
     return this.requireHead()
   }
@@ -114,6 +117,7 @@ export class GitMemoryRepo {
     author: GitCommitAuthor,
   ): Promise<GitCommitResult> {
     await this.hookInstaller(this.dir)
+    await sweepStrandedGitLockFilesIfPresent(this.dir)
     const normalized = normalizePathspecs(paths)
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)
 
@@ -128,6 +132,7 @@ export class GitMemoryRepo {
     author: GitCommitAuthor,
   ): Promise<GitCommitResult> {
     await this.hookInstaller(this.dir)
+    await sweepStrandedGitLockFilesIfPresent(this.dir)
     const normalized = normalizePathspecs(paths)
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)
     await assertNoUnrelatedChanges(this.dir, normalized, () => this.status())
@@ -165,10 +170,14 @@ export class GitMemoryRepo {
     const tracked = normalized.filter((path) => atHead.has(path))
     const untracked = normalized.filter((path) => !atHead.has(path))
     if (tracked.length > 0) {
-      await withGitLockRetry(() => this.git(["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked]))
+      await withGitLockRetry(() =>
+        withStrandedGitLockRecovery(this.dir, () => this.git(["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked])),
+      )
     }
     for (const path of untracked) {
-      await withGitLockRetry(() => this.git(["rm", "-q", "--cached", "--ignore-unmatch", "--", path]))
+      await withGitLockRetry(() =>
+        withStrandedGitLockRecovery(this.dir, () => this.git(["rm", "-q", "--cached", "--ignore-unmatch", "--", path])),
+      )
       await rm(join(this.dir, path), { force: true })
     }
   }
@@ -215,7 +224,7 @@ export class GitMemoryRepo {
     if (options.noFF ?? true) argv.push("--no-ff")
     if (options.message) argv.push("-m", options.message)
     argv.push(ref)
-    await withGitLockRetry(() => this.git(argv))
+    await withStrandedGitLockRecovery(this.dir, () => this.git(argv))
     return this.requireHead()
   }
 
@@ -249,7 +258,7 @@ export class GitMemoryRepo {
   }
 
   private async stage(paths: readonly string[]): Promise<void> {
-    await withGitLockRetry(() => this.git(["add", "-A", "--", ...paths]))
+    await withStrandedGitLockRecovery(this.dir, () => this.git(["add", "-A", "--", ...paths]))
   }
 
   private async hasPathChanges(paths: readonly string[]): Promise<boolean> {
@@ -260,7 +269,7 @@ export class GitMemoryRepo {
     reason: string,
     author: GitCommitAuthor,
   ): Promise<GitCommitResult> {
-    await withGitLockRetry(() => this.git([...authorFlags(author), "commit", "-m", reason]))
+    await withStrandedGitLockRecovery(this.dir, () => this.git([...authorFlags(author), "commit", "-m", reason]))
     return { committed: true, sha: await this.requireHead() }
   }
 

@@ -1,5 +1,8 @@
+import { existsSync } from "node:fs"
+import { spawn } from "node:child_process"
+
 import { GitMemoryRepo } from "../git"
-import { createNodeGitExec, type GitExec } from "../git/exec"
+import { createNodeGitExec, type GitExec, type GitExecResult } from "../git/exec"
 import {
   acquireLock,
   createLockRecord,
@@ -14,12 +17,17 @@ import { runMemoryTool } from "../tools/memory"
 // failure needs: object writes, index update, and ref update sampled at a random point. The peer
 // mode then takes the lock over through the normal dead-owner protocol and lands follow-up
 // commits. Neither mode reads stdin: the kill is self-timed, so the parent only awaits exit.
+//
+// kill-at-git-lock goes one level deeper: it spawns its `git commit` directly, waits for git's own
+// lock file (index.lock, or refs/heads/main.lock) to appear - proof the commit is mid-flight - and
+// SIGKILLs the git process at that exact instant, then SIGKILLs itself. A killed git process can
+// never remove the lock files it created; the peer's takeover then faces that debris.
 
-type Mode = "kill-mid-commit" | "peer"
+type Mode = "kill-mid-commit" | "kill-at-git-lock" | "peer"
 
 const [modeValue, repoPath, locksPath, writerId, first, second] = process.argv.slice(2)
 if (
-  (modeValue !== "kill-mid-commit" && modeValue !== "peer") ||
+  (modeValue !== "kill-mid-commit" && modeValue !== "kill-at-git-lock" && modeValue !== "peer") ||
   repoPath === undefined ||
   locksPath === undefined ||
   writerId === undefined ||
@@ -47,6 +55,70 @@ function createInCommitKillExec(minDelayMs: number, maxDelayMs: number): GitExec
   }
 }
 
+async function gitStdout(args: readonly string[]): Promise<string> {
+  const child = spawn("git", ["-C", repoPath, ...args], { stdio: ["ignore", "pipe", "inherit"] })
+  let out = ""
+  child.stdout.on("data", (chunk: Buffer) => { out += chunk.toString("utf8") })
+  await new Promise((resolve) => child.once("exit", resolve))
+  return out.trim()
+}
+
+async function waitExit(child: ReturnType<typeof spawn>): Promise<void> {
+  await new Promise((resolve) => child.once("exit", resolve))
+}
+
+function unreachable(message: string): never {
+  throw new Error(message)
+}
+
+// git's own lockfile protocol strands these files when its process dies mid-transaction; each
+// stranding below uses a real git child, proven to hold its lock (the file exists, or the command
+// acknowledged `prepare: ok`), before both processes take SIGKILL. Nothing is hand-crafted: the
+// post-kill state is exactly what a crashed committer leaves.
+async function strandIndexLockAndDie(): Promise<never> {
+  // `git update-index --stdin` creates .git/index.lock at startup and holds it while it waits for
+  // input, so the lock file's existence proves the git child is alive and holding it.
+  const git = spawn("git", ["-C", repoPath, "update-index", "--stdin"], { stdio: ["pipe", "ignore", "ignore"] })
+  const deadline = Date.now() + 10_000
+  while (!existsSync(`${repoPath}/.git/index.lock`)) {
+    if (Date.now() >= deadline) {
+      git.kill("SIGKILL")
+      throw new Error("index.lock never appeared under update-index --stdin")
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+  git.kill("SIGKILL")
+  await waitExit(git)
+  process.kill(process.pid, "SIGKILL")
+  return unreachable("survived self-SIGKILL")
+}
+
+async function strandRefLockAndDie(): Promise<never> {
+  // `git update-ref --stdin` takes refs/heads/main.lock during `prepare` and keeps holding it while
+  // it waits for `commit` or `abort`; `prepare: ok` on stdout is git's own acknowledgement.
+  const head = await gitStdout(["rev-parse", "HEAD"])
+  const git = spawn("git", ["-C", repoPath, "update-ref", "--stdin"], { stdio: ["pipe", "pipe", "ignore"] })
+  let out = ""
+  git.stdout.on("data", (chunk: Buffer) => { out += chunk.toString("utf8") })
+  git.stdin.write(`start\nupdate refs/heads/main ${head}\nprepare\n`)
+  const deadline = Date.now() + 10_000
+  while (!out.includes("prepare: ok")) {
+    if (Date.now() >= deadline) {
+      git.kill("SIGKILL")
+      throw new Error(`update-ref never acknowledged prepare: ${JSON.stringify(out)}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+  if (!existsSync(`${repoPath}/.git/refs/heads/main.lock`)) {
+    git.kill("SIGKILL")
+    throw new Error("refs/heads/main.lock missing after prepare: ok")
+  }
+  git.kill("SIGKILL")
+  await waitExit(git)
+  process.kill(process.pid, "SIGKILL")
+  return unreachable("survived self-SIGKILL")
+}
+
 async function createCommit(repo: GitMemoryRepo, writer: string, index: number): Promise<void> {
   await runMemoryTool({
     repo,
@@ -62,27 +134,42 @@ async function createCommit(repo: GitMemoryRepo, writer: string, index: number):
   })
 }
 
-if (mode === "kill-mid-commit") {
-  const minDelayMs = Number.parseInt(first, 10)
-  const maxDelayMs = Number.parseInt(second ?? "", 10)
-  if (!Number.isInteger(minDelayMs) || !Number.isInteger(maxDelayMs) || minDelayMs < 0 || maxDelayMs < minDelayMs) {
-    throw new Error(`invalid kill delay window: ${first}..${String(second)}`)
+if (mode === "kill-mid-commit" || mode === "kill-at-git-lock") {
+  let repo: GitMemoryRepo
+  if (mode === "kill-mid-commit") {
+    const minDelayMs = Number.parseInt(first, 10)
+    const maxDelayMs = Number.parseInt(second ?? "", 10)
+    if (!Number.isInteger(minDelayMs) || !Number.isInteger(maxDelayMs) || minDelayMs < 0 || maxDelayMs < minDelayMs) {
+      throw new Error(`invalid kill delay window: ${first}..${String(second)}`)
+    }
+    repo = new GitMemoryRepo({
+      dir: repoPath,
+      agentId: `crash-${writerId}`,
+      exec: createInCommitKillExec(minDelayMs, maxDelayMs),
+    })
+  } else {
+    if (first !== "index-lock" && first !== "ref-lock") throw new Error(`invalid kill trigger: ${first}`)
+    repo = new GitMemoryRepo({ dir: repoPath, agentId: `crash-${writerId}` })
   }
-  const repo = new GitMemoryRepo({
-    dir: repoPath,
-    agentId: `crash-${writerId}`,
-    exec: createInCommitKillExec(minDelayMs, maxDelayMs),
-  })
   const record = await createLockRecord("memory-write", { runId: `${writerId}-0` })
   await acquireLock(lockPath, record, { waitTimeoutMs: 15_000, retryDelayMs: 5 })
   process.stdout.write("kill-ready\n")
-  try {
+  if (mode === "kill-mid-commit") {
+    try {
+      await createCommit(repo, writerId, 0)
+    } finally {
+      await releaseLock(lockPath, record)
+    }
+    // Reaching here means the kill timer missed the commit window; the lock was released normally.
+    process.stdout.write("done:missed\n")
+  } else if (first === "index-lock") {
+    await strandIndexLockAndDie()
+  } else {
+    // A killed committer has history under its belt, so strand the ref lock on top of a real root
+    // commit before dying. The release never runs: SIGKILL is the point.
     await createCommit(repo, writerId, 0)
-  } finally {
-    await releaseLock(lockPath, record)
+    await strandRefLockAndDie()
   }
-  // Reaching here means the kill timer missed the commit window; the lock was released normally.
-  process.stdout.write("done:missed\n")
 } else {
   const count = Number.parseInt(first, 10)
   if (!Number.isInteger(count) || count < 1) throw new Error(`invalid peer count: ${first}`)
