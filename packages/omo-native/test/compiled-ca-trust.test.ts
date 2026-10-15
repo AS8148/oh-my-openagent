@@ -150,11 +150,13 @@ request("https://localhost:" + port + "/", (r) => { r.resume(); console.log("ok 
     expect(await probe("install", { OMO_EXTRA_CA_CERTIFICATES: fixture("ca.pem") })).toBe("ok 200")
   })
 
-  test("#given the private CA only in an ambient NODE_EXTRA_CA_CERTS #then the engine ignores it", async () => {
+  // A standalone CLI user behind a corporate proxy sets NODE_EXTRA_CA_CERTS; the desktop strips it
+  // from the engines it starts (omo-desktop-app#2766), so honoring it here only serves standalone runs.
+  test("#given the private CA only in an ambient NODE_EXTRA_CA_CERTS #then the engine and its BUN_BE_BUN child honor it", async () => {
     const caFile = join(dir, "ambient-ca.pem")
     writeFileSync(caFile, fixture("ca.pem"))
-    expect(await probe("install", { NODE_EXTRA_CA_CERTS: caFile })).toBe("error UNABLE_TO_VERIFY_LEAF_SIGNATURE")
-    expect(await probe("bun-be-bun-tls", { NODE_EXTRA_CA_CERTS: caFile })).toBe("error UNABLE_TO_VERIFY_LEAF_SIGNATURE")
+    expect(await probe("install", { NODE_EXTRA_CA_CERTS: caFile })).toBe("ok 200")
+    expect(await probe("bun-be-bun-tls", { NODE_EXTRA_CA_CERTS: caFile })).toBe("ok 200")
   })
 
   test("#given an invalid OMO_EXTRA_CA_CERTIFICATES #then the compiled engine refuses to start", async () => {

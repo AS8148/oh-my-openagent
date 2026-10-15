@@ -58,22 +58,23 @@ export interface EngineTrustReport {
 }
 
 /**
- * Installs bundled + OS store + validated extras and nothing else: an ambient `NODE_EXTRA_CA_CERTS`
- * (a path any process in the launch environment can set) is left out of the default set and removed
- * from the environment children inherit. `NODE_USE_SYSTEM_CA=1` makes `BUN_BE_BUN` children, which
- * never run this entry, read the OS store. `OMO_EXTRA_CA_CERTIFICATES` stays in the environment on
- * purpose: the host daemon is a grandchild of the process the server spawned and needs it.
+ * Installs bundled + OS store + `NODE_EXTRA_CA_CERTS` (which Bun loads natively before this runs) +
+ * the validated extras. `NODE_EXTRA_CA_CERTS` is honored because standalone CLI users behind a
+ * corporate proxy set it; the desktop strips it from the engines it starts (omo-desktop-app#2766).
+ * `NODE_USE_SYSTEM_CA=1` makes `BUN_BE_BUN` children, which never run this entry, read the OS store;
+ * they also inherit `NODE_EXTRA_CA_CERTS`, but not the `OMO_EXTRA_CA_CERTIFICATES` extras (known limit).
+ * `OMO_EXTRA_CA_CERTIFICATES` stays in the environment: the host daemon is a grandchild and needs it.
  */
 export function installEngineCaTrust(env: NodeJS.ProcessEnv = process.env, tls: TrustApi = nodeTls): EngineTrustReport {
   const raw = env[ENGINE_EXTRA_CA_ENV]
   const extra = raw === undefined || raw === "" ? [] : parseExtraCaCertificates(raw)
   env.NODE_USE_SYSTEM_CA = "1"
-  delete env.NODE_EXTRA_CA_CERTS
   if (typeof tls.getCACertificates !== "function" || typeof tls.setDefaultCACertificates !== "function") {
     return { installed: false, bundled: 0, system: 0, extra: 0 }
   }
   const bundled = tls.getCACertificates("bundled")
   const system = tls.getCACertificates("system")
-  tls.setDefaultCACertificates([...new Set([...bundled, ...system, ...extra])])
+  const ambient = tls.getCACertificates("extra")
+  tls.setDefaultCACertificates([...new Set([...bundled, ...system, ...ambient, ...extra])])
   return { installed: true, bundled: bundled.length, system: system.length, extra: extra.length }
 }
