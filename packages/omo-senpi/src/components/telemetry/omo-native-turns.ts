@@ -106,8 +106,17 @@ function optionalNonNegativeNumber(value: unknown): NumberResult {
 
 // The ONLY rounding step for cost: every downstream total adds these integers, so a summary and the sum of
 // its raw turns agree exactly, in any summation order, and cost_usd can never disagree with cost_1e4.
+// It rounds half-up on the decimal digits of the reported number, not on the binary product
+// `costUsd * 10_000`: 0.00015 * 1e4 is 1.4999999999999998 in binary, which `Math.round` takes to 1.
 export function toCost1e4(costUsd: number): number {
-  return Math.round(costUsd * 10_000)
+  const [mantissa = "0", exponent = "0"] = costUsd.toString().split("e")
+  const [whole = "0", fraction = ""] = mantissa.split(".")
+  const digits = whole + fraction
+  const point = whole.length + Number(exponent) + 4
+  if (point < 0) return 0
+  const padded = digits.padEnd(point + 1, "0")
+  const scaled = point === 0 ? 0 : Number(padded.slice(0, point))
+  return padded.charAt(point) >= "5" ? scaled + 1 : scaled
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
