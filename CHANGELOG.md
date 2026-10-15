@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A plan you asked for stays approved when the session's task tracker is rebuilt.** Reloading extensions, or switching to another session and back, used to drop the record that you had asked for a plan, so the plan-reviewer was refused as if you never had. The record now carries over to the rebuilt tracker for the same session only; quitting still clears it, and extension-injected input still cannot approve a plan. Thanks to @gtg7784. ([#10143](https://github.com/code-yeongyu/oh-my-openagent/pull/10143))
+
 **Session-gateway store extensions hold the write lock for less time and can no longer commit a partial operation.** A call to a current extension takes the lock once and re-checks the extension's version under it, an exact session id resolves from its session file without enumerating live endpoints inside the lock, and a statement run while an `enqueue`/`bind`/... helper is still in flight fails the call instead of landing inside that helper's savepoint. ([#9508](https://github.com/code-yeongyu/oh-my-openagent/pull/9508))
 
 **`thread_create` can start a thread with skills it follows from its first turn.** Pass `skills: ["<name>", ...]` with the names of installed skills; the new session applies each one as if it were loaded with `/skill`, without a slash command and without starting a turn, and keeps applying it after a restart. A path or raw text refuses the create, and nothing is opened. The new session applies each skill its own registry holds (the same roots and trust rules as `/skill`) and logs any it does not; the result echoes the names passed as `thread.requested_skills`.
