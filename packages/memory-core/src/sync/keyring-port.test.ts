@@ -191,21 +191,46 @@ describe("DeviceKeyring", () => {
     // The full envelope — nested key_material included — must be canonical JSON byte-for-byte.
     const openedText = new TextDecoder().decode(await keyring.unseal(wrap, { account, epoch, id }))
     expect(openedText).toBe(jcs({ version: 1, account, epoch, id, key_material: material }))
-    // Golden-vector leg: opens only once upstream regenerates wraps.json on an RFC-9180 layout.
+  })
+
+  // Golden vector from omo-service fixtures/sync-v1/wraps.json (fixture commit 67b2dbc, copied here so
+  // the test never reads outside the repo). The current vector is sealed with a LabeledExpand that
+  // deviates from RFC 9180 §4 (svc #428 is fixing it RED-first against Appendix A and will regenerate
+  // wraps.json), so this fails until the regenerated fixture is vendored; test.failing keeps the suite
+  // green meanwhile and turns red the day the vector starts opening before the fixture is updated.
+  test.failing("opens the wraps.json golden vector once svc #428 regenerates it (RFC 9180 layout)", async () => {
+    const rawDev = new Uint8Array(32).fill(97) // keys.json wrap_test_device.sealing_private
+    const devMaterial = {
+      signingPrivatePkcs8: createPrivateKey({
+        key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), new Uint8Array(32).fill(1)]),
+        format: "der",
+        type: "pkcs8",
+      }).export({ format: "der", type: "pkcs8" }).toString("base64url"),
+      sealingPrivatePkcs8: createPrivateKey({
+        key: Buffer.concat([Buffer.from("302e020100300506032b656e04220420", "hex"), Buffer.from(rawDev)]),
+        format: "der",
+        type: "pkcs8",
+      }).export({ format: "der", type: "pkcs8" }).toString("base64url"),
+    }
+    const keyring = createDeviceKeyring("wrap-test", devMaterial)
     const fixtureWrap = Buffer.from(
       "IZ5NgA2paNKl_LAJx4T0dGxxOO257khEtznoMLBc9CTP3vz_cqYRnln78yo0QOk-v7eBKuiqsk_PAh4NW0SAWh5tGRAjB_1jkb8S4aLSRk1r3BUVsvjahEr9TODJVOQ6jv9A5Z10W3Herny5DD8u5B0BvU5Za6WZyfxdzEBhqoAaBibfPeBQ0URt3GWeJ13NPy0b7clwp9gJaC6VpGIJH8rOFxVn2LIp31PSg1T5NrzEFcV-89QAL0n4HjJ2P79OI_RF4sZ3V_D7BoRwB7nH9mybzt9Gf-FiaGPeah2HCOFuheNuRlcBUkqXzv0lmQDkKVBDMgzYmgvyIhZzyS92svaWzb5d-NN9hRwugtW9CpaQnYcpTv8DN2_ClKsLoGCUF-sF2w",
       "base64url",
     )
-    let opened: Uint8Array | null = null
-    try {
-      opened = await keyring.unseal(fixtureWrap, { account, epoch, id })
-    } catch {
-      opened = null
-    }
-    expect(
-      opened,
-      "wraps.json is not openable under the RFC 9180 construction: regenerate the fixture (gen/wraps.mjs LabeledExpand deviates from RFC 9180 §4; t13 finding 3)",
-    ).not.toBeNull()
+    const plaintext = await keyring.unseal(fixtureWrap, { account: "encoding-account", epoch: 1, id: "device:wrap-test" })
+    const openedText = new TextDecoder().decode(plaintext)
+    const expected = JSON.stringify({
+      account: "encoding-account",
+      epoch: 1,
+      id: "device:wrap-test",
+      key_material: {
+        version: 1,
+        current_key: "PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0",
+        history: { nonce: "Z2dnZ2dnZ2dnZ2dn", ciphertext: "K4Iv7W4Y-0kv2isbpjQ3VtKX" },
+      },
+      version: 1,
+    })
+    expect(openedText).toBe(expected)
   })
 
   test("wrap AAD binds account, epoch and recipient: a genuine wrap moved to another tuple refuses", async () => {
