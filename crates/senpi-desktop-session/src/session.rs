@@ -269,6 +269,8 @@ impl Pending {
                         match tokio::time::timeout(budget, replied.recv_async()).await {
                             Err(_) => return Err(timed_out("held input release did not complete")),
                             Ok(Ok(Err(error))) if reports_release_failure(&error) => return Err(error),
+                            // A hold that finished or released cleanly after its deadline still
+                            // answers Timeout: the caller's budget is what was exceeded.
                             Ok(_) => {}
                         }
                     }

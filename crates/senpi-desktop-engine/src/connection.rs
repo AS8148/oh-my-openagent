@@ -241,7 +241,10 @@ async fn dispatch(
         let (engine, out, in_flight) = (Arc::clone(&engine), out.clone(), in_flight.clone());
         waiters.spawn(async move {
             let outcome = match started.hold_signal() {
-                Some(signal) => settle_hold(started.wait(), cancel, || signal.cancel()).await,
+                Some(signal) => {
+                    let budget = engine.hold_release_budget();
+                    settle_hold(started.wait(), cancel, || signal.cancel(), budget).await
+                }
                 None => settle(started.wait(), cancel, || Err(Failure::cancelled())).await,
             };
             drop(permit);

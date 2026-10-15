@@ -6,11 +6,13 @@ use senpi_desktop_core::holds::reports_release_failure;
 use crate::rpc::Failure;
 
 /// Holds keep their receiver alive until cleanup replies, bounded by the
-/// backend close budget. Cancellation must not publish before release.
+/// configured close budget (`SENPI_DESKTOP_CLOSE_TIMEOUT_MS`, the same budget
+/// the session gives a hold's release). Cancellation must not publish before release.
 pub(crate) async fn settle_hold<T>(
     outcome: impl Future<Output = Result<T, Failure>>,
     cancel: impl Future,
     interrupt: impl FnOnce(),
+    release_budget: std::time::Duration,
 ) -> Result<T, Failure> {
     tokio::pin!(outcome);
     tokio::select! {
@@ -18,7 +20,7 @@ pub(crate) async fn settle_hold<T>(
         result = &mut outcome => result,
         _ = cancel => {
             interrupt();
-            match tokio::time::timeout(senpi_desktop_session::CLOSE_TIMEOUT, &mut outcome).await {
+            match tokio::time::timeout(release_budget, &mut outcome).await {
                 Ok(Err(Failure::Engine(error))) if reports_release_failure(&error) => {
                     Err(Failure::Engine(error))
                 }
@@ -83,6 +85,7 @@ mod tests {
             async { reply.await.unwrap(); Ok::<_, crate::rpc::Failure>(()) },
             ready(()),
             || {},
+            senpi_desktop_session::CLOSE_TIMEOUT,
         );
         tokio::pin!(result);
         // When cancellation is polled before the release acknowledgement.
@@ -109,6 +112,7 @@ mod tests {
             async move { Err::<(), _>(crate::rpc::Failure::Engine(reported)) },
             ready(()),
             || {},
+            senpi_desktop_session::CLOSE_TIMEOUT,
         )
         .await;
         // Then the release failure reaches the caller instead of a plain Cancelled.

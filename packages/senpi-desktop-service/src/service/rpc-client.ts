@@ -118,10 +118,10 @@ export class RpcClient {
 		return promise;
 	}
 
-	/** Interrupt outstanding calls before enqueueing session.close. */
-	cancelAll(): void {
-		for (const id of this.#pending.keys()) {
-			this.#cancel(id, new DesktopServiceError("Cancelled", "desktop session is closing"));
+	/** Interrupt outstanding holds before enqueueing session.close; other requests run to completion. */
+	cancelHolds(): void {
+		for (const [id, pending] of this.#pending) {
+			if (isHold(pending.method)) this.#cancel(id, new DesktopServiceError("Cancelled", "desktop session is closing"));
 		}
 	}
 
@@ -143,7 +143,7 @@ export class RpcClient {
 			this.#settle(id);
 			pending.reject(new DesktopServiceError(reason.code, `${reason.message}; ${RESTART_MESSAGE}`, true));
 			this.#child.kill();
-		}, pending.method === "holdKeys" || pending.method === "holdMouse" ? HOLD_RELEASE_GRACE_MS : GRACE_MS);
+		}, isHold(pending.method) ? HOLD_RELEASE_GRACE_MS : GRACE_MS);
 		pending.release = () => clearTimeout(grace);
 		this.#child.write({ method: "$/cancel", params: { id } });
 	}
@@ -170,7 +170,9 @@ export class RpcClient {
 		const pending = typeof message.id === "number" ? this.#settle(message.id) : undefined;
 		if (pending === undefined) return;
 		if (pending.cancelled !== undefined) {
-			pending.reject(pending.cancelled);
+			// A cancelled hold whose held input could not be released must say so: a key may still be down.
+			const failure = releaseFailure(pending.method, message.error);
+			pending.reject(failure ?? pending.cancelled);
 			return;
 		}
 		if ("result" in message) {
@@ -194,6 +196,21 @@ export class RpcClient {
 		this.#hooks.onExit();
 	}
 }
+
+const isHold = (method: EngineMethod): boolean => method === "holdKeys" || method === "holdMouse";
+
+/** The engine's reply to a cancelled hold when its release failed (the engine merges that text into the error). */
+function releaseFailure(method: EngineMethod, error: unknown): DesktopEngineRpcError | undefined {
+	if (!isHold(method) || !isRecord(error) || typeof error.code !== "number" || typeof error.message !== "string") {
+		return undefined;
+	}
+	const code = isRecord(error.data) ? error.data.code : undefined;
+	if (code === "Cancelled" && !error.message.includes(RELEASE_ALSO_FAILED)) return undefined;
+	return new DesktopEngineRpcError(method, { code: error.code, message: error.message, data: error.data });
+}
+
+/** Mirrors senpi-desktop-core holds.rs RELEASE_ALSO_FAILED. */
+const RELEASE_ALSO_FAILED = "input release also failed";
 
 function parseLine(line: string): unknown {
 	try {
