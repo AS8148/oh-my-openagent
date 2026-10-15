@@ -1,2 +1,5 @@
 export * from "./binding"
+export * from "./join"
+export * from "./manifest"
 export * from "./merge"
+export * from "./space"
