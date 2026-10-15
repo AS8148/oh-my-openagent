@@ -1,4 +1,6 @@
+export * from "./adopt"
 export * from "./binding"
+export * from "./hub-trace"
 export * from "./join"
 export * from "./manifest"
 export * from "./merge"
