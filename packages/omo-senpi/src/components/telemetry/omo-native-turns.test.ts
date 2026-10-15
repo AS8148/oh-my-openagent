@@ -8,9 +8,8 @@ import type {
 import {
   KNOWN_MODELS,
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
-  type KnownProvider,
 } from "./product-identity"
-import { createOmoNativeTurnHandler, maskModel } from "./omo-native-turns"
+import { createOmoNativeTurnHandler } from "./omo-native-turns"
 import { createSessionSummaryRecorder } from "./omo-native-session-summary"
 
 type CapturedEvent = { readonly name: string; readonly properties: EventTelemetryProperties }
@@ -90,20 +89,23 @@ function turnEvent(input: {
   return { type: "turn_end", turnIndex: input.turnIndex ?? 7, message, toolResults: [] } as unknown as TurnEndEvent
 }
 
-function firstKnownModel(provider: KnownProvider): string {
-  const model = KNOWN_MODELS[provider][0]
-  expect(model).toBeDefined()
-  return model ?? ""
-}
+const OPENAI_MODEL = KNOWN_MODELS.openai[0] ?? "gpt-5.6-sol"
 
 describe("OmO Native turn telemetry", () => {
-  test("#given provider and model identities #when masked #then each field is decided independently", () => {
-    const knownModel = firstKnownModel("openai")
+  // Privacy contract (docs/reference/senpi-telemetry.md masking table): the raw turn row masks provider
+  // and model independently, exactly like session_summary, so a public model behind a private gateway
+  // stays named while the gateway name never leaves the machine.
+  test.each([
+    ["openai", OPENAI_MODEL, "openai", OPENAI_MODEL],
+    ["openai", "user-defined-model", "openai", "custom"],
+    ["my-proxy", "claude-opus-5-5", "custom", "claude-opus-5-5"],
+    ["my-proxy", "user-defined-model", "custom", "custom"],
+  ])("#given provider %s and model %s #when turn_completed is emitted #then it reports %s / %s", (provider, model, maskedProvider, maskedModel) => {
+    const recorder = createRecorder()
 
-    expect(maskModel("openai", knownModel)).toEqual({ provider: "openai", model_id: knownModel })
-    expect(maskModel("openai", "user-defined-model")).toEqual({ provider: "openai", model_id: "custom" })
-    expect(maskModel("sionic-openrouter", knownModel)).toEqual({ provider: "custom", model_id: "custom" })
-    expect(maskModel("sionic-openrouter", "user-defined-model")).toEqual({ provider: "custom", model_id: "custom" })
+    recorder.handle(turnEvent({ provider, model }))
+
+    expect(recorder.captured[0]?.properties).toMatchObject({ provider: maskedProvider, model_id: maskedModel })
   })
 
   test("#given an assistant turn #when it ends #then exactly one allowlisted turn_completed payload is emitted", () => {

@@ -4,8 +4,6 @@ import type {
   TelemetryDiagnosticInput,
 } from "@oh-my-opencode/telemetry-core"
 import {
-  KNOWN_MODELS,
-  KNOWN_PROVIDERS,
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
   maskProviderAndModel,
 } from "./product-identity"
@@ -38,7 +36,7 @@ export function createOmoNativeTurnHandler(
     const reasoning = optionalNonNegativeNumber(usage?.["reasoning"])
     const total = nonNegativeNumber(usage?.["totalTokens"])
     const costTotal = nonNegativeNumber(cost?.["total"])
-    const masked = maskModel(event.message.provider, event.message.model)
+    const masked = maskProviderAndModel(event.message.provider, event.message.model)
     const properties = {
       $session_id: options.sessionId,
       provider: masked.provider,
@@ -56,11 +54,10 @@ export function createOmoNativeTurnHandler(
     } satisfies Record<TurnCompletedProperty, string | number>
 
     const usageValid = [input, output, cacheRead, cacheWrite, reasoning, total, costTotal].every(({ valid }) => valid)
-    const summaryModel = maskProviderAndModel(event.message.provider, event.message.model)
     options.summary.recordTurn(options.sessionId, {
       turnIndex: event.turnIndex,
-      provider: summaryModel.provider,
-      modelId: summaryModel.model_id,
+      provider: masked.provider,
+      modelId: masked.model_id,
       inputTokens: input.value,
       outputTokens: output.value,
       cacheReadTokens: cacheRead.value,
@@ -93,16 +90,6 @@ export function createOmoNativeTurnHandler(
 function stopReasonOf(message: unknown): string | undefined {
   const reason = asRecord(message)?.["stopReason"]
   return typeof reason === "string" ? reason : undefined
-}
-
-export function maskModel(provider: string, modelId: string): { provider: string; model_id: string } {
-  const providerIsKnown = KNOWN_PROVIDERS.some((known) => known === provider)
-  const providerModels: unknown = Reflect.get(KNOWN_MODELS, provider)
-  const modelIsKnown = Array.isArray(providerModels) && providerModels.some((known) => known === modelId)
-  return {
-    provider: providerIsKnown ? provider : "custom",
-    model_id: modelIsKnown ? modelId : "custom",
-  }
 }
 
 function nonNegativeNumber(value: unknown): NumberResult {
