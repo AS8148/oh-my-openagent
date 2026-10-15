@@ -54,6 +54,7 @@ export type TestRecorderInput = {
   readonly ack?: boolean
   readonly droppedEvents?: () => number
   readonly onPublish?: (event: Published, storage: SummaryStorage) => unknown
+  readonly isConsented?: () => boolean
 }
 
 export function createTestRecorder(input: TestRecorderInput): TestRecorder {
@@ -71,6 +72,7 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
     now,
   })
   const summary = createSessionSummaryRecorder({
+    ...(input.isConsented === undefined ? {} : { isConsented: input.isConsented }),
     storage,
     publish: async (event) => {
       if (input.onPublish !== undefined) observed.push(input.onPublish(event, storage))

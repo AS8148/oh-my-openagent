@@ -65,6 +65,8 @@ export type TelemetryTransportOptions = {
 
 export type TelemetryTransport = {
   readonly capture: (message: TelemetryCaptureMessage) => void
+  /** Sends one event now; resolves only after the server answered, rejects when it did not accept it. */
+  readonly captureImmediate?: (message: TelemetryCaptureMessage) => Promise<void>
   readonly flush?: () => Promise<void>
   readonly shutdown: () => Promise<void>
 }

@@ -242,7 +242,8 @@ describe("event telemetry client", () => {
     const client = createClient(recorder, diagnostics)
     const uuid = "0b6c5d3e-2f1a-4c8b-9d7e-6a5b4c3d2e1f"
 
-    client.captureEvent("session_started", { reason: "a" }, { uuid })
+    const createdAt = new Date(1_700_000_000_000)
+    client.captureEvent("session_started", { reason: "a" }, { uuid, timestamp: createdAt })
     client.captureEvent("session_started", { reason: "b" }, { uuid: "not-a-uuid" })
     client.captureEvent("session_started", { reason: "c" })
 
@@ -254,6 +255,8 @@ describe("event telemetry client", () => {
       expect(message?.properties?.["event_id"]).toBe(message?.uuid)
     }
     expect(malformed?.uuid).not.toBe(absent?.uuid)
+    // A re-sent event keeps its original time: PostHog's dedup key is the uuid within the event's day.
+    expect(recorder.messages.map((message) => message.timestamp?.getTime())).toEqual([createdAt.getTime(), undefined, undefined])
     expect(diagnostics.map((input) => input.event)).toEqual(["telemetry_event_property_rejected"])
   })
 

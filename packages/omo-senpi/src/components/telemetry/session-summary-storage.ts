@@ -10,7 +10,30 @@ import { isSummaryWindow, type SummaryWindow } from "./session-summary-window"
 export const SUMMARY_TTL_MS = 14 * 24 * 60 * 60_000
 export const OWNER_STALE_MS = 5 * 60_000
 
+/**
+ * The consent of the session a queued record came from. Only `enabled` records are ever sent; anything else,
+ * including a record written before this mark existed, is deleted unsent (fail closed).
+ */
+export type RecordConsent = "enabled" | "unconsented"
+
+/** Where the writing session read its consent: before a record is sent or resumed, consent is re-read for it. */
+export type ConsentScope = { readonly cwd?: string }
+
+/**
+ * The single send/resume gate for a persisted record: it must carry the `enabled` mark AND its originating
+ * scope must still be opted in now. A record whose scope cannot be read back (older file) fails closed.
+ */
+export function isRecordSendable(
+  record: { readonly consent: RecordConsent; readonly scope: ConsentScope | undefined },
+  isScopeConsented: (scope: ConsentScope) => boolean,
+): boolean {
+  return record.consent === "enabled" && record.scope !== undefined && isScopeConsented(record.scope)
+}
+
 export type WindowRecord = {
+  readonly consent: RecordConsent
+  /** Absent on records older than the scope; such a record is never sent or resumed. */
+  readonly scope: ConsentScope | undefined
   readonly sessionHash: string
   readonly sessionRole: TelemetrySessionRole
   readonly owner: ProcessOwner
@@ -23,6 +46,8 @@ export type WindowRecord = {
 }
 
 export type PendingRecord = {
+  readonly consent: RecordConsent
+  readonly scope: ConsentScope | undefined
   readonly uuid: string
   readonly sessionHash: string
   readonly owner: ProcessOwner
@@ -164,6 +189,8 @@ export function parseWindowRecord(value: unknown): WindowRecord | undefined {
   const windowIsOpen = isSummaryWindow(window) && typeof windowId === "string" && SAFE_UUID.test(windowId)
   if (!windowIsOpen && window !== null) return undefined
   return {
+    consent: parseConsent(Reflect.get(value, "consent")),
+    scope: parseScope(Reflect.get(value, "scope")),
     sessionHash,
     sessionRole: parseTelemetrySessionRole(Reflect.get(value, "sessionRole")),
     owner,
@@ -185,7 +212,42 @@ function parsePendingRecord(value: unknown): PendingRecord | undefined {
   if (owner === undefined || typeof uuid !== "string" || !SAFE_UUID.test(uuid)) return undefined
   if (typeof sessionHash !== "string" || typeof createdAt !== "number") return undefined
   if (typeof properties !== "object" || properties === null || Array.isArray(properties)) return undefined
-  return { uuid, sessionHash, owner, createdAt, properties: { ...properties } }
+  return {
+    consent: parseConsent(Reflect.get(value, "consent")),
+    scope: parseScope(Reflect.get(value, "scope")),
+    uuid,
+    sessionHash,
+    owner,
+    createdAt,
+    properties: { ...properties },
+  }
+}
+
+function parseConsent(value: unknown): RecordConsent {
+  return value === "enabled" ? "enabled" : "unconsented"
+}
+
+function parseScope(value: unknown): ConsentScope | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
+  const cwd: unknown = Reflect.get(value, "cwd")
+  if (cwd === undefined) return {}
+  return typeof cwd === "string" ? { cwd } : undefined
+}
+
+/**
+ * Deletes every queued window and pending event that does not carry an `enabled` consent mark. Runs where no
+ * summary state may be created (an opted-out session), so it only reads and deletes, never writes.
+ */
+export function purgeUnconsentedQueue(stateDir: string): void {
+  const dir = summaryDir(stateDir)
+  const pendingDir = join(dir, "pending")
+  for (const name of listNames(dir)) if (name.endsWith(".json")) purgeIfUnconsented(join(dir, name), parseWindowRecord)
+  for (const name of listNames(pendingDir)) if (name.endsWith(".json")) purgeIfUnconsented(join(pendingDir, name), parsePendingRecord)
+}
+
+function purgeIfUnconsented(path: string, parse: (value: unknown) => { readonly consent: RecordConsent } | undefined): void {
+  const record = parseRead(readJsonOrCorrupt(path), parse)
+  if (record !== undefined && record !== CORRUPT && record.consent !== "enabled") removeFile(path)
 }
 
 function fileName(sessionHash: string): string {

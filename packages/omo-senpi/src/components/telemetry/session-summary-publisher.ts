@@ -1,16 +1,19 @@
 import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import type { TelemetrySessionRole } from "./session-role"
-import type { PendingRecord, SummaryStorage } from "./session-summary-storage"
+import { isRecordSendable, type ConsentScope, type PendingRecord, type RecordConsent, type SummaryStorage } from "./session-summary-storage"
 import { summaryProperties, type EndedBy, type SummaryWindow } from "./session-summary-window"
 import { isSessionSampled } from "./session-summary-sampling"
 
-export type SummaryPublication = { readonly uuid: string; readonly properties: EventTelemetryProperties }
+/** `timestamp` is the window's close time (the pending record's createdAt), the same on every re-send. */
+export type SummaryPublication = { readonly uuid: string; readonly properties: EventTelemetryProperties; readonly timestamp: number }
 
 /** Resolves true only when the transport acknowledged the event (collector 200, PostHog flush resolved). */
 export type PublishSummary = (publication: SummaryPublication) => Promise<boolean>
 
 export type ClosedWindow = {
+  readonly consent: RecordConsent
+  readonly scope: ConsentScope | undefined
   readonly sessionHash: string
   readonly sessionRole: TelemetrySessionRole
   readonly sampleRate: number
@@ -40,7 +43,10 @@ export function createSummaryPublisher(input: {
   readonly publish: PublishSummary
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly transportDropped?: () => number
+  /** Consent for the scope a record came from, read now; defaults to consented. */
+  readonly isScopeConsented?: (scope: ConsentScope) => boolean
 }): SummaryPublisher {
+  const isScopeConsented = input.isScopeConsented ?? (() => true)
   const inFlight = new Set<string>()
   const running = new Set<Promise<void>>()
   let dropped = 0
@@ -62,7 +68,7 @@ export function createSummaryPublisher(input: {
 
   const send = async (record: PendingRecord): Promise<void> => {
     try {
-      if (await input.publish({ uuid: record.uuid, properties: record.properties })) input.storage.removePending(record.uuid)
+      if (await input.publish({ uuid: record.uuid, properties: record.properties, timestamp: record.createdAt })) input.storage.removePending(record.uuid)
     } catch (error) {
       report("telemetry_capture_failed", error)
     } finally {
@@ -71,6 +77,12 @@ export function createSummaryPublisher(input: {
   }
 
   const deliver = (record: PendingRecord): Promise<void> => {
+    // The one place an event leaves for the transport: a record without the consent mark, or whose
+    // originating scope has opted out since it was written, is deleted, never sent.
+    if (!isRecordSendable(record, isScopeConsented)) {
+      input.storage.removePending(record.uuid)
+      return Promise.resolve()
+    }
     if (inFlight.has(record.uuid)) return Promise.resolve()
     inFlight.add(record.uuid)
     const delivery = send(record)
@@ -89,7 +101,10 @@ export function createSummaryPublisher(input: {
       dropped += count
     },
     async publishWindow(closed, advanceSeq) {
+      if (closed.consent !== "enabled") return
       const record: PendingRecord = {
+        consent: closed.consent,
+        scope: closed.scope,
         uuid: closed.windowId,
         sessionHash: closed.sessionHash,
         owner: input.storage.owner,

@@ -1,8 +1,8 @@
-import { existsSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { basename, join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
-import type { TelemetryCaptureMessage, TelemetryTransportFactory } from "@oh-my-opencode/telemetry-core"
+import type { TelemetryCaptureMessage, TelemetryEnv, TelemetryTransportFactory } from "@oh-my-opencode/telemetry-core"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createOmoNativeTelemetryComponent } from "./omo-native-component"
 import { summaryDir } from "./session-summary-storage"
@@ -32,14 +32,21 @@ function turnEnd(): Record<string, unknown> {
   }
 }
 
-async function runSession(agentDir: string, factory: TelemetryTransportFactory, withTurn: boolean): Promise<void> {
+type SessionVariant = {
+  readonly sessionId?: string
+  readonly env?: TelemetryEnv
+  readonly configEnabled?: boolean
+}
+
+async function runSession(agentDir: string, factory: TelemetryTransportFactory, withTurn: boolean, variant: SessionVariant = {}): Promise<void> {
   const pi = new FakeExtensionAPI()
-  const session = { cwd: "/repo", sessionManager: { getSessionId: () => (withTurn ? "ack-session" : "later-session") } }
+  const sessionId = variant.sessionId ?? (withTurn ? "ack-session" : "later-session")
+  const session = { cwd: "/repo", sessionManager: { getSessionId: () => sessionId } }
   createOmoNativeTelemetryComponent({
     rawTurnSampleRate: 0,
-    env: createEnabledEnv(agentDir),
+    env: { ...createEnabledEnv(agentDir), ...variant.env },
     hashSessionId: (raw) => `hashed:${raw}`,
-    isConfigEnabled: () => true,
+    isConfigEnabled: () => variant.configEnabled ?? true,
     now: FIXED_NOW,
     osProvider: createOsProvider("ack-host"),
     stateDir: join(agentDir, "omo-senpi", "omo-native"),
@@ -50,9 +57,55 @@ async function runSession(agentDir: string, factory: TelemetryTransportFactory, 
   await pi.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, session)
 }
 
+const summaryDirOf = (agentDir: string) => summaryDir(join(agentDir, "omo-senpi", "omo-native"))
+
 function pendingOf(agentDir: string): string[] {
-  const dir = join(summaryDir(join(agentDir, "omo-senpi", "omo-native")), "pending")
+  const dir = join(summaryDirOf(agentDir), "pending")
   return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".json")) : []
+}
+
+// Every file under the summary directory, at any depth: windows, pending events, owner registry, temps.
+function queuedFilesOf(agentDir: string): string[] {
+  const dir = summaryDirOf(agentDir)
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((name) => basename(name).includes("."))
+}
+
+const DEAD_OWNER = { pid: 2_147_483_000, bootId: "legacy-boot" }
+const LEGACY_UUID = "0395eae0-1111-4222-8333-944455556666"
+
+// A record exactly as the pre-fix version wrote it: no consent mark.
+function writeLegacyQueue(agentDir: string): void {
+  const dir = summaryDirOf(agentDir)
+  mkdirSync(join(dir, "pending"), { recursive: true })
+  const now = Date.now()
+  writeFileSync(join(dir, "pending", `${LEGACY_UUID}.json`), JSON.stringify({
+    v: 2, uuid: LEGACY_UUID, sessionHash: "hashed:off-session", owner: DEAD_OWNER, createdAt: now,
+    properties: { $session_id: "hashed:off-session", turns: 1, ended_by: "shutdown" },
+  }))
+}
+
+// Delivers only what was enqueued; `capture` enqueues asynchronously, after this test is over, the way
+// posthog-node prepares an event before queueing it. `captureImmediate` resolves once the event was sent.
+function createLateEnqueueTransport(): { readonly sent: TelemetryCaptureMessage[]; readonly factory: TelemetryTransportFactory } {
+  const sent: TelemetryCaptureMessage[] = []
+  const queue: TelemetryCaptureMessage[] = []
+  const never = new Promise<void>(() => undefined)
+  return {
+    sent,
+    factory: () => ({
+      capture(message) {
+        void never.then(() => queue.push(message))
+      },
+      captureImmediate: async (message) => {
+        sent.push(message)
+      },
+      flush: async () => {
+        sent.push(...queue.splice(0))
+      },
+      shutdown: async () => undefined,
+    }),
+  }
 }
 
 const summariesOf = (messages: readonly TelemetryCaptureMessage[]) => messages.filter(({ event }) => event === "session_summary")
@@ -79,10 +132,73 @@ describe("session_summary acknowledgment through the native transport", () => {
       expect(firstUuid).toBeString()
       expect(pendingOf(agentDir)).toEqual([`${firstUuid}.json`])
 
+      const pending: unknown = JSON.parse(readFileSync(join(summaryDirOf(agentDir), "pending", `${firstUuid}.json`), "utf8"))
+      expect(pending).toMatchObject({ consent: "enabled" })
+
       const recorder = createTransportRecorder()
       await runSession(agentDir, recorder.factory, false)
-      expect(summariesOf(recorder.messages).map(({ uuid }) => uuid)).toEqual([firstUuid])
+      const resent = summariesOf(recorder.messages)
+      expect(resent.map(({ uuid }) => uuid)).toEqual([firstUuid])
       expect(pendingOf(agentDir)).toEqual([])
+
+      // The re-send keeps the original event time, so PostHog's (uuid, day) dedup key stays the same.
+      const createdAt = Reflect.get(pending as object, "createdAt")
+      expect(summariesOf(failed)[0]?.timestamp?.getTime()).toBe(createdAt)
+      expect(resent[0]?.timestamp?.getTime()).toBe(createdAt)
+    })
+  })
+
+  test("#given a transport that enqueues a capture only later #when the session quits #then the summary is retired only after it was really sent", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const transport = createLateEnqueueTransport()
+      await runSession(agentDir, transport.factory, true)
+
+      const sentUuids = summariesOf(transport.sent).map(({ uuid }) => uuid)
+      const retired = pendingOf(agentDir).length === 0
+      expect({ sent: sentUuids.length, retired }).toEqual({ sent: 1, retired: true })
+    })
+  })
+})
+
+describe("session_summary consent", () => {
+  test.each([
+    ["DO_NOT_TRACK=1", { env: { DO_NOT_TRACK: "1" } }],
+    ["OMO_DISABLE_POSTHOG=1", { env: { OMO_DISABLE_POSTHOG: "1" } }],
+    ["OMO_SENPI_SEND_ANONYMOUS_TELEMETRY=0", { env: { OMO_SENPI_SEND_ANONYMOUS_TELEMETRY: "0" } }],
+    ["telemetry off in config", { configEnabled: false }],
+  ] as const)("#given an opted-out session (%s) and a later opted-in one #when both run #then nothing of the first is written or sent", async (_label, optOut) => {
+    await withTempAgentDir(async (agentDir) => {
+      const offMessages = createTransportRecorder()
+      await runSession(agentDir, offMessages.factory, true, { sessionId: "off-session", ...optOut })
+      expect(offMessages.messages).toEqual([])
+      expect(queuedFilesOf(agentDir)).toEqual([])
+
+      const recorder = createTransportRecorder()
+      await runSession(agentDir, recorder.factory, false)
+      expect(summariesOf(recorder.messages)).toEqual([])
+      expect(queuedFilesOf(agentDir)).toEqual([])
+    })
+  })
+
+  test("#given a pending file written before consent marks existed #when an opted-in session starts #then it is purged unsent", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      writeLegacyQueue(agentDir)
+      const recorder = createTransportRecorder()
+      await runSession(agentDir, recorder.factory, false)
+
+      expect(summariesOf(recorder.messages)).toEqual([])
+      expect(queuedFilesOf(agentDir)).toEqual([])
+    })
+  })
+
+  test("#given a pending file written before consent marks existed #when an opted-out session runs #then it is purged too", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      writeLegacyQueue(agentDir)
+      const recorder = createTransportRecorder()
+      await runSession(agentDir, recorder.factory, false, { env: { DO_NOT_TRACK: "1" } })
+
+      expect(recorder.messages).toEqual([])
+      expect(queuedFilesOf(agentDir)).toEqual([])
     })
   })
 })

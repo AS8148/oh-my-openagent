@@ -77,6 +77,7 @@ describe("integer cost accounting", () => {
     [[0.00006, 0.00006], [[1, 0.0001], [1, 0.0001]], 2, 0.0002],
     [[0.1, 0.2], [[1000, 0.1], [2000, 0.2]], 3000, 0.3],
     [[0.00005], [[1, 0.0001]], 1, 0.0001],
+    [[0.00015], [[2, 0.0002]], 2, 0.0002],
     [[0.000049], [[0, 0]], 0, 0],
   ])("#given turn costs %p #when summed #then turns report %p and the summary %p / %p", async (costs, turns, summary1e4, summaryUsd) => {
     const result = await costsOf(costs)

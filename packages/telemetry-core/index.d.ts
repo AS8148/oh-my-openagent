@@ -8,6 +8,7 @@ export type TelemetryCaptureMessage = {
   readonly distinctId: string;
   readonly event: string;
   readonly uuid?: string;
+  readonly timestamp?: Date;
   readonly properties?: TelemetryCaptureProperties;
 };
 
@@ -78,6 +79,8 @@ export type TelemetryTransportOptions = {
 
 export type TelemetryTransport = {
   readonly capture: (message: TelemetryCaptureMessage) => void;
+  /** Sends one event now; resolves only after the server answered, rejects when it did not accept it. */
+  readonly captureImmediate?: (message: TelemetryCaptureMessage) => Promise<void>;
   readonly flush?: () => Promise<void>;
   readonly shutdown: () => Promise<void>;
 };
@@ -100,8 +103,8 @@ export type TelemetryClient = {
 
 export type EventPropertyAllowlist = Readonly<Record<string, readonly string[]>>;
 export type EventTelemetryProperties = Readonly<Record<string, unknown>>;
-/** `uuid` makes a re-sent event idempotent: PostHog keeps one row per uuid, and it doubles as `event_id`. */
-export type EventTelemetryCaptureOptions = { readonly uuid?: string };
+/** `uuid` makes a re-sent event idempotent: PostHog keeps one row per uuid, and it doubles as `event_id`; `timestamp` is the event's own time. */
+export type EventTelemetryCaptureOptions = { readonly uuid?: string; readonly timestamp?: Date };
 export type EventTelemetrySetTimeout = (callback: () => void, delay: number) => unknown;
 
 export type CreateEventTelemetryClientInput = {

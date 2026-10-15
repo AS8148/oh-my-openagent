@@ -6,7 +6,12 @@ import type {
 } from "@oh-my-opencode/telemetry-core"
 
 import { loadSenpiOmoConfig } from "../config-resolution"
-import { createSessionSummaryRecorder, type SessionSummaryRecorder, type SummaryPublication } from "./omo-native-session-summary"
+import {
+  createSessionSummaryRecorder,
+  type SessionSummaryOptions,
+  type SessionSummaryRecorder,
+  type SummaryPublication,
+} from "./omo-native-session-summary"
 import type { OmoNativeEventName } from "./product-identity"
 import type { TelemetrySessionRole } from "./session-role"
 import { currentProcessOwner } from "./session-summary-owner"
@@ -20,6 +25,8 @@ export type NativeCaptureState = {
   sessionHash?: string
   /** Event uuids the privacy client actually handed to the transport (rejected events never get here). */
   readonly delivered: Set<string>
+  /** Per-uuid promise of an immediate send: it resolves once the server accepted that very event. */
+  readonly acks: Map<string, Promise<void>>
   onCaptureReady?: () => void
 }
 
@@ -27,6 +34,7 @@ export const SUMMARY_SHUTDOWN_WAIT_MS = 1_000
 
 export function createNativeSummaryRecorder(input: {
   readonly state: NativeCaptureState
+  readonly consent: Pick<SessionSummaryOptions, "isConsented" | "consentScope" | "isScopeConsented" | "scheduleConsentCheck">
   readonly stateDir: string
   readonly env: TelemetryEnv
   readonly cwd: string | undefined
@@ -37,7 +45,8 @@ export function createNativeSummaryRecorder(input: {
 }): SessionSummaryRecorder {
   const { state, env } = input
   let sampleRate = input.rawTurnSampleRate
-  const summary = createSessionSummaryRecorder({
+  return createSessionSummaryRecorder({
+    ...input.consent,
     storage: createSummaryStorage({
       stateDir: input.stateDir,
       owner: currentProcessOwner(),
@@ -49,19 +58,19 @@ export function createNativeSummaryRecorder(input: {
     sampleRate: () => (sampleRate ??= resolveRawTurnSampleRate({ sink: "posthog", configured: configuredSampleRate(input.cwd, env), env })),
     ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
   })
-  state.onCaptureReady = () => {
-    void summary.recover()
-  }
-  return summary
 }
 
-// Acknowledged only when the event reached the transport AND the transport's flush resolved.
+// Acknowledged only when the server accepted this very event: the immediate send resolved. A transport
+// without immediate sends falls back to its flush.
 async function publishThroughState(state: NativeCaptureState, publication: SummaryPublication): Promise<boolean> {
   const capture = state.capture
   if (capture === undefined) return false
-  capture("session_summary", publication.properties, { uuid: publication.uuid })
+  capture("session_summary", publication.properties, { uuid: publication.uuid, timestamp: new Date(publication.timestamp) })
+  const ack = state.acks.get(publication.uuid)
+  state.acks.delete(publication.uuid)
   if (!state.delivered.delete(publication.uuid)) return false
-  await state.flush?.()
+  if (ack !== undefined) await ack
+  else await state.flush?.()
   return true
 }
 

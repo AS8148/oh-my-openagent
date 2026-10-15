@@ -26,8 +26,10 @@ import { registerOmoNativeParallelSummary } from "./omo-native-parallel-summary"
 import { createOmoNativePromptComponent } from "./omo-native-prompt"
 import {
   createOmoNativeSessionComponent,
+  isOmoNativeTelemetryEnabled,
   type OmoNativeSessionOptions,
 } from "./omo-native-session"
+import type { SessionSummaryRecorder } from "./omo-native-session-summary"
 import { registerOmoNativeToolTelemetry } from "./omo-native-tools"
 import { createOmoNativeTurnHandler } from "./omo-native-turns"
 import {
@@ -37,6 +39,7 @@ import {
   type NativeCaptureState,
 } from "./omo-native-summary-wiring"
 import { isTelemetryHostWarmup, resolveTelemetrySessionRole } from "./session-role-resolver"
+import { purgeUnconsentedQueue } from "./session-summary-storage"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
   OMO_NATIVE_SCHEMA_VERSION,
@@ -61,12 +64,21 @@ export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
   readonly rawTurnSampleRate?: number
   /** Liveness probe for summary-window owners; injected by tests that simulate dead processes. */
   readonly isPidAlive?: (pid: number) => boolean
+  /** Clock for the consent cache. Injected in tests. */
+  readonly consentNow?: () => number
+  /** Periodic consent check while a summary window is on disk; defaults to an unref'd interval. */
+  readonly scheduleConsentCheck?: (check: () => void) => () => void
 }
+
+/** A consent read is reused for this long on the per-turn path; the periodic check always reads fresh. */
+export const CONSENT_CACHE_MS = 5_000
+/** How often a persisted window re-checks consent, so an opt-out deletes it even if no turn follows. */
+export const CONSENT_CHECK_INTERVAL_MS = 5_000
 
 export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryComponentOptions = {}): OmoSenpiComponent {
   const env = options.env ?? process.env
   const stateDir = options.stateDir ?? getOmoNativeStateDir(env)
-  const state: SharedState = { delivered: new Set() }
+  const state: SharedState = { delivered: new Set(), acks: new Map() }
   const client: Pick<EventTelemetryClient, "captureEvent"> = {
     captureEvent(name, properties, captureOptions) {
       if (isOmoNativeEventName(name)) state.capture?.(name, properties, captureOptions)
@@ -105,20 +117,56 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
 
       // Same ordering constraint again: the final summary window must be captured before the session
       // component's shutdown handler clears `state.capture`.
+      // Consent is the session component's own decision (`isOmoNativeTelemetryEnabled`), taken at registration
+      // and again before every summary write: an opted-out registration never creates the recorder, so it
+      // writes no window, pending or owner file, and a mid-session opt-out deletes what it wrote. Every
+      // persisted record carries the cwd its consent was read for, and every send or resume re-reads consent
+      // for that cwd: a later process in another project cannot send a record its own project opted out of.
       const sessionRole = resolveTelemetrySessionRole(pi, env)
-      const summary = createNativeSummaryRecorder({
-        state,
-        stateDir,
-        env,
-        cwd: typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : undefined,
-        sessionRole,
-        ...(options.rawTurnSampleRate === undefined ? {} : { rawTurnSampleRate: options.rawTurnSampleRate }),
-        ...(options.isPidAlive === undefined ? {} : { isPidAlive: options.isPidAlive }),
-        ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
-      })
+      const consentOptions = { isConfigEnabled: options.isConfigEnabled }
+      const consentNow = options.consentNow ?? Date.now
+      const readConsent = (cwd: string | undefined): boolean =>
+        isOmoNativeTelemetryEnabled(consentOptions, cwd === undefined ? {} : { cwd }, env)
+      let consentCwd = typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : undefined
+      const consentedAtRegistration = readConsent(consentCwd)
+      let cached = { cwd: consentCwd, at: consentNow(), value: consentedAtRegistration }
+      const currentConsent = (fresh: boolean): boolean => {
+        const at = consentNow()
+        if (!fresh && cached.cwd === consentCwd && at - cached.at < CONSENT_CACHE_MS) return cached.value
+        cached = { cwd: consentCwd, at, value: readConsent(consentCwd) }
+        return cached.value
+      }
+      const summary: SessionSummaryRecorder | undefined = consentedAtRegistration
+        ? createNativeSummaryRecorder({
+          state,
+          consent: {
+            isConsented: (check) => currentConsent(check?.fresh === true),
+            consentScope: () => (consentCwd === undefined ? {} : { cwd: consentCwd }),
+            isScopeConsented: (scope) => readConsent(scope.cwd),
+            scheduleConsentCheck: options.scheduleConsentCheck ?? scheduleUnrefInterval,
+          },
+          stateDir,
+          env,
+          cwd: typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : undefined,
+          sessionRole,
+          ...(options.rawTurnSampleRate === undefined ? {} : { rawTurnSampleRate: options.rawTurnSampleRate }),
+          ...(options.isPidAlive === undefined ? {} : { isPidAlive: options.isPidAlive }),
+          ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
+        })
+        : undefined
+      // The first capture is when recovery runs: the capture path is installed by then.
+      state.onCaptureReady = () => {
+        void summary?.recover()
+      }
       pi.on("session_shutdown", async (payload, eventCtx) => {
+        consentCwd = cwdOf(eventCtx)
+        if (summary === undefined) {
+          purgeQueue(stateDir, options)
+          return
+        }
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
         await settleWithin(summary.finish(state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId), reason), SUMMARY_SHUTDOWN_WAIT_MS)
+        summary.dispose()
       })
 
       createOmoNativePromptComponent({
@@ -156,6 +204,8 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
 
       pi.on("turn_end", (payload, eventCtx) => {
         if (!isTurnEndEvent(payload)) return
+        consentCwd = cwdOf(eventCtx)
+        if (summary === undefined) return
         const sessionHash = state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId)
         createOmoNativeTurnHandler({
           client,
@@ -196,7 +246,7 @@ function sharedTransportFactory(
       capture(message) {
         const firstCapture = state.capture === undefined
         installCaptureFacade(state, transport, message, options)
-        forwardValidatedCapture(transport, message)
+        forwardValidatedCapture(transport, message)?.catch((error: unknown) => reportCaptureFailure(options, error))
         if (firstCapture) state.onCaptureReady?.()
       },
       flush: transport.flush === undefined ? undefined : () => transport.flush?.() ?? Promise.resolve(),
@@ -246,7 +296,8 @@ function installCaptureFacade(
     },
     transportFactory: () => ({
       capture(message) {
-        forwardValidatedCapture(transport, message)
+        const ack = forwardValidatedCapture(transport, message)
+        if (ack !== undefined && message.uuid !== undefined) state.acks.set(message.uuid, ack)
       },
       shutdown: async () => undefined,
     }),
@@ -255,12 +306,41 @@ function installCaptureFacade(
   state.flush = () => transport.flush?.() ?? Promise.resolve()
 }
 
-
 // This is the sole native transport boundary. Every message reaching it has already passed through
 // telemetry-core's captureEvent privacy wrapper; keeping the raw transport call here makes the
 // source-scanning invariant precise and prevents native event producers from bypassing validation.
-function forwardValidatedCapture(transport: TelemetryTransport, message: TelemetryCaptureMessage): void {
+// An ack-gated event (session_summary, carrying its uuid) is sent immediately and its promise returned, so
+// its pending file is retired only once the server accepted it; everything else is batched.
+function forwardValidatedCapture(transport: TelemetryTransport, message: TelemetryCaptureMessage): Promise<void> | undefined {
+  if (message.event === "session_summary" && message.uuid !== undefined && transport.captureImmediate !== undefined) {
+    return transport.captureImmediate(message)
+  }
   transport.capture(message)
+  return undefined
+}
+
+// Queued records without consent (an opted-out session's, or ones written before consent marks existed)
+// are deleted even by a session that records nothing itself.
+function purgeQueue(stateDir: string, options: OmoNativeTelemetryComponentOptions): void {
+  try {
+    purgeUnconsentedQueue(stateDir)
+  } catch (error) {
+    options.diagnostics?.({
+      event: "telemetry_activity_state_write_failed",
+      source: "omo-native-component",
+      error,
+      errorKind: error instanceof Error ? "error" : "non_error",
+    })
+  }
+}
+
+function reportCaptureFailure(options: OmoNativeTelemetryComponentOptions, error: unknown): void {
+  options.diagnostics?.({
+    event: "telemetry_capture_failed",
+    source: "omo-native-component",
+    error,
+    errorKind: error instanceof Error ? "error" : "non_error",
+  })
 }
 
 // The task engine anchors its state dir to the session's project directory; the follow-up counters
@@ -268,6 +348,17 @@ function forwardValidatedCapture(transport: TelemetryTransport, message: Telemet
 // task component does, and a missing log simply yields zero counters.
 function resolveTaskStateDir(pi: { readonly cwd?: string }): string {
   return resolveStateDir({ project_dir: typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : process.cwd() })
+}
+
+function scheduleUnrefInterval(check: () => void): () => void {
+  const timer = setInterval(check, CONSENT_CHECK_INTERVAL_MS)
+  timer.unref?.()
+  return () => clearInterval(timer)
+}
+
+function cwdOf(eventCtx: unknown): string | undefined {
+  const cwd = isRecord(eventCtx) ? eventCtx.cwd : undefined
+  return typeof cwd === "string" && cwd.length > 0 ? cwd : undefined
 }
 
 function hashForContext(
