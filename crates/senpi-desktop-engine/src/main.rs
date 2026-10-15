@@ -30,6 +30,10 @@ use crate::engine::Engine;
 const USAGE_ERROR: u8 = 2;
 
 fn main() -> ExitCode {
+    // The #10207 gate runs before every mode, the private overlay helper included.
+    if let Err(refusal) = check_launch() {
+        return fail(&refusal);
+    }
     // The private helper must own the main thread before Tokio or a session
     // starts. It is not a desktop RPC method and creates no input backend.
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--cursor-overlay")) {
@@ -37,6 +41,10 @@ fn main() -> ExitCode {
     }
     match Cli::parse().mode() {
         Mode::Schema => print_schema(),
+        Mode::DaemonDisabled { flag } => {
+            eprintln!("senpi-desktop-engine: {flag} is off by default; pass --enable-daemon to use it");
+            ExitCode::from(USAGE_ERROR)
+        }
         Mode::Oneshot { endpoint, serve_args } => match endpoint.map_or_else(client::default_endpoint, Ok) {
             Ok(endpoint) => {
                 match oneshot::run(|request| client::exchange_or_start(&endpoint, &serve_args, request)) {
@@ -95,6 +103,16 @@ fn main() -> ExitCode {
                 .map_err(|error| format!("--serve {endpoint}: {error}"))
         }),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn check_launch() -> Result<(), String> {
+    senpi_desktop_backend_macos::check_launch()
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn check_launch() -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
