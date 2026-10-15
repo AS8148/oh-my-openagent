@@ -83,9 +83,12 @@ describe("memory commit path and git auto-maintenance (omo #10177)", () => {
     expect(argvs.filter((argv) => /\bmaintenance run\b.*--auto|\bgc\b.*--auto/.test(argv))).toEqual([])
   }, 30_000)
 
-  test.skipIf(process.platform === "win32")("#given a LIVE git holding .git/index.lock with an unchanging mtime #when the stranded-lock sweep runs #then the live lock survives, and only after the holder dies is it reclaimed", async () => {
+  test.skipIf(process.platform === "win32")("#given a LIVE git holding .git/index.lock with an unchanging mtime #when the stranded-lock sweep runs #then the live lock survives, and after the holder dies the debris is KEPT (unknown ownership)", async () => {
     // #given: `git update-index --stdin` creates index.lock at startup and holds the fd while it
     // waits for input, writing nothing - exactly a slow live writer whose lock mtime never moves.
+    // The sweep must leave it live (omo #10199 review HIGH 1), and must STILL leave it after the
+    // holder dies: a killed git holder's debris has unknown ownership here (no memory-write lock
+    // takeover proved a dead previous owner), so reclamation is reported, not performed.
     const root = realpathSync.native(await mkdtemp(join(tmpdir(), "memory-live-lock-")))
     roots.push(root)
     const dir = join(root, "repo")
@@ -100,13 +103,14 @@ describe("memory commit path and git auto-maintenance (omo #10177)", () => {
       const whileLive = await sweepStrandedGitLockFiles(dir, 50)
 
       // #then
-      expect(whileLive).toEqual([])
+      expect(whileLive).toEqual({ removed: [], keptUnknownOwner: [lockPath] })
       expect(existsSync(lockPath)).toBe(true)
     } finally {
       holder.kill("SIGKILL")
       expect(await exitedWithin(holder, 5_000)).toBe(true)
     }
-    expect(await sweepStrandedGitLockFiles(dir, 50)).toEqual([lockPath])
-    expect(existsSync(lockPath)).toBe(false)
+    const afterDeath = await sweepStrandedGitLockFiles(dir, 50)
+    expect(afterDeath).toEqual({ removed: [], keptUnknownOwner: [lockPath] })
+    expect(existsSync(lockPath)).toBe(true)
   }, 30_000)
 })

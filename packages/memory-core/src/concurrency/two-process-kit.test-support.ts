@@ -31,7 +31,7 @@ export interface ConcurrencyKit {
     readonly identity: MemoryIdentity
     readonly contentionPath: string
   }>
-  readonly harnessFor: (script: string, args: readonly string[]) => ChildHarness
+  readonly harnessFor: (script: string, args: readonly string[], env?: Readonly<Record<string, string>>) => ChildHarness
   readonly expectSuccessful: (child: ChildHarness) => Promise<void>
   readonly cleanup: () => Promise<void>
 }
@@ -45,8 +45,8 @@ export class ChildHarness {
   private stdoutBuffer = ""
   private closed = false
 
-  constructor(liveChildren: Set<ChildProcessWithoutNullStreams>, script: string, args: readonly string[]) {
-    this.child = spawn(process.execPath, [script, ...args], { stdio: ["pipe", "pipe", "pipe"] })
+  constructor(liveChildren: Set<ChildProcessWithoutNullStreams>, script: string, args: readonly string[], extraEnv?: Readonly<Record<string, string>>) {
+    this.child = spawn(process.execPath, [script, ...args], { stdio: ["pipe", "pipe", "pipe"], ...(extraEnv === undefined ? {} : { env: { ...process.env, ...extraEnv } }) })
     liveChildren.add(this.child)
     this.child.stderr.setEncoding("utf8")
     this.child.stderr.on("data", (chunk: string) => { this.stderr += chunk })
@@ -210,7 +210,7 @@ export function createConcurrencyKit(): ConcurrencyKit {
   return {
     fixture,
     cleanup,
-    harnessFor: (script, args) => new ChildHarness(liveChildren, script, args),
+    harnessFor: (script, args, extraEnv) => new ChildHarness(liveChildren, script, args, extraEnv),
     expectSuccessful: async (child) => {
       const exit = await child.exit
       expect(exit, child.failureContext()).toEqual({ code: 0, signal: null })

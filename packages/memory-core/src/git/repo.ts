@@ -2,7 +2,8 @@ import { existsSync } from "../fs/resilient"
 import { mkdir, rm, writeFile } from "../fs/resilient"
 import { dirname, join } from "node:path"
 import { withGitLockRetry, withSerializedGitConfigMutation } from "./config-lock"
-import { withStrandedGitLockRecovery, sweepStrandedGitLockFilesIfPresent } from "./repo-lock-sweep"
+import { NO_AUTO_MAINTENANCE } from "./no-auto-maintenance"
+import { withStrandedGitLockRecovery } from "./repo-lock-sweep"
 import { DirtyRepoError, NoEffectiveChangesError } from "./errors"
 import { createNodeGitExec, type GitExec, type GitExecResult } from "./exec"
 import { describeDirtyMarkdownEncodingIssues } from "./porcelain"
@@ -12,8 +13,7 @@ import { runMemoryRepoMaintenance } from "./repo-maintenance"
 import { PathCommitTimes } from "./repo-commit-times"
 import { GitRevisionReads } from "./repo-revision-reads"
 import { assertNoUnrelatedChanges } from "./repo-status"
-import { MemorySecretError, secretPatternClassOf } from "./secret"
-import { scanSecretLikeMaterial } from "../sync/redact"
+import { assertNoSecretLikeStaging } from "./repo-secret-staging"
 import { withSerializedGitWorktreeMutation } from "./worktree-mutation-queue"
 import type {
   GitCommitAuthor,
@@ -40,7 +40,7 @@ const EMPTY_INITIAL_COMMIT = "chore: initialize empty local memory"
 // git commit/merge end with `git maintenance run --auto --detach`, which can start a background
 // gc (cruft pack + prune of loose objects) that races the next writer and readers outside every
 // memory lock (omo #10177). Packing belongs to `maintain()` under the maintenance lock only.
-const NO_AUTO_MAINTENANCE = ["-c", "maintenance.auto=false", "-c", "gc.auto=0"] as const
+export { NO_AUTO_MAINTENANCE } from "./no-auto-maintenance"
 
 export class GitMemoryRepo {
   readonly dir: string
@@ -117,7 +117,6 @@ export class GitMemoryRepo {
     author: GitCommitAuthor,
   ): Promise<GitCommitResult> {
     await this.hookInstaller(this.dir)
-    await sweepStrandedGitLockFilesIfPresent(this.dir)
     const normalized = normalizePathspecs(paths)
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)
 
@@ -132,12 +131,11 @@ export class GitMemoryRepo {
     author: GitCommitAuthor,
   ): Promise<GitCommitResult> {
     await this.hookInstaller(this.dir)
-    await sweepStrandedGitLockFilesIfPresent(this.dir)
     const normalized = normalizePathspecs(paths)
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)
     await assertNoUnrelatedChanges(this.dir, normalized, () => this.status())
     if (!(await this.hasPathChanges(normalized))) throw new NoEffectiveChangesError(normalized)
-    await this.assertNoSecretLikeStaging(normalized)
+    await assertNoSecretLikeStaging(normalized, (argv) => this.gitResult(argv))
     return this.commitStaged(reason, author)
   }
 
@@ -175,26 +173,6 @@ export class GitMemoryRepo {
     for (const path of untracked) {
       await withStrandedGitLockRecovery(this.dir, () => this.git(["rm", "-q", "--cached", "--ignore-unmatch", "--", path]))
       await rm(join(this.dir, path), { force: true })
-    }
-  }
-
-  /**
-   * Refuse a staged commit that would carry secret-like material: first every
-   * normalized path string (a file name is repository-controlled text like any
-   * body), then every staged blob's full content. Reads come from the INDEX
-   * (`git show :<path>`), never the worktree, and deletions are skipped because
-   * their blob is gone.
-   */
-  private async assertNoSecretLikeStaging(paths: readonly string[]): Promise<void> {
-    for (const path of paths) {
-      const patternClass = secretPatternClassOf(path)
-      if (patternClass !== undefined) throw new MemorySecretError({ path, patternClass, where: "path" })
-    }
-    for (const path of paths) {
-      const result = await this.gitResult(["show", `:${path}`])
-      if (result.code !== 0) continue
-      const patternClass = secretPatternClassOf(result.stdout)
-      if (patternClass !== undefined) throw new MemorySecretError({ path, patternClass, where: "content" })
     }
   }
 

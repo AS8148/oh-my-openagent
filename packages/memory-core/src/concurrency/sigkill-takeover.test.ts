@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 import { memoryWriterLockPath, parseLockRecord } from "../locks"
 import { isLockOwnerProvenDead } from "../locks/acquire"
 import { pidAlive, probeUntil } from "../locks/process-liveness.test-support"
+import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import {
   DEATH_PROOF_BOUND_MS,
@@ -128,17 +129,22 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
         trigger,
       ])
 
-      // #when
+      // #when: the killer strands the lock (its git child is dead), announces kill-ready, then
+      // stays alive holding the memory-write lock record until we confirm the debris - the
+      // peer's sweep needs the takeover proof this process's registry will produce.
       await killer.waitForLine("kill-ready")
-      const killerExit = await killer.exit
-      expect(killerExit, killer.failureContext()).toEqual({ code: null, signal: "SIGKILL" })
-      await expectTakeoverOwnerProvenDead(shared.identity, killer.child.pid)
+      const lockPath = join(shared.identity.paths.repo, ".git", ...(trigger === "ref-lock" ? ["refs", "heads", "main.lock"] : ["index.lock"]))
+      expect(await probeUntil(() => existsSync(lockPath), 10_000)).toBe(true)
       // fsck reads a stranded ref lock as badRefContent; that line is the debris under test, and
       // nothing else may be wrong. The strict (no-allowance) check after the peer's commits then
       // proves the sweep removed it.
       await assertRepoIntegrity(shared.identity.paths.repo, [
         new RegExp(`^error: refs/heads/main\\.lock: badRefContent`),
       ].filter(() => trigger === "ref-lock"))
+      killer.send("swept")
+      const killerExit = await killer.exit
+      expect(killerExit, killer.failureContext()).toEqual({ code: null, signal: "SIGKILL" })
+      await expectTakeoverOwnerProvenDead(shared.identity, killer.child.pid)
 
       const peer = kit.harnessFor(crashCommitChildPath, [
         "peer",
@@ -146,7 +152,7 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
         shared.identity.paths.locks,
         "peer",
         "20",
-      ])
+      ], trigger === "ref-lock" ? { OMO_TEST_GIT_LOCK_SETTLE_MS: "0" } : undefined)
       await peer.waitForPrefix("done:")
       await kit.expectSuccessful(peer)
 

@@ -21,8 +21,17 @@ import { runMemoryTool } from "../tools/memory"
 //
 // kill-at-git-lock goes one level deeper: it spawns its `git commit` directly, waits for git's own
 // lock file (index.lock, or refs/heads/main.lock) to appear - proof the commit is mid-flight - and
-// SIGKILLs the git process at that exact instant, then SIGKILLs itself. A killed git process can
-// never remove the lock files it created; the peer's takeover then faces that debris.
+// SIGKILLs the git process at that exact instant. A killed git process can never remove the lock
+// files it created; the peer's takeover then faces that debris. The peer's sweep runs under the
+// memory-write lock and requires the takeover's recorded dead-owner proof, which lives in the
+// killer's process - so the killer stays alive until the parent observes the debris, sends
+// "swept", and only then does the killer die (the memory-write lock record names the killer).
+
+const SETTLE_ENV_VAR = "OMO_TEST_GIT_LOCK_SETTLE_MS"
+// Read by ../git/repo-lock-sweep at module init in THIS child process; the harness passes the
+// value through the child's environment. Kept here as a named constant so the fixture and the
+// test share one spelling.
+void SETTLE_ENV_VAR
 
 type Mode = "kill-mid-commit" | "kill-at-git-lock" | "peer"
 
@@ -113,6 +122,10 @@ async function strandIndexLockAndDie(): Promise<never> {
   }
   git.kill("SIGKILL")
   await waitExit(git)
+  // Keep this process (the memory-write lock owner) alive until the parent confirms the debris
+  // state and releases us: the peer's sweep needs this process's takeover record, which dies
+  // with this process's in-memory registry.
+  await waitForParentRelease()
   process.kill(process.pid, "SIGKILL")
   return unreachable("survived self-SIGKILL")
 }
@@ -139,8 +152,20 @@ async function strandRefLockAndDie(): Promise<never> {
   }
   git.kill("SIGKILL")
   await waitExit(git)
+  await waitForParentRelease()
   process.kill(process.pid, "SIGKILL")
   return unreachable("survived self-SIGKILL")
+}
+
+function waitForParentRelease(): Promise<void> {
+  return new Promise((resolve) => {
+    let buffer = ""
+    process.stdin.setEncoding("utf8")
+    process.stdin.on("data", (chunk: string) => {
+      buffer += chunk
+      if (buffer.includes("swept\n")) resolve()
+    })
+  })
 }
 
 async function createCommit(repo: GitMemoryRepo, writer: string, index: number): Promise<void> {
