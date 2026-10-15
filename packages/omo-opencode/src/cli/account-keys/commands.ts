@@ -1,5 +1,5 @@
 import type { Command } from "commander"
-import type { DeviceKeyring } from "@oh-my-opencode/memory-core"
+import type { DeviceKeyring } from "@oh-my-opencode/memory-core/keyring"
 import { initializeDeviceKeyring, loadDeviceKeyring } from "./keyring"
 import { createOsKeyStore, type KeyStore } from "./keystore"
 

@@ -11,6 +11,36 @@ function memoryStore(): KeyStore {
 }
 
 describe("account keys", () => {
+  test("initialization generates and persists a unique device id per machine", async () => {
+    const store = memoryStore()
+    const first = await initializeDeviceKeyring(store)
+    const id = first.principal().id
+    expect(id).not.toBe("cli")
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    const second = await initializeDeviceKeyring(store)
+    expect(second.principal().id).toBe(id)
+    const reopened = await loadDeviceKeyring(store)
+    expect(reopened?.principal().id).toBe(id)
+  })
+
+  test("two keystores produce two distinct device ids", async () => {
+    const a = await initializeDeviceKeyring(memoryStore())
+    const b = await initializeDeviceKeyring(memoryStore())
+    expect(a.principal().id).not.toBe(b.principal().id)
+  })
+
+  test("OMO_DEVICE_NAME is a display label, never the principal id", async () => {
+    process.env.OMO_DEVICE_NAME = "workstation one"
+    try {
+      const store = memoryStore()
+      const keyring = await initializeDeviceKeyring(store)
+      expect(keyring.principal().id).not.toBe("workstation one")
+      expect(keyring.principal().id).toMatch(/^[0-9a-f-]{36}$/)
+    } finally {
+      delete process.env.OMO_DEVICE_NAME
+    }
+  })
+
   test("initialization is persistent and idempotent", async () => {
     const store = memoryStore()
     const first = await initializeDeviceKeyring(store)
@@ -66,6 +96,36 @@ describe("account keys", () => {
     const store = createOsKeyStore("fixture", "linux", async () => ({ code: 1, stdout: "", stderr: "locked" }))
     await expect(initializeDeviceKeyring(store)).rejects.toThrow()
     expect(() => createOsKeyStore("fixture", "freebsd")).toThrow()
+  })
+
+  test("keystore success paths: macOS exit 44 is null, Linux strips the newline, Windows exit 3 is null", async () => {
+    const mac = createOsKeyStore("fixture", "darwin", async argv =>
+      argv[1] === "find-generic-password" ? { code: 44, stdout: "", stderr: "" } : { code: 0, stdout: "", stderr: "" },
+    null)
+    expect(await mac.read()).toBeNull()
+
+    const linux = createOsKeyStore("fixture", "linux", async argv =>
+      argv[1] === "lookup" ? { code: 0, stdout: "stored-value\n", stderr: "" } : { code: 0, stdout: "", stderr: "" },
+    null)
+    expect(await linux.read()).toBe("stored-value")
+
+    const windows = createOsKeyStore("fixture", "win32", async () => ({ code: 3, stdout: "", stderr: "" }), null)
+    expect(await windows.read()).toBeNull()
+  })
+
+  test("macOS write puts the secret on stdin via `security -i`, never on argv", async () => {
+    const secret = "PRIVATE-KEY-CANARY"
+    const calls: { argv: readonly string[]; input?: string }[] = []
+    const run: RunSecretCommand = async (argv, input) => {
+      calls.push({ argv, input })
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    const store = createOsKeyStore("fixture", "darwin", run, null)
+    await store.write(secret)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].argv).toEqual(["security", "-i"])
+    expect(calls[0].input).toContain(secret)
+    expect(JSON.stringify(calls.map(call => call.argv))).not.toContain(secret)
   })
 
   test("corrupt private key records never escape in thrown errors", async () => {

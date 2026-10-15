@@ -1,13 +1,12 @@
 import { Buffer } from "node:buffer"
 import {
-  createDecipheriv,
-  createHmac,
   createPrivateKey,
   createPublicKey,
-  diffieHellman,
   generateKeyPairSync,
   sign as ed25519Sign,
 } from "node:crypto"
+import { CanonicalJsonError, requireCanonicalJson } from "./canonical-json"
+import { openHpkeSealedBox } from "./hpke-sealed-box"
 
 /**
  * DeviceKeyring is the sync engine's only path to this device's private keys
@@ -34,6 +33,12 @@ export type DeviceKeyringSignRequest =
       /** RFC 8785 canonical JSON whose top-level "t" starts with "omo-sync/v1/". */
       readonly canonicalJson: Uint8Array
     }
+  | {
+      /** A compaction snapshot preimage (spec §6): `{t, account, author, covers_seq, digest, link, keyring_head}`. */
+      readonly purpose: "snapshot"
+      /** RFC 8785 canonical JSON whose top-level "t" is exactly "omo-sync/v1/snapshot". */
+      readonly canonicalJson: Uint8Array
+    }
 
 /**
  * Refusal for any sign request outside the two typed purposes above. A
@@ -43,7 +48,19 @@ export type DeviceKeyringSignRequest =
 export class DeviceKeyringSignError extends Error {
   readonly name = "DeviceKeyringSignError"
   constructor(
-    readonly reason: "unknown-purpose" | "digest-length" | "record-json" | "record-prefix" | "record-canonical",
+    readonly reason:
+      | "unknown-purpose"
+      | "digest-length"
+      | "record-json"
+      | "record-prefix"
+      | "record-canonical"
+      | "record-canonical-duplicate-key"
+      | "record-canonical-number"
+      | "record-canonical-order"
+      | "record-canonical-escape"
+      | "record-canonical-whitespace"
+      | "record-canonical-encoding"
+      | "snapshot-prefix",
     message: string,
   ) {
     super(message)
@@ -59,6 +76,7 @@ export class DeviceKeyringSignError extends Error {
 const SIGNING_DOMAIN_TAGS: Record<DeviceKeyringSignRequest["purpose"], string> = {
   "object-digest": "omo-sync/v1/object-digest",
   record: "omo-sync/v1/record",
+  snapshot: "omo-sync/v1/snapshot",
 }
 
 function domainSeparatedMessage(purpose: DeviceKeyringSignRequest["purpose"], payload: Uint8Array): Buffer {
@@ -81,9 +99,26 @@ function validateSignRequest(request: DeviceKeyringSignRequest): Uint8Array {
     }
     let parsed: unknown
     try {
-      parsed = JSON.parse(Buffer.from(request.canonicalJson).toString("utf8"))
-    } catch {
-      throw new DeviceKeyringSignError("record-json", "sign: record preimage is not valid JSON")
+      parsed = requireCanonicalJson(request.canonicalJson)
+    } catch (error) {
+      if (error instanceof CanonicalJsonError) {
+        const reason =
+          error.violation === "json"
+            ? "record-json"
+            : error.violation === "duplicate-key"
+              ? "record-canonical-duplicate-key"
+              : error.violation === "number"
+                ? "record-canonical-number"
+                : error.violation === "order"
+                  ? "record-canonical-order"
+                  : error.violation === "escape"
+                    ? "record-canonical-escape"
+                    : error.violation === "whitespace"
+                      ? "record-canonical-whitespace"
+                      : "record-canonical-encoding"
+        throw new DeviceKeyringSignError(reason, `sign: record preimage is not RFC 8785 canonical JSON: ${error.message}`)
+      }
+      throw error
     }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || typeof (parsed as { t?: unknown }).t !== "string") {
       throw new DeviceKeyringSignError("record-json", 'sign: record preimage needs a top-level "t" string')
@@ -97,10 +132,24 @@ function validateSignRequest(request: DeviceKeyringSignRequest): Uint8Array {
     if (t === SIGNING_DOMAIN_TAGS["object-digest"]) {
       throw new DeviceKeyringSignError("record-prefix", 'sign: record "t" must name a record or snapshot type, not the object-digest tag')
     }
-    // RFC 8785 §3.2.2.3: whitespace is forbidden between tokens, so its
-    // presence proves non-canonical input without re-serializing floats.
-    if (/[\t\n\f\r ]/.test(Buffer.from(request.canonicalJson).toString("utf8"))) {
-      throw new DeviceKeyringSignError("record-canonical", "sign: record preimage must be RFC 8785 canonical JSON (no insignificant whitespace)")
+    return request.canonicalJson
+  }
+  if (request.purpose === "snapshot") {
+    if (!(request.canonicalJson instanceof Uint8Array)) {
+      throw new DeviceKeyringSignError("record-json", "sign: snapshot needs RFC 8785 canonical JSON bytes")
+    }
+    let parsed: unknown
+    try {
+      parsed = requireCanonicalJson(request.canonicalJson)
+    } catch (error) {
+      if (error instanceof CanonicalJsonError) {
+        throw new DeviceKeyringSignError("record-canonical", `sign: snapshot preimage is not RFC 8785 canonical JSON: ${error.message}`)
+      }
+      throw error
+    }
+    const t = typeof parsed === "object" && parsed !== null ? (parsed as { t?: unknown }).t : undefined
+    if (t !== SIGNING_DOMAIN_TAGS.snapshot) {
+      throw new DeviceKeyringSignError("snapshot-prefix", 'sign: snapshot preimage "t" must be exactly "omo-sync/v1/snapshot"')
     }
     return request.canonicalJson
   }
@@ -125,101 +174,34 @@ export interface DeviceKeyring {
    */
   sign(request: DeviceKeyringSignRequest): Promise<Uint8Array>
   /**
-   * Opens a sealed box addressed to this device's sealing key and returns the
-   * plaintext (an epoch key wrap in the sync protocol).
+   * Opens a sealed wrap addressed to this device's sealing key and returns the
+   * plaintext envelope (spec §8.1, omo-service docs/sync-design.md @21e0757).
    *
    * Construction: RFC 9180 HPKE, base mode (mode 0), suite
    * DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM
-   * (KEM 0x0020, KDF 0x0001, AEAD 0x0002), single-shot single-recipient API
-   * (`SetupBaseR`/`Open`, empty `info`, no psk). Wire form:
-   * `enc (32 bytes) || ciphertext || 16-byte GCM tag`. omo-service
-   * `docs/sync-design.md` §7 says only "wrapped (X25519 sealed box)" without
-   * fixing the construction, so this port fixes it here.
-   *
-   * Rejects (throws) a malformed box: wrong length, a corrupted byte, or a
-   * box sealed to any other recipient key.
+   * (KEM 0x0020, KDF 0x0001, AEAD 0x0002), single-shot single-recipient
+   * (`SetupBaseR`/`Open`, no psk). `info` is UTF-8 `"omo-sync/v1/wrap"`
+   * followed by one 0x00 byte; AAD is the RFC 8785 canonical JSON
+   * `{"account":...,"epoch":...,"id":...}` of the verified wrap entry, so a
+   * genuine ciphertext moved to another account, epoch or recipient refuses
+   * at the AEAD. Wire form: `enc (32 bytes) || ciphertext || 16-byte tag`.
    */
-  unseal(wrap: Uint8Array): Promise<Uint8Array>
+  unseal(wrap: Uint8Array, binding: WrapBinding): Promise<Uint8Array>
 }
 
-/** Minimum sealed-box size: 32-byte enc + 16-byte tag, with an empty plaintext. */
-const SEALED_BOX_OVERHEAD = 48
+/** The verified wrap entry an `unseal` binds to: account, epoch, recipient id. */
+export type WrapBinding = { readonly account: string; readonly epoch: number; readonly id: string }
 
-const HKDF_HASH_LENGTH = 32
+/** §8.1 wrap `info`: UTF-8 "omo-sync/v1/wrap" followed by one NUL byte. */
+const WRAP_INFO = Buffer.concat([Buffer.from("omo-sync/v1/wrap", "ascii"), Buffer.from([0])])
 
-function labeledExtract(suiteId: Buffer, label: string, ikm: Uint8Array, salt: Uint8Array): Buffer {
-  // RFC 9180 §4: LabeledExtract = HKDF-Extract(salt, "HPKE-v1" || suite_id || label || ikm);
-  // an empty salt means HashLen zero bytes (RFC 5869 §2.2).
-  const key = salt.length === 0 ? Buffer.alloc(HKDF_HASH_LENGTH) : Buffer.from(salt)
-  return createHmac("sha256", key).update(Buffer.concat([Buffer.from("HPKE-v1"), suiteId, Buffer.from(label), Buffer.from(ikm)])).digest()
-}
-
-function labeledExpand(suiteId: Buffer, label: string, prk: Buffer, info: Uint8Array, length: number): Buffer {
-  // RFC 9180 §4: LabeledExpand = HKDF-Expand(prk, "HPKE-v1" || suite_id || label || info).
-  // Every expansion in this suite stays within one SHA-256 block, so T(1) suffices.
-  if (length > 255 * HKDF_HASH_LENGTH) throw new Error("hpke expand length out of range")
-  const lengthBytes = Buffer.alloc(2)
-  lengthBytes.writeUInt16BE(length)
-  const t0 = Buffer.concat([lengthBytes, Buffer.from("HPKE-v1"), suiteId, Buffer.from(label), Buffer.from(info), Buffer.from([1])])
-  return createHmac("sha256", prk).update(t0).digest().subarray(0, length)
-}
-
-const KEM_ID = Buffer.from([0, 0x20])
-const KDF_ID = Buffer.from([0, 0x01])
-const AEAD_ID = Buffer.from([0, 0x02])
-
-function x25519PublicKeyFromRaw(raw: Uint8Array): ReturnType<typeof createPublicKey> {
-  return createPublicKey({ key: { kty: "OKP", crv: "X25519", x: Buffer.from(raw).toString("base64url") }, format: "jwk" })
-}
-
-/**
- * Opens a sealed box with a raw X25519 private scalar and its public key,
- * following RFC 9180 §6.1 `SetupBaseR` + single-shot `Open` with empty info.
- * Shared by every DeviceKeyring implementation so the construction above is
- * the only sealed-box code path in the tree.
- */
-export function openHpkeSealedBox(sealingPrivateRaw: Uint8Array, sealingPublicRaw: Uint8Array, wrap: Uint8Array): Uint8Array {
-  if (wrap.length < SEALED_BOX_OVERHEAD) throw new Error("sealed box is too short")
-  const enc = wrap.subarray(0, 32)
-  const ciphertext = wrap.subarray(32)
-
-  const privateKey = createPrivateKey({
-    key: {
-      kty: "OKP",
-      crv: "X25519",
-      d: Buffer.from(sealingPrivateRaw).toString("base64url"),
-      x: Buffer.from(sealingPublicRaw).toString("base64url"),
-    },
-    format: "jwk",
-  })
-  const dh = diffieHellman({ privateKey, publicKey: x25519PublicKeyFromRaw(enc) })
-
-  const kem = Buffer.concat([Buffer.from("KEM"), KEM_ID])
-  const suite = Buffer.concat([Buffer.from("HPKE"), KEM_ID, KDF_ID, AEAD_ID])
-  const sharedSecret = labeledExpand(
-    kem,
-    "shared_secret",
-    labeledExtract(kem, "eae_prk", dh, Buffer.alloc(0)),
-    Buffer.concat([Buffer.from(enc), Buffer.from(sealingPublicRaw)]),
-    32,
+const wrapAad = (binding: WrapBinding): Buffer =>
+  Buffer.from(
+    `{"account":${JSON.stringify(binding.account)},"epoch":${binding.epoch},"id":${JSON.stringify(binding.id)}}`,
+    "utf8",
   )
-  const keyScheduleContext = Buffer.concat([
-    Buffer.from([0]),
-    labeledExtract(suite, "psk_id_hash", Buffer.alloc(0), Buffer.alloc(0)),
-    labeledExtract(suite, "info_hash", Buffer.alloc(0), Buffer.alloc(0)),
-  ])
-  const secret = labeledExtract(suite, "secret", Buffer.alloc(0), sharedSecret)
-  const key = labeledExpand(suite, "key", secret, keyScheduleContext, 32)
-  const nonce = labeledExpand(suite, "base_nonce", secret, keyScheduleContext, 12)
 
-  const decipher = createDecipheriv("aes-256-gcm", key, nonce)
-  decipher.setAuthTag(ciphertext.subarray(ciphertext.length - 16))
-  try {
-    return Buffer.concat([decipher.update(ciphertext.subarray(0, ciphertext.length - 16)), decipher.final()])
-  } catch {
-    throw new Error("sealed box does not open: wrong recipient or corrupted wrap")
-  }
-}
+export { openHpkeSealedBox } from "./hpke-sealed-box"
 
 interface DeviceKeyMaterial {
   /** PKCS#8 DER of the Ed25519 private key, base64url. */
@@ -268,7 +250,7 @@ export function createDeviceKeyring(id: string, material: DeviceKeyMaterial): De
       const payload = validateSignRequest(request)
       return ed25519Sign(null, domainSeparatedMessage(request.purpose, payload), signingPrivateKey)
     },
-    unseal: async wrap => openHpkeSealedBox(sealingPrivateRaw, sealingPublicRaw, wrap),
+    unseal: async (wrap, binding) => openHpkeSealedBox(sealingPrivateRaw, sealingPublicRaw, wrap, WRAP_INFO, wrapAad(binding)),
   }
 }
 
