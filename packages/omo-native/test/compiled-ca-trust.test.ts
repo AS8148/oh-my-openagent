@@ -14,6 +14,10 @@ import {
 } from "../compiled-ca-trust"
 
 const fixtures = join(import.meta.dir, "fixtures", "ca-trust")
+const withoutCaVariables = (env: NodeJS.ProcessEnv) => {
+  const { NODE_EXTRA_CA_CERTS: _extra, NODE_USE_SYSTEM_CA: _system, OMO_EXTRA_CA_CERTIFICATES: _omo, ...rest } = env
+  return rest
+}
 const fixture = (name: string) => readFileSync(join(fixtures, name), "utf8")
 
 describe("parseExtraCaCertificates", () => {
@@ -90,6 +94,12 @@ if (mode === "daemon") {
   const child = spawnSync(process.execPath, ["install", port], { env: process.env, encoding: "utf8" })
   console.log(child.stdout.trim()); process.exit(0)
 }
+if (mode === "bun-be-bun-tls") {
+  installEngineCaTrust()
+  const code = 'require("node:https").get("https://localhost:' + port + '/",r=>{r.resume();console.log("ok "+r.statusCode)}).on("error",e=>console.log("error "+e.code))'
+  const child = spawnSync(process.execPath, ["-e", code], { env: { ...process.env, BUN_BE_BUN: "1" }, encoding: "utf8" })
+  console.log(child.stdout.trim()); process.exit(0)
+}
 if (mode === "bun-be-bun") {
   installEngineCaTrust()
   const code = 'const t=require("node:tls");console.log(t.getCACertificates("default").length-t.getCACertificates("bundled").length,t.getCACertificates("system").length)'
@@ -114,7 +124,7 @@ request("https://localhost:" + port + "/", (r) => { r.resume(); console.log("ok 
   const probe = (mode: string, env: NodeJS.ProcessEnv) =>
     new Promise<string>((resolve) => {
       const child = spawn(join(dir, "probe"), [mode, String(port)], {
-        env: { ...process.env, NODE_EXTRA_CA_CERTS: "", NODE_USE_SYSTEM_CA: "", ...env },
+        env: { ...withoutCaVariables(process.env), ...env },
       })
       let out = ""
       child.stdout.on("data", (chunk) => (out += chunk))
@@ -127,6 +137,13 @@ request("https://localhost:" + port + "/", (r) => { r.resume(); console.log("ok 
 
   test("#given the private CA in OMO_EXTRA_CA_CERTIFICATES #then the engine trusts it after install", async () => {
     expect(await probe("install", { OMO_EXTRA_CA_CERTIFICATES: fixture("ca.pem") })).toBe("ok 200")
+  })
+
+  test("#given the private CA only in an ambient NODE_EXTRA_CA_CERTS #then the engine ignores it", async () => {
+    const caFile = join(dir, "ambient-ca.pem")
+    writeFileSync(caFile, fixture("ca.pem"))
+    expect(await probe("install", { NODE_EXTRA_CA_CERTS: caFile })).toBe("error UNABLE_TO_VERIFY_LEAF_SIGNATURE")
+    expect(await probe("bun-be-bun-tls", { NODE_EXTRA_CA_CERTS: caFile })).toBe("error UNABLE_TO_VERIFY_LEAF_SIGNATURE")
   })
 
   test("#given an invalid OMO_EXTRA_CA_CERTIFICATES #then the compiled engine refuses to start", async () => {
