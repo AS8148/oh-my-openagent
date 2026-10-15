@@ -1,10 +1,17 @@
 // Current per-key container contents and their combination under the kind rule
 // (sync-design §2): a key's kind is fixed by its earliest first-write op, and content in
-// containers of other kinds renders converted into that kind, losslessly. Both render.ts
-// and capture.ts read state through here so capture's no-op detection compares against
-// exactly what render would emit.
+// containers of other kinds renders converted into that kind, losslessly. Combined text
+// and register values are PLAIN text here; render.ts serializes them once through
+// renderEntry, so a joined value never lands as glued pre-quoted fragments (review r1 #3).
+// Register and set-map containers hold the register's serialized form (its exact source
+// spelling, e.g. `true` stays "true", a colon-bearing string stays '"a: b"'); the kind
+// rule strips one renderScalar layer so a scalar register contributes bare text.
+// Both render.ts and capture.ts read state through here so capture's no-op detection
+// compares against exactly what render would emit.
 
 import type { ContainerID, ContainerType, LoroDoc } from "loro-crdt"
+
+import { parseDocument, isScalar } from "yaml"
 
 import { renderScalar } from "./frontmatter"
 import type { FmPart, ItemHistory, KeyHistory, Stamp } from "./history"
@@ -73,6 +80,20 @@ export function activeReg(entries: readonly RegEntry[]): (RegEntry & { readonly 
 
 const MISSING_STAMP: Stamp = { lamport: Number.MAX_SAFE_INTEGER, peer: "0" }
 
+/**
+ * Bare text of a stored register value: strip one renderScalar layer when it quotes.
+ * Used only where a register's text joins other content into one plain value.
+ */
+export function regText(value: string): string {
+  const doc = parseDocument(value, { schema: "core" })
+  if (doc.errors.length > 0) return value
+  const contents = doc.contents
+  if (contents === null || !isScalar(contents)) return value
+  const parsed: unknown = contents.value
+  return typeof parsed === "string" ? parsed : value
+}
+
+
 function stampCompare(a: Stamp, b: Stamp): number {
   if (a.lamport !== b.lamport) return a.lamport - b.lamport
   const pa = BigInt(a.peer)
@@ -103,7 +124,7 @@ export function orderedSetElements(state: KeyState, key: string, history: ItemHi
 }
 
 export type CombinedValue =
-  | { readonly kind: "text" | "reg"; readonly text: string }
+  | { readonly kind: "text" | "reg"; readonly text: string; readonly verbatim: boolean }
   | { readonly kind: "set"; readonly elements: readonly string[] }
 
 export function combineKey(state: KeyState, key: string, kh: KeyHistory, history: ItemHistory): CombinedValue | null {
@@ -111,21 +132,26 @@ export function combineKey(state: KeyState, key: string, kh: KeyHistory, history
   const regValues = [...active].sort((a, b) =>
     a.value === b.value ? (a.tag < b.tag ? -1 : 1) : a.value < b.value ? -1 : 1,
   )
+  const soleRegister =
+    kh.kind === "reg" && (state.text === null || state.text === "") && state.set.length === 0
+  // A lone register keeps its serialized form verbatim (`count: 2` stays `2`); only a
+  // mixed-content join dequotes scalars so the joined plain text serializes back as itself.
+  const regTexts = regValues.map((e) => (soleRegister ? e.value : regText(e.value)))
   if (kh.kind === "text") {
     const parts: { readonly stamp: Stamp; readonly out: string }[] = []
     if (state.text !== null && state.text !== "") {
-      parts.push({ stamp: kh.byKind.get("text") ?? MISSING_STAMP, out: renderScalar(state.text) })
+      parts.push({ stamp: kh.byKind.get("text") ?? MISSING_STAMP, out: state.text })
     }
     const elements = orderedSetElements(state, key, history)
     if (elements.length > 0) {
       parts.push({ stamp: kh.byKind.get("set") ?? MISSING_STAMP, out: `[${elements.join(", ")}]` })
     }
-    if (regValues.length > 0) {
-      parts.push({ stamp: kh.byKind.get("reg") ?? MISSING_STAMP, out: regValues.map((e) => e.value).join(" / ") })
+    if (regTexts.length > 0) {
+      parts.push({ stamp: kh.byKind.get("reg") ?? MISSING_STAMP, out: regTexts.join(" / ") })
     }
     if (parts.length === 0) return null
     parts.sort((a, b) => stampCompare(a.stamp, b.stamp))
-    return { kind: "text", text: parts.map((part) => part.out).join(" ") }
+    return { kind: "text", text: parts.map((part) => part.out).join(" "), verbatim: false }
   }
   if (kh.kind === "set") {
     const tagged: { readonly stamp: Stamp; readonly source: string }[] = state.set.map(({ tag, element }) => ({
@@ -150,9 +176,9 @@ export function combineKey(state: KeyState, key: string, kh: KeyHistory, history
     return { kind: "set", elements }
   }
   const values = regValues.map((entry) => entry.value)
-  if (state.text !== null && state.text !== "") values.push(renderScalar(state.text))
+  if (state.text !== null && state.text !== "") values.push(state.text)
   for (const { element } of state.set) values.push(element)
   values.sort()
   if (values.length === 0) return null
-  return { kind: "reg", text: values.join(" / ") }
+  return { kind: "reg", text: values.join(" / "), verbatim: soleRegister }
 }

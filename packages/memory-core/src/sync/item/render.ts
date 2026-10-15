@@ -5,7 +5,7 @@
 import type { LoroDoc } from "loro-crdt"
 
 import { isLive } from "./document"
-import { renderScalar } from "./frontmatter"
+import { renderEntry } from "./frontmatter"
 import type { Stamp } from "./history"
 import { analyzeHistory } from "./history"
 import { BODY_NAME, cidRoot, combineKey, readKeyState } from "./state"
@@ -23,12 +23,9 @@ export function renderDocContent(doc: LoroDoc): string {
   for (const [key, kh] of keys) {
     const combined = combineKey(readKeyState(doc, key), key, kh, history)
     if (combined === null) continue
-    if (combined.kind === "set") {
-      lines.push(`${renderScalar(key)}:`)
-      for (const element of combined.elements) lines.push(`  - ${element}`)
-    } else {
-      lines.push(`${renderScalar(key)}: ${combined.text}`)
-    }
+    lines.push(
+      renderEntry(key, combined.kind === "set" ? combined.elements : combined.text, combined.kind === "reg" && combined.verbatim),
+    )
   }
   const body = doc.hasContainer(cidRoot(BODY_NAME, "Text")) ? doc.getText(BODY_NAME).toString() : ""
   if (lines.length === 0) return body
