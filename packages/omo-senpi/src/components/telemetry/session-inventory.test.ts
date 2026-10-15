@@ -1,22 +1,28 @@
 import { describe, expect, test } from "bun:test"
 
-import { PROVIDERS_PATTERN } from "./event-schema-constraints"
-import { joinProviders } from "./session-inventory"
+import { OMO_NATIVE_EVENT_SCHEMAS } from "./event-schemas"
+import { KNOWN_PROVIDERS } from "./model-vocabulary"
+import { classifyProviders, providerPropertyName } from "./session-inventory"
 
-describe("joinProviders", () => {
-  test("#given known and private provider ids #then known ids ship, private ones become one custom token, sorted", () => {
-    expect(joinProviders(["openai", "my-gateway", "anthropic", "corp-proxy"])).toBe("anthropic,custom,openai")
+describe("classifyProviders", () => {
+  test("#given known and private provider ids #then known ids ship as sorted unique ids and private ones only as a count", () => {
+    expect(classifyProviders(["openai", "my-gateway", "anthropic", "corp-proxy", "openai"])).toEqual({
+      known: ["anthropic", "openai"],
+      customCount: 2,
+    })
   })
 
-  test("#given more ids than fit in 64 characters #then the value is cut at a token boundary and still matches the pattern", () => {
-    const value = joinProviders(["alibaba-token-plan", "alibaba-token-plan-cn", "anthropic-subscription", "chatgpt-subscription", "openai"])
-    expect(value.length).toBeLessThanOrEqual(64)
-    expect(value.endsWith(",")).toBe(false)
-    expect(new RegExp(PROVIDERS_PATTERN).test(value)).toBe(true)
-    expect(value).toBe("alibaba-token-plan,alibaba-token-plan-cn,anthropic-subscription")
+  test("#given no providers #then nothing is known and the count is zero", () => {
+    expect(classifyProviders([])).toEqual({ known: [], customCount: 0 })
   })
 
-  test("#given no providers #then the value is empty, which the session emitter omits", () => {
-    expect(joinProviders([])).toBe("")
+  test("#given every built-in provider id #then each maps to a distinct boolean session_started property that the schema declares", () => {
+    const schema: Readonly<Record<string, unknown>> = OMO_NATIVE_EVENT_SCHEMAS.session_started
+    const names = KNOWN_PROVIDERS.map(providerPropertyName)
+    expect(new Set(names).size).toBe(KNOWN_PROVIDERS.length)
+    for (const name of names) {
+      expect(name).toMatch(/^provider_[a-z][a-z0-9_]*$/)
+      expect(schema[name]).toEqual({ type: "boolean" })
+    }
   })
 })

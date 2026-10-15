@@ -111,9 +111,9 @@ describe("OmO Native process_crashed", () => {
           detection: "supervisor",
           signal: "SIGSEGV",
           uptime_bucket: "10_60m",
-          crashed_bun_version: "unknown",
         }),
       ])
+      expect(crashes(first)[1]?.properties).not.toHaveProperty("crashed_bun_version")
       expect(crashes(second)).toEqual([])
     })
   })
@@ -244,8 +244,7 @@ describe("OmO Native process_crashed", () => {
       // then
       const [crash] = crashes(messages)
       expect(Object.keys(crash?.properties ?? {}).sort()).toEqual([
-        "$os", "arch", "crashed_bun_version", "crashed_engine_version", "crashed_omo_version", "detection",
-        "process_kind", "shard_kind", "signal", "uptime_bucket", "uptime_ms",
+        "$os", "arch", "detection", "process_kind", "shard_kind", "signal", "uptime_bucket", "uptime_ms",
         ...Object.keys(OMO_NATIVE_COMMON_PROPERTY_SCHEMAS),
       ].sort())
       expect(crash?.properties?.shard_kind).toBe("p")
@@ -274,7 +273,8 @@ describe("OmO Native process_crashed", () => {
         ...Object.keys(OMO_NATIVE_COMMON_PROPERTY_SCHEMAS),
       ])
       expect(Object.keys(crash?.properties ?? {}).filter((key) => !allowed.has(key))).toEqual([])
-      expect(crash?.properties).toMatchObject({ exit_code: 1, signal: "none", crashed_engine_version: "unknown" })
+      expect(crash?.properties).toMatchObject({ exit_code: 1, signal: "none" })
+      expect(crash?.properties).not.toHaveProperty("crashed_engine_version")
       expect(JSON.stringify(crash)).not.toContain("/Users/someone")
     })
   })

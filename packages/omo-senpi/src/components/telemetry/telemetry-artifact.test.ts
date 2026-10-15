@@ -1,15 +1,8 @@
 import { createHash } from "node:crypto"
-import { readdirSync, readFileSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { readFileSync } from "node:fs"
 import { describe, expect, test } from "bun:test"
 
-import {
-  CATEGORY_VALUE_PATTERN,
-  CRASH_VERSION_PATTERN,
-  OS_VERSION_PATTERN,
-  PROVIDERS_PATTERN,
-  TIMEZONE_PATTERN,
-} from "./event-schema-constraints"
+import { OS_VERSION_PATTERN } from "./event-schema-constraints"
 import { OMO_NATIVE_EVENT_SCHEMAS } from "./event-schemas"
 import { KNOWN_PROVIDERS } from "./model-vocabulary"
 import {
@@ -28,13 +21,13 @@ const SCHEMA: {
   readonly $defs: {
     readonly keyPattern: { readonly pattern: string }
     readonly forbiddenKeys: { readonly enum: readonly string[] }
-    readonly forbiddenKeyPatterns: { readonly anyOf: readonly { readonly pattern: string }[] }
+    readonly wireKey: { readonly allOf: readonly { readonly not?: { readonly pattern?: string } }[] }
   }
   readonly properties: { readonly resource: { readonly required: readonly string[] } }
 } = JSON.parse(readFileSync(new URL("artifact.schema.json", REGISTRY), "utf8"))
 const PINS: { readonly files: Readonly<Record<string, string>> } = JSON.parse(readFileSync(new URL("PINS.json", REGISTRY), "utf8"))
 const KEY_PATTERN = new RegExp(SCHEMA.$defs.keyPattern.pattern, "u")
-const FORBIDDEN_PATTERNS = SCHEMA.$defs.forbiddenKeyPatterns.anyOf.map(({ pattern }) => new RegExp(pattern, "u"))
+const FORBIDDEN_PATTERNS = SCHEMA.$defs.wireKey.allOf.flatMap(({ not }) => (not?.pattern === undefined ? [] : [new RegExp(not.pattern, "u")]))
 const isForbidden = (key: string): boolean =>
   SCHEMA.$defs.forbiddenKeys.enum.includes(key) || FORBIDDEN_PATTERNS.some((pattern) => pattern.test(key))
 
@@ -84,7 +77,8 @@ describe("telemetry schema artifacts", () => {
     for (const [file, pinned] of Object.entries(PINS.files)) {
       expect(createHash("sha256").update(readFileSync(new URL(file, REGISTRY))).digest("hex")).toBe(pinned)
     }
-    for (const artifact of ARTIFACTS) expect(artifact.semconv_map_sha256).toBe(PINS.files["semconv-map.json"])
+    const canonical = readFileSync(new URL("semconv-map.sha256", REGISTRY), "utf8").trim()
+    for (const artifact of ARTIFACTS) expect(artifact.semconv_map_sha256).toBe(canonical)
   })
 
   test("#then two products are published: omo-senpi (install identity, relayed) and omo-cloud (identity none, never relayed)", () => {
@@ -148,8 +142,8 @@ describe("telemetry schema artifacts", () => {
     ]))
     expect(turn).not.toHaveProperty(["omo.cost_usd"])
     expect(SENPI.derived_properties["omo.turn_completed"]).toEqual({ cost_usd: { from: "omo.cost.usd_1e4", divide_by: 10_000 } })
-    expect(SENPI.events["omo.category_config"]).toHaveProperty(["omo.cat_quick"])
-    expect(SENPI.events["omo.session_started"]).toHaveProperty(["omo.providers"])
+    expect(SENPI.events["omo.category_config"]).toHaveProperty(["omo.cat_quick_state"])
+    expect(SENPI.events["omo.session_started"]).toHaveProperty(["omo.provider_anthropic"])
     expect(SENPI.events["omo.session_started"]).not.toHaveProperty(["omo.arch"])
     expect(SENPI.resource_projections["omo.session_started"]).toEqual({ $os: "os.type", $os_version: "os.version", arch: "host.arch" })
     expect(SENPI.events["omo.process_crashed"]).toHaveProperty(["process.exit.code"])
@@ -185,7 +179,6 @@ describe("telemetry schema artifacts", () => {
       "process.exit.code": 139,
       "omo.signal": "SIGSEGV",
       "omo.crashed_omo_version": "5.1.33",
-      "omo.crashed_bun_version": "unknown",
     }
     const missing = Object.entries(crashed).filter(([key, spec]) => spec.required && record[key] === undefined)
     expect(missing).toEqual([])
@@ -209,41 +202,9 @@ describe("telemetry schema artifacts", () => {
     }
   })
 
-  test("#then the D-I fixtures match their patterns and the hostile values do not", () => {
-    for (const value of ["custom/custom/none", "anthropic/claude-opus-5-5/medium+1", "disabled"]) {
-      expect(`${value} ${matches(CATEGORY_VALUE_PATTERN, value)}`).toBe(`${value} true`)
-    }
-    for (const value of ["/srv/customer/alice/report.txt", "custom/custom/none+0", "a b c"]) {
-      expect(`${value} ${matches(CATEGORY_VALUE_PATTERN, value)}`).toBe(`${value} false`)
-      expect(matches(PROVIDERS_PATTERN, value)).toBe(false)
-    }
-    // A path and prose fail the timezone syntax bound; a relative token is accepted by design (D-I).
-    for (const value of ["/srv/customer/alice/report.txt", "a b c"]) expect(matches(TIMEZONE_PATTERN, value)).toBe(false)
+  test("#then the D-I os.version fixtures match their pattern and a path does not", () => {
     for (const value of ["25.3.0", "6.8.0-45-generic", "10.0.22631"]) expect(matches(OS_VERSION_PATTERN, value)).toBe(true)
-    expect(matches(PROVIDERS_PATTERN, "anthropic,openai,custom")).toBe(true)
-    expect(matches(PROVIDERS_PATTERN, "")).toBe(false)
-    for (const zone of ["Etc/GMT+9", "CST6CDT", "America/Argentina/Buenos_Aires", "Asia/Seoul", "UTC"]) {
-      expect(matches(TIMEZONE_PATTERN, zone)).toBe(true)
-    }
-    expect(matches(CRASH_VERSION_PATTERN, "unknown")).toBe(true)
-    expect(matches(CRASH_VERSION_PATTERN, "/usr/local/bin")).toBe(false)
-  })
-
-  test("#then every zone name in this machine's tzdata (excluding posix/ and right/) matches the timezone pattern", () => {
-    const root = "/usr/share/zoneinfo"
-    const zones: string[] = []
-    const walk = (relative: string): void => {
-      for (const entry of readdirSync(join(root, relative))) {
-        const path = relative === "" ? entry : `${relative}/${entry}`
-        if (relative === "" && (entry === "posix" || entry === "right")) continue
-        const stats = statSync(join(root, path))
-        if (stats.isDirectory()) walk(path)
-        else if (readFileSync(join(root, path)).subarray(0, 4).toString("latin1") === "TZif") zones.push(path)
-      }
-    }
-    walk("")
-    expect(zones.length).toBeGreaterThan(300)
-    expect(zones.filter((zone) => !matches(TIMEZONE_PATTERN, zone))).toEqual([])
+    expect(matches(OS_VERSION_PATTERN, "/srv/customer/alice/report.txt")).toBe(false)
   })
 
   test("#then the provider and architecture VALUE tables cover every id and round-trip wire -> id -> wire", () => {
