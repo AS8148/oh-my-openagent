@@ -2,6 +2,7 @@ import { evaluateInvocationGuard } from "@oh-my-opencode/senpi-task"
 import { describe, expect, test } from "bun:test"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
+import { SESSION_HANDOFF_CAPACITY } from "./skill-invocation-handoff"
 import { createSkillInvocationTracker } from "./skill-invocation-tracker"
 
 function ctxFor(sessionId: string) {
@@ -135,6 +136,56 @@ describe("createSkillInvocationTracker - cross-generation handoff", () => {
     )
     expect(verdict.kind).toBe("deny")
     expect(verdict.kind === "deny" && verdict.message).toContain("ulw-execute skill was already invoked")
+  })
+
+  test("#given a handoff adopted by a rebuilt generation #when a third generation queries the session without another shutdown #then the record is gone", async () => {
+    // given
+    const retiring = new FakeExtensionAPI()
+    createSkillInvocationTracker(retiring)
+    await openGate(retiring, "sess-taken")
+    await retiring.dispatch("session_shutdown", { type: "session_shutdown", reason: "reload" }, ctxFor("sess-taken"))
+    expect(verdictFor("sess-taken", new FakeExtensionAPI())).toEqual({ kind: "allow" })
+
+    // when
+    const verdict = verdictFor("sess-taken", new FakeExtensionAPI())
+
+    // then
+    expect(verdict.kind).toBe("deny")
+  })
+
+  test("#given a session reloaded twice #when the third generation serves it #then the gate is still open", async () => {
+    // given
+    const first = new FakeExtensionAPI()
+    createSkillInvocationTracker(first)
+    await openGate(first, "sess-twice")
+    await first.dispatch("session_shutdown", { type: "session_shutdown", reason: "reload" }, ctxFor("sess-twice"))
+    const second = new FakeExtensionAPI()
+    expect(evaluateInvocationGuard("plan-reviewer", createSkillInvocationTracker(second).stateFor("sess-twice"))).toEqual({ kind: "allow" })
+
+    // when
+    await second.dispatch("session_shutdown", { type: "session_shutdown", reason: "reload" }, ctxFor("sess-twice"))
+
+    // then
+    expect(verdictFor("sess-twice", new FakeExtensionAPI())).toEqual({ kind: "allow" })
+  })
+
+  test("#given more sessions set aside than the store holds #when the oldest is revisited #then its record was evicted and the newest survives", async () => {
+    // given
+    const retiring = new FakeExtensionAPI()
+    createSkillInvocationTracker(retiring)
+    const ids = Array.from({ length: SESSION_HANDOFF_CAPACITY + 1 }, (_, index) => `sess-cap-${index}`)
+    for (const id of ids) {
+      await openGate(retiring, id)
+      await retiring.dispatch("session_shutdown", { type: "session_shutdown", reason: "new" }, ctxFor(id))
+    }
+
+    // when
+    const oldest = verdictFor(ids[0] ?? "", new FakeExtensionAPI())
+    const newest = verdictFor(ids[ids.length - 1] ?? "", new FakeExtensionAPI())
+
+    // then
+    expect(oldest.kind).toBe("deny")
+    expect(newest).toEqual({ kind: "allow" })
   })
 
   test("#given a handed-off session #when another session is queried in the rebuilt generation #then it stays locked", async () => {

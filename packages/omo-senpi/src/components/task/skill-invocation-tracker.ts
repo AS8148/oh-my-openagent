@@ -1,6 +1,13 @@
 import type { SkillInvocationState } from "@oh-my-opencode/senpi-task"
 
 import type { SenpiExtensionAPI } from "../../extension/types"
+import {
+  depositSessionHandoff,
+  discardSessionHandoff,
+  type PlanTouch,
+  shutdownKeepsSession,
+  takeSessionHandoff,
+} from "./skill-invocation-handoff"
 
 // Session-scoped state feeding the senpi-task invocation gate for plan-gated agents (plan-consultant/plan-reviewer).
 // Three observation channels, deliberately separated because they carry different trust levels:
@@ -81,33 +88,6 @@ function expandedSkillBlockNames(text: string): readonly string[] {
 }
 const PLAN_ARTIFACT_PATH_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit"])
 
-type PlanTouch = { count: number; lastTouchedAt: number }
-
-// session_shutdown reasons that retire THIS extension generation while the conversation lives on:
-// a reload rebuilds the runner for the same session, and new/resume/fork set this session aside for
-// another one the user can switch back to (same session file, same id). "quit" retires the session
-// itself, and a host that reports no reason is treated as a retirement, so both drop the state.
-const SESSION_SURVIVING_SHUTDOWN_REASONS: ReadonlySet<string> = new Set(["reload", "new", "resume", "fork"])
-// Session-keyed handoffs survive replacement extension factories, like config-reload's registry in
-// the host: a reload or session replacement rebuilds this extension generation - and with it this
-// tracker - while the conversation keeps its sessionId, so instance-local maps alone lose the proof
-// that the human asked and deny plan review for the rest of the session. Only real input events
-// ever write a channel, so carrying a session's own record forward cannot launder provenance.
-const sessionHandoffs = new Map<string, SessionHandoff>()
-
-type SessionHandoff = {
-  readonly invoked: readonly string[]
-  readonly requested: readonly string[]
-  readonly planTouches: readonly (readonly [string, PlanTouch])[]
-  readonly planTouchSequence: number
-}
-
-function shutdownKeepsSession(payload: unknown): boolean {
-  if (!isRecord(payload)) return false
-  const reason = payload["reason"]
-  return typeof reason === "string" && SESSION_SURVIVING_SHUTDOWN_REASONS.has(reason)
-}
-
 export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvocationTracker {
   const invokedBySession = new Map<string, Set<string>>()
   const requestedBySession = new Map<string, Set<string>>()
@@ -130,7 +110,7 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
   const adoptHandoff = (sessionId: string | undefined): void => {
     if (sessionId === undefined || adoptedSessions.has(sessionId)) return
     adoptedSessions.add(sessionId)
-    const handoff = sessionHandoffs.get(sessionId)
+    const handoff = takeSessionHandoff(sessionId)
     if (handoff === undefined) return
     for (const skill of handoff.invoked) record(invokedBySession, sessionId, skill)
     for (const skill of handoff.requested) record(requestedBySession, sessionId, skill)
@@ -143,16 +123,12 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
   }
 
   const depositHandoff = (sessionId: string): void => {
-    const invoked = [...(invokedBySession.get(sessionId) ?? [])]
-    const requested = [...(requestedBySession.get(sessionId) ?? [])]
-    const planTouches = [...(planTouchesBySession.get(sessionId) ?? [])].map(
-      ([path, touch]) => [path, { ...touch }] as const,
-    )
-    if (invoked.length === 0 && requested.length === 0 && planTouches.length === 0) {
-      sessionHandoffs.delete(sessionId)
-      return
-    }
-    sessionHandoffs.set(sessionId, { invoked, requested, planTouches, planTouchSequence })
+    depositSessionHandoff(sessionId, {
+      invoked: [...(invokedBySession.get(sessionId) ?? [])],
+      requested: [...(requestedBySession.get(sessionId) ?? [])],
+      planTouches: [...(planTouchesBySession.get(sessionId) ?? [])].map(([path, touch]) => [path, { ...touch }] as const),
+      planTouchSequence,
+    })
   }
 
   pi.on("tool_result", (payload, eventCtx) => {
@@ -212,7 +188,7 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
     const sessionId = extractSessionId(eventCtx)
     if (sessionId === undefined) return
     if (shutdownKeepsSession(payload)) depositHandoff(sessionId)
-    else sessionHandoffs.delete(sessionId)
+    else discardSessionHandoff(sessionId)
     invokedBySession.delete(sessionId)
     requestedBySession.delete(sessionId)
     planTouchesBySession.delete(sessionId)
