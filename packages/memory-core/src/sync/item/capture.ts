@@ -2,6 +2,9 @@
 // an explicit baseline frontier. The ops are generated on a FORK at that frontier, so a
 // stale writer's diff can only touch text it actually saw; importing the update into the
 // store doc merges it with anything newer. Returns null when nothing changed.
+// The fork keeps its own fresh peer id: forkAt already mints one, and overriding it with
+// the store doc's peer would hand out op ids the store already knows, so a second capture
+// from the same device on a stale baseline would be discarded on import (review r1 #1).
 
 import type { LoroDoc } from "loro-crdt"
 
@@ -26,7 +29,6 @@ export function captureItem(
 ): Uint8Array | null {
   const fork = doc.forkAt(baseFrontier)
   try {
-    fork.setPeerId(doc.peerIdStr)
     fork.setRecordTimestamp(false)
     if (renderDocContent(fork) !== baseText) {
       throw new CaptureBaselineError("captureItem: baseText is not the item's render at baseFrontier")
@@ -70,7 +72,7 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
   const combined = combineKey(state, key, kh, history)
   if (kh.kind === "text") {
     const target = toText(value)
-    if (combined?.kind === "text" && combined.text === renderScalar(target)) return
+    if (combined?.kind === "text" && combined.text === target) return
     if (state.text !== target) fork.getText(fmName(key, "text")).update(target)
     clearLosers(fork, key, state, "text")
     return
@@ -82,8 +84,7 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
     syncSet(fork, key, state, target)
     clearLosers(fork, key, state, "set")
     return
-  }
-  const target = toRegister(value)
+  }  const target = toRegister(value)
   if (combined?.kind === "reg" && combined.text === target) return
   const active = activeReg(state.reg)
   const entry = { v: target, s: active.map((e) => e.tag) }

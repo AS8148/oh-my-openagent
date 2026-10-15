@@ -5,7 +5,7 @@
 // YAML type of its value: string -> text, sequence -> set, boolean/number/date ->
 // register, mapping -> text holding its YAML flow serialisation, null -> removal.
 
-import { isMap, isScalar, isSeq, parseDocument, stringify } from "yaml"
+import { Document, YAMLSeq, isMap, isScalar, isSeq, parseDocument, stringify } from "yaml"
 import type { Node } from "yaml"
 
 export type FmValue =
@@ -43,6 +43,49 @@ export function splitItem(text: string): ParsedItemText {
 /** Canonical scalar source for storage and render; strict-YAML round-trip safe. */
 export function renderScalar(value: string | number | boolean): string {
   return stringify(value).trim()
+}
+
+/**
+ * Canonical frontmatter line(s) for one key (sync-design §2). The pair is built through
+ * the yaml document builder so multiline text lands as a properly indented block scalar
+ * and any joined text is quoted exactly when re-parsing needs it. A verbatim value is
+ * already a serialized YAML scalar (a lone register's stored form): it is emitted as-is
+ * when it re-parses as one scalar, and falls back to the string form otherwise. Capture
+ * compares keys against this render, so the same builder keeps the round trip a zero-op
+ * fixed point.
+ */
+export function renderEntry(key: string, value: string | readonly string[], verbatim = false): string {
+  if (verbatim && typeof value === "string") {
+    const candidate = `${renderScalar(key)}: ${value}`
+    const check = parseDocument(candidate, { schema: "core" })
+    if (check.errors.length === 0) {
+      const contents = check.contents
+      if (contents !== null && isMap(contents) && contents.items.length === 1) {
+        const pair = contents.items[0]
+        if (pair !== undefined && isScalar(pair.value)) return candidate
+      }
+    }
+  }
+  const doc = new Document({}, { schema: "core" })
+  doc.set(key, typeof value === "string" ? value : sequenceOf(value))
+  const out = stringify(doc).trimEnd()
+  if (doc.errors.length > 0) throw new Error(`renderEntry: cannot render key ${JSON.stringify(key)}: ${doc.errors[0]?.message}`)
+  return out
+}
+
+/**
+ * Set elements are stored as canonical YAML sources. Re-parse each one into its node so the
+ * emitter keeps its exact type and style (a number stays a number, a quoted string stays
+ * quoted, a flow map stays a flow map) and indents block scalars under the dash.
+ */
+function sequenceOf(sources: readonly string[]): YAMLSeq {
+  const seq = new YAMLSeq()
+  for (const source of sources) {
+    const parsed = parseDocument(source, { schema: "core" })
+    const node = parsed.errors.length === 0 ? parsed.contents : null
+    seq.items.push(node ?? source)
+  }
+  return seq
 }
 
 function parseHeader(header: string): readonly FmEntry[] | null {
