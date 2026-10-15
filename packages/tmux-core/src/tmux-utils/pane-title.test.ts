@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { buildSubagentPaneTitle } from "./pane-command"
+import { buildSubagentPaneTitle, escapeTmuxFormat } from "./pane-command"
 
 const tmuxPath = Bun.which("tmux")
 const itWithTmux = it.skipIf(process.platform === "win32" || tmuxPath === null)
@@ -30,6 +30,29 @@ describe("buildSubagentPaneTitle", () => {
 
       expect(tmux("display-message", "-p", "#{pane_title}").stdout.toString().trim()).toBe("omo-subagent-#{pane_id}#(touch c)")
       expect(existsSync(join(tempDir, "c"))).toBe(false)
+    } finally {
+      tmux("kill-server")
+      rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  itWithTmux("#given a real tmux server #when split-window -c gets an escaped directory #then the pane opens in the literal directory", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "omo-tmux-dir-"))
+    const literalDir = join(tempDir, "#{session_name}")
+    mkdirSync(literalDir)
+    const socketName = `omo-dir-${process.pid}-${Date.now()}`
+    const { TMUX: _outerTmux, ...env } = process.env
+    const tmux = (...args: string[]) =>
+      Bun.spawnSync([tmuxPath ?? "tmux", "-L", socketName, "-f", "/dev/null", ...args], { stdout: "pipe", stderr: "pipe", env })
+
+    try {
+      expect(tmux("new-session", "-d", "-c", tempDir, "sleep 30").exitCode).toBe(0)
+
+      const split = tmux("split-window", "-d", "-P", "-F", "#{pane_id}", "-c", escapeTmuxFormat(literalDir), "sleep 30")
+      const paneId = split.stdout.toString().trim()
+
+      expect(split.exitCode).toBe(0)
+      expect(realpathSync(tmux("display-message", "-p", "-t", paneId, "#{pane_start_path}").stdout.toString().trim())).toBe(realpathSync(literalDir))
     } finally {
       tmux("kill-server")
       rmSync(tempDir, { recursive: true, force: true })
