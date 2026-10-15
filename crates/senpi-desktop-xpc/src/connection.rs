@@ -166,7 +166,7 @@ impl SessionGate {
                 if !self.challenged {
                     return Err(TransportError::Challenge);
                 }
-                if capability != self.capability {
+                if !crate::capability::matches(&capability, &self.capability) {
                     return Err(TransportError::Capability);
                 }
                 if sequence != self.sequence {

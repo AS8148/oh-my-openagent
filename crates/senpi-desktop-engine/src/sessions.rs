@@ -31,7 +31,7 @@ impl Sessions {
         Self::with_supervisor(Arc::new(supervisor))
     }
 
-    fn with_supervisor(supervisor: Arc<Supervisor>) -> Self {
+    pub(crate) fn with_supervisor(supervisor: Arc<Supervisor>) -> Self {
         #[cfg(not(test))]
         let selection = BackendSelection::Platform;
         #[cfg(test)]
@@ -56,7 +56,7 @@ impl Sessions {
         config: EngineConfig,
         factory: impl BackendFactory,
     ) -> CoreResult<Arc<Engine>> {
-        let engine = Engine::start_session(factory, config, Arc::clone(&self.stop_paths))?;
+        let engine = Engine::start_session(factory, config, Arc::new(self.stop_paths.session_view()))?;
         #[cfg(test)]
         self.started
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);

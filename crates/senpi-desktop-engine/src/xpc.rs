@@ -9,6 +9,22 @@ use tokio::{
     task::JoinSet,
 };
 
+trait FrameStream: Send + Sync + 'static {
+    fn receive(&self) -> impl std::future::Future<Output = Option<Vec<u8>>> + Send;
+    fn send(&self, frame: &[u8]) -> Result<(), senpi_desktop_xpc::TransportError>;
+    fn close(&self);
+}
+
+impl FrameStream for Incoming {
+    fn receive(&self) -> impl std::future::Future<Output = Option<Vec<u8>>> + Send {
+        Incoming::receive(self)
+    }
+    fn send(&self, frame: &[u8]) -> Result<(), senpi_desktop_xpc::TransportError> {
+        Incoming::send(self, frame)
+    }
+    fn close(&self) { Incoming::close(self); }
+}
+
 pub(crate) async fn run(name: &str) -> Result<(), String> {
     let latch = crate::stop_latch::StopLatch::open().map_err(|error| error.to_string())?;
     let sessions = Arc::new(Sessions::persistent(latch));
@@ -21,7 +37,8 @@ pub(crate) async fn run(name: &str) -> Result<(), String> {
             stream = transport.next() => {
                 let Some(stream) = stream else { break; };
                 let sessions = Arc::clone(&sessions);
-                tasks.spawn(async move { serve(stream, sessions).await });
+                let opener = Arc::clone(&sessions);
+                tasks.spawn(async move { serve(stream, sessions, move |config| opener.open(config)).await });
             }
             joined = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(Err(error)) = joined {
@@ -35,7 +52,11 @@ pub(crate) async fn run(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn serve(stream: Incoming, sessions: Arc<Sessions>) {
+async fn serve(
+    stream: impl FrameStream,
+    sessions: Arc<Sessions>,
+    open: impl FnOnce(EngineConfig) -> senpi_desktop_core::error::CoreResult<Arc<Engine>>,
+) {
     let stream = Arc::new(stream);
     let first = loop {
         let Some(frame) = stream.receive().await else {
@@ -80,7 +101,7 @@ async fn serve(stream: Incoming, sessions: Arc<Sessions>) {
         timeouts: SessionTimeouts::default(),
         fake_clock: false,
     };
-    let engine = match sessions.open(config) {
+    let engine = match open(config) {
         Ok(engine) => engine,
         Err(_) => return,
     };
@@ -92,19 +113,22 @@ async fn serve(stream: Incoming, sessions: Arc<Sessions>) {
         let mut frame = first;
         loop {
             if sessions.classify(&frame).is_err() {
-                input_stream.close();
-                return;
+                break;
             }
             if incoming.write_all(&frame).await.is_err() || incoming.write_all(b"\n").await.is_err()
             {
-                input_stream.close();
-                return;
+                break;
             }
             let Some(next) = input_stream.receive().await else {
-                return;
+                break;
             };
             frame = next;
         }
+        // Dropping a split write half alone does not signal EOF to the router.
+        if let Err(error) = incoming.shutdown().await {
+            eprintln!("senpi-desktop-engine: closing XPC input failed: {error}");
+        }
+        input_stream.close();
     };
     let output_stream = Arc::clone(&stream);
     let output = async move {
@@ -133,3 +157,6 @@ async fn serve(stream: Incoming, sessions: Arc<Sessions>) {
     }
     engine.shutdown().await;
 }
+
+#[cfg(test)]
+mod tests;

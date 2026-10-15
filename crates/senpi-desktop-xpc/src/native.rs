@@ -67,7 +67,12 @@ impl Drop for Object {
 }
 
 /// A live accepted/activated connection. Drop revokes only this connection.
-pub(crate) struct Peer(Object);
+pub(crate) struct Peer {
+    object: Object,
+    activated: parking_lot::Mutex<bool>,
+    #[cfg(test)]
+    resumed: std::sync::atomic::AtomicBool,
+}
 
 // SAFETY: XPC connections synchronize their own state. Peer exposes only
 // thread-safe send/cancel/credential APIs, never mutable dictionary access.
@@ -77,7 +82,7 @@ unsafe impl Sync for Peer {}
 
 impl Peer {
     pub(crate) fn raw(&self) -> Raw {
-        self.0.raw()
+        self.object.raw()
     }
 
     pub(crate) fn same_user(&self) -> bool {
@@ -93,6 +98,9 @@ impl Peer {
     }
 
     pub(crate) fn cancel(&self) {
+        // Rejection can happen before a real handler is installed. libxpc
+        // requires activation before the final release, even for rejection.
+        self.install(|_| {});
         // SAFETY: cancellation is idempotent and the retained connection is live.
         unsafe { xpc_connection_cancel(self.raw()) };
     }
@@ -101,15 +109,30 @@ impl Peer {
     pub(crate) unsafe fn accept(raw: Raw) -> Result<Self, TransportError> {
         // SAFETY: the caller holds the listener event's borrowed reference.
         let object = unsafe { Object::retained(raw) }?;
-        Ok(Self(object))
+        Ok(Self {
+            object,
+            activated: parking_lot::Mutex::new(false),
+            #[cfg(test)]
+            resumed: std::sync::atomic::AtomicBool::new(false),
+        })
     }
 
     pub(crate) fn install(&self, callback: impl Fn(Raw) + Send + 'static) {
+        let mut activated = self.activated.lock();
+        if *activated { return; }
         let handler = RcBlock::new(callback);
         // SAFETY: the closure is 'static + Send, copied by XPC, and installed once.
         unsafe { xpc_connection_set_event_handler(self.raw(), &handler) };
         // SAFETY: this accepted peer is inactive and now has its handler.
         unsafe { xpc_connection_resume(self.raw()) };
+        *activated = true;
+        #[cfg(test)]
+        self.resumed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn was_activated(&self) -> bool {
+        self.resumed.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 

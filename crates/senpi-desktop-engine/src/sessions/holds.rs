@@ -14,7 +14,7 @@ impl BackendFactory for Factory {
     }
 }
 
-async fn held_client(owner: &Sessions, timeout: Duration) -> (Client, mpsc::Receiver<SinkOp>) {
+pub(super) async fn held_client(owner: &Sessions, timeout: Duration) -> (Client, mpsc::Receiver<SinkOp>) {
     let (tx, rx) = mpsc::channel();
     let mut config = config();
     config.timeouts.operation = timeout;

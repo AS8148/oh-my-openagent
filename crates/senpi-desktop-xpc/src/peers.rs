@@ -22,10 +22,16 @@ impl Peers {
         // SAFETY: caller supplies a live listener connection event.
         let peer = Arc::new(unsafe { Peer::accept(raw) }?);
         if !peer.same_user() {
+            peer.cancel();
             return Err(TransportError::User);
         }
+        self.insert(peer)
+    }
+
+    fn insert(&self, peer: Arc<Peer>) -> Result<(u64, Arc<Peer>), TransportError> {
         let mut state = self.state.lock();
         if state.peers.len() >= 128 {
+            peer.cancel();
             return Err(TransportError::Capacity);
         }
         state.next = state.next.checked_add(1).ok_or(TransportError::Capacity)?;
@@ -46,3 +52,6 @@ impl Peers {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

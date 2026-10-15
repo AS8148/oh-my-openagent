@@ -47,11 +47,13 @@ Backend construction waits for an authenticated, approved, structurally valid
 outbox, IDs, cancellation and resume token. Physical input arbitration and the
 native stop listener are process-wide. Disconnect cancels queued/in-flight
 requests, releases held input, and closes only that session. Client deadlines
-never terminate the agent.
+never terminate the agent. Each session has its own reporting policy and
+transition watermark, so one session cannot change another's policy or consume
+its `stopPath.changed` notification.
 
 The shared stop latch cannot be cleared with a connection's `stopPath.resume`.
-Restarting revokes connections and requires fresh approval, but never clears a
-user stop. O2 has no reset RPC or persistent-marker deletion operation. Only a
+Restarting revokes connections and requires fresh approval, and restores an
+existing stop marker. O2 has no reset RPC or persistent-marker deletion operation. Only a
 future explicit user action through the signed O3 controller or desktop app may
 lift it; a connection's resume token cannot become global reset authority.
 
@@ -71,14 +73,27 @@ means not stopped. An unreadable or malformed marker, wrong owner or permission
 bits, symlink, non-regular file, or invalid private directory starts the agent
 stopped and logs the reason. No session or backend is needed for restoration.
 
+**Residual: the marker is writable by the same user.** While the agent is down,
+a same-user process can delete it and thereby lift a persisted stop at the next
+startup, because a missing marker means not stopped. A stop during a live
+session remains latched in memory and is unaffected by deleting the marker.
+No external anchor is implemented in this delta; the anchor design remains
+pending. File ownership, permissions and descriptor-relative access do not
+prevent this deletion.
+
 All stop sources, including the native hotkey, pass through the shared
-supervisor's commit boundary. It creates a same-directory, exclusive 0600 temp
-file, writes the marker, fsyncs the file, renames it atomically, and fsyncs the
-directory. Newly created directory entries are also synced through their
-parents. Only then may the stop epoch, suspended flag, held-input notifications
-or RPC acknowledgement be published. A durable-write failure is logged and
-terminates the XPC agent without acknowledging the stop or continuing to accept
-input. Legacy engine modes retain their existing in-memory stop behavior.
+supervisor's release and commit boundary. It first requests physical input
+release and waits for active input scopes to finish, before any slow durable
+write. Releasing input does not publish or acknowledge a stop; held-request
+replies wait for publication. It then creates an exclusive 0600 temp file,
+writes the marker, fsyncs the file, renames it atomically, and fsyncs the
+directory. Marker reads, creation, rename and temporary cleanup use the
+validated directory descriptor rather than resolving its pathname again.
+Newly created directory entries are also synced through their parents.
+Only after commit may the stop epoch, suspended flag or RPC acknowledgement
+be published. A durable-write failure is logged and terminates the agent after
+held input has been released, without acknowledging the stop or accepting more
+input. Legacy engine modes retain their in-memory stop behavior.
 
 ## Manual acceptance
 

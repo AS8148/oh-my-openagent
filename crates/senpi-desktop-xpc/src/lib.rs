@@ -7,6 +7,8 @@ mod policy;
 #[cfg(target_os = "macos")]
 mod connection;
 #[cfg(target_os = "macos")]
+mod capability;
+#[cfg(target_os = "macos")]
 mod listener;
 #[cfg(target_os = "macos")]
 mod native;

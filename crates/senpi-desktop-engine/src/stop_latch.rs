@@ -31,7 +31,7 @@ impl StopLatch {
     fn load(directory: PathBuf) -> Self {
         let uid = account::uid();
         let stopped = match files::directory(&directory, uid)
-            .and_then(|_| files::read(&directory, uid))
+            .and_then(|opened| files::read(&opened, uid))
         {
             Ok(stopped) => stopped,
             Err(error) => {

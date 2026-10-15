@@ -198,6 +198,13 @@ impl Supervisor {
     /// Latch suspension. The first source is kept until [`Self::reset`].
     pub fn trigger_stop(&self, source: StopSource) {
         let mut stopped_by = self.stopped_by.lock();
+        // Keep registration closed until publication. Already active backends
+        // release first, without exposing a stopped epoch or acknowledgement.
+        let mut registered = self.hold_signals.lock();
+        registered.retain(|signal| signal.strong_count() > 0);
+        let signals: Vec<_> = registered.iter().filter_map(Weak::upgrade).collect();
+        for signal in &signals { signal.request_release(); }
+        for signal in &signals { signal.await_release(); }
         if let Some(commit) = &self.stop_commit {
             commit();
         }
@@ -206,14 +213,7 @@ impl Supervisor {
         stopped_by.get_or_insert(source);
         self.suspended.store(true, Ordering::SeqCst);
         drop(stopped_by);
-        self.hold_signals.lock().retain(|signal| {
-            if let Some(signal) = signal.upgrade() {
-                signal.stopped();
-                true
-            } else {
-                false
-            }
-        });
+        for signal in signals { signal.stopped(); }
     }
 
     /// Register before checking state or pressing input. Weak registration

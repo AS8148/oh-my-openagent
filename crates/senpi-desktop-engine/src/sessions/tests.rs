@@ -181,3 +181,40 @@ async fn cancel_only_affects_the_owning_connection() {
 
 #[path = "holds.rs"]
 mod holds;
+
+#[path = "release_order.rs"]
+mod release_order;
+
+#[tokio::test]
+async fn r2_l1_session_policy_is_private() {
+    // given
+    let owner = Sessions::new();
+    let a = owner.open(config()).unwrap();
+    let b = owner.open(config()).unwrap();
+    // when
+    a.route(senpi_desktop_core::methods::Method::SessionOpen, json!({"allowHostRelayOnlyStop":true}));
+    b.route(senpi_desktop_core::methods::Method::SessionOpen, json!({}));
+    a.stop_paths().supervisor().set_live(senpi_desktop_safety::StopPathId::HostRelay, true);
+    // then
+    assert!(a.stop_paths().status().reason.is_none());
+    assert!(b.stop_paths().status().reason.is_some());
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn r2_l1_every_session_observes_the_stop_transition() {
+    // given
+    let owner = Sessions::new();
+    let a = owner.open(config()).unwrap();
+    let b = owner.open(config()).unwrap();
+    // when
+    a.stop_paths().stop(senpi_desktop_core::protocol_params::StopRequestSource::Api);
+    a.announce_stop_path();
+    b.announce_stop_path();
+    // then
+    assert_eq!(a.outbox().drain().len(), 1);
+    assert_eq!(b.outbox().drain().len(), 1, "the first session consumed another session's transition");
+    a.shutdown().await;
+    b.shutdown().await;
+}

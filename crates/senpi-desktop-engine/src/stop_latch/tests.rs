@@ -36,7 +36,8 @@ fn malformed_marker_starts_stopped_without_rewriting_it() {
     let marker = temp.path().join(files::MARKER);
     fs::write(&marker, b"not a valid marker").unwrap();
     fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
-    assert_eq!(files::read(temp.path(), account::uid()).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    let opened = files::directory(temp.path(), account::uid()).unwrap();
+    assert_eq!(files::read(&opened, account::uid()).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     // when
     let latch = StopLatch::for_test(temp.path().to_owned());
     // then
@@ -115,4 +116,36 @@ fn a_failed_rename_does_not_claim_commit_and_removes_only_its_temporary_file() {
     assert!(temp.path().join(files::MARKER).is_dir());
     assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
     assert!(StopLatch::for_test(temp.path().to_owned()).is_stopped());
+}
+
+#[test]
+fn r2_l4_read_stays_with_the_validated_directory_after_path_replacement() {
+    // given
+    let temp = private_dir();
+    let original = temp.path().join("state");
+    let latch = StopLatch::for_test(original.clone());
+    latch.persist().unwrap();
+    let opened = files::directory(&original, account::uid()).unwrap();
+    // when
+    fs::rename(&original, temp.path().join("moved")).unwrap();
+    fs::create_dir(&original).unwrap();
+    fs::set_permissions(&original, fs::Permissions::from_mode(0o700)).unwrap();
+    // then
+    assert!(files::read(&opened, account::uid()).unwrap(), "read followed the replacement pathname");
+}
+
+#[test]
+fn r2_l4_write_stays_with_the_validated_directory_after_path_replacement() {
+    // given
+    let temp = private_dir();
+    let original = temp.path().join("state");
+    let opened = files::directory(&original, account::uid()).unwrap();
+    let moved = temp.path().join("moved");
+    // when
+    fs::rename(&original, &moved).unwrap();
+    fs::create_dir(&original).unwrap();
+    files::commit_at(&opened).unwrap();
+    // then
+    assert!(moved.join(files::MARKER).exists(), "commit followed the replacement pathname");
+    assert!(!original.join(files::MARKER).exists());
 }
