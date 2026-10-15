@@ -2602,6 +2602,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "senpi-desktop-xpc"
+version = "0.0.0"
+dependencies = [
+ "block2",
+ "objc2-core-foundation",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
