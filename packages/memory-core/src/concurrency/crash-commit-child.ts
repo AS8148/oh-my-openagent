@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync } from "../fs/resilient"
 import { spawn } from "node:child_process"
 
 import { GitMemoryRepo } from "../git"
@@ -56,7 +56,7 @@ function createInCommitKillExec(minDelayMs: number, maxDelayMs: number): GitExec
 }
 
 async function gitStdout(args: readonly string[]): Promise<string> {
-  const child = spawn("git", ["-C", repoPath, ...args], { stdio: ["ignore", "pipe", "inherit"] })
+  const child = spawn("git", ["-C", repoPath, ...args], { stdio: ["ignore", "pipe", "inherit"], windowsHide: true })
   let out = ""
   child.stdout.on("data", (chunk: Buffer) => { out += chunk.toString("utf8") })
   await new Promise((resolve) => child.once("exit", resolve))
@@ -78,7 +78,7 @@ function unreachable(message: string): never {
 async function strandIndexLockAndDie(): Promise<never> {
   // `git update-index --stdin` creates .git/index.lock at startup and holds it while it waits for
   // input, so the lock file's existence proves the git child is alive and holding it.
-  const git = spawn("git", ["-C", repoPath, "update-index", "--stdin"], { stdio: ["pipe", "ignore", "ignore"] })
+  const git = spawn("git", ["-C", repoPath, "update-index", "--stdin"], { stdio: ["pipe", "ignore", "ignore"], windowsHide: true })
   const deadline = Date.now() + 10_000
   while (!existsSync(`${repoPath}/.git/index.lock`)) {
     if (Date.now() >= deadline) {
@@ -97,7 +97,7 @@ async function strandRefLockAndDie(): Promise<never> {
   // `git update-ref --stdin` takes refs/heads/main.lock during `prepare` and keeps holding it while
   // it waits for `commit` or `abort`; `prepare: ok` on stdout is git's own acknowledgement.
   const head = await gitStdout(["rev-parse", "HEAD"])
-  const git = spawn("git", ["-C", repoPath, "update-ref", "--stdin"], { stdio: ["pipe", "pipe", "ignore"] })
+  const git = spawn("git", ["-C", repoPath, "update-ref", "--stdin"], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true })
   let out = ""
   git.stdout.on("data", (chunk: Buffer) => { out += chunk.toString("utf8") })
   git.stdin.write(`start\nupdate refs/heads/main ${head}\nprepare\n`)
