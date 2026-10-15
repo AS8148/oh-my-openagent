@@ -31,12 +31,20 @@ interface OpLike {
   readonly content: unknown
 }
 
-const cache = new WeakMap<LoroDoc, { readonly changeCount: number; readonly value: ItemHistory }>()
+// Keyed by the oplog size, not changeCount(): Loro merges consecutive same-peer commits
+// into one Change, so the change count can stay put while new ops land.
+const cache = new WeakMap<LoroDoc, { readonly oplogSize: number; readonly value: ItemHistory }>()
+
+function oplogSize(doc: LoroDoc): number {
+  let size = 0
+  for (const end of doc.oplogVersion().toJSON().values()) size += end
+  return size
+}
 
 export function analyzeHistory(doc: LoroDoc): ItemHistory {
-  const changeCount = doc.changeCount()
+  const size = oplogSize(doc)
   const hit = cache.get(doc)
-  if (hit !== undefined && hit.changeCount === changeCount) return hit.value
+  if (hit !== undefined && hit.oplogSize === size) return hit.value
 
   const keys = new Map<string, { kind: FmPart; first: Stamp; byKind: Map<FmPart, Stamp> }>()
   const setAdds = new Map<string, Map<string, Stamp>>()
@@ -67,7 +75,7 @@ export function analyzeHistory(doc: LoroDoc): ItemHistory {
   }
 
   const value: ItemHistory = { keys, setAdds, regAdds }
-  cache.set(doc, { changeCount, value })
+  cache.set(doc, { oplogSize: size, value })
   return value
 }
 

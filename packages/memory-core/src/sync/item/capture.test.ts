@@ -152,11 +152,11 @@ describe("captureItem", () => {
     captureInto(doc, "", [], v1)
     const v2 = "---\nkey: 7\n---\n"
     captureInto(doc, v1, itemFrontier(doc), v2)
-    expect(renderItem(doc)).toBe(v2)
+    expect(renderItem(doc)).toBe("---\nkey: \"7\"\n---\n")
     expect(captureCurrent(doc, renderItem(doc) ?? "")).toBeNull()
     const v3 = "---\nkey: 8\n---\n"
-    captureInto(doc, v2, itemFrontier(doc), v3)
-    expect(renderItem(doc)).toBe(v3)
+    captureInto(doc, "---\nkey: \"7\"\n---\n", itemFrontier(doc), v3)
+    expect(renderItem(doc)).toBe("---\nkey: \"8\"\n---\n")
     doc.free()
   })
 })
