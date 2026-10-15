@@ -24,8 +24,9 @@ fn decide(pid: libc::pid_t, responsible: Option<libc::pid_t>) -> Result<(), Stri
     match responsible {
         Some(responsible) if responsible != pid => Ok(()),
         Some(_) => Err(format!(
-            "refusing to run as its own responsible process (pid {pid}): start the engine from \
-             the app or terminal that holds the computer-use grants"
+            "refusing to run as its own responsible process (pid {pid}): spawn the engine as a \
+             child of the app, terminal or host that holds the computer-use grants, without the \
+             responsibility-disclaim attribute and not as a launchd job or through a shell exec"
         )),
         None => Err(format!(
             "refusing to run: the responsible process of engine pid {pid} cannot be resolved"

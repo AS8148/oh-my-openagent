@@ -23,14 +23,21 @@ struct Exit {
     stderr: String,
 }
 
-/// Spawns `--stdio` with stdin from /dev/null, stderr to a file, and the
-/// responsibility disclaim attribute set as requested.
 fn spawn_engine(disclaim: bool) -> Exit {
+    spawn_engine_with(disclaim, &["--stdio"])
+}
+
+/// Spawns the engine with `args`, stdin from /dev/null, stderr to a file, and
+/// the responsibility disclaim attribute set as requested.
+fn spawn_engine_with(disclaim: bool, mode_args: &[&str]) -> Exit {
     let dir = tempfile::tempdir().expect("temp dir");
     let stderr_path = dir.path().join("stderr");
     let c = |text: &str| CString::new(text).expect("no interior nul");
     let program = c(BINARY);
-    let args = [c(BINARY), c("--stdio")];
+    let args: Vec<CString> = std::iter::once(BINARY)
+        .chain(mode_args.iter().copied())
+        .map(c)
+        .collect();
     let env = [c(&format!("SENPI_DESKTOP_BACKEND=fake:{TWO_DISPLAYS}"))];
     let (null, stderr_file) = (c("/dev/null"), c(stderr_path.to_str().expect("utf-8 path")));
     let mut argv: Vec<*mut libc::c_char> = args.iter().map(|arg| arg.as_ptr().cast_mut()).collect();
@@ -132,5 +139,38 @@ fn the_daemon_modes_are_off_without_the_opt_in() {
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("--enable-daemon"), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
+fn every_entry_mode_is_refused_when_disclaimed() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let socket = dir.path().join("e.sock");
+    let socket = socket.to_str().expect("utf-8 path");
+    let modes: [&[&str]; 9] = [
+        &["--stdio"],
+        &["--cursor-overlay"],
+        &["--schema"],
+        &["--selftest"],
+        &["--resume", "--endpoint", socket],
+        &["--enable-daemon", "--serve", socket],
+        &["--enable-daemon", "--oneshot", "--endpoint", socket],
+        &["--enable-daemon", "--mcp", "--endpoint", socket],
+        &["--serve", socket],
+    ];
+    for mode in modes {
+        // When
+        let exit = spawn_engine_with(true, mode);
+        // Then
+        assert_ne!(exit.code, 0, "{mode:?}: {}", exit.stderr);
+        assert!(
+            exit.stderr.contains("own responsible process"),
+            "{mode:?}: {}",
+            exit.stderr
+        );
+        assert!(
+            !std::path::Path::new(socket).exists(),
+            "{mode:?} created the daemon socket"
+        );
     }
 }

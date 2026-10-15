@@ -30,18 +30,16 @@ use crate::engine::Engine;
 const USAGE_ERROR: u8 = 2;
 
 fn main() -> ExitCode {
+    // The #10207 gate runs before every mode, the private overlay helper included.
+    if let Err(refusal) = check_launch() {
+        return fail(&refusal);
+    }
     // The private helper must own the main thread before Tokio or a session
     // starts. It is not a desktop RPC method and creates no input backend.
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--cursor-overlay")) {
         return cursor_overlay();
     }
-    let mode = Cli::parse().mode();
-    if !matches!(mode, Mode::Schema) {
-        if let Err(refusal) = check_launch() {
-            return fail(&refusal);
-        }
-    }
-    match mode {
+    match Cli::parse().mode() {
         Mode::Schema => print_schema(),
         Mode::DaemonDisabled { flag } => {
             eprintln!("senpi-desktop-engine: {flag} is off by default; pass --enable-daemon to use it");
