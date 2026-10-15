@@ -216,6 +216,7 @@ export type ResidencyDenied =
 export type ContinueDelivery = "steer" | "followUp" | "revive"
 
 export type ContinueResult =
+  | Extract<SendOutcome, { kind: "uncertain" }>
   | {
       readonly kind: "continued"
       readonly task_id: string
