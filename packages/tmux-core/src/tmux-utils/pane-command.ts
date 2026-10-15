@@ -22,9 +22,13 @@ function withoutNul(value: string): string {
   return value.replaceAll("\0", "")
 }
 
+export function escapeTmuxFormat(value: string): string {
+  return value.replaceAll("#", "##")
+}
+
 export function buildSubagentPaneTitle(description: string): string {
   const shown = withoutNul(description).slice(0, PANE_TITLE_DESCRIPTION_LIMIT)
-  return `omo-subagent-${shown.replaceAll("#", "##")}`
+  return `omo-subagent-${escapeTmuxFormat(shown)}`
 }
 
 export function buildTmuxPlaceholderCommand(description: string): string {
