@@ -107,6 +107,7 @@ export const {
   mkdtemp,
   readFile,
   readdir,
+  readlink,
   realpath,
   rm,
   rmdir,

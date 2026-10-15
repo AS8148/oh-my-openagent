@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process"
 import { hostname } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 
@@ -10,6 +9,7 @@ import { isLockOwnerProvenDead } from "../locks/acquire"
 import { provenDeadTakeoverFor } from "../locks/proven-dead-takeovers"
 import { isGitLockError, withGitLockRetry } from "./config-lock"
 import { GitError } from "./errors"
+import { hasOpenFileHolder } from "./open-file-holders"
 
 // Settle window between observing an idle lock candidate and re-checking it. The crash-
 // consistency fixture child shortens its OWN process's window through the
@@ -54,28 +54,6 @@ async function collectRefLockPaths(gitDir: string): Promise<string[]> {
   return found
 }
 
-// The sweep's contract changed with omo #10199 review HIGH 1: a git process killed
-// mid-transaction strands lock files it can never remove, but so does a LIVE writer in the
-// windows where git already closed the lock fd (commit's prepare_index, the files ref backend's
-// post-write close). Open handles and age can never distinguish the two, so reclamation is tied
-// to ownership: the sweep runs only while the caller holds the identity's memory-write lock, and
-// only when the lock protocol proved the recorded previous owner dead (pid + start identity;
-// provenDeadTakeoverFor keeps that proof across the republish). Unknown ownership keeps the lock
-// and the caller surfaces it through StrandedGitLockError instead of deleting on no evidence.
-async function hasOpenHolder(path: string): Promise<boolean> {
-  if (process.platform === "win32") return true
-  return new Promise((resolveHeld) => {
-    execFile("lsof", ["-t", "--", path], { windowsHide: true, timeout: 5_000 }, (error, stdout) => {
-      if (stdout.trim().length > 0) return resolveHeld(true)
-      // lsof exit 1 with empty stdout is the ONLY "no holders" answer; a nonzero-abnormal exit,
-      // a signal, a timeout, or a spawn error means the check failed, and failed means held.
-      if (error === null) return resolveHeld(false)
-      const code = (error as { code?: unknown }).code
-      resolveHeld(code !== 1)
-    })
-  })
-}
-
 type LockSnapshot = ReadonlyMap<string, { readonly ino: number; readonly mtimeMs: number }>
 
 async function presentLockFiles(gitDir: string): Promise<LockSnapshot> {
@@ -102,7 +80,7 @@ async function settledUnheld(present: LockSnapshot, settleMs: number): Promise<s
   for (const [candidate, before] of present) {
     const status = await lstat(candidate).catch(() => undefined)
     if (status === undefined || status.ino !== before.ino || status.mtimeMs !== before.mtimeMs) continue
-    if (await hasOpenHolder(candidate)) continue
+    if (await hasOpenFileHolder(candidate)) continue
     removable.push(candidate)
   }
   return removable
@@ -117,6 +95,14 @@ function writerLockPathForRepo(repoDir: string): string | null {
   return memoryWriterLockPath(join(dirname(resolved), RUNTIME_DIRNAME, "locks"))
 }
 
+// The sweep's contract changed with omo #10199 review HIGH 1: a git process killed
+// mid-transaction strands lock files it can never remove, but so does a LIVE writer in the
+// windows where git already closed the lock fd (commit's prepare_index, the files ref backend's
+// post-write close). Open handles and age can never distinguish the two, so reclamation is tied
+// to ownership: the sweep runs only while the caller holds the identity's memory-write lock, and
+// only when the lock protocol proved the recorded previous owner dead (pid + start identity;
+// provenDeadTakeoverFor keeps that proof across the republish). Unknown ownership keeps the lock
+// and the caller surfaces it through StrandedGitLockError instead of deleting on no evidence.
 // Both gates must hold, in order: (1) THIS process holds the identity's memory-write lock right
 // now, and (2) the lock protocol proved the previous owner dead when this process took it over,
 // re-verified here so a pid recycled since the takeover cannot pass.

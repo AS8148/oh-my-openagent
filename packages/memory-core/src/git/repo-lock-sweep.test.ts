@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { execFileSync, spawn, type ChildProcess } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
@@ -13,6 +13,7 @@ import { installHooks } from "../memfs/hooks"
 import { assertRepoIntegrity, git } from "../concurrency/two-process-kit.test-support"
 import { GitMemoryRepo } from "./repo"
 import { sweepStrandedGitLockFiles } from "./repo-lock-sweep"
+import { findOpenFileHolderPids, unreadableFdDirMeansHeld } from "./open-file-holders"
 
 // omo #10199 review HIGH 1: the stranded-lock sweep's premise - "git keeps the lock fd open from
 // create until rename" - is false. Git's lockfile API closes the descriptor after writing the lock
@@ -56,16 +57,12 @@ function removedPaths(sweepResult: unknown): readonly string[] {
   return Array.isArray(sweepResult) ? sweepResult : (sweepResult as { readonly removed: readonly string[] }).removed
 }
 
-// Proof that the lock file has NO open holder right now: lsof exit 1 with empty stdout is its
-// "no matching processes" answer; any other failure is a probe error and fails the test.
-function lsofHolders(lockPath: string): string {
-  try {
-    return execFileSync("lsof", ["-t", "--", lockPath], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
-  } catch (error) {
-    const status = (error as { status?: number }).status
-    if (status === 1) return ""
-    throw error
-  }
+// Proof that the lock file has NO open holder right now, through the same production helper the
+// sweep uses (findOpenFileHolderPids: /proc scan on linux, lsof elsewhere). A null answer means
+// "cannot determine" and fails the test - a live-writer test can never proceed on an unknown.
+async function expectNoHolder(lockPath: string): Promise<void> {
+  const holders = await findOpenFileHolderPids(lockPath)
+  expect(holders, `open holders of ${lockPath}`).toEqual([])
 }
 
 async function writeSlowHook(repoDir: string, name: string, script: string): Promise<void> {
@@ -117,7 +114,7 @@ describe("stranded git lock sweep vs LIVE writers (omo #10199 review)", () => {
       // prepare_index wrote index.lock and closed its fd, so the file exists with no holder.
       expect(await probeUntil(() => existsSync(sentinel), 10_000)).toBe(true)
       expect(existsSync(lockPath)).toBe(true)
-      expect(lsofHolders(lockPath)).toBe("")
+      await expectNoHolder(lockPath)
 
       // #when
       const removed = removedPaths(await sweepStrandedGitLockFiles(dir, 50))
@@ -166,7 +163,7 @@ describe("stranded git lock sweep vs LIVE writers (omo #10199 review)", () => {
       // The hook also runs for "preparing"; only "prepared" guarantees the ref locks are written.
       expect(await probeUntil(() => existsSync(states) && readFileSync(states, "utf8").includes("prepared\n"), 10_000)).toBe(true)
       expect(existsSync(lockPath)).toBe(true)
-      expect(lsofHolders(lockPath)).toBe("")
+      await expectNoHolder(lockPath)
 
       // #when
       const removed = removedPaths(await sweepStrandedGitLockFiles(dir, 50))
@@ -272,4 +269,14 @@ describe("stranded git lock sweep vs LIVE writers (omo #10199 review)", () => {
       await releaseLock(writerLockPath, record)
     }
   }, 30_000)
+
+  describe("the conservative /proc unreadable-fd-dir rule", () => {
+    test("#given a same-user process whose fd dir is unreadable #then it counts as held", () => {
+      expect(unreadableFdDirMeansHeld(1000, 1000)).toBe(true)
+    })
+    test("#given another user's process whose fd dir is unreadable #then it is skipped, matching non-root lsof", () => {
+      expect(unreadableFdDirMeansHeld(0, 1000)).toBe(false)
+      expect(unreadableFdDirMeansHeld(1001, 1000)).toBe(false)
+    })
+  })
 })
