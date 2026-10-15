@@ -30,10 +30,11 @@ import { TELEMETRY_SESSION_ROLES } from "./session-role"
  */
 
 const REGISTRY_DIR = new URL("./schema-registry/", import.meta.url)
-const SEMCONV_MAP_BYTES = readFileSync(new URL("semconv-map.json", REGISTRY_DIR))
+const SEMCONV_MAP_JSON: unknown = JSON.parse(readFileSync(new URL("semconv-map.json", REGISTRY_DIR), "utf8"))
 
 export const PROTO_TAG = "v1.7.0"
-export const SEMCONV_MAP_SHA256 = createHash("sha256").update(SEMCONV_MAP_BYTES).digest("hex")
+/** The collector's pin: sha256 of the canonical body, so a reformat of the file does not move it. */
+export const SEMCONV_MAP_SHA256 = createHash("sha256").update(canonicalJson(SEMCONV_MAP_JSON)).digest("hex")
 
 /**
  * Bare property names that name a concept with an OpenTelemetry semantic convention. Such a property
@@ -75,6 +76,15 @@ const EVENT_SCOPED_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   "gen_ai.usage.output_tokens": new Set(["turn_completed"]),
   "gen_ai.usage.reasoning.output_tokens": new Set(["turn_completed"]),
   "omo.usage.total_tokens": new Set(["turn_completed"]),
+}
+
+/**
+ * Wire keys renamed per event because `omo.<bare name>` would end in a forbidden leaf: a bare
+ * `reason` reads like free text to the collector's key rules, so the start reason travels as
+ * `omo.start_reason` and the relay restores the PostHog name from `posthog_name`.
+ */
+const EVENT_KEY_RENAMES: Readonly<Record<string, { readonly key: string; readonly events: ReadonlySet<string> }>> = {
+  reason: { key: "omo.start_reason", events: new Set(["daily_active", "session_started"]) },
 }
 
 /** PostHog properties that are derived from a wire attribute rather than sent (D-P: cost_usd). */
@@ -139,6 +149,8 @@ export function wireKeyOf(event: string, property: string): { readonly key: stri
   } else if (CONVENTION_NAMES.has(property)) {
     throw new Error(`${event}.${property} has a semantic convention but no entry in semconv-map.json`)
   }
+  const renamed = EVENT_KEY_RENAMES[property]
+  if (renamed !== undefined && renamed.events.has(event)) return { key: renamed.key, location: "record" }
   return { key: `omo.${property}`, location: "record" }
 }
 
@@ -243,13 +255,26 @@ function resourceAttributes(spec: ProductSpec): AttributeMap {
   return sortedObject(entries.map(([key, value]) => [key, { ...value, ...posthog(key) }] as const))
 }
 
-/** JSON with object keys sorted at every depth and no whitespace: the artifact hash input. */
+function compareCodePoints(left: string, right: string): number {
+  const a = Array.from(left)
+  const b = Array.from(right)
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    const delta = (a[index]?.codePointAt(0) ?? 0) - (b[index]?.codePointAt(0) ?? 0)
+    if (delta !== 0) return delta
+  }
+  return a.length - b.length
+}
+
+/**
+ * JSON with object keys sorted by Unicode code point at every depth and no whitespace: the hash input
+ * for artifacts and the semconv map, identical to the collector's `canonicalJson`.
+ */
 export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value)
       .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .sort(([left], [right]) => compareCodePoints(left, right))
     return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`
   }
   return JSON.stringify(value)

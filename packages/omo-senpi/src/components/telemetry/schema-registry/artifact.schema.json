@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://omo.dev/schemas/telemetry-artifact.schema.json",
   "title": "OmO telemetry product schema artifact",
-  "description": "The per-product allowlist the collector pins (plan D-A, D-I, D-P). Every wire key matches keyPattern and none is forbidden; every string has values or pattern; every number has min and max.",
+  "description": "The per-product allowlist the collector pins (plan D-A, D-I, D-P). Every wire key matches keyPattern and none is forbidden; every string has values or a pattern from the fixed safePattern set; every number has min and max.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -46,6 +46,7 @@
       "$ref": "#/$defs/sha256"
     },
     "resource": {
+      "type": "object",
       "$ref": "#/$defs/attributeMap",
       "required": [
         "service.name",
@@ -74,7 +75,7 @@
           }
         },
         "version": {
-          "$ref": "#/$defs/anchoredPattern"
+          "$ref": "#/$defs/safePattern"
         }
       }
     },
@@ -85,6 +86,7 @@
         "$ref": "#/$defs/eventName"
       },
       "additionalProperties": {
+        "type": "object",
         "$ref": "#/$defs/attributeMap",
         "required": ["log.record.uid"]
       }
@@ -103,12 +105,23 @@
       "additionalProperties": {
         "type": "object",
         "required": ["rows"],
+        "additionalProperties": false,
         "properties": {
+          "source": {
+            "type": "string"
+          },
+          "source_key": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
           "rows": {
             "type": "array",
             "items": {
               "type": "object",
               "required": ["id", "wire"],
+              "additionalProperties": false,
               "properties": {
                 "id": {
                   "type": "string"
@@ -194,23 +207,12 @@
         "gen_ai.completion",
         "gen_ai.system_instructions",
         "gen_ai.tool.call.arguments",
-        "gen_ai.tool.call.result"
-      ]
-    },
-    "forbiddenKeyPatterns": {
-      "anyOf": [
-        {
-          "pattern": "_(?:text|path|prompt)$"
-        },
-        {
-          "pattern": "^\\$"
-        },
-        {
-          "pattern": "^(?:user|enduser|omo\\.collector)\\."
-        }
+        "gen_ai.tool.call.result",
+        "host.name"
       ]
     },
     "wireKey": {
+      "type": "string",
       "allOf": [
         {
           "$ref": "#/$defs/keyPattern"
@@ -222,18 +224,29 @@
         },
         {
           "not": {
-            "$ref": "#/$defs/forbiddenKeyPatterns"
+            "pattern": "_(?:text|path|prompt)$"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^\\$"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^(?:user|enduser|omo\\.collector)\\."
+          }
+        },
+        {
+          "not": {
+            "pattern": "(?:^|\\.)(?:reason|stack|message|email|ip|hostname|path)$"
           }
         }
       ]
     },
     "eventName": {
       "type": "string",
-      "pattern": "^omo\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,4}$"
-    },
-    "anchoredPattern": {
-      "type": "string",
-      "pattern": "^\\^.*\\$$"
+      "pattern": "^omo\\.[a-z][a-z0-9_]*$"
     },
     "attributeMap": {
       "type": "object",
@@ -261,7 +274,7 @@
           }
         },
         "pattern": {
-          "$ref": "#/$defs/anchoredPattern"
+          "$ref": "#/$defs/safePattern"
         },
         "integer": {
           "type": "boolean"
@@ -286,6 +299,7 @@
       "allOf": [
         {
           "if": {
+            "type": "object",
             "properties": {
               "type": {
                 "const": "string"
@@ -305,6 +319,7 @@
         },
         {
           "if": {
+            "type": "object",
             "properties": {
               "type": {
                 "const": "number"
@@ -314,6 +329,44 @@
           "then": {
             "required": ["min", "max"]
           }
+        }
+      ]
+    },
+    "safePattern": {
+      "description": "The only regexes a string attribute may use (plan D-I: no free-text slot). Matched byte-exact; anything else must be an enum (values).",
+      "oneOf": [
+        {
+          "title": "uuid",
+          "const": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        {
+          "title": "semver",
+          "const": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+        },
+        {
+          "title": "sha256_hex",
+          "const": "^[0-9a-f]{64}$"
+        },
+        {
+          "title": "hex32",
+          "const": "^[0-9a-f]{32}$"
+        },
+        {
+          "title": "hex16",
+          "const": "^[0-9a-f]{16}$"
+        },
+        {
+          "title": "iso_date",
+          "const": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        {
+          "title": "os_version",
+          "const": "^[0-9]+(\\.[0-9]+){1,3}(-[0-9A-Za-z.-]{1,32})?$"
+        },
+        {
+          "title": "os_version_desktop",
+          "description": "The desktop's os.version: a closed OS family plus digits, or unknown (ingest strips the family before storage).",
+          "const": "^(unknown|macOS [0-9]+(\\.[0-9]+){0,2}|Windows [0-9]+\\.[0-9]+\\.[0-9]+|Linux [0-9]+\\.[0-9]+(\\.[0-9]+)?)$"
         }
       ]
     }

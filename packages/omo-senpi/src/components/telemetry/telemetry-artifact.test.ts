@@ -153,7 +153,8 @@ describe("telemetry schema artifacts", () => {
     for (const attributes of Object.values(SENPI.events)) {
       for (const [key, spec] of Object.entries(attributes)) {
         if (spec.posthog_name !== undefined && key.startsWith("omo.") && !key.includes(".", 4)) {
-          expect(key).toBe(`omo.${spec.posthog_name}`)
+          // The one event-scoped rename: a bare `reason` leaf is forbidden on the wire.
+          expect(key).toBe(spec.posthog_name === "reason" ? "omo.start_reason" : `omo.${spec.posthog_name}`)
         }
       }
     }

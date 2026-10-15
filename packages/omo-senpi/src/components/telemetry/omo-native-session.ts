@@ -16,10 +16,10 @@ import { deferUntilAfterFirstPaint } from "../../extension/startup-deferral"
 import type { OmoSenpiComponent } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { loadSenpiOmoConfig } from "../config-resolution"
-import { TIMEZONE_PATTERN } from "./event-schema-constraints"
 import { getSenpiTelemetryStateDir, recordSenpiDailyActive } from "./index"
 import { createCategoryConfigCapture } from "./omo-native-category-config"
 import { captureProcessCrashes } from "./omo-native-crash"
+import { providerPropertyName } from "./model-vocabulary"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
   OMO_NATIVE_SCHEMA_VERSION,
@@ -45,8 +45,8 @@ export type OmoNativeSessionOptions = {
   readonly now?: Date
   readonly osProvider?: TelemetryOsProvider
   readonly setTimeoutFn?: EventTelemetrySetTimeout
-  /** Device-reported IANA zone. Injected in tests; the host default reads the runtime's resolved zone. */
-  readonly timeZone?: () => string
+  /** The device's UTC offset in minutes (east positive). Injected in tests; the host default reads the clock. */
+  readonly utcOffsetMinutes?: () => number
   readonly transportFactory?: TelemetryTransportFactory
 }
 
@@ -100,7 +100,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
 
         const inventory = readOmoNativeInventory(resolveAgentHome({ env }), options.diagnostics)
         const reason = sessionReason(payload)
-        const timezone = readTimeZone(options.timeZone)
+        const utcOffsetMinutes = readUtcOffsetMinutes(options.utcOffsetMinutes, options.now)
         client.captureEvent("session_started", {
           $session_id: sessionHash,
           $os: osProvider.platform(),
@@ -110,10 +110,11 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           memory_bucket: memoryBucket(osProvider.totalmem()),
           provider_count: inventory.providerCount,
           model_count: inventory.modelCount,
-          ...(inventory.providers === "" ? {} : { providers: inventory.providers }),
+          ...Object.fromEntries(inventory.knownProviders.map((id) => [providerPropertyName(id), true])),
+          custom_provider_count: inventory.customProviderCount,
           reason,
           session_role: resolveTelemetrySessionRole(pi, env),
-          ...(timezone === undefined ? {} : { timezone }),
+          ...(utcOffsetMinutes === undefined ? {} : { utc_offset_minutes: utcOffsetMinutes }),
           ...(inventory.defaultProvider === undefined ? {} : { default_provider: inventory.defaultProvider }),
           ...(inventory.defaultModel === undefined ? {} : { default_model: inventory.defaultModel }),
         })
@@ -201,15 +202,16 @@ function loadCategoryConfig(
   }
 }
 
-// A runtime without ICU data (or a host that refuses the lookup) simply ships no timezone.
-// The artifact's syntax bound for a zone name (event-schema-constraints.ts): a zone outside it is
-// dropped here rather than sent and rejected at the collector.
-const TIMEZONE = new RegExp(TIMEZONE_PATTERN)
+// Every real offset lies in UTC-12:00..UTC+14:00 (the artifact's bounds); anything else, a fractional
+// value or a throwing clock ships no offset rather than one the collector would reject.
+const MIN_UTC_OFFSET_MINUTES = -720
+const MAX_UTC_OFFSET_MINUTES = 840
 
-function readTimeZone(provider: (() => string) | undefined): string | undefined {
+function readUtcOffsetMinutes(provider: (() => number) | undefined, now: Date | undefined): number | undefined {
   try {
-    const zone = (provider ?? (() => Intl.DateTimeFormat().resolvedOptions().timeZone))()
-    return TIMEZONE.test(zone) ? zone : undefined
+    const offset = (provider ?? (() => -(now ?? new Date()).getTimezoneOffset()))()
+    if (!Number.isInteger(offset) || offset < MIN_UTC_OFFSET_MINUTES || offset > MAX_UTC_OFFSET_MINUTES) return undefined
+    return offset === 0 ? 0 : offset
   } catch {
     return undefined
   }

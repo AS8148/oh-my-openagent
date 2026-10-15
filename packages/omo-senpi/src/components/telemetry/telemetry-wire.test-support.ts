@@ -7,7 +7,8 @@ const COMMON: ReadonlySet<string> = new Set(Object.keys(OMO_NATIVE_COMMON_PROPER
 /**
  * Projects one emitted PostHog property bag onto the omo-senpi artifact the way the collector sees
  * it (wire key per D-P) and lists every rule it breaks. Common properties travel in the Resource or
- * are added by the relay, so they are not part of the record and are skipped.
+ * are added by the relay, so they are not part of the record and are skipped. `$session_id` is
+ * checked for presence only: tests inject readable fake hashes, production always sends sha256 hex.
  */
 export function wireViolations(event: string, properties: Readonly<Record<string, unknown>>): string[] {
   const attributes = SENPI.events[`omo.${event}`]
@@ -25,6 +26,7 @@ export function wireViolations(event: string, properties: Readonly<Record<string
       continue
     }
     present.add(key)
+    if (name === "$session_id") continue
     if (typeof value !== spec.type) violations.push(`${name}: ${typeof value} is not ${spec.type}`)
     else if (typeof value === "string") {
       if (spec.values !== undefined && !spec.values.includes(value)) violations.push(`${name}: value outside the enum`)

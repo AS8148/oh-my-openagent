@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
 import { OMO_NATIVE_EVENT_SCHEMAS } from "./event-schemas"
-import { KNOWN_PROVIDERS } from "./model-vocabulary"
-import { classifyProviders, providerPropertyName } from "./session-inventory"
+import { KNOWN_PROVIDERS, providerPropertyName } from "./model-vocabulary"
+import { classifyProviders } from "./session-inventory"
 
 describe("classifyProviders", () => {
   test("#given known and private provider ids #then known ids ship as sorted unique ids and private ones only as a count", () => {

@@ -125,11 +125,6 @@ export function privacyScan(events, checks) {
         if (value !== "custom" && !knownProviders.has(value)) throw new Error(`known-provider-allowlist: ${key}=${value}`)
         continue
       }
-      if (key === "providers") {
-        const providers = value === "" ? [] : value.split(",")
-        if (providers.some((provider) => !knownProviders.has(provider))) throw new Error(`known-provider-allowlist: ${key}=${value}`)
-        continue
-      }
       if (/(^|\s)(\/|~\/|[A-Za-z]:\\)/.test(value)) throw new Error(`path-privacy: ${event.event}.${key}=${value}`)
       for (const prompt of prompts) {
         for (const fragment of promptFragments(prompt)) {

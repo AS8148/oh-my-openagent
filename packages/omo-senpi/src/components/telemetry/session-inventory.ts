@@ -15,7 +15,10 @@ export type OmoNativeInventory = {
   readonly defaultProvider?: string
   readonly modelCount: number
   readonly providerCount: number
-  readonly providers: string
+  /** Built-in provider ids that are connected, sorted; each ships as `provider_<id>: true`. */
+  readonly knownProviders: readonly string[]
+  /** How many connected providers are user-defined; their names never leave the machine. */
+  readonly customProviderCount: number
 }
 
 /**
@@ -50,10 +53,12 @@ export function readOmoNativeInventory(
     const masked = defaultProvider !== undefined && defaultModel !== undefined
       ? maskProviderAndModel(defaultProvider, defaultModel)
       : undefined
+    const classified = classifyProviders(providerIds)
     return {
       providerCount: providerIds.length,
       modelCount,
-      providers: joinProviders(providerIds),
+      knownProviders: classified.known,
+      customProviderCount: classified.customCount,
       ...(masked === undefined ? {} : {
         defaultProvider: masked.provider,
         defaultModel: masked.model_id,
@@ -61,26 +66,18 @@ export function readOmoNativeInventory(
     }
   } catch (error) {
     diagnostics?.({ event: "omo_native_inventory_read_failed", error, source: "omo-native-session" })
-    return { providerCount: 0, modelCount: 0, providers: "" }
+    return { providerCount: 0, modelCount: 0, knownProviders: [], customProviderCount: 0 }
   }
 }
 
-const PROVIDERS_MAX_LENGTH = 64
-
 /**
- * Known provider ids verbatim, every other id as `custom`, deduplicated and sorted, joined by commas
- * and cut at a token boundary so the value stays within the 64-char wire limit and always matches the
- * artifact's `providers` pattern (no half token ever ships).
+ * Splits connected provider ids into the built-in ones (deduplicated, sorted) and a count of the rest:
+ * a user-defined provider name is never a value and never a property name.
  */
-export function joinProviders(providerIds: readonly string[]): string {
-  const tokens = [...new Set(providerIds.map((id) => (isKnownProvider(id) ? id : "custom")))].sort()
-  let joined = ""
-  for (const token of tokens) {
-    const next = joined === "" ? token : `${joined},${token}`
-    if (next.length > PROVIDERS_MAX_LENGTH) break
-    joined = next
-  }
-  return joined
+export function classifyProviders(providerIds: readonly string[]): { readonly known: string[]; readonly customCount: number } {
+  const unique = [...new Set(providerIds)]
+  const known = unique.filter(isKnownProvider).sort()
+  return { known, customCount: unique.length - known.length }
 }
 
 function readObject(path: string): Record<string, unknown> {

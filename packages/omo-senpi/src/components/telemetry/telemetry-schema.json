@@ -5,7 +5,7 @@
   "proto_tag": "v1.7.0",
   "identity": "install",
   "relay": true,
-  "semconv_map_sha256": "ac50ef26f3b1bfbc7acb7a1fee1505558d171bcff7bc610def43ef200a068633",
+  "semconv_map_sha256": "246f23be0254c1ff03cacff2bcf238887f2f95e46e5fe1bed861d76b935044f6",
   "resource": {
     "host.arch": {
       "type": "string",
@@ -124,65 +124,1185 @@
         "required": false,
         "posthog_name": "builtin_overridden_count"
       },
-      "omo.cat_architect": {
-        "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+      "omo.cat_architect_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
         "required": false,
-        "posthog_name": "cat_architect"
+        "posthog_name": "cat_architect_depth"
       },
-      "omo.cat_artistry": {
+      "omo.cat_architect_model": {
         "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
         "required": false,
-        "posthog_name": "cat_artistry"
+        "posthog_name": "cat_architect_model"
       },
-      "omo.cat_deep_high": {
+      "omo.cat_architect_provider": {
         "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
         "required": false,
-        "posthog_name": "cat_deep_high"
+        "posthog_name": "cat_architect_provider"
       },
-      "omo.cat_deep_low": {
+      "omo.cat_architect_reasoning": {
         "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
         "required": false,
-        "posthog_name": "cat_deep_low"
+        "posthog_name": "cat_architect_reasoning"
       },
-      "omo.cat_quick": {
+      "omo.cat_architect_state": {
         "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
         "required": false,
-        "posthog_name": "cat_quick"
+        "posthog_name": "cat_architect_state"
       },
-      "omo.cat_ultrabrain": {
-        "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+      "omo.cat_artistry_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
         "required": false,
-        "posthog_name": "cat_ultrabrain"
+        "posthog_name": "cat_artistry_depth"
       },
-      "omo.cat_unspecified_high": {
+      "omo.cat_artistry_model": {
         "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
         "required": false,
-        "posthog_name": "cat_unspecified_high"
+        "posthog_name": "cat_artistry_model"
       },
-      "omo.cat_unspecified_low": {
+      "omo.cat_artistry_provider": {
         "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
         "required": false,
-        "posthog_name": "cat_unspecified_low"
+        "posthog_name": "cat_artistry_provider"
       },
-      "omo.cat_visual_engineering": {
+      "omo.cat_artistry_reasoning": {
         "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
         "required": false,
-        "posthog_name": "cat_visual_engineering"
+        "posthog_name": "cat_artistry_reasoning"
       },
-      "omo.cat_writing": {
+      "omo.cat_artistry_state": {
         "type": "string",
-        "pattern": "^(?:disabled|unavailable|absent|(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)/(?:qwen3\\.6-flash|qwen3\\.8-max-preview|claude-fable-5|claude-fable-5-1|claude-haiku-4-5|claude-haiku-5-5|claude-opus-4-6|claude-opus-5|claude-opus-5-5|claude-sonnet-5|claude-sonnet-5-5|gpt-5\\.6-luna-fast|gpt-5\\.6-sol|gpt-5\\.6-sol-fast|gpt-5\\.6-terra|gpt-6-astra|gpt-6-luna|gpt-6-luna-fast|gpt-6-sol|gpt-6-sol-fast|gpt-6\\.1-sol|gpt-6\\.1-sol-fast|deepseek-flash|deepseek-v4-flash|deepseek-v4-pro|gemini-3\\.1-pro|gemini-3\\.6-flash|grok-4\\.6|grok-4\\.7|k3|kimi-for-coding-highspeed|kimi-k3|glm-5\\.2|glm-5\\.3|mimo-v2\\.5-pro|mimo-v2\\.6-pro|minimax-m2\\.7|minimax-m3|grok-4\\.20-0309-non-reasoning|mimo-v2\\.6-flash|glm-5\\.3-flash|custom)/(?:off|minimal|low|medium|high|xhigh|max|other|none)(?:\\+[1-9][0-9]?)?)$",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
         "required": false,
-        "posthog_name": "cat_writing"
+        "posthog_name": "cat_artistry_state"
+      },
+      "omo.cat_deep_high_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
+        "required": false,
+        "posthog_name": "cat_deep_high_depth"
+      },
+      "omo.cat_deep_high_model": {
+        "type": "string",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_deep_high_model"
+      },
+      "omo.cat_deep_high_provider": {
+        "type": "string",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_deep_high_provider"
+      },
+      "omo.cat_deep_high_reasoning": {
+        "type": "string",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
+        "required": false,
+        "posthog_name": "cat_deep_high_reasoning"
+      },
+      "omo.cat_deep_high_state": {
+        "type": "string",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
+        "required": false,
+        "posthog_name": "cat_deep_high_state"
+      },
+      "omo.cat_deep_low_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
+        "required": false,
+        "posthog_name": "cat_deep_low_depth"
+      },
+      "omo.cat_deep_low_model": {
+        "type": "string",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_deep_low_model"
+      },
+      "omo.cat_deep_low_provider": {
+        "type": "string",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_deep_low_provider"
+      },
+      "omo.cat_deep_low_reasoning": {
+        "type": "string",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
+        "required": false,
+        "posthog_name": "cat_deep_low_reasoning"
+      },
+      "omo.cat_deep_low_state": {
+        "type": "string",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
+        "required": false,
+        "posthog_name": "cat_deep_low_state"
+      },
+      "omo.cat_quick_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
+        "required": false,
+        "posthog_name": "cat_quick_depth"
+      },
+      "omo.cat_quick_model": {
+        "type": "string",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_quick_model"
+      },
+      "omo.cat_quick_provider": {
+        "type": "string",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_quick_provider"
+      },
+      "omo.cat_quick_reasoning": {
+        "type": "string",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
+        "required": false,
+        "posthog_name": "cat_quick_reasoning"
+      },
+      "omo.cat_quick_state": {
+        "type": "string",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
+        "required": false,
+        "posthog_name": "cat_quick_state"
+      },
+      "omo.cat_ultrabrain_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
+        "required": false,
+        "posthog_name": "cat_ultrabrain_depth"
+      },
+      "omo.cat_ultrabrain_model": {
+        "type": "string",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_ultrabrain_model"
+      },
+      "omo.cat_ultrabrain_provider": {
+        "type": "string",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_ultrabrain_provider"
+      },
+      "omo.cat_ultrabrain_reasoning": {
+        "type": "string",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
+        "required": false,
+        "posthog_name": "cat_ultrabrain_reasoning"
+      },
+      "omo.cat_ultrabrain_state": {
+        "type": "string",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
+        "required": false,
+        "posthog_name": "cat_ultrabrain_state"
+      },
+      "omo.cat_unspecified_high_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
+        "required": false,
+        "posthog_name": "cat_unspecified_high_depth"
+      },
+      "omo.cat_unspecified_high_model": {
+        "type": "string",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_unspecified_high_model"
+      },
+      "omo.cat_unspecified_high_provider": {
+        "type": "string",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_unspecified_high_provider"
+      },
+      "omo.cat_unspecified_high_reasoning": {
+        "type": "string",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
+        "required": false,
+        "posthog_name": "cat_unspecified_high_reasoning"
+      },
+      "omo.cat_unspecified_high_state": {
+        "type": "string",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
+        "required": false,
+        "posthog_name": "cat_unspecified_high_state"
+      },
+      "omo.cat_unspecified_low_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
+        "required": false,
+        "posthog_name": "cat_unspecified_low_depth"
+      },
+      "omo.cat_unspecified_low_model": {
+        "type": "string",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_unspecified_low_model"
+      },
+      "omo.cat_unspecified_low_provider": {
+        "type": "string",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_unspecified_low_provider"
+      },
+      "omo.cat_unspecified_low_reasoning": {
+        "type": "string",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
+        "required": false,
+        "posthog_name": "cat_unspecified_low_reasoning"
+      },
+      "omo.cat_unspecified_low_state": {
+        "type": "string",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
+        "required": false,
+        "posthog_name": "cat_unspecified_low_state"
+      },
+      "omo.cat_visual_engineering_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
+        "required": false,
+        "posthog_name": "cat_visual_engineering_depth"
+      },
+      "omo.cat_visual_engineering_model": {
+        "type": "string",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_visual_engineering_model"
+      },
+      "omo.cat_visual_engineering_provider": {
+        "type": "string",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_visual_engineering_provider"
+      },
+      "omo.cat_visual_engineering_reasoning": {
+        "type": "string",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
+        "required": false,
+        "posthog_name": "cat_visual_engineering_reasoning"
+      },
+      "omo.cat_visual_engineering_state": {
+        "type": "string",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
+        "required": false,
+        "posthog_name": "cat_visual_engineering_state"
+      },
+      "omo.cat_writing_depth": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 99,
+        "required": false,
+        "posthog_name": "cat_writing_depth"
+      },
+      "omo.cat_writing_model": {
+        "type": "string",
+        "values": [
+          "qwen3.6-flash",
+          "qwen3.8-max-preview",
+          "claude-fable-5",
+          "claude-fable-5-1",
+          "claude-haiku-4-5",
+          "claude-haiku-5-5",
+          "claude-opus-4-6",
+          "claude-opus-5",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+          "claude-sonnet-5-5",
+          "gpt-5.6-luna-fast",
+          "gpt-5.6-sol",
+          "gpt-5.6-sol-fast",
+          "gpt-5.6-terra",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-luna-fast",
+          "gpt-6-sol",
+          "gpt-6-sol-fast",
+          "gpt-6.1-sol",
+          "gpt-6.1-sol-fast",
+          "deepseek-flash",
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "gemini-3.1-pro",
+          "gemini-3.6-flash",
+          "grok-4.6",
+          "grok-4.7",
+          "k3",
+          "kimi-for-coding-highspeed",
+          "kimi-k3",
+          "glm-5.2",
+          "glm-5.3",
+          "mimo-v2.5-pro",
+          "mimo-v2.6-pro",
+          "minimax-m2.7",
+          "minimax-m3",
+          "grok-4.20-0309-non-reasoning",
+          "mimo-v2.6-flash",
+          "glm-5.3-flash",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_writing_model"
+      },
+      "omo.cat_writing_provider": {
+        "type": "string",
+        "values": [
+          "alibaba-token-plan",
+          "alibaba-token-plan-cn",
+          "anthropic",
+          "anthropic-api",
+          "anthropic-subscription",
+          "bailian-coding-plan",
+          "chatgpt-subscription",
+          "claude-sdk-oauth",
+          "deepseek",
+          "google",
+          "github-copilot",
+          "kimi-coding",
+          "kimi-for-coding",
+          "moonshotai",
+          "openai",
+          "openai-codex",
+          "opencode",
+          "opencode-go",
+          "qwen-token-plan",
+          "qwen-token-plan-cn",
+          "vercel",
+          "xai",
+          "xiaomi",
+          "zai",
+          "zai-coding-cn",
+          "zai-coding-plan",
+          "other"
+        ],
+        "required": false,
+        "posthog_name": "cat_writing_provider"
+      },
+      "omo.cat_writing_reasoning": {
+        "type": "string",
+        "values": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "other",
+          "none"
+        ],
+        "required": false,
+        "posthog_name": "cat_writing_reasoning"
+      },
+      "omo.cat_writing_state": {
+        "type": "string",
+        "values": [
+          "set",
+          "disabled",
+          "unavailable",
+          "absent"
+        ],
+        "required": false,
+        "posthog_name": "cat_writing_state"
       },
       "omo.combo_fingerprint": {
         "type": "string",
@@ -460,7 +1580,7 @@
         "relay_only": true,
         "posthog_name": "machine_hash"
       },
-      "omo.reason": {
+      "omo.start_reason": {
         "type": "string",
         "values": [
           "session_start"
@@ -1346,12 +2466,6 @@
         "required": false,
         "posthog_name": "non_eval_saved_round_trips"
       },
-      "omo.non_eval_wave_size_histogram": {
-        "type": "string",
-        "pattern": "^[0-9:,]{1,64}$",
-        "required": false,
-        "posthog_name": "non_eval_wave_size_histogram"
-      },
       "omo.non_eval_waves_multi": {
         "type": "number",
         "min": 0,
@@ -1382,6 +2496,38 @@
         "required": false,
         "posthog_name": "upper_bound_saved_ms"
       },
+      "omo.wave_size_1": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 1000000000,
+        "required": false,
+        "posthog_name": "wave_size_1"
+      },
+      "omo.wave_size_2_3": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 1000000000,
+        "required": false,
+        "posthog_name": "wave_size_2_3"
+      },
+      "omo.wave_size_4_7": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 1000000000,
+        "required": false,
+        "posthog_name": "wave_size_4_7"
+      },
+      "omo.wave_size_8_plus": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 1000000000,
+        "required": false,
+        "posthog_name": "wave_size_8_plus"
+      },
       "session.id": {
         "type": "string",
         "pattern": "^[0-9a-f]{64}$",
@@ -1398,19 +2544,19 @@
       },
       "omo.crashed_bun_version": {
         "type": "string",
-        "pattern": "^(?:unknown|[0-9][0-9A-Za-z.+-]{0,31})$",
+        "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$",
         "required": false,
         "posthog_name": "crashed_bun_version"
       },
       "omo.crashed_engine_version": {
         "type": "string",
-        "pattern": "^(?:unknown|[0-9][0-9A-Za-z.+-]{0,31})$",
+        "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$",
         "required": false,
         "posthog_name": "crashed_engine_version"
       },
       "omo.crashed_omo_version": {
         "type": "string",
-        "pattern": "^(?:unknown|[0-9][0-9A-Za-z.+-]{0,31})$",
+        "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$",
         "required": false,
         "posthog_name": "crashed_omo_version"
       },
@@ -1665,6 +2811,14 @@
         "required": false,
         "posthog_name": "cpu_count"
       },
+      "omo.custom_provider_count": {
+        "type": "number",
+        "integer": true,
+        "min": 0,
+        "max": 1000000000,
+        "required": false,
+        "posthog_name": "custom_provider_count"
+      },
       "omo.default_model": {
         "type": "string",
         "values": [
@@ -1774,6 +2928,46 @@
         "required": false,
         "posthog_name": "model_count"
       },
+      "omo.provider_alibaba_token_plan": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_alibaba_token_plan"
+      },
+      "omo.provider_alibaba_token_plan_cn": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_alibaba_token_plan_cn"
+      },
+      "omo.provider_anthropic": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_anthropic"
+      },
+      "omo.provider_anthropic_api": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_anthropic_api"
+      },
+      "omo.provider_anthropic_subscription": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_anthropic_subscription"
+      },
+      "omo.provider_bailian_coding_plan": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_bailian_coding_plan"
+      },
+      "omo.provider_chatgpt_subscription": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_chatgpt_subscription"
+      },
+      "omo.provider_claude_sdk_oauth": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_claude_sdk_oauth"
+      },
       "omo.provider_count": {
         "type": "number",
         "min": 0,
@@ -1781,23 +2975,95 @@
         "required": false,
         "posthog_name": "provider_count"
       },
-      "omo.providers": {
-        "type": "string",
-        "pattern": "^(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom)(?:,(?:alibaba-token-plan|alibaba-token-plan-cn|anthropic|anthropic-api|anthropic-subscription|bailian-coding-plan|chatgpt-subscription|claude-sdk-oauth|deepseek|google|github-copilot|kimi-coding|kimi-for-coding|moonshotai|openai|openai-codex|opencode|opencode-go|qwen-token-plan|qwen-token-plan-cn|vercel|xai|xiaomi|zai|zai-coding-cn|zai-coding-plan|custom))*$",
+      "omo.provider_deepseek": {
+        "type": "boolean",
         "required": false,
-        "posthog_name": "providers"
+        "posthog_name": "provider_deepseek"
       },
-      "omo.reason": {
-        "type": "string",
-        "values": [
-          "startup",
-          "reload",
-          "new",
-          "resume",
-          "fork"
-        ],
+      "omo.provider_github_copilot": {
+        "type": "boolean",
         "required": false,
-        "posthog_name": "reason"
+        "posthog_name": "provider_github_copilot"
+      },
+      "omo.provider_google": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_google"
+      },
+      "omo.provider_kimi_coding": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_kimi_coding"
+      },
+      "omo.provider_kimi_for_coding": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_kimi_for_coding"
+      },
+      "omo.provider_moonshotai": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_moonshotai"
+      },
+      "omo.provider_openai": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_openai"
+      },
+      "omo.provider_openai_codex": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_openai_codex"
+      },
+      "omo.provider_opencode": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_opencode"
+      },
+      "omo.provider_opencode_go": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_opencode_go"
+      },
+      "omo.provider_qwen_token_plan": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_qwen_token_plan"
+      },
+      "omo.provider_qwen_token_plan_cn": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_qwen_token_plan_cn"
+      },
+      "omo.provider_vercel": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_vercel"
+      },
+      "omo.provider_xai": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_xai"
+      },
+      "omo.provider_xiaomi": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_xiaomi"
+      },
+      "omo.provider_zai": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_zai"
+      },
+      "omo.provider_zai_coding_cn": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_zai_coding_cn"
+      },
+      "omo.provider_zai_coding_plan": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "provider_zai_coding_plan"
       },
       "omo.session.role": {
         "type": "string",
@@ -1809,11 +3075,25 @@
         "required": false,
         "posthog_name": "session_role"
       },
-      "omo.timezone": {
+      "omo.start_reason": {
         "type": "string",
-        "pattern": "^[A-Za-z0-9_+-]{1,32}(/[A-Za-z0-9_+-]{1,32}){0,2}$",
+        "values": [
+          "startup",
+          "reload",
+          "new",
+          "resume",
+          "fork"
+        ],
         "required": false,
-        "posthog_name": "timezone"
+        "posthog_name": "reason"
+      },
+      "omo.utc_offset_minutes": {
+        "type": "number",
+        "integer": true,
+        "min": -720,
+        "max": 840,
+        "required": false,
+        "posthog_name": "utc_offset_minutes"
       },
       "session.id": {
         "type": "string",
@@ -3216,5 +4496,5 @@
       }
     }
   },
-  "sha256": "aff3ce8135bd3ad59032b3f4e35a5d682a48604fe1f7e3af20b19329e1322ce7"
+  "sha256": "506f30fd11ec3ce5c6eb5b2321609598ab88bdec53c79a71c6dfbb5085e652bc"
 }
