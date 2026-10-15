@@ -1,6 +1,7 @@
 /// <reference path="./loro-wasm.d.ts" />
 
-import { isAbsolute, resolve } from "node:path"
+import { dirname, isAbsolute, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { readFile } from "../fs/resilient"
 import type { Container, ContainerID, ContainerType, LoroDoc, PeerID, Value } from "loro-crdt"
 
@@ -193,7 +194,8 @@ let pending: Promise<LoroRuntime> | undefined
 async function instantiate(): Promise<LoroRuntime> {
   const glue = (await import("loro-crdt/bundler/loro_wasm_bg.js")) as unknown as LoroWasmGlue
   // The import-object key is part of the wasm binary's import section; it must match exactly.
-  const wasmFile = isAbsolute(wasmPath) ? wasmPath : resolve(import.meta.dir, wasmPath)
+  // import.meta.dir is Bun-only; the senpi bundle loads memory-core under plain Node through jiti.
+  const wasmFile = isAbsolute(wasmPath) ? wasmPath : resolve(dirname(fileURLToPath(import.meta.url)), wasmPath)
   const bytes = await readFile(wasmFile)
   const { instance } = await WebAssembly.instantiate(bytes, {
     "./loro_wasm_bg.js": glue,
