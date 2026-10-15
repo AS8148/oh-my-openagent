@@ -11,11 +11,13 @@ export type StoredRollup = {
   readonly nextSeq: number
   readonly window: SummaryWindow | null
   readonly updatedAt: number
+  /** Consent at write time. Only a rollup marked `enabled` may ever be sent; files without it predate the mark. */
+  readonly consent?: "enabled"
 }
 
 export type SummaryStore = {
   readonly read: (sessionHash: string) => StoredRollup | undefined
-  readonly write: (rollup: Omit<StoredRollup, "v" | "pid" | "updatedAt"> & { readonly updatedAt?: number }) => void
+  readonly write: (rollup: Omit<StoredRollup, "v" | "pid" | "updatedAt" | "consent"> & { readonly consent: "enabled"; readonly updatedAt?: number }) => void
   readonly remove: (sessionHash: string) => void
   /** Claims every rollup whose owning process is gone; each is returned once across racing processes. */
   readonly claimOrphans: () => readonly StoredRollup[]

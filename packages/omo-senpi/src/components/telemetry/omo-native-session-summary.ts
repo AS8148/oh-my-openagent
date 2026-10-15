@@ -26,6 +26,11 @@ export type SessionSummaryOptions = {
   readonly store: SummaryStore
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly sessionRole?: string
+  /**
+   * Asked before every write, because consent can change mid-session. Without it nothing is recorded,
+   * and the session's own rollup file is deleted so no later process can send it.
+   */
+  readonly isConsented?: () => boolean
   readonly now?: () => number
   readonly sampleRate?: number
 }
@@ -51,6 +56,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
   const now = options.now ?? Date.now
   const sampleRate = options.sampleRate ?? RAW_TURN_SAMPLE_RATE
   const sessionRole = options.sessionRole ?? "main"
+  const isConsented = options.isConsented ?? (() => true)
   const live = new Map<string, Live>()
   let recovered = false
 
@@ -67,14 +73,16 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
   // Rollups a crashed or killed process left behind are sent once, from the first live event, so the
   // capture path is already installed and only one of several racing processes claims each file. The
   // claimer leaves a window-less placeholder carrying the next seq (and the orphan's age, so it expires),
-  // because the user may resume that session in any other process.
+  // because the user may resume that session in any other process. An orphan without the opted-in mark
+  // (an opted-out session, or a file older than the mark) was claimed, which deleted it, and is not sent.
   const recoverOrphans = (): void => {
     if (recovered) return
     recovered = true
     for (const orphan of options.store.claimOrphans()) {
+      if (orphan.consent !== "enabled") continue
       const nextSeq = orphan.window === null ? orphan.nextSeq : orphan.nextSeq + 1
       if (nextSeq > 0) {
-        writeSafely({ sessionHash: orphan.sessionHash, sessionRole: orphan.sessionRole, nextSeq, window: null, updatedAt: orphan.updatedAt })
+        writeSafely({ sessionHash: orphan.sessionHash, sessionRole: orphan.sessionRole, nextSeq, window: null, updatedAt: orphan.updatedAt, consent: "enabled" })
       }
       if (orphan.window !== null) emit(orphan.sessionHash, orphan.window, orphan.nextSeq, "recovered", orphan.sessionRole)
     }
@@ -84,13 +92,27 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     const cached = live.get(sessionHash)
     if (cached !== undefined) return cached
     const stored = options.store.read(sessionHash)
-    const entry: Live = stored === undefined ? { nextSeq: 0, window: null } : { nextSeq: stored.nextSeq, window: stored.window }
+    const entry: Live = stored?.consent !== "enabled" ? { nextSeq: 0, window: null } : { nextSeq: stored.nextSeq, window: stored.window }
     live.set(sessionHash, entry)
     return entry
   }
 
   const persist = (sessionHash: string, entry: Live): void => {
-    writeSafely({ sessionHash, sessionRole, nextSeq: entry.nextSeq, window: entry.window })
+    writeSafely({ sessionHash, sessionRole, nextSeq: entry.nextSeq, window: entry.window, consent: "enabled" })
+  }
+
+  const discard = (sessionHash: string): void => {
+    live.delete(sessionHash)
+    try {
+      options.store.remove(sessionHash)
+    } catch (error) {
+      options.diagnostics?.({
+        event: "telemetry_activity_state_write_failed",
+        source: "omo-native-session-summary",
+        error: error instanceof Error ? error : new Error(String(error)),
+        errorKind: "error",
+      })
+    }
   }
 
   function writeSafely(rollup: Parameters<SummaryStore["write"]>[0]): void {
@@ -122,6 +144,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     sampleRate,
     isRawTurnSampled: (sessionHash) => isSessionSampled(sessionHash, sampleRate),
     recordTurn(sessionHash, turn) {
+      if (!isConsented()) return discard(sessionHash)
       recoverOrphans()
       const entry = liveFor(sessionHash)
       const at = now()
@@ -134,6 +157,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
       }
     },
     finish(sessionHash, reason) {
+      if (!isConsented()) return discard(sessionHash)
       recoverOrphans()
       const entry = liveFor(sessionHash)
       live.delete(sessionHash)

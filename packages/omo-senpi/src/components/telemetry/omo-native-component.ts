@@ -27,6 +27,7 @@ import { registerOmoNativeParallelSummary } from "./omo-native-parallel-summary"
 import { createOmoNativePromptComponent } from "./omo-native-prompt"
 import {
   createOmoNativeSessionComponent,
+  isOmoNativeTelemetryEnabled,
   type OmoNativeSessionOptions,
 } from "./omo-native-session"
 import { registerOmoNativeToolTelemetry } from "./omo-native-tools"
@@ -102,15 +103,22 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
 
       // Same ordering constraint again: the final summary window must be captured before the session
       // component's shutdown handler clears `state.capture`.
+      // Consent is the session component's own decision, taken at registration and again before every
+      // summary write: an opted-out session must leave nothing on disk that a later process could send.
+      const consentOptions = { isConfigEnabled: options.isConfigEnabled }
+      const consentedAtRegistration = isOmoNativeTelemetryEnabled(consentOptions, { cwd: pi.cwd }, env)
+      let consentContext: unknown = { cwd: pi.cwd }
       const summary = createSessionSummaryRecorder({
         captureEvent: client.captureEvent,
         store: createSummaryStore({ stateDir }),
         sessionRole: readSessionRole(pi, env) ?? "main",
+        isConsented: () => consentedAtRegistration && isOmoNativeTelemetryEnabled(consentOptions, consentContext, env),
         ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
         ...(options.rawTurnSampleRate === undefined ? {} : { sampleRate: options.rawTurnSampleRate }),
       })
       pi.on("session_shutdown", (payload, eventCtx) => {
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
+        consentContext = eventCtx
         summary.finish(state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId), reason)
       })
 
@@ -149,6 +157,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
 
       pi.on("turn_end", (payload, eventCtx) => {
         if (!isTurnEndEvent(payload)) return
+        consentContext = eventCtx
         const sessionHash = state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId)
         createOmoNativeTurnHandler({
           client,
