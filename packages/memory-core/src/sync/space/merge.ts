@@ -1,9 +1,12 @@
 // Insert-only text merge (sync-design §3 adoption): the result is a common supersequence
 // of the base and the incoming text — the base's characters are never deleted, and the
 // incoming text's novel characters are inserted where an LCS alignment places them.
-// Identical inputs return the base unchanged ("identical adoption adds nothing"). The DP
-// runs at code-point granularity under a cell budget; past the budget it falls back to
-// lines, and past that to plain concatenation, which is still a common supersequence.
+// Identical inputs return the base unchanged ("identical adoption adds nothing").
+// Placement adapts to how alike the texts are: near-copies of one text merge at code-point
+// granularity so a small edit lands in place, while mostly disjoint texts (two files
+// folding into one item) merge at line granularity so each side's lines stay intact. The
+// DPs run under a cell budget; past it, lines; past that, plain concatenation — always a
+// common supersequence.
 
 export function isOrderedSubsequence(needle: string, haystack: string): boolean {
   const n = [...needle]
@@ -18,6 +21,8 @@ const DEFAULT_MAX_CELLS = 16_000_000
 
 export function mergeInsertions(base: string, incoming: string, maxCells = DEFAULT_MAX_CELLS): string {
   if (base === incoming) return base
+  if (base === "") return incoming
+  if (incoming === "") return base
   const a = [...base]
   const b = [...incoming]
   if ((a.length + 1) * (b.length + 1) <= maxCells) {
@@ -25,12 +30,16 @@ export function mergeInsertions(base: string, incoming: string, maxCells = DEFAU
     while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++
     let suf = 0
     while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++
-    const middle = supersequence(a.slice(pre, a.length - suf), b.slice(pre, b.length - suf))
-    return a.slice(0, pre).join("") + middle.join("") + a.slice(a.length - suf).join("")
+    const anchors = lcs(a.slice(pre, a.length - suf), b.slice(pre, b.length - suf))
+    const shared = pre + anchors.length + suf
+    if (2 * shared >= Math.min(a.length, b.length)) {
+      const middle = supersequence(a.slice(pre, a.length - suf), b.slice(pre, b.length - suf), anchors)
+      return a.slice(0, pre).join("") + middle.join("") + a.slice(a.length - suf).join("")
+    }
   }
   const la = splitLines(base)
   const lb = splitLines(incoming)
-  if ((la.length + 1) * (lb.length + 1) <= maxCells) return supersequence(la, lb).join("")
+  if ((la.length + 1) * (lb.length + 1) <= maxCells) return supersequence(la, lb, lcs(la, lb)).join("")
   return base + incoming
 }
 
@@ -39,8 +48,7 @@ function splitLines(text: string): string[] {
   return text.split(/(?<=\n)/)
 }
 
-function supersequence(a: readonly string[], b: readonly string[]): string[] {
-  const anchors = lcs(a, b)
+function supersequence(a: readonly string[], b: readonly string[], anchors: readonly string[]): string[] {
   const out: string[] = []
   let i = 0
   let j = 0
