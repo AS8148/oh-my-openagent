@@ -201,7 +201,8 @@ Every event above also carries these properties.
 | `$process_person_profile` | `boolean` | - |
 | `ci` | `boolean` | - |
 | `event_id` | `string` | - |
-| `install_id` | `string` | - |
+| `install_hash` | `string` | - |
+| `machine_hash` | `string` | - |
 | `package_version` | `string` | - |
 | `platform` | `string` | `omo-senpi` |
 | `product_name` | `string` | `omo-native` |
@@ -284,23 +285,24 @@ A process that dies natively cannot report its own death, so `process_crashed` i
 
 ## Identity model
 
-Identity is machine-level, not person-level:
+Identity is installation-level, not person-level:
 
-- The anonymous machine id is `sha256("omo-senpi:" + hostname)`. The raw hostname never leaves the machine; it's only hashed locally.
+- As of schema version 4, every OmO Native event's `distinct_id` is `install_hash` = `sha256(install id)`, where the install id is the random file described below. The same value is sent as the `install_hash` property; the raw install id never leaves the machine.
+- Schema versions 1 to 3 used the machine id `sha256("omo-senpi:" + hostname)` as `distinct_id`. Until `2026-12-15` (UTC, exclusive) every event also carries that value as `machine_hash`, so rows from before and after the switch can be joined per installation; after that date the property is no longer sent. The raw hostname never leaves the machine; it's only hashed locally. The legacy `omo_senpi_daily_active` event keeps the machine id as its `distinct_id`.
 - The `$session_id` value is a keyed hash: a per-machine random salt combined with the raw session id, then hashed. The raw session id is never sent, and sessions from different machines can't be correlated by session id.
 - Person profiles are disabled on every event (`$process_person_profile: false`), so PostHog builds no person records.
 - GeoIP enrichment is enabled as of schema version 2: native events are sent without the `$geoip_disable` transport flag, so PostHog may derive an approximate country (`$geoip_country_code`) from the sending IP server side. The application never authors `$ip` or any location property itself, and stores no IP locally. Earlier schema versions disabled GeoIP; a prior revision of this document wrongly claimed it was already on.
 
-Because identity is machine-level, a shared machine conflates its users into one id. That's an accepted, documented limitation, not a bug.
+Because identity is per installation, a shared machine conflates its users into one id. That's an accepted, documented limitation, not a bug.
 
 ### Surface attribution and install ids (schema version 3)
 
 Every event carries two shared attribution properties as of schema version 3:
 
 - `surface` is `cli` for standalone CLI sessions, or `desktop` when the runtime is embedded in OmO Desktop. The Desktop host sets `OMO_NATIVE_SURFACE=desktop` in the child environment; anything else is the CLI. A Desktop-driven turn is Desktop usage, not CLI adoption, and must never be counted as one.
-- `install_id` is a random 64-hex value stored (like the session-id salt) under the agent home at `omo-senpi/omo-native/install-id`, created with mode 0600 on first use. It is generated locally and derived from nothing: not the hostname, not hardware, not accounts. The standalone CLI and the Desktop-bundled runtime on one machine converge on the same file, which is what joins the two surfaces without fingerprinting the machine. A valid `OMO_NATIVE_INSTALL_ID` env value overrides the file, so a Desktop host can pin a remote (SSH/WSL) runtime to the local installation's id; a malformed override is ignored.
+- The install id is a random 64-hex value stored (like the session-id salt) under the agent home at `omo-senpi/omo-native/install-id`, created with mode 0600 on first use. It is generated locally and derived from nothing: not the hostname, not hardware, not accounts. The standalone CLI and the Desktop-bundled runtime on one machine converge on the same file, which is what joins the two surfaces without fingerprinting the machine. A valid `OMO_NATIVE_INSTALL_ID` env value overrides the file, so a Desktop host can pin a remote (SSH/WSL) runtime to the local installation's id; a malformed override is ignored.
 
-Rows written before schema version 3 carry neither property. Segment on `schema_version` when mixing eras.
+Schema version 3 sent this value raw as the `install_id` property; schema version 4 sends only its hash (`install_hash`). Rows written before schema version 3 carry neither property. Segment on `schema_version` when mixing eras.
 
 ### CI attribution
 

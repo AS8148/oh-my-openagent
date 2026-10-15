@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
   DEFAULT_POSTHOG_HOST,
+  getTelemetryDistinctId,
   type TelemetryEnv,
+  type TelemetryOsProvider,
   type TelemetryProductConfig,
 } from "@oh-my-opencode/telemetry-core"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
@@ -16,7 +18,13 @@ export const OMO_NATIVE_POSTHOG_API_KEY = "phc_r6UYQzNZcGYSzKw4PxCiVrZepGqV3dw9q
 // clients half-apply a bump: a session row and a task row would disagree about their own schema.
 // v3: every event additionally carries the shared attribution properties `surface` (cli | desktop)
 // and `install_id` (random per-installation id shared by CLI and Desktop through the agent home).
-export const OMO_NATIVE_SCHEMA_VERSION = 3
+// v4: `distinct_id` is `install_hash` = sha256(install id), the raw `install_id` property is gone,
+// `machine_hash` (the v3 distinct id) rides along until MACHINE_HASH_SUNSET, and `ci` marks CI runs.
+export const OMO_NATIVE_SCHEMA_VERSION = 4
+
+// The last UTC day `machine_hash` ships: the 60-day window that joins pre-v4 rows to their install.
+export const MACHINE_HASH_SUNSET = "2026-12-15"
+const MACHINE_HASH_SUNSET_MS = Date.parse(`${MACHINE_HASH_SUNSET}T00:00:00.000Z`)
 
 export { ALL_KNOWN_MODEL_IDS, KNOWN_MODELS, KNOWN_PROVIDERS } from "./model-vocabulary"
 export type { KnownProvider } from "./model-vocabulary"
@@ -100,10 +108,13 @@ export type OmoNativeAttributionInput = {
   readonly env?: TelemetryEnv
   /** Injected by tests; defaults to the runtime's resolved agent home. */
   readonly stateDir?: string
+  /** Decides whether `machine_hash` is still inside its transition window. */
+  readonly now?: Date
+  readonly osProvider?: TelemetryOsProvider
 }
 
 /**
- * Shared attribution for every omo-native event. `install_id` is a random 64-hex id stored next to
+ * Shared attribution for every omo-native event. The install id is a random 64-hex id stored next to
  * the session-id salt, so the CLI and the Desktop-bundled runtime on one machine converge on one id
  * without deriving anything from the machine itself. A valid `OMO_NATIVE_INSTALL_ID` env override
  * wins, because a Desktop host pins a remote (SSH/WSL) runtime to ITS local installation id.
@@ -113,16 +124,25 @@ export type OmoNativeAttributionInput = {
  */
 export function getOmoNativeAttribution(input: OmoNativeAttributionInput = {}): {
   readonly surface: OmoNativeSurface
-  readonly install_id: string
+  readonly install_hash: string
   readonly ci: boolean
+  readonly machine_hash?: string
 } {
   const env = input.env ?? process.env
   const surface: OmoNativeSurface = env["OMO_NATIVE_SURFACE"]?.trim() === "desktop" ? "desktop" : "cli"
   const envInstallId = env["OMO_NATIVE_INSTALL_ID"]?.trim() ?? ""
-  const install_id = INSTALL_ID_PATTERN.test(envInstallId)
+  const installId = INSTALL_ID_PATTERN.test(envInstallId)
     ? envInstallId
     : readOrCreateInstallId(join(input.stateDir ?? getOmoNativeStateDir(env), INSTALL_ID_FILE_NAME))
-  return { surface, install_id, ci: isCiEnv(env["CI"]) }
+  const now = input.now ?? new Date()
+  return {
+    surface,
+    install_hash: createHash("sha256").update(installId).digest("hex"),
+    ci: isCiEnv(env["CI"]),
+    ...(now.getTime() < MACHINE_HASH_SUNSET_MS
+      ? { machine_hash: getTelemetryDistinctId(createOmoNativeProductConfig().machineIdPrefix, input.osProvider) }
+      : {}),
+  }
 }
 
 function isCiEnv(value: string | undefined): boolean {
