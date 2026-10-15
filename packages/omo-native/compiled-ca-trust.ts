@@ -29,7 +29,7 @@ export function parseExtraCaCertificates(text: string): string[] {
   if (Buffer.byteLength(text, "utf8") > MAX_EXTRA_CA_BYTES) {
     throw new ExtraCaCertificatesError(`${ENGINE_EXTRA_CA_ENV} is larger than ${MAX_EXTRA_CA_BYTES / 1024} KiB`)
   }
-  const normalized = text.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n")
+  const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n")
   const certificates = new Map<string, string>()
   for (const [block, label] of normalized.matchAll(PEM_BLOCK)) {
     if (label !== "CERTIFICATE") throw new ExtraCaCertificatesError(`${ENGINE_EXTRA_CA_ENV} contains a ${label} block`)
