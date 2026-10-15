@@ -27,8 +27,8 @@ describe("caseFold (vendored Unicode 16.0 full folding)", () => {
   test("Greek sigma: capital and final forms share one fold", () => {
     expect(caseFold("Σ")).toBe("σ")
     expect(caseFold("ς")).toBe("σ")
-    expect(caseFold("ΟΔΗΓΟΣ")).toBe("οδηγοσ")
-    expect(caseFold("οδηγός")).toBe("οδηγοσ")
+    expect(caseFold("\u039F\u0394\u0397\u0393\u039F\u03A3")).toBe("\u03BF\u03B4\u03B7\u03B3\u03BF\u03C3")
+    expect(caseFold("\u03BF\u03B4\u03B7\u03B3\u03CC\u03C2")).toBe("\u03BF\u03B4\u03B7\u03B3\u03CC\u03C3")
   })
 
   test("folds above the BMP by code point", () => {
@@ -36,8 +36,9 @@ describe("caseFold (vendored Unicode 16.0 full folding)", () => {
     expect(caseFold("𐐀𐐨")).toBe("𐐨𐐨")
   })
 
-  test("folds Cherokee lowercase additions from Unicode 8+", () => {
-    expect(caseFold("ᏸ")).toBe("ꮸ")
+  test("folds Cherokee case pairs", () => {
+    expect(caseFold("\u{13B8}")).toBe("\u{AB88}")
+    expect(caseFold("\u{13F8}")).toBe("\u{13F0}")
   })
 
   test("is case-only: it never normalizes or strips marks", () => {
@@ -47,7 +48,7 @@ describe("caseFold (vendored Unicode 16.0 full folding)", () => {
   })
 
   test("is stable: folding twice changes nothing", () => {
-    const samples = ["Straße", "İSTANBUL", "ΟΔΗΓΟΣ", "𐐀", "Notes.MD", "ᏸ"]
+    const samples = ["Straße", "İSTANBUL", "\u039F\u0394\u0397\u0393\u039F\u03A3", "𐐀", "Notes.MD", "\u{13B8}"]
     for (const s of samples) expect(caseFold(caseFold(s))).toBe(caseFold(s))
   })
 })
