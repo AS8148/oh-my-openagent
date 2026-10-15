@@ -117,6 +117,8 @@ describe("gate verdict", () => {
     ["edited released notes", `## [Unreleased]\n\n## [1.1.0]\n${notes.replace("Existing fix.", "Unrelated fix.")}\n\n${history}`, false],
     ["existing release version", `## [Unreleased]\n\n## [1.0.0] - 2026-10-11\n${notes}\n\n${history}`, false],
     ["release after another section", `## [Unreleased]\n\n${history}\n## [1.1.0]\n${notes}\n`, false],
+    ["complete prerelease transition", `## [Unreleased]\n\n## [1.1.0-beta.1] - 2026-10-15\n\n${notes}\n\n${history}`, true],
+    ["existing prerelease version", `## [Unreleased]\n\n## [1.1.0-beta.1]\n${notes}\n\n## [1.1.0-beta.1]\nOld beta.\n\n${history}`, false],
   ])("%s with shipped code", (_name, after, pass) => {
     expect(checkPrChangelog({ ...facts, before: beforeRelease, after, diff: "" }).pass).toBe(pass)
   })
