@@ -3,6 +3,7 @@ import { log } from "@oh-my-opencode/utils"
 import type { RunnerOutcome } from "../in-process/child-handle"
 import { exitTurnOutcome, promptFailureOutcome } from "../rpc/turn-outcome"
 import { createTurnSettlement, sessionIsIdle } from "../rpc/turn-settlement"
+import { createTurnWakeSources } from "../rpc/turn-wake-sources"
 import type { ChildEventListener, ChildExitOutcome, RpcTerminalAssistantMessage } from "../types"
 import { classifySessionExit, type SessionCloseIntent, type SessionExitCause } from "./exit-mapping"
 import { bindHostSessionPort } from "./handle-client-binding"
@@ -59,6 +60,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   let intent: SessionCloseIntent = "running"
   let parked = false
   let detached = false
+  let tornDown = false
 
   const settleTurn = (settled: RunnerOutcome): void => {
     if (turnOutcome !== undefined) return
@@ -67,11 +69,16 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     waiters.settleTurn(settled)
   }
 
+  const wakeSources = createTurnWakeSources()
   const settlement = createTurnSettlement({
     settle: settleTurn,
     abortedByUser: () => abortedByUser,
     baseline: () => turnBaseline,
     finalText: () => finalText,
+    probe: () => client.getState(),
+    settleConfirmMs: heartbeatIntervalMs,
+    wakeSourcesLive: () => wakeSources.hasLiveWakeSources(),
+    disposed: () => tornDown,
   })
 
   const onSessionEvent = (event: Parameters<ChildEventListener>[0]): void => {
@@ -89,6 +96,12 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
       }
     }
     settlement.observe(event)
+    // The host's loose boundary parse fans every tagged record - raw `extension_event` records
+    // included - into this same funnel (see `session-wire.ts` isAgentSessionEvent).
+    if ((event as { readonly type?: string }).type === "extension_event") {
+      wakeSources.observe(event)
+      settlement.reconfirmHeld()
+    }
   }
 
   const stopHeartbeat = startHostHeartbeat({
@@ -216,6 +229,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     terminalAssistantMessage = undefined
     abortedByUser = false
     turnBaseline = finalText
+    wakeSources.resetTurn()
   }
 
   const delivery = createInputDelivery({
@@ -233,6 +247,10 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     clearActive: listeners.clearActive,
     stopHeartbeat: () => { inputEffects.stopRetrying(); stopHeartbeat() },
     settle: settleClassified,
+    onTornDown: () => {
+      tornDown = true
+      settlement.cancelConfirmation()
+    },
   })
 
   return {
@@ -276,6 +294,12 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     },
     waitForIdle: () => waiters.waitForIdle(reachedIdle || outcome !== undefined),
     hasExited: () => outcome !== undefined,
+    // A state read that fails is not proof of idleness, and must never flag the reattach: undefined.
+    sessionIdle: async () => {
+      const state = await client.getState().catch(() => undefined)
+      if (state === undefined) return undefined
+      return sessionIsIdle(state)
+    },
     waitForOutcome: () => waiters.waitForOutcome(turnOutcome, outcome, finalText),
     lastAssistantText: () => finalText,
     terminalAssistantMessage: () => terminalAssistantMessage,
