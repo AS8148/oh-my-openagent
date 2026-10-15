@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { describe, expect, test } from "bun:test"
 
-import { OS_VERSION_PATTERN } from "./event-schema-constraints"
+import { OS_VERSION_PATTERN, VERSION_PATTERN } from "./event-schema-constraints"
 import { OMO_NATIVE_EVENT_SCHEMAS } from "./event-schemas"
 import { KNOWN_PROVIDERS } from "./model-vocabulary"
 import {
@@ -200,6 +200,23 @@ describe("telemetry schema artifacts", () => {
       expect(sdk?.values).not.toContain("/srv/customer/alice/report.txt")
       expect(sdk?.values).not.toContain("alice@example.test")
       expect(matches(artifact.resource["service.version"]?.pattern ?? "", "5.1.33-beta.2")).toBe(true)
+    }
+  })
+
+  test("#then every version slot is MAJOR.MINOR.PATCH with at most one -alpha.N, -beta.N or -rc.N, and a hostname or build suffix is rejected", () => {
+    const accepted = ["1.2.3", "5.1.33", "1.2.3-beta.1", "1.2.3-rc.2", "1.2.3-alpha.10"]
+    const rejected = ["1.2.3-yeongyu-macbook-pro.local", "1.2.3+build.host", "1.2.3-next.1", "1.2.3-beta", "1.2.3-beta.1.2", "1.2"]
+    for (const artifact of ARTIFACTS) {
+      const slots: [string, string][] = [["scope.version", artifact.scope.version]]
+      for (const [owner, key, spec] of attributesOf(artifact)) {
+        if (/(?:^|[._])(?:service|sdk|crashed_[a-z]+)[._]version$/u.test(key) && spec.pattern !== undefined) slots.push([`${owner}.${key}`, spec.pattern])
+      }
+      expect(slots.length).toBeGreaterThan(1)
+      for (const [slot, pattern] of slots) {
+        expect(`${slot} ${pattern === VERSION_PATTERN}`).toBe(`${slot} true`)
+        for (const value of accepted) expect(`${slot} ${value} ${matches(pattern, value)}`).toBe(`${slot} ${value} true`)
+        for (const value of rejected) expect(`${slot} ${value} ${matches(pattern, value)}`).toBe(`${slot} ${value} false`)
+      }
     }
   })
 

@@ -50,6 +50,23 @@ describe("OmO native OTLP Resource", () => {
     expect(first?.["omo.install.hash"]).toBe(second?.["omo.install.hash"])
   })
 
+  test("#given package and SDK versions of every shape #then only MAJOR.MINOR.PATCH with an optional -alpha.N, -beta.N or -rc.N is sent, anything else is omitted", () => {
+    const fakeOs = { platform: () => "linux", release: () => "6.8.0", arch: () => "x64" }
+    const shapes: readonly [string, boolean][] = [
+      ["1.2.3", true],
+      ["5.1.33", true],
+      ["1.2.3-beta.1", true],
+      ["1.2.3-yeongyu-macbook-pro.local", false],
+      ["1.2.3+build.host", false],
+    ]
+    for (const [version, ships] of shapes) {
+      const resource = createOmoNativeResource({ product: "omo-cloud", sdk: { name: "opentelemetry", version }, packageVersion: version, env: {}, os: fakeOs })
+      for (const key of ["service.version", "telemetry.sdk.version"]) {
+        expect(`${version} ${key} ${resource[key] ?? "omitted"}`).toBe(`${version} ${key} ${ships ? version : "omitted"}`)
+      }
+    }
+  })
+
   test("#given this process #then every Resource attribute conforms to the omo-senpi artifact, and omo-cloud carries no install hash", () => {
     const stateDir = mkdtempSync(join(tmpdir(), "omo-resource-"))
     created.push(stateDir)

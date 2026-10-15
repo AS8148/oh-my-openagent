@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { describe, expect, test } from "bun:test"
 
+import { VERSION_PATTERN } from "./event-schema-constraints"
 import { processCrashedProperties } from "./omo-native-crash"
 import { buildTelemetryArtifacts, canonicalJson, type ArtifactAttribute, type TelemetryArtifact } from "./telemetry-artifact"
 import { createOsProvider } from "./telemetry.test-support"
@@ -10,6 +11,10 @@ import { wireViolations } from "./telemetry-wire.test-support"
 // Collector registry sisyphuslabs/omo-telemetry packages/schema-registry at 5c4503de6c393e970d2b16b47831b3ed1a821db4.
 const COLLECTOR_SEMCONV_CANONICAL_SHA256 = "246f23be0254c1ff03cacff2bcf238887f2f95e46e5fe1bed861d76b935044f6"
 const COLLECTOR_ARTIFACT_SCHEMA_SHA256 = "38e9dfc60903d817e61134980042286c6c02ad84137b81e5e8420b7ad430a11e"
+
+// The collector's tightened `semver` safe shape (omo-telemetry #4, "version shapes carry no free suffix"). The vendored
+// artifact.schema.json above predates it; until it is re-pinned, this is the one engine pattern allowed outside it.
+const COLLECTOR_HARDENED_SEMVER = "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$"
 
 const REGISTRY = new URL("./schema-registry/", import.meta.url)
 type SchemaDefs = {
@@ -37,8 +42,9 @@ describe("engine artifacts against the collector's hardened registry", () => {
   })
 
   test("#then every pattern in both artifacts is one of the registry's named safe shapes, byte exact", () => {
-    const safe = new Set((DEFS.safePattern?.oneOf ?? []).map((shape) => shape.const))
-    expect(safe.size).toBeGreaterThan(0)
+    expect(VERSION_PATTERN).toBe(COLLECTOR_HARDENED_SEMVER)
+    const safe = new Set([...(DEFS.safePattern?.oneOf ?? []).map((shape) => shape.const), COLLECTOR_HARDENED_SEMVER])
+    expect(safe.size).toBeGreaterThan(1)
     const outside: string[] = []
     for (const artifact of ARTIFACTS) {
       if (!safe.has(artifact.scope.version)) outside.push(`${artifact.product} scope.version`)
