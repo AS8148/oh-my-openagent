@@ -60,12 +60,20 @@ function createInCommitKillExec(minDelayMs: number, maxDelayMs: number): GitExec
         child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8") })
         child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8") })
         child.once("error", reject)
+        let killTimer: ReturnType<typeof setTimeout> | undefined
         child.once("spawn", () => {
           writeFileSync(orphanPidPath(repoPath), String(child.pid))
           const delayMs = minDelayMs + Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1))
-          setTimeout(() => process.kill(process.pid, "SIGKILL"), delayMs)
+          killTimer = setTimeout(() => process.kill(process.pid, "SIGKILL"), delayMs)
         })
-        child.once("exit", (code) => resolve({ code: code ?? 1, stdout, stderr }))
+        child.once("exit", (code) => {
+          // Disarm before resolving: the kill is only the interleaving under test while the
+          // commit is in flight. A timer that survives git's exit can SIGKILL this child after
+          // it already released the memory-write lock, and the parent then reads a missing lock
+          // record (ENOENT) even though the owner died cleanly past the commit window.
+          if (killTimer !== undefined) clearTimeout(killTimer)
+          resolve({ code: code ?? 1, stdout, stderr })
+        })
       })
     },
   }
