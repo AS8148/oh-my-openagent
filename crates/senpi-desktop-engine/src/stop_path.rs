@@ -122,12 +122,16 @@ pub struct StopPaths {
     supervisor: Arc<Supervisor>,
     resume: ResumeToken,
     state: Mutex<State>,
+    #[cfg(test)]
+    control_slot: Arc<senpi_desktop_session::ControlSlot>,
 }
 
 impl StopPaths {
     pub fn new(supervisor: Arc<Supervisor>, selection: &BackendSelection, resume: ResumeToken) -> Self {
         let announced = Announced::from(supervisor.status());
         Self {
+            #[cfg(test)]
+            control_slot: senpi_desktop_session::ControlSlot::new(),
             state: Mutex::new(State {
                 host_relay: HostRelay::new(),
                 global: global_listener(selection),
@@ -143,6 +147,17 @@ impl StopPaths {
 
     pub fn resume_token(&self) -> &str {
         self.resume.as_str()
+    }
+
+    pub fn supervisor(&self) -> Arc<Supervisor> {
+        Arc::clone(&self.supervisor)
+    }
+
+    pub fn control_slot(&self) -> Arc<senpi_desktop_session::ControlSlot> {
+        #[cfg(test)]
+        { Arc::clone(&self.control_slot) }
+        #[cfg(not(test))]
+        { senpi_desktop_session::ControlSlot::process_wide() }
     }
 
     pub fn set_policy(&self, policy: StopPolicy) {

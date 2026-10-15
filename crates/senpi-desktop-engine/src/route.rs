@@ -107,6 +107,11 @@ impl Engine {
             }
             Method::StopPathResume => {
                 let token = parse::<StopPathResumeParams>(params)?.token;
+                if self.shared_agent() {
+                    return Err(Failure::Engine(senpi_desktop_core::error::DesktopError::permission_denied(
+                        "a connection cannot clear the shared agent stop latch",
+                    )));
+                }
                 let resumed = self.stop_paths().resume(&token).map_err(Failure::Engine);
                 Ok(self.stop_path_changed(resumed.and_then(to_result)))
             }
