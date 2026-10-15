@@ -36,8 +36,9 @@ describe("caseFold (vendored Unicode 16.0 full folding)", () => {
     expect(caseFold("𐐀𐐨")).toBe("𐐨𐐨")
   })
 
-  test("folds Cherokee case pairs", () => {
-    expect(caseFold("\u{13B8}")).toBe("\u{AB88}")
+  test("folds Cherokee small letters to the canonical block", () => {
+    expect(caseFold("\u{AB88}")).toBe("\u{13B8}")
+    expect(caseFold("\u{13B8}")).toBe("\u{13B8}")
     expect(caseFold("\u{13F8}")).toBe("\u{13F0}")
   })
 
