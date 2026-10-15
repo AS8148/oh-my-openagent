@@ -12,8 +12,26 @@ pub(crate) struct Sessions {
 }
 
 impl Sessions {
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn stopped_before_connection(&self) -> bool {
+        self.stop_paths.status().suspended
+    }
+
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         let supervisor = Arc::new(Supervisor::new(Arc::new(MonotonicClock::new())));
+        Self::with_supervisor(supervisor)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn persistent(latch: crate::stop_latch::StopLatch) -> Self {
+        let supervisor = Supervisor::with_stop_commit(
+            Arc::new(MonotonicClock::new()), latch.is_stopped(), move || latch.commit_or_exit(),
+        );
+        Self::with_supervisor(Arc::new(supervisor))
+    }
+
+    fn with_supervisor(supervisor: Arc<Supervisor>) -> Self {
         #[cfg(not(test))]
         let selection = BackendSelection::Platform;
         #[cfg(test)]

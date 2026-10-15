@@ -18,3 +18,4 @@ senpi-desktop-core = { path = "../senpi-desktop-core" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 block2.workspace = true
+serde_json.workspace = true

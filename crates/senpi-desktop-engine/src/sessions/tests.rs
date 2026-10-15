@@ -124,6 +124,10 @@ async fn session_close_does_not_close_another_clients_session() {
 
 #[tokio::test]
 async fn global_stop_latches_all_clients() {
+    #[cfg(target_os = "macos")]
+    if crate::xpc_test_harness::run_if_requested().await {
+        return;
+    }
     // given
     let owner = Sessions::new();
     let mut a = Client::new(&owner);

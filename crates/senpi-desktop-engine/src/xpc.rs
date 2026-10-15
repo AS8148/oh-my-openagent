@@ -10,8 +10,11 @@ use tokio::{
 };
 
 pub(crate) async fn run(name: &str) -> Result<(), String> {
+    let latch = crate::stop_latch::StopLatch::open().map_err(|error| error.to_string())?;
+    let sessions = Arc::new(Sessions::persistent(latch));
+    #[cfg(test)]
+    println!("XPC_TEST_READY stopped={}", sessions.stopped_before_connection());
     let transport = AgentTransport::start(name).map_err(|error| error.to_string())?;
-    let sessions = Arc::new(Sessions::new());
     let mut tasks = JoinSet::new();
     loop {
         tokio::select! {
@@ -70,7 +73,10 @@ async fn serve(stream: Incoming, sessions: Arc<Sessions>) {
     // This point can only be reached after O1, finite authorization, the bound
     // capability/sequence and a valid session.open. No environment-selected backend.
     let config = EngineConfig {
+        #[cfg(not(test))]
         selection: BackendSelection::Platform,
+        #[cfg(test)]
+        selection: BackendSelection::FakeScenario(Box::default()),
         timeouts: SessionTimeouts::default(),
         fake_clock: false,
     };

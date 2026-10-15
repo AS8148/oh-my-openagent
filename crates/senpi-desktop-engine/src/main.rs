@@ -22,6 +22,10 @@ mod stop_path;
 mod sessions;
 #[cfg(target_os = "macos")]
 mod xpc;
+#[cfg(target_os = "macos")]
+mod stop_latch;
+#[cfg(all(test, target_os = "macos"))]
+mod xpc_test_harness;
 
 use clap::Parser;
 use std::process::ExitCode;

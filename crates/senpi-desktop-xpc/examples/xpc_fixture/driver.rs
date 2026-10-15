@@ -2,6 +2,8 @@
 mod connection;
 #[path = "object.rs"]
 mod object;
+#[path = "latch.rs"]
+mod latch;
 use connection::Connection;
 use object::Object;
 use sha2::{Digest, Sha256};
@@ -41,28 +43,28 @@ fn discover(name: &str) -> Result<Connection, String> {
     Ok(data)
 }
 
-fn approve(data: &Connection) -> Result<Vec<u8>, String> {
+fn approve(data: &Connection, payload: &[u8]) -> Result<Vec<u8>, String> {
     let mut request = Object::dictionary()?;
     request.put_uint(c"version", 1);
     request.put_uint(c"kind", 1);
     request.put_uint(c"ttl_ms", 30_000);
-    request.put_data(c"hashes", &Sha256::digest(FRAME));
+    request.put_data(c"hashes", &Sha256::digest(payload));
     let reply = data.exchange(&request)?;
     Ok(reply.data(c"capability")?.to_vec())
 }
 
-fn frame(capability: &[u8], sequence: u64) -> Result<Object, String> {
+fn frame(capability: &[u8], sequence: u64, payload: &[u8]) -> Result<Object, String> {
     let mut request = Object::dictionary()?;
     request.put_uint(c"version", 1);
     request.put_uint(c"kind", 2);
     request.put_uint(c"sequence", sequence);
     request.put_data(c"capability", capability);
-    request.put_data(c"payload", FRAME);
+    request.put_data(c"payload", payload);
     Ok(request)
 }
 
 fn hello(data: &Connection, capability: &[u8]) -> Result<(), String> {
-    data.send(&frame(capability, 1)?);
+    data.send(&frame(capability, 1, FRAME)?);
     let reply = data.next()?;
     let payload =
         std::str::from_utf8(reply.data(c"payload")?).map_err(|error| error.to_string())?;
@@ -102,6 +104,8 @@ pub(super) fn run() -> Result<(), String> {
     let mode = args.get(1).ok_or("missing mode")?;
     let name = args.get(2).ok_or("missing service")?;
     match mode.as_str() {
+        "latch-stop" => latch::run(name, true),
+        "latch-check" => latch::run(name, false),
         "squatter" => connection::squatter(name),
         "reject" => {
             let named = Connection::named(name)?;
@@ -109,12 +113,12 @@ pub(super) fn run() -> Result<(), String> {
         }
         "valid" => {
             let data = discover(name)?;
-            let cap = approve(&data)?;
+            let cap = approve(&data, FRAME)?;
             hello(&data, &cap)
         }
         "restart" => {
             let old = discover(name)?;
-            let old_cap = approve(&old)?;
+            let old_cap = approve(&old, FRAME)?;
             hello(&old, &old_cap)?;
             signal("READY_FOR_REPLACEMENT")?;
             refused(old.next())?;
@@ -124,13 +128,13 @@ pub(super) fn run() -> Result<(), String> {
             drop(named);
             signal("SQUATTER_REFUSED")?;
             let new = discover(name)?;
-            let new_cap = approve(&new)?;
+            let new_cap = approve(&new, FRAME)?;
             if new_cap == old_cap {
                 return Err("capability survived restart".to_owned());
             }
             hello(&new, &new_cap)?;
             println!("RECONNECTED_FRESH");
-            new.send(&frame(&old_cap, 2)?);
+            new.send(&frame(&old_cap, 2, FRAME)?);
             refused(new.next())?;
             println!("STALE_CAPABILITY_REFUSED");
             Ok(())

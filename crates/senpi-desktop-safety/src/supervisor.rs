@@ -135,6 +135,7 @@ pub struct Supervisor {
     stop_paths: Mutex<HashMap<StopPathId, StopPathState>>,
     global_failure: Mutex<Option<StopPathFailure>>,
     clock: Arc<dyn Clock>,
+    stop_commit: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl Supervisor {
@@ -149,7 +150,27 @@ impl Supervisor {
             stop_paths: Mutex::new(HashMap::new()),
             global_failure: Mutex::new(None),
             clock,
+            stop_commit: None,
         }
+    }
+
+    /// A durable owner restores state before sharing this supervisor. The
+    /// commit callback must return only after persistence succeeds; on failure
+    /// its owner must fail closed rather than return and acknowledge the stop.
+    #[must_use]
+    pub fn with_stop_commit(
+        clock: Arc<dyn Clock>,
+        stopped: bool,
+        commit: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        let mut supervisor = Self::new(clock);
+        supervisor.stop_commit = Some(Arc::new(commit));
+        if stopped {
+            supervisor.suspended.store(true, Ordering::SeqCst);
+            supervisor.stop_epoch.store(1, Ordering::SeqCst);
+            *supervisor.stopped_by.get_mut() = Some(StopSource::Api);
+        }
+        supervisor
     }
 
     /// The latest global listener start result; success clears a previous failure.
@@ -176,8 +197,12 @@ impl Supervisor {
 
     /// Latch suspension. The first source is kept until [`Self::reset`].
     pub fn trigger_stop(&self, source: StopSource) {
-        self.stop_epoch.fetch_add(1, Ordering::SeqCst);
         let mut stopped_by = self.stopped_by.lock();
+        if let Some(commit) = &self.stop_commit {
+            commit();
+        }
+        // HoldSignal also observes this epoch, so it must follow durable commit.
+        self.stop_epoch.fetch_add(1, Ordering::SeqCst);
         stopped_by.get_or_insert(source);
         self.suspended.store(true, Ordering::SeqCst);
         drop(stopped_by);
@@ -274,3 +299,7 @@ impl Supervisor {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "supervisor/persistence_tests.rs"]
+mod persistence_tests;
