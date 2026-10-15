@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { spawn, spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, type Server } from "node:https"
 import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
@@ -86,28 +86,43 @@ describe("installEngineCaTrust", () => {
 // compiles a real probe and connects to a local TLS server whose leaf chains to a private CA.
 describe("engine entry", () => {
   const entry = join(import.meta.dir, "..", "compile-entry.ts")
-  const runEntry = (args: string[]) =>
+  const runEntry = (args: readonly string[], home?: string) =>
     spawnSync(process.execPath, [entry, ...args], {
-      env: { ...process.env, OMO_EXTRA_CA_CERTIFICATES: "junk" },
+      env: { ...process.env, ...(home === undefined ? {} : { HOME: home }), OMO_EXTRA_CA_CERTIFICATES: "junk" },
       encoding: "utf8",
     })
 
-  test("#given an invalid OMO_EXTRA_CA_CERTIFICATES #then a working command refuses to start", () => {
-    const run = runEntry(["doctor"])
-    expect(run.status).toBe(78)
-    expect(run.stderr).toContain("OMO_EXTRA_CA_CERTIFICATES")
-  })
+  // Security contract (#10236): a bad trust value fails closed for every argv except the exact
+  // `--version` and `--help`, so no engine code (extension loading, package installs) runs under it.
+  test.each([
+    { args: ["doctor"] },
+    { args: ["-h"] },
+    { args: ["-v"] },
+    { args: ["--help", "x"] },
+    { args: ["--version", "doctor"] },
+    { args: ["--version", "--help"] },
+    { args: ["setup", "--help"] },
+  ].map((row) => [row.args.join(" "), row] as const))("#given an invalid OMO_EXTRA_CA_CERTIFICATES #then `%s` refuses to start", (_argv, { args }) => {
+    const run = runEntry(args)
+    expect({ status: run.status, named: run.stderr.includes("OMO_EXTRA_CA_CERTIFICATES") }).toEqual({ status: 78, named: true })
+  }, 60_000)
 
-  // `--version` and `--help` open no connection, so a bad trust value must not hide them (#10236).
-  test.each([["--version"], ["-v"], ["--help"], ["-h"]])(
-    "#given an invalid OMO_EXTRA_CA_CERTIFICATES #then %s still answers and names the problem",
-    (flag) => {
-      const run = runEntry([flag])
+  // The answer comes from static local data before anything else runs: an empty HOME stays empty,
+  // where the engine's help path would run migrations and write its state there.
+  test.each([
+    { args: ["--version"], output: /^omo \S+ \(engine: / },
+    { args: ["--help"], output: /^Usage: omo / },
+  ].map((row) => [row.args.join(" "), row] as const))("#given an invalid OMO_EXTRA_CA_CERTIFICATES #then `%s` answers without starting anything", (_argv, { args, output }) => {
+    const home = mkdtempSync(join(tmpdir(), "omo-trust-home-"))
+    try {
+      const run = runEntry(args, home)
       expect({ status: run.status, warned: run.stderr.includes("OMO_EXTRA_CA_CERTIFICATES") }).toEqual({ status: 0, warned: true })
-      expect(run.stdout.trim().length).toBeGreaterThan(0)
-    },
-    60_000,
-  )
+      expect(run.stdout).toMatch(output)
+      expect(readdirSync(home)).toEqual([])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 60_000)
 })
 
 describe("compiled binary", () => {

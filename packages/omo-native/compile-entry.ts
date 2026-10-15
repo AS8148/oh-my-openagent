@@ -231,22 +231,50 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
 
 export { reexecProvisionedRuntime } from "./provisioned-handoff"
 
-const INFORMATIONAL_FLAGS = new Set(["--version", "-v", "--help", "-h"])
-const isInformationalInvocation = (args: string[]): boolean => args.length === 1 && INFORMATIONAL_FLAGS.has(args[0] ?? "")
+const HELP_WITHOUT_ENGINE = `Usage: omo [options] [message...]
+       omo <command> [args]
+
+Commands: setup, doctor, daemon, thread, ulw-loop
+
+The full option list, including the options extensions add, needs the engine, which does not
+start while OMO_EXTRA_CA_CERTIFICATES is invalid. Fix or unset it, then run omo --help again.`
+
+/** The exact argv `--version` or `--help`, answered from local data only; anything else returns false. */
+async function answerUnderRefusedTrust(args: string[]): Promise<boolean> {
+  if (args.length !== 1) return false
+  if (args[0] === "--help") {
+    console.log(HELP_WITHOUT_ENGINE)
+    return true
+  }
+  if (args[0] !== "--version") return false
+  const embedded = (globalThis as typeof globalThis & { Bun?: { embeddedFiles?: EmbeddedFile[] } }).Bun?.embeddedFiles as EmbeddedFile[] | undefined
+  const manifestFile = embedded?.length ? await selectRuntimeManifest(embedded) : undefined
+  if (manifestFile) {
+    const manifest = JSON.parse(await embeddedText(manifestFile)) as EmbeddedManifest
+    console.log(versionLine({ version: manifest.omoAiVersion, omoBuild: manifest.buildInfo, engineBuild: manifest.engineBuild }, manifest.enginePin))
+  } else {
+    const packageJson = readJson(join(dirname(fileURLToPath(import.meta.url)), "package.json")) as { version: string; omoBuild?: unknown }
+    console.log(versionLine(packageJson, "unknown"))
+  }
+  return true
+}
 
 async function main(): Promise<void> {
   // Before anything opens TLS, and on every start: `host ensure`, the host daemon and the
-  // provisioned handoff all re-enter here (#10215). A bad value refuses to start (exit 78), except
-  // for `--version` and `--help`, which open no connection and still answer with a warning (#10236).
+  // provisioned handoff all re-enter here (#10215). A bad value refuses to start (exit 78). Only the
+  // exact argv `--version` or `--help` is answered, from static local data, before anything else runs
+  // (#10236): the engine's own help loads extensions, which can install packages over the network.
   try {
     installEngineCaTrust()
   } catch (error) {
     if (!(error instanceof ExtraCaCertificatesError)) throw error
-    if (!isInformationalInvocation(process.argv.slice(2))) {
-      process.stderr.write(`omo: ${error.message}; not starting with a trust set the caller did not intend\n`)
-      process.exit(78)
+    if (await answerUnderRefusedTrust(process.argv.slice(2))) {
+      process.stderr.write(`omo: ${error.message}; every other command refuses to start until it is fixed\n`)
+      process.exitCode = 0
+      return
     }
-    process.stderr.write(`omo: ${error.message}; every other command refuses to start until it is fixed\n`)
+    process.stderr.write(`omo: ${error.message}; not starting with a trust set the caller did not intend\n`)
+    process.exit(78)
   }
   const embedded = (globalThis as typeof globalThis & { Bun?: { embeddedFiles?: EmbeddedFile[] } }).Bun?.embeddedFiles as EmbeddedFile[] | undefined
   if (!embedded?.length) {

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**`omo --version` and `omo --help` still answer when `OMO_EXTRA_CA_CERTIFICATES` is invalid.** The compiled binary refuses to start (exit 78) when that value is not a valid CA bundle, and it used to refuse these two as well. They open no connection, so they now print their usual output plus a warning that names the problem; every other command still refuses. The engine's trust report also counts the certificates `NODE_EXTRA_CA_CERTS` added.
+**`omo --version` and `omo --help` still answer when `OMO_EXTRA_CA_CERTIFICATES` is invalid, without starting anything.** The compiled binary refuses to start (exit 78) when that value is not a valid CA bundle, and it used to refuse these too. Now the exact commands `omo --version` and `omo --help` are answered from local data before the engine or any connection starts: the version line, or a short usage that says the full option list needs the setting fixed. A warning names the problem. Every other command, including `-v`, `-h` and any subcommand's `--help`, still refuses. The engine's trust report also counts the certificates `NODE_EXTRA_CA_CERTS` added.
 
 **Team-mode panes open in the worktree path exactly as written.** The member's worktree path was passed to tmux `split-window -c`, which expands its argument as a tmux format, so `#{...}` in a model-supplied `team_create` path changed the directory a pane opened in, and `#(...)` is tmux's shell-exec format. The path now has every `#` doubled, the same escaping the subagent pane titles use. ([#10233](https://github.com/code-yeongyu/oh-my-openagent/issues/10233))
 
