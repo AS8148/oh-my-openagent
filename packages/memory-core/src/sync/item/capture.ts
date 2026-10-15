@@ -72,8 +72,14 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
   const combined = combineKey(state, key, kh, history)
   if (kh.kind === "text") {
     const target = toText(value)
-    if (combined?.kind === "text" && combined.text === target) return
-    if (state.text !== target) fork.getText(fmName(key, "text")).update(target)
+    // The text join is bare text; a re-parsed register/set value arrives renderScalar-quoted,
+    // so compare the bare form (review r2 #2). A stale writer whose text already lost to a
+    // concurrent register must not re-install it (review r2 #3): when the key has no text
+    // content yet but a register does, the register wins and the text is folded in, not set.
+    const combinedText = combined?.kind === "text" ? combined.text : undefined
+    if (combinedText !== undefined && (combinedText === target || combinedText === regText(target))) return
+    const regWon = (state.text === null || state.text === "") && activeReg(state.reg).length > 0
+    if (!regWon && state.text !== target) fork.getText(fmName(key, "text")).update(target)
     clearLosers(fork, key, state, "text")
     return
   }
@@ -90,6 +96,10 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
   // quoted it ("q: r / true" parses back as bare text); compare the dequoted forms.
   if (combinedReg !== undefined && (combinedReg === target || combinedReg === regText(target))) return
   const active = activeReg(state.reg)
+  // Idempotent by value: if an active register already holds this exact serialized value,
+  // writing it again would only mint a duplicate (a stale capture replaying a value a
+  // concurrent writer already landed is a no-op, review r2 #2).
+  if (active.some((e) => e.value === target)) return
   const entry = { v: target, s: active.map((e) => e.tag) }
   fork.getMap(fmName(key, "reg")).set(newTag(fork, target), entry)
   clearLosers(fork, key, state, "reg")

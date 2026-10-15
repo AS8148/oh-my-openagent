@@ -129,9 +129,14 @@ export type CombinedValue =
 
 export function combineKey(state: KeyState, key: string, kh: KeyHistory, history: ItemHistory): CombinedValue | null {
   const active = activeReg(state.reg)
-  const regValues = [...active].sort((a, b) =>
-    a.value === b.value ? (a.tag < b.tag ? -1 : 1) : a.value < b.value ? -1 : 1,
-  )
+  // Two active registers with one serialized value are one value (a stale capture can replay
+  // a value a concurrent writer already landed); join it once (review r2 #2).
+  const seenValues = new Set<string>()
+  const regValues = [...active]
+    .sort((a, b) =>
+      a.value === b.value ? (a.tag < b.tag ? -1 : 1) : a.value < b.value ? -1 : 1,
+    )
+    .filter((entry) => (seenValues.has(entry.value) ? false : (seenValues.add(entry.value), true)))
   const soleRegister =
     kh.kind === "reg" && (state.text === null || state.text === "") && state.set.length === 0
   // A lone register keeps its serialized form verbatim (`count: 2` stays `2`); only a
@@ -161,8 +166,10 @@ export function combineKey(state: KeyState, key: string, kh: KeyHistory, history
     if (state.text !== null && state.text !== "") {
       tagged.push({ source: renderScalar(state.text), stamp: kh.byKind.get("text") ?? MISSING_STAMP })
     }
+    // A register inside a set join contributes its bare scalar text, not its quoted stored
+    // source, so the joined element parses back to itself (review r2).
     for (const entry of active) {
-      tagged.push({ source: entry.value, stamp: addStamp(history, key, "reg", entry.tag, kh.byKind.get("reg")) })
+      tagged.push({ source: renderScalar(regText(entry.value)), stamp: addStamp(history, key, "reg", entry.tag, kh.byKind.get("reg")) })
     }
     tagged.sort((a, b) => stampCompare(a.stamp, b.stamp) || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0))
     const seen = new Set<string>()
