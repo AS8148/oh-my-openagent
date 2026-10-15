@@ -57,6 +57,11 @@ describe("memory commit path and git auto-maintenance (omo #10177)", () => {
     await git(dir, ["init", "-b", "main"])
     await git(dir, ["config", "commit.gpgsign", "false"])
     await git(dir, ["config", "gc.auto", "1"])
+    // Production repos get a repo-local identity from GitMemoryRepo.init -> ensureIdentity; this
+    // raw fixture must set the same, or `merge` cannot resolve a committer on hosts with no
+    // global git identity (CI runners, clean boxes).
+    await git(dir, ["config", "user.name", "Auto Maintenance"])
+    await git(dir, ["config", "user.email", "auto-maintenance@omo.local"])
     const repo = new GitMemoryRepo({ dir, agentId: "auto-maintenance", exec: tracingExec(traceDir) })
     const author = { agentId: "auto-maintenance", authorName: "Auto Maintenance" }
 
