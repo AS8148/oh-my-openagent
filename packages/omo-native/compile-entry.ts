@@ -32,6 +32,7 @@ import { isInternalSupervisorLaunch, runInternalSupervisor } from "./supervisor-
 import { registerEngineRuntimeModules } from "./engine-runtime-modules"
 import { applyCachedClaudeCode } from "../omo-senpi/src/components/claude-code/index"
 import { buildSenpiArgs, shouldPrintCompiledBanner } from "./compile-args"
+import { runLoroSmoke } from "./loro-smoke"
 import { spawnSync } from "node:child_process"
 import { compiledRollbackMigration } from "./compiled-rollback"
 import { refuseRetiredCommand } from "./bin/lib/retired-command.js"
@@ -129,6 +130,10 @@ export function compiledBannerLines(manifest: Pick<EmbeddedManifest, "omoAiVersi
 type CompiledLauncherSeams = { readonly threadSdk?: (options: Record<string, unknown>) => Promise<{ sdk?: unknown; error?: string }> }
 
 export async function runCompiledLauncher(args: string[], execDir: string, enginePin = "unknown", compiledPackageRoot?: string, migration: CompiledLauncherOptions = {}, seams: CompiledLauncherSeams = {}): Promise<boolean> {
+  if (args[0] === "loro-smoke") {
+    process.exitCode = await runLoroSmoke()
+    return true
+  }
   if (["login", "logout", "whoami"].includes(args[0] ?? "")) {
     await runServiceAuthCommand(args)
     return true
