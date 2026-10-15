@@ -59,11 +59,12 @@ describe("tombstones (sync-design §4)", () => {
     const doc = await newDoc("1")
     const v1 = "---\ndescription: d\n---\nold\n"
     captureInto(doc, "", [], v1)
-    const f1 = itemFrontier(doc)
     deleteItem(doc)
     expect(isLive(doc)).toBe(false)
 
-    captureInto(doc, v1, f1, "---\ndescription: d\n---\nnew\n")
+    // The tombstone keeps the characters, so the content render at the CURRENT frontier
+    // still equals the last materialised text; the recreate diff lands after it.
+    captureInto(doc, v1, itemFrontier(doc), "---\ndescription: d\n---\nnew\n")
     expect(isLive(doc)).toBe(true)
     expect(renderItem(doc)).toBe("---\ndescription: d\n---\nnew\n")
     doc.free()

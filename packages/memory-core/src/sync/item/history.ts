@@ -100,13 +100,14 @@ function mapInsertKey(content: unknown): string | null {
 }
 
 const FM_PREFIX = "cid:root-"
+const SEP = "\x1f"
 
 function parseFmContainer(container: string): { readonly key: string; readonly part: FmPart } | null {
-  if (!container.startsWith(`${FM_PREFIX}fm/`)) return null
+  if (!container.startsWith(`${FM_PREFIX}fm${SEP}`)) return null
   const colon = container.lastIndexOf(":")
   if (colon < FM_PREFIX.length) return null
   const name = container.slice(FM_PREFIX.length, colon)
-  const segments = name.split("/")
+  const segments = name.split(SEP)
   const part = segments[2]
   if (segments.length !== 3 || (part !== "text" && part !== "set" && part !== "reg")) return null
   try {

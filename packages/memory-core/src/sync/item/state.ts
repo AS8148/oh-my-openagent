@@ -13,7 +13,9 @@ export const BODY_NAME = "body"
 export const TOMBSTONES_NAME = "tombstones"
 
 export function fmName(key: string, part: FmPart): string {
-  return `fm/${encodeURIComponent(key)}/${part}`
+  // Root names cannot contain "/" (Loro rejects it), so the §2 `fm/<key>/<part>`
+  // grammar is written with the unit separator; the encoded key never contains it.
+  return `fm\x1f${encodeURIComponent(key)}\x1f${part}`
 }
 
 export function cidRoot(name: string, type: ContainerType): ContainerID {

@@ -64,10 +64,9 @@ describe("renderItem", () => {
     const doc = await newDoc("1")
     const v1 = "old text\n"
     captureInto(doc, "", [], v1)
-    const f1 = itemFrontier(doc)
     deleteItem(doc)
     expect(renderItem(doc)).toBeNull()
-    captureInto(doc, v1, f1, "reborn\n")
+    captureInto(doc, v1, itemFrontier(doc), "reborn\n")
     expect(renderItem(doc)).toBe("reborn\n")
     doc.free()
   })
