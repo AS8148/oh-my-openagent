@@ -26,7 +26,7 @@ export interface ItemHistory {
 }
 
 interface OpLike {
-  readonly container: string
+  readonly rootName: string | null
   readonly counter: number
   readonly content: unknown
 }
@@ -45,7 +45,7 @@ export function analyzeHistory(doc: LoroDoc): ItemHistory {
   changes.sort((a, b) => a.lamport - b.lamport || peerCompare(a.peer, b.peer))
   for (const change of changes) {
     for (const op of readOps(doc, { peer: change.peer, counter: change.counter })) {
-      const parsed = parseFmContainer(op.container)
+      const parsed = op.rootName === null ? null : parseFmName(op.rootName)
       if (parsed === null) continue
       const stamp: Stamp = { lamport: change.lamport + (op.counter - change.counter), peer: change.peer }
       const existing = keys.get(parsed.key)
@@ -83,33 +83,45 @@ function readOps(doc: LoroDoc, id: { peer: PeerID; counter: number }): readonly 
   const out: OpLike[] = []
   for (const raw of ops) {
     if (typeof raw !== "object" || raw === null) continue
-    if (!("container" in raw) || !("counter" in raw)) continue
-    const { container, counter } = raw
-    if (typeof container !== "string" || typeof counter !== "number") continue
-    out.push({ container, counter, content: "content" in raw ? raw.content : undefined })
+    if (!("counter" in raw) || typeof raw.counter !== "number") continue
+    out.push({
+      rootName: "container" in raw ? rootContainerName(raw.container) : null,
+      counter: raw.counter,
+      content: "content" in raw ? raw.content : undefined,
+    })
   }
   out.sort((a, b) => a.counter - b.counter)
   return out
 }
 
-function mapInsertKey(content: unknown): string | null {
-  if (typeof content !== "object" || content === null) return null
-  if (!("type" in content) || content.type !== "insert") return null
-  if (!("key" in content) || typeof content.key !== "string") return null
-  return content.key
+// loro's JSON op shape: container is { Root: { name, container_type } } for root
+// containers (string ids appear only in getChangedContainersIn), and a map write is
+// content { Map: { key, value } }.
+function rootContainerName(container: unknown): string | null {
+  if (typeof container !== "object" || container === null) return null
+  if (!("Root" in container)) return null
+  const root = container.Root
+  if (typeof root !== "object" || root === null) return null
+  if (!("name" in root) || typeof root.name !== "string") return null
+  return root.name
 }
 
-const FM_PREFIX = "cid:root-"
+function mapInsertKey(content: unknown): string | null {
+  if (typeof content !== "object" || content === null) return null
+  if (!("Map" in content)) return null
+  const map = content.Map
+  if (typeof map !== "object" || map === null) return null
+  if (!("key" in map) || typeof map.key !== "string") return null
+  return map.key
+}
+
 const SEP = "\x1f"
 
-function parseFmContainer(container: string): { readonly key: string; readonly part: FmPart } | null {
-  if (!container.startsWith(`${FM_PREFIX}fm${SEP}`)) return null
-  const colon = container.lastIndexOf(":")
-  if (colon < FM_PREFIX.length) return null
-  const name = container.slice(FM_PREFIX.length, colon)
+function parseFmName(name: string): { readonly key: string; readonly part: FmPart } | null {
   const segments = name.split(SEP)
   const part = segments[2]
-  if (segments.length !== 3 || (part !== "text" && part !== "set" && part !== "reg")) return null
+  if (segments.length !== 3 || segments[0] !== "fm") return null
+  if (part !== "text" && part !== "set" && part !== "reg") return null
   try {
     return { key: decodeURIComponent(segments[1] ?? ""), part }
   } catch {
