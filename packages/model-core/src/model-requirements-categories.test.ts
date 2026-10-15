@@ -75,7 +75,7 @@ describe("CATEGORY_MODEL_REQUIREMENTS", () => {
     expect(CATEGORY_MODEL_REQUIREMENTS["deep-high"].fallbackChain.map(({ model }) => model)).toEqual(["gpt-6-astra"])
   })
 
-  test("visual-engineering starts with Gemini 4 Argon low (#10187)", () => {
+  test("visual-engineering starts with Argon low (#10187)", () => {
     expect(CATEGORY_MODEL_REQUIREMENTS["visual-engineering"].fallbackChain.at(0)).toEqual({
       providers: ["google", "google-vertex", "opencode"], model: "gemini-4-argon", variant: "low",
     })
@@ -272,7 +272,7 @@ describe("CATEGORY_MODEL_REQUIREMENTS", () => {
     ])
   })
 
-  test("writing leads with Gemini 4 Argon low, then claude-opus-5-5 low, and never carries claude-fable-5-1", () => {
+  test("writing leads with Argon low, then claude-opus-5-5 low, and never carries claude-fable-5-1", () => {
     // given
     const requirement = CATEGORY_MODEL_REQUIREMENTS["writing"]
 

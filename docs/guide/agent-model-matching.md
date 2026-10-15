@@ -124,7 +124,7 @@ If one premium model is quota-limited while your other models are effectively un
 2. **Prefer a low-frequency, high-leverage role.** `plan-consultant` contributes one gap-analysis pass per plan generation. High-accuracy planning runs one `plan-reviewer` pass per round and repeats after any rejection. Both are far cheaper places for a rare model than the main agent, which runs throughout the workflow.
 3. **Avoid execution-heavy slots.** The category worker, `explore`, and `librarian` are high-volume. They're usually poor homes for the rarest model.
 
-Claude Fable 5.1 is the first rung of `plan-consultant`, of the `architect` and `artistry` categories, the second rung of `visual-engineering` (behind Gemini 4 Argon at low), and of Daily · Heavy. With a tight Fable allocation, move the categories off it first, since each runs once per delegated task of its kind, and keep `plan-consultant`, which runs once per plan, at a lower effort. `architect` has no fallback rung, so it disappears when Fable is missing unless you configure it yourself.
+Claude Fable 5.1 is the first rung of `plan-consultant`, of the `architect` and `artistry` categories, the second rung of `visual-engineering` (behind Argon at low), and of Daily · Heavy. With a tight Fable allocation, move the categories off it first, since each runs once per delegated task of its kind, and keep `plan-consultant`, which runs once per plan, at a lower effort. `architect` has no fallback rung, so it disappears when Fable is missing unless you configure it yourself.
 
 ```jsonc
 {
@@ -238,8 +238,8 @@ Because this is your own configuration, `deep-low` stays on the list even on a m
 - Main agent: Daily · Normal or Daily · Heavy for the generalist lanes; Geeky · Normal or Geeky · Heavy for the GPT lanes.
 - `plan-consultant`: any Claude-family model, Kimi K3, GLM 5.2 / 5.3.
 - `plan-reviewer`: GPT-6 Astra at xhigh or high; Claude Opus 5.5 at max as a communicative fallback.
-- `visual-engineering`: Gemini 4 Argon at low, then Claude Fable 5.1, Claude Opus 5.5, and Kimi K3; `artistry`: swap among Claude Fable 5.1, Claude Opus 5.5, and Kimi K3.
-- `writing`: Gemini 4 Argon at low, then Claude Opus 5.5 or Claude Opus 4.6.
+- `visual-engineering`: Argon at low, then Claude Fable 5.1, Claude Opus 5.5, and Kimi K3; `artistry`: swap among Claude Fable 5.1, Claude Opus 5.5, and Kimi K3.
+- `writing`: Argon at low, then Claude Opus 5.5 or Claude Opus 4.6.
 
 **Lower-confidence**, works but thinly validated:
 

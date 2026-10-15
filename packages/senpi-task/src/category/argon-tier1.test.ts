@@ -10,7 +10,7 @@ import { CATEGORY_FALLBACK_CHAINS } from "./fallback-chains"
 import { resolveCategory } from "./resolver"
 import type { SenpiModelPort, SenpiModelRegistryPort } from "./types"
 
-// #10187: Gemini 4 Argon at its lowest thinking level leads visual-engineering and writing. The
+// #10187: Argon at its lowest thinking level leads visual-engineering and writing. The
 // rung resolves only when the live registry serves the model, so with an engine pin whose catalog
 // has no Argon row both categories keep today's head; a registry that serves it gets Argon first.
 
@@ -34,7 +34,7 @@ function expectResolved(result: ReturnType<typeof resolveCategory<SenpiModelPort
   return result
 }
 
-describe("Gemini 4 Argon leads visual-engineering and writing (#10187)", () => {
+describe("Argon leads visual-engineering and writing (#10187)", () => {
   test.each<ArgonCategory>([...ARGON_CATEGORIES])("#given the builtin %s chain #then its head is the Argon low rung and the rest is the previous chain", (name) => {
     const chain = CATEGORY_FALLBACK_CHAINS[name]
     expect(chain[0]).toEqual(ARGON_RUNG)
