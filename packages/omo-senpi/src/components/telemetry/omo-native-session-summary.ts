@@ -6,7 +6,7 @@ import { CORRUPT, removeFile } from "./session-summary-files"
 import { createSummaryPublisher, type PublishSummary } from "./session-summary-publisher"
 import { createSummaryRecovery } from "./session-summary-recovery"
 import { isSessionSampled } from "./session-summary-sampling"
-import type { SummaryStorage, WindowRecord } from "./session-summary-storage"
+import type { RecordConsent, SummaryStorage, WindowRecord } from "./session-summary-storage"
 import { addTurn, openWindow, type EndedBy, type SummaryTurn, type SummaryWindow } from "./session-summary-window"
 
 export type { SummaryTurn } from "./session-summary-window"
@@ -20,6 +20,8 @@ export const HEARTBEAT_INTERVAL_MS = 60_000
 export type ScheduleHeartbeat = (tick: () => void, intervalMs: number) => () => void
 
 export type SessionSummaryOptions = {
+  /** The originating session's consent, stamped on every record; anything but `enabled` records nothing. */
+  readonly consent: RecordConsent
   readonly storage: SummaryStorage
   readonly publish: PublishSummary
   readonly sessionRole: TelemetrySessionRole
@@ -79,6 +81,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
   }
 
   const recordOf = (sessionHash: string, entry: Live): WindowRecord => ({
+    consent: options.consent,
     sessionHash,
     sessionRole: options.sessionRole,
     owner: storage.owner,
@@ -137,6 +140,10 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     const fresh = (seq: number, entryKey = key): Live => ({ key: entryKey, seq, sampleRate: options.sampleRate(), windowId: null, window: null })
     const stored = storage.readWindow(key)
     if (stored === undefined || stored === CORRUPT) return fresh(0)
+    if (stored.consent !== "enabled") {
+      storage.removeWindow(key)
+      return fresh(0)
+    }
     if (stored.owner.pid === storage.owner.pid && stored.owner.bootId === storage.owner.bootId) {
       return { key, seq: stored.seq, sampleRate: stored.sampleRate, windowId: stored.windowId, window: stored.window }
     }
@@ -145,9 +152,9 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     // Another process won the claim and now continues the shared file: this one keeps its own copy beside it.
     if (claimed === undefined) return fresh(stored.seq, storage.windowKey(sessionHash, true))
     const record = claimed.record
-    if (record === undefined || record === CORRUPT) {
+    if (record === undefined || record === CORRUPT || record.consent !== "enabled") {
       removeFile(claimed.claimPath)
-      return fresh(stored.seq)
+      return fresh(record === undefined || record === CORRUPT ? stored.seq : 0)
     }
     const published = record.windowId !== null && storage.hasPending(record.windowId)
     const entry: Live = published || record.window === null
@@ -163,7 +170,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     const windowId = entry.windowId ?? randomUUID()
     const seq = entry.seq
     void publisher.publishWindow({
-      sessionHash, sessionRole: options.sessionRole, sampleRate: entry.sampleRate, seq, windowId, window, endedBy,
+      consent: options.consent, sessionHash, sessionRole: options.sessionRole, sampleRate: entry.sampleRate, seq, windowId, window, endedBy,
     }, () => {
       entry.seq = seq + 1
       entry.window = null
@@ -179,11 +186,13 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     },
     isRawTurnSampled: (sessionHash) => isSessionSampled(sessionHash, options.sampleRate()),
     async recover() {
+      if (options.consent !== "enabled") return
       swept = true
       runSweep()
       await publisher.settled()
     },
     async recordTurn(sessionHash, turn) {
+      if (options.consent !== "enabled") return
       sweepOnce()
       ensureHeartbeat()
       const entry = liveFor(sessionHash)
@@ -202,6 +211,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
       await publisher.settled()
     },
     async finish(sessionHash, reason) {
+      if (options.consent !== "enabled") return
       sweepOnce()
       const entry = liveFor(sessionHash)
       live.delete(sessionHash)

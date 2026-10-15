@@ -26,8 +26,10 @@ import { registerOmoNativeParallelSummary } from "./omo-native-parallel-summary"
 import { createOmoNativePromptComponent } from "./omo-native-prompt"
 import {
   createOmoNativeSessionComponent,
+  hasNativeTelemetryConsent,
   type OmoNativeSessionOptions,
 } from "./omo-native-session"
+import type { SessionSummaryRecorder } from "./omo-native-session-summary"
 import { registerOmoNativeToolTelemetry } from "./omo-native-tools"
 import { createOmoNativeTurnHandler } from "./omo-native-turns"
 import {
@@ -37,6 +39,7 @@ import {
   type NativeCaptureState,
 } from "./omo-native-summary-wiring"
 import { isTelemetryHostWarmup, resolveTelemetrySessionRole } from "./session-role-resolver"
+import { purgeUnconsentedQueue, type RecordConsent } from "./session-summary-storage"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
   OMO_NATIVE_SCHEMA_VERSION,
@@ -105,20 +108,40 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
 
       // Same ordering constraint again: the final summary window must be captured before the session
       // component's shutdown handler clears `state.capture`.
+      // Opt-out means nothing is recorded: consent is decided BEFORE any summary state exists, and an
+      // opted-out session never creates the recorder, so it writes no window, pending or owner file.
       const sessionRole = resolveTelemetrySessionRole(pi, env)
-      const summary = createNativeSummaryRecorder({
-        state,
-        stateDir,
-        env,
-        cwd: typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : undefined,
-        sessionRole,
-        ...(options.rawTurnSampleRate === undefined ? {} : { rawTurnSampleRate: options.rawTurnSampleRate }),
-        ...(options.isPidAlive === undefined ? {} : { isPidAlive: options.isPidAlive }),
-        ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
-      })
+      let consent: RecordConsent | undefined
+      let summary: SessionSummaryRecorder | undefined
+      const summaryIfConsented = (eventCtx: unknown): SessionSummaryRecorder | undefined => {
+        consent ??= hasNativeTelemetryConsent(options, eventCtx, env) ? "enabled" : "unconsented"
+        if (consent !== "enabled") return undefined
+        summary ??= createNativeSummaryRecorder({
+          state,
+          consent,
+          stateDir,
+          env,
+          cwd: typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : undefined,
+          sessionRole,
+          ...(options.rawTurnSampleRate === undefined ? {} : { rawTurnSampleRate: options.rawTurnSampleRate }),
+          ...(options.isPidAlive === undefined ? {} : { isPidAlive: options.isPidAlive }),
+          ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
+        })
+        return summary
+      }
+      // The first capture proves the session component found consent; it is also when recovery runs.
+      state.onCaptureReady = () => {
+        consent ??= "enabled"
+        void summaryIfConsented(undefined)?.recover()
+      }
       pi.on("session_shutdown", async (payload, eventCtx) => {
+        const recorder = summaryIfConsented(eventCtx)
+        if (recorder === undefined) {
+          purgeQueue(stateDir, options)
+          return
+        }
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
-        await settleWithin(summary.finish(state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId), reason), SUMMARY_SHUTDOWN_WAIT_MS)
+        await settleWithin(recorder.finish(state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId), reason), SUMMARY_SHUTDOWN_WAIT_MS)
       })
 
       createOmoNativePromptComponent({
@@ -156,13 +179,15 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
 
       pi.on("turn_end", (payload, eventCtx) => {
         if (!isTurnEndEvent(payload)) return
+        const recorder = summaryIfConsented(eventCtx)
+        if (recorder === undefined) return
         const sessionHash = state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId)
         createOmoNativeTurnHandler({
           client,
           diagnostics: options.diagnostics,
           sessionId: sessionHash,
           sessionRole,
-          summary,
+          summary: recorder,
         })(payload)
       })
 
@@ -263,6 +288,21 @@ function forwardValidatedCapture(transport: TelemetryTransport, message: Telemet
   }
   transport.capture(message)
   return undefined
+}
+
+// Queued records without consent (an opted-out session's, or ones written before consent marks existed)
+// are deleted even by a session that records nothing itself.
+function purgeQueue(stateDir: string, options: OmoNativeTelemetryComponentOptions): void {
+  try {
+    purgeUnconsentedQueue(stateDir)
+  } catch (error) {
+    options.diagnostics?.({
+      event: "telemetry_activity_state_write_failed",
+      source: "omo-native-component",
+      error,
+      errorKind: error instanceof Error ? "error" : "non_error",
+    })
+  }
 }
 
 function reportCaptureFailure(options: OmoNativeTelemetryComponentOptions, error: unknown): void {

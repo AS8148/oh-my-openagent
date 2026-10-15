@@ -11,7 +11,7 @@ import type { OmoNativeEventName } from "./product-identity"
 import type { TelemetrySessionRole } from "./session-role"
 import { currentProcessOwner } from "./session-summary-owner"
 import { resolveRawTurnSampleRate } from "./session-summary-sampling"
-import { createSummaryStorage } from "./session-summary-storage"
+import { createSummaryStorage, type RecordConsent } from "./session-summary-storage"
 
 /** What the component's transport facade shares with every registration of one loaded extension. */
 export type NativeCaptureState = {
@@ -29,6 +29,7 @@ export const SUMMARY_SHUTDOWN_WAIT_MS = 1_000
 
 export function createNativeSummaryRecorder(input: {
   readonly state: NativeCaptureState
+  readonly consent: RecordConsent
   readonly stateDir: string
   readonly env: TelemetryEnv
   readonly cwd: string | undefined
@@ -39,7 +40,8 @@ export function createNativeSummaryRecorder(input: {
 }): SessionSummaryRecorder {
   const { state, env } = input
   let sampleRate = input.rawTurnSampleRate
-  const summary = createSessionSummaryRecorder({
+  return createSessionSummaryRecorder({
+    consent: input.consent,
     storage: createSummaryStorage({
       stateDir: input.stateDir,
       owner: currentProcessOwner(),
@@ -51,10 +53,6 @@ export function createNativeSummaryRecorder(input: {
     sampleRate: () => (sampleRate ??= resolveRawTurnSampleRate({ sink: "posthog", configured: configuredSampleRate(input.cwd, env), env })),
     ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
   })
-  state.onCaptureReady = () => {
-    void summary.recover()
-  }
-  return summary
 }
 
 // Acknowledged only when the server accepted this very event: the immediate send resolved. A transport

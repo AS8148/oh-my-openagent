@@ -71,6 +71,7 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
     now,
   })
   const summary = createSessionSummaryRecorder({
+    consent: "enabled",
     storage,
     publish: async (event) => {
       if (input.onPublish !== undefined) observed.push(input.onPublish(event, storage))

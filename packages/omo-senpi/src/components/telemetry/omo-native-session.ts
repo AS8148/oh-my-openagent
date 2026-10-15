@@ -66,7 +66,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
         if (sessionClosed) return
         const env = options.env ?? process.env
         const product = createOmoNativeProductConfig()
-        if (!isTelemetryClientEnabled({ env, product }) || !configEnabled(options, eventCtx, env)) return
+        if (!hasNativeTelemetryConsent(options, eventCtx, env)) return
 
         const osProvider = options.osProvider ?? getDefaultTelemetryOsProvider()
         const sessionId = extractSessionId(eventCtx) ?? "unknown"
@@ -208,6 +208,11 @@ function readTimeZone(provider: (() => string) | undefined): string | undefined 
   } catch {
     return undefined
   }
+}
+
+/** The one consent decision for OmO Native telemetry: the full env opt-out matrix, an API key, and omo.json. */
+export function hasNativeTelemetryConsent(options: OmoNativeSessionOptions, eventCtx: unknown, env: TelemetryEnv): boolean {
+  return isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }) && configEnabled(options, eventCtx, env)
 }
 
 function configEnabled(options: OmoNativeSessionOptions, eventCtx: unknown, env: TelemetryEnv): boolean {

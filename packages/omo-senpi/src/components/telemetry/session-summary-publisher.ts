@@ -1,7 +1,7 @@
 import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import type { TelemetrySessionRole } from "./session-role"
-import type { PendingRecord, SummaryStorage } from "./session-summary-storage"
+import type { PendingRecord, RecordConsent, SummaryStorage } from "./session-summary-storage"
 import { summaryProperties, type EndedBy, type SummaryWindow } from "./session-summary-window"
 import { isSessionSampled } from "./session-summary-sampling"
 
@@ -12,6 +12,7 @@ export type SummaryPublication = { readonly uuid: string; readonly properties: E
 export type PublishSummary = (publication: SummaryPublication) => Promise<boolean>
 
 export type ClosedWindow = {
+  readonly consent: RecordConsent
   readonly sessionHash: string
   readonly sessionRole: TelemetrySessionRole
   readonly sampleRate: number
@@ -72,6 +73,11 @@ export function createSummaryPublisher(input: {
   }
 
   const deliver = (record: PendingRecord): Promise<void> => {
+    // The one place an event leaves for the transport: a record without consent is deleted, never sent.
+    if (record.consent !== "enabled") {
+      input.storage.removePending(record.uuid)
+      return Promise.resolve()
+    }
     if (inFlight.has(record.uuid)) return Promise.resolve()
     inFlight.add(record.uuid)
     const delivery = send(record)
@@ -90,7 +96,9 @@ export function createSummaryPublisher(input: {
       dropped += count
     },
     async publishWindow(closed, advanceSeq) {
+      if (closed.consent !== "enabled") return
       const record: PendingRecord = {
+        consent: closed.consent,
         uuid: closed.windowId,
         sessionHash: closed.sessionHash,
         owner: input.storage.owner,

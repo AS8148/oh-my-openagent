@@ -50,6 +50,10 @@ export function createSummaryRecovery(input: {
       if (record === CORRUPT) reportCorrupt("window")
       return undefined
     }
+    if (record.consent !== "enabled") {
+      removeFile(claimed.claimPath)
+      return undefined
+    }
     const nextSeq = record.window === null ? record.seq : record.seq + 1
     const keepNumbering = () => {
       storage.createWindow(key, { ...record, owner: storage.owner, heartbeatAt: storage.now(), seq: nextSeq, windowId: null, window: null })
@@ -62,6 +66,7 @@ export function createSummaryRecovery(input: {
       return nextSeq
     }
     void publisher.publishWindow({
+      consent: record.consent,
       sessionHash: record.sessionHash,
       sessionRole: record.sessionRole,
       sampleRate: record.sampleRate,
@@ -83,6 +88,10 @@ export function createSummaryRecovery(input: {
     if (record === undefined || record === CORRUPT) {
       removeFile(claimed.claimPath)
       if (record === CORRUPT) reportCorrupt("pending event")
+      return
+    }
+    if (record.consent !== "enabled") {
+      removeFile(claimed.claimPath)
       return
     }
     // Re-owned before sending: if this process dies too, the next one resends it; while it lives, nobody does.
@@ -107,6 +116,11 @@ export function createSummaryRecovery(input: {
     for (const uuid of storage.pendingUuids()) {
       const record = storage.readPending(uuid)
       if (record === undefined || publisher.isInFlight(uuid)) continue
+      // Written by an opted-out session, or before consent marks existed: deleted unsent, never counted.
+      if (record !== CORRUPT && record.consent !== "enabled") {
+        storage.removePending(uuid)
+        continue
+      }
       if (record !== CORRUPT && isExpired(record.createdAt)) {
         storage.removePending(uuid)
         publisher.countDropped(1)
@@ -129,6 +143,10 @@ export function createSummaryRecovery(input: {
       if (record === CORRUPT) {
         const claimed = storage.claimWindow(key)
         if (claimed !== undefined) finishClaimedWindow(key, claimed)
+        continue
+      }
+      if (record.consent !== "enabled") {
+        storage.removeWindow(key)
         continue
       }
       if (isExpired(record.heartbeatAt)) {
