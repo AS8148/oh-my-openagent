@@ -199,6 +199,7 @@ Every event above also carries these properties.
 | Property | Type | Allowed values |
 |----------|------|----------------|
 | `$process_person_profile` | `boolean` | - |
+| `ci` | `boolean` | - |
 | `event_id` | `string` | - |
 | `install_id` | `string` | - |
 | `package_version` | `string` | - |
@@ -301,6 +302,10 @@ Every event carries two shared attribution properties as of schema version 3:
 
 Rows written before schema version 3 carry neither property. Segment on `schema_version` when mixing eras.
 
+### CI attribution
+
+Every event carries `ci`: `true` when the process runs with the `CI` environment variable set to anything other than empty, `0` or `false` (the convention GitHub Actions and most CI runners follow), else `false`. It lets analysis separate automated runs from people; it does not turn telemetry off. Rows written before this field existed carry no `ci`.
+
 ### Event ids
 
 Every event carries `event_id`, a UUIDv7 minted on the client at capture time from a monotonic clock and random bits; it is derived from nothing in the event. PostHog's top-level `uuid` is set to the same value, so a delivery that is retried or relayed through a second path deduplicates to one row. Rows written before this field existed carry no `event_id`.
@@ -318,6 +323,7 @@ Each switch below turns telemetry fully off: both the OmO Native events in the s
 | `DO_NOT_TRACK` | `1` | The consoledonottrack.com convention, honored across all omo adapters |
 | `OMO_SENPI_DISABLE_POSTHOG` | `1` | Adapter-specific kill switch |
 | `OMO_DISABLE_POSTHOG` | `1` | Global kill switch across omo packages |
+| `OMO_DISABLE_TELEMETRY` | `1`, `true` or `yes` | Global kill switch across omo packages, named for the product rather than the vendor |
 | `OMO_SENPI_SEND_ANONYMOUS_TELEMETRY` | any opt-out value, including `yes` | See the quirk note below |
 | `OMO_SEND_ANONYMOUS_TELEMETRY` | any opt-out value, including `yes` | See the quirk note below |
 | `omo.json` | `telemetry.enabled: false` | Config-file opt-out |

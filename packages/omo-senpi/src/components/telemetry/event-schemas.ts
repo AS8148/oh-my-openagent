@@ -158,6 +158,7 @@ export const OMO_NATIVE_EVENT_SCHEMAS = Object.freeze({
 // attribution). They bypass the per-event allowlists, so this table is their only published contract.
 export const OMO_NATIVE_COMMON_PROPERTY_SCHEMAS = Object.freeze({
   "$process_person_profile": BOOLEAN_PROPERTY,
+  ci: BOOLEAN_PROPERTY,
   event_id: STRING_PROPERTY,
   install_id: STRING_PROPERTY,
   package_version: STRING_PROPERTY,

@@ -107,11 +107,14 @@ export type OmoNativeAttributionInput = {
  * the session-id salt, so the CLI and the Desktop-bundled runtime on one machine converge on one id
  * without deriving anything from the machine itself. A valid `OMO_NATIVE_INSTALL_ID` env override
  * wins, because a Desktop host pins a remote (SSH/WSL) runtime to ITS local installation id.
- * `OMO_NATIVE_SURFACE=desktop` is set by the Desktop host; anything else is the CLI.
+ * `OMO_NATIVE_SURFACE=desktop` is set by the Desktop host; anything else is the CLI. `ci` marks a
+ * process running under a CI runner (`CI` set to anything but empty, `0` or `false`), so automated
+ * traffic can be separated from people at query time.
  */
 export function getOmoNativeAttribution(input: OmoNativeAttributionInput = {}): {
   readonly surface: OmoNativeSurface
   readonly install_id: string
+  readonly ci: boolean
 } {
   const env = input.env ?? process.env
   const surface: OmoNativeSurface = env["OMO_NATIVE_SURFACE"]?.trim() === "desktop" ? "desktop" : "cli"
@@ -119,7 +122,12 @@ export function getOmoNativeAttribution(input: OmoNativeAttributionInput = {}): 
   const install_id = INSTALL_ID_PATTERN.test(envInstallId)
     ? envInstallId
     : readOrCreateInstallId(join(input.stateDir ?? getOmoNativeStateDir(env), INSTALL_ID_FILE_NAME))
-  return { surface, install_id }
+  return { surface, install_id, ci: isCiEnv(env["CI"]) }
+}
+
+function isCiEnv(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase() ?? ""
+  return normalized !== "" && normalized !== "0" && normalized !== "false"
 }
 
 /** Attach the shared attribution to a product config; the fixed identity keys still win downstream. */

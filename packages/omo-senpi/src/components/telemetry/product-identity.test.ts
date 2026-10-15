@@ -329,10 +329,22 @@ describe("OmO Native product identity", () => {
       SENPI_CODING_AGENT_DIR: agentDir,
     }
 
-    expect(getOmoNativeAttribution({ env })).toEqual({ surface: "desktop", install_id: envInstallId })
+    expect(getOmoNativeAttribution({ env })).toEqual({ surface: "desktop", install_id: envInstallId, ci: false })
     // and: a malformed env id is ignored rather than trusted
     expect(getOmoNativeAttribution({ env: { ...env, OMO_NATIVE_INSTALL_ID: "not-hex" } }).install_id)
       .toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  test("#given a CI env #when attribution is resolved #then ci reflects whether CI is truthy", () => {
+    const agentDir = useTemporaryAgentDir()
+    const env = { OMO_CODING_AGENT_DIR: agentDir, SENPI_CODING_AGENT_DIR: agentDir }
+
+    expect(getOmoNativeAttribution({ env: { ...env, CI: "true" } }).ci).toBe(true)
+    expect(getOmoNativeAttribution({ env: { ...env, CI: "1" } }).ci).toBe(true)
+    expect(getOmoNativeAttribution({ env }).ci).toBe(false)
+    expect(getOmoNativeAttribution({ env: { ...env, CI: "false" } }).ci).toBe(false)
+    expect(getOmoNativeAttribution({ env: { ...env, CI: "0" } }).ci).toBe(false)
+    expect(getOmoNativeAttribution({ env: { ...env, CI: "" } }).ci).toBe(false)
   })
 
   test("#given a product config #when attribution is attached #then additionalProperties carry it and existing product extras survive", () => {
@@ -355,6 +367,7 @@ describe("OmO Native product identity", () => {
       custom_flag: true,
       surface: "desktop",
       install_id: "c".repeat(64),
+      ci: false,
     })
   })
 
