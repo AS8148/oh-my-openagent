@@ -4,6 +4,18 @@ import { readMigrationJournal, removeMigrationJournal, writeMigrationJournal } f
 import { hasMigrationMarker } from "./predicate"
 import { MigrationTransactionError, type MigrationClock, type MigrationEnvironment, type MigrationFileSystem, type MigrationProcess, type MigrationTargetWriter } from "./types"
 
+/**
+ * The planned name is kept when it is free or already holds this target's bytes (a crashed run's copy).
+ * A foreign file there is left alone and the next free `<planned>.N` name is used instead (#8187).
+ */
+function backupPathForResume(planned: string | undefined, targetPath: string, fileSystem: MigrationFileSystem): string | undefined {
+  if (planned === undefined || !fileSystem.existsSync(planned) || !fileSystem.existsSync(targetPath)) return planned
+  if (fileSystem.readFileSync(planned, "utf-8") === fileSystem.readFileSync(targetPath, "utf-8")) return planned
+  let attempt = 1
+  while (fileSystem.existsSync(`${planned}.${attempt}`)) attempt += 1
+  return `${planned}.${attempt}`
+}
+
 export function resumeMigrationJournal(input: {
   readonly clock: MigrationClock
   readonly env: MigrationEnvironment
@@ -12,8 +24,9 @@ export function resumeMigrationJournal(input: {
   readonly renewLock: () => void
   readonly writeTarget: MigrationTargetWriter
 }): { readonly resumed: boolean; readonly targetBackupPath?: string } {
-  const journal = readMigrationJournal(input.fileSystem, input.env)
-  if (journal === null) return { resumed: false }
+  const read = readMigrationJournal(input.fileSystem, input.env)
+  if (read === null) return { resumed: false }
+  let journal = read
 
   input.renewLock()
   const target = targetDocument(journal.targetPath, input.fileSystem)
@@ -32,6 +45,12 @@ export function resumeMigrationJournal(input: {
         target,
         targetPath: journal.targetPath,
       })
+    const backupPath = backupPathForResume(journal.targetBackupPath, journal.targetPath, input.fileSystem)
+    if (backupPath !== journal.targetBackupPath && backupPath !== undefined) {
+      // Record the name before writing it, so a crash after the target write still names the right file.
+      journal = { ...journal, targetBackupPath: backupPath }
+      writeMigrationJournal(journal, input.fileSystem, input.env, input.process, input.clock)
+    }
     writtenBackupPath = writePreparedTarget({
       ...(journal.targetBackupPath === undefined ? {} : { backupPath: journal.targetBackupPath }),
       env: input.env,
