@@ -1,7 +1,7 @@
 {
   "source": {
     "repo": "sisyphuslabs/omo-service",
-    "commit": "3bedb0afd02674cd198fdfb833153ab5003e93f8",
+    "commit": "ab25c8a82a39bb7288e3b457503dc12ce10f0a6f",
     "paths": [
       "packages/contract/src/sync-format/",
       "fixtures/sync-v1/ (data only)"
@@ -41,8 +41,8 @@
     "fixtures/sync-v1/wraps.json": "P-1N4Te6uXEj9i2VS69JZ14mTEwEgAkc4SAG04rYRZU",
     "sync-format/canonical.ts": "hE9i6kK9OT3XJ7mYzc2c-9p0KXuOfitQFXvzgeUC0iM",
     "sync-format/chain.ts": "VZ9qTvuqMz7rLS2_6FS0-6QHIriTPjGvwt9U3H65mbY",
-    "sync-format/fold.ts": "z1fm0H-B9QCwpByEMhusnf7fJjFS4Kp2I4p2wjPDixo",
-    "sync-format/fork-evidence.ts": "PLVEO6VHkQG1gFYuR2zeTrDbOgf8c7WBlBhZWpW4cjc",
+    "sync-format/fold.ts": "MqI_W-UwCCiiH04mZL-Du3uUNOLUWESlnf023fEX4ac",
+    "sync-format/fork-evidence.ts": "LNNerbPKAJOky7-prVp_a2T-z7g_co7Q7Ep8iAzktRY",
     "sync-format/fork-set.ts": "bEIbWVd4vyirBY3Y9YHN8cwRHKMSzGoqaxAME5SCQnY",
     "sync-format/fork-state.ts": "UvO-eLPaWC_9HUwm1V2v5ACacSVSYTXtbUbfCD8VJog",
     "sync-format/frame.ts": "BuQNnV-S4AK0fvkyAqfW4HiwNql7ugrMz7P1vpy8v44",

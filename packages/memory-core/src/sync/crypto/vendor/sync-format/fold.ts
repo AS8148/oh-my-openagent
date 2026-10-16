@@ -84,6 +84,10 @@ const forkRefusal = (
   );
   if (common === undefined) return "fork_common_unknown";
   const ancestry = done.filter((e) => e.seq <= common.seq);
+  // A branch record the receiver would refuse is not skipped: it refuses the whole evidence.
+  for (const branch of evidence.branches) {
+    if (!foldRefusal([...ancestry, ...branch.records]).ok) return "fork_evidence_invalid";
+  }
   const recomputed = recomputeForkStateWith(foldAuthority, ancestry, evidence);
   if (jcsCanonical(recomputed) !== jcsCanonical(state)) return "fork_state_mismatch";
   const signer = entry.author;

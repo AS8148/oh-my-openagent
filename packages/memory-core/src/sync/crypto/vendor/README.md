@@ -1,7 +1,7 @@
 # Vendored sync-format v1 library and sync-v1 fixtures
 
-Source: `sisyphuslabs/omo-service`, commit `3bedb0afd02674cd198fdfb833153ab5003e93f8`
-(`main`, #428 as merged). The contract package is not yet published
+Source: `sisyphuslabs/omo-service`, commit `ab25c8a82a39bb7288e3b457503dc12ce10f0a6f`
+(`main`: #428 as merged plus #456's fork-evidence fixes). The contract package is not yet published
 (omo-service #387), so the memory sync client consumes the format library and its golden
 fixtures as this vendored copy until it is (work plan memory-sync-e2ee-20261015, todo 13).
 
