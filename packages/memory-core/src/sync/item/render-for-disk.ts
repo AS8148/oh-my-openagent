@@ -18,7 +18,7 @@ import type { LoroDoc } from "../../crdt/loro-runtime"
 import { isAlias, isCollection, isMap, isNode, isPair, isScalar, parseDocument } from "yaml"
 
 import type { FmValue } from "./frontmatter"
-import { emitFrontmatter, splitHeader, splitItem } from "./frontmatter"
+import { emitFrontmatter, splitHeader, splitItem, withoutBom } from "./frontmatter"
 import type { FrontmatterEntry } from "./render"
 import { bodyOf, frontmatterEntries, renderItem } from "./render"
 
@@ -34,11 +34,14 @@ export function renderForDisk(doc: LoroDoc, diskText: string, patch: Patcher = p
   if (canonical === null) return null
   const want = modelOf(canonical)
   if (sameModel(want, modelOf(diskText))) return diskText
-  const eol = eolOf(diskText)
-  const patched = tryPatch(patch, doc, diskText, want)
-  if (patched !== null && sameModel(modelOf(patched), want)) return patched
+  // A leading BOM is the file's own encoding marker: written back exactly when the disk had one.
+  const disk = withoutBom(diskText)
+  const bom = diskText.slice(0, diskText.length - disk.length)
+  const eol = eolOf(disk)
+  const patched = tryPatch(patch, doc, disk, want)
+  if (patched !== null && sameModel(modelOf(patched), want)) return `${bom}${patched}`
   const styled = withEol(canonical, eol)
-  return sameModel(modelOf(styled), want) ? styled : canonical
+  return `${bom}${sameModel(modelOf(styled), want) ? styled : canonical}`
 }
 
 // One line-ending style per file, detected once from its first line break (lead decision r6):

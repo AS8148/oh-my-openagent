@@ -26,7 +26,8 @@ export interface ParsedItemText {
   readonly body: string
 }
 
-export function splitItem(text: string): ParsedItemText {
+export function splitItem(raw: string): ParsedItemText {
+  const text = withoutBom(raw)
   const parts = splitHeader(text)
   if (parts === null) return { fm: null, body: text }
   const fm = parseHeader(parts.header)
@@ -70,6 +71,11 @@ export function emitFrontmatter(entries: readonly { readonly key: string; readon
 
 export function renderEntry(key: string, value: string | readonly string[], verbatim = false): string {
   return emitFrontmatter([{ key, node: valueNode(value, verbatim) }])
+}
+
+/** `text` without a leading UTF-8 BOM: the BOM is an encoding marker, not content (t05 r7). */
+export function withoutBom(text: string): string {
+  return text.startsWith("\ufeff") ? text.slice(1) : text
 }
 
 /** The raw frontmatter source and the body of `text`, or null when `text` has no frontmatter fences. */

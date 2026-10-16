@@ -77,6 +77,12 @@ function headerOf(text: string): unknown {
   return parse(text.split("---\n")[1] ?? "")
 }
 
+function styleOf(text: string): "crlf" | "lf" | "mixed" {
+  const crlf = (text.match(/\r\n/g) ?? []).length
+  const lf = (text.match(/\n/g) ?? []).length - crlf
+  return crlf > 0 && lf > 0 ? "mixed" : crlf > 0 ? "crlf" : "lf"
+}
+
 async function syncedEdit(disk: string, edit: (rendered: string) => string) {
   const a = await newDoc("1")
   captureInto(a, "", [], disk)
@@ -175,11 +181,6 @@ describe("renderForDisk keeps the file's own line-ending style on every written 
     "anchor rewrite": (r) => r.replace("base: v", "base: w"),
   }
 
-  function styleOf(text: string): "crlf" | "lf" | "mixed" {
-    const crlf = (text.match(/\r\n/g) ?? []).length
-    const lf = (text.match(/\n/g) ?? []).length - crlf
-    return crlf > 0 && lf > 0 ? "mixed" : crlf > 0 ? "crlf" : "lf"
-  }
 
   test("the fences are written in the file's style on the splice path and on the canonical path (a key added to a file without frontmatter)", async () => {
     const spliced = LF.replaceAll("\n", "\r\n")
@@ -207,6 +208,36 @@ describe("renderForDisk keeps the file's own line-ending style on every written 
         const written = renderForDisk(a, disk) ?? ""
         expect(styleOf(written), JSON.stringify(written)).toBe(style)
         expect(headerOf(written.replaceAll("\r\n", "\n"))).toEqual(headerOf(renderItem(a) ?? ""))
+        expect(captureCurrent(a, written), JSON.stringify(written)).toBeNull()
+        a.free()
+      })
+    }
+  }
+})
+
+describe("renderForDisk keeps a leading UTF-8 BOM (t05 r7 probe, lead)", () => {
+  const BASE = "---\nn: 2\nk: x\nz: 1\n---\nbody line\nsecond\n"
+  const EDITS: Record<string, (rendered: string) => string> = {
+    "change a key": (r) => r.replace("n: 2", "n: 3"),
+    "add a key": (r) => r.replace("z: 1", "z: 1\nadded: new"),
+    "delete a key": (r) => r.replace("k: x\n", ""),
+  }
+
+  test("capturing a BOM file types its frontmatter", () => {
+    expect(splitItem("\ufeff---\nn: 2\n---\nbody\n").fm).not.toBeNull()
+  })
+
+  for (const [style, eol] of [["lf", "\n"], ["crlf", "\r\n"]] as const) {
+    const disk = `\ufeff${BASE.replaceAll("\n", eol)}`
+    for (const [name, edit] of Object.entries(EDITS)) {
+      test(`bom + ${style} file, ${name}: the BOM and the file's line endings are kept, re-capture is a no-op`, async () => {
+        const a = await syncedEdit(disk, edit)
+        const written = renderForDisk(a, disk) ?? ""
+        expect(written.startsWith(`\ufeff---${eol}`), JSON.stringify(written)).toBe(true)
+        expect(written.slice(1).startsWith("\ufeff")).toBe(false)
+        expect(styleOf(written), JSON.stringify(written)).toBe(style)
+        expect(splitItem(written).fm, JSON.stringify(written)).not.toBeNull()
+        expect(headerOf(written.slice(1).replaceAll("\r\n", "\n"))).toEqual(headerOf(renderItem(a) ?? ""))
         expect(captureCurrent(a, written), JSON.stringify(written)).toBeNull()
         a.free()
       })
