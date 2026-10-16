@@ -21,7 +21,7 @@ export type CreateTelemetryProvidersInput = {
   readonly clock?: OtelClock
   readonly consent?: () => boolean
   readonly onAppended?: (writer: SpoolWriter) => void
-  readonly onWriteError?: (error: unknown) => void
+  readonly onWriteError?: (error: unknown, records: number) => void
 }
 
 export type TelemetryProviders = {

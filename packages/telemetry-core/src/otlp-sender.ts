@@ -87,7 +87,7 @@ class OtlpSender {
       ...(input.clock === undefined ? {} : { clock: input.clock }),
       consent: this.#consent,
       onAppended: (writer) => this.#onAppended(writer),
-      onWriteError: (error) => this.#onWriteError(error),
+      onWriteError: (error, records) => this.#onWriteError(error, records),
     })
     this.#ctx = {
       dir: input.spoolDir,
@@ -155,10 +155,10 @@ class OtlpSender {
     })
   }
 
-  /** A record that never reached the spool is a counted loss like any other drop. */
-  #onWriteError(error: unknown): void {
+  /** Records that never reached the spool, or were in an abandoned active file, are a counted loss like any other drop. */
+  #onWriteError(error: unknown, records: number): void {
     this.#report("telemetry_spool_write_failed", error)
-    this.#ctx.onDrop("write_failed", 1)
+    this.#ctx.onDrop("write_failed", records)
   }
 
   #guard(event: TelemetryDiagnosticEvent, run: () => void): void {

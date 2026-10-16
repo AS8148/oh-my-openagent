@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { readFrames } from "./otlp-spool-file"
@@ -21,7 +21,14 @@ function enospc(): Error {
   return Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" })
 }
 
-function writer(dir: string, write: (fd: number, bytes: Uint8Array) => number, errors: unknown[] = []): SpoolWriter {
+type LostRecords = { readonly error: unknown; readonly records: number }
+
+function writer(
+  dir: string,
+  write: (fd: number, bytes: Uint8Array) => number,
+  errors: unknown[] = [],
+  extra: { readonly truncate?: (fd: number, length: number) => void; readonly lost?: LostRecords[] } = {},
+): SpoolWriter {
   return new SpoolWriter({
     dir,
     signal: "logs",
@@ -29,8 +36,12 @@ function writer(dir: string, write: (fd: number, bytes: Uint8Array) => number, e
     bootId: "e".repeat(32),
     header: new Uint8Array([1, 1]),
     consent: () => true,
-    onError: (error) => void errors.push(error),
+    onError: (error, records) => {
+      errors.push(error)
+      extra.lost?.push({ error, records })
+    },
     write,
+    ...(extra.truncate === undefined ? {} : { truncate: extra.truncate }),
   })
 }
 
@@ -84,6 +95,38 @@ describe("short and failed spool writes", () => {
     const frames = readFrames(new Uint8Array(readFileSync(join(dir, spool.name))))
     expect(frames.map((f) => Array.from(f))).toEqual([[1, 1], [1], [3]])
     expect(spool.records).toBe(2)
+  })
+
+  test("#given a torn frame whose truncate also fails #when the active file is abandoned #then every record that was in it is reported as lost, not only the failing one", () => {
+    // given
+    const dir = root()
+    mkdirSync(dir, { recursive: true })
+    const lost: LostRecords[] = []
+    let tear = false
+    const spool = writer(
+      dir,
+      (fd, bytes) => {
+        if (!tear) return writeSync(fd, bytes)
+        tear = false
+        writeSync(fd, bytes.subarray(0, 2))
+        throw enospc()
+      },
+      [],
+      { truncate: () => { throw enospc() }, lost },
+    )
+    spool.append(new Uint8Array([1]))
+    spool.append(new Uint8Array([2]))
+    tear = true
+
+    // when
+    const torn = spool.append(new Uint8Array([3, 3, 3, 3]))
+
+    // then
+    expect(torn).toBe(false)
+    expect(existsSync(join(dir, spool.name))).toBe(false)
+    expect(lost.reduce((sum, entry) => sum + entry.records, 0)).toBe(3)
+    expect(spool.append(new Uint8Array([4]))).toBe(true)
+    expect(readFrames(new Uint8Array(readFileSync(join(dir, spool.name)))).map((f) => Array.from(f))).toEqual([[1, 1], [4]])
   })
 
   test("#given an event lost to a spool write failure #then droppedEvents counts it and the next flush reports it as write_failed", async () => {

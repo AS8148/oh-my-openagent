@@ -19,9 +19,11 @@ export type SpoolWriterInput = {
   readonly bootId: string
   readonly header: Uint8Array
   readonly consent: () => boolean
-  readonly onError: (error: unknown) => void
+  /** `records`: how many records the failure lost (the failing one, or a whole abandoned file). */
+  readonly onError: (error: unknown, records: number) => void
   /** The raw write; returns the bytes written, which may be fewer than given (a short write). */
   readonly write?: (fd: number, bytes: Uint8Array) => number
+  readonly truncate?: (fd: number, length: number) => void
 }
 
 function defaultWrite(fd: number, bytes: Uint8Array): number {
@@ -65,7 +67,7 @@ export class SpoolWriter {
       this.bytes += bytes.byteLength
       return true
     } catch (error) {
-      this.#input.onError(error)
+      this.#input.onError(error, 1)
       return false
     }
   }
@@ -84,13 +86,15 @@ export class SpoolWriter {
   /**
    * A frame that failed part-way is cut off again, so the next frame starts right after the last
    * complete one instead of after torn bytes that would make the whole file read as misframed. If the
-   * cut itself fails, the file is abandoned (closed and deleted) and the next append starts a new one.
+   * cut itself fails, the file is abandoned (closed and deleted), every record it held is reported as
+   * lost, and the next append starts a new one.
    */
   #rollback(fd: number): void {
+    const truncate = this.#input.truncate ?? ftruncateSync
     try {
-      ftruncateSync(fd, this.bytes)
+      truncate(fd, this.bytes)
     } catch (error) {
-      this.#input.onError(error)
+      this.#input.onError(error, this.records)
       this.discard()
     }
   }
