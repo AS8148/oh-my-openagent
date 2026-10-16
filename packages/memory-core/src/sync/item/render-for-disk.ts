@@ -34,8 +34,24 @@ export function renderForDisk(doc: LoroDoc, diskText: string, patch: Patcher = p
   if (canonical === null) return null
   const want = modelOf(canonical)
   if (sameModel(want, modelOf(diskText))) return diskText
+  const eol = eolOf(diskText)
   const patched = tryPatch(patch, doc, diskText, want)
-  return patched !== null && sameModel(modelOf(patched), want) ? patched : canonical
+  if (patched !== null && sameModel(modelOf(patched), want)) return patched
+  const styled = withEol(canonical, eol)
+  return sameModel(modelOf(styled), want) ? styled : canonical
+}
+
+// One line-ending style per file, detected once from its first line break (lead decision r6):
+// every spliced, added, rewritten and fence line is written with it.
+function eolOf(text: string): string {
+  const nl = text.indexOf("\n")
+  return nl > 0 && text[nl - 1] === "\r" ? "\r\n" : "\n"
+}
+
+function withEol(canonical: string, eol: string): string {
+  const parts = eol === "\n" ? null : splitHeader(canonical)
+  if (parts === null) return canonical
+  return `---${eol}${parts.header.replaceAll("\n", eol)}${eol}---${eol}${parts.body}`
 }
 
 function tryPatch(patch: Patcher, doc: LoroDoc, diskText: string, want: Model): string | null {
@@ -57,10 +73,11 @@ function patchDisk(doc: LoroDoc, diskText: string, want: Model): string | null {
   if (sameFields(have, want.fields)) return `${diskText.slice(0, diskText.length - parts.body.length)}${bodyOf(doc)}`
   const changed = reEmitKeys(disk.contents.items, changedKeys(have, want.fields))
   if (changed === null) return null
-  const source = `${parts.header}\n`
+  const eol = eolOf(diskText)
+  const source = `${parts.header}${eol}`
   const spans = pairSpans(disk.contents.items, source)
   if (spans === null) return null
-  return `---\n${spliceHeader(source, spans, entries, changed, want.fields)}---\n${bodyOf(doc)}`
+  return `---${eol}${spliceHeader(source, spans, entries, changed, want.fields, eol)}---${eol}${bodyOf(doc)}`
 }
 
 interface PairSpan {
@@ -79,7 +96,7 @@ function pairSpans(pairs: readonly unknown[], source: string): PairSpan[] | null
     const end = pair.value.range?.[2]
     if (start === undefined || end === undefined) return null
     // The last pair's node end can stop before its line break; a span always owns its line break.
-    spans.push({ key: String(pair.key.value), start, end: source[end - 1] !== "\n" && source[end] === "\n" ? end + 1 : end })
+    spans.push({ key: String(pair.key.value), start, end: end + lineBreakAt(source, end) })
   }
   return spans
 }
@@ -93,10 +110,11 @@ function spliceHeader(
   entries: readonly FrontmatterEntry[],
   changed: ReadonlySet<string>,
   want: ReadonlyMap<string, string>,
+  eol: string,
 ): string {
   const onDisk = new Set(spans.map((span) => span.key))
   const nodes = new Map(entries.map((entry) => [entry.key, entry.node]))
-  const added = entries.filter((entry) => !onDisk.has(entry.key)).map((entry) => emitLine(entry.key, entry.node))
+  const added = entries.filter((entry) => !onDisk.has(entry.key)).map((entry) => emitLine(entry.key, entry.node, eol))
   let out = ""
   let cursor = 0
   for (const span of spans) {
@@ -106,7 +124,7 @@ function spliceHeader(
       const from = commentBlockStart(source, span.start)
       out += source.slice(cursor, from)
     } else {
-      out += source.slice(cursor, span.start) + emitLine(span.key, node)
+      out += source.slice(cursor, span.start) + emitLine(span.key, node, eol)
     }
     cursor = span.end
   }
@@ -118,8 +136,14 @@ function spliceHeader(
   return out + added.join("") + source.slice(cursor)
 }
 
-function emitLine(key: string, node: FrontmatterEntry["node"]): string {
-  return `${emitFrontmatter([{ key, node }])}\n`
+function emitLine(key: string, node: FrontmatterEntry["node"], eol: string): string {
+  return `${emitFrontmatter([{ key, node }]).replaceAll("\n", eol)}${eol}`
+}
+
+function lineBreakAt(source: string, end: number): number {
+  if (source[end - 1] === "\n") return 0
+  if (source.startsWith("\r\n", end)) return 2
+  return source[end] === "\n" ? 1 : 0
 }
 
 function commentBlockStart(source: string, start: number): number {

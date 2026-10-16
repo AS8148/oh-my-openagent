@@ -74,17 +74,15 @@ export function renderEntry(key: string, value: string | readonly string[], verb
 
 /** The raw frontmatter source and the body of `text`, or null when `text` has no frontmatter fences. */
 export function splitHeader(text: string): { readonly header: string; readonly body: string } | null {
-  const sep = text.startsWith("---\r\n") ? "\r\n" : "\n"
-  if (!text.startsWith(`---${sep}`)) return null
-  const open = 3 + sep.length
-  const end = text.indexOf(`${sep}---`, open)
+  const open = text.startsWith("---\r\n") ? 5 : text.startsWith("---\n") ? 4 : 0
+  if (open === 0) return null
+  const end = text.indexOf("\n---", open)
   if (end < 0) return null
-  const close = end + sep.length + 3
-  const nl = text.indexOf("\n", close)
+  const nl = text.indexOf("\n", end + 4)
   const closeEnd = nl < 0 ? text.length : nl
-  if (text.slice(close, closeEnd).trim() !== "") return null
-  // A CRLF file's last header line ends in "\r\n": the CR belongs to the line ending.
-  const header = text.slice(open, text[end - 1] === "\r" ? end - 1 : end)
+  if (text.slice(end + 4, closeEnd).trim() !== "") return null
+  // A CRLF file's fences and last header line end in "\r\n": the CR belongs to the line ending.
+  const header = text.slice(open, text[end - 1] === "\r" ? Math.max(open, end - 1) : end)
   if (header.trim() === "") return null
   return { header, body: nl < 0 ? "" : text.slice(nl + 1) }
 }
