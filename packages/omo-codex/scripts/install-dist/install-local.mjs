@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:3e5594ad32075631c778c9636a3d75fbf3fd84b41c64e7229d8faaddc3bf5349:9c8ec1dce7a1e5ddb554f3c8a7807d7eb61b77bd6096b14f370266eef3dbcd07
+// omo-codex-install:527a916b095e7882678cd45fa8dba16f9922aed3ca4a3ca54d64f6c544280ff8:1bbd909cb8d3d589608ddc1d0dee3256187ab544648655c199eef73d4119e6e0
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -284,6 +284,8 @@ function toDiagnosticRecord(input, now) {
     timestamp: now.toISOString(),
     event: input.event,
     source: input.source,
+    ...input.entryKind === undefined ? {} : { entry_kind: input.entryKind },
+    ...input.errorCode === undefined ? {} : { error_code: input.errorCode },
     ...input.count === undefined ? {} : { count: input.count },
     ...serializeError(input.error, input.errorKind)
   };
@@ -10013,6 +10015,12 @@ var init_events = __esm(() => {
 // packages/telemetry-core/src/record-daily-active.ts
 var init_record_daily_active = () => {};
 
+// packages/telemetry-core/src/turn-trace-bridge.ts
+var REGISTRY;
+var init_turn_trace_bridge = __esm(() => {
+  REGISTRY = Symbol.for("omo.telemetry.turn-traceparent.v1");
+});
+
 // packages/telemetry-core/src/index.ts
 var init_src = __esm(() => {
   init_activity_state();
@@ -10024,6 +10032,7 @@ var init_src = __esm(() => {
   init_machine_id();
   init_posthog_client();
   init_record_daily_active();
+  init_turn_trace_bridge();
 });
 
 // packages/omo-codex/package.json
