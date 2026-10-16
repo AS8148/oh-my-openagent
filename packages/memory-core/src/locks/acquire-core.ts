@@ -1,5 +1,6 @@
 import type { LockRecord } from "./lock-record"
 import { readOwner } from "./lock-owner"
+import { forgetProvenDeadTakeover } from "./proven-dead-takeovers"
 import { publishExclusive } from "./publish"
 import { delay, lockRetryDelayMs } from "./retry-delay"
 import { recoverStaleOwner } from "./stale-owner"
@@ -39,6 +40,24 @@ export async function acquireWithoutDirectorySweep(
   if (waitTimeoutMs < 0 || retryDelayMs <= 0 || incompleteLockGraceMs < 0) throw new Error("lock wait options must be positive")
   const deadline = now() + waitTimeoutMs
 
+  try {
+    await acquireLoop(lockPath, record, options, { retryDelayMs, incompleteLockGraceMs, now, deadline })
+  } catch (error) {
+    // A takeover this contender proved but never turned into a held lock authorizes nothing.
+    forgetProvenDeadTakeover(lockPath, record.nonce)
+    throw error
+  }
+}
+
+type LoopTiming = {
+  readonly retryDelayMs: number
+  readonly incompleteLockGraceMs: number
+  readonly now: () => number
+  readonly deadline: number
+}
+
+async function acquireLoop(lockPath: string, record: LockRecord, options: AcquireLockOptions, timing: LoopTiming): Promise<void> {
+  const { retryDelayMs, incompleteLockGraceMs, now, deadline } = timing
   for (let attempt = 0; ; attempt += 1) {
     options.signal?.throwIfAborted()
     // Read before publishing. `publishExclusive` creates a candidate file, writes it, FSYNCS it,

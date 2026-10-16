@@ -116,8 +116,9 @@ export async function recoverStaleOwner(
     if (fence === null || fence.record?.nonce !== recoveryRecord.nonce) return false
     await unlink(lockPath)
     // Record the reclaimed previous owner so consumers that gate on dead-owner evidence (the
-    // stranded-git-lock sweep) can prove reclamation after the lock file itself is republished.
-    if (current.record !== null) recordProvenDeadTakeover(lockPath, current.record)
+    // stranded-git-lock sweep) can prove reclamation after the lock file itself is republished;
+    // the proof is bound to the contender's acquisition nonce (omo #10199 r5 MEDIUM 3).
+    if (current.record !== null) recordProvenDeadTakeover(lockPath, current.record, contender.nonce)
     return true
   } finally {
     await releaseLock(recoveryPath, recoveryRecord)

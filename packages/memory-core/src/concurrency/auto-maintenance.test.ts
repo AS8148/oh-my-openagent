@@ -103,14 +103,14 @@ describe("memory commit path and git auto-maintenance (omo #10177)", () => {
       const whileLive = await sweepStrandedGitLockFiles(dir, 50)
 
       // #then
-      expect(whileLive).toEqual({ removed: [], keptUnknownOwner: [lockPath] })
+      expect(whileLive).toEqual({ removed: [], kept: [{ path: lockPath, reason: "owner-not-proven-dead" }] })
       expect(existsSync(lockPath)).toBe(true)
     } finally {
       holder.kill("SIGKILL")
       expect(await exitedWithin(holder, 5_000)).toBe(true)
     }
     const afterDeath = await sweepStrandedGitLockFiles(dir, 50)
-    expect(afterDeath).toEqual({ removed: [], keptUnknownOwner: [lockPath] })
+    expect(afterDeath).toEqual({ removed: [], kept: [{ path: lockPath, reason: "owner-not-proven-dead" }] })
     expect(existsSync(lockPath)).toBe(true)
   }, 30_000)
 })

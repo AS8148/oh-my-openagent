@@ -10,6 +10,7 @@ import { provenDeadTakeoverFor } from "../locks/proven-dead-takeovers"
 import { isGitLockError, withGitLockRetry } from "./config-lock"
 import { GitError } from "./errors"
 import { hasOpenFileHolder } from "./open-file-holders"
+import { findProcessesWorkingIn } from "./repo-in-use"
 
 // Settle window between observing an idle lock candidate and re-checking it. The crash-
 // consistency fixture child shortens its OWN process's window through the
@@ -23,19 +24,45 @@ function envSettleOverride(): number | undefined {
 }
 export const GIT_LOCK_SETTLE_MS = envSettleOverride() ?? 300
 
-export interface GitLockSweepReport {
-  readonly removed: readonly string[]
-  readonly keptUnknownOwner: readonly string[]
+export type KeptGitLockReason =
+  | "owner-not-proven-dead"
+  | "repo-in-use"
+  | "changed-during-settle"
+  | "open-holder"
+  | "unlink-failed"
+
+export interface KeptGitLock {
+  readonly path: string
+  readonly reason: KeptGitLockReason
 }
 
-// A stranded git-internal lock whose owner cannot be proven dead is reported, never removed: the
-// file may belong to a LIVE writer whose fd is already closed (omo #10199 review HIGH 1).
+export interface GitLockSweepReport {
+  readonly removed: readonly string[]
+  readonly kept: readonly KeptGitLock[]
+}
+
+const KEPT_REASON_TEXT: Record<KeptGitLockReason, string> = {
+  "owner-not-proven-dead": "the process that last held the memory-write lock cannot be proven dead",
+  "repo-in-use": "a live process is still working in the repository, or that could not be ruled out",
+  "changed-during-settle": "it changed while it was being checked, so a git process is still using it",
+  "open-holder": "a process holds it open, or open holders could not be determined",
+  "unlink-failed": "it could not be removed",
+}
+
+// A stranded git-internal lock is reported, never removed, unless every gate proves it is debris:
+// the file may belong to a LIVE writer whose fd is already closed (omo #10199 review HIGH 1).
 export class StrandedGitLockError extends GitError {
-  constructor(readonly paths: readonly string[]) {
+  readonly paths: readonly string[]
+
+  constructor(readonly kept: readonly KeptGitLock[]) {
     super(
-      `Stranded git lock file(s) block the memory write and their previous owner cannot be proven dead: ${paths.join(", ")}. ` +
-      "Confirm no git process is operating on this repository, remove the lock files, then retry.",
+      [
+        "Stranded git lock file(s) block the memory write:",
+        ...kept.map(({ path, reason }) => `- ${path}: ${KEPT_REASON_TEXT[reason]}`),
+        "Confirm no git process is operating on this repository, remove the lock files, then retry.",
+      ].join("\n"),
     )
+    this.paths = kept.map(({ path }) => path)
   }
 }
 
@@ -74,16 +101,10 @@ async function presentLockFiles(gitDir: string): Promise<LockSnapshot> {
 
 // After authorization, a lock is removable only if it kept its inode and mtime across the settle
 // window AND no process holds it open: belt and braces on top of the ownership proof.
-async function settledUnheld(present: LockSnapshot, settleMs: number): Promise<string[]> {
-  await new Promise((resolveSleep) => setTimeout(resolveSleep, settleMs))
-  const removable: string[] = []
-  for (const [candidate, before] of present) {
-    const status = await lstat(candidate).catch(() => undefined)
-    if (status === undefined || status.ino !== before.ino || status.mtimeMs !== before.mtimeMs) continue
-    if (await hasOpenFileHolder(candidate)) continue
-    removable.push(candidate)
-  }
-  return removable
+async function settledVerdict(candidate: string, before: { readonly ino: number; readonly mtimeMs: number }): Promise<KeptGitLockReason | "removable"> {
+  const status = await lstat(candidate).catch(() => undefined)
+  if (status === undefined || status.ino !== before.ino || status.mtimeMs !== before.mtimeMs) return "changed-during-settle"
+  return (await hasOpenFileHolder(candidate)) ? "open-holder" : "removable"
 }
 
 // The identity layout (identity/layout.ts) pins the memory-write lock next to the repo:
@@ -106,35 +127,53 @@ function writerLockPathForRepo(repoDir: string): string | null {
 // Both gates must hold, in order: (1) THIS process holds the identity's memory-write lock right
 // now, and (2) the lock protocol proved the previous owner dead when this process took it over,
 // re-verified here so a pid recycled since the takeover cannot pass.
+// The proof is bound to THIS acquisition: the current writer record's nonce must be the one the
+// takeover published (omo #10199 r5 MEDIUM 3), so a released takeover or another lock's proof
+// never authorizes anything.
 async function authorizedToReclaim(repoDir: string): Promise<boolean> {
   const writerLockPath = writerLockPathForRepo(repoDir)
   if (writerLockPath === null) return false
   const raw = await readFile(writerLockPath, "utf8").catch(() => undefined)
   const current = raw === undefined ? null : parseLockRecord(raw)
   if (current === null || current.pid !== process.pid || current.hostname !== hostname()) return false
-  const previous = provenDeadTakeoverFor(writerLockPath)
+  const previous = provenDeadTakeoverFor(writerLockPath, current.nonce)
   return previous !== undefined && (await isLockOwnerProvenDead(previous))
+}
+
+function keepAll(present: LockSnapshot, reason: KeptGitLockReason): GitLockSweepReport {
+  return { removed: [], kept: [...present.keys()].map((path) => ({ path, reason })) }
 }
 
 export async function sweepStrandedGitLockFiles(dir: string, settleMs = GIT_LOCK_SETTLE_MS): Promise<GitLockSweepReport> {
   const present = await presentLockFiles(join(dir, ".git"))
-  if (present.size === 0) return { removed: [], keptUnknownOwner: [] }
-  if (!(await authorizedToReclaim(dir))) return { removed: [], keptUnknownOwner: [...present.keys()] }
+  if (present.size === 0) return { removed: [], kept: [] }
+  if (!(await authorizedToReclaim(dir))) return keepAll(present, "owner-not-proven-dead")
 
-  const removable = new Set(await settledUnheld(present, settleMs))
+  await new Promise((resolveSleep) => setTimeout(resolveSleep, settleMs))
+  // A live owner of a stranded lock stays alive from before the sweep until it removes the lock,
+  // so one check after the settle window sees it (omo #10199 r5 HIGH 1: never break a lock while
+  // ANY process - the dead owner's orphaned git child included - is working in the repository).
+  const users = await findProcessesWorkingIn(dir)
+  if (users === null || users.length > 0) return keepAll(present, "repo-in-use")
+
   const removed: string[] = []
-  const kept = [...present.keys()].filter((candidate) => !removable.has(candidate))
-  for (const candidate of removable) {
+  const kept: KeptGitLock[] = []
+  for (const [candidate, before] of present) {
+    const verdict = await settledVerdict(candidate, before)
+    if (verdict !== "removable") {
+      kept.push({ path: candidate, reason: verdict })
+      continue
+    }
     try {
       await unlink(candidate)
       removed.push(candidate)
     } catch {
       // A sharing violation (Windows) or a racing remover leaves the file; the retried command
       // fails loud, or the caller reports what is left through StrandedGitLockError.
-      kept.push(candidate)
+      kept.push({ path: candidate, reason: "unlink-failed" })
     }
   }
-  return { removed, keptUnknownOwner: kept }
+  return { removed, kept }
 }
 
 export async function withStrandedGitLockRecovery<T>(dir: string, run: () => Promise<T>): Promise<T> {
@@ -144,7 +183,7 @@ export async function withStrandedGitLockRecovery<T>(dir: string, run: () => Pro
     if (!isGitLockError(error)) throw error
     const report = await sweepStrandedGitLockFiles(dir)
     if (report.removed.length === 0) {
-      if (report.keptUnknownOwner.length > 0) throw new StrandedGitLockError(report.keptUnknownOwner)
+      if (report.kept.length > 0) throw new StrandedGitLockError(report.kept)
       throw error
     }
     return run()

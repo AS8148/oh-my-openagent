@@ -4,6 +4,17 @@ import { join } from "node:path"
 import { readdir, readlink, realpath, stat } from "../fs/resilient"
 
 import { GitError } from "./errors"
+import {
+  classifyEntryError,
+  errnoCode,
+  liveProcView,
+  scanEveryProcess,
+  type EntryVerdict,
+  type ProcScan,
+  type ProcView,
+} from "./proc-view"
+
+export { unreadableFdDirMeansHeld } from "./proc-view"
 
 // omo #10199 (Linux defect): the stranded-git-lock sweep must answer "does any live process hold
 // this lock file open?" on every supported platform. The first cut asked lsof, but minimal Linux
@@ -23,48 +34,52 @@ import { GitError } from "./errors"
 // fall through, because lsof reads the same /proc with the same euid and an empty answer from it
 // would be false confidence.
 
-// The conservative rule for fd dirs this process cannot read, e.g. another user's processes. A
-// SAME-uid process whose fd dir is unreadable (hidepid, SELinux, ptrace_scope) makes the whole
-// scan indeterminate -> held, because a same-uid git process is exactly the realistic creator and
-// holder of a lock inside this user's memory repo. Another uid's unreadable fd dir is safe to
-// skip: it is the same blind spot non-root lsof has on the same machine (lsof reads the same
-// /proc with the same euid), a foreign-uid process cannot have created a lock inside this user's
-// memory home (it has no write permission there), and a foreign read-only open survives an unlink
-// harmlessly. Parity with the shipped macOS path, never weaker.
-export function unreadableFdDirMeansHeld(ownerUid: number, selfUid: number): boolean {
-  return ownerUid === selfUid
-}
-
-type ProcScan =
-  | { readonly kind: "holders"; readonly pids: readonly number[] }
-  | { readonly kind: "indeterminate" }
-  | { readonly kind: "unavailable" }
-
 interface LockIdentity {
   readonly real: string | undefined
   readonly dev: number
   readonly ino: number
 }
 
-function errnoCode(error: unknown): string | undefined {
-  if (!(error instanceof Error) || !("code" in error)) return undefined
-  const code: unknown = error.code
-  return typeof code === "string" ? code : undefined
-}
-
 // Each /proc/<pid>/fd entry is a symlink: readlink gives the target's path text, stat through the
 // symlink gives the target's (dev, ino). A process holds the lock when the path text equals the
 // lock's realpath OR the (dev, ino) pair matches - the text is the fast common case, and the
 // inode comparison is the authority for a holder in another mount namespace or behind a bind
-// mount, where the same file reads as a different path string.
-async function fdTargetsLock(fdPath: string, lock: LockIdentity): Promise<boolean> {
-  const target = await readlink(fdPath).catch(() => undefined)
-  if (lock.real !== undefined && target === lock.real) return true
-  const opened = await stat(fdPath).catch(() => undefined)
-  return opened !== undefined && opened.dev === lock.dev && opened.ino === lock.ino
+// mount, where the same file reads as a different path string. omo #10199 r5 LOW 5: only "the fd
+// closed meanwhile" (ENOENT) means "not this lock"; any other per-fd failure is indeterminate.
+async function fdVerdict(view: ProcView, pid: number, fdPath: string, lock: LockIdentity): Promise<EntryVerdict> {
+  let target: string
+  try {
+    target = await readlink(fdPath)
+  } catch (error) {
+    return errnoCode(error) === "ENOENT" ? "no-match" : classifyEntryError(view, pid, error)
+  }
+  if (lock.real !== undefined && target === lock.real) return "match"
+  try {
+    const opened = await stat(fdPath)
+    return opened.dev === lock.dev && opened.ino === lock.ino ? "match" : "no-match"
+  } catch (error) {
+    return errnoCode(error) === "ENOENT" ? "no-match" : classifyEntryError(view, pid, error)
+  }
 }
 
-async function scanProcFdHolders(lockPath: string, selfUid: number): Promise<ProcScan> {
+async function processHoldsLock(view: ProcView, pid: number, lock: LockIdentity): Promise<EntryVerdict> {
+  const fdDir = join(view.root, String(pid), "fd")
+  let fds: readonly string[]
+  try {
+    fds = await readdir(fdDir)
+  } catch (error) {
+    return classifyEntryError(view, pid, error)
+  }
+  let sawIndeterminate = false
+  for (const fd of fds) {
+    const verdict = await fdVerdict(view, pid, join(fdDir, fd), lock)
+    if (verdict === "match") return "match"
+    if (verdict === "indeterminate") sawIndeterminate = true
+  }
+  return sawIndeterminate ? "indeterminate" : "no-match"
+}
+
+export async function scanProcFdHolders(lockPath: string, view: ProcView): Promise<ProcScan> {
   const identity = await stat(lockPath).catch(() => undefined)
   // A lock that vanished mid-sweep has no holder; the caller's settle check owns the deletion race.
   if (identity === undefined) return { kind: "holders", pids: [] }
@@ -73,42 +88,7 @@ async function scanProcFdHolders(lockPath: string, selfUid: number): Promise<Pro
     dev: identity.dev,
     ino: identity.ino,
   }
-  const entries = await readdir("/proc").catch(() => undefined)
-  if (entries === undefined) return { kind: "unavailable" }
-  let indeterminate = false
-  const holders: number[] = []
-  await Promise.all(
-    entries.map(async (entry) => {
-      if (!/^\d+$/.test(entry)) return
-      const pid = Number.parseInt(entry, 10)
-      const fdDir = join("/proc", entry, "fd")
-      let fds: readonly string[]
-      try {
-        fds = await readdir(fdDir)
-      } catch (error) {
-        const code = errnoCode(error)
-        // ENOENT/ENOTDIR: the process vanished mid-scan, nothing left to classify.
-        if (code === "ENOENT" || code === "ENOTDIR") return
-        if (code === "EACCES" || code === "EPERM") {
-          const owner = await stat(join("/proc", entry)).catch(() => undefined)
-          if (owner !== undefined && unreadableFdDirMeansHeld(owner.uid, selfUid)) indeterminate = true
-          return
-        }
-        // An error we cannot classify can never prove "no holder".
-        indeterminate = true
-        return
-      }
-      for (const fd of fds) {
-        if (await fdTargetsLock(join(fdDir, fd), lock)) {
-          holders.push(pid)
-          return
-        }
-      }
-    }),
-  )
-  if (indeterminate) return { kind: "indeterminate" }
-  holders.sort((a, b) => a - b)
-  return { kind: "holders", pids: holders }
+  return scanEveryProcess(view, (pid) => processHoldsLock(view, pid, lock))
 }
 
 // The pre-existing macOS source, semantics unchanged (review LOW 5): exit 1 with empty stdout is
@@ -119,8 +99,8 @@ function scanLsofHolders(path: string): Promise<readonly number[] | null> {
     execFile("lsof", ["-t", "--", path], { windowsHide: true, timeout: 5_000 }, (error, stdout) => {
       const listed = stdout.trim()
       if (listed.length > 0) {
-        const pids = listed.split(/\r?\n/).map((line) => Number.parseInt(line, 10))
-        resolveScan(pids.every((pid) => Number.isInteger(pid)) ? pids : null)
+        const lines = listed.split(/\r?\n/)
+        resolveScan(lines.every((line) => /^\d+$/.test(line)) ? lines.map((line) => Number.parseInt(line, 10)) : null)
         return
       }
       if (error === null) {
@@ -133,13 +113,15 @@ function scanLsofHolders(path: string): Promise<readonly number[] | null> {
   })
 }
 
-/** Pids holding `path` open right now, or null when no available source can answer. */
-export async function findOpenFileHolderPids(path: string): Promise<readonly number[] | null> {
+export async function answerFromProcOrLsof(
+  procScan: (view: ProcView) => Promise<ProcScan>,
+  lsofScan: () => Promise<readonly number[] | null>,
+): Promise<readonly number[] | null> {
   if (process.platform === "win32") return null
   // process.geteuid is unix-only; its absence on linux is unexpected, so fail closed (indeterminate).
   const geteuid = process.geteuid
   if (process.platform === "linux" && geteuid !== undefined) {
-    const scan = await scanProcFdHolders(path, geteuid.call(process))
+    const scan = await procScan(liveProcView(geteuid.call(process)))
     switch (scan.kind) {
       case "holders":
         return scan.pids
@@ -153,7 +135,12 @@ export async function findOpenFileHolderPids(path: string): Promise<readonly num
       }
     }
   }
-  return scanLsofHolders(path)
+  return lsofScan()
+}
+
+/** Pids holding `path` open right now, or null when no available source can answer. */
+export function findOpenFileHolderPids(path: string): Promise<readonly number[] | null> {
+  return answerFromProcOrLsof((view) => scanProcFdHolders(path, view), () => scanLsofHolders(path))
 }
 
 /** Fail closed (review LOW 5): a check that could not answer counts as held, never as clean. */
