@@ -70,4 +70,10 @@ describe("canonical-json (RFC 8785)", () => {
     expect(failure).toBeInstanceOf(CanonicalJsonError)
     expect((failure as CanonicalJsonError).violation).toBe("encoding")
   })
+
+  test("a canonical record with a __proto__ key is accepted and keeps it as an own property", () => {
+    const parsed = requireCanonicalJson(enc('{"__proto__":{"x":1},"t":"omo-sync/v1/record"}')) as Record<string, unknown>
+    expect(Object.keys(parsed)).toEqual(["__proto__", "t"])
+    expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype)
+  })
 })

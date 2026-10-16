@@ -17,7 +17,7 @@ function labeledExtract(suiteId: Buffer, label: string, ikm: Uint8Array, salt: U
 function labeledExpand(suiteId: Buffer, label: string, prk: Buffer, info: Uint8Array, length: number): Buffer {
   // RFC 9180 §4: LabeledExpand = HKDF-Expand(prk, I2OSP(L,2) || "HPKE-v1" || suite_id || label || info).
   // Every expansion in this suite stays within one SHA-256 block, so T(1) suffices.
-  if (length > 255 * HKDF_HASH_LENGTH) throw new Error("hpke expand length out of range")
+  if (length > HKDF_HASH_LENGTH) throw new Error("hpke expand length exceeds one SHA-256 block")
   const lengthBytes = Buffer.alloc(2)
   lengthBytes.writeUInt16BE(length)
   const t0 = Buffer.concat([lengthBytes, Buffer.from("HPKE-v1"), suiteId, Buffer.from(label), Buffer.from(info), Buffer.from([1])])

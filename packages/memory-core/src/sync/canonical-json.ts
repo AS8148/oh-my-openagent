@@ -70,7 +70,8 @@ class Parser {
       this.skipInsignificant()
       if (this.text[this.position] !== ":") throw this.fail("json", "expected ':' after object key")
       this.position++
-      object[key.value] = this.parseValue()
+      // defineProperty, not assignment: a "__proto__" key must stay an own property.
+      Object.defineProperty(object, key.value, { value: this.parseValue(), enumerable: true, writable: true, configurable: true })
       this.skipInsignificant()
       const next = this.text[this.position]
       if (next === ",") {
