@@ -10,7 +10,9 @@ import {
   type RunLaunchManifest,
   type RunOutcome,
 } from "./run-artifacts"
+import { emitMemoryReceipt, runReceipt, type ReceiptWarn, type RunReceiptLedger } from "../receipts-port"
 import { requireRunMetadata } from "./spawn-metadata"
+import { describeReflectionLauncher } from "./launcher-identity"
 import { waitForRunCompletion } from "./run-sentinel"
 import {
   defaultSupervisorPath,
@@ -23,6 +25,9 @@ import type {
   ReflectionSandbox,
   ReflectionSpawnArgs,
 } from "./spawn-types"
+
+/** Prefix of the error the launcher sees when the supervisor exits without a complete outcome. */
+export const SUPERVISOR_EXIT_PREFIX = "memory run supervisor exited with"
 
 const DEFAULT_GRACE_MS = 5_000
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024
@@ -38,6 +43,8 @@ export async function runReflectionChild(
     readonly sandbox?: ReflectionSandbox
     readonly supervisorPath?: string
     readonly now?: () => number
+    readonly receiptsDir?: string
+    readonly receiptWarn?: ReceiptWarn
   },
 ): Promise<ReflectionChildResult> {
   const graceMs = options.terminationGraceMs ?? DEFAULT_GRACE_MS
@@ -66,6 +73,8 @@ export async function runReflectionChild(
     terminationGraceMs: graceMs,
     maxOutputBytes,
     supervisorPath: options.supervisorPath,
+    ...(options.receiptsDir === undefined ? {} : { receiptsDir: options.receiptsDir }),
+    ...(options.receiptWarn === undefined ? {} : { receiptWarn: options.receiptWarn }),
     ledger: {
       version: 1,
       runId: metadata.runId,
@@ -92,6 +101,11 @@ export async function runReflectionChild(
       gitFileSnapshot: metadata.worktree.gitFileSnapshot,
       commonConfigPath: metadata.worktree.commonConfigPath,
       commonConfigSnapshot: metadata.worktree.commonConfigSnapshot,
+      launcher: describeReflectionLauncher({
+        env: prepared.env,
+        execPath: process.execPath,
+        pid: process.pid,
+      }),
     },
   })
 }
@@ -113,6 +127,8 @@ async function runSupervisedChild(input: {
   readonly maxOutputBytes: number
   readonly supervisorPath?: string
   readonly ledger: Readonly<Record<string, unknown>>
+  readonly receiptsDir?: string
+  readonly receiptWarn?: ReceiptWarn
 }): Promise<ReflectionChildResult> {
   await mkdir(input.runDir, { recursive: true, mode: 0o700 })
   const stdoutPath = join(input.runDir, "child-stdout.log")
@@ -146,6 +162,7 @@ async function runSupervisedChild(input: {
   await writeRunJsonAtomic(join(input.runDir, "launch.json"), launch)
 
   const supervisor = spawn(process.execPath, [input.supervisorPath ?? defaultSupervisorPath(), input.runDir], {
+    env: { ...process.env, ...input.env, BUN_BE_BUN: "1" },
     detached: true,
     stdio: "ignore",
     // win32 gives a detached child its own console, which flashes an empty terminal window on the
@@ -153,6 +170,9 @@ async function runSupervisedChild(input: {
     windowsHide: true,
   })
   supervisor.unref()
+  if (input.receiptsDir !== undefined && input.attempt === 1) {
+    await emitMemoryReceipt(input.receiptsDir, runReceipt(launchedRun(input.ledger), "launched"), undefined, input.receiptWarn)
+  }
   const outcomePath = join(input.runDir, "outcome.json")
   const launchPath = join(input.runDir, "launch.json")
   const publishingPath = join(input.runDir, "publishing.json")
@@ -201,7 +221,7 @@ async function runSupervisedChild(input: {
   })
   if (result.kind === "error" && !hasCompleteOutcome()) throw result.error
   if (result.kind === "close" && !hasCompleteOutcome()) {
-    throw new Error(`memory run supervisor exited with ${result.exit.code ?? result.exit.signal ?? "unknown status"}`)
+    throw new Error(`${SUPERVISOR_EXIT_PREFIX} ${result.exit.code ?? result.exit.signal ?? "unknown status"}`)
   }
   if (result.kind === "outcome" && result.result === "timeout") {
     throw new Error("memory run supervisor did not publish an outcome before its deadline")
@@ -216,6 +236,16 @@ async function runSupervisedChild(input: {
     stdout: readTail(stdoutPath, input.maxOutputBytes),
     stderr: readTail(stderrPath, input.maxOutputBytes),
     timedOut: outcome.timedOut,
+  }
+}
+
+function launchedRun(ledger: Readonly<Record<string, unknown>>): RunReceiptLedger {
+  return {
+    kind: ledger.kind === "dream" ? "dream" : "reflection",
+    runId: String(ledger.runId),
+    trigger: String(ledger.trigger),
+    ...(typeof ledger.origin === "string" ? { origin: ledger.origin } : {}),
+    startedAt: String(ledger.startedAt),
   }
 }
 

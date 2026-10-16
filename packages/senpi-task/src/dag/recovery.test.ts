@@ -7,6 +7,7 @@ import { join } from "node:path"
 
 import { createTaskLifecycle } from "../lifecycle"
 import { FakeRegistry } from "../lifecycle/__fixtures__/lifecycle-fakes"
+import type { ManagedChildHandle } from "../manager/child-handle"
 import { categoryPlanner, makeHandle, settings } from "../manager/__fixtures__/manager-fakes"
 import { createTaskManager } from "../manager/manager"
 import type { ManagerStartSpec, TaskManager } from "../manager/types"
@@ -21,6 +22,7 @@ import type { DagTaskOwner, OwnedStartResult } from "./owner"
 import { createDagRecovery } from "./recovery"
 import { createDagFileStore, type DagFileStore } from "./store"
 import type { DagNode, DagNodeId, DagRunEvent, DagRunId } from "./types"
+import { NO_HOST_ENDPOINT } from "../lifecycle/host-session"
 
 const cleanupRoots: string[] = []
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(["completed", "error", "cancelled", "interrupted", "lost"])
@@ -196,10 +198,17 @@ class RecoveryTaskManager implements TaskManager {
   interruptTask(): Promise<never> { throw new Error("not implemented") }
   cancelTask(): Promise<never> { throw new Error("not implemented") }
   list(): readonly [] { return [] }
-  forget(): void {}
-  getResidentHandle(): undefined { return undefined }
+  forget(_taskId: string, _options: Parameters<TaskManager["forget"]>[1]): void {}
+  // The real manager settles `waitFor` only for a child it holds resident, so this fake answers
+  // "held" from the same map its completions come from: a task it can still complete is held here.
+  getResidentHandle(taskId: string): ManagedChildHandle | undefined {
+    const record = this.#tasks.get(taskId)?.record
+    if (record === undefined || TERMINAL_TASK_STATUSES.has(record.status)) return undefined
+    return makeHandle(taskId).handle
+  }
   subscribeChild(): () => void { return () => undefined }
   residentTaskIds(): readonly string[] { return [] }
+  residencyChanged(): Promise<void> { return new Promise<void>(() => undefined) }
   promoteToBackground(): boolean { return false }
   wasBackground(): boolean { return true }
 }
@@ -323,6 +332,54 @@ describe("DAG crash recovery", () => {
     // then
     expect(outcome?.kind).toBe("resumed")
     expect(manager.startOwnedCalls).toEqual(["only"])
+  })
+
+  test("#given a paused own-session run whose previous holder is THIS host pid and no in-process holder is registered #when the same host resumes the session #then it is claimed and resumed instead of waiting on itself", async () => {
+    // given - the probe says EVERY pid is alive: a signal-0 probe on our own pid is always true, so the
+    // claim must be decided by identity, not liveness (#8006 saved-session reopen in one host process)
+    const store = createDagFileStore({ project_dir: tempProject() })
+    const manager = new RecoveryTaskManager()
+    store.writeCheckpoint(runId, recoverableRecord(definition([node("only")]), {
+      only: { state: "scheduled" },
+    }, { previousLeaseHolderPid: 101 }))
+
+    // when
+    const outcomes = await createDagRecovery({ store, taskManager: manager, hostPid: 101, isProcessAlive: () => true })
+      .resumePausedRuns(parentSessionId)
+
+    // then
+    expect(outcomes).toHaveLength(1)
+    expect(outcomes[0]).toMatchObject({ runId, kind: "resumed" })
+    expect(manager.startOwnedCalls).toEqual(["only"])
+    expect(events(store).some((event) => event.type === "dag.run.resumed")).toBe(true)
+    const settled = store.readCheckpoint<DagRunRecordV1 & { readonly leaseHolderPid?: number }>(runId)
+    expect(settled?.status).toBe("completed")
+    expect(settled?.leaseHolderPid).toBeUndefined()
+  })
+
+  test("#given a paused own-session run whose previous holder is THIS host pid #when this process still schedules the run #then it is skipped as live_lease naming our own pid", async () => {
+    // given - the same-runtime pause + re-attach: the original scheduler is still registered in this
+    // process, and a recovery-built second scheduler would fold the same children twice
+    const store = createDagFileStore({ project_dir: tempProject() })
+    const manager = new RecoveryTaskManager()
+    store.writeCheckpoint(runId, recoverableRecord(definition([node("only")]), {
+      only: { state: "scheduled" },
+    }, { previousLeaseHolderPid: 101 }))
+
+    // when
+    const outcomes = await createDagRecovery({
+      store,
+      taskManager: manager,
+      hostPid: 101,
+      isProcessAlive: () => true,
+      isRunHeldInProcess: () => true,
+    }).resumePausedRuns(parentSessionId)
+
+    // then
+    expect(outcomes).toEqual([{ runId, kind: "skipped", reason: "live_lease", holderPid: 101 }])
+    expect(manager.startOwnedCalls).toEqual([])
+    expect(events(store).some((event) => event.type === "dag.run.resumed")).toBe(false)
+    expect(store.readCheckpoint<DagRunRecordV1>(runId)?.status).toBe("paused")
   })
 
   test("#given scheduled nodes with and without durable owners #when resumed #then the owner is attached and only never-dispatched work starts", async () => {
@@ -562,6 +619,7 @@ describe("DAG crash recovery", () => {
       planner: categoryPlanner(), config, cwd: project, hostPid: 101, now,
     })
     const lifecycle = createTaskLifecycle({
+      hostEndpoint: NO_HOST_ENDPOINT,
       store: taskStore, registry: new FakeRegistry(), config, hostPid: 101, now,
       signaller: { isAlive: () => false, signal: () => { throw new Error("unexpected signal") } },
     })
@@ -617,7 +675,7 @@ describe("DAG crash recovery", () => {
       store: taskStore, runners: { "in-process": runner, process: runner },
       planner: categoryPlanner(), config, cwd: project, hostPid: 101, now,
     })
-    const lifecycle = createTaskLifecycle({ store: taskStore, registry: new FakeRegistry(), config, hostPid: 101, now })
+    const lifecycle = createTaskLifecycle({ hostEndpoint: NO_HOST_ENDPOINT, store: taskStore, registry: new FakeRegistry(), config, hostPid: 101, now })
     const revived = await lifecycle.reconcileOnSessionStart(parentSessionId)
     lifecycle.dispose?.()
     expect(revived.outcomes).toContainEqual(expect.objectContaining({ task_id: pending.task_id, kind: "resumed" }))

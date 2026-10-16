@@ -58,16 +58,25 @@ function manager(projectDir: string, options: { readonly now?: () => number } = 
 }
 
 function runFiles(store: ReturnType<typeof createDagFileStore>): readonly string[] {
-  return fs.readdirSync(store.paths.runs).filter((entry) => entry.endsWith(".json"))
+  return fs.existsSync(store.paths.runs)
+    ? fs.readdirSync(store.paths.runs).filter((entry) => entry.endsWith(".json"))
+    : []
 }
 
-function raceWorkerSource(projectDir: string, prompt: string): string {
+function raceWorkerSource(projectDir: string, prompt: string, barrierDir: string): string {
   return [
     `const { createDagManager } = await import(${JSON.stringify(managerPath)})`,
     `const { createDagFileStore } = await import(${JSON.stringify(join(import.meta.dir, "store.ts"))})`,
-    `const { readSync } = await import("node:fs")`,
+    `const { existsSync, watch } = await import("node:fs")`,
     `const store = createDagFileStore({ project_dir: ${JSON.stringify(projectDir)} })`,
     `const dag = createDagManager({ store })`,
+    `const releasePath = ${JSON.stringify(join(barrierDir, "release"))}`,
+    `const waitForRelease = () => new Promise((resolve, reject) => {`,
+    `  const watcher = watch(${JSON.stringify(barrierDir)}, () => { if (existsSync(releasePath)) finish() })`,
+    `  const timeout = setTimeout(() => finish(new Error("timed out waiting for DAG race release")), 30_000)`,
+    `  const finish = (error) => { clearTimeout(timeout); watcher.close(); error === undefined ? resolve() : reject(error) }`,
+    `  if (existsSync(releasePath)) finish()`,
+    `})`,
     `const definition = {`,
     `  key: "release-plan",`,
     `  name: "release plan",`,
@@ -77,12 +86,12 @@ function raceWorkerSource(projectDir: string, prompt: string): string {
     `  ],`,
     `}`,
     `process.stdout.write("ready\\n")`,
-    `readSync(0, Buffer.alloc(1), 0, 1, null)`,
+    `await waitForRelease()`,
     `try {`,
     `  const started = await dag.start({ definition, parentSessionId: ${JSON.stringify(parentSessionId)}, rootSessionId: ${JSON.stringify(rootSessionId)} })`,
     `  process.stdout.write(JSON.stringify({ ok: true, reused: started.reused, runId: started.snapshot.runId }) + "\\n")`,
     `} catch (error) {`,
-    `  process.stdout.write(JSON.stringify({ ok: false, code: error.code ?? "unknown" }) + "\\n")`,
+    `  process.stdout.write(JSON.stringify({ ok: false, code: error.code ?? "unknown", message: error.message, syscall: error.syscall, path: error.path }) + "\\n")`,
     `}`,
   ].join("\n")
 }
@@ -111,21 +120,26 @@ type RaceOutcome = {
   readonly reused?: boolean
   readonly runId?: string
   readonly code?: string
+  readonly message?: string
+  readonly syscall?: string
+  readonly path?: string
 }
 
 async function raceStarts(projectDir: string, prompts: readonly string[]): Promise<readonly RaceOutcome[]> {
+  const barrierDir = join(projectDir, "race-barrier")
+  fs.mkdirSync(barrierDir)
   const children = prompts.map((prompt) => Bun.spawn(
-    [process.execPath, "-e", raceWorkerSource(projectDir, prompt)],
-    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+    [process.execPath, "-e", raceWorkerSource(projectDir, prompt, barrierDir)],
+    { stdout: "pipe", stderr: "pipe", env: { ...process.env } },
   ))
   const readers = children.map((child) => lineReader(child.stdout))
   const errors = children.map((child) => new Response(child.stderr).text())
+  // Each child installs its filesystem watcher before publishing ready. The single release file is
+  // written only after both readiness signals, so the two starts cannot be serialized by the
+  // parent's sequential stdin writes on Windows.
   const ready = await Promise.all(readers.map((read) => read()))
   expect(ready).toEqual(prompts.map(() => "ready"))
-  for (const child of children) {
-    child.stdin.write("g")
-    child.stdin.flush()
-  }
+  fs.writeFileSync(join(barrierDir, "release"), "go")
   const outcomes = await Promise.all(readers.map(async (read) => JSON.parse(await read()) as RaceOutcome))
   const exits = await Promise.all(children.map((child) => child.exited))
   const stderr = await Promise.all(errors)
@@ -255,8 +269,8 @@ describe("createDagManager start", () => {
       expect((error as DagManagerError).errors.map((entry) => entry.code)).toEqual(["cycle"])
     })
     expect(runFiles(store)).toEqual([])
-    expect(fs.readdirSync(store.paths.keys)).toEqual([])
-    expect(fs.readdirSync(store.paths.events)).toEqual([])
+    expect(fs.existsSync(store.paths.keys) ? fs.readdirSync(store.paths.keys) : []).toEqual([])
+    expect(fs.existsSync(store.paths.events) ? fs.readdirSync(store.paths.events) : []).toEqual([])
   })
 
   test("#given a configured node ceiling #when a definition exceeds it #then invalid_definition names the configured bound", async () => {
@@ -647,7 +661,10 @@ describe("createDagManager concurrent starts", () => {
     // then
     const store = createDagFileStore({ project_dir: projectDir })
     expect(runFiles(store)).toHaveLength(1)
-    expect(outcomes.map((outcome) => outcome.ok)).toEqual([true, true])
+    expect(outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ok: true }),
+      expect.objectContaining({ ok: true }),
+    ]))
     expect(new Set(outcomes.map((outcome) => outcome.runId)).size).toBe(1)
     expect(outcomes.filter((outcome) => outcome.reused === false)).toHaveLength(1)
     expect(outcomes.filter((outcome) => outcome.reused === true)).toHaveLength(1)

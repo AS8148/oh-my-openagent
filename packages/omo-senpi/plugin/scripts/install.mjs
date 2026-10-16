@@ -51,7 +51,12 @@ function localLauncherPath(homeDir = homedir2()) {
 function localLauncherCmdPath(homeDir = homedir2()) {
   return join2(homeDir, ".local", "bin", "omo.cmd");
 }
+function releaseChannel(version) {
+  return version !== undefined && version.includes("-") ? "beta" : "latest";
+}
 function renderLocalLauncher(options) {
+  const channel = releaseChannel(options.version);
+  const updateCommand = channel === "beta" ? "bun add -g omo-ai@beta" : "bun add -g omo-ai";
   const brand = {
     name: "OmO",
     command: "omo",
@@ -61,10 +66,13 @@ function renderLocalLauncher(options) {
     envPrefix: "OMO",
     userAgent: "omo",
     originator: "omo",
+    changelog: {
+      path: join2(options.pluginPath, "CHANGELOG.md").replaceAll("\\", "/")
+    },
     update: {
       packageName: "omo-ai",
-      distTag: "beta",
-      command: "npm i -g omo-ai@beta",
+      distTag: channel,
+      command: updateCommand,
       changelogUrl: "https://github.com/code-yeongyu/oh-my-openagent/releases"
     }
   };
@@ -94,9 +102,12 @@ const selfUpdate = process.argv[2] === "update"
   && process.argv.slice(3).every((arg) => arg.startsWith("-") || ["self", "senpi", "omo"].includes(arg))
   && !process.argv.slice(3).some((arg) => arg === "--extensions" || arg === "--models")
 if (selfUpdate) {
-  console.log("omo is updated via npm: npm i -g omo-ai@beta")
+  console.log(${JSON.stringify(`omo is updated via bun: ${updateCommand}`)})
   process.exit(0)
 }
+// windowsHide-exempt: this is the interactive foreground CLI, spawned with inherited stdio.
+// CREATE_NO_WINDOW would suppress the console a console-less launch needs to render the TUI,
+// so the launcher keeps the user's console instead of hiding it (#8501).
 const child = spawn(process.execPath, [cli, "--extension", plugin, ...process.argv.slice(2)], {
   env,
   stdio: "inherit",
@@ -142,6 +153,20 @@ import { createHash } from "node:crypto";
 import { constants as constants2 } from "node:fs";
 import { access as access2, readFile as readFile2, stat } from "node:fs/promises";
 import { dirname as dirname3, join as join4 } from "node:path";
+
+// packages/memory-core/src/personas/manifest.ts
+var PERSONA_ASSET_FILENAMES = {
+  reflection: "reflection-persona.md",
+  dream: "dream-persona.md",
+  facts: "facts-persona.md",
+  kibitzer: "kibitzer-persona.md"
+};
+var PERSONA_ASSET_FILES = [
+  PERSONA_ASSET_FILENAMES.reflection,
+  PERSONA_ASSET_FILENAMES.dream,
+  PERSONA_ASSET_FILENAMES.facts,
+  PERSONA_ASSET_FILENAMES.kibitzer
+];
 
 // packages/omo-senpi/src/install/senpi-settings.ts
 import { constants } from "node:fs";
@@ -264,13 +289,19 @@ function isErrno(error, code) {
 var REQUIRED_PLUGIN_ARTIFACTS = [
   join4("extensions", "omo.js"),
   join4("extensions", "omo-task.js"),
+  join4("extensions", "omo-computer-use.js"),
+  join4("extensions", "omo-memory-doctor.js"),
+  join4("extensions", "omo-memory-memfs.js"),
+  join4("extensions", "omo-thread-client.js"),
+  join4("extensions", "assets.generated.json"),
   join4("extensions", "omo-member.js"),
   join4("extensions", "memory-run-supervisor.mjs"),
-  join4("extensions", "reflection-persona.md"),
-  join4("extensions", "dream-persona.md"),
-  join4("extensions", "facts-persona.md"),
-  join4("extensions", "memorian-persona.md"),
+  join4("extensions", "gateway-store-worker.mjs"),
+  ...PERSONA_ASSET_FILES.map((filename) => join4("extensions", filename)),
   join4("skills", "ast-grep", "SKILL.md"),
+  join4("skills", "browser", "SKILL.md"),
+  join4("skills", "browser", "runtime", "omowright", "index.js"),
+  join4("skills", "browser", "runtime", "omowright", "page-bundle.js"),
   join4("skills", "coding-agent-sessions", "SKILL.md"),
   join4("skills", "debugging", "SKILL.md"),
   join4("skills", "frontend", "SKILL.md"),
@@ -289,11 +320,9 @@ var REQUIRED_PLUGIN_ARTIFACTS = [
   join4("skills", "ulw-research", "SKILL.md"),
   join4("skills", "visual-qa", "SKILL.md"),
   join4("skills-conditional", "x-search", "SKILL.md"),
+  join4("runtime", "agent-toolkit-sdk", "sdk.js"),
+  join4("runtime", "thread-sdk", "sdk.js"),
   join4("runtime", "ast-grep-mcp", "cli.js"),
-  join4("runtime", "agent-toolkit", "cli.js"),
-  join4("runtime", "agent-toolkit", "ulw-loop", "cli.js"),
-  join4("runtime", "agent-toolkit", "omo-agent-toolkit"),
-  join4("runtime", "agent-toolkit", "omo-agent-toolkit.cmd"),
   join4("runtime", "lsp-daemon", "dist", "cli.js"),
   join4("runtime", "lsp-daemon", "dist", "index.js"),
   join4("runtime", "lsp-daemon", "dist", "index.d.ts"),
@@ -301,7 +330,8 @@ var REQUIRED_PLUGIN_ARTIFACTS = [
   join4("runtime", "lsp-daemon", "dist", "daemon-client.d.ts"),
   join4("runtime", "lsp-daemon", "dist", "package.json"),
   join4("runtime", "lsp-daemon", "dist", ".omo-runtime-manifest.json"),
-  join4("scripts", "install.mjs")
+  join4("scripts", "install.mjs"),
+  "daemon-launch-spec.json"
 ];
 async function ensurePluginArtifacts(context) {
   if (context.allowBuild) {
@@ -311,7 +341,6 @@ async function ensurePluginArtifacts(context) {
     await context.runCommand("node", [join4(context.pluginPath, "scripts", "build-install.mjs")], { cwd: context.repoRoot });
     await context.runCommand("node", [join4(context.pluginPath, "scripts", "stage-lsp-daemon-runtime.mjs")], { cwd: context.repoRoot });
     await context.runCommand("node", [join4(context.pluginPath, "scripts", "stage-ast-grep-mcp-runtime.mjs")], { cwd: context.repoRoot });
-    await context.runCommand("node", [join4(context.pluginPath, "scripts", "stage-agent-toolkit.mjs")], { cwd: context.repoRoot });
     await context.runCommand("node", [join4(context.pluginPath, "scripts", "stage-x-search-skill.mjs")], { cwd: context.repoRoot });
   }
   if (await hasMissingPluginArtifact(context.pluginPath)) {

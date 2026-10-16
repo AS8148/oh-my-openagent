@@ -7,7 +7,7 @@ import {
 
 import { MemoryFakeExtensionAPI, memorySettings } from "./memory.test-support"
 import { MEMORY_NOTICE_CUSTOM_TYPE } from "./prompt"
-import { RECALL_CUSTOM_TYPE, createMemoryRecallWiring } from "./recall-wiring"
+import { RECALL_CUSTOM_TYPE, createMemoryRecallWiring, resolveAgentRecallSettings } from "./recall-wiring"
 import { rmEfaultTolerant } from "./teardown.test-support"
 import type { RecallLedger as RecallLedgerType } from "@oh-my-opencode/memory-core"
 import {
@@ -45,7 +45,6 @@ interface WiringInput {
   readonly env?: Record<string, string | undefined>
   readonly logs?: Array<{ message: string; details?: unknown }>
   readonly ledgerFor?: (context: MemoryIdentityContext) => RecallLedgerType
-  readonly currentCompactionEpoch?: (sessionId: string) => number
 }
 
 function wiringFor(input: WiringInput) {
@@ -59,9 +58,6 @@ function wiringFor(input: WiringInput) {
     createRepo: () => input.repo,
     env: input.env ?? {},
     ...(input.ledgerFor === undefined ? {} : { ledgerFor: input.ledgerFor }),
-    ...(input.currentCompactionEpoch === undefined
-      ? {}
-      : { currentCompactionEpoch: input.currentCompactionEpoch }),
     ...(input.logs === undefined
       ? {}
       : {
@@ -84,9 +80,45 @@ async function dispatch(
 }
 
 describe("RECALL_CUSTOM_TYPE", () => {
-  test("#given the recall injection channel #when the custom type is read #then it is the memorian recall channel", () => {
+  test("#given the recall injection channel #when the custom type is read #then it is the kibitzer recall channel", () => {
     // given / when / then
-    expect(RECALL_CUSTOM_TYPE).toBe("omo-memorian:recall")
+    expect(RECALL_CUSTOM_TYPE).toBe("omo-kibitzer:recall")
+  })
+})
+
+describe("resolveAgentRecallSettings", () => {
+  test("#given a per-agent recall override with a partial event_caps #when resolved for that agent #then the sidecar settings merge per field and the other agents keep the root values", () => {
+    // given
+    const settings = memorySettings({
+      recall: { ...memorySettings().recall, event_caps: { tool_args: 300, result_head: 900, assistant: 1500, prompt: 4000 } },
+      agents: { research: { recall: { category: "deep", tool_budget: 4, event_caps: { tool_args: 200 } } } },
+    })
+
+    // when
+    const research = resolveAgentRecallSettings(settings, "research")
+    const other = resolveAgentRecallSettings(settings, "default")
+
+    // then
+    expect(research).toEqual({
+      enabled: true,
+      max_items: 2,
+      category: "deep",
+      event_caps: { tool_args: 200, result_head: 900, assistant: 1500, prompt: 4000 },
+      sidecar_max_tokens: 48000,
+      max_concurrent_wakes: 2,
+      tool_budget: 4,
+      query_expansion: false,
+    })
+    expect(other).toEqual({
+      enabled: true,
+      max_items: 2,
+      category: "quick",
+      event_caps: { tool_args: 300, result_head: 900, assistant: 1500, prompt: 4000 },
+      sidecar_max_tokens: 48000,
+      max_concurrent_wakes: 2,
+      tool_budget: 8,
+      query_expansion: false,
+    })
   })
 })
 
@@ -267,6 +299,24 @@ describe("createMemoryRecallWiring collectCandidates", () => {
     expect(collected?.candidates).toHaveLength(1)
   }, 30_000)
 
+  test("#given an inflected Korean prompt and no recall setting #when candidates are collected #then the stem memory is collected", async () => {
+    // given
+    const { repo, context } = await fixture(tempDirs, [
+      {
+        relativePath: "reference/publish.md",
+        content: "---\ndescription: npm 퍼블리시 절차\n---\n배포 토큰은 키체인에 저장한다\n",
+      },
+    ])
+    const prompt = "퍼블리시할 때 막히면 어디서 꺼내 써"
+    const wiring = wiringFor({ repo, identity: context })
+
+    // when
+    const collected = await wiring.collectCandidates(eventContext([userEntry("m1", prompt)]))
+
+    // then
+    expect(collected?.candidates.map((candidate) => candidate.path)).toEqual(["reference/publish.md"])
+  }, 30_000)
+
   test("#given a path already surfaced in the session #when candidates are collected #then it never repeats", async () => {
     // given
     const { repo, context } = await fixture(tempDirs)
@@ -334,19 +384,19 @@ describe("createMemoryRecallWiring collectCandidates", () => {
     const { repo, context } = await fixture(tempDirs)
     const reflection = wiringFor({ repo, identity: context, env: { SENPI_MEMORY_REFLECTION: "1" } })
     const facts = wiringFor({ repo, identity: context, env: { SENPI_MEMORY_FACTS: "1" } })
-    const memorian = wiringFor({ repo, identity: context, env: { SENPI_MEMORY_FACTS: "1" } })
+    const kibitzer = wiringFor({ repo, identity: context, env: { SENPI_MEMORY_FACTS: "1" } })
 
     // when
     const ctx = eventContext([userEntry("m1", KUBERNETES_PROMPT)])
     const reflectionCollected = await reflection.collectCandidates(ctx)
     const factsCollected = await facts.collectCandidates(ctx)
-    const memorianCollected = await memorian.collectCandidates(ctx)
+    const kibitzerCollected = await kibitzer.collectCandidates(ctx)
 
     // then
     expect(reflectionCollected).toBeUndefined()
     expect(factsCollected).toBeUndefined()
     // A gate child must not spawn a second gate over its own transcript.
-    expect(memorianCollected).toBeUndefined()
+    expect(kibitzerCollected).toBeUndefined()
   }, 30_000)
 
   test("#given a settled turn #when candidates are collected #then the judge input carries both roles and the surfaced set", async () => {

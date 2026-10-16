@@ -59,11 +59,18 @@ export type DagRecoveryOptions = {
   // Liveness probe for a paused run's previous lease holder. Defaults to the lifecycle port's
   // signaller so the signal-0 existence check has exactly one implementation in the package.
   readonly isProcessAlive?: (pid: number) => boolean
+  // Whether THIS process still runs a scheduler for the run. Consulted only when the recorded holder
+  // pid is our own: a signal-0 probe on ourselves is always true, so without this a same-process
+  // session reopen (multi-session host) would wait for its own host to exit. (#8006)
+  readonly isRunHeldInProcess?: (runId: DagRunId) => boolean
   readonly now?: () => number
   readonly subscriberRing?: number
   readonly nodeSpawnPolicy?: DagNodeSpawnPolicy
   readonly stopAdmission?: (runId: DagRunId) => void
   readonly reattach?: (runId: DagRunId, taskId: string) => void
+  // The recovering session's own task depth: resumed nodes spawn one level below it, exactly like
+  // a fresh run's nodes (scheduler `ancestry`), so a child session's workflow cannot reset depth.
+  readonly ancestry?: { readonly depth: number }
 }
 
 export type DagRecovery = {
@@ -74,11 +81,13 @@ export type DagRecovery = {
 type RecoveryContext = Required<Pick<DagRecoveryOptions, "store" | "taskManager">> & {
   readonly hostPid: number
   readonly isProcessAlive: (pid: number) => boolean
+  readonly isRunHeldInProcess?: (runId: DagRunId) => boolean
   readonly now: () => number
   readonly subscriberRing?: number
   readonly nodeSpawnPolicy?: DagNodeSpawnPolicy
   readonly stopAdmission?: (runId: DagRunId) => void
   readonly reattach?: (runId: DagRunId, taskId: string) => void
+  readonly ancestry?: { readonly depth: number }
 }
 
 type RecoveryPendingTerminalResult = {
@@ -96,11 +105,13 @@ export function createDagRecovery(options: DagRecoveryOptions): DagRecovery {
     taskManager: options.taskManager,
     hostPid: options.hostPid ?? process.pid,
     isProcessAlive: options.isProcessAlive ?? defaultSignaller.isAlive,
+    ...(options.isRunHeldInProcess === undefined ? {} : { isRunHeldInProcess: options.isRunHeldInProcess }),
     now: options.now ?? Date.now,
     ...(options.subscriberRing === undefined ? {} : { subscriberRing: options.subscriberRing }),
     ...(options.nodeSpawnPolicy === undefined ? {} : { nodeSpawnPolicy: options.nodeSpawnPolicy }),
     ...(options.stopAdmission === undefined ? {} : { stopAdmission: options.stopAdmission }),
     ...(options.reattach === undefined ? {} : { reattach: options.reattach }),
+    ...(options.ancestry === undefined ? {} : { ancestry: options.ancestry }),
   }
 
   return {
@@ -190,13 +201,22 @@ function claimPausedRun(context: RecoveryContext, runId: DagRunId, parentSession
     if (fresh === null || fresh.status !== "paused") return { kind: "skipped", reason: "not_paused" }
     if (fresh.parentSessionId !== parentSessionId) return { kind: "skipped", reason: "foreign_session" }
     const priorHolder = fresh.leaseHolderPid ?? fresh.previousLeaseHolderPid
-    if (priorHolder !== undefined && context.isProcessAlive(priorHolder)) {
+    if (priorHolder !== undefined && holderStillLive(context, runId, priorHolder)) {
       return { kind: "skipped", reason: "live_lease", holderPid: priorHolder }
     }
     const claimed: RecoverableRecord = { ...fresh, leaseHolderPid: context.hostPid }
     context.store.writeCheckpoint(runId, claimed)
     return { kind: "claimed", record: claimed }
   })
+}
+
+// Our own pid is always alive to a signal-0 probe, so for it the only holder that can still matter
+// is a scheduler registered in this process (same-runtime pause + re-attach). A fresh runtime that
+// reopens the session in the same process holds nothing and claims. Every other pid keeps the
+// cross-host liveness fence: two live host processes must never both schedule a run.
+function holderStillLive(context: RecoveryContext, runId: DagRunId, holderPid: number): boolean {
+  if (holderPid === context.hostPid) return context.isRunHeldInProcess?.(runId) ?? false
+  return context.isProcessAlive(holderPid)
 }
 
 async function resumeClaimedRun(context: RecoveryContext, claimed: RecoverableRecord): Promise<DagRecoveryOutcome> {
@@ -216,6 +236,7 @@ async function resumeClaimedRun(context: RecoveryContext, claimed: RecoverableRe
       ...(context.subscriberRing === undefined ? {} : { subscriberRing: context.subscriberRing }),
       ...(context.nodeSpawnPolicy === undefined ? {} : { nodeSpawnPolicy: context.nodeSpawnPolicy }),
       ...(reattachedTasks.size === 0 ? {} : { preAttachedTasks: reattachedTasks }),
+      ...(context.ancestry === undefined ? {} : { ancestry: context.ancestry }),
       now: context.now,
     })
     const record = await scheduler.run()
@@ -233,6 +254,9 @@ async function reconcileNodes(
   pendingTerminalResults: Map<DagNodeId, RecoveryPendingTerminalResult>,
   reattachedTasks: Map<DagNodeId, string>,
 ): Promise<void> {
+  // Children this pass just spawned are live by construction: admission can return them queued
+  // (`pending`, no resident handle yet), and their handle appears at launch.
+  const startedHere = new Set<string>()
   for (const observed of journal.snapshot().nodes) {
     if (observed.state === "completed") {
       const result = readDagNodeResult({ store: context.store, runId: journal.snapshot().runId, nodeId: observed.id })
@@ -259,7 +283,7 @@ async function reconcileNodes(
 
     if (task === undefined && observed.state === "scheduled" && observed.taskId === undefined) {
       const result = await context.taskManager.startOwned(
-        startSpec(journal.snapshot(), observed.id),
+        startSpec(journal.snapshot(), observed.id, context.ancestry?.depth ?? 0),
         taskOwner(journal.snapshot(), observed.id),
       )
       if (result.kind === "residency_denied") {
@@ -272,7 +296,10 @@ async function reconcileNodes(
         continue
       }
       task = attachStartedOrFail(journal, observed.id, result, context.now, pendingErrors)
-      if (task === undefined && result.kind === "started") task = context.taskManager.get(result.task_id)
+      if (task === undefined && result.kind === "started") {
+        startedHere.add(result.task_id)
+        task = context.taskManager.get(result.task_id)
+      }
     }
 
     if (task === undefined) {
@@ -302,6 +329,11 @@ async function reconcileNodes(
     // as long as the slowest child ran, withholding `dag.run.resumed`, the reuse events of every
     // node ordered after it, and every operator lever that refuses on an active run.
     if (task.status === "pending" || task.status === "running") {
+      const orphaned = startedHere.has(task.task_id) ? undefined : orphanedTaskReason(context, task)
+      if (orphaned !== undefined) {
+        failNode(journal, observed.id, "resume_task_orphaned", orphaned, context.now, pendingErrors)
+        continue
+      }
       context.reattach?.(journal.snapshot().runId, task.task_id)
       if (observed.state !== "running") {
         transition(journal, observed.id, "running", pendingErrors)
@@ -329,6 +361,28 @@ async function reconcileNodes(
     }
     foldTaskOutcome(context, journal, observed.id, task, pendingErrors, pendingTerminalResults)
   }
+}
+
+// A re-adopted node folds only when `TaskManager.waitFor` settles, and that resolves from this
+// process's own waiter map (or an already-terminal stored record) - never from a child some other
+// process holds. So `status` alone cannot decide re-adoption: a daemon-hosted child parked at
+// `rpc_detached` keeps `running` by design so it can be revived from its transcript later, and a
+// record frozen `resident` under a foreign pid is left untouched by lifecycle reconcile. Re-adopting
+// either one pins its node at `running` in every future checkpoint, across arbitrarily many
+// restarts. Liveness is therefore "this host holds the child" - the same resident-handle map that
+// feeds those waiters - and never a pid probe: a pid can be alive while the session it hosted is
+// gone. Session-start lifecycle reconcile runs before DAG recovery, so a revivable child already
+// carries a handle here and an unrevivable one never will.
+function orphanedTaskReason(context: RecoveryContext, task: TaskRecord): string | undefined {
+  if (context.taskManager.getResidentHandle(task.task_id) !== undefined) return undefined
+  const residency = [
+    `residency_state=${task.residency_state}`,
+    ...(task.suspension_reason === undefined ? [] : [`suspension_reason=${task.suspension_reason}`]),
+    ...(task.runner_kind === undefined ? [] : [`runner_kind=${task.runner_kind}`]),
+    ...(task.host_pid === undefined ? [] : [`host_pid=${task.host_pid}`]),
+  ].join(", ")
+  return `task ${task.task_id} still reads ${task.status} but no child of this host backs it ` +
+    `(${residency}); its settlement can never be observed here. Retry or send revives the node.`
 }
 
 function attachStartedOrFail(
@@ -461,7 +515,7 @@ function listRunRecords(store: DagFileStore): readonly RecoverableRecord[] {
     .filter((record): record is RecoverableRecord => record !== null)
 }
 
-function startSpec(record: DagRunRecordV1, nodeId: DagNodeId): ManagerStartSpec {
+function startSpec(record: DagRunRecordV1, nodeId: DagNodeId, sessionDepth: number): ManagerStartSpec {
   const node = nodeById(record, nodeId)
   const persisted = persistedNode(record, nodeId)
   return {
@@ -469,7 +523,7 @@ function startSpec(record: DagRunRecordV1, nodeId: DagNodeId): ManagerStartSpec 
     ...(persisted.task_summary === undefined ? {} : { task_summary: persisted.task_summary }),
     parent_session_id: record.parentSessionId,
     root_session_id: record.rootSessionId,
-    depth: 1,
+    depth: sessionDepth + 1,
     ...(node.route.kind === "category"
       ? { category: node.route.category }
       : { subagent_type: node.route.agent, ...(node.route.model === undefined ? {} : { model: node.route.model }) }),

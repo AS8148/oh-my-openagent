@@ -17,12 +17,13 @@ import { createDagFileStore, createDagManager, type DagRunId } from "@oh-my-open
 import { FakeExtensionAPI } from "../../test-support/fake-extension-api"
 import { createDagRuntime } from "../../src/components/task/dag-runtime"
 import { composeTaskEngine } from "../../src/components/task/engine"
+import { resolveOutDirArg } from "./out-dir-arg"
 
 const RUN_ID = "run-lease-handoff" as DagRunId
 const SESSION_ID = "session-lease-handoff"
 const POLL_MS = 100
 
-const outDir = process.argv[2] ?? join(tmpdir(), "dag-lease-handoff-qa")
+const outDir = resolveOutDirArg(process.argv.slice(2), join(tmpdir(), "dag-lease-handoff-qa"))
 const failures: string[] = []
 const report: Record<string, unknown> = {}
 
@@ -94,7 +95,7 @@ try {
   // The predecessor host pauses the run for its shutdown; its pid is the recorded previous holder.
   const predecessorWarnings: unknown[] = []
   const predecessorRuntime = assembleRuntime(root, new CompletingRunner(), predecessorWarnings)
-  predecessorRuntime.pauseForShutdown()
+  await predecessorRuntime.pauseForShutdown()
   predecessorRuntime.dispose()
   store.withRunLock(RUN_ID, () => {
     const fresh = store.readCheckpoint<Record<string, unknown>>(RUN_ID)

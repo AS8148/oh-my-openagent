@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test"
+import { versionLines } from "../packages/omo-native/build-info"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join, resolve } from "node:path"
+import { removeTempRoot } from "./remove-temp-root"
 import { writeTestExecutable } from "./omob-test-executable"
 import * as builder from "./build-omob"
+import { provenancePath, writeProvenanceMarker } from "./omob-provenance"
 
 describe("omob mainline launcher", () => {
 	test("#given ordinary installation #when defaults are parsed #then the managed launcher is retained", () => {
@@ -15,7 +18,7 @@ describe("omob mainline launcher", () => {
 		expect(() => builder.parseOmobArgs(["--if-changed", "--launcher"], "darwin", "arm64", "/home/dev")).not.toThrow()
 	})
 
-	test("#given explicit feature refs #when building directly #then only explicit launcher installation rejects them", () => {
+	test.skipIf(process.platform === "win32")("#given explicit feature refs #when building directly #then only explicit launcher installation rejects them", () => {
 		const args = ["--omo-ref", "origin/feature", "--senpi-ref", "origin/experiment"]
 		const feature = builder.parseOmobArgs([...args, "--name", "omob-feature"], "darwin", "arm64", "/home/dev")
 		expect(feature.omoRef).toBe("origin/feature")
@@ -41,17 +44,26 @@ describe("omob mainline launcher", () => {
 				expect(typeof current).toBe("function")
 				const binary = join(root, process.platform === "win32" ? "omob.exe" : "omob")
 				const info = { command: "omob", omo: { commit: "a".repeat(40), committedAt: "2026-09-09T00:00:00Z", branch: "dev" }, engine: { commit: "b".repeat(40), committedAt: "2026-09-09T00:00:00Z", branch: "main" } }
-				writeTestExecutable(binary, `console.log(${JSON.stringify(`omob dev build\nomo   ${info.omo.commit} ${info.omo.committedAt} (dev)\nsenpi ${info.engine.commit} ${info.engine.committedAt} (main)`)})`)
+				// The real `--version` text: isCurrentOmobBuild compares against versionLines(info), so a
+				// hand-copied format here would decide "changed" for a build that is the same.
+				writeTestExecutable(binary, `console.log(${JSON.stringify(versionLines(info).join("\n"))})`)
 				const requested = changed ? { ...info, engine: { ...info.engine, commit: "c".repeat(40) } } : info
 				writeFileSync(`${binary}.build.json`, JSON.stringify({ buildInfo: requested }))
 				expect(current(binary, requested, builder.hostTargetFor(process.platform, process.arch))).toBe(!changed)
-				rmSync(binary)
-				expect(current(binary, requested, builder.hostTargetFor(process.platform, process.arch))).toBe(false)
-			} finally { rmSync(root, { recursive: true, force: true }) }
+				// A never-created path checks absence without unlinking an executable a Windows scanner may still hold.
+				const missingBinary = join(root, process.platform === "win32" ? "missing-omob.exe" : "missing-omob")
+				// A surviving provenance marker must not make an absent executable current.
+				writeProvenanceMarker(binary, versionLines(requested).join("\n"))
+				const marker = readFileSync(provenancePath(binary), "utf8")
+				writeFileSync(provenancePath(missingBinary), marker)
+				expect(JSON.parse(marker).versionOutput).toBe(versionLines(requested).join("\n"))
+				expect(existsSync(missingBinary)).toBe(false)
+				expect(current(missingBinary, requested, builder.hostTargetFor(process.platform, process.arch))).toBe(false)
+			} finally { removeTempRoot(root) }
 		})
 	}
 
-	test(`#given a signaled executable #when launched #then ${process.platform === "win32" ? "the unsupported launcher is rejected without an install" : "the launcher preserves the signal"}`, () => {
+	test.skipIf(process.platform === "win32")(`#given a signaled executable #when launched #then the launcher preserves the signal`, () => {
 		const root = mkdtempSync(join(tmpdir(), "omob-signal-"))
 		try {
 			const options = builder.parseOmobArgs(["--cache-dir", join(root, "cache"), "--install-dir", join(root, "bin")], "darwin", "arm64", root)
@@ -73,7 +85,7 @@ describe("omob mainline launcher", () => {
 	})
 
 	for (const fail of [false, true]) {
-		test(`#given ${fail ? "failed" : "successful"} refresh #when launched #then ${fail ? "the previous binary survives without launching" : "args and exit status reach the refreshed executable"}`, () => {
+		test.skipIf(process.platform === "win32")(`#given ${fail ? "failed" : "successful"} refresh #when launched #then ${fail ? "the previous binary survives without launching" : "args and exit status reach the refreshed executable"}`, () => {
 			const root = mkdtempSync(join(tmpdir(), "omob-launcher-"))
 			try {
 				const install = builder.installOmobLauncher

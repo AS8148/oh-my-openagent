@@ -3,10 +3,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PreToolUsePayload } from "../src/codex-hook.ts";
-import { applySpawnGuards, DEFAULT_FANOUT_LIMIT, runSpawnAdmissionRecorderCli } from "../src/spawn-guard.ts";
+// Budget/artifact behavior is independent of role admission; the native entry
+// point and its composition are covered in spawn-role-matrix.test.ts.
+import {
+	applySpawnBudgetGuards as applySpawnGuards,
+	DEFAULT_FANOUT_LIMIT,
+	runSpawnAdmissionRecorderCli,
+} from "../src/spawn-guard.ts";
 
 let workDir: string;
 let originalLimit: string | undefined;
@@ -158,6 +164,26 @@ describe("spawn admission breaker", () => {
 		expect(existsSync(join(sessionDir(), "spawn-count.json"))).toBe(false);
 		expect(existsSync(join(sessionDir(), "review-spawn-counts.json"))).toBe(false);
 	});
+
+	it.skipIf(process.getuid?.() === 0)(
+		"#given PLUGIN_DATA is a file #when recording an admission failure #then reports persist failure on stderr and keeps stdout empty",
+		async () => {
+			const blocked = join(workDir, "blocked-plugin-data");
+			writeFileSync(blocked, "not-a-directory");
+			process.env["PLUGIN_DATA"] = blocked;
+			const err: string[] = [];
+			const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array): boolean => {
+				err.push(chunk.toString());
+				return true;
+			});
+			try {
+				await expect(record("too many active cells")).resolves.toBe("");
+				expect(err.join("")).toContain("could not persist");
+			} finally {
+				spy.mockRestore();
+			}
+		},
+	);
 });
 
 describe("applySpawnGuards fan-out cap", () => {
@@ -404,9 +430,10 @@ describe("applySpawnGuards gate-artifact guard", () => {
 		expect(applySpawnGuards(genericGate)).toBe("");
 
 		const fourth = deny(applySpawnGuards(explicitGate));
-		expect(fourth.permissionDecisionReason).toContain("omo-senpi-gate-reviewer 4/3");
+		expect(fourth.permissionDecisionReason).toContain("omo-native-gate-reviewer 4/3");
 		const counters = JSON.parse(readFileSync(join(sessionDir(), "review-spawn-counts.json"), "utf8"));
-		expect(counters["omo-senpi-gate-reviewer:g1:a1"]).toBe(3);
+		expect(counters["omo-native-gate-reviewer:g1:a1"]).toBe(3);
+		expect(counters["omo-senpi-gate-reviewer:g1:a1"]).toBeUndefined();
 		expect(counters["lazycodex-gate-reviewer:g1:a1"]).toBeUndefined();
 	});
 
@@ -425,9 +452,10 @@ describe("applySpawnGuards gate-artifact guard", () => {
 		expect(applySpawnGuards(senpiReviewer)).toBe("");
 
 		const fourth = deny(applySpawnGuards(lazycodexReviewer));
-		expect(fourth.permissionDecisionReason).toContain("omo-senpi-code-reviewer 4/3");
+		expect(fourth.permissionDecisionReason).toContain("omo-native-code-reviewer 4/3");
 		const counters = JSON.parse(readFileSync(join(sessionDir(), "review-spawn-counts.json"), "utf8"));
-		expect(counters["omo-senpi-code-reviewer:g1:a1"]).toBe(3);
+		expect(counters["omo-native-code-reviewer:g1:a1"]).toBe(3);
+		expect(counters["omo-senpi-code-reviewer:g1:a1"]).toBeUndefined();
 		expect(counters["lazycodex-code-reviewer:g1:a1"]).toBeUndefined();
 	});
 

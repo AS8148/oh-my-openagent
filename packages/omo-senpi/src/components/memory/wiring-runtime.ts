@@ -2,6 +2,7 @@ import { join } from "node:path"
 
 import { TranscriptJournal, sanitizeToSlug, type ReservedRun } from "@oh-my-opencode/memory-core"
 
+import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import type { MemoryIdentityContext } from "./context"
 import type { DreamTriggerSession } from "./dream-trigger"
 import { FactsExtractorRunner } from "./facts-runner"
@@ -13,14 +14,13 @@ import {
   type MemoryIdentityRuntimeDeps,
 } from "./identity-runtime"
 import { createMemoryJournalWiring, type MemoryJournalWiring } from "./journal-wiring"
-import { MemorianGateRunner } from "./memorian-runner"
-import type { MemorianGatePort } from "./memorian-wiring"
 import { resolveMemoryModelRegistry } from "./model-registry-resolver"
 import { resolveMemorySessionModel } from "./session-model-resolver"
 import {
   resolveParentCacheReusable as resolveParentCacheReusableFromCtx,
   resolveParentContextTokens as resolveParentContextTokensFromCtx,
   resolveParentSessionFile as resolveParentSessionFileFromCtx,
+  resolveSessionAgentDir,
 } from "./session-context-resolver"
 import { resolveReflectionTriggerConfig, type ReflectionTriggerSession } from "./trigger-wiring"
 import { isRecord, sessionIdFrom } from "./wiring-context"
@@ -32,7 +32,6 @@ export interface MemoryRuntimeWiring {
   resolveModelRegistry(): ReturnType<MemoryIdentityRuntimeDeps["resolveModelRegistry"]>
   journalWiringFor(identity: MemoryIdentityContext): MemoryJournalWiring
   factsWiringFor(identity: MemoryIdentityContext): MemoryFactsWiring
-  memorianRunnerFor(identity: MemoryIdentityContext): MemorianGatePort
   runtimeFor(identity: MemoryIdentityContext): MemoryIdentityRuntime
   triggerSessionFor(eventCtx: unknown): ReflectionTriggerSession | undefined
   dreamSessionById(sessionId: string): DreamTriggerSession | undefined
@@ -55,7 +54,6 @@ export function createMemoryRuntimeWiring(
   const runtimes = new Map<string, MemoryIdentityRuntime>()
   const journals = new Map<string, MemoryJournalWiring>()
   const factsWirings = new Map<string, MemoryFactsWiring>()
-  const memorianRunners = new Map<string, MemorianGatePort>()
 
   const resolveContext = (sessionId: string): MemoryIdentityContext | undefined =>
     options.sessions.get(sessionId)?.context
@@ -78,6 +76,11 @@ export function createMemoryRuntimeWiring(
 
   function resolveParentCacheReusable(): boolean {
     return resolveParentCacheReusableFromCtx(lastEventCtx.current)
+  }
+
+  /** The engine's own answer for this session; detection is the fallback for hosts without it. */
+  function resolveAgentDir(): string {
+    return resolveSessionAgentDir(lastEventCtx.current) ?? resolveAgentHome({ env: process.env })
   }
 
   function journalWiringFor(identity: MemoryIdentityContext): MemoryJournalWiring {
@@ -106,6 +109,7 @@ export function createMemoryRuntimeWiring(
       cwd: options.cwd(),
       loadConfig: () => options.loadConfig({ cwd: options.cwd() }),
       resolveModelRegistry,
+      resolveSessionModel,
       env: options.env,
       ...(options.logger === undefined ? {} : { logger: options.logger }),
     })
@@ -129,25 +133,6 @@ export function createMemoryRuntimeWiring(
     return wiring
   }
 
-  /**
-   * One gate runner per identity: the runner owns the single-launch latch, so a shared instance is
-   * what keeps repeated settles down to one child.
-   */
-  function memorianRunnerFor(identity: MemoryIdentityContext): MemorianGatePort {
-    const cached = memorianRunners.get(identity.identity)
-    if (cached !== undefined) return cached
-    // No resolveModelRegistry here on purpose: the gate runner consumes ONLY the registry snapshot
-    // its settle handler captured, because this runner's launches outlive the senpi ctx.
-    const runner = options.createMemorianRunner?.(identity) ?? new MemorianGateRunner({
-      identityPaths: identity.identityPaths,
-      loadConfig: () => options.loadConfig({ cwd: options.cwd() }),
-      env: options.env,
-      ...(options.logger === undefined ? {} : { logger: options.logger }),
-    })
-    memorianRunners.set(identity.identity, runner)
-    return runner
-  }
-
   function runtimeFor(identity: MemoryIdentityContext): MemoryIdentityRuntime {
     const cached = runtimes.get(identity.identity)
     if (cached !== undefined) return cached
@@ -160,15 +145,17 @@ export function createMemoryRuntimeWiring(
       resolveParentContextTokens,
       resolveParentSessionFile,
       resolveParentCacheReusable,
+      resolveAgentDir,
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(liveSession === undefined
         ? {}
         : {
             liveSession: () => {
               const live = liveSession()
-              if (live === undefined || hooks.onLiveCompletion === undefined) return live
+              if (live === undefined) return live
               return {
                 ...live,
+                identityContext: identity,
                 onCompletion: (runId: string) => hooks.onLiveCompletion?.(identity.identity, runId),
               }
             },
@@ -228,7 +215,6 @@ export function createMemoryRuntimeWiring(
     resolveModelRegistry,
     journalWiringFor,
     factsWiringFor,
-    memorianRunnerFor,
     runtimeFor,
     triggerSessionFor,
     dreamSessionById,
