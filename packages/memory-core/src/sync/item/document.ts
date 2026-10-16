@@ -3,9 +3,7 @@
 // deleter's peer, so the stored vector is the oplog vector with that peer's end + 1.
 // Liveness (§4): at least one operation not covered by the pointwise-max tombstone vector.
 
-import type { LoroDoc, PeerID } from "loro-crdt"
-
-import { loadLoroRuntime } from "../../crdt/loro-runtime"
+import { loadLoroRuntime, type LoroDoc, type PeerID } from "../../crdt/loro-runtime"
 import { TOMBSTONES_NAME, cidRoot } from "./state"
 
 export type ItemFrontier = { peer: PeerID; counter: number }[]

@@ -61,6 +61,9 @@ describe("normalizeItemKey", () => {
     expect(normalizeItemKey("a\\b.md")).toBeNull()
     expect(normalizeItemKey("C:\\x.md")).toBeNull()
     expect(normalizeItemKey("C:/x.md")).toBeNull()
+    // Drive-relative spellings (no separator after the colon) are still Windows paths.
+    expect(normalizeItemKey("c:x.md")).toBeNull()
+    expect(normalizeItemKey("D:notes")).toBeNull()
   })
 
   test("the folded key is itself NFC-stable", () => {

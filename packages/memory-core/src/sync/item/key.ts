@@ -8,7 +8,8 @@
 
 import { caseFold } from "./casefold"
 
-const DRIVE_RE = /^[A-Za-z]:($|[/\\])/
+// Any drive prefix, including the drive-relative `c:x` (no separator after the colon).
+const DRIVE_RE = /^[A-Za-z]:/
 
 export function normalizeItemKey(path: string): string | null {
   if (path === "" || path.includes("\0") || path.includes("\\")) return null

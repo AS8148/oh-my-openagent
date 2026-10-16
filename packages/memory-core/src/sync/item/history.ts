@@ -4,7 +4,7 @@
 // cannot carry its own Lamport stamp - so it is derived here, identically on every
 // peer that holds the same history. No timestamp or peer order ever decides content.
 
-import type { LoroDoc, PeerID } from "loro-crdt"
+import type { LoroDoc, PeerID } from "../../crdt/loro-runtime"
 
 export type FmPart = "text" | "set" | "reg"
 
