@@ -83,7 +83,8 @@ export function splitHeader(text: string): { readonly header: string; readonly b
   const nl = text.indexOf("\n", close)
   const closeEnd = nl < 0 ? text.length : nl
   if (text.slice(close, closeEnd).trim() !== "") return null
-  const header = text.slice(open, end)
+  // A CRLF file's last header line ends in "\r\n": the CR belongs to the line ending.
+  const header = text.slice(open, text[end - 1] === "\r" ? end - 1 : end)
   if (header.trim() === "") return null
   return { header, body: nl < 0 ? "" : text.slice(nl + 1) }
 }
