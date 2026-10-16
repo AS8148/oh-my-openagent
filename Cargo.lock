@@ -2548,6 +2548,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "core-graphics",
+ "libc",
  "objc2-app-kit",
  "parking_lot",
  "schemars",
@@ -2562,6 +2563,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror",
  "tokio",
  "ulid",
@@ -2597,6 +2599,14 @@ dependencies = [
  "thiserror",
  "tokio",
  "ulid",
+]
+
+[[package]]
+name = "senpi-desktop-xpc"
+version = "0.0.0"
+dependencies = [
+ "block2",
+ "objc2-core-foundation",
 ]
 
 [[package]]
