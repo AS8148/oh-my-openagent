@@ -1,6 +1,8 @@
 import { hostname } from "node:os"
 import { join, resolve } from "node:path"
 
+import type { BigIntStats } from "node:fs"
+
 import { lstat, readFile, unlink } from "../fs/resilient"
 import { getPidLiveness, parseLockRecord } from "../locks"
 import { findOpenFileHolderPids } from "./open-file-holders"
@@ -25,8 +27,7 @@ const PRODUCTION_SCANS: UnlockScans = {
 export interface UnlockFindings {
   readonly kind: "found"
   readonly lockPath: string
-  readonly ino: number
-  readonly mtimeMs: number
+  readonly identity: string
   readonly holders: readonly number[] | null
   readonly repoUsers: readonly number[] | null
   readonly writerPid: number | null
@@ -51,16 +52,24 @@ async function liveWriterPid(repoDir: string): Promise<number | null> {
   return getPidLiveness(record.pid) === "alive" ? record.pid : null
 }
 
+// On ext4 a removed file's inode is reused at once and the coarse timestamp clock can repeat, so
+// inode plus mtime cannot tell a re-taken lock from the inspected one; size and the nanosecond
+// change and birth times narrow it to a replacement of the same size within one clock tick.
+function fileIdentity(status: BigIntStats): string {
+  return [status.dev, status.ino, status.size, status.mtimeNs, status.ctimeNs, status.birthtimeNs].join(":")
+}
+
 export async function inspectStrandedGitLock(repoDir: string, lockPath: string, scans: UnlockScans = PRODUCTION_SCANS): Promise<UnlockInspection> {
   const target = resolve(lockPath)
   const present = await presentLockFiles(join(resolve(repoDir), ".git"))
-  const identity = present.get(target)
-  if (identity === undefined) {
+  if (!present.has(target)) {
     const status = await lstat(target).catch(() => undefined)
     return status === undefined && target.startsWith(join(resolve(repoDir), ".git")) && target.endsWith(".lock")
       ? { kind: "missing" }
       : { kind: "not-a-git-lock" }
   }
+  const status = await lstat(target, { bigint: true }).catch(() => undefined)
+  if (status === undefined) return { kind: "missing" }
   const [holders, repoUsers, writerPid] = await Promise.all([
     scans.findHolders(target),
     scans.findRepoUsers(repoDir),
@@ -70,8 +79,7 @@ export async function inspectStrandedGitLock(repoDir: string, lockPath: string, 
   return {
     kind: "found",
     lockPath: target,
-    ino: identity.ino,
-    mtimeMs: identity.mtimeMs,
+    identity: fileIdentity(status),
     holders,
     repoUsers,
     writerPid,
@@ -85,7 +93,7 @@ export async function inspectStrandedGitLock(repoDir: string, lockPath: string, 
 export async function unlockStrandedGitLock(repoDir: string, confirmed: UnlockFindings, scans: UnlockScans = PRODUCTION_SCANS): Promise<UnlockOutcome> {
   const fresh = await inspectStrandedGitLock(repoDir, confirmed.lockPath, scans)
   if (fresh.kind !== "found") return { kind: fresh.kind }
-  if (fresh.ino !== confirmed.ino || fresh.mtimeMs !== confirmed.mtimeMs) return { kind: "changed", lockPath: fresh.lockPath }
+  if (fresh.identity !== confirmed.identity) return { kind: "changed", lockPath: fresh.lockPath }
   if (fresh.verdict === "refuse") return { kind: "refused", inspection: fresh }
   try {
     await unlink(fresh.lockPath)

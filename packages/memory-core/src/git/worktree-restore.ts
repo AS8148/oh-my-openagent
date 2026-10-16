@@ -1,5 +1,6 @@
-import { mkdir, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+
+import { mkdir, rm, writeFile } from "../fs/resilient"
 
 import { normalizePathspecs } from "./repo-arguments"
 import type { GitMemoryRepo } from "./repo"
