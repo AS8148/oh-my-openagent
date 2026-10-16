@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { readdirSync, readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { shouldDisableTelemetry } from "../../../telemetry-core/src/env.ts"
@@ -77,15 +78,35 @@ describe("QA drivers opt out of telemetry", () => {
   })
 })
 
+// Every file under the plugin root ships (extensions/*.js, scripts/install-local.mjs, runtime/, ...),
+// so each one is read; only vendored node_modules are skipped.
+function shippedHelperReferences(pluginRoot) {
+  const shipped = readdirSync(pluginRoot, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && !join(entry.parentPath, entry.name).includes("node_modules"))
+    .map((entry) => join(entry.parentPath, entry.name))
+  const leaking = shipped.filter((path) => /telemetry-opt-out-env|withTelemetryOptOut|telemetryLocalSinkEnv/u.test(readFileSync(path, "latin1")))
+  return { scanned: shipped.length, leaking: leaking.map((path) => relative(pluginRoot, path)) }
+}
+
 describe("the QA helper never ships", () => {
   test("#given the built plugin tree #when every shipped file is read #then none references the QA opt-out helper", () => {
-    const pluginRoot = join(repoRoot, "packages/omo-senpi/plugin")
-    const shipped = readdirSync(pluginRoot, { recursive: true, withFileTypes: true })
-      .filter((entry) => entry.isFile() && !join(entry.parentPath, entry.name).includes("node_modules"))
-      .map((entry) => join(entry.parentPath, entry.name))
-    expect(shipped.length).toBeGreaterThan(0)
-    const leaking = shipped.filter((path) => /telemetry-opt-out-env|withTelemetryOptOut|telemetryLocalSinkEnv/u.test(readFileSync(path, "latin1")))
-    expect(leaking.map((path) => path.slice(repoRoot.length + 1))).toEqual([])
+    const { scanned, leaking } = shippedHelperReferences(join(repoRoot, "packages/omo-senpi/plugin"))
+    expect(scanned).toBeGreaterThan(0)
+    expect(leaking).toEqual([])
+  })
+
+  test("#given a plugin tree whose bundle and installer name the helper #when it is scanned #then both files are reported", () => {
+    const root = mkdtempSync(join(tmpdir(), "qa-helper-ship-"))
+    try {
+      mkdirSync(join(root, "extensions"))
+      mkdirSync(join(root, "scripts"))
+      writeFileSync(join(root, "extensions", "omo.js"), `export const ok = 1\nimport "./telemetry-opt-out-env.mjs"\n`)
+      writeFileSync(join(root, "scripts", "install-local.mjs"), `const env = withTelemetryOptOut(process.env)\n`)
+      writeFileSync(join(root, "extensions", "omo-task.js"), `export const clean = true\n`)
+      expect(shippedHelperReferences(root)).toEqual({ scanned: 3, leaking: ["extensions/omo.js", "scripts/install-local.mjs"] })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 
