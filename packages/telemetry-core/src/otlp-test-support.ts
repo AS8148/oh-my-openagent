@@ -1,6 +1,6 @@
 import { mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { gunzipSync } from "node:zlib"
 
 import { fromBinary } from "@bufbuild/protobuf"
@@ -73,6 +73,7 @@ export function makeTransport(
     productEnvPrefix: "OMO_TEST",
     ingestKey: "test-ingest-key",
     spoolDir: dir,
+    spoolRoot: dirname(dir),
     resource: testResource(),
     scope: TEST_SCOPE,
     env: {},

@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { chownSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { createOtlpTelemetryTransport } from "./otlp-sender"
@@ -15,6 +15,7 @@ import {
   TEST_SCOPE,
   testResource,
 } from "./otlp-test-support"
+import type { CreateOtlpTelemetryTransportInput } from "./otlp-transport-types"
 import type { TelemetryDiagnosticInput } from "./types"
 
 const roots: (() => void)[] = []
@@ -55,6 +56,116 @@ function optOut(spoolDir: string, spoolRoot: string, diagnostics: TelemetryDiagn
 
 const refusals = (diagnostics: TelemetryDiagnosticInput[]): number =>
   diagnostics.filter((d) => d.event === "telemetry_spool_purge_refused").length
+
+const skipped = (diagnostics: TelemetryDiagnosticInput[]): TelemetryDiagnosticInput[] =>
+  diagnostics.filter((d) => d.event === "telemetry_spool_purge_skipped")
+
+const currentUid = typeof process.getuid === "function" ? process.getuid() : undefined
+
+/** The escape check is live only when every caller names the spool root: it is a required input. */
+const spoolRootIsRequired: undefined extends CreateOtlpTelemetryTransportInput["spoolRoot"] ? false : true = true
+
+describe("the opt-out purge skips every spool-named entry that is not a regular file of the current user, and keeps going", () => {
+  test("#given a spool-named directory between the spool's files #when the purge runs #then the directory survives untouched, every spool file is deleted, and one skip is reported with its kind and no path", () => {
+    // given
+    const dir = root()
+    seedSpool(dir)
+    const named = join(dir, `batch-logs-${createBatchId(Date.now() - 1)}.otlp`)
+    mkdirSync(named)
+    writeFileSync(join(named, "inside.txt"), "foreign")
+    const diagnostics: TelemetryDiagnosticInput[] = []
+
+    // when
+    optOut(dir, dirname(dir), diagnostics)
+
+    // then
+    expect(spoolNames(dir)).toEqual([named.slice(dir.length + 1)])
+    expect(readdirSync(named)).toEqual(["inside.txt"])
+    expect(skipped(diagnostics)).toEqual([{ event: "telemetry_spool_purge_skipped", source: "otlp", entryKind: "directory" }])
+    expect(diagnostics.filter((d) => d.event === "telemetry_spool_sweep_failed")).toEqual([])
+  })
+
+  test("#given a spool-named symlink to a directory #when the purge runs #then the link and its target are untouched, the rest is purged, and the skip is reported as a symlink", () => {
+    // given
+    const dir = root()
+    seedSpool(dir)
+    const target = join(dirname(dir), "link-target")
+    mkdirSync(target)
+    writeFileSync(join(target, "keep.txt"), "keep")
+    const linkName = `batch-traces-${createBatchId(Date.now() - 1)}.otlp`
+    symlinkSync(target, join(dir, linkName), "junction")
+    const diagnostics: TelemetryDiagnosticInput[] = []
+
+    // when
+    optOut(dir, dirname(dir), diagnostics)
+
+    // then
+    expect(spoolNames(dir)).toEqual([linkName])
+    expect(readFileSync(join(target, "keep.txt"), "utf8")).toBe("keep")
+    expect(skipped(diagnostics).map((d) => d.entryKind)).toEqual(["symlink"])
+  })
+
+  test.skipIf(currentUid !== 0)("#given a spool-named file owned by another user (needs root to chown) #when the purge runs #then it survives and the skip is reported as foreign_owner", () => {
+    // given
+    const dir = root()
+    seedSpool(dir)
+    const foreign = `active-logs-1-${"c".repeat(32)}.otlp`
+    writeFileSync(join(dir, foreign), "theirs")
+    chownSync(join(dir, foreign), 65534, 65534)
+    const diagnostics: TelemetryDiagnosticInput[] = []
+
+    // when
+    optOut(dir, dirname(dir), diagnostics)
+
+    // then
+    expect(spoolNames(dir)).toEqual([foreign])
+    expect(skipped(diagnostics).map((d) => d.entryKind)).toEqual(["foreign_owner"])
+  })
+})
+
+describe("the opt-out purge refuses a spool directory it does not own or that lies outside the caller's spool root", () => {
+  test.skipIf(currentUid === undefined)("#given the spool directory belongs to another user #when the purge runs #then it is refused, counted, and nothing is deleted", () => {
+    // given
+    const dir = root()
+    seedSpool(dir)
+    const before = spoolNames(dir)
+    const diagnostics: TelemetryDiagnosticInput[] = []
+    const uid = spyOn(process, "getuid").mockImplementation(() => (currentUid ?? 0) + 1)
+
+    // when
+    try {
+      optOut(dir, dirname(dir), diagnostics)
+    } finally {
+      uid.mockRestore()
+    }
+
+    // then
+    expect(spoolNames(dir)).toEqual(before)
+    expect(refusals(diagnostics)).toBe(1)
+  })
+
+  test("#given a plain spool directory that is not below the spool root the caller passed #when the process starts opted out or consent is withdrawn mid-run #then both purges are refused, counted, and the spool is untouched", async () => {
+    // given
+    const dir = root()
+    seedSpool(dir)
+    const before = spoolNames(dir)
+    const spoolRoot = join(dirname(dir), "expected-root")
+    mkdirSync(spoolRoot)
+    const atStart: TelemetryDiagnosticInput[] = []
+    const midRun: TelemetryDiagnosticInput[] = []
+    const transport = makeTransport(dir, { spoolRoot, consent: () => false, diagnostics: (input) => midRun.push(input) })
+
+    // when
+    optOut(dir, spoolRoot, atStart)
+    await transport.flush()
+
+    // then
+    expect(spoolRootIsRequired).toBe(true)
+    expect(spoolNames(dir)).toEqual(before)
+    expect(refusals(atStart)).toBe(1)
+    expect(refusals(midRun)).toBe(1)
+  })
+})
 
 describe("the opt-out purge deletes only what the spool created, only inside a verified spool directory", () => {
   test("#given foreign files and a foreign subdirectory next to the spool's own files #when the purge runs #then only the spool's own files go and the foreign ones survive", () => {
@@ -129,6 +240,7 @@ describe("opt-out purges the spool", () => {
         productEnvPrefix: "OMO_TEST",
         ingestKey: "k",
         spoolDir: dir,
+        spoolRoot: dirname(dir),
         resource: testResource(),
         scope: TEST_SCOPE,
         env,

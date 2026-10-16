@@ -22,7 +22,7 @@ import { purgeSpool } from "./otlp-spool-purge"
 import { abortableSleep, delay } from "./otlp-sleep"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { SpoolWriter } from "./otlp-wal"
-import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent } from "./types"
+import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent, TelemetrySpoolEntryKind } from "./types"
 
 const SEAL_BYTES = 200 * 1024
 const LEASE_RENEW_INTERVAL_MS = 60_000
@@ -46,8 +46,10 @@ export function createOtlpTelemetryTransport(input: CreateOtlpTelemetryTransport
   const env = input.env ?? process.env
   if (!isOtlpTelemetryEnabled({ env, productEnvPrefix: input.productEnvPrefix })) {
     try {
-      if (purgeSpool(input.spoolDir, input.spoolRoot) === "refused") {
-        input.diagnostics?.({ event: "telemetry_spool_purge_refused", source: input.source ?? "otlp" })
+      const source = input.source ?? "otlp"
+      const onSkipped = (entryKind: TelemetrySpoolEntryKind) => input.diagnostics?.({ event: "telemetry_spool_purge_skipped", source, entryKind })
+      if (purgeSpool(input.spoolDir, input.spoolRoot, onSkipped) === "refused") {
+        input.diagnostics?.({ event: "telemetry_spool_purge_refused", source })
       }
     } catch (error) {
       input.diagnostics?.({
@@ -228,7 +230,9 @@ class OtlpSender {
     this.#guard("telemetry_spool_write_failed", () => {
       this.#providers.logWriter.discard()
       this.#providers.spanWriter.discard()
-      if (purgeSpool(this.#ctx.dir, this.#input.spoolRoot) === "refused") this.#report("telemetry_spool_purge_refused")
+      const onSkipped = (entryKind: TelemetrySpoolEntryKind) =>
+        this.#input.diagnostics?.({ event: "telemetry_spool_purge_skipped", source: this.#input.source ?? "otlp", entryKind })
+      if (purgeSpool(this.#ctx.dir, this.#input.spoolRoot, onSkipped) === "refused") this.#report("telemetry_spool_purge_refused")
     })
   }
 

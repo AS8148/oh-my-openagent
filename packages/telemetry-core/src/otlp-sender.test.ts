@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
+import { dirname } from "node:path"
 
 import { create, toBinary } from "@bufbuild/protobuf"
 
@@ -79,7 +80,7 @@ describe("OTLP sender", () => {
     // when
     const ignored = makeTransport(dir, { env: { OTEL_EXPORTER_OTLP_ENDPOINT: "http://evil.test", OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://evil.test" } })
     const overridden = makeTransport(dir, { env: { OMO_TELEMETRY_ENDPOINT: "https://staging.test/" } })
-    const defaulted = createOtlpTelemetryTransport({ productEnvPrefix: "OMO_TEST", ingestKey: "k", spoolDir: dir, resource: testResource(), scope: TEST_SCOPE, env: {}, autoStart: false })
+    const defaulted = createOtlpTelemetryTransport({ productEnvPrefix: "OMO_TEST", ingestKey: "k", spoolDir: dir, spoolRoot: dirname(dir), resource: testResource(), scope: TEST_SCOPE, env: {}, autoStart: false })
 
     // then
     expect(ignored.endpoint).toBe("https://collector.test")
@@ -90,7 +91,7 @@ describe("OTLP sender", () => {
   test("#given OTEL_SDK_DISABLED=true or DO_NOT_TRACK=1 #then no transport is built and no spool directory exists", () => {
     // given
     const dir = root()
-    const base = { productEnvPrefix: "OMO_TEST", ingestKey: "k", spoolDir: dir, resource: testResource(), scope: TEST_SCOPE, autoStart: false }
+    const base = { productEnvPrefix: "OMO_TEST", ingestKey: "k", spoolDir: dir, spoolRoot: dirname(dir), resource: testResource(), scope: TEST_SCOPE, autoStart: false }
 
     // when
     const otelDisabled = createOtlpTelemetryTransport({ ...base, env: { OTEL_SDK_DISABLED: "TRUE" } })

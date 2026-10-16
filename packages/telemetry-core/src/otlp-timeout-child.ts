@@ -1,3 +1,5 @@
+import { dirname } from "node:path"
+
 import { createOtlpTelemetryTransport } from "./otlp-sender"
 import { capture, TEST_SCOPE, testResource } from "./otlp-test-support"
 
@@ -9,6 +11,7 @@ const transport = createOtlpTelemetryTransport({
   productEnvPrefix: "OMO_TEST",
   ingestKey: "test-ingest-key",
   spoolDir: dir,
+  spoolRoot: dirname(dir),
   resource: testResource(),
   scope: TEST_SCOPE,
   env: {},

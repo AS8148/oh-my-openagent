@@ -68,6 +68,7 @@ function toDiagnosticRecord(input: TelemetryDiagnosticInput, now: Date): Record<
     timestamp: now.toISOString(),
     event: input.event,
     source: input.source,
+    ...(input.entryKind === undefined ? {} : { entry_kind: input.entryKind }),
     ...serializeError(input.error, input.errorKind),
   }
 }

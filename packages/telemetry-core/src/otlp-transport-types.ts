@@ -9,8 +9,8 @@ export type CreateOtlpTelemetryTransportInput = {
   readonly productEnvPrefix: string
   readonly ingestKey: string
   readonly spoolDir: string
-  /** The opt-out purge refuses a spool dir whose real path is not strictly below this one's (default: the spool dir's parent). */
-  readonly spoolRoot?: string
+  /** Required: the opt-out purge refuses a spool dir whose real path is not strictly below this one's. */
+  readonly spoolRoot: string
   readonly resource: ResourceAttributes
   readonly scope: InstrumentationScope
   readonly env?: TelemetryEnv
