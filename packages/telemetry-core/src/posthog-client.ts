@@ -1,7 +1,8 @@
-import { PostHog } from "posthog-node"
+import { PostHog, type PostHogOptions } from "posthog-node"
 
 import { getTelemetryApiKey, getTelemetryHost, hasTelemetryApiKey, shouldDisableTelemetry } from "./env"
 import { getDefaultTelemetryOsProvider } from "./machine-id"
+import { createImmediateSender } from "./posthog-immediate-send"
 import type {
   TelemetryCaptureProperties,
   TelemetryClient,
@@ -35,11 +36,18 @@ const NO_OP_CLIENT: TelemetryClient = {
   shutdown: async () => undefined,
 }
 
+export { TelemetryDeliveryError } from "./posthog-immediate-send"
+
+/** The transport options plus posthog-node's own knobs (fetch, retries, timeouts), passed through as given. */
+export type PostHogTransportOptions = TelemetryTransportOptions & PostHogOptions
+
 class PostHogTelemetryTransport implements TelemetryTransport {
   readonly #client: PostHog
+  readonly #immediate: ReturnType<typeof createImmediateSender>
 
-  constructor(apiKey: string, options: TelemetryTransportOptions) {
+  constructor(apiKey: string, options: PostHogTransportOptions) {
     this.#client = new PostHog(apiKey, options)
+    this.#immediate = createImmediateSender(apiKey, options)
   }
 
   capture(message: Parameters<PostHog["capture"]>[0]): void {
@@ -47,9 +55,9 @@ class PostHogTelemetryTransport implements TelemetryTransport {
   }
 
   // capture() only queues the event after an async prepare step that flush() does not wait for, so a
-  // resolved flush() proves nothing about one specific event. captureImmediate resolves after the request.
-  async captureImmediate(message: Parameters<PostHog["capture"]>[0]): Promise<void> {
-    await this.#client.captureImmediate(message)
+  // resolved flush() proves nothing about one specific event. captureImmediate resolves only on a 2xx answer.
+  captureImmediate(message: Parameters<PostHog["capture"]>[0]): Promise<void> {
+    return this.#immediate.send(message)
   }
 
   async flush(): Promise<void> {
@@ -57,13 +65,13 @@ class PostHogTelemetryTransport implements TelemetryTransport {
   }
 
   async shutdown(): Promise<void> {
-    await this.#client.shutdown()
+    await Promise.all([this.#client.shutdown(), this.#immediate.shutdown()])
   }
 }
 
 export function createDefaultPostHogTransport(
   apiKey: string,
-  options: TelemetryTransportOptions,
+  options: PostHogTransportOptions,
 ): TelemetryTransport {
   return new PostHogTelemetryTransport(apiKey, options)
 }
