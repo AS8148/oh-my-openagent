@@ -8,6 +8,7 @@ import { importSnapshot } from "./snapshot.ts"
 import { buildFork, rotation } from "./testing/fork.ts"
 import { genesisEntry, newDevice, newRecoveryCredential } from "./testing/genesis.ts"
 import { sealedEpochWrap } from "./testing/hpke-seal.ts"
+import { pinnedFixtureAnchor } from "./testing/pinned.test-support.ts"
 import { ACCOUNT, appendBatch, appendKeyring, chain, fixtureAnchor, keyringFor, mainChain, objects, record } from "./testing/sync-v1.test-support.ts"
 import { b64urlDecode, b64urlEncode, sha256B64 } from "./vendor/sync-format/jcs.ts"
 import { signFramed } from "./vendor/sync-format/keys.ts"
@@ -54,7 +55,7 @@ describe("H2: importSnapshot binds the account the caller expects", () => {
 
   test("a snapshot whose history from genesis is not the pinned root is refused as untrusted_root", async () => {
     const forged = await forgedSnapshot(ACCOUNT)
-    const imported = await importSnapshot(ACCOUNT, fixtureAnchor(), [forged.genesis], forged.snapshot, [forged.chunk], () => forged.key, createRejectionCounter())
+    const imported = await importSnapshot(ACCOUNT, await pinnedFixtureAnchor(), [forged.genesis], forged.snapshot, [forged.chunk], () => forged.key, createRejectionCounter())
     expect(imported).toEqual({ ok: false, reason: "untrusted_root" })
   })
 })

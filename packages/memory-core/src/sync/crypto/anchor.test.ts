@@ -6,6 +6,7 @@ import type { KeyringEntry, VerifiedWrap } from "./entry.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { approvalEntry, genesisEntry, headAfter, newDeviceKeyring, newRecoveryCredential, type PairingTranscript, pairingTranscript } from "./testing/genesis.ts"
 import { sealedEpochWrap } from "./testing/hpke-seal.ts"
+import { pinnedFixtureAnchor } from "./testing/pinned.test-support.ts"
 import { ACCOUNT, fixtureAnchor, mainChain, record } from "./testing/sync-v1.test-support.ts"
 import { openWrap } from "./unwrap.ts"
 
@@ -157,7 +158,7 @@ describe("H1: a pinned root refuses every other root", () => {
   test("a valid-looking genesis that is not the pinned one is refused before anything is trusted", async () => {
     const [server, joining] = [await newDeviceKeyring(), await newDeviceKeyring()]
     const substituted = await accountBy(server, joining, await pairingTranscript(ACCOUNT, joining), crypto.getRandomValues(new Uint8Array(32)))
-    expectRefused(await walk(fixtureAnchor(), substituted), "untrusted_root")
+    expectRefused(await walk(await pinnedFixtureAnchor(), substituted), "untrusted_root")
   })
 
   test("a hand-built pinned anchor is no anchor", async () => {
