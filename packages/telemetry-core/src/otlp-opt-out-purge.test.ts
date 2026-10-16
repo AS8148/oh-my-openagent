@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 
 import { createOtlpTelemetryTransport } from "./otlp-sender"
 import { createBatchId } from "./otlp-spool-dir"
@@ -37,6 +37,85 @@ function seedSpool(dir: string): void {
   writeFileSync(join(dir, `active-logs-999-${"b".repeat(32)}.otlp`), "wal")
   writeFileSync(join(dir, "quarantine", `batch-logs-${createBatchId(now)}.otlp`), "corrupt")
 }
+
+function optOut(spoolDir: string, spoolRoot: string, diagnostics: TelemetryDiagnosticInput[]): void {
+  const transport = createOtlpTelemetryTransport({
+    productEnvPrefix: "OMO_TEST",
+    ingestKey: "k",
+    spoolDir,
+    spoolRoot,
+    resource: testResource(),
+    scope: TEST_SCOPE,
+    env: { DO_NOT_TRACK: "1" },
+    diagnostics: (input) => diagnostics.push(input),
+    autoStart: false,
+  })
+  expect(transport).toBeNull()
+}
+
+const refusals = (diagnostics: TelemetryDiagnosticInput[]): number =>
+  diagnostics.filter((d) => d.event === "telemetry_spool_purge_refused").length
+
+describe("the opt-out purge deletes only what the spool created, only inside a verified spool directory", () => {
+  test("#given foreign files and a foreign subdirectory next to the spool's own files #when the purge runs #then only the spool's own files go and the foreign ones survive", () => {
+    // given
+    const dir = root()
+    seedSpool(dir)
+    writeFileSync(join(dir, "notes.txt"), "foreign")
+    mkdirSync(join(dir, "projects", "keep"), { recursive: true })
+    writeFileSync(join(dir, "projects", "keep", "batch-logs-not-ours.otlp"), "foreign")
+    writeFileSync(join(dir, "quarantine", "readme.md"), "foreign")
+    const diagnostics: TelemetryDiagnosticInput[] = []
+
+    // when
+    optOut(dir, dirname(dir), diagnostics)
+
+    // then
+    expect(spoolNames(dir)).toEqual(["notes.txt", "projects", "quarantine"])
+    expect(readdirSync(join(dir, "quarantine"))).toEqual(["readme.md"])
+    expect(readdirSync(join(dir, "projects", "keep"))).toEqual(["batch-logs-not-ours.otlp"])
+    expect(refusals(diagnostics)).toBe(0)
+  })
+
+  test("#given the spool directory is a symlink #when the purge runs #then it is refused, counted, and the link target is untouched", () => {
+    // given
+    const base = root()
+    const target = join(dirname(base), "elsewhere")
+    seedSpool(target)
+    const before = spoolNames(target)
+    symlinkSync(target, base, "junction")
+    const diagnostics: TelemetryDiagnosticInput[] = []
+
+    // when
+    optOut(base, dirname(base), diagnostics)
+
+    // then
+    expect(spoolNames(target)).toEqual(before)
+    expect(readdirSync(join(target, "quarantine")).length).toBe(1)
+    expect(refusals(diagnostics)).toBe(1)
+  })
+
+  test("#given a spool directory whose real path escapes the expected spool root #when the purge runs #then it is refused, counted, and nothing is deleted", () => {
+    // given
+    const base = root()
+    const spoolRoot = join(dirname(base), "root")
+    const outside = join(dirname(base), "outside")
+    mkdirSync(spoolRoot, { recursive: true })
+    mkdirSync(outside, { recursive: true })
+    symlinkSync(outside, join(spoolRoot, "link"), "junction")
+    const dir = join(spoolRoot, "link", "telemetry-spool")
+    seedSpool(dir)
+    const before = spoolNames(dir)
+    const diagnostics: TelemetryDiagnosticInput[] = []
+
+    // when
+    optOut(dir, spoolRoot, diagnostics)
+
+    // then
+    expect(spoolNames(join(outside, "telemetry-spool"))).toEqual(before)
+    expect(refusals(diagnostics)).toBe(1)
+  })
+})
 
 describe("opt-out purges the spool", () => {
   for (const env of [{ DO_NOT_TRACK: "1" }, { OTEL_SDK_DISABLED: "true" }, { OMO_TEST_SEND_ANONYMOUS_TELEMETRY: "0" }]) {

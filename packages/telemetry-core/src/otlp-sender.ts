@@ -11,7 +11,6 @@ import {
 } from "./otlp-config"
 import {
   createBatchId,
-  purgeSpool,
   SPOOL_CAP_BYTES,
   SPOOL_MAX_AGE_MS,
   sweepSpool,
@@ -19,6 +18,7 @@ import {
   type SpoolContext,
 } from "./otlp-spool-dir"
 import { SpoolCap } from "./otlp-spool-cap"
+import { purgeSpool } from "./otlp-spool-purge"
 import { abortableSleep, delay } from "./otlp-sleep"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { SpoolWriter } from "./otlp-wal"
@@ -46,7 +46,9 @@ export function createOtlpTelemetryTransport(input: CreateOtlpTelemetryTransport
   const env = input.env ?? process.env
   if (!isOtlpTelemetryEnabled({ env, productEnvPrefix: input.productEnvPrefix })) {
     try {
-      purgeSpool(input.spoolDir)
+      if (purgeSpool(input.spoolDir, input.spoolRoot) === "refused") {
+        input.diagnostics?.({ event: "telemetry_spool_purge_refused", source: input.source ?? "otlp" })
+      }
     } catch (error) {
       input.diagnostics?.({
         event: "telemetry_spool_sweep_failed",
@@ -226,7 +228,7 @@ class OtlpSender {
     this.#guard("telemetry_spool_write_failed", () => {
       this.#providers.logWriter.discard()
       this.#providers.spanWriter.discard()
-      purgeSpool(this.#ctx.dir)
+      if (purgeSpool(this.#ctx.dir, this.#input.spoolRoot) === "refused") this.#report("telemetry_spool_purge_refused")
     })
   }
 

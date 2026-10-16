@@ -16,6 +16,7 @@ export type TelemetryDiagnosticEvent =
   | "telemetry_posthog_import_failed"
   | "telemetry_posthog_init_failed"
   | "telemetry_shutdown_failed"
+  | "telemetry_spool_purge_refused"
   | "telemetry_spool_sweep_failed"
   | "telemetry_spool_write_failed"
 
