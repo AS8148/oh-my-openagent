@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, realpathSync, rmdirSync, unlinkSync } from "node:fs"
+import { lstatSync, readdirSync, realpathSync, rmdirSync, type Stats, unlinkSync } from "node:fs"
 import { isAbsolute, join, relative } from "node:path"
 
 import { isSpoolFileName, QUARANTINE_DIR } from "./otlp-spool-dir"
@@ -7,19 +7,27 @@ import type { TelemetrySpoolEntryKind } from "./types"
 /** `refused`: the directory failed verification and nothing was deleted. */
 export type PurgeOutcome = "purged" | "absent" | "refused"
 
+/** Test seams for what an unprivileged test cannot stage: an entry swapped mid-purge, a file of another user. */
+export type PurgeSeams = {
+  readonly unlink?: (path: string) => void
+  readonly ownerOf?: (path: string, uid: number) => number
+}
+
+type Owner = (path: string, stat: Stats) => boolean
+
 function hasCode(error: unknown, codes: readonly string[]): boolean {
   return error instanceof Error && "code" in error && typeof error.code === "string" && codes.includes(error.code)
 }
 
 /** False only where uids exist (not on Windows) and the entry belongs to someone else. */
-function ownedByCurrentUser(uid: number): boolean {
-  return typeof process.getuid !== "function" || uid === process.getuid()
+function ownerCheck(ownerOf: PurgeSeams["ownerOf"]): Owner {
+  return (path, stat) => typeof process.getuid !== "function" || (ownerOf ? ownerOf(path, stat.uid) : stat.uid) === process.getuid()
 }
 
-function realDirectory(path: string): "dir" | "missing" | "other" {
+function realDirectory(path: string, owned: Owner): "dir" | "missing" | "other" {
   try {
     const stat = lstatSync(path)
-    return stat.isDirectory() && !stat.isSymbolicLink() && ownedByCurrentUser(stat.uid) ? "dir" : "other"
+    return stat.isDirectory() && !stat.isSymbolicLink() && owned(path, stat) ? "dir" : "other"
   } catch (error) {
     if (hasCode(error, ["ENOENT"])) return "missing"
     throw error
@@ -38,33 +46,36 @@ function isStrictlyInside(root: string, dir: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)
 }
 
-function skipKind(path: string): TelemetrySpoolEntryKind | "gone" | null {
+function skipKind(path: string, owned: Owner): TelemetrySpoolEntryKind | "gone" | null {
   try {
     const stat = lstatSync(path)
     if (stat.isSymbolicLink()) return "symlink"
     if (stat.isDirectory()) return "directory"
     if (!stat.isFile()) return "other"
-    return ownedByCurrentUser(stat.uid) ? null : "foreign_owner"
+    return owned(path, stat) ? null : "foreign_owner"
   } catch (error) {
     if (hasCode(error, ["ENOENT"])) return "gone"
     throw error
   }
 }
 
-function unlinkOwned(dir: string, names: readonly string[], onSkipped: (kind: TelemetrySpoolEntryKind) => void): void {
+type Sweep = { readonly owned: Owner; readonly unlink: (path: string) => void; readonly onSkipped: (kind: TelemetrySpoolEntryKind) => void }
+
+function unlinkOwned(dir: string, names: readonly string[], sweep: Sweep): void {
   for (const name of names) {
     if (!isSpoolFileName(name)) continue
     const path = join(dir, name)
-    const skip = skipKind(path)
+    const skip = skipKind(path, sweep.owned)
     if (skip === "gone") continue
     if (skip !== null) {
-      onSkipped(skip)
+      sweep.onSkipped(skip)
       continue
     }
     try {
-      unlinkSync(path)
+      sweep.unlink(path)
     } catch (error) {
-      if (!hasCode(error, ["ENOENT"])) throw error
+      if (hasCode(error, ["EISDIR", "EPERM", "ENOTDIR"])) sweep.onSkipped("other")
+      else if (!hasCode(error, ["ENOENT"])) throw error
     }
   }
 }
@@ -99,16 +110,25 @@ function removeIfEmpty(dir: string): void {
  *   finds nothing, which is also quiet.
  * - The directories are removed last and only when empty: a file a consented process created after
  *   the listing (or a foreign file) leaves the directory in place.
+ * - An entry swapped for a directory (or into one) between its check and its unlink fails with
+ *   EISDIR, EPERM or ENOTDIR; it is skipped and reported as `other`, and the sweep goes on.
  */
-export function purgeSpool(dir: string, root: string, onSkipped: (kind: TelemetrySpoolEntryKind) => void): PurgeOutcome {
-  const kind = realDirectory(dir)
+export function purgeSpool(
+  dir: string,
+  root: string,
+  onSkipped: (kind: TelemetrySpoolEntryKind) => void,
+  seams: PurgeSeams = {},
+): PurgeOutcome {
+  const owned = ownerCheck(seams.ownerOf)
+  const kind = realDirectory(dir, owned)
   if (kind === "missing") return "absent"
   if (kind === "other" || !isStrictlyInside(root, dir)) return "refused"
   const quarantine = join(dir, QUARANTINE_DIR)
-  if (realDirectory(quarantine) === "other") return "refused"
-  unlinkOwned(dir, readdirSync(dir), onSkipped)
+  if (realDirectory(quarantine, owned) === "other") return "refused"
+  const sweep: Sweep = { owned, unlink: seams.unlink ?? unlinkSync, onSkipped }
+  unlinkOwned(dir, readdirSync(dir), sweep)
   try {
-    unlinkOwned(quarantine, readdirSync(quarantine), onSkipped)
+    unlinkOwned(quarantine, readdirSync(quarantine), sweep)
   } catch (error) {
     if (!hasCode(error, ["ENOENT"])) throw error
   }
