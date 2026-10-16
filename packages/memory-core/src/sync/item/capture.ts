@@ -5,8 +5,8 @@
 // doc's own peer (review r3): every op this device ever exports carries its one stable
 // peer, so the version vector stays one entry per device, and the ops continue that peer's
 // counters instead of colliding with its later ops at the stale baseline (review r1 #1).
-// A capture whose (baseline, working text) pair was already applied, per the device's
-// receipt, writes nothing. Returns null when nothing changed.
+// Returns null when nothing changed. Replay safety lives one level up, in captureOnDevice
+// (device-capture.ts), which is the only exported capture entry point.
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
@@ -15,7 +15,6 @@ import type { FmValue } from "./frontmatter"
 import { renderScalar, splitItem } from "./frontmatter"
 import type { ItemHistory } from "./history"
 import { analyzeHistory } from "./history"
-import { captureFingerprint, hasReceipt, writeReceipt } from "./receipt"
 import { renderDocContent } from "./render"
 import type { KeyState } from "./state"
 import { activeReg, combineKey, fmName, orderedSetElements, readKeyState, regText } from "./state"
@@ -32,8 +31,6 @@ export function captureItem(
   baseFrontier: ItemFrontier,
   workingText: string,
 ): Uint8Array | null {
-  const fingerprint = captureFingerprint(baseFrontier, workingText)
-  if (hasReceipt(doc, fingerprint)) return null
   const current = isCurrentFrontier(doc, baseFrontier)
   const merged = current ? null : mergeOntoCurrent(doc, baseText, baseFrontier, workingText)
   if (!current && merged === null) return null
@@ -53,8 +50,6 @@ export function captureItem(
     target.commit()
     const from = doc.oplogVersion()
     if (target.oplogVersion().compare(from) === 0) return null
-    writeReceipt(target, fingerprint)
-    target.commit()
     return target.export({ mode: "update", from })
   } finally {
     target.free()

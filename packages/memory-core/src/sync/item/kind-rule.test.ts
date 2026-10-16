@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test"
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
-import { captureItem, itemFrontier, renderItem, splitItem } from "./index"
+import { itemFrontier, renderItem, splitItem } from "./index"
+import { captureItem } from "./capture"
 import { captureInto, newDoc, type Peer } from "./test-support"
 
 // Concurrent first writes of one key tie at Lamport 0, so which kind wins is decided by

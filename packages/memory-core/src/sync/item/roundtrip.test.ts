@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import { captureItem, itemFrontier, renderItem } from "./index"
+import { itemFrontier, renderItem } from "./index"
+import { captureItem } from "./capture"
 import { mulberry32, newDoc, pick, shuffled } from "./test-support"
 
 const KEY_POOL = ["description", "title", "count", "flag", "due", "tags", "meta", "note"] as const

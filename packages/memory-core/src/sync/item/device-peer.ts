@@ -1,13 +1,15 @@
 // The device's one Loro peer id (review r3): created once, persisted, and reused by every
-// capture on this device, so the version vector holds one entry per device. The id is written
-// whole to a private temp file and published with link(2), which is atomic and fails when the
-// file exists: a racing reader never sees a partial id, and exactly one candidate wins.
+// capture on this device, so the version vector holds one entry per device. `path` is a
+// directory holding the file `id`. The id is written whole into a private candidate directory,
+// which is published by renaming it onto `path`: a directory rename is atomic and fails when
+// the target exists and is non-empty, on every file system (no hard links, review r4 LOW-2).
+// A racing reader never sees a partial id, and exactly one candidate wins.
 
 import { randomBytes } from "node:crypto"
-import { dirname } from "node:path"
+import { dirname, join } from "node:path"
 
 import type { PeerID } from "../../crdt/loro-runtime"
-import { link, mkdir, readFile, unlink, writeFile } from "../../fs/resilient"
+import { mkdir, readFile, rename, rm, writeFile } from "../../fs/resilient"
 
 export class DevicePeerError extends Error {
   override readonly name = "DevicePeerError"
@@ -21,23 +23,25 @@ export async function loadOrCreateDevicePeer(path: string): Promise<PeerID> {
   if (existing !== null) return existing
   await mkdir(dirname(path), { recursive: true })
   const candidate = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`
-  await writeFile(candidate, `${freshPeer()}\n`, { flag: "wx", mode: 0o600 })
+  await mkdir(candidate, { mode: 0o700 })
+  let lost: unknown = null
   try {
-    await link(candidate, path)
+    await writeFile(join(candidate, "id"), `${freshPeer()}\n`, { flag: "wx", mode: 0o600 })
+    await rename(candidate, path)
   } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error
+    lost = error
   } finally {
-    await unlink(candidate)
+    await rm(candidate, { recursive: true, force: true })
   }
   const created = await readPeer(path)
-  if (created === null) throw new DevicePeerError(`device peer file vanished after create: ${path}`)
-  return created
+  if (created !== null) return created
+  throw lost ?? new DevicePeerError(`device peer vanished after create: ${path}`)
 }
 
 async function readPeer(path: string): Promise<PeerID | null> {
   let raw: string
   try {
-    raw = await readFile(path, "utf8")
+    raw = await readFile(join(path, "id"), "utf8")
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return null
     throw error
