@@ -26,7 +26,7 @@ import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent } from "./types"
 const SEAL_BYTES = 200 * 1024
 const LEASE_RENEW_INTERVAL_MS = 60_000
 const SHUTDOWN_CLEANUP_RESERVE_MS = 200
-const DROP_REASONS: readonly DropReason[] = ["evicted", "expired", "rejected", "corrupt"]
+const DROP_REASONS: readonly DropReason[] = ["evicted", "expired", "rejected", "corrupt", "write_failed"]
 
 /**
  * The retry pause; its timer is unref'd so a pending retry never keeps the host process alive, and
@@ -95,7 +95,7 @@ class OtlpSender {
   readonly #consent: () => boolean
   readonly #batches: BatchSender
   readonly #cap: SpoolCap
-  readonly #unreported: Record<DropReason, number> = { evicted: 0, expired: 0, rejected: 0, corrupt: 0 }
+  readonly #unreported: Record<DropReason, number> = { evicted: 0, expired: 0, rejected: 0, corrupt: 0, write_failed: 0 }
   readonly #timers: ReturnType<typeof setInterval>[] = []
   #droppedSince200 = 0
   #stopped = false
@@ -112,7 +112,7 @@ class OtlpSender {
       ...(input.clock === undefined ? {} : { clock: input.clock }),
       consent: this.#consent,
       onAppended: (writer) => this.#onAppended(writer),
-      onWriteError: (error) => this.#report("telemetry_spool_write_failed", error),
+      onWriteError: (error) => this.#onWriteError(error),
     })
     this.#ctx = {
       dir: input.spoolDir,
@@ -178,6 +178,12 @@ class OtlpSender {
       error,
       errorKind: error === undefined ? undefined : error instanceof Error ? "error" : "non_error",
     })
+  }
+
+  /** A record that never reached the spool is a counted loss like any other drop. */
+  #onWriteError(error: unknown): void {
+    this.#report("telemetry_spool_write_failed", error)
+    this.#ctx.onDrop("write_failed", 1)
   }
 
   #guard(event: TelemetryDiagnosticEvent, run: () => void): void {

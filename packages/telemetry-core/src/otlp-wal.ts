@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, writeSync } from "node:fs"
+import { closeSync, ftruncateSync, mkdirSync, openSync, writeSync } from "node:fs"
 import { join } from "node:path"
 
 import { toBinary } from "@bufbuild/protobuf"
@@ -19,6 +19,12 @@ export type SpoolWriterInput = {
   readonly header: Uint8Array
   readonly consent: () => boolean
   readonly onError: (error: unknown) => void
+  /** The raw write; returns the bytes written, which may be fewer than given (a short write). */
+  readonly write?: (fd: number, bytes: Uint8Array) => number
+}
+
+function defaultWrite(fd: number, bytes: Uint8Array): number {
+  return writeSync(fd, bytes)
 }
 
 /**
@@ -48,13 +54,43 @@ export class SpoolWriter {
     try {
       const bytes = frame(typeof encode === "function" ? encode() : encode)
       const fd = this.#fd ?? this.#open()
-      writeSync(fd, bytes)
+      try {
+        this.#writeAll(fd, bytes)
+      } catch (error) {
+        this.#rollback(fd)
+        throw error
+      }
       this.records += 1
       this.bytes += bytes.byteLength
       return true
     } catch (error) {
       this.#input.onError(error)
       return false
+    }
+  }
+
+  /** Loops over short writes until the whole frame is on disk; a write that makes no progress fails. */
+  #writeAll(fd: number, bytes: Uint8Array): void {
+    const write = this.#input.write ?? defaultWrite
+    let at = 0
+    while (at < bytes.byteLength) {
+      const written = write(fd, bytes.subarray(at))
+      if (!(written > 0)) throw new Error("spool write made no progress")
+      at += written
+    }
+  }
+
+  /**
+   * A frame that failed part-way is cut off again, so the next frame starts right after the last
+   * complete one instead of after torn bytes that would make the whole file read as misframed. If the
+   * cut itself fails, the file is abandoned (closed and deleted) and the next append starts a new one.
+   */
+  #rollback(fd: number): void {
+    try {
+      ftruncateSync(fd, this.bytes)
+    } catch (error) {
+      this.#input.onError(error)
+      this.discard()
     }
   }
 
@@ -69,7 +105,13 @@ export class SpoolWriter {
       fd = openSync(path, "a", 0o600)
     }
     const header = frame(this.#input.header)
-    writeSync(fd, header)
+    try {
+      this.#writeAll(fd, header)
+    } catch (error) {
+      closeSync(fd)
+      deleteFile(this.#input.dir, this.name)
+      throw error
+    }
     this.#fd = fd
     this.bytes = header.byteLength
     return fd

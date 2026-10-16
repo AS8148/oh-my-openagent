@@ -4,7 +4,8 @@ import { join } from "node:path"
 
 import { countSpoolRecords, type Signal } from "./otlp-spool-file"
 
-export type DropReason = "evicted" | "expired" | "rejected" | "corrupt"
+/** Why records were lost before acceptance; `write_failed` = the record never reached the spool. */
+export type DropReason = "evicted" | "expired" | "rejected" | "corrupt" | "write_failed"
 
 export const SPOOL_CAP_BYTES = 5 * 1024 * 1024
 export const SPOOL_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
