@@ -5,6 +5,7 @@
 // starting another one on the held port (#10216), and must cancel a call it gave up on so the
 // session stays usable (#10217). A pin bump that regresses either fails here.
 import { afterEach, expect, test } from "bun:test"
+import { randomBytes } from "node:crypto"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { createServer, type Server, type Socket } from "node:net"
 import { tmpdir } from "node:os"
@@ -42,16 +43,23 @@ async function fakeDaemonWithoutDaemonJson(handlers: Record<string, (frame: Fram
       }
     })
   })
-  await new Promise<void>((resolve) => server.listen(join(home, "run", "daemon.sock"), resolve))
+  // The daemon's default IPC endpoint is a Unix socket at $BSK_HOME/run/daemon.sock. Windows has no such socket: there the
+  // daemon is reached over a named pipe passed as `sockPath` (omowright skills/omowright/references/browserskill.md).
+  const sockPath = process.platform === "win32" ? `\\\\.\\pipe\\omo-bsk-test-${randomBytes(6).toString("hex")}` : join(home, "run", "daemon.sock")
+  await new Promise<void>((resolve) => server.listen(sockPath, resolve))
   cleanups.push(async () => {
     for (const socket of sockets) socket.destroy()
     await new Promise<void>((resolve) => server.close(() => resolve()))
     await rm(home, { recursive: true, force: true })
   })
-  return { home, cancelled: cancelled.promise }
+  return { home, sockPath, cancelled: cancelled.promise }
 }
 
-test("a live BrowserSkill daemon without daemon.json is re-adopted, never restarted (#10216)", async () => {
+// Unix only by design, not a Windows gap in the test: omowright re-adopts an orphan daemon by probing the default Unix
+// socket, and its probe returns false on win32 (src/bsk/ipc-client.js probeSocket: `process.platform === "win32"`),
+// because Windows named pipes are not discovered automatically (skills/omowright/references/browserskill.md, "Remote
+// browsers"). On Windows a caller passes `sockPath` instead, so there is no orphan-by-default-path case to re-adopt.
+test.skipIf(process.platform === "win32")("a live BrowserSkill daemon without daemon.json is re-adopted, never restarted (#10216)", async () => {
   // Given a daemon still serving $BSK_HOME/run/daemon.sock after daemon.json disappeared
   const daemon = await fakeDaemonWithoutDaemonJson({})
   let starts = 0
@@ -71,7 +79,7 @@ test("a call the client gives up on is cancelled at the daemon, so the session s
     "tool.evaluate": () => undefined,
     cancel: () => ({ result: { cancelled: true } }),
   })
-  const client = new BskIpcClient({ home: daemon.home, autoStart: false, timeoutMs: 150 })
+  const client = new BskIpcClient({ home: daemon.home, sockPath: daemon.sockPath, autoStart: false, timeoutMs: 150 })
 
   // When the client's wait runs out
   const handle = client.callWithHandle("tool.evaluate", { session_id: "s", expression: "new Promise(() => {})" })
