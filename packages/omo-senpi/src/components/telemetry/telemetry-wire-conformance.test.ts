@@ -14,7 +14,8 @@ const COLLECTOR_ARTIFACT_SCHEMA_SHA256 = "38e9dfc60903d817e61134980042286c6c02ad
 
 // The collector's tightened `semver` safe shape (omo-telemetry #4, "version shapes carry no free suffix"). The vendored
 // artifact.schema.json above predates it; until it is re-pinned, this is the one engine pattern allowed outside it.
-const COLLECTOR_HARDENED_SEMVER = "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$"
+const COLLECTOR_HARDENED_SEMVER =
+  "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6})?$"
 
 const REGISTRY = new URL("./schema-registry/", import.meta.url)
 type SchemaDefs = {

@@ -260,8 +260,12 @@ describe("OmO Native process_crashed", () => {
         ["1.2.3", true],
         ["5.1.33", true],
         ["1.2.3-beta.1", true],
+        ["0.0.34-nightly.20261001.679", true],
+        ["0.0.43-preview.20260928.2413", true],
+        ["0.0.34-dfa.39", true],
         ["1.2.3-yeongyu-macbook-pro.local", false],
         ["1.2.3+build.host", false],
+        ["123456789012345678901234567890123456789012345678901234567890.2.3", false],
       ]
       const records = shapes.map(([version], index) =>
         JSON.stringify({ at: RECENT, kind: "print", code: 1, uptimeMs: 1_000 + index, bunVersion: version, senpiVersion: version, productVersion: version }))

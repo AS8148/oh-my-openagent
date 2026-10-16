@@ -204,8 +204,8 @@ describe("telemetry schema artifacts", () => {
   })
 
   test("#then every version slot is MAJOR.MINOR.PATCH with at most one -alpha.N, -beta.N or -rc.N, and a hostname or build suffix is rejected", () => {
-    const accepted = ["1.2.3", "5.1.33", "1.2.3-beta.1", "1.2.3-rc.2", "1.2.3-alpha.10"]
-    const rejected = ["1.2.3-yeongyu-macbook-pro.local", "1.2.3+build.host", "1.2.3-next.1", "1.2.3-beta", "1.2.3-beta.1.2", "1.2"]
+    const accepted = ["1.2.3", "5.1.33", "1.2.3-beta.1", "1.2.3-rc.2", "1.2.3-alpha.10", "0.0.34-nightly.20261001.679", "0.0.43-preview.20260928.2413", "0.0.34-dfa.39"]
+    const rejected = ["1.2.3-yeongyu-macbook-pro.local", "1.2.3+build.host", "1.2.3-next.1", "1.2.3-beta", "1.2.3-beta.1.2", "1.2", "123456789012345678901234567890123456789012345678901234567890.2.3", "1234567.2.3", "1.2.3-beta.1234567", "1.2.3-nightly.2026100.1", "1.2.3-preview.20260928", "1.2.3-dfa.39.1"]
     for (const artifact of ARTIFACTS) {
       const slots: [string, string][] = [["scope.version", artifact.scope.version]]
       for (const [owner, key, spec] of attributesOf(artifact)) {
