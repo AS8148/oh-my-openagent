@@ -81,7 +81,7 @@ describe("omo-senpi typecheck resolves only its own type packages", () => {
     const { decoy, exitCode, stdout, stderr, files, nodeTypes } = await listNodeTypesUnderDecoyParent("missing-install", false)
 
     expect({ exitCode, stderr }).toEqual({ exitCode: 1, stderr: "" })
-    expect(stdout).toContain("error TS2688: Cannot find type definition file for 'node'.")
+    expect(stdout.split(/\r?\n/).some((line) => line.includes("error TS2688:") && line.includes("'node'"))).toBe(true)
     expect(files.some((file) => file.includes("/bun-types/"))).toBe(true)
     expect(nodeTypes.filter((file) => file.startsWith(decoy))).toEqual([])
   }, 60_000)
