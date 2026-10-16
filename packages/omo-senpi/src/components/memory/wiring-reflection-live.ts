@@ -178,6 +178,7 @@ export function createMemoryReflectionLiveWiring(
     },
     async settled(): Promise<void> {
       while (statusRefreshes.size > 0) await Promise.all([...statusRefreshes])
+      await footerLive.settled()
     },
     clearStatus(eventCtx): void {
       footerLive.stop()

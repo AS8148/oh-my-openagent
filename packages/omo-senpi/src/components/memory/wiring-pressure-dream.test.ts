@@ -49,6 +49,7 @@ describe("memory pressure dream wiring", () => {
     })
     const sessionId = "session-pressure-dream"
     const reservationAttempts: unknown[] = []
+    const shutdownWarnings: Array<{ message: string; step: unknown }> = []
     let advisoryObserved!: () => void
     let reservationObserved!: () => void
     const advisory = new Promise<void>((resolve) => { advisoryObserved = resolve })
@@ -73,6 +74,12 @@ describe("memory pressure dream wiring", () => {
       cwd: () => root,
       env: {},
       createRuntime: () => runtime,
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: (message: string, data?: Record<string, unknown>) => { shutdownWarnings.push({ message, step: data?.step }) },
+        error: () => {},
+      },
     })
     const pi = new MemoryFakeExtensionAPI()
     wiring.registerStatic(pi, componentContext())
@@ -89,37 +96,41 @@ describe("memory pressure dream wiring", () => {
     ])
 
     try {
-      await wiring.afterBind(pi, sessionId, identity, eventCtx)
-      await boundedAdvisory
+      try {
+        await wiring.afterBind(pi, sessionId, identity, eventCtx)
+        await boundedAdvisory
+      } finally {
+        if (advisoryTimeout !== undefined) clearTimeout(advisoryTimeout)
+      }
+      expect(reservationAttempts).toEqual([])
+
+      let reservationTimeout: ReturnType<typeof setTimeout> | undefined
+      const boundedReservation = Promise.race([
+        reservation,
+        new Promise<never>((_resolve, reject) => {
+          reservationTimeout = setTimeout(() => reject(new Error("pressure reservation was not observed after accepted input")), 5_000)
+        }),
+      ])
+      try {
+        await pi.dispatch("input", { source: "rpc", inputId: "pressure-input", text: "Continue." }, eventCtx)
+        await pi.dispatch("input_disposition", { inputId: "pressure-input", disposition: "started" }, eventCtx)
+        await pi.dispatch("agent_settled", {}, eventCtx)
+        await boundedReservation
+      } finally {
+        if (reservationTimeout !== undefined) clearTimeout(reservationTimeout)
+      }
+
+      expect(reservationAttempts).toEqual([{
+        trigger: "dream",
+        origin: "pressure",
+        conversationIds: [],
+        snapshots: [],
+      }])
     } finally {
-      if (advisoryTimeout !== undefined) clearTimeout(advisoryTimeout)
+      // Release everything the session opened inside the temp root before afterEach removes it (#10154).
+      await wiring.onSessionShutdown({ reason: "reload", sessionId, deadlineAt: Date.now() + 10_000 })
     }
-    expect(reservationAttempts).toEqual([])
-
-    let reservationTimeout: ReturnType<typeof setTimeout> | undefined
-    const boundedReservation = Promise.race([
-      reservation,
-      new Promise<never>((_resolve, reject) => {
-        reservationTimeout = setTimeout(() => reject(new Error("pressure reservation was not observed after accepted input")), 5_000)
-      }),
-    ])
-    try {
-      await pi.dispatch("input", { source: "rpc", inputId: "pressure-input", text: "Continue." }, eventCtx)
-      await pi.dispatch("input_disposition", { inputId: "pressure-input", disposition: "started" }, eventCtx)
-      await pi.dispatch("agent_settled", {}, eventCtx)
-      await boundedReservation
-    } finally {
-      if (reservationTimeout !== undefined) clearTimeout(reservationTimeout)
-    }
-
-    expect(reservationAttempts).toEqual([{
-      trigger: "dream",
-      origin: "pressure",
-      conversationIds: [],
-      snapshots: [],
-    }])
-
-    // Release everything the session opened inside the temp root before afterEach removes it (#10154).
-    await wiring.onSessionShutdown({ reason: "reload", sessionId, deadlineAt: Date.now() + 10_000 })
+    // Nothing was left running detached past the budget, so no handle outlives the shutdown.
+    expect(shutdownWarnings.filter((warning) => warning.message === "memory shutdown drain hit its budget")).toEqual([])
   }, 30_000)
 })
