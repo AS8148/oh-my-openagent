@@ -3,8 +3,7 @@ import { join, resolve } from "node:path"
 
 import { lstat, readFile, unlink, type BigIntStats } from "../fs/resilient"
 import { LockContentionError, acquireLock, createLockRecord, getPidLiveness, parseLockRecord, releaseLock } from "../locks"
-import { findOpenFileHolderPids } from "./open-file-holders"
-import { findProcessesWorkingIn } from "./repo-in-use"
+import { PRODUCTION_LOCK_SCANS, type GitLockScans } from "./lock-scans"
 import { presentLockFiles, writerLockPathForRepo } from "./repo-lock-sweep"
 
 // The manual way out of a kept stranded git lock (omo #10199). It re-checks ONE lock with the
@@ -12,15 +11,9 @@ import { presentLockFiles, writerLockPathForRepo } from "./repo-lock-sweep"
 // memory writer refuses; anything else needs the user's confirmation, and an unknown answer is
 // reported as unknown rather than read as "nobody".
 
-export interface UnlockScans {
-  readonly findHolders: (lockPath: string) => Promise<readonly number[] | null>
-  readonly findRepoUsers: (repoDir: string) => Promise<readonly number[] | null>
-}
+export type UnlockScans = GitLockScans
 
-const PRODUCTION_SCANS: UnlockScans = {
-  findHolders: (lockPath) => findOpenFileHolderPids(lockPath),
-  findRepoUsers: (repoDir) => findProcessesWorkingIn(repoDir),
-}
+const PRODUCTION_SCANS: UnlockScans = PRODUCTION_LOCK_SCANS
 
 export interface UnlockFindings {
   readonly kind: "found"

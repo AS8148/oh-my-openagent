@@ -9,8 +9,7 @@ import { isLockOwnerProvenDead } from "../locks/acquire"
 import { provenDeadTakeoverFor } from "../locks/proven-dead-takeovers"
 import { isGitLockError, withGitLockRetry } from "./config-lock"
 import { GitError } from "./errors"
-import { hasOpenFileHolder } from "./open-file-holders"
-import { findProcessesWorkingIn } from "./repo-in-use"
+import { PRODUCTION_LOCK_SCANS, type GitLockScans } from "./lock-scans"
 
 // Settle window between observing an idle lock candidate and re-checking it. The crash-
 // consistency fixture child shortens its OWN process's window through the
@@ -103,10 +102,11 @@ export async function presentLockFiles(gitDir: string): Promise<LockSnapshot> {
 
 // After authorization, a lock is removable only if it kept its inode and mtime across the settle
 // window AND no process holds it open: belt and braces on top of the ownership proof.
-async function settledVerdict(candidate: string, before: { readonly ino: number; readonly mtimeMs: number }): Promise<KeptGitLockReason | "removable"> {
+async function settledVerdict(candidate: string, before: { readonly ino: number; readonly mtimeMs: number }, scans: GitLockScans): Promise<KeptGitLockReason | "removable"> {
   const status = await lstat(candidate).catch(() => undefined)
   if (status === undefined || status.ino !== before.ino || status.mtimeMs !== before.mtimeMs) return "changed-during-settle"
-  return (await hasOpenFileHolder(candidate)) ? "open-holder" : "removable"
+  const holders = await scans.findHolders(candidate)
+  return holders === null || holders.length > 0 ? "open-holder" : "removable"
 }
 
 // The identity layout (identity/layout.ts) pins the memory-write lock next to the repo:
@@ -146,7 +146,7 @@ function keepAll(present: LockSnapshot, reason: KeptGitLockReason): GitLockSweep
   return { removed: [], kept: [...present.keys()].map((path) => ({ path, reason })) }
 }
 
-export async function sweepStrandedGitLockFiles(dir: string, settleMs = GIT_LOCK_SETTLE_MS): Promise<GitLockSweepReport> {
+export async function sweepStrandedGitLockFiles(dir: string, settleMs = GIT_LOCK_SETTLE_MS, scans: GitLockScans = PRODUCTION_LOCK_SCANS): Promise<GitLockSweepReport> {
   const present = await presentLockFiles(join(dir, ".git"))
   if (present.size === 0) return { removed: [], kept: [] }
   if (!(await authorizedToReclaim(dir))) return keepAll(present, "owner-not-proven-dead")
@@ -155,13 +155,13 @@ export async function sweepStrandedGitLockFiles(dir: string, settleMs = GIT_LOCK
   // A live owner of a stranded lock stays alive from before the sweep until it removes the lock,
   // so one check after the settle window sees it (omo #10199 r5 HIGH 1: never break a lock while
   // ANY process - the dead owner's orphaned git child included - is working in the repository).
-  const users = await findProcessesWorkingIn(dir)
+  const users = await scans.findRepoUsers(dir)
   if (users === null || users.length > 0) return keepAll(present, "repo-in-use")
 
   const removed: string[] = []
   const kept: KeptGitLock[] = []
   for (const [candidate, before] of present) {
-    const verdict = await settledVerdict(candidate, before)
+    const verdict = await settledVerdict(candidate, before, scans)
     if (verdict !== "removable") {
       kept.push({ path: candidate, reason: verdict })
       continue
@@ -178,12 +178,12 @@ export async function sweepStrandedGitLockFiles(dir: string, settleMs = GIT_LOCK
   return { removed, kept }
 }
 
-export async function withStrandedGitLockRecovery<T>(dir: string, run: () => Promise<T>): Promise<T> {
+export async function withStrandedGitLockRecovery<T>(dir: string, run: () => Promise<T>, scans: GitLockScans = PRODUCTION_LOCK_SCANS): Promise<T> {
   try {
     return await withGitLockRetry(run)
   } catch (error) {
     if (!isGitLockError(error)) throw error
-    const report = await sweepStrandedGitLockFiles(dir)
+    const report = await sweepStrandedGitLockFiles(dir, GIT_LOCK_SETTLE_MS, scans)
     if (report.removed.length === 0) {
       if (report.kept.length > 0) throw new StrandedGitLockError(report.kept)
       throw error

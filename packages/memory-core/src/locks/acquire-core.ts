@@ -59,6 +59,11 @@ type LoopTiming = {
   readonly deadline: number
 }
 
+function forfeitDeadOwnerProof(lockPath: string, record: LockRecord, recoveredDeadOwner: boolean): false {
+  if (recoveredDeadOwner) forgetProvenDeadTakeover(lockPath, record.nonce)
+  return false
+}
+
 async function acquireLoop(lockPath: string, record: LockRecord, options: AcquireLockOptions, timing: LoopTiming): Promise<AcquireOutcome> {
   const { retryDelayMs, incompleteLockGraceMs, now, deadline } = timing
   let sawOtherOwner = false
@@ -77,18 +82,19 @@ async function acquireLoop(lockPath: string, record: LockRecord, options: Acquir
     if (owner === null) {
       if (await publishExclusive(lockPath, record)) return { sawOtherOwner }
       options.signal?.throwIfAborted()
-      // Lost the publish race: re-read so the contention error and the dead-owner check still see
-      // the holder that won, exactly as the read-after-failed-publish order always did.
+      // Lost the publish race: another owner held the lock at that instant, even if it has already
+      // released by the re-read below, so the dead-owner proof is forfeited here (omo #10199 r8).
+      sawOtherOwner = true
+      recoveredDeadOwner = forfeitDeadOwnerProof(lockPath, record, recoveredDeadOwner)
+      // Re-read so the contention error and the dead-owner check still see the holder that won,
+      // exactly as the read-after-failed-publish order always did.
       owner = await readOwner(lockPath)
       if (owner === null) continue
     }
     sawOtherOwner = true
     // A live owner that slipped in after this contender reclaimed the dead one is the dead owner's
     // successor; this acquisition succeeds it and must not keep the dead-owner proof (omo #10199 r5).
-    if (recoveredDeadOwner) {
-      forgetProvenDeadTakeover(lockPath, record.nonce)
-      recoveredDeadOwner = false
-    }
+    recoveredDeadOwner = forfeitDeadOwnerProof(lockPath, record, recoveredDeadOwner)
     if (await recoverStaleOwner(lockPath, owner, record, now(), incompleteLockGraceMs)) {
       recoveredDeadOwner = true
       continue

@@ -112,13 +112,21 @@ export class ChildHarness {
   }
 }
 
+async function runGit(argv: readonly string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  const child = spawn("git", [...argv], { stdio: ["ignore", "pipe", "pipe"] })
+  const stdout: Buffer[] = []
+  const stderr: Buffer[] = []
+  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk))
+  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject)
+    child.once("close", resolve)
+  })
+  return { stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"), exitCode }
+}
+
 export async function git(repoPath: string, args: readonly string[]): Promise<string> {
-  const child = Bun.spawn(["git", "-C", repoPath, ...args], { stdout: "pipe", stderr: "pipe" })
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
+  const { stdout, stderr, exitCode } = await runGit(["-C", repoPath, ...args])
   if (exitCode !== 0) throw new Error(`git ${args.join(" ")} failed (${exitCode}): ${stderr}`)
   return stdout
 }
@@ -130,12 +138,7 @@ export async function git(repoPath: string, args: readonly string[]): Promise<st
 // a killed writer's stranded lock files produce BEFORE the peer's first mutation sweeps them; the
 // final assertions never pass an allowance, which is what proves the sweep ran.
 export async function assertRepoIntegrity(repoPath: string, allowedDebris: readonly RegExp[] = []): Promise<void> {
-  const child = Bun.spawn(["git", "-C", repoPath, "fsck", "--full", "--strict"], { stdout: "pipe", stderr: "pipe" })
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
+  const { stdout, stderr, exitCode } = await runGit(["-C", repoPath, "fsck", "--full", "--strict"])
   const report = `${stdout}\n${stderr}`
   const broken = report
     .split("\n")
