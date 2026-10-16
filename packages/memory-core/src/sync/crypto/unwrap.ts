@@ -81,9 +81,10 @@ export const openHistory = async (
 
 /**
  * Opens one wrap addressed to this device - only through the DeviceKeyring, which owns the
- * sealing private key and the HPKE construction. The inner envelope must name exactly the
- * account, epoch and recipient of the verified wrap entry, so a genuine ciphertext moved
- * from another account, epoch or device is refused before any key is returned.
+ * sealing private key and the HPKE construction (sync-design section 8.1). The verified wrap
+ * entry's account, epoch and recipient are the AEAD's associated data, so a genuine ciphertext
+ * moved to another account, epoch or device fails to unseal; the inner envelope must name the
+ * same three values before any key is returned.
  */
 export const openWrap = async (
   keyring: DeviceKeyring,
@@ -96,7 +97,7 @@ export const openWrap = async (
   if (sealed === null) return { ok: false, reason: "malformed_envelope" }
   let plaintext: Uint8Array
   try {
-    plaintext = await keyring.unseal(sealed)
+    plaintext = await keyring.unseal(sealed, { account, epoch: wrap.epoch, id: wrap.id })
   } catch {
     return { ok: false, reason: "wrap_refused" }
   }

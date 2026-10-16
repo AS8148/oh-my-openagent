@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createCipheriv, createHmac, createPublicKey, diffieHellman, generateKeyPairSync } from "node:crypto"
-import { createInMemoryDeviceKeyring, type DeviceKeyring } from "../keyring-port.ts"
+import { createInMemoryDeviceKeyring, type DeviceKeyring, type WrapBinding } from "../keyring-port.ts"
 import type { WrapEntry } from "./entry.ts"
 import { openHistory, openWrap } from "./unwrap.ts"
 import { readBytes } from "./testing/sync-v1.ts"
@@ -19,22 +19,24 @@ type WrapsFixture = {
 
 const fixture: WrapsFixture = JSON.parse(new TextDecoder().decode(readBytes("wraps.json")))
 
-// The DeviceKeyring port's own sealed-box construction (keyring-port.test.ts sealTo): a test-side
-// sender so the receive path below is exercised only through keyring.unseal.
-const sealToPort = (recipient: string, plaintext: Uint8Array): Uint8Array => {
+// A test-side §8.1 sender (RFC 9180 base mode, info "omo-sync/v1/wrap\0", AAD = JCS{account,
+// epoch, id}), so the receive path below is exercised only through keyring.unseal.
+const sealToPort = (recipient: string, plaintext: Uint8Array, binding: WrapBinding): Uint8Array => {
   const ephemeral = generateKeyPairSync("x25519")
   const enc = Buffer.from(ephemeral.publicKey.export({ format: "jwk" }).x ?? "", "base64url")
   const dh = diffieHellman({ privateKey: ephemeral.privateKey, publicKey: createPublicKey({ key: { kty: "OKP", crv: "X25519", x: recipient }, format: "jwk" }) })
   const kem = Buffer.concat([Buffer.from("KEM"), Buffer.from([0, 32])])
   const suite = Buffer.concat([Buffer.from("HPKE"), Buffer.from([0, 32, 0, 1, 0, 2])])
+  const info = Buffer.concat([Buffer.from("omo-sync/v1/wrap"), Buffer.from([0])])
   const extract = (id: Buffer, label: string, value: Uint8Array, salt = Buffer.alloc(0)) =>
     createHmac("sha256", salt).update(Buffer.concat([Buffer.from("HPKE-v1"), id, Buffer.from(label), value])).digest()
-  const expand = (id: Buffer, label: string, key: Buffer, info: Uint8Array, length: number) =>
-    createHmac("sha256", key).update(Buffer.concat([Buffer.from([0, length]), Buffer.from("HPKE-v1"), id, Buffer.from(label), info])).update(Buffer.from([1])).digest().subarray(0, length)
+  const expand = (id: Buffer, label: string, key: Buffer, data: Uint8Array, length: number) =>
+    createHmac("sha256", key).update(Buffer.concat([Buffer.from([0, length]), Buffer.from("HPKE-v1"), id, Buffer.from(label), data])).update(Buffer.from([1])).digest().subarray(0, length)
   const secret = expand(kem, "shared_secret", extract(kem, "eae_prk", dh), Buffer.concat([enc, Buffer.from(recipient, "base64url")]), 32)
-  const context = Buffer.concat([Buffer.from([0]), extract(suite, "psk_id_hash", Buffer.alloc(0)), extract(suite, "info_hash", Buffer.alloc(0))])
+  const context = Buffer.concat([Buffer.from([0]), extract(suite, "psk_id_hash", Buffer.alloc(0)), extract(suite, "info_hash", info)])
   const schedule = extract(suite, "secret", Buffer.alloc(0), secret)
   const cipher = createCipheriv("aes-256-gcm", expand(suite, "key", schedule, context, 32), expand(suite, "base_nonce", schedule, context, 12))
+  cipher.setAAD(jcsBytes({ account: binding.account, epoch: binding.epoch, id: binding.id }))
   return Buffer.concat([enc, cipher.update(plaintext), cipher.final(), cipher.getAuthTag()])
 }
 
@@ -47,10 +49,16 @@ const keyMaterial = async (account: string, epoch: number, id: string, history: 
   return { version: 1, current_key: b64urlEncode(current), history: { nonce: b64urlEncode(nonce), ciphertext: b64urlEncode(ciphertext) } }
 }
 
-const wrapFor = async (keyring: DeviceKeyring, envelope: { readonly account: string; readonly epoch: number; readonly id: string }, history: ReadonlyArray<JsonValue> = []): Promise<WrapEntry> => {
-  const material = await keyMaterial(envelope.account, envelope.epoch, envelope.id, history)
-  const sealed = sealToPort(keyring.publicKeys().sealing, jcsBytes({ version: 1, ...envelope, key_material: material }))
-  return { epoch: envelope.epoch, id: `device:${keyring.principal().id}`, wrap: b64urlEncode(sealed) }
+/** Seals a well-formed envelope; `aadAccount` is the account the sender binds into the AEAD. */
+const wrapFor = async (
+  keyring: DeviceKeyring,
+  envelope: { readonly account: string; readonly epoch: number; readonly id: string },
+  aadAccount: string = envelope.account,
+): Promise<WrapEntry> => {
+  const material = await keyMaterial(envelope.account, envelope.epoch, envelope.id, [])
+  const id = `device:${keyring.principal().id}`
+  const sealed = sealToPort(keyring.publicKeys().sealing, jcsBytes({ version: 1, ...envelope, key_material: material }), { account: aadAccount, epoch: envelope.epoch, id })
+  return { epoch: envelope.epoch, id, wrap: b64urlEncode(sealed) }
 }
 
 describe("openHistory: the epoch-history layer of a wrap's key material", () => {
@@ -84,9 +92,9 @@ describe("openWrap: unwrap only through the DeviceKeyring", () => {
     expect(opened.ok && opened.keys.current.length).toBe(32)
   })
 
-  test("a genuine wrap transplanted from another account is refused", async () => {
+  test("an envelope naming another account under a correct binding is refused", async () => {
     const keyring = createInMemoryDeviceKeyring("unwrap-device")
-    const wrap = await wrapFor(keyring, { account: "another-account", epoch: 1, id: "device:unwrap-device" })
+    const wrap = await wrapFor(keyring, { account: "another-account", epoch: 1, id: "device:unwrap-device" }, "acct")
     expect(await openWrap(keyring, wrap, "acct", new Map())).toEqual({ ok: false, reason: "envelope_mismatch" })
   })
 
