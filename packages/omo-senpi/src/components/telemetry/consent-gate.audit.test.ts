@@ -44,7 +44,7 @@ type PathApi = { readonly relative: (from: string, to: string) => string; readon
 // Source names are compared against reviewed entries and prefixes written with "/", so the
 // collection point is the one place a platform path becomes a name.
 export function sourceName(root: string, path: string, paths: PathApi = { relative, sep }): string {
-  return paths.relative(root, path)
+  return paths.relative(root, path).split(paths.sep).join("/")
 }
 
 export function telemetrySources(root: string): readonly SourceFile[] {

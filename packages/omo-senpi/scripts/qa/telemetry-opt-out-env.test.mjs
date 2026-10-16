@@ -78,13 +78,13 @@ describe("QA drivers opt out of telemetry", () => {
   })
 })
 
-// Every file under the plugin root ships (extensions/*.js, scripts/install-local.mjs, runtime/, ...),
-// so each one is read; only vendored node_modules are skipped.
 // Reported paths are compared with "/"-separated expectations on every platform.
 export function shippedName(pluginRoot, path, paths = { relative, sep }) {
-  return paths.relative(pluginRoot, path)
+  return paths.relative(pluginRoot, path).split(paths.sep).join("/")
 }
 
+// Every file under the plugin root ships (extensions/*.js, scripts/install-local.mjs, runtime/, ...),
+// so each one is read; only vendored node_modules are skipped.
 function shippedHelperReferences(pluginRoot) {
   const shipped = readdirSync(pluginRoot, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && !join(entry.parentPath, entry.name).includes("node_modules"))
