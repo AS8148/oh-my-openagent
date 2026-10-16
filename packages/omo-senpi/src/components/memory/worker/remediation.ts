@@ -39,12 +39,12 @@ export function reflectionRemediation(
   // directory is pruned by the time this hint renders - so child-stderr.log is a dead pointer.
   // Only a real user-namespace refusal gets the namespace remedy; any other bwrap error keeps the
   // sandbox on, because telling users to disable isolation for an unrelated failure is wrong (#10317).
-  const missingBindSource = /can't find source path (\S+?):? no such file or directory/.exec(combined)
+  const missingBindSource = /can't find source path (.+?):? no such file or directory/i.exec(`${reason ?? ""} ${detail ?? ""}`)
   if (missingBindSource) {
-    const path = /can't find source path (\S+?):? no such file or directory/i.exec(`${reason ?? ""} ${detail ?? ""}`)?.[1] ?? missingBindSource[1]
-    return `the sandbox could not bind ${path} because that directory does not exist yet; create it with mkdir -p ${path} and run /reflect again (the sandbox itself is working)`
+    const path = missingBindSource[1]
+    return `the sandbox could not bind ${path} because that directory does not exist yet; create it with mkdir -p '${path}' and run /reflect again (the sandbox itself is working)`
   }
-  if (/setting up (uid map|gid map|namespace)|create new namespace|user namespace|unshare/.test(combined)) {
+  if (/setting up (uid map|gid map|namespace)|creat(e|ing) (a )?new namespace|user namespace|unshare/.test(combined)) {
     return 'the sandbox helper (bwrap) cannot create a user namespace on this host; allow unprivileged user namespaces on the host (for example sysctl kernel.unprivileged_userns_clone=1, or the AppArmor userns restriction), and only as a last resort set memory.reflection.sandbox to "off" in your omo config'
   }
   if (combined.includes("bwrap:")) {

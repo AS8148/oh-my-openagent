@@ -76,7 +76,7 @@ describe("reflectionRemediation", () => {
 
     test("#when a real user-namespace error is remediated #then the host fix comes first and disabling the sandbox is only a last resort", () => {
       // when
-      const hint = reflectionRemediation("child_exit", "bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces")
+      const hint = reflectionRemediation("child_exit", "bwrap: No permissions to creating new namespace, likely because the kernel does not allow non-privileged user namespaces. See https://deb.li/bubblewrap or https://deb.li/bubblewrap-sysctl.")
 
       // then
       expect(hint).toContain("user namespace")
@@ -95,6 +95,39 @@ describe("reflectionRemediation", () => {
       expect(hint).not.toContain("user namespace")
       expect(hint).not.toContain("memory.reflection.sandbox")
       expect(hint).not.toContain("\"off\"")
+    })
+
+    // Verbatim bwrap output (bubblewrap.c: die() prints "bwrap: <msg>", die_with_error() appends ": <strerror>").
+    // Released 0.4-0.9 say "No permissions to creating new namespace"; main says "create a new namespace".
+    const REAL_USERNS_REFUSALS = [
+      "bwrap: No permissions to creating new namespace, likely because the kernel does not allow non-privileged user namespaces. On e.g. debian this can be enabled with 'sysctl kernel.unprivileged_userns_clone=1'.",
+      "bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces. On e.g. debian this can be enabled with 'sysctl kernel.unprivileged_userns_clone=1'.",
+      "bwrap: Creating new namespace failed, likely because the kernel does not support user namespaces.  bwrap must be installed setuid on such systems.",
+      "bwrap: Creating new namespace failed: nesting depth or /proc/sys/user/max_*_namespaces exceeded (ENOSPC)",
+      "bwrap: Creating new namespace failed: No space left on device",
+      "bwrap: Creating new namespace failed: Operation not permitted",
+      "bwrap: setting up uid map: Permission denied",
+      "bwrap: setting up gid map: Permission denied",
+    ]
+    for (const message of REAL_USERNS_REFUSALS) {
+      test(`#when bwrap prints the real user-namespace refusal ${JSON.stringify(message.slice(0, 60))} #then the host fix comes first and "off" is only a last resort`, () => {
+        // when
+        const hint = reflectionRemediation("child_exit", message)
+
+        // then
+        expect(hint).toContain("allow unprivileged user namespaces")
+        expect(hint.indexOf("allow unprivileged user namespaces")).toBeLessThan(hint.indexOf("memory.reflection.sandbox"))
+        expect(hint).toContain("last resort")
+      })
+    }
+
+    test("#when the missing bind source path contains spaces #then the whole path is named and quoted in the mkdir advice", () => {
+      // when
+      const hint = reflectionRemediation("child_exit", "bwrap: Can't find source path /home/u/My Memory/runtime/reflection-sessions: No such file or directory")
+
+      // then
+      expect(hint).toContain("mkdir -p '/home/u/My Memory/runtime/reflection-sessions'")
+      expect(hint).not.toContain("user namespace")
     })
 
     test("#when bwrap fails for an unrelated reason #then it does not blame user namespaces or suggest turning the sandbox off", () => {
