@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The ulw-research report checker no longer counts an invisible image as the report's visual.** An image or chart with any zero dimension, such as `width="600" height="0"` or an inline `height: 0`, no longer satisfies the rule that every final report carries a visual; one with no declared size still counts, since the browser sizes it. ([#10266](https://github.com/code-yeongyu/oh-my-openagent/issues/10266))
+
 **Interrupted background tasks recover without crash warnings.** Tasks that cannot reconnect resume automatically from their saved conversation and launch instructions within the existing retry budget. If recovery still fails, one notice names the task and its handle, explains why, and gives the corrective action for that cause; technical crash details stay in logs. Finished tasks with undelivered queued messages ask you to resend those messages rather than repeat finished work. Recovery completions retain partial output, the transcript tail, and a file pointer for large results. ([#10023](https://github.com/code-yeongyu/oh-my-openagent/issues/10023))
 
 **A background child aborted by another client no longer reports a failure.** Another client's user abort on a shared child session now ends that task as `interrupted` with whatever partial answer it had produced, instead of `error`: `task_output` keeps the partial text, no failure notification fires, and the task stays resumable with `task_send`. The parent's own abort still ends the task as `cancelled`, and provider or host-system aborts keep the failure classification.
