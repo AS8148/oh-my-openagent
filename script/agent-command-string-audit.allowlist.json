@@ -85,7 +85,6 @@
     "packages/omo-native/test/doctor.test.ts: omo doctor x2",
     "packages/omo-native/test/gateway.test.ts: omo doctor",
     "packages/omo-native/test/launch-spec-mode.test.ts: omo doctor x2",
-    "packages/omo-opencode/src/cli/account-keys/keystore.ts: =omo",
     "packages/omo-opencode/src/cli/doctor/checks/codex-components.test.ts: omo doctor",
     "packages/omo-opencode/src/cli/doctor/checks/codex-components.ts: omo doctor",
     "packages/omo-opencode/src/cli/doctor/checks/tools.ts: omo doctor",
@@ -98,5 +97,8 @@
     "script/qa/codex-marketplace-e2e.sh: =omo",
     "script/verify-omo-ai-payload.mjs: omo doctor",
     "script/qa/omo-native-parity-smoke.mjs: omo doctor"
+  ],
+  "literal-label": [
+    "packages/omo-opencode/src/cli/account-keys/keystore.ts: =omo"
   ]
 }
