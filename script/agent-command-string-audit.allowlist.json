@@ -85,6 +85,7 @@
     "packages/omo-native/test/doctor.test.ts: omo doctor x2",
     "packages/omo-native/test/gateway.test.ts: omo doctor",
     "packages/omo-native/test/launch-spec-mode.test.ts: omo doctor x2",
+    "packages/omo-opencode/src/cli/account-keys/keystore.ts: =omo",
     "packages/omo-opencode/src/cli/doctor/checks/codex-components.test.ts: omo doctor",
     "packages/omo-opencode/src/cli/doctor/checks/codex-components.ts: omo doctor",
     "packages/omo-opencode/src/cli/doctor/checks/tools.ts: omo doctor",
