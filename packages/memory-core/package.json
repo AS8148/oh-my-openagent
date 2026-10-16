@@ -19,6 +19,9 @@
     },
     "./process-start-time": {
       "import": "./src/locks/process-start-time.ts"
+    },
+    "./keyring": {
+      "import": "./src/sync/keyring-port.ts"
     }
   },
   "scripts": {
