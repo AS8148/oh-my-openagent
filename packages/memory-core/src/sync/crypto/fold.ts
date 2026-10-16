@@ -47,8 +47,8 @@ const genesisAuthority = (record: FoldedRecord): Authority | null => {
  * genesis seeds both sets; approvals add a device; recovery-key enrollments and removals
  * edit the registry; a rotation replaces the membership and starts its epoch; a
  * recovery-join resets both sets to the joined device and the key it used; a veto restores
- * the join's predecessor minus that key and cancels every keyring record after the join.
- * A fork-resolution is never folded here: it is handed to the engine's fork machinery.
+ * the join's predecessor minus that key and cancels every keyring record after the join. A
+ * fork-resolution, once the receiver has proven its evidence, takes the authority it states.
  */
 export const applyRecord = (
   history: ReadonlyArray<FoldedRecord>,
@@ -59,8 +59,17 @@ export const applyRecord = (
   const body = record.body
   switch (body.kind) {
     case "genesis":
-    case "fork-resolution":
       return null
+    case "fork-resolution":
+      return {
+        ...before,
+        members: new Map(body.members.map((member) => [member.id, member])),
+        registry: new Map(body.recoveryKeys.map((key) => [key.credential_id, key])),
+        enrolledEver: new Set([...before.enrolledEver, ...body.recoveryKeys.map((key) => key.credential_id)]),
+        epoch: body.epoch,
+        epochOrigins:
+          body.epoch === before.epoch ? before.epochOrigins : withEntry(before.epochOrigins, body.epoch, record.digest),
+      }
     case "approval":
       return {
         ...before,

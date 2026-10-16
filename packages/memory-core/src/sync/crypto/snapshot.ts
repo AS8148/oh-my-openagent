@@ -2,27 +2,25 @@ import { type ChainState, emptyChain, verifyKeyringEntry } from "./chain.ts"
 import type { KeyringEntry } from "./entry.ts"
 import { isCancelledAdmission } from "./fold.ts"
 import { openBatch } from "./open.ts"
+import { wire } from "./receiver.ts"
 import type { RejectionCounter } from "./rejection.ts"
-import { authorSigningKey, decodeB64, verifyTagged } from "./signatures.ts"
-import { concatBytes, sha256, sha256B64 } from "./vendor/sync-format/jcs.ts"
+import { b64urlDecode, sha256B64 } from "./vendor/sync-format/jcs.ts"
+import { verifyObject } from "./vendor/sync-format/object.ts"
 import type { SyncObjectRecord } from "./vendor/sync-format/object-types.ts"
+import {
+  importSnapshot as verifySnapshotImport,
+  type SnapshotEnvelope,
+  type SnapshotImportFailureReason,
+} from "./vendor/sync-format/snapshot.ts"
 
-export type SnapshotRecord = {
-  readonly account: string
-  readonly covers_seq: number
-  readonly digest: string
-  readonly link: string
-  readonly keyring_head: string
-  readonly author: { readonly kind: "device"; readonly id: string }
-  readonly record_sig: string
-}
+/** The signed snapshot envelope of sync-design section 6, as the state route serves it. */
+export type SnapshotRecord = SnapshotEnvelope
 
 export type SnapshotRejection =
   | "keyring_prefix_refused"
   | "bad_keyring_head"
   | "not_member"
   | "bad_signature"
-  | "account_mismatch"
   | "digest_mismatch"
   | "chunk_refused"
 
@@ -30,13 +28,27 @@ export type SnapshotOutcome =
   | { readonly ok: true; readonly state: ChainState; readonly records: ReadonlyArray<SyncObjectRecord> }
   | { readonly ok: false; readonly reason: SnapshotRejection }
 
+const REJECTION: Readonly<Record<SnapshotImportFailureReason, SnapshotRejection>> = {
+  snapshot_chain_refused: "keyring_prefix_refused",
+  snapshot_keyring_head: "bad_keyring_head",
+  snapshot_author_not_member: "not_member",
+  snapshot_bad_record_sig: "bad_signature",
+  snapshot_digest: "digest_mismatch",
+  snapshot_account: "chunk_refused",
+  snapshot_epoch: "chunk_refused",
+  snapshot_author_mismatch: "chunk_refused",
+  snapshot_kind: "chunk_refused",
+  snapshot_chunk_coverage: "chunk_refused",
+}
+
 /**
- * Imports a compacted account from genesis (sync-design section 8.3): the keyring sub-chain
- * verifies record by record (signatures and keyring_link; the batches its main links hash
- * are compacted away), membership and the registry fold up to covers_seq, the snapshot's
- * keyring_head must equal that fold's sub-chain head, its record_sig must verify under a
- * folded member, and every chunk must verify and open before any record is returned. The
- * resulting state continues the main chain from the snapshot's link at covers_seq.
+ * Imports a compacted account from genesis (sync-design section 8.3). The keyring sub-chain up to
+ * covers_seq verifies record by record through the client chain (signatures, keyring_link, the
+ * merged receiver's refusals); the envelope and its chunks then pass the merged reference check
+ * (vendored importSnapshot: keyring_head, the author's membership and signature over a preimage
+ * that names the author, each chunk's binding, coverage and the digest). Only then is each chunk
+ * opened, in header index order, and the records returned. The state continues the main chain from
+ * the snapshot's link at covers_seq.
  */
 export const importSnapshot = async (
   keyringEntries: ReadonlyArray<KeyringEntry>,
@@ -49,47 +61,47 @@ export const importSnapshot = async (
     rejections.record(reason)
     return { ok: false, reason }
   }
+  const covered = keyringEntries.filter((candidate) => candidate.seq <= snapshot.covers_seq)
   let state = emptyChain(snapshot.account)
-  for (const entry of keyringEntries.filter((candidate) => candidate.seq <= snapshot.covers_seq)) {
+  for (const entry of covered) {
     const step = await verifyKeyringEntry(state, entry, "keyring-only")
-    if (!step.ok || step.step === "fork") return refuse("keyring_prefix_refused")
+    if (!step.ok) return refuse("keyring_prefix_refused")
     state = step.state
   }
   const authority = state.authority
-  if (authority === null || state.head === null) return refuse("keyring_prefix_refused")
-  if (state.head.keyring_link !== snapshot.keyring_head) return refuse("bad_keyring_head")
+  if (authority === null) return refuse("keyring_prefix_refused")
   if (isCancelledAdmission(authority, snapshot.author.id)) return refuse("not_member")
-  const signingKey = authorSigningKey(authority, snapshot.author)
-  if (signingKey === null) return refuse("not_member")
-  const payload = {
-    t: "omo-sync/v1/snapshot",
+  const verified = await verifySnapshotImport({ snapshot, chunks, entries: wire(covered) })
+  if (!verified.ok) return refuse(REJECTION[verified.reason])
+  const signingPublicKey = snapshot.author.signing_public_key
+  const ctx = {
     account: snapshot.account,
-    covers_seq: snapshot.covers_seq,
-    digest: snapshot.digest,
-    link: snapshot.link,
-    keyring_head: snapshot.keyring_head,
+    epoch: verified.headers[0]?.epoch ?? 0,
+    authorId: snapshot.author.id,
+    authorSigningPublicKey: b64urlDecode(signingPublicKey),
   }
-  if (!(await verifyTagged("omo-sync/v1/snapshot", payload, signingKey, snapshot.record_sig))) {
-    return refuse("bad_signature")
+  const placed: Array<Uint8Array<ArrayBuffer> | undefined> = []
+  for (const chunk of chunks) {
+    const header = await verifyObject(chunk, ctx)
+    const index = header.ok ? header.header.chunk?.index : undefined
+    if (index === undefined) return refuse("chunk_refused")
+    placed[index] = chunk
   }
-  const chunkDigests = await Promise.all(chunks.map((chunk) => sha256(chunk)))
-  if (decodeB64(snapshot.digest, 32) === null || (await sha256B64(concatBytes(chunkDigests))) !== snapshot.digest) {
-    return refuse("digest_mismatch")
-  }
-  const epochKey = epochKeyFor(authority.epoch)
+  const epochKey = epochKeyFor(ctx.epoch)
   if (epochKey === null) return refuse("chunk_refused")
   const records: SyncObjectRecord[] = []
-  for (const [index, chunk] of chunks.entries()) {
+  for (const [index, chunk] of placed.entries()) {
+    if (chunk === undefined) return refuse("chunk_refused")
     const opened = await openBatch(
       chunk,
       {
         account: snapshot.account,
-        epoch: authority.epoch,
+        epoch: ctx.epoch,
         authorId: snapshot.author.id,
-        signingPublicKey: signingKey,
+        signingPublicKey,
         digest: await sha256B64(chunk),
         kind: "snapshot",
-        chunk: { index, count: chunks.length },
+        chunk: { index, count: placed.length },
       },
       epochKey,
       rejections,

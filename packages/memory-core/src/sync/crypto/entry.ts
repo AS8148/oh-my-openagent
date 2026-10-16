@@ -1,7 +1,13 @@
 import type { JsonValue } from "./vendor/sync-format/jcs.ts"
 
+/** As the wire carries it: a device author is the full principal, a recovery author its credential. */
 export type SyncAuthor =
-  | { readonly kind: "device"; readonly id: string }
+  | {
+      readonly kind: "device"
+      readonly id: string
+      readonly sealing_public_key: string
+      readonly signing_public_key: string
+    }
   | { readonly kind: "recovery"; readonly credential_id: string }
 
 export type SyncRecordFields = {

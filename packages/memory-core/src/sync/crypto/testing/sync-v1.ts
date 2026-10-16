@@ -21,7 +21,14 @@ type DeviceName = "owner" | "joining" | "recovered" | "recovered2"
 
 type KeysFixture = {
   readonly account: string
-  readonly devices: Record<DeviceName, { readonly signing_seed: string; readonly sealing_private: string; readonly principal: { readonly id: string } }>
+  readonly devices: Record<
+    DeviceName,
+    {
+      readonly signing_seed: string
+      readonly sealing_private: string
+      readonly principal: { readonly id: string }
+    }
+  >
   readonly wrap_test_device: { readonly sealing_private: string; readonly sealing_public: string }
   readonly recovery: Record<"key1" | "key2", { readonly prf_output: string; readonly enrollment_nonce: string }>
   readonly epochs: Record<string, string>
@@ -105,9 +112,37 @@ export const recoverySigningSeed = (key: "key1" | "key2"): Promise<Uint8Array<Ar
 
 export type Signer = { readonly keyring: DeviceKeyring } | { readonly recoverySeed: Uint8Array<ArrayBuffer>; readonly credentialId: string }
 
+/** Every device principal the fixture chain registers (genesis, approvals, joins), by id. */
+const registered = (): ReadonlyMap<string, { readonly sealing_public_key: string; readonly signing_public_key: string }> => {
+  const found = new Map<string, { readonly sealing_public_key: string; readonly signing_public_key: string }>()
+  for (const raw of Object.values(chain.records)) {
+    const body = raw.body
+    const bootstrap: unknown = Reflect.get(Object(body), "bootstrap")
+    for (const candidate of [Reflect.get(Object(bootstrap), "first_device"), Reflect.get(Object(body), "principal")]) {
+      const id: unknown = Reflect.get(Object(candidate), "id")
+      const sealing: unknown = Reflect.get(Object(candidate), "sealing_public_key")
+      const signing: unknown = Reflect.get(Object(candidate), "signing_public_key")
+      if (typeof id === "string" && typeof sealing === "string" && typeof signing === "string") {
+        found.set(id, { sealing_public_key: sealing, signing_public_key: signing })
+      }
+    }
+  }
+  return found
+}
+
+/**
+ * A device principal's public keys as the chain registered them (the fixture's sealing keys are
+ * synthetic, so a keyring's own derived key would not match), else the keyring's keys.
+ */
+export const principalKeys = (keyring: DeviceKeyring) =>
+  registered().get(keyring.principal().id) ?? {
+    sealing_public_key: keyring.publicKeys().sealing,
+    signing_public_key: keyring.publicKeys().signing,
+  }
+
 const authorOf = (signer: Signer): SyncAuthor =>
   "keyring" in signer
-    ? { kind: "device", id: signer.keyring.principal().id }
+    ? { kind: "device", id: signer.keyring.principal().id, ...principalKeys(signer.keyring) }
     : { kind: "recovery", credential_id: signer.credentialId }
 
 const signFields = async (signer: Signer, fields: Parameters<typeof signRecord>[1]): Promise<string> =>
@@ -132,7 +167,7 @@ export const appendKeyring = async (head: Head, body: KeyringBody, signer: Signe
 export const appendBatch = async (head: Head, digest: string, epoch: number, keyring: DeviceKeyring): Promise<BatchEntry> => {
   const link = await linkOrThrow(head.link, digest)
   const fields = { account: ACCOUNT, base_seq: head.seq, digest, epoch, link, keyring_link: null }
-  return { ...fields, seq: head.seq + 1, kind: "batch", author: { kind: "device", id: keyring.principal().id }, record_sig: await signRecord(keyring, fields) }
+  return { ...fields, seq: head.seq + 1, kind: "batch", author: { kind: "device", id: keyring.principal().id, ...principalKeys(keyring) }, record_sig: await signRecord(keyring, fields) }
 }
 
 export const headOf = (entry: { readonly seq: number; readonly link: string; readonly keyring_link: string | null }, keyringLink: string): Head => ({

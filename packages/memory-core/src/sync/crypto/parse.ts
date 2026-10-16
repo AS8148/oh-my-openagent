@@ -53,7 +53,12 @@ export type ParsedBody =
       readonly credentialId: string
     }
   | { readonly kind: "recovery-join-vetoed"; readonly joinDigest: string }
-  | { readonly kind: "fork-resolution" }
+  | {
+      readonly kind: "fork-resolution"
+      readonly members: ReadonlyArray<Principal>
+      readonly recoveryKeys: ReadonlyArray<RecoveryKey>
+      readonly epoch: number
+    }
 
 export type JsonObject = { readonly [key: string]: JsonValue }
 
@@ -176,6 +181,27 @@ const parseJoin = (body: JsonObject): ParsedBody | null => {
   return { kind: "recovery-join", keyringHead, principal, credentialId }
 }
 
+/** The authority a fork-resolution states; its evidence is proven by the vendored receiver. */
+const parseForkResolution = (body: JsonObject): ParsedBody | null => {
+  const keys = ["fork_set", "evidence", "continuation", "state", "merged_digest"]
+  const state = body["state"]
+  if (!hasExactly(body, [...COMMON, ...keys]) || !isObject(state)) return null
+  if (!hasExactly(state, ["members", "recovery_keys", "epoch"])) return null
+  const membersValue = state["members"]
+  const keysValue = state["recovery_keys"]
+  const epoch = state["epoch"]
+  if (!Array.isArray(membersValue) || !Array.isArray(keysValue)) return null
+  if (typeof epoch !== "number" || !Number.isSafeInteger(epoch) || epoch < 1) return null
+  const members = membersValue.map((member: JsonValue) => parsePrincipal(member))
+  const recoveryKeys = keysValue.map((key: JsonValue) =>
+    isObject(key) && hasExactly(key, RECOVERY_KEYS) ? readRecoveryKey(key) : null,
+  )
+  const parsedMembers = members.filter((member): member is Principal => member !== null)
+  const parsedKeys = recoveryKeys.filter((key): key is RecoveryKey => key !== null)
+  if (parsedMembers.length !== members.length || parsedKeys.length !== recoveryKeys.length) return null
+  return { kind: "fork-resolution", members: parsedMembers, recoveryKeys: parsedKeys, epoch }
+}
+
 /**
  * Parses one keyring record body against the closed per-kind schema of sync-design
  * section 8 (unknown or missing fields reject). Unparseable bodies are refused, never folded.
@@ -205,10 +231,8 @@ export const parseBody = (body: KeyringBody): ParsedBody | null => {
       if (!hasExactly(body, [...COMMON, "join_digest"]) || joinDigest === null) return null
       return { kind: "recovery-join-vetoed", joinDigest }
     }
-    case "fork-resolution": {
-      const keys = ["fork_set", "evidence", "continuation", "state", "merged_digest"]
-      return hasExactly(body, [...COMMON, ...keys]) ? { kind: "fork-resolution" } : null
-    }
+    case "fork-resolution":
+      return parseForkResolution(body)
     default:
       return null
   }

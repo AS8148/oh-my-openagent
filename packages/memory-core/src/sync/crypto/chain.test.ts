@@ -127,7 +127,8 @@ describe("receiver refusals: nothing that fails a check is applied", () => {
       { recoverySeed: await recoverySigningSeed("key2"), credentialId: String(join.body["credential_id"]) },
     )
     const { outcome, rejections } = await run([forged], state)
-    expect(refusal(outcome)).toEqual({ seq: 4, reason: "not_member" })
+    // The merged receiver's own code: the join names a credential the fold no longer holds.
+    expect(refusal(outcome)).toEqual({ seq: 4, reason: "recovery_join_unenrolled" })
     expect(rejections.count()).toBe(1)
   })
 

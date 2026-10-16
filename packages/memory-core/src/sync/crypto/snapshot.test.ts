@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { appendEntries } from "./chain.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { importSnapshot, type SnapshotRecord } from "./snapshot.ts"
-import { ACCOUNT, appendBatch, deviceId, epochKey, keyringFor, keys, mainChain, objects, readBytes } from "./testing/sync-v1.ts"
+import { ACCOUNT, appendBatch, deviceId, epochKey, keyringFor, keys, mainChain, objects, principalKeys, readBytes } from "./testing/sync-v1.ts"
 import { b64urlDecode } from "./vendor/sync-format/jcs.ts"
 import { signFramed } from "./vendor/sync-format/keys.ts"
+import { snapshotPreimage } from "./vendor/sync-format/snapshot.ts"
 
 const chunks = () => objects.snapshot.chunks.map((file) => readBytes(`objects/${file}`))
 
@@ -16,17 +17,18 @@ const coverHead = () => {
 
 const snapshotBy = async (device: "owner" | "recovered", overrides: Partial<SnapshotRecord> = {}): Promise<SnapshotRecord> => {
   const head = coverHead()
-  const unsigned = {
+  const unsigned: SnapshotRecord = {
     account: ACCOUNT,
+    author: { kind: "device", id: deviceId(device), ...principalKeys(keyringFor(device)) },
     covers_seq: head.seq,
     digest: objects.snapshot.digest,
     link: head.link,
     keyring_head: head.keyring_link,
+    record_sig: "",
     ...overrides,
   }
-  const payload = { t: "omo-sync/v1/snapshot", ...unsigned }
-  const record_sig = await signFramed("omo-sync/v1/snapshot", payload, b64urlDecode(keys.devices[device].signing_seed))
-  return { ...unsigned, author: { kind: "device", id: deviceId(device) }, record_sig }
+  const record_sig = await signFramed("omo-sync/v1/snapshot", snapshotPreimage(unsigned), b64urlDecode(keys.devices[device].signing_seed))
+  return { ...unsigned, record_sig }
 }
 
 describe("snapshot import after compaction, verified from genesis", () => {
@@ -60,10 +62,18 @@ describe("snapshot import after compaction, verified from genesis", () => {
     expect(rejections.count()).toBe(1)
   })
 
-  test("chunks served out of order are refused before any record is returned", async () => {
+  test("a chunk set missing a chunk is refused before any record is returned", async () => {
     const rejections = createRejectionCounter()
-    const imported = await importSnapshot(mainChain(), await snapshotBy("owner"), chunks().reverse(), epochKey, rejections)
-    expect(imported).toEqual({ ok: false, reason: "digest_mismatch" })
+    const imported = await importSnapshot(mainChain(), await snapshotBy("owner"), chunks().slice(0, 1), epochKey, rejections)
+    expect(imported).toEqual({ ok: false, reason: "chunk_refused" })
     expect(rejections.count()).toBe(1)
+  })
+
+  test("a snapshot whose served author keys differ from the signed ones fails its signature", async () => {
+    const rejections = createRejectionCounter()
+    const signed = await snapshotBy("owner")
+    const swapped = { ...signed, author: { ...signed.author, sealing_public_key: keyringFor("joining").publicKeys().sealing } }
+    const imported = await importSnapshot(mainChain(), swapped, chunks(), epochKey, rejections)
+    expect(imported).toEqual({ ok: false, reason: "bad_signature" })
   })
 })

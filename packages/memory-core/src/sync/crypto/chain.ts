@@ -3,12 +3,15 @@ import { type Authority, applyRecord, type FoldedRecord, isCancelledAdmission, i
 import { nextLink } from "./links.ts"
 import { type ParsedBody, parseBody } from "./parse.ts"
 import type { RejectionCounter } from "./rejection.ts"
+import { receiverRefusal } from "./receiver.ts"
 import { checkRecordRules, type RuleRejection } from "./rules.ts"
 import { authorSigningKey, verifyRecordSig } from "./signatures.ts"
+import type { ReceiverRefusal } from "./vendor/sync-format/fold.ts"
 import { jcsBytes, sha256B64 } from "./vendor/sync-format/jcs.ts"
 
 export type ChainRejection =
   | RuleRejection
+  | ReceiverRefusal
   | "bad_record"
   | "link_mismatch"
   | "not_member"
@@ -22,6 +25,8 @@ export type ChainState = {
   readonly head: Head | null
   readonly authority: Authority | null
   readonly history: ReadonlyArray<FoldedRecord>
+  /** Every verified keyring entry as received: the merged receiver re-reads them for vetoes, joins and forks. */
+  readonly received: ReadonlyArray<KeyringEntry>
 }
 
 export type AcceptedBatch = {
@@ -38,7 +43,7 @@ export type ChainStep =
   | { readonly kind: "vetoed"; readonly seq: number }
 
 export type AppendOutcome =
-  | { readonly ok: true; readonly state: ChainState; readonly steps: ReadonlyArray<ChainStep>; readonly forkAt: number | null }
+  | { readonly ok: true; readonly state: ChainState; readonly steps: ReadonlyArray<ChainStep> }
   | {
       readonly ok: false
       readonly state: ChainState
@@ -47,7 +52,7 @@ export type AppendOutcome =
       readonly reason: ChainRejection
     }
 
-export const emptyChain = (account: string): ChainState => ({ account, head: null, authority: null, history: [] })
+export const emptyChain = (account: string): ChainState => ({ account, head: null, authority: null, history: [], received: [] })
 
 /** Main-chain mode checks seq, base_seq and link; keyring-only mode (snapshot import) checks the sub-chain alone. */
 export type LinkMode = "main" | "keyring-only"
@@ -91,22 +96,26 @@ const signerKey = (
 
 const expectedEpoch = (body: ParsedBody, before: Authority | null): number | null => {
   if (body.kind === "genesis") return 1
+  if (body.kind === "fork-resolution") return body.epoch
   if (before === null) return null
   return body.kind === "rotation" ? before.epoch + 1 : before.epoch
 }
 
 type StepResult =
-  | { readonly ok: true; readonly state: ChainState; readonly step: ChainStep | "fork" }
+  | { readonly ok: true; readonly state: ChainState; readonly step: ChainStep }
   | { readonly ok: false; readonly reason: ChainRejection }
 
 /**
  * One keyring record through the receiver order of sync-design section 6: chain link,
  * record signature (against the authority folded from every earlier keyring record),
  * epoch, account binding, the per-kind rules of the section 8.2 verifier table, and
- * finally the content hash. A fork-resolution halts here for the engine's fork path.
+ * finally the content hash. Right after the link, the merged receiver's own refusals apply, so a
+ * record it refuses is never folded here either.
  */
 export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry, mode: LinkMode): Promise<StepResult> => {
   if (!(await linksHold(state, entry, mode))) return { ok: false, reason: "link_mismatch" }
+  const refused = await receiverRefusal(state.received, entry)
+  if (refused !== null) return { ok: false, reason: refused }
   const body = parseBody(entry.body)
   if (body === null) return { ok: false, reason: "bad_record" }
   const before = state.authority
@@ -123,7 +132,6 @@ export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry,
   const ruleFailure = await checkRecordRules(entry, body, before, state.history, predecessor)
   if (ruleFailure !== null) return { ok: false, reason: ruleFailure }
   if ((await sha256B64(jcsBytes(entry.body))) !== entry.digest) return { ok: false, reason: "digest_mismatch" }
-  if (body.kind === "fork-resolution") return { ok: true, state, step: "fork" }
   const record: FoldedRecord = { seq: entry.seq, digest: entry.digest, body, before }
   const authority = applyRecord(state.history, record)
   if (authority === null) return { ok: false, reason: "bad_record" }
@@ -134,6 +142,7 @@ export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry,
       head: { seq: entry.seq, link: entry.link, keyring_link: entry.keyring_link },
       authority,
       history: [...state.history, record],
+      received: [...state.received, entry],
     },
     step: { kind: "keyring", seq: entry.seq, record: body.kind },
   }
@@ -141,6 +150,8 @@ export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry,
 
 const verifyBatchEntry = async (state: ChainState, entry: BatchEntry): Promise<StepResult> => {
   if (!(await linksHold(state, entry, "main"))) return { ok: false, reason: "link_mismatch" }
+  const refused = await receiverRefusal(state.received, entry)
+  if (refused !== null) return { ok: false, reason: refused }
   const authority = state.authority
   const head = state.head
   if (authority === null || head === null) return { ok: false, reason: "not_member" }
@@ -176,9 +187,8 @@ export const appendEntries = async (
       rejections.record(result.reason)
       return { ok: false, state: current, steps, seq: entry.seq, reason: result.reason }
     }
-    if (result.step === "fork") return { ok: true, state: current, steps, forkAt: entry.seq }
     current = result.state
     steps.push(result.step)
   }
-  return { ok: true, state: current, steps, forkAt: null }
+  return { ok: true, state: current, steps }
 }
