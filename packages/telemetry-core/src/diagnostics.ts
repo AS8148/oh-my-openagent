@@ -69,6 +69,7 @@ function toDiagnosticRecord(input: TelemetryDiagnosticInput, now: Date): Record<
     event: input.event,
     source: input.source,
     ...(input.entryKind === undefined ? {} : { entry_kind: input.entryKind }),
+    ...(input.errorCode === undefined ? {} : { error_code: input.errorCode }),
     ...serializeError(input.error, input.errorKind),
   }
 }
