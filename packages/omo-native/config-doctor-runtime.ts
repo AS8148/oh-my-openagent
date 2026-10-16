@@ -11,6 +11,6 @@ export function configDoctorLines(input: { readonly cwd: string; readonly env: O
   const { config, diagnostics } = loadOmoConfig({ cwd: input.cwd, env: input.env, harness: "senpi" })
   return [
     ...omoConfigDiagnosticLines(diagnostics, { homeDir: resolveHomeDir(input.env) }).map((line) => `WARN ${line}`),
-    ...categoryShadowedAgentNames(config).map((name) => `WARN config: ${categoryShadowMessage(name)}`),
+    ...categoryShadowedAgentNames(config).map((name) => `WARN config: ${categoryShadowMessage(config, name)}`),
   ]
 }

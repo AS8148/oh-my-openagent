@@ -377,7 +377,7 @@ describe("notificationMessages", () => {
 
     // then
     expect(notices).toEqual([{
-      message: 'OmO Native: categories."plan-consultant" is not read for subagent_type "plan-consultant" spawns; put its model chain under agents."plan-consultant".models; categories."scout" is not read for subagent_type "scout" spawns; put its model chain under agents."scout".models',
+      message: 'OmO Native: categories."plan-consultant" is not read for subagent_type "plan-consultant" spawns (categories only route task(category: ...)), so that agent runs its default model chain. Move the chain to the agent: "agents": { "plan-consultant": { "models": ["omo-mock/mock-1"] } }; categories."scout" is not read for subagent_type "scout" spawns (categories only route task(category: ...)), so that agent runs its default model chain. Move the chain to the agent: "agents": { "scout": { "models": ["omo-mock/mock-2"] } }',
       type: "warning",
     }])
   })

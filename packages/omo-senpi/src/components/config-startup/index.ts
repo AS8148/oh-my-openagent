@@ -181,7 +181,7 @@ export function notificationMessages(
   })
   const shadowed = categoryShadowedAgentNames(config.config)
   if (shadowed.length > 0) messages.push({
-    message: `OmO Native: ${shadowed.map(categoryShadowMessage).join("; ")}`,
+    message: `OmO Native: ${shadowed.map((name) => categoryShadowMessage(config.config, name)).join("; ")}`,
     type: "warning",
   })
   const unserved = unservedDevinSelectors(config.config)

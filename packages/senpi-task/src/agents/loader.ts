@@ -51,7 +51,7 @@ export function loadAgents(options: LoadAgentsOptions = {}): LoadAgentsResult {
     diagnostics.push({
       kind: "category_shadows_agent",
       path: MERGED_OMO_CONFIG_PATH,
-      message: categoryShadowMessage(name),
+      message: categoryShadowMessage(omoOverlay.config, name),
       issuePaths: [`categories.${name}`],
     })
   }

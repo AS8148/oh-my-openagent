@@ -13,6 +13,9 @@ export function categoryShadowedAgentNames(config: OmoConfig, agentNames: Iterab
   return Object.keys(config.categories ?? {}).filter((name) => agents.has(name))
 }
 
-export function categoryShadowMessage(name: string): string {
-  return `categories."${name}" is not read for subagent_type "${name}" spawns; put its model chain under agents."${name}".models`
+export function categoryShadowMessage(config: OmoConfig, name: string): string {
+  const category = config.categories?.[name]
+  const chain = category?.models ?? (category?.model === undefined ? undefined : [category.model])
+  const value = chain === undefined ? "[...]" : JSON.stringify(chain)
+  return `categories."${name}" is not read for subagent_type "${name}" spawns (categories only route task(category: ...)), so that agent runs its default model chain. Move the chain to the agent: "agents": { "${name}": { "models": ${value} } }`
 }

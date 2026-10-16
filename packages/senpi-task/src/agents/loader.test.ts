@@ -369,7 +369,7 @@ Reader
     expect(result.diagnostics).toContainEqual({
       kind: "category_shadows_agent",
       path: "(merged omo config)",
-      message: 'categories."plan-consultant" is not read for subagent_type "plan-consultant" spawns; put its model chain under agents."plan-consultant".models',
+      message: 'categories."plan-consultant" is not read for subagent_type "plan-consultant" spawns (categories only route task(category: ...)), so that agent runs its default model chain. Move the chain to the agent: "agents": { "plan-consultant": { "models": [{"model":"provider/sonnet"}] } }',
       issuePaths: ["categories.plan-consultant"],
     })
   })
@@ -397,7 +397,7 @@ Reader
 
     // then
     expect(result.diagnostics.filter((diagnostic) => diagnostic.kind === "category_shadows_agent").map((diagnostic) => diagnostic.message)).toEqual([
-      'categories."finder" is not read for subagent_type "finder" spawns; put its model chain under agents."finder".models',
+      'categories."finder" is not read for subagent_type "finder" spawns (categories only route task(category: ...)), so that agent runs its default model chain. Move the chain to the agent: "agents": { "finder": { "models": ["provider/other"] } }',
     ])
   })
 })
