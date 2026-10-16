@@ -123,13 +123,20 @@ function serviceAccountsOpen(): boolean {
   return SERVICE_ACCOUNTS_OPEN || (globalThis as Record<symbol, unknown>)[testOpenKey] === true
 }
 
+function refuseClosedServiceAuth(): never {
+  console.error(SERVICE_ACCOUNTS_CLOSED_MESSAGE)
+  process.exit(1)
+}
+
 function configureClosedServiceAuthCommands(program: Command): void {
   for (const name of SERVICE_AUTH_COMMANDS) {
-    program.command(name, { hidden: true }).helpOption(false).allowUnknownOption().allowExcessArguments()
+    const command = program.command(name, { hidden: true }).helpOption(false).allowUnknownOption().allowExcessArguments()
       .action(() => {
         console.error(SERVICE_ACCOUNTS_CLOSED_MESSAGE)
         process.exitCode = 1
       })
+    // `omo help <name>` calls the subcommand's help() directly, bypassing its action.
+    command.help = refuseClosedServiceAuth
   }
 }
 

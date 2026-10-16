@@ -61,6 +61,12 @@ test("#given accounts are closed #then the toolkit help lists no service account
   expect(help).toMatch(/^\s+mcp\b/m)
 })
 
+test.each(["login", "whoami"])("#given accounts are closed #when the toolkit CLI runs omo help %s #then it refuses instead of printing usage", async name => {
+  const result = await run(join(root, "packages", "omo-opencode", "src", "cli", "index.ts"), ["help", name])
+  expect({ code: result.code, stdout: result.stdout, stderr: result.stderr.trim(), requests: result.requests })
+    .toEqual({ code: 1, stdout: "", stderr: SERVICE_ACCOUNTS_CLOSED_MESSAGE, requests: 0 })
+}, 60_000)
+
 test("#given accounts are closed #then the engine-less help names no service account command", async () => {
   const result = await run(entries.compiled, ["--help"], { OMO_EXTRA_CA_CERTIFICATES: "junk" })
   expect(result.code).toBe(0)
