@@ -329,6 +329,10 @@ function createPlannedDirNoFollow(dir: string, surface: string): void {
     cursor = parent
   }
   if (lexists(cursor) && realpathSync(cursor) !== cursor) refuse(realpathSync(cursor))
+  // Documented residual (accepted, #10329): each segment is lstat-checked and the next one created in a
+  // separate step, so a link swapped in between those two calls could still get one directory made through
+  // it. Node has no mkdirat / O_NOFOLLOW directory walk to close that, and planting the link needs write
+  // access to the identity's own 0700 runtime root, which already means owning this user.
   for (const segment of missing) {
     try {
       mkdirSync(segment, { mode: 0o700 })
