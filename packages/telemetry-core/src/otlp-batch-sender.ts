@@ -40,6 +40,7 @@ export class BatchSender {
   #pumping: Promise<void> | null = null
   #rerun = false
   #inFlight: string | undefined
+  #claiming: Promise<unknown> | undefined
   #stopped = false
 
   constructor(input: BatchSenderInput) {
@@ -66,11 +67,17 @@ export class BatchSender {
     return this.#pumping
   }
 
-  stop(): void {
+  /**
+   * Releases the in-flight claim, and waits (no longer than `grace`) for a claim rename still in
+   * progress so the pass can release that one too instead of leaving it claimed until its lease ends.
+   */
+  async stop(grace: Promise<void>): Promise<void> {
     this.#stopped = true
     this.#abort.abort()
     const inFlight = this.#inFlight
     if (inFlight !== undefined) this.#release(inFlight)
+    const claiming = this.#claiming
+    if (claiming !== undefined) await Promise.race([claiming.then(() => undefined, () => undefined), grace])
   }
 
   #release(claimed: string): void {
@@ -98,13 +105,20 @@ export class BatchSender {
       const next = pending.shift()
       if (next === undefined) return
       this.#deferred.add(next.batchId)
-      const claimed = await claimBatch(ctx, next)
-      if (claimed === null) continue
-      if (this.#stopped) {
+      // A claim that completes after stop() is released before the promise stop() waits on settles.
+      const claiming = claimBatch(ctx, next).then((claimed) => {
+        if (claimed === null || !this.#stopped) return claimed
         this.#release(claimed)
-        return
+        return null
+      })
+      this.#claiming = claiming
+      let claimed: string | null
+      try {
+        claimed = await claiming
+      } finally {
+        this.#claiming = undefined
       }
-      await this.#send(claimed, next.name)
+      if (claimed !== null) await this.#send(claimed, next.name)
     }
   }
 

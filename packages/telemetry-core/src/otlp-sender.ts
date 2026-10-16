@@ -36,6 +36,14 @@ function abortableSleep(ms: number, abort: AbortSignal): Promise<void> {
   })
 }
 
+function delay(ms: number): { readonly elapsed: Promise<void>; readonly cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const elapsed = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms)
+  })
+  return { elapsed, cancel: () => clearTimeout(timer) }
+}
+
 function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
@@ -233,14 +241,13 @@ class OtlpSender {
     // flush's synchronous seal and claim work counts against the cap instead of delaying its start,
     // and it fires early enough to leave room for releasing the in-flight claim and closing files.
     const cap = this.#input.shutdownTimeoutMs ?? 2_000
-    let deadline: ReturnType<typeof setTimeout> | undefined
-    const expired = new Promise<void>((resolve) => {
-      deadline = setTimeout(resolve, Math.max(0, cap - Math.min(SHUTDOWN_CLEANUP_RESERVE_MS, cap / 10)))
-    })
-    await Promise.race([this.#flush(), expired])
-    clearTimeout(deadline)
+    const flushEnds = delay(Math.max(0, cap - Math.min(SHUTDOWN_CLEANUP_RESERVE_MS, cap / 10)))
+    const capEnds = delay(cap)
+    await Promise.race([this.#flush(), flushEnds.elapsed])
     this.#stopped = true
-    this.#batches.stop()
+    await this.#batches.stop(capEnds.elapsed)
+    flushEnds.cancel()
+    capEnds.cancel()
     this.#providers.shutdown()
   }
 }
