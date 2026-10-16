@@ -1,3 +1,4 @@
+import { recoveryAnchor } from "../crypto/anchor.ts";
 import type { RejectionCounter } from "../crypto/rejection.ts";
 import { deviceIdOf } from "../crypto/signatures.ts";
 import { pinTrustAnchor } from "../crypto/trust-pin.ts";
@@ -101,13 +102,12 @@ export const recoverOnFreshDevice = async (
 		await bridge.recoverAbort(begun.handle);
 		return refuse(reason);
 	};
-	const anchor = {
-		kind: "recovery" as const,
+	const anchor = recoveryAnchor({
 		account: input.account,
 		credentialId: begun.credentialId,
 		sealing_public_key: begun.sealing_public_key,
 		signing_public_key: begun.signing_public_key,
-	};
+	});
 	const [served, wrapRows] = await Promise.all([
 		loadServedChain(input.transport, input.account, input.rejections, anchor),
 		input.transport.listRecoveryWraps(),

@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TrustAnchor } from "../../crypto/anchor.ts";
+import { creatorAnchor, type TrustAnchor } from "../../crypto/anchor.ts";
 import { buildBatch, signRecord } from "../../crypto/build.ts";
 import {
 	appendEntries,
@@ -203,7 +203,7 @@ export const createWorld = async (
 	if (!appended.ok) throw new Error("genesis was not admitted");
 	const genesis = server.chain(account);
 	const walked = await appendEntries(
-		emptyChain(account, { kind: "creator", account, self: { ...owner.principal } }),
+		emptyChain(account, creatorAnchor(account, owner.keyring)),
 		genesis,
 		createRejectionCounter(),
 	);
