@@ -4,18 +4,21 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 import { listNames } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
 import type { SummaryRecovery } from "./session-summary-recovery"
+import type { adoptForeignWindow } from "./session-summary-adopt"
 import type { RecoveryStorage } from "./session-summary-recovery-storage"
 import type { ConsentScope, SummaryStorage } from "./session-summary-storage"
 
 /** What the recorder takes from the `extensions/omo-telemetry-recovery.js` sidecar. */
-export type SummarySidecar = Pick<typeof import("./session-summary-recovery"), "createSummaryRecovery" | "withRecoveryOps" | "sendSummaryRecord">
+export type SummarySidecar = Pick<typeof import("./session-summary-recovery"), "createSummaryRecovery" | "withRecoveryOps" | "sendSummaryRecord" | "adoptForeignWindow">
 
 export type LoadSummaryRecovery = () => Promise<SummarySidecar>
 
 export type LazySummaryRecovery = {
   readonly sweep: () => Promise<void> | undefined
   readonly load: () => Promise<void>
-  readonly ops: () => RecoveryStorage | undefined
+  readonly loaded: () => boolean
+  /** Continues another process's window; undefined while the sidecar is not loaded. */
+  readonly adopt: (input: Omit<Parameters<typeof adoptForeignWindow>[0], "storage">) => ReturnType<typeof adoptForeignWindow> | undefined
 }
 
 /** One load at a time; a failed load is forgotten, so the next caller tries again. */
@@ -40,8 +43,10 @@ export function createLazySummaryRecovery(input: {
   const { storage, publisher } = input
   let ops: RecoveryStorage | undefined
   let recovery: SummaryRecovery | undefined
+  let adopt: typeof adoptForeignWindow | undefined
 
   const ready = (): Promise<SummaryRecovery> => input.load().then((sidecar) => {
+    adopt = sidecar.adoptForeignWindow
     const loadedOps = (ops ??= sidecar.withRecoveryOps(storage))
     return (recovery ??= sidecar.createSummaryRecovery({
       storage: loadedOps,
@@ -70,6 +75,7 @@ export function createLazySummaryRecovery(input: {
       return ready().then((loaded) => loaded.sweep())
     },
     load: () => ready().then(() => undefined),
-    ops: () => ops,
+    loaded: () => ops !== undefined,
+    adopt: (args) => (ops === undefined || adopt === undefined ? undefined : adopt({ storage: ops, ...args })),
   }
 }

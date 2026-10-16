@@ -1,13 +1,13 @@
 import { linkSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { listNames, readJsonOrCorrupt } from "./session-summary-files"
+import { listNames, readJsonOrCorrupt, renameIfPresent } from "./session-summary-files"
 import { createOwnerLiveness } from "./session-summary-liveness"
 import { parseOwner, type ProcessOwner } from "./session-summary-owner"
 import {
-  claimFile,
   parsePendingRecord,
   parseRead,
+  parseWindowRecord,
   type Claimed,
   type PendingRecord,
   type ReadResult,
@@ -24,6 +24,9 @@ export type RecoveryStorage = SummaryStorage & {
   readonly isOwnCopyKey: (key: string) => boolean
   /** Exclusive create: never replaces a window another process wrote in the meantime. */
   readonly createWindow: (key: string, record: WindowRecord) => boolean
+  readonly claimWindow: (key: string) => Claimed<ReadResult<WindowRecord>> | undefined
+  /** Whether the window's event is pending, or claimed by a process resending it. */
+  readonly hasPending: (uuid: string) => boolean
   readonly readPending: (uuid: string) => ReadResult<PendingRecord>
   readonly claimPending: (uuid: string) => Claimed<ReadResult<PendingRecord>> | undefined
   readonly leftovers: () => readonly Leftover[]
@@ -55,6 +58,8 @@ export function withRecoveryOps(storage: SummaryStorage): RecoveryStorage {
         unlinkSync(temp)
       }
     },
+    claimWindow: (key) => claimFile(windowPath(key), owner, parseWindowRecord),
+    hasPending: (uuid) => listNames(pendingDir).some((name) => name === `${uuid}.json` || name.startsWith(`${uuid}.json.claimed-`)),
     readPending: (uuid) => parseRead(readJsonOrCorrupt(pendingPath(uuid)), parsePendingRecord),
     claimPending: (uuid) => claimFile(pendingPath(uuid), owner, parsePendingRecord),
     leftovers: () => [
@@ -62,6 +67,13 @@ export function withRecoveryOps(storage: SummaryStorage): RecoveryStorage {
       ...collectLeftovers(pendingDir, "pending-claim"),
     ],
   }
+}
+
+/** Hands `path` over to `owner` by renaming it; exactly one of several racing claimers gets it. */
+function claimFile<T>(path: string, owner: ProcessOwner, parse: (value: unknown) => T | undefined): Claimed<ReadResult<T>> | undefined {
+  const claimPath = `${path}.claimed-${owner.pid}-${owner.bootId}`
+  if (!renameIfPresent(path, claimPath)) return undefined
+  return { claimPath, record: parseRead(readJsonOrCorrupt(claimPath), parse) }
 }
 
 function collectLeftovers(dir: string, claimKind: "window-claim" | "pending-claim"): Leftover[] {

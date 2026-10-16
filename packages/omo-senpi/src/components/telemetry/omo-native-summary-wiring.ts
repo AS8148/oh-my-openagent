@@ -10,7 +10,6 @@ import {
   createSessionSummaryRecorder,
   type SessionSummaryOptions,
   type SessionSummaryRecorder,
-  type SummaryPublication,
 } from "./omo-native-session-summary"
 import type { OmoNativeEventName } from "./product-identity"
 import type { TelemetrySessionRole } from "./session-role"
@@ -52,27 +51,13 @@ export function createNativeSummaryRecorder(input: {
       owner: currentProcessOwner(),
       ...(input.isPidAlive === undefined ? {} : { isPidAlive: input.isPidAlive }),
     }),
-    publish: (publication) => publishThroughState(state, publication),
+    // Only reached from the sidecar's send step, so the sidecar is already loaded when this import runs.
+    publish: (publication) => import("#omo-telemetry-recovery-runtime").then((sidecar) => sidecar.publishThroughState(state, publication)),
     sessionRole: input.sessionRole,
     // The sink is fixed to PostHog until `telemetry.sink` exists; the collector sink forces 1.
     sampleRate: () => (sampleRate ??= resolveRawTurnSampleRate({ sink: "posthog", configured: configuredSampleRate(input.cwd, env), env })),
     ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
   })
-}
-
-// Acknowledged only when the server accepted this very event: the immediate send resolved on a 2xx answer;
-// a rejected send propagates so the pending file stays. A transport without immediate sends falls back to
-// its flush.
-async function publishThroughState(state: NativeCaptureState, publication: SummaryPublication): Promise<boolean> {
-  const capture = state.capture
-  if (capture === undefined) return false
-  capture("session_summary", publication.properties, { uuid: publication.uuid, timestamp: new Date(publication.timestamp) })
-  const ack = state.acks.get(publication.uuid)
-  state.acks.delete(publication.uuid)
-  if (!state.delivered.delete(publication.uuid)) return false
-  if (ack !== undefined) await ack
-  else await state.flush?.()
-  return true
 }
 
 // `telemetry.rawTurnSampleRate` from omo.json; an unreadable config leaves the documented default.

@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import type { EventTelemetryProperties } from "@oh-my-opencode/telemetry-core"
 
-import { CORRUPT, listNames, readJsonOrCorrupt, removeFile, renameIfPresent, writeJsonAtomic } from "./session-summary-files"
+import { CORRUPT, listNames, readJsonOrCorrupt, removeFile, writeJsonAtomic } from "./session-summary-files"
 import { createOwnerRegistry, parseOwner, type ProcessOwner } from "./session-summary-owner"
 import { parseTelemetrySessionRole, type TelemetrySessionRole } from "./session-role"
 import { SUMMARY_EPOCH_SHAPE, isSummaryWindow, type SummaryWindow } from "./session-summary-window"
@@ -62,7 +62,7 @@ export type ReadResult<T> = T | typeof CORRUPT | undefined
 
 /**
  * What every run needs. The parts only recovery uses (owner liveness, leftovers, exclusive create, pending
- * claims) are added by `withRecoveryOps` in the recovery sidecar, from `dir`, `register` and `probes`.
+ * window and pending claims) are added by `withRecoveryOps` in the recovery sidecar, from `dir`, `register` and `probes`.
  */
 export type SummaryStorage = {
   readonly dir: string
@@ -77,10 +77,8 @@ export type SummaryStorage = {
   readonly writeWindow: (key: string, record: WindowRecord) => void
   readonly removeWindow: (key: string) => void
   readonly windowKeys: () => readonly string[]
-  readonly claimWindow: (key: string) => Claimed<ReadResult<WindowRecord>> | undefined
   readonly writePending: (record: PendingRecord) => void
   readonly removePending: (uuid: string) => void
-  readonly hasPending: (uuid: string) => boolean
   readonly pendingUuids: () => readonly string[]
 }
 
@@ -133,22 +131,13 @@ export function createSummaryStorage(input: {
     },
     removeWindow: (key) => removeFile(windowPath(key)),
     windowKeys: () => listNames(dir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -".json".length)),
-    claimWindow: (key) => claimFile(windowPath(key), owner, parseWindowRecord),
     writePending(record) {
       ensureRegistered()
       writeJsonAtomic(pendingPath(record.uuid), { v: 2, ...record }, owner)
     },
     removePending: (uuid) => removeFile(pendingPath(uuid)),
-    hasPending: (uuid) => listNames(pendingDir).some((name) => name === `${uuid}.json` || name.startsWith(`${uuid}.json.claimed-`)),
     pendingUuids: () => listNames(pendingDir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -".json".length)),
   }
-}
-
-/** Hands `path` over to `owner` by renaming it; exactly one of several racing claimers gets it. */
-export function claimFile<T>(path: string, owner: ProcessOwner, parse: (value: unknown) => T | undefined): Claimed<ReadResult<T>> | undefined {
-  const claimPath = `${path}.claimed-${owner.pid}-${owner.bootId}`
-  if (!renameIfPresent(path, claimPath)) return undefined
-  return { claimPath, record: parseRead(readJsonOrCorrupt(claimPath), parse) }
 }
 
 export function parseRead<T>(value: unknown, parse: (value: unknown) => T | undefined): ReadResult<T> {

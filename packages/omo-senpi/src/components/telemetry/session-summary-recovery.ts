@@ -18,7 +18,8 @@ import {
 // The sidecar's whole surface: this file is the `#omo-telemetry-recovery-runtime` entry, and the bundle maps
 // telemetry-core's `#telemetry-immediate-send` here too, so every lazily loaded telemetry part shares one file.
 export { withRecoveryOps } from "./session-summary-recovery-storage"
-export { sendSummaryRecord } from "./session-summary-delivery"
+export { publishThroughState, sendSummaryRecord } from "./session-summary-delivery"
+export { adoptForeignWindow } from "./session-summary-adopt"
 export { createImmediateSender } from "@oh-my-opencode/telemetry-core"
 
 export type SummaryRecovery = {

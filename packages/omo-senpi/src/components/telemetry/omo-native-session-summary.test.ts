@@ -8,6 +8,7 @@ import {
   isSessionSampled,
 } from "./omo-native-session-summary"
 import { OMO_NATIVE_PROPERTY_ALLOWLISTS } from "./product-identity"
+import * as sidecar from "./session-summary-recovery"
 import { OWNER_STALE_MS, summaryDir } from "./session-summary-storage"
 import { createTempStateDirs, createTestRecorder, rows, summaryKeys, summaryTurn } from "./session-summary.test-support"
 import { percentile } from "./session-summary-window"
@@ -16,6 +17,12 @@ const stateDirs = createTempStateDirs()
 afterEach(() => stateDirs.cleanup())
 
 const recorder = (input: { readonly sampleRate?: number } = {}) => createTestRecorder({ dir: stateDirs.make(), ...input })
+
+// The race: this process read the dead owner's file, but a third process renamed it away before this claim.
+const claimLostToAnotherProcess = async () => ({
+  ...sidecar,
+  withRecoveryOps: (storage: Parameters<typeof sidecar.withRecoveryOps>[0]) => ({ ...sidecar.withRecoveryOps(storage), claimWindow: () => undefined }),
+})
 
 describe("session_summary windows", () => {
   test("#given three turns on two models #when the session quits #then one final row carries exact sums and per-model totals", async () => {
@@ -120,9 +127,7 @@ describe("session_summary windows", () => {
     const shared = join(summaryDir(dir), "s1.json")
     const before = readFileSync(shared, "utf8")
 
-    const live = createTestRecorder({ dir, pid: 222 })
-    // The race: this process read the dead owner's file, but a third process renamed it away first.
-    Object.assign(live.storage, { claimWindow: () => undefined })
+    const live = createTestRecorder({ dir, pid: 222, loadRecovery: claimLostToAnotherProcess })
     await live.summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
 
     expect(readFileSync(shared, "utf8")).toBe(before)
@@ -150,8 +155,7 @@ describe("session_summary windows", () => {
     const dir = stateDirs.make()
     const dead = createTestRecorder({ dir, pid: 111 })
     await dead.summary.recordTurn("s1", summaryTurn())
-    const live = createTestRecorder({ dir, pid: 222, alivePids: [333] })
-    Object.assign(live.storage, { claimWindow: () => undefined })
+    const live = createTestRecorder({ dir, pid: 222, alivePids: [333], loadRecovery: claimLostToAnotherProcess })
     await live.summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
     await live.summary.finish("s1", "quit")
     const winner = createTestRecorder({ dir, pid: 333, alivePids: [222], startAt: 1_000_000 + OWNER_STALE_MS + 1 })
