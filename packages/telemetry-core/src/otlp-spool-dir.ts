@@ -1,4 +1,4 @@
-import { linkSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs"
+import { linkSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync, statSync, unlinkSync } from "node:fs"
 import { rename } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -218,8 +218,45 @@ function tryLinkMove(dir: string, from: string, to: string): boolean {
   return true
 }
 
-export function publishBatch(dir: string, activeName: string, sealedName: string): void {
-  if (!tryLinkMove(dir, activeName, sealedName)) throw new Error(`active spool file vanished before its seal`)
+/** False when the active file is gone: an opt-out purge by another process deleted it, records included. */
+export function publishBatch(dir: string, activeName: string, sealedName: string): boolean {
+  return tryLinkMove(dir, activeName, sealedName)
+}
+
+function hasCode(error: unknown, codes: readonly string[]): boolean {
+  return error instanceof Error && "code" in error && typeof error.code === "string" && codes.includes(error.code)
+}
+
+/**
+ * The opt-out purge: deletes everything in this product's spool (sealed batches, in-flight claims,
+ * every process's WAL file and the quarantine), then the directory itself. An opt-out is the user's
+ * decision for the product, so it covers what earlier consented runs and other live processes left.
+ *
+ * Race handling with other live processes of the same product:
+ * - Each entry is removed on its own and ENOENT is ignored, so an entry another process renames or
+ *   deletes in the meantime (a claim, a send that completed) is never an error.
+ * - A consented process keeps an open file descriptor on its unlinked WAL file; its next seal finds
+ *   the name gone and drops those records quietly (the purge already covered them), and its next
+ *   append starts a new file. Its in-flight claim disappears too: the send's delete or release then
+ *   finds nothing, which is also quiet.
+ * - The directory is removed last and only when empty: if a consented process created a new file
+ *   after the listing, ENOTEMPTY leaves the directory and that new file in place, because it was
+ *   captured with consent after the purge began.
+ */
+export function purgeSpool(dir: string): void {
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch (error) {
+    if (isMissing(error)) return
+    throw error
+  }
+  for (const name of names) rmSync(join(dir, name), { recursive: true, force: true })
+  try {
+    rmdirSync(dir)
+  } catch (error) {
+    if (!hasCode(error, ["ENOENT", "ENOTEMPTY", "EEXIST"])) throw error
+  }
 }
 
 export function dropFile(ctx: SpoolContext, name: string, reason: DropReason): void {

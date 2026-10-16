@@ -25,7 +25,7 @@ export type BatchSenderInput = {
   readonly sleep: (ms: number, abort: AbortSignal) => Promise<void>
   readonly random: () => number
   readonly consent: () => boolean
-  readonly onAccepted: (sealedName: string) => void
+  readonly onAccepted: () => void
   readonly report: (event: TelemetryDiagnosticEvent, error?: unknown) => void
 }
 
@@ -118,11 +118,11 @@ export class BatchSender {
       } finally {
         this.#claiming = undefined
       }
-      if (claimed !== null) await this.#send(claimed, next.name)
+      if (claimed !== null) await this.#send(claimed)
     }
   }
 
-  async #send(claimed: string, sealedName: string): Promise<void> {
+  async #send(claimed: string): Promise<void> {
     const ctx = this.#input.ctx
     this.#inFlight = claimed
     const renew = setInterval(() => {
@@ -148,7 +148,7 @@ export class BatchSender {
       const current = this.#inFlight ?? claimed
       if (outcome.kind === "accepted") {
         deleteFile(ctx.dir, current)
-        this.#input.onAccepted(sealedName)
+        this.#input.onAccepted()
         if (outcome.partial !== undefined && outcome.partial.rejected > 0) {
           this.#input.report("telemetry_otlp_partial_success", new Error(outcome.partial.message))
         }

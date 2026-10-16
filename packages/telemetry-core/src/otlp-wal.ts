@@ -87,8 +87,7 @@ export class SpoolWriter {
     if (this.#fd === null || this.records === 0) return null
     this.#close()
     const sealed = batchName(this.#input.signal, batchId)
-    publishBatch(this.#input.dir, this.name, sealed)
-    return sealed
+    return publishBatch(this.#input.dir, this.name, sealed) ? sealed : null
   }
 
   discard(): void {

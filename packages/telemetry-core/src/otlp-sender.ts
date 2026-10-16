@@ -10,7 +10,7 @@ import {
 } from "./otlp-config"
 import {
   createBatchId,
-  deleteFile,
+  purgeSpool,
   SPOOL_CAP_BYTES,
   SPOOL_MAX_AGE_MS,
   sweepSpool,
@@ -53,10 +53,25 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-/** The collector transport; null whenever any opt-out applies, so nothing is ever created on disk. */
+/**
+ * The collector transport; null whenever any opt-out applies. An opt-out creates nothing on disk and
+ * purges whatever earlier consented runs left in the spool (see `purgeSpool` for the race rules).
+ */
 export function createOtlpTelemetryTransport(input: CreateOtlpTelemetryTransportInput): OtlpTelemetryTransport | null {
   const env = input.env ?? process.env
-  if (!isOtlpTelemetryEnabled({ env, productEnvPrefix: input.productEnvPrefix })) return null
+  if (!isOtlpTelemetryEnabled({ env, productEnvPrefix: input.productEnvPrefix })) {
+    try {
+      purgeSpool(input.spoolDir)
+    } catch (error) {
+      input.diagnostics?.({
+        event: "telemetry_spool_sweep_failed",
+        source: input.source ?? "otlp",
+        error,
+        errorKind: error instanceof Error ? "error" : "non_error",
+      })
+    }
+    return null
+  }
   return new OtlpSender(input, resolveOtlpEndpoint(env, input.endpoint)).transport
 }
 
@@ -67,7 +82,6 @@ class OtlpSender {
   readonly #providers: TelemetryProviders
   readonly #consent: () => boolean
   readonly #batches: BatchSender
-  readonly #ownSealed = new Set<string>()
   readonly #cap: SpoolCap
   readonly #unreported: Record<DropReason, number> = { evicted: 0, expired: 0, rejected: 0, corrupt: 0 }
   readonly #timers: ReturnType<typeof setInterval>[] = []
@@ -110,8 +124,7 @@ class OtlpSender {
       sleep: input.sleep ?? abortableSleep,
       random: input.random ?? Math.random,
       consent: this.#consent,
-      onAccepted: (sealedName) => {
-        this.#ownSealed.delete(sealedName)
+      onAccepted: () => {
         this.#droppedSince200 = 0
       },
       report: (event, error) => this.#report(event, error),
@@ -201,9 +214,7 @@ class OtlpSender {
     this.#guard("telemetry_spool_write_failed", () => {
       const batchId = createBatchId(this.#ctx.nowMs())
       const bytes = writer.bytes
-      const sealed = writer.seal(batchId)
-      if (sealed === null) return
-      this.#ownSealed.add(sealed)
+      if (writer.seal(batchId) === null) return
       this.#cap.sealed(writer.signal, batchId, bytes)
     })
   }
@@ -217,19 +228,19 @@ class OtlpSender {
     }
   }
 
-  #discardOwn(): void {
+  /** Consent withdrawn mid-run: close this process's files, then purge the whole spool. */
+  #purge(): void {
     this.#guard("telemetry_spool_write_failed", () => {
       this.#providers.logWriter.discard()
       this.#providers.spanWriter.discard()
-      for (const name of this.#ownSealed) deleteFile(this.#ctx.dir, name)
-      this.#ownSealed.clear()
+      purgeSpool(this.#ctx.dir)
     })
   }
 
   async #flush(): Promise<void> {
     if (this.#stopped) return
     if (!this.#consent()) {
-      this.#discardOwn()
+      this.#purge()
       return
     }
     this.#batches.newCycle()
