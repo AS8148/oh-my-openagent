@@ -16,8 +16,8 @@ export class MemoryFakeExtensionAPI extends FakeExtensionAPI {
   readonly entries: Array<{ customType: string; data: unknown }> = []
   readonly entryRenderers: Array<{ customType: string; renderer: unknown }> = []
 
-  appendEntry(customType: string, data?: unknown): void {
-    this.entries.push({ customType, data })
+  appendEntry(customType: string, data?: unknown, options?: { readonly startupBookkeeping?: boolean }): void {
+    this.entries.push(options === undefined ? { customType, data } : { customType, data, options })
   }
 
   registerEntryRenderer(customType: string, renderer: unknown): void {

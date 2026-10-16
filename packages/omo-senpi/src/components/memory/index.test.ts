@@ -161,9 +161,11 @@ describe("createMemoryComponent", () => {
     // Direct registration is the only surface: the memory tool always registers directly and no MCP server is offered.
     expect(pi.tools.map((tool) => tool.name)).toEqual(["memory"])
     expect(pi.mcpServers.map((server) => server.name)).toEqual([])
+    // The binding is startup bookkeeping, so a session closed without a conversation leaves no file (#10168, senpi#3263).
     expect(pi.entries).toEqual([{
       customType: MEMORY_BINDING_CUSTOM_TYPE,
       data: expect.objectContaining({ identity: expect.stringMatching(/^project-[a-f0-9]{8}$/), boundAt: 123 }),
+      options: { startupBookkeeping: true },
     }])
     expect(existsSync(memoryHome)).toBe(false)
     expect(notifications).toEqual([])
