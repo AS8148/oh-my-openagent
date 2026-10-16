@@ -77,11 +77,26 @@ const sendingName = (signal: Signal, batchId: string, bootId: string, leaseExpir
 
 const HEX = Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0"))
 
-const COUNTER_BITS = 26
-const COUNTER_LIMIT = 2 ** COUNTER_BITS
-let lastIdMs = -1
-let lastCounter = 0
-let lastCounterOverflowed = false
+export const BATCH_ID_COUNTER_LIMIT = 2 ** 26
+
+export type BatchIdCounter = { readonly ms: number; readonly counter: number; readonly overflowed: boolean }
+
+/**
+ * Documented limit: order holds across ONE counter overflow while the clock stays one millisecond
+ * behind the advanced timestamp. A second overflow within that clock millisecond (2^25 or more ids)
+ * reseeds at the clock's millisecond, below the advanced one, so order can break there.
+ */
+export function nextBatchIdCounter(last: BatchIdCounter, ms: number, random: () => number): BatchIdCounter {
+  if (ms === last.ms || (ms === last.ms - 1 && last.overflowed)) {
+    const counter = last.counter + 1
+    return counter >= BATCH_ID_COUNTER_LIMIT
+      ? { ms: last.ms + 1, counter: 0, overflowed: true }
+      : { ms: last.ms, counter, overflowed: last.overflowed }
+  }
+  return { ms, counter: Math.floor(random() * (BATCH_ID_COUNTER_LIMIT / 2)), overflowed: false }
+}
+
+let lastId: BatchIdCounter = { ms: -1, counter: 0, overflowed: false }
 
 /**
  * UUIDv7 (RFC 9562) with a fixed-length dedicated counter (section 6.2, method 1): 48-bit unix
@@ -93,21 +108,9 @@ let lastCounterOverflowed = false
  * exhausted counter moves the timestamp one millisecond forward, as the RFC allows. Never sent.
  */
 export function createBatchId(unixMs: number): string {
-  const ms = Math.max(0, Math.floor(unixMs))
-  if (ms === lastIdMs || (ms === lastIdMs - 1 && lastCounterOverflowed)) {
-    lastCounter += 1
-    if (lastCounter >= COUNTER_LIMIT) {
-      lastIdMs += 1
-      lastCounter = 0
-      lastCounterOverflowed = true
-    }
-  } else {
-    lastIdMs = ms
-    lastCounter = Math.floor(Math.random() * (COUNTER_LIMIT / 2))
-    lastCounterOverflowed = false
-  }
-  let timestamp = lastIdMs
-  const counter = lastCounter
+  lastId = nextBatchIdCounter(lastId, Math.max(0, Math.floor(unixMs)), Math.random)
+  let timestamp = lastId.ms
+  const counter = lastId.counter
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   for (let index = 5; index >= 0; index -= 1) {
     bytes[index] = timestamp % 256
