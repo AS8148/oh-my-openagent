@@ -87,15 +87,30 @@ fn bounded_keys_release_first_press_when_interrupted_between_presses() {
         let signal = harness.supervisor.hold_signal();
         harness.worker.hold_signal = Some(signal.clone());
         let supervisor = harness.supervisor.clone();
+        let (committed_tx, committed) = std::sync::mpsc::channel();
         harness.faults.on_next(FakeMethod::KeyPress, move || {
             if stop {
-                supervisor.trigger_stop(senpi_desktop_safety::StopSource::Hotkey);
+                // A stop arrives from the tap or API thread, never from the worker:
+                // the stop waits for this very hold to release its input. Refuse
+                // input first, as trigger_stop does, so the next press sees it.
+                supervisor.suspend_input();
+                let supervisor = supervisor.clone();
+                let committed_tx = committed_tx.clone();
+                std::thread::spawn(move || {
+                    supervisor.trigger_stop(senpi_desktop_safety::StopSource::Hotkey);
+                    committed_tx.send(()).unwrap_or(());
+                });
             } else {
                 signal.cancel();
             }
         });
         // When the next press checks the real request signal.
         let error = harness.process(keys(0.0)).unwrap_err();
+        if stop {
+            committed
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the stop commits once the first key is released");
+        }
         // Then neither later key is pressed, and the first one releases.
         assert_eq!(error.code, if stop { ErrorCode::Suspended } else { ErrorCode::Cancelled });
         assert_eq!(transitions(&harness), [(KeyName::Ctrl, true), (KeyName::Ctrl, false)]);
