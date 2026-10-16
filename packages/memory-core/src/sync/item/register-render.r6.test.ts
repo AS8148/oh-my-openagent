@@ -120,6 +120,15 @@ describe("Unicode spaces YAML does not trim are part of the value (delta review 
   })
 })
 
+describe("CRLF frontmatter capture (delta review ea00e988be)", () => {
+  test("the last frontmatter line's CR is a line ending, not part of the value", async () => {
+    const doc = await newDoc("1")
+    captureInto(doc, "", [], "---\nn: 2\r\nz: 1\r\n---\nbody\n")
+    expect(headerOf(renderItem(doc) ?? "")).toEqual({ n: 2, z: 1 })
+    doc.free()
+  })
+})
+
 describe("register values keep their YAML type (review r6 M1, M2)", () => {
   test("a register value joined into a set-kind key keeps its type as an element", async () => {
     for (const [source, expected] of [["3", 3], ["true", true], ["{ a: 1 }", { a: 1 }]] as const) {
