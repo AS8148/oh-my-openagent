@@ -4,7 +4,7 @@
 // cycle and for one resumed after a crash, so each stage is reached exactly once.
 
 import { randomBytes } from "node:crypto"
-import { mkdir, readdir, readFile, rename, rm } from "node:fs/promises"
+import { mkdir, readdir, readFile, rename, rm } from "../../fs/resilient"
 import { dirname, join, relative, sep } from "node:path"
 
 import { TEMP_MARK, writeAtomic } from "./atomic"

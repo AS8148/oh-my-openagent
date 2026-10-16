@@ -3,7 +3,7 @@
 // instant leaves either the old file or the new one, never a half-written one.
 
 import { randomBytes } from "node:crypto"
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, writeFile } from "../../fs/resilient"
 import { basename, dirname, join } from "node:path"
 
 import { syncJournalDirectory, syncJournalFile } from "../../journal/fsync"

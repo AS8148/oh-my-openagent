@@ -5,7 +5,7 @@
 // kept apart and never decides what is pulled. Outgoing ops are journaled as `pending` the moment
 // they are captured, before anything is rendered.
 
-import { readdir } from "node:fs/promises"
+import { readdir } from "../../fs/resilient"
 import { join } from "node:path"
 
 import { readJson, removeAtomic, TEMP_MARK, writeJson } from "./atomic"
