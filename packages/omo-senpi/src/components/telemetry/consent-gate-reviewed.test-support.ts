@@ -36,7 +36,7 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
   },
   {
     file: "omo-native-component.ts", fn: "createOmoNativeTelemetryComponent>captureEvent",
-    guard: "unless(properties.$session_id === OPTED_OUT_SESSION_HASH) if(isOmoNativeEventName(name))",
+    guard: "unless(state.isConsented?.() !== true) unless(properties.$session_id === OPTED_OUT_SESSION_HASH) if(isOmoNativeEventName(name))",
     call: "state.capture(name)", reason: FAN_IN,
   },
   {
@@ -151,7 +151,7 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
   },
   {
     file: "omo-native-turns.ts", fn: "createOmoNativeTurnHandler>=>",
-    guard: "unless(event.message.role !== \"assistant\") if(options.summary.isRawTurnSampled(options.sessionId))",
+    guard: "unless(event.message.role !== \"assistant\") if(options.summary.isRawTurnSampled(options.sessionId) && options.isConsented())",
     call: "options.client.captureEvent(\"turn_completed\")", reason: THROUGH_FAN_IN,
   },
   {

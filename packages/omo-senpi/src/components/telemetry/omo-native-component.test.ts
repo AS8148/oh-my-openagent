@@ -668,6 +668,52 @@ describe("OmO Native telemetry component integration", () => {
     })
   })
 
+  // The fan-in drops an event only when `$session_id` is the opted-out sentinel. That is enough: when
+  // consent is off at start no session client exists at all, and a mid-session withdrawal is caught by
+  // the consent read before each write. Here every later event keeps the live session's real hash in
+  // `$session_id` (so the sentinel drop cannot fire) while other producers hash to the sentinel, and
+  // still nothing leaves the process after the withdrawal.
+  test("#given a sampled session that withdraws consent mid-way #when every producer fires again #then nothing is sent after the withdrawal and no message carries the sentinel", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      // given
+      writeInventory(agentDir)
+      const recorder = createTransportRecorder()
+      const computer = computerObservers()
+      let consent = true
+      let clock = 1_000_000
+      const pi = new FakeExtensionAPI()
+      createOmoNativeTelemetryComponent({
+        computerUseTelemetryObservers: computer.registry,
+        consentNow: () => clock,
+        env: createEnabledEnv(agentDir),
+        hashSessionId: (raw) => `hashed:${raw}`,
+        isConfigEnabled: () => consent,
+        now: FIXED_NOW,
+        osProvider: createOsProvider("withdraw-host"),
+        rawTurnSampleRate: 1,
+        scheduleConsentCheck: () => () => undefined,
+        stateDir: join(agentDir, "omo-senpi", "omo-native"),
+        transportFactory: recorder.factory,
+      }).register(pi, { config: pi, logger: createSilentLogger() })
+      await pi.dispatch("session_start", { type: "session_start", reason: "startup" }, context("withdrawn"))
+      await pi.dispatch("turn_end", turnEnd(), context("withdrawn"))
+      expect(nativeMessages(recorder.messages).map(({ event }) => event)).toContain("turn_completed")
+      const sentBefore = recorder.messages.length
+
+      // when
+      consent = false
+      clock += 60_000
+      await pi.dispatch("turn_end", turnEnd(), context("withdrawn"))
+      await pi.dispatch("tool_result", toolResult(), context("withdrawn"))
+      computer.publish({ kind: "activation", sessionId: "withdrawn", active: true, source: "tool_call", platform: "linux", backend: "x11" })
+      await pi.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, context("withdrawn"))
+
+      // then
+      expect(recorder.messages.slice(sentBefore)).toEqual([])
+      expect(recorder.messages.filter((message) => JSON.stringify(message).includes("opted-out"))).toEqual([])
+    })
+  })
+
   // M1 on #10232: opting out mid-session and being killed before the next turn left the opted-in window
   // on disk, marked enabled, for the next opted-in process to send.
   for (const nextProcessOptedIn of [true, false]) {

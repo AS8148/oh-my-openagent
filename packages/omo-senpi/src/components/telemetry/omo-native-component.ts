@@ -47,6 +47,8 @@ import {
 type SharedState = {
   capture?: (name: OmoNativeEventName, properties: EventTelemetryProperties) => void
   sessionHash?: string
+  /** The one consent gate as of now; unset until registration, so nothing leaves the fan-in before it. */
+  isConsented?: () => boolean
 }
 
 export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
@@ -78,6 +80,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
   const state: SharedState = {}
   const client: Pick<EventTelemetryClient, "captureEvent"> = {
     captureEvent(name, properties) {
+      if (state.isConsented?.() !== true) return
       if (properties.$session_id === OPTED_OUT_SESSION_HASH) return
       if (isOmoNativeEventName(name)) state.capture?.(name, properties)
     },
@@ -114,6 +117,10 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
         cached = { cwd: consentCwd, at, value: readConsent(consentCwd) }
         return cached.value
       }
+      // Read before EVERY event leaves the fan-in, not only when a session is hashed or sampled: a
+      // session sampled while opted in keeps its real hash after a withdrawal, so the sentinel cannot
+      // stop its later events.
+      state.isConsented = () => currentConsent(false)
       const hashSession = (rawId: string): string =>
         currentConsent(false) ? (options.hashSessionId ?? hashSessionId)(rawId) : OPTED_OUT_SESSION_HASH
 
@@ -195,6 +202,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
         createOmoNativeTurnHandler({
           client,
           diagnostics: options.diagnostics,
+          isConsented: () => currentConsent(false),
           sessionId: sessionHash,
           summary,
         })(payload)
