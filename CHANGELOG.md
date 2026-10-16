@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**`oracle`, `momus` and `plan-reviewer` fall back to Argon before the previous pro model.** In all three chains, Argon at high thinking (Google, Vertex or OpenCode) now sits directly ahead of the previous pro rung, which stays in place for Copilot and for engine pins that do not serve Argon yet. The GPT heads keep first place: on 8 consult and plan-review tasks graded blind, Argon beat the previous pro model in all 16 judgments but did not beat the current GPT heads on correctness, and its median answer took 57 s against 15 s. Telemetry now names the Qwen 3.7 Plus rung of `explore` and `librarian` instead of reporting it as `custom`. ([#10180](https://github.com/code-yeongyu/oh-my-openagent/issues/10180))
+
 ## [5.1.34-beta.1] - 2026-10-16
 
 **The browser skill no longer gets stuck when its BrowserSkill connection file goes missing or a page script hangs.** If the background daemon is still running but its `daemon.json` disappeared, the skill reconnects to it instead of trying to start a second one and failing with "port 52800 is already in use" over and over. A script or other browser action that runs past its own time limit is now stopped in the browser, so the next action works; a step that waits for you, such as signing in or approving a tab, is never cut short. Reported by @devswha. ([#10216](https://github.com/code-yeongyu/oh-my-openagent/issues/10216), [#10217](https://github.com/code-yeongyu/oh-my-openagent/issues/10217), [#10254](https://github.com/code-yeongyu/oh-my-openagent/pull/10254))
