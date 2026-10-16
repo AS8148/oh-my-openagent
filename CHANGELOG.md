@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Opening and closing an OmO session without a message no longer leaves an empty session in `/resume`.** The memory component's hidden session binding is now written as startup bookkeeping, so senpi removes a session that never had a conversation. ([#10168](https://github.com/code-yeongyu/oh-my-openagent/issues/10168), [#10308](https://github.com/code-yeongyu/oh-my-openagent/pull/10308))
+
 **The ulw-research report checker no longer counts an invisible image as the report's visual.** An image or chart with any zero dimension, such as `width="600" height="0"` or an inline `height: 0`, no longer satisfies the rule that every final report carries a visual; one with no declared size still counts, since the browser sizes it. ([#10266](https://github.com/code-yeongyu/oh-my-openagent/issues/10266))
 
 **Computer use no longer asks to confirm foreground control in full access mode.** A full-access session grants it directly and shows a note with the reason; other modes still ask, headless runs still never grant, and the grant still ends with the turn, on release or on the stop chord. Reported by Q. ([#10022](https://github.com/code-yeongyu/oh-my-openagent/issues/10022), [#10024](https://github.com/code-yeongyu/oh-my-openagent/pull/10024))
