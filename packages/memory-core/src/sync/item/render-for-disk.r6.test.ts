@@ -43,7 +43,7 @@ describe("renderForDisk (lead decision r6)", () => {
     expect(written).toContain("# a comment the model does not keep")
     expect(written).toContain("description: 'hello there'")
     expect(written).toContain("n: 3")
-    expect(written).toMatch(/tags: \[ ?a, b ?\]/)
+    expect(written).toContain("tags: [a, b]")
     a.free()
     b.free()
   })
@@ -69,5 +69,93 @@ describe("renderForDisk (lead decision r6)", () => {
     const stale = STYLED.replace("body\n", "old body\n")
     expect(renderForDisk(doc, stale)).toBe(STYLED)
     doc.free()
+  })
+})
+
+async function syncedEdit(disk: string, edit: (rendered: string) => string) {
+  const a = await newDoc("1")
+  captureInto(a, "", [], disk)
+  const b = await newDoc("2")
+  b.import(a.export({ mode: "update" }))
+  captureInto(b, renderItem(b) ?? "", itemFrontier(b), edit(renderItem(b) ?? ""))
+  a.import(b.export({ mode: "update" }))
+  b.free()
+  return a
+}
+
+describe("renderForDisk with YAML anchors and aliases (delta review 0bde9bc01e HIGH, lead)", () => {
+  const ANCHORED = "---\nbase: &x hello\n# about other\nother: *x # alias note\nn: 2 # keep\n---\nbody\n"
+
+  test("changing the key that holds an anchor inlines the resolved value at its aliases", async () => {
+    const a = await syncedEdit(ANCHORED, (r) => r.replace("base: hello", "base: bye"))
+    expect(renderForDisk(a, ANCHORED)).toBe("---\nbase: bye\n# about other\nother: hello\nn: 2 # keep\n---\nbody\n")
+    a.free()
+  })
+
+  test("deleting the key that holds an anchor inlines the resolved value at its aliases", async () => {
+    const a = await syncedEdit(ANCHORED, (r) => r.replace("base: hello\n", ""))
+    expect(renderForDisk(a, ANCHORED)).toBe("---\n# about other\nother: hello\nn: 2 # keep\n---\nbody\n")
+    a.free()
+  })
+
+  test("changing a key that uses an alias rewrites only that key; the anchor stays", async () => {
+    const a = await syncedEdit(ANCHORED, (r) => r.replace("other: hello", "other: own"))
+    expect(renderForDisk(a, ANCHORED)).toBe("---\nbase: &x hello\n# about other\nother: own\nn: 2 # keep\n---\nbody\n")
+    a.free()
+  })
+
+  test("changing the anchor of a merge key inlines the merged map", async () => {
+    const merged = "---\nd: &m { a: 1 }\ne: { <<: *m, b: 2 } # merged\nz: 9 # keep\n---\nbody\n"
+    const a = await syncedEdit(merged, (r) => r.replace("d: { a: 1 }", "d: { a: 5 }"))
+    const written = renderForDisk(a, merged) ?? ""
+    expect(written).not.toContain("*m")
+    expect(written).toContain("z: 9 # keep")
+    expect(written.split("---\n")[1]).toBe(renderItem(a)?.split("---\n")[1]?.replace("z: 9", "z: 9 # keep") ?? "")
+    a.free()
+  })
+
+  test("an untouched anchor and alias survive a patch of another key", async () => {
+    const a = await syncedEdit(ANCHORED, (r) => r.replace("n: 2", "n: 3"))
+    expect(renderForDisk(a, ANCHORED)).toBe("---\nbase: &x hello\n# about other\nother: *x # alias note\nn: 3\n---\nbody\n")
+    a.free()
+  })
+
+  test("a top-level merge key falls back to the canonical render", async () => {
+    const top = "---\nd: &m { a: 1 }\n<<: *m\nn: 2\n---\nbody\n"
+    const a = await syncedEdit(top, (r) => r.replace("n: 2", "n: 3"))
+    expect(renderForDisk(a, top)).toBe(renderItem(a))
+    a.free()
+  })
+
+  test("any failure inside the patch path falls back to the canonical render", async () => {
+    const a = await syncedEdit(ANCHORED, (r) => r.replace("n: 2", "n: 3"))
+    const failing = () => {
+      throw new Error("patch failed")
+    }
+    expect(renderForDisk(a, ANCHORED, failing)).toBe(renderItem(a))
+    a.free()
+  })
+})
+
+describe("renderForDisk keeps untouched source exactly (delta review 0bde9bc01e LOW)", () => {
+  const DISK = "---\nd: >\n  long folded\n  text here\nn: 2\nflow: {a: 1,   b: 2}\n# trailing comment\n---\nbody\n"
+
+  test("a folded value, flow spacing and a trailing comment keep their bytes when another key changes", async () => {
+    const a = await syncedEdit(DISK, (r) => r.replace("n: 2", "n: 3"))
+    expect(renderForDisk(a, DISK)).toBe(DISK.replace("n: 2", "n: 3"))
+    a.free()
+  })
+
+  test("a deleted key takes the comment lines directly above it; other bytes stay", async () => {
+    const disk = "---\nkeep: 1\n# about gone\ngone: x # inline\nlast: 2\n---\nbody\n"
+    const a = await syncedEdit(disk, (r) => r.replace("gone: x\n", ""))
+    expect(renderForDisk(a, disk)).toBe("---\nkeep: 1\nlast: 2\n---\nbody\n")
+    a.free()
+  })
+
+  test("a new key is added after the last key, before a trailing comment", async () => {
+    const a = await syncedEdit(DISK, (r) => r.replace("n: 2", "n: 2\nadded: yes-new"))
+    expect(renderForDisk(a, DISK)).toBe(DISK.replace("flow: {a: 1,   b: 2}\n", "flow: {a: 1,   b: 2}\nadded: yes-new\n"))
+    a.free()
   })
 })
