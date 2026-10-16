@@ -22,8 +22,9 @@ async function removeWhenReleased(root: string): Promise<void> {
       await rmEfaultTolerant(root, { recursive: true, force: true })
       return
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if ((code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") || Date.now() >= deadline) throw error
+      // rmEfaultTolerant wraps an exhausted retry as `teardown-failure:`; the errno sits on its cause.
+      const code = (error as NodeJS.ErrnoException).code ?? ((error as Error).cause as NodeJS.ErrnoException | undefined)?.code
+      if ((code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY" && code !== "EFAULT") || Date.now() >= deadline) throw error
       await new Promise((resolve) => setTimeout(resolve, TEMP_ROOT_RELEASE_POLL_MS))
     }
   }
@@ -117,5 +118,8 @@ describe("memory pressure dream wiring", () => {
       conversationIds: [],
       snapshots: [],
     }])
+
+    // Release everything the session opened inside the temp root before afterEach removes it (#10154).
+    await wiring.onSessionShutdown({ reason: "reload", sessionId, deadlineAt: Date.now() + 10_000 })
   }, 30_000)
 })
