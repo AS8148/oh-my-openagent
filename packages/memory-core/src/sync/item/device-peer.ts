@@ -3,10 +3,10 @@
 // exclusive create (`wx`): when two processes race, exactly one id is written and both read it.
 
 import { randomBytes } from "node:crypto"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 
 import type { PeerID } from "../../crdt/loro-runtime"
+import { mkdir, readFile, writeFile } from "../../fs/resilient"
 
 export class DevicePeerError extends Error {
   override readonly name = "DevicePeerError"
