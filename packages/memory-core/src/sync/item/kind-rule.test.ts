@@ -5,9 +5,10 @@ import type { LoroDoc } from "../../crdt/loro-runtime"
 import { captureItem, itemFrontier, renderItem, splitItem } from "./index"
 import { captureInto, newDoc, type Peer } from "./test-support"
 
-// Concurrent first writes of one key tie at Lamport 0, and every capture forks on a fresh
-// random peer, so which kind wins is decided by peer order. Each case therefore asserts
-// what must hold for every peer order: both delivery orders render identical bytes, the
+// Concurrent first writes of one key tie at Lamport 0, so which kind wins is decided by
+// peer order. Captures write under the device's own peer (review r3; a fresh random fork
+// peer made this order, and this test, nondeterministic). Each case asserts what must
+// hold for every peer order: both delivery orders render identical bytes, the
 // render is valid frontmatter, re-capturing it is a zero-op fixed point, and every token
 // either writer typed survives.
 

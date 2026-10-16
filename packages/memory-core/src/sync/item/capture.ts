@@ -1,10 +1,12 @@
 // captureItem (sync-design §5): the working tree is diffed against the item's state at
-// an explicit baseline frontier. The ops are generated on a FORK at that frontier, so a
-// stale writer's diff can only touch text it actually saw; importing the update into the
-// store doc merges it with anything newer. Returns null when nothing changed.
-// The fork keeps its own fresh peer id: forkAt already mints one, and overriding it with
-// the store doc's peer would hand out op ids the store already knows, so a second capture
-// from the same device on a stale baseline would be discarded on import (review r1 #1).
+// an explicit baseline frontier, on a throwaway fork at that frontier, so a stale writer's
+// diff can only touch text it actually saw. That diff is merged into a throwaway copy of
+// the CURRENT document and the result is transplanted onto the current document under the
+// doc's own peer (review r3): every op this device ever exports carries its one stable
+// peer, so the version vector stays one entry per device, and the ops continue that peer's
+// counters instead of colliding with its later ops at the stale baseline (review r1 #1).
+// A capture whose (baseline, working text) pair was already applied, per the device's
+// receipt, writes nothing. Returns null when nothing changed.
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
@@ -13,9 +15,12 @@ import type { FmValue } from "./frontmatter"
 import { renderScalar, splitItem } from "./frontmatter"
 import type { ItemHistory } from "./history"
 import { analyzeHistory } from "./history"
+import { captureFingerprint, hasReceipt, writeReceipt } from "./receipt"
 import { renderDocContent } from "./render"
 import type { KeyState } from "./state"
 import { activeReg, combineKey, fmName, orderedSetElements, readKeyState, regText } from "./state"
+import { newTag } from "./tag"
+import { transplantContent } from "./transplant"
 
 export class CaptureBaselineError extends Error {
   override readonly name = "CaptureBaselineError"
@@ -27,19 +32,65 @@ export function captureItem(
   baseFrontier: ItemFrontier,
   workingText: string,
 ): Uint8Array | null {
-  const fork = doc.forkAt(baseFrontier)
+  const fingerprint = captureFingerprint(baseFrontier, workingText)
+  if (hasReceipt(doc, fingerprint)) return null
+  const current = isCurrentFrontier(doc, baseFrontier)
+  const merged = current ? null : mergeOntoCurrent(doc, baseText, baseFrontier, workingText)
+  if (!current && merged === null) return null
+  const target = doc.fork()
   try {
-    fork.setRecordTimestamp(false)
-    if (renderDocContent(fork) !== baseText) {
+    target.setPeerId(doc.peerId)
+    target.setRecordTimestamp(false)
+    if (merged === null) {
+      // Baseline is the current state: the diff applies directly, no rebase needed.
+      if (renderDocContent(target) !== baseText) {
+        throw new CaptureBaselineError("captureItem: baseText is not the item's render at baseFrontier")
+      }
+      applyWorkingText(target, workingText)
+    } else {
+      transplantContent(target, merged)
+    }
+    target.commit()
+    const from = doc.oplogVersion()
+    if (target.oplogVersion().compare(from) === 0) return null
+    writeReceipt(target, fingerprint)
+    target.commit()
+    return target.export({ mode: "update", from })
+  } finally {
+    target.free()
+    merged?.free()
+  }
+}
+
+function isCurrentFrontier(doc: LoroDoc, frontier: ItemFrontier): boolean {
+  const now = doc.frontiers()
+  if (now.length !== frontier.length) return false
+  return now.every((id) => frontier.some((f) => f.peer === id.peer && f.counter === id.counter))
+}
+
+/** The current document with the user's baseline-to-working diff merged in, under throwaway peers; null when the diff is empty. */
+function mergeOntoCurrent(
+  doc: LoroDoc,
+  baseText: string,
+  baseFrontier: ItemFrontier,
+  workingText: string,
+): LoroDoc | null {
+  const scratch = doc.forkAt(baseFrontier)
+  try {
+    scratch.setRecordTimestamp(false)
+    if (renderDocContent(scratch) !== baseText) {
       throw new CaptureBaselineError("captureItem: baseText is not the item's render at baseFrontier")
     }
-    applyWorkingText(fork, workingText)
-    fork.commit()
-    const from = fork.frontiersToVV(baseFrontier)
-    if (fork.oplogVersion().compare(from) === 0) return null
-    return fork.export({ mode: "update", from })
+    applyWorkingText(scratch, workingText)
+    scratch.commit()
+    const from = scratch.frontiersToVV(baseFrontier)
+    if (scratch.oplogVersion().compare(from) === 0) return null
+    const merged = doc.fork()
+    merged.setRecordTimestamp(false)
+    merged.import(scratch.export({ mode: "update", from }))
+    return merged
   } finally {
-    fork.free()
+    scratch.free()
   }
 }
 
@@ -96,10 +147,10 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
   // quoted it ("q: r / true" parses back as bare text); compare the dequoted forms.
   if (combinedReg !== undefined && (combinedReg === target || combinedReg === regText(target))) return
   const active = activeReg(state.reg)
-  // Idempotent by value: if an active register already holds this exact serialized value,
-  // writing it again would only mint a duplicate (a stale capture replaying a value a
-  // concurrent writer already landed is a no-op, review r2 #2).
-  if (active.some((e) => e.value === target)) return
+  // A no-op only when every active entry already holds the target (duplicates of one value).
+  // When other values are active, the user is resolving a conflict by hand: write an entry
+  // that supersedes all of them, or the conflict re-renders over the user's choice (r2 HIGH-2).
+  if (active.length > 0 && active.every((e) => e.value === target)) return
   const entry = { v: target, s: active.map((e) => e.tag) }
   fork.getMap(fmName(key, "reg")).set(newTag(fork, target), entry)
   clearLosers(fork, key, state, "reg")
@@ -184,15 +235,3 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-function newTag(fork: LoroDoc, salt: string): string {
-  return `${fork.peerIdStr}@${fork.opCount()}#${fnv1a(salt, 2166136261)}${fnv1a(salt, 424242)}`
-}
-
-function fnv1a(text: string, basis: number): string {
-  let hash = basis
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(36)
-}

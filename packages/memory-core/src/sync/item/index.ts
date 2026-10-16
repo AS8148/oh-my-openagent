@@ -1,5 +1,6 @@
 export { captureItem } from "./capture"
 export { caseFold } from "./casefold"
+export { DevicePeerError, loadOrCreateDevicePeer } from "./device-peer"
 export { createItemDoc, deleteItem, isLive, itemFrontier } from "./document"
 export type { ItemFrontier } from "./document"
 export { CaptureBaselineError } from "./capture"
