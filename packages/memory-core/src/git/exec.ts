@@ -10,7 +10,14 @@ export interface GitExecOptions {
   stdin?: string | Buffer
   /** Stops the git process (SIGTERM, so git removes its own lock and temp files) and rejects. */
   signal?: AbortSignal
+  /** After a timeout's SIGTERM, how long git gets to exit before SIGKILL (default GIT_KILL_GRACE_MS). */
+  killGraceMs?: number
 }
+
+// A timed-out git first gets SIGTERM, on which it removes its own lock and temp files; SIGKILL
+// follows only if it is still running after this grace. Killing outright stranded a HEAD.lock
+// when a slow `git commit` was killed right after updating HEAD (omo #10199 field incident).
+export const GIT_KILL_GRACE_MS = 10_000
 
 export interface GitExecResult {
   code: number
@@ -96,9 +103,11 @@ function runGitCommand(
     let settled = false
     let timedOut = false
 
+    let killTimer: ReturnType<typeof setTimeout> | undefined
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill("SIGKILL")
+      child.kill("SIGTERM")
+      killTimer = setTimeout(() => child.kill("SIGKILL"), options.killGraceMs ?? GIT_KILL_GRACE_MS)
     }, options.timeoutMs)
     let aborted = false
     const onAbort = () => {
@@ -115,6 +124,7 @@ function runGitCommand(
       if (settled) return
       settled = true
       clearTimeout(timer)
+      clearTimeout(killTimer)
       options.signal?.removeEventListener("abort", onAbort)
       if (error.code === "ENOENT") {
         // spawn reports ENOENT for a missing cwd as much as for a missing git binary. A fresh
@@ -133,10 +143,21 @@ function runGitCommand(
         reject(new GitNotFoundError({ cause: error }))
       } else reject(error)
     })
+    // A git that was stopped (timeout or abort) has exited even while a hook it started still holds
+    // its stdout/stderr open; waiting for `close` would wait on that hook, unbounded. Settle on exit.
+    child.on("exit", () => {
+      if (settled || (!timedOut && !aborted)) return
+      settled = true
+      clearTimeout(timer)
+      clearTimeout(killTimer)
+      options.signal?.removeEventListener("abort", onAbort)
+      reject(aborted ? new GitAbortedError(argv) : new GitTimeoutError(argv, options.timeoutMs))
+    })
     child.on("close", (code) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      clearTimeout(killTimer)
       options.signal?.removeEventListener("abort", onAbort)
       if (aborted) {
         reject(new GitAbortedError(argv))

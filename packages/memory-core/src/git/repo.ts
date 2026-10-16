@@ -5,6 +5,7 @@ import { withGitLockRetry, withSerializedGitConfigMutation } from "./config-lock
 import { NO_AUTO_MAINTENANCE } from "./no-auto-maintenance"
 import { withStrandedGitLockRecovery } from "./repo-lock-sweep"
 import { DirtyRepoError, NoEffectiveChangesError } from "./errors"
+import { commitJudgedByOutcome } from "./commit-outcome"
 import { createNodeGitExec, type GitExec, type GitExecResult } from "./exec"
 import { describeDirtyMarkdownEncodingIssues } from "./porcelain"
 import { GitPathStateStore } from "./path-state"
@@ -36,6 +37,11 @@ export type {
 } from "./repo-types"
 
 const GIT_TIMEOUT_MS = 30_000
+// `git commit` runs the memory hooks (secret screening, frontmatter checks, the mirror push) on
+// top of the write itself, and on a loaded host that took longer than GIT_TIMEOUT_MS: the commit
+// was killed after updating HEAD and stranded HEAD.lock (omo #10199 field incident). A commit
+// therefore gets a larger budget, and a timed-out commit is still judged by what landed.
+const COMMIT_TIMEOUT_MS = 120_000
 const INITIAL_COMMIT = "chore: initialize local memory"
 const EMPTY_INITIAL_COMMIT = "chore: initialize empty local memory"
 // git commit/merge end with `git maintenance run --auto --detach`, which can start a background
@@ -51,6 +57,7 @@ export class GitMemoryRepo {
   private readonly hookInstaller: (dir: string) => void | Promise<void>
   private readonly reads: GitRevisionReads
   private readonly commitTimes: PathCommitTimes
+  private readonly commitTimeoutMs: number
 
   constructor(options: GitMemoryRepoOptions) {
     this.dir = options.dir
@@ -58,6 +65,7 @@ export class GitMemoryRepo {
     this.exec = options.exec ?? createNodeGitExec()
     this.pathState = new GitPathStateStore(this.dir, this.exec)
     this.hookInstaller = options.installHooks ?? (() => undefined)
+    this.commitTimeoutMs = options.commitTimeoutMs ?? COMMIT_TIMEOUT_MS
     this.reads = new GitRevisionReads({
       run: (argv, timeoutMs) => this.git(argv, timeoutMs),
       result: (argv, stdin) => this.gitResult(argv, stdin),
@@ -251,8 +259,12 @@ export class GitMemoryRepo {
   ): Promise<GitCommitResult> {
     // Every index/ref mutation on the commit path runs through transient-lock retry plus stranded
     // lock recovery, so a SIGKILLed writer's debris never wedges or corrupts the repo (omo #10177).
-    await withStrandedGitLockRecovery(this.dir, () => this.git([...NO_AUTO_MAINTENANCE, ...authorFlags(author), "commit", "-m", reason]))
-    return { committed: true, sha: await this.requireHead() }
+    const landedAfterTimeout = await commitJudgedByOutcome(
+      () => withStrandedGitLockRecovery(this.dir, () => this.git([...NO_AUTO_MAINTENANCE, ...authorFlags(author), "commit", "-m", reason], this.commitTimeoutMs)),
+      { head: () => this.head(), result: (argv) => this.gitResult(argv) },
+      reason,
+    )
+    return { committed: true, sha: landedAfterTimeout ?? (await this.requireHead()) }
   }
 
   private async requireHead(): Promise<string> {
