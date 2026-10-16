@@ -59,7 +59,9 @@ export class StrandedGitLockError extends GitError {
       [
         "Stranded git lock file(s) block the memory write:",
         ...kept.map(({ path, reason }) => `- ${path}: ${KEPT_REASON_TEXT[reason]}`),
-        "Confirm no git process is operating on this repository, remove the lock files, then retry.",
+        "They were kept because a git command or another session may still be using them, and removing a lock that is in use can corrupt the memory repository.",
+        "If no git command or other session is working on this memory, re-check and remove each one after confirming:",
+        ...kept.map(({ path }) => `  /memory unlock ${path}`),
       ].join("\n"),
     )
     this.paths = kept.map(({ path }) => path)
@@ -83,7 +85,7 @@ async function collectRefLockPaths(gitDir: string): Promise<string[]> {
 
 type LockSnapshot = ReadonlyMap<string, { readonly ino: number; readonly mtimeMs: number }>
 
-async function presentLockFiles(gitDir: string): Promise<LockSnapshot> {
+export async function presentLockFiles(gitDir: string): Promise<LockSnapshot> {
   const candidates = [
     join(gitDir, "index.lock"),
     join(gitDir, "HEAD.lock"),
@@ -110,7 +112,7 @@ async function settledVerdict(candidate: string, before: { readonly ino: number;
 // The identity layout (identity/layout.ts) pins the memory-write lock next to the repo:
 // <root>/agents/<id>/repo and <root>/agents/<id>/runtime/locks. A repo outside that layout has
 // no writer lock to authorize with, so it can never be swept.
-function writerLockPathForRepo(repoDir: string): string | null {
+export function writerLockPathForRepo(repoDir: string): string | null {
   const resolved = resolve(repoDir)
   if (basename(resolved) !== REPO_DIRNAME || basename(dirname(dirname(resolved))) !== AGENTS_DIRNAME) return null
   return memoryWriterLockPath(join(dirname(resolved), RUNTIME_DIRNAME, "locks"))
