@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A background child aborted by another client no longer reports a failure.** Another client's user abort on a shared child session now ends that task as `interrupted` with whatever partial answer it had produced, instead of `error`: `task_output` keeps the partial text, no failure notification fires, and the task stays resumable with `task_send`. The parent's own abort still ends the task as `cancelled`, and provider or host-system aborts keep the failure classification.
+
 **ulw-research reports always carry visuals.** The final-report phase now requires at least one chart drawn from the run's own data, a diagram wherever structure matters, and the topic's screenshots or video with attribution, every one captioned and given alt text. A new playbook says which visual fits which finding and how to render it: data charts with live text, Mermaid diagrams themed to the report, PlotNeuralNet for paper-style reports that describe a model's architecture, and Andrej Karpathy's tips on diagrams, HTML pages and explainer videos. The report checker now flags a report with no rendered visual and an image with no alt text; an empty alt counts as decorative only when the image is also marked `role="presentation"` or `aria-hidden`. ([#10258](https://github.com/code-yeongyu/oh-my-openagent/issues/10258), [#10261](https://github.com/code-yeongyu/oh-my-openagent/pull/10261))
 
 ## [5.1.34-beta.1] - 2026-10-16
