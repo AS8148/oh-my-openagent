@@ -258,6 +258,10 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
         }
       }
       await shutdownDrain.run(input, { journalFlushed })
+      // A reflection launch runs its child under the identity dir too. It is awaited last, on what
+      // budget is left: a run that outlives it keeps going detached (by design), and it never
+      // displaces the drain's own steps (#10154).
+      await shutdownDrain.raceDetached(input, "reflection-launch-settle", () => runtimeWiring.settled())
       pressureDreamAdmission.reset(input.sessionId)
       userActivity.reset(input.sessionId)
     },
