@@ -17,6 +17,9 @@ import {
 export const PROJECTION_PIN_ENTRY_TYPE = "omo-memory:projection-pin"
 export const MEMORY_CHANGES_METADATA_TOKEN = "Memory changed after this session's prompt was pinned to"
 const MAX_LISTED_PATHS = 20
+/** The trailer the sync engine writes on each sync commit: the principals whose batches it applied. */
+const SYNC_PRINCIPALS_TRAILER = "Sync-Principals"
+const UNKNOWN_DEVICE = "another device"
 
 export interface ProjectionPinRecord {
   readonly version: 1
@@ -32,6 +35,8 @@ export type ProjectionRepinReason = "first-turn" | "compaction" | "refresh" | "m
 export interface ProjectionTurn {
   readonly revision: string | null
   readonly changes?: ProjectedChanges
+  /** Devices whose synced commits brought these changes, by name; absent when none were synced. */
+  readonly sources?: readonly string[]
   readonly repinned?: ProjectionRepinReason
 }
 
@@ -54,8 +59,15 @@ export interface ProjectionPins {
   requestRefresh(): void
 }
 
-export function createProjectionPins(options: { readonly now?: () => number } = {}): ProjectionPins {
+export interface ProjectionPinsOptions {
+  readonly now?: () => number
+  /** A principal's device name from this device's local device list; unknown principals read "another device". */
+  readonly deviceName?: (principal: string) => string | undefined
+}
+
+export function createProjectionPins(options: ProjectionPinsOptions = {}): ProjectionPins {
   const now = options.now ?? Date.now
+  const deviceName = options.deviceName ?? (() => undefined)
   const live = new Map<string, { readonly record: ProjectionPinRecord; readonly epoch: number }>()
   let refreshEpoch = 0
   let refreshRequestedAtMs = Number.NEGATIVE_INFINITY
@@ -102,9 +114,33 @@ export function createProjectionPins(options: { readonly now?: () => number } = 
       const advanced: ProjectionPinRecord = { ...state, noticedThrough: head }
       live.set(sessionId, { record: advanced, epoch: refreshEpoch })
       record(advanced)
-      return isEmptyProjectedChanges(changes) ? { revision: state.revision } : { revision: state.revision, changes }
+      if (isEmptyProjectedChanges(changes)) return { revision: state.revision }
+      const sources = await syncedSources(repo, state.noticedThrough, head, changes, deviceName)
+      return sources.length === 0 ? { revision: state.revision, changes } : { revision: state.revision, changes, sources }
     },
   }
+}
+
+/** Device names behind the sync commits in the range that touched a path the notice lists. */
+async function syncedSources(
+  repo: GitMemoryRepo,
+  base: string | null,
+  head: string | null,
+  changes: ProjectedChanges,
+  deviceName: (principal: string) => string | undefined,
+): Promise<string[]> {
+  if (head === null) return []
+  const listed = new Set([...changes.added, ...changes.updated, ...changes.removed])
+  const commits = await repo.log({ range: base === null ? head : `${base}..${head}`, includePaths: true })
+  const names = new Set<string>()
+  for (const commit of commits) {
+    const principals = commit.trailers[SYNC_PRINCIPALS_TRAILER]
+    if (principals === undefined || !(commit.paths ?? []).some((path) => listed.has(path))) continue
+    for (const principal of principals.split(",").map((p) => p.trim()).filter((p) => p.length > 0)) {
+      names.add(deviceName(principal) ?? UNKNOWN_DEVICE)
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b))
 }
 
 async function repinReason(
@@ -149,7 +185,11 @@ function latestCompactionId(branch: readonly unknown[]): string | null {
   return null
 }
 
-export function renderProjectedChangesLine(changes: ProjectedChanges, pinnedRevision: string | null): string {
+export function renderProjectedChangesLine(
+  changes: ProjectedChanges,
+  pinnedRevision: string | null,
+  sources: readonly string[] = [],
+): string {
   const groups = [
     ["added", changes.added],
     ["updated", changes.updated],
@@ -166,7 +206,8 @@ export function renderProjectedChangesLine(changes: ProjectedChanges, pinnedRevi
     parts.push(`${verb} ${listed.join(", ")}`)
   }
   const pin = pinnedRevision === null ? "an empty memory repo" : pinnedRevision.slice(0, 7)
-  return `- ${MEMORY_CHANGES_METADATA_TOKEN} ${pin}: ${parts.join("; ")}. The prompt keeps the pinned copy; read a file when it matters now.`
+  const synced = sources.length === 0 ? "" : `, synced from ${sources.join(", ")}`
+  return `- ${MEMORY_CHANGES_METADATA_TOKEN} ${pin}: ${parts.join("; ")}${synced}. The prompt keeps the pinned copy; read a file when it matters now.`
 }
 
 function isNullableString(value: unknown): value is string | null {
