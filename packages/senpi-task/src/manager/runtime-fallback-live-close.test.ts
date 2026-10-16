@@ -62,8 +62,6 @@ describe("runtime fallback over a live daemon session", () => {
       })
       const task = await manager.start(baseSpec())
       if (task.kind !== "started") throw new Error("expected the task to start")
-      // `start` may report the task as starting before its first rung is up (the 250 ms report window), so
-      // wait for the launch to settle - the session open and the live handle tracked - before using either.
       await launchSettled(manager, task.task_id)
       const [original] = host.sessions()
       if (original === undefined) throw new Error("expected the failed rung's session")
