@@ -80,7 +80,7 @@ export class FakeItemStore implements ItemStore {
     this.items.set(key, item)
   }
 
-  render(key: string): string | null {
+  render(key: string, _diskText: string | null): string | null {
     const item = this.items.get(key)
     if (item === undefined) return null
     const live = [...new Set([...item.adds].filter(([id]) => !item.killed.has(id)).map(([, line]) => line))].sort()

@@ -3,6 +3,7 @@ import { afterEach, expect, test } from "bun:test"
 import { ACCOUNT, type Device, GIT_TEST_TIMEOUT, makeDevice } from "./engine-harness.test-support"
 import { encodePayload } from "./fake-crypto.test-support"
 import { FakeSyncServer } from "./fake-server.test-support"
+import type { FakeItemStore } from "./fake-store.test-support"
 
 const devices: Device[] = []
 afterEach(async () => {
@@ -30,7 +31,7 @@ test("a device offline for 40 fixture days catches up from the snapshot and late
   }
   // The server keeps 30 days: everything older is compacted into a snapshot a device built.
   const cutoff = server.head - 30
-  server.compact(cutoff, encodePayload(ACCOUNT, `snapshot-${cutoff}`, cutoff, a.store.snapshotPayload()))
+  server.compact(cutoff, encodePayload(ACCOUNT, `snapshot-${cutoff}`, cutoff, (a.store as FakeItemStore).snapshotPayload()))
   expect(server.entries[0]?.seq).toBe(cutoff + 1)
   const report = await b.engine.runCycle()
   expect(report).toMatchObject({ refused: 0, snapshot: cutoff, pushed: true })

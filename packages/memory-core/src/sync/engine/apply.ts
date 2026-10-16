@@ -106,7 +106,7 @@ export async function advance(deps: EngineDeps, journal: SyncJournal, start: Cyc
   if (cycle.stage === "merged") {
     const texts: Record<string, string | null> = {}
     for (const key of cycle.keys) {
-      texts[key] = deps.store.render(key)
+      texts[key] = deps.store.render(key, await readWorking(deps.repo.root, key))
       await renderInto(deps, journal, key, texts[key])
     }
     const treeId = await deps.repo.stageTree(cycle.keys)

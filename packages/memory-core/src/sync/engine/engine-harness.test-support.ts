@@ -6,12 +6,13 @@ import { copyFile, cp, mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+import { createDeviceItemStore } from "./adapters/device-item-store"
 import { createGitSyncRepo } from "./adapters/git-sync-repo"
 import { SyncEngine, type EngineFault } from "./engine"
 import { FakeSealer, FakeVerifier } from "./fake-crypto.test-support"
 import type { FakeSyncServer } from "./fake-server.test-support"
 import { FakeItemStore } from "./fake-store.test-support"
-import type { Clock, SyncRepo, Transport, WriterLock } from "./ports"
+import type { Clock, ItemStore, SyncRepo, Transport, WriterLock } from "./ports"
 
 export const ACCOUNT = "acc_test"
 /** Every engine test drives real git processes; under machine load a cycle can take seconds. */
@@ -120,7 +121,7 @@ export interface Device {
   readonly repo: SyncRepo
   readonly clock: ManualClock
   engine: SyncEngine
-  store: FakeItemStore
+  store: ItemStore
   readonly verifier: FakeVerifier
   write(key: string, text: string | null): Promise<void>
   read(key: string): Promise<string | null>
@@ -136,6 +137,8 @@ export interface DeviceOptions {
   readonly batchBytes?: number
   /** Start from a copy of another device's memory dir (its .git and journal included). */
   readonly memoryFrom?: string
+  /** Use the production item store over the #10203 device (Loro) instead of the line-set fake. */
+  readonly realStore?: boolean
 }
 
 export async function makeDevice(server: FakeSyncServer, name: string, fault?: EngineFault, options: DeviceOptions = {}): Promise<Device> {
@@ -149,7 +152,9 @@ export async function makeDevice(server: FakeSyncServer, name: string, fault?: E
   const clock = new ManualClock()
   const verifier = new FakeVerifier(ACCOUNT)
   const build = (f?: EngineFault) => {
-    const store = new FakeItemStore(stateDir, name)
+    const store: ItemStore = options.realStore === true
+      ? createDeviceItemStore({ stateDir, memoryRoot: root, syncDir: join(root, ".git", "omo-sync"), machineId: `machine-${name}` })
+      : new FakeItemStore(stateDir, name)
     const lock = inProcessLock()
     const engine = new SyncEngine({
       repo,

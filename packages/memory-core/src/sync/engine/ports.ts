@@ -109,8 +109,11 @@ export interface ItemStore {
   capture(key: string, workingText: string | null): Promise<Uint8Array | null>
   /** Import a verified remote update (or this device's own captured ops). */
   apply(key: string, ops: Uint8Array): Promise<void>
-  /** renderItem: the item's merged text, or null for a dead item. */
-  render(key: string): string | null
+  /**
+   * renderForDisk: the item's merged text, or null for a dead item. `diskText` is the file the
+   * render will replace (null when absent), so an unchanged model keeps the file's own style.
+   */
+  render(key: string, diskText: string | null): string | null
   /** recordMaterialized: the text the engine wrote is the item's new baseline. */
   markMaterialized(key: string, text: string | null): Promise<void>
   /** Import a compaction snapshot's state; local pending state is kept. */
