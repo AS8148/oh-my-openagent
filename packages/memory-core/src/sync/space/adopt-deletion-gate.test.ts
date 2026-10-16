@@ -5,9 +5,10 @@ import { mulberry32, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
 import { stripT2Blocks } from "./hub-trace"
 
+import { t2Block } from "./test-support"
+
 // 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
 const PROPERTY_TIMEOUT_MS = 60_000
-import { t2Block } from "./test-support"
 
 // The deletion gate (HIGH-1, structural guarantee): a source file may be queued in
 // removeAfterCommit only when a read-back of the merged result proves every one of its
@@ -44,7 +45,7 @@ function representedFacts(text: string): readonly FmEntry[] {
   return entries
 }
 
-/** The facts a source file carries, exactly the way planAdoption reads them. */
+/** The facts a source file carries, read through stripT2Blocks: not independent of the code under test (R1 in adopt-readback.test.ts is). */
 function factsOf(source: string): { readonly bodyLines: readonly string[]; readonly entries: readonly FmEntry[] } {
   const parsed = splitItem(source.replace(/\r\n/g, "\n"))
   const stripped = stripT2Blocks(parsed.body)
@@ -155,7 +156,7 @@ test("a merge that drops a line keeps the source and records the reason", () => 
   // Then the side file is not deleted and the reason names the missing line.
   expect(plan.removeAfterCommit).toEqual([])
   expect(plan.retainedSources ?? []).toEqual([
-    { path: "n.sync-conflict-20261015-mac.md", reason: 'missing body line "- likes tea"' },
+    { path: "n.sync-conflict-20261015-mac.md", reason: 'missing line "- likes tea"' },
   ])
 })
 

@@ -4,9 +4,10 @@ import { splitItem, type FmEntry, type FmValue } from "../item/frontmatter"
 import { mulberry32, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
 
+import { t2Block } from "./test-support"
+
 // 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
 const PROPERTY_TIMEOUT_MS = 60_000
-import { t2Block } from "./test-support"
 
 function preserved(wanted: FmValue, actual: FmValue): boolean {
   switch (wanted.kind) {

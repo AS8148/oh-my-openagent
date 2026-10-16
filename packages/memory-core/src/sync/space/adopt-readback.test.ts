@@ -5,9 +5,10 @@ import { mulberry32, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
 import { stripT2Blocks } from "./hub-trace"
 
+import { t2Block } from "./test-support"
+
 // 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
 const PROPERTY_TIMEOUT_MS = 60_000
-import { t2Block } from "./test-support"
 
 // The oracle never parses a source with the code under test: every source is built from
 // facts the test already knows, so a strip bug cannot hide in both sides of the check.
@@ -116,26 +117,49 @@ describe("L2: the local-deletion shortcut", () => {
 
 const POOL = ["- likes tea", "- likes coffee", "abc", "ax", "note: alpha", "prefers 한글", "emoji 🙂", "-->", "--- not fm"] as const
 
-type Built = { readonly text: string; readonly lines: readonly string[]; readonly keys: ReadonlyMap<string, string> }
+type Built = {
+  readonly text: string
+  /** Lines that must survive verbatim: plain text, and every text line inside a malformed block. */
+  readonly lines: readonly string[]
+  /** Keys of well-formed T2 blocks: the value must be represented in the result. */
+  readonly keys: ReadonlyMap<string, string>
+  /** Key lines inside malformed blocks: the line survives, or its key is represented. */
+  readonly keyLines: ReadonlyMap<string, string>
+  readonly malformed: boolean
+}
+
+/** A T2 block written by hand (no "-->" escaping), the shape the hub never emits. */
+const handBlock = (kept: string): string =>
+  `\n<!-- memory-sync 2026-10-15: the other machine had different frontmatter for n.md; kept here so no fact is lost:\n${kept}-->\n`
 
 function build(rand: () => number, tag: string): Built {
   const lines: string[] = []
   const keys = new Map<string, string>()
+  const keyLines = new Map<string, string>()
+  let malformed = false
   let text = ""
   const count = 1 + Math.floor(rand() * 5)
   for (let i = 0; i < count; i++) {
     const line = pick(rand, POOL)
     lines.push(line)
     text += `${line}\n`
-    if (rand() < 0.35) {
-      const key = `k_${tag}_${i}`
-      const value = `v ${tag} ${i}`
+    const roll = rand()
+    const key = `k_${tag}_${i}`
+    const value = `v ${tag} ${i}`
+    let block = ""
+    if (roll < 0.3) {
       keys.set(key, value)
-      const block = t2Block("2026-10-15", "n.md", `---\n${key}: "${value}"\n---\n`)
-      text += rand() < 0.5 ? block.slice(1) : block
+      block = t2Block("2026-10-15", "n.md", `---\n${key}: "${value}"\n---\n`)
+    } else if (roll < 0.45) {
+      malformed = true
+      keyLines.set(key, `${key}: "${value}"`)
+      const inner = rand() < 0.5 ? [`inside ${tag} ${i}`] : [`FACT ${tag} ${i} -->`, `more ${tag} ${i}`]
+      lines.push(...inner)
+      block = handBlock(`---\n${key}: "${value}"\n---\n${inner.map((l) => `${l}\n`).join("")}`)
     }
+    if (block !== "") text += rand() < 0.5 ? block.slice(1) : block
   }
-  return { text: rand() < 0.25 ? text.replace(/\n/g, "\r\n") : text, lines, keys }
+  return { text: rand() < 0.25 ? text.replace(/\n/g, "\r\n") : text, lines, keys, keyLines, malformed }
 }
 
 const LOSSY: readonly ((base: string, incoming: string) => string)[] = [
@@ -144,36 +168,47 @@ const LOSSY: readonly ((base: string, incoming: string) => string)[] = [
 ]
 
 for (const seed of [20261016, 0x5eed4a11]) {
-  test(`R1 every known fact of a deleted source survives, glued blocks and lossy merges included; seed=${seed}`, () => {
+  test(`R1 every known fact of a deleted source survives: glued, malformed and hand-edited blocks, CRLF, duplicates, lossy merges; seed=${seed}`, () => {
     const rand = mulberry32(seed)
     for (let iteration = 0; iteration < 1500; iteration++) {
       const base = "base line\n"
       const main = build(rand, `m${iteration}`)
-      const side = build(rand, `s${iteration}`)
+      const sides = Array.from({ length: 1 + Math.floor(rand() * 2) }, (_, n) => ({
+        path: `n.sync-conflict-20261015-${n === 0 ? "mac" : "mini"}.md`,
+        built: build(rand, `s${iteration}-${n}`),
+      }))
       const merge = rand() < 0.3 ? pick(rand, LOSSY) : undefined
       const plan = planAdoption(
-        [{ path: "n.md", text: main.text }, { path: SIDE, text: side.text }],
+        [{ path: "n.md", text: main.text }, ...sides.map(({ path, built }) => ({ path, text: built.text }))],
         { currentText: base, lastMaterialised: null, tombstoned: false },
         merge,
       )
       const out = outputOf(plan, base)
-      const context = `R1 seed=${seed} case=${iteration} side=${JSON.stringify(side.text)} out=${JSON.stringify(out)}`
+      const context = `R1 seed=${seed} case=${iteration} main=${JSON.stringify(main.text)} out=${JSON.stringify(out)}`
       const outLines = linesOf(splitItem(out).body)
       const facts = representedFacts(out)
       if (merge === undefined) {
         for (const line of main.lines) expect(outLines.includes(line), `${context} main lost ${line}`).toBe(true)
-        for (const line of outLines) expect(line.includes("kept here so no fact is lost"), `${context} block left in body`).toBe(false)
+        if (!main.malformed && !sides.some(({ built }) => built.malformed)) {
+          for (const line of outLines) expect(line.includes("kept here so no fact is lost"), `${context} block left in body`).toBe(false)
+        }
       }
-      if (!plan.removeAfterCommit.includes(SIDE)) {
-        expect(plan.retainedSources.map((entry) => entry.path), context).toEqual([SIDE])
-        continue
-      }
-      for (const line of new Set(side.lines)) {
-        expect(countOf(outLines, line) >= countOf(side.lines, line), `${context} deleted source lost ${line}`).toBe(true)
-      }
-      for (const [key, value] of side.keys) {
-        const kept = facts.some((entry) => entry.key === key && entry.value.kind === "text" && entry.value.text === value)
-        expect(kept, `${context} deleted source lost key ${key}`).toBe(true)
+      const represented = (key: string, value: string): boolean =>
+        facts.some((entry) => entry.key === key && entry.value.kind === "text" && entry.value.text === value)
+      for (const { path, built } of sides) {
+        const where = `${context} side=${JSON.stringify(built.text)}`
+        if (!plan.removeAfterCommit.includes(path)) {
+          expect(plan.retainedSources.map((entry) => entry.path), where).toContain(path)
+          continue
+        }
+        for (const line of new Set(built.lines)) {
+          expect(countOf(outLines, line) >= countOf(built.lines, line), `${where} deleted source lost ${line}`).toBe(true)
+        }
+        for (const [key, value] of built.keys) expect(represented(key, value), `${where} deleted source lost key ${key}`).toBe(true)
+        for (const [key, line] of built.keyLines) {
+          const value = line.slice(key.length + 3, -1)
+          expect(outLines.includes(line) || represented(key, value), `${where} deleted source lost ${line}`).toBe(true)
+        }
       }
     }
   }, PROPERTY_TIMEOUT_MS)

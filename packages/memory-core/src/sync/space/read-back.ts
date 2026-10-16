@@ -1,7 +1,8 @@
-// The read-back gate every adoption deletion goes through. It reads the source line by line
-// on its own and never calls stripT2Blocks, so a defect in the strip cannot hide on both
-// sides of the check. Body lines are compared as counts: a merge that keeps one of two
-// identical lines has lost a fact.
+// The read-back gate every adoption deletion goes through. It is structure-free: it never
+// parses the source into blocks. Every raw source line (line endings normalised, nothing else)
+// must appear in the merged result at least as many times as in the source. The only lines the
+// adopt step may drop are the enumerated metadata lines (droppableAllowance) and key lines the
+// result represents, each metadata kind bounded by a count taken from the source itself. A missing line that is none of those keeps the source.
 
 import { splitItem, type FmEntry, type FmValue } from "../item/frontmatter"
 
@@ -44,54 +45,72 @@ function valueSurvives(wanted: FmValue, actual: FmValue): boolean {
   }
 }
 
-/**
- * A source's facts: its body lines with each well-formed T2 block (and the one blank
- * separator line the hub writes before it) taken out, and its frontmatter entries plus
- * every entry kept inside those blocks. A block that does not parse stays body text.
- */
-function sourceFacts(source: string): { readonly body: readonly string[]; readonly entries: readonly FmEntry[] } {
-  const parsed = splitItem(source)
-  const lines = linesOf(parsed.body)
-  const body: string[] = []
-  const entries: FmEntry[] = [...(parsed.fm ?? [])]
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ""
-    const end = T2_HEADER.test(line) ? lines.indexOf("-->", i + 1) : -1
-    const kept = end === -1 ? null : splitItem(lines.slice(i + 1, end).map((l) => `${l.replace(/-- >/g, "-->")}\n`).join("")).fm
-    if (kept === null) {
-      body.push(line)
-      continue
-    }
-    if (body.at(-1) === "") body.pop()
-    entries.push(...kept)
-    i = end
+/** Every frontmatter fact the result represents: its own keys plus marked conflict payloads. */
+function resultFacts(rendered: string): readonly FmEntry[] {
+  const into = splitItem(rendered)
+  const facts: FmEntry[] = [...(into.fm ?? [])]
+  for (const line of linesOf(into.body)) {
+    const match = CONFLICT_LINE.exec(line)
+    if (match !== null) facts.push(...(splitItem(`---\n${match[1]}\n---\n`).fm ?? []))
   }
-  return { body, entries: entries.filter((entry) => entry.value.kind !== "remove") }
+  return facts
 }
 
 /**
- * Name the first fact of `source` (LF text) the merged result does not represent: a body
- * line present fewer times than in the source, or a frontmatter value neither merged into
- * its key nor kept as a marked conflict. Null means the source is safe to delete.
+ * A single source line that, read alone as a one-key frontmatter header (T2 blocks escape
+ * "-->" as "-- >"), names a key whose value the result represents. Line-local: no block
+ * structure is consulted, and a multi-line value never qualifies (the source is kept).
+ */
+function isRepresentedKeyLine(line: string, facts: readonly FmEntry[]): boolean {
+  for (const candidate of new Set([line, line.replace(/-- >/g, "-->")])) {
+    const entries = splitItem(`---\n${candidate}\n---\n`).fm
+    if (entries === null || entries.length !== 1) continue
+    const [entry] = entries
+    if (entry !== undefined && entry.value.kind !== "remove" && facts.some((fact) => fact.key === entry.key && valueSurvives(entry.value, fact.value))) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * The enumerated metadata lines adoption may drop, each with how many of them a source may
+ * lose: a T2 header carries no fact (all of them); per T2 header, one closing "-->" (or the
+ * hub's fused "----->", its kept header's closing fence plus "-->"), one blank
+ * separator and the block's two "---" fences; plus the two fences of the file's own header.
+ */
+function droppableAllowance(source: readonly string[]): Map<string, number> {
+  const headers = source.filter((line) => T2_HEADER.test(line)).length
+  return new Map([
+    ["-->", headers],
+    ["----->", headers],
+    ["", headers],
+    ["---", 2 + 2 * headers],
+  ])
+}
+
+/**
+ * Name the first source line (LF text) the merged result does not hold as many times as the
+ * source does, after the enumerated metadata allowance and represented key lines. Null means
+ * the source is safe to delete.
  */
 export function firstMissingFact(rendered: string, source: string): string | null {
-  const from = sourceFacts(source)
-  const into = splitItem(rendered)
-  const have = countLines(linesOf(into.body))
-  for (const [line, count] of countLines(from.body)) {
-    const found = have.get(line) ?? 0
-    if (found === 0) return `missing body line ${JSON.stringify(line)}`
-    if (found < count) return `missing body line ${JSON.stringify(line)} (${count} in the source, ${found} merged)`
-  }
-  const candidates: FmEntry[] = [...(into.fm ?? [])]
-  for (const line of linesOf(into.body)) {
-    const match = CONFLICT_LINE.exec(line)
-    if (match !== null) candidates.push(...(splitItem(`---\n${match[1]}\n---\n`).fm ?? []))
-  }
-  for (const { key, value } of from.entries) {
-    if (!candidates.some((candidate) => candidate.key === key && valueSurvives(value, candidate.value))) {
-      return `missing frontmatter key ${JSON.stringify(key)}`
+  const sourceLines = linesOf(source)
+  const have = countLines(linesOf(rendered))
+  const allowance = droppableAllowance(sourceLines)
+  const facts = resultFacts(rendered)
+  for (const [line, count] of countLines(sourceLines)) {
+    const missing = count - (have.get(line) ?? 0)
+    if (missing <= 0 || T2_HEADER.test(line)) continue
+    const allowed = allowance.get(line)
+    if (allowed !== undefined) {
+      if (missing <= allowed) continue
+      return `missing line ${JSON.stringify(line)} (${missing} dropped, ${allowed} allowed as metadata)`
     }
+    if (isRepresentedKeyLine(line, facts)) continue
+    return missing === count
+      ? `missing line ${JSON.stringify(line)}`
+      : `missing line ${JSON.stringify(line)} (${count} in the source, ${count - missing} merged)`
   }
   return null
 }

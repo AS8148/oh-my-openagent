@@ -47,7 +47,7 @@ export interface T2Strip {
 }
 
 const T2_SOURCE =
-  "(?<=^|\\n)\\n?<!-- memory-sync \\d{4}-\\d{2}-\\d{2}: the other machine had different frontmatter for (.+?); kept here so no fact is lost:\\n([\\s\\S]*?)-->\\n"
+  "(?<=^|\\n)\\n?<!-- memory-sync \\d{4}-\\d{2}-\\d{2}: the other machine had different frontmatter for (.+?); kept here so no fact is lost:\\n([\\s\\S]*?(?:\\n|---))-->\\n"
 
 export function stripT2Blocks(body: string): T2Strip {
   const re = new RegExp(T2_SOURCE, "g")
@@ -61,7 +61,7 @@ export function stripT2Blocks(body: string): T2Strip {
     cursor = index + match[0].length
     const kept = (match[2] ?? "").replace(/-- >/g, "-->")
     const parsed = splitItem(kept)
-    if (parsed.fm === null) {
+    if (parsed.fm === null || parsed.body !== "") {
       malformed.push(match[0])
       out += match[0]
       continue
