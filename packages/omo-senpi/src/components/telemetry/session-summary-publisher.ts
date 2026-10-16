@@ -1,4 +1,4 @@
-import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
+import { TelemetryDeliveryError, type EventTelemetryProperties, type TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import type { TelemetrySessionRole } from "./session-role"
 import { isRecordSendable, type ConsentScope, type PendingRecord, type RecordConsent, type SummaryStorage } from "./session-summary-storage"
@@ -8,7 +8,10 @@ import { isSessionSampled } from "./session-summary-sampling"
 /** `timestamp` is the window's close time (the pending record's createdAt), the same on every re-send. */
 export type SummaryPublication = { readonly uuid: string; readonly properties: EventTelemetryProperties; readonly timestamp: number }
 
-/** Resolves true only when the transport acknowledged the event (collector 200, PostHog flush resolved). */
+/**
+ * Resolves true only when the transport acknowledged the event (a 2xx answer). A rejection keeps the pending
+ * file for a later retry, unless it is a permanent `TelemetryDeliveryError` (the event itself was refused).
+ */
 export type PublishSummary = (publication: SummaryPublication) => Promise<boolean>
 
 export type ClosedWindow = {
@@ -17,6 +20,7 @@ export type ClosedWindow = {
   readonly sessionHash: string
   readonly sessionRole: TelemetrySessionRole
   readonly sampleRate: number
+  readonly epoch: string
   readonly seq: number
   readonly windowId: string
   readonly window: SummaryWindow
@@ -71,6 +75,10 @@ export function createSummaryPublisher(input: {
       if (await input.publish({ uuid: record.uuid, properties: record.properties, timestamp: record.createdAt })) input.storage.removePending(record.uuid)
     } catch (error) {
       report("telemetry_capture_failed", error)
+      if (error instanceof TelemetryDeliveryError && error.permanent) {
+        input.storage.removePending(record.uuid)
+        dropped += 1
+      }
     } finally {
       inFlight.delete(record.uuid)
     }
@@ -111,6 +119,7 @@ export function createSummaryPublisher(input: {
         createdAt: input.storage.now(),
         properties: summaryProperties(closed.sessionHash, closed.window, {
           endedBy: closed.endedBy,
+          epoch: closed.epoch,
           seq: closed.seq,
           sampleRate: closed.sampleRate,
           sampled: isSessionSampled(closed.sessionHash, closed.sampleRate),

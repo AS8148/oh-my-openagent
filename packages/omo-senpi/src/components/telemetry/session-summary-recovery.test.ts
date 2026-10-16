@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { CHECKPOINT_MAX_TURNS } from "./omo-native-session-summary"
 import { CORRUPT } from "./session-summary-files"
-import { OWNER_STALE_MS, summaryDir } from "./session-summary-storage"
+import { OWNER_STALE_MS, SUMMARY_TTL_MS, purgeUnconsentedQueue, summaryDir } from "./session-summary-storage"
 import { createTempStateDirs, createTestRecorder, rows, summaryTurn } from "./session-summary.test-support"
 
 // Protocol contract (plan todo 8): a window is claimed only when its heartbeat is older than 5 minutes AND
@@ -114,6 +114,62 @@ describe("session_summary recovery hygiene", () => {
 
     expect(readdirSync(base).filter((name) => name.includes(".tmp") || name.includes(".claimed-"))).toEqual([])
     expect(rows(next.published)).toEqual([[0, "recovered", 1]])
+  })
+
+  test("#given a dead process's own-copy window #when it is recovered #then it is sent once and no empty own-copy file is left behind", async () => {
+    const dir = stateDirs.make()
+    const owner = createTestRecorder({ dir, pid: 141_414, alivePids: [151_515], startAt: T0 })
+    const copier = createTestRecorder({ dir, pid: 151_515, alivePids: [141_414], startAt: T0 })
+    await owner.summary.recordTurn("s1", summaryTurn())
+    await copier.summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
+    const ownCopy = join(summaryDir(dir), "s1@boot-151515.json")
+    expect(existsSync(ownCopy)).toBe(true)
+
+    const sweeper = createTestRecorder({ dir, pid: 161_616, alivePids: [141_414], startAt: T0 + STALE })
+    await sweeper.summary.recover()
+
+    expect(rows(sweeper.published).map(([, endedBy, turns]) => [endedBy, turns])).toEqual([["recovered", 1]])
+    expect(existsSync(ownCopy)).toBe(false)
+  })
+
+  test("#given expired records whose scope has opted out #when a sweep drops them #then they are not counted in dropped_events", async () => {
+    const dir = stateDirs.make()
+    const optedOut = createTestRecorder({ dir, pid: 171_717, startAt: T0, ack: false, consentScope: { cwd: "/off" } })
+    await optedOut.summary.recordTurn("sent", summaryTurn())
+    await optedOut.summary.finish("sent", "quit")
+    await optedOut.summary.recordTurn("open", summaryTurn())
+    expect(optedOut.storage.pendingUuids()).toHaveLength(1)
+
+    const later = createTestRecorder({
+      dir, pid: 181_818, startAt: T0 + SUMMARY_TTL_MS + 1, consentScope: { cwd: "/on" }, isScopeConsented: (scope) => scope.cwd !== "/off",
+    })
+    await later.summary.recordTurn("s2", summaryTurn())
+    await later.summary.finish("s2", "quit")
+
+    expect(later.storage.pendingUuids()).toEqual([])
+    expect(later.storage.windowKeys()).not.toContain("open")
+    expect(later.published.map(({ properties }) => properties.dropped_events)).toEqual([0])
+  })
+
+  test("#given queued records from an opted-out scope #when an opted-out session purges the queue #then they are deleted at rest and opted-in ones stay", () => {
+    const dir = stateDirs.make()
+    const storage = createTestRecorder({ dir, startAt: T0 }).storage
+    const pending = (uuid: string, cwd: string) => ({
+      consent: "enabled" as const, scope: { cwd }, uuid, sessionHash: `h-${cwd}`, owner: storage.owner, createdAt: T0, properties: { turns: 1 },
+    })
+    storage.writePending(pending("0395eae0-1111-4222-8333-944455556661", "/off"))
+    storage.writePending(pending("0395eae0-1111-4222-8333-944455556662", "/on"))
+    const window = (cwd: string) => ({
+      consent: "enabled" as const, scope: { cwd }, sessionHash: `w-${cwd}`, sessionRole: "root" as const, owner: storage.owner,
+      heartbeatAt: T0, epoch: "0123456789abcdef", seq: 1, sampleRate: 0.05, windowId: null, window: null,
+    })
+    storage.writeWindow("w-off", window("/off"))
+    storage.writeWindow("w-on", window("/on"))
+
+    purgeUnconsentedQueue(dir, (scope) => scope.cwd !== "/off")
+
+    expect(storage.pendingUuids()).toEqual(["0395eae0-1111-4222-8333-944455556662"])
+    expect(storage.windowKeys()).toEqual(["w-on"])
   })
 
   test("#given a checkpoint #when the window is published #then its pending file and the advanced seq were already on disk", async () => {

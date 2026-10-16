@@ -714,6 +714,8 @@ describe("OmO Native telemetry component integration", () => {
       const b = register("/project-b")
       await b.dispatch("session_start", { type: "session_start", reason: "startup" }, inProject("b", "/project-b"))
       await b.dispatch("turn_end", turnEnd(), inProject("b", "/project-b"))
+      // The sweep loads its sidecar asynchronously; shutdown awaits that in-flight sweep before it returns.
+      await b.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, inProject("b", "/project-b"))
 
       // then
       expect(recorder.messages.filter(({ event, properties }) => event === "session_summary" && properties?.$session_id === "hashed:a")).toEqual([])

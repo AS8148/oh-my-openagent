@@ -2,6 +2,7 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, removeFile, renameIfPresent } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
+import { newSummaryEpoch } from "./session-summary-window"
 import {
   OWNER_STALE_MS,
   SUMMARY_TTL_MS,
@@ -61,8 +62,12 @@ export function createSummaryRecovery(input: {
       return undefined
     }
     const nextSeq = record.window === null ? record.seq : record.seq + 1
+    const epoch = record.epoch ?? newSummaryEpoch()
+    // A dead process's own copy is never continued (its key names that process), so it is not recreated.
     const keepNumbering = () => {
-      storage.createWindow(key, { ...record, owner: storage.owner, heartbeatAt: storage.now(), seq: nextSeq, windowId: null, window: null })
+      if (!storage.isOwnCopyKey(key)) {
+        storage.createWindow(key, { ...record, owner: storage.owner, heartbeatAt: storage.now(), epoch, seq: nextSeq, windowId: null, window: null })
+      }
       removeFile(claimed.claimPath)
     }
     // The pending file of this window exists when its owner died after step (1) of the publication: the
@@ -77,6 +82,7 @@ export function createSummaryRecovery(input: {
       sessionHash: record.sessionHash,
       sessionRole: record.sessionRole,
       sampleRate: record.sampleRate,
+      epoch,
       seq: record.seq,
       windowId: record.windowId,
       window: record.window,
@@ -130,7 +136,7 @@ export function createSummaryRecovery(input: {
       }
       if (record !== CORRUPT && isExpired(record.createdAt)) {
         storage.removePending(uuid)
-        publisher.countDropped(1)
+        if (isRecordSendable(record, isScopeConsented)) publisher.countDropped(1)
         continue
       }
       if (record !== CORRUPT && isSelf(record)) {
@@ -158,7 +164,8 @@ export function createSummaryRecovery(input: {
       }
       if (isExpired(record.heartbeatAt)) {
         storage.removeWindow(key)
-        if (record.window !== null) publisher.countDropped(1)
+        // An opted-out scope's lost window is not counted either: the count would describe that scope.
+        if (record.window !== null && isRecordSendable(record, isScopeConsented)) publisher.countDropped(1)
         continue
       }
       if (record.window !== null && isAbandoned(record)) recoverWindow(key)

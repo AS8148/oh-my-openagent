@@ -1,3 +1,5 @@
+import type { PostHogOptions } from "posthog-node";
+
 export declare const DEFAULT_POSTHOG_HOST: "https://us.i.posthog.com";
 export declare const DEFAULT_POSTHOG_API_KEY: "phc_CFJhj5HyvA62QPhvyaUCtaq23aUfznnijg5VaaGkNk74";
 /** A product default with this exact value is intentionally unconfigured and must fail closed. */
@@ -79,7 +81,10 @@ export type TelemetryTransportOptions = {
 
 export type TelemetryTransport = {
   readonly capture: (message: TelemetryCaptureMessage) => void;
-  /** Sends one event now; resolves only after the server answered, rejects when it did not accept it. */
+  /**
+   * Sends one event now; resolves only on a 2xx answer and rejects otherwise (the default PostHog transport
+   * rejects with `TelemetryDeliveryError`, whose `permanent` flag says a retry can never succeed).
+   */
   readonly captureImmediate?: (message: TelemetryCaptureMessage) => Promise<void>;
   readonly flush?: () => Promise<void>;
   readonly shutdown: () => Promise<void>;
@@ -179,9 +184,17 @@ export type TelemetryClientEnabledInput = {
 export declare function createEventTelemetryClient(
   input: CreateEventTelemetryClientInput,
 ): EventTelemetryClient;
+/** A send the server did not accept. `permanent` means a retry of the same event can never succeed. */
+export declare class TelemetryDeliveryError extends Error {
+  readonly permanent: boolean;
+  readonly status: number | undefined;
+  constructor(status: number | undefined, cause?: unknown);
+}
+/** The transport options plus posthog-node's own knobs (fetch, retries, timeouts), passed through as given. */
+export type PostHogTransportOptions = TelemetryTransportOptions & PostHogOptions;
 export declare function createDefaultPostHogTransport(
   apiKey: string,
-  options: TelemetryTransportOptions,
+  options: PostHogTransportOptions,
 ): TelemetryTransport;
 export declare function isTelemetryClientEnabled(input: TelemetryClientEnabledInput): boolean;
 export declare function createTelemetryClient(input: {

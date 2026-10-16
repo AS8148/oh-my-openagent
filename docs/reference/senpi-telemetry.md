@@ -132,6 +132,7 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `session_summary` | `reasoning_tokens` | `number` | - |
 | `session_summary` | `sample_rate` | `number` | - |
 | `session_summary` | `session_role` | `string` | `root`, `child`, `unknown` |
+| `session_summary` | `summary_epoch` | `string` | - |
 | `session_summary` | `summary_seq` | `number` | - |
 | `session_summary` | `tool_error_count` | `number` | - |
 | `session_summary` | `tool_result_count` | `number` | - |

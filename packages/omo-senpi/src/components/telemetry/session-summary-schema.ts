@@ -22,6 +22,7 @@ function buildSchema(): Readonly<Record<string, SummaryPropertySchema>> {
     is_final: BOOLEAN_PROPERTY,
     raw_turns_sampled: BOOLEAN_PROPERTY,
     session_role: enumProperty(TELEMETRY_SESSION_ROLES),
+    summary_epoch: STRING_PROPERTY,
   }
   for (const key of SUMMARY_NUMBER_KEYS) schema[key] = NUMBER_PROPERTY
   for (let slot = 1; slot <= MODEL_SLOTS; slot += 1) {
@@ -33,8 +34,9 @@ function buildSchema(): Readonly<Record<string, SummaryPropertySchema>> {
 }
 
 /**
- * `session_summary`: the assistant turns of one window, summed. Windows never overlap and a session keeps
- * one `summary_seq` sequence across reloads and crash recovery, so summing every row of a session
+ * `session_summary`: the assistant turns of one window, summed. Windows never overlap; a process numbers its
+ * windows of a session with `summary_seq` inside a random `summary_epoch` that reloads and crash recovery
+ * continue, and (session, `summary_epoch`, `summary_seq`) is unique, so summing every row of a session
  * reproduces its per-turn totals; the percentiles describe only their own window. The event's uuid is the
  * window id, so a re-sent window is deduplicated rather than counted twice. Cost is summed in integer
  * `cost_1e4` units and `cost_usd` is derived from it. Raw `turn_completed` rows ship only for sessions

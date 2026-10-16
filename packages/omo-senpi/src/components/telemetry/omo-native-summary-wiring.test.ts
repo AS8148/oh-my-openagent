@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { basename, join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
-import type { TelemetryCaptureMessage, TelemetryEnv, TelemetryTransportFactory } from "@oh-my-opencode/telemetry-core"
+import { createDefaultPostHogTransport, type TelemetryCaptureMessage, type TelemetryEnv, type TelemetryTransportFactory } from "@oh-my-opencode/telemetry-core"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createOmoNativeTelemetryComponent } from "./omo-native-component"
 import { summaryDir } from "./session-summary-storage"
@@ -156,6 +156,45 @@ describe("session_summary acknowledgment through the native transport", () => {
       const sentUuids = summariesOf(transport.sent).map(({ uuid }) => uuid)
       const retired = pendingOf(agentDir).length === 0
       expect({ sent: sentUuids.length, retired }).toEqual({ sent: 1, retired: true })
+    })
+  })
+})
+
+// The real PostHog transport against a fake HTTP server: only a 2xx answer retires the pending file.
+describe("session_summary delivery through the real PostHog transport", () => {
+  const realTransport = (host: string): TelemetryTransportFactory => (apiKey, options) =>
+    createDefaultPostHogTransport(apiKey, { ...options, host, fetchRetryCount: 0 })
+
+  const withServer = async (status: number, run: (host: string) => Promise<void>): Promise<void> => {
+    const server = Bun.serve({ port: 0, fetch: () => new Response("{}", { status }) })
+    try {
+      await run(server.url.origin)
+    } finally {
+      server.stop(true)
+    }
+  }
+
+  test("#given a server answering 500 #when the session quits #then the pending file survives for a later retry", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      await withServer(500, (host) => runSession(agentDir, realTransport(host), true))
+      expect(pendingOf(agentDir)).toHaveLength(1)
+    })
+  })
+
+  test("#given a refused connection #when the session quits #then the pending file survives for a later retry", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const closed = Bun.serve({ port: 0, fetch: () => new Response("{}") })
+      const host = closed.url.origin
+      closed.stop(true)
+      await runSession(agentDir, realTransport(host), true)
+      expect(pendingOf(agentDir)).toHaveLength(1)
+    })
+  })
+
+  test("#given a server answering 200 #when the session quits #then the pending file is deleted", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      await withServer(200, (host) => runSession(agentDir, realTransport(host), true))
+      expect(pendingOf(agentDir)).toEqual([])
     })
   })
 })

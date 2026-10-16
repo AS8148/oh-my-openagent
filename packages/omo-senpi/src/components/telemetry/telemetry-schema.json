@@ -3636,6 +3636,12 @@
         "required": false,
         "posthog_name": "session_role"
       },
+      "omo.summary_epoch": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{16}$",
+        "required": false,
+        "posthog_name": "summary_epoch"
+      },
       "omo.summary_seq": {
         "type": "number",
         "min": 0,
@@ -4496,5 +4502,5 @@
       }
     }
   },
-  "sha256": "ee5c2c47619f582e7fad0db9ec7729cfcbca0280451109c1779de52fda022ad3"
+  "sha256": "51c4ae87974d045b1a5ef9847ca0ae971cb7c17363e5a94844f73618fc7d27f3"
 }

@@ -33,6 +33,8 @@ export const INSTANCE_ID_PATTERN = "^[0-9a-f]{32}$"
 export const UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 export const DAY_UTC_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
 export const COMBO_FINGERPRINT_PATTERN = "^[0-9a-f]{16}$"
+/** The random per-run session_summary epoch: 8 random bytes as hex, the collector's `hex16` safe shape. */
+export const SUMMARY_EPOCH_PATTERN = "^[0-9a-f]{16}$"
 
 /** Events with no session by design; every other event requires `session.id`. */
 export const SESSIONLESS_EVENTS: ReadonlySet<string> = new Set(["process_crashed", "forget_request", "client_dropped"])
@@ -59,6 +61,7 @@ const STRING_CONSTRAINTS: Readonly<Record<string, PropertyConstraint>> = {
   $session_id: { pattern: SESSION_ID_PATTERN },
   day_utc: { pattern: DAY_UTC_PATTERN },
   combo_fingerprint: { pattern: COMBO_FINGERPRINT_PATTERN },
+  summary_epoch: { pattern: SUMMARY_EPOCH_PATTERN },
   crashed_bun_version: { pattern: VERSION_PATTERN },
   crashed_engine_version: { pattern: VERSION_PATTERN },
   crashed_omo_version: { pattern: VERSION_PATTERN },

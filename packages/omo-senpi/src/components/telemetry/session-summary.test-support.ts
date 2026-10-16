@@ -3,8 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
-import { createSessionSummaryRecorder, type SessionSummaryRecorder } from "./omo-native-session-summary"
-import { createSummaryStorage, type SummaryStorage } from "./session-summary-storage"
+import { createSessionSummaryRecorder, type SessionSummaryOptions, type SessionSummaryRecorder } from "./omo-native-session-summary"
+import { createSummaryStorage, type ConsentScope, type SummaryStorage } from "./session-summary-storage"
 import type { SummaryTurn } from "./session-summary-window"
 
 export type Published = { readonly uuid: string; readonly properties: EventTelemetryProperties }
@@ -49,12 +49,17 @@ export type TestRecorderInput = {
   readonly otherPidsAlive?: boolean
   /** Other live processes this one can see; any pid not listed (and not its own) is dead. */
   readonly alivePids?: readonly number[]
+  /** Start-time probe; by default every live pid still names the process that registered it. */
+  readonly startTimes?: (pid: number) => string | null
   readonly sampleRate?: number
   readonly startAt?: number
   readonly ack?: boolean
   readonly droppedEvents?: () => number
   readonly onPublish?: (event: Published, storage: SummaryStorage) => unknown
   readonly isConsented?: () => boolean
+  readonly consentScope?: ConsentScope
+  readonly isScopeConsented?: (scope: ConsentScope) => boolean
+  readonly loadRecovery?: SessionSummaryOptions["loadRecovery"]
 }
 
 export function createTestRecorder(input: TestRecorderInput): TestRecorder {
@@ -69,10 +74,13 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
     stateDir: input.dir,
     owner: { pid, bootId: input.bootId ?? `boot-${pid}` },
     isPidAlive: (candidate) => candidate === pid || (input.otherPidsAlive ?? false) || (input.alivePids ?? []).includes(candidate),
+    processStartTime: input.startTimes ?? (() => "test-process-start"),
     now,
   })
   const summary = createSessionSummaryRecorder({
     ...(input.isConsented === undefined ? {} : { isConsented: input.isConsented }),
+    ...(input.consentScope === undefined ? {} : { consentScope: () => input.consentScope ?? {} }),
+    ...(input.isScopeConsented === undefined ? {} : { isScopeConsented: input.isScopeConsented }),
     storage,
     publish: async (event) => {
       if (input.onPublish !== undefined) observed.push(input.onPublish(event, storage))
@@ -90,6 +98,7 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
       }
     },
     ...(input.droppedEvents === undefined ? {} : { droppedEvents: input.droppedEvents }),
+    ...(input.loadRecovery === undefined ? {} : { loadRecovery: input.loadRecovery }),
   })
   return {
     published,
@@ -107,3 +116,6 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
 
 export const rows = (published: readonly Published[]) =>
   published.map(({ properties }) => [properties.summary_seq, properties.ended_by, properties.turns])
+
+export const summaryKeys = (published: readonly Published[]) =>
+  published.map(({ properties }) => `${String(properties.summary_epoch)}:${String(properties.summary_seq)}`)
