@@ -8,7 +8,7 @@ import { join } from "node:path"
 
 import { git } from "../concurrency/two-process-kit.test-support"
 import { buildIdentityPaths } from "../identity"
-import { memoryWriterLockPath } from "../locks"
+import { acquireLock, createLockRecord, memoryWriterLockPath, releaseLock } from "../locks"
 import { exitedWithin } from "../locks/process-liveness.test-support"
 import { StrandedGitLockError } from "./repo-lock-sweep"
 import { inspectStrandedGitLock, unlockStrandedGitLock, type UnlockScans } from "./repo-lock-unlock"
@@ -76,6 +76,44 @@ describe("the kept stranded-lock error gives a way out (omo #10199)", () => {
 })
 
 describe("/memory unlock re-checks one stranded git lock (omo #10199)", () => {
+  test("#given a memory writer in THIS process holding the memory-write lock #when the lock is inspected and unlocked #then both refuse and the lock stays", async () => {
+    // #given
+    const paths = await identity("unlock-same-process-writer")
+    const lockPath = await strand(paths.repo, "index.lock")
+    const record = await createLockRecord("memory-write")
+    await acquireLock(memoryWriterLockPath(paths.locks), record)
+
+    try {
+      // #when
+      const inspection = await inspectStrandedGitLock(paths.repo, lockPath, NOBODY)
+      if (inspection.kind !== "found") throw new Error(`unexpected ${inspection.kind}`)
+      const outcome = await unlockStrandedGitLock(paths.repo, { ...inspection, verdict: "confirm" }, NOBODY)
+
+      // #then
+      expect(inspection.writer).toEqual({ kind: "alive", pid: process.pid })
+      expect(inspection.verdict).toBe("refuse")
+      expect(outcome.kind).toBe("refused")
+      expect(existsSync(lockPath)).toBe(true)
+    } finally {
+      await releaseLock(memoryWriterLockPath(paths.locks), record)
+    }
+  })
+
+  test("#given an unreadable memory-write lock record #when the lock is inspected #then the writer is reported unknown, never none", async () => {
+    // #given
+    const paths = await identity("unlock-unreadable-writer")
+    const lockPath = await strand(paths.repo, "index.lock")
+    await writeFile(memoryWriterLockPath(paths.locks), "{not json", "utf8")
+
+    // #when
+    const inspection = await inspectStrandedGitLock(paths.repo, lockPath, NOBODY)
+
+    // #then
+    expect(inspection.kind).toBe("found")
+    if (inspection.kind !== "found") return
+    expect(inspection.writer.kind).toBe("unknown")
+  })
+
   test("#given a path that is not a git lock the sweep considers #when it is inspected #then it is rejected", async () => {
     // #given
     const paths = await identity("unlock-not-a-lock")
@@ -136,7 +174,7 @@ describe("/memory unlock re-checks one stranded git lock (omo #10199)", () => {
     // #then
     expect(inspection.kind).toBe("found")
     if (inspection.kind !== "found") return
-    expect(inspection.writerPid).toBe(writer.pid)
+    expect(inspection.writer).toEqual({ kind: "alive", pid: writer.pid })
     expect(inspection.verdict).toBe("refuse")
   })
 

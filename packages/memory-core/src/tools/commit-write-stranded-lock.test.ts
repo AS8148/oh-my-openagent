@@ -107,6 +107,26 @@ describe("a memory write behind a kept stranded git lock (omo #10199)", () => {
     expect(await setup.repo.status()).toBe("")
   })
 
+  it("#given a kept ref lock that lets git add succeed #when a create fails at commit and the lock is unlocked #then the index and tree are clean and the retry commits", async () => {
+    // #given
+    const setup = await fixture()
+    const refLock = join(setup.repo.dir, ".git", "refs", "heads", "main.lock")
+    await writeFile(refLock, "", "utf8")
+
+    // #when
+    const failure = await create(setup, "system/new.md", "new fact", "write behind the ref lock").catch((error: unknown) => error)
+    const statusAfterFailure = await setup.repo.status()
+    const inspection = await inspectStrandedGitLock(setup.repo.dir, refLock, NOBODY)
+    if (inspection.kind !== "found") throw new Error(`unexpected ${inspection.kind}`)
+    expect((await unlockStrandedGitLock(setup.repo.dir, inspection, NOBODY)).kind).toBe("removed")
+    const retried = await create(setup, "system/new.md", "new fact", "write after unlock")
+
+    // #then
+    expect(String(failure)).toContain("/memory unlock")
+    expect(statusAfterFailure).toBe("")
+    expect(retried.commit?.affectedPaths).toEqual(["system/new.md"])
+  })
+
   it("#given the restore itself cannot read HEAD #when the write fails behind the lock #then both errors are reported and the lock is kept", async () => {
     // #given
     const setup = await fixture()
