@@ -1,23 +1,24 @@
-// Machine identity for the device peer (review r4 MEDIUM): the peer file stores a hash of the
-// OS machine id, so a state dir copied to another machine (migration, restored backup, cloned
-// VM) is detected there and a new peer is minted instead of sharing (peer, counter) ranges.
-// Sources: /etc/machine-id (Linux), IOPlatformUUID (macOS), MachineGuid (Windows); the
-// hostname is the last resort when the platform source is unavailable.
+// Device identity for the peer (reviews r4 MEDIUM, r5 M3): the peer file stores a hash of the
+// OS machine id AND the canonical state-dir path, so a state dir copied to another machine or
+// to another path on the same machine (a second profile, a cloned image) mints a new peer,
+// while a backup restored to the same path on the same machine keeps it.
+// Sources: /etc/machine-id (Linux), IOPlatformUUID (macOS), MachineGuid (Windows). Without one,
+// a fixed marker stands in, so the path binding still applies and nothing changes with the
+// network (the hostname fallback churned the peer, review r5 L2).
 
 import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
-import { hostname } from "node:os"
 
 import { readFile } from "../../fs/resilient"
 
-export function machineFingerprint(machineId: string): string {
-  return createHash("sha256").update(`omo-item-device:${machineId}`).digest("hex")
+export function deviceFingerprint(machineId: string, stateDir: string): string {
+  return createHash("sha256").update(`omo-item-device:${machineId}\0${stateDir}`).digest("hex")
 }
 
 let cached: Promise<string> | null = null
 
 export function readMachineId(): Promise<string> {
-  cached ??= platformMachineId().then((id) => id ?? `hostname:${hostname()}`)
+  cached ??= platformMachineId().then((id) => id ?? "no-platform-machine-id")
   return cached
 }
 

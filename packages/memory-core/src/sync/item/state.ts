@@ -1,13 +1,17 @@
 // Current per-key container contents and their combination under the kind rule
-// (sync-design §2): a key's kind is fixed by its earliest first-write op, and content in
-// containers of other kinds renders converted into that kind, losslessly. Combined text
-// and register values are PLAIN text here; render.ts serializes them once through
-// renderEntry, so a joined value never lands as glued pre-quoted fragments (review r1 #3).
+// (sync-design §2): a key's kind (register or set) is fixed by its earliest first-write op,
+// and content in the container of the other kind renders converted into that kind, losslessly.
+// A register is multi-value: concurrent writes all stay active until a write that saw them
+// supersedes them, and registerValues is the one place that decides how active entries
+// resolve (review r5: one site for the register rule). Joined values are PLAIN text here;
+// render.ts serializes them once through renderEntry (review r1 #3).
 // Register and set-map containers hold the register's serialized form (its exact source
 // spelling, e.g. `true` stays "true", a colon-bearing string stays '"a: b"'); the kind
 // rule strips one renderScalar layer so a scalar register contributes bare text.
 // Both render.ts and capture.ts read state through here so capture's no-op detection
 // compares against exactly what render would emit.
+
+import { Buffer } from "node:buffer"
 
 import type { ContainerID, ContainerType, LoroDoc } from "../../crdt/loro-runtime"
 
@@ -36,15 +40,11 @@ export interface RegEntry {
 }
 
 export interface KeyState {
-  readonly text: string | null
   readonly set: readonly { readonly tag: string; readonly element: string }[]
   readonly reg: readonly RegEntry[]
 }
 
 export function readKeyState(doc: LoroDoc, key: string): KeyState {
-  const text = doc.hasContainer(cidRoot(fmName(key, "text"), "Text"))
-    ? doc.getText(fmName(key, "text")).toString()
-    : null
   const set: { tag: string; element: string }[] = []
   if (doc.hasContainer(cidRoot(fmName(key, "set"), "Map"))) {
     for (const [tag, value] of doc.getMap(fmName(key, "set")).entries()) {
@@ -58,7 +58,7 @@ export function readKeyState(doc: LoroDoc, key: string): KeyState {
       if (entry !== null) reg.push(entry)
     }
   }
-  return { text, set, reg }
+  return { set, reg }
 }
 
 function asRegEntry(tag: string, value: unknown): RegEntry | null {
@@ -69,6 +69,11 @@ function asRegEntry(tag: string, value: unknown): RegEntry | null {
   if (v !== null && typeof v !== "string") return null
   if (!Array.isArray(s) || s.some((t) => typeof t !== "string")) return null
   return { tag, value: v, supersedes: s as readonly string[] }
+}
+
+/** The register rule: every active entry's whole value, one per distinct value. */
+export function registerValues(entries: readonly RegEntry[]): string[] {
+  return [...new Set(activeReg(entries).map((entry) => entry.value))]
 }
 
 export function activeReg(entries: readonly RegEntry[]): (RegEntry & { readonly value: string })[] {
@@ -124,68 +129,49 @@ export function orderedSetElements(state: KeyState, key: string, history: ItemHi
 }
 
 export type CombinedValue =
-  | { readonly kind: "text" | "reg"; readonly text: string; readonly verbatim: boolean }
+  | { readonly kind: "reg"; readonly text: string; readonly verbatim: boolean }
   | { readonly kind: "set"; readonly elements: readonly string[] }
 
 export function combineKey(state: KeyState, key: string, kh: KeyHistory, history: ItemHistory): CombinedValue | null {
-  const active = activeReg(state.reg)
-  // Two active registers with one serialized value are one value (a stale capture can replay
-  // a value a concurrent writer already landed); join it once (review r2 #2).
-  const seenValues = new Set<string>()
-  const regValues = [...active]
-    .sort((a, b) =>
-      a.value === b.value ? (a.tag < b.tag ? -1 : 1) : a.value < b.value ? -1 : 1,
-    )
-    .filter((entry) => (seenValues.has(entry.value) ? false : (seenValues.add(entry.value), true)))
-  const soleRegister =
-    kh.kind === "reg" && (state.text === null || state.text === "") && state.set.length === 0
-  // A lone register keeps its serialized form verbatim (`count: 2` stays `2`); only a
-  // mixed-content join dequotes scalars so the joined plain text serializes back as itself.
-  const regTexts = regValues.map((e) => (soleRegister ? e.value : regText(e.value)))
-  if (kh.kind === "text") {
-    const parts: { readonly stamp: Stamp; readonly out: string }[] = []
-    if (state.text !== null && state.text !== "") {
-      parts.push({ stamp: kh.byKind.get("text") ?? MISSING_STAMP, out: state.text })
-    }
-    const elements = orderedSetElements(state, key, history)
-    if (elements.length > 0) {
-      parts.push({ stamp: kh.byKind.get("set") ?? MISSING_STAMP, out: `[${elements.join(", ")}]` })
-    }
-    if (regTexts.length > 0) {
-      parts.push({ stamp: kh.byKind.get("reg") ?? MISSING_STAMP, out: regTexts.join(" / ") })
-    }
-    if (parts.length === 0) return null
-    parts.sort((a, b) => stampCompare(a.stamp, b.stamp))
-    return { kind: "text", text: parts.map((part) => part.out).join(" "), verbatim: false }
+  switch (kh.kind) {
+    case "set":
+      return combineSet(state, key, kh, history)
+    case "reg":
+      return combineRegister(state)
+    default:
+      return assertNever(kh.kind)
   }
-  if (kh.kind === "set") {
-    const tagged: { readonly stamp: Stamp; readonly source: string }[] = state.set.map(({ tag, element }) => ({
-      source: element,
-      stamp: addStamp(history, key, "set", tag, kh.byKind.get("set")),
-    }))
-    if (state.text !== null && state.text !== "") {
-      tagged.push({ source: renderScalar(state.text), stamp: kh.byKind.get("text") ?? MISSING_STAMP })
-    }
-    // A register inside a set join contributes its bare scalar text, not its quoted stored
-    // source, so the joined element parses back to itself (review r2).
-    for (const entry of active) {
-      tagged.push({ source: renderScalar(regText(entry.value)), stamp: addStamp(history, key, "reg", entry.tag, kh.byKind.get("reg")) })
-    }
-    tagged.sort((a, b) => stampCompare(a.stamp, b.stamp) || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0))
-    const seen = new Set<string>()
-    const elements: string[] = []
-    for (const { source } of tagged) {
-      if (seen.has(source)) continue
-      seen.add(source)
-      elements.push(source)
-    }
-    if (elements.length === 0) return null
-    return { kind: "set", elements }
+}
+
+function combineRegister(state: KeyState): CombinedValue | null {
+  // Spec #454: one lone value renders its canonical source verbatim; several values (or values
+  // beside set content) render as ONE double-quoted string of their canonical sources, deduped
+  // and sorted by UTF-8 bytes, joined with " / ", so '3' and 3 stay distinct components.
+  const values = registerValues(state.reg)
+  const sole = values.length === 1 && state.set.length === 0
+  const parts = [...new Set([...values, ...state.set.map((e) => e.element)])].sort(utf8Compare)
+  if (parts.length === 0) return null
+  return { kind: "reg", text: parts.join(" / "), verbatim: sole }
+}
+
+function utf8Compare(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"))
+}
+
+function combineSet(state: KeyState, key: string, kh: KeyHistory, history: ItemHistory): CombinedValue | null {
+  const tagged: { readonly stamp: Stamp; readonly source: string }[] = state.set.map(({ tag, element }) => ({
+    source: element,
+    stamp: addStamp(history, key, "set", tag, kh.byKind.get("set")),
+  }))
+  // A register inside a set contributes its bare scalar text as one element (review r2).
+  for (const entry of activeReg(state.reg)) {
+    tagged.push({ source: renderScalar(regText(entry.value)), stamp: addStamp(history, key, "reg", entry.tag, kh.byKind.get("reg")) })
   }
-  const values = regTexts.slice()
-  if (state.text !== null && state.text !== "") values.push(state.text)
-  for (const { element } of state.set) values.push(element)
-  values.sort()
-  if (values.length === 0) return null
-  return { kind: "reg", text: values.join(" / "), verbatim: soleRegister }
+  tagged.sort((a, b) => stampCompare(a.stamp, b.stamp) || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0))
+  const elements = [...new Set(tagged.map((t) => t.source))]
+  return elements.length === 0 ? null : { kind: "set", elements }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`unhandled field kind: ${String(value)}`)
 }

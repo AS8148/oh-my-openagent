@@ -4,9 +4,11 @@
 // which is published by renaming it onto `path`: a directory rename is atomic and fails when
 // the target exists and is non-empty, on every file system (no hard links, review r4 LOW-2).
 // A racing reader never sees a partial id, and exactly one candidate wins.
-// Next to `id` sits `machine`, the fingerprint of the machine that minted it. A peer read on a
-// different machine (a copied state dir) is retired, renamed aside, and a new one is minted
-// (review r4 MEDIUM). Two processes retiring at once can only cost an extra peer, never share one.
+// Next to `id` sits `machine`, the device fingerprint (machine id + canonical state-dir path)
+// it was minted under. A peer read under another fingerprint (a state dir copied to another
+// machine or path) is retired, renamed aside, and a new one is minted (reviews r4 MEDIUM, r5 M3).
+// Only one process may open a state dir; two racing retirers could otherwise retire each
+// other's fresh peer and its receipts (review r5 L3).
 
 import { randomBytes } from "node:crypto"
 import { dirname, join } from "node:path"

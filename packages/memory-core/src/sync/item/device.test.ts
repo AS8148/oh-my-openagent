@@ -60,13 +60,26 @@ describe("openItemDevice", () => {
       if (update !== null) doc.import(update)
       doc.free()
       await cp(join(dir, "a"), join(dir, "b"), { recursive: true })
-      const sameMachine = await openItemDevice({ stateDir: join(dir, "b"), memoryRoot, machineId: "machine-a" })
-      expect(sameMachine.peer).toBe(original.peer)
       const copied = await openItemDevice({ stateDir: join(dir, "b"), memoryRoot, machineId: "machine-b" })
       expect(copied.peer).not.toBe(original.peer)
       expect((await readdir(join(dir, "b"))).filter((name) => name === "captures")).toEqual([])
       const again = await openItemDevice({ stateDir: join(dir, "b"), memoryRoot, machineId: "machine-b" })
       expect(again.peer).toBe(copied.peer)
+    })
+  })
+
+  test("#given a state dir copied to another path on the same machine #when opened #then it gets a NEW peer, while a restore to the original path keeps its peer (review r5 M3)", async () => {
+    await withDir(async (dir) => {
+      const memoryRoot = join(dir, "memory")
+      const original = await openItemDevice({ stateDir: join(dir, "a"), memoryRoot, machineId: "machine-a" })
+      await cp(join(dir, "a"), join(dir, "profile-2"), { recursive: true })
+      const sibling = await openItemDevice({ stateDir: join(dir, "profile-2"), memoryRoot, machineId: "machine-a" })
+      expect(sibling.peer).not.toBe(original.peer)
+      await cp(join(dir, "a"), join(dir, "backup"), { recursive: true })
+      await rm(join(dir, "a"), { recursive: true, force: true })
+      await cp(join(dir, "backup"), join(dir, "a"), { recursive: true })
+      const restored = await openItemDevice({ stateDir: join(dir, "a"), memoryRoot, machineId: "machine-a" })
+      expect(restored.peer).toBe(original.peer)
     })
   })
 

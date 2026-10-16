@@ -2,9 +2,10 @@ import { describe, expect, test } from "bun:test"
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
-import { renderEntry } from "./frontmatter"
-import type { FmValue, ItemDevice, ItemFrontier } from "./index"
-import { captureOnDevice, createDeviceItemDoc, itemFrontier, recordMaterialized, renderItem, splitItem } from "./index"
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
+
+import type { ItemDevice, ItemFrontier } from "./index"
+import { captureOnDevice, createDeviceItemDoc, itemFrontier, recordMaterialized, renderItem } from "./index"
 import { mulberry32, newDoc, withDevices } from "./test-support"
 
 // Reviews r3-r5 property (oMo PR #10203), over a model of the sync engine with 3 devices.
@@ -19,7 +20,7 @@ import { mulberry32, newDoc, withDevices } from "./test-support"
 // re-capture is a no-op, and the version vector holds only device peers.
 
 const SEEDS = 2000
-const SHARD = 125
+const SHARD = 50
 const ITEM = "item.md"
 
 interface Node {
@@ -31,42 +32,81 @@ interface Node {
 
 interface Ledger {
   readonly markers: string[]
-  readonly registers: Set<string>
+  readonly removed: Set<string>
+  readonly written: Map<string, Set<string>>
 }
 
+function header(disk: string): Record<string, unknown> {
+  if (!disk.startsWith("---\n")) return {}
+  const end = disk.indexOf("\n---", 4)
+  if (end < 0) return {}
+  try {
+    const parsed: unknown = parseYaml(disk.slice(4, end))
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? Object.fromEntries(Object.entries(parsed)) : {}
+  } catch {
+    return {}
+  }
+}
+
+function bodyOf(disk: string): string {
+  if (!disk.startsWith("---\n")) return disk
+  const end = disk.indexOf("\n---\n", 3)
+  return end < 0 ? disk : disk.slice(end + 5)
+}
+
+// A written value is recorded raw and as its canonical YAML source: a register with several
+// values renders each component as its canonical source (spec #454).
+function record(ledger: Ledger, key: string, value: unknown): void {
+  const set = ledger.written.get(key) ?? new Set<string>()
+  set.add(String(value))
+  set.add(stringifyYaml(value, { collectionStyle: "flow" }).trim())
+  ledger.written.set(key, set)
+}
+
+// One user edit of the file on disk. Registers (n, description) get whole new values, string
+// or number, including over a value currently shown as a conflict; tags get element adds,
+// removals, and replacement of the whole list by one string (a kind change); the body gets
+// appended lines. Every value a user ever wrote is recorded per key.
 function edit(rand: () => number, disk: string, ledger: Ledger, seed: number): string {
-  const parsed = splitItem(disk)
-  const fields = new Map<string, FmValue>((parsed.fm ?? []).map((e) => [e.key, e.value]))
-  const body = parsed.fm === null ? disk : parsed.body
-  const id = ledger.markers.length + ledger.registers.size
+  const fields = header(disk)
+  let body = bodyOf(disk)
+  const id = ledger.markers.length + [...ledger.written.values()].reduce((n, s) => n + s.size, 0)
+  const token = `m${seed}x${id}q`
   const roll = rand()
-  let nextBody = body
-  if (roll < 0.25) {
-    const value = `${seed * 1000 + id + 1}`
-    ledger.registers.add(value)
-    fields.set("n", { kind: "reg", value })
-  } else {
-    const marker = `m${seed}x${id}q`
-    ledger.markers.push(marker)
-    if (roll < 0.45) {
-      const old = fields.get("description")
-      const text = old?.kind === "text" ? old.text : ""
-      fields.set("description", { kind: "text", text: text === "" ? marker : `${text} ${marker}` })
-    } else if (roll < 0.65) {
-      const old = fields.get("tags")
-      const elements = old?.kind === "set" ? old.elements : []
-      fields.set("tags", { kind: "set", elements: [...elements, marker], flow: "" })
+  if (roll < 0.2) {
+    const value = rand() < 0.5 ? seed * 1000 + id + 1 : `w${token}`
+    record(ledger, "n", value)
+    fields.n = value
+  } else if (roll < 0.4) {
+    const value = `d ${token}`
+    record(ledger, "description", value)
+    fields.description = value
+  } else if (roll < 0.65) {
+    const old = Array.isArray(fields.tags) ? fields.tags.map(String) : []
+    const op = rand()
+    if (op < 0.6 || old.length === 0) {
+      ledger.markers.push(token)
+      record(ledger, "tags", token)
+      fields.tags = [...old, token]
+      // A list written whole into a register-kind key is stored as one value: its flow source.
+      record(ledger, "tags", [...old, token])
+    } else if (op < 0.85) {
+      const drop = old[Math.floor(rand() * old.length)] ?? ""
+      ledger.removed.add(drop)
+      fields.tags = old.filter((e) => e !== drop)
+      if (old.length === 1) delete fields.tags
     } else {
-      nextBody = body === "" || body.endsWith("\n") ? `${body}${marker}\n` : `${body}\n${marker}\n`
+      for (const e of old) ledger.removed.add(e)
+      const value = `k: ${token}`
+      record(ledger, "tags", value)
+      fields.tags = value
     }
+  } else {
+    ledger.markers.push(token)
+    body = body === "" || body.endsWith("\n") ? `${body}${token}\n` : `${body}\n${token}\n`
   }
-  const lines: string[] = []
-  for (const [key, value] of fields) {
-    if (value.kind === "reg") lines.push(renderEntry(key, value.value, true))
-    else if (value.kind === "text") lines.push(renderEntry(key, value.text))
-    else if (value.kind === "set") lines.push(renderEntry(key, value.elements))
-  }
-  return lines.length === 0 ? nextBody : `---\n${lines.join("\n")}\n---\n${nextBody}`
+  const lines = Object.entries(fields).map(([key, value]) => stringifyYaml({ [key]: value }).trimEnd())
+  return lines.length === 0 ? body : `---\n${lines.join("\n")}\n---\n${body}`
 }
 
 async function capture(node: Node): Promise<void> {
@@ -91,12 +131,6 @@ function sync(a: Node, b: Node): void {
   b.doc.import(ua)
 }
 
-function registerParts(rendered: string): string[] {
-  const value = (splitItem(rendered).fm ?? []).find((e) => e.key === "n")?.value
-  if (value === undefined || value.kind === "remove") return []
-  const text = value.kind === "reg" ? value.value : value.kind === "text" ? value.text : value.elements.join(" / ")
-  return text.split(" / ")
-}
 
 async function runSeed(seed: number, devices: readonly ItemDevice[]): Promise<void> {
   const rand = mulberry32(seed)
@@ -105,7 +139,7 @@ async function runSeed(seed: number, devices: readonly ItemDevice[]): Promise<vo
     nodes.push({ device, doc: await createDeviceItemDoc(device), disk: "", saved: { text: "", frontier: [] } })
   }
   const pick = (): Node => nodes[Math.floor(rand() * nodes.length)] ?? nodes[0] ?? fail()
-  const ledger: Ledger = { markers: [], registers: new Set() }
+  const ledger: Ledger = { markers: [], removed: new Set(), written: new Map() }
   try {
     const steps = 10 + Math.floor(rand() * 12)
     for (let step = 0; step < steps; step++) {
@@ -135,12 +169,22 @@ async function runSeed(seed: number, devices: readonly ItemDevice[]): Promise<vo
       expect(renderItem(fresh) ?? "", `seed ${seed}: delivery order ${order.join("")} diverged`).toBe(rendered)
       fresh.free()
     }
+    const settled = header(rendered)
+    for (const key of ["n", "description"]) {
+      if (settled[key] === undefined) continue
+      for (const part of String(settled[key]).split(" / ")) {
+        expect(ledger.written.get(key)?.has(part), `seed ${seed}: ${key} holds ${JSON.stringify(part)}, never written`).toBe(true)
+      }
+    }
+    const tags = settled.tags
+    for (const element of Array.isArray(tags) ? tags : tags === undefined ? [] : String(tags).split(" / ")) {
+      expect(typeof element, `seed ${seed}: tags element ${JSON.stringify(element)} is not a string`).toBe("string")
+      expect(ledger.written.get("tags")?.has(String(element)), `seed ${seed}: tags holds ${JSON.stringify(element)}, never written`).toBe(true)
+    }
     for (const marker of ledger.markers) {
       const count = rendered.split(marker).length - 1
-      expect(count, `seed ${seed}: marker ${marker} appears ${count} times`).toBe(1)
-    }
-    for (const part of registerParts(rendered)) {
-      expect(ledger.registers.has(part), `seed ${seed}: register holds ${JSON.stringify(part)}, never written`).toBe(true)
+      const expected = ledger.removed.has(marker) ? 0 : 1
+      expect(count, `seed ${seed}: marker ${marker} appears ${count} times, expected ${expected}`).toBe(expected)
     }
     for (const node of nodes) {
       const again = await captureOnDevice(node.device, ITEM, node.doc, node.saved.text, node.saved.frontier, node.disk)

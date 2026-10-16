@@ -10,7 +10,7 @@ import { realpath } from "../../fs/resilient"
 
 import { DevicePeerError, loadOrCreateDevicePeer, retireAside } from "./device-peer"
 import { createItemDoc } from "./document"
-import { machineFingerprint, readMachineId } from "./machine-id"
+import { deviceFingerprint, readMachineId } from "./machine-id"
 
 export interface ItemDevice {
   readonly peer: PeerID
@@ -30,7 +30,7 @@ export async function openItemDevice(options: OpenItemDeviceOptions): Promise<It
   if (isInside(stateDir, memoryRoot)) {
     throw new DevicePeerError(`device state dir ${stateDir} is inside the synced memory root ${memoryRoot}`)
   }
-  const machine = machineFingerprint(options.machineId ?? (await readMachineId()))
+  const machine = deviceFingerprint(options.machineId ?? (await readMachineId()), stateDir)
   const { peer, retired } = await loadOrCreateDevicePeer(join(stateDir, "peer"), machine)
   // Receipts of a retired peer describe another machine's captures; they must not steer this one.
   if (retired) await retireAside(join(stateDir, "captures"))
