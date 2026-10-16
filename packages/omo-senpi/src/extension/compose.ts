@@ -6,6 +6,7 @@ import { AGENT_TOOLKIT_SDK_ROOT_ENV, createSdkRootProvisioning } from "./sdk-roo
 import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
 import { createFirstPaintScheduler, createStartupDeferral, type StartupWorkScheduler } from "./startup-deferral"
 import { installToolCaptureRegistry } from "./tool-capture-registry"
+import { createPrewarmDiagnostics } from "./prewarm-diagnostics"
 import type { ComponentContext, ComponentLogger, OmoSenpiComponent, SenpiExtensionAPI } from "./types"
 
 export interface ComposeOmoSenpiExtensionOptions {
@@ -113,6 +114,7 @@ export function composeOmoSenpiExtension(
     // Install the capture registry and idle coordinator BEFORE the component loop so every component
     // (lsp registers earlier than task) has its tools captured and shares one injection arbiter.
     const captureRegistry = installToolCaptureRegistry(pi)
+    const prewarmDiagnostics = createPrewarmDiagnostics(pi, logger)
     // The 200ms batch window: every delivered notification (completions, team messages, the ulw
     // continuation) defers its flush through this timer, so everything that becomes ready within the
     // window collapses into ONE steer injection instead of N separate ones. The timer is unref'd and
@@ -180,7 +182,7 @@ export function composeOmoSenpiExtension(
       }
 
       try {
-        await component.register(pi, ctx)
+        await component.register(prewarmDiagnostics.forComponent(component.name), ctx)
       } catch (error) {
         logger.error("omo-senpi component registration failed", { component: component.name, error })
       }

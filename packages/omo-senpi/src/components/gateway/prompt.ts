@@ -33,8 +33,16 @@ export function createGatewayRulesPromptHandler(
     const sessionId = readSessionId(eventCtx)
     if (sessionId === undefined) return undefined
     if (isRecord(payload) && payload.preview === true) {
-      const block = await options.previewBlockForSession?.(sessionId)
-      return block === undefined ? undefined : { systemPrompt: composeGatewayRulesBlock(systemPrompt, block) }
+      try {
+        const block = await options.previewBlockForSession?.(sessionId)
+        return block === undefined ? undefined : { systemPrompt: composeGatewayRulesBlock(systemPrompt, block) }
+      } catch (error) {
+        if (!lookupWarned) {
+          lookupWarned = true
+          options.onLookupError?.(`gateway rules lookup failed: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        return undefined
+      }
     }
     const store = await options.ensureStore()
     if (store === undefined) return undefined
