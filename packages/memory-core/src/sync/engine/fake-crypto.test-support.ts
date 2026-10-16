@@ -2,7 +2,7 @@
 // the verifier refuses what a real one would - an object naming another batch, another account,
 // or any seq the test marks as failing a receiver check.
 
-import type { BatchPayload, PulledEntry, RefusalCode, Sealer, SnapshotRef, Verdict, Verifier } from "./ports"
+import type { BatchPayload, PulledEntry, RefusalCode, SealedBatch, Sealer, SnapshotRef, Verdict, Verifier } from "./ports"
 
 interface Sealed {
   readonly account: string
@@ -27,8 +27,8 @@ export function encodePayload(account: string, batchId: string, baseSeq: number,
 export class FakeSealer implements Sealer {
   constructor(private readonly account: string) {}
 
-  async seal(batchId: string, baseSeq: number, payload: BatchPayload): Promise<Uint8Array> {
-    return encodePayload(this.account, batchId, baseSeq, payload)
+  async seal(batchId: string, baseSeq: number, payload: BatchPayload): Promise<SealedBatch> {
+    return { bytes: encodePayload(this.account, batchId, baseSeq, payload), epoch: 1, link: "A".repeat(43), recordSig: "S".repeat(86) }
   }
 }
 
@@ -42,6 +42,7 @@ export class FakeVerifier implements Verifier {
   async verifyEntry(entry: PulledEntry, bytes: Uint8Array): Promise<Verdict> {
     const forced = this.failing.get(entry.seq)
     if (forced !== undefined) return this.refuse(forced)
+    if (entry.kind === "keyring") return { ok: true, payload: { items: [] } }
     const sealed = this.open(bytes)
     if (sealed === null) return this.refuse("malformed")
     if (sealed.account !== this.account) return this.refuse("account_binding")
@@ -49,8 +50,8 @@ export class FakeVerifier implements Verifier {
     return { ok: true, payload: payloadOf(sealed) }
   }
 
-  async verifySnapshot(_snapshot: SnapshotRef, bytes: Uint8Array): Promise<Verdict> {
-    const sealed = this.open(bytes)
+  async verifySnapshot(_snapshot: SnapshotRef, chunks: readonly Uint8Array[]): Promise<Verdict> {
+    const sealed = chunks.length === 1 && chunks[0] !== undefined ? this.open(chunks[0]) : null
     if (sealed === null) return this.refuse("malformed")
     if (sealed.account !== this.account) return this.refuse("account_binding")
     return { ok: true, payload: payloadOf(sealed) }

@@ -108,7 +108,7 @@ export class FakeSyncServer {
   compact(coversSeq: number, snapshotBytes: Uint8Array): void {
     const objectId = `snap${++this.ids}`
     this.objects.set(objectId, snapshotBytes)
-    this.snapshot = { coversSeq, objectId, digest: sha256Hex(snapshotBytes) }
+    this.snapshot = { coversSeq, objectIds: [objectId], digest: sha256Hex(snapshotBytes) }
     this.trimmedThrough = coversSeq
     this.entries.splice(0, this.entries.findIndex((e) => e.seq > coversSeq))
   }
@@ -136,7 +136,7 @@ export class FakeSyncServer {
     const objectId = `obj${++this.ids}`
     this.objects.set(objectId, upload.bytes)
     const seq = this.head + 1
-    this.entries.push({ seq, batchId: request.batchId, digest: request.digest, objectId, author })
+    this.entries.push({ seq, kind: "batch", batchId: request.batchId, digest: request.digest, objectId, author })
     this.byBatch.set(request.batchId, seq)
     for (const l of this.listeners) l.onAdvanced(seq)
     return { ok: true, seq }

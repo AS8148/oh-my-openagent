@@ -7,6 +7,8 @@
 /** One pulled sequence entry: a batch the server ordered, never its plaintext. */
 export interface PulledEntry {
   readonly seq: number
+  /** A keyring record carries no object: it is verified (todo 13) and advances the cursor. */
+  readonly kind: "batch" | "keyring"
   /** The batch id (the push's idempotency key); one batch is applied at most once. */
   readonly batchId: string
   /** Hex SHA-256 of the object bytes, checked on download before anything else. */
@@ -19,8 +21,10 @@ export interface PulledEntry {
 /** A compaction snapshot covering every entry up to and including `coversSeq`. */
 export interface SnapshotRef {
   readonly coversSeq: number
-  readonly objectId: string
-  readonly digest: string
+  /** Its chunk objects, in order. */
+  readonly objectIds: readonly string[]
+  /** Hex SHA-256 of a single-chunk snapshot when the server states one; the verifier checks the rest. */
+  readonly digest: string | null
 }
 
 export interface PullPage {
@@ -36,6 +40,16 @@ export interface PullPage {
 export type AppendResult =
   | { readonly ok: true; readonly seq: number }
   | { readonly ok: false; readonly error: "stale_base"; readonly head: number }
+
+export interface AppendRequest {
+  readonly uploadId: string
+  readonly digest: string
+  readonly baseSeq: number
+  readonly batchId: string
+  readonly epoch: number
+  readonly link: string
+  readonly recordSig: string
+}
 
 export interface StreamHandlers {
   /** `sync.advanced` / `sync.keyring.changed`: a trigger carrying the advertised head, never data. */
@@ -53,7 +67,7 @@ export interface Transport {
   reserve(size: number, digest: string): Promise<string>
   upload(uploadId: string, bytes: Uint8Array): Promise<void>
   /** Append the uploaded object at `baseSeq + 1`; a repost of `batchId` answers its original seq. */
-  append(request: { readonly uploadId: string; readonly digest: string; readonly baseSeq: number; readonly batchId: string }): Promise<AppendResult>
+  append(request: AppendRequest): Promise<AppendResult>
   /** Subscribe to the account event stream; returns the unsubscribe. */
   subscribe(handlers: StreamHandlers): () => void
 }
@@ -89,12 +103,20 @@ export type Verdict =
  */
 export interface Verifier {
   verifyEntry(entry: PulledEntry, bytes: Uint8Array): Promise<Verdict>
-  verifySnapshot(snapshot: SnapshotRef, bytes: Uint8Array): Promise<Verdict>
+  verifySnapshot(snapshot: SnapshotRef, chunks: readonly Uint8Array[]): Promise<Verdict>
+}
+
+/** A sealed batch: the object bytes plus the chain fields the append carries (sync-design §6). */
+export interface SealedBatch {
+  readonly bytes: Uint8Array
+  readonly epoch: number
+  readonly link: string
+  readonly recordSig: string
 }
 
 /** The outgoing half of the crypto port: encrypt and sign a batch for upload. */
 export interface Sealer {
-  seal(batchId: string, baseSeq: number, payload: BatchPayload): Promise<Uint8Array>
+  seal(batchId: string, baseSeq: number, payload: BatchPayload): Promise<SealedBatch>
 }
 
 /** The item model (#10203 device API) as the engine uses it. */

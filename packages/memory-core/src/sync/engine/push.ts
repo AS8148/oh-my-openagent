@@ -27,8 +27,19 @@ async function seal(deps: EngineDeps, journal: SyncJournal, items: readonly Wire
   const all = (await journal.pending()).items
   const baseSeq = (await journal.state()).applied
   const payload = { items: items.map((i) => ({ key: i.key, ops: fromBase64(i.ops) })) }
-  const bytes = await deps.sealer.seal(batchId, baseSeq, payload)
-  const out: OutgoingBatch = { batchId, baseSeq, digest: sha256Hex(bytes), bytes: toBase64(bytes), uploadId: null, stage: "sealed", items }
+  const sealed = await deps.sealer.seal(batchId, baseSeq, payload)
+  const out: OutgoingBatch = {
+    batchId,
+    baseSeq,
+    digest: sha256Hex(sealed.bytes),
+    bytes: toBase64(sealed.bytes),
+    uploadId: null,
+    epoch: sealed.epoch,
+    link: sealed.link,
+    recordSig: sealed.recordSig,
+    stage: "sealed",
+    items,
+  }
   await journal.setPending({ items: all, outgoing: out })
   deps.fault?.("sealed")
   return out
@@ -50,7 +61,7 @@ async function pushOne(deps: EngineDeps, journal: SyncJournal, batchBytes: numbe
   if (out === null) {
     const first = splitBatches(pending.items, batchBytes)[0]
     if (first === undefined) return "idle"
-    out = await seal(deps, journal, first, randomBytes(12).toString("hex"))
+    out = await seal(deps, journal, first, randomBytes(16).toString("base64url"))
   }
   const bytes = fromBase64(out.bytes)
   if (out.stage === "sealed") {
@@ -64,14 +75,22 @@ async function pushOne(deps: EngineDeps, journal: SyncJournal, batchBytes: numbe
     await journal.setPending({ ...pending, outgoing: out })
     deps.fault?.("uploaded")
   }
-  const result = await deps.transport.append({ uploadId: out.uploadId ?? "", digest: out.digest, baseSeq: out.baseSeq, batchId: out.batchId })
+  const result = await deps.transport.append({
+    uploadId: out.uploadId ?? "",
+    digest: out.digest,
+    baseSeq: out.baseSeq,
+    batchId: out.batchId,
+    epoch: out.epoch,
+    link: out.link,
+    recordSig: out.recordSig,
+  })
   if (!result.ok) {
     await journal.setPending({ items: (await journal.pending()).items, outgoing: null })
     return "stale"
   }
   deps.fault?.("append-landed")
   const sent = out
-  await journal.recordApplied([{ seq: result.seq, batchId: sent.batchId, digest: sent.digest, objectId: "", author: "self" }])
+  await journal.recordApplied([{ seq: result.seq, kind: "batch", batchId: sent.batchId, digest: sent.digest, objectId: "", author: "self" }])
   const state = await journal.state()
   if (result.seq === state.applied + 1) await journal.updateState({ applied: result.seq })
   const remaining = (await journal.pending()).items.filter((i) => !carried(sent, i))

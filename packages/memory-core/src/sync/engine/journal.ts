@@ -63,6 +63,9 @@ export interface OutgoingBatch {
   readonly digest: string
   readonly bytes: string
   readonly uploadId: string | null
+  readonly epoch: number
+  readonly link: string
+  readonly recordSig: string
   readonly stage: "sealed" | "reserved" | "uploaded"
   readonly items: readonly WireItem[]
 }

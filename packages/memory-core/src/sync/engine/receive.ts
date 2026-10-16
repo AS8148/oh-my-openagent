@@ -8,7 +8,7 @@ import { createHash } from "node:crypto"
 
 import type { EngineDeps } from "./engine-deps"
 import { toBase64, type IncomingRecord, type SyncJournal } from "./journal"
-import type { PulledEntry, RefusalCode, Verdict } from "./ports"
+import type { PulledEntry, RefusalCode, SnapshotRef, Verdict } from "./ports"
 
 const PAGE = 100
 
@@ -18,6 +18,21 @@ export interface Received {
 }
 
 const sha256Hex = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex")
+
+async function takeSnapshot(deps: EngineDeps, journal: SyncJournal, entry: PulledEntry, s: SnapshotRef): Promise<RefusalCode | null> {
+  const chunks: Uint8Array[] = []
+  for (const id of s.objectIds) chunks.push(await deps.transport.download(id))
+  const only = chunks.length === 1 ? chunks[0] : undefined
+  if (s.digest !== null && only !== undefined && sha256Hex(only) !== s.digest) return "content_hash"
+  await journal.putIncoming({ entry, stage: "downloaded", items: [], snapshot: true })
+  deps.fault?.("downloaded")
+  const verdict = await deps.verifier.verifySnapshot(s, chunks)
+  if (!verdict.ok) return verdict.code
+  const items = verdict.payload.items.map((i) => ({ key: i.key, ops: toBase64(i.ops) }))
+  await journal.putIncoming({ entry, stage: "verified", items, snapshot: true })
+  deps.fault?.("verified")
+  return null
+}
 
 export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<Received> {
   const state = await journal.state()
@@ -32,15 +47,15 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
     await journal.updateState({ refused: (await journal.state()).refused + 1, paused: { seq: entry.seq, code } })
     return { refused: 1, snapshot }
   }
-  const take = async (entry: PulledEntry, verify: (bytes: Uint8Array) => Promise<Verdict>, isSnapshot: boolean): Promise<RefusalCode | null> => {
-    const bytes = await deps.transport.download(entry.objectId)
-    if (sha256Hex(bytes) !== entry.digest) return "content_hash"
-    await journal.putIncoming({ entry, stage: "downloaded", items: [], snapshot: isSnapshot })
+  const take = async (entry: PulledEntry, verify: (bytes: Uint8Array) => Promise<Verdict>): Promise<RefusalCode | null> => {
+    const bytes = entry.kind === "keyring" ? new Uint8Array() : await deps.transport.download(entry.objectId)
+    if (entry.kind === "batch" && sha256Hex(bytes) !== entry.digest) return "content_hash"
+    await journal.putIncoming({ entry, stage: "downloaded", items: [], snapshot: false })
     deps.fault?.("downloaded")
     const verdict = await verify(bytes)
     if (!verdict.ok) return verdict.code
     const items = verdict.payload.items.map((i) => ({ key: i.key, ops: toBase64(i.ops) }))
-    await journal.putIncoming({ entry, stage: "verified", items, snapshot: isSnapshot } satisfies IncomingRecord)
+    await journal.putIncoming({ entry, stage: "verified", items, snapshot: false } satisfies IncomingRecord)
     deps.fault?.("verified")
     return null
   }
@@ -48,9 +63,9 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
     const page = await deps.transport.pull(after, PAGE)
     if (page.snapshot !== null && page.snapshot.coversSeq >= expected) {
       const s = page.snapshot
-      const entry: PulledEntry = { seq: s.coversSeq, batchId: `snapshot:${s.coversSeq}`, digest: s.digest, objectId: s.objectId, author: "snapshot" }
+      const entry: PulledEntry = { seq: s.coversSeq, kind: "batch", batchId: `snapshot:${s.coversSeq}`, digest: s.digest ?? "", objectId: s.objectIds.join(","), author: "snapshot" }
       if (held.get(s.coversSeq)?.stage !== "verified") {
-        const problem = await take(entry, (bytes) => deps.verifier.verifySnapshot(s, bytes), true)
+        const problem = await takeSnapshot(deps, journal, entry, s)
         if (problem !== null) return refusal(entry, problem)
       }
       snapshot = s.coversSeq
@@ -69,7 +84,7 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
       if (known !== undefined && known.seq !== entry.seq) return refusal(entry, "replayed_content")
       const mine = held.get(entry.seq)
       if (mine?.stage !== "verified" || mine.entry.digest !== entry.digest) {
-        const problem = await take(entry, (bytes) => deps.verifier.verifyEntry(entry, bytes), false)
+        const problem = await take(entry, (bytes) => deps.verifier.verifyEntry(entry, bytes))
         if (problem !== null) return refusal(entry, problem)
       }
       expected = entry.seq + 1
