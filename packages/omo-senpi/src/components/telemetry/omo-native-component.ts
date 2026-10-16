@@ -150,6 +150,15 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
         captureEvent: (name, properties) => turnSpans.run(() => client.captureEvent(name, properties)),
       }
 
+      // A turn still open at shutdown must end before the session component's `session_shutdown`
+      // handler shuts the transport down, or its span lands on a closed sink. Registered first, so the
+      // shutdown-time summaries below are emitted outside any turn. It is ended (and so exported) only
+      // while the send-time consent read still allows it; otherwise it is dropped unended.
+      pi.on("session_shutdown", (_payload, eventCtx) => {
+        consentCwd = cwdOf(eventCtx)
+        turnSpans.shutdown({ consented: currentConsent(true) })
+      })
+
       // Must precede the session component: its `session_shutdown` handler shuts the client down,
       // which clears `state.capture`, after which `parallelism_summary` would capture nothing.
       registerOmoNativeParallelSummary(pi, {
@@ -253,9 +262,6 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       })
       pi.on("agent_end", () => {
         turnSpans.abandon()
-      })
-      pi.on("session_shutdown", () => {
-        turnSpans.dispose()
       })
 
       registerOmoNativeToolTelemetry(pi, {

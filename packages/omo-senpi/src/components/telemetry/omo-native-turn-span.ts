@@ -39,10 +39,14 @@ export type OmoNativeTurnSpans = {
     readonly model: TurnModel | undefined
   }) => void
   readonly end: (input: { readonly response: TurnModel | undefined; readonly responseModelId: string | undefined; readonly failed: boolean }) => void
-  /** Ends an open span that will see no `turn_end` (the run ended or the session closed). */
+  /** Ends an open span that will see no `turn_end` (the run ended). */
   readonly abandon: () => void
   readonly run: <T>(fn: () => T) => T
-  readonly dispose: () => void
+  /**
+   * Session shutdown, before the transport shuts down: a span still open is ended as `error` with
+   * `omo.turn.end_reason = shutdown` while `consented` (the send-time read) holds, else dropped unended.
+   */
+  readonly shutdown: (input: { readonly consented: boolean }) => void
 }
 
 function modelAttributes(model: TurnModel): TurnSpanAttributes {
@@ -63,9 +67,17 @@ export function createOmoNativeTurnSpans(options: OmoNativeTurnSpansOptions): Om
   let lastPublished: { readonly rawSessionId: string; readonly traceparent: string } | undefined
   const parent = isTraceparent(options.inheritedTraceparent) ? options.inheritedTraceparent : undefined
 
+  // The published traceparent lives exactly as long as its turn, so no later launch carries a stale
+  // trace id: not after the turn ends, not after an opt-out stops the next one from opening.
+  const unpublish = (): void => {
+    if (lastPublished !== undefined) clearTurnTraceparent(lastPublished.rawSessionId, lastPublished.traceparent)
+    lastPublished = undefined
+  }
+
   const close = (status: "ok" | "error"): void => {
     open?.handle.end(status)
     open = undefined
+    unpublish()
   }
 
   return {
@@ -87,7 +99,7 @@ export function createOmoNativeTurnSpans(options: OmoNativeTurnSpansOptions): Om
       })
       if (handle === undefined) return
       open = { handle, rawSessionId: input.rawSessionId, requestModelSet: input.model !== undefined }
-      // A child the task engine launches during this turn (or later, before the next one) continues this trace.
+      // A child the task engine launches during this turn continues this trace.
       if (input.rawSessionId !== undefined) {
         publishTurnTraceparent(input.rawSessionId, handle.traceparent)
         lastPublished = { rawSessionId: input.rawSessionId, traceparent: handle.traceparent }
@@ -110,10 +122,14 @@ export function createOmoNativeTurnSpans(options: OmoNativeTurnSpansOptions): Om
     run(fn) {
       return open === undefined ? fn() : open.handle.run(fn)
     },
-    dispose() {
-      close("error")
-      if (lastPublished !== undefined) clearTurnTraceparent(lastPublished.rawSessionId, lastPublished.traceparent)
-      lastPublished = undefined
+    shutdown({ consented }) {
+      if (open !== undefined && consented) {
+        open.handle.setAttributes({ "omo.turn.end_reason": "shutdown" })
+        close("error")
+        return
+      }
+      open = undefined
+      unpublish()
     },
   }
 }

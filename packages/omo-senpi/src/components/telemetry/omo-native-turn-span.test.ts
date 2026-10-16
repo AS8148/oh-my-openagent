@@ -13,7 +13,7 @@ import {
 } from "@oh-my-opencode/telemetry-core/otlp"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
-import { createOmoNativeTelemetryComponent } from "./omo-native-component"
+import { CONSENT_CACHE_MS, createOmoNativeTelemetryComponent } from "./omo-native-component"
 import {
   FIXED_NOW,
   createEnabledEnv,
@@ -34,8 +34,9 @@ type Collector = {
 }
 
 // A real OTLP transport per factory call, sending to a recording endpoint. Its shutdown is deferred
-// to `drain` so the test reads every record the session wrote, including the shutdown-time ones.
-function otlpCollector(): Collector {
+// to `drain` so the test reads every record the session wrote, including the shutdown-time ones,
+// unless `liveShutdown` lets the session's own shutdown really shut the transport down.
+function otlpCollector(options: { readonly liveShutdown?: boolean } = {}): Collector {
   const root = mkdtempSync(join(tmpdir(), "omo-senpi-turn-span-"))
   cleanups.push(() => rmSync(root, { recursive: true, force: true }))
   const bodies: { url: string; body: Uint8Array }[] = []
@@ -60,7 +61,12 @@ function otlpCollector(): Collector {
     })
     if (transport === null) throw new Error("collector transport unexpectedly disabled")
     transports.push(transport)
-    return { capture: transport.capture, flush: transport.flush, traces: transport.traces, shutdown: async () => undefined }
+    return {
+      capture: transport.capture,
+      flush: transport.flush,
+      traces: transport.traces,
+      shutdown: options.liveShutdown === true ? transport.shutdown : async () => undefined,
+    }
   }
   return {
     factory,
@@ -120,12 +126,34 @@ const featureToolResult = {
 type Session = { readonly pi: FakeExtensionAPI; readonly ctx: Record<string, unknown> }
 type Component = ReturnType<typeof createOmoNativeTelemetryComponent>
 
-function processComponent(agentDir: string, transportFactory: TelemetryTransportFactory, env: Record<string, string> = {}): Component {
+/** A consent switch the component reads; `set` also moves the clock past the consent cache. */
+type Consent = { readonly isEnabled: () => boolean; readonly now: () => number; readonly set: (value: boolean) => void }
+
+function consentSwitch(): Consent {
+  let value = true
+  let clock = 1_000_000
+  return {
+    isEnabled: () => value,
+    now: () => clock,
+    set(next) {
+      value = next
+      clock += CONSENT_CACHE_MS + 1
+    },
+  }
+}
+
+function processComponent(
+  agentDir: string,
+  transportFactory: TelemetryTransportFactory,
+  env: Record<string, string> = {},
+  consent: Consent = consentSwitch(),
+): Component {
   return createOmoNativeTelemetryComponent({
     rawTurnSampleRate: 1,
     env: { ...createEnabledEnv(agentDir), ...env },
     hashSessionId: (raw) => `hashed:${raw}`,
-    isConfigEnabled: () => true,
+    isConfigEnabled: consent.isEnabled,
+    consentNow: consent.now,
     now: FIXED_NOW,
     osProvider: createOsProvider("turn-span-host"),
     stateDir: join(agentDir, "omo-senpi", "omo-native"),
@@ -138,11 +166,16 @@ async function openSession(
   agentDir: string,
   transportFactory: TelemetryTransportFactory,
   sessionId: string,
-  extra: { readonly env?: Record<string, string>; readonly sessionContext?: Record<string, string>; readonly component?: Component } = {},
+  extra: {
+    readonly env?: Record<string, string>
+    readonly sessionContext?: Record<string, string>
+    readonly component?: Component
+    readonly consent?: Consent
+  } = {},
 ): Promise<Session> {
   const pi = new FakeExtensionAPI()
   if (extra.sessionContext !== undefined) Object.assign(pi, { sessionContext: extra.sessionContext })
-  const component = extra.component ?? processComponent(agentDir, transportFactory, extra.env)
+  const component = extra.component ?? processComponent(agentDir, transportFactory, extra.env, extra.consent)
   component.register(pi, { config: pi, logger: createSilentLogger() })
   const ctx = eventContext(sessionId)
   await pi.dispatch("session_start", { type: "session_start", reason: "startup" }, ctx)
@@ -303,6 +336,73 @@ describe("omo.turn span per assistant turn", () => {
       expect(turnRows(logs).map(({ traceId, spanId }) => ({ traceId, spanId }))).toEqual([
         { traceId: spans[0]?.traceId, spanId: spans[0]?.spanId },
       ])
+    })
+  })
+
+  test("#given a turn still open when the session shuts down and consent still holds #then its span is exported as error with end reason shutdown", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      // given
+      const collector = otlpCollector({ liveShutdown: true })
+      const { pi, ctx } = await openSession(agentDir, collector.factory, "quit-mid-turn")
+      await pi.dispatch("turn_start", turnStart(0), ctx)
+      await pi.dispatch("turn_end", turnEnd(0), ctx)
+      await pi.dispatch("turn_start", turnStart(1), ctx)
+
+      // when
+      await pi.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx)
+      const { spans } = await collector.drain()
+
+      // then
+      expect(spans.map(({ status, attributes }) => [attributes["omo.turn.index"], status, attributes["omo.turn.end_reason"]])).toEqual([
+        [0, "ok", undefined],
+        [1, "error", "shutdown"],
+      ])
+    })
+  })
+
+  test("#given a turn still open when the session shuts down after consent was withdrawn #then that span is dropped, never exported", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      // given
+      const collector = otlpCollector()
+      const consent = consentSwitch()
+      const { pi, ctx } = await openSession(agentDir, collector.factory, "withdrawn-mid-turn", { consent })
+      await pi.dispatch("turn_start", turnStart(0), ctx)
+
+      // when
+      consent.set(false)
+      await pi.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx)
+      const { spans } = await collector.drain()
+
+      // then
+      expect(spans).toEqual([])
+    })
+  })
+
+  test("#given a published turn traceparent #when the turn ends, or the next turn starts after an opt-out #then no traceparent is left for a later child launch", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      // given
+      const collector = otlpCollector()
+      const consent = consentSwitch()
+      const { pi, ctx } = await openSession(agentDir, collector.factory, "stale-trace", { consent })
+      await pi.dispatch("turn_start", turnStart(0), ctx)
+      expect(readTurnTraceparent("stale-trace")).toBeDefined()
+
+      // when: the turn ends
+      await pi.dispatch("turn_end", turnEnd(0), ctx)
+
+      // then
+      expect(readTurnTraceparent("stale-trace")).toBeUndefined()
+
+      // when: a turn opens, the user opts out mid-turn, and the next turn starts with no turn_end between
+      await pi.dispatch("turn_start", turnStart(1), ctx)
+      expect(readTurnTraceparent("stale-trace")).toBeDefined()
+      consent.set(false)
+      await pi.dispatch("turn_start", turnStart(2), ctx)
+
+      // then
+      expect(readTurnTraceparent("stale-trace")).toBeUndefined()
+      await pi.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, ctx)
+      await collector.drain()
     })
   })
 
