@@ -129,9 +129,17 @@ export function createIdentityRuntime(
   // (and other runtime dirs), and the lazy sandbox binds them writable, so bwrap died with
   // "Can't find source path". Backfill every identity runtime dir once per runtime, before the
   // runner can build the sandbox or spawn. Ported from #7236 by @AceRothstein71.
+  // A failed backfill must never be cached: forget it so the next launch retries, tell the user
+  // why in plain words with the next step, and still launch (the sandbox creates each directory it
+  // binds itself, so reflection keeps working for every directory that can exist).
   let runtimeDirsReady: Promise<void> | undefined
   const ensureRuntimeDirsOnce = (): Promise<void> => {
-    runtimeDirsReady ??= ensureIdentityRuntimeDirs(identity.identityPaths)
+    runtimeDirsReady ??= ensureIdentityRuntimeDirs(identity.identityPaths).catch((error: unknown) => {
+      runtimeDirsReady = undefined
+      deps.logger?.warn(
+        `memory reflection could not create its runtime directories under ${identity.identityPaths.root}: ${describe(error)}. Check that this directory is writable (permissions, free disk space); reflection keeps running and retries on the next run.`,
+      )
+    })
     return runtimeDirsReady
   }
   const launch = (run: ReservedRun): Promise<void> =>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { rmSyncEfaultTolerant } from "./teardown.test-support"
@@ -218,6 +218,39 @@ describe("reflection sandbox with not-yet-created paths", () => {
       expect(hasExactBind(args, setup.root)).toBe(false)
       expect(hasExactBind(args, dirname(absentRuntimeWrite))).toBe(false)
       expect(args).not.toContain("--bind-try")
+    }, 30_000)
+
+  test.skipIf(process.platform === "win32")("#given a symlink planted on a missing writable path after the transform was planned #when the transform runs #then it refuses to bind instead of following the link",
+    async () => {
+      // given
+      const setup = fixture()
+      const absentRuntimeWrite = join(setup.root, "runtime", "reflection-sessions")
+      const elsewhere = join(setup.root, "elsewhere")
+      mkdirSync(elsewhere)
+      const transform = buildSandboxTransform({
+        policy: "auto",
+        worktreeDir: setup.worktree,
+        gitCommonDir: setup.gitCommonDir,
+        payloadPaths: [setup.payload],
+        runtimeWrites: [absentRuntimeWrite],
+        command: "/bin/sh",
+        env: { PATH: process.env.PATH },
+        ...linuxAvailable,
+      })
+      mkdirSync(dirname(absentRuntimeWrite), { recursive: true })
+      symlinkSync(elsewhere, absentRuntimeWrite)
+
+      // when
+      let failure: unknown
+      try {
+        await transform(spawnArgs(setup.worktree))
+      } catch (error) {
+        failure = error
+      }
+
+      // then
+      expect(String(failure)).toContain("refused to bind")
+      expect(String(failure)).toContain(elsewhere)
     }, 30_000)
 
   test("#given a nested Linux writable path whose ancestors are also missing #when the bwrap transform is built #then the full leaf exists privately and is the bind source",

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, realpathSync, statSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -244,6 +244,69 @@ describe("memory identity runtime backfills runtime dirs of existing identities 
     expect(existsSync(paths.reflectionSessions)).toBe(true)
     expect(existsSync(paths.viewers)).toBe(true)
     expect(existsSync(paths.pushQueue)).toBe(true)
+  }, 30_000)
+
+  test("#given the backfill failed once #when the blocker is gone and a later run launches #then the backfill is retried instead of the failure being cached", async () => {
+    // given: a plain file where runtime/reflection-sessions belongs makes the first backfill fail
+    const root = await mkdtemp(join(tmpdir(), "omo-memory-identity-runtime-backfill-retry-"))
+    roots.push(root)
+    const paths = buildIdentityPaths(root, "agent-retry")
+    await mkdir(join(paths.reflectionSessions, ".."), { recursive: true })
+    await writeFile(paths.reflectionSessions, "not a directory")
+    const identity = createMemoryIdentityContext({
+      identity: "agent-retry",
+      identityPaths: paths,
+      binding: { identity: "agent-retry", repoPathHash: "hash", boundAt: 1 },
+    })
+    const ctx = componentContext()
+    const runtime = createIdentityRuntime(identity, {
+      loadConfig: () => loadedMemoryConfig(memorySettings()),
+      cwd: () => root,
+      resolveModelRegistry: () => undefined,
+      logger: ctx.logger,
+    })
+    const first = await runtime.store.tryReserve({ trigger: "manual", conversationIds: ["conversation-a"], snapshots: [] })
+    if (first.status !== "active") throw new Error("expected an active manual reservation")
+    await runtime.launch(first.run)
+    const warning = ctx.logs.find((log) => log.level === "warn" && log.message.includes("could not create its runtime directories"))
+    expect(warning?.message).toContain("retries on the next run")
+    expect(existsSync(paths.viewers)).toBe(true)
+
+    // when: the blocker is removed and the next launch runs in the same runtime
+    await rm(paths.reflectionSessions)
+    await runtime.launch(first.run)
+
+    // then
+    expect(statSync(paths.reflectionSessions).isDirectory()).toBe(true)
+  }, 30_000)
+
+  test.skipIf(process.platform === "win32")("#given a fresh identity #when the backfill creates its runtime dirs #then they are owner-only (0700)", async () => {
+    // given
+    const root = await mkdtemp(join(tmpdir(), "omo-memory-identity-runtime-backfill-mode-"))
+    roots.push(root)
+    const paths = buildIdentityPaths(root, "agent-mode")
+    const identity = createMemoryIdentityContext({
+      identity: "agent-mode",
+      identityPaths: paths,
+      binding: { identity: "agent-mode", repoPathHash: "hash", boundAt: 1 },
+    })
+    const ctx = componentContext()
+    const runtime = createIdentityRuntime(identity, {
+      loadConfig: () => loadedMemoryConfig(memorySettings()),
+      cwd: () => root,
+      resolveModelRegistry: () => undefined,
+      logger: ctx.logger,
+    })
+    const reserved = await runtime.store.tryReserve({ trigger: "manual", conversationIds: ["conversation-a"], snapshots: [] })
+    if (reserved.status !== "active") throw new Error("expected an active manual reservation")
+
+    // when
+    await runtime.launch(reserved.run)
+
+    // then
+    for (const dir of [paths.reflectionSessions, paths.viewers, paths.pushQueue]) {
+      expect(statSync(dir).mode & 0o777).toBe(0o700)
+    }
   }, 30_000)
 })
 

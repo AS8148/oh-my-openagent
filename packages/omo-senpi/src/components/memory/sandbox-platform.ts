@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "@oh-my-opencode/memory-core/fs"
+import { existsSync, mkdirSync, realpathSync } from "@oh-my-opencode/memory-core/fs"
 import { dirname, join } from "node:path"
 
 import type { ReflectionSpawnArgs } from "./worker/spawn"
@@ -143,6 +143,12 @@ export function buildPathSandboxTransform<T extends SandboxableSpawnArgs>(
     // when bwrap will actually bind it: an off or unavailable sandbox must not create the path.
     for (const writableDir of writableDirs) {
       mkdirSync(writableDir, { recursive: true, mode: 0o700 })
+      // The missing tail was canonicalized when the transform was built; if a symlink appeared on it
+      // since, the directory now resolves elsewhere. Refuse to bind it rather than follow the link.
+      const resolved = realpathSync(writableDir)
+      if (resolved !== writableDir) {
+        throw new Error(`${input.surface} sandbox refused to bind ${writableDir}: it now resolves to ${resolved} (a symlink appeared on the path after the sandbox was planned); remove the link and run again`)
+      }
     }
     return {
       ...spawnArgs,
