@@ -63,6 +63,39 @@ describe("host recovery adopts a turn finished during the transport gap", () => 
     }, 5_000)
   }
 
+  test("a session the host reopened from its file is continued even when get_state fails", async () => {
+    const recovering = Promise.withResolvers<void>()
+    const reopen = Promise.withResolvers<void>()
+    const reattached: string[] = []
+    const host = await harness.fakeHost({ transcripts: true })
+    const runner = harness.runnerOver(host, {
+      reattachDelaysMs: [0],
+      sleep: () => { recovering.resolve(); return reopen.promise },
+      shardEvents: { onReattachOutcome: info => reattached.push(info.outcome) },
+    })
+    const handle = await runner.start(childSpec({ state_dir: tempProject() }))
+    if (!isHostSessionHandle(handle)) throw new Error("expected host session")
+    try {
+      host.cutConnections()
+      await recovering.promise
+      // A restarted host has no live session: the reattach reopens the transcript (attached: false).
+      await host.restart()
+      host.failReply("get_state", "Synthetic state read unavailable")
+      const continuation = host.waitForCommand("prompt")
+      reopen.resolve()
+
+      const delivered = await continuation
+
+      expect(typeof delivered.payload.message).toBe("string")
+      expect(reattached).toEqual(["resumed"])
+      expect(handle.hasExited()).toBe(false)
+    } finally {
+      reopen.resolve()
+      host.failReply("get_state", undefined)
+      await handle.dispose()
+    }
+  }, 5_000)
+
   test("the real host runner completes with the transcript answer and one prompt total", async () => {
     // Subscribe to the reattach attempt; the gate makes the transport gap deterministic.
     const recovering = Promise.withResolvers<void>()

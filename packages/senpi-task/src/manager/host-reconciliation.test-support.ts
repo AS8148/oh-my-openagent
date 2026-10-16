@@ -1,5 +1,6 @@
+import { appendFileSync } from "node:fs"
+
 import { childSpec, hostRunnerHarness } from "../runners/rpc-host.test-support"
-import { HostSessionClient } from "../runners/rpc-host/session-client"
 import { isHostSessionHandle } from "../runners/rpc-host"
 import type { InputEffectStatus } from "../runners/rpc-host/reconcile-turn"
 import { createTaskRecord } from "../state"
@@ -9,15 +10,11 @@ import { respawnManagedTask } from "./manager-respawn"
 
 export const reconciliationHarness = hostRunnerHarness()
 
-/** Only the future receipt input is injected; all host execution and delivery cross the real wire. */
+/** The receipt lands in the session transcript exactly as senpi writes it; everything else crosses the real wire. */
 export async function stoppedChild(receipt: InputEffectStatus) {
   const project = tempProject()
   const host = await reconciliationHarness.fakeHost({ transcripts: true })
-  const runner = reconciliationHarness.runnerOver(host, {
-    createClient: (socketPath) => Object.assign(new HostSessionClient({
-      socketPath, ports: { probeProtocolInfo: () => host.probeProtocolInfo() },
-    }), { lastInputEffect: receipt }),
-  })
+  const runner = reconciliationHarness.runnerOver(host)
   const initial = createTaskRecord({
     parent_session_id: "parent", root_session_id: "parent", depth: 1,
     execution_mode: "process", model: "anthropic/claude-sonnet-4-5", notify_on_terminal: false,
@@ -34,6 +31,9 @@ export async function stoppedChild(receipt: InputEffectStatus) {
   await first.dispose()
   await detached
   host.completeTurn(session.routingId, "PARTIAL TEXT")
+  const sent = inputStore.load(initial.task_id)
+  if (sent?.effect_seq === undefined) throw new Error("the first input carried no effect id")
+  appendFileSync(session.sessionPath, `${JSON.stringify(admissionEntry(`${initial.task_id}:${sent.notification.run_epoch}:${sent.effect_seq}`, receipt))}\n`)
   const record = {
     ...initial, status: "running" as const, host_pid: process.pid, runner_kind: "host-session" as const,
     spawn_spec: { version: 1 as const, cwd: project, prompt: spec.prompt },
@@ -65,4 +65,15 @@ export async function stoppedChild(receipt: InputEffectStatus) {
     host.emitRecord(active.routingId, { type: "agent_start" })
   }
   return { host, result, record, manager, store, events, startContinuation, resumed: resumed.promise }
+}
+
+/** senpi's `rpc_client_message_admission` entry for one input receipt (admission states map queued/running/completed). */
+function admissionEntry(clientMessageId: string, receipt: InputEffectStatus): Record<string, unknown> {
+  const base = { clientMessageId, durableSessionId: "durable", fingerprint: "fp", disposition: "started" }
+  const data = receipt.state === "accepted"
+    ? { ...base, state: "queued", prepared: { clientMessageId, text: "queued input", mode: "steer", enqueueOrder: 1 } }
+    : receipt.state === "applied"
+      ? { ...base, state: "running" }
+      : { ...base, state: "completed", outcome: receipt.state === "failed" ? { kind: "dropped_by_replace" } : receipt.outcome ?? { kind: "completed" } }
+  return { type: "custom", customType: "rpc_client_message_admission", id: `admission-${clientMessageId}`, data }
 }

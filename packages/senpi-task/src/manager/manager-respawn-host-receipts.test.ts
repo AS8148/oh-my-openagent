@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { cleanupProjects } from "./__fixtures__/manager-fakes"
 import { reconciliationHarness, stoppedChild } from "./host-reconciliation.test-support"
 import { runTaskOutput } from "../tools/output/output"
+import { childIdentityOf } from "./manager-helpers"
 
 async function assertRenderedReason(f: Awaited<ReturnType<typeof stoppedChild>>): Promise<void> {
   const record = f.store.load(f.record.task_id)
@@ -56,6 +57,10 @@ describe("receipt-driven host respawn lifecycle", () => {
     await f.manager.reattach(f.record, f.result.handle)
     expect(f.store.load(f.record.task_id)?.status).toBe("interrupted")
     expect(f.store.load(f.record.task_id)?.stop_reason).toBe("deadline")
+    // The interrupted child now lives behind the respawned handle: its record names that session.
+    const respawned = childIdentityOf(f.result.handle).host_session?.routing_id
+    expect(respawned).not.toBe(f.record.host_session.routing_id)
+    expect(f.store.load(f.record.task_id)?.host_session?.routing_id).toBe(respawned)
     await assertRenderedReason(f)
     expect(f.host.commands.filter((command) => command.type === "prompt")).toHaveLength(1)
     const before = f.host.commands.length
