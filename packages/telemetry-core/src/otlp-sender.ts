@@ -23,6 +23,7 @@ import type { SpoolWriter } from "./otlp-wal"
 import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent } from "./types"
 
 const SEAL_BYTES = 200 * 1024
+const SHUTDOWN_CLEANUP_RESERVE_MS = 200
 const DROP_REASONS: readonly DropReason[] = ["evicted", "expired", "rejected", "corrupt"]
 
 function abortableSleep(ms: number, abort: AbortSignal): Promise<void> {
@@ -229,10 +230,12 @@ class OtlpSender {
     if (this.#stopped) return
     for (const timer of this.#timers) clearInterval(timer)
     // The cap is measured from this call: the deadline is armed before the flush runs, so the
-    // flush's synchronous seal and claim work counts against the cap instead of delaying its start.
+    // flush's synchronous seal and claim work counts against the cap instead of delaying its start,
+    // and it fires early enough to leave room for releasing the in-flight claim and closing files.
+    const cap = this.#input.shutdownTimeoutMs ?? 2_000
     let deadline: ReturnType<typeof setTimeout> | undefined
     const expired = new Promise<void>((resolve) => {
-      deadline = setTimeout(resolve, this.#input.shutdownTimeoutMs ?? 2_000)
+      deadline = setTimeout(resolve, Math.max(0, cap - Math.min(SHUTDOWN_CLEANUP_RESERVE_MS, cap / 10)))
     })
     await Promise.race([this.#flush(), expired])
     clearTimeout(deadline)
