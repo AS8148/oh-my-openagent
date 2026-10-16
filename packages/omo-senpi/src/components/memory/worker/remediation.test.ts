@@ -130,6 +130,14 @@ describe("reflectionRemediation", () => {
       expect(hint).not.toContain("user namespace")
     })
 
+    test("#when the missing bind source path contains a single quote #then the mkdir advice still names exactly that path when pasted into a shell", () => {
+      // when
+      const hint = reflectionRemediation("child_exit", "bwrap: Can't find source path /home/u/it's mine/runtime/reflection-sessions: No such file or directory")
+
+      // then
+      expect(hint).toContain("mkdir -p '/home/u/it'\\''s mine/runtime/reflection-sessions'")
+    })
+
     test("#when bwrap fails for an unrelated reason #then it does not blame user namespaces or suggest turning the sandbox off", () => {
       // when
       const hint = reflectionRemediation("child_exit", "bwrap: execvp senpi: Permission denied")

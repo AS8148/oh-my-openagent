@@ -1,3 +1,5 @@
+import { shellQuote } from "@oh-my-opencode/utils/shell-quote"
+
 import { homeRelativePath, type ReflectionChildLog } from "./child-log"
 import { isModelUnreachableDetail } from "./memory-model-attempts"
 
@@ -42,7 +44,7 @@ export function reflectionRemediation(
   const missingBindSource = /can't find source path (.+?):? no such file or directory/i.exec(`${reason ?? ""} ${detail ?? ""}`)
   if (missingBindSource) {
     const path = missingBindSource[1]
-    return `the sandbox could not bind ${path} because that directory does not exist yet; create it with mkdir -p '${path}' and run /reflect again (the sandbox itself is working)`
+    return `the sandbox could not bind ${path} because that directory does not exist yet; create it with mkdir -p ${shellQuote(path)} and run /reflect again (the sandbox itself is working)`
   }
   if (/setting up (uid map|gid map|namespace)|creat(e|ing) (a )?new namespace|user namespace|unshare/.test(combined)) {
     return 'the sandbox helper (bwrap) cannot create a user namespace on this host; allow unprivileged user namespaces on the host (for example sysctl kernel.unprivileged_userns_clone=1, or the AppArmor userns restriction), and only as a last resort set memory.reflection.sandbox to "off" in your omo config'
