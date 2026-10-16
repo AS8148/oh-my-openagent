@@ -32,8 +32,8 @@ export async function stoppedChild(receipt: InputEffectStatus) {
   await detached
   host.completeTurn(session.routingId, "PARTIAL TEXT")
   const sent = inputStore.load(initial.task_id)
-  if (sent?.effect_seq === undefined) throw new Error("the first input carried no effect id")
-  appendFileSync(session.sessionPath, `${JSON.stringify(admissionEntry(`${initial.task_id}:${sent.notification.run_epoch}:${sent.effect_seq}`, receipt))}\n`)
+  if (sent?.last_effect_id === undefined) throw new Error("the first input carried no effect id")
+  appendFileSync(session.sessionPath, `${JSON.stringify(admissionEntry(sent.last_effect_id, receipt))}\n`)
   const record = {
     ...initial, status: "running" as const, host_pid: process.pid, runner_kind: "host-session" as const,
     spawn_spec: { version: 1 as const, cwd: project, prompt: spec.prompt },

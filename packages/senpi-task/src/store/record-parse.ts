@@ -107,6 +107,7 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
 
   return {
     ...(value.effect_seq === undefined ? {} : { effect_seq: readNumber(value, "effect_seq") }),
+    ...(value.last_effect_id === undefined ? {} : { last_effect_id: readString(value, "last_effect_id") }),
     ...(value.uncertain_inputs === undefined ? {} : { uncertain_inputs: parseUncertainInputs(value.uncertain_inputs) }),
     task_id: parseTaskId(readString(value, "task_id")),
     status,

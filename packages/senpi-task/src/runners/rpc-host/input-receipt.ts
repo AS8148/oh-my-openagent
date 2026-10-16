@@ -3,14 +3,16 @@ import { open } from "node:fs/promises"
 import type { InputEffectStatus } from "./reconcile-turn"
 
 /**
- * The newest admission receipt of this task's last identified input, read from the session
- * transcript where senpi writes it (`rpc_client_message_admission`, the same entries its own
- * `get_effect_status { sessionPath }` answers from). Ids are `<taskId>:<epoch>:<seq>`, so the
- * newest entry carrying this task's prefix is the receipt of its last send.
+ * The receipt of ONE input, read from the session transcript where senpi writes it
+ * (`rpc_client_message_admission`, the entries its own `get_effect_status { sessionPath }` reads).
+ * Like senpi, it looks the exact id up: a newer entry can belong to another input (senpi's reopen seal
+ * writes an older running input's `completed` after a newer input's `queued`). The scan walks back in
+ * fixed chunks and stops at a cap, so a transcript without the receipt never loads whole.
  */
 
 const ADMISSION_ENTRY = "rpc_client_message_admission"
-const INITIAL_TAIL_BYTES = 64 * 1024
+const CHUNK_BYTES = 256 * 1024
+export const MAX_RECEIPT_SCAN_BYTES = 8 * 1024 * 1024
 const RECONCILED_OUTCOMES = new Set(["completed", "aborted", "interrupted_by_reopen", "deadline", "error"])
 const ADMISSION_STATES: Readonly<Record<string, InputEffectStatus["state"]>> = {
   queued: "accepted",
@@ -18,7 +20,7 @@ const ADMISSION_STATES: Readonly<Record<string, InputEffectStatus["state"]>> = {
   completed: "done",
 }
 
-export async function readLastInputReceipt(sessionPath: string, taskId: string): Promise<InputEffectStatus | undefined> {
+export async function readInputReceipt(sessionPath: string, effectId: string): Promise<InputEffectStatus | undefined> {
   let file
   try {
     file = await open(sessionPath, "r")
@@ -27,26 +29,30 @@ export async function readLastInputReceipt(sessionPath: string, taskId: string):
   }
   try {
     const { size } = await file.stat()
-    for (let bytes = Math.min(size, INITIAL_TAIL_BYTES); ; bytes = Math.min(size, bytes * 2)) {
-      const start = size - bytes
-      const buffer = Buffer.alloc(bytes)
-      await file.read(buffer, 0, bytes, start)
-      const lines = buffer.toString("utf8").split("\n")
-      // A chunk that starts mid-file begins inside a line; only a read from 0 owns its first line.
-      const complete = start === 0 ? lines : lines.slice(1)
-      for (let index = complete.length - 1; index >= 0; index--) {
-        const receipt = receiptOf(complete[index] ?? "", taskId)
+    const floor = Math.max(0, size - MAX_RECEIPT_SCAN_BYTES)
+    let end = size
+    let carry = ""
+    while (end > floor) {
+      const start = Math.max(floor, end - CHUNK_BYTES)
+      const buffer = Buffer.alloc(end - start)
+      await file.read(buffer, 0, buffer.length, start)
+      const lines = (buffer.toString("utf8") + carry).split("\n")
+      // Only a chunk read from the true file start owns its first line; otherwise it continues backwards.
+      carry = start === 0 ? "" : (lines.shift() ?? "")
+      for (let index = lines.length - 1; index >= 0; index--) {
+        const receipt = receiptOf(lines[index] ?? "", effectId)
         if (receipt !== undefined) return receipt
       }
-      if (start === 0) return undefined
+      end = start
     }
+    return end === 0 ? receiptOf(carry, effectId) : undefined
   } finally {
     await file.close()
   }
 }
 
-function receiptOf(line: string, taskId: string): InputEffectStatus | undefined {
-  if (!line.includes(ADMISSION_ENTRY) || !line.includes(`${taskId}:`)) return undefined
+function receiptOf(line: string, effectId: string): InputEffectStatus | undefined {
+  if (!line.includes(ADMISSION_ENTRY) || !line.includes(effectId)) return undefined
   let parsed: unknown
   try {
     parsed = JSON.parse(line)
@@ -55,7 +61,7 @@ function receiptOf(line: string, taskId: string): InputEffectStatus | undefined 
   }
   if (!isRecord(parsed) || parsed.type !== "custom" || parsed.customType !== ADMISSION_ENTRY || !isRecord(parsed.data)) return undefined
   const data = parsed.data
-  if (typeof data.clientMessageId !== "string" || !data.clientMessageId.startsWith(`${taskId}:`)) return undefined
+  if (data.clientMessageId !== effectId) return undefined
   const state = typeof data.state === "string" ? ADMISSION_STATES[data.state] : undefined
   if (state === undefined) return undefined
   const outcome = isRecord(data.outcome) ? data.outcome : undefined

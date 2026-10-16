@@ -60,6 +60,7 @@ export async function reconcileHostTurn(
         : "Keep the child tracked as streaming and wait for its next outcome without sending input.",
     })
     if (port.reopened !== true) return "streaming"
+    // Valid only because the host just reopened this session from its file: no turn can run there yet.
     state = { sessionId: "", isStreaming: false }
   }
   if (state.isStreaming === true || state.isCompacting === true) return "streaming"

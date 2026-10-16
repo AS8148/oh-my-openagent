@@ -1,12 +1,12 @@
 import type { TaskRecord } from "../../state"
 import type { RunnerOutcome } from "../in-process/child-handle"
 import type { HostSessionPort } from "./handle-port"
-import { readLastInputReceipt } from "./input-receipt"
+import { readInputReceipt } from "./input-receipt"
 import { reconcileHostTurn, type ReconciledTurnNotice } from "./reconcile-turn"
 
 /** Retains startup reconciliation until the manager takes ownership of the handle. */
 export function createHandleReconciliation(input: {
-  readonly taskId: string
+  readonly lastInputId: () => string | undefined
   readonly port: () => HostSessionPort
   readonly settle: (outcome: RunnerOutcome) => void
   readonly continuing: () => void
@@ -27,7 +27,8 @@ export function createHandleReconciliation(input: {
     reconcile: async (sessionPath: string, nextRecord?: Pick<TaskRecord, "host_session" | "final_response">, interruptedWithoutTranscript = false, reopened = false) => {
       if (nextRecord !== undefined) record = nextRecord
       const client = input.port()
-      const lastInputEffect = await readLastInputReceipt(sessionPath, input.taskId)
+      const effectId = input.lastInputId()
+      const lastInputEffect = effectId === undefined ? undefined : await readInputReceipt(sessionPath, effectId)
       const result = await reconcileHostTurn({
         getState: () => client.getState(),
         ...(lastInputEffect === undefined ? {} : { lastInputEffect }),

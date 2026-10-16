@@ -83,7 +83,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   })
   let continuationState: "none" | "pending_delivery" | "awaiting_start" = "none"
   const reconciliation = createHandleReconciliation({
-    taskId,
+    lastInputId: () => options.inputStore?.load(taskId)?.last_effect_id,
     port: () => client,
     settle: (settled) => {
       if (settled.status === "completed") finalText = settled.finalResponse
