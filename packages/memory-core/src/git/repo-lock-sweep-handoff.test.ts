@@ -9,6 +9,7 @@ import { join } from "node:path"
 import { git } from "../concurrency/two-process-kit.test-support"
 import { buildIdentityPaths } from "../identity"
 import { acquireLock, createLockRecord, memoryWriterLockPath, releaseLock, setLockCandidateFsForTests } from "../locks"
+import { acquireWithoutDirectorySweep } from "../locks/acquire"
 import { exitedWithin, probeUntil } from "../locks/process-liveness.test-support"
 import { link } from "../fs/resilient"
 import { sweepStrandedGitLockFiles } from "./repo-lock-sweep"
@@ -27,8 +28,13 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
+const takeoverPaths = [
+  { path: "the directory sweep of acquireLock", acquire: acquireLock },
+  { path: "this contender's own stale-owner recovery", acquire: acquireWithoutDirectorySweep },
+] as const
+
 describe("the dead-owner proof goes only to the dead owner's immediate successor (omo #10199 r5 delta LOW)", () => {
-  test.skipIf(process.platform === "win32")("#given a live writer takes the lock between the dead owner's reclamation and this acquisition #when this acquisition sweeps #then the stranded lock is kept", async () => {
+  for (const { path: takeoverPath, acquire } of takeoverPaths) test.skipIf(process.platform === "win32")(`#given a live writer takes the lock between the dead owner's reclamation by ${takeoverPath} and this acquisition #when this acquisition sweeps #then the stranded lock is kept`, async () => {
     // #given: a dead recorded owner A, and a killed git holder's stranded index.lock
     const root = realpathSync.native(await mkdtemp(join(tmpdir(), "memory-sweep-handoff-")))
     roots.push(root)
@@ -64,7 +70,7 @@ describe("the dead-owner proof goes only to the dead owner's immediate successor
     })
 
     // #when: this acquisition waits behind B, B finishes, then this acquisition holds the lock
-    const acquired = acquireLock(writerLockPath, mine, { waitTimeoutMs: 10_000, retryDelayMs: 5 })
+    const acquired = acquire(writerLockPath, mine, { waitTimeoutMs: 10_000, retryDelayMs: 5 })
     expect(await probeUntil(() => injected, 10_000)).toBe(true)
     expect(await releaseLock(writerLockPath, writerB)).toBe(true)
     await acquired
