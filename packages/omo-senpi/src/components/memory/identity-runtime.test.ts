@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { realpathSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -205,6 +205,47 @@ function sandboxGrantsAgentDir(renderedArgs: readonly string[], agentDirReal: st
   }
   return false
 }
+
+describe("memory identity runtime backfills runtime dirs of existing identities (#7012)", () => {
+  // From the WSL2 report on #7012: identities created before newer layout entries existed have
+  // some runtime dirs but not reflection-sessions/viewers/push-queue, and nothing backfilled them,
+  // so bwrap's writable bind of runtime/reflection-sessions died with "Can't find source path".
+  // Approach ported from #7236 by @AceRothstein71: ensure every runtime dir before each launch.
+  test("#given an identity that predates the layout #when a reserved reflection run launches #then every missing runtime dir exists before the runner builds the sandbox", async () => {
+    // given
+    const root = await mkdtemp(join(tmpdir(), "omo-memory-identity-runtime-predates-layout-"))
+    roots.push(root)
+    const paths = buildIdentityPaths(root, "agent-old")
+    await mkdir(paths.transcripts, { recursive: true })
+    await mkdir(paths.locks, { recursive: true })
+    await mkdir(paths.reflection, { recursive: true })
+    expect(existsSync(paths.reflectionSessions)).toBe(false)
+    expect(existsSync(paths.viewers)).toBe(false)
+    expect(existsSync(paths.pushQueue)).toBe(false)
+    const identity = createMemoryIdentityContext({
+      identity: "agent-old",
+      identityPaths: paths,
+      binding: { identity: "agent-old", repoPathHash: "hash", boundAt: 1 },
+    })
+    const ctx = componentContext()
+    const runtime = createIdentityRuntime(identity, {
+      loadConfig: () => loadedMemoryConfig(memorySettings()),
+      cwd: () => root,
+      resolveModelRegistry: () => undefined,
+      logger: ctx.logger,
+    })
+    const reserved = await runtime.store.tryReserve({ trigger: "manual", conversationIds: ["conversation-a"], snapshots: [] })
+    if (reserved.status !== "active") throw new Error("expected an active manual reservation")
+
+    // when
+    await runtime.launch(reserved.run)
+
+    // then
+    expect(existsSync(paths.reflectionSessions)).toBe(true)
+    expect(existsSync(paths.viewers)).toBe(true)
+    expect(existsSync(paths.pushQueue)).toBe(true)
+  }, 30_000)
+})
 
 describe("memory identity runtime agent-dir resolution", () => {
   test.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
