@@ -13,6 +13,8 @@ import { type CycleRecord, fromBase64, type SyncJournal, toBase64, type WireItem
 
 export interface Applied {
   readonly batches: number
+  /** Distinct memories the cycle rendered. */
+  readonly memories: number
 }
 
 async function workingKeys(root: string): Promise<string[]> {
@@ -52,10 +54,10 @@ export async function applyVerified(deps: EngineDeps, journal: SyncJournal): Pro
   const resumed = (await journal.state()).cycle
   if (resumed !== null) {
     await advance(deps, journal, resumed)
-    return { batches: 0 }
+    return { batches: 0, memories: resumed.keys.length }
   }
   const records = (await journal.incoming()).filter((r) => r.stage === "verified")
-  if (records.length === 0) return { batches: 0 }
+  if (records.length === 0) return { batches: 0, memories: 0 }
   const keys = new Set<string>()
   for (const record of records) {
     const items = record.items.map((i) => ({ key: i.key, ops: fromBase64(i.ops) }))
@@ -79,7 +81,7 @@ export async function applyVerified(deps: EngineDeps, journal: SyncJournal): Pro
   await journal.updateState({ cycle })
   deps.fault?.("merged")
   await advance(deps, journal, cycle)
-  return { batches: records.filter((r) => !r.snapshot).length }
+  return { batches: records.filter((r) => !r.snapshot).length, memories: keys.size }
 }
 
 async function renderInto(deps: EngineDeps, journal: SyncJournal, key: string, text: string | null): Promise<void> {

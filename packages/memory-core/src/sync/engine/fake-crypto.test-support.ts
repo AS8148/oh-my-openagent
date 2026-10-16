@@ -2,7 +2,7 @@
 // the verifier refuses what a real one would - an object naming another batch, another account,
 // or any seq the test marks as failing a receiver check.
 
-import type { BatchPayload, PulledEntry, Sealer, SnapshotRef, Verdict, Verifier } from "./ports"
+import type { BatchPayload, PulledEntry, RefusalCode, Sealer, SnapshotRef, Verdict, Verifier } from "./ports"
 
 interface Sealed {
   readonly account: string
@@ -34,8 +34,8 @@ export class FakeSealer implements Sealer {
 
 export class FakeVerifier implements Verifier {
   /** seq -> the receiver check it fails (signature, link, epoch, ...). */
-  readonly failing = new Map<number, string>()
-  readonly refusals: string[] = []
+  readonly failing = new Map<number, RefusalCode>()
+  readonly refusals: RefusalCode[] = []
 
   constructor(private readonly account: string) {}
 
@@ -43,22 +43,22 @@ export class FakeVerifier implements Verifier {
     const forced = this.failing.get(entry.seq)
     if (forced !== undefined) return this.refuse(forced)
     const sealed = this.open(bytes)
-    if (sealed === null) return this.refuse("malformed object")
-    if (sealed.account !== this.account) return this.refuse("account binding")
-    if (sealed.batchId !== entry.batchId) return this.refuse("object binding")
+    if (sealed === null) return this.refuse("malformed")
+    if (sealed.account !== this.account) return this.refuse("account_binding")
+    if (sealed.batchId !== entry.batchId) return this.refuse("object_binding")
     return { ok: true, payload: payloadOf(sealed) }
   }
 
   async verifySnapshot(_snapshot: SnapshotRef, bytes: Uint8Array): Promise<Verdict> {
     const sealed = this.open(bytes)
-    if (sealed === null) return this.refuse("malformed snapshot")
-    if (sealed.account !== this.account) return this.refuse("account binding")
+    if (sealed === null) return this.refuse("malformed")
+    if (sealed.account !== this.account) return this.refuse("account_binding")
     return { ok: true, payload: payloadOf(sealed) }
   }
 
-  private refuse(reason: string): Verdict {
-    this.refusals.push(reason)
-    return { ok: false, reason }
+  private refuse(code: RefusalCode): Verdict {
+    this.refusals.push(code)
+    return { ok: false, code }
   }
 
   private open(bytes: Uint8Array): Sealed | null {

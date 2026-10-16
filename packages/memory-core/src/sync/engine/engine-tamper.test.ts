@@ -38,7 +38,7 @@ test("an object whose bytes do not hash to the entry's digest is refused and cou
 }, GIT_TEST_TIMEOUT)
 
 test("each receiver check the verifier fails refuses the entry and everything after it", async () => {
-  for (const reason of ["record signature", "chain link", "epoch"]) {
+  for (const reason of ["signature", "chain_link", "epoch"] as const) {
     const { b } = await published(["one", "two"])
     b.verifier.failing.set(1, reason)
     expect(await b.engine.runCycle()).toMatchObject({ applied: 0, refused: 1 })
@@ -52,10 +52,10 @@ test("an object bound to another account or another batch is refused", async () 
   const { server, b } = await published(["one"])
   server.rewriteEntry(1, forged(server.entries[0]?.batchId ?? "", "acc_other"))
   expect(await b.engine.runCycle()).toMatchObject({ refused: 1 })
-  expect(b.verifier.refusals).toEqual(["account binding"])
+  expect(b.verifier.refusals).toEqual(["account_binding"])
   server.rewriteEntry(1, forged("some-other-batch"))
   await b.engine.runCycle()
-  expect(b.verifier.refusals).toEqual(["account binding", "object binding"])
+  expect(b.verifier.refusals).toEqual(["account_binding", "object_binding"])
   await expectNothingApplied(b, 2)
 }, GIT_TEST_TIMEOUT)
 
@@ -73,7 +73,7 @@ test("the same (seq, batch id) arriving later with different bytes is tampering,
 
 test("a refused entry stops the pull there; later entries wait, nothing is skipped", async () => {
   const { b } = await published(["one", "two", "three"])
-  b.verifier.failing.set(2, "record signature")
+  b.verifier.failing.set(2, "signature")
   expect(await b.engine.runCycle()).toMatchObject({ applied: 1, refused: 1 })
   expect([await b.read("n0.md"), await b.read("n1.md"), await b.read("n2.md")]).toEqual(["one\n", null, null])
   b.verifier.failing.clear()

@@ -8,6 +8,7 @@ import { advance, applyVerified, capture } from "./apply"
 import type { EngineDeps } from "./engine-deps"
 import { type EngineState, SyncJournal } from "./journal"
 import { push } from "./push"
+import type { RefusalCode } from "./ports"
 import { receive } from "./receive"
 
 export { CrashInjected, type EngineFault, INBOUND_POINTS, OUTBOUND_POINTS } from "./engine-deps"
@@ -15,6 +16,11 @@ export { CrashInjected, type EngineFault, INBOUND_POINTS, OUTBOUND_POINTS } from
 export const POLL_MS = 10_000
 export const LOCAL_DEBOUNCE_MS = 2_000
 const PUSH_ATTEMPTS = 3
+
+export type EngineStatus =
+  | { readonly kind: "never_synced" }
+  | { readonly kind: "synced"; readonly at: number; readonly updatedWhileOffline: number }
+  | { readonly kind: "paused"; readonly seq: number; readonly code: RefusalCode }
 
 export interface CycleReport {
   readonly applied: number
@@ -42,6 +48,14 @@ export class SyncEngine {
 
   state(): Promise<EngineState> {
     return this.journal.state()
+  }
+
+  /** What a UI shows: paused at a refused entry, else the last successful sync. */
+  async status(): Promise<EngineStatus> {
+    const s = await this.journal.state()
+    if (s.paused !== null) return { kind: "paused", seq: s.paused.seq, code: s.paused.code }
+    if (s.lastSyncedAt === null) return { kind: "never_synced" }
+    return { kind: "synced", at: s.lastSyncedAt, updatedWhileOffline: s.updatedWhileOffline }
   }
 
   start(): void {
@@ -131,18 +145,19 @@ export class SyncEngine {
       await deps.lock.withLock(() => advance(deps, journal, resumed))
     }
     let applied = 0
+    let memories = 0
     let refused = 0
     let snapshot: number | null = null
     const inbound = async () => {
       const got = await receive(deps, journal)
       refused += got.refused
       snapshot = got.snapshot ?? snapshot
-      applied += (
-        await deps.lock.withLock(async () => {
-          await capture(deps, journal)
-          return applyVerified(deps, journal)
-        })
-      ).batches
+      const done = await deps.lock.withLock(async () => {
+        await capture(deps, journal)
+        return applyVerified(deps, journal)
+      })
+      applied += done.batches
+      memories += done.memories
     }
     await inbound()
     let pushed = false
@@ -154,6 +169,7 @@ export class SyncEngine {
       }
       await inbound()
     }
+    if (refused === 0) await journal.updateState({ lastSyncedAt: deps.clock.now(), updatedWhileOffline: memories })
     this.appliedMirror = (await journal.state()).applied
     this.cyclesRun += 1
     return { applied, refused, pushed, snapshot }

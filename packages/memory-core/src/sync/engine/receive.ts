@@ -8,7 +8,7 @@ import { createHash } from "node:crypto"
 
 import type { EngineDeps } from "./engine-deps"
 import { toBase64, type IncomingRecord, type SyncJournal } from "./journal"
-import type { PulledEntry, Verdict } from "./ports"
+import type { PulledEntry, RefusalCode, Verdict } from "./ports"
 
 const PAGE = 100
 
@@ -27,18 +27,18 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
   let expected = state.applied + 1
   let after = state.applied
   let snapshot: number | null = null
-  const refusal = async (entry: PulledEntry, reason: string): Promise<Received> => {
-    deps.log?.(`sync.batch.rejected seq=${entry.seq} batch=${entry.batchId}: ${reason}`)
-    await journal.updateState({ refused: (await journal.state()).refused + 1 })
+  const refusal = async (entry: PulledEntry, code: RefusalCode): Promise<Received> => {
+    deps.log?.(`sync.batch.rejected seq=${entry.seq} batch=${entry.batchId}: ${code}`)
+    await journal.updateState({ refused: (await journal.state()).refused + 1, paused: { seq: entry.seq, code } })
     return { refused: 1, snapshot }
   }
-  const take = async (entry: PulledEntry, verify: (bytes: Uint8Array) => Promise<Verdict>, isSnapshot: boolean) => {
+  const take = async (entry: PulledEntry, verify: (bytes: Uint8Array) => Promise<Verdict>, isSnapshot: boolean): Promise<RefusalCode | null> => {
     const bytes = await deps.transport.download(entry.objectId)
-    if (sha256Hex(bytes) !== entry.digest) return "content hash"
+    if (sha256Hex(bytes) !== entry.digest) return "content_hash"
     await journal.putIncoming({ entry, stage: "downloaded", items: [], snapshot: isSnapshot })
     deps.fault?.("downloaded")
     const verdict = await verify(bytes)
-    if (!verdict.ok) return verdict.reason
+    if (!verdict.ok) return verdict.code
     const items = verdict.payload.items.map((i) => ({ key: i.key, ops: toBase64(i.ops) }))
     await journal.putIncoming({ entry, stage: "verified", items, snapshot: isSnapshot } satisfies IncomingRecord)
     deps.fault?.("verified")
@@ -61,12 +61,12 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
       if (entry.seq < expected) {
         const original = known ?? held.get(entry.seq)?.entry
         if (original !== undefined && (original.seq !== entry.seq || original.digest !== entry.digest)) {
-          return refusal(entry, "an applied (seq, batch id) arrived with different content")
+          return refusal(entry, "replayed_content")
         }
         continue
       }
-      if (entry.seq !== expected) return refusal(entry, `expected seq ${expected}`)
-      if (known !== undefined && known.seq !== entry.seq) return refusal(entry, "a batch id already applied at another seq")
+      if (entry.seq !== expected) return refusal(entry, "sequence_gap")
+      if (known !== undefined && known.seq !== entry.seq) return refusal(entry, "replayed_content")
       const mine = held.get(entry.seq)
       if (mine?.stage !== "verified" || mine.entry.digest !== entry.digest) {
         const problem = await take(entry, (bytes) => deps.verifier.verifyEntry(entry, bytes), false)
@@ -75,7 +75,10 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
       expected = entry.seq + 1
     }
     const last = page.entries.at(-1)
-    if (!page.more || last === undefined) return { refused: 0, snapshot }
+    if (!page.more || last === undefined) {
+      if (state.paused !== null) await journal.updateState({ paused: null })
+      return { refused: 0, snapshot }
+    }
     after = last.seq
   }
 }

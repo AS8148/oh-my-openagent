@@ -40,7 +40,7 @@ test("an advertised head is a trigger only: it never moves the applied cursor", 
   const { server, a, b } = await started()
   b.engine.start()
   await b.engine.nextCycle()
-  b.verifier.failing.set(1, "record signature")
+  b.verifier.failing.set(1, "signature")
   const triggered = b.engine.nextCycle()
   await a.write("x.md", "x\n")
   await a.engine.runCycle()

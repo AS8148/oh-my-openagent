@@ -63,9 +63,24 @@ export interface BatchPayload {
   readonly items: readonly { readonly key: string; readonly ops: Uint8Array }[]
 }
 
+/**
+ * Why an entry was refused, as a closed set: the status shows the code, never raw crypto detail,
+ * so the real verifier maps each receiver check of sync-design §6 onto one of these.
+ */
+export type RefusalCode =
+  | "content_hash"
+  | "signature"
+  | "chain_link"
+  | "epoch"
+  | "account_binding"
+  | "object_binding"
+  | "replayed_content"
+  | "sequence_gap"
+  | "malformed"
+
 export type Verdict =
   | { readonly ok: true; readonly payload: BatchPayload }
-  | { readonly ok: false; readonly reason: string }
+  | { readonly ok: false; readonly code: RefusalCode }
 
 /**
  * Receiver checks of sync-design §6 in order (chain link, record signature, epoch, account

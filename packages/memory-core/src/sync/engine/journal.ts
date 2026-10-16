@@ -9,7 +9,7 @@ import { readdir } from "../../fs/resilient"
 import { join } from "node:path"
 
 import { readJson, removeAtomic, TEMP_MARK, writeJson } from "./atomic"
-import type { PulledEntry } from "./ports"
+import type { PulledEntry, RefusalCode } from "./ports"
 
 export type IncomingStage = "downloaded" | "verified"
 export type CycleStage = "merged" | "rendered" | "committed" | "checkpointed"
@@ -46,6 +46,11 @@ export interface EngineState {
   readonly eventHead: number
   readonly refused: number
   readonly cycle: CycleRecord | null
+  /** The entry the pull stopped at; cleared once a later pull verifies past it. */
+  readonly paused: { readonly seq: number; readonly code: RefusalCode } | null
+  readonly lastSyncedAt: number | null
+  /** Memories the last refusal-free cycle updated on this device. */
+  readonly updatedWhileOffline: number
 }
 
 export interface OutgoingBatch {
@@ -63,7 +68,15 @@ export interface PendingOps {
   readonly outgoing: OutgoingBatch | null
 }
 
-const EMPTY_STATE: EngineState = { applied: 0, eventHead: 0, refused: 0, cycle: null }
+const EMPTY_STATE: EngineState = {
+  applied: 0,
+  eventHead: 0,
+  refused: 0,
+  cycle: null,
+  paused: null,
+  lastSyncedAt: null,
+  updatedWhileOffline: 0,
+}
 const EMPTY_PENDING: PendingOps = { items: [], outgoing: null }
 
 export class SyncJournal {
