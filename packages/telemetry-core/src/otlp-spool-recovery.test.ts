@@ -216,15 +216,20 @@ describe("spool recovery", () => {
     expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
   })
 
-  test("#given shutdown's flush spends 1.5 s in synchronous work before its send settles #then shutdown still returns within the 2 s cap measured from the call", async () => {
+  test("#given shutdown's flush starts with 1.5 s of synchronous work #then shutdown still returns within the 2 s cap measured from the call", async () => {
     // given
     const dir = root()
-    const slowFetch = (): Promise<Response> => {
-      Bun.sleepSync(1_500)
-      return new Promise<Response>(() => undefined)
+    let stallNextConsentCheck = false
+    const consent = (): boolean => {
+      if (stallNextConsentCheck) {
+        stallNextConsentCheck = false
+        Bun.sleepSync(1_500)
+      }
+      return true
     }
-    const transport = makeTransport(dir, { fetch: slowFetch })
+    const transport = makeTransport(dir, { consent, fetch: () => new Promise<Response>(() => undefined) })
     capture(transport, "feature_used", { feature: "a" })
+    stallNextConsentCheck = true
 
     // when
     const started = performance.now()
