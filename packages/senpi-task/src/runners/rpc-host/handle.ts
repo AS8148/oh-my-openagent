@@ -1,15 +1,11 @@
 import { log } from "@oh-my-opencode/utils"
 
 import type { RunnerOutcome } from "../in-process/child-handle"
-import { isBusyChildRejection, type RpcStreamingBehavior } from "../rpc/delivery-semantics"
 import { exitTurnOutcome, promptFailureOutcome } from "../rpc/turn-outcome"
 import { createTurnSettlement, sessionIsIdle } from "../rpc/turn-settlement"
+import { createTurnWakeSources } from "../rpc/turn-wake-sources"
 import type { ChildEventListener, ChildExitOutcome, RpcTerminalAssistantMessage } from "../types"
-import {
-  classifySessionExit,
-  type SessionCloseIntent,
-  type SessionExitCause,
-} from "./exit-mapping"
+import { classifySessionExit, type SessionCloseIntent, type SessionExitCause } from "./exit-mapping"
 import { bindHostSessionPort } from "./handle-client-binding"
 import { settleClassifiedSessionExit } from "./handle-exit"
 import type {
@@ -28,6 +24,9 @@ import { createHandleTeardown } from "./handle-teardown"
 import { createHandleWaiters } from "./handle-waiters"
 import type { HostSessionParked } from "./session-client"
 import { extractTerminalAssistantMessage } from "./terminal-message"
+import { createInputEffects } from "../input-effects"
+import { toHostInput } from "./input-command"
+import { createInputDelivery } from "../input-delivery"
 
 /**
  * The steerable child handle over ONE daemon session: identical turn semantics to
@@ -59,6 +58,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   let intent: SessionCloseIntent = "running"
   let parked = false
   let detached = false
+  let tornDown = false
 
   const settleTurn = (settled: RunnerOutcome): void => {
     if (turnOutcome !== undefined) return
@@ -67,11 +67,16 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     waiters.settleTurn(settled)
   }
 
+  const wakeSources = createTurnWakeSources()
   const settlement = createTurnSettlement({
     settle: settleTurn,
     abortedByUser: () => abortedByUser,
     baseline: () => turnBaseline,
     finalText: () => finalText,
+    probe: () => client.getState(),
+    settleConfirmMs: heartbeatIntervalMs,
+    wakeSourcesLive: () => wakeSources.hasLiveWakeSources(),
+    disposed: () => tornDown,
   })
 
   const onSessionEvent = (event: Parameters<ChildEventListener>[0]): void => {
@@ -89,6 +94,12 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
       }
     }
     settlement.observe(event)
+    // The host's loose boundary parse fans every tagged record - raw `extension_event` records
+    // included - into this same funnel (see `session-wire.ts` isAgentSessionEvent).
+    if ((event as { readonly type?: string }).type === "extension_event") {
+      wakeSources.observe(event)
+      settlement.reconfirmHeld()
+    }
   }
 
   const stopHeartbeat = startHostHeartbeat({
@@ -163,7 +174,11 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     stopRequested: () => stop.requested() || intent !== "running",
     endOnHost: stop.endOnHost,
     stopUnreached: stop.stopUnreached,
-    recoveryEnded: stop.recoveryEnded,
+    recoveryEnded: (adopted) => {
+      stop.recoveryEnded(adopted)
+      if (adopted) void inputEffects.reconcile().catch(error => log("senpi-task input reconciliation failed", { taskId, error: String(error) }))
+    },
+    continueInput: (command) => inputEffects.send(command, identified => client.send(toHostInput(identified))),
     port: () => client,
     identity: () => session,
     alive: () => intent === "running" && !parked && !detached && outcome === undefined,
@@ -196,6 +211,11 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
 
   bindHostSessionPort(client, clientBinding)
 
+  const inputEffects = createInputEffects({
+    taskId, store: options.inputStore,
+    send: command => recovery.issue(toHostInput(command)),
+  })
+
   const beginTurn = (): void => {
     if (outcome !== undefined) return
     if (reachedIdle || turnOutcome !== undefined) {
@@ -205,28 +225,12 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     terminalAssistantMessage = undefined
     abortedByUser = false
     turnBaseline = finalText
+    wakeSources.resetTurn()
   }
 
-  // Same queueing contract as the child-process runner: a delivery that lands mid-run is retried
-  // as followUp instead of failing the child (`rpc/delivery-semantics.ts`).
-  const deliverPrompt = async (text: string, streamingBehavior: RpcStreamingBehavior): Promise<void> => {
-    try {
-      await recovery.issue({ type: "prompt", message: text, streamingBehavior })
-    } catch (error) {
-      if (streamingBehavior === "followUp" || !isBusyChildRejection(error)) throw error
-      await recovery.issue({ type: "prompt", message: text, streamingBehavior: "followUp" })
-    }
-  }
-
-  const runPrompt = async (text: string, streamingBehavior: RpcStreamingBehavior = "steer"): Promise<void> => {
-    beginTurn()
-    try {
-      await deliverPrompt(text, streamingBehavior)
-    } catch (error) {
-      settleTurn(promptFailureOutcome(error))
-      throw error
-    }
-  }
+  const delivery = createInputDelivery({
+    effects: inputEffects, beginTurn, promptFailed: error => settleTurn(promptFailureOutcome(error)),
+  })
 
   const teardown = createHandleTeardown({
     taskId,
@@ -237,11 +241,16 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     markIntent: (next) => { intent = next },
     markDetached: () => { detached = true },
     clearActive: listeners.clearActive,
-    stopHeartbeat,
+    stopHeartbeat: () => { inputEffects.stopRetrying(); stopHeartbeat() },
     settle: settleClassified,
+    onTornDown: () => {
+      tornDown = true
+      settlement.cancelConfirmation()
+    },
   })
 
   return {
+    reconcileInputs: inputEffects.reconcile,
     task_id: taskId,
     kind: "host-session",
     get hostSession() {
@@ -259,16 +268,8 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     },
     getEntries: async (since) => (await recovery.currentPort()).getEntries(since),
     switchSession: async (sessionPath) => (await recovery.currentPort()).switchSession(sessionPath),
-    steer: async (text) => {
-      beginTurn()
-      try {
-        await recovery.issue({ type: "steer", message: text })
-      } catch (error) {
-        if (!isBusyChildRejection(error)) throw error
-        await deliverPrompt(text, "followUp")
-      }
-    },
-    followUp: (text) => runPrompt(text, "followUp"),
+    steer: delivery.steer,
+    followUp: (text) => delivery.runPrompt(text, "followUp"),
     // A child whose cancel is waiting on its lost connection is stopped by that cancel: an abort (a
     // parent shutting down suspends it) must not wait out the whole recovery for nothing.
     abort: () => {
@@ -306,6 +307,6 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     detach: teardown.detach,
     close: teardown.close,
     terminate: teardown.terminate,
-    startInitialPrompt: (text) => runPrompt(text),
+    startInitialPrompt: (text) => delivery.runPrompt(text),
   }
 }
