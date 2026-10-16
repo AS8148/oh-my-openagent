@@ -1,15 +1,16 @@
 // Frontmatter split and typing (sync-design §2). The split grammar is the one the
 // repository already uses (leading "---" line, closing "---" line). A block that is not
 // valid YAML, is empty, or is not a mapping has no frontmatter part: the whole file is
-// the body, so text is never lost to a parse failure. A key's CRDT kind comes from the
-// YAML type of its value: string -> text, sequence -> set, boolean/number/date ->
-// register, mapping -> text holding its YAML flow serialisation, null -> removal.
+// the body, so text is never lost to a parse failure. A key's CRDT kind is declared by the
+// YAML node type of its value, never by its length or content (review r5, lead decision):
+// every scalar (string, number, boolean, date) -> multi-value register holding its canonical
+// YAML source, mapping -> register holding its YAML flow source, sequence -> set,
+// null -> removal. Only the body is text: concurrent edits to one frontmatter value keep both
+// whole values (a register conflict) instead of being merged character by character.
 
-import { Document, YAMLSeq, isMap, isScalar, isSeq, parseDocument, stringify } from "yaml"
-import type { Node } from "yaml"
+import { Document, Scalar, YAMLSeq, isMap, isScalar, isSeq, parseDocument, stringify } from "yaml"
 
 export type FmValue =
-  | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "set"; readonly elements: readonly string[]; readonly flow: string }
   | { readonly kind: "reg"; readonly value: string }
   | { readonly kind: "remove" }
@@ -23,8 +24,6 @@ export interface ParsedItemText {
   readonly fm: readonly FmEntry[] | null
   readonly body: string
 }
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}([Tt ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/
 
 export function splitItem(text: string): ParsedItemText {
   const sep = text.startsWith("---\r\n") ? "\r\n" : "\n"
@@ -58,19 +57,19 @@ export function renderScalar(value: string | number | boolean): string {
  * fixed point.
  */
 export function renderEntry(key: string, value: string | readonly string[], verbatim = false): string {
-  if (verbatim && typeof value === "string") {
+  if (verbatim && typeof value === "string" && !value.includes("\n---")) {
     const candidate = `${renderScalar(key)}: ${value}`
     const check = parseDocument(candidate, { schema: "core" })
     if (check.errors.length === 0) {
       const contents = check.contents
       if (contents !== null && isMap(contents) && contents.items.length === 1) {
         const pair = contents.items[0]
-        if (pair !== undefined && isScalar(pair.value)) return candidate
+        if (pair !== undefined && (isScalar(pair.value) || isMap(pair.value) || isSeq(pair.value))) return candidate
       }
     }
   }
   const doc = new Document({}, { schema: "core" })
-  doc.set(key, typeof value === "string" ? value : sequenceOf(value))
+  doc.set(key, typeof value === "string" ? doubleQuoted(value) : sequenceOf(value))
   const out = stringify(doc).trimEnd()
   if (doc.errors.length > 0) throw new Error(`renderEntry: cannot render key ${JSON.stringify(key)}: ${doc.errors[0]?.message}`)
   return out
@@ -81,6 +80,12 @@ export function renderEntry(key: string, value: string | readonly string[], verb
  * emitter keeps its exact type and style (a number stays a number, a quoted string stays
  * quoted, a flow map stays a flow map) and indents block scalars under the dash.
  */
+function doubleQuoted(value: string): Scalar {
+  const scalar = new Scalar(value)
+  scalar.type = "QUOTE_DOUBLE"
+  return scalar
+}
+
 function sequenceOf(sources: readonly string[]): YAMLSeq {
   const seq = new YAMLSeq()
   for (const source of sources) {
@@ -91,61 +96,46 @@ function sequenceOf(sources: readonly string[]): YAMLSeq {
   return seq
 }
 
+// Aliases and merge keys resolve BEFORE classification (spec #454): a value is classified by
+// what it resolves to. A custom tag (one the core schema cannot resolve) or an alias bomb makes
+// the frontmatter invalid, so the whole file stays body and nothing is lost.
 function parseHeader(header: string): readonly FmEntry[] | null {
-  const doc = parseDocument(header, { schema: "core" })
-  if (doc.errors.length > 0) return null
+  const doc = parseDocument(header, { schema: "core", merge: true })
+  if (doc.errors.length > 0 || doc.warnings.some((w) => w.code === "TAG_RESOLVE_FAILED")) return null
   const contents = doc.contents
   if (contents === null || !isMap(contents)) return null
-  const entries: FmEntry[] = []
   for (const pair of contents.items) {
-    const keyNode = pair.key
-    if (!isScalar(keyNode) || typeof keyNode.value !== "string") return null
-    entries.push({ key: keyNode.value, value: classify(header, pair.value ?? null) })
+    if (!isScalar(pair.key) || typeof pair.key.value !== "string") return null
   }
-  return entries
+  let resolved: unknown
+  try {
+    resolved = doc.toJS({ maxAliasCount: 64 })
+  } catch (error) {
+    if (error instanceof ReferenceError || error instanceof TypeError) return null
+    throw error
+  }
+  if (typeof resolved !== "object" || resolved === null || Array.isArray(resolved)) return null
+  return Object.entries(resolved).map(([key, value]) => ({ key, value: classify(value) }))
 }
 
-function classify(header: string, node: Node | null): FmValue {
-  if (node === null) return { kind: "remove" }
-  if (isScalar(node)) {
-    const value: unknown = node.value
-    if (value === null || value === undefined) return { kind: "remove" }
-    if (typeof value === "boolean" || typeof value === "number") {
-      return { kind: "reg", value: renderScalar(value) }
-    }
-    const text = String(value)
-    const source = nodeSource(header, node)
-    if (source !== null && !source.startsWith("'") && !source.startsWith('"') && DATE_RE.test(source)) {
-      return { kind: "reg", value: renderScalar(text) }
-    }
-    return { kind: "text", text }
-  }
-  if (isSeq(node)) {
-    const elements = node.items.map((item) => elementSource(header, item))
-    return { kind: "set", elements, flow: flowOf(node) }
-  }
-  if (isMap(node)) return { kind: "text", text: flowOf(node) }
-  return { kind: "text", text: flowOf(node) }
+function classify(value: unknown): FmValue {
+  if (value === null || value === undefined) return { kind: "remove" }
+  if (Array.isArray(value)) return { kind: "set", elements: value.map(elementSource), flow: flowOf(value) }
+  if (typeof value === "object") return { kind: "reg", value: flowOf(value) }
+  return { kind: "reg", value: scalarSource(value) }
 }
 
-function elementSource(header: string, item: unknown): string {
-  if (isScalar(item)) {
-    const value: unknown = item.value
-    if (value === null || value === undefined) return "null"
-    if (typeof value === "string") return renderScalar(value)
-    if (typeof value === "boolean" || typeof value === "number") return renderScalar(value)
-    return renderScalar(String(value))
-  }
-  if (typeof item === "object" && item !== null) return flowOf(item)
-  return "null"
+function elementSource(value: unknown): string {
+  if (value === null || value === undefined) return "null"
+  if (typeof value === "object") return flowOf(value)
+  return scalarSource(value)
+}
+
+function scalarSource(value: unknown): string {
+  if (typeof value === "boolean" || typeof value === "number" || typeof value === "string") return renderScalar(value)
+  return renderScalar(String(value))
 }
 
 function flowOf(node: unknown): string {
   return stringify(node, { collectionStyle: "flow" }).trim()
-}
-
-function nodeSource(header: string, node: Node): string | null {
-  const range = node.range
-  if (range === null || range === undefined) return null
-  return header.slice(range[0], range[1]).trim()
 }

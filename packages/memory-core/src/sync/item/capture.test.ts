@@ -147,18 +147,23 @@ describe("captureItem", () => {
     doc.free()
   })
 
-  test("re-typing a key converts into its fixed first-write kind", async () => {
+  test("re-typing a key converts into its fixed first-write kind (strings and numbers are both registers)", async () => {
     const doc = await newDoc("1")
     const v1 = "---\nkey: hello\n---\n"
     captureInto(doc, "", [], v1)
-    const v2 = "---\nkey: 7\n---\n"
-    captureInto(doc, v1, itemFrontier(doc), v2)
-    expect(renderItem(doc)).toBe("---\nkey: \"7\"\n---\n")
+    captureInto(doc, v1, itemFrontier(doc), "---\nkey: 7\n---\n")
+    expect(renderItem(doc)).toBe("---\nkey: 7\n---\n")
+    captureInto(doc, "---\nkey: 7\n---\n", itemFrontier(doc), "---\nkey:\n  - a\n  - b\n---\n")
+    // A lone register holding a whole list renders it verbatim as a list (spec #454).
+    expect(renderItem(doc)).toBe("---\nkey: [ a, b ]\n---\n")
     expect(captureCurrent(doc, renderItem(doc) ?? "")).toBeNull()
-    const v3 = "---\nkey: 8\n---\n"
-    captureInto(doc, "---\nkey: \"7\"\n---\n", itemFrontier(doc), v3)
-    expect(renderItem(doc)).toBe("---\nkey: \"8\"\n---\n")
     doc.free()
+    const set = await newDoc("1")
+    captureInto(set, "", [], "---\ntags:\n  - a\n---\n")
+    captureInto(set, "---\ntags:\n  - a\n---\n", itemFrontier(set), "---\ntags: 'x: y'\n---\n")
+    expect(renderItem(set)).toBe('---\ntags:\n  - "x: y"\n---\n')
+    expect(captureCurrent(set, renderItem(set) ?? "")).toBeNull()
+    set.free()
   })
 
   test("N sequential captures from one device on one stale baseline lose no edit", async () => {

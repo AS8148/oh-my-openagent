@@ -6,7 +6,7 @@
 
 import type { LoroDoc, PeerID } from "../../crdt/loro-runtime"
 
-export type FmPart = "text" | "set" | "reg"
+export type FmPart = "set" | "reg"
 
 export interface Stamp {
   readonly lamport: number
@@ -62,7 +62,7 @@ export function analyzeHistory(doc: LoroDoc): ItemHistory {
       } else if (!existing.byKind.has(parsed.part)) {
         existing.byKind.set(parsed.part, stamp)
       }
-      if (parsed.part !== "text") {
+      {
         const tag = mapInsertKey(op.content)
         if (tag !== null) {
           const book = parsed.part === "set" ? setAdds : regAdds
@@ -129,7 +129,7 @@ function parseFmName(name: string): { readonly key: string; readonly part: FmPar
   const segments = name.split(SEP)
   const part = segments[2]
   if (segments.length !== 3 || segments[0] !== "fm") return null
-  if (part !== "text" && part !== "set" && part !== "reg") return null
+  if (part !== "set" && part !== "reg") return null
   try {
     return { key: decodeURIComponent(segments[1] ?? ""), part }
   } catch {

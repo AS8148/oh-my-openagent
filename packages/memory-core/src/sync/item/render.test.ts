@@ -54,7 +54,7 @@ describe("renderItem", () => {
     docC.free()
   })
 
-  test("renders a register's concurrent values sorted, joined with ' / '", async () => {
+  test("renders a register's concurrent values as one double-quoted string, UTF-8 sorted, joined with ' / ' (spec #454)", async () => {
     const docA = await newDoc("1")
     captureInto(docA, "", [], "---\ncount: 2\n---\n")
     const docB = await newDoc("2")
@@ -65,7 +65,7 @@ describe("renderItem", () => {
     docA.import(updateB)
     docB.import(updateA)
 
-    expect(renderItem(docA)).toBe("---\ncount: 10 / 2\n---\n")
+    expect(renderItem(docA)).toBe('---\ncount: "10 / 2"\n---\n')
     expect(renderItem(docB)).toBe(renderItem(docA))
     docA.free()
     docB.free()

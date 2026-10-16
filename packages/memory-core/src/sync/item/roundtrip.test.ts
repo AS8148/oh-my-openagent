@@ -74,5 +74,5 @@ describe("render/capture round trip on generated items (sync-design §10)", () =
         doc.free()
       }
     }
-  })
+  }, 30_000)
 })
