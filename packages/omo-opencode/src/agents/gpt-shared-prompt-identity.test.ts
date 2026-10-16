@@ -19,6 +19,10 @@ describe("shared GPT prompt identities", () => {
     ["venice/openai-gpt-61-sol", "gpt-6.1-sol"],
     ["openai/gpt-6-luna", "gpt-6-luna"],
     ["openai/gpt-6-luna-fast", "gpt-6-luna"],
+    ["openai/gpt-6-astra-fast", "gpt-6-astra"],
+    ["openai/gpt-6-lunar", "gpt-family"],
+    ["openai/gpt-6.1-luna", "gpt-family"],
+    ["openai/gpt-6-solar", "gpt-family"],
     ["openai/gpt-6.1", "gpt-family"],
     ["openai/gpt-611-sol", "gpt-family"],
   ] as const) {

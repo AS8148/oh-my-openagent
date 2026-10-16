@@ -17,23 +17,24 @@ const GPT_PROMPT_IDENTITIES: Record<GptPromptIdentityKey, string> = {
   "gpt-family": "a GPT-family model",
 }
 
-// Same id shapes as senpi's GPT-6 preset matcher: dotted, dashed, and Venice's dotless `gpt-61-sol`.
-const GPT_6_1_SOL_RE = /gpt-6(?:[.-]1|1)-sol/
+// GPT-6 tier ids with an optional one-digit point release (`gpt-6.1-sol`, `gpt-6-1-sol`, Venice's dotless
+// `gpt-61-sol`), ending at a word boundary so `gpt-6-lunar` or `gpt-611-sol` are not taken for a tier.
+const GPT_6_FAMILY_RE = /gpt-6(?:[.-](\d)|(\d))?-(astra|sol|luna)(?![a-z0-9])/
+
+const GPT_6_IDENTITY_KEYS: Record<string, GptPromptIdentityKey> = {
+  astra: "gpt-6-astra",
+  sol: "gpt-6-sol",
+  luna: "gpt-6-luna",
+  "1-sol": "gpt-6.1-sol",
+}
 
 export function getGptPromptIdentityKey(model?: string): GptPromptIdentityKey {
   const modelID = model?.split("/").at(-1)?.toLowerCase()
 
-  if (modelID?.includes("gpt-6-astra")) {
-    return "gpt-6-astra"
-  }
-  if (modelID && GPT_6_1_SOL_RE.test(modelID)) {
-    return "gpt-6.1-sol"
-  }
-  if (modelID?.includes("gpt-6-sol")) {
-    return "gpt-6-sol"
-  }
-  if (modelID?.includes("gpt-6-luna")) {
-    return "gpt-6-luna"
+  const gpt6 = modelID ? GPT_6_FAMILY_RE.exec(modelID) : null
+  if (gpt6) {
+    const pointRelease = gpt6[1] ?? gpt6[2]
+    return GPT_6_IDENTITY_KEYS[pointRelease ? `${pointRelease}-${gpt6[3]}` : gpt6[3]!] ?? "gpt-family"
   }
   if (modelID?.includes("gpt-5.6-sol") || modelID?.includes("gpt-5-6-sol")) {
     return "gpt-5.6-sol"
