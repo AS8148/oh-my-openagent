@@ -31,21 +31,30 @@ export async function readInputReceipt(sessionPath: string, effectId: string): P
     const { size } = await file.stat()
     const floor = Math.max(0, size - MAX_RECEIPT_SCAN_BYTES)
     let end = size
-    let carry = ""
+    // Undecoded bytes of the line the previous (later) chunk began inside. Decoding only whole lines keeps a
+    // multi-byte character (Hangul in a reason or detail) intact when a chunk boundary falls inside it.
+    let carry = Buffer.alloc(0)
     while (end > floor) {
       const start = Math.max(floor, end - CHUNK_BYTES)
-      const buffer = Buffer.alloc(end - start)
-      await file.read(buffer, 0, buffer.length, start)
-      const lines = (buffer.toString("utf8") + carry).split("\n")
+      const chunk = Buffer.alloc(end - start)
+      await file.read(chunk, 0, chunk.length, start)
+      const bytes = Buffer.concat([chunk, carry])
       // Only a chunk read from the true file start owns its first line; otherwise it continues backwards.
-      carry = start === 0 ? "" : (lines.shift() ?? "")
+      const firstNewline = start === 0 ? -1 : bytes.indexOf(0x0a)
+      if (start > 0 && firstNewline === -1) {
+        carry = bytes
+        end = start
+        continue
+      }
+      carry = start === 0 ? Buffer.alloc(0) : bytes.subarray(0, firstNewline)
+      const lines = bytes.subarray(firstNewline + 1).toString("utf8").split("\n")
       for (let index = lines.length - 1; index >= 0; index--) {
         const receipt = receiptOf(lines[index] ?? "", effectId)
         if (receipt !== undefined) return receipt
       }
       end = start
     }
-    return end === 0 ? receiptOf(carry, effectId) : undefined
+    return undefined
   } finally {
     await file.close()
   }
