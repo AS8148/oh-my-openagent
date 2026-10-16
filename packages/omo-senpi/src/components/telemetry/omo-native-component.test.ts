@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 
 import type { TelemetryCaptureMessage } from "@oh-my-opencode/telemetry-core"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
@@ -12,7 +12,8 @@ import type {
   ComputerUseTelemetryObservation,
   ComputerUseTelemetryObservers,
 } from "./omo-native-computer-use"
-import { createOmoNativeTelemetryComponent } from "./omo-native-component"
+import { CONSENT_CACHE_MS, createOmoNativeTelemetryComponent } from "./omo-native-component"
+import * as parallelSummaryModule from "./omo-native-parallel-summary"
 import { OMO_NATIVE_COMMON_PROPERTY_SCHEMAS, OMO_NATIVE_PROPERTY_ALLOWLISTS, OMO_NATIVE_SCHEMA_VERSION } from "./product-identity"
 import { rollupDir } from "./session-summary-store"
 import {
@@ -711,6 +712,70 @@ describe("OmO Native telemetry component integration", () => {
       // then
       expect(recorder.messages.slice(sentBefore)).toEqual([])
       expect(recorder.messages.filter((message) => JSON.stringify(message).includes("opted-out"))).toEqual([])
+    })
+  })
+
+  // #10328: every native event type, not only the ones today's producers happen to emit, must stop at
+  // the fan-in once consent is withdrawn mid-session. The names come from the facade's own allowlist
+  // (the list `isOmoNativeEventName` reads), so a new event type is covered without editing this test.
+  test("#given a consented session whose consent is withdrawn mid-way #when every facade event type is captured through the fan-in #then each one reached the transport before and none reaches it after", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      // given: the fan-in the component hands its producers
+      writeInventory(agentDir)
+      const recorder = createTransportRecorder()
+      let consent = true
+      let clock = 1_000_000
+      let fanIn: ((name: string, properties: Record<string, unknown>) => void) | undefined
+      const original = parallelSummaryModule.registerOmoNativeParallelSummary
+      const spy = spyOn(parallelSummaryModule, "registerOmoNativeParallelSummary").mockImplementation((pi, options) => {
+        fanIn = options.captureEvent
+        return original(pi, options)
+      })
+      const pi = new FakeExtensionAPI()
+      try {
+        createOmoNativeTelemetryComponent({
+          consentNow: () => clock,
+          env: createEnabledEnv(agentDir),
+          hashSessionId: (raw) => `hashed:${raw}`,
+          isConfigEnabled: () => consent,
+          now: FIXED_NOW,
+          osProvider: createOsProvider("every-type-host"),
+          rawTurnSampleRate: 0,
+          scheduleConsentCheck: () => () => undefined,
+          stateDir: join(agentDir, "omo-senpi", "omo-native"),
+          transportFactory: recorder.factory,
+        }).register(pi, { config: pi, logger: createSilentLogger() })
+      } finally {
+        spy.mockRestore()
+      }
+      if (fanIn === undefined) throw new Error("the component never handed its fan-in to the parallel-summary producer")
+      const capture = fanIn
+      await pi.dispatch("session_start", { type: "session_start", reason: "startup" }, context("every-type"))
+      const eventTypes = Object.keys(OMO_NATIVE_PROPERTY_ALLOWLISTS)
+      const sentFor = (name: string, from: number) => recorder.messages.slice(from).filter(({ event }) => event === name)
+
+      // then (control): while consented, each type reaches the transport through this exact path
+      const deliveredWhileConsented: string[] = []
+      for (const name of eventTypes) {
+        const from = recorder.messages.length
+        capture(name, { $session_id: "hashed:every-type" })
+        if (sentFor(name, from).length > 0) deliveredWhileConsented.push(name)
+      }
+      expect(deliveredWhileConsented).toEqual(eventTypes)
+
+      // when: consent is withdrawn and the consent cache has expired
+      consent = false
+      clock += CONSENT_CACHE_MS + 1
+      const sentBefore = recorder.messages.length
+      const attempted: string[] = []
+      for (const name of eventTypes) {
+        capture(name, { $session_id: "hashed:every-type" })
+        attempted.push(name)
+      }
+
+      // then
+      expect(attempted).toHaveLength(Object.keys(OMO_NATIVE_PROPERTY_ALLOWLISTS).length)
+      expect(recorder.messages.slice(sentBefore).map(({ event }) => event)).toEqual([])
     })
   })
 
