@@ -1,4 +1,4 @@
-export { activeRegisters, adoptRegisterValues } from "./adopt-values"
+export { activeRegisters, commitAdoption } from "./adopt-values"
 export type { RegisterValue } from "./adopt-values"
 export { CaptureBaselineError } from "./capture"
 export { caseFold } from "./casefold"

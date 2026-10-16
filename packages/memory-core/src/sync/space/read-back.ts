@@ -16,6 +16,11 @@ export function toLf(text: string): string {
   return text.replace(/\r\n/g, "\n")
 }
 
+/** How every adopted file is read: a leading UTF-8 BOM is not text (review r7 M2), CRLF becomes LF. */
+export function normalizeInput(text: string): string {
+  return toLf(text.startsWith("\uFEFF") ? text.slice(1) : text)
+}
+
 export function linesOf(text: string): readonly string[] {
   if (text === "") return []
   const lines = text.split("\n")
@@ -73,15 +78,16 @@ function isRepresentedKeyLine(line: string, facts: ReadonlyMap<string, ResultFac
  * The enumerated metadata lines adoption may drop, each with how many of them a source may
  * lose: a T2 header carries no fact (all of them); per T2 header, one closing "-->" (or the
  * hub's fused "----->", its kept header's closing fence plus "-->"), one blank
- * separator and the block's two "---" fences; plus the two fences of the file's own header.
+ * separator and the block's two "---" fences; plus the two fences of the file's own header, only
+ * when the source has one (review r7 L1: without a header, "---" lines are horizontal rules).
  */
-function droppableAllowance(source: readonly string[]): Map<string, number> {
+function droppableAllowance(source: readonly string[], hasHeader: boolean): Map<string, number> {
   const headers = source.filter((line) => T2_HEADER.test(line)).length
   return new Map([
     ["-->", headers],
     ["----->", headers],
     ["", headers],
-    ["---", 2 + 2 * headers],
+    ["---", (hasHeader ? 2 : 0) + 2 * headers],
   ])
 }
 
@@ -97,7 +103,7 @@ export function firstMissingFact(
 ): string | null {
   const sourceLines = linesOf(source)
   const have = countLines(linesOf(rendered))
-  const allowance = droppableAllowance(sourceLines)
+  const allowance = droppableAllowance(sourceLines, splitItem(source).fm !== null)
   const facts = resultFacts(rendered, registers)
   for (const [line, count] of countLines(sourceLines)) {
     const missing = count - (have.get(line) ?? 0)

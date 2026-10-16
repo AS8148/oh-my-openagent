@@ -16,8 +16,11 @@ export type AdoptedField =
 
 export type AdoptedFields = Map<string, AdoptedField>
 
-/** Seed with the space's own keys; `registers` gives a register's exact components when known. */
-export function seedFields(fields: AdoptedFields, entries: readonly FmEntry[], registers?: ReadonlyMap<string, readonly string[]>): void {
+/**
+ * Seed with the space's own keys. `registers` must hold every register key's exact components:
+ * a rendered register is never read as one whole value (review r7 M1), so a missing key throws.
+ */
+export function seedFields(fields: AdoptedFields, entries: readonly FmEntry[], registers: ReadonlyMap<string, readonly string[]>): void {
   for (const { key, value } of entries) {
     switch (value.kind) {
       case "remove":
@@ -26,8 +29,11 @@ export function seedFields(fields: AdoptedFields, entries: readonly FmEntry[], r
         fields.set(key, { kind: "set", elements: [...value.elements] })
         break
       case "reg": {
-        const values = [...(registers?.get(key) ?? [value.value])]
-        fields.set(key, { kind: "reg", values, inText: values.length })
+        const components = registers.get(key)
+        if (components === undefined || components.length === 0) {
+          throw new Error(`planAdoption: ItemState.registers has no components for register key ${JSON.stringify(key)}`)
+        }
+        fields.set(key, { kind: "reg", values: [...components], inText: components.length })
         break
       }
     }

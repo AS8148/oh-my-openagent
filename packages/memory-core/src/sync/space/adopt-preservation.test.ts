@@ -6,7 +6,7 @@ import { renderDocContent } from "../item/render"
 import { captureInto, mulberry32, newDoc, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
 
-import { applyPlan, holdsValue, plainValue, renderedFacts, t2Block } from "./test-support"
+import { applyPlan, holdsValue, plainValue, renderedFacts, t2Block, soleRegisters } from "./test-support"
 
 // 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
 const PROPERTY_TIMEOUT_MS = 60_000
@@ -61,12 +61,12 @@ for (const seed of [20261016, 0x5a17c0de]) {
         { path: "n.md", text: main + t2Block("2026-10-15", "n.md", t2) },
         { path: sidePath, text: side },
       ]
-      const plan = planAdoption(files, { currentText: space, lastMaterialised: null, tombstoned: false })
+      const plan = planAdoption(files, { currentText: space, lastMaterialised: null, tombstoned: false, registers: soleRegisters(space) })
       const output = plan.rendered
       // Then every value survives, including those whose only source is deleted.
       const context = `A1 seed=${seed} case=${iteration}`
       assertPreserved(sources, output, context)
-      if (plan.removeAfterCommit.includes(sidePath)) assertPreserved([side], output, context)
+      if (plan.removalCandidates.includes(sidePath)) assertPreserved([side], output, context)
       expect(plan.action, context).not.toBe("remove")
       const repeated = planAdoption(files, { currentText: output, lastMaterialised: null, tombstoned: false, registers: plan.registers })
       expect(repeated.action, `${context} repeated adoption`).toBe("none")
@@ -99,7 +99,7 @@ test("existing-key T2 and T1 values survive capture into the real item model", a
   const plan = planAdoption([
     { path: "n.md", text: main + t2Block("2026-10-15", "n.md", other) },
     { path: "n.sync-conflict-20261015-device.md", text: side },
-  ], { currentText: null, lastMaterialised: null, tombstoned: false })
+  ], { currentText: null, lastMaterialised: null, tombstoned: false, registers: soleRegisters(null) })
   expect(plan.action).toBe("capture")
   if (plan.action !== "capture") throw new Error("expected capture")
   const doc = await newDoc("1")

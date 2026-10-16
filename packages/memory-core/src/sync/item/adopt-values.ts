@@ -5,6 +5,8 @@
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
+import { captureItem } from "./capture"
+import type { ItemFrontier } from "./document"
 import { analyzeHistory } from "./history"
 import { addRegisterValue } from "./key-writers"
 import { readKeyState, registerValues } from "./state"
@@ -15,13 +17,25 @@ export interface RegisterValue {
   readonly value: string
 }
 
-/** Write each value as a register entry superseding nothing; null when every value was already active. */
-export function adoptRegisterValues(doc: LoroDoc, values: readonly RegisterValue[], commitMessage?: string): Uint8Array | null {
-  if (values.length === 0) return null
+/**
+ * The whole adoption as ONE update: the working text's capture and every extra register value
+ * (an entry superseding nothing) land in one fork and are exported together, so no crash point
+ * persists the capture without the values a source's deletion depends on. Null when nothing changes.
+ */
+export function commitAdoption(
+  doc: LoroDoc,
+  baseText: string,
+  baseFrontier: ItemFrontier,
+  workingText: string,
+  values: readonly RegisterValue[],
+  commitMessage?: string,
+): Uint8Array | null {
+  const captured = captureItem(doc, baseText, baseFrontier, workingText, commitMessage)
   const target = doc.fork()
   try {
     target.setPeerId(doc.peerId)
     target.setRecordTimestamp(false)
+    if (captured !== null) target.import(captured)
     values.forEach(({ key, value }, slot) => addRegisterValue(target, key, value, slot))
     target.commit(commitMessage === undefined ? undefined : { message: commitMessage })
     const from = doc.oplogVersion()
@@ -31,7 +45,6 @@ export function adoptRegisterValues(doc: LoroDoc, values: readonly RegisterValue
     target.free()
   }
 }
-
 /**
  * Every register key's rendered components: its active values plus any set content it renders
  * beside them (state.ts combineRegister). The planner's view of what the space already holds,
