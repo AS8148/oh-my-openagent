@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { postWithRetry, type OtlpFetch } from "./otlp-http"
+import { maxSendMs, postWithRetry, type OtlpFetch } from "./otlp-http"
 import {
   claimBatch,
   deleteFile,
@@ -15,13 +15,14 @@ import {
 import { spoolRequest } from "./otlp-spool-file"
 import type { TelemetryDiagnosticEvent } from "./types"
 
-const LEASE_RENEW_MS = 60_000
 
 export type BatchSenderInput = {
   readonly ctx: SpoolContext
   readonly endpoint: string
   readonly ingestKey: string
   readonly fetch: OtlpFetch
+  readonly requestTimeoutMs: number
+  readonly leaseRenewIntervalMs: number
   readonly sleep: (ms: number, abort: AbortSignal) => Promise<void>
   readonly random: () => number
   readonly consent: () => boolean
@@ -125,11 +126,14 @@ export class BatchSender {
   async #send(claimed: string): Promise<void> {
     const ctx = this.#input.ctx
     this.#inFlight = claimed
+    // Past the longest possible send, the lease is left to expire so another process can take over.
+    const deadlineMs = ctx.nowMs() + maxSendMs(this.#input.requestTimeoutMs)
     const renew = setInterval(() => {
+      if (ctx.nowMs() > deadlineMs) return
       const current = this.#inFlight
       const renewed = current === undefined ? null : renewClaim(ctx, current)
       if (renewed !== null) this.#inFlight = renewed
-    }, LEASE_RENEW_MS)
+    }, this.#input.leaseRenewIntervalMs)
     renew.unref?.()
     try {
       const request = spoolRequest(new Uint8Array(await readFile(join(ctx.dir, claimed))))
@@ -144,6 +148,7 @@ export class BatchSender {
         endpoint: this.#input.endpoint,
         ingestKey: this.#input.ingestKey,
         abort: this.#abort.signal,
+        requestTimeoutMs: this.#input.requestTimeoutMs,
       }, request.signal, request.body)
       const current = this.#inFlight ?? claimed
       if (outcome.kind === "accepted") {

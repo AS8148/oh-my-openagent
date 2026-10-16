@@ -18,6 +18,9 @@ export type CreateOtlpTelemetryTransportInput = {
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly source?: string
   readonly fetch?: OtlpFetch
+  /** Per-request deadline, response body included (default 10 s). */
+  readonly requestTimeoutMs?: number
+  readonly leaseRenewIntervalMs?: number
   readonly sleep?: (ms: number, abort: AbortSignal) => Promise<void>
   readonly random?: () => number
   readonly nowMs?: () => number

@@ -10,6 +10,16 @@ export const MAX_BODY_BYTES = 256 * 1024
 export const GZIP_THRESHOLD_BYTES = 8 * 1024
 export const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const
 export const MAX_RETRY_AFTER_MS = 60_000
+export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
+
+/**
+ * The longest one batch's send can take: every attempt ends by its request timeout and every pause
+ * between attempts is at most MAX_RETRY_AFTER_MS (the jittered backoff stays below it). The claim's
+ * lease is not renewed past this point, so a send stuck anywhere else frees its batch for others.
+ */
+export function maxSendMs(requestTimeoutMs: number): number {
+  return (BACKOFF_MS.length + 1) * requestTimeoutMs + BACKOFF_MS.length * MAX_RETRY_AFTER_MS
+}
 
 const RETRYABLE = new Set([429, 502, 503, 504])
 const NON_RETRYABLE = new Set([400, 401, 413])
@@ -23,6 +33,7 @@ export type PostDeps = {
   readonly endpoint: string
   readonly ingestKey: string
   readonly abort: AbortSignal
+  readonly requestTimeoutMs: number
 }
 
 export type PartialSuccess = { readonly rejected: number; readonly message: string }
@@ -59,24 +70,19 @@ async function partialSuccess(signal: Signal, response: Response): Promise<Parti
   }
 }
 
-async function attempt(deps: PostDeps, signal: Signal, body: Uint8Array): Promise<Attempt> {
+async function exchange(deps: PostDeps, signal: Signal, body: Uint8Array, abort: AbortSignal): Promise<Attempt> {
   const compressed = body.byteLength > GZIP_THRESHOLD_BYTES
   const headers: Record<string, string> = {
     "content-type": "application/x-protobuf",
     "x-omo-ingest-key": deps.ingestKey,
     ...(compressed ? { "content-encoding": "gzip" } : {}),
   }
-  let response: Response
-  try {
-    response = await deps.fetch(`${deps.endpoint}/v1/${signal}`, {
-      method: "POST",
-      headers,
-      body: compressed ? gzipSync(body) : body,
-      signal: deps.abort,
-    })
-  } catch {
-    return deps.abort.aborted ? { kind: "done", outcome: { kind: "aborted" } } : { kind: "retry", retryAfterMs: undefined }
-  }
+  const response = await deps.fetch(`${deps.endpoint}/v1/${signal}`, {
+    method: "POST",
+    headers,
+    body: compressed ? gzipSync(body) : body,
+    signal: abort,
+  })
   if (response.status >= 200 && response.status < 300) {
     return { kind: "done", outcome: { kind: "accepted", partial: await partialSuccess(signal, response) } }
   }
@@ -88,7 +94,28 @@ async function attempt(deps: PostDeps, signal: Signal, body: Uint8Array): Promis
 }
 
 /**
- * One file = one request. 429/502/503/504 and network errors are retried after 1, 2, 4, 8 and
+ * One request, response body included, bounded by the request timeout: the timeout aborts the fetch
+ * and also settles the attempt itself, so a fetch that ignores its signal cannot hold the sender.
+ * The timer is unref'd, so a pending attempt never keeps the host process alive.
+ */
+async function attempt(deps: PostDeps, signal: Signal, body: Uint8Array): Promise<Attempt> {
+  const timeout = new AbortController()
+  const timer = setTimeout(() => timeout.abort(), deps.requestTimeoutMs)
+  timer.unref?.()
+  const timedOut = new Promise<never>((_, reject) => {
+    timeout.signal.addEventListener("abort", () => reject(new Error("OTLP request timed out")), { once: true })
+  })
+  try {
+    return await Promise.race([exchange(deps, signal, body, AbortSignal.any([deps.abort, timeout.signal])), timedOut])
+  } catch {
+    return deps.abort.aborted ? { kind: "done", outcome: { kind: "aborted" } } : { kind: "retry", retryAfterMs: undefined }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * One file = one request. 429/502/503/504, network errors and timed-out requests are retried after 1, 2, 4, 8 and
  * 16 s plus up to 20% jitter (Retry-After wins, capped at 60 s); 400/401/413 are never retried; a
  * 2xx, including one carrying partial_success, settles the batch.
  */

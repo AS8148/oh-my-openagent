@@ -2,6 +2,7 @@ import { context } from "@opentelemetry/api"
 
 import { createTelemetryProviders, type TelemetryProviders } from "./otel-providers"
 import { BatchSender } from "./otlp-batch-sender"
+import { DEFAULT_REQUEST_TIMEOUT_MS } from "./otlp-http"
 import {
   defaultWireProjection,
   isOtlpTelemetryEnabled,
@@ -23,12 +24,15 @@ import type { SpoolWriter } from "./otlp-wal"
 import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent } from "./types"
 
 const SEAL_BYTES = 200 * 1024
+const LEASE_RENEW_INTERVAL_MS = 60_000
 const SHUTDOWN_CLEANUP_RESERVE_MS = 200
 const DROP_REASONS: readonly DropReason[] = ["evicted", "expired", "rejected", "corrupt"]
 
+/** The retry pause; its timer is unref'd so a pending retry never keeps the host process alive. */
 function abortableSleep(ms: number, abort: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms)
+    timer.unref?.()
     abort.addEventListener("abort", () => {
       clearTimeout(timer)
       resolve()
@@ -121,6 +125,8 @@ class OtlpSender {
       endpoint,
       ingestKey: input.ingestKey,
       fetch: input.fetch ?? fetch,
+      requestTimeoutMs: input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+      leaseRenewIntervalMs: input.leaseRenewIntervalMs ?? LEASE_RENEW_INTERVAL_MS,
       sleep: input.sleep ?? abortableSleep,
       random: input.random ?? Math.random,
       consent: this.#consent,
