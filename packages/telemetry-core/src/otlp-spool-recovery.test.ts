@@ -143,7 +143,7 @@ describe("spool recovery", () => {
     expect(spoolNames(dir)).toEqual([`batch-logs-${sealedId}.otlp`, `batch-logs-${releasedId}.otlp`].sort())
   })
 
-  test("#given two sweepers racing for one sealed batch #then exactly one claim wins", () => {
+  test("#given two sweepers racing for one sealed batch #then exactly one claim wins", async () => {
     // given
     const dir = root()
     mkdirSync(dir, { recursive: true })
@@ -151,12 +151,13 @@ describe("spool recovery", () => {
     writeFileSync(join(dir, `batch-logs-${batchId}.otlp`), "")
 
     // when
-    const first = claimBatch(context(dir, { bootId: "1".repeat(32) }), { signal: "logs", batchId })
-    const second = claimBatch(context(dir, { bootId: "2".repeat(32) }), { signal: "logs", batchId })
+    const claims = await Promise.all([
+      claimBatch(context(dir, { bootId: "1".repeat(32) }), { signal: "logs", batchId }),
+      claimBatch(context(dir, { bootId: "2".repeat(32) }), { signal: "logs", batchId }),
+    ])
 
     // then
-    expect(first).not.toBeNull()
-    expect(second).toBeNull()
+    expect(claims.filter((claim) => claim !== null).length).toBe(1)
   })
 
   test("#given a sealed batch older than 14 days by its own batch id #then it is deleted unsent and counted expired", async () => {

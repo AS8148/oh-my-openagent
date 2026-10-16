@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { postWithRetry, type OtlpFetch } from "./otlp-http"
@@ -11,7 +12,7 @@ import {
   renewClaim,
   type SpoolContext,
 } from "./otlp-spool-dir"
-import { readSpoolRequest } from "./otlp-spool-file"
+import { spoolRequest } from "./otlp-spool-file"
 import type { TelemetryDiagnosticEvent } from "./types"
 
 const LEASE_RENEW_MS = 60_000
@@ -69,9 +70,12 @@ export class BatchSender {
     this.#stopped = true
     this.#abort.abort()
     const inFlight = this.#inFlight
-    if (inFlight === undefined) return
+    if (inFlight !== undefined) this.#release(inFlight)
+  }
+
+  #release(claimed: string): void {
     try {
-      releaseClaim(this.#input.ctx, inFlight)
+      releaseClaim(this.#input.ctx, claimed)
     } catch (error) {
       this.#input.report("telemetry_otlp_send_failed", error)
     }
@@ -94,8 +98,13 @@ export class BatchSender {
       const next = pending.shift()
       if (next === undefined) return
       this.#deferred.add(next.batchId)
-      const claimed = claimBatch(ctx, next)
-      if (claimed !== null) await this.#send(claimed, next.name)
+      const claimed = await claimBatch(ctx, next)
+      if (claimed === null) continue
+      if (this.#stopped) {
+        this.#release(claimed)
+        return
+      }
+      await this.#send(claimed, next.name)
     }
   }
 
@@ -109,7 +118,7 @@ export class BatchSender {
     }, LEASE_RENEW_MS)
     renew.unref?.()
     try {
-      const request = readSpoolRequest(join(ctx.dir, claimed))
+      const request = spoolRequest(new Uint8Array(await readFile(join(ctx.dir, claimed))))
       if (request.kind === "corrupt") {
         quarantineFile(ctx, claimed)
         return
@@ -136,12 +145,10 @@ export class BatchSender {
         if (outcome.kind === "retry_later") this.#input.report("telemetry_otlp_send_failed")
       }
     } catch (error) {
+      // After stop() the claim has already been released, so a read that lost the file is expected.
+      if (this.#stopped) return
       this.#input.report("telemetry_otlp_send_failed", error)
-      try {
-        releaseClaim(ctx, this.#inFlight ?? claimed)
-      } catch (releaseError) {
-        this.#input.report("telemetry_otlp_send_failed", releaseError)
-      }
+      this.#release(this.#inFlight ?? claimed)
     } finally {
       clearInterval(renew)
       this.#inFlight = undefined

@@ -13,11 +13,11 @@ import {
   deleteFile,
   SPOOL_CAP_BYTES,
   SPOOL_MAX_AGE_MS,
-  SpoolCap,
   sweepSpool,
   type DropReason,
   type SpoolContext,
 } from "./otlp-spool-dir"
+import { SpoolCap } from "./otlp-spool-cap"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { SpoolWriter } from "./otlp-wal"
 import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent } from "./types"
