@@ -228,14 +228,13 @@ jobs:
       # Linux: memory-core's stranded-git-lock tests read the host process table. On hosted runners
       # same-uid processes of other sessions cannot be inspected, so on Linux memory-core runs in an
       # unprivileged PID namespace, and the step fails loudly when no namespace can be made instead
-      # of falling back to the host table (omo #10199). Even inside it, this runner's kernel (azure
-      # 7.0, apparmor_restrict_unprivileged_unconfined=1) gives EACCES on /proc/<pid>/fd for the
-      # user's own LIVE git processes, so the 5 rows that need the scan to answer are skipped here
-      # via OMO_CI_SAME_UID_GIT_UNINSPECTABLE. Behavior stays fail-closed (an unanswerable scan
-      # keeps the lock). Those rows run on macOS and on Boat inside the same
-      # `unshare -Upf --mount-proc --map-current-user` (plain Boat cannot answer either: non-dumpable
-      # same-uid systemd --user / (sd-pam) / pulseaudio / sshd). Kernel-lock liveness, which removes
-      # the /proc dependence: https://github.com/code-yeongyu/oh-my-openagent/issues/10322
+      # of falling back to the host table (omo #10199). Even inside it, the user's own LIVE git
+      # processes return EACCES on /proc/<pid>/fd (this runner's azure 7.0 kernel, and Boat alike),
+      # so the 5 rows that need the scan to answer are skipped here via
+      # OMO_CI_SAME_UID_GIT_UNINSPECTABLE. Behavior stays fail-closed (an unanswerable scan keeps
+      # the lock). Coverage for those rows is macOS CI (and macOS hosts) until kernel-lock liveness
+      # lands; running them on Linux CI is #10322's acceptance criterion:
+      # https://github.com/code-yeongyu/oh-my-openagent/issues/10322
       - name: Run tests
         id: root-tests-posix-1
         if: needs.ci-mode.outputs.run_heavy == 'true' && runner.os != 'Windows' && matrix.shard == '1/2' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
