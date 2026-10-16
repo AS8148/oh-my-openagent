@@ -18,6 +18,8 @@ import { firstMissingFact } from "./read-back"
 // one update, so no crash point leaves a deleted source whose value the space does not hold.
 
 const SIDE = "n.sync-conflict-20261015-mac.md"
+// The device-entry row opens a device (one machine-id probe spawn); bound it as a circuit breaker.
+const DEVICE_TIMEOUT_MS = 60_000
 
 async function space(text: string): Promise<{ readonly doc: LoroDoc; readonly base: string }> {
   const doc = await newDoc("1")
@@ -55,7 +57,7 @@ describe("H1: one atomic commit, deletion decided on the committed item", () => 
         doc.free()
       }
     })
-  })
+  }, DEVICE_TIMEOUT_MS)
 
   test("a crash after the capture but before the register values keeps the source", async () => {
     const { doc, base } = await space("---\nd: space\n---\nbody\n")

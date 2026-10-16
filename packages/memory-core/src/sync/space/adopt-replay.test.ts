@@ -13,6 +13,9 @@ import { confirmRemovals } from "./confirm-removals"
 // point, so replaying it from the same stale baseline, before or after a crash, applies the edit once.
 
 const SIDE = "n.sync-conflict-20261015-mac.md"
+// Opening a device spawns the platform machine-id probe once per process; under host load that alone
+// can pass bun's 5 s default. This bound is a circuit breaker, not a wait.
+const DEVICE_TIMEOUT_MS = 60_000
 const active = (doc: LoroDoc, key: string): string[] => activeReg(readKeyState(doc, key).reg).map((entry) => entry.value).sort()
 
 async function adopt(device: ItemDevice, doc: LoroDoc, base: string, frontier: ReturnType<typeof itemFrontier>, files: readonly Snapshot[]) {
@@ -47,7 +50,7 @@ describe("M1: adoption replays through the guarded capture entry point", () => {
         doc.free()
       }
     })
-  })
+  }, DEVICE_TIMEOUT_MS)
 
   test("a crash after the receipt but before the import re-captures once, never twice", async () => {
     await withDevices(1, async ([device]) => {
@@ -69,7 +72,7 @@ describe("M1: adoption replays through the guarded capture entry point", () => {
         doc.free()
       }
     })
-  })
+  }, DEVICE_TIMEOUT_MS)
 
   test("register values alone, over an unchanged body, still land through the entry point", async () => {
     await withDevices(1, async ([device]) => {
@@ -89,5 +92,5 @@ describe("M1: adoption replays through the guarded capture entry point", () => {
         doc.free()
       }
     })
-  })
+  }, DEVICE_TIMEOUT_MS)
 })
