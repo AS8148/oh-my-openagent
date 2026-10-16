@@ -270,6 +270,18 @@ describe("checkExtensionCurrent", () => {
     }
   })
 
+  test("#given the split extension build #when the palace sidecar is inspected #then it carries no runtime loader of its own", async () => {
+    const { memoryPalaceInputs, memoryPalaceOutputPath } = await sharedOutputs()
+    for (const suffix of [
+      "packages/omo-senpi/src/components/memory/palace/runtime-loader.ts",
+      "packages/omo-senpi/src/components/memory/palace/command.ts",
+      "packages/omo-senpi/src/components/memory/commands/people.ts",
+    ]) {
+      expect(memoryPalaceInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+    }
+    expect(await readFile(memoryPalaceOutputPath, "utf8")).not.toContain("#omo-memory-palace-runtime")
+  })
+
   test("#given a packaged task import map #when generated artifacts are inspected #then the main bundle resolves its task sidecar", async () => {
     const outputs = await sharedOutputs()
     const main = await readFile(outputs.outputPath, "utf8")
