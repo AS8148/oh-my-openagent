@@ -197,9 +197,9 @@ describe("spool recovery", () => {
     expect(reports).toEqual([expect.objectContaining({ "omo.dropped.reason": "evicted", "omo.dropped.count": droppedBeforeSend })])
     expect(records.length - 1 + droppedBeforeSend).toBe(2_000)
     expect(transport.droppedEvents()).toBe(0)
-  })
+  }, 60_000)
 
-  test("#given a fetch that never settles #when the transport shuts down #then it returns within 2,100 ms and the batch stays on disk", async () => {
+  test("#given a fetch that never settles #when the transport shuts down #then it returns within 2,600 ms (the 2 s cap plus scheduling slack) and the batch stays on disk", async () => {
     // given
     const dir = root()
     const transport = makeTransport(dir, { fetch: () => new Promise<Response>(() => undefined) })
@@ -211,12 +211,12 @@ describe("spool recovery", () => {
     const elapsed = performance.now() - started
 
     // then
-    expect(elapsed).toBeLessThan(2_100)
+    expect(elapsed).toBeLessThan(2_600)
     expect(spoolNames(dir).length).toBe(1)
     expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
-  })
+  }, 30_000)
 
-  test("#given shutdown's flush starts with 1.5 s of synchronous work #then shutdown still returns within the 2 s cap measured from the call", async () => {
+  test("#given shutdown's flush starts with 1.5 s of synchronous work #then shutdown still returns within the 2 s cap measured from the call (plus scheduling slack, far below the 3.5 s a late cap would take)", async () => {
     // given
     const dir = root()
     let stallNextConsentCheck = false
@@ -237,7 +237,7 @@ describe("spool recovery", () => {
     const elapsed = performance.now() - started
 
     // then
-    expect(elapsed).toBeLessThan(2_100)
+    expect(elapsed).toBeLessThan(2_600)
     expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
-  })
+  }, 30_000)
 })

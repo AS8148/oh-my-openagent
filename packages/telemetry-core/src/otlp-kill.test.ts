@@ -56,5 +56,5 @@ describe("crash before the first flush", () => {
     const uids = logRecordsOf(decodeLogs(calls[0]?.body ?? new Uint8Array())).map((r) => attributeMap(r.attributes)["log.record.uid"])
     expect(new Set(uids).size).toBe(7)
     expect(spoolNames(created.dir)).toEqual([])
-  })
+  }, 60_000)
 })

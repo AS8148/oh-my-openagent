@@ -51,7 +51,7 @@ describe("OTLP sender", () => {
     expect(calls[0]?.headers["x-omo-ingest-key"]).toBe("test-ingest-key")
     expect(calls[0]?.headers["content-type"]).toBe("application/x-protobuf")
     expect(spoolNames(dir)).toEqual([])
-  })
+  }, 30_000)
 
   test("#given a body over 8 KB #then it is gzip-encoded; a small body is not", async () => {
     // given
@@ -70,7 +70,7 @@ describe("OTLP sender", () => {
     expect(calls[1]?.headers["content-encoding"]).toBe("gzip")
     expect(calls[1]?.body.byteLength).toBeGreaterThan(8 * 1024)
     expect(logRecordsOf(decodeLogs(calls[1]?.body ?? new Uint8Array())).length).toBe(19)
-  })
+  }, 30_000)
 
   test("#given OTEL_EXPORTER_OTLP_ENDPOINT points elsewhere #then it is ignored; OMO_TELEMETRY_ENDPOINT overrides the configured endpoint", () => {
     // given

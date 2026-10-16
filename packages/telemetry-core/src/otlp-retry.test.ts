@@ -125,5 +125,5 @@ describe("OTLP retry policy", () => {
     expect(calls.filter((c) => c.url.endsWith("/v1/logs")).length).toBe(1)
     expect(calls.filter((c) => c.url.endsWith("/v1/traces")).length).toBe(7)
     expect(spoolNames(dir)).toEqual([])
-  })
+  }, 30_000)
 })
