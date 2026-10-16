@@ -62,6 +62,13 @@ export async function gitRepo(root: string): Promise<SyncRepo> {
 export class ManualClock implements Clock {
   private at = 1_800_000_000_000
   private timers: { readonly due: number; readonly fn: () => void; cancelled: boolean }[] = []
+  private waiting: (() => void)[] = []
+
+  /** Resolves once some timer is scheduled: subscribe-first, so a test advances only after the engine waits. */
+  untilPending(): Promise<void> {
+    if (this.timers.some((t) => !t.cancelled)) return Promise.resolve()
+    return new Promise((resolve) => this.waiting.push(resolve))
+  }
 
   now(): number {
     return this.at
@@ -70,6 +77,7 @@ export class ManualClock implements Clock {
   after(ms: number, fn: () => void): () => void {
     const timer = { due: this.at + ms, fn, cancelled: false }
     this.timers.push(timer)
+    for (const wake of this.waiting.splice(0)) wake()
     return () => {
       timer.cancelled = true
     }
@@ -141,7 +149,11 @@ export interface Device {
   dispose(): Promise<void>
 }
 
-export async function makeDevice(server: FakeSyncServer, name: string, fault?: EngineFault): Promise<Device> {
+export interface DeviceOptions {
+  readonly batchBytes?: number
+}
+
+export async function makeDevice(server: FakeSyncServer, name: string, fault?: EngineFault, options: DeviceOptions = {}): Promise<Device> {
   const base = await mkdtemp(join(tmpdir(), `omo-sync-${name}-`))
   const root = join(base, "memory")
   const stateDir = join(base, "device")
@@ -161,6 +173,8 @@ export async function makeDevice(server: FakeSyncServer, name: string, fault?: E
       sealer: new FakeSealer(ACCOUNT),
       lock,
       clock,
+      random: () => 0,
+      ...(options.batchBytes === undefined ? {} : { batchBytes: options.batchBytes }),
       ...(f === undefined ? {} : { fault: f }),
     })
     return { store, engine }

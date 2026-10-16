@@ -29,6 +29,8 @@ export class FakeSyncServer {
   /** When set, the next page repeats its first entry (a replayed delivery). */
   duplicateNextPage = false
   private readonly replays: PulledEntry[] = []
+  /** Runs once, just before the next append is served: another device's push racing this one. */
+  beforeNextAppend: (() => Promise<void>) | null = null
 
   get head(): number {
     return this.entries.at(-1)?.seq ?? this.trimmedThrough
@@ -53,7 +55,12 @@ export class FakeSyncServer {
         if (bytes.length !== upload.size || sha256Hex(bytes) !== upload.digest) throw new Error("bytes differ from the reservation")
         upload.bytes = bytes
       },
-      append: async (request) => this.append(request, author),
+      append: async (request) => {
+        const race = this.beforeNextAppend
+        this.beforeNextAppend = null
+        if (race !== null) await race()
+        return this.append(request, author)
+      },
       subscribe: (handlers) => {
         this.listeners.add(handlers)
         handlers.onConnected(true)

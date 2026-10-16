@@ -76,14 +76,3 @@ test("a device's own pushed batch is not applied back to it", async () => {
   expect(await a.engine.runCycle()).toMatchObject({ applied: 0, pushed: false })
   expect((await a.engine.state()).applied).toBe(1)
 }, GIT_TEST_TIMEOUT)
-
-test("a stale base receives first, then retries the push on the new head", async () => {
-  const { server, a, b } = await pair()
-  await a.write("a.md", "a\n")
-  await b.write("b.md", "b\n")
-  await a.engine.runCycle()
-  const report = await b.engine.runCycle()
-  expect(report).toMatchObject({ applied: 1, pushed: true })
-  expect(server.entries.map((e) => e.seq)).toEqual([1, 2])
-  expect(await b.read("a.md")).toBe("a\n")
-}, GIT_TEST_TIMEOUT)

@@ -7,7 +7,7 @@
 import { advance, applyVerified, capture } from "./apply"
 import type { EngineDeps } from "./engine-deps"
 import { type EngineState, SyncJournal } from "./journal"
-import { push } from "./push"
+import { push, staleBackoffMs } from "./push"
 import type { RefusalCode } from "./ports"
 import { receive } from "./receive"
 
@@ -120,6 +120,10 @@ export class SyncEngine {
     void this.runCycle().catch((error: unknown) => this.deps.log?.(`sync cycle failed: ${String(error)}`))
   }
 
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => this.deps.clock.after(ms, resolve))
+  }
+
   private poll(): void {
     this.stopPolling()
     this.cancelPoll = this.deps.clock.after(POLL_MS, () => {
@@ -162,11 +166,12 @@ export class SyncEngine {
     await inbound()
     let pushed = false
     for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
-      const outcome = await push(deps, journal)
+      const outcome = await push(deps, journal, deps.batchBytes)
       if (outcome !== "stale") {
         pushed = outcome === "pushed"
         break
       }
+      await this.sleep(staleBackoffMs(attempt, deps.random))
       await inbound()
     }
     if (refused === 0) await journal.updateState({ lastSyncedAt: deps.clock.now(), updatedWhileOffline: memories })

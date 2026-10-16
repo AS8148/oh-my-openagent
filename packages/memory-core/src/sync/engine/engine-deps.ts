@@ -23,4 +23,7 @@ export interface EngineDeps {
   readonly clock: Clock
   readonly fault?: EngineFault
   readonly log?: (line: string) => void
+  /** The plaintext bound per pushed batch; defaults to MAX_BATCH_BYTES. */
+  readonly batchBytes?: number
+  readonly random?: () => number
 }
