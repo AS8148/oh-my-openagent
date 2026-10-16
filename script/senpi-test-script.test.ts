@@ -129,6 +129,7 @@ describe("Senpi compatibility test script", () => {
       await writeFile(join(pluginRoot, "extensions", "omo-memory-doctor.js"), "export {}\n")
       await writeFile(join(pluginRoot, "extensions", "omo-memory-memfs.js"), "export {}\n")
       await writeFile(join(pluginRoot, "extensions", "omo-thread-client.js"), "export {}\n")
+      await writeFile(join(pluginRoot, "extensions", "omo-telemetry-recovery.js"), "export {}\n")
       await writeFile(join(pluginRoot, "extensions", "assets.generated.json"), "{}\n")
       await mkdir(join(pluginRoot, "runtime", "agent-toolkit-sdk"), { recursive: true })
       await writeFile(join(pluginRoot, "runtime", "agent-toolkit-sdk", "sdk.js"), "export {}\n")

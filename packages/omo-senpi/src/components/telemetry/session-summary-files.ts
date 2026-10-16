@@ -10,7 +10,8 @@ export function writeJsonAtomic(path: string, value: unknown, owner: { readonly 
   renameSync(temp, path)
 }
 
-export const CORRUPT: unique symbol = Symbol("corrupt")
+// Registered, so the recovery sidecar bundle and the entry bundle share one marker for unreadable files.
+export const CORRUPT: unique symbol = Symbol.for("omo-senpi.session-summary.corrupt")
 
 export function readJsonOrCorrupt(path: string): unknown {
   let text: string

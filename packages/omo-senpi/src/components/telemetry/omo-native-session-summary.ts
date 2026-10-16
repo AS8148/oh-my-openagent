@@ -4,7 +4,7 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 import type { TelemetrySessionRole } from "./session-role"
 import { CORRUPT, removeFile } from "./session-summary-files"
 import { createSummaryPublisher, type PublishSummary } from "./session-summary-publisher"
-import { createSummaryRecovery } from "./session-summary-recovery"
+import { createLazySummaryRecovery, type LoadSummaryRecovery } from "./session-summary-lazy-recovery"
 import { isSessionSampled } from "./session-summary-sampling"
 import { isRecordSendable, type ConsentScope, type SummaryStorage, type WindowRecord } from "./session-summary-storage"
 import { addTurn, newSummaryEpoch, openWindow, type EndedBy, type SummaryTurn, type SummaryWindow } from "./session-summary-window"
@@ -47,6 +47,8 @@ export type SessionSummaryOptions = {
   readonly scheduleHeartbeat?: ScheduleHeartbeat
   /** Events the transport knows it dropped since the last call (todo 21 wires the OTLP sender's counter). */
   readonly droppedEvents?: () => number
+  /** Loads the recovery sweep; defaults to the `#omo-telemetry-recovery-runtime` sidecar. */
+  readonly loadRecovery?: LoadSummaryRecovery
 }
 
 export type SessionSummaryRecorder = {
@@ -86,15 +88,17 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
     ...(options.droppedEvents === undefined ? {} : { transportDropped: options.droppedEvents }),
   })
-  const recovery = createSummaryRecovery({
-    storage,
-    publisher,
-    isScopeConsented,
-    ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
-  })
   const live = new Map<string, Live>()
   // Window files this process wrote, by session; the periodic consent check runs only while one exists.
   const onDisk = new Map<string, string>()
+  const recovery = createLazySummaryRecovery({
+    storage,
+    publisher,
+    isScopeConsented,
+    ownWindowKeys: () => onDisk.values(),
+    ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
+    ...(options.loadRecovery === undefined ? {} : { load: options.loadRecovery }),
+  })
   let disarmConsentCheck: (() => void) | undefined
   let swept = false
   let stopHeartbeat: (() => void) | undefined
@@ -170,21 +174,30 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     purgeIfOptedOut()
     if (!isConsented()) return
     for (const [sessionHash, entry] of live) if (entry.window !== null) persist(sessionHash, entry)
-    runSweep()
+    void runSweep()
   }
 
-  const runSweep = (): void => {
+  // A sweep still loading its module is awaited by the next turn, which the synchronous sweep always preceded.
+  let sweepInFlight: Promise<void> | undefined
+  const runSweep = (): Promise<void> | undefined => {
     try {
-      recovery.sweep()
+      const loading = recovery.sweep()?.catch(report)
+      if (loading === undefined) return undefined
+      const settled = loading.finally(() => {
+        if (sweepInFlight === settled) sweepInFlight = undefined
+      })
+      sweepInFlight = settled
+      return settled
     } catch (error) {
       report(error)
+      return undefined
     }
   }
 
-  const sweepOnce = (): void => {
-    if (swept) return
+  const sweepOnce = (): Promise<void> | undefined => {
+    if (swept) return sweepInFlight
     swept = true
-    runSweep()
+    return runSweep()
   }
 
   const ensureHeartbeat = (): void => {
@@ -262,12 +275,13 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     async recover() {
       if (!isConsented()) return
       swept = true
-      runSweep()
+      await runSweep()
       await publisher.settled()
     },
     async recordTurn(sessionHash, turn) {
       if (!isConsented()) return discard(sessionHash)
-      sweepOnce()
+      const sweeping = sweepOnce()
+      if (sweeping !== undefined) await sweeping
       ensureHeartbeat()
       const entry = liveFor(sessionHash)
       const at = now()
@@ -286,7 +300,8 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     },
     async finish(sessionHash, reason) {
       if (!isConsented()) return discard(sessionHash)
-      sweepOnce()
+      const sweeping = sweepOnce()
+      if (sweeping !== undefined) await sweeping
       const entry = liveFor(sessionHash)
       live.delete(sessionHash)
       if (live.size === 0) {

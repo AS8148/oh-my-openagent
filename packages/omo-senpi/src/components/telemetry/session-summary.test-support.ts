@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
-import { createSessionSummaryRecorder, type SessionSummaryRecorder } from "./omo-native-session-summary"
+import { createSessionSummaryRecorder, type SessionSummaryOptions, type SessionSummaryRecorder } from "./omo-native-session-summary"
 import { createSummaryStorage, type ConsentScope, type SummaryStorage } from "./session-summary-storage"
 import type { SummaryTurn } from "./session-summary-window"
 
@@ -59,6 +59,7 @@ export type TestRecorderInput = {
   readonly isConsented?: () => boolean
   readonly consentScope?: ConsentScope
   readonly isScopeConsented?: (scope: ConsentScope) => boolean
+  readonly loadRecovery?: SessionSummaryOptions["loadRecovery"]
 }
 
 export function createTestRecorder(input: TestRecorderInput): TestRecorder {
@@ -97,6 +98,7 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
       }
     },
     ...(input.droppedEvents === undefined ? {} : { droppedEvents: input.droppedEvents }),
+    ...(input.loadRecovery === undefined ? {} : { loadRecovery: input.loadRecovery }),
   })
   return {
     published,
