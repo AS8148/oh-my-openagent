@@ -7,14 +7,14 @@ import { type BatchBinding, openBatch } from "./open.ts"
 import { receiverRefusal } from "./receiver.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { buildFork } from "./testing/fork.ts"
-import { ACCOUNT, appendBatch, chain, deviceId, epochKey, keyringFor, mainChain, objects, readBytes, record } from "./testing/sync-v1.test-support.ts"
+import { ACCOUNT, appendBatch, chain, deviceId, epochKey, keyringFor, mainChain, objects, readBytes, record, fixtureAnchor } from "./testing/sync-v1.test-support.ts"
 import { compareWrapEntries } from "./vendor/sync-format/canonical.ts"
 
 // Each test plays a malicious server: it takes genuine, correctly signed material and changes
 // only what the server controls (unsigned wraps, positions, bodies, envelope fields). Every one
 // must be refused, counted once, with a content-free log line.
 
-const run = async (entries: ReadonlyArray<SyncEntry>, state: ChainState = emptyChain(ACCOUNT)) => {
+const run = async (entries: ReadonlyArray<SyncEntry>, state: ChainState = emptyChain(ACCOUNT, fixtureAnchor())) => {
   const logged: string[] = []
   const rejections = createRejectionCounter((line) => logged.push(line))
   const outcome = await appendEntries(state, entries, rejections)
@@ -170,7 +170,7 @@ describe("MEDIUM 3: vetoed-epoch batches are fully verified before the veto appl
 
 describe("MEDIUM 4: the SyncEntry envelope is a closed schema", () => {
   test("a keyring row with an unknown top-level field is refused as bad_envelope", async () => {
-    const empty = emptyChain(ACCOUNT)
+    const empty = emptyChain(ACCOUNT, fixtureAnchor())
     const result = await run([served({ ...record("genesis"), server_note: "trust me" })], empty)
     expectRefusedOnce(result, empty, { seq: 1, reason: "bad_envelope" })
   })
@@ -186,7 +186,7 @@ describe("MEDIUM 4: the SyncEntry envelope is a closed schema", () => {
 
   test("a keyring row missing wraps is a counted bad_envelope, not a TypeError", async () => {
     const { wraps: _dropped, ...withoutWraps } = record("genesis")
-    const empty = emptyChain(ACCOUNT)
+    const empty = emptyChain(ACCOUNT, fixtureAnchor())
     const result = await run([served(withoutWraps)], empty)
     expectRefusedOnce(result, empty, { seq: 1, reason: "bad_envelope" })
   })

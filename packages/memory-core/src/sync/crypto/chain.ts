@@ -1,3 +1,4 @@
+import { type AnchorRejection, anchorStep, type ChainAnchor, type PinCandidate } from "./anchor.ts"
 import type { BatchEntry, Head, KeyringEntry, SyncAuthor, SyncEntry, VerifiedKeyringEntry, VerifiedWrap } from "./entry.ts"
 import { type EnvelopeRejection, envelopeRefusal } from "./envelope.ts"
 import { type Authority, applyRecord, type FoldedRecord, isCancelledAdmission, isVetoedEpoch } from "./fold.ts"
@@ -13,6 +14,9 @@ export type ChainRejection =
   | RuleRejection
   | ReceiverCheck
   | EnvelopeRejection
+  | AnchorRejection
+  | "forced_rotation_required"
+  | "bad_fork_resolution"
   | "bad_record"
   | "link_mismatch"
   | "not_member"
@@ -26,8 +30,18 @@ export type ChainState = {
   readonly head: Head | null
   readonly authority: Authority | null
   readonly history: ReadonlyArray<FoldedRecord>
-  /** Every verified keyring entry as received: the merged receiver re-reads them for vetoes, joins and forks. */
+  /** Every verified keyring entry of an ANCHORED chain, wraps minted: the merged receiver re-reads them. */
   readonly received: ReadonlyArray<VerifiedKeyringEntry>
+  /** The device's trust anchor; nothing is trusted and no wrap is minted until the chain meets it. */
+  readonly anchor: ChainAnchor
+  readonly anchored: boolean
+  /** Verified keyring entries walked before the anchor was met: never minted, never handed out. */
+  readonly unanchored: ReadonlyArray<KeyringEntry>
+  readonly genesisDigest: string | null
+  /** The root a bootstrap walk proved, for the pin store; null for a chain walked under a pin. */
+  readonly pin: PinCandidate | null
+  /** The seq of a fork-resolution whose forced rotation must come next (spec 8.2), else null. */
+  readonly forcedRotationAfter: number | null
 }
 
 const minted = new WeakSet<object>()
@@ -72,7 +86,27 @@ export type AppendOutcome =
       readonly reason: ChainRejection
     }
 
-export const emptyChain = (account: string): ChainState => ({ account, head: null, authority: null, history: [], received: [] })
+export const emptyChain = (account: string, anchor: ChainAnchor): ChainState => ({
+  account,
+  head: null,
+  authority: null,
+  history: [],
+  received: [],
+  anchor,
+  anchored: false,
+  unanchored: [],
+  genesisDigest: null,
+  pin: null,
+  forcedRotationAfter: null,
+})
+
+const seenKeyring = (state: ChainState): ReadonlyArray<KeyringEntry> => [...state.received, ...state.unanchored]
+
+const forcedRotationRefusal = (state: ChainState, body: ParsedBody | null): ChainRejection | null => {
+  const fork = body?.kind === "rotation" ? body.forkResolution : null
+  if (state.forcedRotationAfter !== null) return fork === state.forcedRotationAfter ? null : "forced_rotation_required"
+  return fork === null ? null : "bad_fork_resolution"
+}
 
 /** Main-chain mode checks seq, base_seq and link; keyring-only mode (snapshot import) checks the sub-chain alone. */
 export type LinkMode = "main" | "keyring-only"
@@ -135,8 +169,9 @@ type StepResult =
 export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry, mode: LinkMode): Promise<StepResult> => {
   const malformed = envelopeRefusal(entry)
   if (malformed !== null) return { ok: false, reason: malformed }
+  if (state.anchor.account !== state.account) return { ok: false, reason: "untrusted_root" }
   if (!(await linksHold(state, entry, mode))) return { ok: false, reason: "link_mismatch" }
-  const refused = await receiverRefusal(state.received, entry)
+  const refused = await receiverRefusal(seenKeyring(state), entry)
   if (refused !== null) return { ok: false, reason: refused }
   const body = parseBody(entry.body)
   if (body === null) return { ok: false, reason: "bad_record" }
@@ -154,17 +189,28 @@ export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry,
   const ruleFailure = await checkRecordRules(entry, body, before, state.history, predecessor)
   if (ruleFailure !== null) return { ok: false, reason: ruleFailure }
   if ((await sha256B64(jcsBytes(entry.body))) !== entry.digest) return { ok: false, reason: "digest_mismatch" }
+  const forced = forcedRotationRefusal(state, body)
+  if (forced !== null) return { ok: false, reason: forced }
+  const genesisDigest = body.kind === "genesis" ? entry.digest : state.genesisDigest
+  const met = state.anchored ? null : anchorStep(state.anchor, entry, body, before, genesisDigest ?? "")
+  if (met !== null && !met.ok) return { ok: false, reason: met.reason }
   const record: FoldedRecord = { seq: entry.seq, digest: entry.digest, body, before }
   const authority = applyRecord(state.history, record)
   if (authority === null) return { ok: false, reason: "bad_record" }
+  const anchored = state.anchored || met?.anchored === true
   return {
     ok: true,
     state: {
-      account: state.account,
+      ...state,
       head: { seq: entry.seq, link: entry.link, keyring_link: entry.keyring_link },
       authority,
       history: [...state.history, record],
-      received: [...state.received, mintWraps(entry)],
+      received: anchored ? [...state.received, ...[...state.unanchored, entry].map(mintWraps)] : state.received,
+      anchored,
+      unanchored: anchored ? [] : [...state.unanchored, entry],
+      genesisDigest,
+      pin: met?.ok === true && met.candidate !== null ? met.candidate : state.pin,
+      forcedRotationAfter: body.kind === "fork-resolution" ? entry.seq : null,
     },
     step: { kind: "keyring", seq: entry.seq, record: body.kind },
   }
@@ -189,8 +235,10 @@ const verifyBatchEntry = async (state: ChainState, entry: BatchEntry): Promise<S
   const malformed = envelopeRefusal(entry)
   if (malformed !== null) return { ok: false, reason: malformed }
   if (!(await linksHold(state, entry, "main"))) return { ok: false, reason: "link_mismatch" }
-  const refused = await receiverRefusal(state.received, entry)
+  const refused = await receiverRefusal(seenKeyring(state), entry)
   if (refused !== null) return { ok: false, reason: refused }
+  const forced = forcedRotationRefusal(state, null)
+  if (forced !== null) return { ok: false, reason: forced }
   const authority = state.authority
   const head = state.head
   if (authority === null || head === null || entry.author.kind !== "device") return { ok: false, reason: "not_member" }
@@ -210,7 +258,9 @@ const verifyBatchEntry = async (state: ChainState, entry: BatchEntry): Promise<S
 /**
  * Extends the local verified chain entry by entry. The first refused entry stops the walk,
  * counts one content-free rejection and leaves the state at the last verified entry;
- * vetoed-epoch batches advance the cursor without being applied.
+ * vetoed-epoch batches advance the cursor without being applied. A walk that does not meet the
+ * device's trust anchor hands out nothing: it is refused as a whole (`unanchored`, or the anchor
+ * refusal itself) and the input state comes back unchanged, with no steps and no minted wrap.
  */
 export const appendEntries = async (
   state: ChainState,
@@ -230,10 +280,16 @@ export const appendEntries = async (
     if (!result.ok) {
       rejections.record(result.reason)
       const seq = malformed === null && Number.isSafeInteger(entry.seq) ? entry.seq : (current.head?.seq ?? 0) + 1
-      return { ok: false, state: current, steps, seq, reason: result.reason }
+      return current.anchored
+        ? { ok: false, state: current, steps, seq, reason: result.reason }
+        : { ok: false, state, steps: [], seq, reason: result.reason }
     }
     current = result.state
     steps.push(result.step)
+  }
+  if (!current.anchored) {
+    rejections.record("unanchored")
+    return { ok: false, state, steps: [], seq: (current.head?.seq ?? 0) + 1, reason: "unanchored" }
   }
   return { ok: true, state: current, steps }
 }

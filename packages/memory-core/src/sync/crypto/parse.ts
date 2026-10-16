@@ -45,6 +45,7 @@ export type ParsedBody =
       readonly kind: "rotation"
       readonly members: ReadonlyArray<Principal>
       readonly wrapsDigest: string
+      readonly forkResolution: number | null
     }
   | {
       readonly kind: "recovery-join"
@@ -162,14 +163,15 @@ const parseApproval = (body: JsonObject): ParsedBody | null => {
 const parseRotation = (body: JsonObject): ParsedBody | null => {
   if (!hasExactly(body, [...COMMON, "members", "wraps_digest", "fork_resolution"])) return null
   const fork = body["fork_resolution"]
-  if (fork !== null && !(typeof fork === "number" && Number.isSafeInteger(fork) && fork >= 1)) return null
+  const forkResolution = fork === null ? null : typeof fork === "number" && Number.isSafeInteger(fork) && fork >= 1 ? fork : undefined
+  if (forkResolution === undefined) return null
   const membersValue = body["members"]
   const wrapsDigest = text(body, "wraps_digest")
   if (!Array.isArray(membersValue) || wrapsDigest === null) return null
   const members = membersValue.map((member: JsonValue) => parsePrincipal(member))
   const parsed = members.filter((member): member is Principal => member !== null)
   if (parsed.length !== members.length || parsed.length === 0) return null
-  return { kind: "rotation", members: parsed, wrapsDigest }
+  return { kind: "rotation", members: parsed, wrapsDigest, forkResolution }
 }
 
 const parseJoin = (body: JsonObject): ParsedBody | null => {

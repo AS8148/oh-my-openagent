@@ -16,6 +16,20 @@ const isInteger = (value: unknown, min: number): boolean => typeof value === "nu
 
 const isText = (value: unknown): boolean => typeof value === "string" && value.length > 0
 
+const MAX_DEPTH = 64
+
+/** Iterative, so a hostile row nested deeper than any record can be is refused before anything recurses into it. */
+const withinDepth = (value: unknown): boolean => {
+  const stack: Array<readonly [unknown, number]> = [[value, 1]]
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const [node, depth] = next
+    if (typeof node !== "object" || node === null) continue
+    if (depth > MAX_DEPTH) return false
+    for (const child of Object.values(node)) stack.push([child, depth + 1])
+  }
+  return true
+}
+
 const COMMON = ["seq", "base_seq", "kind", "account", "epoch", "author", "digest", "link", "keyring_link", "record_sig"]
 
 const authorHolds = (author: unknown): boolean => {
@@ -38,7 +52,7 @@ const wrapsHold = (wraps: unknown): boolean =>
  */
 export const envelopeRefusal = (entry: SyncEntry): EnvelopeRejection | null => {
   const row: unknown = entry
-  if (!isRow(row)) return "bad_envelope"
+  if (!isRow(row) || !withinDepth(row)) return "bad_envelope"
   const common =
     isInteger(row["seq"], 1) && isInteger(row["base_seq"], 0) && isInteger(row["epoch"], 1) &&
     isText(row["account"]) && isText(row["digest"]) && isText(row["link"]) && isText(row["record_sig"]) && authorHolds(row["author"])

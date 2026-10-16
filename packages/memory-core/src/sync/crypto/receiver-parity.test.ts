@@ -4,7 +4,7 @@ import type { KeyringEntry, SyncEntry } from "./entry.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { importSnapshot, type SnapshotRecord } from "./snapshot.ts"
 import { buildFork } from "./testing/fork.ts"
-import { ACCOUNT, appendBatch, appendKeyring, chain, deviceId, epochKey, keyringFor, keys, mainChain, objects, principalKeys, readBytes, record } from "./testing/sync-v1.test-support.ts"
+import { ACCOUNT, appendBatch, appendKeyring, chain, deviceId, epochKey, keyringFor, keys, mainChain, objects, principalKeys, readBytes, record, fixtureAnchor } from "./testing/sync-v1.test-support.ts"
 import { buildBatch } from "./build.ts"
 import { b64urlDecode, sha256B64 } from "./vendor/sync-format/jcs.ts"
 import { signFramed } from "./vendor/sync-format/keys.ts"
@@ -13,7 +13,7 @@ import { snapshotPreimage } from "./vendor/sync-format/snapshot.ts"
 // The client's local chain must refuse exactly what the merged omo-service receiver
 // (vendored sync-format receiveKeyringChain, 3bedb0a) refuses, and accept what it accepts.
 
-const run = async (entries: ReadonlyArray<SyncEntry>, state: ChainState = emptyChain(ACCOUNT)) => {
+const run = async (entries: ReadonlyArray<SyncEntry>, state: ChainState = emptyChain(ACCOUNT, fixtureAnchor())) => {
   const rejections = createRejectionCounter()
   const outcome = await appendEntries(state, entries, rejections)
   return { outcome, rejections }
@@ -118,7 +118,7 @@ describe("snapshot import matches the merged receiver", () => {
 
   test("the golden snapshot.json (author in the signed preimage) imports, chunks in any order", async () => {
     for (const order of [chunks(), chunks().reverse()]) {
-      const imported = await importSnapshot(mainChain(), golden, order, epochKey, createRejectionCounter())
+      const imported = await importSnapshot(ACCOUNT, fixtureAnchor(), mainChain(), golden, order, epochKey, createRejectionCounter())
       expect(imported.ok && imported.records.map((r) => r.itemKey)).toEqual(["snapshot part 0", "snapshot part 1"])
     }
   })
@@ -138,7 +138,7 @@ describe("snapshot import matches the merged receiver", () => {
       const digest = await sha256B64(b64urlDecode(await sha256B64(chunk)))
       const unsigned = { account: ACCOUNT, author, covers_seq: veto.seq, digest, link: veto.link, keyring_head: veto.keyring_link, record_sig: "" }
       const record_sig = await signFramed("omo-sync/v1/snapshot", snapshotPreimage(unsigned), b64urlDecode(owner.signing_seed))
-      return importSnapshot(entries, { ...unsigned, record_sig }, [chunk], epochKey, createRejectionCounter())
+      return importSnapshot(ACCOUNT, fixtureAnchor(), entries, { ...unsigned, record_sig }, [chunk], epochKey, createRejectionCounter())
     }
     expect((await sealedAt(1)).ok).toBe(true)
     expect((await sealedAt(2)).ok).toBe(false)

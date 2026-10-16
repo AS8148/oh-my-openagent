@@ -14,9 +14,10 @@ import {
   readBytes,
   record,
   recoverySigningSeed,
+  fixtureAnchor,
 } from "./testing/sync-v1.test-support.ts"
 
-const run = (entries: ReadonlyArray<SyncEntry>, state: ChainState = emptyChain(ACCOUNT)) => {
+const run = (entries: ReadonlyArray<SyncEntry>, state: ChainState = emptyChain(ACCOUNT, fixtureAnchor())) => {
   const rejections = createRejectionCounter()
   return appendEntries(state, entries, rejections).then((outcome) => ({ outcome, rejections }))
 }
@@ -140,7 +141,7 @@ describe("receiver refusals: nothing that fails a check is applied", () => {
   })
 
   test("a keyring chain served for another account is refused at the account binding", async () => {
-    const { outcome, rejections } = await run(mainChain(), emptyChain("another-account"))
+    const { outcome, rejections } = await run(mainChain(), emptyChain("another-account", fixtureAnchor("another-account")))
     expect(refusal(outcome)).toEqual({ seq: 1, reason: "account_mismatch" })
     expect(rejections.count()).toBe(1)
   })

@@ -1,3 +1,4 @@
+import type { AnchorRejection, ChainAnchor } from "./anchor.ts"
 import { type ChainState, emptyChain, verifyKeyringEntry } from "./chain.ts"
 import type { KeyringEntry } from "./entry.ts"
 import { isCancelledAdmission } from "./fold.ts"
@@ -17,6 +18,8 @@ import {
 export type SnapshotRecord = SnapshotEnvelope
 
 export type SnapshotRejection =
+  | AnchorRejection
+  | "account_mismatch"
   | "keyring_prefix_refused"
   | "bad_keyring_head"
   | "not_member"
@@ -51,6 +54,8 @@ const REJECTION: Readonly<Record<SnapshotImportFailureReason, SnapshotRejection>
  * the snapshot's link at covers_seq.
  */
 export const importSnapshot = async (
+  account: string,
+  anchor: ChainAnchor,
   keyringEntries: ReadonlyArray<KeyringEntry>,
   snapshot: SnapshotRecord,
   chunks: ReadonlyArray<Uint8Array<ArrayBuffer>>,
@@ -61,13 +66,18 @@ export const importSnapshot = async (
     rejections.record(reason)
     return { ok: false, reason }
   }
+  if (snapshot.account !== account) return refuse("account_mismatch")
   const covered = keyringEntries.filter((candidate) => candidate.seq <= snapshot.covers_seq)
-  let state = emptyChain(snapshot.account)
+  let state = emptyChain(account, anchor)
   for (const entry of covered) {
     const step = await verifyKeyringEntry(state, entry, "keyring-only")
-    if (!step.ok) return refuse("keyring_prefix_refused")
+    if (!step.ok) {
+      const anchorFailure = step.reason === "untrusted_root" || step.reason === "anchor_mismatch"
+      return refuse(anchorFailure ? step.reason : "keyring_prefix_refused")
+    }
     state = step.state
   }
+  if (!state.anchored) return refuse("unanchored")
   const authority = state.authority
   if (authority === null) return refuse("keyring_prefix_refused")
   if (isCancelledAdmission(authority, snapshot.author.id)) return refuse("not_member")

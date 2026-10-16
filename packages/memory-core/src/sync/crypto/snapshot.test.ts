@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { appendEntries } from "./chain.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { importSnapshot, type SnapshotRecord } from "./snapshot.ts"
-import { ACCOUNT, appendBatch, deviceId, epochKey, keyringFor, keys, mainChain, objects, principalKeys, readBytes } from "./testing/sync-v1.test-support.ts"
+import { ACCOUNT, appendBatch, deviceId, epochKey, keyringFor, keys, mainChain, objects, principalKeys, readBytes, fixtureAnchor } from "./testing/sync-v1.test-support.ts"
 import { b64urlDecode } from "./vendor/sync-format/jcs.ts"
 import { signFramed } from "./vendor/sync-format/keys.ts"
 import { snapshotPreimage } from "./vendor/sync-format/snapshot.ts"
@@ -34,7 +34,7 @@ const snapshotBy = async (device: "owner" | "recovered", overrides: Partial<Snap
 describe("snapshot import after compaction, verified from genesis", () => {
   test("a device with no earlier chain imports the snapshot and continues the chain", async () => {
     const rejections = createRejectionCounter()
-    const imported = await importSnapshot(mainChain(), await snapshotBy("owner"), chunks(), epochKey, rejections)
+    const imported = await importSnapshot(ACCOUNT, fixtureAnchor(), mainChain(), await snapshotBy("owner"), chunks(), epochKey, rejections)
     expect(imported.ok).toBe(true)
     if (!imported.ok) return
     expect(imported.records.map((record) => record.itemKey)).toEqual(["snapshot part 0", "snapshot part 1"])
@@ -50,21 +50,21 @@ describe("snapshot import after compaction, verified from genesis", () => {
 
   test("a snapshot whose keyring head names a record the served prefix hides is refused", async () => {
     const rejections = createRejectionCounter()
-    const imported = await importSnapshot(mainChain().slice(0, 6), await snapshotBy("owner"), chunks(), epochKey, rejections)
+    const imported = await importSnapshot(ACCOUNT, fixtureAnchor(), mainChain().slice(0, 6), await snapshotBy("owner"), chunks(), epochKey, rejections)
     expect(imported).toEqual({ ok: false, reason: "bad_keyring_head" })
     expect(rejections.count()).toBe(1)
   })
 
   test("a snapshot signed by a device the chain rotated out is refused", async () => {
     const rejections = createRejectionCounter()
-    const imported = await importSnapshot(mainChain(), await snapshotBy("recovered"), chunks(), epochKey, rejections)
+    const imported = await importSnapshot(ACCOUNT, fixtureAnchor(), mainChain(), await snapshotBy("recovered"), chunks(), epochKey, rejections)
     expect(imported).toEqual({ ok: false, reason: "not_member" })
     expect(rejections.count()).toBe(1)
   })
 
   test("a chunk set missing a chunk is refused before any record is returned", async () => {
     const rejections = createRejectionCounter()
-    const imported = await importSnapshot(mainChain(), await snapshotBy("owner"), chunks().slice(0, 1), epochKey, rejections)
+    const imported = await importSnapshot(ACCOUNT, fixtureAnchor(), mainChain(), await snapshotBy("owner"), chunks().slice(0, 1), epochKey, rejections)
     expect(imported).toEqual({ ok: false, reason: "chunk_refused" })
     expect(rejections.count()).toBe(1)
   })
@@ -73,7 +73,7 @@ describe("snapshot import after compaction, verified from genesis", () => {
     const rejections = createRejectionCounter()
     const signed = await snapshotBy("owner")
     const swapped = { ...signed, author: { ...signed.author, sealing_public_key: keyringFor("joining").publicKeys().sealing } }
-    const imported = await importSnapshot(mainChain(), swapped, chunks(), epochKey, rejections)
+    const imported = await importSnapshot(ACCOUNT, fixtureAnchor(), mainChain(), swapped, chunks(), epochKey, rejections)
     expect(imported).toEqual({ ok: false, reason: "bad_signature" })
   })
 })
