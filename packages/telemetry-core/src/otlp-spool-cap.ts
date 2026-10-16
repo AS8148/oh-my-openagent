@@ -1,4 +1,4 @@
-import { compareBatchIds, dropFile, fileStat, listSpool, type SpoolContext } from "./otlp-spool-dir"
+import { compareBatchIds, deleteFile, dropFile, fileStat, listQuarantine, listSpool, QUARANTINE_DIR, type SpoolContext } from "./otlp-spool-dir"
 import type { Signal } from "./otlp-spool-file"
 
 /**
@@ -10,15 +10,19 @@ type SpoolSizeCache = Map<string, number>
 const sizeKey = (signal: Signal, batchId: string): string => `${signal}-${batchId}`
 
 /**
- * Oldest sealed batches go first; active files and in-flight claims are never evicted. Returns the
- * directory's total size after eviction.
+ * Quarantined files go first (their records were counted when they were quarantined, so they are not
+ * counted again), then the oldest sealed batches; active files and in-flight claims are never
+ * evicted. Returns the spool's total size, quarantine included, after eviction.
  */
 export function enforceSpoolCap(ctx: SpoolContext, sizes: SpoolSizeCache = new Map()): number {
   const entries = listSpool(ctx.dir)
   let total = 0
   const sealed: { readonly name: string; readonly batchId: string; readonly size: number }[] = []
   const present = new Set<string>()
+  const quarantined = listQuarantine(ctx)
+  for (const file of quarantined) total += file.size
   for (const entry of entries) {
+    if (entry.name === QUARANTINE_DIR) continue
     const key = entry.kind === "batch" || entry.kind === "sending" ? sizeKey(entry.signal, entry.batchId) : undefined
     let size = key === undefined ? undefined : sizes.get(key)
     if (size === undefined) {
@@ -33,6 +37,10 @@ export function enforceSpoolCap(ctx: SpoolContext, sizes: SpoolSizeCache = new M
   }
   for (const key of sizes.keys()) if (!present.has(key)) sizes.delete(key)
   sealed.sort((a, b) => compareBatchIds(a.batchId, b.batchId))
+  for (const file of quarantined) {
+    if (total <= ctx.capBytes) break
+    if (deleteFile(ctx.dir, file.path)) total -= file.size
+  }
   for (const file of sealed) {
     if (total <= ctx.capBytes) break
     dropFile(ctx, file.name, "evicted")

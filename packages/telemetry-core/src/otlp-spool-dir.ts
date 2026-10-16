@@ -264,10 +264,28 @@ export function dropFile(ctx: SpoolContext, name: string, reason: DropReason): v
   if (deleteFile(ctx.dir, name)) ctx.onDrop(reason, records)
 }
 
+export const QUARANTINE_DIR = "quarantine"
+
+/**
+ * Corrupt files are kept for inspection but are bounded like everything else: they count toward the
+ * spool cap (and are evicted first, see `enforceSpoolCap`) and expire by the same age limit, measured
+ * from their last write. Their records were already counted as `corrupt` when they were moved here.
+ */
 export function quarantineFile(ctx: SpoolContext, name: string): void {
   const records = countSpoolRecords(join(ctx.dir, name))
-  mkdirSync(join(ctx.dir, "quarantine"), { recursive: true, mode: 0o700 })
-  if (tryRename(ctx.dir, name, join("quarantine", name))) ctx.onDrop("corrupt", records)
+  mkdirSync(join(ctx.dir, QUARANTINE_DIR), { recursive: true, mode: 0o700 })
+  if (tryRename(ctx.dir, name, join(QUARANTINE_DIR, name))) ctx.onDrop("corrupt", records)
+}
+
+export type QuarantinedFile = { readonly path: string; readonly size: number; readonly mtimeMs: number }
+
+/** Quarantined files, oldest first. */
+export function listQuarantine(ctx: SpoolContext): QuarantinedFile[] {
+  const dir = join(ctx.dir, QUARANTINE_DIR)
+  return listSpool(dir).flatMap((entry) => {
+    const stat = fileStat(dir, entry.name)
+    return stat === null ? [] : [{ path: join(QUARANTINE_DIR, entry.name), size: stat.size, mtimeMs: stat.mtimeMs }]
+  }).sort((a, b) => a.mtimeMs - b.mtimeMs)
 }
 
 type FileStat = { readonly size: number; readonly mtimeMs: number; readonly birthMs: number; readonly links: number }
@@ -292,8 +310,8 @@ function isDeadOwner(ctx: SpoolContext, entry: { readonly pid: number; readonly 
  * Recovers what dead or stalled processes left (D-H claim rules): expired leases go back to sealed
  * batches, a dead owner's idle active file is sealed (its batch id keeps the file's creation time,
  * so the 14-day limit is never extended), an active file or expired claim that is still a second
- * link of its already moved file (a crash inside `tryLinkMove`) is deleted, and sealed batches past
- * the age limit are dropped.
+ * link of its already moved file (a crash inside `tryLinkMove`) is deleted, and sealed batches and
+ * quarantined files past the age limit are dropped.
  */
 export function sweepSpool(ctx: SpoolContext): void {
   const now = ctx.nowMs()
@@ -314,6 +332,9 @@ export function sweepSpool(ctx: SpoolContext): void {
     if (entry.kind === "batch" && now - batchCreatedMs(entry.batchId) > ctx.maxAgeMs) {
       dropFile(ctx, entry.name, "expired")
     }
+  }
+  for (const file of listQuarantine(ctx)) {
+    if (now - file.mtimeMs > ctx.maxAgeMs) deleteFile(ctx.dir, file.path)
   }
 }
 
