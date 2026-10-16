@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**OpenCode edition: Sisyphus names GPT-6.1 Sol and GPT-6 Luna as themselves.** On `gpt-6.1-sol` (and its `-fast`, dashed and Venice `gpt-61-sol` ids) and on `gpt-6-luna`, the Sisyphus and Sisyphus-Junior GPT prompts introduced the model as "a GPT-family model"; they now say "GPT-6.1 Sol" and "GPT-6 Luna". ([#10291](https://github.com/code-yeongyu/oh-my-openagent/issues/10291))
+**OpenCode edition: Sisyphus names GPT-6.1 Sol and GPT-6 Luna as themselves.** On `gpt-6.1-sol` (and its `-fast`, dashed and Venice `gpt-61-sol` ids) and on `gpt-6-luna`, the Sisyphus and Sisyphus-Junior GPT prompts introduced the model as "a GPT-family model"; they now say "GPT-6.1 Sol" and "GPT-6 Luna". ([#10291](https://github.com/code-yeongyu/oh-my-openagent/issues/10291), [#10292](https://github.com/code-yeongyu/oh-my-openagent/pull/10292))
 
 ## [5.1.34] - 2026-10-16
 
