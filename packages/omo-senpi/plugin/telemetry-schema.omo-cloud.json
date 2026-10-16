@@ -71,7 +71,7 @@
     },
     "service.version": {
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$",
+      "pattern": "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6})?$",
       "required": true,
       "posthog_name": "package_version"
     },
@@ -92,7 +92,7 @@
     },
     "telemetry.sdk.version": {
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$",
+      "pattern": "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6})?$",
       "required": true
     }
   },
@@ -100,7 +100,7 @@
     "name": [
       "omo-cloud"
     ],
-    "version": "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$"
+    "version": "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6})?$"
   },
   "events": {
     "omo.category_config": {
@@ -2537,19 +2537,19 @@
       },
       "omo.crashed_bun_version": {
         "type": "string",
-        "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$",
+        "pattern": "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6})?$",
         "required": false,
         "posthog_name": "crashed_bun_version"
       },
       "omo.crashed_engine_version": {
         "type": "string",
-        "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$",
+        "pattern": "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6})?$",
         "required": false,
         "posthog_name": "crashed_engine_version"
       },
       "omo.crashed_omo_version": {
         "type": "string",
-        "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$",
+        "pattern": "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6})?$",
         "required": false,
         "posthog_name": "crashed_omo_version"
       },
@@ -4489,5 +4489,5 @@
       }
     }
   },
-  "sha256": "76d9861e73eaa0182f127869da6d0234a46e72fea2f57a2aa7569d3fd4cb1e20"
+  "sha256": "ecb0dd7a6d8830afe5e0d1c1f217eab34445b2a7bd26e918fe8672364391b159"
 }

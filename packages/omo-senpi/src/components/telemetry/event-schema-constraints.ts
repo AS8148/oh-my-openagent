@@ -19,11 +19,13 @@ export type PropertyConstraint = {
 }
 
 /**
- * Every version the engine emits or declares: MAJOR.MINOR.PATCH with at most one -alpha.N, -beta.N or -rc.N, no build
- * metadata and no free suffix (a hostname-suffixed dev build must not reach the wire). This is the collector's tightened
- * `semver` safe shape; the vendored artifact.schema.json still carries the older, wider one until it is re-pinned.
+ * Every version the engine emits or declares: MAJOR.MINOR.PATCH with at most one -alpha.N, -beta.N, -rc.N or -dfa.N, or a
+ * desktop -nightly.YYYYMMDD.N / -preview.YYYYMMDD.N, every numeric part bounded; no build metadata and no free suffix (a
+ * hostname-suffixed dev build must not reach the wire). Byte-identical to the collector's final `semver` safe shape; the
+ * vendored artifact.schema.json still carries the older, wider one until it is re-pinned.
  */
-export const VERSION_PATTERN = "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)\\.[0-9]+)?$"
+export const VERSION_PATTERN =
+  "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6})?$"
 export const OS_VERSION_PATTERN = "^[0-9]+(\\.[0-9]+){1,3}(-[0-9A-Za-z.-]{1,32})?$"
 export const SESSION_ID_PATTERN = "^[0-9a-f]{64}$"
 export const INSTALL_HASH_PATTERN = "^[0-9a-f]{64}$"

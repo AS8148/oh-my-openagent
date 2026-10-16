@@ -253,7 +253,7 @@ describe("OmO Native process_crashed", () => {
     })
   })
 
-  it("#given crash-time versions of every shape #when reported #then only MAJOR.MINOR.PATCH with an optional -alpha.N, -beta.N or -rc.N ships, anything else is omitted", async () => {
+  it("#given crash-time versions of every shape #when reported #then only the collector semver shape ships, anything else is omitted", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
       const shapes: readonly [string, boolean][] = [

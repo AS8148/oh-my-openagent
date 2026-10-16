@@ -50,7 +50,7 @@ describe("OmO native OTLP Resource", () => {
     expect(first?.["omo.install.hash"]).toBe(second?.["omo.install.hash"])
   })
 
-  test("#given package and SDK versions of every shape #then only MAJOR.MINOR.PATCH with an optional -alpha.N, -beta.N or -rc.N is sent, anything else is omitted", () => {
+  test("#given package and SDK versions of every shape #then only the collector semver shape is sent, anything else is omitted", () => {
     const fakeOs = { platform: () => "linux", release: () => "6.8.0", arch: () => "x64" }
     const shapes: readonly [string, boolean][] = [
       ["1.2.3", true],
