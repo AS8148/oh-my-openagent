@@ -1,4 +1,5 @@
 import { getTelemetryApiKey, getTelemetryHost } from "./env"
+import { createEventId } from "./event-id"
 import { createDefaultPostHogTransport, isTelemetryClientEnabled } from "./posthog-client"
 import type {
   TelemetryCaptureMessage,
@@ -143,11 +144,15 @@ export function createEventTelemetryClient(
       if (uuid !== undefined && !EVENT_UUID.test(uuid)) {
         report("telemetry_event_property_rejected", new Error("invalid event uuid"))
       }
+      // event_id is minted last so no event property can supply it; PostHog dedupes on `uuid`, so
+      // mirroring it there makes a direct and a relayed delivery of one event collapse. A re-send passes
+      // the uuid it first carried, so its event_id stays that same id.
+      const eventId = uuid !== undefined && EVENT_UUID.test(uuid) ? uuid : createEventId()
       const payload: TelemetryCaptureMessage = {
         distinctId: input.distinctId,
         event: name,
-        properties: { ...projected, ...sharedProperties },
-        ...(uuid !== undefined && EVENT_UUID.test(uuid) ? { uuid } : {}),
+        uuid: eventId,
+        properties: { ...projected, ...sharedProperties, event_id: eventId },
         ...(isValidDate(options?.timestamp) ? { timestamp: options.timestamp } : {}),
       }
       try {

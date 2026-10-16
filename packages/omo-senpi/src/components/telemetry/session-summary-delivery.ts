@@ -34,10 +34,11 @@ export async function sendSummaryRecord(record: PendingRecord, context: {
 
 // Acknowledged only when the server accepted this very event: the immediate send resolved on a 2xx answer;
 // a rejected send propagates so the pending file stays. A transport without immediate sends falls back to
-// its flush.
+// its flush. It reads the component's consent gate itself, as the fan-in does for every other event: a
+// withdrawal keeps the pending file unsent, and the recorder's own consent read then deletes it.
 async function publishThroughState(state: NativeCaptureState, publication: SummaryPublication): Promise<boolean> {
   const capture = state.capture
-  if (capture === undefined) return false
+  if (capture === undefined || state.isConsented?.() !== true) return false
   capture("session_summary", publication.properties, { uuid: publication.uuid, timestamp: new Date(publication.timestamp) })
   const ack = state.acks.get(publication.uuid)
   state.acks.delete(publication.uuid)

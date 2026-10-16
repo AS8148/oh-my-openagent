@@ -27,6 +27,12 @@ export type NativeCaptureState = {
   /** Per-uuid promise of an immediate send: it resolves on a 2xx answer for that very event, else rejects. */
   readonly acks: Map<string, Promise<void>>
   onCaptureReady?: () => void
+  /** The one consent gate as of now; unset until registration, so nothing leaves the fan-in before it. */
+  isConsented?: () => boolean
+  /** The same gate read fresh, at the moment a queued batch would leave the process. */
+  isSendAllowed?: () => boolean
+  /** Empties the native SDK queue without sending it; set while a native transport is live. */
+  dropQueued?: () => void
 }
 
 export const SUMMARY_SHUTDOWN_WAIT_MS = 1_000
