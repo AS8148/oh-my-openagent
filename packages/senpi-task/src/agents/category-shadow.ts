@@ -10,7 +10,13 @@ import { BUILTIN_AGENT_NAMES } from "./builtin/names"
  */
 export function categoryShadowedAgentNames(config: OmoConfig, agentNames: Iterable<string> = []): readonly string[] {
   const agents = new Set([...BUILTIN_AGENT_NAMES, ...Object.keys(config.agents ?? {}), ...agentNames])
-  return Object.keys(config.categories ?? {}).filter((name) => agents.has(name))
+  // An agent that already sets its own chain is configured correctly; the category key is not shadowing
+  // anything it relies on, so it gets no warning (and never a snippet that would overwrite that chain).
+  const ownsChain = (name: string): boolean => {
+    const agent = config.agents?.[name]
+    return agent?.model !== undefined || agent?.models !== undefined
+  }
+  return Object.keys(config.categories ?? {}).filter((name) => agents.has(name) && !ownsChain(name))
 }
 
 export function categoryShadowMessage(config: OmoConfig, name: string): string {
