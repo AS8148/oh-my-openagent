@@ -42,14 +42,14 @@ describe("checkStatic fixtures", () => {
 		expect([...result.gatesRun].sort()).toEqual([...STATIC_CODES].sort())
 	})
 
-	test("#given the failing fixture report #when every gate runs #then each static code is raised exactly once", () => {
+	test("#given the failing fixture report #when every gate runs #then each static code except the no-visual one is raised exactly once", () => {
 		// given
 		const options = { requireSections: [/risks/i] }
 		// when
 		const result = run(BAD, options)
 		// then
-		expect([...codes(result)].sort()).toEqual([...STATIC_CODES].sort())
-		expect(STATIC_CODES).toHaveLength(17)
+		expect([...codes(result)].sort()).toEqual(STATIC_CODES.filter((code) => code !== "report_without_visual").sort())
+		expect(STATIC_CODES).toHaveLength(19)
 		expect(codes(result)).not.toContain("missing_promised_deliverable")
 	})
 
@@ -225,6 +225,50 @@ describe("figures and charts", () => {
 		const found = codes(run(`<figure>${svg}<figcaption>Deploys per week</figcaption></figure>`)).filter((code) => code.startsWith("chart_"))
 		// then
 		expect(found).toEqual([])
+	})
+})
+
+describe("report-level visuals", () => {
+	const figures = /<figure\b[\s\S]*?<\/figure>/g
+
+	test("#given the passing fixture with every figure removed #when checked #then only report_without_visual is raised", () => {
+		// given
+		const html = GOOD.replace(figures, "")
+		// when
+		const result = run(html, { requireSections: [/sources/i, /review/i] })
+		// then
+		expect(codes(result)).toEqual(["report_without_visual"])
+		expect(result.defects[0]?.severity).toBe("major")
+	})
+
+	test("#given a report whose only visuals are a header logo and a Mermaid source block #when checked #then the logo does not count and the Mermaid block does", () => {
+		// given
+		const logoOnly = '<header><img src="data:image/png;base64,iVBORw0KGgo=" alt="logo" width="120" height="40"></header><p>x</p>'
+		const withMermaid = `${logoOnly}<pre class="mermaid">flowchart LR\n  A --> B</pre>`
+		// when / then
+		expect(has(logoOnly, "report_without_visual")).toBe(true)
+		expect(has(withMermaid, "report_without_visual")).toBe(false)
+	})
+
+	test("#given rendered Mermaid diagrams with SVG text labels and with HTML-only labels #when checked #then only the HTML-only one is flagged and neither needs chart ticks", () => {
+		// given
+		const diagram = (labels: string) => `<figure><svg width="600" height="300" aria-roledescription="flowchart-v2">${labels}</svg><figcaption>Gate order</figcaption></figure>`
+		const textLabels = diagram("<text>static check</text><text>repair decide</text>")
+		const htmlLabels = diagram("<foreignObject><div>static check</div></foreignObject>")
+		// when
+		const chartCodes = (html: string) => codes(run(html)).filter((code) => code.startsWith("chart_"))
+		// then
+		expect(chartCodes(textLabels)).toEqual([])
+		expect(chartCodes(htmlLabels)).toEqual(["chart_svg_no_text"])
+	})
+
+	test("#given figure images with an empty alt and a descriptive alt #when checked #then only the empty one raises image_missing_alt", () => {
+		// given
+		const img = (alt: string) => `<figure><img src="data:image/png;base64,iVBORw0KGgo=" ${alt} width="480" height="240"><figcaption>c</figcaption></figure>`
+		// when
+		const found = run(img('alt=" "') + img('alt="Deploys per week, 2025"')).defects.filter((d) => d.code === "image_missing_alt")
+		// then
+		expect(found).toHaveLength(1)
 	})
 })
 

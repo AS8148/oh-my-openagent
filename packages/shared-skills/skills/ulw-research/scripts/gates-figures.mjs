@@ -1,5 +1,5 @@
 // gates-figures.mjs - visual gates: G2 palette, G8 chart without figure, G9 chart svg text,
-// G10 Korean serif/brush fonts.
+// G10 Korean serif/brush fonts, G16 report without any visual, G17 image without alt text.
 //
 // Each gate is { codes, skip?(ctx), run(ctx) -> Defect[] } over the context built by
 // gates-static.mjs. Plain Node ESM, sibling imports only.
@@ -20,6 +20,8 @@ const DEFAULT_FONT_SIZE = 16
 const MIN_TITLE_CHARS = 4
 const MIN_TICKS = 3
 const NUMERIC = /^[-+\u2212]?[$\u20AC\u00A3\u00A5\u20A9]?\d[\d,.:]*\s?(?:%|[a-z\uAC00-\uD7A3]{0,3})$/i
+/** Diagram source a destination renders itself (a Markdown post or a page with a Mermaid runtime). */
+const MERMAID_CLASS = /^(?:mermaid|language-mermaid|lang-mermaid)$/
 const SERIF_FAMILY = /nanummyeongjo|applemyungjo|gungsuh|batang|nanumbrush|nanumpen|\uAD81\uC11C|\uBC14\uD0D5|\uBA85\uC870/
 
 function pixels(value) {
@@ -82,6 +84,11 @@ function missingChartLabels(raw) {
 	if (ticks < MIN_TICKS) missing.push(`numeric ticks (${ticks} < ${MIN_TICKS})`)
 	if (!texts.some((text) => /\p{L}/u.test(text.value) && !NUMERIC.test(text.value))) missing.push("text label")
 	return missing
+}
+
+/** A rendered diagram (Mermaid marks its root with aria-roledescription) has node labels, not axes and ticks. */
+function isDiagram(node) {
+	return Boolean(node.attrs["aria-roledescription"])
 }
 
 function colorUses(ctx) {
@@ -147,11 +154,31 @@ export const figureGates = [
 			for (const node of visuals(ctx)) {
 				if (node.tag !== "svg") continue
 				if (!((declaredSize(node) ?? 0) >= CHART_MIN || ctx.util.closest(node, isFigure(ctx)))) continue
+				if (isDiagram(node)) {
+					if (!svgTexts(node.raw ?? "").length) defects.push(ctx.defect("chart_svg_no_text", node, `${label(node)} diagram has no <text> labels (render Mermaid with htmlLabels off)`))
+					continue
+				}
 				const missing = missingChartLabels(node.raw ?? "")
 				if (missing === null) defects.push(ctx.defect("chart_svg_no_text", node, `${label(node)} chart has no <text> and no <title>`))
 				else if (missing.length) defects.push(ctx.defect("chart_svg_missing_labels", node, `${label(node)} chart is missing: ${missing.join(", ")}`))
 			}
 			return defects
+		},
+	},
+	{
+		codes: ["report_without_visual"],
+		run(ctx) {
+			if (visuals(ctx).length > 0) return []
+			if (ctx.elements.some(({ node }) => ctx.util.classTokens(node).some((token) => MERMAID_CLASS.test(token)))) return []
+			return [ctx.defect("report_without_visual", ctx.body, "the report has no chart, diagram, or figure image")]
+		},
+	},
+	{
+		codes: ["image_missing_alt"],
+		run(ctx) {
+			return visuals(ctx)
+				.filter((node) => node.tag === "img" && !String(node.attrs.alt ?? "").trim())
+				.map((node) => ctx.defect("image_missing_alt", node, `${label(node)} has no alt text`))
 		},
 	},
 	{
