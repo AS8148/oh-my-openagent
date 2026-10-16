@@ -73,6 +73,38 @@ describe("reflectionRemediation", () => {
       expect(hint).toContain("memory.reflection.sandbox")
       expect(hint).toContain("user namespace")
     })
+
+    test("#when a real user-namespace error is remediated #then the host fix comes first and disabling the sandbox is only a last resort", () => {
+      // when
+      const hint = reflectionRemediation("child_exit", "bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces")
+
+      // then
+      expect(hint).toContain("user namespace")
+      expect(hint.indexOf("allow unprivileged user namespaces")).toBeGreaterThanOrEqual(0)
+      expect(hint.indexOf("allow unprivileged user namespaces")).toBeLessThan(hint.indexOf("memory.reflection.sandbox"))
+      expect(hint).toContain("last resort")
+    })
+
+    test("#when bwrap cannot find a bind source path #then it names the missing directory and never blames user namespaces or suggests turning the sandbox off (#10317)", () => {
+      // when
+      const hint = reflectionRemediation("child_exit", "bwrap: Can't find source path /home/u/.omo/memory/agents/a1/runtime/reflection-sessions: No such file or directory")
+
+      // then
+      expect(hint).toContain("/home/u/.omo/memory/agents/a1/runtime/reflection-sessions")
+      expect(hint).toContain("mkdir")
+      expect(hint).not.toContain("user namespace")
+      expect(hint).not.toContain("memory.reflection.sandbox")
+      expect(hint).not.toContain("\"off\"")
+    })
+
+    test("#when bwrap fails for an unrelated reason #then it does not blame user namespaces or suggest turning the sandbox off", () => {
+      // when
+      const hint = reflectionRemediation("child_exit", "bwrap: execvp senpi: Permission denied")
+
+      // then
+      expect(hint).not.toContain("user namespace")
+      expect(hint).not.toContain("\"off\"")
+    })
   })
 
   describe("#given a model-admission exhaustion reported as spawn_failed", () => {
