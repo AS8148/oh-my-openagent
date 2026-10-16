@@ -112,6 +112,8 @@ describe("/memory unlock re-checks one stranded git lock (omo #10199)", () => {
     expect(inspection.kind).toBe("found")
     if (inspection.kind !== "found") return
     expect(inspection.writer.kind).toBe("unknown")
+    expect(inspection.verdict).toBe("refuse")
+    expect(inspection.writerLockPath).toBe(memoryWriterLockPath(paths.locks))
   })
 
   test("#given a path that is not a git lock the sweep considers #when it is inspected #then it is rejected", async () => {

@@ -64,6 +64,20 @@ async function recordLiveWriter(locksDir: string): Promise<void> {
 }
 
 describe("/memory unlock (omo #10199)", () => {
+  test("#given an unreadable memory-writer lock record #when unlock runs with --force #then it refuses up front, naming the record and the next step", async () => {
+    // #given
+    const { pi, ctx, indexLock, locksDir } = await harness({ hasUI: false })
+    await writeFile(memoryWriterLockPath(locksDir), "{not json", "utf8")
+
+    // #when
+    const text = await invoke(pi, "memory", `unlock ${indexLock} --force`, ctx)
+
+    // #then
+    expect(existsSync(indexLock)).toBe(true)
+    expect(ctx.ui.notifications.at(-1)?.level).toBe("error")
+    expect(text).toContain(memoryWriterLockPath(locksDir))
+  })
+
   test("#given an interactive session and a confirmed dialog #when unlock runs #then only that lock is removed", async () => {
     // #given
     const { pi, ctx, indexLock, refLock } = await harness({ hasUI: true })

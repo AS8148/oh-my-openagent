@@ -19,6 +19,13 @@ setDefaultTimeout(90_000)
 const AUTHOR: GitCommitAuthor = { agentId: "agent-stranded-lock-write", authorName: "Stranded Lock Write" }
 const NOBODY: UnlockScans = { findHolders: async () => [], findRepoUsers: async () => [] }
 
+class IndexLockAtCommitRepo extends GitMemoryRepo {
+  override async commitPrepared(...args: Parameters<GitMemoryRepo["commitPrepared"]>): ReturnType<GitMemoryRepo["commitPrepared"]> {
+    await writeFile(join(this.dir, ".git", "index.lock"), "", "utf8")
+    return super.commitPrepared(...args)
+  }
+}
+
 class HeadUnreadableRepo extends GitMemoryRepo {
   override show(): Promise<string> {
     return Promise.reject(new Error("HEAD is unreadable in this test"))
@@ -125,6 +132,30 @@ describe("a memory write behind a kept stranded git lock (omo #10199)", () => {
     expect(String(failure)).toContain("/memory unlock")
     expect(statusAfterFailure).toBe("")
     expect(retried.commit?.affectedPaths).toEqual(["system/new.md"])
+  })
+
+  it("#given index.lock appears after git add #when the commit fails and the lock is unlocked #then the next write unstages this write first and commits", async () => {
+    // #given
+    const setup = await fixture()
+    const lockedAtCommit = new IndexLockAtCommitRepo({ dir: setup.repo.dir, agentId: AUTHOR.agentId })
+
+    // #when
+    const failure = await runMemoryTool({
+      repo: lockedAtCommit,
+      lock: setup.lock,
+      params: { command: "create", reason: "write behind a commit-time lock", file_path: "system/new.md", description: "Fact", file_text: "new fact", author: AUTHOR },
+    }).catch((error: unknown) => error)
+    const inspection = await inspectStrandedGitLock(setup.repo.dir, setup.lockPath, NOBODY)
+    if (inspection.kind !== "found") throw new Error(`unexpected ${inspection.kind}`)
+    expect((await unlockStrandedGitLock(setup.repo.dir, inspection, NOBODY)).kind).toBe("removed")
+    const retried = await create(setup, "system/other.md", "other fact", "write after unlock")
+
+    // #then
+    expect(String(failure)).toContain("/memory unlock")
+    expect(String(failure)).toContain("still staged")
+    expect(retried.commit?.affectedPaths).toEqual(["system/other.md"])
+    expect(await setup.repo.status()).toBe("")
+    expect(existsSync(join(setup.repo.dir, "system", "new.md"))).toBe(false)
   })
 
   it("#given the restore itself cannot read HEAD #when the write fails behind the lock #then both errors are reported and the lock is kept", async () => {
