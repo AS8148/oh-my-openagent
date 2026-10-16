@@ -9,6 +9,7 @@ import { SUMMARY_EPOCH_SHAPE, isSummaryWindow, type SummaryWindow } from "./sess
 
 export const SUMMARY_TTL_MS = 14 * 24 * 60 * 60_000
 export const OWNER_STALE_MS = 5 * 60_000
+const OWNER_ENTRY_REFRESH_MS = 60_000
 
 /**
  * The consent of the session a queued record came from. Only `enabled` records are ever sent; anything else,
@@ -98,19 +99,29 @@ export function createSummaryStorage(input: {
   readonly stateDir: string
   readonly owner: ProcessOwner
   readonly isPidAlive?: (pid: number) => boolean
+  /** Start-time probe the owner registry tells a reused pid apart with; defaults to the real one. */
+  readonly processStartTime?: (pid: number) => string | null
   readonly now?: () => number
 }): SummaryStorage {
   const dir = summaryDir(input.stateDir)
   const pendingDir = join(dir, "pending")
   const owner = input.owner
-  const registry = createOwnerRegistry({ dir, owner, isPidAlive: input.isPidAlive ?? processIsAlive })
+  const now = input.now ?? Date.now
+  const registry = createOwnerRegistry({
+    dir,
+    owner,
+    isPidAlive: input.isPidAlive ?? processIsAlive,
+    ...(input.processStartTime === undefined ? {} : { processStartTime: input.processStartTime }),
+    now,
+  })
   const claimSuffix = `.claimed-${owner.pid}-${owner.bootId}`
   const windowPath = (key: string) => join(dir, `${key}.json`)
   const pendingPath = (uuid: string) => join(pendingDir, `${uuid}.json`)
-  let registered = false
+  // The registry entry's heartbeat is what keeps an owner alive where its start time cannot be compared.
+  let registeredAt: number | undefined
   const ensureRegistered = () => {
-    if (registered) return
-    registered = true
+    if (registeredAt !== undefined && now() - registeredAt < OWNER_ENTRY_REFRESH_MS) return
+    registeredAt = now()
     registry.register()
   }
 
@@ -122,7 +133,7 @@ export function createSummaryStorage(input: {
 
   return {
     owner,
-    now: input.now ?? Date.now,
+    now,
     isOwnerAlive: registry.isAlive,
     windowKey: (sessionHash, ownCopy = false) => `${fileName(sessionHash)}${ownCopy ? `@${owner.bootId}` : ""}`,
     isOwnCopyKey: (key) => key.includes("@"),
