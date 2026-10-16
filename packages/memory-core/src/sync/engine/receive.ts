@@ -54,8 +54,11 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
     deps.fault?.("downloaded")
     const verdict = await verify(bytes)
     if (!verdict.ok) return verdict.code
+    const elsewhere = index[verdict.batchId] ?? heldBatches.get(verdict.batchId)
+    if (elsewhere !== undefined && elsewhere.seq !== entry.seq) return "replayed_content"
     const items = verdict.payload.items.map((i) => ({ key: i.key, ops: toBase64(i.ops) }))
-    await journal.putIncoming({ entry, stage: "verified", items, snapshot: false } satisfies IncomingRecord)
+    const named = { ...entry, batchId: verdict.batchId }
+    await journal.putIncoming({ entry: named, stage: "verified", items, snapshot: false } satisfies IncomingRecord)
     deps.fault?.("verified")
     return null
   }
@@ -72,7 +75,7 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
       expected = s.coversSeq + 1
     }
     for (const entry of page.entries) {
-      const known = index[entry.batchId] ?? heldBatches.get(entry.batchId)
+      const known = entry.batchId === null ? undefined : (index[entry.batchId] ?? heldBatches.get(entry.batchId))
       if (entry.seq < expected) {
         const original = known ?? held.get(entry.seq)?.entry
         if (original !== undefined && (original.seq !== entry.seq || original.digest !== entry.digest)) {

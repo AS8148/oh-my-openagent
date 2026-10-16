@@ -42,19 +42,22 @@ export class FakeVerifier implements Verifier {
   async verifyEntry(entry: PulledEntry, bytes: Uint8Array): Promise<Verdict> {
     const forced = this.failing.get(entry.seq)
     if (forced !== undefined) return this.refuse(forced)
-    if (entry.kind === "keyring") return { ok: true, payload: { items: [] } }
+    if (entry.kind === "keyring") return { ok: true, payload: { items: [] }, batchId: `keyring:${entry.seq}` }
     const sealed = this.open(bytes)
     if (sealed === null) return this.refuse("malformed")
     if (sealed.account !== this.account) return this.refuse("account_binding")
-    if (sealed.batchId !== entry.batchId) return this.refuse("object_binding")
-    return { ok: true, payload: payloadOf(sealed) }
+    // The object names its batch and the base it was sealed on; it binds to the entry only when
+    // both match (a transport that cannot name the batch id leaves that half to the header).
+    if (sealed.baseSeq !== entry.seq - 1) return this.refuse("object_binding")
+    if (entry.batchId !== null && sealed.batchId !== entry.batchId) return this.refuse("object_binding")
+    return { ok: true, payload: payloadOf(sealed), batchId: sealed.batchId }
   }
 
   async verifySnapshot(_snapshot: SnapshotRef, chunks: readonly Uint8Array[]): Promise<Verdict> {
     const sealed = chunks.length === 1 && chunks[0] !== undefined ? this.open(chunks[0]) : null
     if (sealed === null) return this.refuse("malformed")
     if (sealed.account !== this.account) return this.refuse("account_binding")
-    return { ok: true, payload: payloadOf(sealed) }
+    return { ok: true, payload: payloadOf(sealed), batchId: sealed.batchId }
   }
 
   private refuse(code: RefusalCode): Verdict {

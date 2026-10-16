@@ -64,7 +64,7 @@ test("the same (seq, batch id) arriving later with different bytes is tampering,
   expect(await b.engine.runCycle()).toMatchObject({ applied: 1 })
   const entry = server.entries[0]
   if (entry === undefined) throw new Error("no entry")
-  server.replayWithBytes(1, forged(entry.batchId))
+  server.replayWithBytes(1, forged(entry.batchId ?? ""))
   expect(await b.engine.runCycle()).toMatchObject({ applied: 0, refused: 1 })
   expect(await b.read("evil.md")).toBeNull()
   expect(await b.read("n0.md")).toBe("one\n")

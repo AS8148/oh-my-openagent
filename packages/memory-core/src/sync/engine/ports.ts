@@ -10,7 +10,8 @@ export interface PulledEntry {
   /** A keyring record carries no object: it is verified (todo 13) and advances the cursor. */
   readonly kind: "batch" | "keyring"
   /** The batch id (the push's idempotency key); one batch is applied at most once. */
-  readonly batchId: string
+  /** The batch id when the transport can name it; null when only the sealed header does. */
+  readonly batchId: string | null
   /** Hex SHA-256 of the object bytes, checked on download before anything else. */
   readonly digest: string
   readonly objectId: string
@@ -93,7 +94,11 @@ export type RefusalCode =
   | "malformed"
 
 export type Verdict =
-  | { readonly ok: true; readonly payload: BatchPayload }
+  /**
+   * `batchId` is the one the sealed header names; the server's rows carry none, so the verifier
+   * is the authority for at-most-once per (seq, batch id).
+   */
+  | { readonly ok: true; readonly payload: BatchPayload; readonly batchId: string }
   | { readonly ok: false; readonly code: RefusalCode }
 
 /**

@@ -2,8 +2,8 @@
 // Digests travel as 43-char base64url and are handled as hex inside the engine. A pull reads
 // `GET /v1/sync/batches?after=n` (at most 500 rows a page); when the cursor is below the retained
 // history it first reads the snapshot from `GET /v1/sync/state`. The server's batch rows carry no
-// batch id (it lives in the sealed header, which the verifier opens, todo 13), so an entry's id
-// here is its seq: replays at one seq still compare by digest. Refusals arrive as
+// batch id (it lives in the sealed header, which the verifier opens, todo 13), so an entry's batch
+// id is null here and the verifier's verdict names it. Refusals arrive as
 // `{ error: { code } }`; `stale_base` is answered with the head read back from the state route.
 
 import type { AppendRequest, AppendResult, PulledEntry, PullPage, SnapshotRef, StreamHandlers, Transport } from "../ports"
@@ -62,7 +62,7 @@ export function createHttpTransport(options: HttpTransportOptions): Transport {
   const entryOf = (row: WireRow): PulledEntry => ({
     seq: row.seq,
     kind: row.kind,
-    batchId: `seq:${row.seq}`,
+    batchId: null,
     digest: hexOfB64url(row.digest),
     objectId: row.object_id ?? "",
     author: `${row.author.kind}:${row.author.id}`,

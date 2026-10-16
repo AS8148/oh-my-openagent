@@ -144,7 +144,7 @@ export class SyncJournal {
 
   async recordApplied(entries: readonly PulledEntry[]): Promise<void> {
     const index = { ...(await this.applied()) }
-    for (const e of entries) index[e.batchId] = { seq: e.seq, digest: e.digest }
+    for (const e of entries) if (e.batchId !== null) index[e.batchId] = { seq: e.seq, digest: e.digest }
     await writeJson(join(this.dir, "applied.json"), index)
   }
 
