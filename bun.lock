@@ -191,8 +191,6 @@
       "version": "0.1.0",
       "dependencies": {
         "loro-crdt": "1.16.4",
-      },
-      "devDependencies": {
         "yaml": "2.9.1",
       },
     },
