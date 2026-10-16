@@ -18,7 +18,7 @@ import { migrateLegacyBunGlobalManifest } from "./bin/lib/legacy-bun-global-migr
 import { adoptLegacyFlatState, canonicalAgentDir } from "./bin/lib/agent-dir.js"
 import { readJson, releaseBanner } from "./bin/lib/package-paths.js"
 import { remapSenpiEnvironment } from "./compiled-environment"
-import { runServiceAuthCommand } from "../omo-opencode/src/cli/service-auth/commands"
+import { runServiceAuthCommand, SERVICE_ACCOUNTS_OPEN } from "../omo-opencode/src/cli/service-auth/commands"
 import { runDaemonCommand } from "./bin/lib/daemon.js"
 import { runThreadCommand } from "./bin/lib/thread.js"
 import { isHostStatusAll, runHostStatusAll, sessionActivityReader } from "./bin/lib/host-status.js"
@@ -236,13 +236,48 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
 
 export { reexecProvisionedRuntime } from "./provisioned-handoff"
 
+const HELP_WITHOUT_ENGINE = `Usage: omo [options] [message...]
+       omo <command> [args]
+
+Some commands: setup, doctor, update, daemon, thread${SERVICE_ACCOUNTS_OPEN ? ", login, logout, whoami" : ""}
+
+The full command and option list, including what extensions add, needs the engine, which does
+not start while OMO_EXTRA_CA_CERTIFICATES is invalid. Fix or unset it, then run omo --help again.`
+
+/** The exact argv `--version` or `--help`, answered from local data only; anything else returns false. */
+async function answerUnderRefusedTrust(args: string[]): Promise<boolean> {
+  if (args.length !== 1) return false
+  if (args[0] === "--help") {
+    console.log(HELP_WITHOUT_ENGINE)
+    return true
+  }
+  if (args[0] !== "--version") return false
+  const embedded = (globalThis as typeof globalThis & { Bun?: { embeddedFiles?: EmbeddedFile[] } }).Bun?.embeddedFiles as EmbeddedFile[] | undefined
+  const manifestFile = embedded?.length ? await selectRuntimeManifest(embedded) : undefined
+  if (manifestFile) {
+    const manifest = JSON.parse(await embeddedText(manifestFile)) as EmbeddedManifest
+    console.log(versionLine({ version: manifest.omoAiVersion, omoBuild: manifest.buildInfo, engineBuild: manifest.engineBuild }, manifest.enginePin))
+  } else {
+    const packageJson = readJson(join(dirname(fileURLToPath(import.meta.url)), "package.json")) as { version: string; omoBuild?: unknown }
+    console.log(versionLine(packageJson, "unknown"))
+  }
+  return true
+}
+
 async function main(): Promise<void> {
   // Before anything opens TLS, and on every start: `host ensure`, the host daemon and the
-  // provisioned handoff all re-enter here (#10215). A bad value refuses to start (exit 78).
+  // provisioned handoff all re-enter here (#10215). A bad value refuses to start (exit 78). Only the
+  // exact argv `--version` or `--help` is answered, from static local data, before anything else runs
+  // (#10236): the engine's own help loads extensions, which can install packages over the network.
   try {
     installEngineCaTrust()
   } catch (error) {
     if (!(error instanceof ExtraCaCertificatesError)) throw error
+    if (await answerUnderRefusedTrust(process.argv.slice(2))) {
+      process.stderr.write(`omo: ${error.message}; every other command refuses to start until it is fixed\n`)
+      process.exitCode = 0
+      return
+    }
     process.stderr.write(`omo: ${error.message}; not starting with a trust set the caller did not intend\n`)
     process.exit(78)
   }
