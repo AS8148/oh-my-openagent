@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:2c2b2270f6e0516124cca2cf9feb8470c84f005407cbb4f373aa2f0ff43a2e8d:4af684b75f7453138a0fa70affd10a00c79b6cc1e4193d94e81fe33759893076
+// omo-codex-install:9fc117c20713169310227d36d8578e1e2fe4c96bbf60e0ad6ef73cdb81566361:21d54b6d89d75bcb9b4312cc540884867a19259ff1fb92f4e0252b2d4fa20a3a
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -9789,8 +9789,24 @@ function getTelemetryDistinctId(machineIdPrefix, osProvider = getDefaultTelemetr
 }
 var init_machine_id = () => {};
 
+// packages/telemetry-core/src/telemetry-delivery-error.ts
+var PERMANENT_STATUSES, TelemetryDeliveryError;
+var init_telemetry_delivery_error = __esm(() => {
+  PERMANENT_STATUSES = new Set([400, 413]);
+  TelemetryDeliveryError = class TelemetryDeliveryError extends Error {
+    permanent;
+    status;
+    constructor(status, cause) {
+      super(status === undefined ? "telemetry event was not delivered (no response)" : `telemetry event was rejected with HTTP ${status}`, { cause });
+      this.name = "TelemetryDeliveryError";
+      this.status = status;
+      this.permanent = status !== undefined && PERMANENT_STATUSES.has(status);
+    }
+  };
+});
+
 // packages/telemetry-core/src/posthog-immediate-send.ts
-function createImmediateSender(apiKey, options) {
+function createImmediateSender(apiKey, options, PostHogClient) {
   const baseFetch = options.fetch ?? ((url, init) => fetch(url, init));
   let current;
   const trackedFetch = async (url, init) => {
@@ -9806,7 +9822,7 @@ function createImmediateSender(apiKey, options) {
       throw error;
     }
   };
-  const client = new PostHog(apiKey, { ...options, fetch: trackedFetch, fetchRetryCount: 0 });
+  const client = new PostHogClient(apiKey, { ...options, fetch: trackedFetch, fetchRetryCount: 0 });
   let queue = Promise.resolve();
   const sendOne = async (message) => {
     const attempt = {};
@@ -9833,41 +9849,38 @@ function createImmediateSender(apiKey, options) {
     }
   };
 }
-var PERMANENT_STATUSES, TelemetryDeliveryError;
 var init_posthog_immediate_send = __esm(() => {
-  init_index_node();
-  PERMANENT_STATUSES = new Set([400, 413]);
-  TelemetryDeliveryError = class TelemetryDeliveryError extends Error {
-    permanent;
-    status;
-    constructor(status, cause) {
-      super(status === undefined ? "telemetry event was not delivered (no response)" : `telemetry event was rejected with HTTP ${status}`, { cause });
-      this.name = "TelemetryDeliveryError";
-      this.status = status;
-      this.permanent = status !== undefined && PERMANENT_STATUSES.has(status);
-    }
-  };
+  init_telemetry_delivery_error();
 });
 
 // packages/telemetry-core/src/posthog-client.ts
 class PostHogTelemetryTransport {
   #client;
+  #apiKey;
+  #options;
   #immediate;
   constructor(apiKey, options) {
     this.#client = new PostHog(apiKey, options);
-    this.#immediate = createImmediateSender(apiKey, options);
+    this.#apiKey = apiKey;
+    this.#options = options;
   }
   capture(message) {
     this.#client.capture(message);
   }
   captureImmediate(message) {
-    return this.#immediate.send(message);
+    this.#immediate ??= Promise.resolve().then(() => (init_posthog_immediate_send(), {})).then(({}) => createImmediateSender(this.#apiKey, this.#options, PostHog)).catch((error) => {
+      this.#immediate = undefined;
+      throw error;
+    });
+    return this.#immediate.then((sender) => sender.send(message));
   }
   async flush() {
     await this.#client.flush();
   }
   async shutdown() {
-    await Promise.all([this.#client.shutdown(), this.#immediate.shutdown()]);
+    await Promise.all([this.#client.shutdown(), this.#immediate?.then((sender) => sender.shutdown(), () => {
+      return;
+    })]);
   }
 }
 function createDefaultPostHogTransport(apiKey, options) {
@@ -10005,7 +10018,6 @@ var init_posthog_client = __esm(() => {
   init_index_node();
   init_env();
   init_machine_id();
-  init_posthog_immediate_send();
   NO_OP_CLIENT = {
     enabled: false,
     trackActive: () => {
