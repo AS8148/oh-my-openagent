@@ -47,6 +47,7 @@ Senpi telemetry adapter over `@oh-my-opencode/telemetry-core` PostHog primitives
 - Provider and model are masked by DIFFERENT rules, and `maskProviderAndModel` is the single place that decides: `provider` is exported only when it is in `KNOWN_PROVIDERS` (a user-authored gateway name never leaves the machine), while `model_id` is exported whenever it matches `ALL_KNOWN_MODEL_IDS` regardless of the routing provider, because a shipped model id is a public product name. Changing this boundary means changing the published disclosure in `docs/reference/senpi-telemetry.md` in the same commit.
 - API keys come from `POSTHOG_API_KEY` or the write-only defaults named in `product-identity.ts` / telemetry-core constants; do not duplicate key literals elsewhere.
 - First-run disclosure notice is mandatory and marker-gated; it fires only when telemetry is actually enabled.
+- `consent-gate.audit.test.ts` matches every disk, network, process and transport call site in this directory (recursively) against `consent-gate-reviewed.test-support.ts`, keyed by file, enclosing function, enclosing guards and call text; a new writer, a writer moved out of its gated branch, or a stale entry fails it. While consent is off a session hashes to the `opted-out` sentinel and the fan-in drops it on `$session_id` alone, because `$session_id` is the only declared property that carries a session hash (pinned by the same test).
 
 ## Delegation telemetry invariants
 

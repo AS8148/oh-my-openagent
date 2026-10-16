@@ -1,91 +1,132 @@
-import { readdir, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, relative } from "node:path"
 import { describe, expect, test } from "bun:test"
 
-// Every telemetry write to disk or the network must sit behind the one consent gate,
-// `isOmoNativeTelemetryEnabled` (#10226 H1). This scan pins each writer site in the component to a
-// reviewed entry, so a new store write, file write, client, or capture call fails here until someone
-// routes it through the gate and records why below.
-const WRITER = /\b(?:writeFileSync|appendFileSync|mkdirSync|renameSync|openSync|writeFile|appendFile|mkdir|rename|fetch|createEventTelemetryClient|recordDailyActive|recordSenpiDailyActive|getDailyActiveCaptureState|captureEvent|capture)\s*\(/gu
+import { REVIEWED_WRITERS, type ReviewedWriter } from "./consent-gate-reviewed.test-support"
+import { scanWriterSites, siteKey } from "./consent-gate-sites.test-support"
+import { OMO_NATIVE_COMMON_PROPERTY_SCHEMAS, OMO_NATIVE_EVENT_SCHEMAS } from "./event-schemas"
 
-type WriterCounts = Readonly<Record<string, number>>
-
-const GATED_WRITERS: Readonly<Record<string, { readonly reason: string; readonly writers: WriterCounts }>> = {
-  "index.ts": {
-    reason: "legacy daily-active; the only registered caller is omo-native-session after the gate",
-    writers: { recordSenpiDailyActive: 2, recordDailyActive: 1 },
-  },
-  "omo-native-category-config.ts": { reason: "called from the gated session_started path", writers: { captureEvent: 1 } },
-  "omo-native-component.ts": {
-    reason: "capture fan-in reaches a transport only after the gated session client exists; opted-out hashes are dropped",
-    writers: { captureEvent: 1, capture: 3, createEventTelemetryClient: 1 },
-  },
-  "omo-native-computer-use.ts": { reason: "through the component fan-in", writers: { captureEvent: 3 } },
-  "omo-native-crash.ts": { reason: "called from the gated session_started path", writers: { captureEvent: 1 } },
-  "omo-native-delegation.ts": { reason: "through the component fan-in", writers: { capture: 2, captureEvent: 1 } },
-  "omo-native-kibitzer-summary.ts": { reason: "through the component fan-in", writers: { captureEvent: 1 } },
-  "omo-native-notice.ts": { reason: "marker written only after isOmoNativeTelemetryEnabled", writers: { mkdirSync: 1, writeFileSync: 1 } },
-  "omo-native-parallel-summary.ts": { reason: "through the component fan-in", writers: { captureEvent: 1 } },
-  "omo-native-prompt.ts": { reason: "through the component fan-in", writers: { captureEvent: 1 } },
-  "omo-native-session-summary.ts": { reason: "recorder writes and sends only under isConsented", writers: { captureEvent: 1 } },
-  "omo-native-session.ts": {
-    reason: "the gate's owner: every writer runs after isOmoNativeTelemetryEnabled",
-    writers: { createEventTelemetryClient: 1, getDailyActiveCaptureState: 1, captureEvent: 2, recordSenpiDailyActive: 1 },
-  },
-  "omo-native-tools.ts": { reason: "through the component fan-in", writers: { captureEvent: 3 } },
-  "omo-native-turns.ts": { reason: "through the component fan-in", writers: { captureEvent: 1 } },
-  "process-crash-records.ts": { reason: "claims run from the gated session_started path", writers: { mkdirSync: 1, openSync: 1 } },
-  "product-identity.ts": {
-    reason: "salt and install id are created only by a gated hash or attribution call",
-    writers: { mkdirSync: 2, writeFileSync: 4 },
-  },
-  "session-summary-store.ts": { reason: "written only by the consent-checked recorder", writers: { mkdirSync: 1, writeFileSync: 1, renameSync: 2 } },
-}
+// Every telemetry write to disk, the network, a process, or a transport must sit behind the one
+// consent gate, `isOmoNativeTelemetryEnabled` (#10226 H1). Each call site is matched to a reviewed
+// entry by file, enclosing function, guards and call text, so an added writer, a writer moved out of
+// its gated branch, or a reviewed site that disappeared all fail here.
 
 type SourceFile = { readonly name: string; readonly source: string }
 
-export function findUngatedWriters(files: readonly SourceFile[]): readonly string[] {
+const keyOf = (file: string, key: string): string => `${file}: ${key}`
+
+export function findUngatedWriters(files: readonly SourceFile[], reviewed: readonly ReviewedWriter[] = REVIEWED_WRITERS): readonly string[] {
+  const found = new Map<string, number>()
+  for (const site of files.flatMap((file) => scanWriterSites(file.name, file.source))) {
+    const key = keyOf(site.file, siteKey(site))
+    found.set(key, (found.get(key) ?? 0) + 1)
+  }
+  const expected = new Map<string, number>()
+  for (const entry of reviewed) {
+    const key = keyOf(entry.file, siteKey(entry))
+    expected.set(key, (expected.get(key) ?? 0) + (entry.reason.trim() === "" ? 0 : entry.count ?? 1))
+  }
   const violations: string[] = []
-  for (const file of files) {
-    const found: Record<string, number> = {}
-    for (const match of file.source.matchAll(WRITER)) {
-      const writer = match[0].replace(/\s*\($/u, "")
-      found[writer] = (found[writer] ?? 0) + 1
-    }
-    const expected = GATED_WRITERS[file.name]?.writers ?? {}
-    for (const writer of new Set([...Object.keys(found), ...Object.keys(expected)])) {
-      if ((found[writer] ?? 0) !== (expected[writer] ?? 0)) {
-        violations.push(`${file.name}: ${writer} x${found[writer] ?? 0} (reviewed x${expected[writer] ?? 0})`)
-      }
-    }
+  for (const [key, count] of found) {
+    const reviewedCount = expected.get(key) ?? 0
+    if (count > reviewedCount) violations.push(`unreviewed ${key}${count - reviewedCount > 1 ? ` x${count - reviewedCount}` : ""}`)
+  }
+  for (const [key, count] of expected) {
+    if ((found.get(key) ?? 0) < count) violations.push(`stale ${key}`)
   }
   return violations
 }
 
-async function telemetrySources(): Promise<readonly SourceFile[]> {
-  const names = (await readdir(import.meta.dir))
-    .filter((name) => name.endsWith(".ts") && !name.includes(".test.") && !name.includes("test-support"))
+export function telemetrySources(root: string): readonly SourceFile[] {
+  const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)])
+  return walk(root)
+    .filter((path) => path.endsWith(".ts") && !path.includes(".test.") && !path.includes("test-support"))
     .sort()
-  return Promise.all(names.map(async (name) => ({ name, source: await readFile(join(import.meta.dir, name), "utf8") })))
+    .map((path) => ({ name: relative(root, path), source: readFileSync(path, "utf8") }))
 }
 
+const realSources = (): readonly SourceFile[] => telemetrySources(import.meta.dir)
+const unreviewed = (source: string): readonly string[] =>
+  findUngatedWriters([...realSources(), { name: "omo-native-new-writer.ts", source }])
+
 describe("telemetry consent gate audit", () => {
-  test("#given the telemetry component sources #when writer sites are scanned #then each one is a reviewed, gated writer", async () => {
-    expect(findUngatedWriters(await telemetrySources())).toEqual([])
+  test("#given the telemetry component sources #when writer sites are scanned #then each one is a reviewed, gated writer", () => {
+    expect(findUngatedWriters(realSources())).toEqual([])
   })
 
-  test("#given a new file that writes to disk #when the audit scans it #then the unreviewed writer is rejected", async () => {
-    const files = [...await telemetrySources(), {
-      name: "omo-native-new-writer.ts",
-      source: `import { writeFileSync } from "node:fs"\nexport function persist(path: string): void {\n  writeFileSync(path, "x")\n}\n`,
-    }]
-    expect(findUngatedWriters(files)).toEqual(["omo-native-new-writer.ts: writeFileSync x1 (reviewed x0)"])
+  test("#given a new file that writes with Bun.write #when the audit scans it #then the site is rejected", () => {
+    expect(unreviewed(`export async function persist(path: string): Promise<void> {\n  await Bun.write(path, "x")\n}\n`))
+      .toEqual(["unreviewed omo-native-new-writer.ts: persist |  | Bun.write(path)"])
   })
 
-  test("#given an extra capture call in a reviewed file #when the audit scans it #then the count mismatch is rejected", async () => {
-    const files = (await telemetrySources()).map((file) => file.name === "omo-native-turns.ts"
-      ? { ...file, source: `${file.source}\nexport function leak(client: Pick<EventTelemetryClient, "captureEvent">): void {\n  client.captureEvent("turn_completed", {})\n}\n` }
-      : file)
-    expect(findUngatedWriters(files)).toEqual(["omo-native-turns.ts: captureEvent x2 (reviewed x1)"])
+  test("#given a new file that opens a write stream #when the audit scans it #then the site is rejected", () => {
+    expect(unreviewed(`import { createWriteStream } from "node:fs"\nexport const open = (path: string) => createWriteStream(path)\n`))
+      .toEqual(["unreviewed omo-native-new-writer.ts: open |  | createWriteStream(path)"])
+  })
+
+  test.each([
+    ["copyFile", `import { copyFile } from "node:fs/promises"\nexport const sink = (a: string) => copyFile(a, "b")\n`, "copyFile(a)"],
+    ["copyFileSync", `import { copyFileSync } from "node:fs"\nexport const sink = (a: string) => copyFileSync(a, "b")\n`, "copyFileSync(a)"],
+    ["cpSync", `import { cpSync } from "node:fs"\nexport const sink = (a: string) => cpSync(a, "b")\n`, "cpSync(a)"],
+    ["appendFile", `import { appendFile } from "node:fs/promises"\nexport const sink = (a: string) => appendFile(a, "x")\n`, "appendFile(a)"],
+    ["rename into the state dir", `import { renameSync } from "node:fs"\nexport const sink = (a: string) => renameSync(a, "state/b")\n`, "renameSync(a)"],
+    ["an aliased import", `import { writeFileSync as persist } from "node:fs"\nexport const sink = (a: string) => persist(a, "x")\n`, "persist(a)"],
+    ["http.request", `import http from "node:http"\nexport const sink = (a: string) => http.request(a)\n`, "http.request(a)"],
+    ["https.request", `import * as https from "node:https"\nexport const sink = (a: string) => https.request(a)\n`, "https.request(a)"],
+    ["fetch", `export const sink = (a: string) => fetch(a, { method: "POST" })\n`, "fetch(a)"],
+  ])("#given a new %s writer #when the audit scans it #then the site is rejected", (_label, source, call) => {
+    expect(unreviewed(source)).toEqual([`unreviewed omo-native-new-writer.ts: sink |  | ${call}`])
+  })
+
+  test("#given a writer handed out as a value #when the audit scans it #then the reference is a site", () => {
+    expect(unreviewed(`import { writeFileSync } from "node:fs"\nexport const deps = { write: writeFileSync }\n`))
+      .toEqual(["unreviewed omo-native-new-writer.ts: <module> |  | ref writeFileSync"])
+  })
+
+  test("#given the session writers moved out of the gate #when the audit scans the same calls #then each moved site is rejected", () => {
+    const gate = "if (!isOmoNativeTelemetryEnabled(options, eventCtx, env)) return\n"
+    const files = realSources().map((file) => file.name === "omo-native-session.ts" ? { ...file, source: file.source.replace(gate, "\n") } : file)
+    expect(files.find((file) => file.name === "omo-native-session.ts")?.source.includes(gate)).toBe(false)
+
+    const violations = findUngatedWriters(files)
+    const moved = violations.filter((line) => line.startsWith("unreviewed omo-native-session.ts:"))
+    expect(moved.length).toBe(5)
+    expect(violations.filter((line) => line.startsWith("stale omo-native-session.ts:")).length).toBe(5)
+    expect(moved.every((line) => !line.includes("isOmoNativeTelemetryEnabled"))).toBe(true)
+  })
+
+  test("#given a writer in a subdirectory #when sources are collected #then the nested file is scanned", () => {
+    const root = mkdtempSync(join(tmpdir(), "consent-gate-audit-"))
+    try {
+      mkdirSync(join(root, "nested"))
+      writeFileSync(join(root, "nested", "sink.ts"), `export const sink = (a: string) => Bun.write(a, "x")\n`)
+      expect(findUngatedWriters(telemetrySources(root), [])).toEqual(["unreviewed nested/sink.ts: sink |  | Bun.write(a)"])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("#given a reviewed entry with no site or no reason #when the audit runs #then both are reported", () => {
+    const ghost: ReviewedWriter = { file: "gone.ts", fn: "persist", guard: "", call: "writeFileSync(path)", reason: "removed writer" }
+    const [first, ...rest] = REVIEWED_WRITERS
+    if (first === undefined) throw new Error("the reviewed table is empty")
+    expect(findUngatedWriters(realSources(), [{ ...first, reason: " " }, ...rest, ghost])).toEqual([
+      `unreviewed ${first.file}: ${siteKey(first)}`,
+      "stale gone.ts: persist |  | writeFileSync(path)",
+    ])
+  })
+})
+
+// The fan-in drops an event whose `$session_id` is the opted-out sentinel and checks no other
+// property, because no other exported property can carry a session hash: the allowlists strip
+// undeclared keys, and this pins that `$session_id` is the only declared session-hash key.
+describe("opted-out sentinel coverage", () => {
+  test("#given every event and common property schema #when session-hash keys are listed #then $session_id is the only one", () => {
+    const carriers = [OMO_NATIVE_COMMON_PROPERTY_SCHEMAS, ...Object.values(OMO_NATIVE_EVENT_SCHEMAS)]
+      .flatMap((schema) => Object.keys(schema))
+      .filter((key) => /session/iu.test(key) && key !== "session_role")
+    expect([...new Set(carriers)]).toEqual(["$session_id"])
   })
 })
