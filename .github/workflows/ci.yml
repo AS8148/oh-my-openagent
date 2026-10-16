@@ -240,6 +240,31 @@ jobs:
         if: needs.ci-mode.outputs.run_heavy == 'true' && runner.os == 'Linux' && matrix.shard == '1/2'
         run: bun test --timeout 20000 packages/omo-opencode
 
+      - name: TEMPORARY /proc fd probe (omo #10199, remove before merge)
+        if: needs.ci-mode.outputs.run_heavy == 'true' && runner.os == 'Linux' && matrix.shard == '1/2'
+        continue-on-error: true
+        run: |
+          echo "kernel $(uname -r) | ptrace_scope $(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null) | userns_restrict $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null) | aa_unconfined $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_unconfined 2>/dev/null)"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+          cat > /tmp/procfd-probe.sh <<'PROBE'
+          denied=0
+          for round in $(seq 1 40); do
+            for i in 1 2 3 4 5; do git --version >/dev/null & done
+            ( exit 0 ) &
+            for p in $(ls /proc | grep -E '^[0-9]+$'); do
+              if ! ls "/proc/$p/fd" >/dev/null 2>/tmp/fderr; then
+                if grep -q 'Permission denied' /tmp/fderr; then
+                  denied=$((denied+1))
+                  echo "DENIED pid=$p state=$(awk '/^State:/{print $2}' /proc/$p/status 2>/dev/null) comm=$(cat /proc/$p/comm 2>/dev/null) uid=$(awk '/^Uid:/{print $2}' /proc/$p/status 2>/dev/null) ppid=$(awk '/^PPid:/{print $2}' /proc/$p/status 2>/dev/null)"
+                fi
+              fi
+            done
+            wait
+          done
+          echo "PROBE_DENIED_TOTAL=$denied"
+          PROBE
+          unshare -Upf --mount-proc --map-current-user -- bash /tmp/procfd-probe.sh | sort | uniq -c | sort -rn | head -40
+
       - name: Run tests (memory-core, PID namespace)
         id: root-tests-linux-1-memory-core
         if: needs.ci-mode.outputs.run_heavy == 'true' && runner.os == 'Linux' && matrix.shard == '1/2'
