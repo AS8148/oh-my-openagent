@@ -108,6 +108,8 @@ export type TaskRecordInput = {
 
 export type TaskRecord = TaskRecordInput & TaskStartFailureRecordFields & {
   readonly effect_seq?: number
+  /** The exact id of the last identified input this task sent; reconciliation reads its receipt by it. */
+  readonly last_effect_id?: string
   readonly uncertain_inputs?: readonly import("../runners/input-effects").IdentifiedInput[]
   readonly isolation?: IsolationRecord
   readonly task_id: string
@@ -127,6 +129,8 @@ export type TaskRecord = TaskRecordInput & TaskStartFailureRecordFields & {
   readonly effective_model?: EffectiveModelRecord
   readonly final_response?: string
   readonly error_message?: string
+  readonly stop_reason?: "deadline"
+  readonly deadline?: Readonly<Record<string, unknown>>
   // Exit observed, cause unconfirmed: status stays running until the owning manager confirms it.
   readonly provisional_exit?: {
     readonly observed_at: string
