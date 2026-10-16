@@ -253,6 +253,39 @@ describe("reflection sandbox with not-yet-created paths", () => {
       expect(String(failure)).toContain(elsewhere)
     }, 30_000)
 
+  test.skipIf(process.platform === "win32")("#given a symlink planted on a missing MIDDLE segment of a writable path #when the transform runs #then nothing is created through the link and the bind is refused",
+    async () => {
+      // given
+      const setup = fixture()
+      const absentRuntimeWrite = join(setup.root, "rt", "mid", "leaf")
+      const elsewhere = join(setup.root, "elsewhere")
+      mkdirSync(elsewhere)
+      const transform = buildSandboxTransform({
+        policy: "auto",
+        worktreeDir: setup.worktree,
+        gitCommonDir: setup.gitCommonDir,
+        payloadPaths: [setup.payload],
+        runtimeWrites: [absentRuntimeWrite],
+        command: "/bin/sh",
+        env: { PATH: process.env.PATH },
+        ...linuxAvailable,
+      })
+      mkdirSync(join(setup.root, "rt"))
+      symlinkSync(elsewhere, join(setup.root, "rt", "mid"))
+
+      // when
+      let failure: unknown
+      try {
+        await transform(spawnArgs(setup.worktree))
+      } catch (error) {
+        failure = error
+      }
+
+      // then
+      expect(String(failure)).toContain("refused to bind")
+      expect(existsSync(join(elsewhere, "leaf"))).toBe(false)
+    }, 30_000)
+
   test("#given a nested Linux writable path whose ancestors are also missing #when the bwrap transform is built #then the full leaf exists privately and is the bind source",
     async () => {
       // given

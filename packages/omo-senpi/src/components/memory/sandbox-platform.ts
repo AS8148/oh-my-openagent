@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync } from "@oh-my-opencode/memory-core/fs"
+import { existsSync, lstatSync, mkdirSync, realpathSync } from "@oh-my-opencode/memory-core/fs"
 import { dirname, join } from "node:path"
 
 import type { ReflectionSpawnArgs } from "./worker/spawn"
@@ -141,15 +141,7 @@ export function buildPathSandboxTransform<T extends SandboxableSpawnArgs>(
     // dirs are granted before anything creates them; mkdir the declared path (0700) so the bind
     // names that exact directory instead of dying or widening to an existing ancestor. Only here,
     // when bwrap will actually bind it: an off or unavailable sandbox must not create the path.
-    for (const writableDir of writableDirs) {
-      mkdirSync(writableDir, { recursive: true, mode: 0o700 })
-      // The missing tail was canonicalized when the transform was built; if a symlink appeared on it
-      // since, the directory now resolves elsewhere. Refuse to bind it rather than follow the link.
-      const resolved = realpathSync(writableDir)
-      if (resolved !== writableDir) {
-        throw new Error(`${input.surface} sandbox refused to bind ${writableDir}: it now resolves to ${resolved} (a symlink appeared on the path after the sandbox was planned); remove the link and run again`)
-      }
-    }
+    for (const writableDir of writableDirs) createPlannedDirNoFollow(writableDir, input.surface)
     return {
       ...spawnArgs,
       command: executable,
@@ -318,4 +310,43 @@ function guardedSandboxedTransform<T extends SandboxableSpawnArgs>(
     return identityTransform(`${surface} sandbox unavailable: inner command "${command}" is not absolute and could not be resolved; running unsandboxed`)
   }
   return Object.assign((spawnArgs: T) => transform(spawnArgs, innerCommand), { wasSandboxed: true })
+}
+
+// Create a planned writable dir one missing segment at a time without following links: the existing
+// prefix must still be the canonical path planned earlier, and each created (or raced-in) segment must
+// be a real directory, so a link planted on any missing segment is refused before anything is written
+// through it. The final realpath equality also refuses a link anywhere on the path.
+function createPlannedDirNoFollow(dir: string, surface: string): void {
+  const refuse = (resolved: string): never => {
+    throw new Error(`${surface} sandbox refused to bind ${dir}: it now resolves to ${resolved} (a symlink appeared on the path after the sandbox was planned); remove the link and run again`)
+  }
+  const missing: string[] = []
+  let cursor = dir
+  while (!lexists(cursor)) {
+    missing.unshift(cursor)
+    const parent = dirname(cursor)
+    if (parent === cursor) break
+    cursor = parent
+  }
+  if (lexists(cursor) && realpathSync(cursor) !== cursor) refuse(realpathSync(cursor))
+  for (const segment of missing) {
+    try {
+      mkdirSync(segment, { mode: 0o700 })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+    }
+    if (lstatSync(segment).isSymbolicLink()) refuse(realpathSync(segment))
+  }
+  const resolved = realpathSync(dir)
+  if (resolved !== dir) refuse(resolved)
+}
+
+function lexists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false
+    throw error
+  }
 }
