@@ -1,4 +1,4 @@
-export { buildBatch, type BuildBatchInput, signRecord, type SyncPayloadRecord } from "./build.ts"
+export { BatchInputError, type BatchInputProblem, buildBatch, type BuildBatchInput, signRecord, type SyncPayloadRecord } from "./build.ts"
 export {
   type AcceptedBatch,
   type AppendOutcome,
@@ -7,8 +7,19 @@ export {
   type ChainState,
   type ChainStep,
   emptyChain,
+  isVerifiedWrap,
 } from "./chain.ts"
-export type { BatchEntry, Head, KeyringBody, KeyringEntry, SyncAuthor, SyncEntry, WrapEntry } from "./entry.ts"
+export type {
+  BatchEntry,
+  Head,
+  KeyringBody,
+  KeyringEntry,
+  SyncAuthor,
+  SyncEntry,
+  VerifiedKeyringEntry,
+  VerifiedWrap,
+  WrapEntry,
+} from "./entry.ts"
 export { type Authority, isCancelledAdmission, isVetoedEpoch } from "./fold.ts"
 export { nextLink } from "./links.ts"
 export { type BatchBinding, type OpenFailureReason, type OpenOutcome, openBatch } from "./open.ts"

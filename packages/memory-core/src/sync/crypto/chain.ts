@@ -1,17 +1,18 @@
-import type { BatchEntry, Head, KeyringEntry, SyncAuthor, SyncEntry } from "./entry.ts"
+import type { BatchEntry, Head, KeyringEntry, SyncAuthor, SyncEntry, VerifiedKeyringEntry, VerifiedWrap } from "./entry.ts"
+import { type EnvelopeRejection, envelopeRefusal } from "./envelope.ts"
 import { type Authority, applyRecord, type FoldedRecord, isCancelledAdmission, isVetoedEpoch } from "./fold.ts"
 import { nextLink } from "./links.ts"
 import { type ParsedBody, parseBody } from "./parse.ts"
 import type { RejectionCounter } from "./rejection.ts"
-import { receiverRefusal } from "./receiver.ts"
+import { type ReceiverCheck, receiverRefusal } from "./receiver.ts"
 import { checkRecordRules, type RuleRejection } from "./rules.ts"
 import { authorSigningKey, verifyRecordSig } from "./signatures.ts"
-import type { ReceiverRefusal } from "./vendor/sync-format/fold.ts"
 import { jcsBytes, sha256B64 } from "./vendor/sync-format/jcs.ts"
 
 export type ChainRejection =
   | RuleRejection
-  | ReceiverRefusal
+  | ReceiverCheck
+  | EnvelopeRejection
   | "bad_record"
   | "link_mismatch"
   | "not_member"
@@ -26,8 +27,27 @@ export type ChainState = {
   readonly authority: Authority | null
   readonly history: ReadonlyArray<FoldedRecord>
   /** Every verified keyring entry as received: the merged receiver re-reads them for vetoes, joins and forks. */
-  readonly received: ReadonlyArray<KeyringEntry>
+  readonly received: ReadonlyArray<VerifiedKeyringEntry>
 }
+
+const minted = new WeakSet<object>()
+
+const isMinted = (wrap: object): wrap is VerifiedWrap => minted.has(wrap)
+
+/** True only for a wrap this module minted from a verified keyring entry, never for a copy. */
+export const isVerifiedWrap = (wrap: unknown): wrap is VerifiedWrap =>
+  typeof wrap === "object" && wrap !== null && isMinted(wrap)
+
+const mintWraps = (entry: KeyringEntry): VerifiedKeyringEntry => ({
+  ...entry,
+  wraps: entry.wraps
+    .map((wrap) => {
+      const sealed = Object.freeze({ epoch: wrap.epoch, id: wrap.id, wrap: wrap.wrap, account: entry.account })
+      minted.add(sealed)
+      return sealed
+    })
+    .filter(isMinted),
+})
 
 export type AcceptedBatch = {
   readonly seq: number
@@ -113,6 +133,8 @@ type StepResult =
  * record it refuses is never folded here either.
  */
 export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry, mode: LinkMode): Promise<StepResult> => {
+  const malformed = envelopeRefusal(entry)
+  if (malformed !== null) return { ok: false, reason: malformed }
   if (!(await linksHold(state, entry, mode))) return { ok: false, reason: "link_mismatch" }
   const refused = await receiverRefusal(state.received, entry)
   if (refused !== null) return { ok: false, reason: refused }
@@ -142,29 +164,45 @@ export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry,
       head: { seq: entry.seq, link: entry.link, keyring_link: entry.keyring_link },
       authority,
       history: [...state.history, record],
-      received: [...state.received, entry],
+      received: [...state.received, mintWraps(entry)],
     },
     step: { kind: "keyring", seq: entry.seq, record: body.kind },
   }
 }
 
+/**
+ * The author's signing key as it stood inside `epoch`: the newest folded authority of that epoch
+ * that holds the author. A vetoed epoch's members are no longer in the current fold, so their
+ * batches verify against the position they were written at, and an author never a member there
+ * gets no key.
+ */
+const keyWithinEpoch = (state: ChainState, author: SyncAuthor, epoch: number): string | null => {
+  const after = state.history.map((_, index) => state.history[index + 1]?.before ?? state.authority)
+  for (const authority of after.reverse()) {
+    const key = authority !== null && authority.epoch === epoch ? authorSigningKey(authority, author) : null
+    if (key !== null) return key
+  }
+  return null
+}
+
 const verifyBatchEntry = async (state: ChainState, entry: BatchEntry): Promise<StepResult> => {
+  const malformed = envelopeRefusal(entry)
+  if (malformed !== null) return { ok: false, reason: malformed }
   if (!(await linksHold(state, entry, "main"))) return { ok: false, reason: "link_mismatch" }
   const refused = await receiverRefusal(state.received, entry)
   if (refused !== null) return { ok: false, reason: refused }
   const authority = state.authority
   const head = state.head
-  if (authority === null || head === null) return { ok: false, reason: "not_member" }
+  if (authority === null || head === null || entry.author.kind !== "device") return { ok: false, reason: "not_member" }
   const next: ChainState = { ...state, head: { seq: entry.seq, link: entry.link, keyring_link: head.keyring_link } }
-  const authorId = entry.author.kind === "device" ? entry.author.id : ""
-  if (isVetoedEpoch(authority, entry.epoch) || isCancelledAdmission(authority, authorId)) {
-    return { ok: true, state: next, step: { kind: "vetoed", seq: entry.seq } }
-  }
-  const key = entry.author.kind === "device" ? authorSigningKey(authority, entry.author) : null
+  const authorId = entry.author.id
+  const vetoed = isVetoedEpoch(authority, entry.epoch) || isCancelledAdmission(authority, authorId)
+  const key = vetoed ? keyWithinEpoch(state, entry.author, entry.epoch) : authorSigningKey(authority, entry.author)
   if (key === null) return { ok: false, reason: "not_member" }
   if (!(await verifyRecordSig(key, entry))) return { ok: false, reason: "bad_signature" }
-  if (entry.epoch !== authority.epoch) return { ok: false, reason: "epoch_mismatch" }
   if (entry.account !== state.account) return { ok: false, reason: "account_mismatch" }
+  if (vetoed) return { ok: true, state: next, step: { kind: "vetoed", seq: entry.seq } }
+  if (entry.epoch !== authority.epoch) return { ok: false, reason: "epoch_mismatch" }
   const batch: AcceptedBatch = { seq: entry.seq, digest: entry.digest, epoch: entry.epoch, authorId, signingPublicKey: key }
   return { ok: true, state: next, step: { kind: "batch", batch } }
 }
@@ -185,7 +223,8 @@ export const appendEntries = async (
     const result = entry.kind === "keyring" ? await verifyKeyringEntry(current, entry, "main") : await verifyBatchEntry(current, entry)
     if (!result.ok) {
       rejections.record(result.reason)
-      return { ok: false, state: current, steps, seq: entry.seq, reason: result.reason }
+      const seq = Number.isSafeInteger(entry.seq) ? entry.seq : (current.head?.seq ?? 0) + 1
+      return { ok: false, state: current, steps, seq, reason: result.reason }
     }
     current = result.state
     steps.push(result.step)

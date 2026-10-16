@@ -23,10 +23,9 @@ export const decodeB64 = (value: JsonValue | undefined, length?: number): Uint8A
 }
 
 /**
- * Ed25519 over `context || 0x00 || JCS(payload)`, framed exactly once. The vendored
- * `verifyFramed` frames twice (it hands an already-framed preimage to `verifyFramedBytes`,
- * which frames again), so no genuine record verifies through it; every JSON-payload
- * signature in this module goes through here instead.
+ * Ed25519 over `context || 0x00 || JCS(payload)`, framed exactly once by the vendored
+ * `verifyFramedBytes`, with the key and signature lengths checked first. Every JSON-payload
+ * signature in this module verifies through here.
  */
 export const verifyTagged = async (
   context: string,

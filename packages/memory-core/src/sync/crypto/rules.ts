@@ -151,6 +151,6 @@ export const checkRecordRules = async (
       return entry.wraps.length === 0 ? null : "unexpected_wraps"
     }
     case "fork-resolution":
-      return null
+      return entry.wraps.length === 0 ? null : "unexpected_wraps"
   }
 }

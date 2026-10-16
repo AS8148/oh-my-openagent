@@ -26,14 +26,30 @@ export type BuildBatchInput = {
 }
 
 const SEGMENT = 65536
+const SPACE_ID_BYTES = 16
+const MAX_ITEM_KEY_BYTES = 0xffff
+const MAX_BODY_BYTES = 0xffffffff
+
+export type BatchInputProblem = "space_id_length" | "item_key_too_long" | "body_too_long"
+
+/** A record the OMOB payload framing cannot carry; thrown before anything is encrypted or signed. */
+export class BatchInputError extends Error {
+  constructor(readonly problem: BatchInputProblem) {
+    super(`buildBatch: ${problem}`)
+    this.name = "BatchInputError"
+  }
+}
 
 const encodePayload = (records: ReadonlyArray<SyncPayloadRecord>): Uint8Array<ArrayBuffer> =>
   concatBytes(
     records.flatMap((record) => {
       const key = new TextEncoder().encode(record.itemKey)
-      const head = new Uint8Array(1 + 16 + 2)
+      if (record.spaceId.length !== SPACE_ID_BYTES) throw new BatchInputError("space_id_length")
+      if (key.length > MAX_ITEM_KEY_BYTES) throw new BatchInputError("item_key_too_long")
+      if (record.body.length > MAX_BODY_BYTES) throw new BatchInputError("body_too_long")
+      const head = new Uint8Array(1 + SPACE_ID_BYTES + 2)
       head[0] = record.type
-      head.set(record.spaceId.subarray(0, 16), 1)
+      head.set(record.spaceId, 1)
       new DataView(head.buffer).setUint16(17, key.length, false)
       const length = new Uint8Array(4)
       new DataView(length.buffer).setUint32(0, record.body.length, false)
@@ -53,8 +69,9 @@ const segmentNonce = (index: number, last: boolean): Uint8Array<ArrayBuffer> => 
 const deflateRaw = async (payload: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> => {
   const stream = new CompressionStream("deflate-raw")
   const writer = stream.writable.getWriter()
-  void writer.write(payload).then(() => writer.close())
-  return new Uint8Array(await new Response(stream.readable).arrayBuffer())
+  const written = writer.write(payload).then(() => writer.close())
+  const [compressed] = await Promise.all([new Response(stream.readable).arrayBuffer(), written])
+  return new Uint8Array(compressed)
 }
 
 const sealStream = async (key: CryptoKey, aad: Uint8Array<ArrayBuffer>, compressed: Uint8Array<ArrayBuffer>) => {

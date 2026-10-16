@@ -28,6 +28,15 @@ export type KeyringBody = {
 
 export type WrapEntry = { readonly epoch: number; readonly id: string; readonly wrap: string }
 
+declare const verifiedWrap: unique symbol
+
+/**
+ * A wrap whose source keyring entry passed every chain check, including its wrap-set rule, and the
+ * account that entry was verified for. Only the local verified chain mints one (chain.ts); a wrap the
+ * server served, copied or re-shaped is a plain WrapEntry and `openWrap` refuses it.
+ */
+export type VerifiedWrap = WrapEntry & { readonly account: string; readonly [verifiedWrap]: true }
+
 export type KeyringEntry = SyncRecordFields & {
   readonly seq: number
   readonly kind: "keyring"
@@ -47,5 +56,7 @@ export type BatchEntry = SyncRecordFields & {
 }
 
 export type SyncEntry = KeyringEntry | BatchEntry
+
+export type VerifiedKeyringEntry = Omit<KeyringEntry, "wraps"> & { readonly wraps: ReadonlyArray<VerifiedWrap> }
 
 export type Head = { readonly seq: number; readonly link: string; readonly keyring_link: string }

@@ -1,5 +1,6 @@
 import type { DeviceKeyring } from "../keyring-port.ts"
-import type { WrapEntry } from "./entry.ts"
+import { isVerifiedWrap } from "./chain.ts"
+import type { VerifiedWrap } from "./entry.ts"
 import { isObject, type JsonObject } from "./parse.ts"
 import { decodeB64 } from "./signatures.ts"
 import { type JsonValue, jcsBytes, jcsCanonical } from "./vendor/sync-format/jcs.ts"
@@ -10,7 +11,13 @@ export type EpochKeys = {
   readonly history: ReadonlyMap<number, Uint8Array<ArrayBuffer>>
 }
 
-export type WrapFailure = "not_addressed_to_device" | "wrap_refused" | "malformed_envelope" | "envelope_mismatch" | "bad_history"
+export type WrapFailure =
+  | "unverified_wrap"
+  | "not_addressed_to_device"
+  | "wrap_refused"
+  | "malformed_envelope"
+  | "envelope_mismatch"
+  | "bad_history"
 
 export type WrapOutcome = { readonly ok: true; readonly keys: EpochKeys } | { readonly ok: false; readonly reason: WrapFailure }
 
@@ -80,18 +87,21 @@ export const openHistory = async (
 }
 
 /**
- * Opens one wrap addressed to this device - only through the DeviceKeyring, which owns the
- * sealing private key and the HPKE construction (sync-design section 8.1). The verified wrap
- * entry's account, epoch and recipient are the AEAD's associated data, so a genuine ciphertext
- * moved to another account, epoch or device fails to unseal; the inner envelope must name the
- * same three values before any key is returned.
+ * Opens one wrap addressed to this device - only a wrap the local verified chain minted from an
+ * entry that passed its wrap-set rule (never one the server attached or a caller re-shaped), and
+ * only through the DeviceKeyring, which owns the sealing private key and the HPKE construction
+ * (sync-design section 8.1). The verified wrap entry's account, epoch and recipient are the AEAD's
+ * associated data, so a genuine ciphertext moved to another account, epoch or device fails to
+ * unseal; the inner envelope must name the same three values before any key is returned.
  */
 export const openWrap = async (
   keyring: DeviceKeyring,
-  wrap: WrapEntry,
+  wrap: VerifiedWrap,
   account: string,
   expectedHistory: ReadonlyMap<number, string>,
 ): Promise<WrapOutcome> => {
+  if (!isVerifiedWrap(wrap)) return { ok: false, reason: "unverified_wrap" }
+  if (wrap.account !== account) return { ok: false, reason: "envelope_mismatch" }
   if (wrap.id !== `device:${keyring.principal().id}`) return { ok: false, reason: "not_addressed_to_device" }
   const sealed = decodeB64(wrap.wrap)
   if (sealed === null) return { ok: false, reason: "malformed_envelope" }

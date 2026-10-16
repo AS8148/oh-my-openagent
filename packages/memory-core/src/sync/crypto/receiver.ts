@@ -14,13 +14,21 @@ import { receiveKeyringChain } from "./vendor/sync-format/receive.ts"
  */
 export const wire = (entries: ReadonlyArray<SyncEntry>): ReadonlyArray<ChainEntry> => JSON.parse(JSON.stringify(entries))
 
-/** The receiver's refusal of `entry` appended after the already-verified keyring `history`; null when it holds. */
+/** A receiver refusal, or the receiver refusing an already-verified history entry instead of this one. */
+export type ReceiverCheck = ReceiverRefusal | "receiver_seq_mismatch"
+
+/**
+ * The receiver's refusal of `entry` appended after the already-verified keyring `history`; null
+ * only when the receiver accepts the whole list. A refusal at any other seq means the verified
+ * history and the receiver disagree, which must never happen, so it refuses this entry too.
+ */
 export const receiverRefusal = async (
   history: ReadonlyArray<SyncEntry>,
   entry: SyncEntry,
-): Promise<ReceiverRefusal | null> => {
+): Promise<ReceiverCheck | null> => {
   const list = wire([...history, entry])
   const isFork = entry.kind === "keyring" && entry.body.kind === "fork-resolution"
   const received = isFork ? await receiveKeyringChain(list) : foldRefusal(list)
-  return received.ok || received.seq !== entry.seq ? null : received.reason
+  if (received.ok) return null
+  return received.seq === entry.seq ? received.reason : "receiver_seq_mismatch"
 }
