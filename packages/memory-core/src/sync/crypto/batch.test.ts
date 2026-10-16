@@ -3,7 +3,7 @@ import { createInMemoryDeviceKeyring } from "../keyring-port.ts"
 import { buildBatch } from "./build.ts"
 import { type BatchBinding, openBatch } from "./open.ts"
 import { createRejectionCounter } from "./rejection.ts"
-import { b64, deviceId, epochKey, keyringFor, type ManifestObject, objects, readBytes } from "./testing/sync-v1.ts"
+import { b64, deviceId, epochKey, keyringFor, type ManifestObject, objects, readBytes } from "./testing/sync-v1.test-support.ts"
 import { b64urlDecode } from "./vendor/sync-format/jcs.ts"
 
 type CorruptedCase = { readonly file: string; readonly base: string; readonly expect: string }

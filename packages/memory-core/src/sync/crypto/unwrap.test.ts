@@ -3,7 +3,7 @@ import { createCipheriv, createHmac, createPublicKey, diffieHellman, generateKey
 import { createDeviceKeyring, createInMemoryDeviceKeyring, type DeviceKeyring, type WrapBinding } from "../keyring-port.ts"
 import type { WrapEntry } from "./entry.ts"
 import { openHistory, openWrap } from "./unwrap.ts"
-import { keys, readBytes } from "./testing/sync-v1.ts"
+import { keys, readBytes } from "./testing/sync-v1.test-support.ts"
 import { b64urlEncode, type JsonValue, jcsBytes } from "./vendor/sync-format/jcs.ts"
 
 type WrapsFixture = {

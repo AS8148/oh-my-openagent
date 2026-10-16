@@ -14,7 +14,7 @@ import {
   readBytes,
   record,
   recoverySigningSeed,
-} from "./testing/sync-v1.ts"
+} from "./testing/sync-v1.test-support.ts"
 
 const run = (entries: ReadonlyArray<SyncEntry>, state: ChainState = emptyChain(ACCOUNT)) => {
   const rejections = createRejectionCounter()
