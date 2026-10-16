@@ -33,9 +33,9 @@ export function applyKey(fork: LoroDoc, key: string, value: FieldValue, history:
     }
     case "reg": {
       const target = toRegister(value)
-      const combinedReg = combined?.kind === "reg" ? combined.text : undefined
-      // A re-parsed scalar equal to the current join is a no-op even when renderScalar quoted it.
-      if (combinedReg !== undefined && (combinedReg === target || combinedReg === regText(target))) return
+      // Canonical sources compare exactly, so retyping 3 as '3' is a real write (review r6 M2). Only
+      // a multi-value join, rendered as one quoted string, compares by the string it holds.
+      if (combined?.kind === "reg" && (combined.text === target || (!combined.verbatim && combined.text === regText(target)))) return
       const active = activeReg(state.reg)
       // A no-op only when every active entry already holds the target. Otherwise the user is
       // writing over what they saw (a hand resolution, r2 HIGH-2): supersede the seen entries.
