@@ -11,6 +11,7 @@ import { createSandbox, credentialDigest, seedSandbox } from "./drive.mjs"
 import { createOwnedProcessRegistry, startSenpiRun } from "./team-e2e-runtime.mjs"
 import { parseEvents } from "./team-e2e-support.mjs"
 import { resolveSenpi } from "./team-e2e.mjs"
+import { telemetryLocalSinkEnv } from "./telemetry-opt-out-env.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, "..", "..")
@@ -130,11 +131,7 @@ async function runLane({ senpiBin, laneName, extraEnv }) {
       mockProviderEntry,
       parseEvents,
       extraEnv: {
-        DO_NOT_TRACK: "",
-        OMO_DISABLE_POSTHOG: "",
-        OMO_SENPI_DISABLE_POSTHOG: "",
-        OMO_SEND_ANONYMOUS_TELEMETRY: "",
-        OMO_SENPI_SEND_ANONYMOUS_TELEMETRY: "",
+        ...telemetryLocalSinkEnv(sinkUrl),
         // The host may export these ambiently (a dev-tree OmO Desktop service exports
         // the attribution pair to every child); OMO_ wins the agent-home resolution
         // loop, so every name must be pinned to the sandbox or the run leaks into the
@@ -143,7 +140,6 @@ async function runLane({ senpiBin, laneName, extraEnv }) {
         PI_CODING_AGENT_DIR: sandbox.agentDir,
         OMO_NATIVE_SURFACE: "",
         OMO_NATIVE_INSTALL_ID: "",
-        POSTHOG_HOST: sinkUrl,
         ...extraEnv,
       },
       onPid: (pid) => processes.onSpawn(pid),
