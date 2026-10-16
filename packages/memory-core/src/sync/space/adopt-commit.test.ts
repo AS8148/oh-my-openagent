@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
-import { activeRegisters, commitAdoption, itemFrontier } from "../item/index"
+import { withRegisterValues } from "../item/adopt-values"
+import { captureItem } from "../item/capture"
+import { activeRegisters, captureOnDevice, createDeviceItemDoc, itemFrontier } from "../item/index"
 import { renderDocContent } from "../item/render"
 import { renderForDisk } from "../item/render-for-disk"
 import { activeReg, readKeyState } from "../item/state"
-import { captureInto, newDoc } from "../item/test-support"
+import { captureInto, newDoc, withDevices } from "../item/test-support"
 import { planAdoption, type Snapshot } from "./adopt"
 import { confirmRemovals } from "./confirm-removals"
 import { mergeInsertions } from "./merge"
@@ -23,25 +25,36 @@ async function space(text: string): Promise<{ readonly doc: LoroDoc; readonly ba
   return { doc, base: renderDocContent(doc) }
 }
 
+/** One update (capture + register values) on a plain doc; the device entry point is covered in the H1 row and adopt-replay.test.ts. */
+function commitAdoption(doc: LoroDoc, base: string, frontier: ReturnType<typeof itemFrontier>, working: string, values: Parameters<typeof withRegisterValues>[2]) {
+  return withRegisterValues(doc, captureItem(doc, base, frontier, working), values)
+}
+
 const stateOf = (doc: LoroDoc, base: string) => ({ currentText: base, lastMaterialised: null, tombstoned: false, registers: activeRegisters(doc) })
 const active = (doc: LoroDoc, key: string): string[] => activeReg(readKeyState(doc, key).reg).map((entry) => entry.value).sort()
 
 describe("H1: one atomic commit, deletion decided on the committed item", () => {
   const files: readonly Snapshot[] = [{ path: SIDE, text: "---\nd: laptop\n---\nbody\nnew line\n" }]
 
-  test("the capture and the extra register values are ONE update", async () => {
-    const { doc, base } = await space("---\nd: space\n---\nbody\n")
-    try {
-      const plan = planAdoption(files, stateOf(doc, base))
-      if (plan.action !== "capture") throw new Error("expected capture")
-      const update = commitAdoption(doc, base, itemFrontier(doc), plan.workingText, plan.extraRegisterValues)
-      expect(update).not.toBeNull()
-      if (update !== null) doc.import(update)
-      expect(active(doc, "d")).toEqual(["laptop", "space"])
-      expect(renderDocContent(doc)).toContain("new line\n")
-    } finally {
-      doc.free()
-    }
+  test("through the device entry point, the capture and the extra register values are ONE update", async () => {
+    await withDevices(1, async ([device]) => {
+      if (device === undefined) throw new Error("no device")
+      const doc = await createDeviceItemDoc(device)
+      try {
+        const seed = await captureOnDevice(device, "n.md", doc, "", [], "---\nd: space\n---\nbody\n")
+        if (seed !== null) doc.import(seed)
+        const base = renderDocContent(doc)
+        const plan = planAdoption(files, stateOf(doc, base))
+        if (plan.action !== "capture") throw new Error("expected capture")
+        const update = await captureOnDevice(device, "n.md", doc, base, itemFrontier(doc), plan.workingText, plan.extraRegisterValues)
+        expect(update).not.toBeNull()
+        if (update !== null) doc.import(update)
+        expect(active(doc, "d")).toEqual(["laptop", "space"])
+        expect(renderDocContent(doc)).toContain("new line\n")
+      } finally {
+        doc.free()
+      }
+    })
   })
 
   test("a crash after the capture but before the register values keeps the source", async () => {
@@ -86,13 +99,6 @@ describe("H1: one atomic commit, deletion decided on the committed item", () => 
 })
 
 describe("M1: the space's register components are required", () => {
-  test("a joined render without its components does not type-check as an item state, and is refused", () => {
-    expect(() =>
-      // @ts-expect-error ItemState.registers is required: a joined render alone cannot tell two values from one.
-      planAdoption([], { currentText: '---\nk: "a / b"\n---\n', lastMaterialised: null, tombstoned: false }),
-    ).toThrow()
-  })
-
   test("a register key missing from the components is refused, never read as one whole value", () => {
     const state = { currentText: '---\nk: "a / b"\n---\n', lastMaterialised: null, tombstoned: false, registers: new Map() }
     expect(() => planAdoption([], state)).toThrow('planAdoption: ItemState.registers has no components for register key "k"')

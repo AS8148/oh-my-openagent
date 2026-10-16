@@ -5,11 +5,9 @@
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
-import { captureItem } from "./capture"
-import type { ItemFrontier } from "./document"
 import { analyzeHistory } from "./history"
 import { addRegisterValue } from "./key-writers"
-import { readKeyState, registerValues } from "./state"
+import { activeReg, readKeyState, registerValues } from "./state"
 
 export interface RegisterValue {
   readonly key: string
@@ -18,19 +16,13 @@ export interface RegisterValue {
 }
 
 /**
- * The whole adoption as ONE update: the working text's capture and every extra register value
- * (an entry superseding nothing) land in one fork and are exported together, so no crash point
- * persists the capture without the values a source's deletion depends on. Null when nothing changes.
+ * One update holding `captured` (a capture's update, or null when the body and keys are unchanged)
+ * plus every register value not already active (an entry superseding nothing), committed under
+ * `commitMessage`. Internal to captureOnDevice (device-capture.ts), the only capture entry point:
+ * adoption's capture and its register values land together and replay under the same receipts.
  */
-export function commitAdoption(
-  doc: LoroDoc,
-  baseText: string,
-  baseFrontier: ItemFrontier,
-  workingText: string,
-  values: readonly RegisterValue[],
-  commitMessage?: string,
-): Uint8Array | null {
-  const captured = captureItem(doc, baseText, baseFrontier, workingText, commitMessage)
+export function withRegisterValues(doc: LoroDoc, captured: Uint8Array | null, values: readonly RegisterValue[], commitMessage?: string): Uint8Array | null {
+  if (values.length === 0) return captured
   const target = doc.fork()
   try {
     target.setPeerId(doc.peerId)
@@ -45,6 +37,12 @@ export function commitAdoption(
     target.free()
   }
 }
+
+/** True when every value is already an active entry of its register. */
+export function registerValuesActive(doc: LoroDoc, values: readonly RegisterValue[]): boolean {
+  return values.every(({ key, value }) => activeReg(readKeyState(doc, key).reg).some((entry) => entry.value === value))
+}
+
 /**
  * Every register key's rendered components: its active values plus any set content it renders
  * beside them (state.ts combineRegister). The planner's view of what the space already holds,

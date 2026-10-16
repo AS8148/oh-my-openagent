@@ -2,13 +2,19 @@ import { parse, parseDocument } from "yaml"
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 import { splitItem, type FmValue } from "../item/frontmatter"
-import { commitAdoption, itemFrontier } from "../item/index"
+import { withRegisterValues } from "../item/adopt-values"
+import { captureItem } from "../item/capture"
+import { itemFrontier } from "../item/index"
 import type { AdoptionPlan } from "./adopt"
 
-/** Commit a plan the way the engine does: the capture and its extra register values as ONE update. */
+/**
+ * Commit a plan as ONE update (capture + extra register values) on a plain doc, for the property
+ * tests. The engine's path is captureOnDevice(..., plan.extraRegisterValues); adopt-replay.test.ts
+ * covers its replay safety, which this helper deliberately does not have.
+ */
 export function applyPlan(doc: LoroDoc, base: string, plan: AdoptionPlan): void {
   if (plan.action !== "capture") return
-  const update = commitAdoption(doc, base, itemFrontier(doc), plan.workingText, plan.extraRegisterValues)
+  const update = withRegisterValues(doc, captureItem(doc, base, itemFrontier(doc), plan.workingText), plan.extraRegisterValues)
   if (update !== null) doc.import(update)
 }
 

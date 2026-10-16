@@ -1,0 +1,93 @@
+import { describe, expect, test } from "bun:test"
+
+import type { LoroDoc } from "../../crdt/loro-runtime"
+import type { ItemDevice } from "../item/device"
+import { activeRegisters, captureOnDevice, createDeviceItemDoc, itemFrontier } from "../item/index"
+import { renderDocContent } from "../item/render"
+import { activeReg, readKeyState } from "../item/state"
+import { withDevices } from "../item/test-support"
+import { planAdoption, type Snapshot } from "./adopt"
+import { confirmRemovals } from "./confirm-removals"
+
+// Review r8 of #10206 (receipt 097ab36d2f, M1): adoption goes through the one guarded capture entry
+// point, so replaying it from the same stale baseline, before or after a crash, applies the edit once.
+
+const SIDE = "n.sync-conflict-20261015-mac.md"
+const active = (doc: LoroDoc, key: string): string[] => activeReg(readKeyState(doc, key).reg).map((entry) => entry.value).sort()
+
+async function adopt(device: ItemDevice, doc: LoroDoc, base: string, frontier: ReturnType<typeof itemFrontier>, files: readonly Snapshot[]) {
+  const plan = planAdoption(files, { currentText: base, lastMaterialised: null, tombstoned: false, registers: activeRegisters(doc) })
+  if (plan.action !== "capture") throw new Error(`expected capture, got ${plan.action}`)
+  const update = await captureOnDevice(device, "n.md", doc, base, frontier, plan.workingText, plan.extraRegisterValues)
+  return { plan, update }
+}
+
+describe("M1: adoption replays through the guarded capture entry point", () => {
+  const files: readonly Snapshot[] = [{ path: SIDE, text: "---\nd: laptop\n---\nx\ny\n" }]
+
+  test("replaying the same adoption from the same stale baseline applies it once", async () => {
+    await withDevices(1, async ([device]) => {
+      if (device === undefined) throw new Error("no device")
+      const doc = await createDeviceItemDoc(device)
+      try {
+        const seed = await captureOnDevice(device, "n.md", doc, "", [], "---\nd: space\n---\nx\n")
+        if (seed !== null) doc.import(seed)
+        const base = renderDocContent(doc)
+        const f0 = itemFrontier(doc)
+        const first = await adopt(device, doc, base, f0, files)
+        if (first.update !== null) doc.import(first.update)
+        const once = renderDocContent(doc)
+        expect(once).toBe('---\nd: "laptop / space"\n---\nx\ny\n')
+        const replay = await captureOnDevice(device, "n.md", doc, base, f0, first.plan.workingText, first.plan.extraRegisterValues)
+        if (replay !== null) doc.import(replay)
+        expect(renderDocContent(doc)).toBe(once)
+        expect(active(doc, "d")).toEqual(["laptop", "space"])
+        expect(confirmRemovals(doc, first.plan, files).remove).toEqual([SIDE])
+      } finally {
+        doc.free()
+      }
+    })
+  })
+
+  test("a crash after the receipt but before the import re-captures once, never twice", async () => {
+    await withDevices(1, async ([device]) => {
+      if (device === undefined) throw new Error("no device")
+      const doc = await createDeviceItemDoc(device)
+      try {
+        const seed = await captureOnDevice(device, "n.md", doc, "", [], "---\nd: space\n---\nx\n")
+        if (seed !== null) doc.import(seed)
+        const base = renderDocContent(doc)
+        const f0 = itemFrontier(doc)
+        const lost = await adopt(device, doc, base, f0, files)
+        expect(lost.update).not.toBeNull()
+        const again = await adopt(device, doc, base, f0, files)
+        if (again.update !== null) doc.import(again.update)
+        const third = await captureOnDevice(device, "n.md", doc, base, f0, again.plan.workingText, again.plan.extraRegisterValues)
+        if (third !== null) doc.import(third)
+        expect(renderDocContent(doc)).toBe('---\nd: "laptop / space"\n---\nx\ny\n')
+      } finally {
+        doc.free()
+      }
+    })
+  })
+
+  test("register values alone, over an unchanged body, still land through the entry point", async () => {
+    await withDevices(1, async ([device]) => {
+      if (device === undefined) throw new Error("no device")
+      const doc = await createDeviceItemDoc(device)
+      try {
+        const seed = await captureOnDevice(device, "n.md", doc, "", [], "---\nd: space\n---\nx\n")
+        if (seed !== null) doc.import(seed)
+        const base = renderDocContent(doc)
+        const only: readonly Snapshot[] = [{ path: SIDE, text: "---\nd: laptop\n---\nx\n" }]
+        const { plan, update } = await adopt(device, doc, base, itemFrontier(doc), only)
+        expect(plan.workingText).toBe(base)
+        if (update !== null) doc.import(update)
+        expect(active(doc, "d")).toEqual(["laptop", "space"])
+        expect(confirmRemovals(doc, plan, only).remove).toEqual([SIDE])
+      } finally {
+        doc.free()
+      }
+    })
+  })
+})

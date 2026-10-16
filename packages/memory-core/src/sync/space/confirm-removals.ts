@@ -3,6 +3,10 @@
 // is imported, and only when the read-back against the doc's own render and active register
 // entries finds every one of its lines. A candidate the doc does not fully hold stays on disk
 // with its reason; the planner's prediction never vouches for itself.
+// "Committed" here means imported into `doc`; this function cannot see the disk. The engine's
+// order is binding: (1) captureOnDevice the plan, (2) import the update AND persist the doc
+// durably, (3) confirmRemovals on that doc, (4) only then delete the confirmed sources. Deleting
+// before step 2 is durable could lose the only copy of a source's text in a crash.
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 import { activeRegisters } from "../item/index"
