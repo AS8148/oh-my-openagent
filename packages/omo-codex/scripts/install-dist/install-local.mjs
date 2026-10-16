@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:6b5dd067b89eca54f59a2a381fad7dce41210383162d9d2a9ab608eb004cb59b:9363b541210d65d845342df0c1a4408dc0a19174c5a809a9290533111026d01a
+// omo-codex-install:d6461760b0b2f0e272b51bfe2d55e5280cc505338f455df43303564f2465006c:3cb54cd0b22fe0bced6a100c92fc2b9f2eddc93cb6a82a57257140c4f8171750
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -373,7 +373,7 @@ function shouldDisableTelemetry(input) {
   const env = input.env ?? process.env;
   const globalPrefix = input.globalEnvPrefix ?? "OMO";
   const prefixes = Array.from(new Set([globalPrefix, input.productEnvPrefix]));
-  if (isDisableFlag(env["DO_NOT_TRACK"]) || isDisableFlag(env[`${globalPrefix}_DISABLE_TELEMETRY`])) {
+  if (isDisableFlag(env["DO_NOT_TRACK"])) {
     return true;
   }
   for (const prefix of prefixes) {
@@ -403,47 +403,6 @@ var TRUTHY_DISABLE_VALUES, SEND_OPT_OUT_VALUES;
 var init_env = __esm(() => {
   TRUTHY_DISABLE_VALUES = ["1", "true", "yes"];
   SEND_OPT_OUT_VALUES = ["0", "false", "no", "yes"];
-});
-
-// packages/telemetry-core/src/event-id.ts
-import { randomBytes as nodeRandomBytes } from "node:crypto";
-function createUuidV7Generator(source = {}) {
-  const now = source.now ?? Date.now;
-  const randomBytes = source.randomBytes ?? ((size) => new Uint8Array(nodeRandomBytes(size)));
-  let lastMs = -1;
-  let counter = 0;
-  return () => {
-    const random = randomBytes(10);
-    const wallMs = Math.floor(now());
-    if (wallMs > lastMs) {
-      lastMs = wallMs;
-      counter = (random[0] << 8 | random[1]) & COUNTER_SEED_MASK;
-    } else if (counter < MAX_COUNTER) {
-      counter += 1;
-    } else {
-      lastMs += 1;
-      counter = (random[0] << 8 | random[1]) & COUNTER_SEED_MASK;
-    }
-    const bytes = new Uint8Array(16);
-    let timestamp = lastMs;
-    for (let index = 5;index >= 0; index -= 1) {
-      bytes[index] = timestamp % 256;
-      timestamp = Math.floor(timestamp / 256);
-    }
-    bytes[6] = 112 | counter >> 8;
-    bytes[7] = counter & 255;
-    bytes[8] = 128 | random[2] & 63;
-    bytes.set(random.subarray(3, 10), 9);
-    return formatUuid(bytes);
-  };
-}
-function formatUuid(bytes) {
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-var MAX_COUNTER = 4095, COUNTER_SEED_MASK = 2047, fallbackEventId;
-var init_event_id = __esm(() => {
-  fallbackEventId = createUuidV7Generator();
 });
 
 // node_modules/.bun/posthog-node@5.52.4/node_modules/posthog-node/dist/extensions/error-tracking/modifiers/module.node.mjs
@@ -10014,7 +9973,6 @@ var init_src = __esm(() => {
   init_activity_state();
   init_diagnostics();
   init_env();
-  init_event_id();
   init_events();
   init_machine_id();
   init_posthog_client();
