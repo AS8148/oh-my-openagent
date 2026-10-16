@@ -164,7 +164,11 @@ describe("own-PR link on added Unreleased paragraphs", () => {
     expect(checkPrChangelog({ ...facts, after, diff, prNumber: 123 }).pass).toBe(true)
   })
   test("checks an entry written directly under a heading", () => {
-    expect(checkPrChangelog({ ...facts, ...add("### Fixed\n**New fix.** No link here."), prNumber: 123 }).pass).toBe(false)
+    const { after } = add("### Fixed\n**New fix.** No link here.")
+    const diff = "@@ -0,0 +3,3 @@\n+### Fixed\n+**New fix.** No link here.\n+"
+    expect(checkPrChangelog({ ...facts, after, diff, prNumber: 123 }).pass).toBe(false)
+    const linked = add(`### Fixed\n**New fix.** Linked (${link(123)}).`).after
+    expect(checkPrChangelog({ ...facts, after: linked, diff: diff.replace("No link here.", `Linked (${link(123)}).`), prNumber: 123 }).pass).toBe(true)
   })
   test("keeps the old verdict when no PR number is known", () => {
     expect(checkPrChangelog({ ...facts, ...add("**New fix.** No link here.") }).pass).toBe(true)
