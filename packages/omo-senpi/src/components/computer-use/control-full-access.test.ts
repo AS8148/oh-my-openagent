@@ -23,6 +23,12 @@ const RECEIVED = "recv "
 
 class HostApi extends FakeExtensionAPI {
   active: string[] = ["read", "bash"]
+  /** What senpi's permission system enforces for this session (settings -> flag -> default). */
+  resolvedPreset: string | undefined = undefined
+
+  getPermissionPreset(): string | undefined {
+    return this.resolvedPreset
+  }
 
   getActiveTools(): string[] {
     return [...this.active]
@@ -131,10 +137,10 @@ async function acquireCounting(pi: HostApi, prompts: { count: number }, notes: s
 }
 
 describe("computer control in full access (#10022)", () => {
-  test("#given the full-access preset #when the model acquires #then it is granted without a confirm, noted, and revoked at agent_end", async () => {
+  test("#given Full access from settings alone (no session flag) #when the model acquires #then it is granted without a confirm, noted, and revoked at agent_end", async () => {
     // given
     const { pi, engine } = register()
-    pi.setFlag("permission-preset", "full-access")
+    pi.resolvedPreset = "full-access"
     await pi.dispatch("tool_activated", { type: "tool_activated", toolNames: ["computer"] }, hostContext())
     const prompts = { count: 0 }
     const notes: string[] = []
@@ -151,13 +157,13 @@ describe("computer control in full access (#10022)", () => {
     })
     expect(engine.methods).toContain("control.grant")
     expect(engine.methods).toContain("control.revoke")
-    expect(pi.flags.map((flag) => flag.name)).toContain("permission-preset")
   })
 
-  test("#given another preset #when the model acquires #then the confirm is asked and a refusal grants nothing", async () => {
+  test("#given another enforced preset although the raw flag says full-access #when the model acquires #then the confirm is asked and a refusal grants nothing", async () => {
     // given
     const { pi, engine } = register()
-    pi.setFlag("permission-preset", "workspace")
+    pi.resolvedPreset = "workspace"
+    pi.setFlag("permission-preset", "full-access")
     await pi.dispatch("tool_activated", { type: "tool_activated", toolNames: ["computer"] }, hostContext())
     const prompts = { count: 0 }
 
