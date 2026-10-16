@@ -33,6 +33,7 @@ export async function createPluginFixture(options: { readonly runtime?: boolean 
   await writeFixtureFile(join(pluginPath, "extensions", "omo-computer-use.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "omo-memory-doctor.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "omo-memory-memfs.js"), "export {}\n")
+  await writeFixtureFile(join(pluginPath, "extensions", "omo-memory-palace.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "omo-thread-client.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "omo-telemetry-recovery.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "assets.generated.json"), "{}\n")

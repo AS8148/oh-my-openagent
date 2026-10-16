@@ -78,10 +78,12 @@ const computerUseEntryPath = join(packageRoot, "src", "components", "computer-us
 const computerUseOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-computer-use.js")
 const memoryDoctorEntryPath = join(packageRoot, "src", "components", "memory", "commands", "doctor-runtime.ts")
 const memoryMemfsEntryPath = join(packageRoot, "src", "components", "memory", "commands", "memfs-runtime.ts")
+const memoryPalaceEntryPath = join(packageRoot, "src", "components", "memory", "palace", "runtime.ts")
 const threadClientEntryPath = join(packageRoot, "src", "components", "thread", "live-surface.ts")
 const telemetryRecoveryEntryPath = join(packageRoot, "src", "components", "telemetry", "session-summary-recovery.ts")
 const memoryDoctorOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-doctor.js")
 const memoryMemfsOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-memfs.js")
+const memoryPalaceOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-palace.js")
 const threadClientOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-thread-client.js")
 const telemetryRecoveryOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-recovery.js")
 // The computer-use prelude JSON: bundled modules read it from beside the bundle (extensions/), the
@@ -96,6 +98,7 @@ const externalSpecifiers = [
   "#omo-computer-use-runtime",
   "#omo-memory-doctor-runtime",
   "#omo-memory-memfs-runtime",
+  "#omo-memory-palace-runtime",
   "#omo-thread-client-runtime",
   "#omo-telemetry-recovery-runtime",
   // telemetry-core loads its immediate sender through this import; the plugin manifest maps it to the recovery sidecar.
@@ -133,6 +136,7 @@ export const extensionBuildPaths = {
   computerUseOutputPath,
   memoryDoctorOutputPath,
   memoryMemfsOutputPath,
+  memoryPalaceOutputPath,
   threadClientOutputPath,
   telemetryRecoveryOutputPath,
   gatewayStoreWorkerOutputPath,
@@ -156,6 +160,7 @@ export function resolveOutputs(options) {
     rollbackRuntimeOutput: sibling(options.rollbackRuntimeOutputPath, rollbackRuntimeOutputPath, join("runtime", "rollback-migrate.js")),
     memoryDoctorOutput: sibling(options.memoryDoctorOutputPath, memoryDoctorOutputPath, "omo-memory-doctor.js"),
     memoryMemfsOutput: sibling(options.memoryMemfsOutputPath, memoryMemfsOutputPath, "omo-memory-memfs.js"),
+    memoryPalaceOutput: sibling(options.memoryPalaceOutputPath, memoryPalaceOutputPath, "omo-memory-palace.js"),
     threadClientOutput: sibling(options.threadClientOutputPath, threadClientOutputPath, "omo-thread-client.js"),
     telemetryRecoveryOutput: sibling(options.telemetryRecoveryOutputPath, telemetryRecoveryOutputPath, "omo-telemetry-recovery.js"),
     computerUseOutput: sibling(options.computerUseOutputPath, computerUseOutputPath, "omo-computer-use.js"),
@@ -186,6 +191,7 @@ export async function buildExtension(options = {}) {
     computerUseOutput,
     memoryDoctorOutput,
     memoryMemfsOutput,
+    memoryPalaceOutput,
     threadClientOutput,
     telemetryRecoveryOutput,
     gatewayStoreWorkerOutput,
@@ -201,6 +207,7 @@ export async function buildExtension(options = {}) {
   const rollbackRuntimeInputs = await buildEntry(rollbackRuntimeEntryPath, rollbackRuntimeOutput, buildDefines, sdkExternalSpecifiers)
   const memoryDoctorInputs = await buildEntry(memoryDoctorEntryPath, memoryDoctorOutput, buildDefines)
   const memoryMemfsInputs = await buildEntry(memoryMemfsEntryPath, memoryMemfsOutput, buildDefines)
+  const memoryPalaceInputs = await buildEntry(memoryPalaceEntryPath, memoryPalaceOutput, buildDefines)
   const threadClientInputs = await buildEntry(threadClientEntryPath, threadClientOutput, buildDefines)
   const telemetryRecoveryInputs = await buildEntry(telemetryRecoveryEntryPath, telemetryRecoveryOutput, buildDefines)
   const computerUseInputs = await buildEntry(computerUseEntryPath, computerUseOutput, buildDefines)
@@ -225,6 +232,7 @@ export async function buildExtension(options = {}) {
     computerUseInputs,
     memoryDoctorInputs,
     memoryMemfsInputs,
+    memoryPalaceInputs,
     threadClientInputs,
     telemetryRecoveryInputs,
     gatewayStoreWorkerInputs,

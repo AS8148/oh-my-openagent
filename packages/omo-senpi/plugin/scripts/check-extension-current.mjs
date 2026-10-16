@@ -19,6 +19,7 @@ export async function checkExtensionCurrent(options = {}) {
     computerUseOutput,
     memoryDoctorOutput,
     memoryMemfsOutput,
+    memoryPalaceOutput,
     threadClientOutput,
     telemetryRecoveryOutput,
     gatewayStoreWorkerOutput,
@@ -42,9 +43,11 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentSidePanelRuntime === undefined) return { ok: false, reason: "missing-output", output: sidePanelRuntimeOutput }
   const currentMemoryDoctor = await readBuiltEntry(memoryDoctorOutput)
   const currentMemoryMemfs = await readBuiltEntry(memoryMemfsOutput)
+  const currentMemoryPalace = await readBuiltEntry(memoryPalaceOutput)
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
   if (currentMemoryDoctor === undefined) return { ok: false, reason: "missing-output", output: memoryDoctorOutput }
   if (currentMemoryMemfs === undefined) return { ok: false, reason: "missing-output", output: memoryMemfsOutput }
+  if (currentMemoryPalace === undefined) return { ok: false, reason: "missing-output", output: memoryPalaceOutput }
   if (currentThreadClient === undefined) return { ok: false, reason: "missing-output", output: threadClientOutput }
   const currentTelemetryRecovery = await readBuiltEntry(telemetryRecoveryOutput)
   if (currentTelemetryRecovery === undefined) return { ok: false, reason: "missing-output", output: telemetryRecoveryOutput }
@@ -67,6 +70,7 @@ export async function checkExtensionCurrent(options = {}) {
     rollbackRuntimeOutputPath: join(tempRoot, "runtime", "rollback-migrate.js"),
     memoryDoctorOutputPath: join(tempRoot, "omo-memory-doctor.js"),
     memoryMemfsOutputPath: join(tempRoot, "omo-memory-memfs.js"),
+    memoryPalaceOutputPath: join(tempRoot, "omo-memory-palace.js"),
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
     telemetryRecoveryOutputPath: join(tempRoot, "omo-telemetry-recovery.js"),
     computerUseOutputPath: join(tempRoot, "omo-computer-use.js"),
@@ -86,6 +90,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentSidePanelRuntime, expected.sidePanelRuntimeOutputPath, sidePanelRuntimeOutput],
       [currentMemoryDoctor, expected.memoryDoctorOutputPath, memoryDoctorOutput],
       [currentMemoryMemfs, expected.memoryMemfsOutputPath, memoryMemfsOutput],
+      [currentMemoryPalace, expected.memoryPalaceOutputPath, memoryPalaceOutput],
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
       [currentTelemetryRecovery, expected.telemetryRecoveryOutputPath, telemetryRecoveryOutput],
       [currentComputerUse, expected.computerUseOutputPath, computerUseOutput],

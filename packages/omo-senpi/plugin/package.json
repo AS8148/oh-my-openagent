@@ -12,6 +12,7 @@
     "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
     "#omo-telemetry-recovery-runtime": "./extensions/omo-telemetry-recovery.js",
     "#telemetry-immediate-send": "./extensions/omo-telemetry-recovery.js",
+    "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
     "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js"
   },
   "keywords": [

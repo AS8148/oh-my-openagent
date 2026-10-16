@@ -16,6 +16,7 @@ export function outputPathsIn(root) {
     rollbackRuntimeOutputPath: join(root, "runtime", "rollback-migrate.js"),
     memoryDoctorOutputPath: join(root, "omo-memory-doctor.js"),
     memoryMemfsOutputPath: join(root, "omo-memory-memfs.js"),
+    memoryPalaceOutputPath: join(root, "omo-memory-palace.js"),
     threadClientOutputPath: join(root, "omo-thread-client.js"),
     telemetryRecoveryOutputPath: join(root, "omo-telemetry-recovery.js"),
     computerUseOutputPath: join(root, "omo-computer-use.js"),
