@@ -3,7 +3,7 @@ import { join, resolve, sep } from "node:path"
 
 import { readlink, realpath, stat } from "../fs/resilient"
 
-import { answerFromProcOrLsof } from "./open-file-holders"
+import { LSOF_EXEC_OPTIONS, answerFromProcOrLsof } from "./open-file-holders"
 import { classifyEntryError, errnoCode, scanEveryProcess, type EntryVerdict, type ProcScan, type ProcView } from "./proc-view"
 
 // omo #10199 r5 HIGH 1: the dead-owner proof covers the process that held the memory-write lock,
@@ -55,14 +55,14 @@ export async function scanProcCwdUsers(dir: string, view: ProcView): Promise<Pro
 
 // macOS: one lsof listing of every same-user process's cwd (-Fpn: `p<pid>` then `n<path>`). Only a
 // clean exit whose listing includes THIS process counts as an answer: anything else (lsof
-// missing, a timeout, a signal, a truncated listing) is indeterminate.
+// missing, a signal, a truncated listing) is indeterminate. Awaited like the holder scan (HIGH 2).
 function scanLsofCwdUsers(dir: string): Promise<readonly number[] | null> {
   return repoTree(dir).then((tree) => {
     const uid = process.getuid?.()
     if (tree === null || uid === undefined) return null
     return new Promise((resolveScan) => {
       const argv = ["-w", "-a", "-d", "cwd", "-u", String(uid), "-Fpn"]
-      execFile("lsof", argv, { windowsHide: true, timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }, (error, stdout) => {
+      execFile("lsof", argv, LSOF_EXEC_OPTIONS, (error, stdout) => {
         if (error !== null) {
           resolveScan(null)
           return

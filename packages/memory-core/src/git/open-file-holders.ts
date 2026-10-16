@@ -91,12 +91,21 @@ export async function scanProcFdHolders(lockPath: string, view: ProcView): Promi
   return scanEveryProcess(view, (pid) => processHoldsLock(view, pid, lock))
 }
 
-// The pre-existing macOS source, semantics unchanged (review LOW 5): exit 1 with empty stdout is
-// the ONLY "no holders" answer; a nonzero-abnormal exit, a signal, a timeout, or a spawn error
-// (lsof not installed) means the check failed, and failed means indeterminate.
+// The macOS source (review LOW 5): exit 1 with empty stdout is the ONLY "no holders" answer; a
+// nonzero-abnormal exit, a signal, or a spawn error (lsof not installed) means the check failed,
+// and failed means indeterminate.
+//
+// omo #10199 r5 HIGH 2: no wall-clock deadline races lsof. A 5 s execFile timeout turned a slow
+// but correct answer into "indeterminate" whenever the host was CPU- or process-starved (51 of
+// 120 concurrent lookups on a loaded macOS host, each killed at 5.0 s), which failed recovery and
+// the suites intermittently. The answer is lsof's own exit; lsof already breaks the only hang it
+// can hit, a kernel lstat/readlink/stat stall, with its built-in timer (lsof(8), BLOCKS AND
+// TIMEOUTS), so nothing is left for an outer timer to bound except slowness.
+export const LSOF_EXEC_OPTIONS = { windowsHide: true, maxBuffer: 32 * 1024 * 1024 } as const
+
 function scanLsofHolders(path: string): Promise<readonly number[] | null> {
   return new Promise((resolveScan) => {
-    execFile("lsof", ["-t", "--", path], { windowsHide: true, timeout: 5_000 }, (error, stdout) => {
+    execFile("lsof", ["-t", "--", path], LSOF_EXEC_OPTIONS, (error, stdout) => {
       const listed = stdout.trim()
       if (listed.length > 0) {
         const lines = listed.split(/\r?\n/)
