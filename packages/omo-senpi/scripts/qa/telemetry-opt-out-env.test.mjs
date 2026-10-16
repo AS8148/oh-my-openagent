@@ -85,7 +85,7 @@ function shippedHelperReferences(pluginRoot) {
     .filter((entry) => entry.isFile() && !join(entry.parentPath, entry.name).includes("node_modules"))
     .map((entry) => join(entry.parentPath, entry.name))
   const leaking = shipped.filter((path) => /telemetry-opt-out-env|withTelemetryOptOut|telemetryLocalSinkEnv/u.test(readFileSync(path, "latin1")))
-  return { scanned: shipped.length, leaking: leaking.map((path) => relative(pluginRoot, path)) }
+  return { scanned: shipped.length, leaking: leaking.map((path) => relative(pluginRoot, path)).sort() }
 }
 
 describe("the QA helper never ships", () => {

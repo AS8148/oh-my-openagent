@@ -728,7 +728,7 @@ describe("OmO Native telemetry component integration", () => {
       let fanIn: ((name: string, properties: Record<string, unknown>) => void) | undefined
       const original = parallelSummaryModule.registerOmoNativeParallelSummary
       const spy = spyOn(parallelSummaryModule, "registerOmoNativeParallelSummary").mockImplementation((pi, options) => {
-        fanIn = options.captureEvent
+        fanIn = options.captureEvent as unknown as (name: string, properties: Record<string, unknown>) => void
         return original(pi, options)
       })
       const pi = new FakeExtensionAPI()
