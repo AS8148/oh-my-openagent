@@ -360,6 +360,28 @@ describe("notificationMessages", () => {
     }])
   })
 
+  test("#given categories named after a builtin and a configured agent #when notices are built #then one warning names each ignored category key and its agents key", () => {
+    // given
+    const config: SenpiOmoConfigResult = {
+      config: {
+        categories: { "plan-consultant": { model: "omo-mock/mock-1" }, scout: { model: "omo-mock/mock-2" }, quick: { model: "omo-mock/mock-3" } },
+        agents: { scout: { description: "Project scout" } },
+      },
+      diagnostics: [],
+      layers: [],
+      sources: [],
+    }
+
+    // when
+    const notices = notificationMessages(quietMigration, config)
+
+    // then
+    expect(notices).toEqual([{
+      message: 'OmO Native: categories."plan-consultant" is not read for subagent_type "plan-consultant" spawns; put its model chain under agents."plan-consultant".models; categories."scout" is not read for subagent_type "scout" spawns; put its model chain under agents."scout".models',
+      type: "warning",
+    }])
+  })
+
   test("#given only canonical and custom agent keys #when notices are built #then no alias-deprecated notice is produced", () => {
     // given
     const config: SenpiOmoConfigResult = {
