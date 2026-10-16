@@ -36,16 +36,25 @@ const sameItem = (a: WireItem, b: WireItem): boolean => a.key === b.key && a.ops
 export async function capture(deps: EngineDeps, journal: SyncJournal): Promise<number> {
   const keys = [...new Set([...deps.store.keys(), ...(await workingKeys(deps.repo.root))])].sort()
   const captured: WireItem[] = []
+  const texts = new Map<string, string | null>()
   for (const key of keys) {
-    const ops = await deps.store.capture(key, await readWorking(deps.repo.root, key))
-    if (ops !== null) captured.push({ key, ops: toBase64(ops) })
+    const text = await readWorking(deps.repo.root, key)
+    const ops = await deps.store.capture(key, text)
+    if (ops === null) continue
+    captured.push({ key, ops: toBase64(ops) })
+    texts.set(key, text)
   }
   if (captured.length === 0) return 0
   const pending = await journal.pending()
   const fresh = captured.filter((c) => !pending.items.some((p) => sameItem(p, c)))
   await journal.setPending({ ...pending, items: [...pending.items, ...fresh] })
   deps.fault?.("captured")
-  for (const item of captured) await deps.store.apply(item.key, fromBase64(item.ops))
+  for (const item of captured) {
+    await deps.store.apply(item.key, fromBase64(item.ops))
+    // The captured text is now what the item's doc holds; without this the next capture sees the
+    // same edit again and pushes it again (and a restarted device would not reload the item).
+    await deps.store.markMaterialized(item.key, texts.get(item.key) ?? null)
+  }
   await deps.store.persist()
   return captured.length
 }
