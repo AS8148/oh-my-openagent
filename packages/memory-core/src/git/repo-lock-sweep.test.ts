@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test, setDefaultTimeout } from "bun:test"
 import { spawn, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync, readFileSync, realpathSync } from "node:fs"
@@ -14,6 +14,11 @@ import { assertRepoIntegrity, git } from "../concurrency/two-process-kit.test-su
 import { GitMemoryRepo } from "./repo"
 import { sweepStrandedGitLockFiles } from "./repo-lock-sweep"
 import { findOpenFileHolderPids, unreadableFdDirMeansHeld } from "./open-file-holders"
+import { SAME_UID_GIT_UNINSPECTABLE } from "./host-scan-blind.test-support"
+
+// A holder scan answers within LSOF_ANSWER_BOUND_MS (60 s) on a loaded macOS host; the default 20 s
+// test budget would cut a correct but slow answer short.
+setDefaultTimeout(90_000)
 
 // omo #10199 review HIGH 1: the stranded-lock sweep's premise - "git keeps the lock fd open from
 // create until rename" - is false. Git's lockfile API closes the descriptor after writing the lock
@@ -82,7 +87,7 @@ async function releaseAndAwaitCommit(commit: ChildProcess, releasePath: string, 
 }
 
 describe("stranded git lock sweep vs LIVE writers (omo #10199 review)", () => {
-  test.skipIf(process.platform === "win32")("#given a LIVE commit -a parked in its commit-msg hook holding a closed-fd index.lock #when the sweep runs #then the lock survives and the commit lands", async () => {
+  test.skipIf(process.platform === "win32" || SAME_UID_GIT_UNINSPECTABLE)("#given a LIVE commit -a parked in its commit-msg hook holding a closed-fd index.lock #when the sweep runs #then the lock survives and the commit lands", async () => {
     // #given: a production-shaped memory repo (GitMemoryRepo.init installs the real hooks) and a
     // commit-msg hook that parks the commit AFTER the -a shape's prepare_index wrote index.lock
     // and CLOSED its fd: lsof sees no holder while the commit is live (verified: git 2.50.1).
@@ -131,7 +136,7 @@ describe("stranded git lock sweep vs LIVE writers (omo #10199 review)", () => {
     await assertRepoIntegrity(dir)
   }, 30_000)
 
-  test.skipIf(process.platform === "win32")("#given a LIVE commit -a parked in its reference-transaction hook holding closed-fd ref locks #when the sweep runs #then the ref lock survives and the commit lands", async () => {
+  test.skipIf(process.platform === "win32" || SAME_UID_GIT_UNINSPECTABLE)("#given a LIVE commit -a parked in its reference-transaction hook holding closed-fd ref locks #when the sweep runs #then the ref lock survives and the commit lands", async () => {
     // #given: the files ref backend closes each ref lock after write_ref_to_lockfile; the
     // reference-transaction hook's "prepared" stage runs while refs/heads/main.lock exists with
     // no open holder (verified: git 2.50.1, commit -a shape).
@@ -224,7 +229,7 @@ describe("stranded git lock sweep vs LIVE writers (omo #10199 review)", () => {
     expect(existsSync(lockPath)).toBe(true)
   }, 30_000)
 
-  test.skipIf(process.platform === "win32")("#given a memory-write lock taken over from a proven-dead recorded owner #when the sweep runs under that lock #then a killed git holder's index.lock is reclaimed", async () => {
+  test.skipIf(process.platform === "win32" || SAME_UID_GIT_UNINSPECTABLE)("#given a memory-write lock taken over from a proven-dead recorded owner #when the sweep runs under that lock #then a killed git holder's index.lock is reclaimed", async () => {
     // #given: the healing path the sweep exists for. A previous memory writer died (kernel-proof:
     // the pid is gone), this process took the writer lock over through the dead-owner protocol,
     // and a killed git holder left index.lock behind. Only here is reclamation allowed.

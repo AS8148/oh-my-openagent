@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test, setDefaultTimeout } from "bun:test"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync, realpathSync } from "node:fs"
@@ -11,6 +11,11 @@ import { buildIdentityPaths } from "../identity"
 import { acquireLock, createLockRecord, memoryMaintenanceLockPath, memoryWriterLockPath, releaseLock } from "../locks"
 import { exitedWithin, probeUntil } from "../locks/process-liveness.test-support"
 import { sweepStrandedGitLockFiles } from "./repo-lock-sweep"
+import { SAME_UID_GIT_UNINSPECTABLE } from "./host-scan-blind.test-support"
+
+// A holder scan answers within LSOF_ANSWER_BOUND_MS (60 s) on a loaded macOS host; the default 20 s
+// test budget would cut a correct but slow answer short.
+setDefaultTimeout(90_000)
 
 // omo #10199 review round 5, MEDIUM 3: a dead-owner takeover authorizes reclaiming stranded git
 // locks for THAT acquisition of THAT writer lock only. The proof must not outlive the acquisition
@@ -96,7 +101,7 @@ describe("the dead-owner reclaim authorization is scoped to one acquisition of o
     expect(existsSync(lockPath)).toBe(true)
   }, 30_000)
 
-  test.skipIf(process.platform === "win32")("#given a takeover of identity A's writer lock held #when identity B's repo is swept under B's ordinary acquisition #then B's stranded lock is kept and A's is reclaimed", async () => {
+  test.skipIf(process.platform === "win32" || SAME_UID_GIT_UNINSPECTABLE)("#given a takeover of identity A's writer lock held #when identity B's repo is swept under B's ordinary acquisition #then B's stranded lock is kept and A's is reclaimed", async () => {
     // #given
     const a = await identityWithDeadWriter("authz-a")
     const root = realpathSync.native(await mkdtemp(join(tmpdir(), "memory-sweep-authz-b-")))

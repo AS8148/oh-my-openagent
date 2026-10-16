@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test, setDefaultTimeout } from "bun:test"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync, realpathSync } from "node:fs"
@@ -13,6 +13,11 @@ import { createLockRecord, memoryWriterLockPath, withLock } from "../locks"
 import { exitedWithin } from "../locks/process-liveness.test-support"
 import { runMemoryTool, type MemoryToolLock } from "./memory"
 import { removeTree } from "../../../../test-support/remove-tree"
+import { SAME_UID_GIT_UNINSPECTABLE } from "../git/host-scan-blind.test-support"
+
+// A holder scan answers within LSOF_ANSWER_BOUND_MS (60 s) on a loaded macOS host; the default 20 s
+// test budget would cut a correct but slow answer short.
+setDefaultTimeout(90_000)
 
 // omo #10199, named regression for a field incident: a memory writer killed mid-commit right
 // after updating HEAD left a 0-byte .git/HEAD.lock. Every later write staged its files, failed on
@@ -66,7 +71,7 @@ function strandedLockIn(error: unknown): StrandedGitLockError | undefined {
 }
 
 describe("a 0-byte HEAD.lock left by a memory writer killed mid-commit (omo #10199 field incident)", () => {
-  test.skipIf(process.platform === "win32")("#given the writer that left it is proven dead #when the next memory write runs #then the lock is reclaimed and the write commits", async () => {
+  test.skipIf(process.platform === "win32" || SAME_UID_GIT_UNINSPECTABLE)("#given the writer that left it is proven dead #when the next memory write runs #then the lock is reclaimed and the write commits", async () => {
     // #given
     const setup = await repoWithZeroByteHeadLock("dead writer")
 

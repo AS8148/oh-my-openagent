@@ -231,10 +231,16 @@ jobs:
         run: bun test --timeout 20000 packages/omo-opencode packages/memory-core
 
       # Linux: memory-core's stranded-git-lock tests read the host process table. On hosted runners
-      # same-uid processes cannot be inspected, so the scans answer "unknown" and the fail-closed
-      # design keeps every lock (omo #10199, #10322). Run memory-core in an unprivileged PID
-      # namespace, where the table holds only the suite's own processes, and fail loudly when the
-      # namespace cannot be created instead of falling back to the host table.
+      # same-uid processes of other sessions cannot be inspected, so memory-core runs in an
+      # unprivileged PID namespace, and the step fails loudly when no namespace can be made instead
+      # of falling back to the host table (omo #10199). Even inside it, this runner's kernel (azure
+      # 7.0, apparmor_restrict_unprivileged_unconfined=1) gives EACCES on /proc/<pid>/fd for the
+      # user's own LIVE git processes, so the 5 rows that need the scan to answer are skipped here
+      # via OMO_CI_SAME_UID_GIT_UNINSPECTABLE. Behavior stays fail-closed (an unanswerable scan
+      # keeps the lock). Those rows run on macOS CI and on Boat inside the same
+      # `unshare -Upf --mount-proc --map-current-user` (plain Boat cannot answer either: non-dumpable
+      # same-uid systemd --user / (sd-pam) / pulseaudio / sshd). Kernel-lock liveness, which removes
+      # the /proc dependence: https://github.com/code-yeongyu/oh-my-openagent/issues/10322
       - name: Run tests (omo-opencode)
         id: root-tests-linux-1
         if: needs.ci-mode.outputs.run_heavy == 'true' && runner.os == 'Linux' && matrix.shard == '1/2'
@@ -257,7 +263,7 @@ jobs:
             exit 1
           fi
           echo "PID namespace ready ($procs processes visible)"
-          unshare -Upf --mount-proc --map-current-user -- env CI=1 bun test --timeout 20000 packages/memory-core
+          unshare -Upf --mount-proc --map-current-user -- env CI=1 OMO_CI_SAME_UID_GIT_UNINSPECTABLE=1 bun test --timeout 20000 packages/memory-core
 
       - name: Run tests with Windows telemetry
         id: root-tests-windows-1
