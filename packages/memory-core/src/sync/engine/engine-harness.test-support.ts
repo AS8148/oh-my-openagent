@@ -6,6 +6,7 @@ import { copyFile, cp, mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+import { createGitSyncRepo } from "./adapters/git-sync-repo"
 import { SyncEngine, type EngineFault } from "./engine"
 import { FakeSealer, FakeVerifier } from "./fake-crypto.test-support"
 import type { FakeSyncServer } from "./fake-server.test-support"
@@ -37,28 +38,7 @@ export async function gitRepo(root: string, existing = false): Promise<SyncRepo>
     await git(root, "add", ".gitkeep")
     await git(root, "commit", "-q", "-m", "init")
   }
-  return {
-    root,
-    gitDir: join(root, ".git"),
-    head: async () => git(root, "rev-parse", "HEAD"),
-    headTree: async () => git(root, "rev-parse", "HEAD^{tree}"),
-    stageTree: async (paths) => {
-      const index = join(root, ".git", "omo-sync-index.tmp")
-      await copyFile(join(root, ".git", "index"), index)
-      try {
-        await gitWith(root, { GIT_INDEX_FILE: index }, "add", "-A", "--", ...paths)
-        return await gitWith(root, { GIT_INDEX_FILE: index }, "write-tree")
-      } finally {
-        await rm(index, { force: true })
-      }
-    },
-    commit: async (paths, message) => {
-      await git(root, "add", "-A", "--", ...paths)
-      await git(root, "-c", "user.name=OmO Sync", "-c", "user.email=sync@omo.invalid", "commit", "-q", "-m", message, "--", ...paths)
-      return git(root, "rev-parse", "HEAD")
-    },
-    hasSyncCommit: async (range) => (await git(root, "log", "--format=%(trailers:key=Sync-Seq,valueonly)", "HEAD")).split("\n").includes(range),
-  }
+  return createGitSyncRepo({ root })
 }
 
 export class ManualClock implements Clock {
