@@ -76,10 +76,11 @@ test("a call the client gives up on is cancelled at the daemon, so the session s
   // When the client's wait runs out
   const handle = client.callWithHandle("tool.evaluate", { session_id: "s", expression: "new Promise(() => {})" })
   await expect(handle.promise).rejects.toMatchObject({ code: "timeout" })
-  const timedOut = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("waited 2 s for the cancel frame, never sent")), 2_000),
-  )
-  const cancel = await Promise.race([daemon.cancelled, timedOut])
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("waited 2 s for the cancel frame, never sent")), 2_000)
+  })
+  const cancel = await Promise.race([daemon.cancelled, timedOut]).finally(() => clearTimeout(timer))
 
   // Then the daemon is told to stop that call
   expect(cancel.params).toEqual({ rpc_id: handle.rpcId })
