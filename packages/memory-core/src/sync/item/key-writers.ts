@@ -70,7 +70,10 @@ export function writeNatural(fork: LoroDoc, key: string, value: FieldValue): voi
  * value shows beside every active one. A value that is already active adds nothing.
  */
 export function addRegisterValue(fork: LoroDoc, key: string, value: string, slot = 0): void {
-  if (activeReg(readKeyState(fork, key).reg).some((entry) => entry.value === value)) return
+  // Any entry that ever held this value, active or superseded, means it was written already. A
+  // superseded one was replaced by a writer who saw it, so re-adding it (a replay, a stale copy)
+  // would let an older write come back above a newer one (review r9 LOW 1).
+  if (readKeyState(fork, key).reg.some((entry) => entry.value === value)) return
   fork.getMap(fmName(key, "reg")).set(newTag(fork, value, slot), { v: value, s: [] })
 }
 

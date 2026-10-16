@@ -74,6 +74,35 @@ describe("M1: adoption replays through the guarded capture entry point", () => {
     })
   }, DEVICE_TIMEOUT_MS)
 
+  test("a replay never brings back a register value a peer already replaced (older never overwrites newer)", async () => {
+    await withDevices(2, async ([device, peer]) => {
+      if (device === undefined || peer === undefined) throw new Error("no devices")
+      const doc = await createDeviceItemDoc(device)
+      const other = await createDeviceItemDoc(peer)
+      try {
+        const seed = await captureOnDevice(device, "n.md", doc, "", [], "---\nd: space\n---\nx\n")
+        if (seed !== null) doc.import(seed)
+        const base = renderDocContent(doc)
+        const f0 = itemFrontier(doc)
+        const only: readonly Snapshot[] = [{ path: SIDE, text: "---\nd: laptop\n---\nx\n" }]
+        const first = await adopt(device, doc, base, f0, only)
+        if (first.update !== null) doc.import(first.update)
+        other.import(doc.export({ mode: "snapshot" }))
+        const seen = renderDocContent(other)
+        const replaced = await captureOnDevice(peer, "n.md", other, seen, itemFrontier(other), "---\nd: z\n---\nx\n")
+        if (replaced !== null) doc.import(replaced)
+        expect(active(doc, "d")).toEqual(["z"])
+        const replay = await captureOnDevice(device, "n.md", doc, base, f0, first.plan.workingText, first.plan.extraRegisterValues)
+        if (replay !== null) doc.import(replay)
+        expect(active(doc, "d")).toEqual(["z"])
+        expect(renderDocContent(doc)).toBe("---\nd: z\n---\nx\n")
+      } finally {
+        doc.free()
+        other.free()
+      }
+    })
+  }, DEVICE_TIMEOUT_MS)
+
   test("register values alone, over an unchanged body, still land through the entry point", async () => {
     await withDevices(1, async ([device]) => {
       if (device === undefined) throw new Error("no device")
