@@ -507,10 +507,72 @@ describe("OmO Native telemetry component integration", () => {
     })
   })
 
+  // #10226 H1: every event the opted-out process sees must stop at the consent gate. Deriving a session
+  // hash alone persists the hashing salt, so the gate has to hold before any hash is taken, not only
+  // before a send.
+  for (const [label, env] of [
+    ["OMO_DISABLE_TELEMETRY=1", { OMO_DISABLE_TELEMETRY: "1" }],
+    ["DO_NOT_TRACK=1", { DO_NOT_TRACK: "1" }],
+  ] as const) {
+    test(`#given an opted-out process (${label}) #when it sees every event kind and is killed #then it derives no session hash, writes no file, and the next enabled process sends nothing of it`, async () => {
+      await withTempAgentDir(async (agentDir) => {
+        writeInventory(agentDir)
+        const stateDir = join(agentDir, "omo-senpi", "omo-native")
+        const recorder = createTransportRecorder()
+        const hashed: string[] = []
+        const register = (extraEnv: Record<string, string>) => {
+          const pi = new FakeExtensionAPI()
+          createOmoNativeTelemetryComponent({
+            rawTurnSampleRate: 1,
+            env: { ...createEnabledEnv(agentDir), ...extraEnv },
+            hashSessionId: (raw) => {
+              hashed.push(raw)
+              return `hashed:${raw}`
+            },
+            isConfigEnabled: () => true,
+            now: FIXED_NOW,
+            osProvider: createOsProvider("gate-host"),
+            scheduleConsentCheck: () => () => undefined,
+            stateDir,
+            transportFactory: recorder.factory,
+          }).register(pi, { config: pi, logger: createSilentLogger() })
+          return pi
+        }
+
+        // given: the opted-out process runs a full turn cycle and dies without session_shutdown
+        const optedOut = register(env)
+        const session = context("opted-out")
+        await optedOut.dispatch("session_start", { type: "session_start", reason: "startup" }, session)
+        await optedOut.dispatch("input", { type: "input", inputId: "input-1", text: "ulw plan", source: "interactive" }, session)
+        await optedOut.dispatch("input_disposition", { type: "input_disposition", inputId: "input-1", disposition: "started" }, session)
+        await optedOut.dispatch("turn_end", turnEnd(), session)
+        await optedOut.dispatch("tool_result", toolResult(), session)
+        await optedOut.dispatch("turn_end", turnEnd(), session)
+        killWithoutShutdown(stateDir)
+
+        // then: nothing was derived, written, or sent
+        expect(hashed).toEqual([])
+        expect(existsSync(stateDir) ? readdirSync(stateDir, { recursive: true }) : []).toEqual([])
+        expect(nativeMessages(recorder.messages)).toEqual([])
+
+        // when: an enabled process starts, records a turn and quits
+        const optedIn = register({})
+        await optedIn.dispatch("session_start", { type: "session_start", reason: "startup" }, context("opted-in"))
+        await optedIn.dispatch("turn_end", turnEnd(), context("opted-in"))
+        await optedIn.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, context("opted-in"))
+
+        // then: only the enabled session reached the wire
+        expect(nativeMessages(recorder.messages).filter(({ properties }) => properties?.$session_id === "hashed:opted-out")).toEqual([])
+        expect(rollupFiles(stateDir)).toEqual([])
+      })
+    })
+  }
+
   // #10229: opt-out used to silence only the opted-out process. Its rollup file still reached disk on
   // every turn, and the next opted-in process recovered it and sent it.
   for (const [label, optOut] of [
     ["DO_NOT_TRACK=1", { env: { DO_NOT_TRACK: "1" }, configEnabled: true }],
+    ["OMO_DISABLE_TELEMETRY=1", { env: { OMO_DISABLE_TELEMETRY: "1" }, configEnabled: true }],
     ["config telemetry disabled", { env: {}, configEnabled: false }],
     ["OMO_DISABLE_POSTHOG=1", { env: { OMO_DISABLE_POSTHOG: "1" }, configEnabled: true }],
     ["OMO_SENPI_SEND_ANONYMOUS_TELEMETRY=0", { env: { OMO_SENPI_SEND_ANONYMOUS_TELEMETRY: "0" }, configEnabled: true }],

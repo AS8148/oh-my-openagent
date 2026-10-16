@@ -22,7 +22,8 @@ export const OMO_NATIVE_POSTHOG_API_KEY = "phc_r6UYQzNZcGYSzKw4PxCiVrZepGqV3dw9q
 // `machine_hash` (the v3 distinct id) rides along until MACHINE_HASH_SUNSET, and `ci` marks CI runs.
 export const OMO_NATIVE_SCHEMA_VERSION = 4
 
-// The last UTC day `machine_hash` ships: the 60-day window that joins pre-v4 rows to their install.
+// The first UTC day `machine_hash` no longer ships (exclusive; the last day it ships is 2026-12-14):
+// the 60-day window that joins pre-v4 rows to their install.
 export const MACHINE_HASH_SUNSET = "2026-12-15"
 const MACHINE_HASH_SUNSET_MS = Date.parse(`${MACHINE_HASH_SUNSET}T00:00:00.000Z`)
 

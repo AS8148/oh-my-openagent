@@ -69,6 +69,8 @@ export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
 export const CONSENT_CACHE_MS = 5_000
 /** How often a persisted window re-checks consent, so an opt-out deletes it even if no turn follows. */
 export const CONSENT_CHECK_INTERVAL_MS = 5_000
+/** What a session hashes to while consent is off: no salt is read or created, and no event carrying it is sent. */
+const OPTED_OUT_SESSION_HASH = "opted-out"
 
 export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryComponentOptions = {}): OmoSenpiComponent {
   const env = options.env ?? process.env
@@ -76,6 +78,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
   const state: SharedState = {}
   const client: Pick<EventTelemetryClient, "captureEvent"> = {
     captureEvent(name, properties) {
+      if (properties.$session_id === OPTED_OUT_SESSION_HASH) return
       if (isOmoNativeEventName(name)) state.capture?.(name, properties)
     },
   }
@@ -92,28 +95,10 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       // counted as one, nor report the crashes and daily activity the real session reports.
       if (isHostWarmupSession(pi)) return
 
-      // Must precede the session component: its `session_shutdown` handler shuts the client down,
-      // which clears `state.capture`, after which `parallelism_summary` would capture nothing.
-      registerOmoNativeParallelSummary(pi, {
-        captureEvent: client.captureEvent,
-        hashSessionId: options.hashSessionId ?? hashSessionId,
-      })
-
-      // Same ordering constraint as the parallelism summary: the session component's shutdown
-      // handler clears `state.capture`, so this registration must precede it. Its own detach runs
-      // after the emission because it is registered second.
-      const detachKibitzerSummary = registerOmoNativeKibitzerSummary(pi, {
-        captureEvent: client.captureEvent,
-        hashSessionId: options.hashSessionId ?? hashSessionId,
-      })
-      pi.on("session_shutdown", () => {
-        detachKibitzerSummary()
-      })
-
-      // Same ordering constraint again: the final summary window must be captured before the session
-      // component's shutdown handler clears `state.capture`.
-      // Consent is the session component's own decision, taken at registration and again before every
-      // summary write: an opted-out session must leave nothing on disk that a later process could send.
+      // Consent is the session component's own decision (`isOmoNativeTelemetryEnabled`, the single gate),
+      // taken at registration and again before every summary write and every session hash: an opted-out
+      // session must leave nothing on disk that a later process could send, and deriving a hash alone
+      // persists the hashing salt.
       // Every persisted window carries the cwd its consent was read for, and recovery re-reads consent
       // for that cwd: a later process in another project cannot send a window its own project opted out of.
       const consentOptions = { isConfigEnabled: options.isConfigEnabled }
@@ -129,6 +114,29 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
         cached = { cwd: consentCwd, at, value: readConsent(consentCwd) }
         return cached.value
       }
+      const hashSession = (rawId: string): string =>
+        currentConsent(false) ? (options.hashSessionId ?? hashSessionId)(rawId) : OPTED_OUT_SESSION_HASH
+
+      // Must precede the session component: its `session_shutdown` handler shuts the client down,
+      // which clears `state.capture`, after which `parallelism_summary` would capture nothing.
+      registerOmoNativeParallelSummary(pi, {
+        captureEvent: client.captureEvent,
+        hashSessionId: hashSession,
+      })
+
+      // Same ordering constraint as the parallelism summary: the session component's shutdown
+      // handler clears `state.capture`, so this registration must precede it. Its own detach runs
+      // after the emission because it is registered second.
+      const detachKibitzerSummary = registerOmoNativeKibitzerSummary(pi, {
+        captureEvent: client.captureEvent,
+        hashSessionId: hashSession,
+      })
+      pi.on("session_shutdown", () => {
+        detachKibitzerSummary()
+      })
+
+      // Same ordering constraint again: the final summary window must be captured before the session
+      // component's shutdown handler clears `state.capture`.
       const summary = createSessionSummaryRecorder({
         captureEvent: client.captureEvent,
         store: createSummaryStore({ stateDir }),
@@ -143,18 +151,18 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       pi.on("session_shutdown", (payload, eventCtx) => {
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
         consentCwd = cwdOf(eventCtx)
-        summary.finish(state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId), reason)
+        summary.finish(state.sessionHash ?? hashForContext(eventCtx, hashSession), reason)
         summary.dispose()
       })
 
       createOmoNativePromptComponent({
         client,
-        hashSessionId: options.hashSessionId,
+        hashSessionId: hashSession,
       }).register(pi, ctx)
 
       registerOmoNativeComputerUseTelemetry(pi, {
         captureEvent: client.captureEvent,
-        hashSessionId: options.hashSessionId,
+        hashSessionId: hashSession,
         ...(options.computerUseTelemetryObservers === undefined
           ? {}
           : { observers: options.computerUseTelemetryObservers }),
@@ -172,7 +180,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       const detachDelegation = createOmoNativeDelegationCapture({
         captureEvent: client.captureEvent,
         ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
-        hashSessionId: options.hashSessionId ?? hashSessionId,
+        hashSessionId: hashSession,
         observers: options.taskTerminalObservers ?? sharedTaskTerminalObservers(),
         stateDir: options.taskStateDir ?? resolveTaskStateDir(pi),
       })
@@ -183,7 +191,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       pi.on("turn_end", (payload, eventCtx) => {
         if (!isTurnEndEvent(payload)) return
         consentCwd = cwdOf(eventCtx)
-        const sessionHash = state.sessionHash ?? hashForContext(eventCtx, options.hashSessionId)
+        const sessionHash = state.sessionHash ?? hashForContext(eventCtx, hashSession)
         createOmoNativeTurnHandler({
           client,
           diagnostics: options.diagnostics,
@@ -195,7 +203,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       registerOmoNativeToolTelemetry(pi, {
         captureEvent: client.captureEvent,
         diagnostics: (message, details) => ctx.logger.warn(message, details),
-        hashSessionId: options.hashSessionId,
+        hashSessionId: hashSession,
         skillsRoot: options.skillsRoot,
       })
 
@@ -299,18 +307,15 @@ function cwdOf(eventCtx: unknown): string | undefined {
   return typeof cwd === "string" && cwd.length > 0 ? cwd : undefined
 }
 
-function hashForContext(
-  value: unknown,
-  hash: ((rawId: string) => string) | undefined,
-): string {
+function hashForContext(value: unknown, hash: (rawId: string) => string): string {
   if (isRecord(value) && isRecord(value.sessionManager)) {
     const getter = value.sessionManager.getSessionId
     if (typeof getter === "function") {
       const sessionId: unknown = getter.call(value.sessionManager)
-      if (typeof sessionId === "string" && sessionId.length > 0) return (hash ?? hashSessionId)(sessionId)
+      if (typeof sessionId === "string" && sessionId.length > 0) return hash(sessionId)
     }
   }
-  return (hash ?? hashSessionId)("unknown")
+  return hash("unknown")
 }
 
 function isNativeTransport(options: TelemetryTransportOptions): boolean {
