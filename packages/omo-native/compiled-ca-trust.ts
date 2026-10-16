@@ -54,6 +54,8 @@ export interface EngineTrustReport {
   readonly installed: boolean
   readonly bundled: number
   readonly system: number
+  /** Certificates `NODE_EXTRA_CA_CERTS` loaded. */
+  readonly ambient: number
   readonly extra: number
 }
 
@@ -61,6 +63,8 @@ export interface EngineTrustReport {
  * Installs bundled + OS store + `NODE_EXTRA_CA_CERTS` (which Bun loads natively before this runs) +
  * the validated extras. `NODE_EXTRA_CA_CERTS` is honored because standalone CLI users behind a
  * corporate proxy set it; the desktop strips it from the engines it starts (omo-desktop-app#2766).
+ * Those ambient certificates are taken as Node loaded them, without the `CA:TRUE` and strict-parse
+ * checks the `OMO_EXTRA_CA_CERTIFICATES` extras get, matching standard Node behaviour.
  * `NODE_USE_SYSTEM_CA=1` makes `BUN_BE_BUN` children, which never run this entry, read the OS store;
  * they also inherit `NODE_EXTRA_CA_CERTS`, but not the `OMO_EXTRA_CA_CERTIFICATES` extras (known limit).
  * `OMO_EXTRA_CA_CERTIFICATES` stays in the environment: the host daemon is a grandchild and needs it.
@@ -70,11 +74,11 @@ export function installEngineCaTrust(env: NodeJS.ProcessEnv = process.env, tls: 
   const extra = raw === undefined || raw === "" ? [] : parseExtraCaCertificates(raw)
   env.NODE_USE_SYSTEM_CA = "1"
   if (typeof tls.getCACertificates !== "function" || typeof tls.setDefaultCACertificates !== "function") {
-    return { installed: false, bundled: 0, system: 0, extra: 0 }
+    return { installed: false, bundled: 0, system: 0, ambient: 0, extra: 0 }
   }
   const bundled = tls.getCACertificates("bundled")
   const system = tls.getCACertificates("system")
   const ambient = tls.getCACertificates("extra")
   tls.setDefaultCACertificates([...new Set([...bundled, ...system, ...ambient, ...extra])])
-  return { installed: true, bundled: bundled.length, system: system.length, extra: extra.length }
+  return { installed: true, bundled: bundled.length, system: system.length, ambient: ambient.length, extra: extra.length }
 }
