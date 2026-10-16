@@ -104,6 +104,9 @@ describe("a child whose session the host replaces", () => {
     expect(record?.status).toBe("interrupted")
     expect(record?.interrupt_cause).toBe("session_replaced")
     expect(record?.error_message).toContain("task_send")
+    // The task_send the message asks for reaches the new session only if the record followed it.
+    expect(record?.host_session?.session_path).toBe(sessionFile)
+    expect(record?.child_session_id).toBe("durable-replaced-1")
   })
 
   test("#given a running child #when the parent interrupts it itself #then it ends interrupted with no cause, so the parent is not notified", async () => {
