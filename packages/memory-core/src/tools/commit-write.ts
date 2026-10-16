@@ -1,5 +1,5 @@
 import { readFile } from "../fs/resilient"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import { NoEffectiveChangesError, MemorySecretError, type GitCommitAuthor, type GitMemoryRepo } from "../git"
 import { StrandedGitLockError } from "../git/repo-lock-sweep"
@@ -65,12 +65,16 @@ export async function commitMemoryWrite(options: CommitMemoryWriteOptions): Prom
   })
 }
 
-// The kept lock stopped `git add`, so the index never changed: put back only this write's files
-// so the retry after /memory unlock starts from a clean tree. If even that fails, both problems are
-// reported and the lock is left exactly where it is.
+// Put back only this write's files so the retry after /memory unlock starts clean. A kept index.lock
+// stopped `git add`, so the index never changed and only the working tree is restored (the index
+// cannot be touched while that lock exists). Any other kept lock (a ref, HEAD or packed-refs lock)
+// let `git add` stage the write and failed at commit, so the index is restored as well. If even
+// that fails, both problems are reported and the lock is left exactly where it is.
 async function undoBehindKeptLock(repo: GitMemoryRepo, paths: readonly string[], kept: StrandedGitLockError): Promise<void> {
+  const indexLockKept = kept.paths.some((path) => basename(path) === "index.lock" && basename(dirname(path)) === ".git")
   try {
-    await restoreWorktreeFromHead(repo, paths)
+    if (indexLockKept) await restoreWorktreeFromHead(repo, paths)
+    else await repo.restorePaths(paths)
   } catch (restoreError) {
     const reason = restoreError instanceof Error ? restoreError.message : String(restoreError)
     throw new MemoryToolError(

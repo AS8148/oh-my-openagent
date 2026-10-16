@@ -13,12 +13,20 @@ function pidList(pids: readonly number[] | null, unknown: string): string {
   return pids.length === 0 ? "none" : pids.map(String).join(", ")
 }
 
+function describeWriter(writer: UnlockFindings["writer"]): string {
+  switch (writer.kind) {
+    case "none": return "none"
+    case "alive": return `pid ${writer.pid}${writer.pid === process.pid ? " (this session's process)" : ""}`
+    case "unknown": return "could not be determined on this system"
+  }
+}
+
 function describeFindings(findings: UnlockFindings): string[] {
   return [
     `Lock: ${findings.lockPath}`,
     `- processes holding it open: ${pidList(findings.holders, "could not be determined on this system")}`,
     `- processes working in the repository: ${pidList(findings.repoUsers, "could not be determined on this system")}`,
-    `- live memory writer: ${findings.writerPid === null ? "none visible" : `pid ${findings.writerPid}`}`,
+    `- live memory writer: ${describeWriter(findings.writer)}`,
   ]
 }
 
