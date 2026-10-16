@@ -9,6 +9,7 @@
 // whole values (a register conflict) instead of being merged character by character.
 
 import { Document, Scalar, YAMLSeq, isMap, isScalar, isSeq, parseDocument, stringify } from "yaml"
+import type { Node } from "yaml"
 
 export type FmValue =
   | { readonly kind: "set"; readonly elements: readonly string[]; readonly flow: string }
@@ -26,17 +27,11 @@ export interface ParsedItemText {
 }
 
 export function splitItem(text: string): ParsedItemText {
-  if (!text.startsWith("---\n")) return { fm: null, body: text }
-  const end = text.indexOf("\n---", 4)
-  if (end < 0) return { fm: null, body: text }
-  const nl = text.indexOf("\n", end + 4)
-  const closeEnd = nl < 0 ? text.length : nl
-  if (text.slice(end + 4, closeEnd).trim() !== "") return { fm: null, body: text }
-  const header = text.slice(4, end)
-  if (header.trim() === "") return { fm: null, body: text }
-  const fm = parseHeader(header)
+  const parts = splitHeader(text)
+  if (parts === null) return { fm: null, body: text }
+  const fm = parseHeader(parts.header)
   if (fm === null) return { fm: null, body: text }
-  return { fm, body: nl < 0 ? "" : text.slice(nl + 1) }
+  return { fm, body: parts.body }
 }
 
 /**
@@ -52,43 +47,54 @@ export function renderScalar(value: string | number | boolean): string {
 }
 
 /**
- * Canonical frontmatter line(s) for one key (sync-design §2). The pair is built through
- * the yaml document builder so multiline text lands as a properly indented block scalar
- * and any joined text is quoted exactly when re-parsing needs it. A verbatim value is
- * already a serialized YAML scalar (a lone register's stored form): it is emitted as-is
- * when it re-parses as one scalar, and falls back to the string form otherwise. Capture
- * compares keys against this render, so the same builder keeps the round trip a zero-op
- * fixed point.
+ * One frontmatter value as a YAML node (spec #454, lead decision r6): a lone register's
+ * canonical source is parsed into its node; several register values are one double-quoted
+ * string; a set's element sources become a sequence of their nodes. Nothing is concatenated
+ * as text, and a source that does not parse is a broken invariant: it throws, it is never
+ * written as if it were the value.
  */
-export function renderEntry(key: string, value: string | readonly string[], verbatim = false): string {
-  if (verbatim && typeof value === "string" && !value.includes("\n---")) {
-    const candidate = `${renderScalar(key)}: ${value}`
-    const check = parseDocument(candidate, { schema: "core" })
-    if (check.errors.length === 0) {
-      const contents = check.contents
-      if (contents !== null && isMap(contents) && contents.items.length === 1) {
-        const pair = contents.items[0]
-        if (pair !== undefined && (isScalar(pair.value) || isMap(pair.value) || isSeq(pair.value))) return candidate
-      }
-    }
-  }
-  const doc = new Document({}, { schema: "core" })
-  // A verbatim source that cannot be emitted as-is is parsed and its VALUE written; a source is
-  // never quoted as if it were the value (t05 report).
-  doc.set(key, typeof value === "string" ? (verbatim ? parsedSource(value) : doubleQuoted(value)) : sequenceOf(value))
-  const out = stringify(doc, { lineWidth: 0 }).trimEnd()
-  if (doc.errors.length > 0) throw new Error(`renderEntry: cannot render key ${JSON.stringify(key)}: ${doc.errors[0]?.message}`)
-  return out
+export function valueNode(value: string | readonly string[], verbatim: boolean): Node {
+  if (typeof value !== "string") return sequenceOf(value)
+  return verbatim ? sourceNode(value) : doubleQuoted(value)
 }
 
-/**
- * Set elements are stored as canonical YAML sources. Re-parse each one into its node so the
- * emitter keeps its exact type and style (a number stays a number, a quoted string stays
- * quoted, a flow map stays a flow map) and indents block scalars under the dash.
- */
-function parsedSource(source: string): unknown {
+/** The frontmatter block (without the --- fences) for `entries`, emitted as ONE YAML document. */
+export function emitFrontmatter(entries: readonly { readonly key: string; readonly node: Node }[]): string {
+  const doc = new Document({}, { schema: "core" })
+  for (const { key, node } of entries) doc.set(key, node)
+  return stringify(doc, { lineWidth: 0 }).trimEnd()
+}
+
+export function renderEntry(key: string, value: string | readonly string[], verbatim = false): string {
+  return emitFrontmatter([{ key, node: valueNode(value, verbatim) }])
+}
+
+/** The raw frontmatter source and the body of `text`, or null when `text` has no frontmatter fences. */
+export function splitHeader(text: string): { readonly header: string; readonly body: string } | null {
+  if (!text.startsWith("---\n")) return null
+  const end = text.indexOf("\n---", 4)
+  if (end < 0) return null
+  const nl = text.indexOf("\n", end + 4)
+  const closeEnd = nl < 0 ? text.length : nl
+  if (text.slice(end + 4, closeEnd).trim() !== "") return null
+  const header = text.slice(4, end)
+  if (header.trim() === "") return null
+  return { header, body: nl < 0 ? "" : text.slice(nl + 1) }
+}
+
+/** The element sources of a canonical source that is a sequence, or null for any other value. */
+export function sequenceElements(source: string): string[] | null {
   const parsed = parseDocument(source, { schema: "core" })
-  return parsed.errors.length === 0 ? parsed.toJS() : source
+  if (parsed.errors.length > 0 || !isSeq(parsed.contents)) return null
+  const items: unknown = parsed.toJS()
+  return Array.isArray(items) ? items.map(elementSource) : null
+}
+
+function sourceNode(source: string): Node {
+  const parsed = parseDocument(source, { schema: "core" })
+  const node = parsed.contents
+  if (parsed.errors.length > 0 || node === null) throw new Error(`invalid canonical source: ${JSON.stringify(source)}`)
+  return node
 }
 
 function doubleQuoted(value: string): Scalar {
@@ -99,11 +105,7 @@ function doubleQuoted(value: string): Scalar {
 
 function sequenceOf(sources: readonly string[]): YAMLSeq {
   const seq = new YAMLSeq()
-  for (const source of sources) {
-    const parsed = parseDocument(source, { schema: "core" })
-    const node = parsed.errors.length === 0 ? parsed.contents : null
-    seq.items.push(node ?? source)
-  }
+  for (const source of sources) seq.items.push(sourceNode(source))
   return seq
 }
 

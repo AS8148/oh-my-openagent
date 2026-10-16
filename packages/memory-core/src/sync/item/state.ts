@@ -1,15 +1,10 @@
 // Current per-key container contents and their combination under the kind rule
-// (sync-design §2): a key's kind (register or set) is fixed by its earliest first-write op,
-// and content in the container of the other kind renders converted into that kind, losslessly.
-// A register is multi-value: concurrent writes all stay active until a write that saw them
-// supersedes them, and registerValues is the one place that decides how active entries
-// resolve (review r5: one site for the register rule). Joined values are PLAIN text here;
-// render.ts serializes them once through renderEntry (review r1 #3).
-// Register and set-map containers hold the register's serialized form (its exact source
-// spelling, e.g. `true` stays "true", a colon-bearing string stays '"a: b"'); the kind
-// rule strips one renderScalar layer so a scalar register contributes bare text.
-// Both render.ts and capture.ts read state through here so capture's no-op detection
-// compares against exactly what render would emit.
+// (sync-design §2, spec #454): a key's kind (register or set) is fixed by its earliest
+// first-write op, and content in the container of the other kind is converted into that kind
+// without changing its YAML type. A register is multi-value: concurrent writes all stay active
+// until a write that saw them supersedes them; registerValues is the one place that decides how
+// active entries resolve. Every stored value is a canonical YAML source (one self-contained
+// line, frontmatter.ts renderScalar); render.ts turns sources into YAML nodes.
 
 import { Buffer } from "node:buffer"
 
@@ -17,7 +12,7 @@ import type { ContainerID, ContainerType, LoroDoc } from "../../crdt/loro-runtim
 
 import { parseDocument, isScalar } from "yaml"
 
-import { renderScalar } from "./frontmatter"
+import { renderScalar, sequenceElements } from "./frontmatter"
 import type { FmPart, ItemHistory, KeyHistory, Stamp } from "./history"
 
 export const BODY_NAME = "body"
@@ -163,9 +158,12 @@ function combineSet(state: KeyState, key: string, kh: KeyHistory, history: ItemH
     source: element,
     stamp: addStamp(history, key, "set", tag, kh.byKind.get("set")),
   }))
-  // A register inside a set contributes its bare scalar text as one element (review r2).
+  // A register inside a set contributes its canonical source as one element, keeping its YAML
+  // type (review r6 M1: 3 stays a number, not the string "3").
   for (const entry of activeReg(state.reg)) {
-    tagged.push({ source: renderScalar(regText(entry.value)), stamp: addStamp(history, key, "reg", entry.tag, kh.byKind.get("reg")) })
+    const stamp = addStamp(history, key, "reg", entry.tag, kh.byKind.get("reg"))
+    // A whole list held by the register contributes its elements, not a nested list.
+    for (const source of sequenceElements(entry.value) ?? [entry.value]) tagged.push({ source, stamp })
   }
   tagged.sort((a, b) => stampCompare(a.stamp, b.stamp) || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0))
   const elements = [...new Set(tagged.map((t) => t.source))]

@@ -10,7 +10,8 @@ import { captureCurrent, captureInto, newDoc } from "./test-support"
 // verbatim. YAML aliases and merge keys resolve before a value is classified; a custom tag makes
 // the frontmatter invalid, so the whole file stays body.
 
-const HOSTILE = ["a\nb", "a\r\nb", "\tlead tab", " lead", "trail ", "x # y", "k: v", "|-", ">", "a\n", "#start", "- dash", "a\n---\nb"]
+const LONG = "This is a fairly long description line that runs well past the default eighty column fold width of yaml"
+const HOSTILE = [LONG, "한국어 설명 문장이 길게 이어집니다. ".repeat(20).trim(), "a\nb", "a\r\nb", "\tlead tab", " lead", "trail ", "x # y", "k: v", "|-", ">", "a\n", "#start", "- dash", "a\n---\nb"]
 
 function headerOf(rendered: string): Record<string, unknown> {
   const parsed: unknown = parseYaml(rendered.slice(4, rendered.indexOf("\n---\n", 3)))
@@ -72,6 +73,50 @@ describe("register render (spec #454)", () => {
     const doc = await newDoc("1")
     captureInto(doc, "", [], "---\nn: 2\nflag: true\nname: plain words\n---\n")
     expect(renderItem(doc)).toBe("---\nn: 2\nflag: true\nname: plain words\n---\n")
+    doc.free()
+  })
+})
+
+describe("source forms round-trip through the whole-frontmatter emitter (review r6 C1, lead)", () => {
+  const FORMS = [
+    `---\ndescription: ${"word ".repeat(40).trim()}\n---\nbody\n`,
+    "---\nk: |\n  line one\n  line two\n---\n",
+    "---\nk: >\n  folded line\n  continues here\n---\n",
+    "---\nk: |-\n  kept\n\n  blank above\n---\n",
+    "---\nk: \"x: y # not a comment\"\n---\n",
+    "---\nk: 'it''s: #x'\n---\n",
+  ]
+
+  test("parse(render(x)) equals parse(x) and the render is byte-stable over 5 cycles", async () => {
+    for (const form of FORMS) {
+      const doc = await newDoc("1")
+      captureInto(doc, "", [], form)
+      const first = renderItem(doc) ?? ""
+      expect(headerOf(first), `form ${JSON.stringify(form)}`).toEqual(headerOf(form))
+      for (let cycle = 0; cycle < 5; cycle++) {
+        expect(captureCurrent(doc, renderItem(doc) ?? ""), `form ${JSON.stringify(form)} cycle ${cycle}`).toBeNull()
+        expect(renderItem(doc), `form ${JSON.stringify(form)} cycle ${cycle} changed bytes`).toBe(first)
+      }
+      doc.free()
+    }
+  })
+})
+
+describe("register values keep their YAML type (review r6 M1, M2)", () => {
+  test("a register value joined into a set-kind key keeps its type as an element", async () => {
+    for (const [source, expected] of [["3", 3], ["true", true], ["{ a: 1 }", { a: 1 }]] as const) {
+      // Concurrent first writes tie on Lamport; the lower peer (the list writer) fixes the kind as set.
+      const rendered = await concurrent("---\nother: 1\n---\n", "---\nother: 1\nk:\n  - x\n---\n", `---\nother: 1\nk: ${source}\n---\n`)
+      expect(headerOf(rendered).k, `register ${source} inside a set`).toEqual(["x", expected])
+    }
+  })
+
+  test("retyping 3 as '3' writes the string value instead of being dropped", async () => {
+    const doc = await newDoc("1")
+    captureInto(doc, "", [], "---\nn: 3\n---\n")
+    captureInto(doc, "---\nn: 3\n---\n", itemFrontier(doc), "---\nn: '3'\n---\n")
+    expect(headerOf(renderItem(doc) ?? "")).toEqual({ n: "3" })
+    expect(captureCurrent(doc, renderItem(doc) ?? "")).toBeNull()
     doc.free()
   })
 })

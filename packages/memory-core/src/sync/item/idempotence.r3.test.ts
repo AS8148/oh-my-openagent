@@ -57,9 +57,9 @@ function bodyOf(disk: string): string {
 
 // A written value is recorded raw and as its canonical YAML source: a register with several
 // values renders each component as its canonical source (spec #454).
-// Hostile string content (memory-sync r6): newlines, CR, tabs, leading/trailing spaces, '#',
-// ': ', and whole values that are exactly a YAML indicator.
-const HOSTILE_PARTS = ["", " ", "\n", "\r\n", "\t", " # ", ": ", " |- ", " > ", "\n---\n"]
+// Hostile string content (memory-sync r6, review r6 L3): newlines, CR, tabs, leading/trailing
+// spaces, '#', ': ', values over 80 columns, and whole values that are exactly a YAML indicator.
+const HOSTILE_PARTS = ["", " ", "\n", "\r\n", "\t", " # ", ": ", " |- ", " > ", "\n---\n", ` ${"long ".repeat(20)}`, ` ${"긴 ".repeat(45)}`]
 const EXACT = ["|-", ">", "#", ": x", " lead", "trail "]
 
 function markersIn(text: string): string[] {
