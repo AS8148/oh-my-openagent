@@ -62,7 +62,7 @@
         "js-yaml": "^5.4.2",
         "jsonc-parser": "^3.3.1",
         "node-pty": "^1.1.0",
-        "omowright": "github:code-yeongyu/omowright#293ca5002cbd4c8b0c104c5934683385ef7e0d3a",
+        "omowright": "github:code-yeongyu/omowright#f87ef4d63fe7b56fe117dbab246c8ad88dd8a780",
         "picocolors": "^1.1.1",
         "picomatch": "^4.0.7",
         "posthog-node": "^5.52.4",
@@ -70,18 +70,18 @@
         "typescript": "^7.0.2",
       },
       "optionalDependencies": {
-        "oh-my-opencode-darwin-arm64": "5.1.33",
-        "oh-my-opencode-darwin-x64": "5.1.33",
-        "oh-my-opencode-darwin-x64-baseline": "5.1.33",
-        "oh-my-opencode-linux-arm64": "5.1.33",
-        "oh-my-opencode-linux-arm64-musl": "5.1.33",
-        "oh-my-opencode-linux-x64": "5.1.33",
-        "oh-my-opencode-linux-x64-baseline": "5.1.33",
-        "oh-my-opencode-linux-x64-musl": "5.1.33",
-        "oh-my-opencode-linux-x64-musl-baseline": "5.1.33",
-        "oh-my-opencode-windows-arm64": "5.1.33",
-        "oh-my-opencode-windows-x64": "5.1.33",
-        "oh-my-opencode-windows-x64-baseline": "5.1.33",
+        "oh-my-opencode-darwin-arm64": "5.1.34-beta.1",
+        "oh-my-opencode-darwin-x64": "5.1.34-beta.1",
+        "oh-my-opencode-darwin-x64-baseline": "5.1.34-beta.1",
+        "oh-my-opencode-linux-arm64": "5.1.34-beta.1",
+        "oh-my-opencode-linux-arm64-musl": "5.1.34-beta.1",
+        "oh-my-opencode-linux-x64": "5.1.34-beta.1",
+        "oh-my-opencode-linux-x64-baseline": "5.1.34-beta.1",
+        "oh-my-opencode-linux-x64-musl": "5.1.34-beta.1",
+        "oh-my-opencode-linux-x64-musl-baseline": "5.1.34-beta.1",
+        "oh-my-opencode-windows-arm64": "5.1.34-beta.1",
+        "oh-my-opencode-windows-x64": "5.1.34-beta.1",
+        "oh-my-opencode-windows-x64-baseline": "5.1.34-beta.1",
       },
     },
     "packages/agents-md-core": {
@@ -189,6 +189,9 @@
     "packages/memory-core": {
       "name": "@oh-my-opencode/memory-core",
       "version": "0.1.0",
+      "dependencies": {
+        "loro-crdt": "1.16.4",
+      },
       "devDependencies": {
         "yaml": "2.9.1",
       },
@@ -199,7 +202,7 @@
     },
     "packages/omo-codex": {
       "name": "@oh-my-opencode/omo-codex",
-      "version": "5.1.33",
+      "version": "5.1.34-beta.1",
       "dependencies": {
         "@oh-my-opencode/shared-skills": "workspace:*",
         "@oh-my-opencode/utils": "workspace:*",
@@ -218,7 +221,7 @@
     },
     "packages/omo-native": {
       "name": "omo-ai",
-      "version": "5.1.33",
+      "version": "5.1.34-0.beta.1",
       "bin": {
         "omo": "bin/omo.js",
       },
@@ -261,7 +264,7 @@
     },
     "packages/omo-senpi": {
       "name": "@oh-my-opencode/omo-senpi",
-      "version": "5.1.33",
+      "version": "5.1.34-beta.1",
       "dependencies": {
         "@code-yeongyu/lsp-daemon": "file:../lsp-daemon",
         "@earendil-works/pi-tui": "npm:@code-yeongyu/senpi-tui@2026.10.15",
@@ -1299,6 +1302,8 @@
 
     "long": ["long@5.3.2", "", {}, "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="],
 
+    "loro-crdt": ["loro-crdt@1.16.4", "", {}, "sha512-UPufMpHSEMLRVjWfCjhVbOD8nkCDwxdfVk4Uer6xTEFAcNn+X+oGYWGgIIYuAgofc8UiI0ERZUIMnP7ib/kh6w=="],
+
     "lru-cache": ["lru-cache@11.5.1", "", {}, "sha512-RPimw/7aMdv2oqRrxKwvZXcPfwBrn/JZ2xYcY9Hus/6LaS3VOAKVWKWgNLCFSiOm1ESXinjsDlidVU7JlnCN2A=="],
 
     "magic-string": ["magic-string@1.4.1", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.6.0" } }, "sha512-8lyCu36ErXR0J9uaGKlKQoiLZKmtI63YGLE8G2o9jyRPdr4X47LusSOwgOJOzcVtp81fTAAjxR7BwKz682Jhow=="],
@@ -1359,7 +1364,7 @@
 
     "omo-ai": ["omo-ai@workspace:packages/omo-native"],
 
-    "omowright": ["omowright@github:code-yeongyu/omowright#293ca50", { "dependencies": { "ws": "^8.18.3", "zod": "^4.1.5" }, "bin": { "omowright-cloak": "./bin/omowright-cloak.mjs" } }, "code-yeongyu-omowright-293ca50", "sha512-T3DUbm/PQIhHdKISDGDNavamumA7bcX1m5KTmkXw7xmUxC3NrXOF4C23neskJr5iwvtUX7heFIYEYN+Q3Aa6LQ=="],
+    "omowright": ["omowright@github:code-yeongyu/omowright#f87ef4d", { "dependencies": { "ws": "^8.18.3", "zod": "^4.1.5" }, "bin": { "omowright-cloak": "./bin/omowright-cloak.mjs" } }, "code-yeongyu-omowright-f87ef4d", "sha512-mqmB3dwh+qNtrRfte2c1L09a3ifX+EwHjXomMCxD1Oqd1pExqSVbMTUh+u/xh4SSq3EMk+kUWz7YHG5iiLqRkA=="],
 
     "on-finished": ["on-finished@2.4.1", "", { "dependencies": { "ee-first": "1.1.1" } }, "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg=="],
 

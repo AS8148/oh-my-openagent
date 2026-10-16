@@ -1,3 +1,10 @@
+## 2026-10-15 - Argon (low) leads visual-engineering and writing (#10187)
+
+- `category/fallback-chains.ts`, `model-core/src/category-model-requirements.ts`: a `{google, google-vertex, opencode}/gemini-4-argon` rung at `low` (the catalog maps `off`/`minimal` to null for this model) is prepended to both chains; every existing rung keeps its order. Copilot is left off the rung until code-yeongyu/senpi#3379 verifies its thinking control. `category/google-categories.ts` / `kimi-categories.ts` (and the omo-opencode mirrors) move both defaults to `google/gemini-4-argon` at `low`.
+- Stacking: the pinned engine (2026.10.15 after #10183; 2026.10.13 before) carries no google `gemini-4-argon` catalog row yet (the release predates code-yeongyu/senpi#3293), so on Senpi the rung is unresolvable and both categories resolve to the previous head until a pin adopts #3293 (plus #3382, #3384). The OpenCode edition reads OpenCode's own provider list and resolves Argon as soon as Google is connected. `category/argon-tier1.test.ts` runs the real pinned catalog and asserts whichever branch applies, and asserts the primary hit on a registry that serves the model.
+- `omo-senpi` telemetry vocabulary lists `gemini-4-argon` on google, google-vertex, github-copilot and opencode so the rung never exports as `custom`; `category_config` depth suffixes for the two categories shift by one until adoption (the previous head is now rung two).
+- `omo-opencode/src/generated/model-capabilities.generated.json` gains the models.dev `gemini-4-argon` entry only (the snapshot-backed guard requires every chain model).
+
 ## 2026-10-14 - A terminal provider error ends the task even when agent_idle never arrives (#3262)
 
 A turn that ended on a terminal provider error (a stream-start timeout, a permanent 4xx, an
