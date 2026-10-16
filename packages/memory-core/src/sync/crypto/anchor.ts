@@ -1,9 +1,12 @@
+import type { DeviceKeyring } from "../keyring-port.ts"
 import type { KeyringEntry } from "./entry.ts"
 import type { Authority } from "./fold.ts"
 import { isObject, type ParsedBody, type Principal } from "./parse.ts"
+import { taggedHash } from "./signatures.ts"
 
 declare const trustAnchorBrand: unique symbol
 declare const pinCandidateBrand: unique symbol
+declare const bootstrapBrand: unique symbol
 
 /**
  * The account root this device pinned when its own pairing or recovery completed (sync-design
@@ -19,30 +22,30 @@ export type TrustAnchor = {
 
 export type PinSource = "pairing" | "recovery" | "creator"
 
+type PublicKeys = { readonly sealing_public_key: string; readonly signing_public_key: string }
+
 /**
- * Evidence a device holds before any pin exists, from its own ceremony, never from the server:
- * - pairing: the approver keys the 6-digit code covered and the transcript the device itself made;
+ * Evidence a device holds before any pin exists, from its own ceremony, never from the server. Each
+ * kind is a branded value only the mint functions below create, so a value of the right shape built
+ * anywhere else is refused:
+ * - pairing: this device's principal (read from its own keyring), the approver keys its 6-digit code
+ *   covered, both nonces, and the commitment the mint RECOMPUTES from the device's own keys and nonce;
  * - recovery: the recovery public keys this device derived from the passkey it is using;
- * - creator: this device's own principal; only a genesis naming exactly these keys as its first device,
- *   and therefore signed with this device's private key, meets it. A caller-supplied digest is never
- *   evidence: the server can produce any genesis and its digest, but not this device's signature.
+ * - creator: this device's id, read from its own keyring. Only a genesis whose first device has that
+ *   id meets it; genesis rules derive the id from the first device's signing key and verify the
+ *   genesis signature under that key, so only the holder of this device's private key produced it.
  */
-export type BootstrapAnchor =
+export type BootstrapAnchor = (
   | {
       readonly kind: "pairing"
       readonly account: string
       readonly self: Principal
-      readonly approver: { readonly sealing_public_key: string; readonly signing_public_key: string }
+      readonly approver: PublicKeys
       readonly transcript: { readonly commitment: string; readonly joining_nonce: string; readonly approver_nonce: string }
     }
-  | {
-      readonly kind: "recovery"
-      readonly account: string
-      readonly credentialId: string
-      readonly sealing_public_key: string
-      readonly signing_public_key: string
-    }
-  | { readonly kind: "creator"; readonly account: string; readonly self: Principal }
+  | ({ readonly kind: "recovery"; readonly account: string; readonly credentialId: string } & PublicKeys)
+  | { readonly kind: "creator"; readonly account: string; readonly selfId: string }
+) & { readonly [bootstrapBrand]: true }
 
 export type ChainAnchor = TrustAnchor | BootstrapAnchor
 
@@ -62,6 +65,53 @@ export const ANCHOR_NEXT_STEP = "re-pair or recover" as const
 
 const anchors = new WeakSet<object>()
 const candidates = new WeakSet<object>()
+const bootstraps = new WeakSet<object>()
+
+export const isBootstrapAnchor = (value: unknown): value is BootstrapAnchor => typeof value === "object" && value !== null && bootstraps.has(value)
+
+const isBootstrap = (value: object): value is BootstrapAnchor => bootstraps.has(value)
+
+const mintBootstrap = (value: object): BootstrapAnchor => {
+  const frozen = Object.freeze(value)
+  bootstraps.add(frozen)
+  if (!isBootstrap(frozen)) throw new Error("unreachable: a fresh bootstrap anchor is always registered")
+  return frozen
+}
+
+const principalOf = (keyring: DeviceKeyring): Principal => ({
+  kind: "device",
+  id: keyring.principal().id,
+  sealing_public_key: keyring.publicKeys().sealing,
+  signing_public_key: keyring.publicKeys().signing,
+})
+
+/** The anchor of the device that creates the account: its own id, from its own keyring. */
+export const creatorAnchor = (account: string, keyring: DeviceKeyring): BootstrapAnchor =>
+  mintBootstrap({ kind: "creator", account, selfId: keyring.principal().id })
+
+/** The anchor of a joining device after its 6-digit code matched; the commitment is recomputed here, never taken. */
+export const pairingAnchor = async (input: {
+  readonly account: string
+  readonly keyring: DeviceKeyring
+  readonly approver: PublicKeys
+  readonly joiningNonce: string
+  readonly approverNonce: string
+}): Promise<BootstrapAnchor> => {
+  const self = principalOf(input.keyring)
+  const commitment = await taggedHash("omo-sync/v1/approval-commitment", {
+    account: input.account,
+    sealing_public_key: self.sealing_public_key,
+    signing_public_key: self.signing_public_key,
+    nonce: input.joiningNonce,
+  })
+  const approver = Object.freeze({ sealing_public_key: input.approver.sealing_public_key, signing_public_key: input.approver.signing_public_key })
+  const transcript = Object.freeze({ commitment, joining_nonce: input.joiningNonce, approver_nonce: input.approverNonce })
+  return mintBootstrap({ kind: "pairing", account: input.account, self: Object.freeze(self), approver, transcript })
+}
+
+/** The anchor of a recovering device: the public keys it derived from the passkey it is using. */
+export const recoveryAnchor = (input: { readonly account: string; readonly credentialId: string } & PublicKeys): BootstrapAnchor =>
+  mintBootstrap({ kind: "recovery", account: input.account, credentialId: input.credentialId, sealing_public_key: input.sealing_public_key, signing_public_key: input.signing_public_key })
 
 export const isTrustAnchor = (value: unknown): value is TrustAnchor => typeof value === "object" && value !== null && anchors.has(value)
 export const isPinCandidate = (value: unknown): value is PinCandidate => typeof value === "object" && value !== null && candidates.has(value)
@@ -84,7 +134,7 @@ const mintCandidate = (account: string, genesisDigest: string, pinnedBy: PinSour
   return candidate
 }
 
-const sameKeys = (a: { readonly sealing_public_key: string; readonly signing_public_key: string } | undefined, b: { readonly sealing_public_key: string; readonly signing_public_key: string }): boolean =>
+const sameKeys = (a: PublicKeys | undefined, b: PublicKeys): boolean =>
   a !== undefined && a.sealing_public_key === b.sealing_public_key && a.signing_public_key === b.signing_public_key
 
 export type AnchorStep =
@@ -93,13 +143,15 @@ export type AnchorStep =
 
 /**
  * Applies the device's anchor to one fully verified keyring record. A pinned anchor is met at
- * genesis when its digest equals the pinned root and refuses any other root. A creator anchor is met
- * only at a genesis whose first device is exactly this device; the chain has already verified that
- * genesis's signature under the first device's key, so only this device can have produced it. A pairing anchor is
+ * genesis when its digest equals the pinned root and refuses any other root. Every other anchor must
+ * be one the mint functions above created. A creator anchor is met only at a genesis whose first
+ * device has this device's id; the rules already tied that id to the first device's signing key and
+ * verified the genesis signature under it, so only this device can have produced it. A pairing anchor is
  * met by the approval naming this device's own principal, signed by the folded member whose keys are
  * the counterpart keys the device's 6-digit code hashed, carrying exactly the device's transcript
- * (the commitment binds the joining keys and nonce; the code binds both devices' keys and both
- * nonces; spec section 7). A recovery anchor is met by the record enrolling the credential in use
+ * (the code binds both devices' keys and both nonces; spec section 7). The served commitment needs
+ * no comparison here: the approval rule already recomputes it from the approval's principal keys and
+ * joining nonce, which this check holds equal to the device's own. A recovery anchor is met by the record enrolling the credential in use
  * (genesis or its recovery-key record) when its public keys equal the locally derived ones; that
  * record's countersignature, already verified under its own key, then verifies under the derived
  * key too. A record that names this device or credential but contradicts the evidence refuses the
@@ -118,9 +170,10 @@ export const anchorStep = (
     if (entry.digest !== anchor.genesisDigest) return { ok: false, reason: "untrusted_root" }
     return { ok: true, anchored: true, candidate: null }
   }
+  if (!isBootstrapAnchor(anchor)) return { ok: false, reason: "untrusted_root" }
   if (anchor.kind === "creator") {
     if (body.kind !== "genesis") return { ok: true, anchored: false, candidate: null }
-    const own = body.firstDevice.id === anchor.self.id && sameKeys(body.firstDevice, anchor.self)
+    const own = body.firstDevice.id === anchor.selfId
     return own ? { ok: true, anchored: true, candidate: mintCandidate(anchor.account, entry.digest, "creator", entry) } : { ok: false, reason: "anchor_mismatch" }
   }
   if (anchor.kind === "pairing") {
@@ -131,7 +184,6 @@ export const anchorStep = (
     const matches =
       sameKeys(body.principal, anchor.self) &&
       sameKeys(signer, anchor.approver) &&
-      transcript["commitment"] === anchor.transcript.commitment &&
       transcript["joining_nonce"] === anchor.transcript.joining_nonce &&
       transcript["approver_nonce"] === anchor.transcript.approver_nonce
     return matches ? { ok: true, anchored: true, candidate: mintCandidate(anchor.account, genesisDigest, "pairing", entry) } : { ok: false, reason: "anchor_mismatch" }

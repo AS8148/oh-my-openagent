@@ -1,5 +1,5 @@
 import type { AnchorRejection, ChainAnchor } from "./anchor.ts"
-import { type ChainState, emptyChain, verifyKeyringEntry } from "./chain.ts"
+import { atVerifiedHead, type ChainState, emptyChain, verifyKeyringEntry } from "./chain.ts"
 import type { KeyringEntry } from "./entry.ts"
 import { isCancelledAdmission } from "./fold.ts"
 import { openBatch } from "./open.ts"
@@ -119,9 +119,7 @@ export const importSnapshot = async (
     if (!opened.ok) return { ok: false, reason: "chunk_refused" }
     records.push(...opened.records)
   }
-  return {
-    ok: true,
-    state: { ...state, head: { seq: snapshot.covers_seq, link: snapshot.link, keyring_link: snapshot.keyring_head } },
-    records,
-  }
+  const continued = atVerifiedHead(state, { seq: snapshot.covers_seq, link: snapshot.link, keyring_link: snapshot.keyring_head })
+  if (continued === null) return refuse("keyring_prefix_refused")
+  return { ok: true, state: continued, records }
 }

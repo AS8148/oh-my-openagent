@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { createDeviceKeyring, type DeviceKeyring } from "../../keyring-port.ts"
-import type { BootstrapAnchor } from "../anchor.ts"
-import { parsePrincipal } from "../parse.ts"
+import { type BootstrapAnchor, creatorAnchor } from "../anchor.ts"
 import { signRecord } from "../build.ts"
 import type { BatchEntry, Head, KeyringBody, KeyringEntry, SyncAuthor, WrapEntry } from "../entry.ts"
 import { nextLink } from "../links.ts"
@@ -87,11 +86,7 @@ export const record = (name: string): KeyringEntry => {
 export const mainChain = (): ReadonlyArray<KeyringEntry> => chain.main.map(record)
 
 /** The fixture account as its creator (the owner device) walks it: every fixture chain is walked under this anchor. */
-export const fixtureAnchor = (account: string = ACCOUNT): BootstrapAnchor => {
-  const firstDevice = parsePrincipal(Reflect.get(Object(record("genesis").body["bootstrap"]), "first_device"))
-  if (firstDevice === null) throw new Error("fixture genesis names no first device")
-  return { kind: "creator", account, self: firstDevice }
-}
+export const fixtureAnchor = (account: string = ACCOUNT): BootstrapAnchor => creatorAnchor(account, keyringFor("owner"))
 
 export const epochKey = (epoch: number): Uint8Array<ArrayBuffer> | null => {
   const key = keys.epochs[String(epoch)]

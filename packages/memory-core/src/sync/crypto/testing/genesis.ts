@@ -1,5 +1,6 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto"
 import { createDeviceKeyring, type DeviceKeyring, generateDeviceKeyMaterial } from "../../keyring-port.ts"
+import { creatorAnchor } from "../anchor.ts"
 import { appendEntries, type ChainState, emptyChain } from "../chain.ts"
 import type { Head, KeyringBody, KeyringEntry, WrapEntry } from "../entry.ts"
 import { createRejectionCounter } from "../rejection.ts"
@@ -105,7 +106,7 @@ export const headAfter = (entry: KeyringEntry): Head => ({ seq: entry.seq, link:
 /** A one-record chain the device itself created (creator anchor), committing `deviceWrap` as its epoch-1 wrap. */
 export const verifiedGenesisFor = async (keyring: DeviceKeyring, deviceWrap: string): Promise<ChainState> => {
   const genesis = await genesisEntry(ACCOUNT, keyring, deviceWrap, await fixtureRecoveryCredential())
-  const outcome = await appendEntries(emptyChain(ACCOUNT, { kind: "creator", account: ACCOUNT, self: principalOf(keyring) }), [genesis], createRejectionCounter())
+  const outcome = await appendEntries(emptyChain(ACCOUNT, creatorAnchor(ACCOUNT, keyring)), [genesis], createRejectionCounter())
   if (!outcome.ok) throw new Error(`test genesis refused: ${outcome.reason}`)
   return outcome.state
 }

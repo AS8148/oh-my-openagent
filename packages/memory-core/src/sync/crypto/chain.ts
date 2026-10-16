@@ -1,13 +1,15 @@
 import { type AnchorRejection, anchorStep, type ChainAnchor, type PinCandidate } from "./anchor.ts"
-import type { BatchEntry, Head, KeyringEntry, SyncAuthor, SyncEntry, VerifiedKeyringEntry, VerifiedWrap } from "./entry.ts"
+import type { BatchEntry, Head, KeyringEntry, SyncEntry, VerifiedKeyringEntry, VerifiedWrap } from "./entry.ts"
 import { type EnvelopeRejection, envelopeRefusal } from "./envelope.ts"
 import { type Authority, applyRecord, type FoldedRecord, isCancelledAdmission, isVetoedEpoch } from "./fold.ts"
-import { nextLink } from "./links.ts"
+import { expectedEpoch, forcedRotationRefusal, keyWithinEpoch, type LinkMode, linksHold, signerKey } from "./chain-checks.ts"
 import { type ParsedBody, parseBody } from "./parse.ts"
 import type { RejectionCounter } from "./rejection.ts"
 import { type ReceiverCheck, receiverRefusal } from "./receiver.ts"
 import { checkRecordRules, type RuleRejection } from "./rules.ts"
 import { authorSigningKey, verifyRecordSig } from "./signatures.ts"
+
+export type { LinkMode }
 import { jcsBytes, sha256B64 } from "./vendor/sync-format/jcs.ts"
 
 export type ChainRejection =
@@ -16,6 +18,7 @@ export type ChainRejection =
   | EnvelopeRejection
   | AnchorRejection
   | "forced_rotation_required"
+  | "untrusted_state"
   | "bad_fork_resolution"
   | "bad_record"
   | "link_mismatch"
@@ -25,7 +28,9 @@ export type ChainRejection =
   | "account_mismatch"
   | "digest_mismatch"
 
-export type ChainState = {
+declare const chainStateBrand: unique symbol
+
+type ChainFields = {
   readonly account: string
   readonly head: Head | null
   readonly authority: Authority | null
@@ -42,6 +47,27 @@ export type ChainState = {
   readonly pin: PinCandidate | null
   /** The seq of a fork-resolution whose forced rotation must come next (spec 8.2), else null. */
   readonly forcedRotationAfter: number | null
+}
+
+/** A verified chain position; only this module mints one, so a state built or copied elsewhere is refused. */
+export type ChainState = ChainFields & { readonly [chainStateBrand]: true }
+
+const states = new WeakSet<object>()
+
+export const isChainState = (value: unknown): value is ChainState => typeof value === "object" && value !== null && states.has(value)
+
+const isState = (value: object): value is ChainState => states.has(value)
+
+const mintState = (fields: ChainFields): ChainState => {
+  const state = Object.freeze({
+    ...fields,
+    history: Object.freeze([...fields.history]),
+    received: Object.freeze([...fields.received]),
+    unanchored: Object.freeze([...fields.unanchored]),
+  })
+  states.add(state)
+  if (!isState(state)) throw new Error("unreachable: a fresh chain state is always registered")
+  return state
 }
 
 const minted = new WeakSet<object>()
@@ -86,7 +112,8 @@ export type AppendOutcome =
       readonly reason: ChainRejection
     }
 
-export const emptyChain = (account: string, anchor: ChainAnchor): ChainState => ({
+export const emptyChain = (account: string, anchor: ChainAnchor): ChainState =>
+  mintState({
   account,
   head: null,
   authority: null,
@@ -98,62 +125,12 @@ export const emptyChain = (account: string, anchor: ChainAnchor): ChainState => 
   genesisDigest: null,
   pin: null,
   forcedRotationAfter: null,
-})
+  })
+
+/** Moves a verified state's head to a snapshot position the caller has verified (snapshot import only). */
+export const atVerifiedHead = (state: ChainState, head: Head): ChainState | null => (isChainState(state) ? mintState({ ...state, head }) : null)
 
 const seenKeyring = (state: ChainState): ReadonlyArray<KeyringEntry> => [...state.received, ...state.unanchored]
-
-const forcedRotationRefusal = (state: ChainState, body: ParsedBody | null): ChainRejection | null => {
-  const fork = body?.kind === "rotation" ? body.forkResolution : null
-  if (state.forcedRotationAfter !== null) return fork === state.forcedRotationAfter ? null : "forced_rotation_required"
-  return fork === null ? null : "bad_fork_resolution"
-}
-
-/** Main-chain mode checks seq, base_seq and link; keyring-only mode (snapshot import) checks the sub-chain alone. */
-export type LinkMode = "main" | "keyring-only"
-
-const linksHold = async (state: ChainState, entry: SyncEntry, mode: LinkMode): Promise<boolean> => {
-  const head = state.head
-  const priorSeq = head === null ? 0 : head.seq
-  if (mode === "main") {
-    if (entry.base_seq !== priorSeq || entry.seq !== priorSeq + 1) return false
-    if (entry.link !== (await nextLink(head === null ? "" : head.link, entry.digest))) return false
-  } else if (entry.seq <= priorSeq || entry.base_seq !== entry.seq - 1) {
-    return false
-  }
-  if (entry.kind === "batch") return entry.keyring_link === null
-  return entry.keyring_link === (await nextLink(head === null ? "" : head.keyring_link, entry.digest))
-}
-
-const signerKey = (
-  body: ParsedBody,
-  before: Authority | null,
-  author: SyncAuthor,
-  history: ReadonlyArray<FoldedRecord>,
-): string | null => {
-  if (body.kind === "genesis") {
-    return author.kind === "device" && author.id === body.firstDevice.id ? body.firstDevice.signing_public_key : null
-  }
-  if (before === null) return null
-  if (body.kind === "recovery-join") {
-    return author.kind === "recovery" && author.credential_id === body.credentialId
-      ? authorSigningKey(before, author)
-      : null
-  }
-  if (author.kind !== "device") return null
-  if (body.kind === "recovery-join-vetoed") {
-    const join = history.find((record) => record.digest === body.joinDigest)
-    return join?.before == null ? null : authorSigningKey(join.before, author)
-  }
-  if (isCancelledAdmission(before, author.id)) return null
-  return authorSigningKey(before, author)
-}
-
-const expectedEpoch = (body: ParsedBody, before: Authority | null): number | null => {
-  if (body.kind === "genesis") return 1
-  if (body.kind === "fork-resolution") return body.epoch
-  if (before === null) return null
-  return body.kind === "rotation" ? before.epoch + 1 : before.epoch
-}
 
 type StepResult =
   | { readonly ok: true; readonly state: ChainState; readonly step: ChainStep }
@@ -169,8 +146,9 @@ type StepResult =
 export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry, mode: LinkMode): Promise<StepResult> => {
   const malformed = envelopeRefusal(entry)
   if (malformed !== null) return { ok: false, reason: malformed }
+  if (!isChainState(state)) return { ok: false, reason: "untrusted_state" }
   if (state.anchor.account !== state.account) return { ok: false, reason: "untrusted_root" }
-  if (!(await linksHold(state, entry, mode))) return { ok: false, reason: "link_mismatch" }
+  if (!(await linksHold(state.head, entry, mode))) return { ok: false, reason: "link_mismatch" }
   const refused = await receiverRefusal(seenKeyring(state), entry)
   if (refused !== null) return { ok: false, reason: refused }
   const body = parseBody(entry.body)
@@ -189,7 +167,7 @@ export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry,
   const ruleFailure = await checkRecordRules(entry, body, before, state.history, predecessor)
   if (ruleFailure !== null) return { ok: false, reason: ruleFailure }
   if ((await sha256B64(jcsBytes(entry.body))) !== entry.digest) return { ok: false, reason: "digest_mismatch" }
-  const forced = forcedRotationRefusal(state, body)
+  const forced = forcedRotationRefusal(state.forcedRotationAfter, body)
   if (forced !== null) return { ok: false, reason: forced }
   const genesisDigest = body.kind === "genesis" ? entry.digest : state.genesisDigest
   const met = state.anchored ? null : anchorStep(state.anchor, entry, body, before, genesisDigest ?? "")
@@ -200,7 +178,7 @@ export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry,
   const anchored = state.anchored || met?.anchored === true
   return {
     ok: true,
-    state: {
+    state: mintState({
       ...state,
       head: { seq: entry.seq, link: entry.link, keyring_link: entry.keyring_link },
       authority,
@@ -211,41 +189,27 @@ export const verifyKeyringEntry = async (state: ChainState, entry: KeyringEntry,
       genesisDigest,
       pin: met?.ok === true && met.candidate !== null ? met.candidate : state.pin,
       forcedRotationAfter: body.kind === "fork-resolution" ? entry.seq : null,
-    },
+    }),
     step: { kind: "keyring", seq: entry.seq, record: body.kind },
   }
-}
-
-/**
- * The author's signing key as it stood inside `epoch`: the newest folded authority of that epoch
- * that holds the author. A vetoed epoch's members are no longer in the current fold, so their
- * batches verify against the position they were written at, and an author never a member there
- * gets no key.
- */
-const keyWithinEpoch = (state: ChainState, author: SyncAuthor, epoch: number): string | null => {
-  const after = state.history.map((_, index) => state.history[index + 1]?.before ?? state.authority)
-  for (const authority of after.reverse()) {
-    const key = authority !== null && authority.epoch === epoch ? authorSigningKey(authority, author) : null
-    if (key !== null) return key
-  }
-  return null
 }
 
 const verifyBatchEntry = async (state: ChainState, entry: BatchEntry): Promise<StepResult> => {
   const malformed = envelopeRefusal(entry)
   if (malformed !== null) return { ok: false, reason: malformed }
-  if (!(await linksHold(state, entry, "main"))) return { ok: false, reason: "link_mismatch" }
+  if (!isChainState(state)) return { ok: false, reason: "untrusted_state" }
+  if (!(await linksHold(state.head, entry, "main"))) return { ok: false, reason: "link_mismatch" }
   const refused = await receiverRefusal(seenKeyring(state), entry)
   if (refused !== null) return { ok: false, reason: refused }
-  const forced = forcedRotationRefusal(state, null)
+  const forced = forcedRotationRefusal(state.forcedRotationAfter, null)
   if (forced !== null) return { ok: false, reason: forced }
   const authority = state.authority
   const head = state.head
   if (authority === null || head === null || entry.author.kind !== "device") return { ok: false, reason: "not_member" }
-  const next: ChainState = { ...state, head: { seq: entry.seq, link: entry.link, keyring_link: head.keyring_link } }
+  const next = mintState({ ...state, head: { seq: entry.seq, link: entry.link, keyring_link: head.keyring_link } })
   const authorId = entry.author.id
   const vetoed = isVetoedEpoch(authority, entry.epoch) || isCancelledAdmission(authority, authorId)
-  const key = vetoed ? keyWithinEpoch(state, entry.author, entry.epoch) : authorSigningKey(authority, entry.author)
+  const key = vetoed ? keyWithinEpoch(state.history, state.authority, entry.author, entry.epoch) : authorSigningKey(authority, entry.author)
   if (key === null) return { ok: false, reason: "not_member" }
   if (!(await verifyRecordSig(key, entry))) return { ok: false, reason: "bad_signature" }
   if (entry.account !== state.account) return { ok: false, reason: "account_mismatch" }
@@ -267,8 +231,12 @@ export const appendEntries = async (
   entries: ReadonlyArray<SyncEntry>,
   rejections: RejectionCounter,
 ): Promise<AppendOutcome> => {
-  let current = state
   const steps: ChainStep[] = []
+  if (!isChainState(state)) {
+    rejections.record("untrusted_state")
+    return { ok: false, state, steps, seq: 0, reason: "untrusted_state" }
+  }
+  let current = state
   for (const entry of entries) {
     const malformed = envelopeRefusal(entry)
     const result: StepResult =
