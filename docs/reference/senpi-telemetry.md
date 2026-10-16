@@ -392,6 +392,18 @@ Each switch below turns telemetry fully off: both the OmO Native events in the s
 
 Quirk, documented honestly: the `*_SEND_ANONYMOUS_TELEMETRY` variables treat the value `yes` as an opt-out. This is a pre-existing behavior in the shared telemetry core, knowingly preserved for compatibility. Don't set `yes` expecting it to opt in; leaving the variable unset is what keeps telemetry on.
 
+## Known issue fixed in 5.1.35
+
+Versions 5.0.0-beta.6 through 5.1.34 kept sending events for the rest of a session after telemetry was turned off while that session was running. Turning telemetry off before a session started, or with one of the environment variables above, was never affected.
+
+The events sent after such a mid-session opt-out can't be told apart from consented ones, and PostHog offers no way to delete individual events, so we offer erasure per machine instead. Open an issue in the [project's issue tracker](https://github.com/code-yeongyu/oh-my-openagent/issues) (the contact channel named in the [privacy policy](../legal/privacy-policy.md)) with your telemetry machine id, and we delete every event recorded for that id. The machine id is `sha256("omo-senpi:" + hostname)`, the `distinct_id` of those versions; this prints it:
+
+```sh
+node -e 'console.log(require("node:crypto").createHash("sha256").update("omo-senpi:" + require("node:os").hostname()).digest("hex"))'
+```
+
+Since 5.1.35 a session reads the consent setting again before every event it sends, so turning telemetry off takes effect within 5 seconds.
+
 ## What is never collected
 
 The following never leaves your machine:
