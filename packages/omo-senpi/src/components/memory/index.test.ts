@@ -207,6 +207,7 @@ describe("createMemoryComponent", () => {
     expect(pi.entries).toEqual([{
       customType: MEMORY_BINDING_CUSTOM_TYPE,
       data: { identity: identity.id, repoPathHash: recorded.repoPathHash, boundAt: 456 },
+      options: { startupBookkeeping: true },
     }])
     expect(memoryModuleSupervisor.refCount).toBe(before + 1)
     expect(notifications).toEqual([])
