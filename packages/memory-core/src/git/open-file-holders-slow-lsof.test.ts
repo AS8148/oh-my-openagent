@@ -67,6 +67,17 @@ describe("macOS lsof answers are awaited under a hang bound", () => {
     expect(await probeUntil(() => !pidAlive(wedged), 5_000)).toBe(true)
   }, 30_000)
 
+  test.skipIf(macOnly)("#given an lsof cwd listing with a malformed pid line #when the repo-in-use lookup parses it #then it reports unknown, never 'nobody'", async () => {
+    // #given: this process is listed, plus one entry whose pid line is not a pure number
+    const { root } = await withFakeLsof(`#!/bin/sh\nprintf 'p${process.pid}\\nn/\\np12abc\\nn/elsewhere\\n'\n`)
+
+    // #when
+    const users = await findProcessesWorkingIn(root)
+
+    // #then
+    expect(users).toBeNull()
+  }, 30_000)
+
   test.skipIf(macOnly)("#given a wedged lsof #when the repo-in-use lookup passes its hang bound #then it reports unknown, never 'nobody'", async () => {
     // #given
     const { root } = await withFakeLsof(WEDGED_LSOF)

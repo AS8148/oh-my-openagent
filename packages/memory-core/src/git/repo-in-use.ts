@@ -66,6 +66,7 @@ async function scanLsofCwdUsers(dir: string, boundMs: number): Promise<readonly 
   const users = new Set<number>()
   for (const line of run.stdout.split("\n")) {
     if (line.startsWith("p")) {
+      if (!/^p\d+$/.test(line)) return null
       pid = Number.parseInt(line.slice(1), 10)
       if (pid === process.pid) sawSelf = true
     } else if (line.startsWith("n") && pid !== undefined && pid !== process.pid && inside(line.slice(1), tree.roots)) {
@@ -78,5 +79,5 @@ async function scanLsofCwdUsers(dir: string, boundMs: number): Promise<readonly 
 /** Pids other than this process working inside `dir` right now, or null when that cannot be told. */
 export function findProcessesWorkingIn(dir: string, options: HolderLookupOptions = {}): Promise<readonly number[] | null> {
   const boundMs = options.lsofBoundMs ?? LSOF_ANSWER_BOUND_MS
-  return answerFromProcOrLsof((view) => scanProcCwdUsers(dir, view), () => scanLsofCwdUsers(dir, boundMs))
+  return answerFromProcOrLsof((view) => scanProcCwdUsers(dir, view), () => scanLsofCwdUsers(dir, boundMs), boundMs)
 }

@@ -47,11 +47,12 @@ export async function acquireLock(
       },
     })
   }
-  await acquireWithoutDirectorySweep(lockPath, record, options)
+  const outcome = await acquireWithoutDirectorySweep(lockPath, record, options)
   // The hygiene sweep reclaimed THIS lock from a proven-dead owner on behalf of this acquisition, so
-  // the takeover proof belongs to it (omo #10199 r5 MEDIUM 3). A takeover the contender performed
-  // itself (stale-owner.ts) already bound its own, more recent proof and wins.
-  if (reclaimedForThisAcquisition !== undefined && provenDeadTakeoverFor(lockPath, record.nonce) === undefined) {
+  // the takeover proof belongs to it (omo #10199 r5 MEDIUM 3) - but only when nobody held the lock
+  // in between: an owner seen during the acquisition is the dead owner's successor (r5 delta LOW).
+  // A takeover the contender performed itself (stale-owner.ts) already bound its own proof and wins.
+  if (reclaimedForThisAcquisition !== undefined && !outcome.sawOtherOwner && provenDeadTakeoverFor(lockPath, record.nonce) === undefined) {
     recordProvenDeadTakeover(lockPath, reclaimedForThisAcquisition, record.nonce)
   }
 }

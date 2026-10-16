@@ -140,15 +140,29 @@ export interface HolderLookupOptions {
   readonly lsofBoundMs?: number
 }
 
+// omo #10199 r5 delta MEDIUM: one deadline around the WHOLE /proc scan (a stat on a hung NFS or
+// dead FUSE mount never returns, and the sweep holds the writer lock). Same generous bound as lsof;
+// an unanswered scan is indeterminate and lsof is not tried, since it reads the same /proc.
+function boundedScan(scan: Promise<ProcScan>, boundMs: number): Promise<ProcScan> {
+  return new Promise((resolveScan) => {
+    const bound = setTimeout(() => resolveScan({ kind: "indeterminate" }), boundMs)
+    scan.then(
+      (answer) => { clearTimeout(bound); resolveScan(answer) },
+      () => { clearTimeout(bound); resolveScan({ kind: "indeterminate" }) },
+    )
+  })
+}
+
 export async function answerFromProcOrLsof(
   procScan: (view: ProcView) => Promise<ProcScan>,
   lsofScan: () => Promise<readonly number[] | null>,
+  boundMs: number = LSOF_ANSWER_BOUND_MS,
 ): Promise<readonly number[] | null> {
   if (process.platform === "win32") return null
   // process.geteuid is unix-only; its absence on linux is unexpected, so fail closed (indeterminate).
   const geteuid = process.geteuid
   if (process.platform === "linux" && geteuid !== undefined) {
-    const scan = await procScan(liveProcView(geteuid.call(process)))
+    const scan = await boundedScan(procScan(liveProcView(geteuid.call(process))), boundMs)
     switch (scan.kind) {
       case "holders":
         return scan.pids
@@ -168,7 +182,7 @@ export async function answerFromProcOrLsof(
 /** Pids holding `path` open right now, or null when no available source can answer. */
 export function findOpenFileHolderPids(path: string, options: HolderLookupOptions = {}): Promise<readonly number[] | null> {
   const boundMs = options.lsofBoundMs ?? LSOF_ANSWER_BOUND_MS
-  return answerFromProcOrLsof((view) => scanProcFdHolders(path, view), () => scanLsofHolders(path, boundMs))
+  return answerFromProcOrLsof((view) => scanProcFdHolders(path, view), () => scanLsofHolders(path, boundMs), boundMs)
 }
 
 /** Fail closed (review LOW 5): a check that could not answer counts as held, never as clean. */
