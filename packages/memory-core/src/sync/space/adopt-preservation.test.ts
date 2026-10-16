@@ -3,6 +3,9 @@ import { expect, test } from "bun:test"
 import { splitItem, type FmEntry, type FmValue } from "../item/frontmatter"
 import { mulberry32, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
+
+// 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
+const PROPERTY_TIMEOUT_MS = 60_000
 import { t2Block } from "./test-support"
 
 function preserved(wanted: FmValue, actual: FmValue): boolean {
@@ -86,7 +89,7 @@ for (const seed of [20261016, 0x5a17c0de]) {
       const repeated = planAdoption(files, { currentText: output, lastMaterialised: null, tombstoned: false })
       expect(repeated.action, `${context} repeated adoption`).toBe("none")
     }
-  })
+  }, PROPERTY_TIMEOUT_MS)
 }
 
 test("existing-key T2 and T1 values survive capture into the real item model", async () => {

@@ -196,7 +196,8 @@ describe("HIGH-1 regression: a fact is never dropped while its source is deleted
     if (plan.action !== "capture") return
     const parsed = splitItem(plan.workingText)
     expect(parsed.fm?.map((entry) => entry.key)).toEqual(["title", "tags"])
-    expect(plan.workingText).toContain("kept line\r\n")
+    expect(plan.workingText).toContain("kept line\n")
+    expect(plan.workingText.includes("\r")).toBe(false)
     expect(plan.removeAfterCommit).toEqual(["n.sync-conflict-20261015-mac.md"])
   })
 })

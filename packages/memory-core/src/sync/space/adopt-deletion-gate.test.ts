@@ -4,6 +4,9 @@ import { splitItem, type FmEntry, type FmValue } from "../item/frontmatter"
 import { mulberry32, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
 import { stripT2Blocks } from "./hub-trace"
+
+// 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
+const PROPERTY_TIMEOUT_MS = 60_000
 import { t2Block } from "./test-support"
 
 // The deletion gate (HIGH-1, structural guarantee): a source file may be queued in
@@ -43,7 +46,7 @@ function representedFacts(text: string): readonly FmEntry[] {
 
 /** The facts a source file carries, exactly the way planAdoption reads them. */
 function factsOf(source: string): { readonly bodyLines: readonly string[]; readonly entries: readonly FmEntry[] } {
-  const parsed = splitItem(source)
+  const parsed = splitItem(source.replace(/\r\n/g, "\n"))
   const stripped = stripT2Blocks(parsed.body)
   return {
     bodyLines: linesOf(stripped.body),
@@ -138,7 +141,7 @@ for (const seed of [20261016, 0xde1e7106]) {
         expect(queued !== retained.has(side.path), `${context} ${side.path} both queued and retained`).toBe(true)
       }
     }
-  })
+  }, PROPERTY_TIMEOUT_MS)
 }
 
 test("a merge that drops a line keeps the source and records the reason", () => {
