@@ -19,6 +19,7 @@ import { startHostHeartbeat } from "./handle-heartbeat"
 import { unresponsiveMessage } from "../rpc/heartbeat"
 import { createHandleListeners } from "./handle-listeners"
 import { createHandleRecovery } from "./handle-recovery"
+import { createHandleReconciliation } from "./handle-reconciliation"
 import { createHandleStop } from "./handle-stop"
 import { createHandleTeardown } from "./handle-teardown"
 import { createHandleWaiters } from "./handle-waiters"
@@ -78,11 +79,21 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     wakeSourcesLive: () => wakeSources.hasLiveWakeSources(),
     disposed: () => tornDown,
   })
+  let continuationState: "none" | "pending_delivery" | "awaiting_start" = "none"
+  const reconciliation = createHandleReconciliation({
+    lastInputId: () => options.inputStore?.load(taskId)?.last_effect_id,
+    port: () => client,
+    settle: (settled) => {
+      if (settled.status === "completed") finalText = settled.finalResponse
+      settleTurn(settled)
+    },
+    continuing: () => { continuationState = "pending_delivery" },
+  })
 
   const onSessionEvent = (event: Parameters<ChildEventListener>[0]): void => {
     // A run the child starts on its own after its turn settled (a monitor or background job woke it)
     // is a new turn: the next outcome is that run's, never the settled one again (omo#9069).
-    if (event.type === "agent_start" && turnOutcome !== undefined && outcome === undefined) {
+    if (event.type === "agent_start" && (continuationState === "awaiting_start" || turnOutcome !== undefined) && outcome === undefined) {
       beginTurn()
       listeners.emitSelfResumed()
     }
@@ -190,6 +201,8 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
       bindHostSessionPort(client, clientBinding)
     },
     turnResumed: () => listeners.emitTurnResumed(),
+    reconcile: (reopened: boolean) => reconciliation.reconcile(session.sessionPath, undefined, true, reopened),
+    beginContinuation: () => beginTurn(),
     endLost: () => endSession({ kind: "transport_gone" }),
     // Transport failures park in recovery; a prompt rejection keeps its own actionable cause.
     continuationFailed: (error) => {
@@ -217,6 +230,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   })
 
   const beginTurn = (): void => {
+    continuationState = continuationState === "pending_delivery" ? "awaiting_start" : "none"
     if (outcome !== undefined) return
     if (reachedIdle || turnOutcome !== undefined) {
       reachedIdle = false
@@ -281,6 +295,8 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     markStopping: stop.markStopping,
     stopWhenReachable: stop.stopWhenReachable,
     ...listeners.registrations,
+    reconcileTurn: (record) => reconciliation.reconcile(session.sessionPath, record, false, openDisposition === "reopened"),
+    onReconciled: reconciliation.subscribe,
     adoptFinishedTurn: async (finalResponse) => {
       if (turnOutcome !== undefined || settlement.pending() !== undefined) return
       // A state read that fails is not proof of idleness, and must never cost the reattach: stay busy.
