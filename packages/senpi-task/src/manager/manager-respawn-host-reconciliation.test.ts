@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { childSpec, hostRunnerHarness } from "../runners/rpc-host.test-support"
 import { isHostSessionHandle } from "../runners/rpc-host"
 import { createTaskRecord } from "../state"
+import { createTaskRecordStore } from "../store"
 import { cleanupProjects, makeManager, tempProject } from "./__fixtures__/manager-fakes"
 import { respawnManagedTask } from "./manager-respawn"
 
@@ -15,7 +16,11 @@ async function detachedChild(deadline = false, aborted = false, rejectState = fa
   const host = await harness.fakeHost({ transcripts: true })
   const runner = harness.runnerOver(host)
   const initial = createTaskRecord({ parent_session_id: "parent", root_session_id: "parent", depth: 1, execution_mode: "process", model: "anthropic/claude-sonnet-4-5", notify_on_terminal: false }, 0)
-  const spec = childSpec({ state_dir: project, task_id: initial.task_id })
+  // Production wiring (manager/runner.ts, manager-respawn.ts): the task record exists in the task store before the
+  // first input, so input ids come from its persisted effect_seq and the respawned continuation gets the next one.
+  const inputStore = createTaskRecordStore({ project_dir: project, task: { state_dir: project } })
+  inputStore.save({ ...initial, status: "running", runner_kind: "host-session" })
+  const spec = childSpec({ state_dir: project, task_id: initial.task_id, cwd: project, taskStoreDir: project })
   const first = await runner.start(spec)
   if (!isHostSessionHandle(first)) throw new Error("expected a host handle")
   const session = first.hostSession
