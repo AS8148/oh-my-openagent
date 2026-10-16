@@ -2,7 +2,6 @@ import type { DeviceKeyring } from "../keyring-port.ts"
 import type { KeyringEntry } from "./entry.ts"
 import type { Authority } from "./fold.ts"
 import { isObject, type ParsedBody, type Principal } from "./parse.ts"
-import { taggedHash } from "./signatures.ts"
 
 declare const trustAnchorBrand: unique symbol
 declare const pinCandidateBrand: unique symbol
@@ -29,7 +28,7 @@ type PublicKeys = { readonly sealing_public_key: string; readonly signing_public
  * kind is a branded value only the mint functions below create, so a value of the right shape built
  * anywhere else is refused:
  * - pairing: this device's principal (read from its own keyring), the approver keys its 6-digit code
- *   covered, both nonces, and the commitment the mint RECOMPUTES from the device's own keys and nonce;
+ *   covered, and both nonces (the approval rule recomputes the commitment from these keys and nonce);
  * - recovery: the recovery public keys this device derived from the passkey it is using;
  * - creator: this device's id, read from its own keyring. Only a genesis whose first device has that
  *   id meets it; genesis rules derive the id from the first device's signing key and verify the
@@ -41,7 +40,7 @@ export type BootstrapAnchor = (
       readonly account: string
       readonly self: Principal
       readonly approver: PublicKeys
-      readonly transcript: { readonly commitment: string; readonly joining_nonce: string; readonly approver_nonce: string }
+      readonly transcript: { readonly joining_nonce: string; readonly approver_nonce: string }
     }
   | ({ readonly kind: "recovery"; readonly account: string; readonly credentialId: string } & PublicKeys)
   | { readonly kind: "creator"; readonly account: string; readonly selfId: string }
@@ -89,24 +88,17 @@ const principalOf = (keyring: DeviceKeyring): Principal => ({
 export const creatorAnchor = (account: string, keyring: DeviceKeyring): BootstrapAnchor =>
   mintBootstrap({ kind: "creator", account, selfId: keyring.principal().id })
 
-/** The anchor of a joining device after its 6-digit code matched; the commitment is recomputed here, never taken. */
-export const pairingAnchor = async (input: {
+/** The anchor of a joining device after its 6-digit code matched: its own principal, the approver keys and both nonces. */
+export const pairingAnchor = (input: {
   readonly account: string
   readonly keyring: DeviceKeyring
   readonly approver: PublicKeys
   readonly joiningNonce: string
   readonly approverNonce: string
-}): Promise<BootstrapAnchor> => {
-  const self = principalOf(input.keyring)
-  const commitment = await taggedHash("omo-sync/v1/approval-commitment", {
-    account: input.account,
-    sealing_public_key: self.sealing_public_key,
-    signing_public_key: self.signing_public_key,
-    nonce: input.joiningNonce,
-  })
+}): BootstrapAnchor => {
   const approver = Object.freeze({ sealing_public_key: input.approver.sealing_public_key, signing_public_key: input.approver.signing_public_key })
-  const transcript = Object.freeze({ commitment, joining_nonce: input.joiningNonce, approver_nonce: input.approverNonce })
-  return mintBootstrap({ kind: "pairing", account: input.account, self: Object.freeze(self), approver, transcript })
+  const transcript = Object.freeze({ joining_nonce: input.joiningNonce, approver_nonce: input.approverNonce })
+  return mintBootstrap({ kind: "pairing", account: input.account, self: Object.freeze(principalOf(input.keyring)), approver, transcript })
 }
 
 /** The anchor of a recovering device: the public keys it derived from the passkey it is using. */

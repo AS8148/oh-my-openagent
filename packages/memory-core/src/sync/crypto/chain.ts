@@ -1,6 +1,7 @@
-import { type AnchorRejection, anchorStep, type ChainAnchor, type PinCandidate } from "./anchor.ts"
+import { type AnchorRejection, anchorStep, type ChainAnchor, isBootstrapAnchor, isPinCandidate, isTrustAnchor, type PinCandidate } from "./anchor.ts"
 import type { BatchEntry, Head, KeyringEntry, SyncEntry, VerifiedKeyringEntry, VerifiedWrap } from "./entry.ts"
 import { type EnvelopeRejection, envelopeRefusal } from "./envelope.ts"
+import { frozenCopy } from "./frozen.ts"
 import { type Authority, applyRecord, type FoldedRecord, isCancelledAdmission, isVetoedEpoch } from "./fold.ts"
 import { expectedEpoch, forcedRotationRefusal, keyWithinEpoch, type LinkMode, linksHold, signerKey } from "./chain-checks.ts"
 import { type ParsedBody, parseBody } from "./parse.ts"
@@ -58,13 +59,10 @@ export const isChainState = (value: unknown): value is ChainState => typeof valu
 
 const isState = (value: object): value is ChainState => states.has(value)
 
+const branded = (value: object): boolean => isVerifiedWrap(value) || isTrustAnchor(value) || isBootstrapAnchor(value) || isPinCandidate(value)
+
 const mintState = (fields: ChainFields): ChainState => {
-  const state = Object.freeze({
-    ...fields,
-    history: Object.freeze([...fields.history]),
-    received: Object.freeze([...fields.received]),
-    unanchored: Object.freeze([...fields.unanchored]),
-  })
+  const state = frozenCopy({ ...fields }, branded)
   states.add(state)
   if (!isState(state)) throw new Error("unreachable: a fresh chain state is always registered")
   return state
@@ -127,8 +125,15 @@ export const emptyChain = (account: string, anchor: ChainAnchor): ChainState =>
   forcedRotationAfter: null,
   })
 
-/** Moves a verified state's head to a snapshot position the caller has verified (snapshot import only). */
-export const atVerifiedHead = (state: ChainState, head: Head): ChainState | null => (isChainState(state) ? mintState({ ...state, head }) : null)
+/**
+ * Moves an anchored state's head forward to a snapshot position whose keyring head is the one this
+ * state verified (snapshot import only); any other position, or an unanchored state, gets null.
+ */
+export const atVerifiedHead = (state: ChainState, head: Head): ChainState | null => {
+  if (!isChainState(state) || !state.anchored || state.head === null) return null
+  if (head.keyring_link !== state.head.keyring_link || head.seq < state.head.seq) return null
+  return mintState({ ...state, head })
+}
 
 const seenKeyring = (state: ChainState): ReadonlyArray<KeyringEntry> => [...state.received, ...state.unanchored]
 

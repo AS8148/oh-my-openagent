@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { DeviceKeyring } from "../keyring-port.ts"
 import { type BootstrapAnchor, type ChainAnchor, creatorAnchor, pairingAnchor, recoveryAnchor, type TrustAnchor } from "./anchor.ts"
-import { appendEntries, type ChainState, emptyChain, isVerifiedWrap, verifyKeyringEntry } from "./chain.ts"
+import { appendEntries, atVerifiedHead, type ChainState, emptyChain, isChainState, isVerifiedWrap, verifyKeyringEntry } from "./chain.ts"
 import type { KeyringEntry, VerifiedWrap } from "./entry.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { approvalEntry, genesisEntry, headAfter, newDeviceKeyring, newRecoveryCredential, type PairingTranscript, pairingTranscript } from "./testing/genesis.ts"
@@ -28,7 +28,7 @@ const expectRefused = (result: Awaited<ReturnType<typeof walk>>, reason: string)
   expect(result.logged).toEqual([`sync.batch.rejected ${reason}`])
 }
 
-const ceremony = (self: DeviceKeyring, approver: DeviceKeyring, transcript: PairingTranscript): Promise<BootstrapAnchor> =>
+const ceremony = (self: DeviceKeyring, approver: DeviceKeyring, transcript: PairingTranscript): BootstrapAnchor =>
   pairingAnchor({
     account: ACCOUNT,
     keyring: self,
@@ -55,7 +55,7 @@ describe("H1: a joining device trusts only the approval its own ceremony bound",
     const [approver, joining] = [await newDeviceKeyring(), await newDeviceKeyring()]
     const transcript = await pairingTranscript(ACCOUNT, joining)
     const epochKey = crypto.getRandomValues(new Uint8Array(32))
-    const { outcome } = await walk(await ceremony(joining, approver, transcript), await accountBy(approver, joining, transcript, epochKey))
+    const { outcome } = await walk(ceremony(joining, approver, transcript), await accountBy(approver, joining, transcript, epochKey))
     if (!outcome.ok) throw new Error(`refused: ${outcome.reason}`)
     expect(outcome.state.pin?.pinnedBy).toBe("pairing")
     expect(outcome.state.pin?.genesisDigest).toBe(outcome.state.genesisDigest ?? "")
@@ -67,7 +67,7 @@ describe("H1: a joining device trusts only the approval its own ceremony bound",
     const [approver, joining, server] = [await newDeviceKeyring(), await newDeviceKeyring(), await newDeviceKeyring()]
     const transcript = await pairingTranscript(ACCOUNT, joining)
     const forged = await accountBy(server, joining, transcript, crypto.getRandomValues(new Uint8Array(32)))
-    const result = await walk(await ceremony(joining, approver, transcript), forged)
+    const result = await walk(ceremony(joining, approver, transcript), forged)
     expectRefused(result, "anchor_mismatch")
     const servedWrap = forged[1].wraps[0]
     if (servedWrap === undefined) throw new Error("forged approval has no wrap")
@@ -81,9 +81,9 @@ describe("H1: a joining device trusts only the approval its own ceremony bound",
     const chain = await accountBy(approver, joining, transcript, crypto.getRandomValues(new Uint8Array(32)))
     const otherApprover = await newDeviceKeyring()
     for (const anchor of [
-      await ceremony(joining, otherApprover, transcript),
-      await ceremony(joining, approver, { ...transcript, approver_nonce: "AAAAAAAAAAAAAAAAAAAAAA" }),
-      await ceremony(joining, approver, { ...transcript, joining_nonce: "AAAAAAAAAAAAAAAAAAAAAA" }),
+      ceremony(joining, otherApprover, transcript),
+      ceremony(joining, approver, { ...transcript, approver_nonce: "AAAAAAAAAAAAAAAAAAAAAA" }),
+      ceremony(joining, approver, { ...transcript, joining_nonce: "AAAAAAAAAAAAAAAAAAAAAA" }),
     ]) {
       expectRefused(await walk(anchor, chain), "anchor_mismatch")
     }
@@ -93,7 +93,7 @@ describe("H1: a joining device trusts only the approval its own ceremony bound",
     const [approver, joining] = [await newDeviceKeyring(), await newDeviceKeyring()]
     const transcript = await pairingTranscript(ACCOUNT, joining)
     const [genesis] = await accountBy(approver, joining, transcript, crypto.getRandomValues(new Uint8Array(32)))
-    const step = await verifyKeyringEntry(emptyChain(ACCOUNT, await ceremony(joining, approver, transcript)), genesis, "main")
+    const step = await verifyKeyringEntry(emptyChain(ACCOUNT, ceremony(joining, approver, transcript)), genesis, "main")
     if (!step.ok) throw new Error(`genesis refused: ${step.reason}`)
     expect({ anchored: step.state.anchored, received: step.state.received.length, held: step.state.unanchored.length }).toEqual({ anchored: false, received: 0, held: 1 })
     const held = step.state.unanchored[0]?.wraps ?? []
@@ -105,7 +105,7 @@ describe("H1: a joining device trusts only the approval its own ceremony bound",
     const [approver, joining] = [await newDeviceKeyring(), await newDeviceKeyring()]
     const transcript = await pairingTranscript(ACCOUNT, joining)
     const [genesis] = await accountBy(approver, joining, transcript, crypto.getRandomValues(new Uint8Array(32)))
-    expectRefused(await walk(await ceremony(joining, approver, transcript), [genesis]), "unanchored")
+    expectRefused(await walk(ceremony(joining, approver, transcript), [genesis]), "unanchored")
   })
 })
 
@@ -148,7 +148,7 @@ describe("every value the verifier trusts is minted by the verifier: a hand-buil
   test("a creator, pairing or recovery anchor built by hand", async () => {
     const [device, server] = [await newDeviceKeyring(), await newDeviceKeyring()]
     const served = await genesisEntry(ACCOUNT, server, "W".repeat(43), newRecoveryCredential())
-    const minted = [creatorAnchor(ACCOUNT, server), await ceremony(device, server, await pairingTranscript(ACCOUNT, device))]
+    const minted = [creatorAnchor(ACCOUNT, server), ceremony(device, server, await pairingTranscript(ACCOUNT, device))]
     for (const anchor of minted) {
       const handBuilt: unknown = JSON.parse(JSON.stringify(anchor))
       // @ts-expect-error only the mint functions create a BootstrapAnchor
@@ -174,13 +174,52 @@ describe("every value the verifier trusts is minted by the verifier: a hand-buil
     expect(step.ok ? "accepted" : step.reason).toBe("untrusted_state")
   })
 
-  test("a minted state cannot be extended in place: its received, history and held entries are frozen", async () => {
+  test("nothing reachable from a minted state can be changed: head, records, wraps and the authority's maps and sets", async () => {
     const { outcome } = await walk(fixtureAnchor(), mainChain())
     if (!outcome.ok) throw new Error(`fixture refused: ${outcome.reason}`)
-    for (const list of [outcome.state.received, outcome.state.history, outcome.state.unanchored]) {
-      expect(() => Reflect.apply(Array.prototype.push, list, [record("genesis")])).toThrow(TypeError)
-    }
-    expect(outcome.state.received.length).toBe(mainChain().length)
+    const state = outcome.state
+    const authority = state.authority
+    const record0 = state.history[0]
+    const entry0 = state.received[0]
+    if (authority === null || state.head === null || record0 === undefined || entry0 === undefined) throw new Error("fixture has no verified records")
+    const attempts: ReadonlyArray<() => unknown> = [
+      () => Reflect.apply(Array.prototype.push, state.received, [entry0]),
+      () => Reflect.apply(Array.prototype.push, state.history, [record0]),
+      () => Reflect.apply(Array.prototype.push, state.unanchored, [entry0]),
+      () => Reflect.apply(Array.prototype.push, entry0.wraps, [entry0.wraps[0]]),
+      () => Reflect.apply(Map.prototype.set, authority.members, ["evil", record0]),
+      () => Reflect.apply(Map.prototype.set, authority.registry, ["evil", record0]),
+      () => Reflect.apply(Set.prototype.add, authority.cancelled, ["evil"]),
+    ]
+    for (const attempt of attempts) expect(attempt).toThrow(TypeError)
+    const assignments: ReadonlyArray<readonly [object, string, unknown]> = [
+      [state.head, "seq", 999],
+      [record0, "digest", "forged"],
+      [record0.body, "kind", "genesis"],
+      [entry0, "digest", "forged"],
+      [entry0.author, "id", "evil"],
+      [authority, "epoch", 999],
+    ]
+    for (const [target, key, value] of assignments) expect(Reflect.set(target, key, value)).toBe(false)
+    expect(isChainState(state)).toBe(true)
+    expect({ seq: state.head.seq, members: authority.members.size, received: state.received.length }).toEqual({ seq: mainChain().length, members: authority.members.size, received: mainChain().length })
+    expect(entry0.wraps.every(isVerifiedWrap)).toBe(true)
+  })
+
+  test("atVerifiedHead moves only an anchored state, only forward, and only to its own verified keyring head", async () => {
+    const { outcome } = await walk(fixtureAnchor(), mainChain())
+    if (!outcome.ok || outcome.state.head === null) throw new Error("fixture refused")
+    const head = outcome.state.head
+    expect(atVerifiedHead(outcome.state, { ...head, seq: head.seq + 5, link: "L".repeat(43) })?.head?.seq).toBe(head.seq + 5)
+    expect(atVerifiedHead(outcome.state, { ...head, keyring_link: "K".repeat(43) })).toBeNull()
+    expect(atVerifiedHead(outcome.state, { ...head, seq: head.seq - 1 })).toBeNull()
+    const [approver, joining] = [await newDeviceKeyring(), await newDeviceKeyring()]
+    const transcript = await pairingTranscript(ACCOUNT, joining)
+    const [genesis] = await accountBy(approver, joining, transcript, crypto.getRandomValues(new Uint8Array(32)))
+    const held = await verifyKeyringEntry(emptyChain(ACCOUNT, ceremony(joining, approver, transcript)), genesis, "main")
+    if (!held.ok || held.state.head === null) throw new Error("genesis refused")
+    expect(held.state.anchored).toBe(false)
+    expect(atVerifiedHead(held.state, held.state.head)).toBeNull()
   })
 })
 
