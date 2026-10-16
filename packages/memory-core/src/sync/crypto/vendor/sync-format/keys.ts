@@ -66,8 +66,15 @@ export const verifyFramed = async (
   payload: JsonValue,
   publicKey: Uint8Array<ArrayBuffer>,
   signature: Uint8Array<ArrayBuffer>,
-): Promise<boolean> =>
-  verifyFramedBytes(context, framedPreimage(context, payload), publicKey, signature);
+): Promise<boolean> => {
+  if (publicKey.length !== 32 || signature.length !== 64) return false;
+  try {
+    const key = await importVerifyKey(publicKey);
+    return await crypto.subtle.verify("Ed25519", key, signature, framedPreimage(context, payload));
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Verifies a framed signature over raw payload bytes (the object-digest purpose signs the raw

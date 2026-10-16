@@ -45,8 +45,17 @@ const rebuild = (entry: ManifestObject, account = objects.account) =>
   })
 
 describe("buildBatch: the client encoder", () => {
-  test.each(objects.objects.map((entry) => [entry.file, entry] as const))("rebuilds %s byte for byte, signed through the DeviceKeyring", async (file, entry) => {
-    expect(b64(await rebuild(entry))).toBe(b64(readBytes(`objects/${file}`)))
+  // The golden objects carry hand-built stored deflate blocks (omo-service fixtures regenerate
+  // byte-identically on any runtime), while the client compresses with the runtime's deflate-raw,
+  // so whole-object bytes are not a format property. What is: the canonical header, a valid
+  // object signature by the author's DeviceKeyring, and a payload that opens to the same records.
+  test.each(objects.objects.map((entry) => [entry.file, entry] as const))("rebuilds %s: same header, signed by its author, opens to its records", async (file, entry) => {
+    const built = await rebuild(entry)
+    const golden = readBytes(`objects/${file}`)
+    const headerOf = (bytes: Uint8Array<ArrayBuffer>) => b64(bytes.subarray(10, 10 + new DataView(bytes.buffer, bytes.byteOffset).getUint32(6, false)))
+    expect(headerOf(built)).toBe(headerOf(golden))
+    const opened = await openBatch(built, await bindingFor(entry, built, b64(new Uint8Array(await crypto.subtle.digest("SHA-256", built)))), epochKey(entry.epoch) ?? new Uint8Array(32), createRejectionCounter())
+    expect(opened.ok && opened.records.map((r) => ({ type: r.type, space_id: b64(r.spaceId), item_key: r.itemKey, body_base64url: b64(r.body) }))).toEqual([...entry.payload])
   })
 
   test("a batch from a fresh in-memory keyring opens with its records intact", async () => {

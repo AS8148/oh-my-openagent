@@ -1,13 +1,13 @@
 # Vendored sync-format v1 library and sync-v1 fixtures
 
-Source: `sisyphuslabs/omo-service`, commit `34d42c6c9db1e3b21a52470ac939769b8f2d7c53`
-(branch `memsync/sync-contract-format`). The contract package is not yet published
+Source: `sisyphuslabs/omo-service`, commit `3bedb0afd02674cd198fdfb833153ab5003e93f8`
+(`main`, #428 as merged). The contract package is not yet published
 (omo-service #387), so the memory sync client consumes the format library and its golden
 fixtures as this vendored copy until it is (work plan memory-sync-e2ee-20261015, todo 13).
 
 - `sync-format/` — byte-identical copy of `packages/contract/src/sync-format/`: the
   WebCrypto-only format library (OMOB frame, STREAM payload, framed Ed25519 signatures, the
-  keyring authority fold). Implements omo-service `docs/sync-design.md` sections 6-8.
+  keyring receiver: `receiveKeyringChain` with its fold refusals and fork evidence proof). Implements omo-service `docs/sync-design.md` sections 6-8.
 - `fixtures/sync-v1/` — byte-identical copy of the golden fixture data: `chain.json`,
   `keys.json`, `wraps.json`, `vectors.jsonl`, `accounting.json`, `objects/`, `corrupted/`.
   The generator tooling (`gen/`, `generate.mjs`, `check-node.mjs`) is deliberately not

@@ -31,7 +31,9 @@ export type {
 const checkContext = (frame: ParsedFrame, ctx: ObjectContext): ObjectFailureReason | null => {
   if (frame.header.account_id !== ctx.account) return "account_mismatch";
   if (frame.header.epoch !== ctx.epoch) return "epoch_mismatch";
-  if (frame.header.author.id !== ctx.authorId) return "author_mismatch";
+  // Objects are signed by devices only; a recovery author never writes a batch or a chunk.
+  const { author } = frame.header;
+  if (author.kind !== "device" || author.id !== ctx.authorId) return "author_mismatch";
   return null;
 };
 
@@ -65,28 +67,26 @@ export const verifyObject = async (
 
 /**
  * Full read: frame, context bindings, signature, and - when the context carries the epoch key -
- * the STREAM decryption and payload records. A failure at any stage yields no partial plaintext.
+ * the STREAM decryption and payload records. The context is required: no object reads as ok
+ * before its signature verified. A failure at any stage yields no partial plaintext.
  */
 export const decodeObject = async (
   bytes: Uint8Array<ArrayBuffer>,
-  ctx?: ObjectContext,
+  ctx: ObjectContext,
 ): Promise<ObjectSuccess | ObjectFailure> => {
   const frame = parseFrame(bytes);
   if ("reason" in frame) return frame;
-  if (ctx !== undefined) {
-    const binding = checkContext(frame, ctx);
-    if (binding !== null) return fail(binding);
-    const signed = await verifySignature(bytes, frame, ctx);
-    if (!signed) return fail("bad_signature");
-    if (ctx.epochKey !== undefined) {
-      const payload = await streamOpen(frame, ctx.epochKey);
-      if ("reason" in payload) return payload;
-      const records = parseRecords(payload);
-      if ("reason" in records) return records;
-      return { ok: true, header: frame.header, signature: frame.signature, records };
-    }
+  const binding = checkContext(frame, ctx);
+  if (binding !== null) return fail(binding);
+  if (!(await verifySignature(bytes, frame, ctx))) return fail("bad_signature");
+  if (ctx.epochKey === undefined) {
+    return { ok: true, header: frame.header, signature: frame.signature, records: [] };
   }
-  return { ok: true, header: frame.header, signature: frame.signature, records: [] };
+  const payload = await streamOpen(frame, ctx.epochKey);
+  if ("reason" in payload) return payload;
+  const records = parseRecords(payload);
+  if ("reason" in records) return records;
+  return { ok: true, header: frame.header, signature: frame.signature, records };
 };
 
 /** The 4-byte magic every version-1 object starts with, exported for peeking readers. */

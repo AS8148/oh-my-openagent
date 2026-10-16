@@ -29,7 +29,8 @@ export type ObjectFailureReason =
   | "author_mismatch"
   | "bad_signature"
   | "stream_aead"
-  | "bad_payload";
+  | "bad_payload"
+  | "payload_too_large";
 
 export type ObjectFailure = {
   readonly ok: false;

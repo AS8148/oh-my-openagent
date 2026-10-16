@@ -22,6 +22,7 @@ type DeviceName = "owner" | "joining" | "recovered" | "recovered2"
 type KeysFixture = {
   readonly account: string
   readonly devices: Record<DeviceName, { readonly signing_seed: string; readonly sealing_private: string; readonly principal: { readonly id: string } }>
+  readonly wrap_test_device: { readonly sealing_private: string; readonly sealing_public: string }
   readonly recovery: Record<"key1" | "key2", { readonly prf_output: string; readonly enrollment_nonce: string }>
   readonly epochs: Record<string, string>
 }

@@ -11,13 +11,8 @@
     "veto_rotation"
   ],
   "branches": {
-    "recovery2": [
-      "recovery_join_2",
-      "post_join_2_rotation"
-    ],
-    "fork": [
-      "fork_resolution"
-    ]
+    "recovery2": ["recovery_join_2", "post_join_2_rotation"],
+    "fork": ["fork_resolution"]
   },
   "records": {
     "genesis": {
@@ -249,26 +244,26 @@
         "kind": "rotation",
         "members": [
           {
-            "id": "HcahOcBrYYAu1Uf5BVu8YQ",
-            "kind": "device",
-            "sealing_public_key": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
-            "signing_public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
-          },
-          {
             "id": "-1m1eENVhqdXRJ3XlN__jQ",
             "kind": "device",
             "sealing_public_key": "BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY",
             "signing_public_key": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E"
+          },
+          {
+            "id": "HcahOcBrYYAu1Uf5BVu8YQ",
+            "kind": "device",
+            "sealing_public_key": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+            "signing_public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
           }
         ],
-        "wraps_digest": "NuqJZsYlBYqLFXTeEbbERtvb2ITPokpOK2NtxgMxt2I"
+        "wraps_digest": "yHkEsGQDML_LzrQHnZicewPWolq5YnynvPCkwls76pM"
       },
-      "digest": "6Tkf09MtT8Bjo3TNuSihv2hqBypX-bWRQso3Hj425bY",
+      "digest": "TohwyyAWIuH6FoY2fBYXLtEuNuykdVxlKzdZDAlQ8tw",
       "epoch": 3,
-      "keyring_link": "btNvqyim9uDOvIpM2FerksyzIsDSy54XPsqWlqa3ls8",
+      "keyring_link": "cHhDqjtrhPxcVuFeZxx9WG6_4MjNJwDRGOf9yCtLFus",
       "kind": "keyring",
-      "link": "btNvqyim9uDOvIpM2FerksyzIsDSy54XPsqWlqa3ls8",
-      "record_sig": "mluTR5GwFETGw55ahXkBQhqNlbZmCE53-6vVlNbPsNmy0zpiXCKfPerxCzvjpeV_gv24nboas7_dkSxdp-AWBg",
+      "link": "cHhDqjtrhPxcVuFeZxx9WG6_4MjNJwDRGOf9yCtLFus",
+      "record_sig": "APwUWshZj7amoEbICqf1_z11GpPGV9OUBYsSkqtTYA1zK-4Qn5lkwEcLOrxPP0czKcvSVYBk1b-BpRUrCfBBDw",
       "seq": 8
     },
     "fork_resolution": {
@@ -533,13 +528,13 @@
     "veto_rotation_wraps": [
       {
         "epoch": 3,
-        "id": "device:HcahOcBrYYAu1Uf5BVu8YQ",
-        "wrap": "GBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGA"
+        "id": "device:-1m1eENVhqdXRJ3XlN__jQ",
+        "wrap": "GRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ"
       },
       {
         "epoch": 3,
-        "id": "device:-1m1eENVhqdXRJ3XlN__jQ",
-        "wrap": "GRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ"
+        "id": "device:HcahOcBrYYAu1Uf5BVu8YQ",
+        "wrap": "GBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGA"
       }
     ],
     "post_join_2_rotation_wraps": [

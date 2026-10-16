@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { createCipheriv, createHmac, createPublicKey, diffieHellman, generateKeyPairSync } from "node:crypto"
-import { createInMemoryDeviceKeyring, type DeviceKeyring, type WrapBinding } from "../keyring-port.ts"
+import { createDeviceKeyring, createInMemoryDeviceKeyring, type DeviceKeyring, type WrapBinding } from "../keyring-port.ts"
 import type { WrapEntry } from "./entry.ts"
 import { openHistory, openWrap } from "./unwrap.ts"
-import { readBytes } from "./testing/sync-v1.ts"
+import { keys, readBytes } from "./testing/sync-v1.ts"
 import { b64urlEncode, type JsonValue, jcsBytes } from "./vendor/sync-format/jcs.ts"
 
 type WrapsFixture = {
@@ -12,6 +12,7 @@ type WrapsFixture = {
     readonly name: string
     readonly epoch: number
     readonly id: string
+    readonly wrap: string
     readonly key_material: JsonValue
     readonly history_plaintext: ReadonlyArray<{ readonly epoch: number; readonly origin: string; readonly key: string }>
   }>
@@ -61,6 +62,19 @@ const wrapFor = async (
   return { epoch: envelope.epoch, id, wrap: b64urlEncode(sealed) }
 }
 
+/** The committed wraps.json entry sealed to the wrap-test device, opened with that device's key. */
+const wrapTestKeyring = (): DeviceKeyring => {
+  const raw = Buffer.from(keys.wrap_test_device.sealing_private, "base64url")
+  const sealingPrivatePkcs8 = Buffer.concat([Buffer.from("302e020100300506032b656e04220420", "hex"), raw]).toString("base64url")
+  const signing = generateKeyPairSync("ed25519").privateKey.export({ format: "der", type: "pkcs8" }).toString("base64url")
+  return createDeviceKeyring("wrap-test", { signingPrivatePkcs8: signing, sealingPrivatePkcs8 })
+}
+const committedWrap = (): WrapEntry => {
+  const wrap = fixture.wraps.find((candidate) => candidate.name === "epoch1_to_wrap_test_device")
+  if (wrap === undefined) throw new Error("fixture missing epoch1_to_wrap_test_device")
+  return { epoch: wrap.epoch, id: wrap.id, wrap: wrap.wrap }
+}
+
 describe("openHistory: the epoch-history layer of a wrap's key material", () => {
   test.each(fixture.wraps.map((wrap) => [wrap.name, wrap] as const))("opens the %s fixture bundle to its committed history", async (_name, wrap) => {
     const expected = new Map(wrap.history_plaintext.map((row) => [row.epoch, row.origin]))
@@ -85,6 +99,17 @@ describe("openHistory: the epoch-history layer of a wrap's key material", () => 
 })
 
 describe("openWrap: unwrap only through the DeviceKeyring", () => {
+  test("the committed wraps.json wrap opens through DeviceKeyring.unseal to the epoch-1 key", async () => {
+    const opened = await openWrap(wrapTestKeyring(), committedWrap(), fixture.account, new Map())
+    expect(opened.ok && b64urlEncode(opened.keys.current)).toBe(keys.epochs["1"])
+  })
+
+  test("the same genuine wrap served for another account or epoch fails its AEAD", async () => {
+    const wrap = committedWrap()
+    expect(await openWrap(wrapTestKeyring(), wrap, "another-account", new Map())).toEqual({ ok: false, reason: "wrap_refused" })
+    expect(await openWrap(wrapTestKeyring(), { ...wrap, epoch: 2 }, fixture.account, new Map())).toEqual({ ok: false, reason: "wrap_refused" })
+  })
+
   test("a wrap sealed to this device opens to its epoch keys", async () => {
     const keyring = createInMemoryDeviceKeyring("unwrap-device")
     const wrap = await wrapFor(keyring, { account: "acct", epoch: 1, id: "device:unwrap-device" })

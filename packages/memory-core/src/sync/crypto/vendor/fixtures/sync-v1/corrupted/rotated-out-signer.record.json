@@ -5,11 +5,13 @@
   "account": "encoding-account",
   "epoch": 3,
   "author": {
+    "id": "PDv3T8-fwlpWrp0DPgjWhA",
     "kind": "device",
-    "id": "PDv3T8-fwlpWrp0DPgjWhA"
+    "sealing_public_key": "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
+    "signing_public_key": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
   },
-  "digest": "85uUihuIKdkRU0Ud85yq1AfWkEJczmNJdYJvNdetQoI",
-  "link": "oPc2dQ7hHae9MBdunzC1V7GadYYFyYTtgu1_Exw7Rdo",
+  "digest": "njzlVjmN8-d2hOPGb78XQACdS4PigYsAAxfEhideP_Y",
+  "link": "Mf5MNDvYCJfK1mRmUwCvj6kVNgiUQRAanCUmaVzs6uk",
   "keyring_link": null,
-  "record_sig": "2JmCAGW24F53XleneRbBzSbBP-Mmsz_IDk_fqBgRYgDQ-gVDIbRpSeg3t3VprbRzcus0EDZn7FAXqtuCmRdwAg"
+  "record_sig": "RyXSWKCjTfgu0XwelDwqVXAsq3yArrmsMiPEPQUUr0Q6CNbsqwaYcI6P2BQmTe65_EHQDNyYB1qx92CV0mLIDA"
 }

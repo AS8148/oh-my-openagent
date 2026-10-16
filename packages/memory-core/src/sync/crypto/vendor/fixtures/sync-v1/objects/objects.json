@@ -12,11 +12,9 @@
         "id": "HcahOcBrYYAu1Uf5BVu8YQ"
       },
       "salt": "SEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEg",
-      "peers": [
-        "8800000000000001"
-      ],
+      "peers": ["8800000000000001"],
       "created_at": 1760000000000,
-      "sha256": "AHHt6dv9QVh706WRcorfvjcH8vSBbw5eCxQMTcmG5V8",
+      "sha256": "YLiBN3DPBmkVDwNiHcxfUecuvCs-BfuH93z7TYNRbW4",
       "payload": [
         {
           "type": 1,
@@ -49,11 +47,9 @@
         "id": "-1m1eENVhqdXRJ3XlN__jQ"
       },
       "salt": "SkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSkpKSko",
-      "peers": [
-        "8800000000000002"
-      ],
+      "peers": ["8800000000000002"],
       "created_at": 1760000000000,
-      "sha256": "gbKZQD8Te4WhIg4txsitFHQZkMLowlZxfBHwnJgzPKY",
+      "sha256": "JxNoY_aqk3T2fdlXjDEh6GQOgdac8QYpZ2BLHcbP_XE",
       "payload": [
         {
           "type": 1,
@@ -74,11 +70,9 @@
         "id": "HcahOcBrYYAu1Uf5BVu8YQ"
       },
       "salt": "TExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEw",
-      "peers": [
-        "8800000000000001"
-      ],
+      "peers": ["8800000000000001"],
       "created_at": 1760000000000,
-      "sha256": "GMrsAOrX506cBh0yd6_RaCUM84fQ6aIkpxmLHwmY25o",
+      "sha256": "kq_I9fp1_aomEAq1D0snb5zbllftOPOWgwSbt3t4MK8",
       "payload": [
         {
           "type": 1,
@@ -99,11 +93,9 @@
         "id": "HcahOcBrYYAu1Uf5BVu8YQ"
       },
       "salt": "Tk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk4",
-      "peers": [
-        "8800000000000001"
-      ],
+      "peers": ["8800000000000001"],
       "created_at": 1760000000000,
-      "sha256": "SmhU6iDi4xN-GQFa7hFCbUuQFcHphwUHv1LWDyW40No",
+      "sha256": "KmKp2HqNPWmySwEM1Oi2VP-f1ABlX7ChfFVwCiubIuw",
       "payload": [
         {
           "type": 1,
@@ -124,11 +116,9 @@
         "id": "HcahOcBrYYAu1Uf5BVu8YQ"
       },
       "salt": "UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFA",
-      "peers": [
-        "8800000000000001"
-      ],
+      "peers": ["8800000000000001"],
       "created_at": 1760000000000,
-      "sha256": "aVOYwxuiX_olS7uMk5xr2JN7Yt7Cf5oi_9uAgQUkUjg",
+      "sha256": "SDV2scjnlpFLfWhj2SaADE4FvTNmdTkRweH6claxfQQ",
       "payload": [
         {
           "type": 1,
@@ -149,11 +139,9 @@
         "id": "PDv3T8-fwlpWrp0DPgjWhA"
       },
       "salt": "XFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFw",
-      "peers": [
-        "8800000000000003"
-      ],
+      "peers": ["8800000000000003"],
       "created_at": 1760000000000,
-      "sha256": "85uUihuIKdkRU0Ud85yq1AfWkEJczmNJdYJvNdetQoI",
+      "sha256": "njzlVjmN8-d2hOPGb78XQACdS4PigYsAAxfEhideP_Y",
       "payload": [
         {
           "type": 1,
@@ -174,15 +162,13 @@
         "id": "HcahOcBrYYAu1Uf5BVu8YQ"
       },
       "salt": "X19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX18",
-      "peers": [
-        "8800000000000001"
-      ],
+      "peers": ["8800000000000001"],
       "chunk": {
         "index": 0,
         "count": 2
       },
       "created_at": 1760000000000,
-      "sha256": "ofSOcmABE_J2GOouCfoPwzhvO_8WIrxr2xzuJFJIEYI",
+      "sha256": "XLEalhpp0oL3qKo6WSBg-75cqQScg4QniFWXIJpXFmI",
       "payload": [
         {
           "type": 3,
@@ -203,15 +189,13 @@
         "id": "HcahOcBrYYAu1Uf5BVu8YQ"
       },
       "salt": "YGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGA",
-      "peers": [
-        "8800000000000001"
-      ],
+      "peers": ["8800000000000001"],
       "chunk": {
         "index": 1,
         "count": 2
       },
       "created_at": 1760000000000,
-      "sha256": "DFcD_LuAQ_McGSZbix9544BkAEGxbVNYLVJ6xvvGH3Q",
+      "sha256": "BYnGRUG52mOs9VhiRu1aNYm4ih8WsQrg2RdlN5iKXzI",
       "payload": [
         {
           "type": 3,
@@ -224,11 +208,8 @@
   ],
   "snapshot": {
     "covers_seq": 105,
-    "chunks": [
-      "snapshot-c0.omob",
-      "snapshot-c1.omob"
-    ],
-    "digest": "yBJnafUZtXXtWhmQMrQdABtpG2ZCeE3Ow8ac3_AFUiw"
+    "chunks": ["snapshot-c0.omob", "snapshot-c1.omob"],
+    "digest": "Eu2EGUVGGpWuJ8bBE8-a9gZiiUBgjAI7xdvFG-Wjgss"
   },
   "canaries": [
     "canary-amethyst-7f3d9b01-memsync-v1",

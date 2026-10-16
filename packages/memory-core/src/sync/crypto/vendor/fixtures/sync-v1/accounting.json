@@ -6,36 +6,36 @@
       "id": "batch-a-epoch1",
       "kind": "batch",
       "seq": 101,
-      "bytes": 489
+      "bytes": 595
     },
     {
       "id": "batch-b-epoch1",
       "kind": "batch",
       "seq": 102,
-      "bytes": 429
+      "bytes": 452
     },
     {
       "id": "batch-big-epoch1",
       "kind": "batch",
       "seq": 103,
-      "bytes": 150500
+      "bytes": 150465
     },
     {
       "id": "batch-big2-epoch1",
       "kind": "batch",
       "seq": 104,
-      "bytes": 150505
+      "bytes": 150470
     },
     {
       "id": "batch-c-epoch3",
       "kind": "batch",
       "seq": 105,
-      "bytes": 415
+      "bytes": 437
     },
     {
       "id": "batch-d-epoch3-recovered",
       "kind": "batch",
-      "bytes": 433
+      "bytes": 457
     },
     {
       "id": "genesis",
@@ -95,21 +95,15 @@
     }
   ],
   "snapshot": {
-    "chunks": [
-      "snapshot-c0.omob",
-      "snapshot-c1.omob"
-    ],
-    "bytes": [
-      448,
-      448
-    ],
+    "chunks": ["snapshot-c0.omob", "snapshot-c1.omob"],
+    "bytes": [478, 478],
     "covers_seq": 105
   },
   "scenarios": [
     {
       "name": "full compaction at the head",
       "covers_seq": 105,
-      "requested_bytes": 896,
+      "requested_bytes": 956,
       "releasable": [
         "batch-a-epoch1",
         "batch-b-epoch1",
@@ -123,11 +117,8 @@
     {
       "name": "partial compaction over the first two batches",
       "covers_seq": 102,
-      "requested_bytes": 448,
-      "releasable": [
-        "batch-a-epoch1",
-        "batch-b-epoch1"
-      ],
+      "requested_bytes": 478,
+      "releasable": ["batch-a-epoch1", "batch-b-epoch1"],
       "charge": 0,
       "admitted_over_quota": true
     }

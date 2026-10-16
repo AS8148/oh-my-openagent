@@ -1,15 +1,27 @@
 export {
+  asciiCompare,
+  assertCanonicalOrder,
+  compareMembers,
+  compareRecoveryKeys,
+  compareWrapEntries,
+} from "./canonical.ts";
+export {
   type AuthorityFold,
   type ChainEntry,
   type EntryAuthorization,
   entryAuthorKey,
-  foldAuthority,
+  type ForkEvidence,
+  type ForkState,
   type KeyringBody,
   recordPreimage,
   type SyncPrincipal,
+  type SyncRecoveryAuthor,
   type SyncRecoveryKey,
   verifyEntrySignature,
+  type WrapEntry,
 } from "./chain.ts";
+export type { ReceivedChain, ReceiverRefusal } from "./fold.ts";
+export { compareRecordRef, forkSetMatchesEvidence, type RecordRef } from "./fork-set.ts";
 export {
   asciiBytes,
   b64urlDecode,
@@ -41,3 +53,14 @@ export {
   type SyncObjectRecord,
   verifyObject,
 } from "./object.ts";
+export { receiveKeyringChain } from "./receive.ts";
+export {
+  importSnapshot,
+  type SnapshotAuthor,
+  type SnapshotEnvelope,
+  type SnapshotImport,
+  type SnapshotImportFailureReason,
+  type SnapshotImportResult,
+  snapshotPreimage,
+  verifySnapshot,
+} from "./snapshot.ts";

@@ -8,12 +8,61 @@ import {
   fail,
   type ObjectFailure,
   type ParsedFrame,
+  type SyncObjectHeader,
   type SyncObjectRecord,
 } from "./object-types.ts";
 
 const SEGMENT = 65536;
 const TAG = 16;
 const FULL_SEGMENT = SEGMENT + TAG;
+const MIB = 1024 * 1024;
+
+/** The plaintext ceiling per object kind (section 8): 8 MiB per batch, 64 MiB per snapshot chunk. */
+export const PLAINTEXT_LIMIT: Readonly<Record<SyncObjectHeader["kind"], number>> = {
+  ops: 8 * MIB,
+  snapshot: 64 * MIB,
+};
+
+/**
+ * Inflates deflate-raw segments, refusing as soon as the output passes `limit` (a small object
+ * must not expand without bound). Every rejection of the stream - bad or truncated deflate, junk
+ * after the final block, the cancel past the limit - becomes a typed failure for this object only;
+ * none escapes as an unhandled rejection that would end the process.
+ */
+const inflateWithin = async (
+  segments: ReadonlyArray<Uint8Array<ArrayBuffer>>,
+  limit: number,
+): Promise<Uint8Array<ArrayBuffer> | ObjectFailure> => {
+  const stream = new DecompressionStream("deflate-raw");
+  const writer = stream.writable.getWriter();
+  const fed = (async () => {
+    for (const segment of segments) await writer.write(segment);
+    await writer.close();
+  })().then(
+    () => true,
+    () => false,
+  );
+  const reader = stream.readable.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel().catch(() => undefined);
+        await fed;
+        return fail("payload_too_large");
+      }
+      parts.push(value);
+    }
+  } catch {
+    await fed;
+    return fail("bad_payload");
+  }
+  return (await fed) ? concatBytes(parts) : fail("bad_payload");
+};
 
 const segmentNonce = (index: number, last: boolean): Uint8Array<ArrayBuffer> => {
   const nonce = new Uint8Array(12);
@@ -54,7 +103,7 @@ export const streamOpen = async (
   );
   const key = await crypto.subtle.importKey("raw", batchKey, "AES-GCM", false, ["decrypt"]);
   const aad = await sha256(frame.headerBytes);
-  const segments: Uint8Array[] = [];
+  const segments: Uint8Array<ArrayBuffer>[] = [];
   let offset = 0;
   for (let index = 0; ; index += 1) {
     const remaining = frame.ciphertext.length - offset;
@@ -75,14 +124,15 @@ export const streamOpen = async (
     offset += length;
     if (last) break;
   }
-  const compressed = concatBytes(segments);
+  return inflateWithin(segments, PLAINTEXT_LIMIT[frame.header.kind]);
+};
+
+/** Item keys are UTF-8 exactly: an invalid sequence is refused, never read as U+FFFD. */
+const strictUtf8 = (bytes: Uint8Array): string | null => {
   try {
-    const stream = new DecompressionStream("deflate-raw");
-    const writer = stream.writable.getWriter();
-    void writer.write(compressed).then(() => writer.close());
-    return new Uint8Array(await new Response(stream.readable).arrayBuffer());
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
-    return fail("bad_payload");
+    return null;
   }
 };
 
@@ -100,7 +150,8 @@ export const parseRecords = (
     const keyLength = view.getUint16(offset + 17, false);
     const keyStart = offset + 19;
     if (payload.length - keyStart < keyLength + 4) return fail("bad_payload");
-    const itemKey = new TextDecoder().decode(payload.subarray(keyStart, keyStart + keyLength));
+    const itemKey = strictUtf8(payload.subarray(keyStart, keyStart + keyLength));
+    if (itemKey === null) return fail("bad_payload");
     const bodyLength = view.getUint32(keyStart + keyLength, false);
     const bodyStart = keyStart + keyLength + 4;
     if (payload.length - bodyStart < bodyLength) return fail("bad_payload");

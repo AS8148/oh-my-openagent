@@ -61,6 +61,24 @@
       "expect": "truncated"
     },
     {
+      "file": "batch-a-bad-deflate.omob",
+      "base": "batch-a-epoch1.omob",
+      "mutation": "bad-deflate",
+      "expect": "bad_payload"
+    },
+    {
+      "file": "batch-a-truncated-deflate.omob",
+      "base": "batch-a-epoch1.omob",
+      "mutation": "truncated-deflate",
+      "expect": "bad_payload"
+    },
+    {
+      "file": "batch-a-deflate-bomb.omob",
+      "base": "batch-a-epoch1.omob",
+      "mutation": "deflate-bomb",
+      "expect": "payload_too_large"
+    },
+    {
       "file": "rotated-out-signer.record.json",
       "base": "batch-d-epoch3-recovered.omob",
       "mutation": "rotated-out-signer",
