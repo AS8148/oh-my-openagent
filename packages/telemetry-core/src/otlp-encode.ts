@@ -56,11 +56,15 @@ export function hexToBytes(hex: string): Uint8Array {
   return out
 }
 
+const INT64_MIN = -(2 ** 63)
+const INT64_LIMIT = 2 ** 63
+
 function anyValue(value: ApiAnyValue): AnyValue {
   if (typeof value === "string") return create(AnyValueSchema, { value: { case: "stringValue", value } })
   if (typeof value === "boolean") return create(AnyValueSchema, { value: { case: "boolValue", value } })
   if (typeof value === "number") {
-    return Number.isInteger(value)
+    // An integer outside int64 (or past 2^63, which a double rounds onto) has no int_value form.
+    return Number.isInteger(value) && value >= INT64_MIN && value < INT64_LIMIT
       ? create(AnyValueSchema, { value: { case: "intValue", value: BigInt(value) } })
       : create(AnyValueSchema, { value: { case: "doubleValue", value } })
   }

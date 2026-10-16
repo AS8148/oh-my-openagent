@@ -42,11 +42,12 @@ export class SpoolWriter {
     return this.#input.signal
   }
 
-  append(payload: Uint8Array): boolean {
+  /** Encoding runs inside the same error boundary as the write: a record that cannot be encoded is reported, never thrown. */
+  append(encode: Uint8Array | (() => Uint8Array)): boolean {
     if (!this.#input.consent()) return false
     try {
+      const bytes = frame(typeof encode === "function" ? encode() : encode)
       const fd = this.#fd ?? this.#open()
-      const bytes = frame(payload)
       writeSync(fd, bytes)
       this.records += 1
       this.bytes += bytes.byteLength
@@ -111,7 +112,7 @@ export class WalLogRecordProcessor implements LogRecordProcessor {
   }
 
   onEmit(record: ReadableLogRecord): void {
-    if (this.writer.append(toBinary(LogRecordSchema, encodeLogRecord(record)))) this.#onAppended(this.writer)
+    if (this.writer.append(() => toBinary(LogRecordSchema, encodeLogRecord(record)))) this.#onAppended(this.writer)
   }
 
   shutdown(): void {
@@ -129,7 +130,7 @@ export class WalSpanProcessor implements SpanProcessor {
   }
 
   onEnd(span: ReadableSpan): void {
-    if (this.writer.append(toBinary(SpanSchema, encodeSpan(span)))) this.#onAppended(this.writer)
+    if (this.writer.append(() => toBinary(SpanSchema, encodeSpan(span)))) this.#onAppended(this.writer)
   }
 
   shutdown(): void {

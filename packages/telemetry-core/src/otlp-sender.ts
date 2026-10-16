@@ -173,8 +173,13 @@ class OtlpSender {
     })
   }
 
+  /** Telemetry never throws into the agent loop: a failing projection or emit is diagnosed and dropped. */
   #capture(message: TelemetryCaptureMessage): void {
     if (this.#stopped) return
+    this.#guard("telemetry_capture_failed", () => this.#captureUnguarded(message))
+  }
+
+  #captureUnguarded(message: TelemetryCaptureMessage): void {
     const properties = message.properties ?? {}
     const project = this.#input.project ?? defaultWireProjection
     const eventId = properties["event_id"]
