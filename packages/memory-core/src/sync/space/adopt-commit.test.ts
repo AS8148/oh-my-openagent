@@ -100,6 +100,44 @@ describe("H1: one atomic commit, deletion decided on the committed item", () => 
   })
 })
 
+describe("the deletion gate reads back BOTH sides of the committed item: its render and its active registers", () => {
+  test("registers side: a joined render of the values a and b never vouches for a side's single value \"a / b\"", async () => {
+    const { doc, base } = await space("---\nk: x\n---\nx\n")
+    try {
+      const other = await newDoc("2")
+      try {
+        other.import(doc.export({ mode: "snapshot" }))
+        captureInto(other, base, itemFrontier(other), "---\nk: b\n---\nx\n")
+        captureInto(doc, base, itemFrontier(doc), "---\nk: a\n---\nx\n")
+        doc.import(other.export({ mode: "update", from: doc.oplogVersion() }))
+      } finally {
+        other.free()
+      }
+      const joined = renderDocContent(doc)
+      expect(joined).toBe('---\nk: "a / b"\n---\nx\n')
+      const files = [{ path: SIDE, text: '---\nk: "a / b"\n---\nx\n' }]
+      const plan = planAdoption(files, stateOf(doc, joined))
+      // The planner keeps it too; the gate is pinned on its own by handing it the side as a candidate.
+      const candidate = { ...plan, removalCandidates: [SIDE], retainedSources: [] }
+      expect(confirmRemovals(doc, candidate, files)).toEqual({ remove: [], retained: [{ path: SIDE, reason: 'missing line "k: \\"a / b\\""' }] })
+    } finally {
+      doc.free()
+    }
+  })
+
+  test("render side: a body line the committed item does not hold keeps the side, whatever the registers hold", async () => {
+    const { doc, base } = await space("---\nd: space\n---\nx\n")
+    try {
+      const files = [{ path: SIDE, text: "---\nd: space\n---\nx\nonly in the side\n" }]
+      const plan = planAdoption(files, stateOf(doc, base))
+      const candidate = { ...plan, removalCandidates: [SIDE], retainedSources: [] }
+      expect(confirmRemovals(doc, candidate, files)).toEqual({ remove: [], retained: [{ path: SIDE, reason: 'missing line "only in the side"' }] })
+    } finally {
+      doc.free()
+    }
+  })
+})
+
 describe("M1: the space's register components are required", () => {
   test("a register key missing from the components is refused, never read as one whole value", () => {
     const state = { currentText: '---\nk: "a / b"\n---\n', lastMaterialised: null, tombstoned: false, registers: new Map() }

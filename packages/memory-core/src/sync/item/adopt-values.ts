@@ -7,7 +7,7 @@ import type { LoroDoc } from "../../crdt/loro-runtime"
 
 import { analyzeHistory } from "./history"
 import { addRegisterValue } from "./key-writers"
-import { activeReg, readKeyState, registerValues } from "./state"
+import { readKeyState, registerValues } from "./state"
 
 export interface RegisterValue {
   readonly key: string
@@ -17,7 +17,7 @@ export interface RegisterValue {
 
 /**
  * One update holding `captured` (a capture's update, or null when the body and keys are unchanged)
- * plus every register value not already active (an entry superseding nothing), committed under
+ * plus every register value no entry ever held, active or superseded (an entry superseding nothing), committed under
  * `commitMessage`. Internal to captureOnDevice (device-capture.ts), the only capture entry point:
  * adoption's capture and its register values land together and replay under the same receipts.
  */
@@ -38,9 +38,15 @@ export function withRegisterValues(doc: LoroDoc, captured: Uint8Array | null, va
   }
 }
 
-/** True when every value is already an active entry of its register. */
-export function registerValuesActive(doc: LoroDoc, values: readonly RegisterValue[]): boolean {
-  return values.every(({ key, value }) => activeReg(readKeyState(doc, key).reg).some((entry) => entry.value === value))
+/**
+ * The WRITE rule, shared with addRegisterValue (key-writers.ts): a value is already written when ANY
+ * entry of its register holds it, active or superseded. True when every value is, so there is
+ * nothing to write. The READ rule is deliberately different: the deletion gate (space/read-back.ts)
+ * counts ACTIVE entries only, so a side file carrying only a superseded value is kept, while the
+ * value itself is never written again (review r10).
+ */
+export function registerValuesWritten(doc: LoroDoc, values: readonly RegisterValue[]): boolean {
+  return values.every(({ key, value }) => readKeyState(doc, key).reg.some((entry) => entry.value === value))
 }
 
 /**

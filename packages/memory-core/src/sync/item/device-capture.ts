@@ -22,7 +22,7 @@ import { randomBytes } from "node:crypto"
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
 import type { RegisterValue } from "./adopt-values"
-import { registerValuesActive, withRegisterValues } from "./adopt-values"
+import { registerValuesWritten, withRegisterValues } from "./adopt-values"
 import { captureItem } from "./capture"
 import type { CaptureReceipt, OpSpan } from "./capture-receipts"
 import { captureMessage, readReceipts, receiptLanded, sameFrontier, stampsOf, writeReceipts } from "./capture-receipts"
@@ -47,7 +47,7 @@ export async function captureOnDevice(
   return serialized(`${device.stateDir}\0${itemKey}`, async () => {
     const receipts = await readReceipts(device.stateDir, itemKey)
     const unchanged = isLive(doc) && workingText === renderDocContent(doc)
-    if (unchanged && registerValuesActive(doc, registerValues)) {
+    if (unchanged && registerValuesWritten(doc, registerValues)) {
       await receipt(device, itemKey, receipts, { base: baseFrontier, text: workingText, landed: doc, seen: mapTags(doc), span: null })
       return null
     }

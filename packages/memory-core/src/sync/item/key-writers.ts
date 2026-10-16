@@ -67,7 +67,9 @@ export function writeNatural(fork: LoroDoc, key: string, value: FieldValue): voi
 
 /**
  * Insert-only adoption (sync-design §3): one more register entry that supersedes nothing, so the
- * value shows beside every active one. A value that is already active adds nothing.
+ * value shows beside every active one. A value ANY entry ever held, active or superseded, adds
+ * nothing: this is the WRITE rule, shared with registerValuesWritten (adopt-values.ts). The deletion
+ * gate's READ rule is active entries only (space/read-back.ts); the two differ on purpose.
  */
 export function addRegisterValue(fork: LoroDoc, key: string, value: string, slot = 0): void {
   // Any entry that ever held this value, active or superseded, means it was written already. A

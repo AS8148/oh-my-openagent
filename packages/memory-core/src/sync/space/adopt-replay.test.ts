@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 import type { ItemDevice } from "../item/device"
+import { readReceipts, sameFrontier } from "../item/capture-receipts"
 import { activeRegisters, captureOnDevice, createDeviceItemDoc, itemFrontier } from "../item/index"
 import { renderDocContent } from "../item/render"
 import { activeReg, readKeyState } from "../item/state"
@@ -96,6 +97,57 @@ describe("M1: adoption replays through the guarded capture entry point", () => {
         if (replay !== null) doc.import(replay)
         expect(active(doc, "d")).toEqual(["z"])
         expect(renderDocContent(doc)).toBe("---\nd: z\n---\nx\n")
+      } finally {
+        doc.free()
+        other.free()
+      }
+    })
+  }, DEVICE_TIMEOUT_MS)
+
+  test("write rule: a superseded value is already written, so an unchanged capture writes nothing and still receipts its baseline", async () => {
+    await withDevices(2, async ([device, peer]) => {
+      if (device === undefined || peer === undefined) throw new Error("no devices")
+      const doc = await createDeviceItemDoc(device)
+      const other = await createDeviceItemDoc(peer)
+      try {
+        const seed = await captureOnDevice(device, "n.md", doc, "", [], "---\nd: space\n---\nx\n")
+        if (seed !== null) doc.import(seed)
+        const only: readonly Snapshot[] = [{ path: SIDE, text: "---\nd: laptop\n---\nx\n" }]
+        const first = await adopt(device, doc, renderDocContent(doc), itemFrontier(doc), only)
+        if (first.update !== null) doc.import(first.update)
+        other.import(doc.export({ mode: "snapshot" }))
+        const replaced = await captureOnDevice(peer, "n.md", other, renderDocContent(other), itemFrontier(other), "---\nd: z\n---\nx\n")
+        if (replaced !== null) doc.import(replaced)
+        const now = renderDocContent(doc)
+        const frontier = itemFrontier(doc)
+        const versionBefore = doc.oplogVersion()
+        const update = await captureOnDevice(device, "n.md", doc, now, frontier, now, [{ key: "d", value: "laptop" }])
+        expect(update).toBeNull()
+        expect(doc.oplogVersion().compare(versionBefore)).toBe(0)
+        const receipts = await readReceipts(device.stateDir, "n.md")
+        expect(receipts.some((r) => sameFrontier(r.base, frontier) && r.text === now)).toBe(true)
+      } finally {
+        doc.free()
+        other.free()
+      }
+    })
+  }, DEVICE_TIMEOUT_MS)
+
+  test("read rule: a superseded value is not held, so the deletion gate keeps the side that carries it", async () => {
+    await withDevices(2, async ([device, peer]) => {
+      if (device === undefined || peer === undefined) throw new Error("no devices")
+      const doc = await createDeviceItemDoc(device)
+      const other = await createDeviceItemDoc(peer)
+      try {
+        const seed = await captureOnDevice(device, "n.md", doc, "", [], "---\nd: space\n---\nx\n")
+        if (seed !== null) doc.import(seed)
+        const only: readonly Snapshot[] = [{ path: SIDE, text: "---\nd: laptop\n---\nx\n" }]
+        const first = await adopt(device, doc, renderDocContent(doc), itemFrontier(doc), only)
+        if (first.update !== null) doc.import(first.update)
+        other.import(doc.export({ mode: "snapshot" }))
+        const replaced = await captureOnDevice(peer, "n.md", other, renderDocContent(other), itemFrontier(other), "---\nd: z\n---\nx\n")
+        if (replaced !== null) doc.import(replaced)
+        expect(confirmRemovals(doc, first.plan, only)).toEqual({ remove: [], retained: [{ path: SIDE, reason: 'missing line "d: laptop"' }] })
       } finally {
         doc.free()
         other.free()
