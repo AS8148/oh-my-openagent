@@ -28,10 +28,8 @@
     "typecheck": "tsgo --noEmit -p tsconfig.json",
     "test": "bun test src/"
   },
-  "devDependencies": {
-    "yaml": "2.9.1"
-  },
   "dependencies": {
-    "loro-crdt": "1.16.4"
+    "loro-crdt": "1.16.4",
+    "yaml": "2.9.1"
   }
 }
