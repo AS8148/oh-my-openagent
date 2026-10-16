@@ -81,15 +81,21 @@ fn r3_stuck_preparation_cannot_hold_the_callback_or_suspension() {
     // given: the hold really blocks; only teardown can release its preparation.
     let commits = Arc::new(AtomicUsize::new(0));
     let recorded = Arc::clone(&commits);
-    let supervisor = Arc::new(Supervisor::with_stop_commit(
-        Arc::new(FakeClock::new(0)),
-        false,
-        move || {
+    let mut supervisor =
+        Supervisor::with_stop_commit(Arc::new(FakeClock::new(0)), false, move || {
             recorded.fetch_add(1, Ordering::SeqCst);
-        },
-    ));
+        });
+    // A stall past the real release budget records the fatal path instead of
+    // exiting the whole test binary.
+    let exits = Arc::new(AtomicUsize::new(0));
+    let exited = Arc::clone(&exits);
+    supervisor.set_fatal_exit_for_test(move |_| {
+        exited.fetch_add(1, Ordering::SeqCst);
+    });
+    let supervisor = Arc::new(supervisor);
     let shared = Arc::new(shared(Arc::clone(&supervisor)));
     let signal = supervisor.hold_signal();
+    let teardown = Arc::clone(&signal);
     let barrier = Arc::new(Barrier::new(2));
     let (entered, ready) = mpsc::channel();
     let blocked = Arc::clone(&barrier);
@@ -116,8 +122,11 @@ fn r3_stuck_preparation_cannot_hold_the_callback_or_suspension() {
     let suspended = supervisor.is_suspended();
     let committed = commits.load(Ordering::SeqCst);
     let epoch = supervisor.stop_epoch();
+    let fatal = exits.load(Ordering::SeqCst);
     // Teardown runs before assertions even on RED, so a failure cannot strand a thread.
     barrier.wait();
+    // A recorded fatal path never publishes the stop; cancel so the scope can return.
+    teardown.cancel();
     let elapsed = tap.join().unwrap();
     assert!(hold.join().unwrap().is_err());
     // then
@@ -133,6 +142,10 @@ fn r3_stuck_preparation_cannot_hold_the_callback_or_suspension() {
     assert!(
         suspended,
         "in-memory refusal waited for foreground preparation"
+    );
+    assert_eq!(
+        fatal, 0,
+        "the test stalled past the release budget before observing the callback"
     );
     assert_eq!(committed, 0, "commit ran before physical release");
     assert_eq!(epoch, 0, "stop was published before durable commit");

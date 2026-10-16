@@ -2574,6 +2574,7 @@ dependencies = [
 name = "senpi-desktop-safety"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "parking_lot",
  "senpi-desktop-backend-fake",
  "senpi-desktop-core",

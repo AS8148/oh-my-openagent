@@ -254,6 +254,13 @@ impl Supervisor {
         self.suspended.store(false, Ordering::SeqCst);
     }
 
+    /// Replaces the deadline-exceeded process exit, for tests only, so a slow
+    /// test machine records the fatal path instead of killing the test binary.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_fatal_exit_for_test(&mut self, exit: impl Fn(i32) + Send + Sync + 'static) {
+        self.fatal_exit = Arc::new(exit);
+    }
+
     #[must_use]
     pub fn status(&self) -> SupervisorStatus {
         let now_ms = self.clock.now_ms();

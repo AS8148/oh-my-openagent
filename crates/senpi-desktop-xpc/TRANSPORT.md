@@ -93,8 +93,11 @@ events re-enable the tap; recovery logging also runs off the callback.
 
 The worker requests physical input release and allows one second in aggregate
 for active scopes to finish. On timeout it attempts tracked key/button ups via
-an independent backend handle, waiting at most another 5 ms, without borrowing
-the blocked backend or waiting for its foreground scope. Preparation that has
+an independent backend handle, without borrowing the blocked backend or waiting
+for its foreground scope. The release work has a 5 ms budget, clocked by the
+prestarted release worker once it runs, so scheduling delay cannot skip it; no
+new handle starts after the budget. The exiting thread waits at most 100 ms in
+total, which lets a post started inside the budget finish before exit. Preparation that has
 emitted no down has no held ledger entry to release. Emergency release is best
 effort: a stalled or failed native post cannot delay fatal termination
 indefinitely. A timed-out stop commits the latch and exits without an ACK.

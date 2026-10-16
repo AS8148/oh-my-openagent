@@ -3,11 +3,32 @@ use super::{Ordering, StopSource, Supervisor, SupervisorStatus, Weak};
 use std::time::{Duration, Instant};
 
 const RELEASE_BUDGET: Duration = Duration::from_secs(1);
-const EMERGENCY_BUDGET: Duration = Duration::from_millis(5);
+/// The emergency release's own work, clocked by its worker from the moment it
+/// starts: scheduling latency before the worker runs does not consume it.
+pub(super) const EMERGENCY_BUDGET: Duration = Duration::from_millis(5);
+/// Hard cap on how long the exiting thread waits for the emergency worker to
+/// be scheduled and finish a release it started inside its budget.
+const EMERGENCY_WAIT: Duration = Duration::from_millis(100);
 
 pub(super) struct StopLimits {
     pub(super) release: Option<Duration>,
     pub(super) emergency: Duration,
+    pub(super) emergency_wait: Duration,
+}
+
+impl StopLimits {
+    /// The limits every real stop uses; tests reuse them to exercise production values.
+    pub(super) const fn production(bounded_release: bool) -> Self {
+        Self {
+            release: if bounded_release {
+                Some(RELEASE_BUDGET)
+            } else {
+                None
+            },
+            emergency: EMERGENCY_BUDGET,
+            emergency_wait: EMERGENCY_WAIT,
+        }
+    }
 }
 
 impl Supervisor {
@@ -58,13 +79,7 @@ impl Supervisor {
     pub fn trigger_stop(&self, source: StopSource) {
         self.finish_stop(
             source,
-            StopLimits {
-                release: self
-                    .bounded_release
-                    .load(Ordering::SeqCst)
-                    .then_some(RELEASE_BUDGET),
-                emergency: EMERGENCY_BUDGET,
-            },
+            StopLimits::production(self.bounded_release.load(Ordering::SeqCst)),
         );
     }
 
@@ -85,7 +100,7 @@ impl Supervisor {
             .all(|signal| signal.await_release_until(deadline));
         if !released {
             if let Some(worker) = self.emergency.lock().as_ref() {
-                worker.attempt(Instant::now() + limits.emergency);
+                worker.attempt(limits.emergency, limits.emergency_wait);
             }
         }
         if let Some(commit) = &self.stop_commit {

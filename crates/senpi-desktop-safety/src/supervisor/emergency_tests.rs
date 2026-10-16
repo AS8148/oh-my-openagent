@@ -10,6 +10,42 @@ use senpi_desktop_core::{
 use std::sync::{Barrier, mpsc};
 use std::time::Duration;
 
+/// Records the release callback's own CPU work, which is the part the
+/// production budget must cover; scheduler latency and preemption are excluded.
+struct MeasuredRelease {
+    inner: Arc<dyn senpi_desktop_core::backend::EmergencyRelease>,
+    work: Mutex<Option<Duration>>,
+}
+
+impl senpi_desktop_core::backend::EmergencyRelease for MeasuredRelease {
+    fn release_all(&self) -> senpi_desktop_core::error::CoreResult<()> {
+        let start = thread_cpu();
+        let result = self.inner.release_all();
+        *self.work.lock() = start.and_then(|start| Some(thread_cpu()? - start));
+        result
+    }
+}
+
+#[cfg(all(unix, not(miri)))]
+fn thread_cpu() -> Option<Duration> {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `now` is a valid, writable timespec for the duration of the call.
+    let status = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut now) };
+    assert_eq!(status, 0, "thread CPU clock unavailable");
+    Some(Duration::new(
+        u64::try_from(now.tv_sec).ok()?,
+        u32::try_from(now.tv_nsec).ok()?,
+    ))
+}
+
+#[cfg(any(not(unix), miri))]
+fn thread_cpu() -> Option<Duration> {
+    None
+}
+
 #[test]
 fn r3_emergency_key_up_precedes_exit_while_other_scope_is_stuck_in_prep() {
     // given: two real scopes, neither can unwind until test teardown.
@@ -22,7 +58,11 @@ fn r3_emergency_key_up_precedes_exit_while_other_scope_is_stuck_in_prep() {
     let mut backend = FakeBackend::new(FakeScenario::default());
     let sink = backend.sink();
     let events = sink.subscribe();
-    let release = backend.emergency_release().unwrap();
+    let measured = Arc::new(MeasuredRelease {
+        inner: backend.emergency_release().unwrap(),
+        work: Mutex::new(None),
+    });
+    let release: Arc<dyn senpi_desktop_core::backend::EmergencyRelease> = measured.clone();
     supervisor.register_emergency_release(&release).unwrap();
     let at_exit = Arc::new(Mutex::new(None));
     let observed = Arc::clone(&at_exit);
@@ -77,13 +117,13 @@ fn r3_emergency_key_up_precedes_exit_while_other_scope_is_stuck_in_prep() {
         events.recv_timeout(Duration::from_secs(5)).unwrap(),
         SinkOp::HeldKey { down: true, .. }
     ) {}
-    // when: deterministic expired release budget; generous event watchdog for
-    // the fake release proves ordering independently of scheduler speed.
+    // when: the release budget is expired deterministically; the emergency
+    // release runs under the exact production limits `trigger_stop` uses.
     supervisor.finish_stop(
         StopSource::Hotkey,
         stop::StopLimits {
             release: Some(Duration::ZERO),
-            emergency: Duration::from_secs(5),
+            ..stop::StopLimits::production(true)
         },
     );
     let exit = *at_exit.lock();
@@ -101,4 +141,14 @@ fn r3_emergency_key_up_precedes_exit_while_other_scope_is_stuck_in_prep() {
         "exit preceded synthetic key-up"
     );
     assert_eq!(supervisor.stop_epoch(), 0, "fatal stop was acknowledged");
+    let work = *measured.work.lock();
+    println!("R4_EMERGENCY_WORK cpu={work:?} budget={:?}", stop::EMERGENCY_BUDGET);
+    // Miri has no real thread CPU clock; it still checks the ordering above.
+    if cfg!(all(unix, not(miri))) {
+        let work = work.expect("release callback did not run");
+        assert!(
+            work < stop::EMERGENCY_BUDGET,
+            "release work {work:?} exceeds the production budget"
+        );
+    }
 }

@@ -2,10 +2,10 @@
 use parking_lot::Mutex;
 use senpi_desktop_core::backend::EmergencyRelease;
 use std::sync::{Arc, Weak, mpsc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 struct Request {
-    deadline: Instant,
+    budget: Duration,
     finished: mpsc::Sender<()>,
 }
 
@@ -25,8 +25,10 @@ impl EmergencyWorker {
                 while let Ok(request) = received.recv() {
                     let releases: Vec<_> =
                         registered.lock().iter().filter_map(Weak::upgrade).collect();
+                    // The budget covers release work only, so a late wakeup cannot skip it.
+                    let deadline = Instant::now() + request.budget;
                     for release in releases {
-                        if Instant::now() >= request.deadline {
+                        if Instant::now() >= deadline {
                             break;
                         }
                         if let Err(error) = release.release_all() {
@@ -47,20 +49,18 @@ impl EmergencyWorker {
         handles.push(Arc::downgrade(release));
     }
 
-    pub(super) fn attempt(&self, deadline: Instant) {
+    /// Waits at most `wait` in total; an in-flight post may finish within it.
+    pub(super) fn attempt(&self, budget: Duration, wait: Duration) {
         let (finished, received) = mpsc::channel();
         if self
             .requests
-            .try_send(Request { deadline, finished })
+            .try_send(Request { budget, finished })
             .is_err()
         {
             eprintln!("senpi-desktop: emergency release worker unavailable before exit");
             return;
         }
-        if received
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .is_err()
-        {
+        if received.recv_timeout(wait).is_err() {
             eprintln!("senpi-desktop: emergency release deadline exceeded before exit");
         }
     }
