@@ -1,23 +1,7 @@
-import { PostHog, type PostHogOptions } from "posthog-node"
+import type { PostHog, PostHogOptions } from "posthog-node"
 
+import { TelemetryDeliveryError } from "./telemetry-delivery-error"
 import type { TelemetryCaptureMessage } from "./types"
-
-// 400 (malformed batch) and 413 (too large) are answers about the event itself: sending the same bytes
-// again can never succeed. Every other failure (5xx, 408, 429, other 4xx, network, timeout) is retryable.
-const PERMANENT_STATUSES: ReadonlySet<number> = new Set([400, 413])
-
-/** A send the server did not accept. `permanent` means a retry of the same event can never succeed. */
-export class TelemetryDeliveryError extends Error {
-  readonly permanent: boolean
-  readonly status: number | undefined
-
-  constructor(status: number | undefined, cause?: unknown) {
-    super(status === undefined ? "telemetry event was not delivered (no response)" : `telemetry event was rejected with HTTP ${status}`, { cause })
-    this.name = "TelemetryDeliveryError"
-    this.status = status
-    this.permanent = status !== undefined && PERMANENT_STATUSES.has(status)
-  }
-}
 
 type Attempt = { status?: number; error?: unknown }
 type Fetch = NonNullable<PostHogOptions["fetch"]>
@@ -27,8 +11,11 @@ type Fetch = NonNullable<PostHogOptions["fetch"]>
  * `error` event), so it cannot tell a delivered event from a lost one. This sender owns a dedicated client
  * whose fetch records each answer, runs one send at a time so every answer belongs to the current send, and
  * never retries inside the process: an undelivered event stays queued on disk and is retried later.
+ *
+ * The PostHog class comes from the caller, so a bundle that loads this module lazily (the senpi telemetry
+ * sidecar) does not carry a second copy of posthog-node.
  */
-export function createImmediateSender(apiKey: string, options: PostHogOptions): {
+export function createImmediateSender(apiKey: string, options: PostHogOptions, PostHogClient: typeof PostHog): {
   readonly send: (message: TelemetryCaptureMessage) => Promise<void>
   readonly shutdown: () => Promise<void>
 } {
@@ -45,7 +32,7 @@ export function createImmediateSender(apiKey: string, options: PostHogOptions): 
       throw error
     }
   }
-  const client = new PostHog(apiKey, { ...options, fetch: trackedFetch, fetchRetryCount: 0 })
+  const client = new PostHogClient(apiKey, { ...options, fetch: trackedFetch, fetchRetryCount: 0 })
   let queue: Promise<unknown> = Promise.resolve()
 
   const sendOne = async (message: TelemetryCaptureMessage): Promise<void> => {

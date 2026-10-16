@@ -4,6 +4,7 @@ import { join } from "node:path"
 
 import { CHECKPOINT_MAX_TURNS } from "./omo-native-session-summary"
 import { CORRUPT } from "./session-summary-files"
+import { withRecoveryOps } from "./session-summary-recovery-storage"
 import { OWNER_STALE_MS, SUMMARY_TTL_MS, purgeUnconsentedQueue, summaryDir } from "./session-summary-storage"
 import { createTempStateDirs, createTestRecorder, rows, summaryTurn } from "./session-summary.test-support"
 
@@ -178,7 +179,7 @@ describe("session_summary recovery hygiene", () => {
       dir,
       startAt: T0,
       onPublish: (event, storage) => ({
-        pending: storage.readPending(event.uuid) !== undefined,
+        pending: withRecoveryOps(storage).readPending(event.uuid) !== undefined,
         window: storage.readWindow(storage.windowKey("s1")),
       }),
     })

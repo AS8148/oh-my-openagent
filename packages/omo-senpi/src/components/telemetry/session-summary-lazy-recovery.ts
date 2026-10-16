@@ -1,32 +1,60 @@
+import { join } from "node:path"
 import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
+import { listNames } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
-import type { SummaryRecovery, createSummaryRecovery } from "./session-summary-recovery"
+import type { SummaryRecovery } from "./session-summary-recovery"
+import type { RecoveryStorage } from "./session-summary-recovery-storage"
 import type { ConsentScope, SummaryStorage } from "./session-summary-storage"
 
-export type LoadSummaryRecovery = () => Promise<{ readonly createSummaryRecovery: typeof createSummaryRecovery }>
+/** What the recorder takes from the `extensions/omo-telemetry-recovery.js` sidecar. */
+export type SummarySidecar = Pick<typeof import("./session-summary-recovery"), "createSummaryRecovery" | "withRecoveryOps" | "sendSummaryRecord">
+
+export type LoadSummaryRecovery = () => Promise<SummarySidecar>
 
 export type LazySummaryRecovery = {
   readonly sweep: () => Promise<void> | undefined
+  readonly load: () => Promise<void>
+  readonly ops: () => RecoveryStorage | undefined
 }
 
-// The sweep ships as `extensions/omo-telemetry-recovery.js`: a directory holding only this process's own
-// windows and in-flight events has nothing a sweep would touch, so the common startup never loads it.
+/** One load at a time; a failed load is forgotten, so the next caller tries again. */
+export function memoizeLoad<T>(load: () => Promise<T>): () => Promise<T> {
+  let loading: Promise<T> | undefined
+  return () => (loading ??= load().catch((error: unknown) => {
+    loading = undefined
+    throw error
+  }))
+}
+
+// The sweep ships in the sidecar: a directory holding only this process's own windows and in-flight events
+// has nothing a sweep would touch, so the common startup never loads it.
 export function createLazySummaryRecovery(input: {
   readonly storage: SummaryStorage
   readonly publisher: SummaryPublisher
   readonly isScopeConsented: (scope: ConsentScope) => boolean
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly ownWindowKeys: () => Iterable<string>
-  readonly load?: LoadSummaryRecovery
+  readonly load: () => Promise<SummarySidecar>
 }): LazySummaryRecovery {
   const { storage, publisher } = input
-  const load = input.load ?? (() => import("#omo-telemetry-recovery-runtime"))
+  let ops: RecoveryStorage | undefined
   let recovery: SummaryRecovery | undefined
-  let loading: Promise<SummaryRecovery> | undefined
 
+  const ready = (): Promise<SummaryRecovery> => input.load().then((sidecar) => {
+    const loadedOps = (ops ??= sidecar.withRecoveryOps(storage))
+    return (recovery ??= sidecar.createSummaryRecovery({
+      storage: loadedOps,
+      publisher,
+      isScopeConsented: input.isScopeConsented,
+      ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
+    }))
+  })
+
+  // A temp or claim file left by any process, a pending event not in flight, or a window this process did not write.
   const hasWork = (): boolean => {
-    if (storage.leftovers().length > 0) return true
+    const names = [...listNames(storage.dir), ...listNames(join(storage.dir, "pending"))]
+    if (names.some((name) => name.endsWith(".tmp") || name.includes(".claimed-"))) return true
     if (storage.pendingUuids().some((uuid) => !publisher.isInFlight(uuid))) return true
     const own = new Set(input.ownWindowKeys())
     return storage.windowKeys().some((key) => !own.has(key))
@@ -39,19 +67,9 @@ export function createLazySummaryRecovery(input: {
         return undefined
       }
       if (!hasWork()) return undefined
-      loading ??= load().then(
-        ({ createSummaryRecovery }) => (recovery = createSummaryRecovery({
-          storage,
-          publisher,
-          isScopeConsented: input.isScopeConsented,
-          ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
-        })),
-        (error: unknown) => {
-          loading = undefined
-          throw error
-        },
-      )
-      return loading.then((loaded) => loaded.sweep())
+      return ready().then((loaded) => loaded.sweep())
     },
+    load: () => ready().then(() => undefined),
+    ops: () => ops,
   }
 }

@@ -98,6 +98,8 @@ const externalSpecifiers = [
   "#omo-memory-memfs-runtime",
   "#omo-thread-client-runtime",
   "#omo-telemetry-recovery-runtime",
+  // telemetry-core loads its immediate sender through this import; the plugin manifest maps it to the recovery sidecar.
+  "#telemetry-immediate-send",
   "#omo-agent-toolkit-sdk",
   ...SENPI_LOADER_ALIASES,
   ...builtinModuleNames,

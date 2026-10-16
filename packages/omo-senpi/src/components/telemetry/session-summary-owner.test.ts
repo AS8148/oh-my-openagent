@@ -2,7 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, readdirSync, renameSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { createOwnerLiveness } from "./session-summary-liveness"
 import { createOwnerRegistry, currentProcessOwner } from "./session-summary-owner"
+import { withRecoveryOps } from "./session-summary-recovery-storage"
 import { OWNER_STALE_MS, createSummaryStorage, summaryDir } from "./session-summary-storage"
 import { createTempStateDirs, createTestRecorder, summaryTurn } from "./session-summary.test-support"
 
@@ -55,7 +57,7 @@ describe("owner registry pid reuse", () => {
     expect(existsSync(ownerEntry(dir, 1))).toBe(true)
 
     // when
-    const reader = createSummaryStorage({ stateDir: dir, owner: currentProcessOwner() })
+    const reader = withRecoveryOps(createSummaryStorage({ stateDir: dir, owner: currentProcessOwner() }))
 
     // then
     expect(reader.isOwnerAlive(killed)).toBe(false)
@@ -65,10 +67,10 @@ describe("owner registry pid reuse", () => {
   test("#given an entry this process wrote under another boot id slot #when the real probes read it #then the same process is still alive", () => {
     const dir = stateDirs.make()
     const owner = { pid: process.pid, bootId: "same-process-other-module" }
-    createOwnerRegistry({ dir: summaryDir(dir), owner, isPidAlive: () => true }).register()
+    createOwnerRegistry({ dir: summaryDir(dir), owner }).register()
 
     // when
-    const reader = createSummaryStorage({ stateDir: dir, owner: { pid: 2_147_483_000, bootId: "reader" } })
+    const reader = withRecoveryOps(createSummaryStorage({ stateDir: dir, owner: { pid: 2_147_483_000, bootId: "reader" } }))
 
     // then
     expect(reader.isOwnerAlive(owner)).toBe(true)
@@ -83,15 +85,15 @@ describe("owner registry without a readable start time", () => {
     const path = join(dir, "owners", "313131.json")
     writeFileSync(path, JSON.stringify(owner))
     const now = Date.now()
-    const registry = createOwnerRegistry({ dir, owner: { pid: 1_212, bootId: "reader" }, isPidAlive: () => true, now: () => now, processStartTime: () => "readable" })
+    const isAlive = createOwnerLiveness({ dir, owner: { pid: 1_212, bootId: "reader" }, isPidAlive: () => true, now: () => now, processStartTime: () => "readable" })
 
-    expect(registry.isAlive(owner)).toBe(true)
+    expect(isAlive(owner)).toBe(true)
 
     // when: the older owner wrote its entry more than the stale window ago and never refreshes it
     utimesSync(path, new Date(now - STALE), new Date(now - STALE))
 
     // then
-    expect(registry.isAlive(owner)).toBe(false)
+    expect(isAlive(owner)).toBe(false)
     expect(existsSync(path)).toBe(false)
   })
 
@@ -99,16 +101,16 @@ describe("owner registry without a readable start time", () => {
     const dir = summaryDir(stateDirs.make())
     let clock = T0
     const owner = { pid: 414_141, bootId: "no-start-time" }
-    createOwnerRegistry({ dir, owner, isPidAlive: () => true, now: () => clock, processStartTime: () => null }).register()
-    const reader = createOwnerRegistry({ dir, owner: { pid: 1_313, bootId: "reader" }, isPidAlive: () => true, now: () => clock, processStartTime: () => null })
+    createOwnerRegistry({ dir, owner, now: () => clock, processStartTime: () => null }).register()
+    const isAlive = createOwnerLiveness({ dir, owner: { pid: 1_313, bootId: "reader" }, isPidAlive: () => true, now: () => clock, processStartTime: () => null })
 
-    expect(reader.isAlive(owner)).toBe(true)
+    expect(isAlive(owner)).toBe(true)
 
     // when
     clock += STALE
 
     // then
-    expect(reader.isAlive(owner)).toBe(false)
+    expect(isAlive(owner)).toBe(false)
   })
 
   test("#given an owner on such a platform that keeps writing #when the stale window passes #then its refreshed entry keeps it alive", async () => {
@@ -118,7 +120,7 @@ describe("owner registry without a readable start time", () => {
     owner.advance(4 * 60_000)
     owner.tick()
 
-    const reader = createOwnerRegistry({ dir: summaryDir(dir), owner: { pid: 1_414, bootId: "reader" }, isPidAlive: () => true, now: () => T0 + 8 * 60_000, processStartTime: () => null })
-    expect(reader.isAlive(owner.storage.owner)).toBe(true)
+    const isAlive = createOwnerLiveness({ dir: summaryDir(dir), owner: { pid: 1_414, bootId: "reader" }, isPidAlive: () => true, now: () => T0 + 8 * 60_000, processStartTime: () => null })
+    expect(isAlive(owner.storage.owner)).toBe(true)
   })
 })

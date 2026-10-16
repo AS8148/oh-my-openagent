@@ -1,4 +1,4 @@
-import type { PostHogOptions } from "posthog-node";
+import type { PostHog, PostHogOptions } from "posthog-node";
 
 export declare const DEFAULT_POSTHOG_HOST: "https://us.i.posthog.com";
 export declare const DEFAULT_POSTHOG_API_KEY: "phc_CFJhj5HyvA62QPhvyaUCtaq23aUfznnijg5VaaGkNk74";
@@ -185,6 +185,15 @@ export declare class TelemetryDeliveryError extends Error {
   readonly status: number | undefined;
   constructor(status: number | undefined, cause?: unknown);
 }
+/** One-at-a-time immediate sender; resolves on a 2xx answer, otherwise rejects with `TelemetryDeliveryError`. */
+export declare function createImmediateSender(
+  apiKey: string,
+  options: PostHogOptions,
+  PostHogClient: typeof PostHog,
+): {
+  readonly send: (message: TelemetryCaptureMessage) => Promise<void>;
+  readonly shutdown: () => Promise<void>;
+};
 /** The transport options plus posthog-node's own knobs (fetch, retries, timeouts), passed through as given. */
 export type PostHogTransportOptions = TelemetryTransportOptions & PostHogOptions;
 export declare function createDefaultPostHogTransport(

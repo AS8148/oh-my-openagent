@@ -2,7 +2,6 @@ import { PostHog, type PostHogOptions } from "posthog-node"
 
 import { getTelemetryApiKey, getTelemetryHost, hasTelemetryApiKey, shouldDisableTelemetry } from "./env"
 import { getDefaultTelemetryOsProvider } from "./machine-id"
-import { createImmediateSender } from "./posthog-immediate-send"
 import type {
   TelemetryCaptureProperties,
   TelemetryClient,
@@ -36,18 +35,24 @@ const NO_OP_CLIENT: TelemetryClient = {
   shutdown: async () => undefined,
 }
 
-export { TelemetryDeliveryError } from "./posthog-immediate-send"
+export { TelemetryDeliveryError } from "./telemetry-delivery-error"
+export { createImmediateSender } from "./posthog-immediate-send"
+
+type ImmediateSender = ReturnType<typeof import("./posthog-immediate-send").createImmediateSender>
 
 /** The transport options plus posthog-node's own knobs (fetch, retries, timeouts), passed through as given. */
 export type PostHogTransportOptions = TelemetryTransportOptions & PostHogOptions
 
 class PostHogTelemetryTransport implements TelemetryTransport {
   readonly #client: PostHog
-  readonly #immediate: ReturnType<typeof createImmediateSender>
+  readonly #apiKey: string
+  readonly #options: PostHogTransportOptions
+  #immediate: Promise<ImmediateSender> | undefined
 
   constructor(apiKey: string, options: PostHogTransportOptions) {
     this.#client = new PostHog(apiKey, options)
-    this.#immediate = createImmediateSender(apiKey, options)
+    this.#apiKey = apiKey
+    this.#options = options
   }
 
   capture(message: Parameters<PostHog["capture"]>[0]): void {
@@ -56,8 +61,16 @@ class PostHogTelemetryTransport implements TelemetryTransport {
 
   // capture() only queues the event after an async prepare step that flush() does not wait for, so a
   // resolved flush() proves nothing about one specific event. captureImmediate resolves only on a 2xx answer.
+  // The immediate sender is loaded on the first ack-gated send (a bundler may ship it as a sidecar through
+  // the `#telemetry-immediate-send` import); a failed load is retried by the next send.
   captureImmediate(message: Parameters<PostHog["capture"]>[0]): Promise<void> {
-    return this.#immediate.send(message)
+    this.#immediate ??= import("#telemetry-immediate-send")
+      .then(({ createImmediateSender }) => createImmediateSender(this.#apiKey, this.#options, PostHog))
+      .catch((error: unknown) => {
+        this.#immediate = undefined
+        throw error
+      })
+    return this.#immediate.then((sender) => sender.send(message))
   }
 
   async flush(): Promise<void> {
@@ -65,7 +78,7 @@ class PostHogTelemetryTransport implements TelemetryTransport {
   }
 
   async shutdown(): Promise<void> {
-    await Promise.all([this.#client.shutdown(), this.#immediate.shutdown()])
+    await Promise.all([this.#client.shutdown(), this.#immediate?.then((sender) => sender.shutdown(), () => undefined)])
   }
 }
 

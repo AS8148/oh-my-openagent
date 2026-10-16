@@ -2,6 +2,7 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, removeFile, renameIfPresent } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
+import type { RecoveryStorage } from "./session-summary-recovery-storage"
 import { newSummaryEpoch } from "./session-summary-window"
 import {
   OWNER_STALE_MS,
@@ -11,9 +12,14 @@ import {
   type ConsentScope,
   type PendingRecord,
   type ReadResult,
-  type SummaryStorage,
   type WindowRecord,
 } from "./session-summary-storage"
+
+// The sidecar's whole surface: this file is the `#omo-telemetry-recovery-runtime` entry, and the bundle maps
+// telemetry-core's `#telemetry-immediate-send` here too, so every lazily loaded telemetry part shares one file.
+export { withRecoveryOps } from "./session-summary-recovery-storage"
+export { sendSummaryRecord } from "./session-summary-delivery"
+export { createImmediateSender } from "@oh-my-opencode/telemetry-core"
 
 export type SummaryRecovery = {
   /** One pass over the summary directory; safe to run concurrently from any number of processes. */
@@ -23,7 +29,7 @@ export type SummaryRecovery = {
 }
 
 export function createSummaryRecovery(input: {
-  readonly storage: SummaryStorage
+  readonly storage: RecoveryStorage
   readonly publisher: SummaryPublisher
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   /** Consent re-read for a record's originating scope before it is sent or continued; defaults to consented. */

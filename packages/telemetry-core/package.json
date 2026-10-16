@@ -4,6 +4,9 @@
   "type": "module",
   "private": true,
   "description": "Harness-neutral telemetry primitives for oh-my-opencode products.",
+  "imports": {
+    "#telemetry-immediate-send": "./src/posthog-immediate-send.ts"
+  },
   "exports": {
     ".": {
       "types": "./index.d.ts",
