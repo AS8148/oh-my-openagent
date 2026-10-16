@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The omo-senpi typecheck gives the same result wherever the checkout sits.** It used to pick up `@types/node` from folders above the checkout, so a stray older copy there failed the typecheck while CI passed on the same commit. omo-senpi now declares its own `@types/node` and `bun-types` and reads type packages only from its own `node_modules`. ([#10320](https://github.com/code-yeongyu/oh-my-openagent/issues/10320), [#10332](https://github.com/code-yeongyu/oh-my-openagent/pull/10332))
+
 **Memory items sync without losing concurrent edits, even from a stale device.** The sync item model captures a device's edits against the exact snapshot it saw, so a stale capture merges as a concurrent edit instead of silently dropping work or throwing; two captures from one device on one baseline lose nothing, multiline and quoted frontmatter values render as valid YAML on every replica, and path keys that would split one file into several (empty segments, trailing slashes, backslashes, drive letters) are rejected instead of canonicalized. Nothing syncs to a server yet. ([#10203](https://github.com/code-yeongyu/oh-my-openagent/pull/10203))
 
 **A steering message to a background task is never recorded as both failed and delivered.** When a steer timed out and its retry was still in flight while a later run of the parent reconciled the task's unconfirmed inputs, that run marked the message failed and the retry then delivered it, so the task's log said both. Reconciliation now leaves an input whose retry is in flight to that retry, which records the one real outcome ([#10165](https://github.com/code-yeongyu/oh-my-openagent/pull/10165)).
