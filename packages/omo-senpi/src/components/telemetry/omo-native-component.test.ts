@@ -550,10 +550,10 @@ describe("OmO Native telemetry component integration", () => {
         await optedOut.dispatch("turn_end", turnEnd(), session)
         killWithoutShutdown(stateDir)
 
-        // then: nothing was derived, written, or sent
+        // then: nothing was derived, written, or sent, not even the legacy daily-active ping
         expect(hashed).toEqual([])
         expect(existsSync(stateDir) ? readdirSync(stateDir, { recursive: true }) : []).toEqual([])
-        expect(nativeMessages(recorder.messages)).toEqual([])
+        expect(recorder.messages).toEqual([])
 
         // when: an enabled process starts, records a turn and quits
         const optedIn = register({})
