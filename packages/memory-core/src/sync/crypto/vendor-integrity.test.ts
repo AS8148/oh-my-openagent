@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync, readdirSync, statSync } from "node:fs"
-import { relative, resolve } from "node:path"
+import { relative, resolve, sep } from "node:path"
 
 /** Vendored-copy provenance guard (todo 13): fails on any drift from the recorded manifest. */
 
@@ -48,7 +48,7 @@ describe("the vendored sync-format library and sync-v1 fixtures", () => {
   test("the manifest covers exactly the vendored tree (no strays, no drops)", () => {
     const manifest = readManifest()
     const onDisk = walkFiles(VENDOR)
-      .map((path) => relative(VENDOR, path))
+      .map((path) => relative(VENDOR, path).split(sep).join("/"))
       .filter((path) => path !== "manifest.json" && path !== "README.md")
       .sort()
     expect(onDisk).toEqual(Object.keys(manifest.files).sort())
