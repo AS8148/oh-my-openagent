@@ -26,8 +26,8 @@ export async function applyUserDelta(target: LoroDoc, before: string, after: str
   const history = analyzeHistory(target)
   const keys = [...afterFields.keys(), ...[...beforeFields.keys()].filter((key) => !afterFields.has(key))]
   for (const key of keys) editField(target, key, beforeFields.get(key), afterFields.get(key), history, unseen)
-  const bodyBefore = b.fm === null ? before : b.body
-  const bodyAfter = a.fm === null ? after : a.body
+  const bodyBefore = b.body
+  const bodyAfter = a.body
   if (bodyBefore === bodyAfter) return
   const current = target.hasContainer(cidRoot(BODY_NAME, "Text")) ? target.getText(BODY_NAME).toString() : ""
   const merged = await mergeText(bodyBefore, bodyAfter, current)
