@@ -4,6 +4,7 @@ import { join, relative } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 import { REVIEWED_WRITERS, type ReviewedWriter } from "./consent-gate-reviewed.test-support"
+import { findGateBypasses } from "./consent-gate-routes.test-support"
 import { scanWriterSites, siteKey } from "./consent-gate-sites.test-support"
 import { OMO_NATIVE_COMMON_PROPERTY_SCHEMAS, OMO_NATIVE_EVENT_SCHEMAS } from "./event-schemas"
 
@@ -115,6 +116,71 @@ describe("telemetry consent gate audit", () => {
     expect(findUngatedWriters(realSources(), [{ ...first, reason: " " }, ...rest, ghost])).toEqual([
       `unreviewed ${first.file}: ${siteKey(first)}`,
       "stale gone.ts: persist |  | writeFileSync(path)",
+    ])
+  })
+})
+
+// A reviewed reason can say "goes through the gated fan-in" while the fan-in has stopped reading consent:
+// that is how a sampled session sent a raw turn_completed after a mid-session withdrawal. Each emission
+// site therefore declares a route, and the route is checked against the source as it is now.
+const packageSources = (): readonly SourceFile[] =>
+  telemetrySources(join(import.meta.dir, "..", "..")).filter((file) => !file.name.startsWith("components/telemetry/"))
+const bypasses = (files: readonly SourceFile[], reviewed: readonly ReviewedWriter[] = REVIEWED_WRITERS): readonly string[] =>
+  findGateBypasses(files, reviewed, packageSources())
+const FAN_IN_GATE = "      if (state.isConsented?.() !== true) return\n"
+const TURN_SEND_GATE = " && options.isConsented()"
+const TURN_SITE = "omo-native-turns.ts: createOmoNativeTurnHandler>=> | unless(event.message.role !== \"assistant\") if(options.summary.isRawTurnSampled(options.sessionId)) | options.client.captureEvent(\"turn_completed\")"
+const SINK = `export const sink = (client: { captureEvent: (name: string) => void }, isConsented: () => boolean) => {\n  client.captureEvent("x")\n}\n`
+const SINK_ENTRY = { file: "omo-native-new-writer.ts", fn: "sink", guard: "", call: "client.captureEvent(\"x\")", reason: "a new producer" }
+
+describe("telemetry consent gate routes", () => {
+  test("#given the telemetry sources #when every emission site's route is checked #then each one reaches the consent gate", () => {
+    expect(bypasses(realSources())).toEqual([])
+  })
+
+  test("#given the source before the mid-session withdrawal fix #when routes are checked #then the raw turn send and the ungated fan-in fail", () => {
+    // given
+    const before = realSources().map((file) => ({ ...file, source: file.source.replace(FAN_IN_GATE, "").replace(TURN_SEND_GATE, "") }))
+    const changed = before.filter((file, index) => file.source !== realSources()[index]?.source).map((file) => file.name)
+    expect(changed).toEqual(["omo-native-component.ts", "omo-native-turns.ts"])
+
+    // when
+    const violations = bypasses(before)
+
+    // then
+    expect(violations).toContain(`bypass ${TURN_SITE} (its guards do not read the consent gate)`)
+    expect(violations.some((line) => line.startsWith("bypass omo-native-component.ts: createOmoNativeTelemetryComponent>captureEvent |"))).toBe(true)
+    expect(violations.filter((line) => line.endsWith("(the fan-in it relies on does not read the consent gate)")).length)
+      .toBe(REVIEWED_WRITERS.filter((entry) => entry.route?.kind === "fan-in").length)
+  })
+
+  test("#given only the raw turn send stops reading consent #when routes are checked #then that one site fails", () => {
+    const files = realSources().map((file) => ({ ...file, source: file.source.replace(TURN_SEND_GATE, "") }))
+    expect(bypasses(files)).toEqual([`bypass ${TURN_SITE} (its guards do not read the consent gate)`])
+  })
+
+  test("#given a new emitting call site with no route #when routes are checked #then it fails", () => {
+    expect(bypasses([...realSources(), { name: "omo-native-new-writer.ts", source: SINK }]))
+      .toEqual(["bypass omo-native-new-writer.ts: sink |  | client.captureEvent(\"x\") (declares no route to the consent gate)"])
+  })
+
+  test("#given a new emitting call site routed through the gate but not guarded by it #when routes are checked #then it fails", () => {
+    const reviewed = [...REVIEWED_WRITERS, { ...SINK_ENTRY, route: { kind: "gate" } as const }]
+    expect(bypasses([...realSources(), { name: "omo-native-new-writer.ts", source: SINK }], reviewed))
+      .toEqual(["bypass omo-native-new-writer.ts: sink |  | client.captureEvent(\"x\") (its guards do not read the consent gate)"])
+  })
+
+  test("#given the same new call site behind the consent read #when routes are checked #then it passes", () => {
+    const guarded = SINK.replace("  client.captureEvent", "  if (!isConsented()) return\n  client.captureEvent")
+    const reviewed = [...REVIEWED_WRITERS, { ...SINK_ENTRY, route: { kind: "gate" } as const }]
+    expect(bypasses([...realSources(), { name: "omo-native-new-writer.ts", source: guarded }], reviewed)).toEqual([])
+  })
+
+  test("#given the unregistered legacy component becomes registered #when routes are checked #then its ungated send fails", () => {
+    const registered = [...packageSources(), { name: "extension/component-list.ts", source: "createSenpiTelemetryComponent()\n" }]
+    expect(findGateBypasses(realSources(), REVIEWED_WRITERS, registered)).toEqual([
+      "bypass index.ts: recordSenpiDailyActive |  | recordDailyActive(options.transportFactory === undefined ? input : { ...input,) (its caller index.ts: createSenpiTelemetryComponent>register>on(=>) |  | recordSenpiDailyActive(options) bypasses the consent gate)",
+      "bypass index.ts: createSenpiTelemetryComponent>register>on(=>) |  | recordSenpiDailyActive(options) (extension/component-list.ts registers it)",
     ])
   })
 })
