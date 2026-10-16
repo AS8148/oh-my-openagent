@@ -28,15 +28,23 @@ const LEASE_RENEW_INTERVAL_MS = 60_000
 const SHUTDOWN_CLEANUP_RESERVE_MS = 200
 const DROP_REASONS: readonly DropReason[] = ["evicted", "expired", "rejected", "corrupt"]
 
-/** The retry pause; its timer is unref'd so a pending retry never keeps the host process alive. */
-function abortableSleep(ms: number, abort: AbortSignal): Promise<void> {
+/**
+ * The retry pause; its timer is unref'd so a pending retry never keeps the host process alive, and
+ * it removes its abort listener when it ends normally, so a long outage does not pile listeners up on
+ * the sender's long-lived signal.
+ */
+export function abortableSleep(ms: number, abort: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms)
-    timer.unref?.()
-    abort.addEventListener("abort", () => {
+    const onAbort = (): void => {
       clearTimeout(timer)
       resolve()
-    }, { once: true })
+    }
+    const timer = setTimeout(() => {
+      abort.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    timer.unref?.()
+    abort.addEventListener("abort", onAbort, { once: true })
   })
 }
 
