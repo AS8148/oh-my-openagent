@@ -29,6 +29,7 @@ export interface UnlockFindings {
   readonly holders: readonly number[] | null
   readonly repoUsers: readonly number[] | null
   readonly writer: WriterState
+  readonly writerLockPath: string | null
   readonly verdict: "refuse" | "confirm"
 }
 
@@ -86,7 +87,9 @@ export async function inspectStrandedGitLock(repoDir: string, lockPath: string, 
     scans.findRepoUsers(repoDir),
     memoryWriterState(repoDir, ownWriterNonce),
   ])
-  const visiblyLive = (holders?.length ?? 0) > 0 || (repoUsers?.length ?? 0) > 0 || writer.kind === "alive"
+  // An unknown writer refuses up front: the unlock must hold the writer lock, which it cannot take
+  // over an unreadable or foreign record, so offering a confirm would only end in a refusal.
+  const visiblyLive = (holders?.length ?? 0) > 0 || (repoUsers?.length ?? 0) > 0 || writer.kind !== "none"
   return {
     kind: "found",
     lockPath: target,
@@ -94,6 +97,7 @@ export async function inspectStrandedGitLock(repoDir: string, lockPath: string, 
     holders,
     repoUsers,
     writer,
+    writerLockPath: writerLockPathForRepo(repoDir),
     verdict: visiblyLive ? "refuse" : "confirm",
   }
 }

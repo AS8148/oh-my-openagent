@@ -31,11 +31,10 @@ function describeFindings(findings: UnlockFindings): string[] {
 }
 
 function refusal(findings: UnlockFindings): string {
-  return [
-    ...describeFindings(findings),
-    "",
-    "Not removed: a live process is still using this lock. Let it finish (or stop it), then run /memory unlock again.",
-  ].join("\n")
+  const reason = findings.writer.kind === "unknown"
+    ? `Not removed: the memory writer could not be determined (its lock record ${findings.writerLockPath ?? ""} is unreadable, from another host, or its process cannot be checked). If no memory session is running, remove that record and run /memory unlock again.`
+    : "Not removed: a live process is still using this lock. Let it finish (or stop it), then run /memory unlock again."
+  return [...describeFindings(findings), "", reason].join("\n")
 }
 
 export async function runMemoryUnlock(
