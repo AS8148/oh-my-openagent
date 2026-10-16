@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use std::{ffi::CString, sync::Arc, time::Instant};
 
 pub struct AgentTransport {
-    _named: Listener,
+    _named: Option<Listener>,
     _anonymous: Listener,
     peers: Arc<Peers>,
     incoming: flume::Receiver<Incoming>,
@@ -24,14 +24,14 @@ impl AgentTransport {
         let peers = Arc::new(Peers::default());
         let (tx, incoming) = flume::bounded(64);
         let sessions = Arc::clone(&peers);
-        let anonymous = Listener::start(None, move |event| accept_session(event, &sessions, &tx))?;
+        let anonymous = Listener::start(None, move |event| accept_session(event, &sessions, &tx, Dictionary::verify))?;
         let endpoint = Arc::new(Endpoint::new(&anonymous)?);
         let discovery = Arc::clone(&peers);
         let named = Listener::start(Some(&name), move |event| {
             accept_discovery(event, &discovery, &endpoint);
         })?;
         Ok(Self {
-            _named: named,
+            _named: Some(named),
             _anonymous: anonymous,
             peers,
             incoming,
@@ -40,6 +40,18 @@ impl AgentTransport {
 
     pub async fn next(&self) -> Option<Incoming> {
         self.incoming.recv_async().await.ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn anonymous_for_test(
+        verify: fn(&Dictionary) -> Result<crate::VerifiedPeer, crate::RejectReason>,
+    ) -> (Self, Endpoint) {
+        let peers = Arc::new(Peers::default());
+        let (tx, incoming) = flume::bounded(64);
+        let sessions = Arc::clone(&peers);
+        let anonymous = Listener::test_anonymous(move |event| accept_session(event, &sessions, &tx, verify));
+        let endpoint = Endpoint::new(&anonymous).unwrap();
+        (Self { _named: None, _anonymous: anonymous, peers, incoming }, endpoint)
     }
 }
 
@@ -92,7 +104,10 @@ fn capability() -> Result<[u8; 32], TransportError> {
     Ok(bytes)
 }
 
-fn accept_session(event: Raw, peers: &Arc<Peers>, incoming: &flume::Sender<Incoming>) {
+fn accept_session(
+    event: Raw, peers: &Arc<Peers>, incoming: &flume::Sender<Incoming>,
+    verify: fn(&Dictionary) -> Result<crate::VerifiedPeer, crate::RejectReason>,
+) {
     if !native::is_connection(event) {
         return;
     }
@@ -126,7 +141,7 @@ fn accept_session(event: Raw, peers: &Arc<Peers>, incoming: &flume::Sender<Incom
             // SAFETY: event is the live callback argument, never a fabricated message.
             let dictionary = unsafe { Dictionary::received(event) }?;
             let accepted = gate.lock().receive(
-                dictionary.verify(),
+                verify(&dictionary),
                 || dictionary.envelope(),
                 Instant::now(),
             )?;

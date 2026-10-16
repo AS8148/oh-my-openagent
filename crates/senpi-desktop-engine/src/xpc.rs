@@ -5,7 +5,7 @@ use senpi_desktop_session::{BackendSelection, SessionTimeouts};
 use senpi_desktop_xpc::{AgentTransport, Incoming};
 use std::sync::Arc;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     task::JoinSet,
 };
 
@@ -38,7 +38,20 @@ pub(crate) async fn run(name: &str) -> Result<(), String> {
                 let Some(stream) = stream else { break; };
                 let sessions = Arc::clone(&sessions);
                 let opener = Arc::clone(&sessions);
-                tasks.spawn(async move { serve(stream, sessions, move |config| opener.open(config)).await });
+                tasks.spawn(async move {
+                    #[cfg(not(test))]
+                    serve(stream, sessions, move |config| opener.open(config)).await;
+                    #[cfg(test)]
+                    {
+                        let observers = crate::xpc_test_harness::Observers::default();
+                        let factory = observers.clone();
+                        serve(stream, sessions, move |mut config| {
+                            config.timeouts.operation = std::time::Duration::from_secs(120);
+                            opener.open_with(config, factory)
+                        }).await;
+                        observers.finish();
+                    }
+                });
             }
             joined = tasks.join_next(), if !tasks.is_empty() => {
                 if let Some(Err(error)) = joined {
@@ -107,25 +120,17 @@ async fn serve(
     };
     let (engine_io, transport_io) = tokio::io::duplex(2 * 1024 * 1024);
     let (reader, writer) = tokio::io::split(engine_io);
-    let (outgoing, mut incoming) = tokio::io::split(transport_io);
+    let (outgoing, incoming) = tokio::io::split(transport_io);
     let input_stream = Arc::clone(&stream);
     let input = async move {
-        let mut frame = first;
-        loop {
-            if sessions.classify(&frame).is_err() {
-                break;
+        let mut first = Some(first);
+        let source = &input_stream;
+        if let Err(error) = senpi_desktop_xpc::forward_frames(incoming, || {
+            let first = first.take();
+            async move {
+                match first { Some(frame) => Some(frame), None => source.receive().await }
             }
-            if incoming.write_all(&frame).await.is_err() || incoming.write_all(b"\n").await.is_err()
-            {
-                break;
-            }
-            let Some(next) = input_stream.receive().await else {
-                break;
-            };
-            frame = next;
-        }
-        // Dropping a split write half alone does not signal EOF to the router.
-        if let Err(error) = incoming.shutdown().await {
+        }, |frame| sessions.classify(frame).is_ok()).await {
             eprintln!("senpi-desktop-engine: closing XPC input failed: {error}");
         }
         input_stream.close();

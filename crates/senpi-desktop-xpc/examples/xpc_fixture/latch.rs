@@ -1,13 +1,13 @@
 use super::{approve, connection::Connection, discover, frame};
 use serde_json::{json, Value};
 
-struct Client {
-    connection: Connection,
-    sequence: u64,
+pub(super) struct Client {
+    pub(super) connection: Connection,
+    pub(super) sequence: u64,
 }
 
 impl Client {
-    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+    pub(super) fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.sequence;
         let payload = serde_json::to_vec(&json!({
             "jsonrpc":"2.0", "id":id, "method":method, "params":params,

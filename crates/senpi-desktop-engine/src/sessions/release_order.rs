@@ -45,7 +45,8 @@ async fn release_before_commit(fails: bool) {
         released_at_commit.load(Ordering::SeqCst),
         "held input was not released before durable commit"
     );
-    assert_eq!(supervisor.is_suspended(), !fails);
+    assert!(supervisor.is_suspended());
+    assert_eq!(supervisor.published_status().suspended, !fails);
     assert_eq!(supervisor.stop_epoch(), u64::from(!fails));
 }
 

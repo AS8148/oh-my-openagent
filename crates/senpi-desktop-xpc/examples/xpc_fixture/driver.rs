@@ -4,6 +4,8 @@ mod connection;
 mod object;
 #[path = "latch.rs"]
 mod latch;
+#[path = "crash.rs"]
+mod crash;
 use connection::Connection;
 use object::Object;
 use sha2::{Digest, Sha256};
@@ -104,6 +106,8 @@ pub(super) fn run() -> Result<(), String> {
     let mode = args.get(1).ok_or("missing mode")?;
     let name = args.get(2).ok_or("missing service")?;
     match mode.as_str() {
+        "crash-hold" => crash::run(name, true),
+        "crash-grant" => crash::run(name, false),
         "latch-stop" => latch::run(name, true),
         "latch-check" => latch::run(name, false),
         "squatter" => connection::squatter(name),

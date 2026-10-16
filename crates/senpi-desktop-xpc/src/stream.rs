@@ -6,6 +6,8 @@ use crate::{
 };
 use parking_lot::Mutex;
 use std::sync::Arc;
+mod forward;
+pub use forward::forward_frames;
 
 /// Sixteen current inline capture budgets plus JSON/AX headroom, rounded up.
 /// The current 5 MB PNG default expands to about 6.7 MB of base64.

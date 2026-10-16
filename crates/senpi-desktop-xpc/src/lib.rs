@@ -23,7 +23,7 @@ mod stream;
 #[cfg(target_os = "macos")]
 pub use agent::AgentTransport;
 #[cfg(target_os = "macos")]
-pub use stream::Incoming;
+pub use stream::{Incoming, forward_frames};
 #[cfg(target_os = "macos")]
 pub use connection::TransportError;
 pub mod roles;
@@ -42,3 +42,6 @@ pub use policy::{RejectReason, SecurityOperation, VerifiedPeer};
 
 #[cfg(all(test, target_os = "macos"))]
 mod transport_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+mod crash_tests;

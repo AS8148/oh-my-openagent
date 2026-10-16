@@ -141,4 +141,5 @@ exec 3>&-
 exec 4>&-
 echo "CASE old endpoint invalidation and no replay PASS"
 echo "CASE restart fresh reconnect and stale capability PASS"
-echo "SUMMARY signed transport cases=6 unexpected=0"
+bash "$root/crates/senpi-desktop-xpc/scripts/signed-crash.sh"
+echo "SUMMARY signed transport cases=7 unexpected=0"

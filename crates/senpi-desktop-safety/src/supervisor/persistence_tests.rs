@@ -7,7 +7,7 @@ use std::sync::{
 };
 
 #[test]
-fn every_stop_source_commits_before_epoch_or_suspension_is_published() {
+fn every_stop_source_refuses_input_before_committing_then_publishes() {
     for source in [StopSource::Api, StopSource::HostRelay, StopSource::Hotkey] {
         // given
         let reference = Arc::new(Mutex::new(Weak::<Supervisor>::new()));
@@ -19,7 +19,8 @@ fn every_stop_source_commits_before_epoch_or_suspension_is_published() {
             false,
             move || {
                 let supervisor = observed.lock().upgrade().unwrap();
-                assert!(!supervisor.is_suspended());
+                assert!(supervisor.is_suspended());
+                assert!(!supervisor.published_status().suspended);
                 assert_eq!(supervisor.stop_epoch(), 0);
                 recorded.fetch_add(1, Ordering::SeqCst);
             },
@@ -61,6 +62,7 @@ fn a_commit_that_does_not_return_cannot_publish_or_acknowledge_a_stop() {
     }));
     // then
     assert!(result.is_err());
-    assert!(!supervisor.is_suspended());
+    assert!(supervisor.is_suspended());
+    assert!(!supervisor.published_status().suspended);
     assert_eq!(supervisor.stop_epoch(), 0);
 }

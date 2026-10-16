@@ -53,9 +53,11 @@ its `stopPath.changed` notification.
 
 The shared stop latch cannot be cleared with a connection's `stopPath.resume`.
 Restarting revokes connections and requires fresh approval, and restores an
-existing stop marker. O2 has no reset RPC or persistent-marker deletion operation. Only a
-future explicit user action through the signed O3 controller or desktop app may
-lift it; a connection's resume token cannot become global reset authority.
+existing stop marker. O2 has no reset RPC or persistent-marker deletion operation.
+A future signed O3 controller or desktop action is the intended authorized lift
+path, but exclusive user control across restarts is not yet enforced: the
+same-user deletion residual below remains. A connection's resume token cannot
+become global reset authority.
 
 ## Durable user stop
 
@@ -77,23 +79,54 @@ stopped and logs the reason. No session or backend is needed for restoration.
 a same-user process can delete it and thereby lift a persisted stop at the next
 startup, because a missing marker means not stopped. A stop during a live
 session remains latched in memory and is unaffected by deleting the marker.
-No external anchor is implemented in this delta; the anchor design remains
-pending. File ownership, permissions and descriptor-relative access do not
+No external anchor is implemented in this delta; the anchor design is tracked in
+[#10238](https://github.com/code-yeongyu/oh-my-openagent/issues/10238).
+File ownership, permissions and descriptor-relative access do not
 prevent this deletion.
 
 All stop sources, including the native hotkey, pass through the shared
-supervisor's release and commit boundary. It first requests physical input
-release and waits for active input scopes to finish, before any slow durable
-write. Releasing input does not publish or acknowledge a stop; held-request
-replies wait for publication. It then creates an exclusive 0600 temp file,
+supervisor's release and commit boundary. The tap callback immediately latches
+in-memory suspension, so new input is refused even when foreground preparation
+is stuck. It queues the stop to a prestarted worker without waiting for input
+scopes, locks or disk I/O. Disabled-by-timeout and disabled-by-user-input tap
+events re-enable the tap; recovery logging also runs off the callback.
+
+The worker requests physical input release and allows one second in aggregate
+for active scopes to finish. On timeout it attempts tracked key/button ups via
+an independent backend handle, waiting at most another 5 ms, without borrowing
+the blocked backend or waiting for its foreground scope. Preparation that has
+emitted no down has no held ledger entry to release. Emergency release is best
+effort: a stalled or failed native post cannot delay fatal termination
+indefinitely. A timed-out stop commits the latch and exits without an ACK.
+
+Releasing input does not publish or acknowledge a stop; held-request replies
+wait for publication. Persistence creates an exclusive 0600 temp file,
 writes the marker, fsyncs the file, renames it atomically, and fsyncs the
 directory. Marker reads, creation, rename and temporary cleanup use the
 validated directory descriptor rather than resolving its pathname again.
 Newly created directory entries are also synced through their parents.
-Only after commit may the stop epoch, suspended flag or RPC acknowledgement
-be published. A durable-write failure is logged and terminates the agent after
-held input has been released, without acknowledging the stop or accepting more
-input. Legacy engine modes retain their in-memory stop behavior.
+Only after commit may the stop epoch, outward suspended status,
+`stopPath.changed` or RPC acknowledgement be published. A durable-write failure
+is logged and terminates the agent after normal release or the bounded emergency
+attempt, without acknowledging the stop or accepting more input. Legacy engine
+modes retain in-memory rather than file-backed stop storage.
+
+## Automated crash regression
+
+Plain `cargo test -p senpi-desktop-xpc` runs the macOS real-child SIGKILL test;
+it is neither ignored nor GUI-dependent. The desktop native contract macOS job
+includes it through `cargo test --workspace --locked`. A spawn-inherited Mach
+port carries the anonymous XPC endpoint to the child using libxpc serialization;
+no launchd job or named service is registered. The child restores its bootstrap
+port before opening the connection. Only the crate-local `cfg(test)` constructor
+injects identity; production listeners retain O1 requirements and verification.
+
+The child uses real libxpc, `agent.rs`, and `Incoming::receive`. The fixture
+retains both duplex halves and uses the same `forward_frames` half-close as
+engine `xpc::serve`, then drives the actual Session worker and ControlSlot.
+Removing that shutdown must fail after observed key-down and SIGKILL because
+key-up/session-close never arrive. The engine's own split regression and the
+signed full-engine case below additionally exercise `xpc::serve` itself.
 
 ## Manual acceptance
 
@@ -101,6 +134,11 @@ input. Legacy engine modes retain their in-memory stop behavior.
 builds real binaries, signs temporary bundles, and exercises a task-owned GUI
 Mach service. It covers valid/unauthorized/old-epoch requesters, squatting,
 anonymous endpoint invalidation, fresh reconnect and stale-capability rejection.
+It also invokes `signed-crash.sh`: a signed controller obtains control and holds
+a fake key through the actual signed engine's `xpc::serve`; the script sends
+`kill -9` and requires the subscribed key-up, session-close event and a fresh
+signed controller's successful grant. This uses real bidirectional O1 checks;
+only the engine's `cfg(test)` hardware factory and event reporting are substituted.
 The trap boots out only its exact random labels and removes its fixture files.
 It neither installs a permanent LaunchAgent nor changes TCC grants.
 

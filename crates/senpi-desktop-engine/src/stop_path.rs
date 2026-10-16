@@ -127,7 +127,7 @@ pub struct StopPaths {
 
 impl StopPaths {
     pub fn new(supervisor: Arc<Supervisor>, selection: &BackendSelection, resume: ResumeToken) -> Self {
-        let announced = Announced::from(supervisor.status());
+        let announced = Announced::from(supervisor.published_status());
         Self {
             #[cfg(test)]
             control_slot: senpi_desktop_session::ControlSlot::new(),
@@ -155,7 +155,7 @@ impl StopPaths {
             resume: ResumeToken::new(self.resume.as_str().to_owned()),
             state: Arc::clone(&self.state),
             policy: Mutex::new(StopPolicy::default()),
-            announced: Mutex::new(Announced::from(self.supervisor.status())),
+            announced: Mutex::new(Announced::from(self.supervisor.published_status())),
             #[cfg(test)]
             control_slot: Arc::clone(&self.control_slot),
         }
@@ -229,7 +229,7 @@ impl StopPaths {
     }
 
     pub fn status(&self) -> StopPathStatus {
-        let status = self.supervisor.status();
+        let status = self.supervisor.published_status();
         let policy = *self.policy.lock();
         StopPathStatus {
             suspended: status.suspended,
@@ -268,7 +268,8 @@ impl StopPaths {
 
     /// The current status when it differs from the last one announced.
     pub fn transition(&self) -> Option<StopPathStatus> {
-        let current = Announced::from(self.supervisor.status());
+        if self.supervisor.stop_pending() { return None; }
+        let current = Announced::from(self.supervisor.published_status());
         let mut announced = self.announced.lock();
         if *announced == current {
             return None;

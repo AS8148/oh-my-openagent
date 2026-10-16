@@ -10,6 +10,8 @@ use std::{
 
 // SAFETY: declarations match the macOS SDK XPC dictionary/data/integer ABI.
 unsafe extern "C" {
+    #[cfg(test)]
+    static _xpc_type_endpoint: u8;
     fn xpc_dictionary_create(keys: *const *const c_char, values: *const Raw, count: usize) -> Raw;
     fn xpc_dictionary_create_reply(original: Raw) -> Raw;
     fn xpc_dictionary_get_count(dictionary: Raw) -> usize;
@@ -32,6 +34,13 @@ pub(crate) const VERSION: u64 = 1;
 pub(crate) struct Dictionary(Object);
 
 impl Dictionary {
+    #[cfg(test)]
+    pub(crate) fn test_endpoint(&self) -> Result<native::Endpoint, TransportError> {
+        let raw = self.value(c"endpoint", ptr::addr_of!(_xpc_type_endpoint).cast())?;
+        // SAFETY: value proved endpoint type, retained by self throughout this call.
+        unsafe { native::Endpoint::retained_for_test(raw) }
+    }
+
     pub(crate) fn new() -> Result<Self, TransportError> {
         // SAFETY: zero entries permits null keys and values.
         let raw = unsafe { xpc_dictionary_create(ptr::null(), ptr::null(), 0) };

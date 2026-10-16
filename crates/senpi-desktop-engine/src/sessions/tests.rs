@@ -186,6 +186,28 @@ mod holds;
 mod release_order;
 
 #[tokio::test]
+async fn r3_pending_stop_refuses_input_without_wire_publication() {
+    use crate::{route::Route, rpc::Failure};
+    use senpi_desktop_core::{error::ErrorCode, methods::Method};
+    // given: the callback has latched refusal, but commit has not run.
+    let owner = Sessions::new();
+    let engine = owner.open(config()).unwrap();
+    engine.stop_paths().supervisor().suspend_input();
+    // when: admission must not enqueue behind a stuck foreground preparation.
+    let routed = engine.route(Method::ControlGrant, json!({
+        "reason":"pending stop", "confirmationId":"fixture",
+    }));
+    let published = engine.stop_paths().status().suspended;
+    let changed = engine.stop_paths().transition();
+    engine.shutdown().await;
+    // then: refusal is immediate, but status/notifications are still uncommitted.
+    assert!(matches!(routed, Route::Immediate(Err(Failure::Engine(ref error))) if error.code == ErrorCode::Suspended),
+        "pending stop enqueued new input: {routed:?}");
+    assert!(!published);
+    assert!(changed.is_none());
+}
+
+#[tokio::test]
 async fn r2_l1_session_policy_is_private() {
     // given
     let owner = Sessions::new();

@@ -23,6 +23,9 @@ use parking_lot::Mutex;
 
 use crate::{clock::Clock, reset::UserReset};
 
+mod stop;
+mod emergency;
+
 /// Max age of a stop path's heartbeat before it stops counting (ms).
 pub const HEARTBEAT_FRESH_MS: u64 = 2_000;
 /// Interval at which a live stop path beats (ms).
@@ -128,6 +131,11 @@ impl StopPathState {
 pub struct Supervisor {
     hold_signals: Mutex<Vec<Weak<crate::HoldSignal>>>,
     suspended: AtomicBool,
+    published: AtomicBool,
+    stop_commit_lock: Mutex<()>,
+    emergency: Mutex<Option<emergency::EmergencyWorker>>,
+    bounded_release: AtomicBool,
+    fatal_exit: Arc<dyn Fn(i32) + Send + Sync>,
     /// Bumped by every stop, so a control grant granted before one is dead.
     stop_epoch: AtomicU64,
     /// Guards every write to `suspended` so the flag and its source agree.
@@ -145,6 +153,11 @@ impl Supervisor {
         Self {
             hold_signals: Mutex::new(Vec::new()),
             suspended: AtomicBool::new(false),
+            published: AtomicBool::new(false),
+            stop_commit_lock: Mutex::new(()),
+            emergency: Mutex::new(None),
+            bounded_release: AtomicBool::new(false),
+            fatal_exit: Arc::new(|code| std::process::exit(code)),
             stop_epoch: AtomicU64::new(0),
             stopped_by: Mutex::new(None),
             stop_paths: Mutex::new(HashMap::new()),
@@ -165,8 +178,10 @@ impl Supervisor {
     ) -> Self {
         let mut supervisor = Self::new(clock);
         supervisor.stop_commit = Some(Arc::new(commit));
+        supervisor.bounded_release.store(true, Ordering::SeqCst);
         if stopped {
             supervisor.suspended.store(true, Ordering::SeqCst);
+            supervisor.published.store(true, Ordering::SeqCst);
             supervisor.stop_epoch.store(1, Ordering::SeqCst);
             *supervisor.stopped_by.get_mut() = Some(StopSource::Api);
         }
@@ -195,27 +210,6 @@ impl Supervisor {
         self.stop_paths.lock().entry(id).or_default().last_heartbeat_ms = now_ms;
     }
 
-    /// Latch suspension. The first source is kept until [`Self::reset`].
-    pub fn trigger_stop(&self, source: StopSource) {
-        let mut stopped_by = self.stopped_by.lock();
-        // Keep registration closed until publication. Already active backends
-        // release first, without exposing a stopped epoch or acknowledgement.
-        let mut registered = self.hold_signals.lock();
-        registered.retain(|signal| signal.strong_count() > 0);
-        let signals: Vec<_> = registered.iter().filter_map(Weak::upgrade).collect();
-        for signal in &signals { signal.request_release(); }
-        for signal in &signals { signal.await_release(); }
-        if let Some(commit) = &self.stop_commit {
-            commit();
-        }
-        // HoldSignal also observes this epoch, so it must follow durable commit.
-        self.stop_epoch.fetch_add(1, Ordering::SeqCst);
-        stopped_by.get_or_insert(source);
-        self.suspended.store(true, Ordering::SeqCst);
-        drop(stopped_by);
-        for signal in signals { signal.stopped(); }
-    }
-
     /// Register before checking state or pressing input. Weak registration
     /// cannot keep a completed request alive; dead registrations are pruned.
     #[must_use]
@@ -236,8 +230,10 @@ impl Supervisor {
 
     /// Lift suspension. User-only: the proof comes from the host's resume token.
     pub fn reset(&self, _proof: UserReset) {
+        let _commit = self.stop_commit_lock.lock();
         let mut stopped_by = self.stopped_by.lock();
         *stopped_by = None;
+        self.published.store(false, Ordering::SeqCst);
         self.suspended.store(false, Ordering::SeqCst);
     }
 
@@ -251,8 +247,10 @@ impl Supervisor {
     /// enable, so no production build can call it.
     #[cfg(any(test, feature = "test-support"))]
     pub fn reset_for_test(&self) {
+        let _commit = self.stop_commit_lock.lock();
         let mut stopped_by = self.stopped_by.lock();
         *stopped_by = None;
+        self.published.store(false, Ordering::SeqCst);
         self.suspended.store(false, Ordering::SeqCst);
     }
 
@@ -293,7 +291,7 @@ impl Supervisor {
     /// Whether side-effecting input may fire right now under `policy`.
     #[must_use]
     pub fn input_allowed(&self, policy: &StopPolicy) -> bool {
-        self.status().input_allowed(policy)
+        !self.is_suspended() && self.status().input_allowed(policy)
     }
 }
 
@@ -303,3 +301,9 @@ mod tests;
 #[cfg(test)]
 #[path = "supervisor/persistence_tests.rs"]
 mod persistence_tests;
+
+#[cfg(test)]
+mod stop_timeout_tests;
+
+#[cfg(test)]
+mod emergency_tests;

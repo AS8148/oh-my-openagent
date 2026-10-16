@@ -81,6 +81,15 @@ unsafe impl Send for Peer {}
 unsafe impl Sync for Peer {}
 
 impl Peer {
+    #[cfg(test)]
+    pub(crate) fn test_client(object: Object) -> Self {
+        Self {
+            object,
+            activated: parking_lot::Mutex::new(false),
+            resumed: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
     pub(crate) fn raw(&self) -> Raw {
         self.object.raw()
     }
@@ -149,6 +158,12 @@ unsafe impl Send for Endpoint {}
 unsafe impl Sync for Endpoint {}
 
 impl Endpoint {
+    #[cfg(test)]
+    pub(crate) unsafe fn retained_for_test(raw: Raw) -> Result<Self, TransportError> {
+        // SAFETY: caller retains the dictionary containing this checked endpoint.
+        unsafe { Object::retained(raw) }.map(Self)
+    }
+
     pub(crate) fn raw(&self) -> Raw {
         self.0.raw()
     }
@@ -163,6 +178,21 @@ impl Endpoint {
 pub(crate) struct Listener(Object);
 
 impl Listener {
+    #[cfg(test)]
+    pub(crate) fn test_anonymous(callback: impl Fn(Raw) + Send + 'static) -> Self {
+        // SAFETY: NULL name/queue creates an owned anonymous listener. This
+        // cfg(test) constructor pairs with the crate-local injected verifier.
+        let raw = unsafe { xpc_connection_create(ptr::null(), ptr::null_mut()) };
+        // SAFETY: the Create reference transfers to this owner.
+        let object = unsafe { Object::owned(raw) }.unwrap();
+        let handler = RcBlock::new(callback);
+        // SAFETY: XPC copies this Send + 'static handler before activation.
+        unsafe { xpc_connection_set_event_handler(raw, &handler) };
+        // SAFETY: handler is installed on this inactive owned listener.
+        unsafe { xpc_connection_resume(raw) };
+        Self(object)
+    }
+
     pub(crate) fn start(
         name: Option<&CStr>,
         callback: impl Fn(Raw) + Send + 'static,

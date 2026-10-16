@@ -2575,8 +2575,10 @@ name = "senpi-desktop-safety"
 version = "0.0.0"
 dependencies = [
  "parking_lot",
+ "senpi-desktop-backend-fake",
  "senpi-desktop-core",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -2611,10 +2613,15 @@ dependencies = [
  "libc",
  "objc2-core-foundation",
  "parking_lot",
+ "senpi-desktop-backend-fake",
  "senpi-desktop-core",
+ "senpi-desktop-safety",
+ "senpi-desktop-session",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

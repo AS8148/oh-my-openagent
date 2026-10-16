@@ -64,7 +64,7 @@ impl HoldSignal {
             Err(DesktopError::new(ErrorCode::Cancelled, "input release requested"))
         };
         let mut state = self.state.lock();
-        while state.releasing && !state.published && !state.cancelled {
+        while (state.releasing || supervisor.stop_pending()) && !state.published && !state.cancelled {
             self.changed.wait(&mut state);
         }
         self.check_state(supervisor, &state)?;
@@ -95,11 +95,19 @@ impl HoldSignal {
         self.changed.notify_all();
     }
 
-    pub(crate) fn await_release(&self) {
+    pub(crate) fn await_release_until(&self, deadline: Option<Instant>) -> bool {
         let mut state = self.state.lock();
         while state.input_active {
-            self.changed.wait(&mut state);
+            match deadline {
+                Some(deadline) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() { return false; }
+                    self.changed.wait_for(&mut state, remaining);
+                }
+                None => self.changed.wait(&mut state),
+            }
         }
+        true
     }
 
     /// Suspension takes precedence over cancellation, even after a quick reset.
