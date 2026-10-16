@@ -51,6 +51,25 @@ describe("openItemDevice", () => {
     })
   })
 
+  test("#given a state dir copied to another machine #when opened there #then a NEW peer is minted and the receipts are retired", async () => {
+    await withDir(async (dir) => {
+      const memoryRoot = join(dir, "memory")
+      const original = await openItemDevice({ stateDir: join(dir, "a"), memoryRoot, machineId: "machine-a" })
+      const doc = await createDeviceItemDoc(original)
+      const update = await captureOnDevice(original, "note.md", doc, "", [], "hello\n")
+      if (update !== null) doc.import(update)
+      doc.free()
+      await cp(join(dir, "a"), join(dir, "b"), { recursive: true })
+      const sameMachine = await openItemDevice({ stateDir: join(dir, "b"), memoryRoot, machineId: "machine-a" })
+      expect(sameMachine.peer).toBe(original.peer)
+      const copied = await openItemDevice({ stateDir: join(dir, "b"), memoryRoot, machineId: "machine-b" })
+      expect(copied.peer).not.toBe(original.peer)
+      expect((await readdir(join(dir, "b"))).filter((name) => name === "captures")).toEqual([])
+      const again = await openItemDevice({ stateDir: join(dir, "b"), memoryRoot, machineId: "machine-b" })
+      expect(again.peer).toBe(copied.peer)
+    })
+  })
+
   test("#given a state dir inside the synced memory root #when opened #then it is refused", async () => {
     await withDir(async (dir) => {
       const memoryRoot = join(dir, "memory")

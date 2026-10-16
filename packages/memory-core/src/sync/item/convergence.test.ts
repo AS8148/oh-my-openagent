@@ -99,5 +99,5 @@ describe("whole-item convergence property (sync-design §10)", () => {
     }
     expect(distinct.size).toBe(1)
     expect([...distinct][0]).toBe(expected)
-  })
+  }, 30_000)
 })

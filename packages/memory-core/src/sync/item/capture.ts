@@ -30,9 +30,10 @@ export function captureItem(
   baseText: string,
   baseFrontier: ItemFrontier,
   workingText: string,
+  unseen: ReadonlySet<string> = NONE,
 ): Uint8Array | null {
   const current = isCurrentFrontier(doc, baseFrontier)
-  const merged = current ? null : mergeOntoCurrent(doc, baseText, baseFrontier, workingText)
+  const merged = current ? null : mergeOntoCurrent(doc, baseText, baseFrontier, workingText, unseen)
   if (!current && merged === null) return null
   const target = doc.fork()
   try {
@@ -43,7 +44,7 @@ export function captureItem(
       if (renderDocContent(target) !== baseText) {
         throw new CaptureBaselineError("captureItem: baseText is not the item's render at baseFrontier")
       }
-      applyWorkingText(target, workingText)
+      applyWorkingText(target, workingText, unseen)
     } else {
       transplantContent(target, merged)
     }
@@ -57,6 +58,8 @@ export function captureItem(
   }
 }
 
+const NONE: ReadonlySet<string> = new Set()
+
 function isCurrentFrontier(doc: LoroDoc, frontier: ItemFrontier): boolean {
   const now = doc.frontiers()
   if (now.length !== frontier.length) return false
@@ -69,6 +72,7 @@ function mergeOntoCurrent(
   baseText: string,
   baseFrontier: ItemFrontier,
   workingText: string,
+  unseen: ReadonlySet<string>,
 ): LoroDoc | null {
   const scratch = doc.forkAt(baseFrontier)
   try {
@@ -76,7 +80,7 @@ function mergeOntoCurrent(
     if (renderDocContent(scratch) !== baseText) {
       throw new CaptureBaselineError("captureItem: baseText is not the item's render at baseFrontier")
     }
-    applyWorkingText(scratch, workingText)
+    applyWorkingText(scratch, workingText, unseen)
     scratch.commit()
     const from = scratch.frontiersToVV(baseFrontier)
     if (scratch.oplogVersion().compare(from) === 0) return null
@@ -89,18 +93,21 @@ function mergeOntoCurrent(
   }
 }
 
-function applyWorkingText(fork: LoroDoc, workingText: string): void {
+// `unseen` holds register tags the user never saw (concurrent writes that reached the doc after
+// the user's baseline): a write or removal supersedes only the other active entries, so an
+// unseen value stays active and renders as a conflict instead of being overwritten.
+function applyWorkingText(fork: LoroDoc, workingText: string, unseen: ReadonlySet<string>): void {
   const parsed = splitItem(workingText)
   const history = analyzeHistory(fork)
   const wanted = new Map<string, FmValue>()
   if (parsed.fm !== null) for (const entry of parsed.fm) wanted.set(entry.key, entry.value)
   for (const key of history.keys.keys()) {
     const value = wanted.get(key)
-    if (value === undefined || value.kind === "remove") clearKey(fork, key)
+    if (value === undefined || value.kind === "remove") clearKey(fork, key, unseen)
   }
   if (parsed.fm !== null) {
     for (const { key, value } of parsed.fm) {
-      if (value.kind !== "remove") applyKey(fork, key, value, history)
+      if (value.kind !== "remove") applyKey(fork, key, value, history, unseen)
     }
   }
   const bodyTarget = parsed.fm === null ? workingText : parsed.body
@@ -108,7 +115,7 @@ function applyWorkingText(fork: LoroDoc, workingText: string): void {
   if (bodyCurrent !== bodyTarget) fork.getText("body").update(bodyTarget)
 }
 
-function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHistory): void {
+function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHistory, unseen: ReadonlySet<string>): void {
   const kh = history.keys.get(key)
   if (kh === undefined) {
     writeNatural(fork, key, value)
@@ -126,7 +133,7 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
     if (combinedText !== undefined && (combinedText === target || combinedText === regText(target))) return
     const regWon = (state.text === null || state.text === "") && activeReg(state.reg).length > 0
     if (!regWon && state.text !== target) fork.getText(fmName(key, "text")).update(target)
-    clearLosers(fork, key, state, "text")
+    clearLosers(fork, key, state, "text", unseen)
     return
   }
   if (kh.kind === "set") {
@@ -134,7 +141,7 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
     const current = combined?.kind === "set" ? combined.elements : orderedSetElements(state, key, history)
     if (sameList(current, target)) return
     syncSet(fork, key, state, target)
-    clearLosers(fork, key, state, "set")
+    clearLosers(fork, key, state, "set", unseen)
     return
   }  const target = toRegister(value)
   const combinedReg = combined?.kind === "reg" ? combined.text : undefined
@@ -146,9 +153,9 @@ function applyKey(fork: LoroDoc, key: string, value: FmValue, history: ItemHisto
   // When other values are active, the user is resolving a conflict by hand: write an entry
   // that supersedes all of them, or the conflict re-renders over the user's choice (r2 HIGH-2).
   if (active.length > 0 && active.every((e) => e.value === target)) return
-  const entry = { v: target, s: active.map((e) => e.tag) }
+  const entry = { v: target, s: active.filter((e) => !unseen.has(e.tag)).map((e) => e.tag) }
   fork.getMap(fmName(key, "reg")).set(newTag(fork, target), entry)
-  clearLosers(fork, key, state, "reg")
+  clearLosers(fork, key, state, "reg", unseen)
 }
 
 function writeNatural(fork: LoroDoc, key: string, value: FmValue): void {
@@ -166,7 +173,7 @@ function writeNatural(fork: LoroDoc, key: string, value: FmValue): void {
   }
 }
 
-function clearKey(fork: LoroDoc, key: string): void {
+function clearKey(fork: LoroDoc, key: string, unseen: ReadonlySet<string>): void {
   const state = readKeyState(fork, key)
   if (state.text !== null && state.text !== "") {
     fork.getText(fmName(key, "text")).delete(0, state.text.length)
@@ -175,10 +182,16 @@ function clearKey(fork: LoroDoc, key: string): void {
     const map = fork.getMap(fmName(key, "set"))
     for (const { tag } of state.set) map.delete(tag)
   }
-  supersedeRegister(fork, key, state)
+  supersedeRegister(fork, key, state, unseen)
 }
 
-function clearLosers(fork: LoroDoc, key: string, state: KeyState, winner: "text" | "set" | "reg"): void {
+function clearLosers(
+  fork: LoroDoc,
+  key: string,
+  state: KeyState,
+  winner: "text" | "set" | "reg",
+  unseen: ReadonlySet<string>,
+): void {
   if (winner !== "text" && state.text !== null && state.text !== "") {
     fork.getText(fmName(key, "text")).delete(0, state.text.length)
   }
@@ -186,11 +199,11 @@ function clearLosers(fork: LoroDoc, key: string, state: KeyState, winner: "text"
     const map = fork.getMap(fmName(key, "set"))
     for (const { tag } of state.set) map.delete(tag)
   }
-  if (winner !== "reg") supersedeRegister(fork, key, state)
+  if (winner !== "reg") supersedeRegister(fork, key, state, unseen)
 }
 
-function supersedeRegister(fork: LoroDoc, key: string, state: KeyState): void {
-  const active = activeReg(state.reg)
+function supersedeRegister(fork: LoroDoc, key: string, state: KeyState, unseen: ReadonlySet<string>): void {
+  const active = activeReg(state.reg).filter((e) => !unseen.has(e.tag))
   if (active.length === 0) return
   const entry = { v: null, s: active.map((e) => e.tag) }
   fork.getMap(fmName(key, "reg")).set(newTag(fork, "null"), entry)

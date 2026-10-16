@@ -4,8 +4,9 @@
 // receipt's text at the receipt's frontier instead of from the baseline, so an edit applied
 // under an identity is never applied again, whatever the user typed since.
 // Receipts are per-device state (the device's state dir, never a synced root) and are only
-// trusted when the document contains the receipt's frontier: a receipt written for an update
-// that was never imported (crash before import) is ignored and the baseline diff applies.
+// trusted when the document holds the receipt's frontier ops with the recorded Lamport stamps:
+// a receipt written for an update that was never imported (crash before import) is ignored
+// and the baseline diff applies, even after later ops reuse those counters (review r4 LOW-1).
 // Each item keeps the newest MAX_RECEIPTS baselines; the engine has at most two in flight.
 
 import { createHash, randomBytes } from "node:crypto"
@@ -20,6 +21,7 @@ export interface CaptureReceipt {
   readonly base: ItemFrontier
   readonly text: string
   readonly at: ItemFrontier
+  readonly stamps: readonly number[]
 }
 
 export const MAX_RECEIPTS = 32
@@ -53,17 +55,30 @@ export function sameFrontier(a: ItemFrontier, b: ItemFrontier): boolean {
   return a.length === b.length && a.every((x) => b.some((y) => x.peer === y.peer && x.counter === y.counter))
 }
 
-export function containsFrontier(doc: LoroDoc, frontier: ItemFrontier): boolean {
+export function stampsOf(doc: LoroDoc, frontier: ItemFrontier): number[] {
+  return frontier.map((id) => {
+    const change = doc.getChangeAt(id)
+    return change.lamport + (id.counter - change.counter)
+  })
+}
+
+export function receiptLanded(doc: LoroDoc, receipt: CaptureReceipt): boolean {
   const version = doc.oplogVersion().toJSON()
-  return frontier.every(({ peer, counter }) => (version.get(peer) ?? 0) > counter)
+  if (!receipt.at.every(({ peer, counter }) => (version.get(peer) ?? 0) > counter)) return false
+  const stamps = stampsOf(doc, receipt.at)
+  return stamps.length === receipt.stamps.length && stamps.every((stamp, i) => stamp === receipt.stamps[i])
 }
 
 function asReceipt(entry: unknown, itemKey: string): CaptureReceipt {
-  if (typeof entry === "object" && entry !== null && "base" in entry && "text" in entry && "at" in entry) {
-    const { base, text, at } = entry
-    if (typeof text === "string" && isFrontier(base) && isFrontier(at)) return { base, text, at }
+  if (typeof entry === "object" && entry !== null && "base" in entry && "text" in entry && "at" in entry && "stamps" in entry) {
+    const { base, text, at, stamps } = entry
+    if (typeof text === "string" && isFrontier(base) && isFrontier(at) && isStamps(stamps)) return { base, text, at, stamps }
   }
   throw new TypeError(`malformed capture receipt: ${itemKey}`)
+}
+
+function isStamps(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((stamp: unknown) => typeof stamp === "number")
 }
 
 function isFrontier(value: unknown): value is ItemFrontier {

@@ -8,21 +8,33 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path"
 import type { LoroDoc, PeerID } from "../../crdt/loro-runtime"
 import { realpath } from "../../fs/resilient"
 
-import { DevicePeerError, loadOrCreateDevicePeer } from "./device-peer"
+import { DevicePeerError, loadOrCreateDevicePeer, retireAside } from "./device-peer"
 import { createItemDoc } from "./document"
+import { machineFingerprint, readMachineId } from "./machine-id"
 
 export interface ItemDevice {
   readonly peer: PeerID
   readonly stateDir: string
 }
 
-export async function openItemDevice(options: { readonly stateDir: string; readonly memoryRoot: string }): Promise<ItemDevice> {
+export interface OpenItemDeviceOptions {
+  readonly stateDir: string
+  readonly memoryRoot: string
+  /** The OS machine id; read from the platform when omitted. Hosts without one pass their own install id. */
+  readonly machineId?: string
+}
+
+export async function openItemDevice(options: OpenItemDeviceOptions): Promise<ItemDevice> {
   const stateDir = await canonical(options.stateDir)
   const memoryRoot = await canonical(options.memoryRoot)
   if (isInside(stateDir, memoryRoot)) {
     throw new DevicePeerError(`device state dir ${stateDir} is inside the synced memory root ${memoryRoot}`)
   }
-  return { peer: await loadOrCreateDevicePeer(join(stateDir, "peer")), stateDir }
+  const machine = machineFingerprint(options.machineId ?? (await readMachineId()))
+  const { peer, retired } = await loadOrCreateDevicePeer(join(stateDir, "peer"), machine)
+  // Receipts of a retired peer describe another machine's captures; they must not steer this one.
+  if (retired) await retireAside(join(stateDir, "captures"))
+  return { peer, stateDir }
 }
 
 export function createDeviceItemDoc(device: ItemDevice): Promise<LoroDoc> {

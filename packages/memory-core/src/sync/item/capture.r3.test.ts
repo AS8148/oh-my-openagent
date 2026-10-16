@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
 import type { ItemDevice, ItemFrontier } from "./index"
-import { captureOnDevice, createDeviceItemDoc, itemFrontier, recordMaterialized, renderItem } from "./index"
+import { captureOnDevice, createDeviceItemDoc, itemFrontier, recordMaterialized, renderItem, splitItem } from "./index"
 import { withDevices } from "./test-support"
 
 // Reviews r3/r4 (oMo PR #10203): through the capture entry point, an edit is applied exactly
@@ -117,6 +117,36 @@ describe("reviews r3/r4: capture through the device entry point applies each edi
       expect(await captureOnDevice(device, "item.md", doc, "x\n", f0, "x\n<A>\n")).toBeNull()
       expect(renderItem(doc)).toBe("x\n<A>\n<B>\n")
       doc.free()
+    })
+  })
+
+  test("a drifted register edit never splices values: an unseen concurrent value stays a conflict", async () => {
+    await withDevices(2, async ([a, b]) => {
+      if (a === undefined || b === undefined) throw new Error("no device")
+      const seed = "---\nn: 1\nf: true\n---\nbody\n"
+      const docA = await seeded(a, seed)
+      const docB = await createDeviceItemDoc(b)
+      sync(docA, docB)
+      const f0 = itemFrontier(docB)
+      await fire(a, docA, seed, itemFrontier(docA), "---\nn: 2\nf: false\n---\nbody\n")
+      sync(docA, docB)
+      // B's disk still shows the seed; it captures a body edit, crashes, then the user edits the registers.
+      await fire(b, docB, seed, f0, "---\nn: 1\nf: true\n---\nbody\n<X>\n")
+      await fire(b, docB, seed, f0, "---\nn: 3\nf: 0\n---\nbody\n<X>\n")
+      sync(docA, docB)
+      const rendered = renderItem(docB) ?? ""
+      expect(renderItem(docA)).toBe(rendered)
+      const fm = new Map((splitItem(rendered).fm ?? []).map((e) => [e.key, e.value]))
+      const parts = (key: string): string[] => {
+        const value = fm.get(key)
+        const text = value?.kind === "text" ? value.text : value?.kind === "reg" ? value.value : ""
+        return text.split(" / ").sort()
+      }
+      expect(parts("n")).toEqual(["2", "3"])
+      expect(parts("f")).toEqual(["0", "false"])
+      expect(rendered.split("<X>").length - 1).toBe(1)
+      docA.free()
+      docB.free()
     })
   })
 
