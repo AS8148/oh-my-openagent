@@ -35,7 +35,8 @@ describe("OTLP sender", () => {
     // given
     const dir = root()
     const { calls, fetch } = recordingFetch()
-    const transport = makeTransport(dir, { fetch })
+    const sealedAt = Date.now()
+    const transport = makeTransport(dir, { fetch, nowMs: () => sealedAt })
 
     // when
     for (let index = 0; index < 45; index += 1) capture(transport, "feature_used", { seq: index })

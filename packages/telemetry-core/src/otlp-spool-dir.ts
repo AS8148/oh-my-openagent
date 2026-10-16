@@ -73,18 +73,54 @@ const sendingName = (signal: Signal, batchId: string, bootId: string, leaseExpir
 
 const HEX = Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0"))
 
-/** UUIDv7 (RFC 9562): 48-bit unix milliseconds, version 7, variant 10, random tail. Never sent. */
+const COUNTER_BITS = 26
+const COUNTER_LIMIT = 2 ** COUNTER_BITS
+let lastIdMs = -1
+let lastCounter = 0
+let lastCounterOverflowed = false
+
+/**
+ * UUIDv7 (RFC 9562) with a fixed-length dedicated counter (section 6.2, method 1): 48-bit unix
+ * milliseconds, version 7, then a 26-bit counter in rand_a (12 bits) and the top 14 bits of rand_b
+ * after the variant, then random bits. Repeated calls for the same millisecond increment the
+ * counter, so ids sort in creation order and the send and eviction order equals the seal order. Any
+ * other millisecond reseeds the counter with a random value whose top bit is 0, leaving at least
+ * 2^25 increments; a recovered file's id therefore keeps its own (older) creation time. An
+ * exhausted counter moves the timestamp one millisecond forward, as the RFC allows. Never sent.
+ */
 export function createBatchId(unixMs: number): string {
+  const ms = Math.max(0, Math.floor(unixMs))
+  if (ms === lastIdMs || (ms === lastIdMs - 1 && lastCounterOverflowed)) {
+    lastCounter += 1
+    if (lastCounter >= COUNTER_LIMIT) {
+      lastIdMs += 1
+      lastCounter = 0
+      lastCounterOverflowed = true
+    }
+  } else {
+    lastIdMs = ms
+    lastCounter = Math.floor(Math.random() * (COUNTER_LIMIT / 2))
+    lastCounterOverflowed = false
+  }
+  let timestamp = lastIdMs
+  const counter = lastCounter
   const bytes = crypto.getRandomValues(new Uint8Array(16))
-  let timestamp = Math.max(0, Math.floor(unixMs))
   for (let index = 5; index >= 0; index -= 1) {
     bytes[index] = timestamp % 256
     timestamp = Math.floor(timestamp / 256)
   }
-  bytes[6] = 0x70 | ((bytes[6] ?? 0) & 0x0f)
-  bytes[8] = 0x80 | ((bytes[8] ?? 0) & 0x3f)
+  // counter bits 25..14 -> rand_a (12 bits); bits 13..8 -> byte 8 after the variant; bits 7..0 -> byte 9
+  bytes[6] = 0x70 | ((counter >>> 22) & 0x0f)
+  bytes[7] = (counter >>> 14) & 0xff
+  bytes[8] = 0x80 | ((counter >>> 8) & 0x3f)
+  bytes[9] = counter & 0xff
   const hex = Array.from(bytes, (byte) => HEX[byte] ?? "00").join("")
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/** Fixed-width lowercase hex ids sort by creation time, then by the in-millisecond counter. */
+export function compareBatchIds(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
 }
 
 export function batchCreatedMs(batchId: string): number {
@@ -247,5 +283,5 @@ export function sweepSpool(ctx: SpoolContext): void {
 export function oldestSealedBatches(dir: string): Extract<SpoolEntry, { readonly kind: "batch" }>[] {
   return listSpool(dir)
     .flatMap((entry) => (entry.kind === "batch" ? [entry] : []))
-    .sort((a, b) => batchCreatedMs(a.batchId) - batchCreatedMs(b.batchId) || a.batchId.localeCompare(b.batchId))
+    .sort((a, b) => compareBatchIds(a.batchId, b.batchId))
 }

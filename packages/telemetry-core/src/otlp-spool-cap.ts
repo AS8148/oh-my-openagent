@@ -1,4 +1,4 @@
-import { batchCreatedMs, dropFile, fileStat, listSpool, type SpoolContext } from "./otlp-spool-dir"
+import { compareBatchIds, dropFile, fileStat, listSpool, type SpoolContext } from "./otlp-spool-dir"
 import type { Signal } from "./otlp-spool-file"
 
 /**
@@ -32,7 +32,7 @@ export function enforceSpoolCap(ctx: SpoolContext, sizes: SpoolSizeCache = new M
     if (entry.kind === "batch") sealed.push({ name: entry.name, batchId: entry.batchId, size })
   }
   for (const key of sizes.keys()) if (!present.has(key)) sizes.delete(key)
-  sealed.sort((a, b) => batchCreatedMs(a.batchId) - batchCreatedMs(b.batchId) || a.batchId.localeCompare(b.batchId))
+  sealed.sort((a, b) => compareBatchIds(a.batchId, b.batchId))
   for (const file of sealed) {
     if (total <= ctx.capBytes) break
     dropFile(ctx, file.name, "evicted")
