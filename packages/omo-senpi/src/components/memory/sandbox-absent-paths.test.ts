@@ -191,7 +191,7 @@ describe("reflection sandbox with not-yet-created paths", () => {
   }, 30_000)
 
   test("#given a Linux runtime write dir that does not exist yet #when the bwrap transform is built #then the directory exists with private permissions and the exact path is bound",
-    () => {
+    async () => {
       // given
       const setup = fixture()
       const absentRuntimeWrite = join(setup.root, "runtime", "reflection-sessions")
@@ -208,7 +208,7 @@ describe("reflection sandbox with not-yet-created paths", () => {
         env: { PATH: process.env.PATH },
         ...linuxAvailable,
       })
-      const args = transform(spawnArgs(setup.worktree)).args
+      const args = (await transform(spawnArgs(setup.worktree))).args
 
       // then: bwrap --bind requires a real source; creating the declared path (0700) is the
       // fix, not widening the grant to an existing ancestor or masking with --bind-try.
@@ -221,7 +221,7 @@ describe("reflection sandbox with not-yet-created paths", () => {
     }, 30_000)
 
   test("#given a nested Linux writable path whose ancestors are also missing #when the bwrap transform is built #then the full leaf exists privately and is the bind source",
-    () => {
+    async () => {
       // given
       const setup = fixture()
       const absentNested = join(setup.root, "runtime", "reflection", "runs", "reflection-run-9")
@@ -238,7 +238,7 @@ describe("reflection sandbox with not-yet-created paths", () => {
         env: { PATH: process.env.PATH },
         ...linuxAvailable,
       })
-      const args = transform(spawnArgs(setup.worktree)).args
+      const args = (await transform(spawnArgs(setup.worktree))).args
 
       // then
       expect(transform.wasSandboxed).toBe(true)
