@@ -24,6 +24,7 @@ export type TelemetryDiagnosticEvent =
   | "telemetry_event_property_dropped"
   | "telemetry_event_property_rejected"
   | "telemetry_event_rejected"
+  | "telemetry_events_dropped_by_consent"
   | "telemetry_posthog_import_failed"
   | "telemetry_posthog_init_failed"
   | "telemetry_shutdown_failed";
@@ -35,6 +36,7 @@ export type TelemetryDiagnosticInput = {
   readonly source: string;
   readonly error?: unknown;
   readonly errorKind?: TelemetryDiagnosticErrorKind;
+  readonly count?: number;
 };
 
 export type TelemetryProductConfig = {
@@ -74,6 +76,28 @@ export type TelemetryTransportOptions = {
   readonly disableRemoteConfig: boolean;
   readonly flushAt: number;
   readonly flushInterval: number;
+  readonly fetch?: TelemetryFetch;
+};
+
+export type TelemetryFetchOptions = {
+  readonly method: "GET" | "POST" | "PUT" | "PATCH";
+  readonly headers: { readonly [key: string]: string };
+  readonly body?: string | Blob | Uint8Array;
+  readonly signal?: AbortSignal;
+};
+
+export type TelemetryFetchResponse = {
+  readonly status: number;
+  readonly text: () => Promise<string>;
+  readonly json: () => Promise<unknown>;
+};
+
+export type TelemetryFetch = (url: string, options: TelemetryFetchOptions) => Promise<TelemetryFetchResponse>;
+
+export type ConsentGatedFetchInput = {
+  readonly isSendAllowed: () => boolean;
+  readonly onDropped?: (count: number) => void;
+  readonly fetch?: TelemetryFetch;
 };
 
 export type TelemetryTransport = {
@@ -175,6 +199,7 @@ export declare function createDefaultPostHogTransport(
   options: TelemetryTransportOptions,
 ): TelemetryTransport;
 export declare function isTelemetryClientEnabled(input: TelemetryClientEnabledInput): boolean;
+export declare function createConsentGatedFetch(input: ConsentGatedFetchInput): TelemetryFetch;
 export declare function createTelemetryClient(input: {
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void;
   readonly env?: TelemetryEnv;

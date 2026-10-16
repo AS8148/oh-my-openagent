@@ -1,5 +1,6 @@
 import type { TurnEndEvent } from "@code-yeongyu/senpi"
 import {
+  createConsentGatedFetch,
   createDefaultPostHogTransport,
   createEventTelemetryClient,
 } from "@oh-my-opencode/telemetry-core"
@@ -49,6 +50,10 @@ type SharedState = {
   sessionHash?: string
   /** The one consent gate as of now; unset until registration, so nothing leaves the fan-in before it. */
   isConsented?: () => boolean
+  /** The same gate read fresh, at the moment a queued batch would leave the process. */
+  isSendAllowed?: () => boolean
+  /** Empties the native SDK queue without sending it; set while a native transport is live. */
+  dropQueued?: () => void
 }
 
 export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
@@ -114,13 +119,17 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       const currentConsent = (fresh: boolean): boolean => {
         const at = consentNow()
         if (!fresh && cached.cwd === consentCwd && at - cached.at < CONSENT_CACHE_MS) return cached.value
+        const wasConsented = cached.value
         cached = { cwd: consentCwd, at, value: readConsent(consentCwd) }
+        // Events queued before the withdrawal are dropped the moment it is read, not sent by a later flush.
+        if (wasConsented && !cached.value) state.dropQueued?.()
         return cached.value
       }
       // Read before EVERY event leaves the fan-in, not only when a session is hashed or sampled: a
       // session sampled while opted in keeps its real hash after a withdrawal, so the sentinel cannot
       // stop its later events.
       state.isConsented = () => currentConsent(false)
+      state.isSendAllowed = () => currentConsent(true)
       const hashSession = (rawId: string): string =>
         currentConsent(false) ? (options.hashSessionId ?? hashSessionId)(rawId) : OPTED_OUT_SESSION_HASH
 
@@ -231,8 +240,37 @@ function sharedTransportFactory(
   options: OmoNativeTelemetryComponentOptions,
 ): TelemetryTransportFactory {
   return (apiKey, transportOptions) => {
-    const transport = factory(apiKey, transportOptions)
-    if (!isNativeTransport(transportOptions)) return transport
+    if (!isNativeTransport(transportOptions)) return factory(apiKey, transportOptions)
+
+    // The SDK sends its interval, batch-size and shutdown flushes through this one fetch, so the gate
+    // read here stops an event that was queued while consented and is still unsent at withdrawal.
+    let dropping = 0
+    const transport = factory(apiKey, {
+      ...transportOptions,
+      fetch: createConsentGatedFetch({
+        isSendAllowed: () => dropping === 0 && state.isSendAllowed?.() === true,
+        onDropped: (count) => options.diagnostics?.({
+          event: "telemetry_events_dropped_by_consent",
+          source: "omo-native-component",
+          count,
+        }),
+        ...(transportOptions.fetch === undefined ? {} : { fetch: transportOptions.fetch }),
+      }),
+    })
+    state.dropQueued = () => {
+      if (transport.flush === undefined) return
+      dropping += 1
+      void transport.flush()
+        .catch((error: unknown) => options.diagnostics?.({
+          event: "telemetry_shutdown_failed",
+          source: "omo-native-component",
+          error,
+          errorKind: error instanceof Error ? "error" : "non_error",
+        }))
+        .finally(() => {
+          dropping -= 1
+        })
+    }
 
     const wrapped: TelemetryTransport = {
       capture(message) {
@@ -244,6 +282,7 @@ function sharedTransportFactory(
         try {
           await transport.shutdown()
         } finally {
+          state.dropQueued = undefined
           if (state.capture !== undefined) {
             state.capture = undefined
             state.sessionHash = undefined
