@@ -122,7 +122,15 @@ const builtExtensionPath = join(packageRoot, "plugin", "extensions", "omo.js")
 // dependency manifests are unchanged. Committed dev measures 1,539,513 bytes; the #10184 branch measures
 // 1,547,296 (+7,783) after minification (linux/arm64, node 24 + bun 1.4.2). 1,550,000 is the measured need
 // plus a 2,704-byte margin, so later growth still has to justify itself rather than ride on slack.
-const BUDGET_BYTES = 1_550_000
+// Raised 1,550,000 -> 1,556,000 in a standalone measured budget PR for #10225 (crash-safe session_summary) and
+// its stacked #10267 (opt-out purge). Both run in the entry bundle on every turn and at startup: the
+// owner/liveness registry (now keyed by the writer's process start time so a reused pid reads as dead), the
+// per-run summary_epoch, orphan recovery, and the opt-out purge of persisted windows. The dependency manifests
+// are unchanged (`git diff origin/dev...<branch> -- package.json bun.lock packages/*/package.json` is empty).
+// Committed sizes (git cat-file -s, linux/amd64 node 24 + bun 1.4.2 bundles): dev 1,540,592; #10225 at
+// 39cd9f0546 1,552,131 (+11,539); #10267 on top 1,552,971 (+840). 1,556,000 is that measured need plus a
+// 3,029-byte margin, so later growth still has to justify itself.
+const BUDGET_BYTES = 1_556_000
 
 describe("omo-senpi bundle size budget", () => {
   it("#given the built extension #when its byte size is measured #then it stays within the documented byte budget", () => {
