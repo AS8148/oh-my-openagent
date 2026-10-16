@@ -67,11 +67,12 @@ describe("host recovery adopts a turn finished during the transport gap", () => 
     const recovering = Promise.withResolvers<void>()
     const reopen = Promise.withResolvers<void>()
     const reattached: string[] = []
+    const outcome = Promise.withResolvers<string>()
     const host = await harness.fakeHost({ transcripts: true })
     const runner = harness.runnerOver(host, {
       reattachDelaysMs: [0],
       sleep: () => { recovering.resolve(); return reopen.promise },
-      shardEvents: { onReattachOutcome: info => reattached.push(info.outcome) },
+      shardEvents: { onReattachOutcome: info => { reattached.push(info.outcome); outcome.resolve(info.outcome) } },
     })
     const handle = await runner.start(childSpec({ state_dir: tempProject() }))
     if (!isHostSessionHandle(handle)) throw new Error("expected host session")
@@ -80,14 +81,18 @@ describe("host recovery adopts a turn finished during the transport gap", () => 
       await recovering.promise
       // A restarted host has no live session: the reattach reopens the transcript (attached: false).
       await host.restart()
-      host.failReply("get_state", "Synthetic state read unavailable")
+      // The reopen's own post-open get_state succeeds; only the reconciliation's read after it fails.
+      const pinCheck = host.waitForCommand("get_state")
+      void pinCheck.then(() => host.failReply("get_state", "Synthetic state read unavailable"))
       const continuation = host.waitForCommand("prompt")
       reopen.resolve()
 
       const delivered = await continuation
+      const reported = await outcome.promise
 
       expect(typeof delivered.payload.message).toBe("string")
-      expect(reattached).toEqual(["resumed"])
+      expect(reported).toBe("continued")
+      expect(reattached).toEqual(["continued"])
       expect(handle.hasExited()).toBe(false)
     } finally {
       reopen.resolve()
