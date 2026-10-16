@@ -98,7 +98,7 @@ export function createInputEffects(input: {
       store?.mutate(taskId, record => {
         const seq = Math.max(record.effect_seq ?? 0, record.host_session?.effect_seq ?? 0) + 1
         id = `${taskId}:${record.notification.run_epoch}:${seq}`
-        return { ...record, effect_seq: seq,
+        return { ...record, effect_seq: seq, last_effect_id: id,
           ...(record.host_session === undefined ? {} : { host_session: { ...record.host_session, effect_seq: seq } }) }
       })
       const identified = { ...command, clientMessageId: id }
