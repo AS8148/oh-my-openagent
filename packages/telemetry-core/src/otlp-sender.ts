@@ -19,6 +19,7 @@ import {
   type SpoolContext,
 } from "./otlp-spool-dir"
 import { SpoolCap } from "./otlp-spool-cap"
+import { abortableSleep, delay } from "./otlp-sleep"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { SpoolWriter } from "./otlp-wal"
 import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent } from "./types"
@@ -27,34 +28,6 @@ const SEAL_BYTES = 200 * 1024
 const LEASE_RENEW_INTERVAL_MS = 60_000
 const SHUTDOWN_CLEANUP_RESERVE_MS = 200
 const DROP_REASONS: readonly DropReason[] = ["evicted", "expired", "rejected", "corrupt", "write_failed"]
-
-/**
- * The retry pause; its timer is unref'd so a pending retry never keeps the host process alive, and
- * it removes its abort listener when it ends normally, so a long outage does not pile listeners up on
- * the sender's long-lived signal.
- */
-export function abortableSleep(ms: number, abort: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      resolve()
-    }
-    const timer = setTimeout(() => {
-      abort.removeEventListener("abort", onAbort)
-      resolve()
-    }, ms)
-    timer.unref?.()
-    abort.addEventListener("abort", onAbort, { once: true })
-  })
-}
-
-function delay(ms: number): { readonly elapsed: Promise<void>; readonly cancel: () => void } {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const elapsed = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, ms)
-  })
-  return { elapsed, cancel: () => clearTimeout(timer) }
-}
 
 function isPidAlive(pid: number): boolean {
   try {

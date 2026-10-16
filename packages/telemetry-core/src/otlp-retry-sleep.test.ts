@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { abortableSleep } from "./otlp-sender"
+import { abortableSleep } from "./otlp-sleep"
 
 describe("retry sleep", () => {
   test("#given sleeps that end normally #then each one removes the abort listener it added", async () => {
