@@ -101,6 +101,8 @@ export interface Sealer {
 export interface ItemStore {
   /** Loads persisted CRDT state and baselines; the engine calls it once before a cycle. */
   load(): Promise<void>
+  /** This device's peer id; a journal created under another peer belongs to another device. */
+  peer(): string
   /** Item keys the store knows, live or dead. */
   keys(): readonly string[]
   /** captureOnDevice: the working text against the item's materialised baseline; null = no edit. */

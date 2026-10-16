@@ -120,6 +120,20 @@ export class SyncEngine {
     void this.runCycle().catch((error: unknown) => this.deps.log?.(`sync cycle failed: ${String(error)}`))
   }
 
+  /**
+   * A journal names the device peer it was created under. One from another peer arrived with a
+   * copied repo: its pending ops are that device's to push, so it is retired, never resumed.
+   */
+  private async claimJournal(): Promise<void> {
+    const peer = this.deps.store.peer()
+    const owner = (await this.journal.state()).peer
+    if (owner !== null && owner !== peer) {
+      this.deps.log?.(`sync: journal belongs to peer ${owner}, this device is ${peer}; retiring it`)
+      await this.journal.retire()
+    }
+    if (owner !== peer) await this.journal.updateState({ peer })
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => this.deps.clock.after(ms, resolve))
   }
@@ -141,6 +155,7 @@ export class SyncEngine {
     const { deps, journal } = this
     if (!this.loaded) {
       await deps.store.load()
+      await this.claimJournal()
       this.loaded = true
     }
     const before = await journal.updateState({ eventHead: Math.max(this.eventHead, (await journal.state()).eventHead) })

@@ -2,7 +2,7 @@
 // against real commits), a fake item store, the fake crypto, an in-process lock and a manual
 // clock. `restart` builds a fresh engine over the same directories, as a process restart would.
 
-import { copyFile, mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises"
+import { copyFile, cp, mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -27,14 +27,16 @@ async function gitWith(cwd: string, env: Record<string, string>, ...args: string
   return out.trim()
 }
 
-export async function gitRepo(root: string): Promise<SyncRepo> {
-  await git(root, "init", "-q", "-b", "main")
-  await git(root, "config", "user.name", "Test Agent")
-  await git(root, "config", "user.email", "agent@example.invalid")
-  await git(root, "config", "commit.gpgsign", "false")
-  await writeFile(join(root, ".gitkeep"), "")
-  await git(root, "add", ".gitkeep")
-  await git(root, "commit", "-q", "-m", "init")
+export async function gitRepo(root: string, existing = false): Promise<SyncRepo> {
+  if (!existing) {
+    await git(root, "init", "-q", "-b", "main")
+    await git(root, "config", "user.name", "Test Agent")
+    await git(root, "config", "user.email", "agent@example.invalid")
+    await git(root, "config", "commit.gpgsign", "false")
+    await writeFile(join(root, ".gitkeep"), "")
+    await git(root, "add", ".gitkeep")
+    await git(root, "commit", "-q", "-m", "init")
+  }
   return {
     root,
     gitDir: join(root, ".git"),
@@ -146,20 +148,24 @@ export interface Device {
   restart(fault?: EngineFault): Promise<void>
   syncCommits(): Promise<string[]>
   workingTempFiles(): Promise<string[]>
+  retiredJournals(): Promise<string[]>
   dispose(): Promise<void>
 }
 
 export interface DeviceOptions {
   readonly batchBytes?: number
+  /** Start from a copy of another device's memory dir (its .git and journal included). */
+  readonly memoryFrom?: string
 }
 
 export async function makeDevice(server: FakeSyncServer, name: string, fault?: EngineFault, options: DeviceOptions = {}): Promise<Device> {
   const base = await mkdtemp(join(tmpdir(), `omo-sync-${name}-`))
   const root = join(base, "memory")
   const stateDir = join(base, "device")
-  await mkdir(root, { recursive: true })
   await mkdir(stateDir, { recursive: true })
-  const repo = await gitRepo(root)
+  if (options.memoryFrom === undefined) await mkdir(root, { recursive: true })
+  else await cp(options.memoryFrom, root, { recursive: true })
+  const repo = await gitRepo(root, options.memoryFrom !== undefined)
   const clock = new ManualClock()
   const verifier = new FakeVerifier(ACCOUNT)
   const build = (f?: EngineFault) => {
@@ -204,6 +210,9 @@ export async function makeDevice(server: FakeSyncServer, name: string, fault?: E
     async workingTempFiles() {
       const names = await readdir(root, { recursive: true })
       return names.filter((n) => String(n).includes(".omo-sync-tmp-"))
+    },
+    async retiredJournals() {
+      return (await readdir(join(root, ".git"))).filter((n) => n.startsWith("omo-sync.retired-"))
     },
     dispose: () => rm(base, { recursive: true, force: true }),
   }

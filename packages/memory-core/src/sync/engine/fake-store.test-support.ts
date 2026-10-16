@@ -45,6 +45,10 @@ export class FakeItemStore implements ItemStore {
     this.materialized = new Map(Object.entries(saved.materialized))
   }
 
+  peer(): string {
+    return this.device
+  }
+
   keys(): readonly string[] {
     return [...new Set([...this.items.keys(), ...this.materialized.keys()])].sort()
   }

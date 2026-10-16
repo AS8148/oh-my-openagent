@@ -5,7 +5,9 @@
 // kept apart and never decides what is pulled. Outgoing ops are journaled as `pending` the moment
 // they are captured, before anything is rendered.
 
-import { readdir } from "../../fs/resilient"
+import { randomBytes } from "node:crypto"
+
+import { readdir, rename } from "../../fs/resilient"
 import { join } from "node:path"
 
 import { readJson, removeAtomic, TEMP_MARK, writeJson } from "./atomic"
@@ -51,6 +53,8 @@ export interface EngineState {
   readonly lastSyncedAt: number | null
   /** Memories the last refusal-free cycle updated on this device. */
   readonly updatedWhileOffline: number
+  /** The device peer this journal was created under. */
+  readonly peer: string | null
 }
 
 export interface OutgoingBatch {
@@ -76,6 +80,7 @@ const EMPTY_STATE: EngineState = {
   paused: null,
   lastSyncedAt: null,
   updatedWhileOffline: 0,
+  peer: null,
 }
 const EMPTY_PENDING: PendingOps = { items: [], outgoing: null }
 
@@ -96,6 +101,15 @@ export class SyncJournal {
     const next = { ...(await this.state()), ...patch }
     await writeJson(join(this.dir, "state.json"), next)
     return next
+  }
+
+  /** Moves the whole journal aside (another device's, carried by a copied repo); a fresh one starts empty. */
+  async retire(): Promise<void> {
+    try {
+      await rename(this.dir, `${this.dir}.retired-${Date.now()}-${randomBytes(4).toString("hex")}`)
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+    }
   }
 
   putIncoming(record: IncomingRecord): Promise<void> {
