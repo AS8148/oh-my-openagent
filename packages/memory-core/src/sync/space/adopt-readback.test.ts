@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { splitItem, type FmEntry } from "../item/frontmatter"
+import { splitItem } from "../item/frontmatter"
 import { mulberry32, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
 import { stripT2Blocks } from "./hub-trace"
 
-import { t2Block } from "./test-support"
+import { holdsValue, renderedFacts, t2Block } from "./test-support"
 
 // 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
 const PROPERTY_TIMEOUT_MS = 60_000
@@ -26,18 +26,6 @@ function countOf(lines: readonly string[], line: string): number {
   return lines.filter((candidate) => candidate === line).length
 }
 
-function representedFacts(text: string): readonly FmEntry[] {
-  const parsed = splitItem(text)
-  const entries = [...(parsed.fm ?? [])]
-  for (const match of parsed.body.matchAll(/^<!-- memory-sync frontmatter conflict: (.+) -->$/gm)) {
-    entries.push(...(splitItem(`---\n${match[1]}\n---\n`).fm ?? []))
-  }
-  return entries
-}
-
-function outputOf(plan: ReturnType<typeof planAdoption>, base: string): string {
-  return plan.action === "capture" ? plan.workingText : base
-}
 
 describe("H1: a mid-body T2 block never glues its neighbours", () => {
   const block = t2Block("2026-10-15", "n.md", '---\nk: "v"\n---\n')
@@ -54,7 +42,7 @@ describe("H1: a mid-body T2 block never glues its neighbours", () => {
   test("a side file with a glued block is adopted with both lines intact", () => {
     const side = `line1\n${block.slice(1)}line2\n`
     const plan = planAdoption([{ path: SIDE, text: side }], { currentText: "base\n", lastMaterialised: null, tombstoned: false })
-    const body = linesOf(splitItem(outputOf(plan, "base\n")).body)
+    const body = linesOf(splitItem(plan.rendered).body)
     expect(body).toContain("line1")
     expect(body).toContain("line2")
     expect(body.some((line) => line.includes("line1line2"))).toBe(false)
@@ -63,7 +51,7 @@ describe("H1: a mid-body T2 block never glues its neighbours", () => {
   test("a main file with a glued block keeps both lines", () => {
     const main = `line1\n${block.slice(1)}line2\n`
     const plan = planAdoption([{ path: "n.md", text: main }], { currentText: null, lastMaterialised: null, tombstoned: false })
-    expect(linesOf(splitItem(outputOf(plan, "")).body)).toEqual(["line1", "line2"])
+    expect(linesOf(splitItem(plan.rendered).body)).toEqual(["line1", "line2"])
   })
 })
 
@@ -82,7 +70,7 @@ describe("L1: CRLF sources", () => {
       [{ path: "n.md", text: "x\ny\n" }, { path: SIDE, text: "x\r\ny\r\nz\r\n" }],
       { currentText: "x\ny\n", lastMaterialised: null, tombstoned: false },
     )
-    const out = outputOf(plan, "x\ny\n")
+    const out = plan.rendered
     expect(out.includes("\r")).toBe(false)
     expect(linesOf(splitItem(out).body)).toEqual(["x", "y", "z"])
     expect(plan.removeAfterCommit).toEqual([SIDE])
@@ -91,9 +79,9 @@ describe("L1: CRLF sources", () => {
   test("a CRLF T2 block is folded into the frontmatter", () => {
     const block = t2Block("2026-10-15", "n.md", '---\nk: "v"\n---\n').replace(/\n/g, "\r\n")
     const plan = planAdoption([{ path: SIDE, text: `x\r\n${block}` }], { currentText: "x\n", lastMaterialised: null, tombstoned: false })
-    const out = outputOf(plan, "x\n")
+    const out = plan.rendered
     expect(out.includes("kept here so no fact is lost")).toBe(false)
-    expect(representedFacts(out).some((entry) => entry.key === "k")).toBe(true)
+    expect(renderedFacts(out).has("k")).toBe(true)
   })
 })
 
@@ -121,8 +109,8 @@ type Built = {
   readonly text: string
   /** Lines that must survive verbatim: plain text, and every text line inside a malformed block. */
   readonly lines: readonly string[]
-  /** Keys of well-formed T2 blocks: the value must be represented in the result. */
-  readonly keys: ReadonlyMap<string, string>
+  /** Frontmatter and well-formed T2 values (registers and lists, some keys shared across files): each must be held. */
+  readonly keys: readonly (readonly [string, unknown])[]
   /** Key lines inside malformed blocks: the line survives, or its key is represented. */
   readonly keyLines: ReadonlyMap<string, string>
   readonly malformed: boolean
@@ -134,10 +122,14 @@ const handBlock = (kept: string): string =>
 
 function build(rand: () => number, tag: string): Built {
   const lines: string[] = []
-  const keys = new Map<string, string>()
+  const keys: [string, unknown][] = []
   const keyLines = new Map<string, string>()
   let malformed = false
   let text = ""
+  if (rand() < 0.4) {
+    keys.push(["shared", `v ${tag}`], ["tags", ["shared", tag]])
+    text += `---\nshared: "v ${tag}"\ntags: [shared, "${tag}"]\n---\n`
+  }
   const count = 1 + Math.floor(rand() * 5)
   for (let i = 0; i < count; i++) {
     const line = pick(rand, POOL)
@@ -148,8 +140,9 @@ function build(rand: () => number, tag: string): Built {
     const value = `v ${tag} ${i}`
     let block = ""
     if (roll < 0.3) {
-      keys.set(key, value)
-      block = t2Block("2026-10-15", "n.md", `---\n${key}: "${value}"\n---\n`)
+      const blockKey = rand() < 0.3 ? "shared" : key
+      keys.push([blockKey, value])
+      block = t2Block("2026-10-15", "n.md", `---\n${blockKey}: "${value}"\n---\n`)
     } else if (roll < 0.45) {
       malformed = true
       keyLines.set(key, `${key}: "${value}"`)
@@ -168,7 +161,7 @@ const LOSSY: readonly ((base: string, incoming: string) => string)[] = [
 ]
 
 for (const seed of [20261016, 0x5eed4a11]) {
-  test(`R1 every known fact of a deleted source survives: glued, malformed and hand-edited blocks, CRLF, duplicates, lossy merges; seed=${seed}`, () => {
+  test(`R1 every known fact of a deleted source survives: glued, malformed and hand-edited blocks, shared register and list keys, CRLF, duplicates, lossy merges; seed=${seed}`, () => {
     const rand = mulberry32(seed)
     for (let iteration = 0; iteration < 1500; iteration++) {
       const base = "base line\n"
@@ -183,18 +176,19 @@ for (const seed of [20261016, 0x5eed4a11]) {
         { currentText: base, lastMaterialised: null, tombstoned: false },
         merge,
       )
-      const out = outputOf(plan, base)
+      const out = plan.rendered
       const context = `R1 seed=${seed} case=${iteration} main=${JSON.stringify(main.text)} out=${JSON.stringify(out)}`
       const outLines = linesOf(splitItem(out).body)
-      const facts = representedFacts(out)
+      const facts = renderedFacts(out)
+      for (const line of outLines) expect(line.startsWith("<!-- memory-sync frontmatter conflict"), `${context} marker in body`).toBe(false)
+      for (const [key, value] of main.keys) expect(holdsValue(facts, key, value), `${context} main lost ${key}`).toBe(true)
       if (merge === undefined) {
         for (const line of main.lines) expect(outLines.includes(line), `${context} main lost ${line}`).toBe(true)
         if (!main.malformed && !sides.some(({ built }) => built.malformed)) {
           for (const line of outLines) expect(line.includes("kept here so no fact is lost"), `${context} block left in body`).toBe(false)
         }
       }
-      const represented = (key: string, value: string): boolean =>
-        facts.some((entry) => entry.key === key && entry.value.kind === "text" && entry.value.text === value)
+      const represented = (key: string, value: unknown): boolean => holdsValue(facts, key, value)
       for (const { path, built } of sides) {
         const where = `${context} side=${JSON.stringify(built.text)}`
         if (!plan.removeAfterCommit.includes(path)) {

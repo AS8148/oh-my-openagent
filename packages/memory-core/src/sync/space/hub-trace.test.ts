@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 
 import { renderDocContent } from "../item/render"
 import { splitItem } from "../item/frontmatter"
-import { captureInto, newDoc } from "../item/test-support"
+import { newDoc } from "../item/test-support"
 import { groupByItemKey, isOrderedSubsequence, parseSyncConflictName, planAdoption, stripT2Blocks } from "./index"
-import { fmValuesByKey, t2Block } from "./test-support"
+import { applyPlan, fmValuesByKey, t2Block } from "./test-support"
 
 describe("parseSyncConflictName (hub worktree-merge keepSideCopy shape)", () => {
   const hits: readonly (readonly [string, string])[] = [
@@ -65,13 +65,13 @@ describe("stripT2Blocks (hub md-merge-driver pickFrontmatter shape)", () => {
     expect(r.malformed).toEqual([])
     const values = fmValuesByKey(r.entries)
     expect(values.get("reviewed")).toEqual({ kind: "reg", value: "true" })
-    expect(values.get("note")).toEqual({ kind: "text", text: "kept" })
+    expect(values.get("note")).toEqual({ kind: "reg", value: "kept" })
   })
 
   test("the emitter's --> escaping is reversed before parsing", () => {
     const fm = "---\ncomment: a --> b\n---\n"
     const r = stripT2Blocks(`x\n${t2Block("2026-10-15", "n.md", fm)}`)
-    expect(fmValuesByKey(r.entries).get("comment")).toEqual({ kind: "text", text: "a --> b" })
+    expect(fmValuesByKey(r.entries).get("comment")).toEqual({ kind: "reg", value: "a --> b" })
     expect(r.body).toBe("x\n")
   })
 
@@ -125,8 +125,9 @@ describe("hub-trace folding end to end (fixture shaped like real hub output)", (
     expect(plan.action).toBe("capture")
     if (plan.action !== "capture") return
     expect(plan.removeAfterCommit).toEqual(["notes/daily.sync-conflict-20261015-mini.md"])
-    captureInto(doc, "", [], plan.workingText)
+    applyPlan(doc, "", plan)
     const rendered = renderDocContent(doc)
+    expect(rendered).toBe(plan.rendered)
     const parsed = splitItem(rendered)
 
     const preBody = splitItem(mainText).body.replace(t2Block("2026-10-15", "notes/daily.md", "---\nreviewed: true\n---\n"), "")
@@ -135,8 +136,8 @@ describe("hub-trace folding end to end (fixture shaped like real hub output)", (
     expect(parsed.body).not.toContain("<!-- memory-sync")
 
     const values = fmValuesByKey(parsed.fm ?? [])
-    expect(values.get("title")).toEqual({ kind: "text", text: "Daily log" })
-    expect(values.get("author")).toEqual({ kind: "text", text: "Dori" })
+    expect(values.get("title")).toEqual({ kind: "reg", value: "Daily log" })
+    expect(values.get("author")).toEqual({ kind: "reg", value: "Dori" })
     expect(values.get("reviewed")).toEqual({ kind: "reg", value: "true" })
     doc.free()
   })
@@ -145,7 +146,7 @@ describe("hub-trace folding end to end (fixture shaped like real hub output)", (
     const doc = await newDoc("1")
     const first = planAdoption(files(), { currentText: null, tombstoned: false, lastMaterialised: null })
     if (first.action !== "capture") throw new Error("expected capture")
-    captureInto(doc, "", [], first.workingText)
+    applyPlan(doc, "", first)
     const second = planAdoption(files(), {
       currentText: renderDocContent(doc),
       tombstoned: false,

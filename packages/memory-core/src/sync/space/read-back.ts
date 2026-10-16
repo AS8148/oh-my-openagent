@@ -3,12 +3,14 @@
 // must appear in the merged result at least as many times as in the source. The only lines the
 // adopt step may drop are the enumerated metadata lines (droppableAllowance) and key lines the
 // result represents, each metadata kind bounded by a count taken from the source itself. A missing line that is none of those keeps the source.
+// A key line is represented only by an active register entry or a set element of the result
+// (sync-design #454 §3): a register line is accounted for when its value is one of the key's
+// active entries, never because a joined " / " render happens to contain it.
 
-import { splitItem, type FmEntry, type FmValue } from "../item/frontmatter"
+import { splitItem, type FmValue } from "../item/frontmatter"
 
 const T2_HEADER =
   /^<!-- memory-sync \d{4}-\d{2}-\d{2}: the other machine had different frontmatter for .+; kept here so no fact is lost:$/
-const CONFLICT_LINE = /^<!-- memory-sync frontmatter conflict: (.+) -->$/
 
 export function toLf(text: string): string {
   return text.replace(/\r\n/g, "\n")
@@ -27,31 +29,26 @@ function countLines(lines: readonly string[]): Map<string, number> {
   return counts
 }
 
-function coversLines(wanted: readonly string[], actual: readonly string[]): boolean {
-  const have = countLines(actual)
-  return [...countLines(wanted)].every(([line, count]) => (have.get(line) ?? 0) >= count)
-}
+type ResultFact = { readonly kind: "reg"; readonly values: readonly string[] } | { readonly kind: "set"; readonly elements: readonly string[] }
 
-function valueSurvives(wanted: FmValue, actual: FmValue): boolean {
+function valueSurvives(wanted: FmValue, actual: ResultFact): boolean {
+  const held = actual.kind === "reg" ? actual.values : actual.elements
   switch (wanted.kind) {
-    case "text":
-      return actual.kind === "text" && coversLines(linesOf(wanted.text), linesOf(actual.text))
     case "set":
-      return actual.kind === "set" && wanted.elements.every((element) => actual.elements.includes(element))
+      return actual.kind === "set" ? wanted.elements.every((element) => held.includes(element)) : held.includes(wanted.flow)
     case "reg":
-      return actual.kind === "reg" && actual.value === wanted.value
+      return held.includes(wanted.value)
     case "remove":
-      return true // A null is a removal request, not an adopted value.
+      return false
   }
 }
 
-/** Every frontmatter fact the result represents: its own keys plus marked conflict payloads. */
-function resultFacts(rendered: string): readonly FmEntry[] {
-  const into = splitItem(rendered)
-  const facts: FmEntry[] = [...(into.fm ?? [])]
-  for (const line of linesOf(into.body)) {
-    const match = CONFLICT_LINE.exec(line)
-    if (match !== null) facts.push(...(splitItem(`---\n${match[1]}\n---\n`).fm ?? []))
+/** The result's keys: a register's components from `registers` when given, else its rendered value as one whole value. */
+function resultFacts(rendered: string, registers: ReadonlyMap<string, readonly string[]> | undefined): Map<string, ResultFact> {
+  const facts = new Map<string, ResultFact>()
+  for (const { key, value } of splitItem(rendered).fm ?? []) {
+    if (value.kind === "set") facts.set(key, { kind: "set", elements: value.elements })
+    else if (value.kind === "reg") facts.set(key, { kind: "reg", values: registers?.get(key) ?? [value.value] })
   }
   return facts
 }
@@ -61,14 +58,13 @@ function resultFacts(rendered: string): readonly FmEntry[] {
  * "-->" as "-- >"), names a key whose value the result represents. Line-local: no block
  * structure is consulted, and a multi-line value never qualifies (the source is kept).
  */
-function isRepresentedKeyLine(line: string, facts: readonly FmEntry[]): boolean {
+function isRepresentedKeyLine(line: string, facts: ReadonlyMap<string, ResultFact>): boolean {
   for (const candidate of new Set([line, line.replace(/-- >/g, "-->")])) {
     const entries = splitItem(`---\n${candidate}\n---\n`).fm
     if (entries === null || entries.length !== 1) continue
     const [entry] = entries
-    if (entry !== undefined && entry.value.kind !== "remove" && facts.some((fact) => fact.key === entry.key && valueSurvives(entry.value, fact.value))) {
-      return true
-    }
+    const fact = entry === undefined ? undefined : facts.get(entry.key)
+    if (entry !== undefined && fact !== undefined && valueSurvives(entry.value, fact)) return true
   }
   return false
 }
@@ -94,11 +90,15 @@ function droppableAllowance(source: readonly string[]): Map<string, number> {
  * source does, after the enumerated metadata allowance and represented key lines. Null means
  * the source is safe to delete.
  */
-export function firstMissingFact(rendered: string, source: string): string | null {
+export function firstMissingFact(
+  rendered: string,
+  source: string,
+  registers?: ReadonlyMap<string, readonly string[]>,
+): string | null {
   const sourceLines = linesOf(source)
   const have = countLines(linesOf(rendered))
   const allowance = droppableAllowance(sourceLines)
-  const facts = resultFacts(rendered)
+  const facts = resultFacts(rendered, registers)
   for (const [line, count] of countLines(sourceLines)) {
     const missing = count - (have.get(line) ?? 0)
     if (missing <= 0 || T2_HEADER.test(line)) continue

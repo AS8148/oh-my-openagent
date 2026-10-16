@@ -1,15 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { deleteItem, isLive, itemFrontier, renderItem } from "../item/index"
+import { deleteItem, isLive, renderItem } from "../item/index"
 import { renderDocContent } from "../item/render"
 import { splitItem } from "../item/frontmatter"
 import { captureInto, newDoc } from "../item/test-support"
-import { planAdoption, type AdoptionPlan, type ItemState } from "./index"
-
-function applyPlan(doc: Parameters<typeof captureInto>[0], base: string, plan: AdoptionPlan): Uint8Array | null {
-  if (plan.action !== "capture") return null
-  return captureInto(doc, base, itemFrontier(doc), plan.workingText)
-}
+import { planAdoption, type ItemState } from "./index"
+import { applyPlan } from "./test-support"
 
 const live = (currentText: string | null, lastMaterialised: string | null = null): ItemState => ({
   currentText,
@@ -109,7 +105,7 @@ describe("planAdoption (sync-design §3 insert-only adoption)", () => {
     doc.free()
   })
 
-  test("frontmatter keys are added and existing text values are merged without loss", async () => {
+  test("frontmatter keys are added and a differing value joins as a second whole value", async () => {
     const doc = await newDoc("1")
     captureInto(doc, "", [], "---\ntitle: space title\n---\nbody\n")
     const current = renderDocContent(doc)
@@ -121,8 +117,8 @@ describe("planAdoption (sync-design §3 insert-only adoption)", () => {
     if (plan.action !== "capture") return
     applyPlan(doc, current, plan)
     const rendered = renderItem(doc)
-    expect(splitItem(rendered ?? "").fm?.find((entry) => entry.key === "title")?.value)
-      .toEqual({ kind: "text", text: "space title\nlocal title" })
+    expect(rendered).toContain('title: "local title / space title"')
+    expect(rendered).toBe(plan.rendered)
     expect(rendered).toContain("mood: reflective")
     expect(rendered).toContain("plus")
     doc.free()

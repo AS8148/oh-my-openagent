@@ -1,48 +1,25 @@
 import { expect, test } from "bun:test"
 
-import { splitItem, type FmEntry, type FmValue } from "../item/frontmatter"
+import { splitItem, type FmEntry } from "../item/frontmatter"
 import { mulberry32, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
 import { stripT2Blocks } from "./hub-trace"
 
-import { t2Block } from "./test-support"
+import { holdsValue, plainValue, renderedFacts, t2Block } from "./test-support"
 
 // 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
 const PROPERTY_TIMEOUT_MS = 60_000
 
 // The deletion gate (HIGH-1, structural guarantee): a source file may be queued in
 // removeAfterCommit only when a read-back of the merged result proves every one of its
-// facts survived — every body line intact, every frontmatter key's value(s) present,
-// merged or as a marked conflict. Otherwise the source stays on disk with a reason.
+// facts survived — every body line intact, every frontmatter value held as a whole register
+// component or set element. Otherwise the source stays on disk with a reason.
 
 function linesOf(text: string): readonly string[] {
   if (text === "") return []
   const lines = text.split("\n")
   if (text.endsWith("\n")) lines.pop()
   return lines
-}
-
-function valuePreserved(wanted: FmValue, actual: FmValue): boolean {
-  switch (wanted.kind) {
-    case "text":
-      return actual.kind === "text" && linesOf(wanted.text).every((line) => linesOf(actual.text).includes(line))
-    case "set":
-      return actual.kind === "set" && wanted.elements.every((element) => actual.elements.includes(element))
-    case "reg":
-      return actual.kind === "reg" && actual.value === wanted.value
-    case "remove":
-      return true // A null is a removal request, not an adopted value.
-  }
-}
-
-/** All frontmatter entries an output represents: its own keys plus marked conflict payloads. */
-function representedFacts(text: string): readonly FmEntry[] {
-  const parsed = splitItem(text)
-  const entries = [...(parsed.fm ?? [])]
-  for (const match of parsed.body.matchAll(/^<!-- memory-sync frontmatter conflict: (.+) -->$/gm)) {
-    entries.push(...(splitItem(`---\n${match[1]}\n---\n`).fm ?? []))
-  }
-  return entries
 }
 
 /** The facts a source file carries, read through stripT2Blocks: not independent of the code under test (R1 in adopt-readback.test.ts is). */
@@ -116,9 +93,9 @@ for (const seed of [20261016, 0xde1e7106]) {
         lastMaterialised: lastMaterialised === "" ? null : lastMaterialised,
         tombstoned: false,
       })
-      const output = plan.action === "capture" ? plan.workingText : space
+      const output = plan.rendered
       const context = `A3 seed=${seed} case=${iteration}`
-      const outFacts = representedFacts(output)
+      const outFacts = renderedFacts(output)
       const outBodyLines = linesOf(splitItem(output).body)
       const retained = new Map((plan.retainedSources ?? []).map((entry) => [entry.path, entry.reason]))
       for (const side of sides) {
@@ -131,7 +108,7 @@ for (const seed of [20261016, 0xde1e7106]) {
           }
           for (const entry of entries) {
             expect(
-              outFacts.some((candidate) => candidate.key === entry.key && valuePreserved(entry.value, candidate.value)),
+              holdsValue(outFacts, entry.key, plainValue(entry.value)),
               `${context} deleted ${side.path} lost ${JSON.stringify(entry)} output=${JSON.stringify(output)}`,
             ).toBe(true)
           }

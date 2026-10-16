@@ -1,6 +1,18 @@
-import { describe, expect, test } from "bun:test"
+import { parse, parseDocument } from "yaml"
 
+import type { LoroDoc } from "../../crdt/loro-runtime"
 import type { FmValue } from "../item/frontmatter"
+import { adoptRegisterValues, itemFrontier } from "../item/index"
+import { captureInto } from "../item/test-support"
+import type { AdoptionPlan } from "./adopt"
+
+/** Commit a plan the way the engine does: capture the working text, then add the extra register values. */
+export function applyPlan(doc: LoroDoc, base: string, plan: AdoptionPlan): void {
+  if (plan.action !== "capture") return
+  captureInto(doc, base, itemFrontier(doc), plan.workingText)
+  const update = adoptRegisterValues(doc, plan.extraRegisterValues)
+  if (update !== null) doc.import(update)
+}
 
 /** Build a T2 marker block byte-exactly the way the Mini hub's md-merge-driver emits it. */
 export function t2Block(day: string, forPath: string, fmText: string): string {
@@ -13,6 +25,55 @@ export function fmValuesByKey(entries: readonly { key: string; value: FmValue }[
   const map = new Map<string, FmValue>()
   for (const entry of entries) map.set(entry.key, entry.value)
   return map
+}
+
+export interface RenderedFact {
+  readonly set: boolean
+  readonly values: readonly unknown[]
+}
+
+/**
+ * The oracle's reading of a rendered item, independent of the planner: the header is parsed with
+ * `yaml` directly, a sequence is a set, and a register rendered as several values (sync-design
+ * #454 §2: one double-quoted string of canonical sources joined with " / ") is split into its
+ * components. Generated values never contain " / ", so the split is unambiguous here.
+ */
+export function renderedFacts(text: string): Map<string, RenderedFact> {
+  const out = new Map<string, RenderedFact>()
+  const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text)
+  if (match === null) return out
+  const doc = parseDocument(match[1] ?? "", { schema: "core", merge: true })
+  if (doc.errors.length > 0) return out
+  const header: unknown = doc.toJS()
+  if (typeof header !== "object" || header === null || Array.isArray(header)) return out
+  for (const [key, value] of Object.entries(header)) {
+    if (Array.isArray(value)) out.set(key, { set: true, values: value })
+    else if (typeof value === "string" && value.includes(" / ")) {
+      out.set(key, { set: false, values: value.split(" / ").map((part) => parse(part, { schema: "core" })) })
+    } else out.set(key, { set: false, values: [value] })
+  }
+  return out
+}
+
+/** A source value is held when it is a whole register component, a set element, or (a sequence) a subset of the set. */
+export function holdsValue(facts: ReadonlyMap<string, RenderedFact>, key: string, wanted: unknown): boolean {
+  if (Array.isArray(wanted) && wanted.length === 0) return true
+  const fact = facts.get(key)
+  if (fact === undefined) return false
+  if (fact.set && Array.isArray(wanted)) return wanted.every((element) => fact.values.some((held) => Bun.deepEquals(held, element)))
+  return fact.values.some((held) => Bun.deepEquals(held, wanted))
+}
+
+/** A parsed source value as plain data, for holdsValue. */
+export function plainValue(value: FmValue): unknown {
+  switch (value.kind) {
+    case "set":
+      return value.elements.map((element) => parse(element, { schema: "core" }))
+    case "reg":
+      return parse(value.value, { schema: "core" })
+    case "remove":
+      return null
+  }
 }
 
 /** Run git in a fixture repository; returns stdout, throws on failure. */

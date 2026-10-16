@@ -78,7 +78,6 @@ describe("the enumerated metadata lines adoption may drop", () => {
   test("a key line may drop only when the result represents that key's value", () => {
     expect(firstMissingFact("---\ntags:\n  - a\n  - b\n---\nx\n", "---\ntags: [a, b]\n---\nx\n")).toBeNull()
     expect(firstMissingFact("---\nk: other\n---\nx\n", `x\n${block}`)).toBe('missing line "k: \\"v\\""')
-    expect(firstMissingFact('---\nk: v\n---\nx\n<!-- memory-sync frontmatter conflict: k: "w" -->\n', '---\nk: "w"\n---\nx\n')).toBeNull()
   })
 
   test("a multi-line value is never vouched for line by line", () => {

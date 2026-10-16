@@ -1,43 +1,24 @@
 import { expect, test } from "bun:test"
 
-import { splitItem, type FmEntry, type FmValue } from "../item/frontmatter"
-import { mulberry32, pick } from "../item/test-support"
+import { splitItem } from "../item/frontmatter"
+import { activeRegisters } from "../item/index"
+import { renderDocContent } from "../item/render"
+import { captureInto, mulberry32, newDoc, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
 
-import { t2Block } from "./test-support"
+import { applyPlan, holdsValue, plainValue, renderedFacts, t2Block } from "./test-support"
 
 // 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
 const PROPERTY_TIMEOUT_MS = 60_000
 
-function preserved(wanted: FmValue, actual: FmValue): boolean {
-  switch (wanted.kind) {
-    case "text":
-      return actual.kind === "text" && wanted.text.split("\n").every((line) => actual.text.split("\n").includes(line))
-    case "set":
-      return actual.kind === "set" && wanted.elements.every((element) => actual.elements.includes(element))
-    case "reg":
-      return actual.kind === "reg" && actual.value === wanted.value
-    case "remove":
-      return true // A null is a removal request, not an adopted value.
-  }
-}
-
-function represented(text: string): readonly FmEntry[] {
-  const parsed = splitItem(text)
-  const entries = [...(parsed.fm ?? [])]
-  // Conflict payloads are ordinary YAML flow maps, one atomic marked line each.
-  for (const match of parsed.body.matchAll(/^<!-- memory-sync frontmatter conflict: (.+) -->$/gm)) {
-    entries.push(...(splitItem(`---\n${match[1]}\n---\n`).fm ?? []))
-  }
-  return entries
-}
-
 function assertPreserved(sources: readonly string[], output: string, context: string): void {
-  const actual = represented(output)
+  const actual = renderedFacts(output)
+  expect(output.includes("memory-sync frontmatter conflict"), `${context} marker written`).toBe(false)
   for (const source of sources) {
     for (const entry of splitItem(source).fm ?? []) {
+      if (entry.value.kind === "remove") continue
       expect(
-        actual.some((candidate) => candidate.key === entry.key && preserved(entry.value, candidate.value)),
+        holdsValue(actual, entry.key, plainValue(entry.value)),
         `${context} missing ${JSON.stringify(entry)} output=${JSON.stringify(output)}`,
       ).toBe(true)
     }
@@ -45,7 +26,7 @@ function assertPreserved(sources: readonly string[], output: string, context: st
 }
 
 for (const seed of [20261016, 0x5a17c0de]) {
-  test(`A1 adoption preserves all source keys and values; seed=${seed}, cases=2000`, () => {
+  test(`A1 adoption preserves all source keys and values; seed=${seed}, cases=2000`, async () => {
     // Given random overlapping keys, kinds and values in all four real sources,
     // including duplicate keys, non-ASCII, CRLF, unterminated and empty files.
     const rand = mulberry32(seed)
@@ -81,22 +62,37 @@ for (const seed of [20261016, 0x5a17c0de]) {
         { path: sidePath, text: side },
       ]
       const plan = planAdoption(files, { currentText: space, lastMaterialised: null, tombstoned: false })
-      const output = plan.action === "capture" ? plan.workingText : space
+      const output = plan.rendered
       // Then every value survives, including those whose only source is deleted.
       const context = `A1 seed=${seed} case=${iteration}`
       assertPreserved(sources, output, context)
       if (plan.removeAfterCommit.includes(sidePath)) assertPreserved([side], output, context)
       expect(plan.action, context).not.toBe("remove")
-      const repeated = planAdoption(files, { currentText: output, lastMaterialised: null, tombstoned: false })
+      const repeated = planAdoption(files, { currentText: output, lastMaterialised: null, tombstoned: false, registers: plan.registers })
       expect(repeated.action, `${context} repeated adoption`).toBe("none")
+      if (iteration % 25 === 0) await expectCommitted(files, space, context)
     }
   }, PROPERTY_TIMEOUT_MS)
 }
 
+/** Commit the plan into a real item doc built from the space text: the doc renders exactly plan.rendered and holds plan.registers. */
+async function expectCommitted(files: readonly { path: string; text: string }[], space: string, context: string): Promise<void> {
+  const doc = await newDoc("1")
+  try {
+    captureInto(doc, "", [], space)
+    const base = renderDocContent(doc)
+    const plan = planAdoption(files, { currentText: base, lastMaterialised: null, tombstoned: false, registers: activeRegisters(doc) })
+    applyPlan(doc, base, plan)
+    expect(renderDocContent(doc), `${context} committed render`).toBe(plan.rendered)
+    const sorted = (registers: ReadonlyMap<string, readonly string[]>) => new Map([...registers].map(([key, values]) => [key, [...values].sort()]))
+    expect(sorted(activeRegisters(doc)), `${context} committed registers`).toEqual(sorted(plan.registers))
+  } finally {
+    doc.free()
+  }
+}
+
 test("existing-key T2 and T1 values survive capture into the real item model", async () => {
   // Given the hub's actual differing-existing-key shape, not an absent-key fixture.
-  const { captureInto, newDoc } = await import("../item/test-support")
-  const { renderDocContent } = await import("../item/render")
   const main = "---\ntitle: Main\ntags: [a]\nreviewed: true\n---\nmain\n"
   const other = "---\ntitle: Other\ntags: [a, b]\nreviewed: false\n---\n"
   const side = "---\ntitle: Side\ntags: [c]\nreviewed: 3\n---\nside\n"
@@ -109,9 +105,10 @@ test("existing-key T2 and T1 values survive capture into the real item model", a
   const doc = await newDoc("1")
   try {
     // When the plan is committed as real CRDT operations.
-    captureInto(doc, "", [], plan.workingText)
+    applyPlan(doc, "", plan)
     // Then the committed render, not merely the plan, retains all values.
     assertPreserved([main, other, side], renderDocContent(doc), "existing-key capture")
+    expect(renderDocContent(doc)).toBe(plan.rendered)
   } finally {
     doc.free()
   }
