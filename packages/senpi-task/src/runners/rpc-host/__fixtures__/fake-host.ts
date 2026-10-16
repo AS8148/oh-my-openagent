@@ -8,6 +8,7 @@ import { FakeSessionTable, type FakeDrainedSession, type FakeHostSession } from 
 import { fakeProtocolInfo, probeFakeHost, type FakeHostIdentityOptions } from "./fake-host-probe"
 import { fakeHostTransport, type FakeHostTransport } from "./fake-host-transport"
 import { handleWireLine, writeFrame, type FakeHostCommand, type FakeHostOpenFailure, type FakeHostWarmAnswer } from "./fake-host-wire"
+import { FakeInputAdmissions } from "./fake-input-admissions"
 
 /**
  * In-process unix-socket JSONL daemon: enough of the senpi multi-session wire for a child session
@@ -40,6 +41,7 @@ export interface FakeHostOptions extends FakeHostIdentityOptions {
 }
 
 export interface FakeHost {
+  readonly admissions: FakeInputAdmissions
   readonly socketPath: string
   readonly commands: readonly FakeHostCommand[]
   readonly connections: number
@@ -96,6 +98,7 @@ export async function startFakeHost(options: FakeHostOptions = {}): Promise<Fake
   let transport: FakeHostTransport
   const drainRetryAfterMs = options.drainRetryAfterMs ?? 2_000
   const table = new FakeSessionTable({ transcripts: options.transcripts === true, sessionProcesses: options.sessionProcesses === true })
+  const admissions = new FakeInputAdmissions()
   const commands: FakeHostCommand[] = []
   const waiters: Array<{ readonly type: string; readonly resolve: (command: FakeHostCommand) => void }> = []
   const sockets = new Set<Socket>()
@@ -117,7 +120,7 @@ export async function startFakeHost(options: FakeHostOptions = {}): Promise<Fake
     }
   }
 
-  const ports = { table, warm: options.warm ?? { state: "warmed" as const }, identity: () => identity, openFailure: () => openFailure, enforceSessionDir: options.enforceSessionDir === true, withheld, failed, record }
+  const ports = { table, admissions, warm: options.warm ?? { state: "warmed" as const }, identity: () => identity, openFailure: () => openFailure, enforceSessionDir: options.enforceSessionDir === true, withheld, failed, record }
 
   const settleConnectionWaiters = (): void => {
     for (let index = connectionWaiters.length - 1; index >= 0; index--) {
@@ -183,6 +186,7 @@ export async function startFakeHost(options: FakeHostOptions = {}): Promise<Fake
 
   return {
     socketPath,
+    admissions,
     commands,
     get connections() {
       return sockets.size
