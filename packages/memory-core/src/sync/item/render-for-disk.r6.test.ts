@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { parse } from "yaml"
 
-import { itemFrontier, renderForDisk, renderItem } from "./index"
-import { captureInto, newDoc } from "./test-support"
+import { itemFrontier, renderForDisk, renderItem, splitItem } from "./index"
+import { captureCurrent, captureInto, newDoc } from "./test-support"
 
 // Lead decision r6 (design (b)): the frontmatter is re-emitted from the merged typed model, but a
 // file whose typed model is unchanged stays byte-for-byte, whatever its style. Only a real model
@@ -71,6 +72,10 @@ describe("renderForDisk (lead decision r6)", () => {
     doc.free()
   })
 })
+
+function headerOf(text: string): unknown {
+  return parse(text.split("---\n")[1] ?? "")
+}
 
 async function syncedEdit(disk: string, edit: (rendered: string) => string) {
   const a = await newDoc("1")
@@ -158,4 +163,53 @@ describe("renderForDisk keeps untouched source exactly (delta review 0bde9bc01e 
     expect(renderForDisk(a, DISK)).toBe(DISK.replace("flow: {a: 1,   b: 2}\n", "flow: {a: 1,   b: 2}\nadded: yes-new\n"))
     a.free()
   })
+})
+
+describe("renderForDisk keeps the file's own line-ending style on every written line (delta review ea00e988be L1, lead)", () => {
+  const LF = "---\nn: 2\nk: x # note\nbase: &a v\nother: *a\nz: 1\n---\nbody line\nsecond\n"
+  const EDITS: Record<string, (rendered: string) => string> = {
+    "change a key": (r) => r.replace("n: 2", "n: 3"),
+    "add a key": (r) => r.replace("z: 1", "z: 1\nadded: new"),
+    "delete a key": (r) => r.replace("k: x\n", ""),
+    "delete the last key": (r) => r.replace("z: 1\n", ""),
+    "anchor rewrite": (r) => r.replace("base: v", "base: w"),
+  }
+
+  function styleOf(text: string): "crlf" | "lf" | "mixed" {
+    const crlf = (text.match(/\r\n/g) ?? []).length
+    const lf = (text.match(/\n/g) ?? []).length - crlf
+    return crlf > 0 && lf > 0 ? "mixed" : crlf > 0 ? "crlf" : "lf"
+  }
+
+  test("the fences are written in the file's style on the splice path and on the canonical path (a key added to a file without frontmatter)", async () => {
+    const spliced = LF.replaceAll("\n", "\r\n")
+    const noFrontmatter = "body line\r\nsecond\r\n"
+    const cases: [string, (rendered: string) => string][] = [
+      [spliced, (r) => r.replace("n: 2", "n: 3")],
+      [noFrontmatter, (r) => `---\nn: 3\n---\n${r}`],
+    ]
+    for (const [disk, edit] of cases) {
+      const a = await syncedEdit(disk, edit)
+      const written = renderForDisk(a, disk) ?? ""
+      expect(splitItem(written).fm, `fences parse as fences: ${JSON.stringify(written)}`).not.toBeNull()
+      expect(headerOf(written.replaceAll("\r\n", "\n"))).toMatchObject({ n: 3 })
+      expect(written.startsWith("---\r\n"), JSON.stringify(written)).toBe(true)
+      expect(written, JSON.stringify(written)).toContain("\r\n---\r\n")
+      expect(styleOf(written), JSON.stringify(written)).toBe("crlf")
+      a.free()
+    }
+  })
+
+  for (const [style, disk] of [["lf", LF], ["crlf", LF.replaceAll("\n", "\r\n")]] as const) {
+    for (const [name, edit] of Object.entries(EDITS)) {
+      test(`${style} file, ${name}: one line-ending style equal to the input's, re-capture is a no-op`, async () => {
+        const a = await syncedEdit(disk, edit)
+        const written = renderForDisk(a, disk) ?? ""
+        expect(styleOf(written), JSON.stringify(written)).toBe(style)
+        expect(headerOf(written.replaceAll("\r\n", "\n"))).toEqual(headerOf(renderItem(a) ?? ""))
+        expect(captureCurrent(a, written), JSON.stringify(written)).toBeNull()
+        a.free()
+      })
+    }
+  }
 })
