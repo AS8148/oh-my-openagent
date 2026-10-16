@@ -53,7 +53,9 @@ impl Worker {
                 check()?;
                 signal.wait(&supervisor, duration)
             };
-            worker.backend()?.hold_keys(&target, &keys, mode, &HoldControl { check: &check, wait: &wait })?;
+            signal.with_input(&supervisor, || {
+                worker.backend()?.hold_keys(&target, &keys, mode, &HoldControl { check: &check, wait: &wait })
+            })?;
             Ok(Response::Unit)
         })
     }
@@ -96,12 +98,12 @@ impl Worker {
                 check()?;
                 signal.wait(&supervisor, duration)
             };
-            worker.backend()?.hold_mouse(
+            signal.with_input(&supervisor, || worker.backend()?.hold_mouse(
                 &target,
                 &MouseHold { x, y, button, keys: &keys },
                 mode,
                 &HoldControl { check: &check, wait: &wait },
-            )?;
+            ))?;
             Ok(Response::Unit)
         })
     }
