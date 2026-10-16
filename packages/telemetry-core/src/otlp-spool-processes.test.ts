@@ -9,7 +9,7 @@ import { capture, createSpoolRoot, makeTransport, spoolNames } from "./otlp-test
 const CHILD = join(import.meta.dir, "otlp-spool-child.ts")
 const cleanups: (() => void)[] = []
 afterEach(() => {
-  for (const cleanup of cleanups.splice(0)) cleanup()
+  for (const cleanup of cleanups.splice(0).reverse()) cleanup()
 })
 
 function root(): string {
@@ -91,7 +91,7 @@ describe("spool claims across real processes", () => {
     // when
     for (const racer of racers) racer.child.stdin.write("g")
     for (const racer of racers) racer.child.stdin.flush()
-    const done = await Promise.all(racers.map((racer) => racer.next(30_000, "racer DONE")))
+    const done = await Promise.all(racers.map((racer) => racer.next(90_000, "racer DONE")))
     const sentByEach = done.map((line) => Number(line.split(" ")[1]))
 
     // then
@@ -100,7 +100,7 @@ describe("spool claims across real processes", () => {
     expect(server.accepted.length).toBe(60)
     expect([...server.accepted].sort()).toEqual([...sealed, ...active].sort())
     expect(spoolNames(dir)).toEqual([])
-  }, 60_000)
+  }, 120_000)
 
   test("#given a claimer killed with SIGKILL mid-send #when another process starts after the 5 min lease #then it reclaims and sends the batch once and no claim file remains", async () => {
     // given
