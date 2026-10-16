@@ -241,13 +241,14 @@ describe("report-level visuals", () => {
 		expect(result.defects[0]?.severity).toBe("major")
 	})
 
-	test("#given a report whose only visuals are a header logo and a Mermaid source block #when checked #then the logo does not count and the Mermaid block does", () => {
+	test("#given a header logo, an unrendered Mermaid source block, a zero-size svg, then a rendered diagram #when checked #then only the rendered diagram counts as a visual", () => {
 		// given
-		const logoOnly = '<header><img src="data:image/png;base64,iVBORw0KGgo=" alt="logo" width="120" height="40"></header><p>x</p>'
-		const withMermaid = `${logoOnly}<pre class="mermaid">flowchart LR\n  A --> B</pre>`
+		const logo = '<header><img src="data:image/png;base64,iVBORw0KGgo=" alt="logo" width="120" height="40"></header><p>x</p>'
+		const unrendered = `${logo}<pre class="mermaid">flowchart LR\n  A --> B</pre><figure><svg width="0" height="0"><text>A</text></svg><figcaption>c</figcaption></figure>`
+		const rendered = `${logo}<figure><svg width="600" height="300" aria-roledescription="flowchart-v2"><text>A</text><text>B</text></svg><figcaption>c</figcaption></figure>`
 		// when / then
-		expect(has(logoOnly, "report_without_visual")).toBe(true)
-		expect(has(withMermaid, "report_without_visual")).toBe(false)
+		expect(has(unrendered, "report_without_visual")).toBe(true)
+		expect(has(rendered, "report_without_visual")).toBe(false)
 	})
 
 	test("#given rendered Mermaid diagrams with SVG text labels and with HTML-only labels #when checked #then only the HTML-only one is flagged and neither needs chart ticks", () => {
@@ -262,18 +263,19 @@ describe("report-level visuals", () => {
 		expect(chartCodes(htmlLabels)).toEqual(["chart_svg_no_text"])
 	})
 
-	test("#given figure images with no alt, a decorative empty alt and a descriptive alt #when checked #then only the missing one raises image_missing_alt", () => {
+	test("#given figure images with no alt, a bare empty alt, role- and aria-marked decorative alts and a descriptive alt #when checked #then only the unmarked two raise image_missing_alt", () => {
 		// given
 		const img = (alt: string) => `<figure><img src="data:image/png;base64,iVBORw0KGgo=" ${alt} width="480" height="240"><figcaption>c</figcaption></figure>`
+		const html = ["", 'alt=""', 'alt="" role="presentation"', 'alt="" aria-hidden="true"', 'alt="Deploys per week, 2025"'].map(img).join("")
 		// when
-		const found = run(img("") + img('alt=""') + img('alt="Deploys per week, 2025"')).defects.filter((d) => d.code === "image_missing_alt")
+		const found = run(html).defects.filter((d) => d.code === "image_missing_alt")
 		// then
-		expect(found).toHaveLength(1)
+		expect(found).toHaveLength(2)
 	})
 
-	test("#given a report whose only image is decorative (empty alt) #when checked #then report_without_visual is raised", () => {
+	test("#given a report whose only image is marked decorative #when checked #then report_without_visual is raised", () => {
 		// given
-		const html = '<figure><img src="data:image/png;base64,iVBORw0KGgo=" alt="" width="480" height="240"><figcaption>c</figcaption></figure>'
+		const html = '<figure><img src="data:image/png;base64,iVBORw0KGgo=" alt="" role="presentation" width="480" height="240"><figcaption>c</figcaption></figure>'
 		// when / then
 		expect(has(html, "report_without_visual")).toBe(true)
 	})

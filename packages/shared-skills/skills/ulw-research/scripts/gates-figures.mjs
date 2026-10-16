@@ -20,8 +20,6 @@ const DEFAULT_FONT_SIZE = 16
 const MIN_TITLE_CHARS = 4
 const MIN_TICKS = 3
 const NUMERIC = /^[-+\u2212]?[$\u20AC\u00A3\u00A5\u20A9]?\d[\d,.:]*\s?(?:%|[a-z\uAC00-\uD7A3]{0,3})$/i
-/** Diagram source a destination renders itself (a Markdown post or a page with a Mermaid runtime). */
-const MERMAID_CLASS = /^(?:mermaid|language-mermaid|lang-mermaid)$/
 const SERIF_FAMILY = /nanummyeongjo|applemyungjo|gungsuh|batang|nanumbrush|nanumpen|\uAD81\uC11C|\uBC14\uD0D5|\uBA85\uC870/
 
 function pixels(value) {
@@ -86,9 +84,12 @@ function missingChartLabels(raw) {
 	return missing
 }
 
-/** An image marked decorative with an explicit empty alt (HTML convention) carries no finding. */
+const DECORATIVE_ROLE = /^(?:presentation|none)$/i
+
+/** An image explicitly marked decorative: empty alt plus role=presentation|none or aria-hidden=true. */
 function isDecorative(node) {
-	return node.tag === "img" && node.attrs.alt !== undefined && !String(node.attrs.alt).trim()
+	if (node.tag !== "img" || node.attrs.alt === undefined || String(node.attrs.alt).trim()) return false
+	return DECORATIVE_ROLE.test(String(node.attrs.role ?? "").trim()) || String(node.attrs["aria-hidden"] ?? "").trim() === "true"
 }
 
 /** A rendered diagram (Mermaid marks its root with aria-roledescription) has node labels, not axes and ticks. */
@@ -173,8 +174,7 @@ export const figureGates = [
 	{
 		codes: ["report_without_visual"],
 		run(ctx) {
-			if (visuals(ctx).some((node) => !isDecorative(node))) return []
-			if (ctx.elements.some(({ node }) => ctx.util.classTokens(node).some((token) => MERMAID_CLASS.test(token)))) return []
+			if (visuals(ctx).some((node) => declaredSize(node) !== 0 && !isDecorative(node))) return []
 			return [ctx.defect("report_without_visual", ctx.body, "the report has no chart, diagram, or figure image")]
 		},
 	},
@@ -182,7 +182,7 @@ export const figureGates = [
 		codes: ["image_missing_alt"],
 		run(ctx) {
 			return visuals(ctx)
-				.filter((node) => node.tag === "img" && node.attrs.alt === undefined)
+				.filter((node) => node.tag === "img" && !String(node.attrs.alt ?? "").trim() && !isDecorative(node))
 				.map((node) => ctx.defect("image_missing_alt", node, `${label(node)} has no alt text`))
 		},
 	},

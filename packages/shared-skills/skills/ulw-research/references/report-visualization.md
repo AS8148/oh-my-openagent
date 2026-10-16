@@ -58,7 +58,7 @@ npx -y @mermaid-js/mermaid-cli -i "$SESSION_DIR/assets/<name>.mmd" -o "$SESSION_
 ```
 
 - Keep `htmlLabels` off. With HTML labels the node text lands in `foreignObject` HTML instead of SVG `<text>`, so the static gate sees a diagram with no labels, and PDF and DOCX converters often drop it.
-- The CLI drives its own headless renderer. When it cannot start in this session, keep the `.mmd` source, deliver the diagram as a Mermaid code block only where the destination renders Mermaid (GitHub, Notion, many Markdown viewers), and record the render as not run in the closing section.
+- The CLI drives its own headless renderer. When it cannot start in this session, keep the `.mmd` source, deliver the diagram as a Mermaid code block only where the destination renders Mermaid (GitHub, Notion, many Markdown viewers), and record the render as not run in the closing section. The static gate counts only rendered figures, so an HTML report still needs another rendered visual.
 - Keep a diagram to about 15 nodes. Split a bigger one by subgraph or by step.
 - Lay a chain of more than about five nodes out top to bottom (`flowchart TB`). A wide left-to-right diagram scaled down to the page width shrinks its labels below legible size, worst on a phone.
 - Label every edge whose meaning is not obvious. Node text is short nouns; the caption carries the explanation.
@@ -103,7 +103,7 @@ A post by Andrej Karpathy on 2026-10-02 ranks the formats that make model output
 
 - Every figure follows the figure standard in SKILL.md: fixed container, contain-fit, aspect ratio preserved, spec fonts and palette.
 - The caption alone tells the reader what the visual shows and what to conclude: "Median build time fell from 9.4 to 3.1 minutes after the cache change [S4]" beats "Build times".
-- Alt text states the content, not the file: the key values or the shape of the trend for a chart, the main nodes and flow for a diagram. A decorative image takes `alt=""` and does not count as a visual.
+- Alt text states the content, not the file: the key values or the shape of the trend for a chart, the main nodes and flow for a diagram. A purely decorative image takes `alt=""` plus `role="presentation"` and does not count as a visual; an empty alt without that marker is reported as missing.
 - Every number in a visual comes from the data table and carries its source or lineage tag in the caption.
 - Colors are never the only signal: label series directly or use distinct markers, so the figure reads in grayscale.
 
