@@ -5,6 +5,7 @@ import { toBinary } from "@bufbuild/protobuf"
 
 import type { LogRecordProcessor, ReadableLogRecord } from "./otel-minimal-logs"
 import type { ReadableSpan, SpanProcessor } from "./otel-minimal-trace"
+import { isWireAttributeKey } from "./otlp-config"
 import { encodeLogRecord, encodeSpan } from "./otlp-encode"
 import { LogRecordSchema } from "./otlp-proto/opentelemetry/proto/logs/v1/logs_pb.js"
 import { SpanSchema } from "./otlp-proto/opentelemetry/proto/trace/v1/trace_pb.js"
@@ -143,6 +144,10 @@ export class SpoolWriter {
   }
 }
 
+function wireAttributes<T>(attributes: Readonly<Record<string, T>>): Record<string, T> {
+  return Object.fromEntries(Object.entries(attributes).filter(([key]) => isWireAttributeKey(key)))
+}
+
 export class WalLogRecordProcessor implements LogRecordProcessor {
   readonly writer: SpoolWriter
   readonly #onAppended: (writer: SpoolWriter) => void
@@ -153,7 +158,9 @@ export class WalLogRecordProcessor implements LogRecordProcessor {
   }
 
   onEmit(record: ReadableLogRecord): void {
-    if (this.writer.append(() => toBinary(LogRecordSchema, encodeLogRecord(record)))) this.#onAppended(this.writer)
+    const encode = (): Uint8Array =>
+      toBinary(LogRecordSchema, encodeLogRecord({ ...record, attributes: wireAttributes(record.attributes) }))
+    if (this.writer.append(encode)) this.#onAppended(this.writer)
   }
 
   shutdown(): void {
@@ -171,7 +178,8 @@ export class WalSpanProcessor implements SpanProcessor {
   }
 
   onEnd(span: ReadableSpan): void {
-    if (this.writer.append(() => toBinary(SpanSchema, encodeSpan(span)))) this.#onAppended(this.writer)
+    const encode = (): Uint8Array => toBinary(SpanSchema, encodeSpan({ ...span, attributes: wireAttributes(span.attributes) }))
+    if (this.writer.append(encode)) this.#onAppended(this.writer)
   }
 
   shutdown(): void {

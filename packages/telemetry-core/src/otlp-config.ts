@@ -38,14 +38,26 @@ const RESOURCE_OR_RELAY_KEYS = new Set([
 ])
 
 /**
- * The default D-P key rule for an allowlisted bag: Resource-level and relay-only keys stay off the
- * record, `$` keys never travel on the OTLP wire, every other key becomes `omo.<bare name>`. A
- * product passes its artifact projection instead to map the semantic-convention keys.
+ * The key rule every record on the wire obeys, whichever API produced it: Resource-level and
+ * relay-only keys stay off the record and `$` keys never travel on the OTLP wire. The WAL
+ * processors apply it to every LogRecord and Span they encode, so attributes given to
+ * `providers.logger` or `providers.tracer` directly pass the same rule as `capture()`.
+ */
+export function isWireAttributeKey(key: string): boolean {
+  return !RESOURCE_OR_RELAY_KEYS.has(key) && !key.startsWith("$")
+}
+
+/**
+ * The default projection: the key rule above, then every remaining primitive becomes
+ * `omo.<bare name>`. It is NOT a per-event allowlist: the caller must pass only allowlisted
+ * properties, or pass its schema artifact's projection as `project`, which maps each event's
+ * allowlisted properties to their wire keys and drops everything else (the contract the engine
+ * wiring relies on).
  */
 export const defaultWireProjection: OtlpWireProjection = (_event, properties) => {
   const attributes: WireAttributes = {}
   for (const [key, value] of Object.entries(properties)) {
-    if (RESOURCE_OR_RELAY_KEYS.has(key) || key.startsWith("$")) continue
+    if (!isWireAttributeKey(key)) continue
     if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
       attributes[`omo.${key}`] = value
     }
