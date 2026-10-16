@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createInMemoryDeviceKeyring } from "../keyring-port.ts"
-import { buildBatch } from "./build.ts"
+import { BatchInputError, buildBatch } from "./build.ts"
 import { type BatchBinding, openBatch } from "./open.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { b64, deviceId, epochKey, keyringFor, type ManifestObject, objects, readBytes } from "./testing/sync-v1.test-support.ts"
@@ -86,6 +86,33 @@ describe("buildBatch: the client encoder", () => {
     const opened = await openBatch(built, binding, new Uint8Array(key), rejections)
     expect(opened.ok && opened.records.map((record) => new TextDecoder().decode(record.body))).toEqual(["alpha"])
     expect(rejections.count()).toBe(0)
+  })
+
+  test("input the payload framing cannot carry is rejected, never padded or wrapped and then signed", async () => {
+    const keyring = createInMemoryDeviceKeyring("device-under-test")
+    const signed: unknown[] = []
+    const watched = { ...keyring, sign: (request: Parameters<typeof keyring.sign>[0]) => { signed.push(request); return keyring.sign(request) } }
+    const input = (record: { readonly spaceId: Uint8Array; readonly itemKey: string }) => ({
+      account: "framing-account",
+      kind: "ops" as const,
+      epoch: 1,
+      epochKey: new Uint8Array(32),
+      keyring: watched,
+      peers: [],
+      batchId: new Uint8Array(16),
+      salt: new Uint8Array(32),
+      createdAt: 1760000000000,
+      records: [{ type: 1 as const, ...record, body: new Uint8Array([1]) }],
+    })
+    for (const record of [
+      { spaceId: new Uint8Array(15), itemKey: "a" },
+      { spaceId: new Uint8Array(17), itemKey: "a" },
+      { spaceId: new Uint8Array(16), itemKey: "k".repeat(65536) },
+    ]) {
+      await expect(buildBatch(input(record))).rejects.toBeInstanceOf(BatchInputError)
+    }
+    expect(signed).toEqual([])
+    expect(await buildBatch(input({ spaceId: new Uint8Array(16), itemKey: "k".repeat(65535) }))).toBeInstanceOf(Uint8Array)
   })
 })
 
