@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A steering message to a background task is never recorded as both failed and delivered.** When a steer timed out and its retry was still in flight while a later run of the parent reconciled the task's unconfirmed inputs, that run marked the message failed and the retry then delivered it, so the task's log said both. Reconciliation now leaves an input whose retry is in flight to that retry, which records the one real outcome ([#10165](https://github.com/code-yeongyu/oh-my-openagent/pull/10165)).
+
 **Opening and closing an OmO session without a message no longer leaves an empty session in `/resume`.** The memory component's hidden session binding is now written as startup bookkeeping, so senpi removes a session that never had a conversation. ([#10168](https://github.com/code-yeongyu/oh-my-openagent/issues/10168), [#10308](https://github.com/code-yeongyu/oh-my-openagent/pull/10308))
 
 **A task shard host now exits once its children are done instead of staying alive for days.** When a task child's session parked or closed on its shard, the child's own connection to that shard stayed open, so the shard kept counting the connections and its idle exit never fired; one shard served zero sessions for two days with 18 connections back to itself. Those connections now close when the session ends, and a refused close no longer strands its client ([#10062](https://github.com/code-yeongyu/oh-my-openagent/issues/10062), [#10066](https://github.com/code-yeongyu/oh-my-openagent/pull/10066)).
