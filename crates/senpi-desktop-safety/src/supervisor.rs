@@ -129,6 +129,8 @@ impl StopPathState {
 
 /// Kill-switch state shared by the session loop and every stop path.
 pub struct Supervisor {
+    #[cfg(any(test, feature = "test-support"))]
+    hold_waiting: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     hold_signals: Mutex<Vec<Weak<crate::HoldSignal>>>,
     suspended: AtomicBool,
     published: AtomicBool,
@@ -151,6 +153,8 @@ impl Supervisor {
     #[must_use]
     pub fn new(clock: Arc<dyn Clock>) -> Self {
         Self {
+            #[cfg(any(test, feature = "test-support"))]
+            hold_waiting: Mutex::new(None),
             hold_signals: Mutex::new(Vec::new()),
             suspended: AtomicBool::new(false),
             published: AtomicBool::new(false),
@@ -219,6 +223,23 @@ impl Supervisor {
         signals.retain(|signal| signal.strong_count() > 0);
         signals.push(Arc::downgrade(&signal));
         signal
+    }
+
+    /// Observe the next hold's atomic park. The notification is sent while
+    /// holding the wait mutex: cancel/stop cannot acquire it until wait_for
+    /// has atomically parked and unlocked, so their notification cannot race.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn subscribe_hold_wait_for_test(&self) -> std::sync::mpsc::Receiver<()> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        *self.hold_waiting.lock() = Some(sender);
+        receiver
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn hold_waiting_for_test(&self) {
+        if let Some(sender) = self.hold_waiting.lock().take() {
+            sender.send(()).unwrap_or(());
+        }
     }
 
     /// How many stops this supervisor observed; a control grant's epoch at
