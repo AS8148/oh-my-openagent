@@ -19,6 +19,7 @@ export interface BeforeAgentStartHandlerOptions {
 }
 
 export interface SenpiExtensionAPI {
+  readonly sessionKind?: "interactive" | "worker"
   /**
    * Absolute cwd of the session this extension instance was loaded for. senpi builds one
    * ExtensionAPI per session and already knows the value at load time. Optional because hosts
@@ -58,6 +59,8 @@ export interface SenpiExtensionAPI {
   getFlag(name: string): boolean | string | undefined
   /** The session's current name (`/name`, `set_session_name`); undefined when it has none. */
   getSessionName?(): string | undefined
+  /** The permission preset senpi enforces for this session (senpi #3301); undefined without the permission system. */
+  getPermissionPreset?(): string | undefined
   sendMessage(message: Record<string, unknown>, options?: Record<string, unknown>): void | Promise<void>
   sendUserMessage(content: string | readonly Record<string, unknown>[], options?: { deliverAs?: "steer" | "followUp" }): void
   /** senpi's slash-command registry: extension commands, prompt templates, and `skill:<name>` entries. */
