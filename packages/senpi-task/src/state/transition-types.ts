@@ -31,6 +31,8 @@ export type TaskTransition =
       readonly type: "interrupt"
       readonly timestamp: string
       readonly error_message?: string
+      // The partial answer a foreign user abort preserved (F10a); absent when the run had none.
+      readonly final_response?: string
       readonly run_stats?: TaskRunStats
       /** Set only for an interrupt the parent did not request (it then notifies the parent). */
       readonly interrupt_cause?: TaskInterruptCause

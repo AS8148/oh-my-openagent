@@ -267,6 +267,24 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
           return
         }
 
+        // The run stopped for a reason the parent did not ask for - another client's user abort (F10a,
+        // partial text kept) or its session being replaced (cause and message) - so it is terminal and
+        // resumable, never a failure: no fail transition, no failure notification, no runtime fallback.
+        if (outcome.status === "interrupted") {
+          ports.releaseSlot(taskId, model, epoch)
+          const settlingInterrupted = settleIsolationFor(ports, owned, false)
+          if (settlingInterrupted !== undefined) await settlingInterrupted
+          persistTerminal(taskId, owned, timestamp, {
+            type: "interrupt",
+            timestamp,
+            ...(outcome.message === undefined ? {} : { error_message: outcome.message }),
+            ...(outcome.cause === undefined ? {} : { interrupt_cause: outcome.cause }),
+            ...(outcome.finalResponse === undefined ? {} : { final_response: outcome.finalResponse }),
+            ...(runStats === undefined ? {} : { run_stats: runStats }),
+          })
+          return
+        }
+
         ports.releaseSlot(taskId, model, epoch)
         const settling = settleIsolationFor(ports, owned, outcome.status === "completed" && outcome.finalResponse.length > 0)
         if (settling !== undefined) await settling
@@ -281,14 +299,6 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
             type: "fail",
             timestamp,
             error_message: "child turn produced no assistant output",
-            ...runStatsField,
-          })
-        } else if (outcome.status === "interrupted") {
-          persistTerminal(taskId, owned, timestamp, {
-            type: "interrupt",
-            timestamp,
-            error_message: outcome.message,
-            interrupt_cause: outcome.cause,
             ...runStatsField,
           })
         } else {

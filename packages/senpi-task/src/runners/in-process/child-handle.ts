@@ -88,8 +88,15 @@ export type RunnerOutcome =
   | { readonly status: "completed"; readonly finalResponse: string; readonly model?: string }
   | { readonly status: "error"; readonly failure: RunnerFailure; readonly killed?: boolean; readonly model?: string }
   | { readonly status: "cancelled" }
-  /** The run stopped for a reason the parent did not request (its session was replaced); task_send continues it. */
-  | { readonly status: "interrupted"; readonly cause: TaskInterruptCause; readonly message: string }
+  // A run stopped for a reason the parent did not request: its session was replaced (cause, message), or
+  // another client's user abort took it (F10a: partial text kept, abortedBy). Resumable; never a failure.
+  | {
+      readonly status: "interrupted"
+      readonly cause?: TaskInterruptCause
+      readonly message?: string
+      readonly finalResponse?: string
+      readonly abortedBy?: string
+    }
 
 export type ChildCompletionPolicy = "final-text" | "turn"
 

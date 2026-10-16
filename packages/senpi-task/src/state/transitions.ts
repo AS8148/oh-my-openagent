@@ -104,6 +104,7 @@ function applyTransitionFields(record: TaskRecord, transition: TaskTransition): 
       return {
         ...withoutCause,
         ...(transition.error_message === undefined ? {} : { error_message: transition.error_message }),
+        ...(transition.final_response === undefined ? {} : { final_response: transition.final_response }),
         ...(transition.interrupt_cause === undefined ? {} : { interrupt_cause: transition.interrupt_cause }),
         ...runStatsField(transition.run_stats),
       }
