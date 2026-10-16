@@ -1,9 +1,7 @@
 import { hostname } from "node:os"
 import { join, resolve } from "node:path"
 
-import type { BigIntStats } from "node:fs"
-
-import { lstat, readFile, unlink } from "../fs/resilient"
+import { lstat, readFile, unlink, type BigIntStats } from "../fs/resilient"
 import { getPidLiveness, parseLockRecord } from "../locks"
 import { findOpenFileHolderPids } from "./open-file-holders"
 import { findProcessesWorkingIn } from "./repo-in-use"

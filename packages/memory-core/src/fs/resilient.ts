@@ -194,5 +194,5 @@ export function existsSync(path: fsSync.PathLike): boolean {
   }
 }
 
-export type { Dirent, FSWatcher, PathLike, Stats } from "node:fs"
+export type { BigIntStats, Dirent, FSWatcher, PathLike, Stats } from "node:fs"
 export type { FileHandle } from "node:fs/promises"
