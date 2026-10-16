@@ -86,6 +86,11 @@ function missingChartLabels(raw) {
 	return missing
 }
 
+/** An image marked decorative with an explicit empty alt (HTML convention) carries no finding. */
+function isDecorative(node) {
+	return node.tag === "img" && node.attrs.alt !== undefined && !String(node.attrs.alt).trim()
+}
+
 /** A rendered diagram (Mermaid marks its root with aria-roledescription) has node labels, not axes and ticks. */
 function isDiagram(node) {
 	return Boolean(node.attrs["aria-roledescription"])
@@ -168,7 +173,7 @@ export const figureGates = [
 	{
 		codes: ["report_without_visual"],
 		run(ctx) {
-			if (visuals(ctx).length > 0) return []
+			if (visuals(ctx).some((node) => !isDecorative(node))) return []
 			if (ctx.elements.some(({ node }) => ctx.util.classTokens(node).some((token) => MERMAID_CLASS.test(token)))) return []
 			return [ctx.defect("report_without_visual", ctx.body, "the report has no chart, diagram, or figure image")]
 		},
@@ -177,7 +182,7 @@ export const figureGates = [
 		codes: ["image_missing_alt"],
 		run(ctx) {
 			return visuals(ctx)
-				.filter((node) => node.tag === "img" && !String(node.attrs.alt ?? "").trim())
+				.filter((node) => node.tag === "img" && node.attrs.alt === undefined)
 				.map((node) => ctx.defect("image_missing_alt", node, `${label(node)} has no alt text`))
 		},
 	},

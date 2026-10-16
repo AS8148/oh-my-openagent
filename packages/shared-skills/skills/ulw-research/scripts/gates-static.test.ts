@@ -262,13 +262,20 @@ describe("report-level visuals", () => {
 		expect(chartCodes(htmlLabels)).toEqual(["chart_svg_no_text"])
 	})
 
-	test("#given figure images with an empty alt and a descriptive alt #when checked #then only the empty one raises image_missing_alt", () => {
+	test("#given figure images with no alt, a decorative empty alt and a descriptive alt #when checked #then only the missing one raises image_missing_alt", () => {
 		// given
 		const img = (alt: string) => `<figure><img src="data:image/png;base64,iVBORw0KGgo=" ${alt} width="480" height="240"><figcaption>c</figcaption></figure>`
 		// when
-		const found = run(img('alt=" "') + img('alt="Deploys per week, 2025"')).defects.filter((d) => d.code === "image_missing_alt")
+		const found = run(img("") + img('alt=""') + img('alt="Deploys per week, 2025"')).defects.filter((d) => d.code === "image_missing_alt")
 		// then
 		expect(found).toHaveLength(1)
+	})
+
+	test("#given a report whose only image is decorative (empty alt) #when checked #then report_without_visual is raised", () => {
+		// given
+		const html = '<figure><img src="data:image/png;base64,iVBORw0KGgo=" alt="" width="480" height="240"><figcaption>c</figcaption></figure>'
+		// when / then
+		expect(has(html, "report_without_visual")).toBe(true)
 	})
 })
 
