@@ -18,6 +18,11 @@ import {
 const writerChildPath = fileURLToPath(new URL("./writer-child.ts", import.meta.url))
 const crashCommitChildPath = fileURLToPath(new URL("./crash-commit-child.ts", import.meta.url))
 
+// The peer's follow-up commits prove the repository keeps working after the takeover; five do that
+// as well as twenty, and the extra fifteen only made each case's 30 s budget a function of host
+// load (omo #10199 r5 HIGH 2). Volume stress lives in loop-crash-consistency.mjs.
+const PEER_COMMITS = 5
+
 const kit = createConcurrencyKit()
 afterEach(kit.cleanup)
 
@@ -70,7 +75,7 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
     await assertLinearCommits(shared.identity, 20)
   }, 30_000)
 
-  test("#given a writer SIGKILLed inside its git commit #when its peer takes over #then every reachable object survives and twenty follow-up commits land", async () => {
+  test("#given a writer SIGKILLed inside its git commit #when its peer takes over #then every reachable object survives and the peer's follow-up commits land", async () => {
     // #given
     const shared = await kit.fixture()
     const killer = kit.harnessFor(crashCommitChildPath, [
@@ -99,13 +104,13 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
       shared.identity.paths.repo,
       shared.identity.paths.locks,
       "peer",
-      "20",
+      String(PEER_COMMITS),
     ])
     await peer.waitForPrefix("done:")
     await kit.expectSuccessful(peer)
 
-    // #then: the killed writer's commit always lands through its orphan, then the peer's twenty
-    await assertLinearCommits(shared.identity, 21)
+    // #then: the killed writer's commit always lands through its orphan, then the peer's commits
+    await assertLinearCommits(shared.identity, PEER_COMMITS + 1)
   }, 30_000)
 
   // One row per point a killed `git commit` can strand its own lock file (git lockfile protocol:
@@ -118,7 +123,7 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
   ] as const
 
   for (const { trigger, name } of killTriggers) {
-    test(`#given a writer SIGKILLed with a stranded .git/${name} #when its peer takes over #then every reachable object survives and twenty follow-up commits land`, async () => {
+    test(`#given a writer SIGKILLed with a stranded .git/${name} #when its peer takes over #then every reachable object survives and the peer's follow-up commits land`, async () => {
       // #given
       const shared = await kit.fixture()
       const killer = kit.harnessFor(crashCommitChildPath, [
@@ -151,15 +156,15 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
         shared.identity.paths.repo,
         shared.identity.paths.locks,
         "peer",
-        "20",
+        String(PEER_COMMITS),
       ], trigger === "ref-lock" ? { OMO_TEST_GIT_LOCK_SETTLE_MS: "0" } : undefined)
       await peer.waitForPrefix("done:")
       await kit.expectSuccessful(peer)
 
-      // #then: the stranded commit dies with its git process, so history is the peer's twenty
+      // #then: the stranded commit dies with its git process, so history is the peer's
       // linear commits plus, for the ref-lock row, the killer's completed root commit; the orphan
       // can never publish a ref past a stranded refs lock.
-      await assertLinearCommits(shared.identity, trigger === "ref-lock" ? 21 : 20)
+      await assertLinearCommits(shared.identity, trigger === "ref-lock" ? PEER_COMMITS + 1 : PEER_COMMITS)
     }, 30_000)
   }
 })
