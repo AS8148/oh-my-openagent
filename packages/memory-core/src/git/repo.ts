@@ -13,6 +13,7 @@ import { runMemoryRepoMaintenance } from "./repo-maintenance"
 import { PathCommitTimes } from "./repo-commit-times"
 import { GitRevisionReads } from "./repo-revision-reads"
 import { assertNoUnrelatedChanges } from "./repo-status"
+import { settlePendingRollback } from "./pending-rollback"
 import { assertNoSecretLikeStaging } from "./repo-secret-staging"
 import { withSerializedGitWorktreeMutation } from "./worktree-mutation-queue"
 import type {
@@ -106,6 +107,7 @@ export class GitMemoryRepo {
 
   async cleanCheck(): Promise<void> {
     await this.hookInstaller(this.dir)
+    await settlePendingRollback(this)
     const porcelain = await this.status()
     if (!porcelain.trim()) return
     throw new DirtyRepoError(porcelain, describeDirtyMarkdownEncodingIssues(this.dir, porcelain))
@@ -120,6 +122,7 @@ export class GitMemoryRepo {
     const normalized = normalizePathspecs(paths)
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)
 
+    await settlePendingRollback(this)
     await assertNoUnrelatedChanges(this.dir, normalized, () => this.status())
     await this.stage(normalized)
     return this.commitPrepared(normalized, reason, author)
@@ -133,6 +136,7 @@ export class GitMemoryRepo {
     await this.hookInstaller(this.dir)
     const normalized = normalizePathspecs(paths)
     if (normalized.length === 0) throw new NoEffectiveChangesError(normalized)
+    await settlePendingRollback(this)
     await assertNoUnrelatedChanges(this.dir, normalized, () => this.status())
     if (!(await this.hasPathChanges(normalized))) throw new NoEffectiveChangesError(normalized)
     await assertNoSecretLikeStaging(normalized, (argv) => this.gitResult(argv))
@@ -173,6 +177,16 @@ export class GitMemoryRepo {
     for (const path of untracked) {
       await withStrandedGitLockRecovery(this.dir, () => this.git(["rm", "-q", "--cached", "--ignore-unmatch", "--", path]))
       await rm(join(this.dir, path), { force: true })
+    }
+  }
+
+  /** Undo staged entries only; the working tree is left exactly as it is. */
+  async unstage(tracked: readonly string[], untracked: readonly string[]): Promise<void> {
+    if (tracked.length > 0) {
+      await withStrandedGitLockRecovery(this.dir, () => this.git(["restore", "--source=HEAD", "--staged", "--", ...tracked]))
+    }
+    if (untracked.length > 0) {
+      await withStrandedGitLockRecovery(this.dir, () => this.git(["rm", "-q", "--cached", "-f", "--ignore-unmatch", "--", ...untracked]))
     }
   }
 

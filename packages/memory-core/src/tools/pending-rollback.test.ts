@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { GitMemoryRepo, inspectStrandedGitLock, unlockStrandedGitLock, type GitCommitAuthor, type UnlockScans } from "../git"
+import { PendingRollbackEditsKeptError } from "../git/pending-rollback"
 import { renderMemoryFile } from "../memfs/frontmatter"
 import { runMemoryApplyPatch } from "./memory-apply-patch"
 import { runMemoryTool, type MemoryToolLock } from "./memory"
@@ -60,6 +61,11 @@ async function afterStagedFailure(params: Parameters<typeof runMemoryTool>[0]["p
   if (inspection.kind !== "found") throw new Error(`unexpected ${inspection.kind}`)
   expect((await unlockStrandedGitLock(repo.dir, inspection, NOBODY)).kind).toBe("removed")
   return repo
+}
+
+function keptPaths(failure: unknown): readonly string[] | undefined {
+  if (!(failure instanceof Error) || !(failure.cause instanceof PendingRollbackEditsKeptError)) return undefined
+  return failure.cause.paths
 }
 
 const CREATE_NEW = { command: "create", reason: "write behind a commit-time lock", file_path: "system/new.md", description: "Fact", file_text: "new fact", author: AUTHOR } as const
@@ -124,7 +130,7 @@ describe("a pending rollback after a staged failure (omo #10199)", () => {
     const failure = await runMemoryTool({ repo, lock, params: { ...CREATE_NEW, file_path: "system/other.md", reason: "next write" } }).catch((error: unknown) => error)
 
     // #then
-    expect(String(failure)).toContain("system/new.md")
+    expect(keptPaths(failure)).toEqual(["system/new.md"])
     expect(await readFile(join(repo.dir, "system", "new.md"), "utf8")).toBe(handWritten)
     expect(await repo.status()).toBe("?? system/new.md\n")
   })
@@ -142,7 +148,7 @@ describe("a pending rollback after a staged failure (omo #10199)", () => {
     const failure = await runMemoryTool({ repo, lock, params: { ...CREATE_NEW, file_path: "system/other.md", reason: "next write" } }).catch((error: unknown) => error)
 
     // #then
-    expect(String(failure)).toContain("system/facts.md")
+    expect(keptPaths(failure)).toEqual(["system/facts.md"])
     expect(await readFile(join(repo.dir, "system", "facts.md"), "utf8")).toBe(edited)
     expect(await repo.status()).toBe(" M system/facts.md\n")
   })

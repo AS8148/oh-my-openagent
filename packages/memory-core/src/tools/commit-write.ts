@@ -6,7 +6,7 @@ import { StrandedGitLockError } from "../git/repo-lock-sweep"
 import { SOUL_EDIT_RESULT_LINE, touchesSoulPath } from "../soul"
 import type { LockDomain } from "../locks"
 import type { MemoryToolProvenance } from "./memory"
-import { applyPendingRollback, undoBehindKeptLock } from "./rollback-behind-lock"
+import { undoBehindKeptLock } from "./rollback-behind-lock"
 import { MemoryToolError } from "./tool-errors"
 
 export interface CommitMemoryWriteOptions {
@@ -34,7 +34,6 @@ export interface MemoryWriteCommit {
 export async function commitMemoryWrite(options: CommitMemoryWriteOptions): Promise<MemoryWriteCommit> {
   const { repo, lock, reason, author, provenance, successLabel, noChangesMessage } = options
   return lock("memory-write", async () => {
-    await applyPendingRollback(repo)
     await repo.cleanCheck()
     const paths = await options.apply()
     if (paths.length === 0) throw new MemoryToolError(noChangesMessage ?? "made no changes")
