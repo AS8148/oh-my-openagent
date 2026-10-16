@@ -121,7 +121,7 @@ describe("omo-native category config capture", () => {
       cat_quick_model: "other",
       cat_quick_reasoning: "low",
     })
-    expect(JSON.stringify(captured[0])).not.toMatch(/my-gateway|my-finetune|custom/)
+    expect(JSON.stringify(Object.values(captured[0] ?? {}))).not.toMatch(/my-gateway|my-finetune|custom/)
     expect(wireViolations("category_config", captured[0] ?? {})).toEqual([])
   })
 

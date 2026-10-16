@@ -259,7 +259,7 @@ describe("OmO Native product identity", () => {
     expect(delegation.duration_status.values).toEqual(["monotonic", "wall_clock", "unavailable"])
     expect(delegation.category.values).toEqual([...BUILTIN_CATEGORY_NAMES, "custom", "none"])
     expect(delegation.agent_type.values).toEqual([...CURATED_AGENTS, "custom", "none"])
-    expect(categoryConfig.source.values).toEqual(OMO_NATIVE_EVENT_SCHEMAS.session_started.reason.values)
+    expect(categoryConfig.source.values).toEqual(OMO_NATIVE_EVENT_SCHEMAS.session_started.start_trigger.values)
 
     // and: the join keys and every measurement stay unbucketed numbers
     for (const key of ["task_seq", "run_epoch", "config_generation", "duration_ms", "turns", "tool_calls"] as const) {
