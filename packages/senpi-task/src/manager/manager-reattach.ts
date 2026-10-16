@@ -65,7 +65,6 @@ export async function reattachManagedTask(input: {
     unsubscribe = input.attachLive(fresh, input.handle)
     attached = true
     const reconciled = input.store.load(fresh.task_id)
-    if (reconciled?.status === "interrupted") return { ok: true }
     if (reconciled !== null) fresh = reconciled
     if (isTerminalRecord(fresh)) {
       // The result stays, but the child now lives behind THIS handle: a daemon session reopened on a

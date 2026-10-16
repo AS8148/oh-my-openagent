@@ -52,7 +52,7 @@ export interface ReattachSubject extends HostShardEvents {
   readonly adopt: (next: HostSessionReattached) => void
   // A turn in flight at the loss runs again on the new port: re-joined still streaming, or re-prompted.
   readonly turnResumed: () => void
-  readonly reconcile: () => Promise<HostTurnReconciliation>
+  readonly reconcile: (reopened: boolean) => Promise<HostTurnReconciliation>
   readonly continueTurn: (prompt: string) => Promise<void>
   readonly giveUp: (refusal?: HostParkReason) => void
 }
@@ -97,7 +97,7 @@ export async function recoverLostTransport(subject: ReattachSubject, reattach: H
   })
   const rejoined = next.attached ? "attached" : "resumed"
   if (!turnWasInFlight) return report(rejoined, next.session.instanceId)
-  const reconciled = await subject.reconcile()
+  const reconciled = await subject.reconcile(!next.attached)
   if (reconciled === "streaming") {
     observe(taskId, subject.turnResumed)
     return report(rejoined, next.session.instanceId)

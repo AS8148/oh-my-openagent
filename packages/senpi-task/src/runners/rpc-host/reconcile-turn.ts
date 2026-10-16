@@ -29,6 +29,8 @@ export interface ReconcileTurnPort {
   getState(): Promise<HostSessionLiveness>
   readonly lastInputEffect?: InputEffectStatus
   readonly interruptedWithoutTranscript?: boolean
+  /** The host reopened the session from its file, so no turn can be running there. */
+  readonly reopened?: boolean
   readonly adoptedEntryId?: string
   settle(outcome: RunnerOutcome): void
   notify(notice: ReconciledTurnNotice): void
@@ -53,9 +55,12 @@ export async function reconcileHostTurn(
     log("senpi-task host turn state read failed", {
       sessionPath,
       reason: error instanceof Error ? error.message : String(error),
-      action: "Keep the child tracked as streaming and wait for its next outcome without sending input.",
+      action: port.reopened === true
+        ? "The session was reopened from its file, so no turn runs there; reconcile from its receipt and transcript."
+        : "Keep the child tracked as streaming and wait for its next outcome without sending input.",
     })
-    return "streaming"
+    if (port.reopened !== true) return "streaming"
+    state = { sessionId: "", isStreaming: false }
   }
   if (state.isStreaming === true || state.isCompacting === true) return "streaming"
   const receipt = port.lastInputEffect

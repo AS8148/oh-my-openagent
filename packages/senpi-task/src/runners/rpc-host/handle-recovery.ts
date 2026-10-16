@@ -23,7 +23,7 @@ export interface HandleRecoveryHost {
   turnSettled(): boolean
   adopt(next: HostSessionReattached): void
   turnResumed(): void
-  reconcile(): Promise<HostTurnReconciliation>
+  reconcile(reopened: boolean): Promise<HostTurnReconciliation>
   beginContinuation(): void
   endLost(): void
   park(reason: HostParkReason): void

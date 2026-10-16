@@ -36,7 +36,6 @@ export interface HostSessionLiveness {
 
 /** `HostSessionClient` satisfies this structurally. The transport error itself is never read. */
 export interface HostSessionPort {
-  readonly lastInputEffect?: InputEffectStatus
   readonly socketPath: string
   readonly transportGone: Promise<unknown>
   send(command: HostSessionCommand): Promise<void>

@@ -83,6 +83,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   })
   let continuationState: "none" | "pending_delivery" | "awaiting_start" = "none"
   const reconciliation = createHandleReconciliation({
+    taskId,
     port: () => client,
     settle: (settled) => {
       if (settled.status === "completed") finalText = settled.finalResponse
@@ -201,7 +202,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
       bindHostSessionPort(client, clientBinding)
     },
     turnResumed: () => listeners.emitTurnResumed(),
-    reconcile: () => reconciliation.reconcile(session.sessionPath, undefined, true),
+    reconcile: (reopened: boolean) => reconciliation.reconcile(session.sessionPath, undefined, true, reopened),
     beginContinuation: () => beginTurn(),
     endLost: () => endSession({ kind: "transport_gone" }),
     // The continuation that re-drives the in-flight turn was not delivered (omo#9093). A lost
