@@ -4,8 +4,19 @@ import { isAbsolute, join, relative } from "node:path"
 import { isSpoolFileName, QUARANTINE_DIR } from "./otlp-spool-dir"
 import type { TelemetrySpoolEntryKind } from "./types"
 
-/** `refused`: the directory failed verification and nothing was deleted. */
-export type PurgeOutcome = "purged" | "absent" | "refused"
+/**
+ * `refused`: the directory failed verification and nothing was deleted. `incomplete`: the sweep ran
+ * but at least one regular spool file of the current user could not be deleted (see `onFailed`).
+ */
+export type PurgeOutcome = "purged" | "incomplete" | "absent" | "refused"
+
+/** How the purge reports what it left behind, by kind or error code only, never by path. */
+export type PurgeReport = {
+  /** A spool-named entry it does not delete: not a regular file of the current user, or swapped mid-purge. */
+  readonly onSkipped: (kind: TelemetrySpoolEntryKind) => void
+  /** A regular spool file of the current user whose unlink failed while the entry stayed the same. */
+  readonly onFailed: (code: string) => void
+}
 
 /** Test seams for what an unprivileged test cannot stage: an entry swapped mid-purge, a file of another user. */
 export type PurgeSeams = {
@@ -15,8 +26,13 @@ export type PurgeSeams = {
 
 type Owner = (path: string, stat: Stats) => boolean
 
+function errorCode(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined
+}
+
 function hasCode(error: unknown, codes: readonly string[]): boolean {
-  return error instanceof Error && "code" in error && typeof error.code === "string" && codes.includes(error.code)
+  const code = errorCode(error)
+  return code !== undefined && codes.includes(code)
 }
 
 /** False only where uids exist (not on Windows) and the entry belongs to someone else. */
@@ -46,37 +62,65 @@ function isStrictlyInside(root: string, dir: string): boolean {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)
 }
 
-function skipKind(path: string, owned: Owner): TelemetrySpoolEntryKind | "gone" | null {
+function lstatOrGone(path: string): Stats | "gone" {
   try {
-    const stat = lstatSync(path)
-    if (stat.isSymbolicLink()) return "symlink"
-    if (stat.isDirectory()) return "directory"
-    if (!stat.isFile()) return "other"
-    return owned(path, stat) ? null : "foreign_owner"
+    return lstatSync(path)
   } catch (error) {
     if (hasCode(error, ["ENOENT"])) return "gone"
     throw error
   }
 }
 
-type Sweep = { readonly owned: Owner; readonly unlink: (path: string) => void; readonly onSkipped: (kind: TelemetrySpoolEntryKind) => void }
+/** The checked regular file of the current user, or why it is not deleted. */
+function checkEntry(path: string, owned: Owner): Stats | TelemetrySpoolEntryKind | "gone" {
+  const stat = lstatOrGone(path)
+  if (stat === "gone") return "gone"
+  if (stat.isSymbolicLink()) return "symlink"
+  if (stat.isDirectory()) return "directory"
+  if (!stat.isFile()) return "other"
+  return owned(path, stat) ? stat : "foreign_owner"
+}
+
+/** After a failed unlink: did the checked file vanish, get replaced (other inode or type), or stay put? */
+function afterFailedUnlink(path: string, checked: Stats): "gone" | "swapped" | "same" {
+  const now = lstatOrGone(path)
+  if (now === "gone") return "gone"
+  return now.isFile() && now.dev === checked.dev && now.ino === checked.ino ? "same" : "swapped"
+}
+
+/** Codes an unlink of a regular file can fail with when it is denied or was swapped mid-purge. */
+const DENIED_OR_SWAPPED: readonly string[] = ["EPERM", "EACCES", "EBUSY", "EISDIR", "ENOTDIR"]
+
+type Sweep = {
+  readonly owned: Owner
+  readonly unlink: (path: string) => void
+  readonly report: PurgeReport
+  failed: number
+}
+
+function unlinkChecked(path: string, checked: Stats, sweep: Sweep): void {
+  try {
+    sweep.unlink(path)
+  } catch (error) {
+    const code = errorCode(error)
+    if (code === "ENOENT") return
+    if (code === undefined || !DENIED_OR_SWAPPED.includes(code)) throw error
+    const state = afterFailedUnlink(path, checked)
+    if (state === "swapped") sweep.report.onSkipped("other")
+    if (state !== "same") return
+    sweep.failed += 1
+    sweep.report.onFailed(code)
+  }
+}
 
 function unlinkOwned(dir: string, names: readonly string[], sweep: Sweep): void {
   for (const name of names) {
     if (!isSpoolFileName(name)) continue
     const path = join(dir, name)
-    const skip = skipKind(path, sweep.owned)
-    if (skip === "gone") continue
-    if (skip !== null) {
-      sweep.onSkipped(skip)
-      continue
-    }
-    try {
-      sweep.unlink(path)
-    } catch (error) {
-      if (hasCode(error, ["EISDIR", "EPERM", "ENOTDIR"])) sweep.onSkipped("other")
-      else if (!hasCode(error, ["ENOENT"])) throw error
-    }
+    const checked = checkEntry(path, sweep.owned)
+    if (checked === "gone") continue
+    if (typeof checked === "string") sweep.report.onSkipped(checked)
+    else unlinkChecked(path, checked, sweep)
   }
 }
 
@@ -110,13 +154,16 @@ function removeIfEmpty(dir: string): void {
  *   finds nothing, which is also quiet.
  * - The directories are removed last and only when empty: a file a consented process created after
  *   the listing (or a foreign file) leaves the directory in place.
- * - An entry swapped for a directory (or into one) between its check and its unlink fails with
- *   EISDIR, EPERM or ENOTDIR; it is skipped and reported as `other`, and the sweep goes on.
+ * - When an unlink fails with EPERM, EACCES, EBUSY, EISDIR or ENOTDIR, the entry is checked again:
+ *   gone means another process removed it (quiet); a different inode or type means it was swapped
+ *   between its check and its unlink (skipped, reported as `other`); the same regular file means the
+ *   deletion itself failed (immutable flag, permissions, a busy file), reported through `onFailed`
+ *   with the errno code, and the outcome becomes `incomplete`. The sweep goes on in every case.
  */
 export function purgeSpool(
   dir: string,
   root: string,
-  onSkipped: (kind: TelemetrySpoolEntryKind) => void,
+  report: PurgeReport,
   seams: PurgeSeams = {},
 ): PurgeOutcome {
   const owned = ownerCheck(seams.ownerOf)
@@ -125,7 +172,7 @@ export function purgeSpool(
   if (kind === "other" || !isStrictlyInside(root, dir)) return "refused"
   const quarantine = join(dir, QUARANTINE_DIR)
   if (realDirectory(quarantine, owned) === "other") return "refused"
-  const sweep: Sweep = { owned, unlink: seams.unlink ?? unlinkSync, onSkipped }
+  const sweep: Sweep = { owned, unlink: seams.unlink ?? unlinkSync, report, failed: 0 }
   unlinkOwned(dir, readdirSync(dir), sweep)
   try {
     unlinkOwned(quarantine, readdirSync(quarantine), sweep)
@@ -134,5 +181,5 @@ export function purgeSpool(
   }
   removeIfEmpty(quarantine)
   removeIfEmpty(dir)
-  return "purged"
+  return sweep.failed > 0 ? "incomplete" : "purged"
 }

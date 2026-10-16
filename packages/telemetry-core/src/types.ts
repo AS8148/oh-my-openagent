@@ -16,6 +16,7 @@ export type TelemetryDiagnosticEvent =
   | "telemetry_posthog_import_failed"
   | "telemetry_posthog_init_failed"
   | "telemetry_shutdown_failed"
+  | "telemetry_spool_purge_failed"
   | "telemetry_spool_purge_refused"
   | "telemetry_spool_purge_skipped"
   | "telemetry_spool_sweep_failed"
@@ -33,6 +34,15 @@ export type TelemetryDiagnosticInput = {
   readonly errorKind?: TelemetryDiagnosticErrorKind
   /** `telemetry_spool_purge_skipped` only: what kind of spool-named entry the purge left in place. */
   readonly entryKind?: TelemetrySpoolEntryKind
+  /**
+   * `telemetry_spool_purge_failed` only: the errno code (never the path) of one spool file of the
+   * current user that the opt-out purge could not delete. One event per file, so the count is the
+   * number of files left. The opt-out is then incomplete: those files stay on disk until a later
+   * opted-out start purges them again, which needs the cause removed first (for EPERM, an immutable
+   * or append-only flag; for EACCES, the spool directory's permissions; for EBUSY, the process
+   * holding the file).
+   */
+  readonly errorCode?: string
 }
 
 export type TelemetryProductConfig = {

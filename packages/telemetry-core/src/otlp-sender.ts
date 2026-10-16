@@ -18,7 +18,7 @@ import {
   type SpoolContext,
 } from "./otlp-spool-dir"
 import { SpoolCap } from "./otlp-spool-cap"
-import { purgeSpool } from "./otlp-spool-purge"
+import { type PurgeReport, purgeSpool } from "./otlp-spool-purge"
 import { abortableSleep, delay } from "./otlp-sleep"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { SpoolWriter } from "./otlp-wal"
@@ -38,6 +38,14 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
+/** Each entry the purge leaves behind becomes one diagnostic, by kind or errno code, never by path. */
+function purgeReport(diagnostics: CreateOtlpTelemetryTransportInput["diagnostics"], source: string): PurgeReport {
+  return {
+    onSkipped: (entryKind: TelemetrySpoolEntryKind) => diagnostics?.({ event: "telemetry_spool_purge_skipped", source, entryKind }),
+    onFailed: (errorCode: string) => diagnostics?.({ event: "telemetry_spool_purge_failed", source, errorCode }),
+  }
+}
+
 /**
  * The collector transport; null whenever any opt-out applies. An opt-out creates nothing on disk and
  * purges whatever earlier consented runs left in the spool (see `purgeSpool` for the race rules).
@@ -47,8 +55,7 @@ export function createOtlpTelemetryTransport(input: CreateOtlpTelemetryTransport
   if (!isOtlpTelemetryEnabled({ env, productEnvPrefix: input.productEnvPrefix })) {
     try {
       const source = input.source ?? "otlp"
-      const onSkipped = (entryKind: TelemetrySpoolEntryKind) => input.diagnostics?.({ event: "telemetry_spool_purge_skipped", source, entryKind })
-      if (purgeSpool(input.spoolDir, input.spoolRoot, onSkipped) === "refused") {
+      if (purgeSpool(input.spoolDir, input.spoolRoot, purgeReport(input.diagnostics, source)) === "refused") {
         input.diagnostics?.({ event: "telemetry_spool_purge_refused", source })
       }
     } catch (error) {
@@ -230,9 +237,8 @@ class OtlpSender {
     this.#guard("telemetry_spool_write_failed", () => {
       this.#providers.logWriter.discard()
       this.#providers.spanWriter.discard()
-      const onSkipped = (entryKind: TelemetrySpoolEntryKind) =>
-        this.#input.diagnostics?.({ event: "telemetry_spool_purge_skipped", source: this.#input.source ?? "otlp", entryKind })
-      if (purgeSpool(this.#ctx.dir, this.#input.spoolRoot, onSkipped) === "refused") this.#report("telemetry_spool_purge_refused")
+      const report = purgeReport(this.#input.diagnostics, this.#input.source ?? "otlp")
+      if (purgeSpool(this.#ctx.dir, this.#input.spoolRoot, report) === "refused") this.#report("telemetry_spool_purge_refused")
     })
   }
 
