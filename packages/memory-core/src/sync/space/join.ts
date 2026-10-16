@@ -5,7 +5,7 @@
 // adopts again. The tombstone makes the join idempotent; a second join of the pair changes
 // nothing.
 
-import type { LoroDoc } from "loro-crdt"
+import type { LoroDoc } from "../../crdt/loro-runtime"
 
 import { manifestAbsorbedInto, manifestAddBinding, manifestBindings, manifestMarkAbsorbed } from "./manifest"
 

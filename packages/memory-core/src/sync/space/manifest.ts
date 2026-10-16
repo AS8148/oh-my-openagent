@@ -4,7 +4,7 @@
 // later sees it never adopts again. Binding keys never leave the document, so a removed
 // alias is not expressible; renames add the new key.
 
-import type { LoroDoc, PeerID } from "loro-crdt"
+import type { LoroDoc, PeerID } from "../../crdt/loro-runtime"
 
 import { loadLoroRuntime } from "../../crdt/loro-runtime"
 
