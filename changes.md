@@ -1,3 +1,7 @@
+## 2026-10-16 - OpenCode GPT prompt identity covers GPT-6.1 Sol and GPT-6 Luna (#10291)
+
+`packages/omo-opencode/src/agents/gpt-prompt-identity.ts` gains the `gpt-6.1-sol` ("GPT-6.1 Sol") and `gpt-6-luna` ("GPT-6 Luna") keys. 6.1 Sol matches the dotted, dashed and Venice dotless id shapes senpi's GPT-6 preset matcher accepts (`gpt-6.1-sol`, `gpt-6-1-sol`, `gpt-61-sol`, with any provider prefix or `-fast` suffix) and is checked before the `gpt-6-sol` substring; bare `gpt-6.1` and `gpt-611-sol` stay generic. Before, both models fell through to "a GPT-family model" in the Sisyphus and Sisyphus-Junior GPT prompts. `gpt-shared-prompt-identity.test.ts` covers the id shapes (8 of its 18 cases fail on the previous matcher).
+
 ## 2026-10-16 - Adopt senpi 2026.10.16
 
 Every `@code-yeongyu/senpi` pin moves from 2026.10.15 to 2026.10.16: the root devDependency, `omo-native`, the `omo-senpi` and `senpi-task` peer/dev pins with their `senpi-tui` and `senpi-ai` aliases, the pin and package-shape assertions, and the engine-catalog note in the `senpi-task` coverage test. `bun.lock` resolves the senpi entries at 2026.10.16 (refreshed with `bun install --no-cache`). `packages/omo-native/bin/lib/provider-map.json` is re-derived from the installed engine's `builtinProviders()`: the builtin and OAuth provider ids are unchanged, only its derivation comment moves, and the committed Senpi plugin bundle (`omo.js`, which embeds that comment) is rebuilt on Linux (bun 1.4.2, the version `ci.yml` pins) with `bun run build:senpi-plugin`.

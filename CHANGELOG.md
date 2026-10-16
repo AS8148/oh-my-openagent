@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**OpenCode edition: Sisyphus names GPT-6.1 Sol and GPT-6 Luna as themselves.** On `gpt-6.1-sol` (and its `-fast`, dashed and Venice `gpt-61-sol` ids) and on `gpt-6-luna`, the Sisyphus and Sisyphus-Junior GPT prompts introduced the model as "a GPT-family model"; they now say "GPT-6.1 Sol" and "GPT-6 Luna". ([#10291](https://github.com/code-yeongyu/oh-my-openagent/issues/10291))
+
 ## [5.1.34] - 2026-10-16
 
 **`oracle`, `momus` and `plan-reviewer` fall back to Argon before the previous pro model.** In all three chains, Argon at high thinking (Google, Vertex or OpenCode) now sits directly ahead of the previous pro rung, which stays in place for Copilot and for engine pins that do not serve Argon yet. The GPT heads keep first place: on 8 consult and plan-review tasks graded blind, Argon beat the previous pro model in all 16 judgments but did not beat the current GPT heads on correctness, and its median answer took 57 s against 15 s. Telemetry now names the Qwen 3.7 Plus rung of `explore` and `librarian` instead of reporting it as `custom`. ([#10180](https://github.com/code-yeongyu/oh-my-openagent/issues/10180), [#10263](https://github.com/code-yeongyu/oh-my-openagent/pull/10263))
