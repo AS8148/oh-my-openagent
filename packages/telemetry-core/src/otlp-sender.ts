@@ -1,0 +1,239 @@
+import { context } from "@opentelemetry/api"
+
+import { createTelemetryProviders, type TelemetryProviders } from "./otel-providers"
+import { BatchSender } from "./otlp-batch-sender"
+import {
+  defaultWireProjection,
+  isOtlpTelemetryEnabled,
+  resolveOtlpEndpoint,
+  type WireAttributes,
+} from "./otlp-config"
+import {
+  createBatchId,
+  deleteFile,
+  enforceSpoolCap,
+  SPOOL_CAP_BYTES,
+  SPOOL_MAX_AGE_MS,
+  sweepSpool,
+  type DropReason,
+  type SpoolContext,
+} from "./otlp-spool-dir"
+import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
+import type { SpoolWriter } from "./otlp-wal"
+import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent } from "./types"
+
+const SEAL_BYTES = 200 * 1024
+const DROP_REASONS: readonly DropReason[] = ["evicted", "expired", "rejected", "corrupt"]
+
+function abortableSleep(ms: number, abort: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    abort.addEventListener("abort", () => {
+      clearTimeout(timer)
+      resolve()
+    }, { once: true })
+  })
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM"
+  }
+}
+
+/** The collector transport; null whenever any opt-out applies, so nothing is ever created on disk. */
+export function createOtlpTelemetryTransport(input: CreateOtlpTelemetryTransportInput): OtlpTelemetryTransport | null {
+  const env = input.env ?? process.env
+  if (!isOtlpTelemetryEnabled({ env, productEnvPrefix: input.productEnvPrefix })) return null
+  return new OtlpSender(input, resolveOtlpEndpoint(env, input.endpoint)).transport
+}
+
+class OtlpSender {
+  readonly transport: OtlpTelemetryTransport
+  readonly #input: CreateOtlpTelemetryTransportInput
+  readonly #ctx: SpoolContext
+  readonly #providers: TelemetryProviders
+  readonly #consent: () => boolean
+  readonly #batches: BatchSender
+  readonly #ownSealed = new Set<string>()
+  readonly #unreported: Record<DropReason, number> = { evicted: 0, expired: 0, rejected: 0, corrupt: 0 }
+  readonly #timers: ReturnType<typeof setInterval>[] = []
+  #droppedSince200 = 0
+  #stopped = false
+
+  constructor(input: CreateOtlpTelemetryTransportInput, endpoint: string) {
+    this.#input = input
+    this.#consent = input.consent ?? (() => true)
+    this.#providers = createTelemetryProviders({
+      resource: input.resource,
+      scope: input.scope,
+      spoolDir: input.spoolDir,
+      ...(input.bootId === undefined ? {} : { bootId: input.bootId }),
+      ...(input.pid === undefined ? {} : { pid: input.pid }),
+      ...(input.clock === undefined ? {} : { clock: input.clock }),
+      consent: this.#consent,
+      onAppended: (writer) => this.#onAppended(writer),
+      onWriteError: (error) => this.#report("telemetry_spool_write_failed", error),
+    })
+    this.#ctx = {
+      dir: input.spoolDir,
+      bootId: this.#providers.bootId,
+      pid: input.pid ?? process.pid,
+      nowMs: input.nowMs ?? Date.now,
+      isPidAlive: input.isPidAlive ?? isPidAlive,
+      capBytes: input.capBytes ?? SPOOL_CAP_BYTES,
+      maxAgeMs: input.maxAgeMs ?? SPOOL_MAX_AGE_MS,
+      onDrop: (reason, records) => {
+        this.#droppedSince200 += records
+        this.#unreported[reason] += records
+      },
+    }
+    this.#batches = new BatchSender({
+      ctx: this.#ctx,
+      endpoint,
+      ingestKey: input.ingestKey,
+      fetch: input.fetch ?? fetch,
+      sleep: input.sleep ?? abortableSleep,
+      random: input.random ?? Math.random,
+      consent: this.#consent,
+      onAccepted: (sealedName) => {
+        this.#ownSealed.delete(sealedName)
+        this.#droppedSince200 = 0
+      },
+      report: (event, error) => this.#report(event, error),
+    })
+    this.transport = {
+      sampling: { rawTurnRate: 1 },
+      providers: this.#providers,
+      endpoint,
+      ready: input.autoStart === false ? Promise.resolve() : this.#start(),
+      capture: (message) => this.#capture(message),
+      flush: () => this.#flush(),
+      shutdown: () => this.#shutdown(),
+      sweep: () => this.#guard("telemetry_spool_sweep_failed", () => sweepSpool(this.#ctx)),
+      droppedEvents: () => this.#droppedSince200,
+    }
+  }
+
+  #start(): Promise<void> {
+    const flushTimer = setInterval(() => void this.#flush(), this.#input.flushIntervalMs ?? 10_000)
+    const sweepTimer = setInterval(() => {
+      this.transport.sweep()
+      void this.#batches.pump()
+    }, this.#input.sweepIntervalMs ?? 60_000)
+    flushTimer.unref?.()
+    sweepTimer.unref?.()
+    this.#timers.push(flushTimer, sweepTimer)
+    return Promise.resolve().then(() => {
+      this.transport.sweep()
+      return this.#batches.pump()
+    })
+  }
+
+  #report(event: TelemetryDiagnosticEvent, error?: unknown): void {
+    this.#input.diagnostics?.({
+      event,
+      source: this.#input.source ?? "otlp",
+      error,
+      errorKind: error === undefined ? undefined : error instanceof Error ? "error" : "non_error",
+    })
+  }
+
+  #guard(event: TelemetryDiagnosticEvent, run: () => void): void {
+    try {
+      run()
+    } catch (error) {
+      this.#report(event, error)
+    }
+  }
+
+  #emit(name: string, attributes: WireAttributes): void {
+    const uid = attributes["log.record.uid"]
+    this.#providers.logger.emit({
+      eventName: `omo.${name}`,
+      attributes: {
+        ...attributes,
+        "log.record.uid": typeof uid === "string" ? uid : (this.#input.createEventId ?? Bun.randomUUIDv7)(),
+      },
+      context: context.active(),
+    })
+  }
+
+  #capture(message: TelemetryCaptureMessage): void {
+    if (this.#stopped) return
+    const properties = message.properties ?? {}
+    const project = this.#input.project ?? defaultWireProjection
+    const eventId = properties["event_id"]
+    const session = properties["$session_id"]
+    this.#emit(message.event, {
+      ...project(message.event, properties),
+      ...(typeof eventId === "string" && eventId.length > 0 ? { "log.record.uid": eventId } : {}),
+      ...(typeof session === "string" && session.length > 0 ? { "session.id": session } : {}),
+    })
+  }
+
+  #onAppended(writer: SpoolWriter): void {
+    if (writer.records < (this.#input.flushAt ?? 20) && writer.bytes < SEAL_BYTES) return
+    this.#seal(writer)
+    void this.#batches.pump()
+  }
+
+  #seal(writer: SpoolWriter): void {
+    this.#guard("telemetry_spool_write_failed", () => {
+      const sealed = writer.seal(createBatchId(this.#ctx.nowMs()))
+      if (sealed === null) return
+      this.#ownSealed.add(sealed)
+      enforceSpoolCap(this.#ctx)
+    })
+  }
+
+  #reportDrops(): void {
+    for (const reason of DROP_REASONS) {
+      const count = this.#unreported[reason]
+      if (count === 0) continue
+      this.#unreported[reason] = 0
+      this.#emit("client_dropped", { "omo.dropped.count": count, "omo.dropped.reason": reason })
+    }
+  }
+
+  #discardOwn(): void {
+    this.#guard("telemetry_spool_write_failed", () => {
+      this.#providers.logWriter.discard()
+      this.#providers.spanWriter.discard()
+      for (const name of this.#ownSealed) deleteFile(this.#ctx.dir, name)
+      this.#ownSealed.clear()
+    })
+  }
+
+  async #flush(): Promise<void> {
+    if (this.#stopped) return
+    if (!this.#consent()) {
+      this.#discardOwn()
+      return
+    }
+    this.#batches.newCycle()
+    this.#reportDrops()
+    this.#seal(this.#providers.logWriter)
+    this.#seal(this.#providers.spanWriter)
+    await this.#batches.pump()
+  }
+
+  async #shutdown(): Promise<void> {
+    if (this.#stopped) return
+    for (const timer of this.#timers) clearInterval(timer)
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      this.#flush(),
+      new Promise<void>((resolve) => {
+        deadline = setTimeout(resolve, this.#input.shutdownTimeoutMs ?? 2_000)
+      }),
+    ])
+    clearTimeout(deadline)
+    this.#stopped = true
+    this.#batches.stop()
+    this.#providers.shutdown()
+  }
+}
