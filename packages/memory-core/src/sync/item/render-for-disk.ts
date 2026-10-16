@@ -18,7 +18,7 @@ import type { LoroDoc } from "../../crdt/loro-runtime"
 import { isAlias, isCollection, isMap, isNode, isPair, isScalar, parseDocument } from "yaml"
 
 import type { FmValue } from "./frontmatter"
-import { emitFrontmatter, splitHeader, splitItem } from "./frontmatter"
+import { emitFrontmatter, splitHeader, splitItem, withoutBom } from "./frontmatter"
 import type { FrontmatterEntry } from "./render"
 import { bodyOf, frontmatterEntries, renderItem } from "./render"
 
@@ -34,8 +34,33 @@ export function renderForDisk(doc: LoroDoc, diskText: string, patch: Patcher = p
   if (canonical === null) return null
   const want = modelOf(canonical)
   if (sameModel(want, modelOf(diskText))) return diskText
-  const patched = tryPatch(patch, doc, diskText, want)
-  return patched !== null && sameModel(modelOf(patched), want) ? patched : canonical
+  // A leading BOM is the file's own encoding marker: written back exactly when the disk had one,
+  // and never from the doc, whose text never starts with one.
+  const disk = withoutBom(diskText)
+  const bom = diskText.slice(0, diskText.length - disk.length)
+  const eol = eolOf(disk)
+  const patched = tryPatch(patch, doc, disk, want)
+  if (patched !== null && sameModel(modelOf(patched), want)) return `${bom}${patched}`
+  const bare = withoutBom(canonical)
+  const styled = withEol(bare, eol)
+  return `${bom}${sameModel(modelOf(styled), want) ? styled : bare}`
+}
+
+// The file's dominant line ending (lead r6): the majority of its line breaks, ties to the first
+// break. Every line the client writes (re-emitted, added, and fences it creates) uses it; lines it
+// does not touch keep their own bytes, so a mixed file stays mixed only where it already was.
+function eolOf(text: string): string {
+  const crlf = text.split("\r\n").length - 1
+  const lf = text.split("\n").length - 1 - crlf
+  if (crlf !== lf) return crlf > lf ? "\r\n" : "\n"
+  const nl = text.indexOf("\n")
+  return nl > 0 && text[nl - 1] === "\r" ? "\r\n" : "\n"
+}
+
+function withEol(canonical: string, eol: string): string {
+  const parts = eol === "\n" ? null : splitHeader(canonical)
+  if (parts === null) return canonical
+  return `---${eol}${parts.header.replaceAll("\n", eol)}${eol}---${eol}${parts.body}`
 }
 
 function tryPatch(patch: Patcher, doc: LoroDoc, diskText: string, want: Model): string | null {
@@ -57,10 +82,32 @@ function patchDisk(doc: LoroDoc, diskText: string, want: Model): string | null {
   if (sameFields(have, want.fields)) return `${diskText.slice(0, diskText.length - parts.body.length)}${bodyOf(doc)}`
   const changed = reEmitKeys(disk.contents.items, changedKeys(have, want.fields))
   if (changed === null) return null
-  const source = `${parts.header}\n`
-  const spans = pairSpans(disk.contents.items, source)
+  const eol = eolOf(diskText)
+  const region = rawRegion(diskText, parts.body.length)
+  if (region === null) return null
+  const spans = pairSpans(region.items, region.source)
   if (spans === null) return null
-  return `---\n${spliceHeader(source, spans, entries, changed, want.fields)}---\n${bodyOf(doc)}`
+  return `${region.open}${spliceHeader(region.source, spans, entries, changed, want.fields, eol)}${region.close}${bodyOf(doc)}`
+}
+
+interface RawRegion {
+  readonly open: string
+  readonly source: string
+  readonly close: string
+  readonly items: readonly unknown[]
+}
+
+// The disk's own bytes around the frontmatter: its opening fence line, the header lines including
+// the last line's own break, and its closing fence line. Untouched, they are copied as they are.
+function rawRegion(text: string, bodyLength: number): RawRegion | null {
+  const openLength = text.startsWith("---\r\n") ? 5 : 4
+  const end = text.indexOf("\n---", openLength)
+  const bodyStart = text.length - bodyLength
+  if (end < 0 || end + 1 > bodyStart) return null
+  const source = text.slice(openLength, end + 1)
+  const parsed = parseDocument(source, { schema: "core", merge: true })
+  if (parsed.errors.length > 0 || !isMap(parsed.contents)) return null
+  return { open: text.slice(0, openLength), source, close: text.slice(end + 1, bodyStart), items: parsed.contents.items }
 }
 
 interface PairSpan {
@@ -79,7 +126,7 @@ function pairSpans(pairs: readonly unknown[], source: string): PairSpan[] | null
     const end = pair.value.range?.[2]
     if (start === undefined || end === undefined) return null
     // The last pair's node end can stop before its line break; a span always owns its line break.
-    spans.push({ key: String(pair.key.value), start, end: source[end - 1] !== "\n" && source[end] === "\n" ? end + 1 : end })
+    spans.push({ key: String(pair.key.value), start, end: end + lineBreakAt(source, end) })
   }
   return spans
 }
@@ -93,10 +140,11 @@ function spliceHeader(
   entries: readonly FrontmatterEntry[],
   changed: ReadonlySet<string>,
   want: ReadonlyMap<string, string>,
+  eol: string,
 ): string {
   const onDisk = new Set(spans.map((span) => span.key))
   const nodes = new Map(entries.map((entry) => [entry.key, entry.node]))
-  const added = entries.filter((entry) => !onDisk.has(entry.key)).map((entry) => emitLine(entry.key, entry.node))
+  const added = entries.filter((entry) => !onDisk.has(entry.key)).map((entry) => emitLine(entry.key, entry.node, eol))
   let out = ""
   let cursor = 0
   for (const span of spans) {
@@ -106,7 +154,7 @@ function spliceHeader(
       const from = commentBlockStart(source, span.start)
       out += source.slice(cursor, from)
     } else {
-      out += source.slice(cursor, span.start) + emitLine(span.key, node)
+      out += source.slice(cursor, span.start) + emitLine(span.key, node, eol)
     }
     cursor = span.end
   }
@@ -118,8 +166,14 @@ function spliceHeader(
   return out + added.join("") + source.slice(cursor)
 }
 
-function emitLine(key: string, node: FrontmatterEntry["node"]): string {
-  return `${emitFrontmatter([{ key, node }])}\n`
+function emitLine(key: string, node: FrontmatterEntry["node"], eol: string): string {
+  return `${emitFrontmatter([{ key, node }]).replaceAll("\n", eol)}${eol}`
+}
+
+function lineBreakAt(source: string, end: number): number {
+  if (source[end - 1] === "\n") return 0
+  if (source.startsWith("\r\n", end)) return 2
+  return source[end] === "\n" ? 1 : 0
 }
 
 function commentBlockStart(source: string, start: number): number {

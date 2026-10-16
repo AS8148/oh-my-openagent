@@ -104,7 +104,8 @@ function applyWorkingText(fork: LoroDoc, workingText: string): void {
       if (value.kind !== "remove") applyKey(fork, key, value, history, NONE)
     }
   }
-  const bodyTarget = parsed.fm === null ? workingText : parsed.body
+  // The body never carries the BOM, frontmatter or not: it is an encoding marker (review d58391c9b3).
+  const bodyTarget = parsed.body
   const bodyCurrent = fork.hasContainer("cid:root-body:Text") ? fork.getText("body").toString() : ""
   if (bodyCurrent !== bodyTarget) fork.getText("body").update(bodyTarget)
 }
