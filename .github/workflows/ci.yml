@@ -244,26 +244,46 @@ jobs:
         if: needs.ci-mode.outputs.run_heavy == 'true' && runner.os == 'Linux' && matrix.shard == '1/2'
         continue-on-error: true
         run: |
-          echo "kernel $(uname -r) | ptrace_scope $(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null) | userns_restrict $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null) | aa_unconfined $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_unconfined 2>/dev/null)"
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
-          cat > /tmp/procfd-probe.sh <<'PROBE'
-          denied=0
-          for round in $(seq 1 40); do
-            for i in 1 2 3 4 5; do git --version >/dev/null & done
-            ( exit 0 ) &
-            for p in $(ls /proc | grep -E '^[0-9]+$'); do
-              if ! ls "/proc/$p/fd" >/dev/null 2>/tmp/fderr; then
-                if grep -q 'Permission denied' /tmp/fderr; then
-                  denied=$((denied+1))
-                  echo "DENIED pid=$p state=$(awk '/^State:/{print $2}' /proc/$p/status 2>/dev/null) comm=$(cat /proc/$p/comm 2>/dev/null) uid=$(awk '/^Uid:/{print $2}' /proc/$p/status 2>/dev/null) ppid=$(awk '/^PPid:/{print $2}' /proc/$p/status 2>/dev/null)"
-                fi
-              fi
-            done
-            wait
-          done
-          echo "PROBE_DENIED_TOTAL=$denied"
+          cat > /tmp/scan-probe.ts <<'PROBE'
+          import { spawn } from "node:child_process"
+          import { readdir, readlink, stat, writeFile, mkdtemp } from "node:fs/promises"
+          import { tmpdir } from "node:os"
+          import { join } from "node:path"
+          const ws = process.env.GITHUB_WORKSPACE ?? "."
+          const { scanProcFdHolders } = await import(`${ws}/packages/memory-core/src/git/open-file-holders.ts`)
+          const { liveProcView } = await import(`${ws}/packages/memory-core/src/git/proc-view.ts`)
+          const dir = await mkdtemp(join(tmpdir(), "scan-probe-"))
+          const lock = join(dir, "HEAD.lock")
+          await writeFile(lock, "")
+          const holder = spawn("sh", ["-c", `exec 3<"${lock}"; sleep 3`], { stdio: "ignore" })
+          const uid = process.geteuid!()
+          const counts = new Map<string, number>()
+          const bump = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1)
+          for (let round = 0; round < 60; round += 1) {
+            for (let i = 0; i < 4; i += 1) spawn("git", ["--version"], { stdio: "ignore" })
+            const scan = await scanProcFdHolders(lock, liveProcView(uid))
+            bump(`scan:${scan.kind}`)
+            if (scan.kind !== "holders") {
+              for (const entry of await readdir("/proc")) {
+                if (!/^\d+$/.test(entry)) continue
+                const fdDir = `/proc/${entry}/fd`
+                let comm = "?"; try { comm = (await Bun.file(`/proc/${entry}/comm`).text()).trim() } catch {}
+                try {
+                  for (const fd of await readdir(fdDir)) {
+                    try { await readlink(join(fdDir, fd)) } catch (e: any) { bump(`readlink:${e.code}:${comm}`) }
+                  }
+                } catch (e: any) {
+                  let owner = "?"; try { owner = String((await stat(`/proc/${entry}`)).uid) } catch (s: any) { owner = `stat-${s.code}` }
+                  bump(`readdir:${e.code}:${comm}:owner=${owner}:self=${uid}`)
+                }
+              }
+            }
+          }
+          holder.kill()
+          console.log(JSON.stringify(Object.fromEntries(counts), null, 1))
           PROBE
-          unshare -Upf --mount-proc --map-current-user -- bash /tmp/procfd-probe.sh | sort | uniq -c | sort -rn | head -40
+          unshare -Upf --mount-proc --map-current-user -- env CI=1 bun /tmp/scan-probe.ts 2>&1 | tail -40
 
       - name: Run tests (memory-core, PID namespace)
         id: root-tests-linux-1-memory-core
