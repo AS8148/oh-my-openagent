@@ -9,7 +9,7 @@ import {
 } from "./omo-native-session-summary"
 import { OMO_NATIVE_PROPERTY_ALLOWLISTS } from "./product-identity"
 import { OWNER_STALE_MS, summaryDir } from "./session-summary-storage"
-import { createTempStateDirs, createTestRecorder, rows, summaryTurn } from "./session-summary.test-support"
+import { createTempStateDirs, createTestRecorder, rows, summaryKeys, summaryTurn } from "./session-summary.test-support"
 import { percentile } from "./session-summary-window"
 
 const stateDirs = createTempStateDirs()
@@ -129,9 +129,9 @@ describe("session_summary windows", () => {
     expect(existsSync(join(summaryDir(dir), "s1@boot-222.json"))).toBe(true)
   })
 
-  // summary_seq is unique per session: a process that keeps its own copy beside another process's window
-  // must never publish a seq that other process uses for the same session.
-  test("#given a live owner continuing a session #when a second process keeps its own copy #then the two never publish the same seq", async () => {
+  // The collector deduplicates session_summary rows on (session, summary_epoch, summary_seq): a process that
+  // keeps its own copy beside another process's window must never publish a pair that process uses.
+  test("#given a live owner continuing a session #when a second process keeps its own copy #then the two never publish the same (epoch, seq)", async () => {
     const dir = stateDirs.make()
     const owner = createTestRecorder({ dir, pid: 111, alivePids: [222] })
     const second = createTestRecorder({ dir, pid: 222, alivePids: [111] })
@@ -140,12 +140,13 @@ describe("session_summary windows", () => {
     await owner.summary.finish("s1", "quit")
     await second.summary.finish("s1", "quit")
 
-    const seqs = [...owner.published, ...second.published].map(({ properties }) => properties.summary_seq)
-    expect(seqs).toHaveLength(2)
-    expect(new Set(seqs).size).toBe(2)
+    const keys = summaryKeys([...owner.published, ...second.published])
+    expect(keys).toHaveLength(2)
+    expect(new Set(keys).size).toBe(2)
+    expect(existsSync(join(summaryDir(dir), "seq"))).toBe(false)
   })
 
-  test("#given a dead owner's window another process wins the claim on #when this process keeps its own copy #then its seq differs from the recovered one", async () => {
+  test("#given a dead owner's window another process wins the claim on #when this process keeps its own copy #then its (epoch, seq) differs from the recovered one", async () => {
     const dir = stateDirs.make()
     const dead = createTestRecorder({ dir, pid: 111 })
     await dead.summary.recordTurn("s1", summaryTurn())
@@ -157,7 +158,8 @@ describe("session_summary windows", () => {
     await winner.summary.recover()
 
     expect(rows(winner.published)).toEqual([[0, "recovered", 1]])
-    expect(rows(live.published).map(([seq]) => seq)).not.toContain(0)
+    const recovered = summaryKeys(winner.published)
+    expect(summaryKeys(live.published).filter((key) => recovered.includes(key))).toEqual([])
   })
 
   // #10229: a window written before consent was recorded (or by an opted-out session) carries no opted-in
@@ -176,17 +178,37 @@ describe("session_summary windows", () => {
     expect(existsSync(path)).toBe(false)
   })
 
-  test("#given a session that sent seq 0, opted out, and opted back in #when it sends again #then it never reuses a sent seq", async () => {
+  test("#given a session that sent seq 0, opted out, and opted back in #when it sends again #then no (epoch, seq) pair repeats and nothing of it stayed on disk", async () => {
     let consent = true
-    const { published, summary } = createTestRecorder({ dir: stateDirs.make(), isConsented: () => consent })
+    const dir = stateDirs.make()
+    const { published, summary } = createTestRecorder({ dir, isConsented: () => consent })
     await summary.recordTurn("s1", summaryTurn())
     await summary.finish("s1", "reload")
     consent = false
     await summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
+    const left = readdirSync(summaryDir(dir), { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile())
+    expect(left.map((entry) => entry.name).filter((name) => !/^\d+\.json$/.test(name))).toEqual([])
     consent = true
     await summary.recordTurn("s1", summaryTurn({ turnIndex: 2 }))
     await summary.finish("s1", "quit")
-    expect(rows(published)).toEqual([[0, "reload", 1], [1, "shutdown", 1]])
+    const keys = summaryKeys(published)
+    expect(keys).toHaveLength(2)
+    expect(new Set(keys).size).toBe(2)
+  })
+
+  test("#given a session that reloads #when both rows are published #then each carries a 16-hex summary_epoch, the continued window keeps it, and no seq reservation is written", async () => {
+    const dir = stateDirs.make()
+    const first = createTestRecorder({ dir })
+    await first.summary.recordTurn("s1", summaryTurn())
+    await first.summary.finish("s1", "reload")
+    await first.summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
+    await first.summary.finish("s1", "quit")
+
+    const epochs = first.published.map(({ properties }) => properties.summary_epoch)
+    expect(rows(first.published)).toEqual([[0, "reload", 1], [1, "shutdown", 1]])
+    for (const epoch of epochs) expect(String(epoch)).toMatch(/^[0-9a-f]{16}$/)
+    expect(new Set(epochs).size).toBe(1)
+    expect(existsSync(join(summaryDir(dir), "seq"))).toBe(false)
   })
 })
 

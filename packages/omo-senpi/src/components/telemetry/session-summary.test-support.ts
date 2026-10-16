@@ -111,3 +111,6 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
 
 export const rows = (published: readonly Published[]) =>
   published.map(({ properties }) => [properties.summary_seq, properties.ended_by, properties.turns])
+
+export const summaryKeys = (published: readonly Published[]) =>
+  published.map(({ properties }) => `${String(properties.summary_epoch)}:${String(properties.summary_seq)}`)

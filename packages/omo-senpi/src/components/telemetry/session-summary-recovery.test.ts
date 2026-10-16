@@ -161,7 +161,7 @@ describe("session_summary recovery hygiene", () => {
     storage.writePending(pending("0395eae0-1111-4222-8333-944455556662", "/on"))
     const window = (cwd: string) => ({
       consent: "enabled" as const, scope: { cwd }, sessionHash: `w-${cwd}`, sessionRole: "root" as const, owner: storage.owner,
-      heartbeatAt: T0, seq: 1, sampleRate: 0.05, windowId: null, window: null,
+      heartbeatAt: T0, epoch: "0123456789abcdef", seq: 1, sampleRate: 0.05, windowId: null, window: null,
     })
     storage.writeWindow("w-off", window("/off"))
     storage.writeWindow("w-on", window("/on"))
