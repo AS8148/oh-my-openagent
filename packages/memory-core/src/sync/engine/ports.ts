@@ -1,0 +1,135 @@
+// The sync engine's ports (sync-design §5-§8, plan todo 16). The engine owns ordering, the
+// journal and the lock discipline; everything that talks to the service, verifies or seals
+// bytes, holds item CRDT state or touches git sits behind these interfaces, so the engine is
+// tested against deterministic fakes and the real implementations (todo 13 crypto, the #10203
+// item device, the HTTP transport) plug in without changing it.
+
+/** One pulled sequence entry: a batch the server ordered, never its plaintext. */
+export interface PulledEntry {
+  readonly seq: number
+  /** The batch id (the push's idempotency key); one batch is applied at most once. */
+  readonly batchId: string
+  /** Hex SHA-256 of the object bytes, checked on download before anything else. */
+  readonly digest: string
+  readonly objectId: string
+  /** The principal that signed the record, for the commit's provenance trailer. */
+  readonly author: string
+}
+
+/** A compaction snapshot covering every entry up to and including `coversSeq`. */
+export interface SnapshotRef {
+  readonly coversSeq: number
+  readonly objectId: string
+  readonly digest: string
+}
+
+export interface PullPage {
+  /** Present when the cursor is older than retained history: load it before `entries`. */
+  readonly snapshot: SnapshotRef | null
+  readonly entries: readonly PulledEntry[]
+  /** The server's head when the page was served. */
+  readonly head: number
+  /** More entries follow after the last one in this page. */
+  readonly more: boolean
+}
+
+export type AppendResult =
+  | { readonly ok: true; readonly seq: number }
+  | { readonly ok: false; readonly error: "stale_base"; readonly head: number }
+
+export interface StreamHandlers {
+  /** `sync.advanced` / `sync.keyring.changed`: a trigger carrying the advertised head, never data. */
+  readonly onAdvanced: (head: number) => void
+  /** The stream connected (true) or dropped (false); while down the engine polls. */
+  readonly onConnected: (connected: boolean) => void
+}
+
+export interface Transport {
+  /** Entries with `seq > after`, in sequence order, at most `limit` of them. */
+  pull(after: number, limit: number): Promise<PullPage>
+  /** Object bytes, fetched through the Worker after the account check. */
+  download(objectId: string): Promise<Uint8Array>
+  /** Reserve exactly `size` bytes with this SHA-256; returns the upload id. */
+  reserve(size: number, digest: string): Promise<string>
+  upload(uploadId: string, bytes: Uint8Array): Promise<void>
+  /** Append the uploaded object at `baseSeq + 1`; a repost of `batchId` answers its original seq. */
+  append(request: { readonly uploadId: string; readonly digest: string; readonly baseSeq: number; readonly batchId: string }): Promise<AppendResult>
+  /** Subscribe to the account event stream; returns the unsubscribe. */
+  subscribe(handlers: StreamHandlers): () => void
+}
+
+/** A batch's plaintext: per-item CRDT updates, opaque to the engine. */
+export interface BatchPayload {
+  readonly items: readonly { readonly key: string; readonly ops: Uint8Array }[]
+}
+
+export type Verdict =
+  | { readonly ok: true; readonly payload: BatchPayload }
+  | { readonly ok: false; readonly reason: string }
+
+/**
+ * Receiver checks of sync-design §6 in order (chain link, record signature, epoch, account
+ * binding, object binding, content hash), then the plaintext. Nothing reaches the item store
+ * without passing here.
+ */
+export interface Verifier {
+  verifyEntry(entry: PulledEntry, bytes: Uint8Array): Promise<Verdict>
+  verifySnapshot(snapshot: SnapshotRef, bytes: Uint8Array): Promise<Verdict>
+}
+
+/** The outgoing half of the crypto port: encrypt and sign a batch for upload. */
+export interface Sealer {
+  seal(batchId: string, baseSeq: number, payload: BatchPayload): Promise<Uint8Array>
+}
+
+/** The item model (#10203 device API) as the engine uses it. */
+export interface ItemStore {
+  /** Loads persisted CRDT state and baselines; the engine calls it once before a cycle. */
+  load(): Promise<void>
+  /** Item keys the store knows, live or dead. */
+  keys(): readonly string[]
+  /** captureOnDevice: the working text against the item's materialised baseline; null = no edit. */
+  capture(key: string, workingText: string | null): Promise<Uint8Array | null>
+  /** Import a verified remote update (or this device's own captured ops). */
+  apply(key: string, ops: Uint8Array): Promise<void>
+  /** renderItem: the item's merged text, or null for a dead item. */
+  render(key: string): string | null
+  /** recordMaterialized: the text the engine wrote is the item's new baseline. */
+  markMaterialized(key: string, text: string | null): Promise<void>
+  /** Import a compaction snapshot's state; local pending state is kept. */
+  applySnapshot(payload: BatchPayload): Promise<void>
+  /** Make CRDT state and baselines durable (temp file + rename) before the journal advances. */
+  persist(): Promise<void>
+}
+
+/** The memory writer lock: network work never runs while it is held. */
+export interface WriterLock {
+  withLock<T>(fn: () => Promise<T>): Promise<T>
+}
+
+export interface Clock {
+  now(): number
+  /** Schedule `fn` after `ms`; returns the cancel. */
+  after(ms: number, fn: () => void): () => void
+}
+
+/** The memory repository: working tree paths, the sync commit and its trailer. */
+export interface SyncRepo {
+  /** The working tree root; item key `k` lives at `<root>/<k>`. */
+  readonly root: string
+  /** The git directory; the journal lives in `<gitDir>/omo-sync/`. */
+  readonly gitDir: string
+  head(): Promise<string | null>
+  /** HEAD's tree id; a cycle whose staged tree equals it has nothing to commit. */
+  headTree(): Promise<string>
+  /**
+   * The tree id a commit of HEAD plus `paths` (as they are in the working tree) would have,
+   * computed in a private index: the shared index is left untouched, so an agent commit landing
+   * meanwhile never swallows the sync's rendered files.
+   */
+  stageTree(paths: readonly string[]): Promise<string>
+  /** Commit exactly `paths` as `OmO Sync` with `message` (trailers included). */
+  commit(paths: readonly string[], message: string): Promise<string>
+  /** True when a commit reachable from HEAD carries `Sync-Seq: <range>`. */
+  hasSyncCommit(range: string): Promise<boolean>
+}
