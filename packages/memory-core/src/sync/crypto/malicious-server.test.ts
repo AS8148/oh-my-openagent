@@ -175,6 +175,15 @@ describe("MEDIUM 4: the SyncEntry envelope is a closed schema", () => {
     expectRefusedOnce(result, empty, { seq: 1, reason: "bad_envelope" })
   })
 
+  test.each([["null", null], ["an array", []], ["a number", 7], ["a string", "row"], ["a boolean", true]] as const)(
+    "a served row that is %s is refused and counted before any field is read",
+    async (_shape, row) => {
+      const state = await verified(mainChain())
+      const result = await run([served(row)], state)
+      expectRefusedOnce(result, state, { seq: headOf(state).seq + 1, reason: "bad_envelope" })
+    },
+  )
+
   test("a keyring row missing wraps is a counted bad_envelope, not a TypeError", async () => {
     const { wraps: _dropped, ...withoutWraps } = record("genesis")
     const empty = emptyChain(ACCOUNT)

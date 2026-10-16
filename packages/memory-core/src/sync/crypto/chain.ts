@@ -220,10 +220,16 @@ export const appendEntries = async (
   let current = state
   const steps: ChainStep[] = []
   for (const entry of entries) {
-    const result = entry.kind === "keyring" ? await verifyKeyringEntry(current, entry, "main") : await verifyBatchEntry(current, entry)
+    const malformed = envelopeRefusal(entry)
+    const result: StepResult =
+      malformed !== null
+        ? { ok: false, reason: malformed }
+        : entry.kind === "keyring"
+          ? await verifyKeyringEntry(current, entry, "main")
+          : await verifyBatchEntry(current, entry)
     if (!result.ok) {
       rejections.record(result.reason)
-      const seq = Number.isSafeInteger(entry.seq) ? entry.seq : (current.head?.seq ?? 0) + 1
+      const seq = malformed === null && Number.isSafeInteger(entry.seq) ? entry.seq : (current.head?.seq ?? 0) + 1
       return { ok: false, state: current, steps, seq, reason: result.reason }
     }
     current = result.state
