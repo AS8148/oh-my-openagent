@@ -35,8 +35,8 @@ function buildSchema(): Readonly<Record<string, SummaryPropertySchema>> {
 
 /**
  * `session_summary`: the assistant turns of one window, summed. Windows never overlap; a process numbers its
- * windows of a session with `summary_seq` inside a random `summary_epoch` that reloads and crash recovery
- * continue, and (session, `summary_epoch`, `summary_seq`) is unique, so summing every row of a session
+ * windows of a session with `summary_seq` inside a random `summary_epoch` that a reload in the same process
+ * keeps and any hand-over to another process (resume, crash recovery) replaces, and (session, `summary_epoch`, `summary_seq`) is unique, so summing every row of a session
  * reproduces its per-turn totals; the percentiles describe only their own window. The event's uuid is the
  * window id, so a re-sent window is deduplicated rather than counted twice. Cost is summed in integer
  * `cost_1e4` units and `cost_usd` is derived from it. Raw `turn_completed` rows ship only for sessions

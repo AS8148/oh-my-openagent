@@ -85,7 +85,7 @@ export type SummaryMeta = {
 
 /**
  * A run of one session's numbering: random per process (and per opt-in), kept while that process continues the
- * same window file. The collector deduplicates on (session, summary_epoch, summary_seq), so two processes never
+ * same window file and replaced whenever another process continues or recovers it. The collector deduplicates on (session, summary_epoch, summary_seq), so two processes never
  * need to coordinate seqs and nothing has to survive an opt-out.
  */
 export function newSummaryEpoch(): string {

@@ -8,7 +8,7 @@ import { newSummaryEpoch } from "./session-summary-window"
  * Continues the window another process wrote for this session once that process is gone, claiming the file
  * first so two resuming processes never both continue it. A live owner, or a claim another process won,
  * leaves this process its own copy beside the shared file. Only a session resumed from another process gets
- * here, so this ships in the recovery sidecar.
+ * here, so this ships in the recovery sidecar. The continuation numbers in a new epoch (see below).
  */
 export function adoptForeignWindow(input: {
   readonly storage: RecoveryStorage
@@ -28,7 +28,8 @@ export function adoptForeignWindow(input: {
     removeFile(claimed.claimPath)
     return fresh()
   }
-  const epoch = record.epoch ?? newSummaryEpoch()
+  // A new epoch on every hand-over: if the owner was misjudged dead and still publishes, no (epoch, seq) repeats.
+  const epoch = newSummaryEpoch()
   const published = record.windowId !== null && storage.hasPending(record.windowId)
   const entry: LiveWindow = published || record.window === null
     ? fresh(key, epoch, published ? record.seq + 1 : record.seq)

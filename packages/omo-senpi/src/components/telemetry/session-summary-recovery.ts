@@ -71,7 +71,8 @@ export function createSummaryRecovery(input: {
       return undefined
     }
     const nextSeq = record.window === null ? record.seq : record.seq + 1
-    const epoch = record.epoch ?? newSummaryEpoch()
+    // Published and continued under a new epoch: an owner misjudged dead that still publishes never repeats a pair.
+    const epoch = newSummaryEpoch()
     // A dead process's own copy is never continued (its key names that process), so it is not recreated.
     const keepNumbering = () => {
       if (!storage.isOwnCopyKey(key)) {
