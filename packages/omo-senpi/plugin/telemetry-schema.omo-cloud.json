@@ -52,7 +52,7 @@
     },
     "os.version": {
       "type": "string",
-      "pattern": "^[0-9]+(\\.[0-9]+){1,3}(-[0-9A-Za-z.-]{1,32})?$",
+      "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$",
       "required": false,
       "posthog_name": "$os_version"
     },
@@ -1310,6 +1310,13 @@
         "required": false,
         "posthog_name": "config_generation"
       },
+      "omo.custom_category_count": {
+        "type": "number",
+        "min": 0,
+        "max": 1000000000,
+        "required": false,
+        "posthog_name": "custom_category_count"
+      },
       "omo.machine_hash": {
         "type": "string",
         "pattern": "^[0-9a-f]{64}$",
@@ -1328,13 +1335,6 @@
         ],
         "required": false,
         "posthog_name": "source"
-      },
-      "omo.user_category_count": {
-        "type": "number",
-        "min": 0,
-        "max": 1000000000,
-        "required": false,
-        "posthog_name": "user_category_count"
       },
       "session.id": {
         "type": "string",
@@ -1573,13 +1573,13 @@
         "relay_only": true,
         "posthog_name": "machine_hash"
       },
-      "omo.start_reason": {
+      "omo.start_trigger": {
         "type": "string",
         "values": [
           "session_start"
         ],
         "required": false,
-        "posthog_name": "reason"
+        "posthog_name": "start_trigger"
       },
       "session.id": {
         "type": "string",
@@ -1858,7 +1858,7 @@
         "required": false,
         "posthog_name": "run_epoch"
       },
-      "omo.start_reason": {
+      "omo.start_trigger": {
         "type": "string",
         "values": [
           "initial_spawn",
@@ -1873,7 +1873,7 @@
           "unknown"
         ],
         "required": false,
-        "posthog_name": "start_reason"
+        "posthog_name": "start_trigger"
       },
       "omo.stats_status": {
         "type": "string",
@@ -2679,6 +2679,11 @@
         "required": false,
         "posthog_name": "is_effective_ultrawork_invocation"
       },
+      "omo.is_real_user": {
+        "type": "boolean",
+        "required": false,
+        "posthog_name": "is_real_user"
+      },
       "omo.is_turn_start": {
         "type": "boolean",
         "required": false,
@@ -2728,11 +2733,6 @@
         "relay_only": true,
         "posthog_name": "machine_hash"
       },
-      "omo.prompt.is_real_user": {
-        "type": "boolean",
-        "required": false,
-        "posthog_name": "is_real_user_prompt"
-      },
       "omo.prompt_length_bucket": {
         "type": "string",
         "values": [
@@ -2767,7 +2767,7 @@
         "required": false,
         "posthog_name": "real_prompt_ordinal_bucket"
       },
-      "omo.suppression_reason": {
+      "omo.suppression_cause": {
         "type": "string",
         "values": [
           "none",
@@ -2781,7 +2781,7 @@
           "skill_name_only"
         ],
         "required": false,
-        "posthog_name": "suppression_reason"
+        "posthog_name": "suppression_cause"
       },
       "session.id": {
         "type": "string",
@@ -3068,7 +3068,7 @@
         "required": false,
         "posthog_name": "session_role"
       },
-      "omo.start_reason": {
+      "omo.start_trigger": {
         "type": "string",
         "values": [
           "startup",
@@ -3078,7 +3078,7 @@
           "fork"
         ],
         "required": false,
-        "posthog_name": "reason"
+        "posthog_name": "start_trigger"
       },
       "omo.utc_offset_minutes": {
         "type": "number",
@@ -4495,5 +4495,5 @@
       }
     }
   },
-  "sha256": "e652b3f233f94aeb0a83c99a2390c99a4c7e26da1258897261f41245c693216c"
+  "sha256": "e78ecf679cbd46753e4b306fd4655b94627a902d4447de60766177ee161347f1"
 }

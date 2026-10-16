@@ -17,7 +17,7 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 |-------|----------|------|----------------|
 | `daily_active` | `$session_id` | `string` | - |
 | `daily_active` | `day_utc` | `string` | - |
-| `daily_active` | `reason` | `string` | `session_start` |
+| `daily_active` | `start_trigger` | `string` | `session_start` |
 | `session_started` | `$session_id` | `string` | - |
 | `session_started` | `$os` | `string` | - |
 | `session_started` | `$os_version` | `string` | - |
@@ -55,14 +55,14 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `session_started` | `provider_zai` | `boolean` | - |
 | `session_started` | `provider_zai_coding_cn` | `boolean` | - |
 | `session_started` | `provider_zai_coding_plan` | `boolean` | - |
-| `session_started` | `reason` | `string` | `startup`, `reload`, `new`, `resume`, `fork` |
 | `session_started` | `session_role` | `string` | `root`, `child`, `unknown` |
+| `session_started` | `start_trigger` | `string` | `startup`, `reload`, `new`, `resume`, `fork` |
 | `session_started` | `utc_offset_minutes` | `number` | - |
 | `prompt_submitted` | `$session_id` | `string` | - |
 | `prompt_submitted` | `input_source` | `string` | `interactive`, `rpc`, `extension` |
 | `prompt_submitted` | `invocation_stage` | `string` | `none`, `first_arm`, `remention`, `post_compact_rearm` |
 | `prompt_submitted` | `is_effective_ultrawork_invocation` | `boolean` | - |
-| `prompt_submitted` | `is_real_user_prompt` | `boolean` | - |
+| `prompt_submitted` | `is_real_user` | `boolean` | - |
 | `prompt_submitted` | `is_turn_start` | `boolean` | - |
 | `prompt_submitted` | `keyword_any` | `boolean` | - |
 | `prompt_submitted` | `keyword_occurrence_bucket` | `string` | `1`, `2`, `3_5`, `6_plus` |
@@ -72,7 +72,7 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `prompt_submitted` | `prompt_length_bucket` | `string` | `lt_100`, `100_500`, `500_2000`, `gte_2000` |
 | `prompt_submitted` | `queue_mode` | `string` | `immediate`, `follow_up`, `steer`, `other` |
 | `prompt_submitted` | `real_prompt_ordinal_bucket` | `string` | `1`, `2_3`, `4_10`, `11_25`, `26_plus` |
-| `prompt_submitted` | `suppression_reason` | `string` | `none`, `no_keyword`, `identifier_reference`, `negated_mention`, `extension_source`, `child_session`, `embedded_directive`, `skill_expansion`, `skill_name_only` |
+| `prompt_submitted` | `suppression_cause` | `string` | `none`, `no_keyword`, `identifier_reference`, `negated_mention`, `extension_source`, `child_session`, `embedded_directive`, `skill_expansion`, `skill_name_only` |
 | `turn_completed` | `$session_id` | `string` | - |
 | `turn_completed` | `cache_read_tokens` | `number` | - |
 | `turn_completed` | `cache_write_tokens` | `number` | - |
@@ -243,7 +243,7 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `delegation_completed` | `provider` | `string` | `alibaba-token-plan`, `alibaba-token-plan-cn`, `anthropic`, `anthropic-api`, `anthropic-subscription`, `bailian-coding-plan`, `chatgpt-subscription`, `claude-sdk-oauth`, `deepseek`, `google`, `github-copilot`, `kimi-coding`, `kimi-for-coding`, `moonshotai`, `openai`, `openai-codex`, `opencode`, `opencode-go`, `qwen-token-plan`, `qwen-token-plan-cn`, `vercel`, `xai`, `xiaomi`, `zai`, `zai-coding-cn`, `zai-coding-plan`, `custom` |
 | `delegation_completed` | `reasoning_effort` | `string` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `other`, `none` |
 | `delegation_completed` | `run_epoch` | `number` | - |
-| `delegation_completed` | `start_reason` | `string` | `initial_spawn`, `runtime_fallback`, `session_resume`, `dag_retry`, `revive_after_completed`, `revive_after_error`, `revive_after_cancelled`, `revive_after_interrupted`, `revive_after_lost`, `unknown` |
+| `delegation_completed` | `start_trigger` | `string` | `initial_spawn`, `runtime_fallback`, `session_resume`, `dag_retry`, `revive_after_completed`, `revive_after_error`, `revive_after_cancelled`, `revive_after_interrupted`, `revive_after_lost`, `unknown` |
 | `delegation_completed` | `stats_status` | `string` | `complete`, `partial`, `unavailable` |
 | `delegation_completed` | `status` | `string` | `completed`, `error`, `cancelled`, `interrupted`, `lost` |
 | `delegation_completed` | `task_send_queued_count` | `number` | - |
@@ -257,8 +257,8 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `category_config` | `builtin_overridden_count` | `number` | - |
 | `category_config` | `combo_fingerprint` | `string` | - |
 | `category_config` | `config_generation` | `number` | - |
+| `category_config` | `custom_category_count` | `number` | - |
 | `category_config` | `source` | `string` | `startup`, `reload`, `new`, `resume`, `fork` |
-| `category_config` | `user_category_count` | `number` | - |
 | `category_config` | `cat_visual_engineering_state` | `string` | `set`, `disabled`, `unavailable`, `absent` |
 | `category_config` | `cat_visual_engineering_provider` | `string` | `alibaba-token-plan`, `alibaba-token-plan-cn`, `anthropic`, `anthropic-api`, `anthropic-subscription`, `bailian-coding-plan`, `chatgpt-subscription`, `claude-sdk-oauth`, `deepseek`, `google`, `github-copilot`, `kimi-coding`, `kimi-for-coding`, `moonshotai`, `openai`, `openai-codex`, `opencode`, `opencode-go`, `qwen-token-plan`, `qwen-token-plan-cn`, `vercel`, `xai`, `xiaomi`, `zai`, `zai-coding-cn`, `zai-coding-plan`, `other` |
 | `category_config` | `cat_visual_engineering_model` | `string` | `qwen3.6-flash`, `qwen3.8-max-preview`, `claude-fable-5`, `claude-fable-5-1`, `claude-haiku-4-5`, `claude-haiku-5-5`, `claude-opus-4-6`, `claude-opus-5`, `claude-opus-5-5`, `claude-sonnet-5`, `claude-sonnet-5-5`, `gpt-5.6-luna-fast`, `gpt-5.6-sol`, `gpt-5.6-sol-fast`, `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-luna`, `gpt-6-luna-fast`, `gpt-6-sol`, `gpt-6-sol-fast`, `gpt-6.1-sol`, `gpt-6.1-sol-fast`, `deepseek-flash`, `deepseek-v4-flash`, `deepseek-v4-pro`, `gemini-3.1-pro`, `gemini-3.6-flash`, `grok-4.6`, `grok-4.7`, `k3`, `kimi-for-coding-highspeed`, `kimi-k3`, `glm-5.2`, `glm-5.3`, `mimo-v2.5-pro`, `mimo-v2.6-pro`, `minimax-m2.7`, `minimax-m3`, `grok-4.20-0309-non-reasoning`, `mimo-v2.6-flash`, `glm-5.3-flash`, `other` |
@@ -392,7 +392,7 @@ Raw `turn_completed` rows go to PostHog only for a fixed share of sessions, chos
 
 `task_send_running_count` counts accepted parent messages delivered while the child was running in the reported `run_epoch`. `task_send_queued_count` counts messages queued before the child launched. Neither is a revision-request metric, and no dashboard may label it as one. Message intent (revision, added context, nudge, status poll, crash recovery, control traffic) is not identifiable without the message text, which never leaves the machine, so the honest published name is parent follow-up rate. Queued sends are reported separately and never enter the follow-up numerator: a prelaunch message cannot revise output that does not exist yet.
 
-Related: the re-query signal is `start_reason = 'revive_after_completed'` only. Revives after `error`, `cancelled`, `interrupted`, or `lost` are recovery and belong in a separate rate.
+Related: the re-query signal is `start_trigger = 'revive_after_completed'` only. Revives after `error`, `cancelled`, `interrupted`, or `lost` are recovery and belong in a separate rate.
 
 #### Coverage status fields
 
@@ -408,7 +408,7 @@ Every cost or time dashboard must publish its coverage column alongside the aggr
 #### Known undercounts
 
 - Runtime fallback: tokens and cost consumed by a destroyed pre-fallback attempt are lost. `fallback_attempts > 0` flags the row and its `token_status` / `cost_status` degrade when totals cannot be vouched for. Cost per category is a lower bound for these tasks.
-- Session shutdown suspension: work done before a suspension is never counted. The resumed run emits with `start_reason = 'session_resume'` and only the resumed epoch's stats.
+- Session shutdown suspension: work done before a suspension is never counted. The resumed run emits with `start_trigger = 'session_resume'` and only the resumed epoch's stats.
 - Background completion after client shutdown: a task that terminates after the spawning host's telemetry client shut down emits nothing. Completion counts are a lower bound; use `delegation_started` as the request denominator, never the completion count.
 
 #### Country queries and delayed delivery

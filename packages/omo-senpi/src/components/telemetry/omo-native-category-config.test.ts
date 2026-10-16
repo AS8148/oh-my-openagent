@@ -41,7 +41,7 @@ function harness(config: OmoConfig, models: TaskModelRegistry = FULL_REGISTRY) {
 }
 
 describe("omo-native category config capture", () => {
-  test("#given a config with one builtin override and two user categories #when the snapshot is captured #then cat_architect is split into state/provider/model/reasoning enums, user_category_count is 2, builtin_overridden_count is 1, and combo_fingerprint is stable across property-order permutations", () => {
+  test("#given a config with one builtin override and two user categories #when the snapshot is captured #then cat_architect is split into state/provider/model/reasoning enums, custom_category_count is 2, builtin_overridden_count is 1, and combo_fingerprint is stable across property-order permutations", () => {
     // given
     const architectOverride = { model: "openai/gpt-5.6-sol", reasoningEffort: "high" } as const
     const first: OmoConfig = {

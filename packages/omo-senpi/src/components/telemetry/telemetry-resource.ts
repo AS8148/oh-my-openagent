@@ -3,7 +3,7 @@ import { arch, platform, release } from "node:os"
 
 import type { TelemetryEnv } from "@oh-my-opencode/telemetry-core"
 
-import { VERSION_PATTERN } from "./event-schema-constraints"
+import { bareOsVersion, VERSION_PATTERN } from "./event-schema-constraints"
 import { getOmoNativeAttribution, OMO_NATIVE_SCHEMA_VERSION } from "./product-identity"
 import { SEMCONV_MAP } from "./semconv-map"
 
@@ -35,8 +35,6 @@ function wire(table: string, id: string, fallback: string | undefined): string |
   return SEMCONV_MAP.values[table]?.rows.find((row) => row.id === id)?.wire ?? fallback
 }
 
-/** Kernel release shapes the artifact accepts; anything else is omitted (the attribute is optional). */
-const OS_VERSION = /^[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z.-]{1,32})?$/
 const VERSION = new RegExp(VERSION_PATTERN)
 
 /** A version outside VERSION_PATTERN (a dev build, a build-metadata suffix) is omitted, never sent. */
@@ -56,14 +54,14 @@ export function createOmoNativeResource(input: OmoNativeResourceInput): OmoNativ
     })
   const ci = attribution?.ci ?? isCi((input.env ?? process.env)["CI"])
   const osType = wire("os.type", os.platform(), undefined)
-  const osVersion = os.release()
+  const osVersion = bareOsVersion(os.release())
   return {
     "service.name": product,
     ...versionOrOmitted("service.version", input.packageVersion),
     "service.instance.id": PROCESS_INSTANCE_ID,
     ...(attribution === undefined ? {} : { "omo.install.hash": attribution.install_hash }),
     ...(osType === undefined ? {} : { "os.type": osType }),
-    ...(OS_VERSION.test(osVersion) ? { "os.version": osVersion } : {}),
+    ...(osVersion === undefined ? {} : { "os.version": osVersion }),
     "host.arch": wire("host.arch", os.arch(), "other") ?? "other",
     "telemetry.sdk.name": input.sdk.name,
     "telemetry.sdk.language": "nodejs",

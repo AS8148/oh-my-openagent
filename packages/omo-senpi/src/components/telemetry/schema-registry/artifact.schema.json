@@ -102,6 +102,9 @@
     },
     "values": {
       "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/wireKey"
+      },
       "additionalProperties": {
         "type": "object",
         "required": ["rows"],
@@ -111,7 +114,7 @@
             "type": "string"
           },
           "source_key": {
-            "type": "string"
+            "$ref": "#/$defs/wireKey"
           },
           "note": {
             "type": "string"
@@ -127,7 +130,9 @@
                   "type": "string"
                 },
                 "wire": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[a-z0-9][a-z0-9._-]*$"
                 }
               }
             }
@@ -143,8 +148,11 @@
       },
       "additionalProperties": {
         "type": "object",
+        "propertyNames": {
+          "$ref": "#/$defs/projectionName"
+        },
         "additionalProperties": {
-          "$ref": "#/$defs/keyPattern"
+          "$ref": "#/$defs/wireKey"
         }
       }
     },
@@ -156,13 +164,16 @@
       },
       "additionalProperties": {
         "type": "object",
+        "propertyNames": {
+          "$ref": "#/$defs/derivedName"
+        },
         "additionalProperties": {
           "type": "object",
           "required": ["from", "divide_by"],
           "additionalProperties": false,
           "properties": {
             "from": {
-              "$ref": "#/$defs/keyPattern"
+              "$ref": "#/$defs/wireKey"
             },
             "divide_by": {
               "type": "number"
@@ -185,6 +196,7 @@
       "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,5}$"
     },
     "forbiddenKeys": {
+      "description": "Exact forbidden field names, compared after normalization (leading $ _ @ stripped, lower-cased, . _ - unified): wire forms, PostHog forms and PostHog identity/group-merge names.",
       "enum": [
         "omo.install_id",
         "install_id",
@@ -208,39 +220,130 @@
         "gen_ai.system_instructions",
         "gen_ai.tool.call.arguments",
         "gen_ai.tool.call.result",
-        "host.name"
+        "host.name",
+        "host_name",
+        "hostname",
+        "ip",
+        "email",
+        "message",
+        "stack",
+        "reason",
+        "path",
+        "distinct_id",
+        "$ip",
+        "$current_url",
+        "$pathname",
+        "$host",
+        "$referrer",
+        "$referring_domain",
+        "$raw_user_agent",
+        "$user_agent",
+        "$device_name",
+        "$set",
+        "$set_once",
+        "$unset",
+        "$exception",
+        "$anon_distinct_id",
+        "$groups"
+      ]
+    },
+    "forbiddenWords": {
+      "description": "Identity words banned as a token anywhere in a normalized name (email_address, user_email_hash, ip_address).",
+      "enum": ["email", "ip", "hostname", "host_name", "distinct_id"]
+    },
+    "forbiddenSuffixes": {
+      "description": "Content words banned as the last token(s) of a normalized name: text that can be free-form (a count, code or fingerprint of it is a bounded value and stays legal).",
+      "enum": ["reason", "stack", "message", "path", "text", "prompt", "stack_trace"]
+    },
+    "forbiddenEndings": {
+      "description": "Endings banned even inside a token (omo.errorstacktrace).",
+      "enum": ["stacktrace"]
+    },
+    "forbiddenPrefixes": {
+      "description": "Namespaces banned as the leading token(s) of a normalized name: end-user identity, collector internals, PostHog exception, geoip, initial-attribution and group properties.",
+      "enum": ["user", "enduser", "omo.collector", "exception", "geoip", "initial", "group"]
+    },
+    "fieldName": {
+      "description": "The forbidden-key rule (plan D-I), the one definition every field-name position uses. Each pattern is generated from the forbidden* lists above (src/field-name-rule.ts) and matches every variant of a listed name: any leading $ _ @, any letter case, and . _ - as one separator.",
+      "type": "string",
+      "maxLength": 64,
+      "allOf": [
+        {
+          "not": {
+            "pattern": "^[$_@.-]*(?:[oO][mM][oO][._-]+[iI][nN][sS][tT][aA][lL][lL][._-]+[iI][dD]|[iI][nN][sS][tT][aA][lL][lL][._-]+[iI][dD]|[eE][xX][cC][eE][pP][tT][iI][oO][nN][._-]+[mM][eE][sS][sS][aA][gG][eE]|[eE][xX][cC][eE][pP][tT][iI][oO][nN][._-]+[sS][tT][aA][cC][kK][tT][rR][aA][cC][eE]|[eE][xX][cC][eE][pP][tT][iI][oO][nN][._-]+[tT][yY][pP][eE]|[cC][oO][dD][eE][._-]+[fF][iI][lL][eE][._-]+[pP][aA][tT][hH]|[cC][oO][dD][eE][._-]+[fF][iI][lL][eE][pP][aA][tT][hH]|[cC][oO][dD][eE][._-]+[fF][uU][nN][cC][tT][iI][oO][nN][._-]+[nN][aA][mM][eE]|[cC][oO][dD][eE][._-]+[sS][tT][aA][cC][kK][tT][rR][aA][cC][eE]|[uU][rR][lL][._-]+[fF][uU][lL][lL]|[uU][rR][lL][._-]+[pP][aA][tT][hH]|[uU][rR][lL][._-]+[qQ][uU][eE][rR][yY]|[cC][lL][iI][eE][nN][tT][._-]+[aA][dD][dD][rR][eE][sS][sS]|[sS][eE][rR][vV][eE][rR][._-]+[aA][dD][dD][rR][eE][sS][sS]|[nN][eE][tT][wW][oO][rR][kK][._-]+[pP][eE][eE][rR][._-]+[aA][dD][dD][rR][eE][sS][sS]|[gG][eE][nN][._-]+[aA][iI][._-]+[iI][nN][pP][uU][tT][._-]+[mM][eE][sS][sS][aA][gG][eE][sS]|[gG][eE][nN][._-]+[aA][iI][._-]+[oO][uU][tT][pP][uU][tT][._-]+[mM][eE][sS][sS][aA][gG][eE][sS]|[gG][eE][nN][._-]+[aA][iI][._-]+[pP][rR][oO][mM][pP][tT]|[gG][eE][nN][._-]+[aA][iI][._-]+[cC][oO][mM][pP][lL][eE][tT][iI][oO][nN]|[gG][eE][nN][._-]+[aA][iI][._-]+[sS][yY][sS][tT][eE][mM][._-]+[iI][nN][sS][tT][rR][uU][cC][tT][iI][oO][nN][sS]|[gG][eE][nN][._-]+[aA][iI][._-]+[tT][oO][oO][lL][._-]+[cC][aA][lL][lL][._-]+[aA][rR][gG][uU][mM][eE][nN][tT][sS]|[gG][eE][nN][._-]+[aA][iI][._-]+[tT][oO][oO][lL][._-]+[cC][aA][lL][lL][._-]+[rR][eE][sS][uU][lL][tT]|[hH][oO][sS][tT][._-]+[nN][aA][mM][eE]|[hH][oO][sS][tT][._-]+[nN][aA][mM][eE]|[hH][oO][sS][tT][nN][aA][mM][eE]|[iI][pP]|[eE][mM][aA][iI][lL]|[mM][eE][sS][sS][aA][gG][eE]|[sS][tT][aA][cC][kK]|[rR][eE][aA][sS][oO][nN]|[pP][aA][tT][hH]|[dD][iI][sS][tT][iI][nN][cC][tT][._-]+[iI][dD]|[iI][pP]|[cC][uU][rR][rR][eE][nN][tT][._-]+[uU][rR][lL]|[pP][aA][tT][hH][nN][aA][mM][eE]|[hH][oO][sS][tT]|[rR][eE][fF][eE][rR][rR][eE][rR]|[rR][eE][fF][eE][rR][rR][iI][nN][gG][._-]+[dD][oO][mM][aA][iI][nN]|[rR][aA][wW][._-]+[uU][sS][eE][rR][._-]+[aA][gG][eE][nN][tT]|[uU][sS][eE][rR][._-]+[aA][gG][eE][nN][tT]|[dD][eE][vV][iI][cC][eE][._-]+[nN][aA][mM][eE]|[sS][eE][tT]|[sS][eE][tT][._-]+[oO][nN][cC][eE]|[uU][nN][sS][eE][tT]|[eE][xX][cC][eE][pP][tT][iI][oO][nN]|[aA][nN][oO][nN][._-]+[dD][iI][sS][tT][iI][nN][cC][tT][._-]+[iI][dD]|[gG][rR][oO][uU][pP][sS])[._-]*$"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(?:^[$_@.-]*|[._-])(?:[eE][mM][aA][iI][lL]|[iI][pP]|[hH][oO][sS][tT][nN][aA][mM][eE]|[hH][oO][sS][tT][._-]+[nN][aA][mM][eE]|[dD][iI][sS][tT][iI][nN][cC][tT][._-]+[iI][dD])(?:[._-]|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(?:^[$_@.-]*|[._-])(?:[rR][eE][aA][sS][oO][nN]|[sS][tT][aA][cC][kK]|[mM][eE][sS][sS][aA][gG][eE]|[pP][aA][tT][hH]|[tT][eE][xX][tT]|[pP][rR][oO][mM][pP][tT]|[sS][tT][aA][cC][kK][._-]+[tT][rR][aA][cC][eE])[._-]*$"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(?:[sS][tT][aA][cC][kK][tT][rR][aA][cC][eE])[._-]*$"
+          }
+        },
+        {
+          "not": {
+            "pattern": "^[$_@.-]*(?:[uU][sS][eE][rR]|[eE][nN][dD][uU][sS][eE][rR]|[oO][mM][oO][._-]+[cC][oO][lL][lL][eE][cC][tT][oO][rR]|[eE][xX][cC][eE][pP][tT][iI][oO][nN]|[gG][eE][oO][iI][pP]|[iI][nN][iI][tT][iI][aA][lL]|[gG][rR][oO][uU][pP])[._-]+[^._-]"
+          }
+        }
       ]
     },
     "wireKey": {
       "type": "string",
       "allOf": [
         {
+          "$ref": "#/$defs/fieldName"
+        },
+        {
           "$ref": "#/$defs/keyPattern"
-        },
-        {
-          "not": {
-            "$ref": "#/$defs/forbiddenKeys"
-          }
-        },
-        {
-          "not": {
-            "pattern": "_(?:text|path|prompt)$"
-          }
         },
         {
           "not": {
             "pattern": "^\\$"
           }
+        }
+      ]
+    },
+    "posthogName": {
+      "description": "A PostHog property name the relay emits: an alias, a projection or a derived property.",
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/fieldName"
         },
         {
-          "not": {
-            "pattern": "^(?:user|enduser|omo\\.collector)\\."
-          }
+          "pattern": "^\\$?[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,5}$"
+        }
+      ]
+    },
+    "projectionName": {
+      "description": "Closed allowlist: the PostHog property names a resource projection may emit (today's clients). Anything else is rejected; fieldName stays as a second guard.",
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/fieldName"
         },
         {
-          "not": {
-            "pattern": "(?:^|\\.)(?:reason|stack|message|email|ip|hostname|path)$"
-          }
+          "enum": ["$os", "$os_version", "app_version", "arch", "os_platform", "os_version"]
+        }
+      ]
+    },
+    "derivedName": {
+      "description": "Closed allowlist: the PostHog property names a derived property may emit. Anything else is rejected; fieldName stays as a second guard.",
+      "type": "string",
+      "allOf": [
+        {
+          "$ref": "#/$defs/fieldName"
+        },
+        {
+          "enum": ["cost_usd"]
         }
       ]
     },
@@ -292,7 +395,7 @@
           "type": "boolean"
         },
         "posthog_name": {
-          "type": "string"
+          "$ref": "#/$defs/posthogName"
         }
       },
       "additionalProperties": false,
@@ -341,7 +444,8 @@
         },
         {
           "title": "semver",
-          "const": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+          "description": "MAJOR.MINOR.PATCH with at most one prerelease from a fixed set; no build metadata, no free suffix; every numeric part is at most 6 digits (the nightly/preview date is exactly 8).",
+          "const": "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6}|-[0-9]{1,6})?$"
         },
         {
           "title": "sha256_hex",
@@ -361,11 +465,12 @@
         },
         {
           "title": "os_version",
-          "const": "^[0-9]+(\\.[0-9]+){1,3}(-[0-9A-Za-z.-]{1,32})?$"
+          "description": "Dotted digits only, each part at most 6 digits; clients send the bare release (the kernel suffix of os.release() is stripped).",
+          "const": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"
         },
         {
           "title": "os_version_desktop",
-          "description": "The desktop's os.version: a closed OS family plus digits, or unknown (ingest strips the family before storage).",
+          "description": "The desktop's os.version: a closed OS family, a space and dotted digits, or unknown (ingest strips the family before storage).",
           "const": "^(unknown|macOS [0-9]+(\\.[0-9]+){0,2}|Windows [0-9]+\\.[0-9]+\\.[0-9]+|Linux [0-9]+\\.[0-9]+(\\.[0-9]+)?)$"
         }
       ]

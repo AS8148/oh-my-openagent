@@ -78,15 +78,6 @@ const EVENT_SCOPED_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   "omo.usage.total_tokens": new Set(["turn_completed"]),
 }
 
-/**
- * Wire keys renamed per event because `omo.<bare name>` would end in a forbidden leaf: a bare
- * `reason` reads like free text to the collector's key rules, so the start reason travels as
- * `omo.start_reason` and the relay restores the PostHog name from `posthog_name`.
- */
-const EVENT_KEY_RENAMES: Readonly<Record<string, { readonly key: string; readonly events: ReadonlySet<string> }>> = {
-  reason: { key: "omo.start_reason", events: new Set(["daily_active", "session_started"]) },
-}
-
 /** PostHog properties that are derived from a wire attribute rather than sent (D-P: cost_usd). */
 const DERIVED_PROPERTIES: Readonly<Record<string, { readonly from: string; readonly divide_by: number; readonly events: ReadonlySet<string> }>> = {
   cost_usd: { from: "omo.cost.usd_1e4", divide_by: 10_000, events: new Set(["turn_completed", "session_summary"]) },
@@ -149,8 +140,6 @@ export function wireKeyOf(event: string, property: string): { readonly key: stri
   } else if (CONVENTION_NAMES.has(property)) {
     throw new Error(`${event}.${property} has a semantic convention but no entry in semconv-map.json`)
   }
-  const renamed = EVENT_KEY_RENAMES[property]
-  if (renamed !== undefined && renamed.events.has(event)) return { key: renamed.key, location: "record" }
   return { key: `omo.${property}`, location: "record" }
 }
 

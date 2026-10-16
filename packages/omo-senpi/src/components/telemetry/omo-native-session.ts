@@ -18,6 +18,7 @@ import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { loadSenpiOmoConfig } from "../config-resolution"
 import { getSenpiTelemetryStateDir, recordSenpiDailyActive } from "./index"
 import { createCategoryConfigCapture } from "./omo-native-category-config"
+import { bareOsVersion } from "./event-schema-constraints"
 import { captureProcessCrashes } from "./omo-native-crash"
 import { providerPropertyName } from "./model-vocabulary"
 import {
@@ -94,17 +95,18 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           client.captureEvent("daily_active", {
             $session_id: sessionHash,
             day_utc: activity.dayUTC,
-            reason: "session_start",
+            start_trigger: "session_start",
           })
         }
 
         const inventory = readOmoNativeInventory(resolveAgentHome({ env }), options.diagnostics)
         const reason = sessionReason(payload)
         const utcOffsetMinutes = readUtcOffsetMinutes(options.utcOffsetMinutes, options.now)
+        const osVersion = bareOsVersion(osProvider.release())
         client.captureEvent("session_started", {
           $session_id: sessionHash,
           $os: osProvider.platform(),
-          $os_version: osProvider.release(),
+          ...(osVersion === undefined ? {} : { $os_version: osVersion }),
           arch: osProvider.arch(),
           cpu_count: osProvider.cpus().length,
           memory_bucket: memoryBucket(osProvider.totalmem()),
@@ -112,7 +114,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           model_count: inventory.modelCount,
           ...Object.fromEntries(inventory.knownProviders.map((id) => [providerPropertyName(id), true])),
           custom_provider_count: inventory.customProviderCount,
-          reason,
+          start_trigger: reason,
           session_role: resolveTelemetrySessionRole(pi, env),
           ...(utcOffsetMinutes === undefined ? {} : { utc_offset_minutes: utcOffsetMinutes }),
           ...(inventory.defaultProvider === undefined ? {} : { default_provider: inventory.defaultProvider }),

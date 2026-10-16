@@ -47,7 +47,7 @@ export function createCategoryConfigCapture(options: CategoryConfigCaptureOption
         config_generation: generation,
         ...Object.fromEntries(Object.entries(categories).flatMap(([name, value]) => categoryProperties(name, value))),
         combo_fingerprint: createHash("sha256").update(form).digest("hex").slice(0, FINGERPRINT_LENGTH),
-        user_category_count: counts.user,
+        custom_category_count: counts.user,
         builtin_overridden_count: counts.overridden,
         source,
       })

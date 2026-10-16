@@ -26,7 +26,18 @@ export type PropertyConstraint = {
  */
 export const VERSION_PATTERN =
   "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6}|-[0-9]{1,6})?$"
-export const OS_VERSION_PATTERN = "^[0-9]+(\\.[0-9]+){1,3}(-[0-9A-Za-z.-]{1,32})?$"
+/** The collector's `os_version` safe shape: the bare dotted release, no kernel or build suffix. */
+export const OS_VERSION_PATTERN = "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"
+const OS_RELEASE_PREFIX = /^([0-9]{1,6}(?:\.[0-9]{1,6}){1,3})(?:$|[^0-9.])/
+
+/**
+ * The bare dotted release of an OS release string (`26.4.1 (25E253)` -> `26.4.1`, `6.8.0-45-generic`
+ * -> `6.8.0`): the suffix after the numeric prefix is stripped. Undefined when the value does not
+ * start with such a prefix, so the caller omits it instead of sending it.
+ */
+export function bareOsVersion(release: string): string | undefined {
+  return OS_RELEASE_PREFIX.exec(release)?.[1]
+}
 export const SESSION_ID_PATTERN = "^[0-9a-f]{64}$"
 export const INSTALL_HASH_PATTERN = "^[0-9a-f]{64}$"
 export const INSTANCE_ID_PATTERN = "^[0-9a-f]{32}$"

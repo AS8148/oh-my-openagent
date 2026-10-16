@@ -14,7 +14,7 @@ function enumProperty<const Values extends readonly string[]>(values: Values): R
   return Object.freeze({ type: "string", values: Object.freeze(values) })
 }
 
-/** Snapshot provenance; reuses the `session_started.reason` vocabulary so snapshots dedupe across re-register. */
+/** Snapshot provenance; reuses the `session_started.start_trigger` vocabulary so snapshots dedupe across re-register. */
 export const CATEGORY_CONFIG_SOURCES = ["startup", "reload", "new", "resume", "fork"] as const
 
 /** How a builtin category resolved: `set` carries provider/model/reasoning/depth, the rest carry nothing else. */
@@ -47,8 +47,8 @@ const CATEGORY_CONFIG_FIXED_PROPERTIES = {
   builtin_overridden_count: NUMBER_PROPERTY,
   combo_fingerprint: STRING_PROPERTY,
   config_generation: NUMBER_PROPERTY,
+  custom_category_count: NUMBER_PROPERTY,
   source: enumProperty(CATEGORY_CONFIG_SOURCES),
-  user_category_count: NUMBER_PROPERTY,
 } as const
 
 /**
