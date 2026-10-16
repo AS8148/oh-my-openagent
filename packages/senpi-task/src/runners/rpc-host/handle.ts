@@ -5,11 +5,7 @@ import { exitTurnOutcome, promptFailureOutcome } from "../rpc/turn-outcome"
 import { createTurnSettlement, sessionIsIdle } from "../rpc/turn-settlement"
 import { createTurnWakeSources } from "../rpc/turn-wake-sources"
 import type { ChildEventListener, ChildExitOutcome, RpcTerminalAssistantMessage } from "../types"
-import {
-  classifySessionExit,
-  type SessionCloseIntent,
-  type SessionExitCause,
-} from "./exit-mapping"
+import { classifySessionExit, type SessionCloseIntent, type SessionExitCause } from "./exit-mapping"
 import { bindHostSessionPort } from "./handle-client-binding"
 import { settleClassifiedSessionExit } from "./handle-exit"
 import type {
@@ -24,7 +20,6 @@ import { unresponsiveMessage } from "../rpc/heartbeat"
 import { createHandleListeners } from "./handle-listeners"
 import { createHandleRecovery } from "./handle-recovery"
 import { createHandleReconciliation } from "./handle-reconciliation"
-import { createHostDelivery } from "./handle-delivery"
 import { createHandleStop } from "./handle-stop"
 import { createHandleTeardown } from "./handle-teardown"
 import { createHandleWaiters } from "./handle-waiters"
@@ -32,6 +27,9 @@ import { isTransportLossError } from "./reattach"
 import type { HostSessionParked } from "./session-client"
 import { extractTerminalAssistantMessage } from "./terminal-message"
 import { isTransportRecoveryExpired } from "./transport-recovery"
+import { createInputEffects } from "../input-effects"
+import { toHostInput } from "./input-command"
+import { createInputDelivery } from "../input-delivery"
 
 /**
  * The steerable child handle over ONE daemon session: identical turn semantics to
@@ -187,7 +185,11 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     stopRequested: () => stop.requested() || intent !== "running",
     endOnHost: stop.endOnHost,
     stopUnreached: stop.stopUnreached,
-    recoveryEnded: stop.recoveryEnded,
+    recoveryEnded: (adopted) => {
+      stop.recoveryEnded(adopted)
+      if (adopted) void inputEffects.reconcile().catch(error => log("senpi-task input reconciliation failed", { taskId, error: String(error) }))
+    },
+    continueInput: (command) => inputEffects.send(command, identified => client.send(toHostInput(identified))),
     port: () => client,
     identity: () => session,
     alive: () => intent === "running" && !parked && !detached && outcome === undefined,
@@ -225,6 +227,11 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
 
   bindHostSessionPort(client, clientBinding)
 
+  const inputEffects = createInputEffects({
+    taskId, store: options.inputStore,
+    send: command => recovery.issue(toHostInput(command)),
+  })
+
   const beginTurn = (): void => {
     continuationState = continuationState === "pending_delivery" ? "awaiting_start" : "none"
     if (outcome !== undefined) return
@@ -238,7 +245,9 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     wakeSources.resetTurn()
   }
 
-  const delivery = createHostDelivery({ beginTurn, issue: recovery.issue, settle: settleTurn })
+  const delivery = createInputDelivery({
+    effects: inputEffects, beginTurn, promptFailed: error => settleTurn(promptFailureOutcome(error)),
+  })
 
   const teardown = createHandleTeardown({
     taskId,
@@ -249,7 +258,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     markIntent: (next) => { intent = next },
     markDetached: () => { detached = true },
     clearActive: listeners.clearActive,
-    stopHeartbeat,
+    stopHeartbeat: () => { inputEffects.stopRetrying(); stopHeartbeat() },
     settle: settleClassified,
     onTornDown: () => {
       tornDown = true
@@ -258,6 +267,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   })
 
   return {
+    reconcileInputs: inputEffects.reconcile,
     task_id: taskId,
     kind: "host-session",
     get hostSession() {

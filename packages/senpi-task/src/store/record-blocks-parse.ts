@@ -21,7 +21,7 @@ import {
 } from "./scalar-read"
 import { IsolationBackendKindSchema } from "@oh-my-opencode/omo-config-core"
 import type { IsolationMergeResult, IsolationRecord, TaskIsolationSpec } from "../state"
-export { parseOptionalHostSession, validateHostSessionConsistency } from "./record-host-session-parse"
+export { parseOptionalHostSession, validateHostSessionConsistency } from "./host-session-parse"
 
 function parseIsolationSpec(value: unknown): TaskIsolationSpec {
   if (!isRecord(value)) throw new Error("isolation is not an object")

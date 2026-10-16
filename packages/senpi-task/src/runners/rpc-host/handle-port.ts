@@ -70,6 +70,7 @@ export interface HostSessionFacts extends HostSessionIdentity {
 }
 
 export type HostSessionHandleOptions = {
+  readonly inputStore?: import("../../store").TaskRecordStore
   readonly client: HostSessionPort
   readonly session: HostSessionIdentity
   readonly taskId: string
