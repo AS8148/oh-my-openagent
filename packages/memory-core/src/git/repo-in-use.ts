@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process"
 import { join, resolve, sep } from "node:path"
 
 import { readlink, realpath, stat } from "../fs/resilient"
 
-import { LSOF_EXEC_OPTIONS, answerFromProcOrLsof } from "./open-file-holders"
+import { LSOF_ANSWER_BOUND_MS, answerFromProcOrLsof, runLsofBounded, type HolderLookupOptions } from "./open-file-holders"
 import { classifyEntryError, errnoCode, scanEveryProcess, type EntryVerdict, type ProcScan, type ProcView } from "./proc-view"
 
 // omo #10199 r5 HIGH 1: the dead-owner proof covers the process that held the memory-write lock,
@@ -55,36 +54,29 @@ export async function scanProcCwdUsers(dir: string, view: ProcView): Promise<Pro
 
 // macOS: one lsof listing of every same-user process's cwd (-Fpn: `p<pid>` then `n<path>`). Only a
 // clean exit whose listing includes THIS process counts as an answer: anything else (lsof
-// missing, a signal, a truncated listing) is indeterminate. Awaited like the holder scan (HIGH 2).
-function scanLsofCwdUsers(dir: string): Promise<readonly number[] | null> {
-  return repoTree(dir).then((tree) => {
-    const uid = process.getuid?.()
-    if (tree === null || uid === undefined) return null
-    return new Promise((resolveScan) => {
-      const argv = ["-w", "-a", "-d", "cwd", "-u", String(uid), "-Fpn"]
-      execFile("lsof", argv, LSOF_EXEC_OPTIONS, (error, stdout) => {
-        if (error !== null) {
-          resolveScan(null)
-          return
-        }
-        let pid: number | undefined
-        let sawSelf = false
-        const users = new Set<number>()
-        for (const line of stdout.split("\n")) {
-          if (line.startsWith("p")) {
-            pid = Number.parseInt(line.slice(1), 10)
-            if (pid === process.pid) sawSelf = true
-          } else if (line.startsWith("n") && pid !== undefined && pid !== process.pid && inside(line.slice(1), tree.roots)) {
-            users.add(pid)
-          }
-        }
-        resolveScan(sawSelf ? [...users].sort((a, b) => a - b) : null)
-      })
-    })
-  })
+// missing, a signal, a truncated listing, the hang bound) is indeterminate, as for the holder scan.
+async function scanLsofCwdUsers(dir: string, boundMs: number): Promise<readonly number[] | null> {
+  const tree = await repoTree(dir)
+  const uid = process.getuid?.()
+  if (tree === null || uid === undefined) return null
+  const run = await runLsofBounded(["-w", "-a", "-d", "cwd", "-u", String(uid), "-Fpn"], boundMs)
+  if (run === null || run.error !== null) return null
+  let pid: number | undefined
+  let sawSelf = false
+  const users = new Set<number>()
+  for (const line of run.stdout.split("\n")) {
+    if (line.startsWith("p")) {
+      pid = Number.parseInt(line.slice(1), 10)
+      if (pid === process.pid) sawSelf = true
+    } else if (line.startsWith("n") && pid !== undefined && pid !== process.pid && inside(line.slice(1), tree.roots)) {
+      users.add(pid)
+    }
+  }
+  return sawSelf ? [...users].sort((a, b) => a - b) : null
 }
 
 /** Pids other than this process working inside `dir` right now, or null when that cannot be told. */
-export function findProcessesWorkingIn(dir: string): Promise<readonly number[] | null> {
-  return answerFromProcOrLsof((view) => scanProcCwdUsers(dir, view), () => scanLsofCwdUsers(dir))
+export function findProcessesWorkingIn(dir: string, options: HolderLookupOptions = {}): Promise<readonly number[] | null> {
+  const boundMs = options.lsofBoundMs ?? LSOF_ANSWER_BOUND_MS
+  return answerFromProcOrLsof((view) => scanProcCwdUsers(dir, view), () => scanLsofCwdUsers(dir, boundMs))
 }

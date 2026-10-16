@@ -95,31 +95,49 @@ export async function scanProcFdHolders(lockPath: string, view: ProcView): Promi
 // nonzero-abnormal exit, a signal, or a spawn error (lsof not installed) means the check failed,
 // and failed means indeterminate.
 //
-// omo #10199 r5 HIGH 2: no wall-clock deadline races lsof. A 5 s execFile timeout turned a slow
-// but correct answer into "indeterminate" whenever the host was CPU- or process-starved (51 of
-// 120 concurrent lookups on a loaded macOS host, each killed at 5.0 s), which failed recovery and
-// the suites intermittently. The answer is lsof's own exit; lsof already breaks the only hang it
-// can hit, a kernel lstat/readlink/stat stall, with its built-in timer (lsof(8), BLOCKS AND
-// TIMEOUTS), so nothing is left for an outer timer to bound except slowness.
-export const LSOF_EXEC_OPTIONS = { windowsHide: true, maxBuffer: 32 * 1024 * 1024 } as const
+// omo #10199 r5 HIGH 2: a 5 s execFile timeout turned a slow but correct answer into
+// "indeterminate" whenever the host was CPU- or process-starved (51 of 120 concurrent lookups on a
+// loaded macOS host, each killed at 5.0 s), which failed recovery and the suites intermittently.
+// The answer is lsof's own exit, awaited under a GENEROUS bound that only exists for a wedged lsof
+// (a stuck NFS mount): when the bound passes, the answer settles as indeterminate - never as "no
+// holders" - and lsof is killed. The bound is this module's own timer, not execFile's `timeout`,
+// whose callback waits for the killed child to exit and so would hang with an unkillable lsof.
+export const LSOF_ANSWER_BOUND_MS = 60_000
 
-function scanLsofHolders(path: string): Promise<readonly number[] | null> {
-  return new Promise((resolveScan) => {
-    execFile("lsof", ["-t", "--", path], LSOF_EXEC_OPTIONS, (error, stdout) => {
-      const listed = stdout.trim()
-      if (listed.length > 0) {
-        const lines = listed.split(/\r?\n/)
-        resolveScan(lines.every((line) => /^\d+$/.test(line)) ? lines.map((line) => Number.parseInt(line, 10)) : null)
-        return
-      }
-      if (error === null) {
-        resolveScan([])
-        return
-      }
-      const code: unknown = "code" in error ? error.code : undefined
-      resolveScan(code === 1 ? [] : null)
+export type LsofRun = { readonly error: (Error & { readonly code?: unknown }) | null; readonly stdout: string }
+
+export function runLsofBounded(argv: readonly string[], boundMs: number): Promise<LsofRun | null> {
+  return new Promise((resolveRun) => {
+    let settled = false
+    const child = execFile("lsof", [...argv], { windowsHide: true, maxBuffer: 32 * 1024 * 1024 }, (error, stdout) => {
+      if (settled) return
+      settled = true
+      clearTimeout(bound)
+      resolveRun({ error, stdout })
     })
+    const bound = setTimeout(() => {
+      if (settled) return
+      settled = true
+      child.kill("SIGKILL")
+      resolveRun(null)
+    }, boundMs)
   })
+}
+
+async function scanLsofHolders(path: string, boundMs: number): Promise<readonly number[] | null> {
+  const run = await runLsofBounded(["-t", "--", path], boundMs)
+  if (run === null) return null
+  const listed = run.stdout.trim()
+  if (listed.length > 0) {
+    const lines = listed.split(/\r?\n/)
+    return lines.every((line) => /^\d+$/.test(line)) ? lines.map((line) => Number.parseInt(line, 10)) : null
+  }
+  if (run.error === null) return []
+  return run.error.code === 1 ? [] : null
+}
+
+export interface HolderLookupOptions {
+  readonly lsofBoundMs?: number
 }
 
 export async function answerFromProcOrLsof(
@@ -148,12 +166,13 @@ export async function answerFromProcOrLsof(
 }
 
 /** Pids holding `path` open right now, or null when no available source can answer. */
-export function findOpenFileHolderPids(path: string): Promise<readonly number[] | null> {
-  return answerFromProcOrLsof((view) => scanProcFdHolders(path, view), () => scanLsofHolders(path))
+export function findOpenFileHolderPids(path: string, options: HolderLookupOptions = {}): Promise<readonly number[] | null> {
+  const boundMs = options.lsofBoundMs ?? LSOF_ANSWER_BOUND_MS
+  return answerFromProcOrLsof((view) => scanProcFdHolders(path, view), () => scanLsofHolders(path, boundMs))
 }
 
 /** Fail closed (review LOW 5): a check that could not answer counts as held, never as clean. */
-export async function hasOpenFileHolder(path: string): Promise<boolean> {
-  const holders = await findOpenFileHolderPids(path)
+export async function hasOpenFileHolder(path: string, options: HolderLookupOptions = {}): Promise<boolean> {
+  const holders = await findOpenFileHolderPids(path, options)
   return holders === null || holders.length > 0
 }
