@@ -3,6 +3,9 @@ import type { PostHog, PostHogOptions } from "posthog-node"
 import { TelemetryDeliveryError } from "./telemetry-delivery-error"
 import type { TelemetryCaptureMessage } from "./types"
 
+// The `./immediate-send` subpath is the whole send surface: the sender and the error it rejects with.
+export { TelemetryDeliveryError }
+
 type Attempt = { status?: number; error?: unknown }
 type Fetch = NonNullable<PostHogOptions["fetch"]>
 

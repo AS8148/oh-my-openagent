@@ -20,9 +20,10 @@ import {
 
 // The sidecar's whole surface: this file is the `#omo-telemetry-recovery-runtime` entry, and the bundle maps
 // telemetry-core's `#telemetry-immediate-send` here too, so every lazily loaded telemetry part shares one file.
+// The sender comes from its own module, not the telemetry-core barrel, so posthog-node stays out of the sidecar.
 export { adoptForeignWindow, withRecoveryOps }
 export { sendSummaryRecord } from "./session-summary-delivery"
-export { createImmediateSender } from "@oh-my-opencode/telemetry-core"
+export { createImmediateSender } from "@oh-my-opencode/telemetry-core/immediate-send"
 
 export type SummaryRecovery = {
   /** One pass over the summary directory; safe to run concurrently from any number of processes. */

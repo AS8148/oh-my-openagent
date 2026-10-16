@@ -1,4 +1,5 @@
-import { TelemetryDeliveryError, type TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
+import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
+import { TelemetryDeliveryError } from "@oh-my-opencode/telemetry-core/immediate-send"
 
 import type { NativeCaptureState } from "./omo-native-summary-wiring"
 import type { PublishSummary, SummaryPublication } from "./session-summary-publisher"
