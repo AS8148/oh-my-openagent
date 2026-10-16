@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import { CaptureBaselineError, captureItem, itemFrontier, renderItem } from "./index"
+import { CaptureBaselineError, itemFrontier, renderItem } from "./index"
+import { captureItem } from "./capture"
 import { captureCurrent, captureInto, mulberry32, newDoc } from "./test-support"
 
 describe("captureItem", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import { captureItem, deleteItem, isLive, itemFrontier, renderItem } from "./index"
+import { deleteItem, isLive, itemFrontier, renderItem } from "./index"
+import { captureItem } from "./capture"
 import { captureInto, newDoc } from "./test-support"
 
 describe("tombstones (sync-design §4)", () => {

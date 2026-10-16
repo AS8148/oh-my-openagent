@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test"
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
 
-import { captureItem, itemFrontier, renderItem, splitItem } from "./index"
+import { itemFrontier, renderItem, splitItem } from "./index"
+import { captureItem } from "./capture"
 import { captureInto, newDoc, mulberry32, type Peer } from "./test-support"
 
 function peer(n: number): Peer {

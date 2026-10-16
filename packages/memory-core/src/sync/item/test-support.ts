@@ -1,9 +1,16 @@
 // Shared helpers for the item-model tests: deterministic doc factory, capture/import
 // plumbing, and a seeded PRNG for the property tests. Not a test file itself.
 
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 import { loadLoroRuntime, type LoroDoc } from "../../crdt/loro-runtime"
 import type { ItemFrontier } from "./index"
-import { captureItem, itemFrontier, renderItem } from "./index"
+import { itemFrontier, renderItem } from "./index"
+import { captureItem } from "./capture"
+import type { ItemDevice } from "./device"
+import { openItemDevice } from "./device"
 
 export type Peer = `${number}`
 
@@ -30,6 +37,20 @@ export function captureInto(
 /** Capture the transition from the doc's current materialised state to `workingText`. */
 export function captureCurrent(doc: LoroDoc, workingText: string): Uint8Array | null {
   return captureInto(doc, renderItem(doc) ?? "", itemFrontier(doc), workingText)
+}
+
+/** Opens `count` devices, each with its own memory root and state dir, and removes them afterwards. */
+export async function withDevices<T>(count: number, run: (devices: ItemDevice[]) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), "item-devices-"))
+  try {
+    const devices: ItemDevice[] = []
+    for (let i = 0; i < count; i++) {
+      devices.push(await openItemDevice({ stateDir: join(root, `d${i}`, "state"), memoryRoot: join(root, `d${i}`, "memory") }))
+    }
+    return await run(devices)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 }
 
 /** Deterministic PRNG (mulberry32) so property tests reproduce byte-for-byte. */
