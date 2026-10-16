@@ -7,7 +7,7 @@ import type { PinCandidate } from "./anchor.ts"
 import { appendEntries, emptyChain } from "./chain.ts"
 import * as cryptoIndex from "./index.ts"
 import { createRejectionCounter } from "./rejection.ts"
-import { genesisEntry, newDeviceKeyring, newRecoveryCredential } from "./testing/genesis.ts"
+import { genesisEntry, newDeviceKeyring, newRecoveryCredential, principalOf } from "./testing/genesis.ts"
 import { ACCOUNT, fixtureAnchor, mainChain, record } from "./testing/sync-v1.test-support.ts"
 import { forgetTrustAnchor, loadTrustAnchor, pinTrustAnchor, TrustPinError } from "./trust-pin.ts"
 
@@ -59,7 +59,7 @@ describe("the pinned root: set once from a proven walk, then the only root", () 
     const before = readFileSync(pinPath(dir), "utf8")
     const keyring = await newDeviceKeyring()
     const other = await genesisEntry(ACCOUNT, keyring, "W".repeat(43), newRecoveryCredential())
-    const walked = await appendEntries(emptyChain(ACCOUNT, { kind: "creator", account: ACCOUNT, genesisDigest: other.digest }), [other], createRejectionCounter())
+    const walked = await appendEntries(emptyChain(ACCOUNT, { kind: "creator", account: ACCOUNT, self: principalOf(keyring) }), [other], createRejectionCounter())
     if (!walked.ok || walked.state.pin === null) throw new Error("other root walk")
     await expect(pinTrustAnchor(dir, ACCOUNT, walked.state.pin)).rejects.toBeInstanceOf(TrustPinError)
     expect(readFileSync(pinPath(dir), "utf8")).toBe(before)

@@ -131,6 +131,28 @@ describe("H1: a recovering device trusts only the enrolment of the passkey it de
   })
 })
 
+describe("a creator device trusts only a genesis signed with its own key", () => {
+  test("a genesis the server built, whatever its digest, does not meet this device's creator anchor", async () => {
+    const [device, server] = [await newDeviceKeyring(), await newDeviceKeyring()]
+    const served = await genesisEntry(ACCOUNT, server, "W".repeat(43), newRecoveryCredential())
+    expectRefused(await walk({ kind: "creator", account: ACCOUNT, self: principal(device) }, [served]), "anchor_mismatch")
+  })
+
+  test("a genesis naming this device's principal under other keys is refused", async () => {
+    const [device, server] = [await newDeviceKeyring(), await newDeviceKeyring()]
+    const served = await genesisEntry(ACCOUNT, server, "W".repeat(43), newRecoveryCredential())
+    const impersonated = { ...principal(device), id: server.principal().id }
+    expectRefused(await walk({ kind: "creator", account: ACCOUNT, self: impersonated }, [served]), "anchor_mismatch")
+  })
+
+  test("the device's own genesis anchors the chain and yields its pin candidate", async () => {
+    const device = await newDeviceKeyring()
+    const own = await genesisEntry(ACCOUNT, device, "W".repeat(43), newRecoveryCredential())
+    const { outcome } = await walk({ kind: "creator", account: ACCOUNT, self: principal(device) }, [own])
+    expect(outcome.ok && outcome.state.pin?.genesisDigest).toBe(own.digest)
+  })
+})
+
 describe("H1: a pinned root refuses every other root", () => {
   test("a valid-looking genesis that is not the pinned one is refused before anything is trusted", async () => {
     const [server, joining] = [await newDeviceKeyring(), await newDeviceKeyring()]

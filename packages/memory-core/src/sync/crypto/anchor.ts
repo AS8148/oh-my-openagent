@@ -23,7 +23,9 @@ export type PinSource = "pairing" | "recovery" | "creator"
  * Evidence a device holds before any pin exists, from its own ceremony, never from the server:
  * - pairing: the approver keys the 6-digit code covered and the transcript the device itself made;
  * - recovery: the recovery public keys this device derived from the passkey it is using;
- * - creator: the digest of the genesis this device signed itself.
+ * - creator: this device's own principal; only a genesis naming exactly these keys as its first device,
+ *   and therefore signed with this device's private key, meets it. A caller-supplied digest is never
+ *   evidence: the server can produce any genesis and its digest, but not this device's signature.
  */
 export type BootstrapAnchor =
   | {
@@ -40,7 +42,7 @@ export type BootstrapAnchor =
       readonly sealing_public_key: string
       readonly signing_public_key: string
     }
-  | { readonly kind: "creator"; readonly account: string; readonly genesisDigest: string }
+  | { readonly kind: "creator"; readonly account: string; readonly self: Principal }
 
 export type ChainAnchor = TrustAnchor | BootstrapAnchor
 
@@ -90,8 +92,10 @@ export type AnchorStep =
   | { readonly ok: false; readonly reason: AnchorRejection }
 
 /**
- * Applies the device's anchor to one fully verified keyring record. A pinned or creator anchor is
- * met at genesis (its digest equals the pinned root) and refuses any other root. A pairing anchor is
+ * Applies the device's anchor to one fully verified keyring record. A pinned anchor is met at
+ * genesis when its digest equals the pinned root and refuses any other root. A creator anchor is met
+ * only at a genesis whose first device is exactly this device; the chain has already verified that
+ * genesis's signature under the first device's key, so only this device can have produced it. A pairing anchor is
  * met by the approval naming this device's own principal, signed by the folded member whose keys are
  * the counterpart keys the device's 6-digit code hashed, carrying exactly the device's transcript
  * (the commitment binds the joining keys and nonce; the code binds both devices' keys and both
@@ -108,12 +112,16 @@ export const anchorStep = (
   before: Authority | null,
   genesisDigest: string,
 ): AnchorStep => {
-  if (anchor.kind === "pinned" || anchor.kind === "creator") {
+  if (anchor.kind === "pinned") {
     if (body.kind !== "genesis") return { ok: true, anchored: false, candidate: null }
-    if (anchor.kind === "pinned" && !isTrustAnchor(anchor)) return { ok: false, reason: "untrusted_root" }
+    if (!isTrustAnchor(anchor)) return { ok: false, reason: "untrusted_root" }
     if (entry.digest !== anchor.genesisDigest) return { ok: false, reason: "untrusted_root" }
-    const candidate = anchor.kind === "creator" ? mintCandidate(anchor.account, entry.digest, "creator", entry) : null
-    return { ok: true, anchored: true, candidate }
+    return { ok: true, anchored: true, candidate: null }
+  }
+  if (anchor.kind === "creator") {
+    if (body.kind !== "genesis") return { ok: true, anchored: false, candidate: null }
+    const own = body.firstDevice.id === anchor.self.id && sameKeys(body.firstDevice, anchor.self)
+    return own ? { ok: true, anchored: true, candidate: mintCandidate(anchor.account, entry.digest, "creator", entry) } : { ok: false, reason: "anchor_mismatch" }
   }
   if (anchor.kind === "pairing") {
     if (body.kind !== "approval" || body.principal.id !== anchor.self.id) return { ok: true, anchored: false, candidate: null }

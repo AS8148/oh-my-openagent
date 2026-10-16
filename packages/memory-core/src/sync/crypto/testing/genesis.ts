@@ -4,7 +4,7 @@ import { appendEntries, type ChainState, emptyChain } from "../chain.ts"
 import type { Head, KeyringBody, KeyringEntry, WrapEntry } from "../entry.ts"
 import { createRejectionCounter } from "../rejection.ts"
 import { wrapSetDigest } from "../links.ts"
-import { isObject, type JsonObject } from "../parse.ts"
+import { isObject, type JsonObject, type Principal } from "../parse.ts"
 import { deviceIdOf, taggedHash } from "../signatures.ts"
 import { compareWrapEntries } from "../vendor/sync-format/canonical.ts"
 import { b64urlEncode } from "../vendor/sync-format/jcs.ts"
@@ -41,7 +41,7 @@ export const fixtureRecoveryCredential = async (): Promise<RecoveryCredential> =
   return { seed: await recoverySigningSeed("key1"), key: bootstrap["recovery_key"] }
 }
 
-const principalOf = (keyring: DeviceKeyring) => ({
+export const principalOf = (keyring: DeviceKeyring): Principal => ({
   kind: "device",
   id: keyring.principal().id,
   sealing_public_key: keyring.publicKeys().sealing,
@@ -105,7 +105,7 @@ export const headAfter = (entry: KeyringEntry): Head => ({ seq: entry.seq, link:
 /** A one-record chain the device itself created (creator anchor), committing `deviceWrap` as its epoch-1 wrap. */
 export const verifiedGenesisFor = async (keyring: DeviceKeyring, deviceWrap: string): Promise<ChainState> => {
   const genesis = await genesisEntry(ACCOUNT, keyring, deviceWrap, await fixtureRecoveryCredential())
-  const outcome = await appendEntries(emptyChain(ACCOUNT, { kind: "creator", account: ACCOUNT, genesisDigest: genesis.digest }), [genesis], createRejectionCounter())
+  const outcome = await appendEntries(emptyChain(ACCOUNT, { kind: "creator", account: ACCOUNT, self: principalOf(keyring) }), [genesis], createRejectionCounter())
   if (!outcome.ok) throw new Error(`test genesis refused: ${outcome.reason}`)
   return outcome.state
 }
