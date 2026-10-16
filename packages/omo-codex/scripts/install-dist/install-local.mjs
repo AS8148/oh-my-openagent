@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:3e5594ad32075631c778c9636a3d75fbf3fd84b41c64e7229d8faaddc3bf5349:9c8ec1dce7a1e5ddb554f3c8a7807d7eb61b77bd6096b14f370266eef3dbcd07
+// omo-codex-install:c81f8dd6950c4a8410b539a3c02cecc77b740cbe78e53ba0682d470d040a8971:d79cfc075b638ce643becd4ad8b66572da549ff1b69c6b9fa1eb360f7fd5c43d
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -9834,20 +9834,98 @@ function getTelemetryDistinctId(machineIdPrefix, osProvider = getDefaultTelemetr
 }
 var init_machine_id = () => {};
 
+// packages/telemetry-core/src/telemetry-delivery-error.ts
+var PERMANENT_STATUSES, TelemetryDeliveryError;
+var init_telemetry_delivery_error = __esm(() => {
+  PERMANENT_STATUSES = new Set([400, 413]);
+  TelemetryDeliveryError = class TelemetryDeliveryError extends Error {
+    permanent;
+    status;
+    constructor(status, cause) {
+      super(status === undefined ? "telemetry event was not delivered (no response)" : `telemetry event was rejected with HTTP ${status}`, { cause });
+      this.name = "TelemetryDeliveryError";
+      this.status = status;
+      this.permanent = status !== undefined && PERMANENT_STATUSES.has(status);
+    }
+  };
+});
+
+// packages/telemetry-core/src/posthog-immediate-send.ts
+function createImmediateSender(apiKey, options, PostHogClient) {
+  const baseFetch = options.fetch ?? ((url, init) => fetch(url, init));
+  let current;
+  const trackedFetch = async (url, init) => {
+    const attempt = current;
+    try {
+      const response = await baseFetch(url, init);
+      if (attempt !== undefined)
+        attempt.status = response.status;
+      return response;
+    } catch (error) {
+      if (attempt !== undefined)
+        attempt.error = error;
+      throw error;
+    }
+  };
+  const client = new PostHogClient(apiKey, { ...options, fetch: trackedFetch, fetchRetryCount: 0 });
+  let queue = Promise.resolve();
+  const sendOne = async (message) => {
+    const attempt = {};
+    current = attempt;
+    try {
+      await client.captureImmediate(message);
+    } finally {
+      current = undefined;
+    }
+    const { status } = attempt;
+    if (status === undefined || status < 200 || status >= 300)
+      throw new TelemetryDeliveryError(status, attempt.error);
+  };
+  return {
+    send(message) {
+      const result = queue.then(() => sendOne(message));
+      queue = result.catch(() => {
+        return;
+      });
+      return result;
+    },
+    async shutdown() {
+      await client.shutdown();
+    }
+  };
+}
+var init_posthog_immediate_send = __esm(() => {
+  init_telemetry_delivery_error();
+});
+
 // packages/telemetry-core/src/posthog-client.ts
 class PostHogTelemetryTransport {
   #client;
+  #apiKey;
+  #options;
+  #immediate;
   constructor(apiKey, options) {
     this.#client = new PostHog(apiKey, options);
+    this.#apiKey = apiKey;
+    this.#options = options;
   }
   capture(message) {
     this.#client.capture(message);
+  }
+  captureImmediate(message) {
+    this.#immediate ??= Promise.resolve().then(() => (init_posthog_immediate_send(), {})).then(({}) => createImmediateSender(this.#apiKey, this.#options, PostHog)).catch((error) => {
+      this.#immediate = undefined;
+      throw error;
+    });
+    return this.#immediate.then((sender) => sender.send(message));
   }
   async flush() {
     await this.#client.flush();
   }
   async shutdown() {
-    await this.#client.shutdown();
+    await Promise.all([this.#client.shutdown(), this.#immediate?.then((sender) => sender.shutdown(), () => {
+      return;
+    })]);
   }
 }
 function createDefaultPostHogTransport(apiKey, options) {
@@ -19949,7 +20027,8 @@ var OmoTeamsConfigLayerSchema = record(string2(), OmoTeamSpecLayerSchema);
 
 // packages/omo-config-core/src/schema/telemetry.ts
 var OmoTelemetrySettingsShape = {
-  enabled: boolean2()
+  enabled: boolean2(),
+  rawTurnSampleRate: number2().min(0).max(1)
 };
 var OmoTelemetrySettingsLayerSchema = object(OmoTelemetrySettingsShape).partial().strict();
 var OmoTelemetrySettingsSchema = OmoTelemetrySettingsLayerSchema.extend({
