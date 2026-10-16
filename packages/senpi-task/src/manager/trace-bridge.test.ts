@@ -61,7 +61,7 @@ describe("delegating turn trace context across the task bridge", () => {
     ])
 
     // then
-    expect(started.kind === "started" || started.kind === "starting").toBe(true)
+    expect(started.kind).toBe("started")
     expect(asked).toEqual(["parent-1"])
     expect(env[OMO_SENPI_TASK_TRACEPARENT]).toBe(delegating)
     expect(readSessionTraceparent({}, env)).toBe(delegating)

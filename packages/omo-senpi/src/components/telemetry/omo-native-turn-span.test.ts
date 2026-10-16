@@ -267,22 +267,20 @@ describe("omo.turn span per assistant turn", () => {
       const b = await openSession(agentDir, collector.factory, "sibling-b", { component })
 
       // when
-      await a.pi.dispatch("turn_start", turnStart(0), a.ctx)
-      await b.pi.dispatch("turn_start", turnStart(0), b.ctx)
-      await a.pi.dispatch("turn_end", turnEnd(0), a.ctx)
-      await b.pi.dispatch("turn_end", turnEnd(0), b.ctx)
+      await a.pi.dispatch("turn_start", turnStart(3), a.ctx)
+      await b.pi.dispatch("turn_start", turnStart(7), b.ctx)
+      await a.pi.dispatch("turn_end", turnEnd(3), a.ctx)
+      await b.pi.dispatch("turn_end", turnEnd(7), b.ctx)
       const { logs, spans } = await collector.drain()
 
       // then
-      const bySession = (session: string) => spans.find(({ attributes }) => attributes["session.id"] === session)
-      const spanA = bySession("hashed:sibling-a")
-      const spanB = bySession("hashed:sibling-b")
+      const spanOf = (turnIndex: number) => spans.find(({ attributes }) => attributes["omo.turn.index"] === turnIndex)
       expect(spans).toHaveLength(2)
-      expect(spanA?.spanId).not.toBe(spanB?.spanId)
-      const rows = turnRows(logs)
-      expect(rows.map(({ attributes, spanId }) => [attributes["session.id"], spanId])).toEqual([
-        ["hashed:sibling-a", spanA?.spanId],
-        ["hashed:sibling-b", spanB?.spanId],
+      expect(spanOf(3)?.spanId).not.toBe(spanOf(7)?.spanId)
+      const rows = turnRows(logs).toSorted((left, right) => Number(left.attributes["omo.turn_index"]) - Number(right.attributes["omo.turn_index"]))
+      expect(rows.map(({ attributes, spanId }) => [attributes["omo.turn_index"], spanId])).toEqual([
+        [3, spanOf(3)?.spanId],
+        [7, spanOf(7)?.spanId],
       ])
     })
   })
