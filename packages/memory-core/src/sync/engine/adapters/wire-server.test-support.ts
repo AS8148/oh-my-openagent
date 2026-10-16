@@ -104,7 +104,7 @@ export function startWireServer(options: WireServerOptions): WireServer {
         const floor = snapshot?.covers ?? 0
         const page = rows.filter((r) => r.seq > after && r.seq > floor).slice(0, state.pageSize)
         return Response.json({
-          entries: page.map((r) => ({ seq: r.seq, base_seq: r.seq - 1, kind: "batch", account: "acct", epoch: 1, author: { kind: "device", id: r.author }, digest: b64(r.digest), link: "A".repeat(43), keyring_link: null, record_sig: "S", object_id: r.objectId, bytes: objects.get(r.objectId)?.byteLength ?? 0 })),
+          entries: page.map((r) => ({ seq: r.seq, base_seq: r.seq - 1, kind: "batch", account: "acct", epoch: 1, author: { kind: "device", id: r.author }, digest: b64(r.digest), link: "A".repeat(43), keyring_link: null, record_sig: "S", object_id: r.objectId, bytes: objects.get(r.objectId)?.byteLength ?? 0, batch_id: r.batchId })),
         })
       }
       if (req.method === "GET" && path.startsWith("/v1/sync/objects/")) {

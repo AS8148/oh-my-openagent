@@ -54,6 +54,8 @@ export async function receive(deps: EngineDeps, journal: SyncJournal): Promise<R
     deps.fault?.("downloaded")
     const verdict = await verify(bytes)
     if (!verdict.ok) return verdict.code
+    // The pull row names the batch; an object whose sealed header names another is not this entry.
+    if (entry.batchId !== null && verdict.batchId !== entry.batchId) return "object_binding"
     const elsewhere = index[verdict.batchId] ?? heldBatches.get(verdict.batchId)
     if (elsewhere !== undefined && elsewhere.seq !== entry.seq) return "replayed_content"
     const items = verdict.payload.items.map((i) => ({ key: i.key, ops: toBase64(i.ops) }))

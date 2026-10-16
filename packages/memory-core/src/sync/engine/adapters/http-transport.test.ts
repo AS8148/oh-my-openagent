@@ -16,6 +16,7 @@ async function pair() {
   return { server, a, b }
 }
 
+const pushedIds: string[] = []
 const sha256Hex = (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
 const batchId = () => Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64url")
 
@@ -23,7 +24,10 @@ async function pushOne(t: ReturnType<typeof createHttpTransport>, bytes: Uint8Ar
   const digest = sha256Hex(bytes)
   const uploadId = await t.reserve(bytes.byteLength, digest)
   await t.upload(uploadId, bytes)
-  return t.append({ uploadId, digest, baseSeq, batchId: batchId(), epoch: 1, link: "A".repeat(43), recordSig: "S".repeat(86) })
+  const id = batchId()
+  const result = await t.append({ uploadId, digest, baseSeq, batchId: id, epoch: 1, link: "A".repeat(43), recordSig: "S".repeat(86) })
+  pushedIds.push(id)
+  return result
 }
 
 test("digests travel as 43-character base64url and come back as the same hex", () => {
@@ -42,7 +46,8 @@ test("reserve, upload and append land a batch the other device pulls and downloa
   expect(page.entries).toHaveLength(1)
   const [entry] = page.entries
   if (entry === undefined) throw new Error("no entry")
-  expect(entry).toMatchObject({ seq: 1, kind: "batch", digest: sha256Hex(bytes), author: "device:dev-a" })
+  expect(entry).toMatchObject({ seq: 1, kind: "batch", digest: sha256Hex(bytes), author: "device:dev-a", batchId: pushedIds.at(-1) })
+  expect(entry.batchId).toMatch(/^[A-Za-z0-9_-]{22}$/)
   expect(await b.download(entry.objectId)).toEqual(bytes)
 })
 

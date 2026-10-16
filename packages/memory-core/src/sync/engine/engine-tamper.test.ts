@@ -80,3 +80,15 @@ test("a refused entry stops the pull there; later entries wait, nothing is skipp
   expect(await b.engine.runCycle()).toMatchObject({ applied: 2, refused: 0 })
   expect(await b.read("n2.md")).toBe("three\n")
 }, GIT_TEST_TIMEOUT)
+
+test("a header naming another batch id than the pull row is refused by the engine whatever the verifier says", async () => {
+  const { b } = await published(["one"])
+  const verify = b.verifier.verifyEntry.bind(b.verifier)
+  b.verifier.verifyEntry = async (entry, bytes) => {
+    const verdict = await verify({ ...entry, batchId: null }, bytes)
+    return verdict.ok ? { ...verdict, batchId: "AAAAAAAAAAAAAAAAAAAAAA" } : verdict
+  }
+  expect(await b.engine.runCycle()).toMatchObject({ applied: 0, refused: 1 })
+  expect(await b.engine.status()).toEqual({ kind: "paused", seq: 1, code: "object_binding" })
+  await expectNothingApplied(b, 1)
+}, GIT_TEST_TIMEOUT)
