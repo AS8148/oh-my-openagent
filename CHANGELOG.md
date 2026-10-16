@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A steering message to a background task is never recorded as both failed and delivered.** When a steer timed out and its retry was still in flight while a later run of the parent reconciled the task's unconfirmed inputs, that run marked the message failed and the retry then delivered it, so the task's log said both. Reconciliation now leaves an input whose retry is in flight to that retry, which records the one real outcome ([#10165](https://github.com/code-yeongyu/oh-my-openagent/pull/10165)).
+
 **A plan you asked for stays approved when the session's task tracker is rebuilt.** Reloading extensions, or switching to another session and back, used to drop the record that you had asked for a plan, so the plan-reviewer was refused as if you never had. The record now carries over to the rebuilt tracker for the same session only; quitting still clears it, and extension-injected input still cannot approve a plan. Thanks to @gtg7784. ([#10143](https://github.com/code-yeongyu/oh-my-openagent/pull/10143))
 
 **A task shard host now exits once its children are done instead of staying alive for days.** When a task child's session parked or closed on its shard, the child's own connection to that shard stayed open, so the shard kept counting the connections and its idle exit never fired; one shard served zero sessions for two days with 18 connections back to itself. Those connections now close when the session ends, and a refused close no longer strands its client ([#10062](https://github.com/code-yeongyu/oh-my-openagent/issues/10062), [#10066](https://github.com/code-yeongyu/oh-my-openagent/pull/10066)).
