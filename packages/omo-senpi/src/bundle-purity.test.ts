@@ -40,7 +40,7 @@ const EXPECTED_SENPI_LOADER_ALIASES = [
 ] as const
 
 describe("omo-senpi bundle purity", () => {
-  it("#given the eval SDK #when imports and build inputs are inspected #then only node builtins are external and no node_modules are bundled", async () => {
+  it("#given the eval SDK and the telemetry sidecar #when imports and build inputs are inspected #then the SDK bundles no node_modules and the sidecar carries no posthog-node code", async () => {
     const path = join(packageRoot, "plugin", "runtime", "agent-toolkit-sdk", "sdk.js")
     expect(existsSync(path)).toBe(true)
     const imports = collectStaticImportSpecifiers(readFileSync(path, "utf8"))
@@ -48,9 +48,15 @@ describe("omo-senpi bundle purity", () => {
     expect(imports.filter(specifier => !specifier.startsWith("node:"))).toEqual([])
     const root = await mkdtemp(join(tmpdir(), "sdk-inputs-"))
     try {
-      const { toolkitSdkInputs } = await buildExtension({ outputPath: join(root, "omo.js") })
+      const built = await buildExtension({ outputPath: join(root, "omo.js") })
+      const { toolkitSdkInputs } = built
       expect(toolkitSdkInputs.length).toBeGreaterThan(0)
       expect(toolkitSdkInputs.filter(input => input.replaceAll("\\\\", "/").includes("node_modules/"))).toEqual([])
+      // The sidecar gets the PostHog class from the main bundle; its gzip/Sentry top-level code must not come along.
+      const { telemetryRecoveryInputs } = built
+      expect(telemetryRecoveryInputs.length).toBeGreaterThan(0)
+      expect(telemetryRecoveryInputs.filter(input => /posthog-node|telemetry-core\/src\/(index|posthog-client)\.ts$/.test(input.replaceAll("\\", "/")))).toEqual([])
+      expect(collectStaticImportSpecifiers(readFileSync(join(root, "omo-telemetry-recovery.js"), "utf8"))).not.toContain("node:zlib")
     } finally { await rm(root, { recursive: true, force: true }) }
   }, 120_000)
 

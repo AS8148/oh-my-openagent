@@ -49,6 +49,8 @@ export type TestRecorderInput = {
   readonly otherPidsAlive?: boolean
   /** Other live processes this one can see; any pid not listed (and not its own) is dead. */
   readonly alivePids?: readonly number[]
+  /** Replaces the pid probe built from `otherPidsAlive` / `alivePids`. */
+  readonly isPidAlive?: (pid: number) => boolean
   /** Start-time probe; by default every live pid still names the process that registered it. */
   readonly startTimes?: (pid: number) => string | null
   readonly sampleRate?: number
@@ -73,7 +75,7 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
   const storage = createSummaryStorage({
     stateDir: input.dir,
     owner: { pid, bootId: input.bootId ?? `boot-${pid}` },
-    isPidAlive: (candidate) => candidate === pid || (input.otherPidsAlive ?? false) || (input.alivePids ?? []).includes(candidate),
+    isPidAlive: input.isPidAlive ?? ((candidate) => candidate === pid || (input.otherPidsAlive ?? false) || (input.alivePids ?? []).includes(candidate)),
     processStartTime: input.startTimes ?? (() => "test-process-start"),
     now,
   })
