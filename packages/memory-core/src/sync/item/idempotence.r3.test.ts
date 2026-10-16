@@ -4,6 +4,7 @@ import type { LoroDoc } from "../../crdt/loro-runtime"
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 
+import { renderScalar } from "./frontmatter"
 import type { ItemDevice, ItemFrontier } from "./index"
 import { captureOnDevice, createDeviceItemDoc, itemFrontier, recordMaterialized, renderItem } from "./index"
 import { mulberry32, newDoc, withDevices } from "./test-support"
@@ -56,10 +57,24 @@ function bodyOf(disk: string): string {
 
 // A written value is recorded raw and as its canonical YAML source: a register with several
 // values renders each component as its canonical source (spec #454).
+// Hostile string content (memory-sync r6): newlines, CR, tabs, leading/trailing spaces, '#',
+// ': ', and whole values that are exactly a YAML indicator.
+const HOSTILE_PARTS = ["", " ", "\n", "\r\n", "\t", " # ", ": ", " |- ", " > ", "\n---\n"]
+const EXACT = ["|-", ">", "#", ": x", " lead", "trail "]
+
+function markersIn(text: string): string[] {
+  return text.match(/m\d+x\d+q/g) ?? []
+}
+
+function hostile(rand: () => number): string {
+  return HOSTILE_PARTS[Math.floor(rand() * HOSTILE_PARTS.length)] ?? ""
+}
+
 function record(ledger: Ledger, key: string, value: unknown): void {
   const set = ledger.written.get(key) ?? new Set<string>()
   set.add(String(value))
-  set.add(stringifyYaml(value, { collectionStyle: "flow" }).trim())
+  set.add(Array.isArray(value) ? stringifyYaml(value, { collectionStyle: "flow", lineWidth: 0 }).trim() : renderScalar(String(value)))
+  if (typeof value === "number") set.add(renderScalar(value))
   ledger.written.set(key, set)
 }
 
@@ -74,11 +89,12 @@ function edit(rand: () => number, disk: string, ledger: Ledger, seed: number): s
   const token = `m${seed}x${id}q`
   const roll = rand()
   if (roll < 0.2) {
-    const value = rand() < 0.5 ? seed * 1000 + id + 1 : `w${token}`
+    const roll2 = rand()
+    const value = roll2 < 0.4 ? seed * 1000 + id + 1 : roll2 < 0.55 ? (EXACT[Math.floor(rand() * EXACT.length)] ?? "|-") : `w${hostile(rand)}${token}`
     record(ledger, "n", value)
     fields.n = value
   } else if (roll < 0.4) {
-    const value = `d ${token}`
+    const value = `d${hostile(rand)}${token}`
     record(ledger, "description", value)
     fields.description = value
   } else if (roll < 0.65) {
@@ -86,17 +102,18 @@ function edit(rand: () => number, disk: string, ledger: Ledger, seed: number): s
     const op = rand()
     if (op < 0.6 || old.length === 0) {
       ledger.markers.push(token)
-      record(ledger, "tags", token)
-      fields.tags = [...old, token]
+      const element = `${hostile(rand).trimStart()}${token}`
+      record(ledger, "tags", element)
+      fields.tags = [...old, element]
       // A list written whole into a register-kind key is stored as one value: its flow source.
-      record(ledger, "tags", [...old, token])
+      record(ledger, "tags", [...old, element])
     } else if (op < 0.85) {
       const drop = old[Math.floor(rand() * old.length)] ?? ""
-      ledger.removed.add(drop)
+      for (const marker of markersIn(drop)) ledger.removed.add(marker)
       fields.tags = old.filter((e) => e !== drop)
       if (old.length === 1) delete fields.tags
     } else {
-      for (const e of old) ledger.removed.add(e)
+      for (const e of old) for (const marker of markersIn(e)) ledger.removed.add(marker)
       const value = `k: ${token}`
       record(ledger, "tags", value)
       fields.tags = value
@@ -105,7 +122,7 @@ function edit(rand: () => number, disk: string, ledger: Ledger, seed: number): s
     ledger.markers.push(token)
     body = body === "" || body.endsWith("\n") ? `${body}${token}\n` : `${body}\n${token}\n`
   }
-  const lines = Object.entries(fields).map(([key, value]) => stringifyYaml({ [key]: value }).trimEnd())
+  const lines = Object.entries(fields).map(([key, value]) => stringifyYaml({ [key]: value }, { blockQuote: false, lineWidth: 0 }).trimEnd())
   return lines.length === 0 ? body : `---\n${lines.join("\n")}\n---\n${body}`
 }
 

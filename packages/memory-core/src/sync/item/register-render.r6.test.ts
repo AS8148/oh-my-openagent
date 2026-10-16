@@ -10,6 +10,13 @@ import { captureCurrent, captureInto, newDoc } from "./test-support"
 // verbatim. YAML aliases and merge keys resolve before a value is classified; a custom tag makes
 // the frontmatter invalid, so the whole file stays body.
 
+const HOSTILE = ["a\nb", "a\r\nb", "\tlead tab", " lead", "trail ", "x # y", "k: v", "|-", ">", "a\n", "#start", "- dash", "a\n---\nb"]
+
+function headerOf(rendered: string): Record<string, unknown> {
+  const parsed: unknown = parseYaml(rendered.slice(4, rendered.indexOf("\n---\n", 3)))
+  return typeof parsed === "object" && parsed !== null ? Object.fromEntries(Object.entries(parsed)) : {}
+}
+
 async function concurrent(seed: string, left: string, right: string): Promise<string> {
   const a = await newDoc("1")
   captureInto(a, "", [], seed)
@@ -36,6 +43,29 @@ describe("register render (spec #454)", () => {
   test("a string and a number with the same text stay two values, sorted by UTF-8 bytes", async () => {
     const rendered = await concurrent("---\nn: 1\n---\n", "---\nn: 3\n---\n", "---\nn: \"3\"\n---\n")
     expect(parseYaml(rendered.slice(4, rendered.indexOf("\n---", 4)))).toEqual({ n: '"3" / 3' })
+  })
+
+  test("hostile string values are byte-stable over 5 capture -> render -> capture cycles (t05 report)", async () => {
+    for (const value of HOSTILE) {
+      const doc = await newDoc("1")
+      captureInto(doc, "", [], `---\nk: ${JSON.stringify(value)}\n---\nx\n`)
+      const first = renderItem(doc) ?? ""
+      for (let cycle = 0; cycle < 5; cycle++) {
+        const rendered = renderItem(doc) ?? ""
+        expect(rendered, `${JSON.stringify(value)} cycle ${cycle} changed bytes`).toBe(first)
+        expect(headerOf(rendered), `${JSON.stringify(value)} cycle ${cycle}`).toEqual({ k: value })
+        expect(captureCurrent(doc, rendered), `${JSON.stringify(value)} cycle ${cycle} re-capture minted ops`).toBeNull()
+      }
+      doc.free()
+    }
+  })
+
+  test("a multi-value register with multiline components renders one valid string of whole canonical sources", async () => {
+    const rendered = await concurrent("---\nk: s\n---\n", '---\nk: "a\\nb"\n---\n', '---\nk: "|-"\n---\n')
+    const joined = headerOf(rendered).k
+    expect(typeof joined).toBe("string")
+    const parts = String(joined).split(" / ").map((part) => parseYaml(part))
+    expect(parts.sort()).toEqual(["a\nb", "|-"])
   })
 
   test("a single value renders its canonical source verbatim", async () => {

@@ -39,9 +39,16 @@ export function splitItem(text: string): ParsedItemText {
   return { fm, body: nl < 0 ? "" : text.slice(nl + 1) }
 }
 
-/** Canonical scalar source for storage and render; strict-YAML round-trip safe. */
+/**
+ * Canonical scalar source for storage and render: always ONE self-contained YAML line (spec #454),
+ * so the same source is valid verbatim, as a component of a multi-value register, and as a set
+ * element. A string that would render across lines (block scalar or folding) is double-quoted
+ * with escapes instead (t05 report: an unindented block source corrupted on every cycle).
+ */
 export function renderScalar(value: string | number | boolean): string {
-  return stringify(value).trim()
+  const plain = stringify(value, { lineWidth: 0 }).trim()
+  if (!plain.includes("\n")) return plain
+  return stringify(doubleQuoted(String(value)), { lineWidth: 0 }).trim()
 }
 
 /**
@@ -66,8 +73,10 @@ export function renderEntry(key: string, value: string | readonly string[], verb
     }
   }
   const doc = new Document({}, { schema: "core" })
-  doc.set(key, typeof value === "string" ? doubleQuoted(value) : sequenceOf(value))
-  const out = stringify(doc).trimEnd()
+  // A verbatim source that cannot be emitted as-is is parsed and its VALUE written; a source is
+  // never quoted as if it were the value (t05 report).
+  doc.set(key, typeof value === "string" ? (verbatim ? parsedSource(value) : doubleQuoted(value)) : sequenceOf(value))
+  const out = stringify(doc, { lineWidth: 0 }).trimEnd()
   if (doc.errors.length > 0) throw new Error(`renderEntry: cannot render key ${JSON.stringify(key)}: ${doc.errors[0]?.message}`)
   return out
 }
@@ -77,6 +86,11 @@ export function renderEntry(key: string, value: string | readonly string[], verb
  * emitter keeps its exact type and style (a number stays a number, a quoted string stays
  * quoted, a flow map stays a flow map) and indents block scalars under the dash.
  */
+function parsedSource(source: string): unknown {
+  const parsed = parseDocument(source, { schema: "core" })
+  return parsed.errors.length === 0 ? parsed.toJS() : source
+}
+
 function doubleQuoted(value: string): Scalar {
   const scalar = new Scalar(value)
   scalar.type = "QUOTE_DOUBLE"
@@ -134,5 +148,5 @@ function scalarSource(value: unknown): string {
 }
 
 function flowOf(node: unknown): string {
-  return stringify(node, { collectionStyle: "flow" }).trim()
+  return stringify(node, { collectionStyle: "flow", lineWidth: 0 }).trim()
 }
