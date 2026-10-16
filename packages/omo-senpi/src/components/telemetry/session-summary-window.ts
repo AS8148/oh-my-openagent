@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto"
 import type { EventTelemetryProperties } from "@oh-my-opencode/telemetry-core"
 
 export const MODEL_SLOTS = 3
@@ -74,12 +75,24 @@ export type EndedBy = (typeof ENDED_BY)[number]
 
 export type SummaryMeta = {
   readonly endedBy: EndedBy
+  readonly epoch: string
   readonly seq: number
   readonly sampleRate: number
   readonly sampled: boolean
   readonly sessionRole: string
   readonly droppedEvents: number
 }
+
+/**
+ * A run of one session's numbering: random per process (and per opt-in), kept while that process continues the
+ * same window file. The collector deduplicates on (session, summary_epoch, summary_seq), so two processes never
+ * need to coordinate seqs and nothing has to survive an opt-out.
+ */
+export function newSummaryEpoch(): string {
+  return randomBytes(8).toString("hex")
+}
+
+export const SUMMARY_EPOCH_SHAPE = /^[0-9a-f]{16}$/
 
 export function openWindow(at: number, turnIndex: number): SummaryWindow {
   return { startedAt: at, lastAt: at, firstTurnIndex: turnIndex, lastTurnIndex: turnIndex, sums: {}, totals: [], models: [] }
@@ -128,6 +141,7 @@ export function summaryProperties(sessionHash: string, window: SummaryWindow, me
   const restSum = (key: string) => rest.reduce((sum, model) => sum + (model.sums[key] ?? 0), 0)
   const properties: Record<string, string | number | boolean> = {
     $session_id: sessionHash,
+    summary_epoch: meta.epoch,
     summary_seq: meta.seq,
     is_final: meta.endedBy === "shutdown",
     ended_by: meta.endedBy,

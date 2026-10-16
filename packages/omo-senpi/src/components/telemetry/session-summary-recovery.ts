@@ -2,6 +2,7 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, removeFile, renameIfPresent } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
+import { newSummaryEpoch } from "./session-summary-window"
 import {
   OWNER_STALE_MS,
   SUMMARY_TTL_MS,
@@ -61,10 +62,11 @@ export function createSummaryRecovery(input: {
       return undefined
     }
     const nextSeq = record.window === null ? record.seq : record.seq + 1
+    const epoch = record.epoch ?? newSummaryEpoch()
     // A dead process's own copy is never continued (its key names that process), so it is not recreated.
     const keepNumbering = () => {
       if (!storage.isOwnCopyKey(key)) {
-        storage.createWindow(key, { ...record, owner: storage.owner, heartbeatAt: storage.now(), seq: nextSeq, windowId: null, window: null })
+        storage.createWindow(key, { ...record, owner: storage.owner, heartbeatAt: storage.now(), epoch, seq: nextSeq, windowId: null, window: null })
       }
       removeFile(claimed.claimPath)
     }
@@ -80,6 +82,7 @@ export function createSummaryRecovery(input: {
       sessionHash: record.sessionHash,
       sessionRole: record.sessionRole,
       sampleRate: record.sampleRate,
+      epoch,
       seq: record.seq,
       windowId: record.windowId,
       window: record.window,
@@ -169,17 +172,9 @@ export function createSummaryRecovery(input: {
     }
   }
 
-  let prunedSeq = false
-  const pruneSeqOnce = (): void => {
-    if (prunedSeq) return
-    prunedSeq = true
-    storage.pruneSeq()
-  }
-
   return {
     recoverWindow,
     sweep() {
-      pruneSeqOnce()
       sweepLeftovers()
       sweepPending()
       sweepWindows()

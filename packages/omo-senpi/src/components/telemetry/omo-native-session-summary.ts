@@ -7,7 +7,7 @@ import { createSummaryPublisher, type PublishSummary } from "./session-summary-p
 import { createSummaryRecovery } from "./session-summary-recovery"
 import { isSessionSampled } from "./session-summary-sampling"
 import { isRecordSendable, type ConsentScope, type SummaryStorage, type WindowRecord } from "./session-summary-storage"
-import { addTurn, openWindow, type EndedBy, type SummaryTurn, type SummaryWindow } from "./session-summary-window"
+import { addTurn, newSummaryEpoch, openWindow, type EndedBy, type SummaryTurn, type SummaryWindow } from "./session-summary-window"
 
 export type { SummaryTurn } from "./session-summary-window"
 export type { SummaryPublication } from "./session-summary-publisher"
@@ -66,6 +66,7 @@ export type SessionSummaryRecorder = {
 
 type Live = {
   key: string
+  epoch: string
   seq: number
   sampleRate: number
   windowId: string | null
@@ -92,8 +93,6 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
   })
   const live = new Map<string, Live>()
-  // Seqs a session already used before it opted out, so opting back in never reuses a sent seq.
-  const retiredSeq = new Map<string, number>()
   // Window files this process wrote, by session; the periodic consent check runs only while one exists.
   const onDisk = new Map<string, string>()
   let disarmConsentCheck: (() => void) | undefined
@@ -132,6 +131,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     sessionRole: options.sessionRole,
     owner: storage.owner,
     heartbeatAt: now(),
+    epoch: entry.epoch,
     seq: entry.seq,
     sampleRate: entry.sampleRate,
     windowId: entry.windowId,
@@ -147,30 +147,17 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     }
   }
 
-  // Opting out drops the session: its live state, its window file, and the seq it reached (kept aside so a
-  // later opt-in continues numbering instead of reusing a sent seq).
+  // Opting out drops the session with nothing left on disk: its live state and its window file. Opting back
+  // in starts a new epoch, so no (epoch, seq) pair it already sent can repeat.
   const discard = (sessionHash: string): void => {
     const key = live.get(sessionHash)?.key ?? onDisk.get(sessionHash)
-    const stored = live.get(sessionHash)?.seq ?? (key === undefined ? undefined : seqOf(storage.readWindow(key)))
-    if (stored !== undefined && stored > 0) retiredSeq.set(sessionHash, Math.max(stored, retiredSeq.get(sessionHash) ?? 0))
     live.delete(sessionHash)
+    if (key === undefined) return
     try {
-      storage.forgetSeq(sessionHash)
-      if (key !== undefined) removeWindow(sessionHash, key)
+      removeWindow(sessionHash, key)
     } catch (error) {
       report(error)
     }
-  }
-
-  // Every new window takes a seq no other process has used for this session (an own copy beside another
-  // process's window would otherwise start at that window's seq). A failed reservation keeps the hint.
-  const startWindow = (sessionHash: string, entry: Live): string => {
-    try {
-      entry.seq = storage.reserveSeq(sessionHash, entry.seq)
-    } catch (error) {
-      report(error)
-    }
-    return randomUUID()
   }
 
   function purgeIfOptedOut(): void {
@@ -209,40 +196,44 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     const cached = live.get(sessionHash)
     if (cached !== undefined) return cached
     const entry = adopt(sessionHash)
-    entry.seq = Math.max(entry.seq, retiredSeq.get(sessionHash) ?? 0)
     live.set(sessionHash, entry)
     return entry
   }
 
   // A session's file is continued by whoever records its next turn: this process's own file, or the file
-  // of a dead owner (claimed first, so two resuming processes never both continue it). A file a LIVE
-  // process still owns is left alone; this process keeps its own copy beside it.
+  // of a dead owner (claimed first, so two resuming processes never both continue it). Continuing a file keeps
+  // its epoch and seq; anything else (no usable file, a LIVE process's file, a lost claim) starts a new epoch at
+  // seq 0, so an own copy beside another process's window can never publish that window's (epoch, seq).
   const adopt = (sessionHash: string): Live => {
     const key = storage.windowKey(sessionHash)
-    const fresh = (seq: number, entryKey = key): Live => ({ key: entryKey, seq, sampleRate: options.sampleRate(), windowId: null, window: null })
+    const fresh = (entryKey = key, epoch = newSummaryEpoch(), seq = 0): Live => ({
+      key: entryKey, epoch, seq, sampleRate: options.sampleRate(), windowId: null, window: null,
+    })
+    const ownCopy = storage.windowKey(sessionHash, true)
     const stored = storage.readWindow(key)
-    if (stored === undefined || stored === CORRUPT) return fresh(0)
+    if (stored === undefined || stored === CORRUPT) return fresh()
     // Only a window marked opted in, whose originating scope is still opted in now, may be continued.
     if (!isRecordSendable(stored, isScopeConsented)) {
       storage.removeWindow(key)
-      return fresh(0)
+      return fresh()
     }
     if (stored.owner.pid === storage.owner.pid && stored.owner.bootId === storage.owner.bootId) {
-      return { key, seq: stored.seq, sampleRate: stored.sampleRate, windowId: stored.windowId, window: stored.window }
+      return { key, epoch: stored.epoch ?? newSummaryEpoch(), seq: stored.seq, sampleRate: stored.sampleRate, windowId: stored.windowId, window: stored.window }
     }
-    if (storage.isOwnerAlive(stored.owner)) return fresh(stored.seq, storage.windowKey(sessionHash, true))
+    if (storage.isOwnerAlive(stored.owner)) return fresh(ownCopy)
     const claimed = storage.claimWindow(key)
     // Another process won the claim and now continues the shared file: this one keeps its own copy beside it.
-    if (claimed === undefined) return fresh(stored.seq, storage.windowKey(sessionHash, true))
+    if (claimed === undefined) return fresh(ownCopy)
     const record = claimed.record
     if (record === undefined || record === CORRUPT || !isRecordSendable(record, isScopeConsented)) {
       removeFile(claimed.claimPath)
-      return fresh(record === undefined || record === CORRUPT ? stored.seq : 0)
+      return fresh()
     }
+    const epoch = record.epoch ?? newSummaryEpoch()
     const published = record.windowId !== null && storage.hasPending(record.windowId)
     const entry: Live = published || record.window === null
-      ? fresh(published ? record.seq + 1 : record.seq)
-      : { key, seq: record.seq, sampleRate: record.sampleRate, windowId: record.windowId, window: record.window }
+      ? fresh(key, epoch, published ? record.seq + 1 : record.seq)
+      : { key, epoch, seq: record.seq, sampleRate: record.sampleRate, windowId: record.windowId, window: record.window }
     persist(sessionHash, entry)
     removeFile(claimed.claimPath)
     return entry
@@ -250,10 +241,10 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
 
   const close = (sessionHash: string, entry: Live, endedBy: EndedBy, keepFile: boolean): void => {
     const window = entry.window ?? openWindow(now(), 0)
-    const windowId = entry.windowId ?? startWindow(sessionHash, entry)
+    const windowId = entry.windowId ?? randomUUID()
     const seq = entry.seq
     void publisher.publishWindow({
-      consent: "enabled", scope: consentScope(), sessionHash, sessionRole: options.sessionRole, sampleRate: entry.sampleRate, seq, windowId, window, endedBy,
+      consent: "enabled", scope: consentScope(), sessionHash, sessionRole: options.sessionRole, sampleRate: entry.sampleRate, epoch: entry.epoch, seq, windowId, window, endedBy,
     }, () => {
       entry.seq = seq + 1
       entry.window = null
@@ -281,7 +272,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
       const entry = liveFor(sessionHash)
       const at = now()
       if (entry.window === null) {
-        entry.windowId = startWindow(sessionHash, entry)
+        entry.windowId = randomUUID()
         entry.window = openWindow(at, turn.turnIndex)
         entry.sampleRate = options.sampleRate()
       }
@@ -319,10 +310,6 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
       disarmConsentCheck = undefined
     },
   }
-}
-
-function seqOf(stored: ReturnType<SummaryStorage["readWindow"]>): number | undefined {
-  return stored === undefined || stored === CORRUPT ? undefined : stored.seq
 }
 
 function scheduleUnrefInterval(tick: () => void, intervalMs: number): () => void {

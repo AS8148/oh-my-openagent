@@ -4,9 +4,8 @@ import type { EventTelemetryProperties } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, listNames, readJsonOrCorrupt, removeFile, renameIfPresent, writeJsonAtomic } from "./session-summary-files"
 import { createOwnerRegistry, parseOwner, processIsAlive, type ProcessOwner } from "./session-summary-owner"
-import { createSeqReservations } from "./session-summary-seq"
 import { parseTelemetrySessionRole, type TelemetrySessionRole } from "./session-role"
-import { isSummaryWindow, type SummaryWindow } from "./session-summary-window"
+import { SUMMARY_EPOCH_SHAPE, isSummaryWindow, type SummaryWindow } from "./session-summary-window"
 
 export const SUMMARY_TTL_MS = 14 * 24 * 60 * 60_000
 export const OWNER_STALE_MS = 5 * 60_000
@@ -39,6 +38,8 @@ export type WindowRecord = {
   readonly sessionRole: TelemetrySessionRole
   readonly owner: ProcessOwner
   readonly heartbeatAt: number
+  /** The run `seq` counts in; absent on records older than the epoch (a continuer starts a new one). */
+  readonly epoch: string | undefined
   /** The `summary_seq` the open window will carry, or the next window when none is open. */
   readonly seq: number
   readonly sampleRate: number
@@ -66,10 +67,6 @@ export type SummaryStorage = {
   readonly windowKey: (sessionHash: string, ownCopy?: boolean) => string
   /** A key one process wrote beside another process's window; nobody continues it once its writer is gone. */
   readonly isOwnCopyKey: (key: string) => boolean
-  /** Takes the first seq at or above `from` that no process has used for this session. */
-  readonly reserveSeq: (sessionHash: string, from: number) => number
-  readonly forgetSeq: (sessionHash: string) => void
-  readonly pruneSeq: () => void
   readonly readWindow: (key: string) => ReadResult<WindowRecord>
   readonly writeWindow: (key: string, record: WindowRecord) => void
   /** Exclusive create: never replaces a window another process wrote in the meantime. */
@@ -110,7 +107,6 @@ export function createSummaryStorage(input: {
   const claimSuffix = `.claimed-${owner.pid}-${owner.bootId}`
   const windowPath = (key: string) => join(dir, `${key}.json`)
   const pendingPath = (uuid: string) => join(pendingDir, `${uuid}.json`)
-  const seqs = createSeqReservations(dir)
   let registered = false
   const ensureRegistered = () => {
     if (registered) return
@@ -130,9 +126,6 @@ export function createSummaryStorage(input: {
     isOwnerAlive: registry.isAlive,
     windowKey: (sessionHash, ownCopy = false) => `${fileName(sessionHash)}${ownCopy ? `@${owner.bootId}` : ""}`,
     isOwnCopyKey: (key) => key.includes("@"),
-    reserveSeq: (sessionHash, from) => seqs.reserve(fileName(sessionHash), from),
-    forgetSeq: (sessionHash) => seqs.forget(fileName(sessionHash)),
-    pruneSeq: () => seqs.prune(SUMMARY_TTL_MS, Date.now()),
     readWindow: (key) => parseRead(readJsonOrCorrupt(windowPath(key)), parseWindowRecord),
     writeWindow(key, record) {
       ensureRegistered()
@@ -193,6 +186,7 @@ export function parseWindowRecord(value: unknown): WindowRecord | undefined {
   const sessionHash: unknown = Reflect.get(value, "sessionHash")
   const heartbeatAt: unknown = Reflect.get(value, "heartbeatAt")
   const seq: unknown = Reflect.get(value, "seq")
+  const epoch: unknown = Reflect.get(value, "epoch")
   const sampleRate: unknown = Reflect.get(value, "sampleRate")
   const windowId: unknown = Reflect.get(value, "windowId")
   const window: unknown = Reflect.get(value, "window")
@@ -207,6 +201,7 @@ export function parseWindowRecord(value: unknown): WindowRecord | undefined {
     sessionRole: parseTelemetrySessionRole(Reflect.get(value, "sessionRole")),
     owner,
     heartbeatAt,
+    epoch: typeof epoch === "string" && SUMMARY_EPOCH_SHAPE.test(epoch) ? epoch : undefined,
     seq,
     sampleRate,
     windowId: windowIsOpen ? windowId : null,

@@ -20,6 +20,7 @@ export type ClosedWindow = {
   readonly sessionHash: string
   readonly sessionRole: TelemetrySessionRole
   readonly sampleRate: number
+  readonly epoch: string
   readonly seq: number
   readonly windowId: string
   readonly window: SummaryWindow
@@ -118,6 +119,7 @@ export function createSummaryPublisher(input: {
         createdAt: input.storage.now(),
         properties: summaryProperties(closed.sessionHash, closed.window, {
           endedBy: closed.endedBy,
+          epoch: closed.epoch,
           seq: closed.seq,
           sampleRate: closed.sampleRate,
           sampled: isSessionSampled(closed.sessionHash, closed.sampleRate),
