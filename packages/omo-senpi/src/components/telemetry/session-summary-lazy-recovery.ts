@@ -5,7 +5,6 @@ import { listNames } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
 import type { SummaryRecovery } from "./session-summary-recovery"
 import type { adoptForeignWindow } from "./session-summary-adopt"
-import type { RecoveryStorage } from "./session-summary-recovery-storage"
 import type { ConsentScope, SummaryStorage } from "./session-summary-storage"
 
 /** What the recorder takes from the `extensions/omo-telemetry-recovery.js` sidecar. */
@@ -41,19 +40,17 @@ export function createLazySummaryRecovery(input: {
   readonly load: () => Promise<SummarySidecar>
 }): LazySummaryRecovery {
   const { storage, publisher } = input
-  let ops: RecoveryStorage | undefined
-  let recovery: SummaryRecovery | undefined
-  let adopt: typeof adoptForeignWindow | undefined
+  let runtime: { readonly sweep: SummaryRecovery["sweep"]; readonly adopt: LazySummaryRecovery["adopt"] } | undefined
 
-  const ready = (): Promise<SummaryRecovery> => input.load().then((sidecar) => {
-    adopt = sidecar.adoptForeignWindow
-    const loadedOps = (ops ??= sidecar.withRecoveryOps(storage))
-    return (recovery ??= sidecar.createSummaryRecovery({
-      storage: loadedOps,
-      publisher,
-      isScopeConsented: input.isScopeConsented,
-      ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
-    }))
+  const ready = () => input.load().then((sidecar) => {
+    if (runtime === undefined) {
+      const ops = sidecar.withRecoveryOps(storage)
+      runtime = {
+        sweep: sidecar.createSummaryRecovery({ ...input, storage: ops }).sweep,
+        adopt: (args) => sidecar.adoptForeignWindow({ storage: ops, ...args }),
+      }
+    }
+    return runtime
   })
 
   // A temp or claim file left by any process, a pending event not in flight, or a window this process did not write.
@@ -67,15 +64,15 @@ export function createLazySummaryRecovery(input: {
 
   return {
     sweep() {
-      if (recovery !== undefined) {
-        recovery.sweep()
+      if (runtime !== undefined) {
+        runtime.sweep()
         return undefined
       }
       if (!hasWork()) return undefined
       return ready().then((loaded) => loaded.sweep())
     },
     load: () => ready().then(() => undefined),
-    loaded: () => ops !== undefined,
-    adopt: (args) => (ops === undefined || adopt === undefined ? undefined : adopt({ storage: ops, ...args })),
+    loaded: () => runtime !== undefined,
+    adopt: (args) => runtime?.adopt(args),
   }
 }

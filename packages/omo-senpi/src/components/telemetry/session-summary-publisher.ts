@@ -40,6 +40,8 @@ export type SummaryPublisher = {
   readonly deliver: (record: PendingRecord) => Promise<void>
   readonly isInFlight: (uuid: string) => boolean
   readonly countDropped: (count: number) => void
+  /** The summary's one diagnostic path, shared with the recorder. */
+  readonly report: (event: TelemetryDiagnosticInput["event"], error: unknown) => void
   /** Resolves once every delivery started so far has been acknowledged or given up. */
   readonly settled: () => Promise<void>
 }
@@ -109,6 +111,7 @@ export function createSummaryPublisher(input: {
 
   return {
     deliver,
+    report,
     isInFlight: (uuid) => inFlight.has(uuid),
     settled: async () => {
       await Promise.all([...running])

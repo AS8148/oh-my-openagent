@@ -123,14 +123,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     if (onDisk.get(sessionHash) === key) track(sessionHash, undefined)
   }
 
-  const report = (error: unknown): void => {
-    options.diagnostics?.({
-      event: "telemetry_activity_state_write_failed",
-      source: "omo-native-session-summary",
-      error: error instanceof Error ? error : new Error(String(error)),
-      errorKind: error instanceof Error ? "error" : "non_error",
-    })
-  }
+  const report = (error: unknown): void => publisher.report("telemetry_activity_state_write_failed", error)
 
   const recordOf = (sessionHash: string, entry: LiveWindow): WindowRecord => ({
     consent: "enabled",
@@ -213,6 +206,12 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     return typeof stored === "object" && !isOwn(stored.owner) ? recovery.load().catch(report) : undefined
   }
 
+  // What a turn or shutdown waits for first: the first sweep, then the liveness check it may need.
+  const ready = (sessionHash: string): Promise<void> | undefined => {
+    const sweeping = sweepOnce()
+    return sweeping === undefined ? loadLivenessFor(sessionHash) : sweeping.then(() => loadLivenessFor(sessionHash))
+  }
+
   const ensureHeartbeat = (): void => {
     if (stopHeartbeat !== undefined) return
     stopHeartbeat = (options.scheduleHeartbeat ?? scheduleUnrefInterval)(heartbeat, HEARTBEAT_INTERVAL_MS)
@@ -278,10 +277,8 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     },
     async recordTurn(sessionHash, turn) {
       if (!isConsented()) return discard(sessionHash)
-      const sweeping = sweepOnce()
-      if (sweeping !== undefined) await sweeping
-      const liveness = loadLivenessFor(sessionHash)
-      if (liveness !== undefined) await liveness
+      const waiting = ready(sessionHash)
+      if (waiting !== undefined) await waiting
       ensureHeartbeat()
       const entry = liveFor(sessionHash)
       const at = now()
@@ -300,10 +297,8 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     },
     async finish(sessionHash, reason) {
       if (!isConsented()) return discard(sessionHash)
-      const sweeping = sweepOnce()
-      if (sweeping !== undefined) await sweeping
-      const liveness = loadLivenessFor(sessionHash)
-      if (liveness !== undefined) await liveness
+      const waiting = ready(sessionHash)
+      if (waiting !== undefined) await waiting
       const entry = liveFor(sessionHash)
       live.delete(sessionHash)
       if (live.size === 0) {
