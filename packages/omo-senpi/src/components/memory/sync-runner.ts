@@ -14,6 +14,9 @@ import type { DeviceSync, EngineStatus, OpenDeviceSyncOptions, SyncSession } fro
 
 import type { ComponentLogger } from "../../extension/types"
 
+/** The one line a runner logs when this device has no session to sync with (no network, no state). */
+export const SYNC_IDLE_NO_DEVICE_SESSION = "sync idle: no device session"
+
 export type SyncSessionResolver = (identity: string) => Promise<SyncSession | null>
 
 /** No device sign-in or device keys exist on this client yet (todos 13 and 14). */
@@ -75,7 +78,7 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   const start = async (identity: string, paths: MemoryIdentityPaths): Promise<Running | null> => {
     const session = await resolveSession(identity)
     if (session === null) {
-      logger.info("memory sync idle: this device is not signed in to sync", { identity })
+      logger.info(SYNC_IDLE_NO_DEVICE_SESSION, { identity })
       return null
     }
     const device = await open({

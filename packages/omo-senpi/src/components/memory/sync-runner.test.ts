@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
 import { EventEmitter } from "node:events"
-import type { FSWatcher } from "node:fs"
+import { existsSync, type FSWatcher } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -8,7 +8,7 @@ import { join } from "node:path"
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import type { DeviceSync, EngineStatus, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
 
-import { createSyncRunner, watchHeadLog } from "./sync-runner"
+import { SYNC_IDLE_NO_DEVICE_SESSION, createSyncRunner, watchHeadLog } from "./sync-runner"
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -61,6 +61,20 @@ test("sessions sharing a repository share one engine, started once and closed wi
   await runner.release(paths.repo)
   expect(fake.closed).toEqual([paths.repo])
   expect(await runner.status(paths.repo)).toBeNull()
+})
+
+test("without a device session the production runner is a no-op: one typed idle line, no engine, nothing written", async () => {
+  const paths = await identity()
+  const lines: string[] = []
+  const recording = { info: (m: string) => lines.push(m), warn: (m: string) => lines.push(`warn ${m}`), error: (m: string) => lines.push(`error ${m}`) }
+  const runner = createSyncRunner({ logger: recording })
+  await runner.acquire("agent", paths, { enabled: true })
+  await runner.acquire("agent", paths, { enabled: true })
+  expect(lines).toEqual([SYNC_IDLE_NO_DEVICE_SESSION])
+  expect(await runner.status(paths.repo)).toBeNull()
+  expect(existsSync(join(paths.repo, ".git", "omo-sync"))).toBe(false)
+  await runner.release(paths.repo)
+  await runner.release(paths.repo)
 })
 
 test("memory.sync.enabled false, or no signed-in device session, opens nothing", async () => {
