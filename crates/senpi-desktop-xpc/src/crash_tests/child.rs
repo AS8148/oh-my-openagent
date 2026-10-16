@@ -1,5 +1,5 @@
 use super::{
-    handoff::{Handoff, posix_spawnattr_setspecialport_np},
+    handoff::{Handoff, posix_spawnattr_set_registered_ports_np},
     wait::Event,
 };
 use crate::native::Endpoint;
@@ -12,9 +12,13 @@ impl Attributes {
         // SAFETY: initialize one writable spawn attribute object.
         assert_eq!(unsafe { libc::posix_spawnattr_init(&mut raw) }, 0);
         let mut attr = Self(raw);
-        // SAFETY: valid attribute object and owned port copied into the child.
+        // SAFETY: valid attribute object; the child inherits a send right to
+        // `port` as its first registered port, and its bootstrap stays intact.
+        let mut ports = [port];
         assert_eq!(
-            unsafe { posix_spawnattr_setspecialport_np(&mut attr.0, port, 4) },
+            unsafe {
+                posix_spawnattr_set_registered_ports_np(&mut attr.0, ports.as_mut_ptr(), 1)
+            },
             0
         );
         // SAFETY: suspend before any child code so NOTE_EXIT is registered first.
