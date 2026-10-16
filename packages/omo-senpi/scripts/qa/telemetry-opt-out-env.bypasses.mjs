@@ -8,9 +8,15 @@ const LSP_CORE = "packages/lsp-core/scripts/qa/local-binary-resolution-e2e.mjs"
 const RESOLVER = "runs .agents/skills/senpi-qa/scripts/resolve-evidence-dir.mjs, which prints a path and boots nothing"
 const LEASE_HOLDER = "an inline `-e` script that only holds a live pid; no omo code loads"
 const TMUX_CONTROL = "tmux send-keys/capture-pane/kill-session against a session started with the sandbox env; starts no process"
+const LSP_DAEMON = "packages/lsp-daemon/scripts/qa/format-request-e2e.mjs"
+const LSP_DAEMON_ONLY = "lsp-daemon QA: the lsp-daemon package carries no telemetry and loads no omo runtime"
 const SCRATCH_ENV = "env is scratch.env, built by the thread-tools kit through isolatedChildEnv; the scan cannot follow the kit object"
 
 export const SPAWN_BYPASSES = [
+  { file: LSP_DAEMON, function: "createFixtureRepo", call: `spawnSync("bun")`, reason: `bun add of a biome fixture dependency; ${LSP_DAEMON_ONLY}` },
+  { file: LSP_DAEMON, function: "createLinterOnlyFixture", call: `spawnSync("bun")`, reason: `bun add of an oxlint fixture dependency; ${LSP_DAEMON_ONLY}` },
+  { file: LSP_DAEMON, function: "countProcesses", call: `spawnSync("bash")`, reason: `ps | grep | wc for the residency check; starts no process of ours` },
+  { file: LSP_DAEMON, function: "main", call: "spawn(process.execPath)", reason: `starts the lsp-daemon's own dist/cli.js daemon; ${LSP_DAEMON_ONLY}` },
   { file: LSP_CORE, function: "createFixtureRepo", call: `spawnSync("bun")`, reason: "bun add of a biome fixture dependency; no runtime" },
   { file: LSP_CORE, function: "runResolutionProbe", call: `spawnSync("bun")`, reason: "bun -e over lsp-core sources only; no omo runtime or telemetry" },
   { file: LSP_CORE, function: "runBaselineProbe", call: `spawnSync("bun")`, reason: "bun -e over lsp-core sources only; no omo runtime or telemetry" },
@@ -21,8 +27,6 @@ export const SPAWN_BYPASSES = [
   { file: `${QA}/dag-owner-scope.mjs`, function: "run", call: "spawnSync(process.execPath)", reason: "`-e \"\"` under a PATH-only env to mint a dead pid" },
   { file: `${QA}/dag-paused-header-qa.ts`, function: "<module>", call: "spawn(process.execPath)", reason: LEASE_HOLDER },
   { file: `${QA}/fixtures/policy-continuation-extension.ts`, function: "policyContinuationExtension", call: "execFileSync(toolkit)", reason: "runs inside the already opted-out senpi child and inherits its env" },
-  { file: `${QA}/kibitzer-sidecar-support.mjs`, function: "launchRpc", call: "spawn(command.file)", reason: "env parameter is sandboxEnv from prepareSandbox (isolatedChildEnv) in every lane caller" },
-  { file: `${QA}/kibitzer-sidecar-tui-qa.mjs`, function: "launchTui", call: `Bun.spawn([command.file, ...command.prefix, "--pro)`, reason: "env parameter is the sandbox env from kibitzer-sidecar-support.mjs (isolatedChildEnv)" },
   { file: `${QA}/lsp-e2e.mjs`, function: "runChecked", call: "spawnSync(command)", reason: "callers run npm pack and tar only" },
   { file: `${QA}/lsp-e2e.mjs`, function: "runInjectedPostEditProbe", call: `spawnSync("bun")`, reason: "bun -e builds only the LSP component on a FakeExtensionAPI; no telemetry component is constructed" },
   { file: `${QA}/lsp-e2e.mjs`, function: "runSelfTest", call: `spawnSync("bun")`, reason: "bun -e runs the local installer into a temp agent dir; no session starts" },
@@ -31,7 +35,6 @@ export const SPAWN_BYPASSES = [
   { file: `${QA}/policy-continuation-e2e.mjs`, function: "run", call: "execFileSync(process.execPath)", reason: RESOLVER },
   { file: `${QA}/probe-continuation.mjs`, function: "main", call: "spawnSync(tmuxBin)", count: 2, reason: TMUX_CONTROL },
   { file: `${QA}/reflection-recap-e2e.mjs`, function: "optionsFrom", call: "spawnSync(process.execPath)", reason: RESOLVER },
-  { file: `${QA}/reflection-recap-runtime.mjs`, function: "retainRuntime", call: "spawn(process.execPath)", reason: "starts the retained mock provider script, not the runtime; env is the caller's sandbox env" },
   { file: `${QA}/session-dag-resume-qa.mjs`, function: "<module>", call: `execFileSync("node")`, reason: RESOLVER },
   { file: `${QA}/task-14/version-capability.mjs`, function: "<module>", call: `spawn("node")`, reason: "the unmanaged fake host fixture answers a handshake; no omo code loads" },
   { file: `${QA}/task-host-e2e-ops.mjs`, function: "scenarioG", call: `spawnSync("tmux")`, count: 3, reason: TMUX_CONTROL },

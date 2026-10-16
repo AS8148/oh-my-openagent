@@ -9,6 +9,9 @@ import { createTracer, unwrap } from "./telemetry-opt-out-env.trace.mjs"
 // literal command that is neither a launcher nor named after the runtime (git, ps, sysctl) are skipped.
 
 export const RUNTIME = /senpi|omo-native|binary-runtime|plugin\/extensions|omo-ai/iu
+// A source can start the runtime without naming it: the current executable, or one of its entry files
+// (the root launcher and CLI bundles, the native launcher).
+export const RUNTIME_ENTRY = /process\.(?:execPath|argv0)|\bdist\/cli(?:-node)?\b|\bbin\/(?:omo|oh-my-opencode)\.js\b|oh-my-openagent|lazycodex/u
 const SPAWNERS = new Set(["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"])
 const LAUNCHERS = /^(?:node|bun|bunx|npx|deno|sh|bash|zsh|cmd|cmd\.exe|pwsh|powershell|tmux|env|script|expect)$/u
 
@@ -98,7 +101,7 @@ export function findUnroutedSpawns(files) {
   const tracer = createTracer(parseFile, files.map((file) => file.path))
   const sites = []
   for (const { path, source } of files) {
-    if (!RUNTIME.test(source)) continue
+    if (!RUNTIME.test(source) && !RUNTIME_ENTRY.test(source)) continue
     const file = parseFile(path)
     const processNames = childProcessNames(file)
     const visit = (node) => {

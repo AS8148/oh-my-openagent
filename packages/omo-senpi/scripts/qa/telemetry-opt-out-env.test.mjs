@@ -139,3 +139,58 @@ describe("spawn tracing (#10226 delta-review probes)", () => {
     expect(unrouted(`${SPAWN_IMPORT}// boots senpi elsewhere\nspawn("git", ["status"])\n`)).toEqual([])
   })
 })
+
+// Delta-3 LOW 1: each of these re-enables telemetry after the helper ran, so a QA child could reach the
+// production analytics project.
+describe("spawn tracing (#10226 delta-3 opt-out overrides)", () => {
+  const routedEnv = `const env = withTelemetryOptOut(process.env)\n`
+  const launch = `spawn("senpi", ["-p"], { env })\n`
+
+  for (const [label, mutation] of [
+    ["an assignment that turns an opt-out off", `env.OMO_DISABLE_TELEMETRY = "0"\n`],
+    ["a delete of an opt-out", `delete env.DO_NOT_TRACK\n`],
+    ["an element assignment of an opt-out", `env["DO_NOT_TRACK"] = ""\n`],
+    ["an element assignment with a computed key", `const key = "DO_NOT_TRACK"\nenv[key] = ""\n`],
+    ["an Object.assign over an opt-out", `Object.assign(env, { DO_NOT_TRACK: "" })\n`],
+  ]) {
+    test(`#given a helper env mutated by ${label} #when it is spawned #then the site is unrouted`, () => {
+      expect(unrouted(`${HELPER_IMPORT}${SPAWN_IMPORT}${routedEnv}${mutation}${launch}`)).toEqual([`spawn("senpi")`])
+    })
+  }
+
+  test("#given a helper env whose unrelated key is set #when it is spawned #then the site stays routed", () => {
+    expect(unrouted(`${HELPER_IMPORT}${SPAWN_IMPORT}${routedEnv}env.HOME = "/tmp/h"\n${launch}`)).toEqual([])
+  })
+
+  test("#given a parameter env mutated inside the launcher #when every caller passes the helper result #then the site is unrouted", () => {
+    const source = `${HELPER_IMPORT}${SPAWN_IMPORT}function boot(env) { delete env.OMO_DISABLE_TELEMETRY\n  return spawn("senpi", [], { env }) }\n`
+      + `boot(withTelemetryOptOut(process.env))\n`
+    expect(unrouted(source)).toEqual([`spawn("senpi")`])
+  })
+
+  for (const [label, literal] of [
+    ["an explicit opt-out override", `{ ...withTelemetryOptOut(process.env), DO_NOT_TRACK: "" }`],
+    ["a computed-key override", `{ ...withTelemetryOptOut(process.env), ["DO_NOT_TRACK"]: "" }`],
+    ["a later spread of the caller's env", `{ ...withTelemetryOptOut({}), ...process.env }`],
+  ]) {
+    test(`#given a spread of the helper result followed by ${label} #when it is spawned #then the site is unrouted`, () => {
+      expect(unrouted(`${HELPER_IMPORT}${SPAWN_IMPORT}spawn("senpi", [], { env: ${literal} })\n`)).toEqual([`spawn("senpi")`])
+    })
+  }
+
+  test("#given the helper spread followed by the loopback sink helper and a plain key #when it is spawned #then the site stays routed", () => {
+    const imports = `import { telemetryLocalSinkEnv, withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"\n${SPAWN_IMPORT}`
+    const env = `{ ...withTelemetryOptOut(process.env), ...telemetryLocalSinkEnv("http://127.0.0.1:1"), HOME: "/tmp/h" }`
+    expect(unrouted(`${imports}spawn("senpi", [], { env: ${env} })\n`)).toEqual([])
+  })
+
+  for (const [label, source] of [
+    ["process.execPath on the root CLI bundle", `import { execFileSync } from "node:child_process"\nexecFileSync(process.execPath, ["dist/cli/index.js"], { env: process.env })\n`],
+    ["process.argv0 on the root launcher", `import { spawnSync } from "node:child_process"\nspawnSync(process.argv0, ["bin/oh-my-opencode.js", "run"], { env: process.env })\n`],
+    ["node on the native launcher entry", `import { spawn } from "node:child_process"\nspawn("node", ["bin/omo.js"], { env: process.env })\n`],
+  ]) {
+    test(`#given a file that never names the runtime #when it spawns ${label} with the caller's env #then the site is unrouted`, () => {
+      expect(findUnroutedSpawns([{ path: "script/qa/entry-driver.mjs", source }])).toHaveLength(1)
+    })
+  }
+})
