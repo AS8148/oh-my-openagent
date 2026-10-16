@@ -35,15 +35,18 @@ export function splitItem(text: string): ParsedItemText {
 }
 
 /**
- * Canonical scalar source for storage and render: always ONE self-contained YAML line (spec #454),
- * so the same source is valid verbatim, as a component of a multi-value register, and as a set
- * element. A string that would render across lines (block scalar or folding) is double-quoted
- * with escapes instead (t05 report: an unindented block source corrupted on every cycle).
+ * Canonical scalar source for storage and render: a self-contained YAML scalar that is never a
+ * block scalar and never folded (lineWidth 0), so the same source parses on its own, as a
+ * component of a multi-value register, and as a set element. A string that would render as a
+ * block is double-quoted with escapes instead (t05 report). A double-quoted source can still span
+ * lines where the emitter breaks at an escaped newline; render parses sources into nodes, so this
+ * is lossless (delta review 0bde9bc01e).
  */
 export function renderScalar(value: string | number | boolean): string {
-  const plain = stringify(value, { lineWidth: 0 }).trim()
-  if (!plain.includes("\n")) return plain
-  return stringify(doubleQuoted(String(value)), { lineWidth: 0 }).trim()
+  // Only the emitter's final newline is stripped: NBSP, BOM, U+3000 and similar are value content.
+  const plain = stringify(value, { lineWidth: 0 }).replace(/\n$/, "")
+  if (typeof value !== "string" || (!plain.includes("\n") && parsesTo(plain, value))) return plain
+  return stringify(doubleQuoted(value), { lineWidth: 0 }).replace(/\n$/, "")
 }
 
 /**
@@ -88,6 +91,19 @@ export function sequenceElements(source: string): string[] | null {
   if (parsed.errors.length > 0 || !isSeq(parsed.contents)) return null
   const items: unknown = parsed.toJS()
   return Array.isArray(items) ? items.map(elementSource) : null
+}
+
+// The plain form must survive the exact path render takes (source -> node -> emitted entry ->
+// parse); the emitter drops some trailing Unicode spaces from plain scalars.
+function parsesTo(source: string, value: string): boolean {
+  const parsed = parseDocument(source, { schema: "core" })
+  if (parsed.errors.length > 0 || parsed.toJS() !== value || parsed.contents === null) return false
+  const entry = parseDocument(emitFrontmatter([{ key: "k", node: parsed.contents }]), { schema: "core" }).toJS()
+  return isRecord(entry) && entry.k === value
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }
 
 function sourceNode(source: string): Node {

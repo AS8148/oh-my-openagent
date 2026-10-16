@@ -102,6 +102,24 @@ describe("source forms round-trip through the whole-frontmatter emitter (review 
   })
 })
 
+describe("Unicode spaces YAML does not trim are part of the value (delta review 0bde9bc01e LOW)", () => {
+  const SPACES = ["\u00a0", "\ufeff", "\u3000", "\u2003", "\u2009", "\u200b", "\u2028", "\u0085", "\u1680", "\u202f"]
+
+  test("a value starting or ending with one keeps it through capture -> render -> capture", async () => {
+    for (const space of SPACES) {
+      for (const value of [`${space}v`, `v${space}`, `${space}v${space}`]) {
+        const doc = await newDoc("1")
+        captureInto(doc, "", [], `---\nk: ${JSON.stringify(value)}\n---\n`)
+        const first = renderItem(doc) ?? ""
+        expect(headerOf(first).k, `value ${JSON.stringify(value)}`).toBe(value)
+        expect(captureCurrent(doc, first), `value ${JSON.stringify(value)} re-capture`).toBeNull()
+        expect(renderItem(doc), `value ${JSON.stringify(value)} stable`).toBe(first)
+        doc.free()
+      }
+    }
+  })
+})
+
 describe("register values keep their YAML type (review r6 M1, M2)", () => {
   test("a register value joined into a set-kind key keeps its type as an element", async () => {
     for (const [source, expected] of [["3", 3], ["true", true], ["{ a: 1 }", { a: 1 }]] as const) {
