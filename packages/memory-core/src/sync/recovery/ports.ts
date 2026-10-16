@@ -1,4 +1,4 @@
-import type { KeyringBody, KeyringEntry, SyncAuthor, WrapEntry } from "../crypto/entry.ts"
+import type { KeyringBody, KeyringEntry, SyncAuthor, VerifiedWrap, WrapEntry } from "../crypto/entry.ts"
 import type { Principal, RecoveryKey } from "../crypto/parse.ts"
 
 /**
@@ -54,7 +54,7 @@ export type EnrollBridgeRequest = {
   readonly custodyRoot: string
   readonly predecessor: string
   readonly epoch: number
-  readonly deviceWrap: WrapEntry
+  readonly deviceWrap: VerifiedWrap
   readonly expectedHistory: ReadonlyArray<readonly [number, string]>
 }
 

@@ -1,4 +1,5 @@
 import { openHpkeSealedBox } from "../hpke-sealed-box.ts"
+import type { DeviceKeyring } from "../keyring-port.ts"
 import type { WrapEntry } from "../crypto/entry.ts"
 import { isObject, type JsonObject } from "../crypto/parse.ts"
 import { decodeB64 } from "../crypto/signatures.ts"
@@ -76,6 +77,43 @@ export const openWrapWithKey = async (
   let plaintext: Uint8Array
   try {
     plaintext = openHpkeSealedBox(sealPrivate, sealPublic, sealed, WRAP_INFO, wrapAad(address))
+  } catch {
+    return { ok: false, reason: "wrap_refused" }
+  }
+  const envelope = parseEnvelope(plaintext)
+  if (envelope === null || envelope["version"] !== 1) return { ok: false, reason: "malformed_envelope" }
+  if (envelope["account"] !== address.account || envelope["epoch"] !== address.epoch || envelope["id"] !== address.id) {
+    return { ok: false, reason: "envelope_mismatch" }
+  }
+  const opened = await openHistory(envelope["key_material"], address, expectedHistory)
+  if (opened === null) return { ok: false, reason: "bad_history" }
+  const history = [...opened.history].map(([epoch, key]) => ({ epoch, origin: expectedHistory.get(epoch) ?? "", key }))
+  return { ok: true, material: { epoch: address.epoch, current: opened.current, history } }
+}
+
+/**
+ * Opens the device wrap the recovery bridge sealed for THIS device (bridge-recover) - the one wrap
+ * recovery opens without a verified chain entry. openWrap refuses it by design: no entry has
+ * committed it yet, and the rotation that will commit it needs this material first. It is safe
+ * because recover.ts passes only the bridge's own return value (never a served wrap), the material
+ * inside came from the recovery wrap the verified chain committed (recoveryCandidates), and the
+ * address is this device's own, sealed to its key, so the AEAD still binds account, epoch and
+ * recipient and the envelope and history checks match openWrap's.
+ */
+export const openBridgeSealedWrap = async (
+  keyring: DeviceKeyring,
+  wrap: WrapEntry,
+  address: WrapAddress,
+  expectedHistory: ReadonlyMap<number, string>,
+): Promise<OpenedMaterial> => {
+  if (wrap.epoch !== address.epoch || wrap.id !== address.id || address.id !== `device:${keyring.principal().id}`) {
+    return { ok: false, reason: "envelope_mismatch" }
+  }
+  const sealed = decodeB64(wrap.wrap)
+  if (sealed === null) return { ok: false, reason: "malformed_envelope" }
+  let plaintext: Uint8Array
+  try {
+    plaintext = await keyring.unseal(sealed, address)
   } catch {
     return { ok: false, reason: "wrap_refused" }
   }

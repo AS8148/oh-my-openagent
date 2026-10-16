@@ -1,5 +1,5 @@
 import { appendEntries, type ChainState, emptyChain } from "../crypto/chain.ts"
-import type { BatchEntry, SyncEntry, WrapEntry } from "../crypto/entry.ts"
+import type { BatchEntry, SyncEntry, VerifiedWrap, WrapEntry } from "../crypto/entry.ts"
 import type { Authority } from "../crypto/fold.ts"
 import type { RejectionCounter } from "../crypto/rejection.ts"
 import type { RecoveryCandidate, RecoveryTransport, RecoveryWrapRow } from "./ports.ts"
@@ -40,7 +40,7 @@ export const expectedHistory = (authority: Authority, epoch: number): ReadonlyAr
   [...authority.epochOrigins].filter(([candidate, origin]) => candidate < epoch && !authority.cancelled.has(origin)).sort(([left], [right]) => left - right)
 
 /** The wrap addressed to `id` at `epoch`, taken only from verified, digest-committed records. */
-export const committedWrap = (state: ChainState, epoch: number, id: string): WrapEntry | null => {
+export const committedWrap = (state: ChainState, epoch: number, id: string): VerifiedWrap | null => {
   for (const entry of [...state.received].reverse()) {
     if (state.authority?.cancelled.has(entry.digest) === true) continue
     const found = entry.wraps.find((wrap) => wrap.epoch === epoch && wrap.id === id)

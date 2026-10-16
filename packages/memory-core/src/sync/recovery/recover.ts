@@ -1,7 +1,8 @@
 import type { DeviceKeyring } from "../keyring-port.ts"
 import type { RejectionCounter } from "../crypto/rejection.ts"
 import { deviceIdOf } from "../crypto/signatures.ts"
-import { ownMaterial, rotationAppend } from "./keyring-append.ts"
+import { openBridgeSealedWrap } from "./key-material.ts"
+import { rotationAppend } from "./keyring-append.ts"
 import type { RecoverRefusal, RecoveryBridge, RecoveryEvent, RecoveryTransport, TransportRefusal } from "./ports.ts"
 import { loadServedChain, recoveryCandidates } from "./served-chain.ts"
 
@@ -75,8 +76,10 @@ export const recoverOnFreshDevice = async (input: RecoverInput): Promise<Recover
     return refuse("join-refused")
   }
   const expected = [...afterAuthority.epochOrigins].filter(([epoch, origin]) => epoch < authority.epoch && !afterAuthority.cancelled.has(origin))
-  const retained = await ownMaterial(input.keyring, input.account, recovered.deviceWrap, expected)
-  if (retained === null) return refuse("wrap-refused")
+  const address = { account: input.account, epoch: authority.epoch, id: `device:${device.id}` }
+  const opened = await openBridgeSealedWrap(input.keyring, recovered.deviceWrap, address, new Map(expected))
+  if (!opened.ok) return refuse("wrap-refused")
+  const retained = opened.material
   const rotation = await rotationAppend(input.keyring, afterHead, input.account, afterAuthority, retained, [device], [usedKey])
   retained.current.fill(0)
   for (const row of retained.history) row.key.fill(0)

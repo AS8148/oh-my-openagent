@@ -1,6 +1,6 @@
 import type { DeviceKeyring } from "../keyring-port.ts"
 import { signRecord } from "../crypto/build.ts"
-import type { Head, KeyringBody, WrapEntry } from "../crypto/entry.ts"
+import type { Head, KeyringBody, VerifiedWrap, WrapEntry } from "../crypto/entry.ts"
 import type { Authority } from "../crypto/fold.ts"
 import { nextLink, wrapSetDigest } from "../crypto/links.ts"
 import type { Principal, RecoveryKey } from "../crypto/parse.ts"
@@ -56,7 +56,7 @@ export const rotationAppend = async (
 }
 
 /** This member's current-epoch material, opened only through its own DeviceKeyring from a committed wrap. */
-export const ownMaterial = async (keyring: DeviceKeyring, account: string, wrap: WrapEntry, expected: ReadonlyArray<readonly [number, string]>): Promise<EpochMaterial | null> => {
+export const ownMaterial = async (keyring: DeviceKeyring, account: string, wrap: VerifiedWrap, expected: ReadonlyArray<readonly [number, string]>): Promise<EpochMaterial | null> => {
   const origins = new Map(expected)
   const opened = await openWrap(keyring, wrap, account, origins)
   if (!opened.ok) return null
