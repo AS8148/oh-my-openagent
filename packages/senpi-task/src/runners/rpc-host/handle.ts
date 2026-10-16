@@ -23,10 +23,8 @@ import { createHandleReconciliation } from "./handle-reconciliation"
 import { createHandleStop } from "./handle-stop"
 import { createHandleTeardown } from "./handle-teardown"
 import { createHandleWaiters } from "./handle-waiters"
-import { isTransportLossError } from "./reattach"
 import type { HostSessionParked } from "./session-client"
 import { extractTerminalAssistantMessage } from "./terminal-message"
-import { isTransportRecoveryExpired } from "./transport-recovery"
 import { createInputEffects } from "../input-effects"
 import { toHostInput } from "./input-command"
 import { createInputDelivery } from "../input-delivery"
@@ -179,6 +177,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
 
   const recovery = createHandleRecovery({
     taskId,
+    closeGraceMs,
     reattach,
     events: shardEvents,
     bound: transportRecovery,
@@ -205,13 +204,10 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     reconcile: (reopened: boolean) => reconciliation.reconcile(session.sessionPath, undefined, true, reopened),
     beginContinuation: () => beginTurn(),
     endLost: () => endSession({ kind: "transport_gone" }),
-    // The continuation that re-drives the in-flight turn was not delivered (omo#9093). A lost
-    // transport is the next recovery's to handle; anything else fails the turn exactly like an
-    // undelivered prompt, instead of escaping as an unhandled rejection.
+    // Transport failures park in recovery; a prompt rejection keeps its own actionable cause.
     continuationFailed: (error) => {
-      log("senpi-task host session reattach continuation failed", { taskId, error: String(error) })
-      if (isTransportRecoveryExpired(error)) return stop.lostOnReopen()
-      if (!isTransportLossError(error)) settleTurn(promptFailureOutcome(error))
+      if (intent === "running" && !stop.requested() && !detached && outcome === undefined)
+        settleTurn(promptFailureOutcome(error))
     },
     park: (reason) => park({ sessionId: session.routingId, sessionPath: session.sessionPath, reason }),
   })

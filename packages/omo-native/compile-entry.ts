@@ -18,7 +18,7 @@ import { migrateLegacyBunGlobalManifest } from "./bin/lib/legacy-bun-global-migr
 import { adoptLegacyFlatState, canonicalAgentDir } from "./bin/lib/agent-dir.js"
 import { readJson, releaseBanner } from "./bin/lib/package-paths.js"
 import { remapSenpiEnvironment } from "./compiled-environment"
-import { runServiceAuthCommand } from "../omo-opencode/src/cli/service-auth/commands"
+import { runServiceAuthCommand, SERVICE_ACCOUNTS_OPEN } from "../omo-opencode/src/cli/service-auth/commands"
 import { runDaemonCommand } from "./bin/lib/daemon.js"
 import { runThreadCommand } from "./bin/lib/thread.js"
 import { isHostStatusAll, runHostStatusAll, sessionActivityReader } from "./bin/lib/host-status.js"
@@ -239,7 +239,7 @@ export { reexecProvisionedRuntime } from "./provisioned-handoff"
 const HELP_WITHOUT_ENGINE = `Usage: omo [options] [message...]
        omo <command> [args]
 
-Some commands: setup, doctor, update, daemon, thread, login, logout, whoami
+Some commands: setup, doctor, update, daemon, thread${SERVICE_ACCOUNTS_OPEN ? ", login, logout, whoami" : ""}
 
 The full command and option list, including what extensions add, needs the engine, which does
 not start while OMO_EXTRA_CA_CERTIFICATES is invalid. Fix or unset it, then run omo --help again.`
