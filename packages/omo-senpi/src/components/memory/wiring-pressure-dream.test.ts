@@ -67,6 +67,7 @@ describe("memory pressure dream wiring", () => {
         },
       },
       launch: () => {},
+      settled: async () => {},
     } as unknown as MemoryIdentityRuntime
     const wiring = createMemoryWiring({
       sessions: new Map([[sessionId, { context: identity }]]),
@@ -132,5 +133,6 @@ describe("memory pressure dream wiring", () => {
     }
     // Nothing was left running detached past the budget, so no handle outlives the shutdown.
     expect(shutdownWarnings.filter((warning) => warning.message === "memory shutdown drain hit its budget")).toEqual([])
+    expect(shutdownWarnings.filter((warning) => warning.message === "memory shutdown drain step failed")).toEqual([])
   }, 30_000)
 })

@@ -23,7 +23,7 @@ type Warning = { readonly message: string; readonly data?: Record<string, unknow
 // Work that never settles: the only way shutdown can account for it is to race it against the drain budget.
 const never = (): Promise<never> => new Promise<never>(() => {})
 
-async function bindAndShutDown(overrides: { maintenance?: MemoryMaintenance; runtime?: MemoryIdentityRuntime }) {
+async function bindAndShutDown(overrides: { maintenance?: MemoryMaintenance; runtime?: MemoryIdentityRuntime; budgetMs?: number; whileShuttingDown?: (shutdown: { readonly returned: () => boolean }) => Promise<void> }) {
   const root = realpathSync.native(await mkdtemp(join(tmpdir(), "omo-memory-shutdown-settle-")))
   roots.push(root)
   const identityName = "shutdown-settle-agent"
@@ -60,8 +60,12 @@ async function bindAndShutDown(overrides: { maintenance?: MemoryMaintenance; run
   await pi.dispatch("input", { source: "rpc", inputId: "settle-input", text: "Continue." }, eventCtx)
   await pi.dispatch("input_disposition", { inputId: "settle-input", disposition: "started" }, eventCtx)
   await pi.dispatch("agent_settled", {}, eventCtx)
-  // A zero budget: every raced step is reported as over budget instead of being awaited.
-  await wiring.onSessionShutdown({ reason: "reload", sessionId, deadlineAt: Date.now() })
+  // A zero budget (the default) reports every raced step as over budget instead of awaiting it.
+  let returned = false
+  const shutdown = wiring.onSessionShutdown({ reason: "reload", sessionId, deadlineAt: Date.now() + (overrides.budgetMs ?? 0) })
+    .then(() => { returned = true })
+  await overrides.whileShuttingDown?.({ returned: () => returned })
+  await shutdown
   return warnings
     .filter((warning) => warning.message === "memory shutdown drain hit its budget")
     .map((warning) => warning.data?.step)
@@ -94,4 +98,40 @@ describe("memory wiring shutdown settles maintenance running in the identity dir
     // then
     expect(overBudget).toContain("reflection-launch-settle")
   })
+
+  test("#given a reflection launch still in flight and budget to spare #when the session shuts down #then shutdown returns only after the launch settles", async () => {
+    // given: settled() is shutdown's last await, so once it is called only synchronous resets remain
+    let releaseLaunch!: () => void
+    const launchSettled = new Promise<void>((resolve) => { releaseLaunch = resolve })
+    let settledCalled!: () => void
+    const settledInvoked = new Promise<void>((resolve) => { settledCalled = resolve })
+    const runtime = {
+      reconcile: async () => {},
+      store: { tryReserve: async () => ({ status: "skipped" }) },
+      launch: () => {},
+      settled: () => {
+        settledCalled()
+        return launchSettled
+      },
+    } as unknown as MemoryIdentityRuntime
+    let returnedBeforeRelease: boolean | undefined
+
+    // when
+    const overBudget = await bindAndShutDown({
+      runtime,
+      budgetMs: 60_000,
+      whileShuttingDown: async (shutdown) => {
+        await settledInvoked
+        // One macrotask turn drains every microtask: a shutdown that does not await the launch has returned by now.
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        returnedBeforeRelease = shutdown.returned()
+        releaseLaunch()
+      },
+    })
+
+    // then
+    expect(returnedBeforeRelease).toBe(false)
+    expect(overBudget).toEqual([])
+  })
+
 })
