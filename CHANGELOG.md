@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**`unspecified-low` tries GLM 5.3 before GPT.** A user with Claude and Z.ai (or OpenCode Go) but no Xiaomi or xAI provider used to fall from Sonnet 5.5 straight to GPT-6.1 Sol once Sonnet was unavailable. The chain now has `glm-5.3` at high thinking right after Grok 4.7 and ahead of the GPT rungs, so the order for users who hold MiMo or Grok is unchanged. ([#10306](https://github.com/code-yeongyu/oh-my-openagent/issues/10306))
+**`unspecified-low` tries GLM 5.3 before GPT.** A user with Claude and Z.ai (or OpenCode Go) but no Xiaomi or xAI provider used to fall from Sonnet 5.5 straight to GPT-6.1 Sol once Sonnet was unavailable. The chain now has `glm-5.3` at high thinking right after Grok 4.7 and ahead of the GPT rungs, so the order for users who hold MiMo or Grok is unchanged. ([#10306](https://github.com/code-yeongyu/oh-my-openagent/issues/10306), [#10311](https://github.com/code-yeongyu/oh-my-openagent/pull/10311))
 
 **The memory sync device keyring refuses a few more malformed inputs instead of failing late.** A keyring record can no longer carry the snapshot tag as its type, deeply nested JSON (over 64 levels) is refused with a typed error instead of a stack overflow, the wrap associated data goes through the one RFC 8785 serializer and refuses a non-integer epoch, and a low-order X25519 point is refused with the normal "does not open" error. Follow-up to the review of [#10194](https://github.com/code-yeongyu/oh-my-openagent/pull/10194) ([#10274](https://github.com/code-yeongyu/oh-my-openagent/pull/10274)).
 
