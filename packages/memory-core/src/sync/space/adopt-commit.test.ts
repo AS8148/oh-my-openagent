@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import type { LoroDoc } from "../../crdt/loro-runtime"
 import { activeRegisters, commitAdoption, itemFrontier } from "../item/index"
 import { renderDocContent } from "../item/render"
+import { renderForDisk } from "../item/render-for-disk"
 import { activeReg, readKeyState } from "../item/state"
 import { captureInto, newDoc } from "../item/test-support"
 import { planAdoption, type Snapshot } from "./adopt"
@@ -152,6 +153,21 @@ describe("M2: a leading UTF-8 BOM", () => {
       doc.free()
     }
   })
+})
+
+test("M2 end to end: a BOM main and a BOM side are adopted, and the main is written back with its BOM", async () => {
+  const { doc, base } = await space("---\ntitle: A\n---\nbody\n")
+  try {
+    const main = "\uFEFF---\ntitle: A\n---\nbody\n"
+    const files = [{ path: "n.md", text: main }, { path: SIDE, text: "\uFEFF---\ntitle: B\n---\nbody\n" }]
+    const plan = planAdoption(files, stateOf(doc, base))
+    if (plan.action !== "capture") throw new Error("expected capture")
+    const update = commitAdoption(doc, base, itemFrontier(doc), plan.workingText, plan.extraRegisterValues)
+    if (update !== null) doc.import(update)
+    expect(renderForDisk(doc, main)).toBe('\uFEFF---\ntitle: "A / B"\n---\nbody\n')
+  } finally {
+    doc.free()
+  }
 })
 
 describe("L1: the two header fences are allowed only when the source has a header", () => {
