@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, utimesSync, writeFileSync } from "node:fs"
+import { linkSync, mkdirSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { claimBatch, createBatchId, type SpoolContext } from "./otlp-spool-dir"
@@ -121,6 +121,28 @@ describe("spool recovery", () => {
     expect(spoolNames(dir)[0]).toMatch(/^batch-traces-[0-9a-f-]{36}\.otlp$/)
   })
 
+  test("#given a crash between linking the new name and unlinking the old one (seal or claim release) #then the sweep drops the old name and the batch stays exactly once", () => {
+    // given
+    const dir = root()
+    mkdirSync(dir, { recursive: true })
+    const now = Date.now()
+    const sealedId = createBatchId(now)
+    const releasedId = createBatchId(now)
+    const active = `active-logs-999-${"b".repeat(32)}.otlp`
+    const expiredClaim = `batch-logs-${releasedId}.sending-${"a".repeat(32)}-${now - 1}`
+    writeFileSync(join(dir, active), "")
+    writeFileSync(join(dir, expiredClaim), "")
+    linkSync(join(dir, active), join(dir, `batch-logs-${sealedId}.otlp`))
+    linkSync(join(dir, expiredClaim), join(dir, `batch-logs-${releasedId}.otlp`))
+    const transport = makeTransport(dir, { isPidAlive: () => false, nowMs: () => now + 300_000 })
+
+    // when
+    transport.sweep()
+
+    // then
+    expect(spoolNames(dir)).toEqual([`batch-logs-${sealedId}.otlp`, `batch-logs-${releasedId}.otlp`].sort())
+  })
+
   test("#given two sweepers racing for one sealed batch #then exactly one claim wins", () => {
     // given
     const dir = root()
@@ -190,6 +212,26 @@ describe("spool recovery", () => {
     // then
     expect(elapsed).toBeLessThan(2_100)
     expect(spoolNames(dir).length).toBe(1)
+    expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
+  })
+
+  test("#given shutdown's flush spends 1.5 s in synchronous work before its send settles #then shutdown still returns within the 2 s cap measured from the call", async () => {
+    // given
+    const dir = root()
+    const slowFetch = (): Promise<Response> => {
+      Bun.sleepSync(1_500)
+      return new Promise<Response>(() => undefined)
+    }
+    const transport = makeTransport(dir, { fetch: slowFetch })
+    capture(transport, "feature_used", { feature: "a" })
+
+    // when
+    const started = performance.now()
+    await transport.shutdown()
+    const elapsed = performance.now() - started
+
+    // then
+    expect(elapsed).toBeLessThan(2_100)
     expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
   })
 })
