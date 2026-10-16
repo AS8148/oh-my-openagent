@@ -202,9 +202,8 @@ export const createWorld = async (
 		);
 	if (!appended.ok) throw new Error("genesis was not admitted");
 	const genesis = server.chain(account);
-	const genesisDigest = genesis[0]?.digest ?? "";
 	const walked = await appendEntries(
-		emptyChain(account, { kind: "creator", account, genesisDigest }),
+		emptyChain(account, { kind: "creator", account, self: { ...owner.principal } }),
 		genesis,
 		createRejectionCounter(),
 	);
