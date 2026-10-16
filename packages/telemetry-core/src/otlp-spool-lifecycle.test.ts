@@ -2,6 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { statSync } from "node:fs"
 import { join } from "node:path"
 
+import { create, toBinary } from "@bufbuild/protobuf"
+
+import { ExportLogsServiceResponseSchema } from "./otlp-proto/opentelemetry/proto/collector/logs/v1/logs_service_pb.js"
+
 import { claimBatch, createBatchId, CLAIM_LEASE_MS, type SpoolContext } from "./otlp-spool-dir"
 import {
   attributeMap,
@@ -273,11 +277,14 @@ describe("replay-time consent and acknowledgment", () => {
     expect(transport.droppedEvents()).toBe(0)
   })
 
-  test("#given a drain window (200 with every record rejected in partial_success) #then the file is deleted as delivered and nothing is counted dropped", async () => {
+  test("#given the collector's drain reply (200, partial_success rejected 0 with message 'mode: drain') #then the file is deleted as delivered and nothing is counted dropped", async () => {
     // given
     const dir = root()
     sealedBatch(dir, 2, Date.now() - 1_000)
-    const drained = new Uint8Array([0x0a, 0x02, 0x08, 0x02])
+    const drained = toBinary(
+      ExportLogsServiceResponseSchema,
+      create(ExportLogsServiceResponseSchema, { partialSuccess: { rejectedLogRecords: 0n, errorMessage: "mode: drain" } }),
+    )
     const { calls, fetch } = recordingFetch(() => new Response(drained, { status: 200 }))
     const transport = makeTransport(dir, { fetch })
 
