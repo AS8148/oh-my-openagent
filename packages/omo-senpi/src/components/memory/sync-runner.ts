@@ -9,14 +9,8 @@
 import { watch } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 
-import {
-  type DeviceSync,
-  type EngineStatus,
-  type MemoryIdentityPaths,
-  openDeviceSync,
-  type OpenDeviceSyncOptions,
-  type SyncSession,
-} from "@oh-my-opencode/memory-core"
+import type { MemoryIdentityPaths } from "@oh-my-opencode/memory-core"
+import type { DeviceSync, EngineStatus, OpenDeviceSyncOptions, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
 
 import type { ComponentLogger } from "../../extension/types"
 
@@ -72,7 +66,8 @@ export interface SyncRunner {
 
 export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   const resolveSession = options.resolveSession ?? noAccountSession
-  const open = options.open ?? openDeviceSync
+  // The engine (and the Loro wasm under it) loads only once a device has an account session.
+  const open = options.open ?? (async (o: OpenDeviceSyncOptions) => (await import("#omo-memory-sync-runtime")).openDeviceSync(o))
   const watchHead = options.watchHead ?? watchHeadLog
   const { logger } = options
   const repos = new Map<string, Held>()

@@ -97,6 +97,7 @@ const externalSpecifiers = [
   "#omo-memory-doctor-runtime",
   "#omo-memory-memfs-runtime",
   "#omo-memory-palace-runtime",
+  "#omo-memory-sync-runtime",
   "#omo-thread-client-runtime",
   "#omo-agent-toolkit-sdk",
   ...SENPI_LOADER_ALIASES,

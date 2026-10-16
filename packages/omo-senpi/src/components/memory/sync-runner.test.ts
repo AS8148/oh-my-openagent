@@ -5,7 +5,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { buildIdentityPaths, type DeviceSync, type EngineStatus, type SyncSession } from "@oh-my-opencode/memory-core"
+import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
+import type { DeviceSync, EngineStatus, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
 
 import { createSyncRunner, watchHeadLog } from "./sync-runner"
 
