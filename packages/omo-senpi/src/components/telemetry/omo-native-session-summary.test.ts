@@ -21,7 +21,10 @@ const recorder = (input: { readonly sampleRate?: number } = {}) => createTestRec
 // The race: this process read the dead owner's file, but a third process renamed it away before this claim.
 const claimLostToAnotherProcess = async () => ({
   ...sidecar,
-  withRecoveryOps: (storage: Parameters<typeof sidecar.withRecoveryOps>[0]) => ({ ...sidecar.withRecoveryOps(storage), claimWindow: () => undefined }),
+  createRecoveryRuntime: (input: Parameters<typeof sidecar.createRecoveryRuntime>[0]) => {
+    const storage = { ...sidecar.withRecoveryOps(input.storage), claimWindow: () => undefined }
+    return { ...sidecar.createRecoveryRuntime(input), adopt: (args: Parameters<sidecar.RecoveryRuntime["adopt"]>[0]) => sidecar.adoptForeignWindow({ ...args, storage }) }
+  },
 })
 
 describe("session_summary windows", () => {

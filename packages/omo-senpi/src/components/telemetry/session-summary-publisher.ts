@@ -1,6 +1,6 @@
 import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
-import type { sendSummaryRecord } from "./session-summary-delivery"
+import type { sendSummaryRecord, SummaryPublish } from "./session-summary-delivery"
 
 import type { TelemetrySessionRole } from "./session-role"
 import { isRecordSendable, type ConsentScope, type PendingRecord, type RecordConsent, type SummaryStorage } from "./session-summary-storage"
@@ -51,7 +51,7 @@ export type LoadSummaryDelivery = () => Promise<{ readonly sendSummaryRecord: ty
 
 export function createSummaryPublisher(input: {
   readonly storage: SummaryStorage
-  readonly publish: PublishSummary
+  readonly publish: SummaryPublish
   readonly loadDelivery: LoadSummaryDelivery
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly transportDropped?: () => number

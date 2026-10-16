@@ -2,7 +2,9 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, removeFile, renameIfPresent } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
-import type { RecoveryStorage } from "./session-summary-recovery-storage"
+import type { LiveWindow } from "./omo-native-session-summary"
+import { adoptForeignWindow } from "./session-summary-adopt"
+import { withRecoveryOps, type RecoveryStorage } from "./session-summary-recovery-storage"
 import { newSummaryEpoch } from "./session-summary-window"
 import {
   OWNER_STALE_MS,
@@ -12,14 +14,14 @@ import {
   type ConsentScope,
   type PendingRecord,
   type ReadResult,
+  type SummaryStorage,
   type WindowRecord,
 } from "./session-summary-storage"
 
 // The sidecar's whole surface: this file is the `#omo-telemetry-recovery-runtime` entry, and the bundle maps
 // telemetry-core's `#telemetry-immediate-send` here too, so every lazily loaded telemetry part shares one file.
-export { withRecoveryOps } from "./session-summary-recovery-storage"
-export { publishThroughState, sendSummaryRecord } from "./session-summary-delivery"
-export { adoptForeignWindow } from "./session-summary-adopt"
+export { adoptForeignWindow, withRecoveryOps }
+export { sendSummaryRecord } from "./session-summary-delivery"
 export { createImmediateSender } from "@oh-my-opencode/telemetry-core"
 
 export type SummaryRecovery = {
@@ -186,5 +188,25 @@ export function createSummaryRecovery(input: {
       sweepPending()
       sweepWindows()
     },
+  }
+}
+
+export type RecoveryRuntime = {
+  readonly sweep: () => void
+  /** Continues another process's window for this session (see `adoptForeignWindow`). */
+  readonly adopt: (input: Omit<Parameters<typeof adoptForeignWindow>[0], "storage">) => LiveWindow
+}
+
+/** The recorder's whole recovery side, built once on the first sidecar load. */
+export function createRecoveryRuntime(input: {
+  readonly storage: SummaryStorage
+  readonly publisher: SummaryPublisher
+  readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
+  readonly isScopeConsented?: (scope: ConsentScope) => boolean
+}): RecoveryRuntime {
+  const storage = withRecoveryOps(input.storage)
+  return {
+    sweep: createSummaryRecovery({ ...input, storage }).sweep,
+    adopt: (args) => adoptForeignWindow({ storage, ...args }),
   }
 }

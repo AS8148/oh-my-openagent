@@ -3,21 +3,19 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import { listNames } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
-import type { SummaryRecovery } from "./session-summary-recovery"
-import type { adoptForeignWindow } from "./session-summary-adopt"
+import type { RecoveryRuntime } from "./session-summary-recovery"
 import type { ConsentScope, SummaryStorage } from "./session-summary-storage"
 
 /** What the recorder takes from the `extensions/omo-telemetry-recovery.js` sidecar. */
-export type SummarySidecar = Pick<typeof import("./session-summary-recovery"), "createSummaryRecovery" | "withRecoveryOps" | "sendSummaryRecord" | "adoptForeignWindow">
+export type SummarySidecar = Pick<typeof import("./session-summary-recovery"), "createRecoveryRuntime" | "sendSummaryRecord">
 
 export type LoadSummaryRecovery = () => Promise<SummarySidecar>
 
 export type LazySummaryRecovery = {
   readonly sweep: () => Promise<void> | undefined
-  readonly load: () => Promise<void>
-  readonly loaded: () => boolean
-  /** Continues another process's window; undefined while the sidecar is not loaded. */
-  readonly adopt: (input: Omit<Parameters<typeof adoptForeignWindow>[0], "storage">) => ReturnType<typeof adoptForeignWindow> | undefined
+  readonly load: () => Promise<RecoveryRuntime>
+  /** The loaded recovery side; undefined until the sidecar is loaded. */
+  readonly runtime: () => RecoveryRuntime | undefined
 }
 
 /** One load at a time; a failed load is forgotten, so the next caller tries again. */
@@ -40,18 +38,8 @@ export function createLazySummaryRecovery(input: {
   readonly load: () => Promise<SummarySidecar>
 }): LazySummaryRecovery {
   const { storage, publisher } = input
-  let runtime: { readonly sweep: SummaryRecovery["sweep"]; readonly adopt: LazySummaryRecovery["adopt"] } | undefined
-
-  const ready = () => input.load().then((sidecar) => {
-    if (runtime === undefined) {
-      const ops = sidecar.withRecoveryOps(storage)
-      runtime = {
-        sweep: sidecar.createSummaryRecovery({ ...input, storage: ops }).sweep,
-        adopt: (args) => sidecar.adoptForeignWindow({ storage: ops, ...args }),
-      }
-    }
-    return runtime
-  })
+  let runtime: RecoveryRuntime | undefined
+  const ready = () => input.load().then((sidecar) => (runtime ??= sidecar.createRecoveryRuntime(input)))
 
   // A temp or claim file left by any process, a pending event not in flight, or a window this process did not write.
   const hasWork = (): boolean => {
@@ -71,8 +59,7 @@ export function createLazySummaryRecovery(input: {
       if (!hasWork()) return undefined
       return ready().then((loaded) => loaded.sweep())
     },
-    load: () => ready().then(() => undefined),
-    loaded: () => runtime !== undefined,
-    adopt: (args) => runtime?.adopt(args),
+    load: ready,
+    runtime: () => runtime,
   }
 }

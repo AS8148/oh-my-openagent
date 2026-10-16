@@ -51,8 +51,7 @@ export function createNativeSummaryRecorder(input: {
       owner: currentProcessOwner(),
       ...(input.isPidAlive === undefined ? {} : { isPidAlive: input.isPidAlive }),
     }),
-    // Only reached from the sidecar's send step, so the sidecar is already loaded when this import runs.
-    publish: (publication) => import("#omo-telemetry-recovery-runtime").then((sidecar) => sidecar.publishThroughState(state, publication)),
+    publish: state,
     sessionRole: input.sessionRole,
     // The sink is fixed to PostHog until `telemetry.sink` exists; the collector sink forces 1.
     sampleRate: () => (sampleRate ??= resolveRawTurnSampleRate({ sink: "posthog", configured: configuredSampleRate(input.cwd, env), env })),

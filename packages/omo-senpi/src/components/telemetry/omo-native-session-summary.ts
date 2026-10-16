@@ -3,7 +3,8 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import type { TelemetrySessionRole } from "./session-role"
 import { CORRUPT } from "./session-summary-files"
-import { createSummaryPublisher, type PublishSummary } from "./session-summary-publisher"
+import type { SummaryPublish } from "./session-summary-delivery"
+import { createSummaryPublisher } from "./session-summary-publisher"
 import { createLazySummaryRecovery, memoizeLoad, type LoadSummaryRecovery } from "./session-summary-lazy-recovery"
 import { isSessionSampled } from "./session-summary-sampling"
 import { isRecordSendable, type ConsentScope, type SummaryStorage, type WindowRecord } from "./session-summary-storage"
@@ -38,7 +39,8 @@ export type SessionSummaryOptions = {
    */
   readonly scheduleConsentCheck?: (check: () => void) => () => void
   readonly storage: SummaryStorage
-  readonly publish: PublishSummary
+  /** The capture state publishes through the sidecar, so the entry bundle carries no publish code. */
+  readonly publish: SummaryPublish
   readonly sessionRole: TelemetrySessionRole
   /** Read when a window opens; the component resolves config, env and sink lazily behind it. */
   readonly sampleRate: () => number
@@ -200,14 +202,14 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
   const isOwn = (owner: WindowRecord["owner"]) => owner.pid === storage.owner.pid && owner.bootId === storage.owner.bootId
 
   // Before a session adopts a window another process wrote, the sidecar (owner liveness, claims) must be loaded.
-  const loadLivenessFor = (sessionHash: string): Promise<void> | undefined => {
-    if (live.has(sessionHash) || recovery.loaded()) return undefined
+  const loadLivenessFor = (sessionHash: string): Promise<unknown> | undefined => {
+    if (live.has(sessionHash) || recovery.runtime() !== undefined) return undefined
     const stored = storage.readWindow(storage.windowKey(sessionHash))
     return typeof stored === "object" && !isOwn(stored.owner) ? recovery.load().catch(report) : undefined
   }
 
   // What a turn or shutdown waits for first: the first sweep, then the liveness check it may need.
-  const ready = (sessionHash: string): Promise<void> | undefined => {
+  const ready = (sessionHash: string): Promise<unknown> | undefined => {
     const sweeping = sweepOnce()
     return sweeping === undefined ? loadLivenessFor(sessionHash) : sweeping.then(() => loadLivenessFor(sessionHash))
   }
@@ -246,7 +248,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
       return { key, epoch: stored.epoch ?? newSummaryEpoch(), seq: stored.seq, sampleRate: stored.sampleRate, windowId: stored.windowId, window: stored.window }
     }
     // Without the sidecar (its load failed, already reported) the owner counts as alive: nothing is claimed.
-    return recovery.adopt({ key, ownCopy, stored, isScopeConsented, fresh, persist: (entry) => persist(sessionHash, entry) }) ?? fresh(ownCopy)
+    return recovery.runtime()?.adopt({ key, ownCopy, stored, isScopeConsented, fresh, persist: (entry) => persist(sessionHash, entry) }) ?? fresh(ownCopy)
   }
 
   const close = (sessionHash: string, entry: LiveWindow, endedBy: EndedBy, keepFile: boolean): void => {
