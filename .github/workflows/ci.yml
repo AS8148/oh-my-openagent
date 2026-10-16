@@ -271,7 +271,9 @@ jobs:
                 let comm = "?"; try { comm = (await Bun.file(`/proc/${entry}/comm`).text()).trim() } catch {}
                 try {
                   for (const fd of await readdir(fdDir)) {
-                    try { await readlink(join(fdDir, fd)) } catch (e: any) { bump(`readlink:${e.code}:${comm}`) }
+                    let target = "?"
+                    try { target = await readlink(join(fdDir, fd)) } catch (e: any) { bump(`readlink:${e.code}:${comm}`); continue }
+                    try { await stat(join(fdDir, fd)) } catch (e: any) { bump(`stat:${e.code}:${comm}:${target.replace(/[0-9]+/g, "N")}`) }
                   }
                 } catch (e: any) {
                   let owner = "?"; try { owner = String((await stat(`/proc/${entry}`)).uid) } catch (s: any) { owner = `stat-${s.code}` }
