@@ -109,6 +109,8 @@ export type TaskRecordInput = {
 
 export type TaskRecord = TaskRecordInput & TaskStartFailureRecordFields & {
   readonly effect_seq?: number
+  /** The exact id of the last identified input this task sent; reconciliation reads its receipt by it. */
+  readonly last_effect_id?: string
   readonly uncertain_inputs?: readonly import("../runners/input-effects").IdentifiedInput[]
   readonly isolation?: IsolationRecord
   readonly task_id: string
@@ -130,6 +132,8 @@ export type TaskRecord = TaskRecordInput & TaskStartFailureRecordFields & {
   readonly error_message?: string
   /** Why a run was interrupted when the parent did not ask for it; such an interrupt notifies the parent. */
   readonly interrupt_cause?: TaskInterruptCause
+  readonly stop_reason?: "deadline"
+  readonly deadline?: Readonly<Record<string, unknown>>
   // Exit observed, cause unconfirmed: status stays running until the owning manager confirms it.
   readonly provisional_exit?: {
     readonly observed_at: string
