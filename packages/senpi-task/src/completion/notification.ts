@@ -44,6 +44,7 @@ export function buildCompletionDetails(record: TaskRecord, options: BuildDetails
       ? {}
       : { fallback_models: record.fallback_models }),
     ...(record.resolved_model === undefined ? {} : { resolved_model: record.resolved_model }),
+    ...(record.effective_model === undefined ? {} : { effective_model: record.effective_model }),
     duration_ms: durationMs(record),
     ...(runStats === undefined ? {} : { run_stats: runStats }),
     final_response: finalResponse.text,
@@ -129,6 +130,7 @@ function completionDetailLines(detail: CompletionDetails, width: number | undefi
       category: detail.category,
       agentType: detail.agent_type,
       resolvedModel: detail.resolved_model,
+      effectiveModel: detail.effective_model,
       model: detail.model,
     }),
     fallbackToken(detail),
