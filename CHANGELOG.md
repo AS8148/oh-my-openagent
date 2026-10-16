@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Computer use no longer asks to confirm foreground control in full access mode.** A full-access session grants it directly and shows a note with the reason; other modes still ask, headless runs still never grant, and the grant still ends with the turn, on release or on the stop chord. Reported by Q. ([#10022](https://github.com/code-yeongyu/oh-my-openagent/issues/10022), [#10024](https://github.com/code-yeongyu/oh-my-openagent/pull/10024))
+
 **`omo update` no longer offers to overwrite a binary your package manager installed.** When the compiled `omo` is owned by pacman, dpkg, rpm, Homebrew or Nix, `omo update` used to print a `curl … && mv` replace command that either failed on a root-owned path or left the package manager tracking a file it no longer installed. It now exits non-zero and names the package and the manager's own upgrade command (for example `brew upgrade omo`). The ownership probe fails open: a missing tool or an unowned path keeps the old behavior. Thanks to @cynkai. ([#9585](https://github.com/code-yeongyu/oh-my-openagent/issues/9585), [#9629](https://github.com/code-yeongyu/oh-my-openagent/pull/9629))
 
 ## [5.1.34] - 2026-10-16
