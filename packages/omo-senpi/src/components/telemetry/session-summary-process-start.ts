@@ -12,9 +12,9 @@ import { parseLstart } from "../thread/gateway/process-identity"
  * already uses. Windows: null. Its only source is the process creation time behind a PowerShell or WMI call,
  * far too slow to run on every liveness check, so the registry falls back to the entry's heartbeat there.
  */
-export function readProcessStartTime(pid: number): string | null {
-  if (process.platform === "win32") return null
-  return process.platform === "linux" ? procStatStartTime(pid) : psStartTime(pid)
+export function readProcessStartTime(pid: number, platform: typeof process.platform = process.platform): string | null {
+  if (platform === "win32") return null
+  return platform === "linux" ? procStatStartTime(pid) : psStartTime(pid)
 }
 
 function procStatStartTime(pid: number): string | null {

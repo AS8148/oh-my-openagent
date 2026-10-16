@@ -172,6 +172,13 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
   const heartbeat = (): void => {
     purgeIfOptedOut()
     if (!isConsented()) return
+    // An idle session writes no window, so the tick itself keeps this owner's entry fresh: where no start time
+    // can be compared (Windows), a stale entry is what tells a dead owner apart.
+    try {
+      storage.register()
+    } catch (error) {
+      report(error)
+    }
     for (const [sessionHash, entry] of live) if (entry.window !== null) persist(sessionHash, entry)
     void runSweep()
   }
