@@ -36,6 +36,8 @@ export function createConsentGatedFetch(input: ConsentGatedFetchInput): Telemetr
 
 const defaultFetch: TelemetryFetch = (url, options) => fetch(url, options as RequestInit)
 
+// The count is diagnostic only. Whatever a malformed body throws, Error or not, counting must not
+// reject: a rejected fetch reads as a network error to the SDK, which then keeps the dropped batch.
 async function countBatchEvents(options: FetchOptions): Promise<number> {
   try {
     const body = options.body
@@ -50,8 +52,7 @@ async function countBatchEvents(options: FetchOptions): Promise<number> {
       return parsed.batch.length
     }
     return 1
-  } catch (error) {
-    if (error instanceof Error) return 0
-    throw error
+  } catch {
+    return 0
   }
 }

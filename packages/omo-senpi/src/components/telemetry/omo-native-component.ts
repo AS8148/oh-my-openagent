@@ -76,6 +76,8 @@ export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
 export const CONSENT_CACHE_MS = 5_000
 /** How often a persisted window re-checks consent, so an opt-out deletes it even if no turn follows. */
 export const CONSENT_CHECK_INTERVAL_MS = 5_000
+/** How long a failed drop flush waits before draining the still-queued events again; the gate stays closed meanwhile. */
+const DROP_RETRY_MS = 5_000
 /** What a session hashes to while consent is off: no salt is read or created, and no event carrying it is sent. */
 const OPTED_OUT_SESSION_HASH = "opted-out"
 
@@ -245,6 +247,7 @@ function sharedTransportFactory(
     // The SDK sends its interval, batch-size and shutdown flushes through this one fetch, so the gate
     // read here stops an event that was queued while consented and is still unsent at withdrawal.
     let dropping = 0
+    let dropRetry: ReturnType<typeof setTimeout> | undefined
     const transport = factory(apiKey, {
       ...transportOptions,
       fetch: createConsentGatedFetch({
@@ -257,20 +260,33 @@ function sharedTransportFactory(
         ...(transportOptions.fetch === undefined ? {} : { fetch: transportOptions.fetch }),
       }),
     })
-    state.dropQueued = () => {
+    // Holds the gate closed until one drain of the queue has finished. A drop flush that fails keeps
+    // its hold and drains again later: whatever it left queued was captured before the withdrawal, so no
+    // later flush may send it, even after consent comes back.
+    const drainUnsent = (): void => {
       if (transport.flush === undefined) return
       dropping += 1
-      void transport.flush()
-        .catch((error: unknown) => options.diagnostics?.({
-          event: "telemetry_shutdown_failed",
-          source: "omo-native-component",
-          error,
-          errorKind: error instanceof Error ? "error" : "non_error",
-        }))
-        .finally(() => {
+      transport.flush().then(
+        () => {
           dropping -= 1
-        })
+        },
+        (error: unknown) => {
+          options.diagnostics?.({
+            event: "telemetry_drop_flush_failed",
+            source: "omo-native-component",
+            error,
+            errorKind: error instanceof Error ? "error" : "non_error",
+          })
+          dropRetry = setTimeout(() => {
+            dropRetry = undefined
+            dropping -= 1
+            drainUnsent()
+          }, DROP_RETRY_MS)
+          dropRetry.unref?.()
+        },
+      )
     }
+    state.dropQueued = drainUnsent
 
     const wrapped: TelemetryTransport = {
       capture(message) {
@@ -280,8 +296,11 @@ function sharedTransportFactory(
       flush: transport.flush === undefined ? undefined : () => transport.flush?.() ?? Promise.resolve(),
       async shutdown() {
         try {
+          // A drop still held here keeps the gate closed, so the shutdown drain discards what is queued.
           await transport.shutdown()
         } finally {
+          clearTimeout(dropRetry)
+          dropRetry = undefined
           state.dropQueued = undefined
           if (state.capture !== undefined) {
             state.capture = undefined

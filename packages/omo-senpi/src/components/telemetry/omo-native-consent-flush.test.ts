@@ -84,6 +84,8 @@ type Harness = {
   /** The native SDK transport, so a test can run the same flush its 10 s timer would run. */
   readonly nativeTransport: () => TelemetryTransport
   setConsent(value: boolean): void
+  /** The next flush the component runs fails before sending anything, leaving the queue intact. */
+  failNextFlush(): void
 }
 
 function startSession(agentDir: string, sink: Sink): Harness {
@@ -92,11 +94,23 @@ function startSession(agentDir: string, sink: Sink): Harness {
   let consent = true
   let clock = 1_000_000
   let nativeTransport: TelemetryTransport | undefined
+  let failingFlushes = 0
   const diagnostics: DiagnosticRecord[] = []
   const factory: TelemetryTransportFactory = (apiKey, options) => {
     const transport = createDefaultPostHogTransport(apiKey, options)
-    if (options.flushAt === 20) nativeTransport = transport
-    return transport
+    if (options.flushAt !== 20) return transport
+    nativeTransport = transport
+    return {
+      capture: (message) => transport.capture(message),
+      shutdown: () => transport.shutdown(),
+      flush: async () => {
+        if (failingFlushes > 0) {
+          failingFlushes -= 1
+          throw new Error("flush failed before sending")
+        }
+        await transport.flush?.()
+      },
+    }
   }
   const pi = new FakeExtensionAPI()
   createOmoNativeTelemetryComponent({
@@ -124,6 +138,9 @@ function startSession(agentDir: string, sink: Sink): Harness {
     setConsent(value) {
       consent = value
       clock += CONSENT_CACHE_MS + 1
+    },
+    failNextFlush() {
+      failingFlushes += 1
     },
   }
 }
@@ -211,6 +228,32 @@ describe("omo-native queued events after a consent withdrawal (#10226 M1)", () =
         const dropped = session.diagnostics.filter(({ event }) => event === "telemetry_events_dropped_by_consent")
         expect(dropped.reduce((total, { count }) => total + (count ?? 0), 0)).toBeGreaterThanOrEqual(2)
         expect(JSON.stringify(dropped)).not.toContain("hashed:")
+      })
+    })
+  })
+
+  test("#given the drop flush at withdrawal fails #when consent comes back and a later flush runs #then the pre-withdrawal events are still not posted", async () => {
+    await withPostHogSink(async (sink) => {
+      await withTempAgentDir(async (agentDir) => {
+        // given
+        const session = startSession(agentDir, sink)
+        await session.pi.dispatch("session_start", { type: "session_start", reason: "startup" }, context("failed-drop"))
+        await session.pi.dispatch("turn_end", turnEnd(), context("failed-drop"))
+        session.failNextFlush()
+        session.setConsent(false)
+        await session.pi.dispatch("turn_end", turnEnd(), context("failed-drop"))
+
+        // when
+        session.setConsent(true)
+        await flush(session.nativeTransport())
+        await session.pi.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, context("failed-drop"))
+
+        // then
+        expect(native(sink.posted)).not.toContain("session_started")
+        expect(native(sink.posted)).not.toContain("turn_completed")
+        const events = session.diagnostics.map(({ event }) => event)
+        expect(events).toContain("telemetry_drop_flush_failed")
+        expect(events).not.toContain("telemetry_shutdown_failed")
       })
     })
   })

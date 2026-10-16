@@ -74,4 +74,22 @@ describe("createConsentGatedFetch", () => {
       expect(dropped).toEqual([3])
     })
   })
+
+  test("#given a dropped batch whose body throws a non-Error while counted #when the gate drops it #then the SDK is still told it was accepted", async () => {
+    // given
+    class UnreadableBody extends Blob {
+      override arrayBuffer(): Promise<ArrayBuffer> {
+        return Promise.reject("unreadable")
+      }
+    }
+    const dropped: number[] = []
+    const gated = createConsentGatedFetch({ isSendAllowed: () => false, onDropped: (count) => dropped.push(count) })
+
+    // when
+    const response = await gated("http://127.0.0.1:9/batch", { method: "POST", headers: {}, body: new UnreadableBody(["x"]) })
+
+    // then
+    expect(response.status).toBe(200)
+    expect(dropped).toEqual([0])
+  })
 })
