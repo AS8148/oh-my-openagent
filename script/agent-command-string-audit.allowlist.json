@@ -97,5 +97,8 @@
     "script/qa/codex-marketplace-e2e.sh: =omo",
     "script/verify-omo-ai-payload.mjs: omo doctor",
     "script/qa/omo-native-parity-smoke.mjs: omo doctor"
+  ],
+  "literal-label": [
+    "packages/omo-opencode/src/cli/account-keys/keystore.ts: =omo"
   ]
 }
