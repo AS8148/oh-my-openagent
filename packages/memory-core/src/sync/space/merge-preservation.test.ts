@@ -23,6 +23,9 @@ for (const seed of [20261016, 0x1a2b3c4d]) {
         "- likes coffee",
         "",
         `note ${Math.floor(rand() * 20)}: alpha beta`,
+        "韓国語の行を保持する",
+        "한글 줄 그대로",
+        "emoji line 🙂🚀",
       ])).join(eol)
       return content + (rand() < 0.5 ? eol : "")
     }

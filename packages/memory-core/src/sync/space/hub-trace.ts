@@ -47,7 +47,7 @@ export interface T2Strip {
 }
 
 const T2_SOURCE =
-  "\\n<!-- memory-sync \\d{4}-\\d{2}-\\d{2}: the other machine had different frontmatter for (.+?); kept here so no fact is lost:\\n([\\s\\S]*?)-->\\n"
+  "(?:^|\\n)<!-- memory-sync \\d{4}-\\d{2}-\\d{2}: the other machine had different frontmatter for (.+?); kept here so no fact is lost:\\n([\\s\\S]*?)-->\\n"
 
 export function stripT2Blocks(body: string): T2Strip {
   const re = new RegExp(T2_SOURCE, "g")

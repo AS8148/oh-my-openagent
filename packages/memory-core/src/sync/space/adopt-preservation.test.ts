@@ -42,9 +42,11 @@ function assertPreserved(sources: readonly string[], output: string, context: st
 
 for (const seed of [20261016, 0x5a17c0de]) {
   test(`A1 adoption preserves all source keys and values; seed=${seed}, cases=2000`, () => {
-    // Given random overlapping keys, kinds and values in all four real sources.
+    // Given random overlapping keys, kinds and values in all four real sources,
+    // including duplicate keys, non-ASCII, CRLF, unterminated and empty files.
     const rand = mulberry32(seed)
     const make = (source: number, iteration: number) => {
+      if (rand() < 0.03) return ""
       const fields: string[] = []
       for (let key = 0; key < 4; key++) {
         if (rand() < 0.2) continue
@@ -55,9 +57,15 @@ for (const seed of [20261016, 0x5a17c0de]) {
           `k${key}: ${source + iteration * 4}`,
           `k${key}: []`,
           `k${key}: "shared\\n${token} --> end"`,
+          `k${key}: "한글-${token} 🙂"`,
+          `키${key}: "${token}"`,
         ]))
       }
-      return `---\n${fields.length ? fields.join("\n") : "empty: shared"}\n---\n`
+      if (rand() < 0.06 && fields.length > 0) fields.push(fields[0] ?? "")
+      const eol = rand() < 0.2 ? "\r\n" : "\n"
+      const header = fields.length ? fields.join(eol) : "empty: shared"
+      const closing = rand() < 0.1 ? "---" : `---${eol}`
+      return `---${eol}${header}${eol}${closing}`
     }
     for (let iteration = 0; iteration < 2000; iteration++) {
       const sources = Array.from({ length: 4 }, (_, source) => make(source, iteration))

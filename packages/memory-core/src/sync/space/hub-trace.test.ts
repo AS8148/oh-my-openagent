@@ -83,6 +83,13 @@ describe("stripT2Blocks (hub md-merge-driver pickFrontmatter shape)", () => {
     expect(r.body).toBe(`keep me\n${bad}after\n`)
   })
 
+  test("a T2 block at the very start of the body is folded too", () => {
+    const fm = "---\nreviewed: true\n---\n"
+    const r = stripT2Blocks(`${t2Block("2026-10-15", "n.md", fm).slice(1)}tail\n`)
+    expect(r.entries.map((entry) => entry.key)).toEqual(["reviewed"])
+    expect(r.body).toBe("tail\n")
+  })
+
   test("a comment that only resembles a T2 block is not touched", () => {
     const body = "a\n<!-- memory-sync 2026-10-15: something else entirely -->\nb\n"
     const r = stripT2Blocks(body)

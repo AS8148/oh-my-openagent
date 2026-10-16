@@ -27,13 +27,16 @@ export interface ParsedItemText {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}([Tt ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/
 
 export function splitItem(text: string): ParsedItemText {
-  if (!text.startsWith("---\n")) return { fm: null, body: text }
-  const end = text.indexOf("\n---", 4)
+  const sep = text.startsWith("---\r\n") ? "\r\n" : "\n"
+  if (!text.startsWith(`---${sep}`)) return { fm: null, body: text }
+  const open = 3 + sep.length
+  const end = text.indexOf(`${sep}---`, open)
   if (end < 0) return { fm: null, body: text }
-  const nl = text.indexOf("\n", end + 4)
+  const close = end + sep.length + 3
+  const nl = text.indexOf("\n", close)
   const closeEnd = nl < 0 ? text.length : nl
-  if (text.slice(end + 4, closeEnd).trim() !== "") return { fm: null, body: text }
-  const header = text.slice(4, end)
+  if (text.slice(close, closeEnd).trim() !== "") return { fm: null, body: text }
+  const header = text.slice(open, end)
   if (header.trim() === "") return { fm: null, body: text }
   const fm = parseHeader(header)
   if (fm === null) return { fm: null, body: text }

@@ -148,3 +148,55 @@ describe("planAdoption (sync-design §3 insert-only adoption)", () => {
     doc.free()
   })
 })
+
+describe("HIGH-1 regression: a fact is never dropped while its source is deleted", () => {
+  test("P1: a side line sharing characters with the body is still adopted", () => {
+    const plan = planAdoption(
+      [
+        { path: "n.md", text: "- likes coffee\n- hates tea\n" },
+        { path: "n.sync-conflict-20261015-mac.md", text: "- likes tea\n" },
+      ],
+      live("- likes coffee\n- hates tea\n", null),
+    )
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    expect(plan.workingText).toContain("- likes tea\n")
+    expect(plan.workingText).toContain("- hates tea\n")
+    expect(plan.removeAfterCommit).toEqual(["n.sync-conflict-20261015-mac.md"])
+  })
+
+  test("P1b: prose whose characters are scattered across other lines is still adopted", () => {
+    const plan = planAdoption(
+      [
+        { path: "n.md", text: "I do not like tea anymore.\n" },
+        { path: "n.sync-conflict-20261015-mac.md", text: "I like tea.\n" },
+      ],
+      live("I do not like tea anymore.\n", null),
+    )
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    expect(plan.workingText).toContain("I like tea.\n")
+    expect(plan.workingText).toContain("I do not like tea anymore.\n")
+  })
+
+  test("P2: a history-less main file is always line-merged", () => {
+    const plan = planAdoption([{ path: "n.md", text: "ax\n" }], live("abc\nxyz\n", null))
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    expect(plan.workingText).toContain("abc\nxyz\n")
+    expect(plan.workingText).toContain("ax\n")
+  })
+
+  test("a CRLF side file's frontmatter keys survive adoption", () => {
+    const plan = planAdoption(
+      [{ path: "n.sync-conflict-20261015-mac.md", text: "---\r\ntitle: 茶 log\r\ntags: [a, b]\r\n---\r\nkept line\r\n" }],
+      live("- base line\n", null),
+    )
+    expect(plan.action).toBe("capture")
+    if (plan.action !== "capture") return
+    const parsed = splitItem(plan.workingText)
+    expect(parsed.fm?.map((entry) => entry.key)).toEqual(["title", "tags"])
+    expect(plan.workingText).toContain("kept line\r\n")
+    expect(plan.removeAfterCommit).toEqual(["n.sync-conflict-20261015-mac.md"])
+  })
+})
