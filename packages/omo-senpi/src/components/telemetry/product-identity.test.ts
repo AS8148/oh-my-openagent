@@ -222,7 +222,7 @@ describe("OmO Native product identity", () => {
       "$session_id", "agent_type", "background_mode", "cache_read_tokens", "cache_write_tokens",
       "category", "config_generation", "cost_status", "cost_usd", "duration_ms", "duration_status",
       "execution_mode", "fallback_attempts", "input_tokens", "model_id", "model_source",
-      "output_tokens", "owner_kind", "provider", "reasoning_effort", "run_epoch", "start_reason",
+      "output_tokens", "owner_kind", "provider", "reasoning_effort", "run_epoch", "start_trigger",
       "stats_status", "status", "task_send_queued_count", "task_send_running_count", "task_seq",
       "token_status", "tool_calls", "total_tokens", "turns",
     ].sort())
@@ -232,7 +232,7 @@ describe("OmO Native product identity", () => {
     })
     expect(Object.keys(categoryConfig).sort()).toEqual([
       "$session_id", "builtin_overridden_count", ...categoryKeys, "combo_fingerprint", "config_generation", "source",
-      "user_category_count",
+      "custom_category_count",
     ].sort())
     expect(categoryConfig.cat_quick_state?.values).toEqual(["set", "disabled", "unavailable", "absent"])
     expect(categoryConfig.cat_quick_provider?.values).toEqual([...KNOWN_PROVIDERS, "other"])
@@ -241,7 +241,7 @@ describe("OmO Native product identity", () => {
 
     // and: every discriminating string is a closed vocabulary
     expect(delegation.status.values).toEqual(["completed", "error", "cancelled", "interrupted", "lost"])
-    expect(delegation.start_reason.values).toEqual([
+    expect(delegation.start_trigger.values).toEqual([
       "initial_spawn", "runtime_fallback", "session_resume", "dag_retry", "revive_after_completed",
       "revive_after_error", "revive_after_cancelled", "revive_after_interrupted", "revive_after_lost",
       "unknown",

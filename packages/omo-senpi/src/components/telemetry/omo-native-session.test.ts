@@ -74,6 +74,7 @@ function register(agentDir: string, recorder: Recorder, options: {
   readonly diagnostics?: (input: TelemetryDiagnosticInput | { readonly event: "omo_native_inventory_read_failed" }) => void
   readonly setTimeoutFn?: (callback: () => void, delay: number) => unknown
   readonly utcOffsetMinutes?: () => number
+  readonly osRelease?: string
 } = {}): FakeExtensionAPI {
   const pi = new FakeExtensionAPI()
   const configEnabled = options.configEnabled
@@ -83,7 +84,9 @@ function register(agentDir: string, recorder: Recorder, options: {
     hashSessionId: (raw) => `hashed:${raw}`,
     ...(configEnabled === undefined ? {} : { isConfigEnabled: () => configEnabled }),
     now: options.now ?? FIXED_NOW,
-    osProvider: createOsProvider("native-session-host"),
+    osProvider: options.osRelease === undefined
+      ? createOsProvider("native-session-host")
+      : { ...createOsProvider("native-session-host"), release: () => options.osRelease as string },
     setTimeoutFn: options.setTimeoutFn,
     ...(options.utcOffsetMinutes === undefined ? {} : { utcOffsetMinutes: options.utcOffsetMinutes }),
     transportFactory: recorder.factory,
@@ -240,6 +243,11 @@ describe("OmO Native session telemetry", () => {
         "2026-07-03",
         "2026-07-04",
       ])
+      for (const { event, properties } of recorder.messages.filter(({ event }) => event === "daily_active")) {
+        expect(properties).toMatchObject({ start_trigger: "session_start" })
+        expect(properties).not.toHaveProperty("reason")
+        expect(wireViolations(event, properties ?? {})).toEqual([])
+      }
       expect(recorder.messages.filter(({ event }) => event === SENPI_TELEMETRY_EVENT_NAME)).toHaveLength(2)
     })
   })
@@ -331,9 +339,10 @@ describe("OmO Native session telemetry", () => {
         provider_anthropic: true,
         provider_github_copilot: true,
         custom_provider_count: 2,
-        reason: "fork",
+        start_trigger: "fork",
       })
       const properties = captured?.properties ?? {}
+      expect(properties).not.toHaveProperty("reason")
       expect(properties).not.toHaveProperty("providers")
       expect(properties).not.toHaveProperty("timezone")
       expect(Object.keys(properties).filter((key) => key.startsWith("provider_") && key !== "provider_count").sort())
@@ -556,5 +565,19 @@ describe("OmO Native session telemetry", () => {
       expect(recorder.shutdowns).toEqual([1, 1])
       expect(delays).toEqual([1_000])
     })
+  })
+
+  it("#given kernel releases with and without a build suffix #when a session starts #then $os_version is the bare dotted release or is omitted", async () => {
+    const cases: readonly [string, string | undefined][] = [["26.4.1 (25E253)", "26.4.1"], ["6.8.0-45-generic", "6.8.0"], ["Darwin", undefined]]
+    for (const [release, expected] of cases) {
+      await withTempAgentDir(async (agentDir) => {
+        writeInventory(agentDir)
+        const recorder = createRecorder()
+        await register(agentDir, recorder, { osRelease: release }).dispatch("session_start", { type: "session_start", reason: "startup" }, sessionCtx("os-version"))
+        const properties = recorder.messages.find(({ event }) => event === "session_started")?.properties ?? {}
+        expect(`${release} -> ${properties["$os_version"] ?? "omitted"}`).toBe(`${release} -> ${expected ?? "omitted"}`)
+        expect(wireViolations("session_started", properties)).toEqual([])
+      })
+    }
   })
 })

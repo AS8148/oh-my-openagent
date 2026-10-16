@@ -148,13 +148,12 @@ describe("telemetry schema artifacts", () => {
     expect(SENPI.resource_projections["omo.session_started"]).toEqual({ $os: "os.type", $os_version: "os.version", arch: "host.arch" })
     expect(SENPI.events["omo.process_crashed"]).toHaveProperty(["process.exit.code"])
     expect(SENPI.events["omo.session_summary"]).toHaveProperty(["omo.input_tokens"])
-    // `omo.is_real_user_prompt` would hit the forbidden `_prompt` suffix rule: the map renames it.
-    expect(SENPI.events["omo.prompt_submitted"]?.["omo.prompt.is_real_user"]?.posthog_name).toBe("is_real_user_prompt")
+    expect(SENPI.events["omo.prompt_submitted"]?.["omo.is_real_user"]?.posthog_name).toBe("is_real_user")
+    expect(SENPI.events["omo.prompt_submitted"]).not.toHaveProperty(["omo.prompt.is_real_user"])
     for (const attributes of Object.values(SENPI.events)) {
       for (const [key, spec] of Object.entries(attributes)) {
         if (spec.posthog_name !== undefined && key.startsWith("omo.") && !key.includes(".", 4)) {
-          // The one event-scoped rename: a bare `reason` leaf is forbidden on the wire.
-          expect(key).toBe(spec.posthog_name === "reason" ? "omo.start_reason" : `omo.${spec.posthog_name}`)
+          expect(key).toBe(`omo.${spec.posthog_name}`)
         }
       }
     }
@@ -220,9 +219,11 @@ describe("telemetry schema artifacts", () => {
     }
   })
 
-  test("#then the D-I os.version fixtures match their pattern and a path does not", () => {
-    for (const value of ["25.3.0", "6.8.0-45-generic", "10.0.22631"]) expect(matches(OS_VERSION_PATTERN, value)).toBe(true)
-    expect(matches(OS_VERSION_PATTERN, "/srv/customer/alice/report.txt")).toBe(false)
+  test("#then os.version accepts only a bare dotted release; a kernel or build suffix and a path do not match", () => {
+    for (const value of ["25.3.0", "26.4.1", "6.8.0", "10.0.22631"]) expect(`${value} ${matches(OS_VERSION_PATTERN, value)}`).toBe(`${value} true`)
+    for (const value of ["6.8.0-45-generic", "26.4.1 (25E253)", "1234567.0", "6", "/srv/customer/alice/report.txt"]) {
+      expect(`${value} ${matches(OS_VERSION_PATTERN, value)}`).toBe(`${value} false`)
+    }
   })
 
   test("#then the provider and architecture VALUE tables cover every id and round-trip wire -> id -> wire", () => {

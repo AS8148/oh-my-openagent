@@ -2,25 +2,21 @@ import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { describe, expect, test } from "bun:test"
 
-import { VERSION_PATTERN } from "./event-schema-constraints"
+import { OS_VERSION_PATTERN, VERSION_PATTERN } from "./event-schema-constraints"
 import { processCrashedProperties } from "./omo-native-crash"
 import { buildTelemetryArtifacts, canonicalJson, type ArtifactAttribute, type TelemetryArtifact } from "./telemetry-artifact"
 import { createOsProvider } from "./telemetry.test-support"
 import { wireViolations } from "./telemetry-wire.test-support"
 
-// Collector registry sisyphuslabs/omo-telemetry packages/schema-registry at 5c4503de6c393e970d2b16b47831b3ed1a821db4.
+// Collector registry sisyphuslabs/omo-telemetry packages/schema-registry at eef2e2b52731fded2507048f4aa141f84736cc74 (main).
 const COLLECTOR_SEMCONV_CANONICAL_SHA256 = "246f23be0254c1ff03cacff2bcf238887f2f95e46e5fe1bed861d76b935044f6"
-const COLLECTOR_ARTIFACT_SCHEMA_SHA256 = "38e9dfc60903d817e61134980042286c6c02ad84137b81e5e8420b7ad430a11e"
-
-// The collector's tightened `semver` safe shape (omo-telemetry #4, "version shapes carry no free suffix"). The vendored
-// artifact.schema.json above predates it; until it is re-pinned, this is the one engine pattern allowed outside it.
-const COLLECTOR_HARDENED_SEMVER =
-  "^[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}(-(alpha|beta|rc|dfa)\\.[0-9]{1,6}|-(nightly|preview)\\.[0-9]{8}\\.[0-9]{1,6}|-[0-9]{1,6})?$"
+const COLLECTOR_ARTIFACT_SCHEMA_SHA256 = "18ebd67bbf785d83f1a339e79c6f5e6a5d7cc5c2e59f7ec9a33f51f4e60158d7"
 
 const REGISTRY = new URL("./schema-registry/", import.meta.url)
 type SchemaDefs = {
   readonly safePattern?: { readonly oneOf: readonly { readonly title: string; readonly const: string }[] }
   readonly forbiddenKeys: { readonly enum: readonly string[] }
+  readonly fieldName?: { readonly allOf: readonly { readonly not?: { readonly pattern?: string } }[] }
   readonly wireKey?: { readonly allOf: readonly { readonly not?: { readonly pattern?: string } }[] }
 }
 const DEFS: SchemaDefs = JSON.parse(readFileSync(new URL("artifact.schema.json", REGISTRY), "utf8")).$defs
@@ -43,8 +39,10 @@ describe("engine artifacts against the collector's hardened registry", () => {
   })
 
   test("#then every pattern in both artifacts is one of the registry's named safe shapes, byte exact", () => {
-    expect(VERSION_PATTERN).toBe(COLLECTOR_HARDENED_SEMVER)
-    const safe = new Set([...(DEFS.safePattern?.oneOf ?? []).map((shape) => shape.const), COLLECTOR_HARDENED_SEMVER])
+    const shape = (title: string) => DEFS.safePattern?.oneOf.find((entry) => entry.title === title)?.const
+    expect(VERSION_PATTERN).toBe(shape("semver") ?? "missing semver shape")
+    expect(OS_VERSION_PATTERN).toBe(shape("os_version") ?? "missing os_version shape")
+    const safe = new Set((DEFS.safePattern?.oneOf ?? []).map((entry) => entry.const))
     expect(safe.size).toBeGreaterThan(1)
     const outside: string[] = []
     for (const artifact of ARTIFACTS) {
@@ -56,20 +54,39 @@ describe("engine artifacts against the collector's hardened registry", () => {
     expect(outside).toEqual([])
   })
 
-  test("#then no wire key hits a forbidden key or a forbidden leaf rule (omo.reason is gone, omo.start_reason carries it)", () => {
-    const rules = (DEFS.wireKey?.allOf ?? []).flatMap(({ not }) => (not?.pattern === undefined ? [] : [new RegExp(not.pattern, "u")]))
-    expect(rules.length).toBeGreaterThan(0)
+  test("#then no wire key and no PostHog name hits a forbidden key or any field-name rule of the collector", () => {
+    const rules = (DEFS.fieldName?.allOf ?? []).flatMap(({ not }) => (not?.pattern === undefined ? [] : [new RegExp(not.pattern, "u")]))
+    expect(rules.length).toBeGreaterThan(4)
+    const forbidden = (name: string) => DEFS.forbiddenKeys.enum.includes(name) || rules.some((rule) => rule.test(name))
     for (const artifact of ARTIFACTS) {
-      for (const [key] of attributesOf(artifact)) {
-        expect(`${key} ${DEFS.forbiddenKeys.enum.includes(key) || rules.some((rule) => rule.test(key))}`).toBe(`${key} false`)
-      }
-      for (const event of ["omo.session_started", "omo.daily_active"]) {
-        expect(artifact.events[event]).not.toHaveProperty(["omo.reason"])
-        expect(artifact.events[event]?.["omo.start_reason"]?.posthog_name).toBe("reason")
+      for (const [key, spec] of attributesOf(artifact)) {
+        expect(`${key} ${forbidden(key)}`).toBe(`${key} false`)
+        if (spec.posthog_name !== undefined) expect(`${key} ${spec.posthog_name} ${forbidden(spec.posthog_name)}`).toBe(`${key} ${spec.posthog_name} false`)
       }
     }
-    expect(wireViolations("session_started", { $session_id: "a".repeat(64), reason: "fork" })).toEqual([])
-    expect(wireViolations("daily_active", { $session_id: "a".repeat(64), reason: "session_start", day_utc: "2026-10-15" })).toEqual([])
+  })
+
+  test("#then the renamed attributes travel under their new wire key and PostHog name, and the old names are gone", () => {
+    const renamed: readonly [string, string, string][] = [
+      ["omo.session_started", "omo.start_trigger", "start_trigger"],
+      ["omo.daily_active", "omo.start_trigger", "start_trigger"],
+      ["omo.delegation_completed", "omo.start_trigger", "start_trigger"],
+      ["omo.prompt_submitted", "omo.suppression_cause", "suppression_cause"],
+      ["omo.prompt_submitted", "omo.is_real_user", "is_real_user"],
+      ["omo.category_config", "omo.custom_category_count", "custom_category_count"],
+    ]
+    const retired = new Set(["reason", "start_reason", "suppression_reason", "user_category_count", "is_real_user_prompt"])
+    for (const artifact of ARTIFACTS) {
+      for (const [event, key, posthog] of renamed) expect(`${event} ${key} ${artifact.events[event]?.[key]?.posthog_name}`).toBe(`${event} ${key} ${posthog}`)
+      for (const [event, attributes] of Object.entries(artifact.events)) {
+        for (const [key, spec] of Object.entries(attributes)) {
+          expect(`${event} ${key} ${retired.has(spec.posthog_name ?? "")}`).toBe(`${event} ${key} false`)
+        }
+        expect(Object.keys(attributes).filter((key) => /^omo\.(?:reason|start_reason|suppression_reason|user_category_count|prompt\.is_real_user)$/.test(key))).toEqual([])
+      }
+    }
+    expect(wireViolations("session_started", { $session_id: "a".repeat(64), start_trigger: "fork" })).toEqual([])
+    expect(wireViolations("daily_active", { $session_id: "a".repeat(64), start_trigger: "session_start", day_utc: "2026-10-15" })).toEqual([])
   })
 
   test("#then the old free-shape attributes are gone from the artifacts", () => {

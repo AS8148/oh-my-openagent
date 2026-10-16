@@ -75,6 +75,28 @@ describe("OmO native OTLP Resource", () => {
     }
   })
 
+  test("#given kernel releases of every shape #then os.version is the bare dotted release with any suffix stripped, and anything else is omitted", () => {
+    const shapes: readonly [string, string | undefined][] = [
+      ["26.4.1 (25E253)", "26.4.1"],
+      ["6.8.0-45-generic", "6.8.0"],
+      ["6.8.0+rpt-rpi-v8", "6.8.0"],
+      ["25.3.0", "25.3.0"],
+      ["10.0.22631", "10.0.22631"],
+      ["5.15.153.1-microsoft-standard-WSL2", "5.15.153.1"],
+      ["Darwin", undefined],
+      ["", undefined],
+      ["6", undefined],
+      ["1234567.0.1", undefined],
+      ["1.2.3.4.5", undefined],
+      ["/srv/customer/alice/report.txt", undefined],
+    ]
+    for (const [release, expected] of shapes) {
+      const fakeOs = { platform: () => "linux", release: () => release, arch: () => "x64" }
+      const resource = createOmoNativeResource({ product: "omo-cloud", sdk: { name: "opentelemetry", version: "2.1.0" }, packageVersion: "5.1.33", env: {}, os: fakeOs })
+      expect(`${release} -> ${resource["os.version"] ?? "omitted"}`).toBe(`${release} -> ${expected ?? "omitted"}`)
+    }
+  })
+
   test("#given this process #then every Resource attribute conforms to the omo-senpi artifact, and omo-cloud carries no install hash", () => {
     const stateDir = mkdtempSync(join(tmpdir(), "omo-resource-"))
     created.push(stateDir)
@@ -86,6 +108,7 @@ describe("OmO native OTLP Resource", () => {
       if (resource[key] !== undefined) expect(`${key} ${matchesSpec(spec, resource[key])}`).toBe(`${key} true`)
     }
     expect(resource["host.arch"]).toBe("amd64")
+    expect(resource["os.version"]).toBe("6.8.0")
     const cloudResource = createOmoNativeResource({ product: "omo-cloud", sdk: { name: "opentelemetry", version: "2.1.0" }, packageVersion: "5.1.33", env: {}, os: fakeOs })
     expect(cloudResource).not.toHaveProperty(["omo.install.hash"])
     for (const [key, spec] of Object.entries(cloud?.resource ?? {})) {
