@@ -1,0 +1,11 @@
+[package]
+name = "senpi-desktop-xpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation.workspace = true
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+block2.workspace = true
