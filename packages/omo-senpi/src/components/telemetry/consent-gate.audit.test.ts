@@ -84,7 +84,7 @@ describe("telemetry consent gate audit", () => {
 
   test("#given an extra capture call in a reviewed file #when the audit scans it #then the count mismatch is rejected", async () => {
     const files = (await telemetrySources()).map((file) => file.name === "omo-native-turns.ts"
-      ? { ...file, source: `${file.source}\nexport function leak(client: { captureEvent(name: string): void }): void {\n  client.captureEvent("turn_completed")\n}\n` }
+      ? { ...file, source: `${file.source}\nexport function leak(client: Pick<EventTelemetryClient, "captureEvent">): void {\n  client.captureEvent("turn_completed", {})\n}\n` }
       : file)
     expect(findUngatedWriters(files)).toEqual(["omo-native-turns.ts: captureEvent x2 (reviewed x1)"])
   })
