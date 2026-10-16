@@ -117,10 +117,12 @@ describe("host crash uses existing bounded child recovery (#10023)", () => {
       expect(f.launchRecords).toEqual([{ prompt: "do the thing", sessionPath: f.sessionPath }])
       expect(f.specs[0]).toMatchObject({ cwd: f.store.load(f.id)?.spawn_spec?.cwd, prompt: "", resumeSessionPath: f.sessionPath })
       expect(f.switched).toEqual([f.sessionPath])
+      // The continuation is an identified input (#10129): a durable id bound to this task.
       expect(f.replacement.sent).toEqual([{
         type: "prompt",
         streamingBehavior: "followUp",
         message: expect.any(String),
+        clientMessageId: expect.stringMatching(new RegExp(`^${f.id}:\\d+:\\d+$`)),
       }])
       const continuation = f.replacement.sent[0]
       expect(continuation?.type === "prompt" ? continuation.message : undefined).not.toBe(f.launchRecords[0]?.prompt)
