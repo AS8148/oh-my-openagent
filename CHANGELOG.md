@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Computer use can hold keys or a mouse button for a set time and always lets go.** `holdKeys(keys, { duration })` and `holdMouse(x, y, { duration })` hold for up to 100 seconds and release everything they pressed, in reverse order, even when the run is cancelled or the emergency stop fires. ([#9651](https://github.com/code-yeongyu/oh-my-openagent/issues/9651))
+**Computer use can hold keys or a mouse button for a set time and always lets go.** `holdKeys(keys, { duration })` and `holdMouse(x, y, { duration })` hold for up to 100 seconds and release everything they pressed, in reverse order, even when the run is cancelled or the emergency stop fires. ([#9651](https://github.com/code-yeongyu/oh-my-openagent/issues/9651), [#10030](https://github.com/code-yeongyu/oh-my-openagent/pull/10030))
 
 ## [5.1.34] - 2026-10-16
 
