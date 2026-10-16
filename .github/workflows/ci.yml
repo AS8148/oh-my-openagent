@@ -248,41 +248,49 @@ jobs:
           cat > /tmp/scan-probe.ts <<'PROBE'
           import { spawn } from "node:child_process"
           import { readdir, readlink, stat, writeFile, mkdtemp } from "node:fs/promises"
+          import { existsSync } from "node:fs"
           import { tmpdir } from "node:os"
           import { join } from "node:path"
           const ws = process.env.GITHUB_WORKSPACE ?? "."
-          const { scanProcFdHolders } = await import(`${ws}/packages/memory-core/src/git/open-file-holders.ts`)
-          const { liveProcView } = await import(`${ws}/packages/memory-core/src/git/proc-view.ts`)
+          const pv = await import(`${ws}/packages/memory-core/src/git/proc-view.ts`)
           const dir = await mkdtemp(join(tmpdir(), "scan-probe-"))
           const lock = join(dir, "HEAD.lock")
           await writeFile(lock, "")
-          const holder = spawn("sh", ["-c", `exec 3<"${lock}"; sleep 3`], { stdio: "ignore" })
           const uid = process.geteuid!()
+          const view = pv.liveProcView(uid)
           const counts = new Map<string, number>()
           const bump = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1)
-          for (let round = 0; round < 60; round += 1) {
-            for (let i = 0; i < 4; i += 1) spawn("git", ["--version"], { stdio: "ignore" })
-            const scan = await scanProcFdHolders(lock, liveProcView(uid))
-            bump(`scan:${scan.kind}`)
-            if (scan.kind !== "holders") {
-              for (const entry of await readdir("/proc")) {
-                if (!/^\d+$/.test(entry)) continue
-                const fdDir = `/proc/${entry}/fd`
-                let comm = "?"; try { comm = (await Bun.file(`/proc/${entry}/comm`).text()).trim() } catch {}
-                try {
-                  for (const fd of await readdir(fdDir)) {
-                    let target = "?"
-                    try { target = await readlink(join(fdDir, fd)) } catch (e: any) { bump(`readlink:${e.code}:${comm}`); continue }
-                    try { await stat(join(fdDir, fd)) } catch (e: any) { bump(`stat:${e.code}:${comm}:${target.replace(/[0-9]+/g, "N")}`) }
-                  }
-                } catch (e: any) {
-                  let owner = "?"; try { owner = String((await stat(`/proc/${entry}`)).uid) } catch (s: any) { owner = `stat-${s.code}` }
-                  bump(`readdir:${e.code}:${comm}:owner=${owner}:self=${uid}`)
-                }
+          const comm = async (pid: number) => { try { return (await Bun.file(`/proc/${pid}/comm`).text()).trim() } catch { return "gone" } }
+          async function inspect(pid: number) {
+            const fdDir = join("/proc", String(pid), "fd")
+            let fds: string[]
+            try { fds = await readdir(fdDir) } catch (e: any) {
+              const v = await pv.classifyEntryError(view, pid, e)
+              if (v === "indeterminate") bump(`INDET readdir ${e.code} comm=${await comm(pid)} aliveAfter=${existsSync(`/proc/${pid}`)}`)
+              return v
+            }
+            let indet = false
+            for (const fd of fds) {
+              const p = join(fdDir, fd)
+              try { await readlink(p) } catch (e: any) {
+                if (e.code === "ENOENT") continue
+                const v = await pv.classifyEntryError(view, pid, e)
+                if (v === "indeterminate") { indet = true; bump(`INDET readlink ${e.code} comm=${await comm(pid)}`) }
+                continue
+              }
+              try { await stat(p) } catch (e: any) {
+                if (e.code === "ENOENT") continue
+                const v = await pv.classifyEntryError(view, pid, e)
+                if (v === "indeterminate") { indet = true; bump(`INDET stat ${e.code} comm=${await comm(pid)}`) }
               }
             }
+            return indet ? "indeterminate" : "no-match"
           }
-          holder.kill()
+          for (let round = 0; round < 60; round += 1) {
+            for (let i = 0; i < 4; i += 1) spawn("git", ["--version"], { stdio: "ignore" })
+            const scan = await pv.scanEveryProcess(view, inspect)
+            bump(`scan:${scan.kind}`)
+          }
           console.log(JSON.stringify(Object.fromEntries(counts), null, 1))
           PROBE
           unshare -Upf --mount-proc --map-current-user -- env CI=1 bun /tmp/scan-probe.ts 2>&1 | tail -40
