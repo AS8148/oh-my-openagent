@@ -118,6 +118,7 @@ const isPlain = (value: object): boolean => {
 }
 
 const freezeDeep = (value: unknown, keep: (value: object) => boolean): unknown => {
+  if (typeof value === "function") throw new TypeError("a verified state holds only plain data, never a function")
   if (typeof value !== "object" || value === null) return value
   if (deep.has(value) || keep(value)) return value
   if (Array.isArray(value)) return registered(Object.freeze(value.map((item) => freezeDeep(item, keep))))
