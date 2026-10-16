@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -26,12 +26,15 @@ describe("loadOrCreateDevicePeer", () => {
     })
   })
 
-  test("#given 16 concurrent first loads #when they race #then all return the same id", async () => {
-    await withDir(async (dir) => {
-      const path = join(dir, "peer")
-      const ids = await Promise.all(Array.from({ length: 16 }, () => loadOrCreateDevicePeer(path)))
-      expect(new Set(ids).size).toBe(1)
-    })
+  test("#given 64 concurrent first loads #when they race #then all read one complete id and no candidate is left", async () => {
+    for (let round = 0; round < 20; round++) {
+      await withDir(async (dir) => {
+        const path = join(dir, "peer")
+        const ids = await Promise.all(Array.from({ length: 64 }, () => loadOrCreateDevicePeer(path)))
+        expect(new Set(ids).size, `round ${round}`).toBe(1)
+        expect(await readdir(dir), `round ${round}`).toEqual(["peer"])
+      })
+    }
   })
 
   test("#given a corrupt peer file #when loaded #then it throws instead of minting a second identity", async () => {

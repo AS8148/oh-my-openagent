@@ -1,12 +1,13 @@
 // The device's one Loro peer id (review r3): created once, persisted, and reused by every
-// capture on this device, so the version vector holds one entry per device. Creation is an
-// exclusive create (`wx`): when two processes race, exactly one id is written and both read it.
+// capture on this device, so the version vector holds one entry per device. The id is written
+// whole to a private temp file and published with link(2), which is atomic and fails when the
+// file exists: a racing reader never sees a partial id, and exactly one candidate wins.
 
 import { randomBytes } from "node:crypto"
 import { dirname } from "node:path"
 
 import type { PeerID } from "../../crdt/loro-runtime"
-import { mkdir, readFile, writeFile } from "../../fs/resilient"
+import { link, mkdir, readFile, unlink, writeFile } from "../../fs/resilient"
 
 export class DevicePeerError extends Error {
   override readonly name = "DevicePeerError"
@@ -19,10 +20,14 @@ export async function loadOrCreateDevicePeer(path: string): Promise<PeerID> {
   const existing = await readPeer(path)
   if (existing !== null) return existing
   await mkdir(dirname(path), { recursive: true })
+  const candidate = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`
+  await writeFile(candidate, `${freshPeer()}\n`, { flag: "wx", mode: 0o600 })
   try {
-    await writeFile(path, `${freshPeer()}\n`, { flag: "wx", mode: 0o600 })
+    await link(candidate, path)
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error
+  } finally {
+    await unlink(candidate)
   }
   const created = await readPeer(path)
   if (created === null) throw new DevicePeerError(`device peer file vanished after create: ${path}`)
