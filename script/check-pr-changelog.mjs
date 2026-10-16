@@ -41,8 +41,9 @@ export function addedUnreleasedParagraphs(before, after, diff) {
   const added = new Set(diff.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++")).map((line) => line.slice(1).trim()).filter(Boolean))
   const section = /^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(after.replace(/<!--[\s\S]*?-->/g, ""))
   if (!section) return []
-  return section[1].split(/\n\s*\n/).map((block) => block.trim()).filter((block) => {
-    if (!block || /^#{1,6}\s/.test(block)) return false
+  // Drop heading lines rather than whole blocks: an entry directly under "### Fixed" is still checked.
+  return section[1].split(/\n\s*\n/).map((block) => block.split("\n").filter((line) => !/^#{1,6}\s/.test(line.trim())).join("\n").trim()).filter((block) => {
+    if (!block) return false
     if (!block.split("\n").some((line) => added.has(line.trim()))) return false
     const title = /^\*\*(.+?)\*\*/.exec(block)?.[1]
     return title ? !before.includes(`**${title}**`) : !before.includes(block)
