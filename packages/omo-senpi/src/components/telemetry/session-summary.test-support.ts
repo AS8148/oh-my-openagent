@@ -4,7 +4,7 @@ import { join } from "node:path"
 import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import { createSessionSummaryRecorder, type SessionSummaryRecorder } from "./omo-native-session-summary"
-import { createSummaryStorage, type SummaryStorage } from "./session-summary-storage"
+import { createSummaryStorage, type ConsentScope, type SummaryStorage } from "./session-summary-storage"
 import type { SummaryTurn } from "./session-summary-window"
 
 export type Published = { readonly uuid: string; readonly properties: EventTelemetryProperties }
@@ -55,6 +55,8 @@ export type TestRecorderInput = {
   readonly droppedEvents?: () => number
   readonly onPublish?: (event: Published, storage: SummaryStorage) => unknown
   readonly isConsented?: () => boolean
+  readonly consentScope?: ConsentScope
+  readonly isScopeConsented?: (scope: ConsentScope) => boolean
 }
 
 export function createTestRecorder(input: TestRecorderInput): TestRecorder {
@@ -73,6 +75,8 @@ export function createTestRecorder(input: TestRecorderInput): TestRecorder {
   })
   const summary = createSessionSummaryRecorder({
     ...(input.isConsented === undefined ? {} : { isConsented: input.isConsented }),
+    ...(input.consentScope === undefined ? {} : { consentScope: () => input.consentScope ?? {} }),
+    ...(input.isScopeConsented === undefined ? {} : { isScopeConsented: input.isScopeConsented }),
     storage,
     publish: async (event) => {
       if (input.onPublish !== undefined) observed.push(input.onPublish(event, storage))

@@ -129,6 +129,37 @@ describe("session_summary windows", () => {
     expect(existsSync(join(summaryDir(dir), "s1@boot-222.json"))).toBe(true)
   })
 
+  // summary_seq is unique per session: a process that keeps its own copy beside another process's window
+  // must never publish a seq that other process uses for the same session.
+  test("#given a live owner continuing a session #when a second process keeps its own copy #then the two never publish the same seq", async () => {
+    const dir = stateDirs.make()
+    const owner = createTestRecorder({ dir, pid: 111, alivePids: [222] })
+    const second = createTestRecorder({ dir, pid: 222, alivePids: [111] })
+    await owner.summary.recordTurn("s1", summaryTurn())
+    await second.summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
+    await owner.summary.finish("s1", "quit")
+    await second.summary.finish("s1", "quit")
+
+    const seqs = [...owner.published, ...second.published].map(({ properties }) => properties.summary_seq)
+    expect(seqs).toHaveLength(2)
+    expect(new Set(seqs).size).toBe(2)
+  })
+
+  test("#given a dead owner's window another process wins the claim on #when this process keeps its own copy #then its seq differs from the recovered one", async () => {
+    const dir = stateDirs.make()
+    const dead = createTestRecorder({ dir, pid: 111 })
+    await dead.summary.recordTurn("s1", summaryTurn())
+    const live = createTestRecorder({ dir, pid: 222, alivePids: [333] })
+    Object.assign(live.storage, { claimWindow: () => undefined })
+    await live.summary.recordTurn("s1", summaryTurn({ turnIndex: 1 }))
+    await live.summary.finish("s1", "quit")
+    const winner = createTestRecorder({ dir, pid: 333, alivePids: [222], startAt: 1_000_000 + OWNER_STALE_MS + 1 })
+    await winner.summary.recover()
+
+    expect(rows(winner.published)).toEqual([[0, "recovered", 1]])
+    expect(rows(live.published).map(([seq]) => seq)).not.toContain(0)
+  })
+
   // #10229: a window written before consent was recorded (or by an opted-out session) carries no opted-in
   // mark, so nothing proves its session agreed to be sent: recovery deletes it unsent.
   test("#given a dead process's window without a consent mark #when recovery runs #then it is deleted and never sent", async () => {

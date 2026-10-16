@@ -25,7 +25,7 @@ export type NativeCaptureState = {
   sessionHash?: string
   /** Event uuids the privacy client actually handed to the transport (rejected events never get here). */
   readonly delivered: Set<string>
-  /** Per-uuid promise of an immediate send: it resolves once the server accepted that very event. */
+  /** Per-uuid promise of an immediate send: it resolves on a 2xx answer for that very event, else rejects. */
   readonly acks: Map<string, Promise<void>>
   onCaptureReady?: () => void
 }
@@ -60,8 +60,9 @@ export function createNativeSummaryRecorder(input: {
   })
 }
 
-// Acknowledged only when the server accepted this very event: the immediate send resolved. A transport
-// without immediate sends falls back to its flush.
+// Acknowledged only when the server accepted this very event: the immediate send resolved on a 2xx answer;
+// a rejected send propagates so the pending file stays. A transport without immediate sends falls back to
+// its flush.
 async function publishThroughState(state: NativeCaptureState, publication: SummaryPublication): Promise<boolean> {
   const capture = state.capture
   if (capture === undefined) return false

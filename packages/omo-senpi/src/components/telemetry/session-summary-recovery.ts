@@ -61,8 +61,11 @@ export function createSummaryRecovery(input: {
       return undefined
     }
     const nextSeq = record.window === null ? record.seq : record.seq + 1
+    // A dead process's own copy is never continued (its key names that process), so it is not recreated.
     const keepNumbering = () => {
-      storage.createWindow(key, { ...record, owner: storage.owner, heartbeatAt: storage.now(), seq: nextSeq, windowId: null, window: null })
+      if (!storage.isOwnCopyKey(key)) {
+        storage.createWindow(key, { ...record, owner: storage.owner, heartbeatAt: storage.now(), seq: nextSeq, windowId: null, window: null })
+      }
       removeFile(claimed.claimPath)
     }
     // The pending file of this window exists when its owner died after step (1) of the publication: the
@@ -130,7 +133,7 @@ export function createSummaryRecovery(input: {
       }
       if (record !== CORRUPT && isExpired(record.createdAt)) {
         storage.removePending(uuid)
-        publisher.countDropped(1)
+        if (isRecordSendable(record, isScopeConsented)) publisher.countDropped(1)
         continue
       }
       if (record !== CORRUPT && isSelf(record)) {
@@ -158,16 +161,25 @@ export function createSummaryRecovery(input: {
       }
       if (isExpired(record.heartbeatAt)) {
         storage.removeWindow(key)
-        if (record.window !== null) publisher.countDropped(1)
+        // An opted-out scope's lost window is not counted either: the count would describe that scope.
+        if (record.window !== null && isRecordSendable(record, isScopeConsented)) publisher.countDropped(1)
         continue
       }
       if (record.window !== null && isAbandoned(record)) recoverWindow(key)
     }
   }
 
+  let prunedSeq = false
+  const pruneSeqOnce = (): void => {
+    if (prunedSeq) return
+    prunedSeq = true
+    storage.pruneSeq()
+  }
+
   return {
     recoverWindow,
     sweep() {
+      pruneSeqOnce()
       sweepLeftovers()
       sweepPending()
       sweepWindows()

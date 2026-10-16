@@ -4,6 +4,7 @@ import type { EventTelemetryProperties } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, listNames, readJsonOrCorrupt, removeFile, renameIfPresent, writeJsonAtomic } from "./session-summary-files"
 import { createOwnerRegistry, parseOwner, processIsAlive, type ProcessOwner } from "./session-summary-owner"
+import { createSeqReservations } from "./session-summary-seq"
 import { parseTelemetrySessionRole, type TelemetrySessionRole } from "./session-role"
 import { isSummaryWindow, type SummaryWindow } from "./session-summary-window"
 
@@ -63,6 +64,12 @@ export type SummaryStorage = {
   readonly now: () => number
   readonly isOwnerAlive: (owner: ProcessOwner) => boolean
   readonly windowKey: (sessionHash: string, ownCopy?: boolean) => string
+  /** A key one process wrote beside another process's window; nobody continues it once its writer is gone. */
+  readonly isOwnCopyKey: (key: string) => boolean
+  /** Takes the first seq at or above `from` that no process has used for this session. */
+  readonly reserveSeq: (sessionHash: string, from: number) => number
+  readonly forgetSeq: (sessionHash: string) => void
+  readonly pruneSeq: () => void
   readonly readWindow: (key: string) => ReadResult<WindowRecord>
   readonly writeWindow: (key: string, record: WindowRecord) => void
   /** Exclusive create: never replaces a window another process wrote in the meantime. */
@@ -103,6 +110,7 @@ export function createSummaryStorage(input: {
   const claimSuffix = `.claimed-${owner.pid}-${owner.bootId}`
   const windowPath = (key: string) => join(dir, `${key}.json`)
   const pendingPath = (uuid: string) => join(pendingDir, `${uuid}.json`)
+  const seqs = createSeqReservations(dir)
   let registered = false
   const ensureRegistered = () => {
     if (registered) return
@@ -121,6 +129,10 @@ export function createSummaryStorage(input: {
     now: input.now ?? Date.now,
     isOwnerAlive: registry.isAlive,
     windowKey: (sessionHash, ownCopy = false) => `${fileName(sessionHash)}${ownCopy ? `@${owner.bootId}` : ""}`,
+    isOwnCopyKey: (key) => key.includes("@"),
+    reserveSeq: (sessionHash, from) => seqs.reserve(fileName(sessionHash), from),
+    forgetSeq: (sessionHash) => seqs.forget(fileName(sessionHash)),
+    pruneSeq: () => seqs.prune(SUMMARY_TTL_MS, Date.now()),
     readWindow: (key) => parseRead(readJsonOrCorrupt(windowPath(key)), parseWindowRecord),
     writeWindow(key, record) {
       ensureRegistered()
@@ -235,20 +247,22 @@ function parseScope(value: unknown): ConsentScope | undefined {
 }
 
 /**
- * Deletes every queued window and pending event that does not carry an `enabled` consent mark. Runs where no
- * summary state may be created (an opted-out session), so it only reads and deletes, never writes.
+ * Deletes every queued window and pending event that may never be sent: no `enabled` consent mark, or a
+ * scope whose consent, read now, is off. Runs where no summary state may be created (an opted-out session),
+ * so it only reads and deletes, never writes.
  */
-export function purgeUnconsentedQueue(stateDir: string): void {
+export function purgeUnconsentedQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean): void {
   const dir = summaryDir(stateDir)
   const pendingDir = join(dir, "pending")
-  for (const name of listNames(dir)) if (name.endsWith(".json")) purgeIfUnconsented(join(dir, name), parseWindowRecord)
-  for (const name of listNames(pendingDir)) if (name.endsWith(".json")) purgeIfUnconsented(join(pendingDir, name), parsePendingRecord)
+  const purge = (path: string, parse: (value: unknown) => SendableRecord | undefined): void => {
+    const record = parseRead(readJsonOrCorrupt(path), parse)
+    if (record !== undefined && record !== CORRUPT && !isRecordSendable(record, isScopeConsented)) removeFile(path)
+  }
+  for (const name of listNames(dir)) if (name.endsWith(".json")) purge(join(dir, name), parseWindowRecord)
+  for (const name of listNames(pendingDir)) if (name.endsWith(".json")) purge(join(pendingDir, name), parsePendingRecord)
 }
 
-function purgeIfUnconsented(path: string, parse: (value: unknown) => { readonly consent: RecordConsent } | undefined): void {
-  const record = parseRead(readJsonOrCorrupt(path), parse)
-  if (record !== undefined && record !== CORRUPT && record.consent !== "enabled") removeFile(path)
-}
+type SendableRecord = Parameters<typeof isRecordSendable>[0]
 
 function fileName(sessionHash: string): string {
   return SAFE_NAME.test(sessionHash) ? sessionHash.replaceAll(":", "_") : Buffer.from(sessionHash).toString("hex").slice(0, 128)

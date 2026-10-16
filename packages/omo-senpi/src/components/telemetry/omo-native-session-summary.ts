@@ -154,12 +154,23 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     const stored = live.get(sessionHash)?.seq ?? (key === undefined ? undefined : seqOf(storage.readWindow(key)))
     if (stored !== undefined && stored > 0) retiredSeq.set(sessionHash, Math.max(stored, retiredSeq.get(sessionHash) ?? 0))
     live.delete(sessionHash)
-    if (key === undefined) return
     try {
-      removeWindow(sessionHash, key)
+      storage.forgetSeq(sessionHash)
+      if (key !== undefined) removeWindow(sessionHash, key)
     } catch (error) {
       report(error)
     }
+  }
+
+  // Every new window takes a seq no other process has used for this session (an own copy beside another
+  // process's window would otherwise start at that window's seq). A failed reservation keeps the hint.
+  const startWindow = (sessionHash: string, entry: Live): string => {
+    try {
+      entry.seq = storage.reserveSeq(sessionHash, entry.seq)
+    } catch (error) {
+      report(error)
+    }
+    return randomUUID()
   }
 
   function purgeIfOptedOut(): void {
@@ -239,7 +250,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
 
   const close = (sessionHash: string, entry: Live, endedBy: EndedBy, keepFile: boolean): void => {
     const window = entry.window ?? openWindow(now(), 0)
-    const windowId = entry.windowId ?? randomUUID()
+    const windowId = entry.windowId ?? startWindow(sessionHash, entry)
     const seq = entry.seq
     void publisher.publishWindow({
       consent: "enabled", scope: consentScope(), sessionHash, sessionRole: options.sessionRole, sampleRate: entry.sampleRate, seq, windowId, window, endedBy,
@@ -270,8 +281,8 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
       const entry = liveFor(sessionHash)
       const at = now()
       if (entry.window === null) {
+        entry.windowId = startWindow(sessionHash, entry)
         entry.window = openWindow(at, turn.turnIndex)
-        entry.windowId = randomUUID()
         entry.sampleRate = options.sampleRate()
       }
       addTurn(entry.window, turn, at)

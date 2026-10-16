@@ -39,7 +39,7 @@ import {
   type NativeCaptureState,
 } from "./omo-native-summary-wiring"
 import { isTelemetryHostWarmup, resolveTelemetrySessionRole } from "./session-role-resolver"
-import { purgeUnconsentedQueue } from "./session-summary-storage"
+import { purgeUnconsentedQueue, type ConsentScope } from "./session-summary-storage"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
   OMO_NATIVE_SCHEMA_VERSION,
@@ -161,7 +161,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       pi.on("session_shutdown", async (payload, eventCtx) => {
         consentCwd = cwdOf(eventCtx)
         if (summary === undefined) {
-          purgeQueue(stateDir, options)
+          purgeQueue(stateDir, (scope) => readConsent(scope.cwd), options)
           return
         }
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
@@ -293,7 +293,10 @@ function installCaptureFacade(
     transportFactory: () => ({
       capture(message) {
         const ack = forwardValidatedCapture(transport, message)
-        if (ack !== undefined && message.uuid !== undefined) state.acks.set(message.uuid, ack)
+        if (ack === undefined || message.uuid === undefined) return
+        // The publisher awaits this promise; a send it never reaches must not surface as an unhandled rejection.
+        void ack.catch(() => undefined)
+        state.acks.set(message.uuid, ack)
       },
       shutdown: async () => undefined,
     }),
@@ -315,11 +318,11 @@ function forwardValidatedCapture(transport: TelemetryTransport, message: Telemet
   return undefined
 }
 
-// Queued records without consent (an opted-out session's, or ones written before consent marks existed)
-// are deleted even by a session that records nothing itself.
-function purgeQueue(stateDir: string, options: OmoNativeTelemetryComponentOptions): void {
+// Queued records that may never be sent (no consent mark, or a scope that has opted out since) are deleted
+// even by a session that records nothing itself.
+function purgeQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean, options: OmoNativeTelemetryComponentOptions): void {
   try {
-    purgeUnconsentedQueue(stateDir)
+    purgeUnconsentedQueue(stateDir, isScopeConsented)
   } catch (error) {
     options.diagnostics?.({
       event: "telemetry_activity_state_write_failed",
