@@ -48,22 +48,22 @@ export async function reconcileHostTurn(
   record: Pick<TaskRecord, "host_session" | "final_response">,
   sessionPath: string,
 ): Promise<HostTurnReconciliation> {
-  let state: HostSessionLiveness
-  try {
-    state = await port.getState()
-  } catch (error) {
-    log("senpi-task host turn state read failed", {
-      sessionPath,
-      reason: error instanceof Error ? error.message : String(error),
-      action: port.reopened === true
-        ? "The session was reopened from its file, so no turn runs there; reconcile from its receipt and transcript."
-        : "Keep the child tracked as streaming and wait for its next outcome without sending input.",
-    })
-    if (port.reopened !== true) return "streaming"
-    // Valid only because the host just reopened this session from its file: no turn can run there yet.
-    state = { sessionId: "", isStreaming: false }
+  // A session the host just reopened from its file has no running turn, so its state is not asked for:
+  // reconciliation goes straight to the receipt and the transcript.
+  if (port.reopened !== true) {
+    let state: HostSessionLiveness
+    try {
+      state = await port.getState()
+    } catch (error) {
+      log("senpi-task host turn state read failed", {
+        sessionPath,
+        reason: error instanceof Error ? error.message : String(error),
+        action: "Keep the child tracked as streaming and wait for its next outcome without sending input.",
+      })
+      return "streaming"
+    }
+    if (state.isStreaming === true || state.isCompacting === true) return "streaming"
   }
-  if (state.isStreaming === true || state.isCompacting === true) return "streaming"
   const receipt = port.lastInputEffect
   if (receipt?.state === "accepted") {
     port.notify({ kind: "idle_queued", reason: QUEUED_REASON })

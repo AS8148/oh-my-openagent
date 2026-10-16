@@ -295,7 +295,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     markStopping: stop.markStopping,
     stopWhenReachable: stop.stopWhenReachable,
     ...listeners.registrations,
-    reconcileTurn: (record) => reconciliation.reconcile(session.sessionPath, record),
+    reconcileTurn: (record) => reconciliation.reconcile(session.sessionPath, record, false, openDisposition === "reopened"),
     onReconciled: reconciliation.subscribe,
     adoptFinishedTurn: async (finalResponse) => {
       if (turnOutcome !== undefined || settlement.pending() !== undefined) return
