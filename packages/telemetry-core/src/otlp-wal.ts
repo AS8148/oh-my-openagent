@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, renameSync, writeSync } from "node:fs"
+import { closeSync, mkdirSync, openSync, writeSync } from "node:fs"
 import { join } from "node:path"
 
 import { toBinary } from "@bufbuild/protobuf"
@@ -8,7 +8,7 @@ import type { ReadableSpan, SpanProcessor } from "./otel-minimal-trace"
 import { encodeLogRecord, encodeSpan } from "./otlp-encode"
 import { LogRecordSchema } from "./otlp-proto/opentelemetry/proto/logs/v1/logs_pb.js"
 import { SpanSchema } from "./otlp-proto/opentelemetry/proto/trace/v1/trace_pb.js"
-import { activeName, batchName, deleteFile } from "./otlp-spool-dir"
+import { activeName, batchName, deleteFile, publishBatch } from "./otlp-spool-dir"
 import { frame, type Signal } from "./otlp-spool-file"
 
 export type SpoolWriterInput = {
@@ -58,8 +58,15 @@ export class SpoolWriter {
   }
 
   #open(): number {
-    mkdirSync(this.#input.dir, { recursive: true, mode: 0o700 })
-    const fd = openSync(join(this.#input.dir, this.name), "a", 0o600)
+    const path = join(this.#input.dir, this.name)
+    let fd: number
+    try {
+      fd = openSync(path, "a", 0o600)
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+      mkdirSync(this.#input.dir, { recursive: true, mode: 0o700 })
+      fd = openSync(path, "a", 0o600)
+    }
     const header = frame(this.#input.header)
     writeSync(fd, header)
     this.#fd = fd
@@ -79,7 +86,7 @@ export class SpoolWriter {
     if (this.#fd === null || this.records === 0) return null
     this.#close()
     const sealed = batchName(this.#input.signal, batchId)
-    renameSync(join(this.#input.dir, this.name), join(this.#input.dir, sealed))
+    publishBatch(this.#input.dir, this.name, sealed)
     return sealed
   }
 

@@ -79,14 +79,19 @@ export class BatchSender {
 
   async #pass(): Promise<void> {
     const ctx = this.#input.ctx
+    // One directory listing serves a whole run of sends; the spool is re-listed only once that run
+    // is used up, so a pass over n files costs O(n) directory reads instead of one per file.
+    let pending: ReturnType<typeof oldestSealedBatches> = []
     while (!this.#stopped && this.#input.consent()) {
-      let next: ReturnType<typeof oldestSealedBatches>[number] | undefined
-      try {
-        next = oldestSealedBatches(ctx.dir).find((entry) => !this.#deferred.has(entry.batchId))
-      } catch (error) {
-        this.#input.report("telemetry_spool_sweep_failed", error)
-        return
+      if (pending.length === 0) {
+        try {
+          pending = oldestSealedBatches(ctx.dir).filter((entry) => !this.#deferred.has(entry.batchId))
+        } catch (error) {
+          this.#input.report("telemetry_spool_sweep_failed", error)
+          return
+        }
       }
+      const next = pending.shift()
       if (next === undefined) return
       this.#deferred.add(next.batchId)
       const claimed = claimBatch(ctx, next)

@@ -11,9 +11,9 @@ import {
 import {
   createBatchId,
   deleteFile,
-  enforceSpoolCap,
   SPOOL_CAP_BYTES,
   SPOOL_MAX_AGE_MS,
+  SpoolCap,
   sweepSpool,
   type DropReason,
   type SpoolContext,
@@ -59,6 +59,7 @@ class OtlpSender {
   readonly #consent: () => boolean
   readonly #batches: BatchSender
   readonly #ownSealed = new Set<string>()
+  readonly #cap: SpoolCap
   readonly #unreported: Record<DropReason, number> = { evicted: 0, expired: 0, rejected: 0, corrupt: 0 }
   readonly #timers: ReturnType<typeof setInterval>[] = []
   #droppedSince200 = 0
@@ -91,6 +92,7 @@ class OtlpSender {
         this.#unreported[reason] += records
       },
     }
+    this.#cap = new SpoolCap(this.#ctx)
     this.#batches = new BatchSender({
       ctx: this.#ctx,
       endpoint,
@@ -183,10 +185,12 @@ class OtlpSender {
 
   #seal(writer: SpoolWriter): void {
     this.#guard("telemetry_spool_write_failed", () => {
-      const sealed = writer.seal(createBatchId(this.#ctx.nowMs()))
+      const batchId = createBatchId(this.#ctx.nowMs())
+      const bytes = writer.bytes
+      const sealed = writer.seal(batchId)
       if (sealed === null) return
       this.#ownSealed.add(sealed)
-      enforceSpoolCap(this.#ctx)
+      this.#cap.sealed(writer.signal, batchId, bytes)
     })
   }
 
@@ -224,13 +228,13 @@ class OtlpSender {
   async #shutdown(): Promise<void> {
     if (this.#stopped) return
     for (const timer of this.#timers) clearInterval(timer)
+    // The cap is measured from this call: the deadline is armed before the flush runs, so the
+    // flush's synchronous seal and claim work counts against the cap instead of delaying its start.
     let deadline: ReturnType<typeof setTimeout> | undefined
-    await Promise.race([
-      this.#flush(),
-      new Promise<void>((resolve) => {
-        deadline = setTimeout(resolve, this.#input.shutdownTimeoutMs ?? 2_000)
-      }),
-    ])
+    const expired = new Promise<void>((resolve) => {
+      deadline = setTimeout(resolve, this.#input.shutdownTimeoutMs ?? 2_000)
+    })
+    await Promise.race([this.#flush(), expired])
     clearTimeout(deadline)
     this.#stopped = true
     this.#batches.stop()
