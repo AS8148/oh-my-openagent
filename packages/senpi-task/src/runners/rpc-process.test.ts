@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import type { RpcSpawnDescriptor } from "./rpc/spawn"
 import { mapExitOutcomeToError } from "./rpc/exit-mapping"
-import { terminateRpcChild } from "./rpc/terminate"
+import { releaseSpawnedChild } from "./rpc/__fixtures__/release-child"
 import { spawnFakeChild } from "./rpc/__fixtures__/spawn-fake"
 import { RpcProcessRunner } from "./rpc-process"
 import type { RpcRunnerSpec } from "./types"
@@ -53,7 +53,7 @@ afterEach(async () => {
   while (children.length > 0) {
     const child = children.pop()
     if (child) {
-      await terminateRpcChild(child, { sigkillDelayMs: 200 })
+      await releaseSpawnedChild(child)
     }
   }
   while (tmpDirs.length > 0) {

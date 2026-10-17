@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import { RunnerError } from "../runners/in-process"
 import { RpcProcessRunner } from "../runners/rpc-process"
+import { releaseSpawnedChild } from "../runners/rpc/__fixtures__/release-child"
 import { spawnFakeChild } from "../runners/rpc/__fixtures__/spawn-fake"
 import { terminateRpcChild } from "../runners/rpc/terminate"
 import { createRpcManagedRunner } from "./runner"
@@ -17,27 +18,10 @@ const PUBLIC_START_FAILURE = "Child prompt failed to start."
 
 const spawned: ChildProcess[] = []
 
-const RUNNER_TEARDOWN_BOUND_MS = 10_000
-
-// A refused start is torn down by the runner itself, after it reports the failure (#10402). Terminating that
-// child here too would race the runner's teardown (EPERM on an exiting process group), so wait for its exit
-// and terminate only a child the runner left behind.
-async function settleSpawnedChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const exited = new Promise<"exited">((resolve) => child.once("exit", () => resolve("exited")))
-  const bound = new Promise<"left">((resolve) => {
-    timer = setTimeout(() => resolve("left"), RUNNER_TEARDOWN_BOUND_MS)
-  })
-  const outcome = await Promise.race([exited, bound])
-  clearTimeout(timer)
-  if (outcome === "left") await terminateRpcChild(child, { sigkillDelayMs: 200 })
-}
-
 afterEach(async () => {
   while (spawned.length > 0) {
     const child = spawned.pop()
-    if (child) await settleSpawnedChild(child)
+    if (child) await releaseSpawnedChild(child)
   }
   cleanupProjects()
 })

@@ -2,7 +2,7 @@
 
 - `runners/rpc/start-cleanup.ts`: `discardUnstartedRpcHandle` now starts the terminate-then-dispose teardown and returns at once; a teardown failure goes to the caller's `onFailure` log. `RpcProcessRunner.start` and the host session opener (`runners/rpc-host/session-open.ts`) throw the `child-prompt-failed` RunnerError as soon as the prompt is refused instead of after the process tree is gone. Before, a slow teardown (Windows `taskkill`) outlasted the manager's 250 ms `START_REPORT_WINDOW_MS`, so `TaskManager.start` reported a refused task as `started` with `starting: true` (about 2% of runs on windows-latest).
 - `RpcProcessRunner` accepts `terminateChild` and hands it to the child handle, the same terminate port the handle already takes.
-- `manager/start-failure-diagnostics.test.ts` adds the row that holds the teardown open past the window and asserts `start_failed`; it fails on every run without the fix. Its `afterEach` now waits for the runner's own teardown instead of signalling the same exiting process group a second time.
+- `manager/start-failure-diagnostics.test.ts` adds the row that holds the teardown open past the window and asserts `start_failed`; it fails on every run without the fix. Suites that spawn real fake children (`start-failure-diagnostics`, `rpc-terminal-outcome`, `rpc-process`, `rpc-process-fallback-chain`) release them through `runners/rpc/__fixtures__/release-child.ts`, which waits for a group the runner is already tearing down (macOS answers that second signal with EPERM) instead of failing the hook.
 
 ## 2026-10-16 - Argon (high) ahead of the previous pro rung in plan-reviewer (#10180)
 
