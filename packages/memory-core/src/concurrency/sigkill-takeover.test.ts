@@ -93,7 +93,7 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
     const killerExit = await killer.exit
     // SIGKILL is the interleaving under test; a clean exit means the self-kill timer fired after the
     // commit finished, which is still a valid (normal-completion) sample.
-    expect(killerExit.signal === "SIGKILL" || killerExit.code === 0, killer.failureContext()).toBe(true)
+    expect(killer.diedByKill(killerExit) || killerExit.code === 0, `${JSON.stringify(killerExit)} ${killer.failureContext()}`).toBe(true)
     if (killerExit.code !== 0) await expectTakeoverOwnerProvenDead(shared.identity, killer.child.pid)
     // The killed writer's `git commit` runs on as an orphan; the takeover waits for it like for the owner.
     const orphanPid = Number.parseInt(await readFile(join(dirname(shared.identity.paths.repo), "killer-git.pid"), "utf8"), 10)
@@ -149,7 +149,7 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
       ].filter(() => trigger === "ref-lock"))
       killer.send("swept")
       const killerExit = await killer.exit
-      expect(killerExit, killer.failureContext()).toEqual({ code: null, signal: "SIGKILL" })
+      expect(killer.diedByKill(killerExit), `${JSON.stringify(killerExit)} ${killer.failureContext()}`).toBe(true)
       await expectTakeoverOwnerProvenDead(shared.identity, killer.child.pid)
 
       const peer = kit.harnessFor(crashCommitChildPath, [

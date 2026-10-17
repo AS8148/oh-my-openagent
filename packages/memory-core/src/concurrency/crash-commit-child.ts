@@ -100,6 +100,17 @@ async function waitExit(child: ReturnType<typeof spawn>): Promise<void> {
   await new Promise((resolve) => child.once("exit", resolve))
 }
 
+// On Windows `git` is a launcher whose child is the real git.exe. Killing only the launcher lets the
+// real git see stdin close and remove its own lock, so kill the whole tree, as SIGKILL does on POSIX.
+async function killGitTree(git: ReturnType<typeof spawn>): Promise<void> {
+  const exited = git.exitCode !== null || git.signalCode !== null ? Promise.resolve() : waitExit(git)
+  if (process.platform === "win32") {
+    const taskkill = spawn("taskkill", ["/F", "/T", "/PID", String(git.pid)], { stdio: "ignore", windowsHide: true })
+    await waitExit(taskkill)
+  } else git.kill("SIGKILL")
+  await exited
+}
+
 function unreachable(message: string): never {
   throw new Error(message)
 }
@@ -120,8 +131,7 @@ async function strandIndexLockAndDie(): Promise<never> {
     }
     await new Promise((resolve) => setTimeout(resolve, 1))
   }
-  git.kill("SIGKILL")
-  await waitExit(git)
+  await killGitTree(git)
   // Keep this process (the memory-write lock owner) alive until the parent confirms the debris
   // state and releases us: the peer's sweep needs this process's takeover record, which dies
   // with this process's in-memory registry.
@@ -150,8 +160,7 @@ async function strandRefLockAndDie(): Promise<never> {
     git.kill("SIGKILL")
     throw new Error("refs/heads/main.lock missing after prepare: ok")
   }
-  git.kill("SIGKILL")
-  await waitExit(git)
+  await killGitTree(git)
   await waitForParentRelease()
   process.kill(process.pid, "SIGKILL")
   return unreachable("survived self-SIGKILL")

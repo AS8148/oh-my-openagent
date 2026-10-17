@@ -78,6 +78,13 @@ export class ChildHarness {
     return this.waitFor((line) => line.startsWith(prefix))
   }
 
+  // A child that killed itself: POSIX reports the signal. Windows has no signals: a self-kill is
+  // TerminateProcess with exit code 1, told apart from a crash by the absence of an error on stderr.
+  diedByKill(exit: Exit): boolean {
+    if (exit.signal === "SIGKILL") return true
+    return process.platform === "win32" && exit.code === 1 && this.stderr === ""
+  }
+
   failureContext(): string {
     return `stdout=${JSON.stringify(this.lines)} stderr=${JSON.stringify(this.stderr)}`
   }
