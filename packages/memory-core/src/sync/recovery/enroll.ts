@@ -9,6 +9,7 @@ import type {
 	RecoveryTransport,
 	TransportRefusal,
 } from "./ports.ts";
+import { MAX_RECOVERY_KEYS } from "./salt-inputs.ts";
 import {
 	committedWrap,
 	expectedHistory,
@@ -24,6 +25,7 @@ export type EnrollOutcome =
 				| "unavailable"
 				| "unverified"
 				| "not-member"
+				| "too-many-recovery-keys"
 				| TransportRefusal;
 	  };
 
@@ -80,6 +82,8 @@ export const enrollRecoveryKey = async (
 	}
 	const deviceWrap = committedWrap(state, authority.epoch, `device:${self}`);
 	if (deviceWrap === null) return refuse("not-member");
+	if (authority.registry.size >= MAX_RECOVERY_KEYS)
+		return refuse("too-many-recovery-keys");
 	const enrolled = await input.bridge.enroll({
 		account: input.account,
 		rpId: input.rpId,

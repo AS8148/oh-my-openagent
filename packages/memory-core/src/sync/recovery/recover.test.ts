@@ -178,7 +178,7 @@ describe("recovery on a fresh device (sync-design section 7)", () => {
 		const fresh = await newDevice();
 		expect(await recoverWith(world, fresh, { choose: () => removed })).toEqual({
 			ok: false,
-			reason: "not-enrolled",
+			reason: "history-incomplete",
 		});
 		expect(world.server.chain(world.account).length).toBe(before);
 	});

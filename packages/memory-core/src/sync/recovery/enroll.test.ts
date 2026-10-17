@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createRejectionCounter } from "../crypto/rejection.ts";
 import { removeRecoveryKey } from "./index.ts";
+import { MAX_RECOVERY_KEYS } from "./salt-inputs.ts";
 import {
 	createWorld,
 	enrollAnother,
@@ -131,5 +132,18 @@ describe("enrolling and removing recovery passkeys (sync-design section 7)", () 
 			reason: "confirm-last-key",
 		});
 		expect((await remove(true)).ok).toBe(true);
+	});
+
+	test(`an account holding ${MAX_RECOVERY_KEYS} recovery keys refuses another (#10412 review H3)`, async () => {
+		const world = await createWorld();
+		for (let held = 1; held < MAX_RECOVERY_KEYS; held += 1) {
+			const enrolled = await enrollAnother(world);
+			if (!enrolled.ok)
+				throw new Error(`enrollment failed: ${enrolled.reason}`);
+		}
+		expect(await enrollAnother(world)).toEqual({
+			ok: false,
+			reason: "too-many-recovery-keys",
+		});
 	});
 });

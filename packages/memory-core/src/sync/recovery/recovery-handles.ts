@@ -20,29 +20,47 @@ export type RecoveryHandles = {
 	disposeAll(): void;
 };
 
+/** Arms a one-shot timer and returns its cancel; the default never keeps the process alive. */
+export type Schedule = (delayMs: number, run: () => void) => () => void;
+
+const unrefTimer: Schedule = (delayMs, run) => {
+	const timer = setTimeout(run, delayMs);
+	timer.unref?.();
+	return () => clearTimeout(timer);
+};
+
 /**
  * The bridge-side store of recovery keys between begin and finish (review r3 option A): at most
- * one live handle, a 32-byte random id, a two-minute TTL read from `now` at every use, and every
- * exit path overwrites the private keys.
+ * one live handle, a 32-byte random id, and a two-minute TTL enforced twice: a timer armed at hold
+ * zeroes the keys when it fires even if nothing calls the store again (#10412 review H1), and every
+ * use re-reads `now`. Every exit path overwrites the private keys.
  */
 export const createRecoveryHandles = (
 	now: () => number = Date.now,
 	ttlMs = RECOVERY_HANDLE_TTL_MS,
+	schedule: Schedule = unrefTimer,
 ): RecoveryHandles => {
 	let live: {
 		readonly handle: string;
 		readonly expiresAt: number;
 		readonly recovery: HeldRecovery;
+		readonly cancel: () => void;
 	} | null = null;
 	const disposeAll = (): void => {
-		if (live !== null) disposeRecoveryKeys(live.recovery.keys);
+		if (live !== null) {
+			live.cancel();
+			disposeRecoveryKeys(live.recovery.keys);
+		}
 		live = null;
 	};
 	return {
 		hold: (recovery) => {
 			disposeAll();
 			const handle = b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-			live = { handle, expiresAt: now() + ttlMs, recovery };
+			const cancel = schedule(ttlMs, () => {
+				if (live?.handle === handle) disposeAll();
+			});
+			live = { handle, expiresAt: now() + ttlMs, recovery, cancel };
 			return handle;
 		},
 		take: (handle) => {
@@ -53,6 +71,7 @@ export const createRecoveryHandles = (
 				return null;
 			}
 			if (current.handle !== handle) return null;
+			current.cancel();
 			live = null;
 			return current.recovery;
 		},

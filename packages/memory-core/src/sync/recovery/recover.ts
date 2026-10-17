@@ -1,22 +1,38 @@
-import { recoveryAnchor } from "../crypto/anchor.ts";
+import { ANCHOR_NEXT_STEP, recoveryAnchor } from "../crypto/anchor.ts";
 import type { RejectionCounter } from "../crypto/rejection.ts";
 import { deviceIdOf } from "../crypto/signatures.ts";
-import { pinTrustAnchor } from "../crypto/trust-pin.ts";
+import {
+	loadTrustAnchor,
+	pinTrustAnchor,
+	TrustPinError,
+} from "../crypto/trust-pin.ts";
 import type { DeviceKeyring } from "../keyring-port.ts";
 import { openBridgeSealedWrap } from "./key-material.ts";
 import { rotationAppend } from "./keyring-append.ts";
 import type {
+	RecoverBeginResult,
 	RecoverRefusal,
 	RecoveryBridge,
 	RecoveryEvent,
 	RecoveryTransport,
 	TransportRefusal,
 } from "./ports.ts";
-import {
-	loadServedChain,
-	recoveryCandidates,
-	servedSaltInputs,
-} from "./served-chain.ts";
+import { appendAndConfirmJoin } from "./recover-join.ts";
+import { servedSaltInputs } from "./salt-inputs.ts";
+import { loadServedChain, recoveryCandidates } from "./served-chain.ts";
+import { holdWrites, releaseWriteHold } from "./write-hold.ts";
+
+export type RecoverRefusalReason =
+	| RecoverRefusal
+	| "approval-required"
+	| "unavailable"
+	| "unverified"
+	| "no-recovery-key"
+	| "too-many-recovery-keys"
+	| "bad-device"
+	| "join-refused"
+	| "join-unconfirmed"
+	| TransportRefusal;
 
 export type RecoverOutcome =
 	| {
@@ -30,17 +46,11 @@ export type RecoverOutcome =
 			readonly state: "joined-read-only";
 			readonly credentialId: string;
 	  }
+	| { readonly ok: false; readonly reason: RecoverRefusalReason }
 	| {
 			readonly ok: false;
-			readonly reason:
-				| RecoverRefusal
-				| "approval-required"
-				| "unavailable"
-				| "unverified"
-				| "no-recovery-key"
-				| "bad-device"
-				| "join-refused"
-				| TransportRefusal;
+			readonly reason: "pin-conflict" | "pin-corrupt";
+			readonly next: typeof ANCHOR_NEXT_STEP;
 	  };
 
 export type RecoverInput = {
@@ -50,58 +60,93 @@ export type RecoverInput = {
 	readonly bridge: RecoveryBridge | null;
 	readonly transport: RecoveryTransport;
 	readonly rejections: RejectionCounter;
-	/** Where this device keeps its trust pin; recovery sets it from the anchored walk. */
+	/** Where this device keeps its trust pin and write hold; recovery sets the pin from the anchored walk. */
 	readonly stateDir: string;
 	readonly acknowledgeUnknownCredential?: boolean;
 	readonly onEvent?: (event: RecoveryEvent) => void;
 };
+
+type Device = {
+	readonly kind: "device";
+	readonly id: string;
+	readonly sealing_public_key: string;
+	readonly signing_public_key: string;
+};
+type Begun = Extract<RecoverBeginResult, { ok: true }>;
+type Refuse = (reason: RecoverRefusalReason) => RecoverOutcome;
 
 /**
  * Recovery on a fresh device (sync-design section 7, review r3 option A): the bridge asserts with
  * salts read from the served records and holds the derived keys; the served chain is then walked
  * anchored at the record that enrolled the touched credential with exactly those keys; only a
  * candidate from that anchored state reaches finish; after the join the device pins the anchor and
- * rotates at once to a fresh epoch wrapped only to this device and the key it used. The recovered epoch's key is never used to write; a withheld rotation
- * leaves the device read-only.
+ * rotates at once to a fresh epoch wrapped only to this device and the key it used. The recovered
+ * epoch's key is never used to write; a withheld rotation leaves the device read-only, persisted.
+ * Once begin succeeds the handle is aborted on every exit, thrown ones included (#10412 review H1).
  */
 export const recoverOnFreshDevice = async (
 	input: RecoverInput,
 ): Promise<RecoverOutcome> => {
-	const refuse = (
-		reason: Exclude<RecoverOutcome, { ok: true }>["reason"],
-	): RecoverOutcome => {
+	const refuse: Refuse = (reason) => {
 		input.onEvent?.("sync.recovery.recover_refused");
 		return { ok: false, reason };
+	};
+	const refusePin = (
+		reason: "pin-conflict" | "pin-corrupt",
+	): RecoverOutcome => {
+		input.onEvent?.("sync.recovery.recover_refused");
+		return { ok: false, reason, next: ANCHOR_NEXT_STEP };
 	};
 	if (input.bridge === null || !input.bridge.prfSupported)
 		return refuse("approval-required");
 	const keys = input.keyring.publicKeys();
 	const id = input.keyring.principal().id;
 	if ((await deviceIdOf(keys.signing)) !== id) return refuse("bad-device");
-	const device = {
-		kind: "device" as const,
-		id,
-		sealing_public_key: keys.sealing,
-		signing_public_key: keys.signing,
-	};
-	const salts = await servedSaltInputs(input.transport);
-	if (salts === null) return refuse("unavailable");
-	if (salts.length === 0) return refuse("no-recovery-key");
-	const begun = await input.bridge.recoverBegin({
+	const existing = await loadTrustAnchor(input.stateDir, input.account);
+	if (!existing.ok && existing.reason === "corrupt_pin")
+		return refusePin("pin-corrupt");
+	const pinned = existing.ok ? existing.anchor.genesisDigest : null;
+	const served = await servedSaltInputs(input.transport);
+	if (!served.ok) return refuse(served.reason);
+	if (served.salts.length === 0) return refuse("no-recovery-key");
+	const bridge = input.bridge;
+	const begun = await bridge.recoverBegin({
 		account: input.account,
 		rpId: input.rpId,
-		salts,
-		knownCredentialIds: salts.map((salt) => salt.credentialId),
+		salts: served.salts,
+		knownCredentialIds: served.salts.map((salt) => salt.credentialId),
 		acknowledgeUnknown: input.acknowledgeUnknownCredential === true,
 	});
 	if (!begun.ok) return refuse(begun.reason);
-	const bridge = input.bridge;
-	const abort = async (
-		reason: Exclude<RecoverOutcome, { ok: true }>["reason"],
-	): Promise<RecoverOutcome> => {
+	try {
+		return await recoverWithHandle(
+			input,
+			bridge,
+			begun,
+			pinned,
+			{
+				kind: "device",
+				id,
+				sealing_public_key: keys.sealing,
+				signing_public_key: keys.signing,
+			},
+			refuse,
+			refusePin,
+		);
+	} finally {
 		await bridge.recoverAbort(begun.handle);
-		return refuse(reason);
-	};
+	}
+};
+
+const recoverWithHandle = async (
+	input: RecoverInput,
+	bridge: RecoveryBridge,
+	begun: Begun,
+	pinned: string | null,
+	device: Device,
+	refuse: Refuse,
+	refusePin: (reason: "pin-conflict") => RecoverOutcome,
+): Promise<RecoverOutcome> => {
 	const anchor = recoveryAnchor({
 		account: input.account,
 		credentialId: begun.credentialId,
@@ -113,18 +158,19 @@ export const recoverOnFreshDevice = async (
 		input.transport.listRecoveryWraps(),
 	]);
 	if (!served.ok)
-		return abort(
+		return refuse(
 			served.reason === "anchor-mismatch" ? "key-mismatch" : served.reason,
 		);
-	if (wrapRows === null) return abort("unavailable");
-	const { state } = served;
-	const authority = state.authority;
-	const head = state.head;
-	if (authority === null || head === null) return abort("unverified");
-	const candidate = recoveryCandidates(state, wrapRows).find(
+	if (!Array.isArray(wrapRows)) return refuse("unavailable");
+	const { authority, head, pin } = served.state;
+	if (authority === null || head === null || pin === null)
+		return refuse("unverified");
+	if (pinned !== null && pin.genesisDigest !== pinned)
+		return refusePin("pin-conflict");
+	const candidate = recoveryCandidates(served.state, wrapRows).find(
 		(entry) => entry.key.credential_id === begun.credentialId,
 	);
-	if (candidate === undefined) return abort("not-enrolled");
+	if (candidate === undefined) return refuse("not-enrolled");
 	const recovered = await bridge.recoverFinish({
 		handle: begun.handle,
 		account: input.account,
@@ -138,77 +184,69 @@ export const recoverOnFreshDevice = async (
 		},
 	});
 	if (!recovered.ok) return refuse(recovered.reason);
-	const join = recovered.join;
-	const joined = await input.transport.recoveryJoin({
-		record: join.body,
-		base_seq: head.seq,
-		link: join.link,
-		keyring_link: join.keyringLink,
-		record_sig: join.recordSig,
-		wraps: [],
-	});
-	if (!joined.ok) return refuse(joined.reason);
-	const after = await loadServedChain(
+	const confirmed = await appendAndConfirmJoin(
 		input.transport,
 		input.account,
 		input.rejections,
 		anchor,
+		head,
+		recovered,
 	);
-	const afterAuthority = after.ok ? after.state.authority : null;
-	const afterHead = after.ok ? after.state.head : null;
-	const usedKey = afterAuthority?.registry.get(recovered.credentialId);
-	if (
-		!after.ok ||
-		afterAuthority === null ||
-		afterHead === null ||
-		usedKey === undefined ||
-		afterHead.keyring_link !== join.keyringLink
-	) {
-		return refuse("join-refused");
+	if (!confirmed.ok) return refuse(confirmed.reason);
+	try {
+		await pinTrustAnchor(input.stateDir, input.account, confirmed.pin);
+	} catch (error) {
+		if (error instanceof TrustPinError && error.problem === "pin_conflict")
+			return refusePin("pin-conflict");
+		throw error;
 	}
-	const pin = after.state.pin;
-	if (pin === null) return refuse("join-refused");
-	await pinTrustAnchor(input.stateDir, input.account, pin);
-	const expected = [...afterAuthority.epochOrigins].filter(
+	const expected = [...confirmed.authority.epochOrigins].filter(
 		([epoch, origin]) =>
-			epoch < authority.epoch && !afterAuthority.cancelled.has(origin),
+			epoch < authority.epoch && !confirmed.authority.cancelled.has(origin),
 	);
-	const address = {
-		account: input.account,
-		epoch: authority.epoch,
-		id: `device:${device.id}`,
-	};
 	const opened = await openBridgeSealedWrap(
 		input.keyring,
 		recovered.deviceWrap,
-		address,
+		{
+			account: input.account,
+			epoch: authority.epoch,
+			id: `device:${device.id}`,
+		},
 		new Map(expected),
 	);
 	if (!opened.ok) return refuse("wrap-refused");
 	const retained = opened.material;
-	const rotation = await rotationAppend(
-		input.keyring,
-		afterHead,
-		input.account,
-		afterAuthority,
-		retained,
-		[device],
-		[usedKey],
-	);
-	retained.current.fill(0);
-	for (const row of retained.history) row.key.fill(0);
-	const rotated = await input.transport.appendKeys(rotation);
+	let rotated: Awaited<ReturnType<RecoveryTransport["appendKeys"]>>;
+	try {
+		rotated = await input.transport.appendKeys(
+			await rotationAppend(
+				input.keyring,
+				confirmed.head,
+				input.account,
+				confirmed.authority,
+				retained,
+				[device],
+				[confirmed.usedKey],
+			),
+		);
+	} finally {
+		retained.current.fill(0);
+		for (const row of retained.history) row.key.fill(0);
+	}
 	input.onEvent?.("sync.recovery.recovered");
-	if (!rotated.ok)
+	if (!rotated.ok) {
+		await holdWrites(input.stateDir, input.account, recovered.credentialId);
 		return {
 			ok: true,
 			state: "joined-read-only",
 			credentialId: recovered.credentialId,
 		};
+	}
+	await releaseWriteHold(input.stateDir, input.account);
 	return {
 		ok: true,
 		state: "recovered",
-		epoch: afterAuthority.epoch + 1,
+		epoch: confirmed.authority.epoch + 1,
 		credentialId: recovered.credentialId,
 	};
 };

@@ -10,7 +10,6 @@ import type { Authority } from "../crypto/fold.ts";
 import type { RejectionCounter } from "../crypto/rejection.ts";
 import type {
 	RecoveryCandidate,
-	RecoverySaltInput,
 	RecoveryTransport,
 	RecoveryWrapRow,
 } from "./ports.ts";
@@ -21,6 +20,11 @@ export type ServedChain =
 			readonly ok: false;
 			readonly reason: "unavailable" | "unverified" | "anchor-mismatch";
 	  };
+
+/** A hostile response can put anything in a list; only plain objects reach field reads. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+const isPlainObject = (value: unknown): boolean => isRecord(value);
 
 const sameWrap = (left: WrapEntry, right: WrapEntry): boolean =>
 	left.epoch === right.epoch &&
@@ -42,8 +46,10 @@ export const loadServedChain = async (
 		transport.listEntries(),
 		transport.listKeys(),
 	]);
-	if (rows === null || keys === null)
+	if (!Array.isArray(rows) || !Array.isArray(keys))
 		return { ok: false, reason: "unavailable" };
+	if (!rows.every(isPlainObject) || !keys.every(isPlainObject))
+		return { ok: false, reason: "unverified" };
 	const bySeq = new Map(keys.map((entry) => [entry.seq, entry]));
 	const entries: SyncEntry[] = [];
 	for (const row of rows) {
@@ -175,8 +181,12 @@ export const recoveryCandidates = (
 			`recovery:${key.credential_id}`,
 		);
 		if (enrolling === null || committed === null) continue;
-		const row = served.find((candidate) =>
-			sameWrap(candidate.entry, committed),
+		const row = served.find(
+			(candidate) =>
+				isRecord(candidate) &&
+				isRecord(candidate.entry) &&
+				isRecord(candidate.record) &&
+				sameWrap(candidate.entry, committed),
 		);
 		const anchored =
 			row !== undefined &&
@@ -205,46 +215,4 @@ export const recoveryCandidates = (
 		});
 	}
 	return candidates;
-};
-
-const saltOf = (value: unknown): RecoverySaltInput | null => {
-	const credentialId: unknown = Reflect.get(Object(value), "credential_id");
-	const enrollmentNonce: unknown = Reflect.get(
-		Object(value),
-		"enrollment_nonce",
-	);
-	return typeof credentialId === "string" && typeof enrollmentNonce === "string"
-		? { credentialId, enrollmentNonce }
-		: null;
-};
-
-/**
- * The PRF salt inputs a recovery assertion needs, read from the served keyring rows BEFORE any
- * verification (review r3 option A): only credential ids and enrollment nonces, which are not
- * secrets. A wrong one yields keys that fail the anchored walk; nothing else from this parse is used.
- */
-export const servedSaltInputs = async (
-	transport: RecoveryTransport,
-): Promise<ReadonlyArray<RecoverySaltInput> | null> => {
-	const keys = await transport.listKeys();
-	if (keys === null) return null;
-	const found = new Map<string, RecoverySaltInput>();
-	for (const row of keys) {
-		const body: unknown = row.body;
-		const kind: unknown = Reflect.get(Object(body), "kind");
-		const salt =
-			kind === "genesis"
-				? saltOf(
-						Reflect.get(
-							Object(Reflect.get(Object(body), "bootstrap")),
-							"recovery_key",
-						),
-					)
-				: kind === "recovery-key"
-					? saltOf(body)
-					: null;
-		if (salt !== null && !found.has(salt.credentialId))
-			found.set(salt.credentialId, salt);
-	}
-	return [...found.values()];
 };
