@@ -7,18 +7,19 @@
 // folded per key into the frontmatter (adopt-frontmatter.ts). Adoption is not pure text: the
 // plan carries the working text a §5 capture applies (each register with the values the space
 // already holds, or a new key's first value) and extraRegisterValues, the differing whole
-// values the caller writes after the capture through adoptRegisterValues, each a register entry
-// superseding nothing. `rendered` is the item text once both are applied. No marker or conflict
-// text is ever written into the body (§10).
+// values, each a register entry superseding nothing. The caller commits both as ONE update
+// (commitAdoption). `rendered` is the predicted item text. No marker or conflict text is ever
+// written into the body (§10).
 //
-// Every file is read as LF text (CRLF is normalised on input). The body shortcut is a
+// Every file is read as LF text without a leading UTF-8 BOM (normalizeInput). The body shortcut is a
 // provable local deletion only: it applies to a main file whose text is a character
 // subsequence of what this device last materialised (an in-line word deletion included;
 // adopting the shortened line as new text would duplicate the sentence). Side files and history-less mains
-// are always line-merged. A source file enters removeAfterCommit only after the
-// independent read-back (read-back.ts) proves every one of its facts survived: every body
+// are always line-merged. A source file enters removalCandidates only after the
+// independent read-back (read-back.ts) finds every one of its facts in the prediction: every body
 // line as many times as the source has it, every frontmatter value an active register entry
-// or set element of the result. A source that fails the read-back stays on disk and the plan records
+// or set element. A candidate is deleted only after confirmRemovals repeats that read-back on
+// the committed item. A source that fails the read-back stays on disk and the plan records
 // its structured reason in retainedSources; deletion is never silent.
 
 import { splitItem } from "../item/frontmatter"
@@ -27,7 +28,7 @@ import type { RegisterValue } from "../item/index"
 import { adoptFields, extraValues, registersOf, renderFields, seedFields, type AdoptedFields } from "./adopt-frontmatter"
 import { parseSyncConflictName, stripT2Blocks } from "./hub-trace"
 import { isOrderedSubsequence, mergeInsertions } from "./merge"
-import { firstMissingFact, toLf } from "./read-back"
+import { firstMissingFact, normalizeInput } from "./read-back"
 
 export interface Snapshot {
   readonly path: string
@@ -41,11 +42,10 @@ export interface ItemState {
   /** The exact text this device last materialised for the item; null when it never did. */
   readonly lastMaterialised: string | null
   /**
-   * The space item's register components per key (activeRegisters(doc)). A joined render alone
-   * cannot tell two values from one value containing " / "; without this, each rendered register
-   * is read as one whole value.
+   * The space item's register components per key (activeRegisters(doc)); required, because a
+   * joined render alone cannot tell two values from one value containing " / " (review r7 M1).
    */
-  readonly registers?: ReadonlyMap<string, readonly string[]>
+  readonly registers: ReadonlyMap<string, readonly string[]>
 }
 
 export interface RetainedSource {
@@ -59,7 +59,7 @@ interface PlanResult {
   readonly rendered: string
   /** Register components per key in `rendered`. */
   readonly registers: ReadonlyMap<string, readonly string[]>
-  readonly removeAfterCommit: readonly string[]
+  readonly removalCandidates: readonly string[]
   readonly retainedSources: readonly RetainedSource[]
 }
 
@@ -85,10 +85,9 @@ export function planAdoption(
     mains.length === 1 &&
     first !== undefined &&
     first.text === item.lastMaterialised
-  const base = toLf(item.currentText ?? "")
+  const base = normalizeInput(item.currentText ?? "")
   if (unchanged) {
-    const registers = item.registers ?? new Map()
-    return { action: item.tombstoned ? "remove" : "none", rendered: base, registers, removeAfterCommit: [], retainedSources: [] }
+    return { action: item.tombstoned ? "remove" : "none", rendered: base, registers: item.registers, removalCandidates: [], retainedSources: [] }
   }
   const fields: AdoptedFields = new Map()
   const baseParsed = splitItem(base)
@@ -97,13 +96,13 @@ export function planAdoption(
   adoptFields(fields, baseStripped.entries)
   let body = merge("", baseStripped.body)
   const adoptFile = (raw: string, isMain: boolean): void => {
-    const text = toLf(raw)
+    const text = normalizeInput(raw)
     const parsed = splitItem(text)
     adoptFields(fields, parsed.fm ?? [])
     const stripped = stripT2Blocks(parsed.body)
     adoptFields(fields, stripped.entries)
     const localDeletion =
-      isMain && item.lastMaterialised !== null && isOrderedSubsequence(text, toLf(item.lastMaterialised))
+      isMain && item.lastMaterialised !== null && isOrderedSubsequence(text, normalizeInput(item.lastMaterialised))
     if (!localDeletion) body = merge(body, stripped.body)
   }
   for (const file of mains) adoptFile(file.text, true)
@@ -112,15 +111,15 @@ export function planAdoption(
   const extraRegisterValues = extraValues(fields)
   const rendered = renderFields(fields, body, "final")
   const registers = registersOf(fields)
-  const removeAfterCommit: string[] = []
+  const removalCandidates: string[] = []
   const retainedSources: RetainedSource[] = []
   for (const side of sides) {
-    const missing = firstMissingFact(rendered, toLf(side.text), registers)
-    if (missing === null) removeAfterCommit.push(side.path)
+    const missing = firstMissingFact(rendered, normalizeInput(side.text), registers)
+    if (missing === null) removalCandidates.push(side.path)
     else retainedSources.push({ path: side.path, reason: missing })
   }
   if (workingText === base && extraRegisterValues.length === 0) {
-    return { action: item.tombstoned ? "remove" : "none", rendered, registers, removeAfterCommit, retainedSources }
+    return { action: item.tombstoned ? "remove" : "none", rendered, registers, removalCandidates, retainedSources }
   }
-  return { action: "capture", workingText, extraRegisterValues, rendered, registers, removeAfterCommit, retainedSources }
+  return { action: "capture", workingText, extraRegisterValues, rendered, registers, removalCandidates, retainedSources }
 }

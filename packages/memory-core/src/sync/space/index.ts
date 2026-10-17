@@ -1,5 +1,6 @@
 export * from "./adopt"
 export * from "./binding"
+export * from "./confirm-removals"
 export * from "./hub-trace"
 export * from "./join"
 export * from "./manifest"

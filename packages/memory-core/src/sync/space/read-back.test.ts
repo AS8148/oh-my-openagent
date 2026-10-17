@@ -3,12 +3,12 @@ import { describe, expect, test } from "bun:test"
 import { splitItem } from "../item/frontmatter"
 import { planAdoption } from "./adopt"
 import { firstMissingFact } from "./read-back"
-import { t2Block } from "./test-support"
+import { t2Block, soleRegisters } from "./test-support"
 
 const SIDE = "n.sync-conflict-20261015-mac.md"
 const HEADER =
   "<!-- memory-sync 2026-10-15: the other machine had different frontmatter for n.md; kept here so no fact is lost:"
-const live = (currentText: string | null) => ({ currentText, lastMaterialised: null, tombstoned: false })
+const live = (currentText: string | null) => ({ currentText, lastMaterialised: null, tombstoned: false, registers: soleRegisters(currentText) })
 const bodyOf = (plan: ReturnType<typeof planAdoption>, base: string): string =>
   splitItem(plan.action === "capture" ? plan.workingText : base).body
 

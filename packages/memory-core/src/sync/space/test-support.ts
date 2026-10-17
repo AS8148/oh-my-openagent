@@ -1,16 +1,20 @@
 import { parse, parseDocument } from "yaml"
 
 import type { LoroDoc } from "../../crdt/loro-runtime"
-import type { FmValue } from "../item/frontmatter"
-import { adoptRegisterValues, itemFrontier } from "../item/index"
-import { captureInto } from "../item/test-support"
+import { splitItem, type FmValue } from "../item/frontmatter"
+import { withRegisterValues } from "../item/adopt-values"
+import { captureItem } from "../item/capture"
+import { itemFrontier } from "../item/index"
 import type { AdoptionPlan } from "./adopt"
 
-/** Commit a plan the way the engine does: capture the working text, then add the extra register values. */
+/**
+ * Commit a plan as ONE update (capture + extra register values) on a plain doc, for the property
+ * tests. The engine's path is captureOnDevice(..., plan.extraRegisterValues); adopt-replay.test.ts
+ * covers its replay safety, which this helper deliberately does not have.
+ */
 export function applyPlan(doc: LoroDoc, base: string, plan: AdoptionPlan): void {
   if (plan.action !== "capture") return
-  captureInto(doc, base, itemFrontier(doc), plan.workingText)
-  const update = adoptRegisterValues(doc, plan.extraRegisterValues)
+  const update = withRegisterValues(doc, captureItem(doc, base, itemFrontier(doc), plan.workingText), plan.extraRegisterValues)
   if (update !== null) doc.import(update)
 }
 
@@ -25,6 +29,18 @@ export function fmValuesByKey(entries: readonly { key: string; value: FmValue }[
   const map = new Map<string, FmValue>()
   for (const entry of entries) map.set(entry.key, entry.value)
   return map
+}
+
+/**
+ * The register components a doc captured once from `text` holds: one whole value per register key.
+ * For tests whose space is plain text rather than a doc (a real caller passes activeRegisters(doc)).
+ */
+export function soleRegisters(text: string | null): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const { key, value } of splitItem((text ?? "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")).fm ?? []) {
+    if (value.kind === "reg") out.set(key, [value.value])
+  }
+  return out
 }
 
 export interface RenderedFact {

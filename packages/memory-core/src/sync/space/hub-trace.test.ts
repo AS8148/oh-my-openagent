@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
+import { activeRegisters } from "../item/index"
 import { renderDocContent } from "../item/render"
 import { splitItem } from "../item/frontmatter"
 import { newDoc } from "../item/test-support"
 import { groupByItemKey, isOrderedSubsequence, parseSyncConflictName, planAdoption, stripT2Blocks } from "./index"
-import { applyPlan, fmValuesByKey, t2Block } from "./test-support"
+import { applyPlan, fmValuesByKey, t2Block, soleRegisters } from "./test-support"
 
 describe("parseSyncConflictName (hub worktree-merge keepSideCopy shape)", () => {
   const hits: readonly (readonly [string, string])[] = [
@@ -121,10 +122,10 @@ describe("hub-trace folding end to end (fixture shaped like real hub output)", (
 
   test("T1 folds the side file in insert-only and schedules its removal; T2 lands as frontmatter", async () => {
     const doc = await newDoc("1")
-    const plan = planAdoption(files(), { currentText: null, tombstoned: false, lastMaterialised: null })
+    const plan = planAdoption(files(), { currentText: null, tombstoned: false, lastMaterialised: null, registers: soleRegisters(null) })
     expect(plan.action).toBe("capture")
     if (plan.action !== "capture") return
-    expect(plan.removeAfterCommit).toEqual(["notes/daily.sync-conflict-20261015-mini.md"])
+    expect(plan.removalCandidates).toEqual(["notes/daily.sync-conflict-20261015-mini.md"])
     applyPlan(doc, "", plan)
     const rendered = renderDocContent(doc)
     expect(rendered).toBe(plan.rendered)
@@ -144,13 +145,14 @@ describe("hub-trace folding end to end (fixture shaped like real hub output)", (
 
   test("the fold is idempotent against the adopted state", async () => {
     const doc = await newDoc("1")
-    const first = planAdoption(files(), { currentText: null, tombstoned: false, lastMaterialised: null })
+    const first = planAdoption(files(), { currentText: null, tombstoned: false, lastMaterialised: null, registers: soleRegisters(null) })
     if (first.action !== "capture") throw new Error("expected capture")
     applyPlan(doc, "", first)
     const second = planAdoption(files(), {
       currentText: renderDocContent(doc),
       tombstoned: false,
       lastMaterialised: null,
+      registers: activeRegisters(doc)
     })
     expect(second.action).toBe("none")
     doc.free()
