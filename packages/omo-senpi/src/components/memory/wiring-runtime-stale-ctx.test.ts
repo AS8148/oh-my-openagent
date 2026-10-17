@@ -138,6 +138,38 @@ describe("a launch without a trigger snapshot (#10339)", () => {
   }, 30_000)
 })
 
+describe("facts extraction outside a launch scope (#10339)", () => {
+  test("#given session B is current #when a facts launch without a captured selection resolves its model #then it gets no session model, only the shared registry", async () => {
+    // given: a facts launch that was not handed a selection (unpark, reconcile, final delta) reads the
+    // resolvers directly; whatever session is current must not choose the model for another session's facts.
+    const root = await mkdtemp(`${tmpdir()}/omo-10339-facts-`)
+    roots.push(root)
+    const identity = createMemoryIdentityContext({
+      identity: "agent-10339",
+      identityPaths: buildIdentityPaths(root, "agent-10339"),
+      binding: { identity: "agent-10339", repoPathHash: "hash", boundAt: 1 },
+    })
+    let extractor: { resolveModelRegistry: () => unknown; resolveSessionModel?: () => unknown } | undefined
+    const wiring = createMemoryRuntimeWiring({
+      sessions: new Map(),
+      loadConfig: () => loadedMemoryConfig(memorySettings()),
+      cwd: () => root,
+      env: {},
+      createFactsExtractor: (options) => {
+        extractor = options
+        return { launchPending: async () => ({ status: "empty" }), reconcilePending: async () => ({ status: "empty" }) }
+      },
+    }, { current: successorContext() })
+
+    // when
+    wiring.factsWiringFor(identity)
+
+    // then
+    expect(extractor?.resolveModelRegistry()).toBeDefined()
+    expect(extractor?.resolveSessionModel?.()).toBeUndefined()
+  }, 30_000)
+})
+
 function successorContext(): unknown {
   return {
     sessionManager: {
