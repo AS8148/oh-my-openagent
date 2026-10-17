@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const REASON = "QA: raise the TextEdit window";
+export const REASON = "QA: raise the QA target window";
 export const TARGET_TITLE = `omo-control-qa-${process.pid}`;
 
 export function jsonLines(text) {
@@ -55,7 +55,7 @@ export const toolResults = (agentDir) =>
 			(message.content ?? []).map((part) => part?.text ?? "").join("\n"),
 		);
 
-const raiseCode = `const w = await desktop.window({ app: "TextEdit", title: ${JSON.stringify(TARGET_TITLE)} }); await w.raise(); return "raised"`;
+const raiseCode = `const w = await desktop.window({ title: ${JSON.stringify(TARGET_TITLE)} }); await w.raise(); return "raised"`;
 const run = (code) => ({
 	type: "tool_call",
 	name: "computer",
@@ -139,9 +139,7 @@ export const scenarios = {
 	},
 	interrupted: {
 		steps: [
-			run(
-				`${acquire} await new Promise((r) => setTimeout(r, 30000)); return JSON.stringify(state)`,
-			),
+			run(`${acquire} await wait(30000); return JSON.stringify(state)`),
 			{ type: "text", text: "done" },
 			run(raiseCode),
 			{ type: "text", text: "done" },

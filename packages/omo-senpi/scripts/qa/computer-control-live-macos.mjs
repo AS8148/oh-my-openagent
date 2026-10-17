@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Live macOS QA for the foreground-control grant (#9651, #10443): the real senpi in `--mode rpc`, the built omo
 // plugin, the omo mock provider, and the REAL `senpi-desktop-engine` on its macOS backend (no fake backend).
-// It raises a TextEdit window this script opens, because `win.raise()` always needs the grant, then checks that
+// It raises a dialog window this driver opens, because `win.raise()` always needs the grant, then checks that
 // the grant really ends. Each scenario is one senpi session with two prompts:
 //
 //   approved-then-ended  prompt 1 acquires (the client approves) and raises: admitted. After agent_end the engine
@@ -14,7 +14,7 @@
 // responsible process: start this from Terminal (or the app holding the grants), never from a disclaimed spawn.
 //
 // Usage: SENPI_BIN=<senpi> bun computer-control-live-macos.mjs --engine <path> [--evidence-dir <dir>] [--only a,b]
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,24 +54,24 @@ const scrubbedEnv = () =>
 		),
 	);
 
+// The target is a dialog owned by an osascript child of this driver: no AppleEvent reaches another app, and
+// closing it is killing that child.
+let target;
 function openTarget() {
-	const script = `tell application "TextEdit"
-    activate
-    set d to make new document
-    set text of d to "${TARGET_TITLE}"
-    delay 0.5
-    set name of front window to "${TARGET_TITLE}"
-  end tell`;
-	const result = spawnSync("osascript", ["-e", script], { encoding: "utf8" });
-	if (result.status !== 0)
-		throw new Error(`cannot open the TextEdit target: ${result.stderr}`);
+	target = spawn(
+		"osascript",
+		[
+			"-e",
+			`display dialog "computer-control QA target" with title "${TARGET_TITLE}" giving up after 900`,
+		],
+		{
+			stdio: "ignore",
+		},
+	);
 }
 
 function closeTarget() {
-	spawnSync("osascript", [
-		"-e",
-		`tell application "TextEdit" to close (every window whose name is "${TARGET_TITLE}") saving no`,
-	]);
+	target?.kill("SIGTERM");
 }
 
 // One senpi rpc session; `steps` is the mock provider's whole script across both prompts.
@@ -98,6 +98,12 @@ function startSession(steps) {
 			"omo-mock",
 			"--model",
 			"mock-1",
+			"--permission-preset",
+			"ask",
+			"--permission",
+			"computer:read=allow",
+			"--permission",
+			"computer:exec=allow",
 		],
 		{
 			cwd: sandbox.cwd,
