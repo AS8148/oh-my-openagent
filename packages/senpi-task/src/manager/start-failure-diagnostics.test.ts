@@ -17,10 +17,27 @@ const PUBLIC_START_FAILURE = "Child prompt failed to start."
 
 const spawned: ChildProcess[] = []
 
+const RUNNER_TEARDOWN_BOUND_MS = 10_000
+
+// A refused start is torn down by the runner itself, after it reports the failure (#10402). Terminating that
+// child here too would race the runner's teardown (EPERM on an exiting process group), so wait for its exit
+// and terminate only a child the runner left behind.
+async function settleSpawnedChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const exited = new Promise<"exited">((resolve) => child.once("exit", () => resolve("exited")))
+  const bound = new Promise<"left">((resolve) => {
+    timer = setTimeout(() => resolve("left"), RUNNER_TEARDOWN_BOUND_MS)
+  })
+  const outcome = await Promise.race([exited, bound])
+  clearTimeout(timer)
+  if (outcome === "left") await terminateRpcChild(child, { sigkillDelayMs: 200 })
+}
+
 afterEach(async () => {
   while (spawned.length > 0) {
     const child = spawned.pop()
-    if (child) await terminateRpcChild(child, { sigkillDelayMs: 200 })
+    if (child) await settleSpawnedChild(child)
   }
   cleanupProjects()
 })
@@ -128,6 +145,60 @@ describe("TaskManager start failure diagnostics", () => {
 
     // and: the stderr-derived message is still excluded from the durable artifact.
     expect(eventLog).not.toContain("credentials.json")
+  })
+
+  test("#given an rpc prompt rejects and tearing its child down outlasts the start-report window #when the manager starts it #then it reports start_failed without waiting for the teardown", async () => {
+    // given: the prompt write is refused, and the child's teardown stays pending until the test releases it,
+    // the way a slow Windows taskkill held it past START_REPORT_WINDOW_MS (#10402).
+    let releaseTeardown: (() => void) | undefined
+    const teardownHeld = new Promise<void>((resolve) => {
+      releaseTeardown = resolve
+    })
+    let teardownStarted = false
+    let teardownDone: Promise<void> | undefined
+    const rpcRunner = new RpcProcessRunner({
+      modelAdmission: async () => {},
+      buildSpawn: (spec) => ({ command: process.execPath, args: [], cwd: spec.cwd, env: process.env }),
+      spawnChild: () => {
+        const child = spawnFakeChild()
+        spawned.push(child)
+        const stdin = child.stdin
+        if (stdin === null) throw new Error("fake child stdin was not piped")
+        const write = (...args: unknown[]): boolean => {
+          const callback = args.findLast((value): value is (error: Error) => void => typeof value === "function")
+          callback?.(new Error(SECRET_BEARING_STDERR))
+          return false
+        }
+        Object.defineProperty(stdin, "write", { value: write })
+        return child
+      },
+      terminateChild: (child) => {
+        teardownStarted = true
+        teardownDone = teardownHeld.then(() => terminateRpcChild(child, { sigkillDelayMs: 200 }))
+        return teardownDone
+      },
+    })
+    const { manager, store } = makeManager({ process: createRpcManagedRunner(rpcRunner) })
+
+    // when
+    const result = await manager.start({
+      prompt: "private prompt payload",
+      parent_session_id: "parent-1",
+      depth: 1,
+      execution_mode: "process",
+      category: "quick",
+    })
+
+    // then: the refusal is the outcome, and the child is still being torn down
+    expect(result.kind).toBe("start_failed")
+    expect(result).not.toHaveProperty("starting")
+    expect(teardownStarted).toBe(true)
+    const event = JSON.parse(readOnlyEventLog(store.stateDir).trim().split("\n").at(-1) ?? "{}") as { type?: string }
+    expect(event.type).toBe("task_start_failed")
+
+    // and: the held teardown still runs to completion once released
+    releaseTeardown?.()
+    await teardownDone
   })
 
   test("#given a start failure that never reached a process exit #when it is recorded #then the failure kind alone is persisted", async () => {

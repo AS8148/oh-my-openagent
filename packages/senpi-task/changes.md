@@ -1,3 +1,9 @@
+## 2026-10-17 - A refused first prompt reports start_failed without waiting for the child's teardown (#10402)
+
+- `runners/rpc/start-cleanup.ts`: `discardUnstartedRpcHandle` now starts the terminate-then-dispose teardown and returns at once; a teardown failure goes to the caller's `onFailure` log. `RpcProcessRunner.start` and the host session opener (`runners/rpc-host/session-open.ts`) throw the `child-prompt-failed` RunnerError as soon as the prompt is refused instead of after the process tree is gone. Before, a slow teardown (Windows `taskkill`) outlasted the manager's 250 ms `START_REPORT_WINDOW_MS`, so `TaskManager.start` reported a refused task as `started` with `starting: true` (about 2% of runs on windows-latest).
+- `RpcProcessRunner` accepts `terminateChild` and hands it to the child handle, the same terminate port the handle already takes.
+- `manager/start-failure-diagnostics.test.ts` adds the row that holds the teardown open past the window and asserts `start_failed`; it fails on every run without the fix. Its `afterEach` now waits for the runner's own teardown instead of signalling the same exiting process group a second time.
+
 ## 2026-10-16 - Argon (high) ahead of the previous pro rung in plan-reviewer (#10180)
 
 - `agents/builtin/fallback-chains.ts` (mirrored from `model-core/src/agent-model-requirements.ts`, where `oracle` and `momus` get the same rung): a `{google, google-vertex, opencode}/gemini-4-argon` rung at `high` goes directly before the `gemini-3.1-pro` rung of `plan-reviewer`. The previous rung stays for Copilot (off the Argon rung until code-yeongyu/senpi#3379) and for engine pins without the Argon row. The GPT heads are unchanged: a blind eval put Argon ahead of the previous pro model in 16/16 judgments but behind the GPT heads on correctness, with a median latency of 57 s vs 15 s.
