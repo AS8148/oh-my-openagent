@@ -244,3 +244,52 @@ describe("renderForDisk keeps a leading UTF-8 BOM (t05 r7 probe, lead)", () => {
     }
   }
 })
+
+describe("renderForDisk writes exactly one BOM for files without valid frontmatter (review d58391c9b3 HIGH 1)", () => {
+  function oneLeadingBom(text: string): boolean {
+    return text.startsWith("\ufeff") && text.split("\ufeff").length === 2
+  }
+
+  const CASES: [string, string, (rendered: string) => string][] = [
+    ["a BOM file with no frontmatter", "\ufeffbody\r\n", (r) => `${r}x\r\n`],
+    ["a BOM file with unparseable frontmatter", "\ufeff---\r\nn: [\r\n---\r\nbody\r\n", (r) => r.replace("body", "body2")],
+    ["a key added to a BOM file with no frontmatter", "\ufeffbody\r\n", (r) => `---\r\nadded: y\r\n---\r\n${r.replace(/^\ufeff/, "")}`],
+  ]
+
+  for (const [name, disk, edit] of CASES) {
+    test(`${name}, edited on one device and written by the other: one BOM, a second write and a recapture are no-ops`, async () => {
+      const a = await syncedEdit(disk, edit)
+      const written = renderForDisk(a, disk) ?? ""
+      expect(oneLeadingBom(written), JSON.stringify(written)).toBe(true)
+      expect(renderForDisk(a, written), JSON.stringify(written)).toBe(written)
+      expect(captureCurrent(a, written), JSON.stringify(written)).toBeNull()
+      a.free()
+    })
+  }
+})
+
+describe("renderForDisk written twice stays byte-stable (review d58391c9b3 MEDIUM 4)", () => {
+  const BASE = "---\nn: 2\nk: x\nz: 1\n---\nbody line\nsecond\n"
+  const EDITS: Record<string, (rendered: string) => string> = {
+    "change a key": (r) => r.replace("n: 2", "n: 3"),
+    "add a key": (r) => r.replace("z: 1", "z: 1\nadded: new"),
+    "delete a key": (r) => r.replace("k: x\n", ""),
+  }
+  const STYLES: [string, string][] = [
+    ["lf", BASE],
+    ["crlf", BASE.replaceAll("\n", "\r\n")],
+    ["bom + lf", `\ufeff${BASE}`],
+    ["bom + crlf", `\ufeff${BASE.replaceAll("\n", "\r\n")}`],
+  ]
+
+  for (const [style, disk] of STYLES) {
+    for (const [name, edit] of Object.entries(EDITS)) {
+      test(`${style} file, ${name}: renderForDisk(renderForDisk(x)) equals renderForDisk(x)`, async () => {
+        const a = await syncedEdit(disk, edit)
+        const once = renderForDisk(a, disk) ?? ""
+        expect(renderForDisk(a, once), JSON.stringify(once)).toBe(once)
+        a.free()
+      })
+    }
+  }
+})

@@ -34,19 +34,25 @@ export function renderForDisk(doc: LoroDoc, diskText: string, patch: Patcher = p
   if (canonical === null) return null
   const want = modelOf(canonical)
   if (sameModel(want, modelOf(diskText))) return diskText
-  // A leading BOM is the file's own encoding marker: written back exactly when the disk had one.
+  // A leading BOM is the file's own encoding marker: written back exactly when the disk had one,
+  // and never from the doc, whose text never starts with one.
   const disk = withoutBom(diskText)
   const bom = diskText.slice(0, diskText.length - disk.length)
   const eol = eolOf(disk)
   const patched = tryPatch(patch, doc, disk, want)
   if (patched !== null && sameModel(modelOf(patched), want)) return `${bom}${patched}`
-  const styled = withEol(canonical, eol)
-  return `${bom}${sameModel(modelOf(styled), want) ? styled : canonical}`
+  const bare = withoutBom(canonical)
+  const styled = withEol(bare, eol)
+  return `${bom}${sameModel(modelOf(styled), want) ? styled : bare}`
 }
 
-// One line-ending style per file, detected once from its first line break (lead decision r6):
-// every spliced, added, rewritten and fence line is written with it.
+// The file's dominant line ending (lead r6): the majority of its line breaks, ties to the first
+// break. Every line the client writes (re-emitted, added, and fences it creates) uses it; lines it
+// does not touch keep their own bytes, so a mixed file stays mixed only where it already was.
 function eolOf(text: string): string {
+  const crlf = text.split("\r\n").length - 1
+  const lf = text.split("\n").length - 1 - crlf
+  if (crlf !== lf) return crlf > lf ? "\r\n" : "\n"
   const nl = text.indexOf("\n")
   return nl > 0 && text[nl - 1] === "\r" ? "\r\n" : "\n"
 }
@@ -77,10 +83,31 @@ function patchDisk(doc: LoroDoc, diskText: string, want: Model): string | null {
   const changed = reEmitKeys(disk.contents.items, changedKeys(have, want.fields))
   if (changed === null) return null
   const eol = eolOf(diskText)
-  const source = `${parts.header}${eol}`
-  const spans = pairSpans(disk.contents.items, source)
+  const region = rawRegion(diskText, parts.body.length)
+  if (region === null) return null
+  const spans = pairSpans(region.items, region.source)
   if (spans === null) return null
-  return `---${eol}${spliceHeader(source, spans, entries, changed, want.fields, eol)}---${eol}${bodyOf(doc)}`
+  return `${region.open}${spliceHeader(region.source, spans, entries, changed, want.fields, eol)}${region.close}${bodyOf(doc)}`
+}
+
+interface RawRegion {
+  readonly open: string
+  readonly source: string
+  readonly close: string
+  readonly items: readonly unknown[]
+}
+
+// The disk's own bytes around the frontmatter: its opening fence line, the header lines including
+// the last line's own break, and its closing fence line. Untouched, they are copied as they are.
+function rawRegion(text: string, bodyLength: number): RawRegion | null {
+  const openLength = text.startsWith("---\r\n") ? 5 : 4
+  const end = text.indexOf("\n---", openLength)
+  const bodyStart = text.length - bodyLength
+  if (end < 0 || end + 1 > bodyStart) return null
+  const source = text.slice(openLength, end + 1)
+  const parsed = parseDocument(source, { schema: "core", merge: true })
+  if (parsed.errors.length > 0 || !isMap(parsed.contents)) return null
+  return { open: text.slice(0, openLength), source, close: text.slice(end + 1, bodyStart), items: parsed.contents.items }
 }
 
 interface PairSpan {
