@@ -1,4 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { PostHog } from "posthog-node"
 
 import { takePostHogTestGuardViolations } from "./posthog-test-guard"
@@ -32,4 +35,35 @@ describe("PostHog test guard preload (#10394)", () => {
       fetchSpy.mockRestore()
     }
   })
+
+  test("#given a test file whose afterAll uses a PostHog client after the last test #when bun test runs it with the guard preload #then the run fails and names the client", async () => {
+    // given
+    const scratch = mkdtempSync(join(tmpdir(), "posthog-guard-after-last-"))
+    const posthogEntry = Bun.resolveSync("posthog-node", import.meta.dir)
+    writeFileSync(
+      join(scratch, "after-last.test.ts"),
+      [
+        `import { afterAll, test } from "bun:test"`,
+        `import { PostHog } from ${JSON.stringify(posthogEntry)}`,
+        `test("only test", () => {})`,
+        `afterAll(async () => {`,
+        `  const client = new PostHog("phc_test_guard_dummy_key", { host: "https://us.i.posthog.com", flushAt: 1, flushInterval: 0, fetchRetryCount: 0 })`,
+        `  client.capture({ distinctId: "test-guard", event: "test_guard_after_last" })`,
+        `  await client.shutdown().catch(() => undefined)`,
+        `})`,
+      ].join("\n"),
+    )
+
+    try {
+      // when
+      const run = Bun.spawn([process.execPath, "test", "--preload", join(import.meta.dir, "posthog-test-guard.preload.ts"), "./after-last.test.ts"], { cwd: scratch, stdout: "pipe", stderr: "pipe" })
+      const [exitCode, stdout, stderr] = await Promise.all([run.exited, new Response(run.stdout).text(), new Response(run.stderr).text()])
+
+      // then
+      expect(exitCode).not.toBe(0)
+      expect(`${stdout}\n${stderr}`).toContain("was used outside a test")
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  }, 30_000)
 })

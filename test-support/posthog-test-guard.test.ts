@@ -98,4 +98,42 @@ describe("PostHog test guard (#10394)", () => {
     expect(violations[0]).toContain("https://us.i.posthog.com/batch/")
     expect(sent).toEqual([])
   })
+
+  test("#given a client first used after the last test #when the run ends #then its use and its refused send are reported", async () => {
+    // given
+    const { FakeClient, sent, guard } = fakeClientClass()
+    guard.beginTest()
+    guard.endTest()
+    const client = new FakeClient()
+    client.capture({ event: "e" })
+    await expect(client.fetch("http://127.0.0.1:4318/batch/", {})).rejects.toThrow("used outside a test")
+
+    // when
+    const violations = guard.endRun()
+
+    // then
+    expect(violations).toHaveLength(2)
+    expect(violations.every((violation) => violation.includes("outside a test"))).toBe(true)
+    expect(guard.endRun()).toEqual([])
+    expect(sent).toEqual([])
+  })
+
+  test("#given a stale client that sends between two tests #when the next test runs #then the refused send is reported in that test", async () => {
+    // given
+    const { FakeClient, guard } = fakeClientClass()
+    guard.beginTest()
+    const client = new FakeClient()
+    client.capture({ event: "e" })
+    await client.shutdown()
+    guard.endTest()
+    await expect(client.fetch("http://127.0.0.1:4318/batch/", {})).rejects.toThrow("outlived its test")
+
+    // when
+    guard.beginTest()
+    const violations = guard.endTest()
+
+    // then
+    expect(violations).toHaveLength(1)
+    expect(violations[0]).toContain("after its test ended")
+  })
 })

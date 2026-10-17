@@ -1,4 +1,4 @@
-import { afterEach, beforeEach } from "bun:test"
+import { afterAll, afterEach, beforeEach } from "bun:test"
 import { PostHog } from "posthog-node"
 
 // A test process never sends product telemetry, and no PostHog client outlives the test that made it
@@ -24,6 +24,7 @@ type GuardedPrototype = {
 export type PostHogTestGuard = {
   beginTest(): void
   endTest(): string[]
+  endRun(): string[]
   takeViolations(): string[]
 }
 
@@ -99,7 +100,7 @@ export function createPostHogTestGuard(prototype: GuardedPrototype): PostHogTest
     beginTest() {
       test += 1
       inTest = true
-      violations = outsideTestViolations
+      violations = [...violations, ...outsideTestViolations]
       outsideTestViolations = []
       live = new Set()
     },
@@ -122,6 +123,12 @@ export function createPostHogTestGuard(prototype: GuardedPrototype): PostHogTest
       test += 1
       return found
     },
+    endRun() {
+      const found = [...violations, ...outsideTestViolations]
+      violations = []
+      outsideTestViolations = []
+      return found
+    },
   }
 }
 
@@ -140,5 +147,9 @@ export function installPostHogTestGuard(): void {
   afterEach(() => {
     const violations = guard.endTest()
     if (violations.length > 0) throw new Error(`PostHog test guard (#10394):\n${violations.join("\n")}`)
+  })
+  afterAll(() => {
+    const violations = guard.endRun()
+    if (violations.length > 0) throw new Error(`PostHog test guard (#10394), after the last test:\n${violations.join("\n")}`)
   })
 }
