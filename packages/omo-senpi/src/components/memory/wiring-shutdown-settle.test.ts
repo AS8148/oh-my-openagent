@@ -133,5 +133,4 @@ describe("memory wiring shutdown settles maintenance running in the identity dir
     expect(returnedBeforeRelease).toBe(false)
     expect(overBudget).toEqual([])
   })
-
 })
