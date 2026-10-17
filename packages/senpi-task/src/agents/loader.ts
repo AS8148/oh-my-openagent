@@ -27,7 +27,9 @@ export function loadAgents(options: LoadAgentsOptions = {}): LoadAgentsResult {
   const agents = new Map<string, AgentDefinition>()
   const diagnostics: AgentLoaderDiagnostic[] = []
   // A user's markdown agent that declares its own model already has a chain, so a same-named category
-  // shadows nothing it relies on (same rule as an omo.json agent entry with model/models).
+  // shadows nothing it relies on (same rule as an omo.json agent entry with model/models). The startup
+  // notice and `omo doctor` read config only and do not see markdown agents, so for a markdown agent
+  // named after a builtin they can still warn where this loader does not.
   const markdownAgentsWithOwnModel = new Set<string>()
 
   for (const location of resolveAgentDefinitionLocations(resolvedOptions)) {

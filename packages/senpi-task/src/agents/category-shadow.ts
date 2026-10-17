@@ -1,6 +1,5 @@
 import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 
-import { canonicalAgentName } from "./builtin/legacy-agent-names"
 import { BUILTIN_AGENT_NAMES } from "./builtin/names"
 
 /**
@@ -13,13 +12,12 @@ export function categoryShadowedAgentNames(config: OmoConfig, agentNames: Iterab
   const agents = new Set([...BUILTIN_AGENT_NAMES, ...Object.keys(config.agents ?? {}), ...agentNames])
   // An agent that already sets its own chain is configured correctly; the category key is not shadowing
   // anything it relies on, so it gets no warning (and never a snippet that would overwrite that chain).
-  // A retired alias key resolves to its canonical agent, so a chain set under the old key counts too.
-  const chainOwners = new Set(
-    Object.entries(config.agents ?? {})
-      .filter(([, agent]) => agent?.model !== undefined || agent?.models !== undefined)
-      .map(([key]) => canonicalAgentName(key)),
-  )
-  const ownsChain = (name: string): boolean => chainOwners.has(canonicalAgentName(name))
+  // Only the agent's own key counts: omo.json agents are mapped by their key as written, so a chain
+  // under a retired alias key never reaches the canonical agent and must not silence this warning.
+  const ownsChain = (name: string): boolean => {
+    const agent = config.agents?.[name]
+    return agent?.model !== undefined || agent?.models !== undefined
+  }
   return Object.keys(config.categories ?? {}).filter((name) => agents.has(name) && !ownsChain(name))
 }
 
