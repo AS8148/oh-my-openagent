@@ -26,6 +26,8 @@ export type OmoNativeTurnSpansOptions = {
   /** The live transport's span sink; undefined on the PostHog path, which has none. */
   readonly traces: () => TurnTracing | undefined
   readonly isConsented: () => boolean
+  /** The fresh send-time consent read, taken at the moment a span would end and so be exported. */
+  readonly isSendAllowed: () => boolean
   readonly sessionRole: string
   readonly inheritedTraceparent: string | undefined
 }
@@ -44,9 +46,9 @@ export type OmoNativeTurnSpans = {
   readonly run: <T>(fn: () => T) => T
   /**
    * Session shutdown, before the transport shuts down: a span still open is ended as `error` with
-   * `omo.turn.end_reason = shutdown` while `consented` (the send-time read) holds, else dropped unended.
+   * `omo.turn.end_reason = shutdown` while the send-time consent read holds, else dropped unended.
    */
-  readonly shutdown: (input: { readonly consented: boolean }) => void
+  readonly shutdown: () => void
 }
 
 function modelAttributes(model: TurnModel): TurnSpanAttributes {
@@ -74,8 +76,10 @@ export function createOmoNativeTurnSpans(options: OmoNativeTurnSpansOptions): Om
     lastPublished = undefined
   }
 
+  // Ending a span exports it, so every ending (turn end, abandon, a replaced turn, shutdown) reads
+  // consent fresh at that moment; after a withdrawal the span is dropped unended, never exported.
   const close = (status: "ok" | "error"): void => {
-    open?.handle.end(status)
+    if (open !== undefined && options.isSendAllowed()) open.handle.end(status)
     open = undefined
     unpublish()
   }
@@ -122,14 +126,9 @@ export function createOmoNativeTurnSpans(options: OmoNativeTurnSpansOptions): Om
     run(fn) {
       return open === undefined ? fn() : open.handle.run(fn)
     },
-    shutdown({ consented }) {
-      if (open !== undefined && consented) {
-        open.handle.setAttributes({ "omo.turn.end_reason": "shutdown" })
-        close("error")
-        return
-      }
-      open = undefined
-      unpublish()
+    shutdown() {
+      open?.handle.setAttributes({ "omo.turn.end_reason": "shutdown" })
+      close("error")
     },
   }
 }

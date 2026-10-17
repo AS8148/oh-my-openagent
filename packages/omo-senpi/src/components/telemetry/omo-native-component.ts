@@ -142,6 +142,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       const turnSpans = createOmoNativeTurnSpans({
         traces: () => state.traces,
         isConsented: () => currentConsent(false),
+        isSendAllowed: () => currentConsent(true),
         sessionRole,
         inheritedTraceparent: readSessionTraceparent(pi, env),
       })
@@ -152,11 +153,11 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
 
       // A turn still open at shutdown must end before the session component's `session_shutdown`
       // handler shuts the transport down, or its span lands on a closed sink. Registered first, so the
-      // shutdown-time summaries below are emitted outside any turn. It is ended (and so exported) only
-      // while the send-time consent read still allows it; otherwise it is dropped unended.
+      // shutdown-time summaries below are emitted outside any turn. Like every span ending, it is ended
+      // (and so exported) only while the fresh send-time consent read allows it; otherwise dropped unended.
       pi.on("session_shutdown", (_payload, eventCtx) => {
         consentCwd = cwdOf(eventCtx)
-        turnSpans.shutdown({ consented: currentConsent(true) })
+        turnSpans.shutdown()
       })
 
       // Must precede the session component: its `session_shutdown` handler shuts the client down,

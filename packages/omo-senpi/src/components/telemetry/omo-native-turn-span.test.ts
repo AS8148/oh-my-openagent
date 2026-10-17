@@ -126,8 +126,16 @@ const featureToolResult = {
 type Session = { readonly pi: FakeExtensionAPI; readonly ctx: Record<string, unknown> }
 type Component = ReturnType<typeof createOmoNativeTelemetryComponent>
 
-/** A consent switch the component reads; `set` also moves the clock past the consent cache. */
-type Consent = { readonly isEnabled: () => boolean; readonly now: () => number; readonly set: (value: boolean) => void }
+/**
+ * A consent switch the component reads; `set` also moves the clock past the consent cache, while
+ * `withdrawWithinCache` leaves the cached read stale, so only a fresh read can see the withdrawal.
+ */
+type Consent = {
+  readonly isEnabled: () => boolean
+  readonly now: () => number
+  readonly set: (value: boolean) => void
+  readonly withdrawWithinCache: () => void
+}
 
 function consentSwitch(): Consent {
   let value = true
@@ -138,6 +146,9 @@ function consentSwitch(): Consent {
     set(next) {
       value = next
       clock += CONSENT_CACHE_MS + 1
+    },
+    withdrawWithinCache() {
+      value = false
     },
   }
 }
@@ -377,6 +388,59 @@ describe("omo.turn span per assistant turn", () => {
       expect(spans).toEqual([])
     })
   })
+
+  // Every path that ends (and so exports) a span reads consent fresh at that moment, not the cached read.
+  const spanEndings: readonly {
+    readonly name: string
+    readonly finish: (session: Session) => Promise<void>
+    readonly exported: readonly (readonly [number, string])[]
+  }[] = [
+    { name: "turn_end", finish: async ({ pi, ctx }) => { await pi.dispatch("turn_end", turnEnd(0), ctx) }, exported: [[0, "ok"]] },
+    {
+      name: "agent_end abandon",
+      finish: async ({ pi, ctx }) => { await pi.dispatch("agent_end", { type: "agent_end", messages: [], aborted: true }, ctx) },
+      exported: [[0, "error"]],
+    },
+    { name: "the next turn_start", finish: async ({ pi, ctx }) => { await pi.dispatch("turn_start", turnStart(1), ctx) }, exported: [[0, "error"]] },
+  ]
+
+  for (const ending of spanEndings) {
+    test(`#given consent withdrawn mid-turn inside the consent cache window #when the turn ends by ${ending.name} #then no span is exported and no traceparent is left`, async () => {
+      await withTempAgentDir(async (agentDir) => {
+        // given
+        const collector = otlpCollector()
+        const consent = consentSwitch()
+        const session = await openSession(agentDir, collector.factory, "withdrawn-ending", { consent })
+        await session.pi.dispatch("turn_start", turnStart(0), session.ctx)
+        expect(readTurnTraceparent("withdrawn-ending")).toBeDefined()
+
+        // when
+        consent.withdrawWithinCache()
+        await ending.finish(session)
+        const { spans } = await collector.drain()
+
+        // then
+        expect(spans).toEqual([])
+        expect(readTurnTraceparent("withdrawn-ending")).toBeUndefined()
+      })
+    })
+
+    test(`#given consent kept #when the turn ends by ${ending.name} #then its span is exported exactly once`, async () => {
+      await withTempAgentDir(async (agentDir) => {
+        // given
+        const collector = otlpCollector()
+        const session = await openSession(agentDir, collector.factory, "kept-ending")
+        await session.pi.dispatch("turn_start", turnStart(0), session.ctx)
+
+        // when
+        await ending.finish(session)
+        const { spans } = await collector.drain()
+
+        // then
+        expect(spans.map(({ attributes, status }) => [attributes["omo.turn.index"], status])).toEqual(ending.exported.map((row) => [...row]))
+      })
+    })
+  }
 
   test("#given a published turn traceparent #when the turn ends, or the next turn starts after an opt-out #then no traceparent is left for a later child launch", async () => {
     await withTempAgentDir(async (agentDir) => {
