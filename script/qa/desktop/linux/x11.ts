@@ -1,7 +1,13 @@
 // X11 scenarios: capture + click into the target xterm, the foreground focus guard, background
 // `XSendEvent` delivery that leaves `_NET_ACTIVE_WINDOW` alone, scroll direction in both delivery
 // modes, and the XI2 stop chord latch.
-import { asObject, Engine, type Json, type JsonObject, outcome } from "./engine.ts";
+import {
+	asObject,
+	Engine,
+	type Json,
+	type JsonObject,
+	outcome,
+} from "./engine.ts";
 import { until } from "./procs.ts";
 import { type Context, type Result, result } from "./scenario.ts";
 import { PASTE_TOKEN, type X11Observer, type X11Stage } from "./x11-env.ts";
@@ -24,45 +30,76 @@ function png(base64: Json | undefined): Png {
 	return { bytes: data.length, signature, width, height };
 }
 
-async function engineFor(ctx: Context, stage: X11Stage): Promise<{ engine: Engine; stop: JsonObject }> {
+async function engineFor(
+	ctx: Context,
+	stage: X11Stage,
+): Promise<{ engine: Engine; stop: JsonObject }> {
 	const engine = Engine.spawn(ctx.engineBinary, ctx.procs.childEnv(stage.env));
 	const stop = await engine.activate(false);
 	return { engine, stop };
 }
 
-async function captureTarget(engine: Engine, stage: X11Stage): Promise<JsonObject> {
+async function captureTarget(
+	engine: Engine,
+	stage: X11Stage,
+): Promise<JsonObject> {
 	return asObject(await engine.result("capture", { target: stage.target }));
 }
 
 /** A middle-button click (xterm pastes PRIMARY) at the centre of the target's latest frame. */
-function clickParams(stage: X11Stage, frame: JsonObject, deliveryMode?: string): JsonObject {
+function clickParams(
+	stage: X11Stage,
+	frame: JsonObject,
+	deliveryMode?: string,
+): JsonObject {
 	return {
 		target: stage.target,
 		x: Math.floor(Number(frame.width) / 2),
 		y: Math.floor(Number(frame.height) / 2),
 		frameId: frame.frameId ?? null,
-		opts: deliveryMode === undefined ? { button: "middle" } : { button: "middle", deliveryMode },
+		opts:
+			deliveryMode === undefined
+				? { button: "middle" }
+				: { button: "middle", deliveryMode },
 	};
 }
 
-async function captureClick(ctx: Context, stage: X11Stage, observe: X11Observer): Promise<Result> {
+async function captureClick(
+	ctx: Context,
+	stage: X11Stage,
+	observe: X11Observer,
+): Promise<Result> {
 	const { engine, stop } = await engineFor(ctx, stage);
 	try {
 		const frame = await captureTarget(engine, stage);
 		const image = png(frame.data);
 		const geometry = await observe.geometry(stage.target);
 		const before = observe.pastes();
-		const click = outcome(await engine.exec("click", clickParams(stage, frame)));
-		const after = click === "ok" ? await observe.pastesAbove(before.count) : observe.pastes();
+		const click = outcome(
+			await engine.exec("click", clickParams(stage, frame)),
+		);
+		const after =
+			click === "ok"
+				? await observe.pastesAbove(before.count)
+				: observe.pastes();
 		return result(
 			"x11-capture-click-xterm",
 			{
 				png_signature: image.signature,
-				png_size_matches_xwininfo: image.width === geometry.width && image.height === geometry.height,
+				png_size_matches_xwininfo:
+					image.width === geometry.width && image.height === geometry.height,
 				click_ok: click === "ok",
-				xterm_received_click: after.count === before.count + 1 && after.last === PASTE_TOKEN,
+				xterm_received_click:
+					after.count === before.count + 1 && after.last === PASTE_TOKEN,
 			},
-			{ display: stage.display, stopPath: stop, png: { ...image }, xwininfo: geometry, click, mode: String(frame.mode) },
+			{
+				display: stage.display,
+				stopPath: stop,
+				png: { ...image },
+				xwininfo: geometry,
+				click,
+				mode: String(frame.mode),
+			},
 			{ before, after },
 		);
 	} finally {
@@ -80,20 +117,38 @@ async function deliveredClick(
 	try {
 		await observe.activate(stage.other);
 		const frame = await captureTarget(engine, stage);
-		const before = { active: await observe.activeWindow(), ...observe.pastes() };
-		const click = outcome(await engine.exec("click", clickParams(stage, frame, deliveryMode)));
-		const pasted = click === "ok" ? await observe.pastesAbove(before.count) : observe.pastes();
+		const before = {
+			active: await observe.activeWindow(),
+			...observe.pastes(),
+		};
+		const click = outcome(
+			await engine.exec("click", clickParams(stage, frame, deliveryMode)),
+		);
+		const pasted =
+			click === "ok"
+				? await observe.pastesAbove(before.count)
+				: observe.pastes();
 		const after = { active: await observe.activeWindow(), ...pasted };
-		const name = deliveryMode === "foreground" ? "x11-focus-guard" : "x11-background-keeps-active-window";
+		const name =
+			deliveryMode === "foreground"
+				? "x11-focus-guard"
+				: "x11-background-keeps-active-window";
 		return result(
 			name,
 			{
 				other_active_before: before.active === stage.other,
 				click_ok: click === "ok",
-				target_received_click: after.count === before.count + 1 && after.last === PASTE_TOKEN,
+				target_received_click:
+					after.count === before.count + 1 && after.last === PASTE_TOKEN,
 				active_window_restored: after.active === before.active,
 			},
-			{ display: stage.display, target: stage.target, other: stage.other, deliveryMode, click },
+			{
+				display: stage.display,
+				target: stage.target,
+				other: stage.other,
+				deliveryMode,
+				click,
+			},
 			{ before, after },
 		);
 	} finally {
@@ -106,41 +161,82 @@ async function latched(engine: Engine): Promise<JsonObject> {
 	let found: JsonObject | undefined;
 	await until(async () => {
 		await engine.call("stopPath.heartbeat");
-		const note = engine.notifications.find((n) => n.method === "stopPath.changed" && asObject(n.params).suspended === true);
+		const note = engine.notifications.find(
+			(n) =>
+				n.method === "stopPath.changed" &&
+				asObject(n.params).suspended === true,
+		);
 		found = note === undefined ? undefined : asObject(note.params);
 		return found !== undefined;
 	}, "stopPath.changed with suspended=true");
 	return found ?? {};
 }
 
-async function chordLatches(ctx: Context, stage: X11Stage, observe: X11Observer): Promise<Result> {
+async function chordLatches(
+	ctx: Context,
+	stage: X11Stage,
+	observe: X11Observer,
+): Promise<Result> {
 	const { engine, stop } = await engineFor(ctx, stage);
 	try {
 		await observe.activate(stage.other);
 		const frame = await captureTarget(engine, stage);
 		const before = { ...observe.pastes(), globalLive: stop.globalLive ?? null };
-		const posted = await ctx.procs.run(["xdotool", "key", "ctrl+alt+shift+Escape"], stage.env);
+		// An XTEST chord (xdotool, like any program) must be ignored: only a physical keyboard stops
+		// input (#10444). The status read after xdotool exits is a round trip behind the raw events.
+		const posted = await ctx.procs.run(
+			["xdotool", "key", "ctrl+alt+shift+Escape"],
+			stage.env,
+		);
+		const afterInjected = asObject(await engine.result("stopPath.status"));
+		// The user's other stop, `/computer stop`, reaches the engine as a host-relay stop.
+		const stopped = await engine.call("stopPath.stop", {
+			source: "host-relay",
+		});
 		const changed = await latched(engine);
-		const refused = outcome(await engine.exec("click", clickParams(stage, frame, "background")));
+		const refused = outcome(
+			await engine.exec("click", clickParams(stage, frame, "background")),
+		);
 		// Control: an independent XTEST middle click proves the target still records pastes, so an
 		// exact +1 shows the refused engine click delivered nothing.
 		const control = await ctx.procs.run(
-			["xdotool", "mousemove", "--window", stage.target, "20", "20", "click", "2"],
+			[
+				"xdotool",
+				"mousemove",
+				"--window",
+				stage.target,
+				"20",
+				"20",
+				"click",
+				"2",
+			],
 			stage.env,
 		);
 		const pasted = await observe.pastesAbove(before.count);
-		const after = { ...pasted, suspended: changed.suspended ?? null, stoppedBy: changed.stoppedBy ?? null };
+		const after = {
+			...pasted,
+			suspended: changed.suspended ?? null,
+			stoppedBy: changed.stoppedBy ?? null,
+		};
 		return result(
 			"x11-chord-latches",
 			{
 				global_listener_live: stop.globalLive === true,
 				xdotool_posted_chord: posted.code === 0,
+				xtest_chord_ignored: afterInjected.suspended === false,
+				host_stop_sent: stopped.error === undefined,
 				engine_latched: changed.suspended === true,
 				click_refused_suspended: refused === "Suspended",
 				control_click_delivered: control.code === 0,
 				engine_delivered_nothing: pasted.count === before.count + 1,
 			},
-			{ display: stage.display, chord: "ctrl+alt+shift+Escape", refused, stopPathChanged: changed },
+			{
+				display: stage.display,
+				chord: "ctrl+alt+shift+Escape",
+				refused,
+				afterInjected,
+				stopPathChanged: changed,
+			},
 			{ before, after },
 		);
 	} finally {
@@ -158,7 +254,12 @@ export const X11_SCENARIOS = [
 ] as const;
 export type X11Scenario = (typeof X11_SCENARIOS)[number];
 
-export function runX11(name: X11Scenario, ctx: Context, stage: X11Stage, observe: X11Observer): Promise<Result> {
+export function runX11(
+	name: X11Scenario,
+	ctx: Context,
+	stage: X11Stage,
+	observe: X11Observer,
+): Promise<Result> {
 	switch (name) {
 		case "x11-capture-click-xterm":
 			return captureClick(ctx, stage, observe);
