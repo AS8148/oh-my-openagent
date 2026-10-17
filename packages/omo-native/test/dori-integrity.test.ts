@@ -181,11 +181,11 @@ describe("the package directory omo verifies is the one whose host entry it load
     expect(result.status).toBe(7)
   })
 
-  const NODE_LAUNCH_BUDGET_MS = 60_000
   test("#given a copy only in a node global folder under HOME #when omo dori runs on node #then it is not installed instead of a refusal naming a copy omo cannot load", () => {
     // given: node's CommonJS search list adds ~/.node_modules; ESM resolution from omo's install never does
-    const node = Bun.which("node")
-    if (node === null) throw new Error("this test needs a real node on PATH")
+    const shim = Bun.which("node")
+    if (shim === null) throw new Error("this test needs a real node on PATH")
+    const node = Bun.spawnSync([shim, "-p", "process.execPath"]).stdout.toString().trim()
     const app = packagedOmo()
     const env = home()
     write(env.HOME, join(".node_modules", "dori-extension", "package.json"), JSON.stringify(DORI_MANIFEST))
@@ -198,5 +198,5 @@ describe("the package directory omo verifies is the one whose host entry it load
     expect(result.stdout).toBe("")
     expect(result.status).toBe(1)
     expect(result.stderr).toBe(`omo dori: ${DORI_NOT_INSTALLED}\n`)
-  }, NODE_LAUNCH_BUDGET_MS)
+  })
 })

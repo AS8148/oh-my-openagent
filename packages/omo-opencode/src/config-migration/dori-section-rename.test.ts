@@ -11,7 +11,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-function fixture(document: Record<string, unknown>) {
+function fixture(document: Record<string, unknown>, legacyFiles: Readonly<Record<string, string>> = {}) {
   const homeDir = realpathSync.native(mkdtempSync(join(tmpdir(), "dori-migration-")))
   roots.push(homeDir)
   const cwd = join(homeDir, "project")
@@ -19,6 +19,11 @@ function fixture(document: Record<string, unknown>) {
   mkdirSync(join(homeDir, ".omo"))
   mkdirSync(cwd)
   writeFileSync(targetPath, `// keep this comment\n${JSON.stringify(document, null, 2)}\n`)
+  for (const [relativePath, content] of Object.entries(legacyFiles)) {
+    const path = join(homeDir, relativePath)
+    mkdirSync(join(path, ".."), { recursive: true })
+    writeFileSync(path, content)
+  }
   const plans = createLegacyConfigMigrationPlans({
     cwd, homeDir, environment: { HOME: homeDir }, pathOperations: posix, platform: "linux",
   })
@@ -28,13 +33,33 @@ function fixture(document: Record<string, unknown>) {
 }
 
 describe("gateway to dori config migration", () => {
-  test("#given an existing legacy section #when the startup batch runs #then the rename precedes strict target validation by other migrations", () => {
-    const f = fixture({ gateway: { scopes: [{ id: "local" }] } })
+  test.each([
+    {
+      name: "gateway target plus a legacy OpenCode config",
+      document: { gateway: { scopes: [{ id: "local" }] } },
+      legacy: { ".config/opencode/oh-my-openagent.json": '{"agents":{"finder":{"model":"provider/finder"}}}' },
+      dori: { scopes: [{ id: "local" }] },
+    },
+    {
+      name: "gateway and dori target plus a legacy OpenCode config",
+      document: { gateway: { a: 1 }, dori: { b: 2 } },
+      legacy: { ".config/opencode/oh-my-openagent.json": '{"agents":{"finder":{"model":"provider/finder"}}}' },
+      dori: { b: 2 },
+    },
+    {
+      name: "gateway target plus a legacy codex config.jsonc",
+      document: { gateway: { a: 1 } },
+      legacy: { ".omo/config.jsonc": '{"[opencode]":{"disabled_hooks":["startup-toast"]}}' },
+      dori: { a: 1 },
+    },
+  ])("#given $name #when the startup batch runs #then the rename precedes strict target validation by the legacy plans", ({ document, legacy, dori }) => {
+    const f = fixture(document, legacy)
     const result = runMigrations({ env: { HOME: f.homeDir }, discover: () => f.plans })
     expect(result.status).toBe("completed")
     const loaded = loadOmoConfig({ cwd: f.cwd, env: { HOME: f.homeDir } })
     expect(loaded.diagnostics).toEqual([])
-    expect(loaded.config.dori).toEqual({ scopes: [{ id: "local" }] })
+    expect(loaded.config.dori).toEqual(dori)
+    expect(Object.hasOwn(parse(readFileSync(f.targetPath, "utf8")), "gateway")).toBe(false)
   })
 
   test("#given legacy sections in every config container #when migrating twice #then values and comments survive and the second run writes nothing", () => {
