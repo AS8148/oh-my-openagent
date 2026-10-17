@@ -207,6 +207,7 @@ export async function startFakeHost(options: FakeHostOptions = {}): Promise<Fake
       withheld.delete(type)
     },
     holdReply: (type) => {
+      if (!["prompt", "steer", "follow_up"].includes(type)) throw new Error(`holdReply only holds input commands, not ${type}`)
       const buffered: Array<() => void> = []
       held.set(type, buffered)
       return () => {
