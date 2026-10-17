@@ -1,4 +1,4 @@
-// Set only by the ubuntu CI step (.github/workflows/ci.yml). These 5 rows need a /proc holder scan
+// Set only by the ubuntu CI step (.github/workflows/ci.yml). These 7 rows need a /proc holder scan
 // that can answer, and no Linux host available to CI can answer it today: the user's own LIVE `git`
 // processes return EACCES on /proc/<pid>/fd, on GitHub's ubuntu runners (azure 7.0 kernel) and on
 // Boat alike, even inside `unshare -Upf --mount-proc --map-current-user`. There the lock is kept,

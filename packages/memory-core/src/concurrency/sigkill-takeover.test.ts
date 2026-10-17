@@ -8,6 +8,7 @@ import { pidAlive, probeUntil } from "../locks/process-liveness.test-support"
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 import {
+import { SAME_UID_GIT_UNINSPECTABLE } from "../git/host-scan-blind.test-support"
   DEATH_PROOF_BOUND_MS,
   assertLinearCommits,
   assertRepoIntegrity,
@@ -123,7 +124,7 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
   ] as const
 
   for (const { trigger, name } of killTriggers) {
-    test(`#given a writer SIGKILLed with a stranded .git/${name} #when its peer takes over #then every reachable object survives and the peer's follow-up commits land`, async () => {
+    test.skipIf(SAME_UID_GIT_UNINSPECTABLE)(`#given a writer SIGKILLed with a stranded .git/${name} #when its peer takes over #then every reachable object survives and the peer's follow-up commits land`, async () => {
       // #given
       const shared = await kit.fixture()
       const killer = kit.harnessFor(crashCommitChildPath, [
