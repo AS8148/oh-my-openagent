@@ -209,7 +209,9 @@ if [ "$${SYNC_PUSH_ENV}" = "1" ]; then
   exit 0
 fi
 
-push_to_mirror &
+# Detach the background push from git's stdout/stderr: a child that keeps them open makes the
+# commit wait for it (omo #10199).
+push_to_mirror </dev/null >/dev/null 2>&1 &
 exit 0
 `
 }
