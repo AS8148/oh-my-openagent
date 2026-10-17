@@ -11,9 +11,7 @@ import { applyPlan, holdsValue, plainValue, renderedFacts, soleRegisters, t2Bloc
 
 // Each seed's 2,000 cases run as CHUNKS_PER_SEED tests of 250. One 2,000-case test used 47 s of a
 // 60 s cap on a Windows runner and timed out on a slower one (#10413); a chunk is an eighth of
-// that work under the same cap. The test boundary is also a macrotask turn, so Loro's
-// FinalizationRegistry can release the wasm handles each chunk leaves behind; the case loop
-// itself only awaits microtasks, which never lets a finalizer run.
+// that work under the same cap (6.5 s at most on windows-latest).
 const PROPERTY_TIMEOUT_MS = 60_000
 const CASES_PER_SEED = 2000
 const CHUNKS_PER_SEED = 8
