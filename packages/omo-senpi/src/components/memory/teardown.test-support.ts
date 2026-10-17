@@ -108,3 +108,35 @@ export async function rmEfaultTolerant(
   }
   throw teardownFailure(path, attempts, lastError)
 }
+
+export type RmWhenReleasedDeps = RmEfaultTolerantDeps & {
+  releaseTimeoutMs?: number
+  releasePollMs?: number
+  now?: () => number
+}
+
+// Windows keeps a directory busy until every process holding a handle or cwd inside it has exited, so
+// a test that spawned children (git, a reflection run) waits for them to release the temp root before
+// failing its teardown.
+const RELEASE_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY"])
+const DEFAULT_RELEASE_TIMEOUT_MS = 30_000
+const DEFAULT_RELEASE_POLL_MS = 50
+
+export async function rmWhenReleased(
+  path: string,
+  options: TeardownRmOptions = DEFAULT_OPTIONS,
+  deps: RmWhenReleasedDeps = {},
+): Promise<void> {
+  const now = deps.now ?? Date.now
+  const sleep = deps.sleep ?? defaultSleepAsync
+  const deadline = now() + (deps.releaseTimeoutMs ?? DEFAULT_RELEASE_TIMEOUT_MS)
+  for (;;) {
+    try {
+      await rmEfaultTolerant(path, options, deps)
+      return
+    } catch (error) {
+      if (!RELEASE_CODES.has(errorCode(error) ?? "") || now() >= deadline) throw error
+      await sleep(deps.releasePollMs ?? DEFAULT_RELEASE_POLL_MS)
+    }
+  }
+}
