@@ -124,7 +124,10 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
   ] as const
 
   for (const { trigger, name } of killTriggers) {
-    test.skipIf(SAME_UID_GIT_UNINSPECTABLE)(`#given a writer SIGKILLed with a stranded .git/${name} #when its peer takes over #then every reachable object survives and the peer's follow-up commits land`, async () => {
+    // Windows has neither /proc nor lsof, so the repo-in-use scan can never answer there and the
+    // fail-closed sweep keeps every stranded lock by design: these rows' reclaim cannot happen on
+    // Windows until kernel-lock liveness (#10322) gives it an answer.
+    test.skipIf(SAME_UID_GIT_UNINSPECTABLE || process.platform === "win32")(`#given a writer SIGKILLed with a stranded .git/${name} #when its peer takes over #then every reachable object survives and the peer's follow-up commits land`, async () => {
       // #given
       const shared = await kit.fixture()
       const killer = kit.harnessFor(crashCommitChildPath, [
