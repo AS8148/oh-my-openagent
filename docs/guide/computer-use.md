@@ -29,7 +29,7 @@ The tool comes with a `computer-use` skill, the full helper reference. If you al
 
 ### Where the engine comes from
 
-- **Compiled OmO binary:** the engine is staged inside the extracted runtime on macOS (arm64, x64), Linux x64 (glibc) and Windows x64.
+- **Compiled OmO binary:** the engine is staged inside the extracted runtime on macOS (arm64, x64), Linux (x64 and arm64, glibc) and Windows (x64 and arm64). Musl Linux has no released engine.
 - **npm install (`omo-ai`):** the npm package carries no native binaries. On first use, OmO looks for an engine for its own release version under `~/.omo/cache/senpi-desktop-engine/<version>/<host>/`, and when none is there it downloads the matching asset from the OmO GitHub release and verifies it against the release's checksum file before running it.
 - **Your own build:** set `computer.engine_path` to a binary, or build one in a checkout with `cargo build --release -p senpi-desktop-engine`.
 
@@ -165,8 +165,8 @@ omo --permission computer:read=allow --permission computer:exec=deny
 Computer use is experimental on every OS. These are the known gaps:
 
 - macOS (experimental): a background click can raise the clicked window to just below the frontmost window; your frontmost app, front window, focus, cursor and next-keystroke destination are kept. Restoring the full previous window order is tracked in [#8930](https://github.com/code-yeongyu/oh-my-openagent/issues/8930).
-- Linux (experimental): on Wayland, no single-window capture, no per-window input, no `raise()`; the stop chord needs the GlobalShortcuts portal. No released engine for Linux arm64 yet.
-- Windows (experimental): no input into elevated applications from a non-elevated OmO (UIPI), including accessibility click fallback. Background input is action-specific: WPF pointer/text and Chromium posted input remain restricted; see [Windows](#windows). No released engine for Windows arm64 yet.
+- Linux (experimental): on Wayland, no single-window capture, no per-window input, no `raise()`; the stop chord needs the GlobalShortcuts portal. No released engine for musl Linux (Alpine).
+- Windows (experimental): no input into elevated applications from a non-elevated OmO (UIPI), including accessibility click fallback. Background input is action-specific: WPF pointer/text and Chromium posted input remain restricted; see [Windows](#windows).
 
 ## Engine modes and bunshin
 
