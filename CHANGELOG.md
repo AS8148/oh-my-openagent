@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The warning for a `categories` entry named after an agent no longer flags agents that already have their own models.** A markdown agent that declares its own model, or an agent configured under its retired name, is now left alone, and the warning now says that the key keeps working for `task(category: ...)` and that giving the agent its own models silences it ([#10386](https://github.com/code-yeongyu/oh-my-openagent/pull/10386)).
+
 ## [5.1.35] - 2026-10-16
 
 **The omo-senpi typecheck gives the same result wherever the checkout sits.** It used to pick up `@types/node` from folders above the checkout, so a stray older copy there failed the typecheck while CI passed on the same commit. omo-senpi now declares its own `@types/node` and `bun-types` and reads type packages only from its own `node_modules`. ([#10320](https://github.com/code-yeongyu/oh-my-openagent/issues/10320), [#10332](https://github.com/code-yeongyu/oh-my-openagent/pull/10332))
