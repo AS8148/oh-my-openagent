@@ -255,8 +255,8 @@ export function createLegacyConfigMigrationPlans(
 
   const inPlaceTargets = [...reasoningTargets.values()]
   return [
-    ...inPlaceTargets.map(doriSectionRenamePlan),
     ...legacyPlans,
+    ...inPlaceTargets.map(doriSectionRenamePlan),
     ...inPlaceTargets.map(reasoningPlan),
     ...inPlaceTargets.map(categoryDeepSplitPlan),
     ...inPlaceTargets.map(harnessNativeRenamePlan),
