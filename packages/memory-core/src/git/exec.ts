@@ -190,7 +190,7 @@ function runGitCommand(
       }
       clearTimeout(timer)
       exitDrain = setTimeout(() => {
-        // Still open past the drain: a hook child holds them. Stop reading so it cannot keep us.
+        // Still open past the drain: a hook child holds them. Destroy them so it cannot keep us.
         child.stdout!.destroy()
         child.stderr!.destroy()
         settleWithResult(code)
