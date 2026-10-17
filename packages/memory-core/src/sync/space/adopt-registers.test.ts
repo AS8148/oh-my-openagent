@@ -7,7 +7,7 @@ import { activeReg, readKeyState } from "../item/state"
 import { captureInto, newDoc } from "../item/test-support"
 import { planAdoption } from "./adopt"
 import { firstMissingFact } from "./read-back"
-import { applyPlan, t2Block } from "./test-support"
+import { applyPlan, t2Block, soleRegisters } from "./test-support"
 
 // sync-design #454 §3 "Insert-only adoption" and §10 (no marker or conflict text in the user's
 // file). Every expectation is written from the spec, not read back from the planner.
@@ -37,7 +37,7 @@ describe("(a) a differing register value is one more entry superseding nothing",
       applyPlan(doc, base, plan)
       expect(activeValues(doc, "description")).toEqual(["laptop view", "space view"])
       expect(renderDocContent(doc)).toBe('---\ndescription: "laptop view / space view"\n---\nbody\n')
-      expect(plan.removeAfterCommit).toEqual([SIDE])
+      expect(plan.removalCandidates).toEqual([SIDE])
     } finally {
       doc.free()
     }
@@ -51,7 +51,7 @@ describe("(a) a differing register value is one more entry superseding nothing",
       expect(activeValues(doc, "n")).toEqual(['"3"', "3"])
       expect(activeValues(doc, "m")).toEqual(["{ a: 1 }", "{ a: 2 }"])
       expect(hasMarker(renderDocContent(doc))).toBe(false)
-      expect(plan.removeAfterCommit).toEqual([SIDE])
+      expect(plan.removalCandidates).toEqual([SIDE])
     } finally {
       doc.free()
     }
@@ -65,6 +65,7 @@ describe("(a) a differing register value is one more entry superseding nothing",
         currentText: null,
         lastMaterialised: null,
         tombstoned: false,
+        registers: soleRegisters(null)
       })
       applyPlan(doc, "", plan)
       expect(activeValues(doc, "title")).toEqual(["Main", "Other", "Side"])
@@ -95,7 +96,7 @@ test("(b) a list key adopts the union of its elements", async () => {
     applyPlan(doc, base, plan)
     const tags = splitItem(renderDocContent(doc)).fm?.find((entry) => entry.key === "tags")?.value
     expect(tags?.kind === "set" ? [...tags.elements].sort() : tags).toEqual(["a", "b", "c"])
-    expect(plan.removeAfterCommit).toEqual([SIDE])
+    expect(plan.removalCandidates).toEqual([SIDE])
   } finally {
     doc.free()
   }

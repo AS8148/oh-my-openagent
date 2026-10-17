@@ -1,17 +1,19 @@
 import { expect, test } from "bun:test"
 
 import { splitItem, type FmEntry } from "../item/frontmatter"
-import { mulberry32, pick } from "../item/test-support"
+import { activeRegisters } from "../item/index"
+import { renderDocContent } from "../item/render"
+import { captureInto, mulberry32, newDoc, pick } from "../item/test-support"
 import { planAdoption } from "./adopt"
+import { confirmRemovals, type RemovalDecision } from "./confirm-removals"
 import { stripT2Blocks } from "./hub-trace"
-
-import { holdsValue, plainValue, renderedFacts, t2Block } from "./test-support"
+import { applyPlan, holdsValue, plainValue, renderedFacts, soleRegisters, t2Block } from "./test-support"
 
 // 2,000 generated cases are CPU-bound; under host load they exceed bun's 5 s default.
 const PROPERTY_TIMEOUT_MS = 60_000
 
 // The deletion gate (HIGH-1, structural guarantee): a source file may be queued in
-// removeAfterCommit only when a read-back of the merged result proves every one of its
+// removalCandidates only when a read-back of the merged result proves every one of its
 // facts survived — every body line intact, every frontmatter value held as a whole register
 // component or set element. Otherwise the source stays on disk with a reason.
 
@@ -76,7 +78,7 @@ function genFmOnly(rand: () => number, tag: string): string {
 }
 
 for (const seed of [20261016, 0xde1e7106]) {
-  test(`A3 a deleted source's facts survive intact or it is kept; seed=${seed}, cases=2000`, () => {
+  test(`A3 a deleted source's facts survive in the COMMITTED item, or it is kept; seed=${seed}, cases=2000`, async () => {
     // Given random mains, T2 blocks and side files with overlapping prose and keys.
     const rand = mulberry32(seed)
     for (let iteration = 0; iteration < 2000; iteration++) {
@@ -87,19 +89,33 @@ for (const seed of [20261016, 0xde1e7106]) {
         path: `n.sync-conflict-20261015-${i === 0 ? "mac" : "mini"}.md`,
         text: genDoc(rand, `x${iteration}-${i}`),
       }))
-      const lastMaterialised = rand() < 0.3 ? space : null
-      const plan = planAdoption([{ path: "n.md", text: main }, ...sides], {
-        currentText: space === "" ? null : space,
-        lastMaterialised: lastMaterialised === "" ? null : lastMaterialised,
-        tombstoned: false,
-      })
-      const output = plan.rendered
+      const remembered = rand() < 0.3
+      const files = [{ path: "n.md", text: main }, ...sides]
+      // When the plan is committed into a real item and deletion is decided on the committed item.
+      const doc = await newDoc("1")
+      let output = ""
+      let decision: RemovalDecision = { remove: [], retained: [] }
+      try {
+        captureInto(doc, "", [], space)
+        const base = renderDocContent(doc)
+        const plan = planAdoption(files, {
+          currentText: base === "" ? null : base,
+          lastMaterialised: remembered && base !== "" ? base : null,
+          tombstoned: false,
+          registers: activeRegisters(doc),
+        })
+        applyPlan(doc, base, plan)
+        output = renderDocContent(doc)
+        decision = confirmRemovals(doc, plan, files)
+      } finally {
+        doc.free()
+      }
       const context = `A3 seed=${seed} case=${iteration}`
       const outFacts = renderedFacts(output)
       const outBodyLines = linesOf(splitItem(output).body)
-      const retained = new Map((plan.retainedSources ?? []).map((entry) => [entry.path, entry.reason]))
+      const retained = new Map(decision.retained.map((entry) => [entry.path, entry.reason]))
       for (const side of sides) {
-        const queued = plan.removeAfterCommit.includes(side.path)
+        const queued = decision.remove.includes(side.path)
         if (queued) {
           // Then every fact of the deleted source is intact in the output.
           const { bodyLines, entries } = factsOf(side.text)
@@ -113,7 +129,7 @@ for (const seed of [20261016, 0xde1e7106]) {
             ).toBe(true)
           }
         } else {
-          // Or the source stays on disk and the plan records a structured reason.
+          // Or the source stays on disk with a structured reason.
           expect(typeof retained.get(side.path), `${context} ${side.path} kept without a reason`).toBe("string")
         }
         expect(queued !== retained.has(side.path), `${context} ${side.path} both queued and retained`).toBe(true)
@@ -127,11 +143,11 @@ test("a merge that drops a line keeps the source and records the reason", () => 
   const dropIncoming = (base: string, incoming: string): string => (base === "" ? incoming : base)
   const plan = planAdoption(
     [{ path: "n.sync-conflict-20261015-mac.md", text: "- likes tea\n" }],
-    { currentText: "- likes coffee\n", lastMaterialised: null, tombstoned: false },
+    { currentText: "- likes coffee\n", lastMaterialised: null, tombstoned: false, registers: soleRegisters("- likes coffee\n") },
     dropIncoming,
   )
   // Then the side file is not deleted and the reason names the missing line.
-  expect(plan.removeAfterCommit).toEqual([])
+  expect(plan.removalCandidates).toEqual([])
   expect(plan.retainedSources ?? []).toEqual([
     { path: "n.sync-conflict-20261015-mac.md", reason: 'missing line "- likes tea"' },
   ])
@@ -143,8 +159,8 @@ test("a side file whose facts all survive is queued for deletion", () => {
       { path: "n.md", text: "- likes tea\n- likes coffee\n" },
       { path: "n.sync-conflict-20261015-mac.md", text: "- likes tea\n" },
     ],
-    { currentText: "- likes tea\n- likes coffee\n", lastMaterialised: null, tombstoned: false },
+    { currentText: "- likes tea\n- likes coffee\n", lastMaterialised: null, tombstoned: false, registers: soleRegisters("- likes tea\n- likes coffee\n") },
   )
-  expect(plan.removeAfterCommit).toEqual(["n.sync-conflict-20261015-mac.md"])
+  expect(plan.removalCandidates).toEqual(["n.sync-conflict-20261015-mac.md"])
   expect(plan.retainedSources ?? []).toEqual([])
 })

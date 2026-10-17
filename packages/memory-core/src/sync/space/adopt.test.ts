@@ -5,12 +5,13 @@ import { renderDocContent } from "../item/render"
 import { splitItem } from "../item/frontmatter"
 import { captureInto, newDoc } from "../item/test-support"
 import { planAdoption, type ItemState } from "./index"
-import { applyPlan } from "./test-support"
+import { applyPlan, soleRegisters } from "./test-support"
 
 const live = (currentText: string | null, lastMaterialised: string | null = null): ItemState => ({
   currentText,
   tombstoned: false,
   lastMaterialised,
+  registers: soleRegisters(currentText)
 })
 
 describe("planAdoption (sync-design §3 insert-only adoption)", () => {
@@ -55,6 +56,7 @@ describe("planAdoption (sync-design §3 insert-only adoption)", () => {
       currentText: renderDocContent(doc),
       tombstoned: true,
       lastMaterialised: text,
+      registers: soleRegisters(renderDocContent(doc))
     })
     expect(plan.action).toBe("remove")
     expect(isLive(doc)).toBe(false)
@@ -96,6 +98,7 @@ describe("planAdoption (sync-design §3 insert-only adoption)", () => {
       currentText: current,
       tombstoned: true,
       lastMaterialised: "alpha beta\n",
+      registers: soleRegisters(current)
     })
     expect(plan.action).toBe("capture")
     if (plan.action !== "capture") return
@@ -158,7 +161,7 @@ describe("HIGH-1 regression: a fact is never dropped while its source is deleted
     if (plan.action !== "capture") return
     expect(plan.workingText).toContain("- likes tea\n")
     expect(plan.workingText).toContain("- hates tea\n")
-    expect(plan.removeAfterCommit).toEqual(["n.sync-conflict-20261015-mac.md"])
+    expect(plan.removalCandidates).toEqual(["n.sync-conflict-20261015-mac.md"])
   })
 
   test("P1b: prose whose characters are scattered across other lines is still adopted", () => {
@@ -194,6 +197,6 @@ describe("HIGH-1 regression: a fact is never dropped while its source is deleted
     expect(parsed.fm?.map((entry) => entry.key)).toEqual(["title", "tags"])
     expect(plan.workingText).toContain("kept line\n")
     expect(plan.workingText.includes("\r")).toBe(false)
-    expect(plan.removeAfterCommit).toEqual(["n.sync-conflict-20261015-mac.md"])
+    expect(plan.removalCandidates).toEqual(["n.sync-conflict-20261015-mac.md"])
   })
 })
