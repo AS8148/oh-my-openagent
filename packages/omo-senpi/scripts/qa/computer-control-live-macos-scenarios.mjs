@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const REASON = "QA: raise the QA target window";
+export const CONFIRM_TITLE = "Allow foreground computer control?";
 export const TARGET_TITLE = `omo-control-qa-${process.pid}`;
 
 export function jsonLines(text) {
@@ -70,6 +71,7 @@ function answerConfirms(session, answer) {
 			if (
 				event.type === "extension_ui_request" &&
 				event.method === "confirm" &&
+				event.title === CONFIRM_TITLE &&
 				!answered.has(event.id)
 			) {
 				answered.add(event.id);
@@ -192,6 +194,10 @@ export const scenarios = {
 				"the raise after the interrupt was refused COMPUTER_CONTROL_REQUIRED",
 				results.at(-1)?.includes("COMPUTER_CONTROL_REQUIRED") === true,
 			],
+			[
+				"the engine audited the refused raise",
+				audits.includes("raiseWindow:error"),
+			],
 		],
 	},
 	declined: {
@@ -207,10 +213,18 @@ export const scenarios = {
 				return session.agentEnds() >= 1;
 			});
 		},
-		verify: ({ audits, results }) => [
+		verify: ({ audits, results, confirms }) => [
+			[
+				"the control confirm reached the client",
+				confirms.includes(CONFIRM_TITLE),
+			],
 			[
 				"the engine never saw control.grant",
 				!audits.includes("control.grant:success"),
+			],
+			[
+				"the engine audited the refused raise",
+				audits.includes("raiseWindow:error"),
 			],
 			["no raise reached the engine", !audits.includes("raiseWindow:success")],
 			[

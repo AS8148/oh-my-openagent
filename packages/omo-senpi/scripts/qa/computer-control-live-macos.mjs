@@ -15,7 +15,15 @@
 //
 // Usage: SENPI_BIN=<senpi> bun computer-control-live-macos.mjs --engine <path> [--evidence-dir <dir>] [--only a,b]
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -159,7 +167,8 @@ function startSession(steps) {
 			const cleanup = () => {
 				clearTimeout(timer);
 				clearInterval(poll);
-				waiters.splice(waiters.indexOf(check), 1);
+				const index = waiters.indexOf(check);
+				if (index !== -1) waiters.splice(index, 1);
 			};
 			waiters.push(check);
 			check();
@@ -173,6 +182,12 @@ function startSession(steps) {
 		const outcome = {
 			audits: auditActions(sandbox.root),
 			results: toolResults(sandbox.agentDir),
+			confirms: events
+				.filter(
+					(event) =>
+						event.type === "extension_ui_request" && event.method === "confirm",
+				)
+				.map((event) => event.title),
 			stdout,
 			stderr,
 		};
@@ -202,6 +217,17 @@ if (!senpiBin || !existsSync(enginePath)) {
 }
 if (evidenceDir !== undefined) mkdirSync(evidenceDir, { recursive: true });
 
+// The real credentials and settings must not change: the driver only ever touches its sandbox.
+const protectedFiles = [
+	join(homedir(), ".senpi", "agent", "auth.json"),
+	join(homedir(), ".omo", "agent", "auth.json"),
+	join(homedir(), ".omo", "agent", "settings.json"),
+];
+const digest = (path) =>
+	existsSync(path)
+		? createHash("sha256").update(readFileSync(path)).digest("hex")
+		: "absent";
+const before = protectedFiles.map(digest);
 const report = [];
 openTarget();
 try {
@@ -230,7 +256,18 @@ try {
 } finally {
 	closeTarget();
 }
+const realSenpiUntouched = protectedFiles.every(
+	(path, index) => digest(path) === before[index],
+);
 const verdict =
-	report.length > 0 && report.every((entry) => entry.pass) ? "PASS" : "FAIL";
-console.log(JSON.stringify({ verdict, engine: enginePath, report }, null, 2));
+	report.length > 0 && report.every((entry) => entry.pass) && realSenpiUntouched
+		? "PASS"
+		: "FAIL";
+console.log(
+	JSON.stringify(
+		{ verdict, engine: enginePath, realSenpiUntouched, protectedFiles, report },
+		null,
+		2,
+	),
+);
 process.exit(verdict === "PASS" ? 0 : 1);
