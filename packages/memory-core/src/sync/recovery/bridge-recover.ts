@@ -7,6 +7,7 @@ import {
 	sha256B64,
 } from "../crypto/vendor/sync-format/jcs.ts";
 import { signFramed } from "../crypto/vendor/sync-format/keys.ts";
+import { provenRecoveryMaterial } from "./bridge-provenance.ts";
 import {
 	deriveRecoveryKeys,
 	disposeRecoveryKeys,
@@ -15,7 +16,7 @@ import {
 	recoveryPrfSalt,
 	recoveryUserHandle,
 } from "./derive.ts";
-import { disposeMaterial, openWrapWithKey, sealWrap } from "./key-material.ts";
+import { disposeMaterial, sealWrap } from "./key-material.ts";
 import type {
 	PasskeyAuthenticator,
 	RecoverBeginRequest,
@@ -209,29 +210,22 @@ export const recoverFinishInBridge = async (
 			return { ok: false, reason: "key-mismatch" };
 		const anchor = await anchorHolds(request.account, candidate, keys);
 		if (anchor !== null) return { ok: false, reason: anchor };
-		const address = {
-			account: request.account,
-			epoch: candidate.wrap.epoch,
-			id: `recovery:${candidate.key.credential_id}`,
-		};
-		const opened = await openWrapWithKey(
-			keys.sealPrivate,
-			keys.sealPublic,
-			candidate.wrap,
-			address,
-			new Map(candidate.expectedHistory),
+		const material = await provenRecoveryMaterial(
+			request.account,
+			candidate,
+			keys,
 		);
-		if (!opened.ok) return { ok: false, reason: "wrap-refused" };
+		if (typeof material === "string") return { ok: false, reason: material };
 		try {
 			const deviceAddress = {
 				account: request.account,
-				epoch: address.epoch,
+				epoch: candidate.wrap.epoch,
 				id: `device:${request.device.id}`,
 			};
 			const deviceWrap = await sealWrap(
 				deviceAddress,
 				request.device.sealing_public_key,
-				opened.material,
+				material,
 			);
 			const join = await signJoin(request, candidate.key.credential_id, keys);
 			if (join === null) return { ok: false, reason: "wrap-refused" };
@@ -242,7 +236,7 @@ export const recoverFinishInBridge = async (
 				join,
 			};
 		} finally {
-			disposeMaterial(opened.material);
+			disposeMaterial(material);
 		}
 	} finally {
 		disposeRecoveryKeys(keys);

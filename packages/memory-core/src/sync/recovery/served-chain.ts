@@ -112,6 +112,9 @@ type Enrolling = {
 	readonly countersign: string;
 	readonly wrapsDigest: string;
 	readonly predecessor: string;
+	/** Every wrap the enrolling record committed, in served order: its countersignature covers them all. */
+	readonly wraps: ReadonlyArray<VerifiedWrap>;
+	readonly epoch: number;
 };
 
 const enrollingRecord = (
@@ -122,6 +125,8 @@ const enrollingRecord = (
 		const body = record.body;
 		const predecessor =
 			index === 0 ? "" : (state.received[index - 1]?.keyring_link ?? "");
+		const wraps = state.received[index]?.wraps ?? [];
+		const epoch = state.received[index]?.epoch ?? 0;
 		if (
 			body.kind === "genesis" &&
 			body.recoveryKey.credential_id === credentialId
@@ -130,6 +135,8 @@ const enrollingRecord = (
 				countersign: body.countersign,
 				wrapsDigest: body.wrapsDigest,
 				predecessor,
+				wraps,
+				epoch,
 			};
 		}
 		if (
@@ -140,6 +147,8 @@ const enrollingRecord = (
 				countersign: body.countersign,
 				wrapsDigest: body.wrapsDigest,
 				predecessor,
+				wraps,
+				epoch,
 			};
 		}
 	}
@@ -189,6 +198,10 @@ export const recoveryCandidates = (
 			},
 			wrap: committed,
 			expectedHistory: expectedHistory(authority, authority.epoch),
+			enrollment: {
+				wraps: enrolling.wraps,
+				expectedHistory: expectedHistory(authority, enrolling.epoch),
+			},
 		});
 	}
 	return candidates;

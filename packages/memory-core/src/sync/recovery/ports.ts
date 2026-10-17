@@ -103,6 +103,15 @@ export type RecoveryCandidate = {
 	};
 	readonly wrap: WrapEntry;
 	readonly expectedHistory: ReadonlyArray<readonly [number, string]>;
+	/**
+	 * The enrolling record's full wrap list (in served order) and the expected history at its epoch.
+	 * The record's countersignature covers that list's digest; its one recovery wrap is the
+	 * enrollment wrap the bridge binds `wrap` to (desktop #2897 review r4 H2).
+	 */
+	readonly enrollment: {
+		readonly wraps: ReadonlyArray<WrapEntry>;
+		readonly expectedHistory: ReadonlyArray<readonly [number, string]>;
+	};
 };
 
 /** A PRF salt input, read from served records BEFORE verification: a salt is not a secret. */
@@ -155,6 +164,7 @@ export type RecoverRefusal =
 	| "key-mismatch"
 	| "countersign-mismatch"
 	| "wrap-refused"
+	| "wrap-unbound"
 	| "recovery-expired";
 
 export type SignedJoin = {
