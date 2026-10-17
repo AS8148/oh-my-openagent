@@ -4,11 +4,12 @@ import { join } from "node:path";
 import { mkdir, readFile, rename, rm, writeFile } from "../../fs/resilient";
 
 /**
- * The persisted read-only state of a recovered device (#10412 review M3). A recovery whose rotation
- * the server withheld leaves the device joined but on the recovered epoch, whose key it must never
- * write with; that fact outlives the process, so it is written next to the trust pin and only a
- * recovery that stores and verifies its rotation releases it. The sync engine reads it before any
- * write. A hold file that does not parse still holds: the state fails closed.
+ * The persisted read-only state of a recovered device (#10412 review M3). Recovery writes it before
+ * its join can land, and only a rotation that a fresh reload shows stored releases it, so a crash, a
+ * throw or a withheld rotation all leave the device unable to write with the recovered epoch's key.
+ * It sits next to the trust pin and outlives the process. A hold file that does not parse still
+ * holds: the state fails closed. No sync engine reads it yet (the engine must check it before any
+ * write, and should derive the same fact from the chain); that is tracked as a follow-up.
  */
 export type WriteHold =
 	| { readonly held: false }

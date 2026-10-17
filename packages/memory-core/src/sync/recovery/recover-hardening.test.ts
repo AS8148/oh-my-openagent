@@ -165,6 +165,7 @@ describe("the trust pin is checked before any join (#10412 review M1)", () => {
 			next: "re-pair or recover",
 		});
 		expect(second.server.chain(second.account).length).toBe(before);
+		expect(derived.length).toBe(1);
 		expect(derived.every(zero)).toBe(true);
 		expect(await loadTrustAnchor(stateDir, first.account)).toEqual(
 			pinnedBefore,
@@ -194,6 +195,51 @@ describe("read-only after a withheld rotation is persisted (#10412 review M3)", 
 		});
 		expect(await loadWriteHold(stateDir, world.account)).toEqual({
 			held: false,
+		});
+	});
+});
+
+describe("the write hold never fails open (#10412 review r2)", () => {
+	test("a crash right after the join lands leaves the device held", async () => {
+		const world = await createWorld();
+		const device = await newDevice();
+		const stateDir = freshStateDir();
+		const base = transportFor(world, device);
+		const transport: RecoveryTransport = {
+			...base,
+			recoveryJoin: async (request) => {
+				await base.recoveryJoin(request);
+				throw new Error("the process died after the join landed");
+			},
+		};
+		await expect(
+			recover(world, device, { transport, stateDir }),
+		).rejects.toThrow("the process died");
+		expect(await loadWriteHold(stateDir, world.account)).toMatchObject({
+			held: true,
+		});
+	});
+
+	test("a rotation the server acknowledges but does not store keeps the hold", async () => {
+		const world = await createWorld();
+		const device = await newDevice();
+		const stateDir = freshStateDir();
+		const base = transportFor(world, device);
+		const transport: RecoveryTransport = {
+			...base,
+			appendKeys: async (request) =>
+				request.record.kind === "rotation"
+					? { ok: true, seq: 999 }
+					: base.appendKeys(request),
+		};
+		expect(await recover(world, device, { transport, stateDir })).toMatchObject(
+			{
+				ok: true,
+				state: "joined-read-only",
+			},
+		);
+		expect(await loadWriteHold(stateDir, world.account)).toMatchObject({
+			held: true,
 		});
 	});
 });

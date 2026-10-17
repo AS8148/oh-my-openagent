@@ -184,6 +184,9 @@ const recoverWithHandle = async (
 		},
 	});
 	if (!recovered.ok) return refuse(recovered.reason);
+	// The hold goes on disk BEFORE the join can land (#10412 review r2 M1): a crash or a throw after
+	// the join or the pin then leaves the device read-only. Only a verified rotation releases it.
+	await holdWrites(input.stateDir, input.account, recovered.credentialId);
 	const confirmed = await appendAndConfirmJoin(
 		input.transport,
 		input.account,
@@ -234,14 +237,27 @@ const recoverWithHandle = async (
 		for (const row of retained.history) row.key.fill(0);
 	}
 	input.onEvent?.("sync.recovery.recovered");
-	if (!rotated.ok) {
-		await holdWrites(input.stateDir, input.account, recovered.credentialId);
-		return {
-			ok: true,
-			state: "joined-read-only",
-			credentialId: recovered.credentialId,
-		};
-	}
+	const readOnly: RecoverOutcome = {
+		ok: true,
+		state: "joined-read-only",
+		credentialId: recovered.credentialId,
+	};
+	if (!rotated.ok) return readOnly;
+	// An acknowledged rotation releases the hold only once a reload shows it stored (#10412 review r2 M2).
+	const stored = await loadServedChain(
+		input.transport,
+		input.account,
+		input.rejections,
+		anchor,
+	);
+	const storedAuthority = stored.ok ? stored.state.authority : null;
+	if (
+		storedAuthority === null ||
+		storedAuthority.epoch !== confirmed.authority.epoch + 1 ||
+		storedAuthority.members.get(device.id)?.signing_public_key !==
+			device.signing_public_key
+	)
+		return readOnly;
 	await releaseWriteHold(input.stateDir, input.account);
 	return {
 		ok: true,
