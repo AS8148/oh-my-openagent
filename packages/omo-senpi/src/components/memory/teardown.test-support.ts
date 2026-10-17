@@ -58,7 +58,11 @@ function errorCode(error: unknown): string | undefined {
 const RETRYABLE_CODES = new Set(["EFAULT", "EBUSY", "EPERM", "ENOTEMPTY"])
 
 function teardownFailure(path: string, attempts: number, cause: unknown): Error {
-  const error = new Error(`${TEARDOWN_FAILURE_PREFIX} EFAULT persisted after ${attempts} attempts removing ${path}`)
+  const code = errorCode(cause)
+  const error = Object.assign(
+    new Error(`${TEARDOWN_FAILURE_PREFIX} ${code ?? "EFAULT"} persisted after ${attempts} attempts removing ${path}`),
+    code === undefined ? {} : { code },
+  )
   error.cause = cause
   return error
 }
