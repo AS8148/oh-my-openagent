@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from "node:fs"
 import { delimiter, isAbsolute, join, relative, sep } from "node:path"
 import { canonicalAgentDir } from "./agent-dir.js"
+import { HERDR_AGENT_MARKER } from "./herdr-agent-hint.js"
 import { nearestNodeBin, packageManifest, packageRoot, readJson, releaseChannel, updateTarget } from "./package-paths.js"
 
 // Identity the engine adopts for this install: what the user sees, where state lives, which
@@ -86,6 +87,9 @@ export function senpiEnvironment(senpiRoot) {
   // under bun. Handing that answer down stops the engine from making its own, conflicting choice.
   env.SENPI_RUNTIME = process.versions.bun ? "bun" : "node"
   env.SENPI_BRAND = JSON.stringify(brandProfile())
+  // Only the interactive launch writes this record of the herdr hint it set (herdr-agent-hint.js);
+  // no engine started here may inherit one from the parent environment.
+  delete env[HERDR_AGENT_MARKER]
 
   const binDir = nearestNodeBin(senpiRoot)
   if (binDir) {

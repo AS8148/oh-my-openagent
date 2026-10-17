@@ -5,8 +5,10 @@
 //
 // The hint is only for an interactive engine the user sees in the pane: a TTY on stdin and no
 // print or protocol flag before `--`. A HERDR_AGENT the user set is left alone. The launcher also
-// sets HERDR_AGENT_MARKER to the value it wrote, so the plugin releases only a hint the launcher
-// set (packages/omo-senpi/src/extension/herdr-agent-hint.ts).
+// sets OMO_HERDR_AGENT_HINT to the value it wrote, so the plugin releases only a hint the launcher
+// set (packages/omo-senpi/src/extension/herdr-agent-hint.ts). Only this function writes that
+// record: one inherited from the parent environment is dropped first, so it can never vouch for a
+// HERDR_AGENT the user set.
 
 const NON_INTERACTIVE_FLAGS = new Set(["-p", "--print", "--mode"])
 
@@ -14,6 +16,7 @@ export const HERDR_AGENT_LABEL = "pi"
 export const HERDR_AGENT_MARKER = "OMO_HERDR_AGENT_HINT"
 
 export function withHerdrAgentHint(env, args, stdinIsTTY = process.stdin.isTTY === true) {
+  delete env[HERDR_AGENT_MARKER]
   if (env.HERDR_ENV !== "1") return env
   if (env.HERDR_AGENT !== undefined && env.HERDR_AGENT !== "") return env
   if (!stdinIsTTY) return env

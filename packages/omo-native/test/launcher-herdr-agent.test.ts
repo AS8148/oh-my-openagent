@@ -64,6 +64,16 @@ describe("the launcher names the engine for herdr (#10448)", () => {
     expect(handed.OMO_HERDR_AGENT_HINT).toBe("pi")
   })
 
+  test("#given a user-set HERDR_AGENT and an inherited marker matching it #then the engine gets the user's value and no marker", () => {
+    const handed = launchCapture(["hello"], { HERDR_ENV: "1", HERDR_AGENT: "claude", OMO_HERDR_AGENT_HINT: "claude" })
+    expect(handed.HERDR_AGENT).toBe("claude")
+    expect(handed.OMO_HERDR_AGENT_HINT).toBeUndefined()
+  })
+
+  test("#given an inherited marker on an engine command #then it is not handed down", () => {
+    expect(launchCapture(["install"], { OMO_HERDR_AGENT_HINT: "pi" }).OMO_HERDR_AGENT_HINT).toBeUndefined()
+  })
+
   test("#given piped stdin inside herdr #then no hint is handed down", () => {
     expect(launchCapture(["hello"], { HERDR_ENV: "1" }, false).HERDR_AGENT).toBeUndefined()
   })
