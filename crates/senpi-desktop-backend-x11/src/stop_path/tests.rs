@@ -90,20 +90,20 @@ fn an_invalid_chord_is_refused_before_any_listener_starts() {
 }
 
 #[test]
-fn only_non_xtest_keyboards_count_as_physical_sources() {
-    assert!(super::source::counts_as_physical(b"AT Translated Set 2 keyboard"));
-    assert!(super::source::counts_as_physical(b"Logitech USB Keyboard"));
-    assert!(!super::source::counts_as_physical(b"Virtual core XTEST keyboard"));
-    assert!(!super::source::counts_as_physical(b"second XTEST keyboard"));
-}
-
-#[test]
 fn a_device_the_server_cannot_describe_never_stops_input() {
-    use x11rb::protocol::xinput::DeviceType;
     // A lookup that failed, or a device removed before the lookup (a client can
     // add a master, chord through its XTEST slave and remove it at once).
     assert!(!super::source::physical_from(None));
-    // Known devices keep their classification.
-    assert!(super::source::physical_from(Some((DeviceType::SLAVE_KEYBOARD, b"AT Translated Set 2 keyboard".as_slice()))));
-    assert!(!super::source::physical_from(Some((DeviceType::SLAVE_KEYBOARD, b"Virtual core XTEST keyboard".as_slice()))));
+}
+
+#[test]
+fn the_xtest_property_or_name_marks_a_device_synthetic() {
+    use super::source::{physical_from, Described};
+    use x11rb::protocol::xinput::DeviceType;
+    let keyboard = |name: &'static [u8], xtest_property| Described { kind: DeviceType::SLAVE_KEYBOARD, name, xtest_property };
+    assert!(physical_from(Some(keyboard(b"AT Translated Set 2 keyboard", false))));
+    // The server's own marker wins over any name, so renaming cannot dodge it.
+    assert!(!physical_from(Some(keyboard(b"Logitech USB Keyboard", true))));
+    // The name fallback for servers that do not set the property.
+    assert!(!physical_from(Some(keyboard(b"Virtual core XTEST keyboard", false))));
 }
