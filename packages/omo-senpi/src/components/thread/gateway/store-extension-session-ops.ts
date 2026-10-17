@@ -8,7 +8,6 @@
 import { randomUUID } from "node:crypto"
 import { rmSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { Value } from "typebox/value"
 
 import { AWAIT_REQUEST_ID, RESERVED_CALLER_KEYS, isToolSessionOp } from "./extension-registrations"
 import { gatewayDatabasePath } from "./paths"
@@ -31,6 +30,19 @@ export type SessionCallRequest = {
 export type SessionCallReply = {
   readonly result: StoreExtensionResult<unknown>
   readonly await?: { readonly timeout_ms: number; readonly wake_dir: string }
+}
+
+type TypeboxValue = (typeof import("typebox/value"))["Value"]
+
+/**
+ * typebox's validator is imported on the first op-phase call, not with the worker: every worker spawn
+ * (and every respawn after an idle retire) would otherwise pay for its ~700-module graph, which only
+ * argument validation of a session-callable op uses.
+ */
+let value: TypeboxValue | undefined
+async function typeboxValue(): Promise<TypeboxValue> {
+  value ??= (await import("typebox/value")).Value
+  return value
 }
 
 const refused = (code: StoreExtensionRefusal["code"], message: string): SessionCallReply => ({ result: { kind: "refused", code, message } })
@@ -75,6 +87,7 @@ export async function sessionCall(ctx: StoreContext, extensions: StoreExtensions
   let op = entry.op
   const awaited = isToolSessionOp(entry) ? entry.await : undefined
   if (phase === "op") {
+    const Value = await typeboxValue()
     let valid: boolean
     try {
       valid = Value.Check(entry.parameters, args)

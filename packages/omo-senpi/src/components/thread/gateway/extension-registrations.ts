@@ -1,5 +1,5 @@
 /**
- * The persisted half of store extension registrations (`extension_registrations`, schema v10): the
+ * The persisted half of store extension registrations (`extension_registrations`, schema v8): the
  * descriptor `register()` upserts by name, the session-op declaration rules both `register()` and
  * every reader apply, and the worker's lazy import of a persisted module. An engine process lists
  * session tools from these rows without importing anything; only a call imports the module.
