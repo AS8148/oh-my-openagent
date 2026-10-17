@@ -30,8 +30,8 @@ function filesNamed(root, name, found = []) {
 export const auditActions = (root) =>
 	filesNamed(root, ".computer-audit.jsonl")
 		.flatMap((path) => jsonLines(readFileSync(path, "utf8")))
-		.map((entry) => entry.action)
-		.filter((action) => typeof action === "string");
+		.filter((entry) => typeof entry.action === "string")
+		.map((entry) => `${entry.action}:${entry.status}`);
 
 export const sessionFiles = (agentDir) => {
 	const root = join(agentDir, "sessions");
@@ -105,7 +105,7 @@ export const scenarios = {
 				return session.agentEnds() >= 1;
 			});
 			await session.until("control.revoke after agent_end", () =>
-				auditActions(session.sandbox.root).includes("control.revoke"),
+				auditActions(session.sandbox.root).includes("control.revoke:success"),
 			);
 			session.send({ type: "prompt", message: "control QA: raise again" });
 			await session.until(
@@ -124,23 +124,28 @@ export const scenarios = {
 			],
 			[
 				"the engine audited control.grant, then raiseWindow",
-				audits.indexOf("control.grant") !== -1 &&
-					audits.indexOf("raiseWindow") > audits.indexOf("control.grant"),
+				audits.indexOf("control.grant:success") !== -1 &&
+					audits.indexOf("raiseWindow:success") >
+						audits.indexOf("control.grant:success"),
 			],
 			[
 				"the end of the task revoked the grant",
-				audits.includes("control.revoke"),
+				audits.includes("control.revoke:success"),
 			],
 			[
-				"the raise after the task ended was refused ControlRequired",
-				results[1]?.includes("ControlRequired") === true,
+				"the raise after the task ended was refused COMPUTER_CONTROL_REQUIRED",
+				results[1]?.includes("COMPUTER_CONTROL_REQUIRED") === true,
+			],
+			[
+				"the engine audited that refusal as an error",
+				audits.at(-1) === "raiseWindow:error",
 			],
 		],
 	},
 	interrupted: {
 		steps: [
 			run(`${acquire} await wait(30000); return JSON.stringify(state)`),
-			{ type: "text", text: "done" },
+			// The abort ends the first turn before it asks the provider again.
 			run(raiseCode),
 			{ type: "text", text: "done" },
 		],
@@ -152,7 +157,9 @@ export const scenarios = {
 			});
 			await session.until("control.grant in the audit", () => {
 				answer();
-				return auditActions(session.sandbox.root).includes("control.grant");
+				return auditActions(session.sandbox.root).includes(
+					"control.grant:success",
+				);
 			});
 			session.send({ type: "abort" });
 			await session.until(
@@ -160,7 +167,7 @@ export const scenarios = {
 				() => session.agentEnds() >= 1,
 			);
 			await session.until("control.revoke after the abort", () =>
-				auditActions(session.sandbox.root).includes("control.revoke"),
+				auditActions(session.sandbox.root).includes("control.revoke:success"),
 			);
 			session.send({
 				type: "prompt",
@@ -172,12 +179,18 @@ export const scenarios = {
 			);
 		},
 		verify: ({ audits, results }) => [
-			["the engine audited control.grant", audits.includes("control.grant")],
-			["the interrupt revoked the grant", audits.includes("control.revoke")],
-			["no raise reached the engine", !audits.includes("raiseWindow")],
 			[
-				"the raise after the interrupt was refused ControlRequired",
-				results.at(-1)?.includes("ControlRequired") === true,
+				"the engine audited control.grant",
+				audits.includes("control.grant:success"),
+			],
+			[
+				"the interrupt revoked the grant",
+				audits.includes("control.revoke:success"),
+			],
+			["no raise reached the engine", !audits.includes("raiseWindow:success")],
+			[
+				"the raise after the interrupt was refused COMPUTER_CONTROL_REQUIRED",
+				results.at(-1)?.includes("COMPUTER_CONTROL_REQUIRED") === true,
 			],
 		],
 	},
@@ -195,11 +208,14 @@ export const scenarios = {
 			});
 		},
 		verify: ({ audits, results }) => [
-			["the engine never saw control.grant", !audits.includes("control.grant")],
-			["no raise reached the engine", !audits.includes("raiseWindow")],
 			[
-				"the raise was refused ControlRequired",
-				results[0]?.includes("ControlRequired") === true,
+				"the engine never saw control.grant",
+				!audits.includes("control.grant:success"),
+			],
+			["no raise reached the engine", !audits.includes("raiseWindow:success")],
+			[
+				"the raise was refused COMPUTER_CONTROL_REQUIRED",
+				results[0]?.includes("COMPUTER_CONTROL_REQUIRED") === true,
 			],
 		],
 	},
