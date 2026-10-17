@@ -52,7 +52,11 @@ jobs:
           - { host: darwin-arm64, runner: macos-15, rust_target: aarch64-apple-darwin, clang_arch: arm64, binary: senpi-desktop-engine }
           - { host: darwin-x64, runner: macos-15, rust_target: x86_64-apple-darwin, clang_arch: x86_64, binary: senpi-desktop-engine }
           - { host: linux-x64, runner: ubuntu-22.04, rust_target: x86_64-unknown-linux-gnu, binary: senpi-desktop-engine }
+          # Native arm64 runners, so --selftest below executes the arm64 build itself; 22.04 keeps the
+          # same glibc floor as the x64 engine.
+          - { host: linux-arm64, runner: ubuntu-22.04-arm, rust_target: aarch64-unknown-linux-gnu, binary: senpi-desktop-engine }
           - { host: win32-x64, runner: windows-latest, rust_target: x86_64-pc-windows-msvc, binary: senpi-desktop-engine.exe }
+          - { host: win32-arm64, runner: windows-11-arm, rust_target: aarch64-pc-windows-msvc, binary: senpi-desktop-engine.exe }
     steps:
       - uses: actions/checkout@v7
 
