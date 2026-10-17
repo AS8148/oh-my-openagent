@@ -88,3 +88,11 @@ fn an_invalid_chord_is_refused_before_any_listener_starts() {
     assert!(!listener.is_live());
     assert!(!supervisor.status().global_live);
 }
+
+#[test]
+fn only_non_xtest_keyboards_count_as_physical_sources() {
+    assert!(super::source::counts_as_physical(b"AT Translated Set 2 keyboard"));
+    assert!(super::source::counts_as_physical(b"Logitech USB Keyboard"));
+    assert!(!super::source::counts_as_physical(b"Virtual core XTEST keyboard"));
+    assert!(!super::source::counts_as_physical(b"second XTEST keyboard"));
+}
