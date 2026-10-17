@@ -1,5 +1,6 @@
 import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 
+import { canonicalAgentName } from "./builtin/legacy-agent-names"
 import { BUILTIN_AGENT_NAMES } from "./builtin/names"
 
 /**
@@ -12,10 +13,13 @@ export function categoryShadowedAgentNames(config: OmoConfig, agentNames: Iterab
   const agents = new Set([...BUILTIN_AGENT_NAMES, ...Object.keys(config.agents ?? {}), ...agentNames])
   // An agent that already sets its own chain is configured correctly; the category key is not shadowing
   // anything it relies on, so it gets no warning (and never a snippet that would overwrite that chain).
-  const ownsChain = (name: string): boolean => {
-    const agent = config.agents?.[name]
-    return agent?.model !== undefined || agent?.models !== undefined
-  }
+  // A retired alias key resolves to its canonical agent, so a chain set under the old key counts too.
+  const chainOwners = new Set(
+    Object.entries(config.agents ?? {})
+      .filter(([, agent]) => agent?.model !== undefined || agent?.models !== undefined)
+      .map(([key]) => canonicalAgentName(key)),
+  )
+  const ownsChain = (name: string): boolean => chainOwners.has(canonicalAgentName(name))
   return Object.keys(config.categories ?? {}).filter((name) => agents.has(name) && !ownsChain(name))
 }
 
@@ -23,5 +27,5 @@ export function categoryShadowMessage(config: OmoConfig, name: string): string {
   const category = config.categories?.[name]
   const chain = category?.models ?? (category?.model === undefined ? undefined : [category.model])
   const value = chain === undefined ? "[...]" : JSON.stringify(chain)
-  return `categories."${name}" is not read for subagent_type "${name}" spawns (categories only route task(category: ...)), so that agent runs its default model chain. Move the chain to the agent: "agents": { "${name}": { "models": ${value} } }`
+  return `categories."${name}" is not read for subagent_type "${name}" spawns (categories only route task(category: ...)), so that agent runs its default model chain. Move the chain to the agent: "agents": { "${name}": { "models": ${value} } }. If you also use task(category: "${name}") on purpose, the key keeps working there; giving the agent its own models silences this warning`
 }
