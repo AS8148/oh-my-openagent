@@ -19,5 +19,7 @@ export function sessionListedAfterClose(host: FakeHost, sessionPath: string | un
 function childSegment(path: string): string {
   const normalized = path.replaceAll("\\", "/")
   const at = normalized.indexOf("/children/")
-  return at === -1 ? "(outside children)" : normalized.slice(at + 1)
+  if (at === -1) return "(outside children)"
+  const rest = normalized.slice(at + 1)
+  return rest.split("/").includes("..") ? "(outside children)" : rest
 }
