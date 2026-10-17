@@ -108,9 +108,12 @@ export class RpcProcessRunner {
       // Capture this BEFORE cleanup: a rejected prompt can leave the child alive, and the cleanup
       // termination must never be recorded as the cause of the rejection.
       const exitOutcome = handle.exitOutcome()
-      void discardUnstartedRpcHandle(handle, (cleanupError) => {
+      const teardown = discardUnstartedRpcHandle(handle, (cleanupError) => {
         log("senpi-task rpc start cleanup failed", { taskId: spec.task_id, error: String(cleanupError) })
       })
+      // Only a first prompt is reported under the start window, so only it skips the wait. A failed resume is
+      // retried on the same session file, which the old child must have released first (#10402 review).
+      if (spec.resumeSessionPath !== undefined) await teardown
       const message = error instanceof Error ? error.message : String(error)
       // A child that died before its first prompt leaves its cause ONLY here: the classified exit is
       // otherwise folded into `message`, which is stderr-derived and gets sanitized away downstream.

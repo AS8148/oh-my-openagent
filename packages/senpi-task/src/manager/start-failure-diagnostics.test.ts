@@ -183,6 +183,8 @@ describe("TaskManager start failure diagnostics", () => {
     // and: the held teardown still runs to completion once released
     releaseTeardown?.()
     await teardownDone
+    const child = spawned.at(-1)
+    expect(child?.exitCode ?? child?.signalCode ?? null).not.toBeNull()
   })
 
   test("#given a start failure that never reached a process exit #when it is recorded #then the failure kind alone is persisted", async () => {

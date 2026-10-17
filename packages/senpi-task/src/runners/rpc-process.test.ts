@@ -185,6 +185,38 @@ describe("RpcProcessRunner", () => {
     expect(failure).not.toMatchObject({ failure: { exit: expect.anything() } })
   })
 
+  test("#given a resumed session whose switch is refused #when startup cleans up #then start rejects only after the old child is gone", async () => {
+    // given: a refused switch_session; a retry would reopen this same session file, so the old child must be
+    // dead before start() answers (#10402 review). Its exit arrives as an I/O event, never inside the
+    // rejection's own microtasks, so a start that did not wait would reject with the child still alive.
+    let spawned: ChildProcess | undefined
+    const runner = new RpcProcessRunner({
+      modelAdmission: async () => {},
+      buildSpawn: (spec) => ({ command: process.execPath, args: [], cwd: spec.cwd, env: process.env }),
+      spawnChild: () => {
+        const child = spawnFakeChild()
+        children.push(child)
+        spawned = child
+        const stdin = child.stdin
+        if (stdin === null) throw new Error("fake child stdin was not piped")
+        const write = (...args: unknown[]): boolean => {
+          const callback = args.findLast((value): value is (error: Error) => void => typeof value === "function")
+          callback?.(new Error("synthetic switch rejection"))
+          return false
+        }
+        Object.defineProperty(stdin, "write", { value: write })
+        return child
+      },
+    })
+
+    // when
+    const failure = await runner.start(makeSpec({ resumeSessionPath: join(process.cwd(), "never-opened.jsonl") })).catch((error: unknown) => error)
+
+    // then
+    expect(failure).toMatchObject({ failure: { kind: "session_unavailable" } })
+    expect(spawned?.exitCode ?? spawned?.signalCode ?? null).not.toBeNull()
+  })
+
   test("#given a child that exits nonzero before terminal #when it crashes #then the outcome carries the stderr tail", async () => {
     // given
     const rejections: unknown[] = []
