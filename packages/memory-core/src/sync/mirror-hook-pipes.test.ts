@@ -27,7 +27,7 @@ async function scratch(prefix: string): Promise<string> {
   return dir
 }
 
-async function repoMirroringToABlockedRemote() {
+async function repoMirroringToABlockedRemote(shell: string) {
   const repo = await scratch("memory-mirror-pipes-")
   const bare = await scratch("memory-mirror-pipes-bare-")
   const release = join(bare, "release")
@@ -41,15 +41,19 @@ async function repoMirroringToABlockedRemote() {
   }
   const hook = join(repo, ".git", "hooks", "post-commit")
   await mkdir(dirname(hook), { recursive: true })
-  await writeFile(hook, getPostCommitHookScript(), "utf8")
+  await writeFile(hook, getPostCommitHookScript().replace(/^#!\/bin\/sh\n/, `#!${shell}\n`), "utf8")
   chmodSync(hook, 0o755)
   return { repo, release, pushing }
 }
 
+// dash (Linux's /bin/sh) keeps saved copies of a function call's redirected fds open in the
+// background subshell; bash (macOS's /bin/sh) does not. Run the hook under each shell present.
+const SHELLS = ["/bin/sh", "/bin/dash"].filter((shell) => existsSync(shell))
+
 describe("a mirrored memory commit (omo #10199 delta review)", () => {
-  test.skipIf(process.platform === "win32")("#given the mirror push is still running in the background #when the commit finishes #then it settles without waiting on the push or the exit drain", async () => {
+  test.skipIf(process.platform === "win32").each(SHELLS)("#given the mirror push is still running in the background under %s #when the commit finishes #then it settles without waiting on the push or the exit drain", async (shell) => {
     // #given
-    const { repo, release, pushing } = await repoMirroringToABlockedRemote()
+    const { repo, release, pushing } = await repoMirroringToABlockedRemote(shell)
     const exec = createNodeGitExec()
 
     // #when
