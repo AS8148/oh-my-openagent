@@ -6,10 +6,10 @@
 // the publish claimant, if any, is gone, and the run recorded a valid outcome. Anything that cannot be
 // proven is "stuck", never "dead". Each rule carries a `rule:` tag named by its test.
 
-import { readFile } from "node:fs/promises"
 import { hostname as readHostname } from "node:os"
 import { join } from "node:path"
 
+import { readFile } from "../fs/resilient"
 import { getPidLiveness, getProcessStartIdentity, startIdentitiesComparable, type ProcessLiveness } from "../locks/process-identity"
 
 export type ReflectionLockVerdict =
