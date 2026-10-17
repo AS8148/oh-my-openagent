@@ -3,7 +3,7 @@
 // file (script/build-reflection-lock.ts, checked for staleness by its test), so the two cannot drift.
 //
 // Dead means all of: the launcher on this host is gone (or its pid now belongs to another process),
-// the publish claimant, if any, is gone, and the run recorded its outcome. Anything that cannot be
+// the publish claimant, if any, is gone, and the run recorded a valid outcome. Anything that cannot be
 // proven is "stuck", never "dead". Each rule carries a `rule:` tag named by its test.
 
 import { readFile } from "node:fs/promises"
@@ -54,6 +54,21 @@ function fieldsOf(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : {}
 }
 
+// The shape reconciliation reads as a RunOutcome (omo-senpi worker/run-artifacts.ts). A file that does
+// not match it, or names another run, is not a recorded outcome, so nothing is finalized on it.
+function isRunOutcome(value: unknown, runId: string): boolean {
+  const fields = fieldsOf(value)
+  const childExit = fieldsOf(fields.childExit)
+  return fields.version === 1
+    && fields.runId === runId
+    && typeof fields.finishedAt === "string"
+    && (fields.attempt === undefined || (typeof fields.attempt === "number" && Number.isInteger(fields.attempt) && fields.attempt > 0))
+    && typeof fields.childExit === "object" && fields.childExit !== null
+    && (childExit.code === null || typeof childExit.code === "number")
+    && (childExit.signal === null || typeof childExit.signal === "string")
+    && typeof fields.timedOut === "boolean"
+}
+
 function stuck(runId: string, reason: string): ReflectionLockVerdict {
   return { state: "stuck", runId, reason }
 }
@@ -90,6 +105,8 @@ export async function classifyReflectionLockHolder(
   const outcome = await readJson(join(runDir, "outcome.json"), readText)
   if (outcome.kind === "missing") return stuck(runId, `launcher pid ${launcherPid} is gone and the run recorded no outcome`) // rule:outcome-missing
   if (outcome.kind === "unreadable") return stuck(runId, `its outcome could not be read (${outcome.code})`) // rule:outcome-unreadable
+  if (outcome.kind === "invalid") return stuck(runId, "its outcome is not valid JSON") // rule:outcome-invalid
+  if (!isRunOutcome(outcome.value, runId)) return stuck(runId, "its outcome is not a recorded run outcome") // rule:outcome-schema
   const claim = await readJson(join(runDir, "terminal-claim.json"), readText)
   if (claim.kind === "unreadable") return stuck(runId, `its terminal claim could not be read (${claim.code})`) // rule:claim-unreadable
   if (claim.kind === "invalid") return stuck(runId, "its terminal claim is not valid JSON") // rule:claim-invalid
