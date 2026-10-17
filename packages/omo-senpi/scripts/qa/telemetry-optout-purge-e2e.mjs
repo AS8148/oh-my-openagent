@@ -15,6 +15,7 @@ import { createSandbox, credentialDigest, seedSandbox } from "./drive.mjs"
 import { createOwnedProcessRegistry, startSenpiRun } from "./team-e2e-runtime.mjs"
 import { parseEvents } from "./team-e2e-support.mjs"
 import { resolveSenpi } from "./team-e2e.mjs"
+import { telemetryLocalSinkEnv, withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, "..", "..")
@@ -26,23 +27,19 @@ const SEEDED = "seeded-session"
 const SEED_WINDOW_UUID = "0395eae0-1111-4222-8333-944455556661"
 const SEED_PENDING_UUID = "0395eae0-1111-4222-8333-944455556662"
 const SEED_UUIDS = new Set([SEED_WINDOW_UUID, SEED_PENDING_UUID])
+const SEED_EPOCH = "0123456789abcdef"
 const DEAD = { pid: 0x7fff_fff0, bootId: "killed" }
 const STALE_MS = 10 * 60_000
-const OPTED_IN_ENV = {
-  DO_NOT_TRACK: "",
-  OMO_DISABLE_POSTHOG: "",
-  OMO_SENPI_DISABLE_POSTHOG: "",
-  OMO_SEND_ANONYMOUS_TELEMETRY: "",
-  OMO_SENPI_SEND_ANONYMOUS_TELEMETRY: "",
+const NATIVE_IDENTITY_ENV = {
   OMO_NATIVE_SURFACE: "",
   OMO_NATIVE_INSTALL_ID: "",
 }
 
 const LANES = {
-  control: { env: {}, telemetryConfig: true, scope: "cwd" },
-  "optout-env": { env: { DO_NOT_TRACK: "1" }, telemetryConfig: true, scope: "cwd" },
-  "optout-config": { env: {}, telemetryConfig: false, scope: "cwd" },
-  "scopeless-optin": { env: {}, telemetryConfig: true, scope: "none" },
+  control: { optOutEnv: false, telemetryConfig: true, scope: "cwd" },
+  "optout-env": { optOutEnv: true, telemetryConfig: true, scope: "cwd" },
+  "optout-config": { optOutEnv: false, telemetryConfig: false, scope: "cwd" },
+  "scopeless-optin": { optOutEnv: false, telemetryConfig: true, scope: "none" },
 }
 
 async function main() {
@@ -65,7 +62,9 @@ async function main() {
   const controlWindow = lanes.control.summaries.find((event) => event.uuid === SEED_WINDOW_UUID)
   const checks = {
     controlRecoversTheSeedWindow: controlWindow?.properties?.ended_by === "recovered",
-    controlRecoveredWindowKeepsItsEpoch: controlWindow?.properties?.summary_epoch === "0123456789abcdef",
+    // A recovered window starts a new summary epoch, so its (epoch, seq) pair never repeats the dead owner's.
+    controlRecoveredWindowStartsANewEpoch: /^[0-9a-f]{16}$/.test(String(controlWindow?.properties?.summary_epoch))
+      && controlWindow?.properties?.summary_epoch !== SEED_EPOCH,
     controlResendsTheSeedPending: lanes.control.summaries.some((event) => event.uuid === SEED_PENDING_UUID),
     optoutEnvSentNothing: lanes["optout-env"].events.length === 0,
     optoutEnvLeftNoSummaryFile: lanes["optout-env"].filesAfter.length === 0,
@@ -90,6 +89,16 @@ async function main() {
   writeFileSync(join(evidenceDir, "optout-purge-verdict.json"), `${JSON.stringify(verdict, null, 2)}\n`)
   console.log(JSON.stringify(verdict))
   if (verdict.result !== "PASS") process.exitCode = 1
+}
+
+/** A lane's opted-in env: telemetry on toward the loopback sink only, with the lane's own agent dir. */
+function laneEnv(sandbox, sinkUrl) {
+  return {
+    ...telemetryLocalSinkEnv(sinkUrl),
+    ...NATIVE_IDENTITY_ENV,
+    OMO_CODING_AGENT_DIR: sandbox.agentDir,
+    PI_CODING_AGENT_DIR: sandbox.agentDir,
+  }
 }
 
 async function runLane(senpiBin, name, lane) {
@@ -117,13 +126,9 @@ async function runLane(senpiBin, name, lane) {
       script: SCRIPT,
       mockProviderEntry,
       parseEvents,
-      extraEnv: {
-        ...OPTED_IN_ENV,
-        OMO_CODING_AGENT_DIR: sandbox.agentDir,
-        PI_CODING_AGENT_DIR: sandbox.agentDir,
-        POSTHOG_HOST: sinkUrl,
-        ...lane.env,
-      },
+      // The env opt-out lane wraps the opted-in env in the shared opt-out helper, so every lane's env is a
+      // helper call the opt-out audit can trace.
+      extraEnv: lane.optOutEnv ? withTelemetryOptOut(laneEnv(sandbox, sinkUrl)) : laneEnv(sandbox, sinkUrl),
       onPid: (pid) => processes.onSpawn(pid),
       onClose: (pid) => processes.onClose(pid),
     })
@@ -169,7 +174,7 @@ function seedDeadOwnerQueue(root, scope) {
   }
   const record = {
     v: 2, consent: "enabled", scope, sessionHash: SEEDED, sessionRole: "root", owner: DEAD, heartbeatAt: at,
-    epoch: "0123456789abcdef", seq: 0, sampleRate: 0, windowId: "0395eae0-1111-4222-8333-944455556661", window,
+    epoch: SEED_EPOCH, seq: 0, sampleRate: 0, windowId: "0395eae0-1111-4222-8333-944455556661", window,
   }
   mkdirSync(join(root, "pending"), { recursive: true })
   mkdirSync(join(root, "owners"), { recursive: true })
