@@ -107,3 +107,16 @@ fn the_xtest_property_or_name_marks_a_device_synthetic() {
     // The name fallback for servers that do not set the property.
     assert!(!physical_from(Some(keyboard(b"Virtual core XTEST keyboard", false))));
 }
+
+#[test]
+fn a_failed_property_read_fails_closed_for_that_press_only() {
+    use super::source::classify;
+    use x11rb::protocol::xinput::DeviceType;
+    let keyboard = b"AT Translated Set 2 keyboard".as_slice();
+    // The read failed: this press does not stop, and nothing is cached, so the
+    // keyboard's next press is classified again.
+    assert_eq!(classify(DeviceType::SLAVE_KEYBOARD, keyboard, None), (false, false));
+    // The server answered: the result is cached either way.
+    assert_eq!(classify(DeviceType::SLAVE_KEYBOARD, keyboard, Some(false)), (true, true));
+    assert_eq!(classify(DeviceType::SLAVE_KEYBOARD, keyboard, Some(true)), (false, true));
+}

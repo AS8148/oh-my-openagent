@@ -62,9 +62,16 @@ impl Sources {
         else {
             return physical_from(None);
         };
-        let xtest_property = atom.is_some_and(|atom| has_property(conn, sourceid, atom));
-        let physical = physical_from(Some(Described { kind: info.type_, name: &info.name, xtest_property }));
-        self.known.insert(sourceid, physical);
+        // `None`: the property read failed; that press is not trusted, and the
+        // device is asked again on its next press instead of being cached.
+        let property = match atom {
+            Some(atom) => property_of(conn, sourceid, atom),
+            None => Some(false),
+        };
+        let (physical, cache) = classify(info.type_, &info.name, property);
+        if cache {
+            self.known.insert(sourceid, physical);
+        }
         physical
     }
 
@@ -87,11 +94,18 @@ impl Sources {
     }
 }
 
-/// Whether `deviceid` carries `property`. A failed request counts as
-/// carrying it, so the device is not trusted as a physical keyboard.
-fn has_property(conn: &impl Connection, deviceid: u16, property: u32) -> bool {
+/// Whether `deviceid` carries `property`, or `None` when the request failed.
+fn property_of(conn: &impl Connection, deviceid: u16, property: u32) -> Option<bool> {
     conn.xinput_xi_get_property(deviceid, false, property, u32::from(AtomEnum::ANY), 0, 1)
         .ok()
         .and_then(|cookie| cookie.reply().ok())
-        .is_none_or(|reply| reply.type_ != u32::from(AtomEnum::NONE))
+        .map(|reply| reply.type_ != u32::from(AtomEnum::NONE))
+}
+
+/// A described device's classification and whether it may be cached. A failed
+/// property read (`None`) fails closed for that press only: caching it would
+/// mute a real keyboard until the next hierarchy change.
+pub fn classify(kind: DeviceType, name: &[u8], property: Option<bool>) -> (bool, bool) {
+    let physical = physical_from(Some(Described { kind, name, xtest_property: property.unwrap_or(true) }));
+    (physical, property.is_some())
 }
