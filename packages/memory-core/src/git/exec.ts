@@ -159,8 +159,6 @@ function runGitCommand(
       clearTimeout(killTimer)
       clearTimeout(exitDrain)
       options.signal?.removeEventListener("abort", onAbort)
-      child.stdout!.destroy()
-      child.stderr!.destroy()
       if (aborted) {
         reject(new GitAbortedError(argv))
         return
@@ -191,7 +189,12 @@ function runGitCommand(
         return
       }
       clearTimeout(timer)
-      exitDrain = setTimeout(() => settleWithResult(code), options.exitDrainMs ?? GIT_EXIT_DRAIN_MS)
+      exitDrain = setTimeout(() => {
+        // Still open past the drain: a hook child holds them. Stop reading so it cannot keep us.
+        child.stdout!.destroy()
+        child.stderr!.destroy()
+        settleWithResult(code)
+      }, options.exitDrainMs ?? GIT_EXIT_DRAIN_MS)
     })
     child.on("close", (code) => settleWithResult(code))
   })
