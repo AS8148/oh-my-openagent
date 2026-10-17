@@ -114,7 +114,7 @@ describe("omo dori resolves a separately installed package", () => {
 
     // then
     expect(result.status).toBe(1)
-    expect(result.stderr).toBe("omo dori: the installed dori speaks host contract 2, this omo speaks 1\n")
+    expect(result.stderr).toBe("omo dori: the installed dori-extension speaks host contract 2, this omo speaks 1: upgrade omo so both speak the same host contract\n")
   })
 
   test("#given a missing module inside an installed package #when loaded #then it is reported as broken, not as not installed", async () => {

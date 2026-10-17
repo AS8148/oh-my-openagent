@@ -73,10 +73,16 @@ describe("gateway to dori config migration", () => {
 
   test("#given canonical and legacy sections #when migrating #then canonical values win without merging opaque data", () => {
     const f = fixture({ gateway: { legacy: true }, dori: { current: true } })
-    expect(executeLegacyConfigMigrationPlan(f.plan, { env: { HOME: f.homeDir } }).status).toBe("migrated")
+    const before = readFileSync(f.targetPath, "utf8")
+    const result = executeLegacyConfigMigrationPlan(f.plan, { env: { HOME: f.homeDir } })
+    expect(result.status).toBe("migrated")
     expect(parse(readFileSync(f.targetPath, "utf8"))).toEqual({
       dori: { current: true }, _migrations: ["2026-10-dori-section-rename"],
     })
+    // the dropped gateway section stays recoverable from the engine's pre-write backup of the target
+    expect(result.targetBackupPath).toStartWith(`${f.targetPath}.bak.`)
+    expect(readFileSync(result.targetBackupPath ?? "", "utf8")).toBe(before)
+    expect(parse(readFileSync(result.targetBackupPath ?? "", "utf8")).gateway).toEqual({ legacy: true })
   })
 
   test("#given no legacy section #when migrating #then no backup marker or write occurs", () => {

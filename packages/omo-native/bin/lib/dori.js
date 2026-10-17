@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs"
-import { createRequire } from "node:module"
-import { isAbsolute, join, relative, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { canonicalAgentDir, runtimeHome } from "./agent-dir.js"
 import { parseJsonc } from "./jsonc.js"
@@ -15,7 +14,7 @@ import { packageRoot } from "./package-paths.js"
 export const DORI_PACKAGE = "dori-extension"
 export const DORI_HOST_ENTRY = `${DORI_PACKAGE}/host`
 export const DORI_HOST_CONTRACT_VERSION = 1
-export const DORI_NOT_INSTALLED = `the omo dori is not installed: install the ${DORI_PACKAGE} package where omo is installed (for a global omo, \`bun add -g <package>\`), then run \`omo doctor\``
+export const DORI_NOT_INSTALLED = `${DORI_PACKAGE} is not installed: install the ${DORI_PACKAGE} package where omo is installed (for a global omo, \`bun add -g <package>\`), then run \`omo doctor\``
 
 // Where the dori finds omo's plugin payload and the thread SDK in it. The SDK file ships with the thread
 // SDK itself; the URL is handed over either way and nothing here checks that the file exists.
@@ -45,22 +44,42 @@ export async function loadDoriHost(importHost) {
   if (host?.HOST_CONTRACT_VERSION !== DORI_HOST_CONTRACT_VERSION) {
     return {
       status: "broken",
-      reason: `the installed dori speaks host contract ${String(host?.HOST_CONTRACT_VERSION)}, this omo speaks ${DORI_HOST_CONTRACT_VERSION}`,
+      reason: `the installed ${DORI_PACKAGE} speaks host contract ${String(host?.HOST_CONTRACT_VERSION)}, this omo speaks ${DORI_HOST_CONTRACT_VERSION}: ${contractRemedy(host?.HOST_CONTRACT_VERSION)}`,
     }
   }
   return { status: "installed", host }
 }
 
+// Whichever side is older is the one to upgrade; an unreadable version names both.
+function contractRemedy(found) {
+  const older = typeof found !== "number" ? `${DORI_PACKAGE} or omo` : found > DORI_HOST_CONTRACT_VERSION ? "omo" : DORI_PACKAGE
+  return `upgrade ${older} so both speak the same host contract`
+}
+
+// The node_modules directories above omo's own install, nearest first. Node's global folders
+// (~/.node_modules, NODE_PATH) are left out: ESM resolution from omo never reaches them.
 function doriSearchPaths() {
-  return createRequire(import.meta.url).resolve.paths(DORI_PACKAGE) ?? []
+  const paths = []
+  for (let dir = dirname(fileURLToPath(import.meta.url)); ; dir = dirname(dir)) {
+    if (basename(dir) !== "node_modules") paths.push(join(dir, "node_modules"))
+    if (dirname(dir) === dir) return paths
+  }
+}
+
+// The `./host` target of the package's own manifest: a string, or the `import`/`default` condition.
+function hostExportTarget(manifest) {
+  let target = isRecord(manifest.exports) ? manifest.exports["./host"] : undefined
+  while (isRecord(target)) target = target.import ?? target.default
+  return typeof target === "string" ? target : undefined
 }
 
 /**
- * Before anything of the package runs: the nearest installed package on omo's own resolver search
- * paths must be the one this omo expects, declare the host contract in its manifest, and export a
- * host entry that stays inside its own directory once symlinks are resolved on both sides.
+ * Before anything of the package runs: the nearest installed package above omo's own install must
+ * be the one this omo expects, declare the host contract in its manifest, and export a host entry
+ * that stays inside its own directory once symlinks are resolved on both sides. The entry comes
+ * from that same directory's manifest, so the checked package and the loaded file are one copy.
  */
-export function verifyDoriPackage(resolveHostEntry = (specifier) => import.meta.resolve(specifier)) {
+export function verifyDoriPackage() {
   const root = doriSearchPaths().map((path) => join(path, DORI_PACKAGE)).find((dir) => existsSync(dir))
   if (root === undefined) return { status: "missing" }
   const refuse = (why) => ({ status: "broken", reason: `refusing the installed dori at ${root}: ${why}` })
@@ -75,12 +94,14 @@ export function verifyDoriPackage(resolveHostEntry = (specifier) => import.meta.
   const declared = isRecord(manifest.doriExtension) ? manifest.doriExtension.hostContract : undefined
   if (declared === undefined) return refuse("its package.json does not declare doriExtension.hostContract")
   if (declared !== DORI_HOST_CONTRACT_VERSION) {
-    return refuse(`its package.json declares host contract ${JSON.stringify(declared)}, this omo speaks ${DORI_HOST_CONTRACT_VERSION}`)
+    return refuse(`its package.json declares host contract ${JSON.stringify(declared)}, this omo speaks ${DORI_HOST_CONTRACT_VERSION}: ${contractRemedy(declared)}`)
   }
+  const target = hostExportTarget(manifest)
+  if (target === undefined) return refuse('its package.json does not export "./host"')
   let entry
   let realRoot
   try {
-    entry = realpathSync.native(fileURLToPath(resolveHostEntry(DORI_HOST_ENTRY)))
+    entry = realpathSync.native(resolve(root, target))
     realRoot = realpathSync.native(root)
   } catch (error) {
     return { status: "broken", reason: `cannot load ${DORI_HOST_ENTRY}: ${error instanceof Error ? error.message : String(error)}` }

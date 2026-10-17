@@ -62,8 +62,8 @@ export function packagedOmo(doriHostSource?: string, manifest: Record<string, un
   return app
 }
 
-export function drive(app: string, args: string[], env: { HOME: string }): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [join(app, "drive.mjs"), ...args], {
+export function drive(app: string, args: string[], env: { HOME: string }, runtime = process.execPath): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync(runtime, [join(app, "drive.mjs"), ...args], {
     cwd: app,
     encoding: "utf8",
     env: { PATH: process.env.PATH ?? "", HOME: env.HOME, OMO_CODING_AGENT_DIR: join(env.HOME, ".omo", "agent") },
