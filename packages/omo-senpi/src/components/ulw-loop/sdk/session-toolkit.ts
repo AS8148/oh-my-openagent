@@ -131,8 +131,16 @@ const baseToolkit: SessionAgentToolkit = {
   },
 }
 
+declare const OMO_SENPI_BUNDLED: boolean | undefined
+
 // The engine sets OMO_DORI_TOOLKIT (dori-gate.ts) only while the `dori` config section is on; otherwise the
 // namespace properties do not exist and the layer module is never imported. The shape is fixed per kernel import.
+// The built SDK loads the layer from its own sidecar (runtime/dori/layer2.js), so sdk.js carries none of it.
+function doriLayerUrl(): string {
+  const bundled = typeof OMO_SENPI_BUNDLED !== "undefined" && OMO_SENPI_BUNDLED
+  return (bundled ? new URL("../dori/layer2.js", import.meta.url) : new URL("./dori/layer2.ts", import.meta.url)).href
+}
+
 export const agentToolkit: SessionAgentToolkit & Partial<DoriLayer2> = process.env.OMO_DORI_TOOLKIT === "1"
-  ? (await import("./dori/layer2")).withDoriLayer2(baseToolkit)
+  ? ((await import(doriLayerUrl())) as typeof import("./dori/layer2")).withDoriLayer2(baseToolkit)
   : baseToolkit

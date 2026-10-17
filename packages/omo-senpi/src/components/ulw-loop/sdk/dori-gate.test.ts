@@ -58,17 +58,13 @@ function moduleGraph(entry: string): { readonly statics: ReadonlySet<string>; re
   return { statics, dynamics }
 }
 
-test("#given the agent toolkit SDK and the thread component #when their import-time module graphs are walked #then no dori layer module loads statically and the layer is reachable only by a dynamic import", () => {
-  const layer = resolve(here, "dori/layer2.ts")
-  const replay = resolve(here, "../../thread/tools/dori-replay.ts")
+test("#given the agent toolkit SDK and the thread component #when their import-time module graphs are walked #then no dori layer module loads statically", () => {
   const sdk = moduleGraph(sdkEntry)
   const thread = moduleGraph(threadComponent)
   for (const graph of [sdk, thread]) {
     expect([...graph.statics].filter((file) => file.includes("/sdk/dori/") || file.endsWith("/dori-replay.ts"))).toEqual([])
   }
   expect([...sdk.statics].filter((file) => file.endsWith("/dori-gate.ts"))).toEqual([])
-  expect(sdk.dynamics.has(layer)).toBe(true)
-  expect(thread.dynamics.has(replay)).toBe(true)
 })
 
 async function toolkitKeys(env: Record<string, string | undefined>): Promise<string[]> {

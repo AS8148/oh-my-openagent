@@ -23,13 +23,17 @@ afterEach(async () => {
 })
 
 const fixture = new URL("../gateway/testing/dori-layer2-extension.mjs", import.meta.url)
-const empty = { type: "object", additionalProperties: false, properties: { note: { type: "string" } } }
+const parameters = { type: "object", additionalProperties: false, properties: { note: { type: "string" }, replay_key: { type: "string" }, turn_id: { type: "string" } } }
 const ops: SessionCallableOp[] = [
-  { op: "replyMark", toolName: "reply_mark", description: "Mark a reply debt.", parameters: empty },
-  { op: "sendPost", toolName: "send_post", description: "Post to a room.", parameters: empty },
+  { op: "replyMark", toolName: "reply_mark", description: "Mark a reply debt.", parameters },
+  { op: "sendPost", toolName: "send_post", description: "Post to a room.", parameters },
 ]
 const caller: ThreadHostSession = { sessionId: "route-caller", durableSessionId: "dur-caller", cwd: process.cwd(), name: "caller", status: "open" }
-const branch = [{ type: "message", id: "u1", message: { role: "user" } }, { type: "message", id: "a1", message: { role: "assistant" } }]
+const recent = new Date().toISOString()
+const branch: unknown[] = [
+  { type: "message", id: "u1", timestamp: recent, message: { role: "user" } },
+  { type: "message", id: "a1", timestamp: recent, message: { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "ext_dori_reply_mark" }, { type: "toolCall", id: "cell-a", name: "eval" }] } },
+]
 const ectx = { sessionManager: { getSessionId: () => "dur-caller", getBranch: () => branch } }
 
 function tempDir(prefix: string): string {
@@ -67,19 +71,27 @@ async function setup(extension = DORI_STORE_EXTENSION, sessionCallable: readonly
   return { agentDir, base, freshProcess, journal }
 }
 
-async function call(options: ThreadToolSurfaceOptions, name: string) {
+async function call(options: ThreadToolSurfaceOptions, name: string, args: Record<string, unknown> = { note: "n" }, toolCallId = "call-1") {
   const tool = (await buildExtensionTools(options)).find((candidate) => candidate.name === name)
   if (tool === undefined) throw new Error(`no tool ${name}`)
-  const output = await tool.execute("call-1", { note: "n" }, undefined, undefined, ectx as never) as { details: { result: Record<string, unknown> } }
+  const output = await tool.execute(toolCallId, args, undefined, undefined, ectx as never) as { details: { result: Record<string, unknown> } }
   return output.details.result
 }
 
-function dispatchCount(agentDir: string): number {
-  const db = new Database(gatewayDatabasePath(agentDir), { readonly: true })
+function storeRows(agentDir: string): { op: string; args: string }[] {
+  const db = new Database(gatewayDatabasePath(agentDir))
   try {
-    const tables = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%dori_calls'").all() as { name: string }[]
-    const table = tables[0]?.name
-    return table === undefined ? 0 : Number((db.query(`SELECT count(*) AS n FROM "${table}"`).get() as { n: number }).n)
+    const table = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%dori_calls'").get() as { name: string } | null
+    return table === null ? [] : db.query(`SELECT op, args FROM "${table.name}" ORDER BY id`).all() as { op: string; args: string }[]
+  } finally {
+    db.close()
+  }
+}
+
+function journalKeys(journal: string): string[] {
+  const db = new Database(journal)
+  try {
+    return (db.query("SELECT replay_key FROM toolkit_replay ORDER BY replay_key").all() as { replay_key: string }[]).map((row) => row.replay_key)
   } finally {
     db.close()
   }
@@ -89,35 +101,66 @@ test("#given the dori toolkit is on #when a fresh process replays the same turn'
   const { agentDir, freshProcess } = await setup()
   const first = await call(await freshProcess(), "ext_dori_reply_mark")
   expect(first).toMatchObject({ kind: "ok", value: { op: "reply.mark", dispatch_number: 1, caller: "dur-caller" } })
-  const replayed = await call(await freshProcess(), "ext_dori_reply_mark")
-  expect(replayed).toEqual(first)
-  expect(dispatchCount(agentDir)).toBe(1)
+  expect(await call(await freshProcess(), "ext_dori_reply_mark")).toEqual(first)
+  expect(storeRows(agentDir)).toHaveLength(1)
 })
 
-test("#given the turn recorded reply.mark at index 0 #when a replay calls send.post there #then it stops with the divergence and nothing dispatches", async () => {
+test("#given the turn recorded reply.mark at index 0 #when a replay calls send.post there #then it stops with the op divergence and nothing dispatches", async () => {
   const { agentDir, freshProcess } = await setup()
   await call(await freshProcess(), "ext_dori_reply_mark")
-  expect(await call(await freshProcess(), "ext_dori_send_post")).toMatchObject({ kind: "replay_stopped", code: "toolkit_replay_divergence", recorded_op: "reply.mark", attempted_op: "send.post", key: '["turn","dur-caller:a1",0]' })
-  expect(dispatchCount(agentDir)).toBe(1)
+  expect(await call(await freshProcess(), "ext_dori_send_post")).toMatchObject({ kind: "replay_stopped", code: "toolkit_replay_divergence", differs: ["op"], recorded_op: "reply.mark", attempted_op: "send.post", key: '["turn","dur-caller:a1/call-1",0]' })
+  expect(storeRows(agentDir)).toHaveLength(1)
+})
+
+test("#given a recorded call #when a replay sends the same op with different arguments #then it stops with the arguments divergence and nothing dispatches", async () => {
+  const { agentDir, freshProcess } = await setup()
+  await call(await freshProcess(), "ext_dori_reply_mark", { note: "hello" })
+  expect(await call(await freshProcess(), "ext_dori_reply_mark", { note: "DIFFERENT" })).toMatchObject({ kind: "replay_stopped", code: "toolkit_replay_divergence", differs: ["args"] })
+  expect(storeRows(agentDir)).toHaveLength(1)
+})
+
+test("#given a kernel cell that outlived its turn #when its call replays after the session moved on #then it keeps its original turn and returns the recorded result", async () => {
+  const { agentDir, freshProcess } = await setup()
+  const carried = { note: "n", omo_toolkit_replay: { cell: "cell-a", index: 0 } }
+  const first = await call(await freshProcess(), "ext_dori_reply_mark", carried, "kernel-generated")
+  branch.push({ type: "message", id: "a2", timestamp: recent, message: { role: "assistant", content: [{ type: "toolCall", id: "cell-b", name: "eval" }] } })
+  try {
+    expect(await call(await freshProcess(), "ext_dori_reply_mark", carried, "kernel-generated")).toEqual(first)
+  } finally {
+    branch.pop()
+  }
+  expect(storeRows(agentDir)).toHaveLength(1)
+  expect(JSON.parse(storeRows(agentDir)[0]?.args ?? "{}")).toEqual({ note: "n", caller_session_durable_id: "dur-caller" })
+})
+
+test("#given key-shaped arguments or a carried turn the engine did not issue #when called #then the arguments never pick the journal key and a foreign turn is refused before dispatch", async () => {
+  const { agentDir, freshProcess, journal } = await setup()
+  const options = await freshProcess()
+  expect(await call(options, "ext_dori_reply_mark", { note: "n", replay_key: '["turn","evil",0]', turn_id: "evil" })).toMatchObject({ kind: "ok" })
+  expect(journalKeys(journal)).toEqual(['["turn","dur-caller:a1/call-1",0]'])
+  expect(await call(options, "ext_dori_send_post", { note: "n", omo_toolkit_replay: { cell: "cell-of-another-session", index: 0 } }, "kernel-generated")).toMatchObject({ kind: "replay_stopped", code: "toolkit_replay_turn_unknown" })
+  expect(storeRows(agentDir)).toHaveLength(1)
+})
+
+test("#given the toolkit on and off #when the layer-2 tools are built #then only on does the tool schema accept the SDK's replay context, so the engine's argument validation lets the kernel's calls through", async () => {
+  const { base, freshProcess } = await setup()
+  const propertiesOf = async (options: ThreadToolSurfaceOptions) => ((await buildExtensionTools(options)).find((tool) => tool.name === "ext_dori_reply_mark")?.parameters as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}
+  expect(Object.keys(await propertiesOf(await freshProcess()))).toEqual(["note", "replay_key", "turn_id", "omo_toolkit_replay"])
+  expect(Object.keys(await propertiesOf(base))).toEqual(["note", "replay_key", "turn_id"])
 })
 
 test("#given the dori toolkit is off #when the same op is called twice #then no replay journal applies and each call dispatches", async () => {
   const { agentDir, base } = await setup()
   await call(base, "ext_dori_reply_mark")
   await call(base, "ext_dori_reply_mark")
-  expect(dispatchCount(agentDir)).toBe(2)
+  expect(storeRows(agentDir)).toHaveLength(2)
 })
 
 test("#given the toolkit is on #when another extension declares namespace-shaped tools #then they are not journaled", async () => {
-  const ping: SessionCallableOp = { op: "ping", toolName: "reply_mark", description: "Shaped like a layer-2 tool.", parameters: empty }
+  const ping: SessionCallableOp = { op: "ping", toolName: "reply_mark", description: "Shaped like a layer-2 tool.", parameters: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } } }
   const { freshProcess, journal } = await setup("other", [ping])
   const options = await freshProcess()
   expect(await call(options, "ext_other_reply_mark")).toEqual({ kind: "ok", value: { pinged: true } })
   expect(await call(options, "ext_other_reply_mark")).toEqual({ kind: "ok", value: { pinged: true } })
-  const db = new Database(journal, { readonly: true })
-  try {
-    expect((db.query("SELECT count(*) AS n FROM toolkit_replay").get() as { n: number }).n).toBe(0)
-  } finally {
-    db.close()
-  }
+  expect(journalKeys(journal)).toEqual([])
 })

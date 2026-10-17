@@ -90,6 +90,11 @@ export const COMPUTER_PRELUDE_ASSET_NAME = "assets.generated.json"
 const computerPreludeAssetSource = join(repoRoot, "packages", "senpi-desktop-prelude", "src", "assets.generated.json")
 const rollbackRuntimeEntryPath = join(packageRoot, "src", "extension", "rollback-migrate-runtime.ts")
 const rollbackRuntimeOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "rollback-migrate.js")
+// The dori toolkit layers: loaded by URL only while the `dori` section is on, so the SDK and omo.js carry none of them.
+const doriLayerEntryPath = join(packageRoot, "src", "components", "ulw-loop", "sdk", "dori", "layer2.ts")
+const doriLayerOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "dori", "layer2.js")
+const doriReplayEntryPath = join(packageRoot, "src", "components", "thread", "tools", "dori-replay.ts")
+const doriReplayOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "dori", "replay.js")
 const builtinModuleNames = builtinModules.filter((moduleName) => !moduleName.startsWith("_")).sort()
 const externalSpecifiers = [
   "#omo-task-runtime",
@@ -128,6 +133,8 @@ export const extensionBuildPaths = {
   advisorRuntimeOutputPath,
   sidePanelRuntimeOutputPath,
   rollbackRuntimeOutputPath,
+  doriLayerOutputPath,
+  doriReplayOutputPath,
   computerUseOutputPath,
   memoryDoctorOutputPath,
   memoryMemfsOutputPath,
@@ -152,6 +159,8 @@ export function resolveOutputs(options) {
     toolkitSdkOutput: sibling(options.toolkitSdkOutputPath, toolkitSdkOutputPath, join("runtime", "agent-toolkit-sdk", "sdk.js")),
     threadSdkOutput: sibling(options.threadSdkOutputPath, threadSdkOutputPath, THREAD_SDK_RELATIVE_PATH),
     rollbackRuntimeOutput: sibling(options.rollbackRuntimeOutputPath, rollbackRuntimeOutputPath, join("runtime", "rollback-migrate.js")),
+    doriLayerOutput: sibling(options.doriLayerOutputPath, doriLayerOutputPath, join("runtime", "dori", "layer2.js")),
+    doriReplayOutput: sibling(options.doriReplayOutputPath, doriReplayOutputPath, join("runtime", "dori", "replay.js")),
     memoryDoctorOutput: sibling(options.memoryDoctorOutputPath, memoryDoctorOutputPath, "omo-memory-doctor.js"),
     memoryMemfsOutput: sibling(options.memoryMemfsOutputPath, memoryMemfsOutputPath, "omo-memory-memfs.js"),
     memoryPalaceOutput: sibling(options.memoryPalaceOutputPath, memoryPalaceOutputPath, "omo-memory-palace.js"),
@@ -181,6 +190,8 @@ export async function buildExtension(options = {}) {
     toolkitSdkOutput,
     threadSdkOutput,
     rollbackRuntimeOutput,
+    doriLayerOutput,
+    doriReplayOutput,
     computerUseOutput,
     memoryDoctorOutput,
     memoryMemfsOutput,
@@ -197,6 +208,8 @@ export async function buildExtension(options = {}) {
   const advisorRuntimeInputs = await buildEntry(advisorRuntimeEntryPath, advisorRuntimeOutput, buildDefines)
   const sidePanelRuntimeInputs = await buildEntry(sidePanelRuntimeEntryPath, sidePanelRuntimeOutput, buildDefines)
   const rollbackRuntimeInputs = await buildEntry(rollbackRuntimeEntryPath, rollbackRuntimeOutput, buildDefines, sdkExternalSpecifiers)
+  const doriLayerInputs = await buildEntry(doriLayerEntryPath, doriLayerOutput, buildDefines, sdkExternalSpecifiers)
+  const doriReplayInputs = await buildEntry(doriReplayEntryPath, doriReplayOutput, buildDefines, sdkExternalSpecifiers)
   const memoryDoctorInputs = await buildEntry(memoryDoctorEntryPath, memoryDoctorOutput, buildDefines)
   const memoryMemfsInputs = await buildEntry(memoryMemfsEntryPath, memoryMemfsOutput, buildDefines)
   const memoryPalaceInputs = await buildEntry(memoryPalaceEntryPath, memoryPalaceOutput, buildDefines)
@@ -220,6 +233,8 @@ export async function buildExtension(options = {}) {
     sidePanelRuntimeInputs,
     toolkitSdkInputs,
     rollbackRuntimeInputs,
+    doriLayerInputs,
+    doriReplayInputs,
     computerUseInputs,
     memoryDoctorInputs,
     memoryMemfsInputs,

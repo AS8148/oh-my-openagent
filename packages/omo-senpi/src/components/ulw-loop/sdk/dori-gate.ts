@@ -10,6 +10,9 @@
 /** Read by the agent toolkit SDK when a kernel imports it; "1" adds the namespaces. */
 export const DORI_TOOLKIT_ENV = "OMO_DORI_TOOLKIT"
 
+/** The tool argument a layer-2 call carries its eval cell and call index in; the engine strips it before the op runs. */
+export const DORI_REPLAY_CONTEXT_ARG = "omo_toolkit_replay"
+
 /** The store extension name the dori host registers its session ops under. */
 export const DORI_STORE_EXTENSION = "dori"
 

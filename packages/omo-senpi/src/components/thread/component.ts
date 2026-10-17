@@ -13,6 +13,7 @@ import { controlSessionOf, createControlEndpointRegistrant, hostInstanceOf, sess
 import { createGatewayStore, type GatewayStore } from "./gateway/store"
 import { registerThreadTools, UNKNOWN_CALLER, type ThreadToolSurfaceOptions } from "./tools"
 import type { DoriReplay } from "./tools/dori-replay"
+import { loadDoriReplayModule } from "./tools/dori-replay-loader"
 import { createLazyLiveThreadSurface } from "./lazy-live-surface"
 import { defaultThreadStateDirectory } from "./live-surface-paths"
 
@@ -61,7 +62,7 @@ function readDoriSection(options: ThreadComponentOptions, ctx: ComponentContext)
 function lazyDoriReplay(agentDir: () => string): () => Promise<DoriReplay> {
   let opened: Promise<DoriReplay> | undefined
   return () => {
-    opened ??= import("./tools/dori-replay").then((module) => module.openDoriReplay({ path: join(dirname(gatewayDatabasePath(agentDir())), "toolkit-replay.sqlite") }))
+    opened ??= loadDoriReplayModule().then((module) => module.openDoriReplay({ path: join(dirname(gatewayDatabasePath(agentDir())), "toolkit-replay.sqlite") }))
     opened.catch(() => { opened = undefined })
     return opened
   }

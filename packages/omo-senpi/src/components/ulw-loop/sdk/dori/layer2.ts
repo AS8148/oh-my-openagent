@@ -2,10 +2,12 @@
  * The agent toolkit's layer-2 namespaces (kernel side). The SDK imports this module only when the
  * engine published the dori switch; omo implements no namespace function itself. `toolkit.<ns>.<fn>`
  * calls the session tool the dori host's store extension declared (`ext_dori_<ns>_<fn>`) through the
- * kernel's tool bridge, so the engine stamps the caller and journals the call under its replay key;
- * a replay the engine stopped is thrown as `ToolkitReplayStopError`.
+ * kernel's tool bridge, so the engine stamps the caller and journals the call under its replay key.
+ * Each call carries the eval cell it came from and its index in that cell, taken synchronously in
+ * program order; the engine maps the cell to the turn it started in. A replay the engine stopped is
+ * thrown as `ToolkitReplayStopError`. The built plugin ships this module as `runtime/dori/layer2.js`.
  */
-import { DORI_STORE_EXTENSION, DORI_TOOLKIT_NAMESPACES, doriLayer2Path, type DoriToolkitNamespace } from "../dori-gate"
+import { DORI_REPLAY_CONTEXT_ARG as REPLAY_CONTEXT_ARG, DORI_STORE_EXTENSION, DORI_TOOLKIT_NAMESPACES, doriLayer2Path, type DoriToolkitNamespace } from "../dori-gate"
 import { renderSignature } from "./signature"
 
 export { inboundReplayKey, TOOLKIT_REPLAY_RETENTION_MS, toolkitReplayKey } from "./replay-key"
@@ -42,26 +44,38 @@ export interface KernelToolHost {
   schema(name: string): Promise<{ readonly name: string; readonly description?: string; readonly parameters?: unknown }>
 }
 
-export type ToolkitReplayStopCode = "toolkit_replay_divergence" | "toolkit_replay_pending" | "turn_context_missing"
+export type ToolkitReplayStopCode = "toolkit_replay_divergence" | "toolkit_replay_pending" | "toolkit_replay_expired" | "toolkit_replay_turn_unknown"
 
 export class ToolkitReplayStopError extends Error {
   override readonly name = "ToolkitReplayStopError"
   readonly code: ToolkitReplayStopCode
   readonly key: string | undefined
+  readonly differs: readonly ("op" | "args")[] | undefined
   readonly recordedOp: string | undefined
   readonly attemptedOp: string | undefined
 
-  constructor(stop: { readonly code: ToolkitReplayStopCode; readonly message: string; readonly key?: string; readonly recorded_op?: string; readonly attempted_op?: string }) {
+  constructor(stop: { readonly code: ToolkitReplayStopCode; readonly message: string; readonly key?: string; readonly differs?: readonly ("op" | "args")[]; readonly recorded_op?: string; readonly attempted_op?: string }) {
     super(stop.message)
     this.code = stop.code
     this.key = stop.key
+    this.differs = stop.differs
     this.recordedOp = stop.recorded_op
     this.attemptedOp = stop.attempted_op
   }
 }
 
 const TOOL_PREFIX = `ext_${DORI_STORE_EXTENSION}_`
-const PASSTHROUGH = new Set(["then", "call", "apply", "bind", "toString", "name", "length", "prototype", "constructor"])
+/** A stack location that is not a file: the kernel evaluates each cell under its tool call id as the sourceURL. */
+const CELL_FRAME = /\(([^()\s/\\:]+):\d+:\d+\)\s*$/
+
+/** The eval cell this call was made from, read from the stack while the cell's code is still on it; undefined outside a cell. */
+function callingCell(): string | undefined {
+  for (const line of (new Error().stack ?? "").split("\n")) {
+    const cell = CELL_FRAME.exec(line)?.[1]
+    if (cell !== undefined && cell !== "native" && !cell.startsWith("<")) return cell
+  }
+  return undefined
+}
 
 type KernelGlobals = {
   readonly tool?: Readonly<Record<string, (args: unknown) => Promise<unknown>>>
@@ -104,23 +118,39 @@ async function callLayer2(host: KernelToolHost, tool: string, args: Readonly<Rec
   return result as DoriCallResult
 }
 
-function layerFunction(host: KernelToolHost, path: readonly string[]): DoriFunction {
-  const invoke = (args: Readonly<Record<string, unknown>> = {}) => callLayer2(host, `${TOOL_PREFIX}${path.join("_")}`, args)
+type CellCounters = Map<string, number>
+
+/** Index and cell are taken synchronously at the call, before any await, so concurrent calls keep program order. */
+function layerFunction(host: KernelToolHost, counters: CellCounters, path: readonly string[]): DoriFunction {
+  const invoke = (args: Readonly<Record<string, unknown>> = {}) => {
+    const cell = callingCell()
+    if (cell === undefined) return callLayer2(host, `${TOOL_PREFIX}${path.join("_")}`, args)
+    const index = counters.get(cell) ?? 0
+    counters.set(cell, index + 1)
+    return callLayer2(host, `${TOOL_PREFIX}${path.join("_")}`, { ...args, [REPLAY_CONTEXT_ARG]: { cell, index } })
+  }
   return new Proxy(invoke, {
     get(target, property) {
-      if (typeof property !== "string" || PASSTHROUGH.has(property)) return Reflect.get(target, property)
-      return layerFunction(host, [...path, property])
+      if (typeof property !== "string" || property === "then") return Reflect.get(target, property)
+      return layerFunction(host, counters, [...path, property])
     },
   }) as unknown as DoriFunction
 }
 
-function namespaceObject(host: KernelToolHost, namespace: DoriToolkitNamespace): DoriNamespace {
+function namespaceObject(host: KernelToolHost, counters: CellCounters, namespace: DoriToolkitNamespace): DoriNamespace {
   return new Proxy(Object.freeze({}), {
     get(target, property) {
       if (typeof property !== "string" || property === "then") return Reflect.get(target, property)
-      return layerFunction(host, [namespace, property])
+      return layerFunction(host, counters, [namespace, property])
     },
   }) as DoriNamespace
+}
+
+/** The tool schema as the caller writes it: the SDK sets the replay context itself, so help() never shows it. */
+function withoutReplayContext(parameters: unknown): unknown {
+  if (!isRecord(parameters) || !isRecord(parameters.properties) || !Object.hasOwn(parameters.properties, REPLAY_CONTEXT_ARG)) return parameters
+  const { [REPLAY_CONTEXT_ARG]: _context, ...properties } = parameters.properties
+  return { ...parameters, properties }
 }
 
 async function describeLayer2(host: KernelToolHost): Promise<DoriLayer2Help> {
@@ -132,7 +162,7 @@ async function describeLayer2(host: KernelToolHost): Promise<DoriLayer2Help> {
       const path = doriLayer2Path(DORI_STORE_EXTENSION, tool.slice(TOOL_PREFIX.length))
       if (path === undefined) continue
       const schema = await host.schema(tool)
-      functions.push({ namespace: path.namespace, name: path.op, tool, description: schema.description ?? "", signature: renderSignature(path.op, schema.parameters) })
+      functions.push({ namespace: path.namespace, name: path.op, tool, description: schema.description ?? "", signature: renderSignature(path.op, withoutReplayContext(schema.parameters)) })
     }
     const rank = (fn: DoriLayer2Function) => namespaces.indexOf(fn.namespace)
     functions.sort((left, right) => rank(left) - rank(right) || left.name.localeCompare(right.name))
@@ -144,7 +174,8 @@ async function describeLayer2(host: KernelToolHost): Promise<DoriLayer2Help> {
 
 /** The toolkit with the eleven namespaces added and `help()` listing the registered functions with their signatures. */
 export function withDoriLayer2<Base extends { readonly help: () => Promise<{ readonly ok: boolean }> }>(base: Base, host: KernelToolHost = kernelToolHost()): Base & DoriLayer2 {
-  const namespaces = Object.fromEntries(DORI_TOOLKIT_NAMESPACES.map((namespace) => [namespace, namespaceObject(host, namespace)])) as DoriLayer2
+  const counters: CellCounters = new Map()
+  const namespaces = Object.fromEntries(DORI_TOOLKIT_NAMESPACES.map((namespace) => [namespace, namespaceObject(host, counters, namespace)])) as DoriLayer2
   const help = async () => {
     const response = await base.help()
     if (!response.ok || !("result" in response) || !isRecord(response.result)) return response
