@@ -7,8 +7,8 @@ import { isLockOwnerProvenDead } from "../locks/acquire"
 import { pidAlive, probeUntil } from "../locks/process-liveness.test-support"
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
-import {
 import { SAME_UID_GIT_UNINSPECTABLE } from "../git/host-scan-blind.test-support"
+import {
   DEATH_PROOF_BOUND_MS,
   assertLinearCommits,
   assertRepoIntegrity,
