@@ -8,11 +8,14 @@
 import type { AgentToolResult } from "@code-yeongyu/senpi"
 
 import type { ThreadToolResult } from "../contracts"
+import { doriLayer2Path } from "../../ulw-loop/sdk/dori-gate"
 import type { DeclaredSessionOp, StoreExtensionResult } from "../gateway/store"
+import type { ReplayStop } from "./dori-replay"
 import { addressBook, hostView, type AnyTool } from "./internals"
 import { UNKNOWN_CALLER, type ThreadHostView, type ThreadToolSurfaceOptions } from "./ports"
 
-type ExtensionToolOutput = AgentToolResult<{ readonly result: StoreExtensionResult<unknown> }>
+type ExtensionCallResult = StoreExtensionResult<unknown> | ReplayStop
+type ExtensionToolOutput = AgentToolResult<{ readonly result: ExtensionCallResult }>
 
 /**
  * The durable id of the engine's caller, the lookup `self` uses: the engine's `getSessionId()` IS the
@@ -38,7 +41,7 @@ export async function recordThreadCreator(options: ThreadToolSurfaceOptions, vie
   return created
 }
 
-function output(result: StoreExtensionResult<unknown>): ExtensionToolOutput {
+function output(result: ExtensionCallResult): ExtensionToolOutput {
   return { content: [{ type: "text", text: JSON.stringify(result) }], details: { result } }
 }
 
@@ -55,7 +58,12 @@ function extensionTool(options: ThreadToolSurfaceOptions, op: DeclaredSessionOp)
       if (caller === undefined) {
         return output({ kind: "refused", code: "caller_context_missing", message: "The calling session's durable id is not in the thread address book; the op was not run." })
       }
-      return output(await options.store.extensionSessionAwait(op.extension, op.op, args, { callerDurableId: caller }))
+      const run = () => options.store.extensionSessionAwait(op.extension, op.op, args, { callerDurableId: caller })
+      const layer2 = options.doriReplay === undefined ? undefined : doriLayer2Path(op.extension, op.toolName)
+      if (options.doriReplay === undefined || layer2 === undefined) return output(await run())
+      const replay = await options.doriReplay()
+      const { turnIdOf } = await import("./dori-replay")
+      return output(await replay.run(turnIdOf(caller, ectx), layer2.op, run) as ExtensionCallResult)
     },
   }
 }
