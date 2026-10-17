@@ -80,7 +80,7 @@ describe("owner registry pid reuse", () => {
 })
 
 describe("owner registry without a readable start time", () => {
-  test("#given an entry from an older version (no start time) #when its pid is alive #then it is alive while the entry is fresh and dead once it is stale", () => {
+  test("#given an entry from an older version (no start time) #when its pid is alive #then it stays alive however old the entry is, and is dead once the pid is", () => {
     const dir = summaryDir(stateDirs.make())
     const owner = { pid: 313_131, bootId: "older-version" }
     mkdirSync(join(dir, "owners"), { recursive: true })
@@ -94,12 +94,19 @@ describe("owner registry without a readable start time", () => {
     // when: the older owner wrote its entry more than the stale window ago and never refreshes it
     utimesSync(path, new Date(now - STALE), new Date(now - STALE))
 
+    // then: an aged entry proves nothing while the pid lives
+    expect(isAlive(owner)).toBe(true)
+    expect(existsSync(path)).toBe(true)
+
+    // when
+    const afterExit = createOwnerLiveness({ dir, owner: { pid: 1_212, bootId: "reader" }, isPidAlive: () => false, now: () => now, processStartTime: () => "readable" })
+
     // then
-    expect(isAlive(owner)).toBe(false)
+    expect(afterExit(owner)).toBe(false)
     expect(existsSync(path)).toBe(false)
   })
 
-  test("#given a platform where no start time can be read #when the owner's pid is alive #then it is alive while its entry heartbeat is fresh and dead once it is stale", () => {
+  test("#given a platform where no start time can be read #when the owner's pid is alive and its entry heartbeat is stale #then it is still alive", () => {
     const dir = summaryDir(stateDirs.make())
     let clock = T0
     const owner = { pid: 414_141, bootId: "no-start-time" }
@@ -108,11 +115,11 @@ describe("owner registry without a readable start time", () => {
 
     expect(isAlive(owner)).toBe(true)
 
-    // when
+    // when: the reader's clock runs past the stale window while the owner's timer never ran
     clock += STALE
 
     // then
-    expect(isAlive(owner)).toBe(false)
+    expect(isAlive(owner)).toBe(true)
   })
 
   test("#given a stale entry for a pid #when a new process registers that pid between the read and the removal #then its fresh entry survives", () => {

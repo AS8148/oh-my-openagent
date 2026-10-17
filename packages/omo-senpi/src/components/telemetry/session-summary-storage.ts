@@ -109,7 +109,7 @@ export function createSummaryStorage(input: {
   })
   const windowPath = (key: string) => join(dir, `${key}.json`)
   const pendingPath = (uuid: string) => join(pendingDir, `${uuid}.json`)
-  // The registry entry's heartbeat is what keeps an owner alive where its start time cannot be compared.
+  // The registry entry (boot id, start time) is what tells this owner from a later process on the same pid.
   let registeredAt: number | undefined
   const ensureRegistered = () => {
     if (registeredAt !== undefined && now() - registeredAt < OWNER_ENTRY_REFRESH_MS) return

@@ -1,11 +1,8 @@
-import { linkSync, readFileSync, statSync } from "node:fs"
+import { linkSync, readFileSync } from "node:fs"
 
 import { removeFile, renameIfPresent } from "./session-summary-files"
 import { ownerEntryPath, type OwnerRegistryInput, type ProcessOwner } from "./session-summary-owner"
 import { readProcessStartTime } from "./session-summary-process-start"
-
-/** How long an entry whose start time cannot be compared still vouches for its owner without a refresh. */
-export const OWNER_ENTRY_STALE_MS = 5 * 60_000
 
 /**
  * Only ESRCH (no such process) proves a pid dead. Every other answer, EPERM above all (on win32 `kill(pid, 0)`
@@ -28,18 +25,20 @@ export function processIsAlive(pid: number, kill: (pid: number) => unknown = (ta
  * the start time an unrelated process that later reuses the pid would keep the dead owner's files until it
  * exits; a later OmO process on the pid writes another boot id.
  *
- * When the start time cannot be compared (an entry from an older version without one, or a platform or
- * moment where the probe reads nothing) the entry's heartbeat decides: alive while it is fresher than
- * `OWNER_ENTRY_STALE_MS`, dead after. Owners refresh it on every window write, at most once a minute, so a
- * live owner on such a platform stays alive while a killed one ages out. An entry without a heartbeat (older
- * version) is aged by its file mtime. Only recovery asks, so this ships in the recovery sidecar.
+ * When the start time cannot be compared (Windows, where the probe reads nothing; an entry written without
+ * one) a live pid with a matching entry is ambiguous, and ambiguous counts as alive, like EPERM. The entry's
+ * heartbeat does not decide: its age only says the owner's timer has not run (a blocked event loop, a sleeping
+ * machine, or the reader's clock ahead of the owner's), not that the owner died, and adopting a live owner's
+ * window sends it twice. The cost of the other mistake is a delay: a dead owner whose pid an unrelated process
+ * took keeps its window until that process exits (a later OmO process on the pid writes another boot id and
+ * frees it at once), and a window older than the 14-day limit is dropped and counted in `dropped_events`.
+ * Only recovery asks, so this ships in the recovery sidecar.
  */
 export function createOwnerLiveness(input: OwnerRegistryInput & {
   readonly isPidAlive?: (pid: number) => boolean
 }): (owner: ProcessOwner) => boolean {
   const isPidAlive = input.isPidAlive ?? processIsAlive
   const startTimeOf = input.processStartTime ?? readProcessStartTime
-  const now = input.now ?? Date.now
   // Removes the entry only while it is still the one judged: a process that took the pid meanwhile keeps its own.
   const forget = (path: string, judged: string | undefined) => {
     if (judged !== undefined) removeIfUnchanged(path, judged, input.owner)
@@ -56,10 +55,7 @@ export function createOwnerLiveness(input: OwnerRegistryInput & {
     if (entry === undefined || !matches) return false
     const recorded: unknown = Reflect.get(entry, "startTime")
     const current = typeof recorded === "string" ? startTimeOf(owner.pid) : null
-    if (current !== null) return current === recorded || forget(path, judged)
-    const heartbeatAt: unknown = Reflect.get(entry, "heartbeatAt")
-    const beat = typeof heartbeatAt === "number" ? heartbeatAt : modifiedAt(path)
-    return (beat !== undefined && now() - beat <= OWNER_ENTRY_STALE_MS) || forget(path, judged)
+    return current === null || current === recorded || forget(path, judged)
   }
 }
 
@@ -96,12 +92,4 @@ function removeIfUnchanged(path: string, judged: string, reader: { readonly pid:
     }
   }
   removeFile(aside)
-}
-
-function modifiedAt(path: string): number | undefined {
-  try {
-    return statSync(path).mtimeMs
-  } catch {
-    return undefined
-  }
 }
