@@ -24,6 +24,7 @@ type GuardedPrototype = {
 export type PostHogTestGuard = {
   beginTest(): void
   endTest(): string[]
+  takeViolations(): string[]
 }
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"])
@@ -102,6 +103,11 @@ export function createPostHogTestGuard(prototype: GuardedPrototype): PostHogTest
       outsideTestViolations = []
       live = new Set()
     },
+    takeViolations() {
+      const found = violations
+      violations = []
+      return found
+    },
     endTest() {
       inTest = false
       for (const client of live) {
@@ -119,8 +125,17 @@ export function createPostHogTestGuard(prototype: GuardedPrototype): PostHogTest
   }
 }
 
+let installedGuard: PostHogTestGuard | undefined
+
+// For a test that deliberately triggers a refusal: returns the current test's violations and clears them.
+export function takePostHogTestGuardViolations(): string[] {
+  return installedGuard?.takeViolations() ?? []
+}
+
 export function installPostHogTestGuard(): void {
+  if (installedGuard !== undefined) return
   const guard = createPostHogTestGuard(PostHog.prototype as unknown as GuardedPrototype)
+  installedGuard = guard
   beforeEach(() => guard.beginTest())
   afterEach(() => {
     const violations = guard.endTest()
