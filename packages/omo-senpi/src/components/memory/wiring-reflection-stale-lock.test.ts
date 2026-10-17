@@ -51,7 +51,7 @@ function createEventCtx() {
   }
 }
 
-async function staleLockFixture(seams?: ActiveHolderSeams) {
+async function staleLockFixture(seams?: ActiveHolderSeams, options: { readonly reconcileReleases?: boolean } = {}) {
   const eventCtx = createEventCtx()
   const root = realpathSync.native(await mkdtemp(join(tmpdir(), "omo-reflection-stale-lock-")))
   roots.push(root)
@@ -83,6 +83,7 @@ async function staleLockFixture(seams?: ActiveHolderSeams) {
     launch,
     async reconcile(): Promise<void> {
       reconciles.count += 1
+      if (options.reconcileReleases === false) return
       await reconcileReflectionRuns({ identity: memoryIdentity, reservation: store, launch, deferOnSchedulerContention: true })
     },
   } as unknown as MemoryIdentityRuntime
@@ -201,6 +202,9 @@ describe("memory reflection stale active lock (#10377)", () => {
     expect(existsSync(join(item.paths.reflection, "runs", runId, "final.json"))).toBe(true)
     expect(await activeRunId(item)).not.toBe(runId)
     expect(reply).toContain(`the previous run ${runId} had stopped without releasing its lock`)
+    const promoted = await activeRunId(item)
+    if (promoted === undefined) throw new Error("expected the queued request to become the active run")
+    expect(item.launched.map((run) => run.runId)).toContain(promoted)
   }, 30_000)
 
   test("#given a session that already reconciled #when the host dies mid-publish and a later turn settles #then the dead run is finalized", async () => {
@@ -258,5 +262,48 @@ describe("memory reflection stale active lock (#10377)", () => {
     expect(await activeRunId(item)).toBe(runId)
     expect(reply).toContain("a run is already active and this request runs next")
     expect(item.eventCtx.notices.filter((notice) => notice.message.includes("stale lock"))).toEqual([])
+  }, 30_000)
+
+  test("#given a dead holder that recovery does not release #when later turns settle #then it is reconciled once and the stuck state is shown once", async () => {
+    // given
+    const item = await staleLockFixture(undefined, { reconcileReleases: false })
+    await settleTurn(item)
+    const runId = await hostDiesMidPublish(item, await deadPid())
+    const reconcilesBefore = item.reconciles.count
+
+    // when
+    await settleTurn(item)
+    await settleTurn(item)
+    await settleTurn(item)
+
+    // then
+    expect(item.reconciles.count).toBe(reconcilesBefore + 1)
+    expect(await activeRunId(item)).toBe(runId)
+    const shown = item.eventCtx.notices.filter((notice) => notice.message.includes("memory reflection is stuck on a stale lock"))
+    expect(shown).toHaveLength(1)
+    expect(shown[0]?.message).toContain("recovering it did not release the lock")
+  }, 30_000)
+
+  test("#given active.lock cannot be read #when /reflect and a later turn find the lock held #then the stuck state is shown with the reason instead of failing", async () => {
+    // given
+    const item = await staleLockFixture({
+      readText: async (path) => {
+        if (path.endsWith("active.lock")) throw Object.assign(new Error("permission denied"), { code: "EACCES" })
+        return readFile(path, "utf8")
+      },
+    })
+    await settleTurn(item)
+    const runId = await hostDiesMidPublish(item, await deadPid())
+
+    // when
+    const reply = await runReflect(item)
+    await settleTurn(item)
+
+    // then
+    expect(reply).toContain("active.lock could not be read (EACCES)")
+    expect(reply).toContain("Next step: run /doctor")
+    expect(await activeRunId(item)).toBe(runId)
+    const shown = item.eventCtx.notices.filter((notice) => notice.message.includes("active.lock could not be read (EACCES)"))
+    expect(shown.length).toBeGreaterThanOrEqual(1)
   }, 30_000)
 })

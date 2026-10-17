@@ -39,6 +39,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   const memoryUsageTrackersRef: { current: Map<string, MemoryUsageTracker> } = { current: new Map() }
   const reflectionLive = createMemoryReflectionLiveWiring(options, activeSession, lastEventCtx)
   const staleLockNoticesShown = new Set<string>()
+  const staleHolderReconciles = new Set<string>()
   // Session-start reconciliation runs once per session, so a holder that died after it would keep
   // the reflection lock for good (#10377). Each later turn settles a provably dead holder, and shows
   // a holder whose liveness cannot be proven once per session and run.
@@ -48,6 +49,13 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
       const recovery = await recoverStaleReflectionHolder({
         reflectionDir: identity.identityPaths.reflection,
         reconcile: () => runtimeFor(identity).reconcile(),
+        // A holder that one reconciliation could not release is reported, not reconciled every turn.
+        shouldReconcile: (runId) => {
+          const key = `${sessionId}:${runId}`
+          if (staleHolderReconciles.has(key)) return false
+          staleHolderReconciles.add(key)
+          return true
+        },
         ...(options.reflectionHolderSeams === undefined ? {} : { seams: options.reflectionHolderSeams }),
       })
       if (recovery.notice === undefined || recovery.verdict.state === "none") return

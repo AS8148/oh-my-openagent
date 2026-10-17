@@ -9,7 +9,6 @@ import { daemonReportLines } from "./daemon.js"
 import { migrationReport } from "./doctor-migration.js"
 import { launchSpecDoctorLines } from "./launch-spec-mode.js"
 import { piConfigReport } from "./doctor-pi-config.js"
-import { reflectionLockReport } from "./doctor-reflection-lock.js"
 import { needsSetupSuggestion } from "./setup-detect.js"
 
 export function installedDistTag(version) {
@@ -424,7 +423,7 @@ export function runDoctor(inventory, args = [], options = {}) {
   lines.push(...staleEngineReport(options))
   lines.push(...retiredPayloadReport(options))
   lines.push(...transientMemoryReport(options))
-  lines.push(...reflectionLockReport(options))
+  lines.push(...(options.reflectionLock ?? []))
   const launchSpec = launchSpecDoctorLines(options.pluginRoot ?? join(packageRoot, "plugin"), options.launchSpecIo)
   if (launchSpec.some((line) => line.startsWith("FAIL "))) failed = true
   lines.push(...launchSpec)
