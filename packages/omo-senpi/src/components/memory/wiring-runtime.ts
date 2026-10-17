@@ -22,6 +22,7 @@ import {
   resolveParentSessionFile as resolveParentSessionFileFromCtx,
   resolveSessionAgentDir,
 } from "./session-context-resolver"
+import { isStaleExtensionContextError } from "./stale-extension-context"
 import { resolveReflectionTriggerConfig, type ReflectionTriggerSession } from "./trigger-wiring"
 import { isRecord, sessionIdFrom } from "./wiring-context"
 import type { MemoryWiringOptions } from "./wiring-types"
@@ -58,29 +59,43 @@ export function createMemoryRuntimeWiring(
   const resolveContext = (sessionId: string): MemoryIdentityContext | undefined =>
     options.sessions.get(sessionId)?.context
 
+  // The launch reads these facts asynchronously, after the handler that fired it returned. If the
+  // session was replaced or reloaded meanwhile, every read of the captured ctx throws the host's
+  // stale-ctx error (#10339), so each successful read is remembered and a retired ctx answers with
+  // the facts of the session that triggered the run (the run belongs to that session).
+  let launchFacts: LaunchFacts | undefined
+  function currentLaunchFacts(): LaunchFacts {
+    try {
+      launchFacts = readLaunchFacts(lastEventCtx.current)
+    } catch (error) {
+      if (!isStaleExtensionContextError(error)) throw error
+    }
+    return launchFacts ?? NO_LAUNCH_FACTS
+  }
+
   function resolveModelRegistry(): ReturnType<MemoryIdentityRuntimeDeps["resolveModelRegistry"]> {
-    return resolveMemoryModelRegistry(lastEventCtx.current)
+    return currentLaunchFacts().modelRegistry
   }
 
   function resolveSessionModel(): ReflectionSessionModel | undefined {
-    return resolveMemorySessionModel(lastEventCtx.current)
+    return currentLaunchFacts().sessionModel
   }
 
   function resolveParentContextTokens(): number | undefined {
-    return resolveParentContextTokensFromCtx(lastEventCtx.current)
+    return currentLaunchFacts().parentContextTokens
   }
 
   function resolveParentSessionFile(): string | undefined {
-    return resolveParentSessionFileFromCtx(lastEventCtx.current)
+    return currentLaunchFacts().parentSessionFile
   }
 
   function resolveParentCacheReusable(): boolean {
-    return resolveParentCacheReusableFromCtx(lastEventCtx.current)
+    return currentLaunchFacts().parentCacheReusable
   }
 
   /** The engine's own answer for this session; detection is the fallback for hosts without it. */
   function resolveAgentDir(): string {
-    return resolveSessionAgentDir(lastEventCtx.current) ?? resolveAgentHome({ env: process.env })
+    return currentLaunchFacts().agentDir ?? resolveAgentHome({ env: process.env })
   }
 
   function journalWiringFor(identity: MemoryIdentityContext): MemoryJournalWiring {
@@ -179,6 +194,9 @@ export function createMemoryRuntimeWiring(
       engine: {
         evaluate: async (conversationId, event) => {
           lastEventCtx.current = eventCtx
+          // Read while this ctx is live: the launch below resolves its facts later, possibly after
+          // a session replacement or reload has retired it.
+          currentLaunchFacts()
           const result = await runtime.store.evaluate(conversationId, event)
           if (result?.status === "active") {
             void runtime.launch(result.run)
@@ -219,5 +237,34 @@ export function createMemoryRuntimeWiring(
     triggerSessionFor,
     dreamSessionById,
     dreamSessionFor,
+  }
+}
+
+interface LaunchFacts {
+  readonly modelRegistry: ReturnType<MemoryIdentityRuntimeDeps["resolveModelRegistry"]>
+  readonly sessionModel: ReflectionSessionModel | undefined
+  readonly parentContextTokens: number | undefined
+  readonly parentSessionFile: string | undefined
+  readonly parentCacheReusable: boolean
+  readonly agentDir: string | undefined
+}
+
+const NO_LAUNCH_FACTS: LaunchFacts = {
+  modelRegistry: undefined,
+  sessionModel: undefined,
+  parentContextTokens: undefined,
+  parentSessionFile: undefined,
+  parentCacheReusable: false,
+  agentDir: undefined,
+}
+
+function readLaunchFacts(eventContext: unknown): LaunchFacts {
+  return {
+    modelRegistry: resolveMemoryModelRegistry(eventContext),
+    sessionModel: resolveMemorySessionModel(eventContext),
+    parentContextTokens: resolveParentContextTokensFromCtx(eventContext),
+    parentSessionFile: resolveParentSessionFileFromCtx(eventContext),
+    parentCacheReusable: resolveParentCacheReusableFromCtx(eventContext),
+    agentDir: resolveSessionAgentDir(eventContext),
   }
 }
