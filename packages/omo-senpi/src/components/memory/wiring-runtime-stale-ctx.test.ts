@@ -1,0 +1,132 @@
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+
+import { buildIdentityPaths, type ReservedRun } from "@oh-my-opencode/memory-core"
+
+import { createMemoryIdentityContext, type MemoryIdentityContext } from "./context"
+import type { MemoryIdentityRuntime, MemoryIdentityRuntimeDeps } from "./identity-runtime"
+import { loadedMemoryConfig, memorySettings } from "./memory.test-support"
+import { createMemoryRuntimeWiring } from "./wiring-runtime"
+
+// Regression coverage for https://github.com/code-yeongyu/oh-my-openagent/issues/10339: the
+// reflection launch resolves its model registry, session model and parent session facts from the
+// event ctx captured when the trigger fired. The launch itself runs later; if the session was
+// replaced or reloaded in between, every read of that captured ctx throws, and the launch died.
+
+const SESSION = "session-10339"
+const NEW_SESSION_MESSAGE =
+  "This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload()."
+const RUNTIME_RELOAD_MESSAGE = "stale extension generation after reload"
+
+const roots: string[] = []
+afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
+
+describe("reflection launch after the trigger ctx is retired (#10339)", () => {
+  test.each([
+    ["ctx.newSession()", NEW_SESSION_MESSAGE],
+    ["ctx.fork()", NEW_SESSION_MESSAGE],
+    ["ctx.switchSession()", NEW_SESSION_MESSAGE],
+    ["ctx.reload()", NEW_SESSION_MESSAGE],
+    ["a runtime reload", RUNTIME_RELOAD_MESSAGE],
+  ])("#given a reflection triggered on a live session #when %s retires its ctx before the launch resolves #then the launch still gets the triggering session's facts", async (_path, message) => {
+    // given
+    const root = await mkdtemp(`${tmpdir()}/omo-10339-`)
+    roots.push(root)
+    const identity = createMemoryIdentityContext({
+      identity: "agent-10339",
+      identityPaths: buildIdentityPaths(root, "agent-10339"),
+      binding: { identity: "agent-10339", repoPathHash: "hash", boundAt: 1 },
+    })
+    const registry = { find: () => undefined, getProviderAuth: () => undefined }
+    const live = retirableContext(message, {
+      sessionManager: {
+        getSessionId: () => SESSION,
+        getSessionFile: () => `${root}/session.jsonl`,
+        getUsageTotals: () => ({ cacheRead: 42 }),
+      },
+      modelRegistry: registry,
+      model: { provider: "anthropic", id: "claude-test" },
+      getContextUsage: () => ({ tokens: 1234 }),
+      agentDir: root,
+    })
+    let launched: (() => void) | undefined
+    let deps: MemoryIdentityRuntimeDeps | undefined
+    const wiring = createMemoryRuntimeWiring({
+      sessions: new Map([[SESSION, { context: identity } as never]]),
+      loadConfig: () => loadedMemoryConfig(memorySettings()),
+      cwd: () => root,
+      env: {},
+      createRuntime: (_identity, runtimeDeps) => {
+        deps = runtimeDeps
+        return fakeRuntime(identity, () => launched?.())
+      },
+    }, {})
+    const resolved = new Promise<Record<string, unknown>>((resolve, reject) => {
+      // The real launch resolves these asynchronously, after the trigger handler returned.
+      launched = () => {
+        queueMicrotask(() => {
+          try {
+            live.retire()
+            resolve({
+              registry: deps?.resolveModelRegistry(),
+              tokens: deps?.resolveParentContextTokens?.(),
+              file: deps?.resolveParentSessionFile?.(),
+              cacheReusable: deps?.resolveParentCacheReusable?.(),
+              agentDir: deps?.resolveAgentDir?.(),
+            })
+          } catch (error) {
+            reject(error)
+          }
+        })
+      }
+    })
+
+    // when
+    await wiring.triggerSessionFor(live.ctx)?.engine.evaluate(SESSION, { kind: "settled" } as never)
+
+    // then
+    expect(await resolved).toEqual({
+      registry,
+      tokens: 1234,
+      file: `${root}/session.jsonl`,
+      cacheReusable: true,
+      agentDir: root,
+    })
+  }, 30_000)
+})
+
+function fakeRuntime(identity: MemoryIdentityContext, onLaunch: () => void): MemoryIdentityRuntime {
+  const run = { runId: "run-10339", conversationId: SESSION } as unknown as ReservedRun
+  return {
+    identity,
+    store: { evaluate: async () => ({ status: "active", run }) },
+    launch: async () => onLaunch(),
+    reconcile: async () => {},
+  } as unknown as MemoryIdentityRuntime
+}
+
+/** Every getter on the ctx throws the host's stale-ctx error once retired, as the engine's guard does. */
+function retirableContext(message: string, shape: Record<string, unknown>): { readonly ctx: unknown; readonly retire: () => void } {
+  let retired = false
+  const guard = (value: unknown): unknown => {
+    if (typeof value === "function") {
+      return (...args: unknown[]) => {
+        if (retired) throw new Error(message)
+        return Reflect.apply(value as (...a: unknown[]) => unknown, undefined, args)
+      }
+    }
+    if (value !== null && typeof value === "object" && !Array.isArray(value) && !("find" in value)) {
+      return wrap(value as Record<string, unknown>)
+    }
+    return value
+  }
+  const wrap = (target: Record<string, unknown>): Record<string, unknown> =>
+    new Proxy(target, {
+      get(object, key) {
+        if (retired) throw new Error(message)
+        return guard(Reflect.get(object, key))
+      },
+    })
+  return { ctx: wrap(shape), retire: () => { retired = true } }
+}
