@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ import {
 	type Device,
 	newDevice,
 	RP_ID,
+	removeWorldStateDirs,
 	transportFor,
 	verified,
 	type World,
@@ -61,6 +62,8 @@ const input = (
 	rejections: createRejectionCounter(),
 	stateDir,
 });
+
+afterAll(removeWorldStateDirs);
 
 describe("anchored recovery (todo 17, review r3 option A)", () => {
 	test("recovery anchors its walk at the enrolling record with the derived keys, then pins the trust anchor", async () => {

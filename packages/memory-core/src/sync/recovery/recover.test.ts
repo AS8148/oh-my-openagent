@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { openBatch } from "../crypto/open.ts";
 import { createRejectionCounter } from "../crypto/rejection.ts";
 import { openWrap } from "../crypto/unwrap.ts";
@@ -22,6 +22,7 @@ import {
 	freshStateDir,
 	newDevice,
 	RP_ID,
+	removeWorldStateDirs,
 	rotate,
 	transportFor,
 	verified,
@@ -104,6 +105,8 @@ const readAll = async (
 	}
 	return texts;
 };
+
+afterAll(removeWorldStateDirs);
 
 describe("recovery on a fresh device (sync-design section 7)", () => {
 	test("after several rotations the recovered device reads every retained batch, under a fresh epoch wrapped only to it and the used key", async () => {

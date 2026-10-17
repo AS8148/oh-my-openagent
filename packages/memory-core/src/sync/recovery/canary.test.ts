@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	spyOn,
+	test,
+} from "bun:test";
 import { isObject } from "../crypto/parse.ts";
 import { createRejectionCounter } from "../crypto/rejection.ts";
 import { b64urlDecode } from "../crypto/vendor/sync-format/jcs.ts";
@@ -16,6 +24,7 @@ import {
 	freshStateDir,
 	newDevice,
 	RP_ID,
+	removeWorldStateDirs,
 	transportFor,
 	verified,
 } from "./testing/world.test-support.ts";
@@ -49,6 +58,8 @@ const recording = (bridge: RecoveryBridge, sink: string[]): RecoveryBridge => ({
 	recoverAbort: bridge.recoverAbort,
 	signalRemoved: bridge.signalRemoved,
 });
+
+afterAll(removeWorldStateDirs);
 
 describe("PRF output and derived recovery keys never reach logs, telemetry or any boundary", () => {
 	const logged: string[] = [];

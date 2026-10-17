@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { createRejectionCounter } from "../crypto/rejection.ts";
 import { removeRecoveryKey } from "./index.ts";
 import {
@@ -6,6 +6,7 @@ import {
 	enrollAnother,
 	newDevice,
 	RP_ID,
+	removeWorldStateDirs,
 	transportFor,
 	verified,
 } from "./testing/world.test-support.ts";
@@ -15,6 +16,8 @@ const NOT_BACKED_UP = {
 	backupEligible: true,
 	backupState: false,
 };
+
+afterAll(removeWorldStateDirs);
 
 describe("enrolling and removing recovery passkeys (sync-design section 7)", () => {
 	test("a synced passkey enrolls with one countersigned wrap that every member verifies", async () => {

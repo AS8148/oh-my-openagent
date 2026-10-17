@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { creatorAnchor, type TrustAnchor } from "../../crypto/anchor.ts";
@@ -96,9 +96,16 @@ export const transportFor = (
 ): RecoveryTransport => server.transport(world.account, authorOf(device));
 
 /** A fresh per-device state directory for a trust pin (under one temp root per test process). */
-const stateRoot = mkdtempSync(join(tmpdir(), "omo-recovery-world-"));
-export const freshStateDir = (): string =>
-	mkdtempSync(join(stateRoot, "device-"));
+let stateRoot: string | null = null;
+export const freshStateDir = (): string => {
+	stateRoot ??= mkdtempSync(join(tmpdir(), "omo-recovery-world-"));
+	return mkdtempSync(join(stateRoot, "device-"));
+};
+/** Removes every state dir `freshStateDir` made; each test file using this world calls it in afterAll. */
+export const removeWorldStateDirs = (): void => {
+	if (stateRoot !== null) rmSync(stateRoot, { recursive: true, force: true });
+	stateRoot = null;
+};
 
 export const verified = async (
 	world: World,

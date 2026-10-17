@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { appendEntries } from "../crypto/chain.ts";
 import type { KeyringEntry } from "../crypto/entry.ts";
 import { nextLink } from "../crypto/links.ts";
@@ -31,6 +31,7 @@ import {
 	freshStateDir,
 	newDevice,
 	RP_ID,
+	removeWorldStateDirs,
 	rotate,
 	transportFor,
 	verified,
@@ -68,6 +69,8 @@ const lastKeyring = (world: World): KeyringEntry => {
 	if (entry === undefined) throw new Error("no recovery-join on the chain");
 	return entry;
 };
+
+afterAll(removeWorldStateDirs);
 
 describe("recovery refusals and the surviving devices' view", () => {
 	test("a recovery-join replayed against a later head is refused by every receiver", async () => {
