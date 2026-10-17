@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createNodeGitExec } from "./exec"
+import { settlesWithin } from "./settles-within.test-support"
 import { probeUntil } from "../locks/process-liveness.test-support"
 
 // omo #10199 review LOW 1: git that exits NORMALLY while a hook's background child still holds the
@@ -51,14 +52,11 @@ describe("a git whose hook leaves a child holding its pipe (omo #10199 review LO
     const outcome = exec.run(["commit", "--allow-empty", "-q", "-m", "first"], { cwd: repo, timeoutMs: 10_000, exitDrainMs: 500 })
     expect(await probeUntil(() => existsSync(holderPid), 20_000)).toBe(true)
     holders.push(Number((await readFile(holderPid, "utf8")).trim()))
-    const settled = await Promise.race([
-      outcome.then((result) => ({ kind: "settled" as const, result })),
-      new Promise<{ readonly kind: "still-waiting" }>((resolve) => setTimeout(() => resolve({ kind: "still-waiting" }), 20_000)),
-    ])
+    const settled = await settlesWithin(outcome, 20_000)
 
     // #then
     expect(settled.kind).toBe("settled")
-    if (settled.kind === "settled") expect(settled.result.code).toBe(0)
+    if (settled.kind === "settled") expect(settled.value.code).toBe(0)
     expect(execFileSync("git", ["-C", repo, "rev-list", "--count", "HEAD"], { encoding: "utf8" }).trim()).toBe("1")
   }, 60_000)
 
