@@ -7,8 +7,15 @@
 //! The procedure only reads the event, updates [`PhysicalChord`] and, on a
 //! physical chord, refuses input in memory and wakes the stop-commit worker:
 //! nothing in it blocks, so the system's hook timeout is never reached.
+//!
+//! Every inaccuracy errs toward an extra stop, never a missed one: while the
+//! hook is blind (dropped by the system and not yet re-installed, or an
+//! elevated window has focus) the `RegisterHotKey` backstop stops on any
+//! chord, injected ones included; and a modifier released while the hook was
+//! blind stays counted as held until it is pressed and released again.
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -103,6 +110,9 @@ unsafe extern "system" fn procedure(code: i32, wparam: WPARAM, lparam: LPARAM) -
     unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
 }
 
+/// Hooks this process has installed and not yet removed.
+pub(super) static INSTALLED: AtomicUsize = AtomicUsize::new(0);
+
 /// One installed hook; unhooked on drop.
 pub(super) struct Hook(HHOOK);
 
@@ -116,7 +126,11 @@ impl Hook {
         // thread id 0 with a module handle is the documented form for
         // low-level hooks.
         let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(procedure), module, 0) };
-        (!hook.is_null()).then_some(Self(hook))
+        if hook.is_null() {
+            return None;
+        }
+        INSTALLED.fetch_add(1, Ordering::SeqCst);
+        Some(Self(hook))
     }
 }
 
@@ -127,5 +141,10 @@ impl Drop for Hook {
         if unsafe { UnhookWindowsHookEx(self.0) } == 0 {
             eprintln!("senpi-desktop: UnhookWindowsHookEx failed");
         }
+        INSTALLED.fetch_sub(1, Ordering::SeqCst);
     }
 }
+
+#[cfg(test)]
+#[path = "hook_tests.rs"]
+mod tests;

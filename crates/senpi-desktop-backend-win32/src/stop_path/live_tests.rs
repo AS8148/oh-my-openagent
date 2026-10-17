@@ -98,3 +98,41 @@ fn a_second_listener_is_live_while_the_first_holds_the_hotkey() {
     assert_eq!(started, Ok(()));
     assert!(holder.is_live() && second.is_live() && supervisor.status().global_live);
 }
+
+#[test]
+#[ignore = "live: needs an interactive Windows desktop"]
+fn dropping_the_listener_removes_its_hook_and_ends_both_threads() {
+    use std::sync::atomic::Ordering;
+
+    use super::hook::INSTALLED;
+
+    // Given: a live listener (its hook is installed)
+    let before = INSTALLED.load(Ordering::SeqCst);
+    let supervisor = supervisor();
+    let mut listener = HotkeyListener::new();
+    listener
+        .start(&Chord::parse(DEFAULT_STOP_CHORD).unwrap(), Arc::clone(&supervisor))
+        .unwrap();
+    let shared = Arc::clone(listener.shared.as_ref().unwrap());
+    let while_live = INSTALLED.load(Ordering::SeqCst);
+
+    // When: the session disposes of it
+    drop(listener);
+
+    // Then: both threads exit, the path is down, and the hook is gone
+    let mut control = shared.control.lock();
+    let waited = shared.changed.wait_while_for(
+        &mut control,
+        |control| !(control.listener_exited && control.worker_exited),
+        HANG_GUARD,
+    );
+    let (shutdown, live) = (control.shutdown, control.live);
+    drop(control);
+    let after = INSTALLED.load(Ordering::SeqCst);
+    println!("hooks_before={before} hooks_live={while_live} hooks_after={after} shutdown={shutdown} live={live}");
+    assert!(!waited.timed_out(), "a listener thread outlived the drop");
+    assert!(shutdown && !live);
+    assert_eq!(while_live, before + 1);
+    assert_eq!(after, before);
+    assert!(!supervisor.status().global_live);
+}

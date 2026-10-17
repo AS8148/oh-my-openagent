@@ -35,6 +35,9 @@ pub(super) struct Control {
     /// Re-register (the chord changed, or a refused one should retry).
     pub(super) restart: bool,
     pub(super) shutdown: bool,
+    /// Set by each thread as it returns, so dispose is observable.
+    pub(super) listener_exited: bool,
+    pub(super) worker_exited: bool,
 }
 
 pub(super) struct Shared {
@@ -137,13 +140,57 @@ fn run_worker(shared: &Shared) {
             continue;
         }
         if shared.control.lock().shutdown {
+            shared.update(|control| control.worker_exited = true);
             return;
         }
         thread::park_timeout(super::hotkey::HEARTBEAT);
     }
 }
 
+/// Starts the stop-commit worker and registers it for the hook's wake-ups.
+pub(super) fn spawn_worker(shared: &Arc<Shared>) -> Result<(), StopPathError> {
+    let committer = Arc::clone(shared);
+    let worker = thread::Builder::new()
+        .name(WORKER_NAME.to_owned())
+        .spawn(move || run_worker(&committer))
+        .map_err(|_| StopPathError::Unavailable {
+            reason: THREAD_UNAVAILABLE.to_owned(),
+        })?;
+    // A fresh OnceLock, set before the hook can request a stop.
+    if shared.worker.set(worker.thread().clone()).is_err() {
+        eprintln!("senpi-desktop: stop-commit worker registered twice");
+    }
+    Ok(())
+}
+
+impl Shared {
+    pub(super) fn new(supervisor: Arc<Supervisor>, hotkey: Hotkey) -> Arc<Self> {
+        Arc::new(Self {
+            supervisor,
+            hotkey: Mutex::new(hotkey),
+            control: Mutex::new(Control::default()),
+            changed: Condvar::new(),
+            stop_pending: AtomicBool::new(false),
+            worker: OnceLock::new(),
+        })
+    }
+
+    /// Asks both threads to exit and wakes them.
+    pub(super) fn shut_down(&self) {
+        self.update(|control| control.shutdown = true);
+        hotkey::wake(self.control.lock().thread_id);
+        if let Some(worker) = self.worker.get() {
+            worker.unpark();
+        }
+    }
+}
+
 fn run_listener(shared: &Arc<Shared>) {
+    listen(shared);
+    shared.update(|control| control.listener_exited = true);
+}
+
+fn listen(shared: &Arc<Shared>) {
     hotkey::create_queue(shared);
     loop {
         let chord = *shared.hotkey.lock();
@@ -184,32 +231,19 @@ impl StopPathListener for HotkeyListener {
             shared.request_restart(true);
             return shared.wait_settled(attempts, START_TIMEOUT);
         }
-        let shared = Arc::new(Shared {
-            supervisor: sup,
-            hotkey: Mutex::new(hotkey),
-            control: Mutex::new(Control::default()),
-            changed: Condvar::new(),
-            stop_pending: AtomicBool::new(false),
-            worker: OnceLock::new(),
-        });
-        let committer = Arc::clone(&shared);
-        let worker = thread::Builder::new()
-            .name(WORKER_NAME.to_owned())
-            .spawn(move || run_worker(&committer))
-            .map_err(|_| StopPathError::Unavailable {
-                reason: THREAD_UNAVAILABLE.to_owned(),
-            })?;
-        // A fresh OnceLock, set before the hook can request a stop.
-        if shared.worker.set(worker.thread().clone()).is_err() {
-            eprintln!("senpi-desktop: stop-commit worker registered twice");
-        }
+        let shared = Shared::new(sup, hotkey);
+        spawn_worker(&shared)?;
         let listener = Arc::clone(&shared);
-        thread::Builder::new()
+        let spawned = thread::Builder::new()
             .name(THREAD_NAME.to_owned())
-            .spawn(move || run_listener(&listener))
-            .map_err(|_| StopPathError::Unavailable {
+            .spawn(move || run_listener(&listener));
+        if spawned.is_err() {
+            // The worker is already running: stop it rather than leak it.
+            shared.shut_down();
+            return Err(StopPathError::Unavailable {
                 reason: THREAD_UNAVAILABLE.to_owned(),
-            })?;
+            });
+        }
         self.shared = Some(Arc::clone(&shared));
         shared.wait_settled(0, START_TIMEOUT)
     }
@@ -230,11 +264,7 @@ impl StopPathListener for HotkeyListener {
 impl Drop for HotkeyListener {
     fn drop(&mut self) {
         if let Some(shared) = &self.shared {
-            shared.update(|control| control.shutdown = true);
-            hotkey::wake(shared.control.lock().thread_id);
-            if let Some(worker) = shared.worker.get() {
-                worker.unpark();
-            }
+            shared.shut_down();
         }
     }
 }
