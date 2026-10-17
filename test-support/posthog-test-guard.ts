@@ -47,16 +47,23 @@ export function createPostHogTestGuard(prototype: GuardedPrototype): PostHogTest
   const realFetch = prototype.fetch
   const realCapture = prototype.capture
   const realShutdown = prototype.shutdown
-  const owners = new WeakMap<object, { readonly test: number; readonly origin: string }>()
+  const owners = new WeakMap<object, { readonly test: number; readonly origin: string; readonly outsideTest: boolean }>()
   const silenced = new WeakSet<object>()
   let live = new Set<GuardedClient>()
   let violations: string[] = []
+  let outsideTestViolations: string[] = []
   let test = 0
+  let inTest = false
 
   const claim = (client: GuardedClient): void => {
     if (owners.has(client)) return
-    owners.set(client, { test, origin: origin() })
-    live.add(client)
+    const owner = { test, origin: origin(), outsideTest: !inTest }
+    owners.set(client, owner)
+    if (inTest) {
+      live.add(client)
+      return
+    }
+    outsideTestViolations.push(`a PostHog client was used outside a test (${owner.origin}); create and shut down each client inside the test that uses it`)
   }
 
   prototype.capture = function (this: GuardedClient, ...args: unknown[]) {
@@ -72,6 +79,10 @@ export function createPostHogTestGuard(prototype: GuardedPrototype): PostHogTest
   prototype.fetch = function (this: GuardedClient, url: string, options: unknown) {
     claim(this)
     const owner = owners.get(this)
+    if (owner?.outsideTest) {
+      violations.push(`a PostHog client used outside a test (${owner.origin}) sent ${url}`)
+      return Promise.reject(new Error("PostHog test guard: client used outside a test"))
+    }
     if (silenced.has(this) || owner?.test !== test) {
       violations.push(`a PostHog client created at ${owner?.origin ?? "an unknown test"} sent ${url} after its test ended`)
       return Promise.reject(new Error("PostHog test guard: client outlived its test"))
@@ -86,10 +97,13 @@ export function createPostHogTestGuard(prototype: GuardedPrototype): PostHogTest
   return {
     beginTest() {
       test += 1
-      violations = []
+      inTest = true
+      violations = outsideTestViolations
+      outsideTestViolations = []
       live = new Set()
     },
     endTest() {
+      inTest = false
       for (const client of live) {
         violations.push(`a PostHog client created at ${owners.get(client)?.origin} was never shut down`)
         silenced.add(client)

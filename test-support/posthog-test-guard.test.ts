@@ -63,6 +63,24 @@ describe("PostHog test guard (#10394)", () => {
     expect(guard.endTest()).toHaveLength(1)
   })
 
+  test("#given a client first used outside a test #when the next test runs #then the client is reported as suite-scoped and its sends are refused under that name", async () => {
+    // given
+    const { FakeClient, sent, guard } = fakeClientClass()
+    const client = new FakeClient()
+    client.capture({ event: "e" })
+
+    // when
+    guard.beginTest()
+    const send = client.fetch("http://127.0.0.1:4318/batch/", {})
+
+    // then
+    await expect(send).rejects.toThrow("used outside a test")
+    const violations = guard.endTest()
+    expect(violations).toHaveLength(2)
+    expect(violations.every((violation) => violation.includes("outside a test"))).toBe(true)
+    expect(sent).toEqual([])
+  })
+
   test("#given a client pointed at a real analytics host #when it sends #then the request is refused and reported", async () => {
     // given
     const { FakeClient, sent, guard } = fakeClientClass()
