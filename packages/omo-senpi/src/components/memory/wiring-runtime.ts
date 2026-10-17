@@ -14,6 +14,7 @@ import {
   type MemoryIdentityRuntimeDeps,
 } from "./identity-runtime"
 import { createMemoryJournalWiring, type MemoryJournalWiring } from "./journal-wiring"
+import { resolveMemorySessionModel } from "./session-model-resolver"
 import { NO_LAUNCH_FACTS, currentLaunchScope, factsForScope, readLaunchFacts, withLaunchScope, type LaunchFacts } from "./launch-facts"
 import { isStaleExtensionContextError } from "./stale-extension-context"
 import { resolveReflectionTriggerConfig, type ReflectionTriggerSession } from "./trigger-wiring"
@@ -54,7 +55,6 @@ export function createMemoryRuntimeWiring(
 
   // Launch facts are bound to the run (launch-facts.ts): a trigger launch reads only its own
   // immutable snapshot, any other launch reads the current ctx only when it belongs to the run.
-  // Outside any launch (facts extraction) the current ctx answers as before.
   function currentLaunchFacts(): LaunchFacts {
     const scope = currentLaunchScope()
     if (scope?.snapshot !== undefined) return scope.snapshot
@@ -66,7 +66,9 @@ export function createMemoryRuntimeWiring(
       if (!isStaleExtensionContextError(error)) throw error
       live = NO_LAUNCH_FACTS
     }
-    if (scope === undefined) return live
+    // Outside any launch (a facts launch without a captured selection) no session's own details apply:
+    // only the process-wide model registry, never whichever session happens to be current.
+    if (scope === undefined) return { ...NO_LAUNCH_FACTS, modelRegistry: live.modelRegistry }
     let currentSessionId: string | undefined
     try {
       currentSessionId = sessionIdFrom(current)
@@ -107,6 +109,21 @@ export function createMemoryRuntimeWiring(
     }
   }
 
+  function ownSessionModel(identity: MemoryIdentityContext): ReflectionSessionModel | undefined {
+    const current = lastEventCtx.current
+    let sessionId: string | undefined
+    let model: ReflectionSessionModel | undefined
+    try {
+      sessionId = sessionIdFrom(current)
+      model = resolveMemorySessionModel(current)
+    } catch (error) {
+      if (!isStaleExtensionContextError(error)) throw error
+      return undefined
+    }
+    if (sessionId === undefined) return undefined
+    return resolveContext(sessionId)?.identity === identity.identity ? model : undefined
+  }
+
   /** The engine's own answer for this session; detection is the fallback for hosts without it. */
   function resolveAgentDir(): string {
     return currentLaunchFacts().agentDir ?? resolveAgentHome({ env: process.env })
@@ -138,7 +155,9 @@ export function createMemoryRuntimeWiring(
       cwd: options.cwd(),
       loadConfig: () => options.loadConfig({ cwd: options.cwd() }),
       resolveModelRegistry,
-      resolveSessionModel,
+      // A facts launch handed no selection (unpark, reconcile, final delta) may use the current
+      // session's model only when that session belongs to this identity: never another agent's.
+      resolveSessionModel: () => ownSessionModel(identity),
       env: options.env,
       ...(options.logger === undefined ? {} : { logger: options.logger }),
     })

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Memory reflection keeps running after a session is replaced or reloaded, and never uses another session's details.** A reflection launch reads its model and session details after the trigger has returned; if the session was replaced (`newSession`, `fork`, `switchSession`) or reloaded in between, those reads failed on the retired session and reflection silently stopped, and once the new session was current they could return the new session's transcript, model and agent folder instead. A triggered launch now uses a snapshot of the triggering session taken when it fired, and any other launch uses session details only from its own session ([#10382](https://github.com/code-yeongyu/oh-my-openagent/pull/10382)).
+**Memory reflection keeps running after a session is replaced or reloaded, and never uses another session's details.** A reflection launch reads its model and session details after the trigger has returned; if the session was replaced (`newSession`, `fork`, `switchSession`) or reloaded in between, those reads failed on the retired session and reflection silently stopped, and once the new session was current they could return the new session's transcript, model and agent folder instead. A triggered launch now uses a snapshot of the triggering session taken when it fired, any other launch uses session details only from its own session, and a facts extraction that was not handed its session's model takes the current session's model only when that session belongs to the same agent ([#10382](https://github.com/code-yeongyu/oh-my-openagent/pull/10382)).
 
 ## [5.1.35] - 2026-10-16
 
