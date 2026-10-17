@@ -96,3 +96,14 @@ fn only_non_xtest_keyboards_count_as_physical_sources() {
     assert!(!super::source::counts_as_physical(b"Virtual core XTEST keyboard"));
     assert!(!super::source::counts_as_physical(b"second XTEST keyboard"));
 }
+
+#[test]
+fn a_device_the_server_cannot_describe_never_stops_input() {
+    use x11rb::protocol::xinput::DeviceType;
+    // A lookup that failed, or a device removed before the lookup (a client can
+    // add a master, chord through its XTEST slave and remove it at once).
+    assert!(!super::source::physical_from(None));
+    // Known devices keep their classification.
+    assert!(super::source::physical_from(Some((DeviceType::SLAVE_KEYBOARD, b"AT Translated Set 2 keyboard".as_slice()))));
+    assert!(!super::source::physical_from(Some((DeviceType::SLAVE_KEYBOARD, b"Virtual core XTEST keyboard".as_slice()))));
+}

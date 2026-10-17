@@ -14,6 +14,12 @@ pub fn counts_as_physical(name: &[u8]) -> bool {
     !name.windows(5).any(|window| window == b"XTEST")
 }
 
+/// Classifies the device a raw event came from, given what the server
+/// reported for its id (`None`: the lookup failed or the device is gone).
+pub fn physical_from(found: Option<(DeviceType, &[u8])>) -> bool {
+    found.is_none_or(|(kind, name)| kind != DeviceType::SLAVE_KEYBOARD || counts_as_physical(name))
+}
+
 /// Per-connection cache of source device classifications. Device ids are
 /// reused after removal, so the owner clears it on every hierarchy change.
 #[derive(Debug, Default)]
@@ -28,12 +34,12 @@ impl Sources {
         if let Some(&physical) = self.known.get(&sourceid) {
             return physical;
         }
-        let physical = conn
+        let found = conn
             .xinput_xi_query_device(sourceid)
             .ok()
             .and_then(|cookie| cookie.reply().ok())
-            .and_then(|reply| reply.infos.into_iter().find(|info| info.deviceid == sourceid))
-            .is_none_or(|info| info.type_ != DeviceType::SLAVE_KEYBOARD || counts_as_physical(&info.name));
+            .and_then(|reply| reply.infos.into_iter().find(|info| info.deviceid == sourceid));
+        let physical = physical_from(found.as_ref().map(|info| (info.type_, info.name.as_slice())));
         self.known.insert(sourceid, physical);
         physical
     }
