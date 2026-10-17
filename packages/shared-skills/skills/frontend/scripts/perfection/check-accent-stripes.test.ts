@@ -9,17 +9,19 @@ const FIXTURES = join(import.meta.dir, "fixtures", "accent-stripes")
 const SCRIPT = join(import.meta.dir, "check-accent-stripes.ts")
 
 const EXPECTED: Readonly<Record<string, ReadonlyArray<[number, RuleId]>>> = {
-	"border-top-card.css": [[1, "edge-stripe"]],
-	"split-rule-and-token.scss": [[1, "edge-stripe"], [9, "edge-stripe"]],
-	"pseudo-bar.css": [[7, "pseudo-bar"]],
-	"inset-shadow.css": [[1, "inset-shadow-stripe"]],
-	"apply.css": [[1, "edge-stripe"]],
+	"border-top-card.css": [[4, "edge-stripe"]],
+	"split-rule-and-token.scss": [[3, "edge-stripe"], [10, "edge-stripe"]],
+	"pseudo-bar.css": [[12, "pseudo-bar"]],
+	"inset-shadow.css": [[3, "inset-shadow-stripe"]],
+	"apply.css": [[2, "edge-stripe"]],
 	"tailwind-cards.tsx": [[4, "edge-stripe"], [5, "edge-stripe"]],
 	"tailwind-pseudo.html": [[1, "pseudo-bar"]],
-	"tailwind-inset-and-style.vue": [[2, "inset-shadow-stripe"], [7, "edge-stripe"]],
+	"tailwind-inset-and-style.vue": [[2, "inset-shadow-stripe"], [9, "edge-stripe"]],
 	"inline-styles.tsx": [[3, "edge-stripe"], [4, "edge-stripe"]],
 	"cva-variant.ts": [[1, "edge-stripe"]],
-	"styled-components.tsx": [[3, "edge-stripe"], [10, "edge-stripe"]],
+	"gradient-edges.css": [[3, "gradient-stripe"], [8, "edge-stripe"], [20, "pseudo-bar"], [25, "gradient-stripe"]],
+	"non-visible-focus-and-nested.tsx": [[2, "edge-stripe"], [3, "edge-stripe"], [6, "edge-stripe"]],
+	"styled-components.tsx": [[6, "edge-stripe"], [12, "edge-stripe"]],
 }
 
 function lintFixture(dir: string, name: string) {
@@ -64,7 +66,7 @@ describe("#given the CLI", () => {
 	test("#when it scans the positive fixtures #then it exits 1 and prints file:line findings", () => {
 		const result = run(join(FIXTURES, "positive"))
 		expect(result.status).toBe(1)
-		expect(result.stdout).toMatch(/border-top-card\.css:1:1 {2}edge-stripe/)
+		expect(result.stdout).toMatch(/border-top-card\.css:4:3 {2}edge-stripe/)
 	})
 
 	test("#when it scans the negative fixtures #then it exits 0", () => {
@@ -73,7 +75,7 @@ describe("#given the CLI", () => {
 
 	test("#when --json is passed #then stdout is a parseable findings array", () => {
 		const result = run("--json", join(FIXTURES, "positive", "pseudo-bar.css"))
-		expect(JSON.parse(result.stdout)).toEqual([expect.objectContaining({ line: 7, rule: "pseudo-bar" })])
+		expect(JSON.parse(result.stdout)).toEqual([expect.objectContaining({ line: 12, rule: "pseudo-bar" })])
 	})
 
 	test("#when no path is given #then it exits 2 with usage", () => {

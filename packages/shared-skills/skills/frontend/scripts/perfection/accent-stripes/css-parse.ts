@@ -1,13 +1,14 @@
-export type Declaration = { readonly prop: string; readonly value: string }
+export type Declaration = { readonly prop: string; readonly value: string; readonly offset?: number }
 
 export type CssRule = {
 	readonly selector: string
 	readonly declarations: readonly Declaration[]
 	readonly applyClasses: readonly string[]
+	readonly applyOffset?: number
 	readonly offset: number
 }
 
-type Frame = { selector: string; declarations: Declaration[]; applyClasses: string[]; offset: number }
+type Frame = { selector: string; declarations: Declaration[]; applyClasses: string[]; applyOffset?: number; offset: number }
 
 function blankComments(text: string, lineComments: boolean): string {
 	let out = text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
@@ -48,16 +49,17 @@ function nearestSelector(stack: readonly Frame[]): string | undefined {
 	return undefined
 }
 
-function addStatement(frame: Frame | undefined, statement: string): void {
+function addStatement(frame: Frame | undefined, statement: string, offset: number): void {
 	const text = statement.trim()
 	if (!frame || !text) return
 	if (text.startsWith("@apply")) {
+		frame.applyOffset ??= offset
 		frame.applyClasses.push(...text.slice("@apply".length).replace(/!important/g, "").split(/\s+/).filter(Boolean))
 		return
 	}
 	const colon = text.indexOf(":")
 	if (colon <= 0) return
-	frame.declarations.push({ prop: text.slice(0, colon).trim().toLowerCase(), value: text.slice(colon + 1).trim() })
+	frame.declarations.push({ prop: text.slice(0, colon).trim().toLowerCase(), value: text.slice(colon + 1).trim(), offset })
 }
 
 export function parseCss(source: string, baseOffset = 0, lineComments = false): CssRule[] {
@@ -88,9 +90,9 @@ export function parseCss(source: string, baseOffset = 0, lineComments = false): 
 			const raw = buffer.trim()
 			const selector = raw.startsWith("@") ? raw : resolveSelector(nearestSelector(stack), raw)
 			stack.push({ selector, declarations: [], applyClasses: [], offset: baseOffset + Math.max(bufferStart, 0) })
-		} else if (ch === ";") addStatement(top, buffer)
+		} else if (ch === ";") addStatement(top, buffer, baseOffset + Math.max(bufferStart, 0))
 		else {
-			addStatement(top, buffer)
+			addStatement(top, buffer, baseOffset + Math.max(bufferStart, 0))
 			const done = stack.pop()
 			if (done && !done.selector.startsWith("@")) rules.push(done)
 		}

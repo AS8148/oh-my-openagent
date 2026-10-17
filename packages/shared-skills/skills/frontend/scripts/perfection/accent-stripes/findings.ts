@@ -1,4 +1,4 @@
-export type RuleId = "edge-stripe" | "pseudo-bar" | "inset-shadow-stripe"
+export type RuleId = "edge-stripe" | "pseudo-bar" | "inset-shadow-stripe" | "gradient-stripe"
 
 export type Finding = {
 	readonly file: string
@@ -12,6 +12,7 @@ export const RULE_MESSAGES: Readonly<Record<RuleId, string>> = {
 	"edge-stripe": "coloured one-side border on a rounded surface; the corners bend the stripe",
 	"pseudo-bar": "coloured ::before/::after bar on a rounded surface",
 	"inset-shadow-stripe": "inset box-shadow stripe on a rounded surface",
+	"gradient-stripe": "hard-stop gradient band along one edge of a rounded surface",
 }
 
 export const FIX_HINT =

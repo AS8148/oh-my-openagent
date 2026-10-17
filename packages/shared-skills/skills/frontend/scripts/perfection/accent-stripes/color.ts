@@ -114,6 +114,12 @@ export function looksLikeColor(token: string): boolean {
 	)
 }
 
+const COLOR_IN_VALUE = /#[0-9a-f]{3,8}\b|(?:rgba?|hsla?|oklch|lch)\([^)]*\)|var\(--[\w-]+(?:,[^)]*)?\)|\b[a-z]+\b/gi
+
+export function containsChromatic(value: string): boolean {
+	return (value.match(COLOR_IN_VALUE) ?? []).some((c) => looksLikeColor(c) && classifyColor(c) === "chromatic")
+}
+
 export function classifyUtilityColor(fragment: string): ColorClass {
 	if (fragment.startsWith("[") && fragment.endsWith("]")) {
 		const inner = fragment.slice(1, -1).replace(/^color:/, "").replace(/_/g, " ")

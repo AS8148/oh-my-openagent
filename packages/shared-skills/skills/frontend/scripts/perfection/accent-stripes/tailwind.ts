@@ -2,7 +2,7 @@ import { classifyUtilityColor } from "./color"
 import { type Corner, isInsetShadowStripe, MAX_BAR_PX, MIN_STRIPE_PX, parseLength } from "./declarations"
 import type { RuleId } from "./findings"
 
-const EXEMPT_VARIANT = /^(?:[\w-]+-)?(focus|focus-visible|focus-within|invalid|user-invalid|aria-invalid|aria-\[invalid[^\]]*\])$/
+const EXEMPT_VARIANT = /^(?:[\w-]+-)?(focus-visible|invalid|user-invalid|aria-invalid|aria-\[invalid[^\]]*\])$/
 const BORDER_STYLE = new Set(["solid", "dashed", "dotted", "double", "hidden", "none"])
 const SPACING_PX: Readonly<Record<string, number>> = { px: 1, "0.5": 2, "1": 4, "1.5": 6, "2": 8 }
 

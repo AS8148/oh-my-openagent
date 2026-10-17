@@ -1,4 +1,4 @@
-import { type ColorClass, classifyColor, looksLikeColor } from "./color"
+import { type ColorClass, classifyColor, containsChromatic, looksLikeColor } from "./color"
 import { type Declaration, splitTopLevel } from "./css-parse"
 
 export const MIN_STRIPE_PX = 2
@@ -50,8 +50,10 @@ function parseEdgeShorthand(value: string): Edge {
 function collectEdges(declarations: readonly Declaration[]): Map<Side, Edge> {
 	const edges = new Map<Side, Edge>(SIDES.map((s) => [s, {}]))
 	const merge = (side: Side, patch: Edge) => edges.set(side, { ...edges.get(side), ...patch })
+	let imageChromatic = false
 	for (const { prop, value } of declarations) {
-		if (prop === "border") SIDES.forEach((s) => merge(s, parseEdgeShorthand(value)))
+		if (prop === "border-image" || prop === "border-image-source") imageChromatic = containsChromatic(value)
+		else if (prop === "border") SIDES.forEach((s) => merge(s, parseEdgeShorthand(value)))
 		else if (prop === "border-width") boxValues(value).forEach((v, i) => merge(SIDES[i] ?? "top", { width: parseLength(v) ?? 0 }))
 		else if (prop === "border-color") boxValues(value).forEach((v, i) => merge(SIDES[i] ?? "top", { color: classifyColor(v) }))
 		else {
@@ -62,6 +64,9 @@ function collectEdges(declarations: readonly Declaration[]): Map<Side, Edge> {
 			else if (m?.[2] === "color") merge(side, { color: classifyColor(value) })
 			else merge(side, parseEdgeShorthand(value))
 		}
+	}
+	if (imageChromatic) {
+		for (const side of SIDES) if ((edges.get(side)?.width ?? 0) > 0) merge(side, { color: "chromatic" })
 	}
 	return edges
 }
@@ -132,14 +137,10 @@ export function hasInsetShadowStripe(declarations: readonly Declaration[]): bool
 	return declarations.some(({ prop, value }) => prop === "box-shadow" && isInsetShadowStripe(value))
 }
 
-const COLOR_IN_VALUE = /#[0-9a-f]{3,8}\b|(?:rgba?|hsla?|oklch|lch)\([^)]*\)|var\(--[\w-]+(?:,[^)]*)?\)|\b[a-z]+\b/gi
+export const isBackground = (prop: string) => prop === "background" || prop === "background-color" || prop === "background-image"
 
 function backgroundIsChromatic(declarations: readonly Declaration[]): boolean {
-	return declarations.some(
-		({ prop, value }) =>
-			(prop === "background" || prop === "background-color" || prop === "background-image") &&
-			(value.match(COLOR_IN_VALUE) ?? []).some((c) => looksLikeColor(c) && classifyColor(c) === "chromatic"),
-	)
+	return declarations.some(({ prop, value }) => isBackground(prop) && containsChromatic(value))
 }
 
 export function isPseudoBar(declarations: readonly Declaration[]): boolean {

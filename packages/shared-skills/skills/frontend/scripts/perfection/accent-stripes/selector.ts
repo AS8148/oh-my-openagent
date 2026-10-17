@@ -7,7 +7,7 @@ export type Compound = {
 	readonly pseudoElement: boolean
 }
 
-const EXEMPT_STATE = /:(focus-visible|focus-within|focus|invalid|user-invalid)\b|\[aria-invalid|\.(is-invalid|has-error|was-validated)\b/i
+const EXEMPT_STATE = /:(focus-visible|invalid|user-invalid)\b|\[aria-invalid|\.(is-invalid|has-error|was-validated)\b/i
 const EXEMPT_TAGS = new Set(["table", "thead", "tbody", "tfoot", "tr", "th", "td", "hr", "input", "select", "textarea"])
 
 function lastCompound(part: string): string {
@@ -29,10 +29,7 @@ export function parseCompound(part: string): Compound {
 
 export function isExemptSelector(part: string): boolean {
 	if (EXEMPT_STATE.test(part)) return true
-	return part
-		.replace(/[>+~]/g, " ")
-		.split(/\s+/)
-		.some((piece) => EXEMPT_TAGS.has((/^[a-z][\w-]*/i.exec(piece)?.[0] ?? "").toLowerCase()))
+	return EXEMPT_TAGS.has(parseCompound(part).tag)
 }
 
 export function selectorParts(selector: string): string[] {
