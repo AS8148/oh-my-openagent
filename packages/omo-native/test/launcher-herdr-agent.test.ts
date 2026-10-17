@@ -18,7 +18,7 @@ function write(path: string, content: string): void {
 }
 
 /** A copied launcher over a fake engine, with execve replaced so the handed environment is recorded. */
-function launchCapture(args: readonly string[], env: Record<string, string>): NodeJS.ProcessEnv {
+function launchCapture(args: readonly string[], env: Record<string, string>, stdinIsTTY = true): NodeJS.ProcessEnv {
   const root = mkdtempSync(join(tmpdir(), "omo-herdr-agent-"))
   roots.push(root)
   const packageRoot = join(root, "app")
@@ -43,12 +43,12 @@ function launchCapture(args: readonly string[], env: Record<string, string>): No
   write(probe, `import { writeFileSync } from "node:fs"
 import { runLauncher } from "./bin/lib/launcher.js"
 Object.defineProperty(process, "platform", { value: "linux" })
-process.execve = (file, argv, handed) => { writeFileSync(process.env.EXEC_CAPTURE, JSON.stringify(handed)) }
+${stdinIsTTY ? 'Object.defineProperty(process.stdin, "isTTY", { value: true })\n' : ""}process.execve = (file, argv, handed) => { writeFileSync(process.env.EXEC_CAPTURE, JSON.stringify(handed)) }
 await runLauncher(${JSON.stringify(args)})
 `)
   const home = join(root, "home")
   mkdirSync(home, { recursive: true })
-  const { HERDR_ENV: _env, HERDR_AGENT: _agent, ...inherited } = process.env
+  const { HERDR_ENV: _env, HERDR_AGENT: _agent, OMO_HERDR_AGENT_HINT: _marker, ...inherited } = process.env
   const result = spawnSync(process.execPath, [probe], {
     encoding: "utf8",
     env: { ...inherited, HOME: home, SENPI_CODING_AGENT_DIR: join(root, "agent"), XDG_DATA_HOME: join(root, "xdg"), EXEC_CAPTURE: capture, ...env },
@@ -58,8 +58,14 @@ await runLauncher(${JSON.stringify(args)})
 }
 
 describe("the launcher names the engine for herdr (#10448)", () => {
-  test("#given an interactive launch inside herdr #then the engine starts with HERDR_AGENT=pi", () => {
-    expect(launchCapture(["hello"], { HERDR_ENV: "1" }).HERDR_AGENT).toBe("pi")
+  test("#given an interactive launch inside herdr #then the engine starts with HERDR_AGENT=pi and the launcher's marker", () => {
+    const handed = launchCapture(["hello"], { HERDR_ENV: "1" })
+    expect(handed.HERDR_AGENT).toBe("pi")
+    expect(handed.OMO_HERDR_AGENT_HINT).toBe("pi")
+  })
+
+  test("#given piped stdin inside herdr #then no hint is handed down", () => {
+    expect(launchCapture(["hello"], { HERDR_ENV: "1" }, false).HERDR_AGENT).toBeUndefined()
   })
 
   test("#given an interactive launch outside herdr #then no hint is handed down", () => {
