@@ -28,8 +28,8 @@ function rung(id: string): ResolvedModelRecord {
 }
 
 describe("runtime fallback over a live daemon session", () => {
-  for (const acknowledged of [true, false] as const) {
-    test(`#given the failed rung's close_session is ${acknowledged ? "acknowledged" : "never acknowledged"} #when fallback runs #then ${acknowledged ? "the next rung replaces it" : "the task fails and the next rung never starts beside it"}`, async () => {
+  for (const [acknowledged, lateReply] of [[true, false], [true, true], [false, false]] as const) {
+    test(`#given the failed rung's close_session is ${acknowledged ? (lateReply ? "acknowledged after its close grace" : "acknowledged") : "never acknowledged"} #when fallback runs #then ${acknowledged ? "the next rung replaces it" : "the task fails and the next rung never starts beside it"}`, async () => {
       // given
       const project = tempProject()
       const store = createTaskRecordStore({ project_dir: project })
@@ -81,6 +81,10 @@ describe("runtime fallback over a live daemon session", () => {
         return result
       })
       if (!acknowledged) host.withholdReply("close_session")
+      // The Windows failure (#9489): the acknowledgement lands after the 50 ms grace. It is released by a real
+      // timer armed before the grace clock is frozen, so it arrives in real time either way.
+      const releaseClose = lateReply ? host.holdReply("close_session") : undefined
+      const lateClose = releaseClose === undefined ? undefined : setTimeout(releaseClose, 200)
       const settled = acknowledged ? undefined : manager.waitFor(task.task_id, { signal: AbortSignal.timeout(10_000) })
       const nextOpened = acknowledged ? host.waitForCommand("prompt") : undefined
       let timeout: ReturnType<typeof setTimeout> | undefined
@@ -119,6 +123,7 @@ describe("runtime fallback over a live daemon session", () => {
       } finally {
         if (acknowledged) jest.useRealTimers()
         clearTimeout(timeout)
+        if (lateClose !== undefined) clearTimeout(lateClose)
         for (const handle of launched) await handle.dispose()
         for (const id of manager.residentTaskIds()) manager.forget(id, { path: "end" })
         lifecycle.dispose?.()
