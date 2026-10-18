@@ -34,6 +34,7 @@ export function createOnboardingHarness(dir: string, sessionId = "session", mode
     isOnboardingComplete: () => state.isOnboardingComplete(dir),
     releaseOnboarding: () => state.releaseOnboarding(dir),
     scan: async () => undefined,
+    stateDir: dir,
   }
   ;(component ?? createOnboardingComponent(dependencies)).register(pi, {
     logger: { info() {}, warn() {}, error() {} },

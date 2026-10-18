@@ -161,6 +161,7 @@ describe("onboarding entry", () => {
           claimOnboarding: () => claimOnboarding(dir),
           isOnboardingComplete: () => isOnboardingComplete(dir),
           releaseOnboarding: () => releaseOnboarding(dir),
+          scan: async () => undefined,
         })
         const h = createOnboardingHarness(dir, reason, mode, component)
         h.pi.setFlag("onboard", true)

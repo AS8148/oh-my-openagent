@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { readFile } from "node:fs/promises"
+import { mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { GitMemoryRepo, buildDefaultSeedFiles, buildIdentityPaths, type FactsPeopleRouting } from "@oh-my-opencode/memory-core"
@@ -35,6 +35,7 @@ async function machine() {
   const home = join(root.path, "home")
   const codex = join(root.path, "codex")
   const workspace = join(root.path, "workspace")
+  await mkdir(workspace, { recursive: true })
   for (const [index, prompt] of ["Ship the feature with bun", "Fix the bun test"].entries()) {
     await writeTranscript({
       filePath: join(codex, "sessions", "2026", "10", "18", `rollout-${index}.jsonl`),

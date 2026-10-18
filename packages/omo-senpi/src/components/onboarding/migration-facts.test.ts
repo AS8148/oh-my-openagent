@@ -98,6 +98,7 @@ describe("onboarding migration inventory", () => {
       isOnboardingComplete: () => state.isOnboardingComplete(dir),
       releaseOnboarding: () => state.releaseOnboarding(dir),
       migrationFacts: () => Promise.reject(new Error("scan unavailable")),
+      scan: () => Promise.reject(new Error("scan unavailable")),
     })
     const h = createOnboardingHarness(dir, "s", "rpc", component)
     await h.start()

@@ -45,6 +45,25 @@ export function isOnboardingComplete(stateDir: string): boolean {
   }
 }
 
+/** When onboarding was completed (the marker's `completedAt`), or null when it is not. */
+export function readOnboardingCompletedAt(stateDir: string): string | null {
+  let raw: string
+  try {
+    raw = readFileSync(join(stateDir, ONBOARDING_MARKER), "utf8")
+  } catch {
+    return null
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    const completedAt = isRecord(parsed) ? parsed["completedAt"] : undefined
+    if (typeof completedAt === "string" && !Number.isNaN(Date.parse(completedAt))) return completedAt
+  } catch {
+    // A marker from an older writer still means completed; its mtime is the best timestamp.
+  }
+  const mtime = getOnboardingMarkerMtime(stateDir)
+  return mtime === null ? null : new Date(mtime).toISOString()
+}
+
 export function releaseOnboarding(stateDir: string): void {
   try {
     unlinkSync(join(stateDir, ONBOARDING_MARKER))

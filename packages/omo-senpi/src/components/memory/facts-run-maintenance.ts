@@ -1,8 +1,9 @@
 import { existsSync } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 import {
-  GitMemoryRepo, createLockRecord, memoryWriterLockPath, runFinalizationLockPath, withLock,
+  GitMemoryRepo, createLockRecord, runFinalizationLockPath, withLock,
 } from "@oh-my-opencode/memory-core"
+import { withFactsWriterLock } from "./facts-batch-apply"
 import { ledgerTargets } from "./facts-failure-recording"
 import { finalizeClaimedFactsRun } from "./facts-run-finalize"
 import { reconcileFactsRuns } from "./facts-run-reconcile"
@@ -21,8 +22,7 @@ export function createFactsRunMaintenance(
 ) {
   async function withWriterLock<T>(operation: () => Promise<T>, attempt: number): Promise<T> {
     if (options.withWriterLock !== undefined) return options.withWriterLock(operation, attempt)
-    const record = await createLockRecord("memory-write", { runId: `facts-${attempt}` })
-    return withLock(memoryWriterLockPath(options.identity.paths.locks), record, operation, { waitTimeoutMs: 2_000 })
+    return withFactsWriterLock(options.identity.paths.locks, operation, attempt)
   }
 
   async function prune(): Promise<void> {

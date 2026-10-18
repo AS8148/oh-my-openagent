@@ -11,7 +11,7 @@ import {
   type OnboardingApplyStage,
   type OnboardingScanResponse,
 } from "./scan-contract"
-import type { applyOnboardingScan, migrationFactsFromScan, OnboardingScanEnvironment, runOnboardingScan, runOnboardingUnderstanding } from "./scan-runtime"
+import type { applyOnboardingScan, migrationFactsFromScan, onboardingScanContext, OnboardingScanEnvironment, runOnboardingScan, runOnboardingUnderstanding } from "./scan-runtime"
 import { registerOnboardingUnderstanding, type OnboardingUnderstandingSeams } from "./understand-component"
 
 export * from "./scan-contract"
@@ -28,6 +28,7 @@ export interface OnboardingScanRuntime {
   readonly runOnboardingScan: typeof runOnboardingScan
   readonly applyOnboardingScan: typeof applyOnboardingScan
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
+  readonly onboardingScanContext: typeof onboardingScanContext
   readonly runOnboardingUnderstanding: typeof runOnboardingUnderstanding
 }
 
@@ -118,13 +119,15 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const apply = loaded["applyOnboardingScan"]
   const facts = loaded["migrationFactsFromScan"]
   const understand = loaded["runOnboardingUnderstanding"]
-  if (typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function") {
+  const context = loaded["onboardingScanContext"]
+  if (typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof context !== "function") {
     throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
   }
   return {
     runOnboardingScan: (...args) => Reflect.apply(run, undefined, args),
     applyOnboardingScan: (...args) => Reflect.apply(apply, undefined, args),
     migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
+    onboardingScanContext: (...args) => Reflect.apply(context, undefined, args),
     runOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
   }
 }

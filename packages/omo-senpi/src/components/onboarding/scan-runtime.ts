@@ -108,6 +108,54 @@ export async function applyOnboardingScan(plans: SetupPlans, stages: ReadonlySet
   return [...await applySetupStages(plans, (stage) => stages.has(stage.id))]
 }
 
+const ROWS_PER_SOURCE = 40
+
+const SUMMARY_KINDS: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [
+  ["sign-ins", new Set(["api-key", "oauth"])],
+  ["providers", new Set(["provider"])],
+  ["MCP servers", new Set(["mcp"])],
+  ["skills", new Set(["skill"])],
+]
+
+/**
+ * The first-prompt context of one scan, computed from its events every time: one row per found item
+ * (ids and states, never a key; capped per source with the remainder counted), failed sources, and
+ * the value summary the onboarding reports.
+ */
+export function onboardingScanContext(scanId: string, events: readonly OnboardingScanEvent[]): string {
+  const items = events.filter((event) => event.kind === "item" && event.item !== undefined)
+  const lines = [`Onboarding scan ${scanId} (the same scan omo setup and the desktop app run; one row per found item):`]
+  for (const source of [...new Set(items.map((event) => event.source))]) {
+    const own = items.filter((event) => event.source === source)
+    for (const { item } of own.slice(0, ROWS_PER_SOURCE)) {
+      if (item === undefined) continue
+      const detail = item.detail === undefined ? "" : ` - ${item.detail}`
+      const project = item.project === undefined ? "" : ` (project ${item.project})`
+      lines.push(`- ${source} ${item.id} [${item.kind}: ${item.state}]${detail}${project}`)
+    }
+    if (own.length > ROWS_PER_SOURCE) lines.push(`- ${source}: ${own.length - ROWS_PER_SOURCE} more`)
+  }
+  for (const failed of events.filter((event) => event.kind === "source_failed")) {
+    lines.push(`! ${failed.source} could not be read: ${failed.reason ?? "unknown error"}`)
+  }
+  lines.push(`Value summary: ${valueSummary(items.flatMap((event) => (event.item === undefined ? [] : [event.item])))}`)
+  return lines.join("\n")
+}
+
+function valueSummary(rows: readonly OnboardingScanItem[]): string {
+  const count = (kind: string): number => rows.filter((row) => row.kind === kind).length
+  const sessions = count("session")
+  const projects = count("project")
+  const parts = [`${sessions} recent ${sessions === 1 ? "session" : "sessions"} across ${projects} ${projects === 1 ? "project" : "projects"}`]
+  for (const [label, kinds] of SUMMARY_KINDS) {
+    const found = rows.filter((row) => kinds.has(row.kind))
+    if (found.length === 0) continue
+    const carried = found.filter((row) => row.state === "import" || row.state === "login").length
+    parts.push(`${found.length} ${label} (${carried} to carry over)`)
+  }
+  return `${parts.join("; ")}.`
+}
+
 const FACT_GROUPS: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [
   ["sign-ins", new Set(["api-key", "oauth"])],
   ["providers", new Set(["provider"])],

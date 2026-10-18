@@ -8,7 +8,7 @@ import { GitMemoryRepo, buildDefaultSeedFiles, buildIdentityPaths, type FactsPeo
 
 import type { SenpiExtensionAPI } from "../../extension/types"
 import { snapshotTree } from "../onboarding/understand.test-support"
-import type { MemoryIdentityContext } from "./context"
+import { createMemoryIdentityContext, type MemoryIdentityContext } from "./context"
 import {
   MEMORY_FACTS_APPLY_RPC_METHOD,
   applyMemoryFacts,
@@ -29,7 +29,7 @@ async function boundIdentity(): Promise<{ readonly context: MemoryIdentityContex
   const identityPaths = buildIdentityPaths(root, "apply-agent")
   const repo = new GitMemoryRepo({ dir: identityPaths.repo, agentId: "apply-agent" })
   await repo.init({ seedFiles: buildDefaultSeedFiles() })
-  const context = { identity: "apply-agent", identityPaths } as unknown as MemoryIdentityContext
+  const context = createMemoryIdentityContext({ identity: "apply-agent", identityPaths, binding: {} as never })
   return { context, repo }
 }
 

@@ -1,12 +1,18 @@
+import { randomUUID } from "node:crypto"
+
 import type { ExtensionContext, SessionStartEvent } from "@code-yeongyu/senpi"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { getBuiltinSkillsRoot, getOmoNativeStateDir } from "../telemetry/product-identity"
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
 import { loadOnboardingScanRuntime } from "./scan-component"
+import type { OnboardingScanEvent } from "./scan-contract"
 import type { OnboardingScanEnvironment } from "./scan-runtime"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
+import { registerOnboardingStateRpc } from "./state-rpc"
+import type { OnboardingUnderstandingSeams } from "./understand-component"
+import { createOnboardingMemoryTools, type TuiOnboardingScan } from "./tui-memory-tools"
 
 export interface OnboardingComponentDependencies {
   claimOnboarding(stateDir: string): boolean
@@ -16,15 +22,37 @@ export interface OnboardingComponentDependencies {
   readonly scanEnvironment?: () => OnboardingScanEnvironment
   /** The whole inventory source; defaults to the shared scan runtime `omo setup` uses. */
   readonly migrationFacts?: () => Promise<string | undefined>
+  /** The whole scan; defaults to the shared onboarding scan. `undefined` onboards without one. */
+  readonly scan?: () => Promise<TuiScanResult | undefined>
+  /** Fake-model seams for the understanding the TUI runs. */
+  readonly understanding?: OnboardingUnderstandingSeams
+  /** Install-wide state dir; defaults to the engine's. */
+  readonly stateDir?: string
 }
 
-// The migration inventory comes from the one shared scan (`omo setup`'s own detection, through the
-// lazy onboarding-scan runtime), so the TUI never grows a second config reader. Fail-open: a scan
-// that cannot run onboards the user without an inventory.
-async function defaultMigrationFacts(environment: () => OnboardingScanEnvironment): Promise<string | undefined> {
+export interface TuiScanResult extends TuiOnboardingScan {
+  /** Scan rows and value summary, computed from this scan's events. */
+  readonly context: string
+  readonly inventory?: string
+}
+
+// The TUI reads this computer through the one shared scan (`omo setup`'s detection plus the engine
+// session history, through the lazy onboarding-scan runtime), so it never grows a second reader.
+// Fail-open: a scan that cannot run onboards the user without it.
+async function defaultScan(environment: OnboardingScanEnvironment, stateDir: string): Promise<TuiScanResult> {
   const runtime = await loadOnboardingScanRuntime()
-  const { results } = await runtime.runOnboardingScan(environment(), { scanId: "onboarding-tui", includeCustomProviders: true }, () => {})
-  return runtime.migrationFactsFromScan(results)
+  const scanId = randomUUID()
+  const events: OnboardingScanEvent[] = []
+  const scanStateDir = environment.stateDir ?? (environment.env === undefined ? stateDir : getOmoNativeStateDir(environment.env))
+  const { results } = await runtime.runOnboardingScan({ ...environment, stateDir: scanStateDir }, { scanId, includeCustomProviders: true }, (event) => { events.push(event) })
+  const inventory = runtime.migrationFactsFromScan(results)
+  return {
+    scanId,
+    stateDir: scanStateDir,
+    ...(environment.env === undefined ? {} : { env: environment.env }),
+    context: runtime.onboardingScanContext(scanId, events),
+    ...(inventory === undefined ? {} : { inventory }),
+  }
 }
 
 const defaultDependencies: OnboardingComponentDependencies = {
@@ -49,13 +77,24 @@ export function createOnboardingComponent(
   return {
     name: "onboarding",
     register(pi: SenpiExtensionAPI, _ctx: ComponentContext): void {
-      const stateDir = getOmoNativeStateDir(process.env)
+      const stateDir = dependencies.stateDir ?? getOmoNativeStateDir(process.env)
       const tour = `Follow ${getBuiltinSkillsRoot()}/onboarding/SKILL.md.`
       const scanEnvironment = dependencies.scanEnvironment ?? (() => ({}))
-      const migrationInventory = (dependencies.migrationFacts ?? (() => defaultMigrationFacts(scanEnvironment)))().catch(() => undefined)
+      // Started on the first onboarding turn, once per process: other sessions never pay for it.
+      let scanned: Promise<TuiScanResult | undefined> | undefined
+      const scan = (): Promise<TuiScanResult | undefined> => {
+        scanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment(), stateDir)))().catch(() => undefined)
+        return scanned
+      }
       const withInventory = async (base: string): Promise<string> => {
-        const facts = await migrationInventory
-        return facts === undefined ? base : `${base} Migration inventory (from the same scan omo setup runs): ${facts}`
+        const result = await scan()
+        const facts = dependencies.migrationFacts === undefined
+          ? result?.inventory
+          : await dependencies.migrationFacts().catch(() => undefined)
+        const parts = [base]
+        if (facts !== undefined) parts.push(` Migration inventory (from the same scan omo setup runs): ${facts}`)
+        if (result !== undefined) parts.push(`\n\n${result.context}`)
+        return parts.join("")
       }
       const force = () => pi.getFlag("onboard") === true && !processState[forcedKey]
       // Undefined is unclaimed; null is a successfully completed onboarding turn.
@@ -97,6 +136,18 @@ export function createOnboardingComponent(
       }
 
       pi.registerTool({ ...createOnboardingSessionHistoryTool({ stateDir }) })
+      const memoryTools = createOnboardingMemoryTools({
+        scan,
+        loadRun: async () => (await loadOnboardingScanRuntime()).runOnboardingUnderstanding,
+        ...(dependencies.understanding === undefined ? {} : { seams: dependencies.understanding }),
+      })
+      pi.registerTool({ ...memoryTools.understand })
+      pi.registerTool({ ...memoryTools.apply })
+      registerOnboardingStateRpc(pi, {
+        stateDir,
+        claimOnboarding: dependencies.claimOnboarding,
+        releaseOnboarding: dependencies.releaseOnboarding,
+      })
 
       pi.registerFlag("onboard", {
         type: "boolean",
