@@ -51,8 +51,11 @@ export function createOnboardingComponent(
       const stateDir = getOmoNativeStateDir(process.env)
       const tour = `Follow ${getBuiltinSkillsRoot()}/onboarding/SKILL.md.`
       const scanEnvironment = dependencies.scanEnvironment ?? (() => ({}))
-      const migrationInventory = (dependencies.migrationFacts ?? (() => defaultMigrationFacts(scanEnvironment)))().catch(() => undefined)
+      // The inventory loads lazily (#10478): the scan runs once, only after a claim actually succeeds
+      // - never at register(), so sessions that never onboard pay none of its cost.
+      let migrationInventory: Promise<string | undefined> | undefined
       const withInventory = async (base: string): Promise<string> => {
+        migrationInventory ??= (dependencies.migrationFacts ?? (() => defaultMigrationFacts(scanEnvironment)))().catch(() => undefined)
         const facts = await migrationInventory
         return facts === undefined ? base : `${base} Migration inventory (from the same scan omo setup runs): ${facts}`
       }
