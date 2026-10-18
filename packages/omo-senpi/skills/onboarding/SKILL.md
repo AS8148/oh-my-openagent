@@ -101,11 +101,21 @@ This lane is opt-in. If they say no, skip to lane 3.
 If they say yes, start from the migration inventory that arrived with this skill's context (the
 `Migration inventory` sentence): the engine already ran the same detection `omo setup` uses, and it
 lists every sign-in it found (API keys to import, OAuth logins to sign in again, unmapped
-providers), every custom provider, every global skill, and every MCP server, each with its state.
-That inventory is the source of truth for those categories - do not read other agents' config
-files by hand to rebuild it. Show the user what `omo setup --dry-run` would do with it. Only look
-beyond the inventory when the user names a source it does not cover (for example a project
-`.mcp.json`, or an `AGENTS.md` another agent manages).
+providers), every custom provider, every global skill, and every MCP server from the sources it
+covers - OpenCode, the oh-my-pi and gajae-code credential stores, and the engine's own files. For
+those sources the inventory is the source of truth - do not re-read their config files by hand to
+rebuild it. Show the user what `omo setup --dry-run` would do with it.
+
+The scan does not know every harness. When the user is coming from one it does not detect, read
+that harness's own files by hand and fold what you find into the same plan:
+
+- Claude Code: `~/.claude/settings.json`, global and project `CLAUDE.md` files, MCP server
+  definitions in `.mcp.json` or settings.
+- Codex: `~/.codex/config.toml` and any `AGENTS.md` files it manages.
+- Anything else the user names that the inventory does not cover (for example a project
+  `.mcp.json`, or an `AGENTS.md` another agent manages).
+
+Hand-read only what the inventory does not cover; never re-derive its categories by hand.
 
 Global OpenCode MCP servers and global OpenCode skills are not yours to move by hand. `omo setup`
 imports them: MCP servers from `~/.config/opencode/opencode.json[c]` into the engine's global

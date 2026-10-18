@@ -40,7 +40,7 @@ export interface OnboardingScanEvent {
   readonly item?: OnboardingScanItem
   readonly counts?: OnboardingScanCounts
   readonly elapsedMs: number
-  /** On `source_failed`: why the source could not be read. */
+  /** On `source_failed`: why the source could not be read; on a failed scan's final `done`: why the scan failed. */
   readonly reason?: string
 }
 
@@ -50,8 +50,9 @@ export interface OnboardingApplyRequest {
 }
 
 export type OnboardingApplyResponse =
-  | { readonly scanId: string; readonly applied: readonly OnboardingApplyStage[] }
+  | { readonly scanId: string; readonly applied: readonly OnboardingApplyStage[]; readonly notices?: readonly string[] }
   | OnboardingUnavailable
+  | { readonly kind: "stale"; readonly reason: string; readonly paths: readonly string[]; readonly applied?: readonly OnboardingApplyStage[] }
   | { readonly kind: "invalid"; readonly reason: string }
 
 export interface OnboardingUnavailable {
