@@ -33,7 +33,13 @@ concurrency:
 
 jobs:
   resolve-pr:
-    if: github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'
+    # A superseded (cancelled) or skipped PR Automation Signal run must skip cleanly:
+    # the newer signal's run already carries the work. A real upstream failure still runs and fails.
+    if: >-
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion != 'cancelled' &&
+        github.event.workflow_run.conclusion != 'skipped') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -69,6 +75,8 @@ jobs:
         run: echo 'Resolved current PR identity from authenticated GitHub metadata.' >> "$GITHUB_STEP_SUMMARY"
 
   ensure-labels:
+    # Skip entirely for superseded (cancelled) or skipped signals so the workflow run stays gray, not just green.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion != 'cancelled' && github.event.workflow_run.conclusion != 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Ensure canonical labels exist

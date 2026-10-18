@@ -81,7 +81,13 @@ jobs:
 
   reconcile:
     name: Reconcile fork review claims
-    if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
+    # A superseded (cancelled) or skipped PR Automation Signal run must skip cleanly:
+    # the newer signal's run already carries the work. A real upstream failure still runs and fails.
+    if: >-
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion != 'cancelled' &&
+        github.event.workflow_run.conclusion != 'skipped') ||
+      (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
