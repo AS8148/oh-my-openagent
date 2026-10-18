@@ -10,7 +10,7 @@ import {
   type OnboardingApplyStage,
   type OnboardingScanResponse,
 } from "./scan-contract"
-import type { applyOnboardingScan, OnboardingScanEnvironment, runOnboardingScan } from "./scan-runtime"
+import type { applyOnboardingScan, migrationFactsFromScan, OnboardingScanEnvironment, runOnboardingScan } from "./scan-runtime"
 
 export * from "./scan-contract"
 
@@ -24,6 +24,7 @@ const RETAINED_SCANS = 8
 export interface OnboardingScanRuntime {
   readonly runOnboardingScan: typeof runOnboardingScan
   readonly applyOnboardingScan: typeof applyOnboardingScan
+  readonly migrationFactsFromScan: typeof migrationFactsFromScan
 }
 
 export interface OnboardingScanComponentDependencies {
@@ -32,7 +33,6 @@ export interface OnboardingScanComponentDependencies {
 }
 
 type Scan = Promise<Awaited<ReturnType<typeof runOnboardingScan>> | undefined>
-
 /**
  * `omo.onboarding.scan` / `omo.onboarding.apply`: `omo setup`'s detection streamed to RPC clients
  * and its writers run on their consent. Programmatic only: no model is read or called, no socket is
@@ -45,7 +45,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
       const handle = pi.rpc?.handle
       if (handle === undefined) return
       const environment = deps.runtime ?? (() => ({}))
-      const loadRuntime = deps.loadRuntime ?? loadBundledRuntime
+      const loadRuntime = deps.loadRuntime ?? loadOnboardingScanRuntime
       const scans = new Map<string, Scan>()
 
       handle(ONBOARDING_SCAN_RPC_METHOD, (request): OnboardingScanResponse => {
@@ -78,7 +78,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
         const plans = await scan
         if (plans === undefined) return { kind: "unavailable", reason: "The scan failed before it planned anything." }
         const runtime = await loadRuntime()
-        return { scanId, applied: await runtime.applyOnboardingScan(plans, new Set(stages.filter(isApplyStage))) }
+        return { scanId, applied: await runtime.applyOnboardingScan(plans.plans, new Set(stages.filter(isApplyStage))) }
       })
     },
   }
@@ -92,12 +92,17 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-async function loadBundledRuntime(): Promise<OnboardingScanRuntime> {
+export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime> {
   const bundled = typeof OMO_SENPI_BUNDLED !== "undefined" && OMO_SENPI_BUNDLED
   const loaded: unknown = await import(new URL(bundled ? ONBOARDING_SCAN_RUNTIME_FILE : "scan-runtime.ts", import.meta.url).href)
   if (!isRecord(loaded)) throw new Error("onboarding scan runtime did not load")
   const run = loaded["runOnboardingScan"]
   const apply = loaded["applyOnboardingScan"]
-  if (typeof run !== "function" || typeof apply !== "function") throw new Error("onboarding scan runtime is missing its scan or apply export")
-  return { runOnboardingScan: (...args) => Reflect.apply(run, undefined, args), applyOnboardingScan: (...args) => Reflect.apply(apply, undefined, args) }
+  const facts = loaded["migrationFactsFromScan"]
+  if (typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function") throw new Error("onboarding scan runtime is missing its scan or apply export")
+  return {
+    runOnboardingScan: (...args) => Reflect.apply(run, undefined, args),
+    applyOnboardingScan: (...args) => Reflect.apply(apply, undefined, args),
+    migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
+  }
 }
