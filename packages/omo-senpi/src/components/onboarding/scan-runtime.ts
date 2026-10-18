@@ -11,13 +11,13 @@ import {
   type SetupPlans,
   type SetupStageResult,
 } from "../../../../omo-native/bin/lib/setup-stream.js"
-import { getOmoNativeStateDir } from "../telemetry/product-identity"
 import type { OnboardingApplyStage, OnboardingScanEvent, OnboardingScanItem, OnboardingScanSource } from "./scan-contract"
 import {
-  createSessionDigestStore,
+  createMemorySessionDigestStore,
   MAX_TRANSCRIPTS_PER_SOURCE,
   scanSessionHistory,
   type ProjectCandidate,
+  type SessionDigest,
   type SessionHistoryOptions,
   type SessionScanItem,
 } from "./session-history"
@@ -29,16 +29,20 @@ export interface OnboardingScanEnvironment {
   readonly home?: string
   readonly env?: Readonly<Record<string, string | undefined>>
   readonly agentDir?: string
-  /** Engine state dir; session digests land in `<stateDir>/onboarding/scans/<scanId>/`. */
-  readonly stateDir?: string
   /** Session-history overrides (agent homes, omo session roots, clock); defaults read this machine. */
   readonly sessionHistory?: SessionHistoryOptions
 }
 
-/** One scan's outcome: the stage plans an apply needs, and the per-source rows a UI renders. */
+/**
+ * One scan's outcome: the stage plans an apply needs, the per-source rows a UI renders, and what
+ * understanding may read after consent. The digests live only in memory, with the retained scan.
+ */
 export interface OnboardingScanOutcome {
   readonly plans: SetupPlans
   readonly results: readonly SetupStageResult[]
+  readonly digests: readonly SessionDigest[]
+  /** The project roots the scan showed the user; understanding reads AGENTS.md only inside these. */
+  readonly projectRoots: ReadonlySet<string>
 }
 
 type EventBody = Omit<OnboardingScanEvent, "scanId" | "elapsedMs">
@@ -78,18 +82,24 @@ export async function runOnboardingScan(
     send({ kind: "source_done", source, counts: { found: result.items.length, read: result.items.length, cap: null } })
   }
   let read = found
+  // Nothing is persisted before consent: the digests stay in memory, with the retained scan.
+  const digestStore = createMemorySessionDigestStore()
+  const projectRoots = new Set<string>()
   const history = scanSessionHistory({
     homeDir: home,
     env,
     ...environment.sessionHistory,
     scanId: options.scanId,
-    digestStore: createSessionDigestStore({ stateDir: environment.stateDir ?? getOmoNativeStateDir(env) }),
+    digestStore,
   })
   for await (const event of history) {
     const source = event.source
     if (event.kind === "source_started") send({ kind: "source_started", source })
     else if (event.kind === "source_failed") send({ kind: "source_failed", source, reason: event.error ?? "unknown error" })
-    else if (event.kind === "item" && event.item !== undefined) send({ kind: "item", source, item: historyItem(event.item) })
+    else if (event.kind === "item" && event.item !== undefined) {
+      if ("path" in event.item) projectRoots.add(event.item.path)
+      send({ kind: "item", source, item: historyItem(event.item) })
+    }
     else if (event.kind === "source_done" && event.counts !== undefined) {
       found += event.counts.found
       read += event.counts.read
@@ -98,7 +108,7 @@ export async function runOnboardingScan(
   }
   send({ kind: "done", source: "all", counts: { found, read, cap: null } })
   const plans = (await collectSetupPlans(results.filter((result) => result.error === undefined))).plans
-  return { plans, results }
+  return { plans, results, digests: await digestStore.list(options.scanId), projectRoots }
 }
 
 function historyItem(item: ProjectCandidate | SessionScanItem): OnboardingScanItem {

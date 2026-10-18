@@ -12,6 +12,10 @@ export const ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD = "omo.onboarding.understand.
 export const ONBOARDING_UNDERSTAND_STOP_RPC_METHOD = "omo.onboarding.understand.stop"
 
 export interface OnboardingUnderstandBudgetLimits {
+  /**
+   * `record_fact` tool calls across the run, rejected ones included; NOT model calls. Model calls are
+   * bounded separately: one per step (one step per project group) plus at most one retry of a failed step.
+   */
   readonly toolCalls: number
   readonly readBytes: number
   readonly totalMs: number
@@ -33,7 +37,7 @@ export interface OnboardingUnderstandRequest {
   readonly scanId: string
   /** `provider/model`: the caller's default model. */
   readonly model: string
-  /** Required: this stage sends session digests to the model provider. */
+  /** Required: this stage sends the scan's session digests and each scanned project's AGENTS.md to the model provider. */
   readonly consent: true
 }
 

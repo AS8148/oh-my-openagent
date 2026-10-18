@@ -18,10 +18,13 @@ export interface OnboardingUnderstandingInput extends Omit<UnderstandingModel, "
   readonly understandId: string
   readonly scanId: string
   readonly digests: readonly SessionDigest[]
+  /** Project roots the scan listed; a step reads AGENTS.md only inside one of these. */
+  readonly projectRoots: ReadonlySet<string>
   readonly control: OnboardingUnderstandingControl
   readonly budget?: OnboardingUnderstandBudgetLimits
   readonly env?: NodeJS.ProcessEnv
   readonly today?: string
+  readonly now?: () => number
 }
 
 interface StepGroup {
@@ -46,12 +49,28 @@ export async function runOnboardingUnderstanding(
   input: OnboardingUnderstandingInput,
   emit: (event: OnboardingUnderstandEvent) => void,
 ): Promise<OnboardingUnderstandEvent> {
+  // A step that timed out may still be disposing a child that writes into its scratch dir; the run
+  // settles only after every such dir is removed again, while `done` has already been emitted.
+  const scratchCleanups: Promise<void>[] = []
+  try {
+    return await understand(input, emit, scratchCleanups)
+  } finally {
+    await Promise.all(scratchCleanups)
+  }
+}
+
+async function understand(
+  input: OnboardingUnderstandingInput,
+  emit: (event: OnboardingUnderstandEvent) => void,
+  scratchCleanups: Promise<void>[],
+): Promise<OnboardingUnderstandEvent> {
   const budget = input.budget ?? ONBOARDING_UNDERSTAND_BUDGET
   const today = input.today ?? new Date().toISOString().slice(0, 10)
   const model: UnderstandingModel = { ...input, env: input.env ?? process.env }
   const { control } = input
-  const startedAt = performance.now()
-  const elapsed = (): number => Math.round(performance.now() - startedAt)
+  const now = input.now ?? (() => performance.now())
+  const startedAt = now()
+  const elapsed = (): number => Math.round(now() - startedAt)
   let bytesRead = 0
   let toolCalls = 0
   let candidates: Candidate[] = []
@@ -71,7 +90,7 @@ export async function runOnboardingUnderstanding(
       send({ kind: "budget", budget: "total_ms" })
       return finish()
     }
-    const read = await readStep(live, group.project, budget.readBytes - bytesRead)
+    const read = await readStep(live, group.project, budget.readBytes - bytesRead, input.projectRoots)
     if (read.digests.length < budget.minSourceSessions) {
       send({ kind: "budget", budget: "read_bytes" })
       return finish()
@@ -89,9 +108,15 @@ export async function runOnboardingUnderstanding(
       onCall: () => { toolCalls += 1 },
       control,
       projects: new Set(read.digests.map((digest) => digest.cwd)),
+      onScratchCleanup: (cleanup) => { scratchCleanups.push(cleanup) },
     })
     let result = await runOnce()
     if (result.status === "failed") {
+      if (budget.totalMs - elapsed() <= 0) {
+        send({ kind: "step_failed", step, reason: result.reason })
+        send({ kind: "budget", budget: "total_ms" })
+        return finish()
+      }
       send({ kind: "step_failed", step, reason: result.reason, retrying: true })
       result = await runOnce()
       if (result.status === "failed") {
