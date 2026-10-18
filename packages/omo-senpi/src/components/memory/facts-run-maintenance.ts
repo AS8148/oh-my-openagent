@@ -85,7 +85,7 @@ export function createFactsRunMaintenance(
           ...(options.logger === undefined ? {} : { logger: options.logger }),
         })
       } catch (error) {
-        options.logger?.warn("facts applied batch reconcile could not run", { error: describe(error) })
+        options.logger?.warn("facts applied reconcile failed", { error: describe(error) })
       }
     }
     await prune()

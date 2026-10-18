@@ -100,45 +100,36 @@ function unlinkIfPresent(path: string): void {
   }
 }
 
+// A marker's `completedAt`, else its mtime (an unparseable marker still counts); null when absent.
 function readMarkerTime(stateDir: string, name: string): string | null {
-  let raw: string
+  const marker = readMarker(join(stateDir, name))
+  if (marker === undefined) return null
+  const completedAt = marker["completedAt"]
+  if (typeof completedAt === "string" && !Number.isNaN(Date.parse(completedAt))) return completedAt
   try {
-    raw = readFileSync(join(stateDir, name), "utf8")
+    return new Date(statSync(join(stateDir, name)).mtimeMs).toISOString()
   } catch {
     return null
   }
-  const completedAt = parseRecord(raw)?.["completedAt"]
-  if (typeof completedAt === "string" && !Number.isNaN(Date.parse(completedAt))) return completedAt
-  return mtimeIso(join(stateDir, name))
 }
 
 // Before claims and completion were split, the claim marker itself meant completed.
 function readLegacyCompletion(stateDir: string): string | null {
-  let raw: string
-  try {
-    raw = readFileSync(join(stateDir, ONBOARDING_MARKER), "utf8")
-  } catch {
-    return null
-  }
-  const parsed = parseRecord(raw)
-  if (parsed !== undefined && typeof parsed["claimedAt"] === "string") return null
-  return readMarkerTime(stateDir, ONBOARDING_MARKER)
+  return typeof readMarker(join(stateDir, ONBOARDING_MARKER))?.["claimedAt"] === "string" ? null : readMarkerTime(stateDir, ONBOARDING_MARKER)
 }
 
-function parseRecord(raw: string): Record<string, unknown> | undefined {
+function readMarker(path: string): Record<string, unknown> | undefined {
+  let raw: string
   try {
-    const parsed: unknown = JSON.parse(raw)
-    return isRecord(parsed) ? parsed : undefined
+    raw = readFileSync(path, "utf8")
   } catch {
     return undefined
   }
-}
-
-function mtimeIso(path: string): string | null {
   try {
-    return new Date(statSync(path).mtimeMs).toISOString()
+    const parsed: unknown = JSON.parse(raw)
+    return isRecord(parsed) ? parsed : {}
   } catch {
-    return null
+    return {}
   }
 }
 
