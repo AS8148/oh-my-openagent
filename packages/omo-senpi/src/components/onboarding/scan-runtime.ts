@@ -2,9 +2,12 @@ import { homedir } from "node:os"
 
 import {
   applySetupStages,
+  authWritesPending,
   canonicalAgentDir,
   collectSetupPlans,
   scanSetup,
+  SetupStaleError,
+  staleSetupTargets,
   type SetupPlans,
   type SetupStageResult,
 } from "../../../../omo-native/bin/lib/setup-stream.js"
@@ -103,9 +106,56 @@ function historyItem(item: ProjectCandidate | SessionScanItem): OnboardingScanIt
   return { id: item.sessionKey, kind: "session", state: "found", detail: item.title, project: item.cwd }
 }
 
-/** Applies the requested stages of a finished scan with the same writers `omo setup` uses. */
-export async function applyOnboardingScan(plans: SetupPlans, stages: ReadonlySet<OnboardingApplyStage>): Promise<OnboardingApplyStage[]> {
-  return [...await applySetupStages(plans, (stage) => stages.has(stage.id))]
+export { authWritesPending, staleSetupTargets } from "../../../../omo-native/bin/lib/setup-stream.js"
+
+/** How an apply's credential additions and notice lines travel: through the engine's locked store, and to the caller's report sink. */
+export interface ApplyOnboardingScanOptions {
+  readonly writeAuth?: (target: string, additions: readonly { readonly provider: string; readonly key: string }[]) => Promise<void> | void
+  readonly report?: (line: string) => void
+}
+
+export type OnboardingApplyOutcome =
+  | { readonly applied: readonly OnboardingApplyStage[]; readonly notices: readonly string[] }
+  | { readonly kind: "stale"; readonly reason: string; readonly paths: readonly string[]; readonly applied?: readonly OnboardingApplyStage[] }
+
+/**
+ * Applies the requested stages of a finished scan with the same writers `omo setup` uses. Every
+ * requested stage's targets are re-read first and compared by content hash against what the scan
+ * read: anything that changed since the scan answers `{kind: "stale"}` and nothing is written,
+ * and a target that changes mid-apply refuses that stage instead of writing the scan-time copy.
+ */
+export async function applyOnboardingScan(
+  plans: SetupPlans,
+  stages: ReadonlySet<OnboardingApplyStage>,
+  options: ApplyOnboardingScanOptions = {},
+): Promise<OnboardingApplyOutcome> {
+  const requested = [...stages]
+  const stale = staleSetupTargets(plans, requested)
+  if (stale.length > 0) {
+    return { kind: "stale", reason: `targets changed since the scan: ${stale.join(", ")}`, paths: stale }
+  }
+  const notices: string[] = []
+  const report = (line: string): void => {
+    notices.push(line)
+    options.report?.(line)
+  }
+  try {
+    const applied = [...await applySetupStages(plans, (stage) => stages.has(stage.id), report, {
+      ...(options.writeAuth === undefined ? {} : { writeAuth: options.writeAuth }),
+      staleGuard: (stageId: string) => staleSetupTargets(plans, [stageId as OnboardingApplyStage]),
+    })]
+    return { applied, notices }
+  } catch (error) {
+    if (error instanceof SetupStaleError) {
+      return {
+        kind: "stale",
+        reason: `targets changed since the scan: ${error.paths.join(", ")}`,
+        paths: error.paths,
+        ...(error.applied.length > 0 ? { applied: [...error.applied] as readonly OnboardingApplyStage[] } : {}),
+      }
+    }
+    throw error
+  }
 }
 
 const ROWS_PER_SOURCE = 40

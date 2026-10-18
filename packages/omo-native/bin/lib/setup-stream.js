@@ -7,6 +7,8 @@
  * engine's offline model catalog only.
  */
 
+import { createHash } from "node:crypto"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { detectHarnesses } from "./setup-detect.js"
 import { applyCredentials, credentialCounts, credentialPlanLines, credentialQuestion, opencodeOauthProviders, planCredentials } from "./setup-credentials.js"
@@ -104,19 +106,89 @@ export async function collectSetupPlans(stream) {
  */
 export function setupStages(plans) {
   return [
-    { id: "credentials", plan: plans.credentials, present: plans.credentials !== undefined && !plans.credentials.malformed, lines: credentialPlanLines, counts: credentialCounts, question: credentialQuestion, apply: applyCredentials },
-    { id: "assets", plan: plans.assets, present: plans.assets?.present === true, lines: assetPlanLines, counts: assetCounts, question: assetQuestion, apply: applyAssets },
-    { id: "providers", plan: plans.providers, present: plans.providers?.present === true, lines: providerPlanLines, counts: providerCounts, question: providerQuestion, apply: applyProviders },
-    { id: "model-choices", plan: plans.modelChoices, present: plans.modelChoices?.present === true, lines: modelChoicePlanLines, counts: modelChoiceCounts, question: modelChoiceQuestion, apply: applyModelChoices },
+    { id: "credentials", plan: plans.credentials, present: plans.credentials !== undefined && !plans.credentials.malformed, lines: credentialPlanLines, counts: credentialCounts, question: credentialQuestion, apply: (plan, options) => applyCredentials(plan, options) },
+    { id: "assets", plan: plans.assets, present: plans.assets?.present === true, lines: assetPlanLines, counts: assetCounts, question: assetQuestion, apply: (plan) => applyAssets(plan) },
+    { id: "providers", plan: plans.providers, present: plans.providers?.present === true, lines: providerPlanLines, counts: providerCounts, question: providerQuestion, apply: (plan, options) => applyProviders(plan, options) },
+    { id: "model-choices", plan: plans.modelChoices, present: plans.modelChoices?.present === true, lines: modelChoicePlanLines, counts: modelChoiceCounts, question: modelChoiceQuestion, apply: (plan, options) => applyModelChoices(plan, options) },
   ]
+}
+
+/** Thrown by `applySetupStages` when its `staleGuard` finds a target that changed since planning. */
+export class SetupStaleError extends Error {
+  constructor(paths, applied) {
+    super(`setup targets changed since planning: ${paths.join(", ")}`)
+    this.name = "SetupStaleError"
+    this.paths = paths
+    this.applied = applied
+  }
+}
+
+// Every plan holds the bytes its target had when it was read. A target whose content hash no longer
+// matches would be overwritten with the scan-time copy, so it counts as stale; an absent file is its
+// own expected state, and mtime alone never decides anything.
+function targetDigest(bytes) {
+  return createHash("sha256").update(bytes === undefined ? "\0absent" : bytes).digest("hex")
+}
+
+function staleTarget(path, expectedBytes) {
+  let current
+  try {
+    current = readFileSync(path, "utf8")
+  } catch {
+    current = undefined
+  }
+  return targetDigest(current) !== targetDigest(expectedBytes)
+}
+
+/** The target paths of the given stages whose content changed since their plans read them. */
+export function staleSetupTargets(plans, stageIds) {
+  const changed = new Set()
+  const mark = (path, expectedBytes) => {
+    if (staleTarget(path, expectedBytes)) changed.add(path)
+  }
+  for (const id of stageIds) {
+    if (id === "credentials") {
+      const plan = plans.credentials
+      if (plan === undefined || plan.malformed || plan.pending === 0) continue
+      mark(plan.target, plan.current?.bytes)
+    } else if (id === "assets") {
+      const plan = plans.assets
+      if (plan?.present !== true || plan.pending === 0) continue
+      if (plan.result.target.malformed !== true) mark(plan.paths.mcp, plan.result.target.bytes)
+      for (const skill of plan.result.skills.added) mark(join(plan.paths.skills, skill.name), undefined)
+    } else if (id === "providers") {
+      const plan = plans.providers
+      if (plan?.present !== true || plan.pending === 0) continue
+      if (plan.models.malformed !== true) mark(plan.paths.models, plan.models.bytes)
+      if ((plan.result.keys?.length ?? 0) > 0) mark(plan.paths.auth, plan.authBytes)
+    } else if (id === "model-choices") {
+      const plan = plans.modelChoices
+      if (plan?.present !== true || plan.pending === 0) continue
+      for (const item of plan.items) {
+        if (item.state === "pending" && item.target.malformed !== true) mark(item.target.path, item.target.text)
+      }
+    }
+  }
+  return [...changed]
+}
+
+/** True when any of the given stages would write into a credential store. */
+export function authWritesPending(plans, stageIds) {
+  const ids = new Set(stageIds)
+  const credentials = ids.has("credentials") && plans.credentials !== undefined && !plans.credentials.malformed && plans.credentials.pending > 0
+  const keys = ids.has("providers") && plans.providers !== undefined && (plans.providers.result?.keys?.length ?? 0) > 0
+  return credentials || keys
 }
 
 /**
  * Applies every stage `confirm` accepts and returns the ids it applied. A declined provider stage
  * leaves models.json as it is, so the model choices are re-planned against it rather than against
- * providers that will not exist; the notices that re-plan adds go to `report`.
+ * providers that will not exist; the notices that re-plan adds go to `report`. `options.writeAuth`
+ * routes credential additions through a locked credential store instead of the CLI's direct writer,
+ * and `options.staleGuard`, re-checked right before each write, refuses a stage whose target
+ * changed since planning by throwing `SetupStaleError`.
  */
-export async function applySetupStages(plans, confirm, report = () => {}) {
+export async function applySetupStages(plans, confirm, report = () => {}, options = {}) {
   const applied = new Set()
   for (const stage of setupStages(plans)) {
     if (stage.id === "model-choices" && stage.plan !== undefined && plans.planChoices !== undefined && (plans.providers?.pending ?? 0) > 0 && !applied.has("providers")) {
@@ -127,7 +199,11 @@ export async function applySetupStages(plans, confirm, report = () => {}) {
     }
     if (stage.plan === undefined || stage.plan.pending === 0) continue
     if (!await confirm(stage)) continue
-    stage.apply(stage.plan)
+    if (options.staleGuard !== undefined) {
+      const stale = options.staleGuard(stage.id)
+      if (stale !== undefined && stale.length > 0) throw new SetupStaleError(stale, [...applied])
+    }
+    await stage.apply(stage.plan, { ...options, report })
     applied.add(stage.id)
   }
   return applied

@@ -70,7 +70,7 @@ export async function runSetup(args = process.argv.slice(2), options = {}) {
     applied = await applySetupStages(plans, (stage) => confirm(stage.question(stage.plan), false), (line) => write([line]))
   } else {
     if (!await confirm(`Import all of the above into ${targetRoots(plans, agentDir, home).join(" and ")}? [Y/n] `, true)) return
-    applied = await applySetupStages(plans, () => true)
+    applied = await applySetupStages(plans, () => true, (line) => write([line]))
   }
   write(setupStages(plans).filter((stage) => stage.present && (applied.has(stage.id) || stage.plan.pending === 0)).flatMap((stage) => stage.counts(stage.plan)))
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -109,11 +109,61 @@ describe("onboarding migration inventory", () => {
     expect(state.isOnboardingComplete(dir)).toBe(true)
   })
 
-  test("#given the one-implementation rule #when the onboarding component is inspected #then it routes through the shared scan and hand-reads no agent config", () => {
-    const source = readFileSync(new URL("./component.ts", import.meta.url), "utf8")
-    expect(source).toContain("scan-runtime")
-    for (const handRead of ["~/.claude", "~/.codex", "opencode.json", ".mcp.json"]) {
-      expect(source).not.toContain(handRead)
-    }
+  test("#given the one-implementation rule #when the onboarding context is injected #then its inventory sentence is exactly the shared scan's output", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-onboarding-state-"))
+    roots.push(dir)
+    const home = openCodeHome()
+    const h = migrationHarness(dir, home)
+    await h.start()
+
+    const content = injectedContent(await h.prompt())
+
+    const { runOnboardingScan, migrationFactsFromScan } = await import("./scan-runtime")
+    const agentDir = join(home, ".omo", "agent")
+    const { results } = await runOnboardingScan({ home, env: { HOME: home }, agentDir }, { scanId: "one-implementation-check", includeCustomProviders: true }, () => {})
+    const facts = migrationFactsFromScan(results)
+    expect(facts).toBeDefined()
+    expect(content).toContain(`Migration inventory (from the same scan omo setup runs): ${facts}`)
+    expect(content).not.toContain(SECRET)
+  })
+
+  test("#given no onboarding claim succeeds #when the component registers and runs #then the migration scan never runs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-onboarding-state-"))
+    roots.push(dir)
+    let scans = 0
+    const component = createOnboardingComponent({
+      claimOnboarding: () => false,
+      isOnboardingComplete: () => false,
+      releaseOnboarding: () => {},
+      migrationFacts: () => { scans++; return Promise.resolve("facts") },
+    })
+    const h = createOnboardingHarness(dir, "s", "rpc", component)
+    await h.start()
+    await h.prompt()
+
+    expect(scans).toBe(0)
+  })
+
+  test("#given a successful claim #when the context is injected across separate runs #then the scan runs lazily and exactly once", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-onboarding-state-"))
+    roots.push(dir)
+    let scans = 0
+    const component = createOnboardingComponent({
+      claimOnboarding: () => true,
+      isOnboardingComplete: () => false,
+      releaseOnboarding: () => {},
+      migrationFacts: () => { scans++; return Promise.resolve("facts") },
+    })
+    const h = createOnboardingHarness(dir, "s", "rpc", component)
+    await h.start()
+    expect(scans).toBe(0)
+
+    await h.prompt()
+    await h.agentStart()
+    await h.end()
+    await h.settle()
+    await h.prompt()
+
+    expect(scans).toBe(1)
   })
 })
