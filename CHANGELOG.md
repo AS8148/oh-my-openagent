@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Built, tested and released on Bun 1.4.3.** CI, the release workflows and the devcontainer move from Bun 1.4.2 to 1.4.3, the current stable release, which fixes CVE-2026-48618 (TLS host names) and idle garbage collection in workers. ([#10432](https://github.com/code-yeongyu/oh-my-openagent/pull/10432))
+
 **OpenCode edition: Sisyphus names GPT-6.1 Sol and GPT-6 Luna as themselves.** On `gpt-6.1-sol` (and its `-fast`, dashed and Venice `gpt-61-sol` ids) and on `gpt-6-luna`, the Sisyphus and Sisyphus-Junior GPT prompts introduced the model as "a GPT-family model"; they now say "GPT-6.1 Sol" and "GPT-6 Luna". ([#10291](https://github.com/code-yeongyu/oh-my-openagent/issues/10291), [#10292](https://github.com/code-yeongyu/oh-my-openagent/pull/10292))
 
 **Memory session shutdown waits for the work it started in the memory directory.** Shutdown now waits, within its existing drain budget, for an in-flight repo maintenance pass and for the status refreshes started at bind and settle, all of which run git inside the identity directory. Before, they could still hold files open after shutdown returned; on Windows the next delete of that directory failed with `EBUSY`/`EFAULT`, which is how the memory pressure-dream test failed intermittently in CI. ([#10154](https://github.com/code-yeongyu/oh-my-openagent/issues/10154), [#10312](https://github.com/code-yeongyu/oh-my-openagent/pull/10312))
