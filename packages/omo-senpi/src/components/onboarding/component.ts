@@ -5,6 +5,7 @@ import { getBuiltinSkillsRoot, getOmoNativeStateDir } from "../telemetry/product
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
 import { loadOnboardingScanRuntime } from "./scan-component"
 import type { OnboardingScanEnvironment } from "./scan-runtime"
+import { createOnboardingSessionHistoryTool } from "./session-history-tool"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
 
 export interface OnboardingComponentDependencies {
@@ -94,6 +95,8 @@ export function createOnboardingComponent(
         if (ctx.mode === "tui") ctx.ui.setWidget("omo-onboarding", undefined)
         return true
       }
+
+      pi.registerTool({ ...createOnboardingSessionHistoryTool({ stateDir }) })
 
       pi.registerFlag("onboard", {
         type: "boolean",
