@@ -11,6 +11,7 @@ import {
   type OnboardingApplyStage,
   type OnboardingScanResponse,
 } from "./scan-contract"
+import type { applyMemoryFacts } from "../memory/facts-apply-runtime"
 import type {
   applyOnboardingScan,
   authWritesPending,
@@ -42,6 +43,7 @@ export interface OnboardingScanRuntime {
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
   readonly onboardingScanContext: typeof onboardingScanContext
   readonly startOnboardingUnderstanding: typeof startOnboardingUnderstanding
+  readonly applyMemoryFacts: typeof applyMemoryFacts
   readonly authWritesPending: typeof authWritesPending
   readonly staleSetupTargets: typeof staleSetupTargets
 }
@@ -250,10 +252,11 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const facts = loaded["migrationFactsFromScan"]
   const context = loaded["onboardingScanContext"]
   const understand = loaded["startOnboardingUnderstanding"]
+  const memoryFacts = loaded["applyMemoryFacts"]
   const authPending = loaded["authWritesPending"]
   const staleTargets = loaded["staleSetupTargets"]
   if (
-    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" ||
+    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof memoryFacts !== "function" ||
     typeof context !== "function" || typeof authPending !== "function" || typeof staleTargets !== "function"
   ) {
     throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
@@ -264,6 +267,7 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
     migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
     onboardingScanContext: (...args) => Reflect.apply(context, undefined, args),
     startOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
+    applyMemoryFacts: (...args) => Reflect.apply(memoryFacts, undefined, args),
     authWritesPending: (...args) => Reflect.apply(authPending, undefined, args),
     staleSetupTargets: (...args) => Reflect.apply(staleTargets, undefined, args),
   }

@@ -9,12 +9,8 @@ import { GitMemoryRepo, buildDefaultSeedFiles, buildIdentityPaths, type FactsPeo
 import type { SenpiExtensionAPI } from "../../extension/types"
 import { snapshotTree } from "../onboarding/understand.test-support"
 import { createMemoryIdentityContext, type MemoryIdentityContext } from "./context"
-import {
-  MEMORY_FACTS_APPLY_RPC_METHOD,
-  applyMemoryFacts,
-  createSessionFactsApplier,
-  type MemoryFactsApplyResponse,
-} from "./facts-apply-rpc"
+import { MEMORY_FACTS_APPLY_RPC_METHOD, createSessionFactsApplier, type MemoryFactsApplyResponse } from "./facts-apply-rpc"
+import { applyMemoryFacts } from "./facts-apply-runtime"
 import { createMemoryRpcBridge } from "./memory-rpc-bridge"
 
 const PEOPLE: FactsPeopleRouting = { enabled: true, maxEntries: 40, maxEntryChars: 200 }
@@ -134,10 +130,10 @@ describe("omo.memory.facts.apply", () => {
     expect(await snapshotTree(context.identityPaths.root)).toEqual(before)
   }, 60_000)
 
-  // Architecture contract (#10481): the RPC owns no memory writer; every byte goes through the
+  // Architecture contract (#10481): the RPC's apply owns no memory writer; every byte goes through the
   // extractor's applyFactsWithRetries. Retained under the architecture exception of test discipline.
   test("#given the one-writer rule #when the RPC module is inspected #then it has no file or git writer of its own", async () => {
-    const source = await readFile(new URL("./facts-apply-rpc.ts", import.meta.url), "utf8")
+    const source = await readFile(new URL("./facts-apply-runtime.ts", import.meta.url), "utf8")
     expect(source).toContain("applyFactsWithRetries")
     expect(source).toContain("parseFactsExtractionRecord")
     for (const writer of ["writeFile", "appendFile", "mkdir", "rename", "unlink", "rmSync", "commitPrepared", ".commit(", "applyFactsRecovery", "applyFactsBatch"]) {

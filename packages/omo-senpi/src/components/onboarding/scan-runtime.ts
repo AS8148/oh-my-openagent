@@ -23,6 +23,7 @@ import {
 } from "./session-history"
 
 export { startOnboardingUnderstanding } from "./understand-start"
+export { applyMemoryFacts } from "../memory/facts-apply-runtime"
 
 /** Where the scan reads and the apply writes; every field defaults to what `omo setup` uses. */
 export interface OnboardingScanEnvironment {

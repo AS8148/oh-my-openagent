@@ -1,15 +1,10 @@
-import { randomUUID } from "node:crypto"
-
-import {
-  MemorySecretError,
-  parseFactsExtractionRecord,
-  type FactsExtractionRecord,
-  type FactsPeopleRouting,
-} from "@oh-my-opencode/memory-core"
+import type { FactsExtractionRecord, FactsPeopleRouting } from "@oh-my-opencode/memory-core"
 
 import type { ComponentLogger } from "../../extension/types"
+import { loadOnboardingScanRuntime } from "../onboarding/scan-component"
 import type { MemoryIdentityContext } from "./context"
-import { applyFactsWithRetriesUnderLock, resolveFactsPeopleRouting, type Applied } from "./facts-batch-apply"
+import type { applyMemoryFacts } from "./facts-apply-runtime"
+import { resolveFactsPeopleRouting } from "./facts-batch-apply"
 import type { MemoryWiringOptions } from "./wiring-types"
 
 /** Pull channel: an RPC client writes reviewed facts through the facts extractor's own apply. */
@@ -35,56 +30,24 @@ export interface FactsApplyCall {
   readonly people: FactsPeopleRouting
 }
 
-/** Validates the request, then hands the batch to the extractor's apply; unselected records never arrive here. */
-export async function applyMemoryFacts(input: {
-  readonly context: MemoryIdentityContext
-  readonly people: FactsPeopleRouting
-  readonly request: unknown
-  readonly logger?: ComponentLogger
-  readonly newBatchId?: () => string
-  readonly apply?: (call: FactsApplyCall) => Promise<Applied | undefined>
-}): Promise<MemoryFactsApplyResponse> {
-  const raw = isRecord(input.request) ? input.request["records"] : undefined
-  if (!Array.isArray(raw)) return { kind: "invalid", reason: "facts apply needs a records list" }
-  const records: FactsExtractionRecord[] = []
-  for (const [index, value] of raw.entries()) {
-    try {
-      records.push(parseFactsExtractionRecord(value, index))
-    } catch (error) {
-      return { kind: "invalid", reason: `record ${index + 1} rejected: ${describe(error)}` }
-    }
-  }
-  if (records.length === 0) return { outcome: "no_facts", affectedPaths: [] }
-  const batchId = (input.newBatchId ?? randomUUID)()
-  const context = input.context
-  const apply = input.apply ?? ((call: FactsApplyCall) => applyFactsWithRetriesUnderLock({
-    identity: { id: context.identity, safeSlug: context.identity, paths: context.identityPaths },
-    ...call,
-    ...(input.logger === undefined ? {} : { logger: input.logger }),
-  }))
-  let applied: Applied | undefined
-  try {
-    applied = await apply({ batchId, records, people: input.people })
-  } catch (error) {
-    if (error instanceof MemorySecretError) return { kind: "invalid", reason: error.message }
-    throw error
-  }
-  if (applied === undefined) return { kind: "unavailable", reason: "The memory-write lock stayed busy; try again." }
-  if (applied.outcome === "parent_dirty") {
-    return { outcome: "parent_dirty", batchId, ...(applied.detail === undefined ? {} : { detail: applied.detail }) }
-  }
-  return { outcome: "committed", sha: applied.sha, affectedPaths: applied.affectedPaths, batchId }
-}
-
 /** The applier the memory component owns: the session's bound identity and its configured people routing. */
 export function createSessionFactsApplier(deps: {
   readonly resolveContext: (sessionId: string | undefined) => MemoryIdentityContext | undefined
   readonly people: (identity: string) => FactsPeopleRouting
   readonly logger?: ComponentLogger
+  /** The validating apply; it ships in the lazy onboarding-scan sidecar, so omo.js carries only this shell. */
+  readonly loadApply?: () => Promise<typeof applyMemoryFacts>
 }): MemoryFactsApplier {
+  const loadApply = deps.loadApply ?? (async () => (await loadOnboardingScanRuntime()).applyMemoryFacts)
   return async (request, sessionId) => {
     const context = deps.resolveContext(sessionId)
     if (context === undefined) return { kind: "unavailable", reason: "No bound memory session." }
+    let applyMemoryFacts: Awaited<ReturnType<typeof loadApply>>
+    try {
+      applyMemoryFacts = await loadApply()
+    } catch (error) {
+      return { kind: "unavailable", reason: `The memory apply runtime could not load: ${describe(error)}` }
+    }
     return applyMemoryFacts({
       context,
       people: deps.people(context.identity),
@@ -122,8 +85,4 @@ export function sessionFactsApplier(): MemoryFactsApplier | undefined {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
