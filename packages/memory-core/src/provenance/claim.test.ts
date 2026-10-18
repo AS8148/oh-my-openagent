@@ -18,11 +18,19 @@ describe("claim receipts", () => {
     expect(receipt).toEqual({ source: "agent", downgraded: true })
   })
 
-  test("#given a quote cut out of a negation or a question #when resolved #then the receipt keeps the whole user sentence", () => {
-    const negation = resolveClaimReceipt({ source: "user", userQuote: "delete the prod database" }, ["Don't delete the prod database yet. Ask me again tomorrow."])
-    expect(negation).toEqual({ source: "user", userQuote: "Don't delete the prod database yet." })
-    const question = resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, ["Should we remove plugins X and Y? I'm not sure."])
-    expect(question).toEqual({ source: "user", userQuote: "Should we remove plugins X and Y?" })
+  test.each([
+    ["a negation", "delete the prod database", "Don't delete the prod database yet. Ask me again tomorrow."],
+    ["a question", "remove plugins X and Y", "Should we remove plugins X and Y? I'm not sure."],
+    ["a qualifier", "remove plugins X and Y", "Maybe remove plugins X and Y later."],
+    ["a Korean negation", "플러그인 X 지우기", "아직 플러그인 X 지우기는 하지 마"],
+    ["a Korean question", "플러그인 X 지워도", "플러그인 X 지워도 될까"],
+  ])("#given a quote cut out of %s #when resolved #then it stays a suggestion", (_case, quote, said) => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: quote }, [said])).toEqual({ source: "agent", downgraded: true })
+  })
+
+  test("#given a fragment of an affirmative user sentence #when resolved #then the receipt stores the whole sentence", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, ["Thanks. Please remove plugins X and Y now."]))
+      .toEqual({ source: "user", userQuote: "Please remove plugins X and Y now." })
   })
 
   test("#given a user claim with no quote #when resolved #then it is downgraded", () => {

@@ -44,10 +44,23 @@ export function enclosingUserSentence(quote: string, userTexts: readonly string[
   if (!UNSPACED_SCRIPT.test(needle) && needle.split(" ").length < MIN_QUOTE_WORDS) return undefined
   for (const text of userTexts) {
     if (!normalize(text).includes(needle)) continue
-    const sentence = sentencesOf(text).find((candidate) => normalize(candidate).includes(needle))
-    return capQuote(sentence ?? text)
+    const sentence = sentencesOf(text).find((candidate) => normalize(candidate).includes(needle)) ?? text
+    // When in doubt the claim stays a suggestion: a question, or a negation/qualifier before the quote, is not consent.
+    if (!isAffirmativeStatement(normalize(sentence), needle)) return undefined
+    return capQuote(sentence)
   }
   return undefined
+}
+
+const QUESTION = /[?\uff1f]|(?:\uae4c|\ub098\uc694|\ub2c8|\uc744\uae4c|\ub97c\uae4c)\s*$/u
+const PREFIX_QUALIFIER = /\b(?:don'?t|do not|never|not|no|nor|shouldn'?t|should not|mustn'?t|can'?t|cannot|won'?t|wouldn'?t|stop|avoid|without|unless|if|whether|maybe|perhaps|might|probably|should we|could we|shall we|can we|do we|would you|not sure|later|wait|hold off|before)\b/u
+const KOREAN_NEGATION = /\uc9c0\s*\ub9c8|\ub9d0\uc544|\ub9d0\uace0|\ub9d0\uc790|\uc54a|\uc548\s|\ubabb\s|\uae08\uc9c0|\ubcf4\ub958|\ub098\uc911\uc5d0|\uc77c\ub2e8|\ud639\uc2dc|\uc544\ub9c8/u
+
+function isAffirmativeStatement(sentence: string, needle: string): boolean {
+  if (QUESTION.test(sentence)) return false
+  const prefix = sentence.slice(0, Math.max(0, sentence.indexOf(needle)))
+  if (PREFIX_QUALIFIER.test(prefix)) return false
+  return !KOREAN_NEGATION.test(sentence)
 }
 
 export function quoteAppearsInUserText(quote: string, userTexts: readonly string[]): boolean {
