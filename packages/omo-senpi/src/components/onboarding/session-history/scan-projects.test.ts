@@ -1,6 +1,6 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, dirname, join, relative, resolve } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { nodeSessionHistoryFs } from "./session-history-fs"
@@ -166,7 +166,8 @@ describe("session-history scanProjects (parity with desktop AgentSessionScanner.
     const result = await runScan({ claudeHomePath, codexHomePath, fs })
 
     // then
-    expect(result.candidates.map((candidate) => candidate.path)).toEqual([upperWorkspace, lowerWorkspace])
+    // Windows paths are case-insensitive, so the comparison key folds case there and the variants are one project.
+    expect(result.candidates.map((candidate) => candidate.path)).toEqual(process.platform === "win32" ? [upperWorkspace] : [upperWorkspace, lowerWorkspace])
   })
 
   it("#given two distinct Codex homes #when scanned #then scans each home once", async () => {
@@ -192,8 +193,7 @@ describe("session-history scanProjects (parity with desktop AgentSessionScanner.
     // given
     const claudeHomePath = await temp.make("claude-home-")
     const codexHomePath = await temp.make("codex-home-")
-    const workspace = await temp.make("workspace-")
-    await writeTranscript({ filePath: join(claudeHomePath, "projects", "-relative", "session.jsonl"), contents: claudeSessionLine(relative(resolve(), workspace)), mtimeMs: Date.parse("2026-01-01T00:00:00.000Z") })
+    await writeTranscript({ filePath: join(claudeHomePath, "projects", "-relative", "session.jsonl"), contents: claudeSessionLine(join("relative", "workspace")), mtimeMs: Date.parse("2026-01-01T00:00:00.000Z") })
 
     // when / then
     expect((await runScan({ claudeHomePath, codexHomePath })).candidates).toEqual([])
