@@ -1,12 +1,13 @@
-import { mkdtemp, open, readFile, rm } from "node:fs/promises"
+import { mkdtemp, open, readFile, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, join } from "node:path"
+import { basename, isAbsolute, join, relative, sep } from "node:path"
 
 import { parseFactsExtractionRecord, type FactsExtractionRecord } from "@oh-my-opencode/memory-core"
 import type { CreateChildSession, InProcessRunnerLike } from "@oh-my-opencode/senpi-task"
 
 import type { ComponentLogger } from "../../extension/types"
 import { launchFactsInProcess } from "../memory/facts-in-process-launch"
+import type { InProcessMemoryChildState } from "../memory/in-process-memory-child"
 import type { ChildModelRegistry } from "../memory/model-registry-resolver"
 import { readRunJson, writeRunJsonAtomic, type RunOutcome } from "../memory/worker/run-artifacts"
 import type { SessionDigest } from "./session-history"
@@ -33,7 +34,12 @@ export type StepResult =
   | { readonly status: "completed" | "timeout" | "cancelled"; readonly records: readonly FactsExtractionRecord[] }
   | { readonly status: "failed"; readonly reason: string; readonly records: readonly FactsExtractionRecord[] }
 
-export async function readStep(digests: readonly SessionDigest[], project: string | undefined, limit: number): Promise<StepRead> {
+export async function readStep(
+  digests: readonly SessionDigest[],
+  project: string | undefined,
+  limit: number,
+  projectRoots: ReadonlySet<string>,
+): Promise<StepRead> {
   const kept: SessionDigest[] = []
   let bytes = 0
   let truncated = false
@@ -46,8 +52,9 @@ export async function readStep(digests: readonly SessionDigest[], project: strin
     kept.push(digest)
     bytes += size
   }
-  if (project === undefined || truncated) return { digests: kept, bytes, truncated }
-  const agentsMd = await readBounded(join(project, "AGENTS.md"), limit - bytes)
+  if (project === undefined || truncated || !projectRoots.has(project)) return { digests: kept, bytes, truncated }
+  const inside = await agentsMdInside(project)
+  const agentsMd = inside === undefined ? undefined : await readBounded(inside, limit - bytes)
   if (agentsMd === undefined) return { digests: kept, bytes, truncated }
   return {
     digests: kept,
@@ -55,6 +62,16 @@ export async function readStep(digests: readonly SessionDigest[], project: strin
     bytes: bytes + agentsMd.bytes,
     truncated: agentsMd.truncated,
   }
+}
+
+/** The real path of `<root>/AGENTS.md` when it resolves inside the root itself; a symlink out of the project is never followed. */
+async function agentsMdInside(root: string): Promise<string | undefined> {
+  const resolved = await Promise.all([realpath(root), realpath(join(root, "AGENTS.md"))]).catch(() => undefined)
+  if (resolved === undefined) return undefined
+  const [realRoot, realFile] = resolved
+  const path = relative(realRoot, realFile)
+  if (path === "" || isAbsolute(path) || path.split(sep)[0] === "..") return undefined
+  return realFile
 }
 
 async function readBounded(path: string, limit: number): Promise<{ readonly text: string; readonly bytes: number; readonly truncated: boolean } | undefined> {
@@ -96,9 +113,12 @@ export async function runStep(input: {
   readonly onCall: () => void
   readonly control: OnboardingUnderstandingControl
   readonly projects: ReadonlySet<string>
+  /** Receives the removal that runs again once every started child is disposed, even after this step returned. */
+  readonly onScratchCleanup: (cleanup: Promise<void>) => void
 }): Promise<StepResult> {
   const runDir = await mkdtemp(join(tmpdir(), "omo-onboarding-understand-"))
   const runId = basename(runDir)
+  const children = new Set<InProcessMemoryChildState>()
   try {
     await writeRunJsonAtomic(join(runDir, "ledger.json"), { version: 1, runId, kind: "facts" })
     let cancelled: boolean
@@ -122,6 +142,7 @@ export async function runStep(input: {
         deadlineMs: input.deadlineMs,
         recordLimits: { maxCalls: input.maxCalls, onCall: input.onCall },
         onState: (state) => {
+          children.add(state)
           if (state.cancel !== undefined) input.control.attach(input.projects, () => state.cancel?.())
         },
       })
@@ -138,6 +159,15 @@ export async function runStep(input: {
     return { status: "failed", reason: "the model call failed", records }
   } finally {
     await rm(runDir, { recursive: true, force: true })
+    const released = [...children].flatMap((state) => (state.released === undefined ? [] : [state.released]))
+    if (released.length > 0) {
+      input.onScratchCleanup(Promise.allSettled(released).then(async (settled) => {
+        for (const outcome of settled) {
+          if (outcome.status === "rejected") input.model.logger?.warn("onboarding understanding child disposal failed", { runId, error: String(outcome.reason) })
+        }
+        await rm(runDir, { recursive: true, force: true })
+      }))
+    }
   }
 }
 

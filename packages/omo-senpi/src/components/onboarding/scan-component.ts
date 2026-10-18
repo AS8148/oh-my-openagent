@@ -77,11 +77,13 @@ interface HeldScan {
  */
 export interface OnboardingScanStore {
   readonly scans: Map<string, HeldScan>
+  /** Scans with an understanding run in progress, whichever session started it. */
+  readonly understanding: Map<string, symbol>
   latestAuthStore: OnboardingEngineAuthStore | undefined
 }
 
 export function createOnboardingScanStore(): OnboardingScanStore {
-  return { scans: new Map(), latestAuthStore: undefined }
+  return { scans: new Map(), understanding: new Map(), latestAuthStore: undefined }
 }
 
 const processScanStore = createOnboardingScanStore()
@@ -120,11 +122,23 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
           }
         })
       }
+      const expired = (entry: HeldScan): boolean => entry.finishedAt !== undefined && now() - entry.finishedAt > ONBOARDING_SCAN_TTL_MS
       registerOnboardingUnderstanding(pi, handle, {
         environment,
         loadStart: async () => (await loadRuntime()).startOnboardingUnderstanding,
         modelRegistry: () => modelRegistry,
-        scanSettled: async (scanId) => { await scans.get(scanId)?.outcome },
+        busyScans: shared.understanding,
+        // The digests exist only in memory, with the retained scan: an expired, evicted or applied scan has none.
+        scanForUnderstanding: async (scanId) => {
+          const held = scans.get(scanId)
+          const outcome = await held?.outcome
+          if (held === undefined || outcome === undefined || scans.get(scanId) !== held) return undefined
+          if (held.finishedAt === undefined || expired(held)) {
+            scans.delete(scanId)
+            return undefined
+          }
+          return { digests: outcome.digests, projectRoots: outcome.projectRoots }
+        },
         ...(deps.understanding === undefined ? {} : { seams: deps.understanding }),
       })
 
@@ -136,7 +150,13 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
         // read when the final `done` event is emitted - inside the scan - so an apply racing in
         // right after the events never sees a stale-or-missing finish time.
         const emit = (event: unknown): void => {
-          if (isRecord(event) && event["kind"] === "done") held.finishedAt = now()
+          if (isRecord(event) && event["kind"] === "done") {
+            held.finishedAt = now()
+            // Release the scan, digests included, once it has expired even if no later call prunes it.
+            setTimeout(() => {
+              if (scans.get(scanId) === held) scans.delete(scanId)
+            }, ONBOARDING_SCAN_TTL_MS).unref?.()
+          }
           pi.rpc?.emit(ONBOARDING_SCAN_RPC_EVENT, event)
         }
         held.outcome = new Promise((resolve) => setTimeout(resolve, 0))
@@ -148,8 +168,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
           })
         scans.set(scanId, held)
         for (const [id, entry] of scans) {
-          if (entry === held) continue
-          if (entry.finishedAt !== undefined && now() - entry.finishedAt > ONBOARDING_SCAN_TTL_MS) scans.delete(id)
+          if (entry !== held && expired(entry)) scans.delete(id)
         }
         const retained = [...scans.keys()].filter((id) => {
           const entry = scans.get(id)
@@ -171,7 +190,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
         scans.delete(scanId)
         const plans = await held.outcome
         if (plans === undefined) return { kind: "unavailable", reason: "The scan failed before it planned anything." }
-        if (held.finishedAt === undefined || now() - held.finishedAt > ONBOARDING_SCAN_TTL_MS) {
+        if (held.finishedAt === undefined || expired(held)) {
           return { kind: "stale", reason: "The scan expired; retained scans live ten minutes. Run omo.onboarding.scan again.", paths: [] }
         }
         // The stale, credential-store and write checks ship in the sidecar; the scan was taken

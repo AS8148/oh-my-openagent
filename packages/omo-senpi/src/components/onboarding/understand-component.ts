@@ -1,7 +1,7 @@
 import type { SenpiExtensionAPI } from "../../extension/types"
 import type { ChildModelRegistry } from "../memory/model-registry-resolver"
-import { getOmoNativeStateDir } from "../telemetry/product-identity"
 import type { OnboardingScanEnvironment } from "./scan-runtime"
+import type { SessionDigest } from "./session-history"
 import {
   ONBOARDING_UNDERSTAND_RPC_EVENT,
   ONBOARDING_UNDERSTAND_RPC_METHOD,
@@ -15,11 +15,20 @@ import type { OnboardingUnderstandingSeams, OnboardingUnderstandingStarted, star
 
 export type { OnboardingUnderstandingSeams } from "./understand-start"
 
+/** What understanding may read from a retained scan: its in-memory digests and the project roots it listed. */
+export interface OnboardingScanForUnderstanding {
+  readonly digests: readonly SessionDigest[]
+  readonly projectRoots: ReadonlySet<string>
+}
+
 export interface OnboardingUnderstandRegistration {
   readonly environment: () => OnboardingScanEnvironment
   readonly loadStart: () => Promise<typeof startOnboardingUnderstanding>
   readonly modelRegistry: () => ChildModelRegistry | undefined
-  readonly scanSettled: (scanId: string) => Promise<void>
+  /** Shared by every session of the process: one understanding per scan at a time. */
+  readonly busyScans: Map<string, symbol>
+  /** The retained scan once it settles; undefined when it never ran, failed, expired, was evicted or applied. */
+  readonly scanForUnderstanding: (scanId: string) => Promise<OnboardingScanForUnderstanding | undefined>
   readonly seams?: OnboardingUnderstandingSeams
 }
 
@@ -27,10 +36,11 @@ const MODEL_SELECTOR = /^[^/\s]+\/\S+$/
 
 export function registerOnboardingUnderstanding(pi: SenpiExtensionAPI, handle: NonNullable<NonNullable<SenpiExtensionAPI["rpc"]>["handle"]>, deps: OnboardingUnderstandRegistration): void {
   const runs = new Map<string, OnboardingUnderstandingStarted["control"]>()
+  const { busyScans } = deps
 
   handle(ONBOARDING_UNDERSTAND_RPC_METHOD, async (request): Promise<OnboardingUnderstandResponse> => {
     if (!isRecord(request) || request["consent"] !== true) {
-      return { kind: "invalid", reason: "Understanding sends session digests to the model provider, so it needs consent: true." }
+      return { kind: "invalid", reason: "Understanding sends the scan's session digests and each scanned project's AGENTS.md to the model provider, so it needs consent: true." }
     }
     const scanId = request["scanId"]
     const model = request["model"]
@@ -38,28 +48,49 @@ export function registerOnboardingUnderstanding(pi: SenpiExtensionAPI, handle: N
     if (typeof model !== "string" || !MODEL_SELECTOR.test(model)) return { kind: "invalid", reason: "model must be provider/model" }
     const modelRegistry = deps.modelRegistry()
     if (modelRegistry === undefined) return { kind: "unavailable", reason: "No session has started yet, so no model is available." }
-    await deps.scanSettled(scanId)
-    const environment = deps.environment()
-    const stateDir = environment.stateDir ?? getOmoNativeStateDir(environment.env ?? process.env)
-    let start: typeof startOnboardingUnderstanding
-    try {
-      start = await deps.loadStart()
-    } catch (error) {
-      return { kind: "unavailable", reason: `The onboarding runtime could not load: ${error instanceof Error ? error.message : String(error)}` }
+    if (busyScans.has(scanId)) return { kind: "invalid", reason: "An understanding run is already in progress for this scan; stop it or wait for its done event." }
+    const token = Symbol(scanId)
+    busyScans.set(scanId, token)
+    const release = (): void => {
+      if (busyScans.get(scanId) === token) busyScans.delete(scanId)
     }
-    const emit = (event: OnboardingUnderstandEvent): void => pi.rpc?.emit(ONBOARDING_UNDERSTAND_RPC_EVENT, event)
-    const started = await start({
-      scanId,
-      model,
-      stateDir,
-      modelRegistry,
-      ...(environment.env === undefined ? {} : { env: environment.env }),
-      ...(deps.seams === undefined ? {} : { seams: deps.seams }),
-    }, emit)
+    let started: Awaited<ReturnType<typeof startOnboardingUnderstanding>> | undefined
+    try {
+      const scan = await deps.scanForUnderstanding(scanId)
+      if (scan === undefined) {
+        return { kind: "unavailable", reason: "No retained scan with this id: it never ran, failed, expired after ten minutes, or was applied. Run omo.onboarding.scan again." }
+      }
+      const environment = deps.environment()
+      let start: typeof startOnboardingUnderstanding
+      try {
+        start = await deps.loadStart()
+      } catch (error) {
+        return { kind: "unavailable", reason: `The onboarding runtime could not load: ${error instanceof Error ? error.message : String(error)}` }
+      }
+      const emit = (event: OnboardingUnderstandEvent): void => {
+        if (event.kind === "done") release()
+        pi.rpc?.emit(ONBOARDING_UNDERSTAND_RPC_EVENT, event)
+      }
+      started = await start({
+        scanId,
+        model,
+        digests: scan.digests,
+        projectRoots: scan.projectRoots,
+        modelRegistry,
+        ...(environment.env === undefined ? {} : { env: environment.env }),
+        ...(deps.seams === undefined ? {} : { seams: deps.seams }),
+      }, emit)
+    } finally {
+      if (started === undefined || "kind" in started) release()
+    }
     if ("kind" in started) return started
-    runs.set(started.understandId, started.control)
-    void started.finished.finally(() => runs.delete(started.understandId))
-    return { understandId: started.understandId }
+    const { understandId, control: running, finished } = started
+    runs.set(understandId, running)
+    void finished.finally(() => {
+      runs.delete(understandId)
+      release()
+    })
+    return { understandId }
   })
 
   const control = (request: unknown, act: (run: OnboardingUnderstandingStarted["control"], body: Readonly<Record<string, unknown>>) => string | undefined): OnboardingUnderstandControlResponse => {

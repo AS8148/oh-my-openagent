@@ -2,6 +2,7 @@ import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { type Static, Type } from "typebox"
 
 import { sessionFactsApplier, type MemoryFactsApplyResponse } from "../memory/facts-apply-rpc"
+import type { SessionDigest } from "./session-history"
 import type { OnboardingFactCandidate } from "./understand-contract"
 import type { OnboardingUnderstandingSeams } from "./understand-start"
 import type { executeOnboardingMemoryApply, executeOnboardingUnderstand } from "./tui-memory-runtime"
@@ -11,7 +12,10 @@ export const ONBOARDING_MEMORY_APPLY_TOOL_NAME = "onboarding_memory_apply"
 
 export interface TuiOnboardingScan {
   readonly scanId: string
-  readonly stateDir: string
+  /** The scan's session digests, held in memory only; nothing of the scan is on disk. */
+  readonly digests: readonly SessionDigest[]
+  /** Project roots the scan listed; understanding reads AGENTS.md only inside these. */
+  readonly projectRoots: ReadonlySet<string>
   readonly env?: Readonly<Record<string, string | undefined>>
 }
 

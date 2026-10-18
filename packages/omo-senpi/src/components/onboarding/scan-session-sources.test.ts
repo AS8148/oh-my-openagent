@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test"
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 import type { OnboardingScanEvent } from "./scan-contract"
 import { runOnboardingScan } from "./scan-runtime"
-import { createSessionDigestStore } from "./session-history"
+import { getOmoNativeStateDir } from "../telemetry/product-identity"
 import { createTempDirectories, encodeRecord, writeTranscript } from "./session-history/test-support"
 
 const temp = createTempDirectories()
@@ -67,15 +68,16 @@ describe("onboarding scan projects and sessions sources (#10478 + #10479)", () =
     expect(events.findIndex((event) => event.source === "sessions")).toBeGreaterThan(events.findIndex((event) => event.source === "projects"))
   })
 
-  it("#given a finished scan #when its digests are listed #then they sit under the scan id in the engine state dir", async () => {
+  it("#given a finished scan #when nobody has consented yet #then its digests are held in memory and nothing is written to disk", async () => {
     // given
     const { stateDir, environment } = await fixture()
 
     // when
-    await runOnboardingScan(environment, { scanId: "scan-digests", includeCustomProviders: false }, () => undefined)
+    const outcome = await runOnboardingScan(environment, { scanId: "scan-digests", includeCustomProviders: false }, () => undefined)
 
     // then
-    const digests = await createSessionDigestStore({ stateDir }).list("scan-digests")
-    expect(digests.map((digest) => digest.firstRequest)).toEqual(["Ship the feature", "Fix the flaky test"])
+    expect(outcome.digests.map((digest) => digest.firstRequest)).toEqual(["Ship the feature", "Fix the flaky test"])
+    expect(existsSync(join(stateDir, "onboarding", "scans"))).toBe(false)
+    expect(existsSync(join(getOmoNativeStateDir(environment.env), "onboarding", "scans"))).toBe(false)
   })
 })

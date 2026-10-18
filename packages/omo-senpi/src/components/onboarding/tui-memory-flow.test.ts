@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -8,7 +9,6 @@ import type { MemoryIdentityContext } from "../memory/context"
 import { createSessionFactsApplier, publishSessionFactsApplier } from "../memory/facts-apply-rpc"
 import { registrySnapshot } from "../memory/facts-runner.test-support"
 import { createOnboardingComponent } from "./component"
-import { createSessionDigestStore } from "./session-history"
 import { encodeRecord, writeTranscript } from "./session-history/test-support"
 import * as state from "./state"
 import { createOnboardingHarness } from "./test-harness"
@@ -60,7 +60,6 @@ async function machine() {
       home,
       env: { HOME: home },
       agentDir: join(home, ".omo", "agent"),
-      stateDir,
       sessionHistory: { homes: [{ source: "codex" as const, homePath: codex }], omoSessionsRoots: [] },
     },
   }
@@ -107,7 +106,7 @@ const recordsBoth: FakeTurn = async ({ record }) => {
 }
 
 describe("TUI onboarding: shared scan, understanding, select-before-write", () => {
-  test("#given recent agent sessions #when the first prompt is onboarded #then the context carries the shared scan: its id, one row per found item, and the value summary", async () => {
+  test("#given recent agent sessions #when the first prompt is onboarded #then the context carries the shared scan: its id, one row per found item, and the value summary, with no digest on disk", async () => {
     const profile = await machine()
     const { h } = tuiOnboarding(profile, recordsBoth)
     await h.start()
@@ -116,11 +115,10 @@ describe("TUI onboarding: shared scan, understanding, select-before-write", () =
 
     const scanId = /Onboarding scan ([\w-]+)/.exec(content)?.[1]
     expect(scanId).toBeDefined()
-    const digests = await createSessionDigestStore({ stateDir: profile.stateDir }).list(scanId ?? "")
-    expect(digests).toHaveLength(2)
+    expect(existsSync(join(profile.stateDir, "onboarding", "scans"))).toBe(false)
     const rows = content.split("\n").filter((line) => line.startsWith("- "))
     expect(rows.filter((row) => row.startsWith("- sessions "))).toHaveLength(2)
-    for (const digest of digests) expect(rows.some((row) => row.includes(digest.sessionKey))).toBe(true)
+    for (const key of ["codex:codex-0", "codex:codex-1"]) expect(rows.some((row) => row.includes(key))).toBe(true)
     expect(rows.filter((row) => row.startsWith("- projects "))).toHaveLength(1)
     expect(content).toMatch(/2 recent sessions/)
   }, 60_000)

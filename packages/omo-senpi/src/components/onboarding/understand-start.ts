@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import type { CreateChildSession, InProcessRunnerLike } from "@oh-my-opencode/senpi-task"
 
 import type { ChildModelRegistry } from "../memory/model-registry-resolver"
-import { createSessionDigestStore } from "./session-history"
+import type { SessionDigest } from "./session-history"
 import type { OnboardingUnderstandBudgetLimits, OnboardingUnderstandEvent } from "./understand-contract"
 import { OnboardingUnderstandingControl } from "./understand-control"
 import { runOnboardingUnderstanding } from "./understand-runtime"
@@ -17,7 +17,9 @@ export interface OnboardingUnderstandingSeams {
 export interface OnboardingUnderstandingStart {
   readonly scanId: string
   readonly model: string
-  readonly stateDir: string
+  readonly digests: readonly SessionDigest[]
+  /** Project roots the scan listed; AGENTS.md is read only inside these. */
+  readonly projectRoots: ReadonlySet<string>
   readonly modelRegistry: ChildModelRegistry
   readonly env?: Readonly<Record<string, string | undefined>>
   readonly seams?: OnboardingUnderstandingSeams
@@ -35,33 +37,41 @@ export type OnboardingUnderstandingStartResult =
 
 /**
  * The understanding pass behind `omo.onboarding.understand`, shipped in the lazy onboarding-scan sidecar:
- * it reads the scan's digests, and when there are any, starts the run on the next macrotask so the caller
- * can answer with the id (and hold the control) before the first event.
+ * when the scan has digests, it starts the run on the next macrotask so the caller can answer with the id
+ * (and hold the control) before the first event.
  */
 export async function startOnboardingUnderstanding(
   input: OnboardingUnderstandingStart,
   emit: (event: OnboardingUnderstandEvent) => void,
 ): Promise<OnboardingUnderstandingStartResult> {
-  const digests = await createSessionDigestStore({ stateDir: input.stateDir }).list(input.scanId).catch(() => undefined)
-  if (digests === undefined) return { kind: "invalid", reason: "scanId is not a valid scan id" }
-  if (digests.length === 0) return { kind: "unavailable", reason: "This scan found no recent sessions to read." }
+  if (input.digests.length === 0) return { kind: "unavailable", reason: "This scan found no recent sessions to read." }
 
   const understandId = randomUUID()
   const control = new OnboardingUnderstandingControl()
-  const { scanId, model, modelRegistry } = input
+  const { scanId, model, modelRegistry, digests, projectRoots } = input
+  const startedAt = performance.now()
+  let usage = { bytesRead: 0, toolCalls: 0 }
+  const tracked = (event: OnboardingUnderstandEvent): void => {
+    usage = { bytesRead: event.bytesRead, toolCalls: event.toolCalls }
+    emit(event)
+  }
   const finished = new Promise((resolve) => setTimeout(resolve, 0))
     .then(() => runOnboardingUnderstanding({
       understandId,
       scanId,
       model,
       digests,
+      projectRoots,
       modelRegistry,
       control,
       ...(input.env === undefined ? {} : { env: { ...input.env } }),
       ...input.seams,
-    }, emit))
+    }, tracked))
     .catch((error: unknown): OnboardingUnderstandEvent => {
-      const done: OnboardingUnderstandEvent = { understandId, scanId, kind: "done", bytesRead: 0, toolCalls: 0, elapsedMs: 0, candidates: [], fallback: "scan_only", reason: error instanceof Error ? error.message : String(error) }
+      const done: OnboardingUnderstandEvent = {
+        understandId, scanId, kind: "done", ...usage, elapsedMs: Math.round(performance.now() - startedAt),
+        candidates: [], fallback: "scan_only", reason: error instanceof Error ? error.message : String(error),
+      }
       emit(done)
       return done
     })

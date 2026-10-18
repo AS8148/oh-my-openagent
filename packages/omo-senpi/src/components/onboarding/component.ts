@@ -44,16 +44,17 @@ export interface TuiScanResult extends TuiOnboardingScan {
 // The TUI reads this computer through the one shared scan (`omo setup`'s detection plus the engine
 // session history, through the lazy onboarding-scan runtime), so it never grows a second reader.
 // Fail-open: a scan that cannot run onboards the user without it.
-async function defaultScan(environment: OnboardingScanEnvironment, stateDir: string): Promise<TuiScanResult> {
+// Its digests stay in memory with this process's cached scan, like the RPC scan's: nothing is on disk.
+async function defaultScan(environment: OnboardingScanEnvironment): Promise<TuiScanResult> {
   const runtime = await loadOnboardingScanRuntime()
   const scanId = randomUUID()
   const events: OnboardingScanEvent[] = []
-  const scanStateDir = environment.stateDir ?? (environment.env === undefined ? stateDir : getOmoNativeStateDir(environment.env))
-  const { results } = await runtime.runOnboardingScan({ ...environment, stateDir: scanStateDir }, { scanId, includeCustomProviders: true }, (event) => { events.push(event) })
+  const { results, digests, projectRoots } = await runtime.runOnboardingScan(environment, { scanId, includeCustomProviders: true }, (event) => { events.push(event) })
   const inventory = runtime.migrationFactsFromScan(results)
   return {
     scanId,
-    stateDir: scanStateDir,
+    digests,
+    projectRoots,
     ...(environment.env === undefined ? {} : { env: environment.env }),
     context: runtime.onboardingScanContext(scanId, events),
     ...(inventory === undefined ? {} : { inventory }),
@@ -90,7 +91,7 @@ export function createOnboardingComponent(
       // Started on the first onboarding turn, once per process: other sessions never pay for it.
       let scanned: Promise<TuiScanResult | undefined> | undefined
       const scan = (): Promise<TuiScanResult | undefined> => {
-        scanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment(), stateDir)))().catch(() => undefined)
+        scanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment())))().catch(() => undefined)
         return scanned
       }
       // An injected inventory replaces the scan's; the default scan then never starts for it.

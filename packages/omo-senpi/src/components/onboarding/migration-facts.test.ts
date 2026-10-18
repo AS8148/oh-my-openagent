@@ -155,7 +155,7 @@ describe("onboarding migration inventory", () => {
       releaseOnboarding: () => {},
       stateDir: dir,
       // Hermetic: the default scan would read this environment; an injected inventory must never start it.
-      scanEnvironment: () => { defaultScans++; return { home: dir, env: { HOME: dir }, agentDir: join(dir, "agent"), stateDir: dir } },
+      scanEnvironment: () => { defaultScans++; return { home: dir, env: { HOME: dir }, agentDir: join(dir, "agent") } },
       migrationFacts: () => { scans++; return Promise.resolve("facts") },
     })
     const h = createOnboardingHarness(dir, "s", "rpc", component)

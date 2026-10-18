@@ -34,7 +34,8 @@ export async function executeOnboardingUnderstand(input: {
   const started = await startOnboardingUnderstanding({
     scanId: scan.scanId,
     model,
-    stateDir: scan.stateDir,
+    digests: scan.digests,
+    projectRoots: scan.projectRoots,
     modelRegistry,
     ...(scan.env === undefined ? {} : { env: scan.env }),
     ...(input.seams === undefined ? {} : { seams: input.seams }),

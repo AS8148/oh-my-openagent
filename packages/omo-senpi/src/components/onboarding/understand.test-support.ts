@@ -19,7 +19,7 @@ export type FakeTurn = (turn: {
  * A fake model behind the real facts launch path: `launchFactsInProcess` builds the child spec and the
  * `record_fact` tool, this runner plays the model's turn by calling that tool.
  */
-export function fakeModel(turn: FakeTurn) {
+export function fakeModel(turn: FakeTurn, hooks: { readonly onAbort?: (spec: ChildSpec) => Promise<void> } = {}) {
   const starts: ChildSpec[] = []
   let call = 0
   const createRunner = (): InProcessRunnerLike => ({
@@ -45,7 +45,7 @@ export function fakeModel(turn: FakeTurn) {
         effectiveModel: () => undefined,
         steer: async () => undefined,
         followUp: async () => undefined,
-        abort: async () => undefined,
+        abort: async () => { await hooks.onAbort?.(spec) },
         subscribe: () => () => undefined,
         waitForIdle: () => idle,
         lastAssistantText: () => undefined,
