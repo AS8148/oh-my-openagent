@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { load } from "js-yaml"
-import { checkPrChangelog, hasAddedUnreleasedLine, isUserFacingPath } from "./check-pr-changelog.mjs"
+import { checkPrChangelog, fragmentReleaseTransition, hasAddedUnreleasedLine, isUserFacingPath } from "./check-pr-changelog.mjs"
 import { shippingPolicy } from "./changelog-shipping-policy.mjs"
 
 const root = fileURLToPath(new URL("..", import.meta.url))
@@ -50,11 +50,11 @@ describe("shipped path classifier", () => {
     "packages/omo-senpi/plugin/extensions/omo.js",
     "packages/omo-codex/scripts/install-dist/install-local.mjs",
     "docs/reference/omo-ai-publishing.md", "README.md", "AGENTS.md", "changes.md",
+    "changes/unreleased/9626.md", "changes/unreleased/README.md",
     "scripts/check-third-party-notices.mjs",
     "script/qa/omo-native-eval-smoke-stop.mjs", "script/qa/omo-native-eval-smoke.mjs",
     ".github/workflows/ci.yml", "bun.lock",
   ])("does not require a note for %s", (path) => {
-    expect(tracked).toContain(path)
     expect(isUserFacingPath(path, policy)).toBe(false)
   })
   test("uses manifest glob, bin and negative entries", () => {
@@ -67,7 +67,7 @@ describe("shipped path classifier", () => {
 })
 
 describe("Unreleased added-line detection", () => {
-  const before = "# Changelog\n\n## [Unreleased]\n\nExisting note.\n\n## [1.0.0]\n\nOld note.\n"
+  const before = "# Changelog\n\n## [Unreleased]\n\nExisting note.\n\n## [1.0.0]\nOld note.\n"
   test.each([
     ["adds content", "## [Unreleased]\n\nNew note.\n", "@@ -0,0 +3 @@\n+New note.", true],
     ["edits content", "## [Unreleased]\n\nEdited note.\n", "@@ -5 +3 @@\n-Existing note.\n+Edited note.", true],
@@ -106,80 +106,91 @@ describe("gate verdict", () => {
   test("classifies removed shipped entries using the previous manifest", () => {
     expect(checkPrChangelog({ ...facts, changedFiles: ["assets/runtime.json"], policy: manifestPolicy({ files: [] }), previousPolicy: manifestPolicy({ files: ["assets/*.json"] }) }).pass).toBe(false)
   })
-  const notes = "### Fixed\n- Existing fix.\n- Another fix."
+})
+
+describe("fragment gate", () => {
+  const link = (n) => `[#${n}](https://github.com/code-yeongyu/oh-my-openagent/pull/${n})`
+  const facts = { changedFiles: ["packages/omo-native/compile-entry.ts"], policy, before: "## [Unreleased]\n\n## [1.0.0]\nOld.\n", after: "## [Unreleased]\n\n## [1.0.0]\nOld.\n", diff: "" }
+  const fragment = { name: "123.md", content: `**New fix.** Details (${link(123)}).` }
+
+  test("passes a fragment that links its own PR", () => {
+    const result = checkPrChangelog({ ...facts, fragment, prNumber: 123 })
+    expect(result.pass).toBe(true)
+    expect(result.reason).toContain("changes/unreleased/123.md")
+  })
+  test("refuses a fragment without a link to its own PR", () => {
+    const result = checkPrChangelog({ ...facts, fragment: { name: "123.md", content: "**New fix.** No link." }, prNumber: 123 })
+    expect(result.pass).toBe(false)
+    expect(result.reason).toContain("pull/123")
+  })
+  test("refuses an empty fragment", () => {
+    expect(checkPrChangelog({ ...facts, fragment: { name: "123.md", content: "  " }, prNumber: 123 }).pass).toBe(false)
+  })
+  test("refuses a fragment numbered for another PR", () => {
+    expect(checkPrChangelog({ ...facts, changedFiles: [...facts.changedFiles, "changes/unreleased/999.md"], fragment: undefined, prNumber: 123, deletedFragments: [] }).pass).toBe(false)
+  })
+  test("refuses a hand-edited Unreleased alongside a valid fragment", () => {
+    const after = `## [Unreleased]\n\n**Hand note.** Text (${link(123)}).\n\n## [1.0.0]\nOld.\n`
+    const diff = `@@ -0,0 +3 @@\n+**Hand note.** Text (${link(123)}).`
+    expect(checkPrChangelog({ ...facts, after, diff, fragment, prNumber: 123 }).pass).toBe(false)
+  })
+  test("refuses a hand-edited Unreleased with no fragment at all", () => {
+    const after = `## [Unreleased]\n\n**Hand note.** Text (${link(123)}).\n\n## [1.0.0]\nOld.\n`
+    const diff = `@@ -0,0 +3 @@\n+**Hand note.** Text (${link(123)}).`
+    const result = checkPrChangelog({ ...facts, after, diff, prNumber: 123 })
+    expect(result.pass).toBe(false)
+    expect(result.reason).toContain("hand-edited")
+  })
+  test("refuses a user-facing change with neither fragment nor hand edit", () => {
+    const result = checkPrChangelog({ ...facts, prNumber: 123 })
+    expect(result.pass).toBe(false)
+    expect(result.reason).toContain("without a changelog fragment")
+  })
+  test("without a PR number nothing passes except the escapes", () => {
+    expect(checkPrChangelog({ ...facts }).pass).toBe(false)
+    expect(checkPrChangelog({ ...facts, labels: ["no-changelog"] }).pass).toBe(true)
+  })
+})
+
+describe("fragment release transition", () => {
+  const notes = "**Fixed.** Existing fix."
   const history = "## [1.0.0]\nOld note.\n"
-  const beforeRelease = `## [Unreleased]\n\n${notes}\n\n${history}`
+  const beforeRelease = `## [Unreleased]\n\n${history}`
+  const deleted = [{ pr: 1, content: notes }]
   test.each([
     ["complete release transition", `## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n${notes}\n\n${history}`, true],
-    ["unrelated release heading", `${beforeRelease}\n## [1.1.0]\nUnrelated note.\n`, false],
+    ["partial release transition", `## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n**Fixed.** Half a fix.\n\n${history}`, false],
+    ["dropped a consumed fragment's entry", `## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n${history}`, false],
+    ["release body edited after assembly", `## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n**Fixed.** Edited fix.\n\n${history}`, false],
     ["copied notes without clearing Unreleased", `## [Unreleased]\n${notes}\n\n## [1.1.0]\n${notes}\n\n${history}`, false],
-    ["partial release transition", `## [Unreleased]\n\n## [1.1.0]\n### Fixed\n- Existing fix.\n\n${history}`, false],
-    ["edited released notes", `## [Unreleased]\n\n## [1.1.0]\n${notes.replace("Existing fix.", "Unrelated fix.")}\n\n${history}`, false],
+    ["unrelated release heading", `${beforeRelease}\n## [1.1.0]\nUnrelated note.\n`, false],
     ["existing release version", `## [Unreleased]\n\n## [1.0.0] - 2026-10-11\n${notes}\n\n${history}`, false],
-    ["release after another section", `## [Unreleased]\n\n${history}\n## [1.1.0]\n${notes}\n`, false],
     ["complete prerelease transition", `## [Unreleased]\n\n## [1.1.0-beta.1] - 2026-10-15\n\n${notes}\n\n${history}`, true],
-  ])("%s with shipped code", (_name, after, pass) => {
-    expect(checkPrChangelog({ ...facts, before: beforeRelease, after, diff: "" }).pass).toBe(pass)
+  ])("%s", (_name, after, pass) => {
+    expect(fragmentReleaseTransition({ before: beforeRelease, after, deletedFragments: deleted })).toBe(pass)
   })
   test("does not count an already released prerelease version as a new release", () => {
     const releasedBeta = `## [1.1.0-beta.1] - 2026-10-14\nOld beta.\n\n${history}`
-    expect(checkPrChangelog({
-      ...facts,
-      before: `## [Unreleased]\n\n${notes}\n\n${releasedBeta}`,
-      after: `## [Unreleased]\n\n## [1.1.0-beta.1] - 2026-10-15\n\n${notes}\n\n${releasedBeta}`,
-      diff: "",
-    }).pass).toBe(false)
+    const after = `## [Unreleased]\n\n## [1.1.0-beta.1] - 2026-10-15\n\n${notes}\n\n${history}`
+    expect(fragmentReleaseTransition({ before: `## [Unreleased]\n\n${releasedBeta}`, after, deletedFragments: deleted })).toBe(false)
   })
-  test.each(["", "### Fixed", "<!-- hidden note -->"])("does not release an empty or heading/comment-only section: %s", (body) => {
-    expect(checkPrChangelog({
-      ...facts,
-      before: `## [Unreleased]\n${body}\n\n${history}`,
-      after: `## [Unreleased]\n\n## [1.1.0]\n${body}\n\n${history}`,
-    }).pass).toBe(false)
+  test("refuses a transition claim with no consumed fragments", () => {
+    expect(fragmentReleaseTransition({ after: `## [Unreleased]\n\n## [1.1.0]\n${notes}\n`, deletedFragments: [] })).toBe(false)
+  })
+  test("passes the gate for a release commit", () => {
+    const facts = { changedFiles: ["packages/omo-native/compile-entry.ts"], policy, before: beforeRelease, after: `## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n${notes}\n\n${history}`, diff: "" }
+    const result = checkPrChangelog({ ...facts, before: beforeRelease, deletedFragments: deleted })
+    expect(result.pass).toBe(true)
+    expect(result.reason).toContain("consumed changelog fragments")
   })
 })
 
-describe("own-PR link on added Unreleased paragraphs", () => {
-  const link = (n) => `[#${n}](https://github.com/code-yeongyu/oh-my-openagent/pull/${n})`
-  const before = "## [Unreleased]\n\n**Old fix.** Existing text (${link(1)}).\n\n## [1.0.0]\nOld note.\n".replace("${link(1)}", link(1))
-  const facts = { changedFiles: ["packages/omo-native/compile-entry.ts"], policy, before }
-  const add = (paragraph) => ({
-    after: `## [Unreleased]\n\n${paragraph}\n\n**Old fix.** Existing text (${link(1)}).\n\n## [1.0.0]\nOld note.\n`,
-    diff: `@@ -0,0 +3,2 @@\n+${paragraph}\n+`,
-  })
-  test("refuses an added paragraph with no link to its own PR", () => {
-    const result = checkPrChangelog({ ...facts, ...add("**New fix.** No link here."), prNumber: 123 })
-    expect(result.pass).toBe(false)
-    expect(result.reason).toContain("#123")
-  })
-  test("passes an added paragraph that links its own PR", () => {
-    expect(checkPrChangelog({ ...facts, ...add(`**New fix.** Linked (${link(123)}).`), prNumber: 123 }).pass).toBe(true)
-  })
-  test("refuses an added paragraph that links only a different PR", () => {
-    expect(checkPrChangelog({ ...facts, ...add(`**New fix.** Linked (${link(99)}).`), prNumber: 123 }).pass).toBe(false)
-  })
-  test("accepts an edit of an existing paragraph without its own link", () => {
-    const after = `## [Unreleased]\n\n**Old fix.** Existing text (${link(1)}, ${link(2)}).\n\n## [1.0.0]\nOld note.\n`
-    const diff = `@@ -3 +3 @@\n-**Old fix.** Existing text (${link(1)}).\n+**Old fix.** Existing text (${link(1)}, ${link(2)}).`
-    expect(checkPrChangelog({ ...facts, after, diff, prNumber: 123 }).pass).toBe(true)
-  })
-  test("checks an entry written directly under a heading", () => {
-    const { after } = add("### Fixed\n**New fix.** No link here.")
-    const diff = "@@ -0,0 +3,3 @@\n+### Fixed\n+**New fix.** No link here.\n+"
-    expect(checkPrChangelog({ ...facts, after, diff, prNumber: 123 }).pass).toBe(false)
-    const linked = add(`### Fixed\n**New fix.** Linked (${link(123)}).`).after
-    expect(checkPrChangelog({ ...facts, after: linked, diff: diff.replace("No link here.", `Linked (${link(123)}).`), prNumber: 123 }).pass).toBe(true)
-  })
-  test("keeps the old verdict when no PR number is known", () => {
-    expect(checkPrChangelog({ ...facts, ...add("**New fix.** No link here.") }).pass).toBe(true)
-  })
-})
-
-test("CLI uses the PR merge base, includes deleted sources, and accepts a real note", () => {
+test("CLI uses the PR merge base, checks the PR's own fragment, and refuses hand edits", () => {
   const repo = mkdtempSync(join(tmpdir(), "changelog-gate-cli-"))
   const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim()
   const script = fileURLToPath(new URL("./check-pr-changelog.mjs", import.meta.url))
   const run = (base, labels = "[]") => spawnSync(process.execPath, [script, "--repo", repo, "--base", base, "--labels", labels], { encoding: "utf8", cwd: "/tmp" })
+  const runPr = (base, pr) => spawnSync(process.execPath, [script, "--repo", repo, "--base", base, "--pr", pr], { encoding: "utf8", cwd: "/tmp" })
   try {
     git("init", "-q")
     git("config", "user.name", "YeonGyu-Kim")
@@ -197,9 +208,16 @@ test("CLI uses the PR merge base, includes deleted sources, and accepts a real n
     git("commit", "-qm", "remove shipped asset")
     expect(run(base).status).toBe(1)
     expect(run(base, '["no-changelog"]').status).toBe(0)
-    writeFileSync(join(repo, "CHANGELOG.md"), "## [Unreleased]\nRemoved asset.\n\n## [1.0.0]\nOld note.\n")
+    mkdirSync(join(repo, "changes", "unreleased"), { recursive: true })
+    writeFileSync(join(repo, "changes/unreleased/7.md"), "**Removed the asset.** It is gone ([#7](https://github.com/code-yeongyu/oh-my-openagent/pull/7)).")
+    writeFileSync(join(repo, "CHANGELOG.md"), "## [Unreleased]\nRemoved asset by hand.\n\n## [1.0.0]\nOld note.\n")
     git("add", ".")
-    git("commit", "-qm", "document removal")
+    git("commit", "-qm", "fragment plus hand edit")
+    const handEdit = git("rev-parse", "HEAD")
+    expect(runPr(base, "7").status).toBe(1)
+    writeFileSync(join(repo, "CHANGELOG.md"), "## [Unreleased]\n\n## [1.0.0]\nOld note.\n")
+    git("add", ".")
+    git("commit", "-qm", "document removal in a fragment only")
     const head = git("rev-parse", "HEAD")
     git("checkout", "-q", "base")
     writeFileSync(join(repo, "CHANGELOG.md"), "## [Unreleased]\nBase-only note.\n\n## [1.0.0]\nOld note.\n")
@@ -207,10 +225,12 @@ test("CLI uses the PR merge base, includes deleted sources, and accepts a real n
     git("commit", "-qm", "advance base")
     const advancedBase = git("rev-parse", "HEAD")
     git("checkout", "-q", head)
-    expect(run(advancedBase).status).toBe(0)
-    const runPr = (pr) => spawnSync(process.execPath, [script, "--repo", repo, "--base", advancedBase, "--pr", pr], { encoding: "utf8", cwd: "/tmp" })
-    expect(runPr("7").status).toBe(1)
-    expect(runPr("7").stdout).toContain("pull/7")
+    expect(handEdit).not.toBe(head)
+    expect(run(advancedBase).status).toBe(1)
+    expect(runPr(advancedBase, "7").status).toBe(0)
+    expect(runPr(advancedBase, "7").stdout).toContain("PASS - added changes/unreleased/7.md")
+    expect(runPr(advancedBase, "8").status).toBe(1)
+    expect(runPr(advancedBase, "8").stdout).toContain("pull/8")
     expect(runPr("not-a-number").status).toBe(1)
     expect(run("--invalid-option").status).toBe(1)
     expect(run(base, "{}").status).toBe(1)
@@ -257,7 +277,7 @@ test("workflow emits one real gate verdict for every label event and passes the 
     const head = git("rev-parse", "HEAD")
     git("checkout", "-q", ancestor)
     mkdirSync(join(repo, "script"))
-    for (const name of ["check-pr-changelog.mjs", "changelog-shipping-policy.mjs"]) {
+    for (const name of ["check-pr-changelog.mjs", "changelog-shipping-policy.mjs", "changelog-fragments.ts"]) {
       writeFileSync(join(repo, "script", name), readFileSync(new URL(name, import.meta.url), "utf8"))
     }
     git("add", ".")

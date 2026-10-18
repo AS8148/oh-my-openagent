@@ -417,6 +417,10 @@ Adding `ci:full-matrix` launches `ci-full-matrix-label.yml`, which calls `ci.yml
 | `package-labels.yml` | issues opened/edited + pull_request_target | Auto-applies package labels (`opencode` / `lazycodex` / `lazycodex-generated`) |
 | `stats.yml` | weekly cron (Sun) / dispatch | Runs `script/stats.ts` (npm + GitHub-release download counts) |
 
+## CHANGELOG FRAGMENTS
+
+Never edit `CHANGELOG.md`'s `## [Unreleased]` section by hand — it is assembled from per-PR fragment files. A user-facing PR adds `changes/unreleased/<pr-number>.md` (body = the Unreleased paragraph, linking its own PR; see `changes/unreleased/README.md`). The `changelog-gate` workflow enforces this with the `no-changelog` label as the escape; `script/stamp-release-changelog.ts` assembles, stamps, and deletes fragments in the release commit (#9961).
+
 ## PR MERGE POLICY
 
 - **PRs into `dev` MUST use merge commits.**
