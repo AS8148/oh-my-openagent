@@ -14,9 +14,11 @@ import {
   ONBOARDING_SCAN_RPC_EVENT,
   ONBOARDING_SCAN_RPC_METHOD,
   createOnboardingScanComponent,
+  createOnboardingScanStore,
   type OnboardingApplyResponse,
   type OnboardingScanEvent,
   type OnboardingScanResponse,
+  type OnboardingScanStore,
 } from "./scan-component"
 
 const roots: string[] = []
@@ -141,24 +143,20 @@ interface RegisterOptions {
   readonly now?: () => number
 }
 
+/** One session with a scan store of its own, so no test sees another test's retained scans. */
 function register(profile: Profile, options: RegisterOptions = {}) {
-  const host = fakeHost()
-  createOnboardingScanComponent({
-    runtime: () => ({ home: profile.home, env: profile.env, agentDir: profile.agentDir }),
-    ...(options.authStore === undefined ? {} : { authStore: options.authStore }),
-    ...(options.now === undefined ? {} : { now: options.now }),
-  }).register(host.pi, {} as never)
-  return host
+  return registerSession(profile, createOnboardingScanStore(), options)
 }
 
 /**
- * One more session of the same engine process, wired exactly as production wires it: no scan store
- * is injected, so every session shares the process-wide one.
+ * One session of an engine process. Sessions given the same store share retained scans the way
+ * sessions of one process do; `undefined` is production wiring, the process-wide store.
  */
-function registerSession(profile: Profile, options: RegisterOptions = {}) {
+function registerSession(profile: Profile, store: OnboardingScanStore | undefined, options: RegisterOptions = {}) {
   const host = fakeHost()
   createOnboardingScanComponent({
     runtime: () => ({ home: profile.home, env: profile.env, agentDir: profile.agentDir }),
+    ...(store === undefined ? {} : { scanStore: store }),
     ...(options.authStore === undefined ? {} : { authStore: options.authStore }),
     ...(options.now === undefined ? {} : { now: options.now }),
   }).register(host.pi, {} as never)
@@ -472,8 +470,9 @@ describe("onboarding scan and apply across sessions of one process", () => {
   // new one: the retained scan has to outlive the session that ran it.
   test("#given a scan on session A #when session B applies it #then the apply succeeds and writes", async () => {
     const profile = openCodeProfile()
-    const a = registerSession(profile)
-    const b = registerSession(profile)
+    // Production wiring: neither session is handed a store, so both use the process-wide one.
+    const a = registerSession(profile, undefined)
+    const b = registerSession(profile, undefined)
     const { scanId } = await a.scan({})
 
     const response = await b.apply({ scanId, stages: ["assets"] })
@@ -485,13 +484,14 @@ describe("onboarding scan and apply across sessions of one process", () => {
 
   test("#given session B captured no credential store #when it applies session A's scan #then credentials go through the store the process captured last", async () => {
     const profile = openCodeProfile()
-    const a = registerSession(profile)
+    const store = createOnboardingScanStore()
+    const a = registerSession(profile, store)
     const log: string[] = []
     await a.dispatchEvent("session_start", { type: "session_start", reason: "startup" }, {
       modelRegistry: { authStorage: fileStore(authPath(profile), log) },
     })
     const { scanId } = await a.scan({})
-    const b = registerSession(profile)
+    const b = registerSession(profile, store)
 
     const response = await b.apply({ scanId, stages: ["credentials"] })
 
@@ -503,8 +503,9 @@ describe("onboarding scan and apply across sessions of one process", () => {
 
   test("#given session B applied session A's scan #when either session applies it again #then both answer unavailable", async () => {
     const profile = openCodeProfile()
-    const a = registerSession(profile)
-    const b = registerSession(profile)
+    const store = createOnboardingScanStore()
+    const a = registerSession(profile, store)
+    const b = registerSession(profile, store)
     const { scanId } = await a.scan({})
     expect(await b.apply({ scanId, stages: ["assets"] })).toEqual(expect.objectContaining({ applied: ["assets"] }))
 
@@ -514,8 +515,9 @@ describe("onboarding scan and apply across sessions of one process", () => {
 
   test("#given simultaneous applies of one scan from two sessions #when both run #then exactly one succeeds", async () => {
     const profile = openCodeProfile()
-    const a = registerSession(profile)
-    const b = registerSession(profile)
+    const store = createOnboardingScanStore()
+    const a = registerSession(profile, store)
+    const b = registerSession(profile, store)
     const { scanId } = await a.scan({})
 
     const responses = await Promise.all([
@@ -529,9 +531,10 @@ describe("onboarding scan and apply across sessions of one process", () => {
 
   test("#given session A's scan is older than ten minutes #when session B applies it #then it answers stale with the expiry reason and writes nothing", async () => {
     const profile = openCodeProfile()
+    const store = createOnboardingScanStore()
     let now = 1_000_000_000_000
-    const a = registerSession(profile, { now: () => now })
-    const b = registerSession(profile, { now: () => now })
+    const a = registerSession(profile, store, { now: () => now })
+    const b = registerSession(profile, store, { now: () => now })
     const { scanId } = await a.scan({})
     now += 10 * 60_000 + 1
 
@@ -544,8 +547,9 @@ describe("onboarding scan and apply across sessions of one process", () => {
 
   test("#given a target changed after session A's scan #when session B applies it #then it answers stale and the user's edit survives", async () => {
     const profile = openCodeProfile()
-    const a = registerSession(profile)
-    const b = registerSession(profile)
+    const store = createOnboardingScanStore()
+    const a = registerSession(profile, store)
+    const b = registerSession(profile, store)
     const { scanId } = await a.scan({})
     const mcp = join(profile.agentDir, "mcp.json")
     write(mcp, JSON.stringify({ mcpServers: { "user-server": { type: "local", command: ["npx", "x"] } } }, null, 2))

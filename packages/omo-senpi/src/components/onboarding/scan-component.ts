@@ -51,6 +51,8 @@ export interface OnboardingScanComponentDependencies {
   /** The engine's credential store apply writes through; defaults to the one `session_start` reports. */
   readonly authStore?: () => OnboardingEngineAuthStore | undefined
   readonly now?: () => number
+  /** Where finished scans wait for their apply; defaults to the one store every session of the process shares. */
+  readonly scanStore?: OnboardingScanStore
 }
 
 type Scan = Promise<Awaited<ReturnType<typeof runOnboardingScan>> | undefined>
@@ -58,6 +60,21 @@ interface HeldScan {
   outcome: Scan
   finishedAt: number | undefined
 }
+
+/**
+ * Retained scans and the last engine credential store, held for the whole engine process: a client
+ * may scan on one control session and apply on the next, so nothing here may live per session.
+ */
+export interface OnboardingScanStore {
+  readonly scans: Map<string, HeldScan>
+  latestAuthStore: OnboardingEngineAuthStore | undefined
+}
+
+export function createOnboardingScanStore(): OnboardingScanStore {
+  return { scans: new Map(), latestAuthStore: undefined }
+}
+
+const processScanStore = createOnboardingScanStore()
 /**
  * `omo.onboarding.scan` / `omo.onboarding.apply`: `omo setup`'s detection streamed to RPC clients
  * and its writers run on their consent. Programmatic only: no model is read or called, no socket is
@@ -72,11 +89,13 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
       const environment = deps.runtime ?? (() => ({}))
       const loadRuntime = deps.loadRuntime ?? loadOnboardingScanRuntime
       const now = deps.now ?? (() => Date.now())
-      const scans = new Map<string, HeldScan>()
+      const shared = deps.scanStore ?? processScanStore
+      const scans = shared.scans
       // The engine's own AuthStorage (modelRegistry.authStorage): an apply's credential writes go
-      // through its lock, so a token refresh that lands mid-apply is merged, never reverted.
+      // through its lock, so a token refresh that lands mid-apply is merged, never reverted. A
+      // session that captured none (a fresh control session) uses the one the process captured last.
       let capturedStore: OnboardingEngineAuthStore | undefined
-      const authStore = deps.authStore ?? (() => capturedStore)
+      const authStore = deps.authStore ?? (() => capturedStore ?? shared.latestAuthStore)
       pi.on("session_start", (_event, ctx) => {
         const registry = isRecord(ctx) && isRecord(ctx["modelRegistry"]) ? ctx["modelRegistry"] : undefined
         const candidate = isRecord(registry?.["authStorage"]) ? registry?.["authStorage"] : undefined
@@ -84,6 +103,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
           candidate !== undefined && typeof candidate["getStoragePath"] === "function" && typeof candidate["modify"] === "function"
         ) {
           capturedStore = candidate as unknown as OnboardingEngineAuthStore
+          shared.latestAuthStore = capturedStore
         }
       })
 
