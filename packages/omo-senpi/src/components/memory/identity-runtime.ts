@@ -52,6 +52,8 @@ export interface MemoryIdentityRuntime {
   readonly runner: SenpiSubprocessRunner
   launch(run: ReservedRun): Promise<void>
   reconcile(): Promise<void>
+  /** Resolves once every launch started in this process has returned (a detached child may still be running). */
+  settled(): Promise<void>
 }
 
 function asMemoryIdentity(context: MemoryIdentityContext): MemoryIdentity {
@@ -143,6 +145,7 @@ export function createIdentityRuntime(
     })
     return runtimeDirsReady
   }
+  const inFlight = new Set<Promise<void>>()
   // Every launch runs in a scope bound to ITS run (launch-facts.ts): a trigger's own scope is kept
   // when it is for this run; a queued follow-up or a reconcile gets a fresh scope of its own.
   const launch = (run: ReservedRun): Promise<void> => {
@@ -150,8 +153,8 @@ export function createIdentityRuntime(
     const owned = scope !== undefined && sameConversations(scope.conversationIds, run.request.conversationIds)
     return owned ? launchInScope(run) : withLaunchScope({ conversationIds: run.request.conversationIds }, () => launchInScope(run))
   }
-  const launchInScope = (run: ReservedRun): Promise<void> =>
-    ensureRuntimeDirsOnce()
+  const launchInScope = (run: ReservedRun): Promise<void> => {
+    const tracked: Promise<void> = ensureRuntimeDirsOnce()
       .then(() => runner.launch(run))
       .then((result) => {
         if (result.launch !== undefined) void launch(result.launch)
@@ -159,6 +162,10 @@ export function createIdentityRuntime(
       .catch((error: unknown) => {
         deps.logger?.warn("memory reflection launch failed", { error: describe(error) })
       })
+      .finally(() => inFlight.delete(tracked))
+    inFlight.add(tracked)
+    return tracked
+  }
 
   const runtime: MemoryIdentityRuntime = {
     identity,
@@ -166,6 +173,9 @@ export function createIdentityRuntime(
     reservationPort: store,
     runner,
     launch,
+    async settled(): Promise<void> {
+      while (inFlight.size > 0) await Promise.all([...inFlight])
+    },
     async reconcile(): Promise<void> {
       await reconcileReflectionRuns({
         identity: asMemoryIdentity(identity),
