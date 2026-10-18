@@ -120,4 +120,46 @@ describe("setup-stream", () => {
     expect(existsSync(join(agentDir, "models.json"))).toBe(false)
     expect(existsSync(join(agentDir, "settings.json"))).toBe(false)
   })
+
+  test("#given a target edited after planning #when apply runs with a stale guard #then it writes nothing and names the path", async () => {
+    const { home, agentDir, env } = fixture()
+    const { loadModelCatalog } = catalogSpy()
+    const { plans } = await collectSetupPlans(scanSetup({ home, env, loadModelCatalog }, agentDir, { includeCustomProviders: true }))
+    // The engine refreshes a token into auth.json after the plan read it.
+    write(join(agentDir, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", access: "a2", refresh: "r2", expires: 2 } }, null, 2))
+    const staleGuard = (stageId: string) => (stageId === "credentials" ? [join(agentDir, "auth.json")] : [])
+
+    await expect(applySetupStages(plans, () => true, () => {}, { staleGuard })).rejects.toThrow(/changed since planning/)
+
+    const auth = JSON.parse(readFileSync(join(agentDir, "auth.json"), "utf8"))
+    expect(auth.anthropic.refresh).toBe("r2")
+    expect(auth.openai).toBeUndefined()
+  })
+
+  test("#given a credential store #when apply runs with writeAuth #then keys land through the store and merge with what it already holds", async () => {
+    const { home, agentDir, env } = fixture()
+    const { loadModelCatalog } = catalogSpy()
+    const { plans } = await collectSetupPlans(scanSetup({ home, env, loadModelCatalog }, agentDir))
+    const target = join(agentDir, "auth.json")
+    const calls: string[] = []
+    const writeAuth = async (path: string, additions: ReadonlyArray<{ provider: string; key: string }>) => {
+      expect(path).toBe(target)
+      let entries: Record<string, unknown> = {}
+      try { entries = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> } catch { /* absent */ }
+      // A store writes under its lock and keeps whatever it already holds - a concurrent login survives.
+      for (const item of additions) {
+        calls.push(item.provider)
+        entries[item.provider] = { type: "api_key", key: item.key }
+      }
+      write(path, JSON.stringify(entries, null, 2))
+    }
+
+    const applied = await applySetupStages(plans, (stage) => stage.id === "credentials", () => {}, { writeAuth })
+
+    expect([...applied]).toEqual(["credentials"])
+    expect(calls).toEqual(["openai"])
+    const auth = JSON.parse(readFileSync(target, "utf8"))
+    expect(auth.openai).toEqual({ type: "api_key", key: SECRET_A })
+    expect(auth.anthropic).toBeUndefined()
+  })
 })
