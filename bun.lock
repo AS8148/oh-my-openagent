@@ -202,6 +202,7 @@
       "name": "@oh-my-opencode/omo-codex",
       "version": "5.1.35",
       "dependencies": {
+        "@oh-my-opencode/model-core": "workspace:*",
         "@oh-my-opencode/shared-skills": "workspace:*",
         "@oh-my-opencode/utils": "workspace:*",
       },
@@ -383,6 +384,7 @@
       "dependencies": {
         "@oh-my-opencode/delegate-core": "workspace:*",
         "@oh-my-opencode/isolation-core": "workspace:*",
+        "@oh-my-opencode/model-core": "workspace:*",
         "@oh-my-opencode/omo-config-core": "workspace:*",
         "@oh-my-opencode/team-core": "workspace:*",
         "@oh-my-opencode/utils": "workspace:*",
@@ -449,6 +451,7 @@
       "name": "@oh-my-opencode/utils",
       "version": "0.1.0",
       "dependencies": {
+        "@oh-my-opencode/model-core": "workspace:*",
         "@oh-my-opencode/omo-config-core": "workspace:*",
         "js-yaml": "^5.4.2",
         "jsonc-parser": "^3.3.1",
