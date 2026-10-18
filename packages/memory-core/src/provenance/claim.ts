@@ -49,7 +49,8 @@ export function enclosingUserSentence(quote: string, userTexts: readonly string[
     const sentences = sentencesOf(text)
     const at = sentences.findIndex((candidate) => normalize(candidate).includes(needle))
     const sentence = sentences[at] ?? text
-    const following = at >= 0 ? sentences[at + 1] : undefined
+    // Every later sentence of the same message counts: "Remove X. Thanks. Never mind." is a retraction too.
+    const following = at >= 0 && at + 1 < sentences.length ? sentences.slice(at + 1).join(" ") : undefined
     if (!isAffirmativeStatement(normalize(sentence), following === undefined ? undefined : normalize(following))) return undefined
     return capQuote(sentence)
   }

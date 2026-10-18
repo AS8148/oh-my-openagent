@@ -42,6 +42,7 @@ describe("claim receipts", () => {
 
   test.each([
     "아니야", "아냐", "잠깐만", "그만해", "됐어요", "하지 마세요", "아닙니다", "아니에요", "안 돼", "안돼", "싫다", "취소", "멈춰", "아니라니까",
+    "아뇨", "아뇨.", "아뇨 그건 두세요", "잠시만", "기다려", "ㄴㄴ", "노노", "냅둬", "놔둬", "그대로 둬", "없던 걸로 해", "스톱", "다시 생각해보니 그냥 둬", "됐어",
   ])("#given a Korean retraction %s in the next sentence #when resolved #then it stays a suggestion", (retraction) => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "플러그인 X 지워" }, [`플러그인 X 지워. ${retraction}`]))
       .toEqual({ source: "agent", downgraded: true })
@@ -49,6 +50,7 @@ describe("claim receipts", () => {
 
   test.each([
     "Not yet.", "Never mind.", "Nevermind.", "Hold on.", "Cancel that.", "Scratch that.", "Please don't.", "Just kidding.", "Nooo.",
+    "Forget it.", "Nvm.", "Ignore that.", "Disregard that.", "Undo that.", "Changed my mind.", "On second thought, keep them.", "Leave them.", "jk", "Thanks. Never mind.",
   ])("#given an English retraction %s in the next sentence #when resolved #then it stays a suggestion", (retraction) => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, [`Remove plugins X and Y. ${retraction}`]))
       .toEqual({ source: "agent", downgraded: true })
@@ -58,6 +60,12 @@ describe("claim receipts", () => {
     ["Remove plugins X and Y. Also update plugin Z.", "remove plugins X and Y"],
     ["플러그인 X 지워. 그리고 Y도 정리해", "플러그인 X 지워"],
     ["플러그인 X 지우지 맙시다", "플러그인 X 지우지"],
+    ["플러그인 X 지워. 일단 그거부터 해", "플러그인 X 지워"],
+    ["플러그인 X 지워. 아니면 Y도 지워", "플러그인 X 지워"],
+    ["플러그인 X 지워. 백업은 이미 완료됐어", "플러그인 X 지워"],
+    ["플러그인 X 지워. 그만큼 중요해", "플러그인 X 지워"],
+    ["플러그인 X 지워. 안에 있는 것도 지워", "플러그인 X 지워"],
+    ["Remove plugins X and Y. Thanks. Then push it.", "remove plugins X and Y"],
   ])("#given %s #when resolved #then a plain follow-up stays the user's and a written prohibition does not", (said, quote) => {
     const expected = said.includes("맙시다") ? "agent" : "user"
     expect(resolveClaimReceipt({ source: "user", userQuote: quote }, [said]).source).toBe(expected)
