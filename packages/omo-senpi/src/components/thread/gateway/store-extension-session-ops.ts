@@ -11,6 +11,7 @@ import { dirname, join } from "node:path"
 
 import { AWAIT_REQUEST_ID, RESERVED_CALLER_KEYS, isToolSessionOp } from "./extension-registrations"
 import { gatewayDatabasePath } from "./paths"
+import { argumentFailure } from "./session-args-schema"
 import type { StoreExtensions } from "./store-extension-ops"
 import { transaction, type StoreContext } from "./store-ops"
 import type { StoreExtensionRefusal, StoreExtensionResult } from "./store-extensions"
@@ -30,19 +31,6 @@ export type SessionCallRequest = {
 export type SessionCallReply = {
   readonly result: StoreExtensionResult<unknown>
   readonly await?: { readonly timeout_ms: number; readonly wake_dir: string }
-}
-
-type TypeboxValue = (typeof import("typebox/value"))["Value"]
-
-/**
- * typebox's validator is imported on the first op-phase call, not with the worker: every worker spawn
- * (and every respawn after an idle retire) would otherwise pay for its ~700-module graph, which only
- * argument validation of a session-callable op uses.
- */
-let value: TypeboxValue | undefined
-async function typeboxValue(): Promise<TypeboxValue> {
-  value ??= (await import("typebox/value")).Value
-  return value
 }
 
 const refused = (code: StoreExtensionRefusal["code"], message: string): SessionCallReply => ({ result: { kind: "refused", code, message } })
@@ -87,18 +75,14 @@ export async function sessionCall(ctx: StoreContext, extensions: StoreExtensions
   let op = entry.op
   const awaited = isToolSessionOp(entry) ? entry.await : undefined
   if (phase === "op") {
-    const Value = await typeboxValue()
-    let valid: boolean
+    let failure: ReturnType<typeof argumentFailure>
     try {
-      valid = Value.Check(entry.parameters, args)
+      failure = argumentFailure(entry.parameters, args)
     } catch (error) {
-      // A schema typebox only rejects once a value reaches the bad part (an invalid pattern).
+      // A schema that only breaks once a value reaches the bad part (an invalid pattern).
       return refused("invalid_arguments", `${name}.${entry.op} declares parameters that cannot be checked: ${error instanceof Error ? error.message : String(error)}`)
     }
-    if (!valid) {
-      const [first] = Value.Errors(entry.parameters, args)
-      return refused("invalid_arguments", `Parameter validation failed at ${first?.instancePath || "/"}: ${first?.message ?? "invalid value"}`)
-    }
+    if (failure !== undefined) return refused("invalid_arguments", `Parameter validation failed at ${failure.path || "/"}: ${failure.message}`)
   } else if (phase === "status" || phase === "expire") {
     const id = (args as { readonly await_request_id?: unknown }).await_request_id
     if (awaited === undefined) return refused("extension_unknown_op", `${name}.${entry.op} declares no await.`)

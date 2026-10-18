@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
+import type { Worker } from "node:worker_threads"
 
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 import type { StoreExtensionRegistration } from "./store-extensions"
@@ -85,6 +86,43 @@ test.each([
   const result = await store.extensionSessionAwait("gw", "openThread", { target_session_durable_id: "child", ...forged }, { callerDurableId: "caller" })
   expect(result).toMatchObject({ kind: "refused", code: "invalid_arguments" })
   expect(await store.extensionCall("gw", "completeThreadOpen", { await_request_id: "tor_" + "b".repeat(32) })).toMatchObject({ kind: "ok" })
+})
+
+/** One raw request posted to the store worker, bypassing the facade; the reply is awaited by its own id. */
+function rawWorkerRequest(worker: Worker, op: string, args: unknown): Promise<unknown> {
+  const id = 1_000_000
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { worker.off("message", listen); reject(new Error(`waited 5 s for the worker's reply to a raw ${op}, none came`)) }, 5_000)
+    function listen(message: { readonly type?: string; readonly id?: number; readonly ok?: boolean; readonly value?: unknown; readonly error?: { readonly message: string } }): void {
+      if (message.type !== "response" || message.id !== id) return
+      clearTimeout(timer)
+      worker.off("message", listen)
+      if (message.ok === true) resolve(message.value)
+      else reject(new Error(message.error?.message ?? "worker request failed"))
+    }
+    worker.on("message", listen)
+    worker.postMessage({ type: "request", id, op, args })
+  })
+}
+
+// Security contract: the worker validates op args itself, so a request that skipped every check before
+// it (a raw worker message, not the facade) still never reaches the op with malformed args.
+test.each<[string, Readonly<Record<string, unknown>>]>([
+  ["a target of the wrong type", { target_session_durable_id: 42 }],
+  ["a missing required target", { title: "no target" }],
+  ["an undeclared field", { target_session_durable_id: "child", nope: 1 }],
+  ["a target shorter than its minLength", { target_session_durable_id: "" }],
+  ["an optional field of the wrong type", { target_session_durable_id: "child", await: "yes" }],
+])("#given %s sent straight to the store worker #when the op phase runs #then the worker refuses invalid_arguments and the op never runs", async (_label, args) => {
+  const h = (harness = createGatewayHarness())
+  const workers: Worker[] = []
+  const store = h.store({ _test: { onWorkerStarted: (worker) => workers.push(worker) } })
+  expect(await store.registerStoreExtension(registration())).toMatchObject({ kind: "ok" })
+  const worker = workers.at(-1)
+  if (worker === undefined) throw new Error("the store started no worker")
+  const reply = await rawWorkerRequest(worker, "extension_session_call", { name: "gw", op: "openThread", phase: "op", args, caller: "caller", now: Date.now() })
+  expect(reply).toMatchObject({ result: { kind: "refused", code: "invalid_arguments" } })
+  expect(await store.extensionCall("gw", "sql", { sql: "DELETE FROM gw_opens" })).toEqual({ kind: "ok", value: 0 })
 })
 
 test("#given an env var naming another caller #when the session channel is called #then the stamp is the engine caller, never the environment", async () => {
