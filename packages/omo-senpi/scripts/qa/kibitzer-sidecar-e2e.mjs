@@ -92,7 +92,9 @@ import {
   writeOmoConfig,
 } from "./kibitzer-sidecar-support.mjs"
 
-export const SCENARIOS = ["happy", "provider-429", "context-reseed", "category-unavailable", "refused-pinned-model", "cjk-auto", "query-expansion"]
+export const SCENARIOS = ["happy", "provider-429", "context-reseed", "category-unavailable", "refused-pinned-model", "fast-alias-config", "cjk-auto", "query-expansion"]
+/** #10536: a priority alias declared only in models.json; senpi starts it on its base model. */
+const FAST_ALIAS = { base: "mock-1", alias: "mock-1-fast" }
 /** The pinned model the refused-pinned-model provider refuses, and the builtin quick rung it falls back to. */
 const REFUSED_MODEL = "refused-1"
 const BUILTIN_RUNG = { provider: "deepseek", id: "deepseek-flash" }
@@ -100,6 +102,7 @@ const BUILTIN_RUNG = { provider: "deepseek", id: "deepseek-flash" }
 const CONFIG = {
   "category-unavailable": { categories: {} },
   "refused-pinned-model": { categories: { quick: { description: "QA pin outside the builtin quick chain", model: `omo-mock/${REFUSED_MODEL}` } } },
+  "fast-alias-config": { categories: { quick: { description: "QA pin on a models.json priority alias", model: `omo-mock/${FAST_ALIAS.alias}` } } },
   "query-expansion": { recall: { query_expansion: true } },
 }
 /** A search whose own words match no seeded memory; only the added terms reach the helm memory. */
@@ -149,6 +152,13 @@ const SANDBOX = {
     const auth = JSON.parse(readFileSync(authFile, "utf8"))
     auth[BUILTIN_RUNG.provider] = { type: "api_key", key: "mock" }
     writeFileSync(authFile, `${JSON.stringify(auth, null, 2)}\n`)
+  },
+  "fast-alias-config": (sandbox) => {
+    const modelsFile = join(sandbox.agentDir, "models.json")
+    const models = JSON.parse(readFileSync(modelsFile, "utf8"))
+    const template = models.providers["omo-mock"].models[0]
+    models.providers["omo-mock"].models.push({ ...template, id: FAST_ALIAS.alias, name: "Mock 1 Fast", serviceTier: "priority", upstreamModelId: FAST_ALIAS.base })
+    writeFileSync(modelsFile, `${JSON.stringify(models, null, 2)}\n`)
   },
 }
 /** Refusals to observe before the absence of a gate notice is meaningful: the gate fires at three. */
@@ -525,6 +535,36 @@ async function runRefusedPinnedModel({ session, state, identity, router, facts, 
   }
 }
 
+// ---- fast-alias-config ---------------------------------------------------------------------------------------
+
+async function runFastAliasConfig({ session, state, identity, router, facts, parentTurns, record }) {
+  const recallDir = join(identity, "runtime", "recall")
+  router.setParentSteps([{ type: "text", text: "Checking." }, { type: "text", text: "Done." }])
+  router.setSidecarSteps([nudgeStep(MEMORIES.rollout)])
+
+  await prompt(session, MEMORIES.rollout.prompt)
+  const settled = await watchUntil(recallDir, () => {
+    const lineage = sidecarDirs(identity)[0]
+    const records = lineage === undefined ? [] : wakeRecords(lineage.dir)
+    return records.length === 0 ? undefined : { lineage, records }
+  }, { timeoutMs: WAKE_TIMEOUT_MS, description: "fast-alias-config wake 1: the wake settled" })
+  const wake = settled.records[0]
+  const answered = childTranscripts(settled.lineage.dir).flatMap((transcript) => transcript.assistants)
+  record("wake-completed", wake?.status === "completed" && wake?.diagnostic === false, `wake=${JSON.stringify({ status: wake?.status, cause: wake?.cause, model: wake?.model, diagnostic: wake?.diagnostic, reason: wake?.reason })}`)
+  record("child-ran-on-base-model", answered.length >= 1 && answered.every((message) => message.provider === "omo-mock" && message.model === FAST_ALIAS.base), `models=[${answered.map((message) => `${message.provider}/${message.model}:${message.stopReason}`).join(",")}]`)
+  if (wake?.status !== "completed") {
+    facts.result = { wakeStatus: wake?.status, wakeCause: wake?.cause, wakeReason: wake?.reason, sidecarRequests: router.state.sidecar, nudged: 0, parentRequests: parentTurns() }
+    return
+  }
+  const held = await waitForAccepted(identity, state, MEMORIES.rollout, { description: "fast-alias-config: accepted nudge" })
+  record("nudge-accepted", held.nudges.length === 1 && held.nudges[0].path === MEMORIES.rollout.path, `held=${JSON.stringify(held)}`)
+  await prompt(session, MEMORIES.rollout.prompt)
+  const entries = readEntries(state.sessionFile)
+  record("nudge-reached-parent", nudgedPaths(entries).join(",") === MEMORIES.rollout.path, `paths=${nudgedPaths(entries).join(",")}`)
+  record("no-gate-escalation", entries.filter(isGate).length === 0, `gateEntries=${entries.filter(isGate).length}`)
+  facts.result = { wakeStatus: wake.status, wakeModel: wake.model, childModels: [...new Set(answered.map((message) => message.model))], sidecarRequests: router.state.sidecar, nudged: nudgedPaths(entries).length, parentRequests: parentTurns() }
+}
+
 // ---- cjk-auto -----------------------------------------------------------------------------------------------------
 
 async function runCjkAuto({ session, state, identity, router, facts, parentTurns, record }) {
@@ -594,7 +634,7 @@ async function runQueryExpansion({ session, state, identity, router, facts, pare
   }
 }
 
-const RUNNERS = { happy: runHappy, "provider-429": runProvider429, "context-reseed": runContextReseed, "category-unavailable": runCategoryUnavailable, "refused-pinned-model": runRefusedPinnedModel, "cjk-auto": runCjkAuto, "query-expansion": runQueryExpansion }
+const RUNNERS = { happy: runHappy, "provider-429": runProvider429, "context-reseed": runContextReseed, "category-unavailable": runCategoryUnavailable, "refused-pinned-model": runRefusedPinnedModel, "fast-alias-config": runFastAliasConfig, "cjk-auto": runCjkAuto, "query-expansion": runQueryExpansion }
 
 // ---- main --------------------------------------------------------------------------------------------------------
 
