@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { rankRecallDocumentsBm25 } from "./bm25"
+import { type DocumentTermsInput, recallBm25IndexFor } from "./bm25-index"
 import type { RecallDocument } from "./provider"
 
 function doc(path: string, body: string): RecallDocument {
@@ -33,11 +34,33 @@ describe("recall bm25 index storage", () => {
     const wide = doc("wide.md", Array.from({ length: 70_000 }, (_, index) => `zq${index.toString(36)}`).join(" "))
     expect(ranking([...small, wide], "zq0")).toHaveLength(1)
 
-    // when
-    const afterCompaction = ranking([...small], "heap retainer")
+    // when: the wide note stays out of enough later builds for the dictionary to be replaced
+    const rankings = Array.from({ length: 10 }, () => ranking([...small], "heap retainer"))
 
     // then
-    expect(afterCompaction).toEqual(expected)
+    for (const afterReplacement of rankings) expect(afterReplacement).toEqual(expected)
     expect(ranking([...small, wide], "heap retainer")).toHaveLength(2)
+  })
+
+  it("#given a host ranking a large and a small memory in turn #when it switches back and forth #then the large memory's notes are not read again", () => {
+    // given
+    const reads = new Map<string, number>()
+    const read = (document: RecallDocument): DocumentTermsInput => {
+      reads.set(document.path, (reads.get(document.path) ?? 0) + 1)
+      const terms = document.body.split(" ")
+      return { terms, length: terms.length }
+    }
+    const large = [doc("large.md", Array.from({ length: 70_000 }, (_, index) => `yk${index.toString(36)}`).join(" "))]
+    const small = [doc("small.md", "deploy rollback")]
+    recallBm25IndexFor([...large], read)
+
+    // when
+    for (let turn = 0; turn < 6; turn += 1) {
+      recallBm25IndexFor([...small], read)
+      recallBm25IndexFor([...large], read)
+    }
+
+    // then
+    expect(reads.get("large.md")).toBe(1)
   })
 })

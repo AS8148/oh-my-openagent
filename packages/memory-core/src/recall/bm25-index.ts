@@ -31,9 +31,13 @@ export interface RecallBm25Index {
 
 /**
  * Terms no live index holds still keep their ids, so the dictionary is replaced once it holds more
- * than twice the live vocabulary plus this slack; every cached document is then re-read once.
+ * than twice the live vocabulary plus this slack; every cached document is then re-read once. The live
+ * vocabulary is the largest of the last RECENT_BUILDS builds, so a host that ranks two memories in
+ * turn (one per agent) does not replace the dictionary on every switch.
  */
 const DICTIONARY_SLACK = 65_536
+const RECENT_BUILDS = 8
+const recentLive: number[] = []
 
 let generation = 0
 let dictionary = new Map<string, number>()
@@ -82,9 +86,12 @@ function build(documents: readonly RecallDocument[], read: (document: RecallDocu
       documentFrequency[id] = (documentFrequency[id] ?? 0) + 1
     }
   }
-  if (dictionary.size > 2 * live + DICTIONARY_SLACK) {
+  recentLive.push(live)
+  if (recentLive.length > RECENT_BUILDS) recentLive.shift()
+  if (dictionary.size > 2 * Math.max(...recentLive) + DICTIONARY_SLACK) {
     generation += 1
     dictionary = new Map()
+    recentLive.length = 0
     return build(documents, read)
   }
   const terms = dictionary
