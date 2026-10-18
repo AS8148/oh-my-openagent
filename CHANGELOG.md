@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Onboarding can get to know you, once you agree.** After consent, the default model reads digests of your recent sessions and proposes facts about you and how you work; nothing is saved at this step. ([#10505](https://github.com/code-yeongyu/oh-my-openagent/pull/10505))
+
 **The engine can run `omo setup`'s detection for a client and apply only the stages you pick.** The new `omo.onboarding.scan` request streams what `omo setup` finds (sign-ins, custom providers, skills, MCP servers), and `omo.onboarding.apply` runs the same writers for the chosen stages only, refusing any target that changed since the scan and writing credentials through the engine's own store under its lock. ([#10496](https://github.com/code-yeongyu/oh-my-openagent/pull/10496))
 
 **`unspecified-low` tries GLM 5.3 before GPT.** A user with Claude and Z.ai (or OpenCode Go) but no Xiaomi or xAI provider used to fall from Sonnet 5.5 straight to GPT-6.1 Sol once Sonnet was unavailable. The chain now has `glm-5.3` at high thinking right after Grok 4.7 and ahead of the GPT rungs, so the order for users who hold MiMo or Grok is unchanged. ([#10306](https://github.com/code-yeongyu/oh-my-openagent/issues/10306), [#10311](https://github.com/code-yeongyu/oh-my-openagent/pull/10311))
