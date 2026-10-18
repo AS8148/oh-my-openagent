@@ -17,8 +17,8 @@ import type {
   migrationFactsFromScan,
   OnboardingScanEnvironment,
   runOnboardingScan,
-  runOnboardingUnderstanding,
   staleSetupTargets,
+  startOnboardingUnderstanding,
 } from "./scan-runtime"
 import { registerOnboardingUnderstanding, type OnboardingUnderstandingSeams } from "./understand-component"
 import { resolve } from "node:path"
@@ -39,7 +39,7 @@ export interface OnboardingScanRuntime {
   readonly runOnboardingScan: typeof runOnboardingScan
   readonly applyOnboardingScan: typeof applyOnboardingScan
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
-  readonly runOnboardingUnderstanding: typeof runOnboardingUnderstanding
+  readonly startOnboardingUnderstanding: typeof startOnboardingUnderstanding
   readonly authWritesPending: typeof authWritesPending
   readonly staleSetupTargets: typeof staleSetupTargets
 }
@@ -118,7 +118,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
       }
       registerOnboardingUnderstanding(pi, handle, {
         environment,
-        loadRun: async () => (await loadRuntime()).runOnboardingUnderstanding,
+        loadStart: async () => (await loadRuntime()).startOnboardingUnderstanding,
         modelRegistry: () => modelRegistry,
         scanSettled: async (scanId) => { await scans.get(scanId)?.outcome },
         ...(deps.understanding === undefined ? {} : { seams: deps.understanding }),
@@ -246,7 +246,7 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const run = loaded["runOnboardingScan"]
   const apply = loaded["applyOnboardingScan"]
   const facts = loaded["migrationFactsFromScan"]
-  const understand = loaded["runOnboardingUnderstanding"]
+  const understand = loaded["startOnboardingUnderstanding"]
   const authPending = loaded["authWritesPending"]
   const staleTargets = loaded["staleSetupTargets"]
   if (
@@ -259,7 +259,7 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
     runOnboardingScan: (...args) => Reflect.apply(run, undefined, args),
     applyOnboardingScan: (...args) => Reflect.apply(apply, undefined, args),
     migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
-    runOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
+    startOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
     authWritesPending: (...args) => Reflect.apply(authPending, undefined, args),
     staleSetupTargets: (...args) => Reflect.apply(staleTargets, undefined, args),
   }
