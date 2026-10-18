@@ -139,7 +139,7 @@ export function createOnboardingComponent(
       pi.registerTool({ ...createOnboardingSessionHistoryTool({ stateDir }) })
       const memoryTools = createOnboardingMemoryTools({
         scan,
-        loadStart: async () => (await loadOnboardingScanRuntime()).startOnboardingUnderstanding,
+        loadRuntime: loadOnboardingScanRuntime,
         ...(dependencies.understanding === undefined ? {} : { seams: dependencies.understanding }),
       })
       pi.registerTool({ ...memoryTools.understand })

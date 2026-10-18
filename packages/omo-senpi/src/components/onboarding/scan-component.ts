@@ -12,6 +12,7 @@ import {
   type OnboardingScanResponse,
 } from "./scan-contract"
 import type { applyMemoryFacts } from "../memory/facts-apply-runtime"
+import type { TuiMemoryToolsRuntime } from "./tui-memory-tools"
 import type {
   applyOnboardingScan,
   authWritesPending,
@@ -37,7 +38,7 @@ const RETAINED_SCANS = 8
 /** A scan describes the machine only briefly; after this, an apply answers stale instead of writing. */
 export const ONBOARDING_SCAN_TTL_MS = 10 * 60_000
 
-export interface OnboardingScanRuntime {
+export interface OnboardingScanRuntime extends TuiMemoryToolsRuntime {
   readonly runOnboardingScan: typeof runOnboardingScan
   readonly applyOnboardingScan: typeof applyOnboardingScan
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
@@ -253,10 +254,13 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const context = loaded["onboardingScanContext"]
   const understand = loaded["startOnboardingUnderstanding"]
   const memoryFacts = loaded["applyMemoryFacts"]
+  const tuiUnderstand = loaded["executeOnboardingUnderstand"]
+  const tuiApply = loaded["executeOnboardingMemoryApply"]
   const authPending = loaded["authWritesPending"]
   const staleTargets = loaded["staleSetupTargets"]
   if (
     typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof memoryFacts !== "function" ||
+    typeof tuiUnderstand !== "function" || typeof tuiApply !== "function" ||
     typeof context !== "function" || typeof authPending !== "function" || typeof staleTargets !== "function"
   ) {
     throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
@@ -268,6 +272,8 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
     onboardingScanContext: (...args) => Reflect.apply(context, undefined, args),
     startOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
     applyMemoryFacts: (...args) => Reflect.apply(memoryFacts, undefined, args),
+    executeOnboardingUnderstand: (...args) => Reflect.apply(tuiUnderstand, undefined, args),
+    executeOnboardingMemoryApply: (...args) => Reflect.apply(tuiApply, undefined, args),
     authWritesPending: (...args) => Reflect.apply(authPending, undefined, args),
     staleSetupTargets: (...args) => Reflect.apply(staleTargets, undefined, args),
   }
