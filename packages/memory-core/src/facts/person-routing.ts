@@ -22,6 +22,7 @@ import {
   type ObservationSection,
   type PeopleLimits,
 } from "../people"
+import { factDisplayText } from "./display"
 import type { FactsExtractionRecord, FactsPersonReference } from "./extraction"
 import { readFactsPeopleIndex, type FactsPeopleIndexEntry } from "./person-index"
 
@@ -170,12 +171,13 @@ async function renderExplicitObservations(
     groups.unshift(explicit)
   }
   for (const record of records) {
-    const normalized = normalizeObservationText(record.text)
+    const content = factDisplayText(record)
+    const normalized = normalizeObservationText(content)
     const at = explicit.entries.findIndex(
       (entry) => normalizeObservationText(entry.content) === normalized,
     )
     if (at === -1) {
-      explicit.entries.push({ date: record.date, content: record.text })
+      explicit.entries.push({ date: record.date, content })
       continue
     }
     const found = explicit.entries[at]!

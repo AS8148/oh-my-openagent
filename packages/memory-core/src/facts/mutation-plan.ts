@@ -11,6 +11,7 @@ import {
   type FactsAliasTie,
   type FactsPeopleRouting,
 } from "./person-routing"
+import { factDisplayText } from "./display"
 import type { FactsBatch, FactsExtractionRecord } from "./extraction"
 
 export interface FactsRecoveryPath {
@@ -96,6 +97,6 @@ async function renderFactsNote(
     ? { frontmatter: { description: `Explicit facts for ${relativePath.slice(-10, -3)}` }, body: "" }
     : parseMemoryFile(existing)
   const prefix = parsed.body.length === 0 || parsed.body.endsWith("\n") ? "" : "\n"
-  const bullets = records.map((record) => `- [${record.date}] ${record.text}`).join("\n")
+  const bullets = records.map((record) => `- [${record.date}] ${factDisplayText(record)}`).join("\n")
   return renderMemoryFile(parsed.frontmatter, `${parsed.body}${prefix}${bullets}\n`)
 }

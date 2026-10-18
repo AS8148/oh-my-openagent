@@ -12,7 +12,7 @@ describe("facts record tool", () => {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
       const failures: string[] = []
-      const tool = createFactsRecordTool({ extractionPath: path, maxRecords: 1, onFailure: (reason) => failures.push(reason) })
+      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path, maxRecords: 1, onFailure: (reason) => failures.push(reason) })
       const record = { scope: "project" as const, text: "fact", date: "2026-08-10" }
       const results = await Promise.all([tool.execute("one", record), tool.execute("two", record)])
       expect(results.filter((result) => result.isError === true)).toHaveLength(1)
@@ -27,9 +27,9 @@ describe("facts record tool", () => {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
       const record = { scope: "project" as const, text: "é🌍", date: "2026-08-10" }
-      const line = `${JSON.stringify(record)}\n`
+      const line = `${JSON.stringify({ ...record, receipt: { source: "inferred" } })}\n`
       const failures: string[] = []
-      const tool = createFactsRecordTool({ extractionPath: path, maxBytes: Buffer.byteLength(line), onFailure: (reason) => failures.push(reason) })
+      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path, maxBytes: Buffer.byteLength(line), onFailure: (reason) => failures.push(reason) })
       const results = await Promise.all([tool.execute("one", record), tool.execute("two", record)])
       expect(results.filter((result) => result.isError === true)).toHaveLength(1)
       expect(failures).toHaveLength(1)
@@ -41,7 +41,7 @@ describe("facts record tool", () => {
     const failures: string[] = []
     const root = await mkdtemp(join(tmpdir(), "facts-record-tool-"))
     try {
-      const tool = createFactsRecordTool({ extractionPath: root, onFailure: (reason) => failures.push(reason) })
+      const tool = createFactsRecordTool({ userTexts: [], extractionPath: root, onFailure: (reason) => failures.push(reason) })
       expect((await tool.execute("one", { scope: "project", text: "fact", date: "2026-08-10" })).isError).toBe(true)
       expect(failures).toHaveLength(1)
     } finally { await rm(root, { recursive: true, force: true }) }
@@ -49,7 +49,7 @@ describe("facts record tool", () => {
 
   test("#given the registered record_fact schema #when inspected #then it is a top-level object for provider tool contracts", () => {
     // given
-    const tool = createFactsRecordTool({ extractionPath: "/tmp/facts-record-tool-test.jsonl" })
+    const tool = createFactsRecordTool({ userTexts: [], extractionPath: "/tmp/facts-record-tool-test.jsonl" })
 
     // when / then
     expect(tool.parameters.type).toBe("object")
@@ -62,7 +62,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "seed\n")
-      const tool = createFactsRecordTool({ extractionPath: path })
+      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path })
 
       // when
       const malformed = JSON.parse('[{"scope":"project","text":"missing"},{"scope":"other","text":"bad","date":"2026-08-10"},{"scope":"person","person":"bad","text":"bad","date":"2026-08-10"}]')
@@ -86,7 +86,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
-      const tool = createFactsRecordTool({ extractionPath: path })
+      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path })
 
       // when
       await tool.execute("person", { scope: "person", person: { name: "Mina", aliases: ["Min"] }, text: "Mina prefers Bun.", date: "2026-08-10" })
@@ -94,8 +94,8 @@ describe("facts record tool", () => {
 
       // then
       expect(await readFile(path, "utf8")).toBe(
-        '{"scope":"person","person":{"name":"Mina","aliases":["Min"]},"text":"Mina prefers Bun.","date":"2026-08-10"}\n'
-        + '{"scope":"project","text":"The project uses Bun.","date":"2026-08-10"}\n',
+        '{"scope":"person","person":{"name":"Mina","aliases":["Min"]},"text":"Mina prefers Bun.","date":"2026-08-10","receipt":{"source":"inferred"}}\n'
+        + '{"scope":"project","text":"The project uses Bun.","date":"2026-08-10","receipt":{"source":"inferred"}}\n',
       )
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -108,7 +108,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
-      const tool = createFactsRecordTool({ extractionPath: path })
+      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path })
       tool.deactivate()
 
       // when
@@ -117,6 +117,24 @@ describe("facts record tool", () => {
       // then
       expect(result.isError).toBe(true)
       expect(await readFile(path, "utf8")).toBe("")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("#given the #10488 flip: a 'user decided' fact quoting the agent's suggestion #when recorded #then it is stored as an agent suggestion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "facts-record-tool-"))
+    try {
+      const path = join(root, "extraction.jsonl")
+      await Bun.write(path, "")
+      const tool = createFactsRecordTool({ userTexts: ["Review the plugins and tell me which look unused."], extractionPath: path })
+
+      await tool.execute("flip", { scope: "project", text: "User agreed to remove plugins X and Y.", date: "2026-10-18", source: "user", user_quote: "remove plugins X and Y" })
+      await tool.execute("real", { scope: "project", text: "User wants an unused-plugin review.", date: "2026-10-18", source: "user", user_quote: "tell me which look unused" })
+
+      const [flip, real] = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
+      expect(flip.receipt).toEqual({ source: "agent", downgraded: true })
+      expect(real.receipt).toEqual({ source: "user", userQuote: "tell me which look unused" })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

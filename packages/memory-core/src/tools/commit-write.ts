@@ -5,6 +5,7 @@ import { NoEffectiveChangesError, MemorySecretError, type GitCommitAuthor, type 
 import { StrandedGitLockError } from "../git/repo-lock-sweep"
 import { SOUL_EDIT_RESULT_LINE, touchesSoulPath } from "../soul"
 import type { LockDomain } from "../locks"
+import { claimReceiptTrailers } from "../provenance"
 import type { MemoryToolProvenance } from "./memory"
 import { undoBehindKeptLock } from "./rollback-behind-lock"
 import { MemoryToolError } from "./tool-errors"
@@ -78,5 +79,6 @@ function memoryCommitMessage(reason: string, provenance: MemoryToolProvenance | 
     "Omo-Writer: memory-tool",
     `Omo-Session: ${provenance.sessionId}`,
     `Omo-Turn: ${provenance.userTurns}`,
+    ...(provenance.claim === undefined ? [] : claimReceiptTrailers(provenance.claim)),
   ].join("\n")
 }

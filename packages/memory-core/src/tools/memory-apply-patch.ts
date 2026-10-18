@@ -3,6 +3,7 @@ import { dirname, join, relative } from "node:path"
 
 import { NoEffectiveChangesError, MemorySecretError, type GitCommitAuthor, type GitMemoryRepo } from "../git"
 import { SOUL_EDIT_RESULT_LINE, touchesSoulPath } from "../soul"
+import { claimReceiptTrailers } from "../provenance"
 import type { MemoryToolCommit, MemoryToolProvenance } from "./memory"
 import { parseMemoryFile, renderMemoryFile } from "../memfs/frontmatter"
 import { describeDescriptionViolation } from "../memfs/frontmatter-validation"
@@ -261,6 +262,7 @@ function memoryCommitMessage(reason: string, provenance: MemoryToolProvenance | 
     "Omo-Writer: memory-tool",
     `Omo-Session: ${provenance.sessionId}`,
     `Omo-Turn: ${provenance.userTurns}`,
+    ...(provenance.claim === undefined ? [] : claimReceiptTrailers(provenance.claim)),
   ].join("\n")
 }
 

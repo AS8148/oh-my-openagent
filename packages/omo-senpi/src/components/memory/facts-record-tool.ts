@@ -1,6 +1,6 @@
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { appendFile } from "@oh-my-opencode/memory-core/fs"
-import { parseFactsExtractionRecord } from "@oh-my-opencode/memory-core"
+import { parseFactsExtractionRecord, resolveClaimReceipt, type FactsPayload } from "@oh-my-opencode/memory-core"
 import { Type, type Static } from "typebox"
 
 export const FACTS_RECORD_TOOL_NAME = "record_fact"
@@ -13,6 +13,12 @@ const FactsRecordParams = Type.Object({
   }, { additionalProperties: false })),
   text: Type.String(),
   date: Type.String(),
+  source: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("agent"), Type.Literal("inferred")], {
+    description: "Who the fact came from: user (the user said it), agent (an assistant suggestion or statement), inferred (a conclusion drawn from the conversation). Omitted means inferred.",
+  })),
+  user_quote: Type.Optional(Type.String({
+    description: "Required when source is user: the user's own words, copied verbatim from a user message. Without a matching quote the fact is stored as an agent suggestion.",
+  })),
 }, { additionalProperties: false })
 
 type FactsRecordParams = Static<typeof FactsRecordParams>
@@ -29,6 +35,8 @@ export type FactsRecordTool = Omit<ToolDefinition<typeof FactsRecordParams, unde
 
 type FactsRecordToolInput = {
   readonly extractionPath: string
+  /** Every user-authored message in the payload; a `user` claim must quote one of them verbatim. */
+  readonly userTexts: readonly string[]
   readonly maxRecords?: number
   readonly maxBytes?: number
   readonly onFailure?: (reason: string) => void
@@ -53,7 +61,9 @@ export function createFactsRecordTool(input: FactsRecordToolInput): FactsRecordT
         return reject(`the facts run limit (${input.maxRecords}) has been reached`)
       }
       try {
-        const record = parseFactsExtractionRecord(params, count)
+        const { source, user_quote: userQuote, ...fact } = params
+        const receipt = resolveClaimReceipt({ source, userQuote }, input.userTexts)
+        const record = parseFactsExtractionRecord({ ...fact, receipt }, count)
         const line = `${JSON.stringify(record)}\n`
         const lineBytes = Buffer.byteLength(line, "utf8")
         if (input.maxBytes !== undefined && bytes + lineBytes > input.maxBytes) {
@@ -73,6 +83,10 @@ export function createFactsRecordTool(input: FactsRecordToolInput): FactsRecordT
       }
     },
   }
+}
+
+export function payloadUserTexts(payload: FactsPayload): string[] {
+  return payload.entries.flatMap((entry) => entry.entries.flatMap((item) => item.kind === "user" ? [item.text] : []))
 }
 
 function errorResult(reason: string): FactsRecordToolResult {
