@@ -75,12 +75,15 @@ pub struct StopPolicy {
     pub allow_host_relay_only: bool,
 }
 
-/// Why the global stop-chord listener failed to start; the gate turns
+/// Why the global stop-chord listener cannot authorize input; the gate turns
 /// `AccessibilityDenied` into a permission error instead of a missing stop path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopPathFailure {
     Unavailable,
     AccessibilityDenied,
+    /// The listener runs but cannot hear the chord: another process enabled
+    /// macOS Secure Event Input, which hides key events from every event tap.
+    SecureInput,
 }
 
 /// Snapshot of supervisor state used for gating and status reporting.

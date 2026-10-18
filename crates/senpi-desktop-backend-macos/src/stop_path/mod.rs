@@ -15,6 +15,8 @@ mod worker;
 #[cfg(test)]
 mod live_tests;
 #[cfg(test)]
+mod secure_input_tests;
+#[cfg(test)]
 mod tests;
 
 use std::sync::Arc;
@@ -84,10 +86,20 @@ struct Shared {
     control: Arc<Mutex<Control>>,
     changed: Arc<Condvar>,
     stop_worker: worker::StopWorker,
+    /// Reads macOS Secure Event Input; injected only by unit tests.
+    secure_input: fn() -> bool,
 }
 
 impl Shared {
     fn new(supervisor: Arc<Supervisor>, hotkey: Hotkey) -> Result<Self, StopPathError> {
+        Self::with_secure_input(supervisor, hotkey, tap::secure_input_enabled)
+    }
+
+    fn with_secure_input(
+        supervisor: Arc<Supervisor>,
+        hotkey: Hotkey,
+        secure_input: fn() -> bool,
+    ) -> Result<Self, StopPathError> {
         let control = Arc::new(Mutex::new(Control::default()));
         let changed = Arc::new(Condvar::new());
         let stop_worker = worker::StopWorker::start(
@@ -99,6 +111,7 @@ impl Shared {
             control,
             changed,
             stop_worker,
+            secure_input,
         })
     }
 
