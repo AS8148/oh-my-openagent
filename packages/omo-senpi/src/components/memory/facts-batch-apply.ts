@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs"
-import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
+
+import { existsSync, mkdir, rm } from "@oh-my-opencode/memory-core/fs"
 
 import {
   FactsPlanParentDirtyError,
