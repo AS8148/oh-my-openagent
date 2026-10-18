@@ -4,14 +4,19 @@ import { createNodeGitExec, type GitExec } from "../git"
 import { FRONTMATTER_RE } from "../memfs/frontmatter-scalar"
 import { describeFrontmatterViolation } from "../memfs/frontmatter-validation"
 import { isMemoryContentPath } from "../memfs/paths"
-import { findSecretLikeFailure } from "./completion-secret-scan"
+import { redactSecretLikeMaterial } from "../sync/redact"
+import { commitCount, squashWithoutPaths, type DroppedEntry } from "./completion-repair"
+import { findSecretLikeFailures } from "./completion-secret-scan"
 import type { ReflectionWorktree } from "./worktree"
 
 const GIT_TIMEOUT_MS = 30_000
 
+export type { DroppedEntry }
+
+/** `dropped` lists entries the gate removed so the valid ones could land; absent when nothing was dropped. */
 export type CompletionValidation =
-  | { status: "valid"; tipSha: string; changedPaths: readonly string[] }
-  | { status: "no_changes"; tipSha: string; changedPaths: readonly [] }
+  | { status: "valid"; tipSha: string; changedPaths: readonly string[]; dropped?: readonly DroppedEntry[] }
+  | { status: "no_changes"; tipSha: string; changedPaths: readonly []; dropped?: readonly DroppedEntry[] }
   | { status: "dirty_uncommitted"; detail: string }
   | { status: "failed"; detail: string }
 
@@ -60,27 +65,57 @@ export async function validateCompletion(
     }
     if (tipSha === recordedBase) return { status: "no_changes", tipSha, changedPaths: [] }
 
-    const secretFailure = await findSecretLikeFailure(
-      (argv, stdin) => run(exec, worktree.dir, argv, stdin),
-      recordedBase,
-      tipSha,
-    )
-    if (secretFailure !== null) return { status: "failed", detail: secretFailure }
-    const changed = await git(exec, worktree.dir, ["diff", "--name-only", "-z", `${recordedBase}..${tipSha}`, "--"])
+    return await screenEntries(exec, worktree, recordedBase, tipSha)
+  } catch (error) {
+    return { status: "failed", detail: errorMessage(error) }
+  }
+}
+
+const MAX_REPAIR_ROUNDS = 3
+
+/**
+ * One entry that fails validation must not discard the run's valid entries. Each round collects
+ * every per-entry failure (secret-like content or name, invalid frontmatter); when there are any,
+ * the branch is rewritten without those entries and screened again. Structural refusals (a path
+ * escaping the repository, no changed paths) still fail the whole run.
+ */
+async function screenEntries(
+  exec: GitExec,
+  worktree: ReflectionWorktree,
+  recordedBase: string,
+  startTip: string,
+): Promise<CompletionValidation> {
+  const dir = worktree.dir
+  const dropped = new Map<string, string>()
+  const droppedList = (): { dropped?: DroppedEntry[] } =>
+    dropped.size === 0 ? {} : { dropped: [...dropped].map(([path, reason]) => ({ path, reason })) }
+  let tipSha = startTip
+  for (let round = 0; ; round += 1) {
+    if (tipSha === recordedBase) return { status: "no_changes", tipSha, changedPaths: [], ...droppedList() }
+    const changed = await git(exec, dir, ["diff", "--name-only", "-z", `${recordedBase}..${tipSha}`, "--"])
     const changedPaths = changed.stdout.split("\0").filter(Boolean)
-    if (changedPaths.length === 0) {
-      return { status: "failed", detail: "Reflection commits contain no changed paths" }
-    }
     for (const path of changedPaths) {
       if (!isConfinedRepoPath(worktree.parent.dir, path) || path.split("/").includes(".git")) {
         return { status: "failed", detail: `Changed path escapes the memory repository: ${path}` }
       }
     }
-    const frontmatterFailure = await findFrontmatterFailure(exec, worktree.dir, recordedBase, tipSha, changedPaths)
-    if (frontmatterFailure !== null) return { status: "failed", detail: frontmatterFailure }
-    return { status: "valid", tipSha, changedPaths }
-  } catch (error) {
-    return { status: "failed", detail: errorMessage(error) }
+    const secrets = await findSecretLikeFailures((argv, stdin) => run(exec, dir, argv, stdin), recordedBase, tipSha)
+    const frontmatter = await findFrontmatterFailures(exec, dir, recordedBase, tipSha, changedPaths)
+    if (secrets.length === 0 && frontmatter.size === 0 && changedPaths.length === 0) {
+      return { status: "failed", detail: "Reflection commits contain no changed paths" }
+    }
+    if (secrets.length === 0 && frontmatter.size === 0) return { status: "valid", tipSha, changedPaths, ...droppedList() }
+    if (round >= MAX_REPAIR_ROUNDS) {
+      return { status: "failed", detail: secrets[0]?.detail ?? [...frontmatter.values()][0] ?? "completion validation failed" }
+    }
+    // A secret in an earlier commit may be gone from the tip, so a multi-commit branch is first
+    // squashed with only the tip-level frontmatter failures removed; the squashed commit is then
+    // scanned and whatever still fails is a real entry to drop.
+    const multiCommit = (await commitCount(exec, dir, recordedBase, tipSha)) > 1
+    const now = new Map<string, string>(frontmatter)
+    if (!multiCommit) for (const { path, detail } of secrets) now.set(path, detail)
+    for (const [path, reason] of now) if (!dropped.has(path)) dropped.set(path, reason)
+    tipSha = await squashWithoutPaths(exec, dir, recordedBase, tipSha, new Set(now.keys()))
   }
 }
 
@@ -90,13 +125,14 @@ export async function validateCompletion(
  * the base are the normalizer's job, not the reflection's, so a body-only edit
  * of one still passes.
  */
-async function findFrontmatterFailure(
+async function findFrontmatterFailures(
   exec: GitExec,
   dir: string,
   baseSha: string,
   tipSha: string,
   changedPaths: readonly string[],
-): Promise<string | null> {
+): Promise<Map<string, string>> {
+  const failures = new Map<string, string>()
   for (const path of changedPaths) {
     if (!isMemoryContentPath(path)) continue
     const tipContent = await showOptional(exec, dir, tipSha, path)
@@ -105,9 +141,9 @@ async function findFrontmatterFailure(
     if (violation === null) continue
     const baseContent = await showOptional(exec, dir, baseSha, path)
     if (baseContent !== null && frontmatterBlock(baseContent) === frontmatterBlock(tipContent)) continue
-    return `Reflection commit contains invalid frontmatter in ${path}: ${violation}`
+    failures.set(path, `invalid frontmatter: ${redactSecretLikeMaterial(violation)}`)
   }
-  return null
+  return failures
 }
 
 function frontmatterBlock(content: string): string | null {

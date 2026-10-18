@@ -16,22 +16,39 @@ import { getPostCommitHookScript } from "../sync/mirror"
  * format-character normalisation exists here (that is the authoritative TypeScript gates'
  * job), and ERE has no `\\b`, `(?:...)` or `\\S`, so boundaries and alternations are spelled out.
  */
-export const HOOK_SECRET_PATTERNS = [
+/**
+ * ERE cannot look ahead, so the reference-value exclusion of sync/redact.ts runs as a second stage: the
+ * matched text is filtered, case-insensitively, through an exclude expression, and only a match that
+ * survives it counts. A value that merely REFERS to a secret (environment lookup, shell variable, template
+ * slot, masked [FILTERED], the Bearer scheme word, null/example literals) is not a credential. The
+ * literal words must end the value, so nullable-9fQ2 is still refused.
+ */
+const END = "[],<>})\"]*$"
+const REFERENCE_VALUE_EXCLUDE =
+  "(process\\.env\\.|os\\.environ|env\\.|\\{\\{|" +
+  `\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?${END}|\\[?(redacted|filtered)\\]?${END}|` +
+  `(bearer|changeme|placeholder|example|none|null|undefined|true|false)${END})`
+
+export const HOOK_SECRET_PATTERNS: ReadonlyArray<{ readonly class: string; readonly ere: string; readonly exclude?: string }> = [
   { class: "aws_access_key", ere: "(^|[^A-Za-z0-9_])AKIA[0-9A-Z]{16}([^A-Za-z0-9_]|$)" },
   {
     class: "credential_assignment",
     ere: "(^|[^A-Za-z0-9_])([Bb][Ee][Aa][Rr][Ee][Rr]|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][-_]?[Kk][Ee][Yy]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd])[[:space:]]*[=:][[:space:]]*[^[:space:]]{1,255}",
+    exclude: `[=:][[:space:]]*${REFERENCE_VALUE_EXCLUDE}`,
   },
   {
     class: "authorization_header",
     ere: "(^|[^A-Za-z0-9_])[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn][[:space:]]*:[[:space:]]*[Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+[^[:space:]]{1,255}",
+    exclude: "[Bb][Ee][Aa][Rr][Ee][Rr][[:space:]]+(<|\\{\\{|\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?[],<>})\"]*$)",
   },
   { class: "openai_key", ere: "(^|[^A-Za-z0-9_])sk-(proj-)?[-_A-Za-z0-9]+([^A-Za-z0-9_-]|$)" },
   { class: "vendor_token", ere: "(^|[^A-Za-z0-9_])(ghp|github_pat|glpat|xox[baprs])[-_][-_A-Za-z0-9]+([^A-Za-z0-9_-]|$)" },
-] as const
+]
 
-const SECRET_SCAN_LINES = HOOK_SECRET_PATTERNS.map(({ class: patternClass, ere }) => [
-  `      if printf '%s' "$blob" | grep -E -q -e '${ere}'; then`,
+const SECRET_SCAN_LINES = HOOK_SECRET_PATTERNS.map(({ class: patternClass, ere, exclude }) => [
+  exclude === undefined
+    ? `      if printf '%s' "$blob" | grep -E -q -e '${ere}'; then`
+    : `      if printf '%s' "$blob" | grep -E -o -e '${ere}' | grep -E -v -i -e '${exclude}' | grep -q .; then`,
   `        printf 'memory pre-commit: %s contains secret-like content (${patternClass})\\n' "$p"`,
   "      fi",
 ].join("\n")).join("\n")
