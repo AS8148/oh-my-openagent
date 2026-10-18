@@ -3,8 +3,8 @@ import { join } from "node:path"
 import {
   GitMemoryRepo, createLockRecord, runFinalizationLockPath, withLock,
 } from "@oh-my-opencode/memory-core"
-import { reconcileAppliedFactsBatches } from "./facts-applied-reconcile"
-import { withFactsWriterLock } from "./facts-batch-apply"
+import { loadOnboardingScanRuntime } from "../onboarding/scan-component"
+import { appliedFactsDir, withFactsWriterLock } from "./facts-batch-apply"
 import { ledgerTargets } from "./facts-failure-recording"
 import { finalizeClaimedFactsRun } from "./facts-run-finalize"
 import { reconcileFactsRuns } from "./facts-run-reconcile"
@@ -76,10 +76,18 @@ export function createFactsRunMaintenance(
       warn: (message, fields) => options.logger?.warn(message, fields),
       receiptsDir: options.identity.paths.runtime,
     })
-    const appliedActive = await reconcileAppliedFactsBatches({
-      identity: options.identity, withWriterLock,
-      ...(options.logger === undefined ? {} : { logger: options.logger }),
-    })
+    let appliedActive = false
+    // Onboarding apply envelopes are rare: their reconcile ships in the onboarding-scan sidecar.
+    if (existsSync(appliedFactsDir(options.identity.paths.facts))) {
+      try {
+        appliedActive = await (await loadOnboardingScanRuntime()).reconcileAppliedFactsBatches({
+          identity: options.identity, withWriterLock,
+          ...(options.logger === undefined ? {} : { logger: options.logger }),
+        })
+      } catch (error) {
+        options.logger?.warn("facts applied batch reconcile could not run", { error: describe(error) })
+      }
+    }
     await prune()
     return active || appliedActive
   }

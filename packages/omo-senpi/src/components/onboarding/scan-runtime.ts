@@ -24,6 +24,7 @@ import {
 
 export { startOnboardingUnderstanding } from "./understand-start"
 export { applyMemoryFacts } from "../memory/facts-apply-runtime"
+export { reconcileAppliedFactsBatches } from "../memory/facts-applied-reconcile"
 export { executeOnboardingMemoryApply, executeOnboardingUnderstand } from "./tui-memory-runtime"
 
 /** Where the scan reads and the apply writes; every field defaults to what `omo setup` uses. */

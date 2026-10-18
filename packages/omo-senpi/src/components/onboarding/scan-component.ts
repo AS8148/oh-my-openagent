@@ -12,6 +12,7 @@ import {
   type OnboardingScanResponse,
 } from "./scan-contract"
 import type { applyMemoryFacts } from "../memory/facts-apply-runtime"
+import type { reconcileAppliedFactsBatches } from "../memory/facts-applied-reconcile"
 import type { TuiMemoryToolsRuntime } from "./tui-memory-tools"
 import type {
   applyOnboardingScan,
@@ -45,6 +46,7 @@ export interface OnboardingScanRuntime extends TuiMemoryToolsRuntime {
   readonly onboardingScanContext: typeof onboardingScanContext
   readonly startOnboardingUnderstanding: typeof startOnboardingUnderstanding
   readonly applyMemoryFacts: typeof applyMemoryFacts
+  readonly reconcileAppliedFactsBatches: typeof reconcileAppliedFactsBatches
   readonly authWritesPending: typeof authWritesPending
   readonly staleSetupTargets: typeof staleSetupTargets
 }
@@ -254,12 +256,13 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const context = loaded["onboardingScanContext"]
   const understand = loaded["startOnboardingUnderstanding"]
   const memoryFacts = loaded["applyMemoryFacts"]
+  const appliedReconcile = loaded["reconcileAppliedFactsBatches"]
   const tuiUnderstand = loaded["executeOnboardingUnderstand"]
   const tuiApply = loaded["executeOnboardingMemoryApply"]
   const authPending = loaded["authWritesPending"]
   const staleTargets = loaded["staleSetupTargets"]
   if (
-    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof memoryFacts !== "function" ||
+    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof memoryFacts !== "function" || typeof appliedReconcile !== "function" ||
     typeof tuiUnderstand !== "function" || typeof tuiApply !== "function" ||
     typeof context !== "function" || typeof authPending !== "function" || typeof staleTargets !== "function"
   ) {
@@ -272,6 +275,7 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
     onboardingScanContext: (...args) => Reflect.apply(context, undefined, args),
     startOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
     applyMemoryFacts: (...args) => Reflect.apply(memoryFacts, undefined, args),
+    reconcileAppliedFactsBatches: (...args) => Reflect.apply(appliedReconcile, undefined, args),
     executeOnboardingUnderstand: (...args) => Reflect.apply(tuiUnderstand, undefined, args),
     executeOnboardingMemoryApply: (...args) => Reflect.apply(tuiApply, undefined, args),
     authWritesPending: (...args) => Reflect.apply(authPending, undefined, args),
