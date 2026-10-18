@@ -2,6 +2,7 @@ import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../
 import { loadSenpiOmoConfig } from "../config-resolution"
 import { RETIRED_MODEL_PROFILE_IDS } from "./builtin-profiles"
 import { credentialRotationPolicy } from "./credential-policy"
+import { customModelProviders } from "./custom-providers"
 import { newProbeState, resolveDefaultModelProfile, type ProbeState } from "./default-profile"
 import { authFailedDetails, noticeContent } from "./notice"
 import { type AuthFailure, type ProbeRegistry, probeRequestAuth, probeRuntime, sanitizedAuthErrorDetail } from "./request-auth"
@@ -163,11 +164,13 @@ async function resolveWithRequestAuth(
   state: ProbeState = newProbeState(),
 ): Promise<ProbedResolution> {
   const available = availableSelectors(registry)
+  const customProviders = customModelProviders(agentDir)
   const { excludedProviders, excludedSelectors, failures } = state
   const resolve = () =>
     resolveModelProfile({
       profiles,
       active,
+      customProviders,
       availableModels: available.filter(
         (selector) => !excludedSelectors.has(selector) && !excludedProviders.has(providerOf(selector)),
       ),
