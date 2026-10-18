@@ -174,7 +174,7 @@ describe("onboarding scan RPC", () => {
     const host = register(openCodeProfile())
     const { scanId, events } = await host.scan({})
 
-    expect(sourcesOf(events)).toEqual(["detect", "credentials", "assets", "model-choices"])
+    expect(sourcesOf(events)).toEqual(["detect", "credentials", "assets", "model-choices", "projects", "sessions"])
     for (const event of events) {
       expect(event.scanId).toBe(scanId)
       expect(typeof event.elapsedMs).toBe("number")
@@ -199,7 +199,7 @@ describe("onboarding scan RPC", () => {
   test("#given includeCustomProviders #when a scan runs #then the provider source streams too", async () => {
     const host = register(openCodeProfile())
     const { events } = await host.scan({ includeCustomProviders: true })
-    expect(sourcesOf(events)).toEqual(["detect", "providers", "credentials", "assets", "model-choices"])
+    expect(sourcesOf(events)).toEqual(["detect", "providers", "credentials", "assets", "model-choices", "projects", "sessions"])
     expect(events.filter((event) => event.kind === "item").map((event) => event.item)).toContainEqual(expect.objectContaining({ id: "myco", kind: "provider", state: "import" }))
   })
 
