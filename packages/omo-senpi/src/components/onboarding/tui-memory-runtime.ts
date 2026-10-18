@@ -23,7 +23,6 @@ export async function executeOnboardingUnderstand(input: {
   readonly seams?: OnboardingUnderstandingSeams
 }): Promise<AgentToolResult<OnboardingUnderstandDetails>> {
   const { params, signal, ectx, runs } = input
-  if (params.consent !== true) return failure("Ask the user first: understanding sends session digests to the model provider. Call again with consent: true once they agree.")
   const ctx = ectx as unknown as ToolCtx
   const model = params.model ?? currentModel(ctx)
   if (model === undefined) return failure("No model is selected in this session; pass model as provider/model.")

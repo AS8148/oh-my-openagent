@@ -80,6 +80,7 @@ export function createOnboardingMemoryTools(options: TuiMemoryToolsOptions): {
     allowLazyActivation: true,
     executionMode: "sequential",
     async execute(_toolCallId, params: Static<typeof OnboardingUnderstandParams>, signal, _onUpdate, ectx): Promise<AgentToolResult<OnboardingUnderstandDetails>> {
+      if (params.consent !== true) return failure("Ask the user first: understanding sends session digests to the model provider. Call again with consent: true once they agree.")
       const loaded = await runtime()
       if (typeof loaded === "string") return failure(loaded)
       return loaded.executeOnboardingUnderstand({ params, signal, ectx, runs, scan: options.scan, ...(options.seams === undefined ? {} : { seams: options.seams }) })
