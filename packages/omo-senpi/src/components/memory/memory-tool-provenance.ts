@@ -1,4 +1,4 @@
-import { resolveClaimReceipt } from "@oh-my-opencode/memory-core"
+import { resolveClaimReceipt, type ClaimReceipt } from "@oh-my-opencode/memory-core"
 
 import type { MemoryIdentityContext } from "./context"
 import { allUserTexts } from "./recall-session-read"
@@ -12,10 +12,20 @@ export interface MemoryToolProvenanceInput {
   readonly entries: readonly unknown[]
 }
 
-// The whole object replaces whatever the model passed, so neither the identity keys nor the claim
-// receipt can be forged from tool arguments. A `user` claim keeps its source only when its quote
-// appears verbatim in this session's user messages; otherwise it is stored as an agent suggestion (#10488).
-export function memoryToolProvenance(input: MemoryToolProvenanceInput): Record<string, unknown> {
+export interface InjectedMemoryToolProvenance {
+  readonly sessionId: string
+  readonly userTurns: number
+  readonly identityId: string
+  readonly repoPath: string
+  readonly toolCallId?: string
+  readonly claim: ClaimReceipt
+}
+
+// The bridge deletes any model-supplied provenance and writes this object in its place, so neither
+// the identity keys nor the claim receipt can be forged from tool arguments. A `user` claim keeps
+// its source only when its quote appears verbatim in a user message on the active branch; otherwise
+// it is stored as an agent suggestion (#10488).
+export function memoryToolProvenance(input: MemoryToolProvenanceInput): InjectedMemoryToolProvenance {
   return {
     sessionId: input.sessionId,
     userTurns: input.userTurns,
@@ -27,4 +37,18 @@ export function memoryToolProvenance(input: MemoryToolProvenanceInput): Record<s
       allUserTexts(input.entries),
     ),
   }
+}
+
+/** The live branch only: an abandoned branch's user messages are not what the user said here. */
+export function activeBranchEntries(eventCtx: unknown): readonly unknown[] | undefined {
+  if (!isRecord(eventCtx) || !isRecord(eventCtx.sessionManager)) return undefined
+  const manager = eventCtx.sessionManager
+  const getBranch = manager.getBranch
+  if (typeof getBranch !== "function") return undefined
+  const branch: unknown = Reflect.apply(getBranch, manager, [])
+  return Array.isArray(branch) ? branch : undefined
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
 }

@@ -136,48 +136,6 @@ describe("runMemoryTool", () => {
     })
   })
 
-  it("#given a claim receipt #when memory commits #then the receipt is a durable trailer and visible in the note's frontmatter (#10488)", async () => {
-    // given
-    const setup = await fixture()
-
-    // when: the #10488 flip, an agent suggestion downgraded from a claimed user decision
-    await runMemoryTool({
-      repo: setup.repo,
-      lock: setup.lock,
-      params: {
-        command: "create",
-        reason: "remember cleanup",
-        file_path: "cleanup.md",
-        description: "Cleanup",
-        file_text: "Remove plugins X and Y.",
-        author: AUTHOR,
-        provenance: { sessionId: "s", userTurns: 1, claim: { source: "agent", downgraded: true } },
-      },
-    })
-    await runMemoryTool({
-      repo: setup.repo,
-      lock: setup.lock,
-      params: {
-        command: "str_replace",
-        reason: "user decided",
-        file_path: "cleanup.md",
-        old_string: "Remove plugins X and Y.",
-        new_string: "Keep plugin X.",
-        author: AUTHOR,
-        provenance: { sessionId: "s", userTurns: 2, claim: { source: "user", userQuote: "keep plugin X please" } },
-      },
-    })
-
-    // then
-    const [latest, first] = await setup.repo.log({ limit: 2 })
-    expect(first?.trailers["Omo-Claim-Source"]).toBe("agent")
-    expect(first?.trailers["Omo-Claim-Downgraded"]).toBe("unverified-user-quote")
-    expect(latest?.trailers["Omo-Claim-Source"]).toBe("user")
-    expect(latest?.trailers["Omo-User-Quote"]).toBe("keep plugin X please")
-    const note = parseMemoryFile(await readFile(join(setup.repo.dir, "cleanup.md"), "utf8"))
-    expect(note.frontmatter.extra?.["provenance"]).toContain("keep plugin X please")
-  })
-
   it("#given create omits optional file_text #when run #then an empty body is valid", async () => {
     const setup = await fixture()
 

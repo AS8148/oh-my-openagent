@@ -7,7 +7,7 @@ import { describeDescriptionViolation } from "../memfs/frontmatter-validation"
 import { validateMemoryPath, validateRepositoryPath } from "../memfs/paths"
 import { MemoryPatchHunkError, MemoryPatchParseError, applyMemoryPatch } from "./patch-apply"
 import type { ClaimReceipt } from "../provenance"
-import { withReceipt } from "./claim-frontmatter"
+import { stampReceipt } from "./claim-frontmatter"
 import { commitMemoryWrite, type MemoryWriteLock } from "./commit-write"
 import { describeRepairs, repairLeakedArguments } from "./leaked-arguments"
 import { MemoryToolError } from "./tool-errors"
@@ -105,7 +105,7 @@ async function applyCommand(root: string, params: MemoryToolParams): Promise<App
     case "update_description": return updateDescription(root, params)
     case "apply_patch": {
       const input = required(params.input, "input", "apply_patch")
-      return { affectedPaths: await applyMemoryPatch(root, input) }
+      return { affectedPaths: await applyMemoryPatch(root, input, params.provenance?.claim) }
     }
   }
 }
@@ -116,7 +116,7 @@ async function create(root: string, params: MemoryToolParams): Promise<AppliedCo
   const path = validateMemoryPath(root, source, { fieldName: "file_path" })
   if (existsSync(path)) throw toolError(`create: block already exists at ${source}`)
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, renderMemoryFile(withReceipt({ description }, params), params.file_text ?? ""), "utf8")
+  await writeFile(path, renderMemoryFile(stampReceipt(undefined, { description }, params.provenance?.claim), params.file_text ?? ""), "utf8")
   return affected(root, path)
 }
 
@@ -129,7 +129,7 @@ async function strReplace(root: string, params: MemoryToolParams): Promise<Appli
   const index = file.body.indexOf(oldString)
   if (index < 0) throw toolError("str_replace: old_string was not found in the target memory block")
   const body = file.body.slice(0, index) + newString + file.body.slice(index + oldString.length)
-  await writeFile(path, renderMemoryFile(withReceipt(file.frontmatter, params), body), "utf8")
+  await writeFile(path, renderMemoryFile(stampReceipt(file.frontmatter, file.frontmatter, params.provenance?.claim), body), "utf8")
   return affected(root, path)
 }
 
@@ -144,7 +144,7 @@ async function insert(root: string, params: MemoryToolParams): Promise<AppliedCo
   const lines = file.body.length > 0 ? file.body.split("\n") : []
   const line = Math.max(1, Math.floor(params.insert_line))
   lines.splice(Math.min(line - 1, lines.length), 0, ...text.split("\n"))
-  await writeFile(path, renderMemoryFile(withReceipt(file.frontmatter, params), lines.join("\n")), "utf8")
+  await writeFile(path, renderMemoryFile(stampReceipt(file.frontmatter, file.frontmatter, params.provenance?.claim), lines.join("\n")), "utf8")
   return affected(root, path)
 }
 

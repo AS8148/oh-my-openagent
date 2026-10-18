@@ -3,7 +3,7 @@ import type { GitMemoryRepo, MemoryToolProvenance } from "@oh-my-opencode/memory
 
 import type { MemoryExtensionAPI } from "./capabilities"
 import type { MemoryIdentityContext } from "./context"
-import { memoryToolProvenance } from "./memory-tool-provenance"
+import { activeBranchEntries, memoryToolProvenance } from "./memory-tool-provenance"
 import {
   MEMORY_TOOL_NAME,
 } from "./tool-metadata"
@@ -155,6 +155,7 @@ export function createMemoryNudgeWiring(options: MemoryNudgeWiringOptions): Memo
 
       pi.on("tool_call", (payload, eventCtx) => {
         if (!isRecord(payload) || !isMemoryToolName(payload.toolName) || !isRecord(payload.input)) return
+        delete payload.input.provenance
         const session = readSession(eventCtx)
         if (session === undefined) return
         const context = options.resolveContext(session.id)
@@ -166,7 +167,7 @@ export function createMemoryNudgeWiring(options: MemoryNudgeWiringOptions): Memo
           context,
           toolCallId: payload.toolCallId,
           input: payload.input,
-          entries: session.entries,
+          entries: activeBranchEntries(eventCtx) ?? session.entries,
         })
       })
     },

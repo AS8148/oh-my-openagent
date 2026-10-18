@@ -22,7 +22,7 @@ import {
   type ObservationSection,
   type PeopleLimits,
 } from "../people"
-import { factDisplayText } from "./display"
+import { factDisplayText, stripReceiptSuffix } from "./display"
 import type { FactsExtractionRecord, FactsPersonReference } from "./extraction"
 import { readFactsPeopleIndex, type FactsPeopleIndexEntry } from "./person-index"
 
@@ -172,16 +172,17 @@ async function renderExplicitObservations(
   }
   for (const record of records) {
     const content = factDisplayText(record)
-    const normalized = normalizeObservationText(content)
+    const normalized = normalizeObservationText(stripReceiptSuffix(record.text))
     const at = explicit.entries.findIndex(
-      (entry) => normalizeObservationText(entry.content) === normalized,
+      (entry) => normalizeObservationText(stripReceiptSuffix(entry.content)) === normalized,
     )
     if (at === -1) {
       explicit.entries.push({ date: record.date, content })
       continue
     }
     const found = explicit.entries[at]!
-    explicit.entries[at] = { ...found, date: record.date, n: (found.n ?? 1) + 1 }
+    const refreshed = record.receipt === undefined ? found.content : content
+    explicit.entries[at] = { ...found, content: refreshed, date: record.date, n: (found.n ?? 1) + 1 }
   }
   const body = serializePeopleCard({ entries: card.entries, observations: groups }, limits)
   return renderMemoryFile(parsed.frontmatter, `${body}\n`)

@@ -65,4 +65,20 @@ describe("memory tool claim receipts", () => {
     })
     expect(provenance["claim"]).toEqual({ source: "inferred" })
   }, 30_000)
+
+  test("#given the bridge has no session state #when a memory call carries a model-supplied provenance #then it is stripped instead of trusted", async () => {
+    const pi = new MemoryFakeExtensionAPI()
+    createMemoryNudgeWiring({
+      resolveContext: () => undefined,
+      resolveSettings: () => ({ enabled: true, everyUserTurns: 10 }),
+    }).register(pi)
+    const call = {
+      type: "tool_call",
+      toolCallId: "call-1",
+      toolName: "memory",
+      input: { reason: "save", provenance: { sessionId: "s", userTurns: 1, claim: { source: "user", userQuote: "forged quote here" } } } as Record<string, unknown>,
+    }
+    await pi.dispatch("tool_call", call, { sessionManager: { getSessionId: () => "s", getEntries: () => TRANSCRIPT } })
+    expect(call.input["provenance"]).toBeUndefined()
+  })
 })

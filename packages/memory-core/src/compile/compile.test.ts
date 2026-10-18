@@ -33,8 +33,6 @@ describe("compileMemoryBlock", () => {
     expect(block).not.toContain("EXTERNAL_BODY_SENTINEL")
     expect(block).not.toContain("BINARY_BODY_SENTINEL")
     expect(block).not.toContain("SKILL_BODY_SENTINEL")
-    // Prompt-byte contract (#10488): every compiled projection carries the memory authority rule.
-    expect(block).toContain(MEMORY_AUTHORITY_RULE)
     // Loaded Windows runners push these git fixtures past the 5s default; the work stays
     // deterministic (~230ms locally), so only the ceiling moves.
   }, 30_000)

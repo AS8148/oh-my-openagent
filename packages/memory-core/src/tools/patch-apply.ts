@@ -3,6 +3,8 @@ import { dirname, relative } from "node:path"
 
 import { parseMemoryFile, renderMemoryFile } from "../memfs/frontmatter"
 import { MemoryPathError, validateMemoryPath } from "../memfs/paths"
+import type { ClaimReceipt } from "../provenance"
+import { restampContent } from "./claim-frontmatter"
 import {
   applyMemoryPatchHunk,
   MemoryPatchHunkError,
@@ -13,11 +15,11 @@ import {
 
 export { MemoryPatchHunkError, MemoryPatchParseError }
 
-export async function applyMemoryPatch(root: string, input: string): Promise<string[]> {
-  return applyOperations(root, parseMemoryPatch(input))
+export async function applyMemoryPatch(root: string, input: string, claim?: ClaimReceipt): Promise<string[]> {
+  return applyOperations(root, parseMemoryPatch(input), claim)
 }
 
-async function applyOperations(root: string, operations: readonly PatchOperation[]): Promise<string[]> {
+async function applyOperations(root: string, operations: readonly PatchOperation[], claim: ClaimReceipt | undefined): Promise<string[]> {
   const pendingWrites = new Map<string, string>()
   const pendingDeletes = new Set<string>()
   const affectedPaths = new Set<string>()
@@ -55,7 +57,7 @@ async function applyOperations(root: string, operations: readonly PatchOperation
       if (await exists(target.absolute)) {
         throw new Error(`memory apply_patch: cannot add existing memory file: ${target.relative}`)
       }
-      pendingWrites.set(target.absolute, normalizeAddedContent(target.relative.slice(0, -3), operation.contentLines.join("\n")))
+      pendingWrites.set(target.absolute, restampContent(undefined, normalizeAddedContent(target.relative.slice(0, -3), operation.contentLines.join("\n")), claim))
       pendingDeletes.delete(target.absolute)
       affectedPaths.add(target.relative)
       continue
@@ -80,7 +82,7 @@ async function applyOperations(root: string, operations: readonly PatchOperation
     if (parseForTool(next).frontmatter.read_only === "true") {
       throw new Error(`memory apply_patch: ${target.relative} cannot be written with read_only=true`)
     }
-    pendingWrites.set(target.absolute, next)
+    pendingWrites.set(target.absolute, restampContent(current, next, claim))
     pendingDeletes.delete(target.absolute)
     affectedPaths.add(target.relative)
     if (source.absolute !== target.absolute) {

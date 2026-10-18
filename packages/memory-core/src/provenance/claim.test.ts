@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 
 import {
   claimReceiptTrailers,
-  renderClaimReceipt,
   resolveClaimReceipt,
 } from "./claim"
 
@@ -17,20 +16,24 @@ describe("claim receipts", () => {
   test("#given the #10488 flip: a user claim quoting the agent's own suggestion #when resolved #then it is downgraded to an agent suggestion", () => {
     const receipt = resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, USER_TEXTS)
     expect(receipt).toEqual({ source: "agent", downgraded: true })
-    expect(renderClaimReceipt(receipt)).toContain("not a user decision")
   })
 
   test("#given a user claim with no quote #when resolved #then it is downgraded", () => {
     expect(resolveClaimReceipt({ source: "user" }, USER_TEXTS)).toEqual({ source: "agent", downgraded: true })
   })
 
-  test("#given a quote that differs only in whitespace and width #when resolved #then it still matches", () => {
-    const receipt = resolveClaimReceipt({ source: "user", userQuote: "  tell me   which ones\nlook unused " }, USER_TEXTS)
+  test("#given a quote that differs only in whitespace and case #when resolved #then it still matches", () => {
+    const receipt = resolveClaimReceipt({ source: "user", userQuote: "  Tell me   which ones\nlook UNUSED " }, USER_TEXTS)
     expect(receipt.source).toBe("user")
   })
 
   test("#given a quote too short to identify the user's words #when resolved #then it is downgraded", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "ok" }, ["ok"]).source).toBe("agent")
+    expect(resolveClaimReceipt({ source: "user", userQuote: "look unused." }, USER_TEXTS).source).toBe("agent")
+  })
+
+  test("#given a quote in a script written without spaces #when it is long enough #then the word floor does not apply", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "このプラグインを削除して" }, ["じゃあこのプラグインを削除してください"]).source).toBe("user")
   })
 
   test("#given an agent or inferred claim #when resolved #then the source is kept and any quote is dropped", () => {
