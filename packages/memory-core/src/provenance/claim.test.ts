@@ -40,6 +40,29 @@ describe("claim receipts", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: quote }, [said])).toEqual({ source: "agent", downgraded: true })
   })
 
+  test.each([
+    "아니야", "아냐", "잠깐만", "그만해", "됐어요", "하지 마세요", "아닙니다", "아니에요", "안 돼", "안돼", "싫다", "취소", "멈춰", "아니라니까",
+  ])("#given a Korean retraction %s in the next sentence #when resolved #then it stays a suggestion", (retraction) => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "플러그인 X 지워" }, [`플러그인 X 지워. ${retraction}`]))
+      .toEqual({ source: "agent", downgraded: true })
+  })
+
+  test.each([
+    "Not yet.", "Never mind.", "Nevermind.", "Hold on.", "Cancel that.", "Scratch that.", "Please don't.", "Just kidding.", "Nooo.",
+  ])("#given an English retraction %s in the next sentence #when resolved #then it stays a suggestion", (retraction) => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, [`Remove plugins X and Y. ${retraction}`]))
+      .toEqual({ source: "agent", downgraded: true })
+  })
+
+  test.each([
+    ["Remove plugins X and Y. Also update plugin Z.", "remove plugins X and Y"],
+    ["플러그인 X 지워. 그리고 Y도 정리해", "플러그인 X 지워"],
+    ["플러그인 X 지우지 맙시다", "플러그인 X 지우지"],
+  ])("#given %s #when resolved #then a plain follow-up stays the user's and a written prohibition does not", (said, quote) => {
+    const expected = said.includes("맙시다") ? "agent" : "user"
+    expect(resolveClaimReceipt({ source: "user", userQuote: quote }, [said]).source).toBe(expected)
+  })
+
   test("#given a fragment of an affirmative user sentence #when resolved #then the receipt stores the whole sentence", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, ["Thanks. Please remove plugins X and Y now."]))
       .toEqual({ source: "user", userQuote: "Please remove plugins X and Y now." })
