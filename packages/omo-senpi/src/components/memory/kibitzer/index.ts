@@ -149,6 +149,7 @@ export function createKibitzerComposition(options: KibitzerCompositionOptions): 
       category: settings.category,
       loadConfig: () => options.loadConfig({ cwd: options.cwd() }).config,
       modelRegistry: () => captured.registry,
+      ...(logger === undefined ? {} : { logger }),
       ...options.childStarter,
     })
     const sidecar = createKibitzerSidecar({
