@@ -8,6 +8,7 @@ import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligi
 import { loadOnboardingScanRuntime } from "./scan-component"
 import type { OnboardingScanEvent } from "./scan-contract"
 import type { OnboardingScanEnvironment } from "./scan-runtime"
+import { registerSessionHistoryRpc } from "./session-history-rpc"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
 import { registerOnboardingStateRpc } from "./state-rpc"
@@ -148,6 +149,7 @@ export function createOnboardingComponent(
         claimOnboarding: dependencies.claimOnboarding,
         releaseOnboarding: dependencies.releaseOnboarding,
       })
+      registerSessionHistoryRpc(pi)
 
       pi.registerFlag("onboard", {
         type: "boolean",
