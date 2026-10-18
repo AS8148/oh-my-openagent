@@ -1,19 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
   assembleUnreleasedBody,
-  fragmentPath,
-  FRAGMENT_DIR,
   mergeUnreleased,
   parseFragment,
   readFragments,
   unreleasedBody,
 } from "./changelog-fragments"
-import { readdirSync, readFileSync } from "node:fs"
-import { execFileSync } from "node:child_process"
-import { join } from "node:path"
-import { fileURLToPath } from "node:url"
-
-const root = fileURLToPath(new URL("..", import.meta.url))
 
 describe("fragment parsing", () => {
   test.each([

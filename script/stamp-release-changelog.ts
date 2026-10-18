@@ -6,8 +6,9 @@
  * hand-written Unreleased content: Unreleased is machine-assembled from fragments (#9961).
  */
 import { readdir, rm } from "node:fs/promises"
-import { assembleUnreleasedBody, FRAGMENT_DIR, mergeUnreleased, parseFragment, readFragments, unreleasedBody } from "./changelog-fragments"
+import { assembleUnreleasedBody as legacyAssemble, FRAGMENT_DIR, mergeUnreleased, parseFragment, readFragments, unreleasedBody } from "./changelog-fragments"
 import { stampUnreleased } from "./changelog-release-notes"
+import { assembleUnreleasedBody } from "./changelog-gate-rules.ts"
 
 async function main(): Promise<void> {
   const version = process.argv[2]
@@ -29,11 +30,12 @@ async function main(): Promise<void> {
     return content
   })
   if (fragments.length === 0) throw new Error(`no changelog fragments under ${FRAGMENT_DIR}/ to release`)
-  const assembled = assembleUnreleasedBody(fragments)
   const changelog = await Bun.file(changelogPath).text()
+  const legacy = unreleasedBody(changelog)
+  const assembled = [legacy, assembleUnreleasedBody(fragments)].filter((part) => part.trim()).join("\n\n")
   const existing = unreleasedBody(changelog)
-  if (existing && existing !== assembled) {
-    throw new Error(`## [Unreleased] holds hand-written content; move it into ${FRAGMENT_DIR}/ fragments`)
+  if (existing && existing !== assembled && existing !== legacy) {
+    throw new Error(`## [Unreleased] holds content that is neither the legacy notes nor the fragment assembly`)
   }
   const stamped = stampUnreleased(mergeUnreleased(changelog, assembled), version, date)
   await Bun.write(changelogPath, stamped)
