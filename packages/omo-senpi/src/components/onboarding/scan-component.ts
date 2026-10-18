@@ -15,17 +15,15 @@ import type { applyMemoryFacts } from "../memory/facts-apply-runtime"
 import type { reconcileAppliedFactsBatches } from "../memory/facts-applied-reconcile"
 import type { TuiMemoryToolsRuntime } from "./tui-memory-tools"
 import type {
-  applyOnboardingScan,
-  authWritesPending,
+  applyRetainedScan,
   migrationFactsFromScan,
   onboardingScanContext,
   OnboardingScanEnvironment,
+  readOnboardingState,
   runOnboardingScan,
-  staleSetupTargets,
   startOnboardingUnderstanding,
 } from "./scan-runtime"
 import { registerOnboardingUnderstanding, type OnboardingUnderstandingSeams } from "./understand-component"
-import { resolve } from "node:path"
 
 export * from "./scan-contract"
 export * from "./understand-contract"
@@ -41,14 +39,13 @@ export const ONBOARDING_SCAN_TTL_MS = 10 * 60_000
 
 export interface OnboardingScanRuntime extends TuiMemoryToolsRuntime {
   readonly runOnboardingScan: typeof runOnboardingScan
-  readonly applyOnboardingScan: typeof applyOnboardingScan
+  readonly applyRetainedScan: typeof applyRetainedScan
+  readonly readOnboardingState: typeof readOnboardingState
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
   readonly onboardingScanContext: typeof onboardingScanContext
   readonly startOnboardingUnderstanding: typeof startOnboardingUnderstanding
   readonly applyMemoryFacts: typeof applyMemoryFacts
   readonly reconcileAppliedFactsBatches: typeof reconcileAppliedFactsBatches
-  readonly authWritesPending: typeof authWritesPending
-  readonly staleSetupTargets: typeof staleSetupTargets
 }
 
 /** The engine's own credential store (senpi `AuthStorage`), narrowed to the surface an apply uses. */
@@ -177,64 +174,12 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
         if (held.finishedAt === undefined || now() - held.finishedAt > ONBOARDING_SCAN_TTL_MS) {
           return { kind: "stale", reason: "The scan expired; retained scans live ten minutes. Run omo.onboarding.scan again.", paths: [] }
         }
+        // The stale, credential-store and write checks ship in the sidecar; the scan was taken
+        // above, synchronously, so two applies racing on one scan can never both run.
         const runtime = await loadRuntime()
-        const requested = stages.filter(isApplyStage)
-        // Staleness is answered before anything else: a target that changed since the scan means
-        // the plans no longer describe the machine, so no store is consulted and nothing is written.
-        const stale = runtime.staleSetupTargets(plans.plans, requested)
-        if (stale.length > 0) {
-          return { kind: "stale", reason: `targets changed since the scan: ${stale.join(", ")}`, paths: stale }
-        }
-        if (runtime.authWritesPending(plans.plans, requested)) {
-          const store = authStore()
-          if (store === undefined) {
-            return { kind: "unavailable", reason: "The engine's credential store is not available, so credentials cannot be imported here; run omo setup --yes instead." }
-          }
-          const target = authTargetOf(plans.plans)
-          if (target === undefined || resolve(store.getStoragePath()) !== resolve(target)) {
-            return { kind: "unavailable", reason: `The engine's credential store (${store.getStoragePath()}) is not the planned target; run omo setup --yes instead.` }
-          }
-        }
-        const notices: string[] = []
-        const outcome = await runtime.applyOnboardingScan(plans.plans, new Set(requested), {
-          ...(authStore() === undefined ? {} : {
-            writeAuth: (target, additions) => writeAuthThrough(authStore() as OnboardingEngineAuthStore, target, additions),
-          }),
-          report: (line) => notices.push(line),
-        })
-        if ("kind" in outcome) {
-          return outcome.applied === undefined
-            ? { kind: "stale", reason: outcome.reason, paths: outcome.paths }
-            : { kind: "stale", reason: outcome.reason, paths: outcome.paths, applied: outcome.applied }
-        }
-        return { scanId, applied: outcome.applied, ...(notices.length === 0 ? {} : { notices }) }
+        return runtime.applyRetainedScan(scanId, plans.plans, stages.filter(isApplyStage), authStore)
       })
     },
-  }
-}
-
-function authTargetOf(plans: Record<string, unknown>): string | undefined {
-  const credentials = isRecord(plans["credentials"]) ? plans["credentials"] : undefined
-  if (isRecord(credentials) && typeof credentials["target"] === "string") return credentials["target"]
-  const providers = isRecord(plans["providers"]) ? plans["providers"] : undefined
-  const paths = isRecord(providers) && isRecord(providers["paths"]) ? providers["paths"] : undefined
-  if (paths !== undefined && typeof paths["auth"] === "string") return paths["auth"]
-  return undefined
-}
-
-async function writeAuthThrough(
-  store: OnboardingEngineAuthStore,
-  target: string,
-  additions: readonly { readonly provider: string; readonly key: string }[],
-): Promise<void> {
-  if (resolve(store.getStoragePath()) !== resolve(target)) {
-    throw new Error(`the engine's credential store is not the planned target ${target}`)
-  }
-  for (const item of additions) {
-    // Under the store's lock: an entry the store already holds (a login or refresh that landed
-    // after the scan) is kept exactly as it is.
-    await store.modify(item.provider, (current: unknown) =>
-      current === undefined ? { type: "api_key", key: item.key } : undefined)
   }
 }
 
@@ -251,7 +196,7 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const loaded: unknown = await import(new URL(bundled ? ONBOARDING_SCAN_RUNTIME_FILE : "scan-runtime.ts", import.meta.url).href)
   if (!isRecord(loaded)) throw new Error("onboarding scan runtime did not load")
   const run = loaded["runOnboardingScan"]
-  const apply = loaded["applyOnboardingScan"]
+  const apply = loaded["applyRetainedScan"]
   const facts = loaded["migrationFactsFromScan"]
   const context = loaded["onboardingScanContext"]
   const understand = loaded["startOnboardingUnderstanding"]
@@ -259,18 +204,17 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const appliedReconcile = loaded["reconcileAppliedFactsBatches"]
   const tuiUnderstand = loaded["executeOnboardingUnderstand"]
   const tuiApply = loaded["executeOnboardingMemoryApply"]
-  const authPending = loaded["authWritesPending"]
-  const staleTargets = loaded["staleSetupTargets"]
+  const readState = loaded["readOnboardingState"]
   if (
     typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof memoryFacts !== "function" || typeof appliedReconcile !== "function" ||
     typeof tuiUnderstand !== "function" || typeof tuiApply !== "function" ||
-    typeof context !== "function" || typeof authPending !== "function" || typeof staleTargets !== "function"
+    typeof context !== "function" || typeof readState !== "function"
   ) {
     throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
   }
   return {
     runOnboardingScan: (...args) => Reflect.apply(run, undefined, args),
-    applyOnboardingScan: (...args) => Reflect.apply(apply, undefined, args),
+    applyRetainedScan: (...args) => Reflect.apply(apply, undefined, args),
     migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
     onboardingScanContext: (...args) => Reflect.apply(context, undefined, args),
     startOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
@@ -278,7 +222,6 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
     reconcileAppliedFactsBatches: (...args) => Reflect.apply(appliedReconcile, undefined, args),
     executeOnboardingUnderstand: (...args) => Reflect.apply(tuiUnderstand, undefined, args),
     executeOnboardingMemoryApply: (...args) => Reflect.apply(tuiApply, undefined, args),
-    authWritesPending: (...args) => Reflect.apply(authPending, undefined, args),
-    staleSetupTargets: (...args) => Reflect.apply(staleTargets, undefined, args),
+    readOnboardingState: (...args) => Reflect.apply(readState, undefined, args),
   }
 }

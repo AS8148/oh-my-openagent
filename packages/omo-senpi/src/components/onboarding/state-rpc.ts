@@ -1,5 +1,5 @@
 import type { SenpiExtensionAPI } from "../../extension/types"
-import { readOnboardingState } from "./state"
+import { loadOnboardingScanRuntime } from "./scan-component"
 
 export const ONBOARDING_STATE_GET_RPC_METHOD = "omo.onboarding.state.get"
 export const ONBOARDING_STATE_COMPLETE_RPC_METHOD = "omo.onboarding.state.complete"
@@ -29,8 +29,10 @@ export interface OnboardingStateStore {
 export function registerOnboardingStateRpc(pi: SenpiExtensionAPI, store: OnboardingStateStore): void {
   const handle = pi.rpc?.handle
   if (handle === undefined) return
-  const read = (): OnboardingStateResponse => {
-    const { completedAt, inProgress } = readOnboardingState(store.stateDir)
+  // The marker reader ships in the onboarding-scan sidecar; the writes stay here, synchronous, so a
+  // complete or reset lands before the sidecar is even asked for.
+  const read = async (): Promise<OnboardingStateResponse> => {
+    const { completedAt, inProgress } = (await loadOnboardingScanRuntime()).readOnboardingState(store.stateDir)
     return { completed: completedAt !== null, completedAt, inProgress }
   }
   handle(ONBOARDING_STATE_GET_RPC_METHOD, read)
