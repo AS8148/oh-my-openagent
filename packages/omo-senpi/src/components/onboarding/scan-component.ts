@@ -73,11 +73,13 @@ interface HeldScan {
  */
 export interface OnboardingScanStore {
   readonly scans: Map<string, HeldScan>
+  /** Scans with an understanding run in progress, whichever session started it. */
+  readonly understanding: Map<string, symbol>
   latestAuthStore: OnboardingEngineAuthStore | undefined
 }
 
 export function createOnboardingScanStore(): OnboardingScanStore {
-  return { scans: new Map(), latestAuthStore: undefined }
+  return { scans: new Map(), understanding: new Map(), latestAuthStore: undefined }
 }
 
 const processScanStore = createOnboardingScanStore()
@@ -121,6 +123,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
         environment,
         loadStart: async () => (await loadRuntime()).startOnboardingUnderstanding,
         modelRegistry: () => modelRegistry,
+        busyScans: shared.understanding,
         // The digests exist only in memory, with the retained scan: an expired, evicted or applied scan has none.
         scanForUnderstanding: async (scanId) => {
           const held = scans.get(scanId)

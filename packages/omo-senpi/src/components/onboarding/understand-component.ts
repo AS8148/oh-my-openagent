@@ -25,6 +25,8 @@ export interface OnboardingUnderstandRegistration {
   readonly environment: () => OnboardingScanEnvironment
   readonly loadStart: () => Promise<typeof startOnboardingUnderstanding>
   readonly modelRegistry: () => ChildModelRegistry | undefined
+  /** Shared by every session of the process: one understanding per scan at a time. */
+  readonly busyScans: Map<string, symbol>
   /** The retained scan once it settles; undefined when it never ran, failed, expired, was evicted or applied. */
   readonly scanForUnderstanding: (scanId: string) => Promise<OnboardingScanForUnderstanding | undefined>
   readonly seams?: OnboardingUnderstandingSeams
@@ -34,7 +36,7 @@ const MODEL_SELECTOR = /^[^/\s]+\/\S+$/
 
 export function registerOnboardingUnderstanding(pi: SenpiExtensionAPI, handle: NonNullable<NonNullable<SenpiExtensionAPI["rpc"]>["handle"]>, deps: OnboardingUnderstandRegistration): void {
   const runs = new Map<string, OnboardingUnderstandingStarted["control"]>()
-  const busyScans = new Map<string, symbol>()
+  const { busyScans } = deps
 
   handle(ONBOARDING_UNDERSTAND_RPC_METHOD, async (request): Promise<OnboardingUnderstandResponse> => {
     if (!isRecord(request) || request["consent"] !== true) {

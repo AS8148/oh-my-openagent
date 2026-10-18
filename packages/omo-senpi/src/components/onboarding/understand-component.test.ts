@@ -210,24 +210,29 @@ describe("omo.onboarding.understand RPC (#10480)", () => {
     const holding = new Promise<void>((resolve) => { release = resolve })
     let entered: (() => void) | undefined
     const running = new Promise<void>((resolve) => { entered = resolve })
-    const rpc = host({ environment, turn: async () => {
+    const scanStore = createOnboardingScanStore()
+    const turn: FakeTurn = async () => {
       entered?.()
       await holding
       return "completed"
-    } })
+    }
+    const rpc = host({ environment, turn, scanStore })
+    const otherSession = host({ environment, turn, scanStore })
     const scanId = await rpc.scan()
     const first = await rpc.call(ONBOARDING_UNDERSTAND_RPC_METHOD, { scanId, model: UNDERSTAND_MODEL, consent: true })
     await within("the first model call", running)
 
     // when
     const second = await rpc.call(ONBOARDING_UNDERSTAND_RPC_METHOD, { scanId, model: UNDERSTAND_MODEL, consent: true })
+    const fromOtherSession = await otherSession.call(ONBOARDING_UNDERSTAND_RPC_METHOD, { scanId, model: UNDERSTAND_MODEL, consent: true })
     release?.()
     await rpc.understandDone(String(first["understandId"]))
 
     // then
     expect(typeof first["understandId"]).toBe("string")
     expect(second).toMatchObject({ kind: "invalid" })
-    expect(rpc.starts).toHaveLength(1)
+    expect(fromOtherSession).toMatchObject({ kind: "invalid" })
+    expect(rpc.starts.length + otherSession.starts.length).toBe(1)
   })
 
   test("#given a finished scan and consent #when understanding is requested #then the caller's model reads the scan's digests and returns candidates", async () => {
