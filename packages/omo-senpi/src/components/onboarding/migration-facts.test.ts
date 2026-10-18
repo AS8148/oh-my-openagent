@@ -148,10 +148,14 @@ describe("onboarding migration inventory", () => {
     const dir = mkdtempSync(join(tmpdir(), "omo-onboarding-state-"))
     roots.push(dir)
     let scans = 0
+    let defaultScans = 0
     const component = createOnboardingComponent({
       claimOnboarding: () => true,
       isOnboardingComplete: () => false,
       releaseOnboarding: () => {},
+      stateDir: dir,
+      // Hermetic: the default scan would read this environment; an injected inventory must never start it.
+      scanEnvironment: () => { defaultScans++; return { home: dir, env: { HOME: dir }, agentDir: join(dir, "agent"), stateDir: dir } },
       migrationFacts: () => { scans++; return Promise.resolve("facts") },
     })
     const h = createOnboardingHarness(dir, "s", "rpc", component)
@@ -165,5 +169,6 @@ describe("onboarding migration inventory", () => {
     await h.prompt()
 
     expect(scans).toBe(1)
+    expect(defaultScans).toBe(0)
   })
 })
