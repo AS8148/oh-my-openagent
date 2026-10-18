@@ -1,37 +1,46 @@
 import type { SenpiExtensionAPI } from "../../extension/types"
-import { readOnboardingCompletedAt } from "./state"
+import { readOnboardingState } from "./state"
 
 export const ONBOARDING_STATE_GET_RPC_METHOD = "omo.onboarding.state.get"
 export const ONBOARDING_STATE_COMPLETE_RPC_METHOD = "omo.onboarding.state.complete"
 export const ONBOARDING_STATE_RESET_RPC_METHOD = "omo.onboarding.state.reset"
 
-/** The one install-wide completion flag (`onboarding/state.ts`) the TUI and RPC clients share. */
+/**
+ * The one install-wide onboarding state (`onboarding/state.ts`) the TUI and RPC clients share.
+ * A TUI claim is `inProgress`, never `completed`; completion is written when the TUI's onboarding
+ * turn finishes or a client calls `complete`, and a claim released later never erases it.
+ */
 export interface OnboardingStateResponse {
   readonly completed: boolean
-  /** ISO time the flag was set; null when onboarding is not complete. */
+  /** ISO time onboarding finished; null when it has not. */
   readonly completedAt: string | null
+  /** An onboarding run holds the claim and has not finished. */
+  readonly inProgress: boolean
 }
 
 export interface OnboardingStateStore {
   readonly stateDir: string
-  claimOnboarding(stateDir: string): boolean
-  releaseOnboarding(stateDir: string): void
+  completeOnboarding(stateDir: string): void
+  resetOnboarding(stateDir: string): void
+  /** Clears this process's own onboarding run so its next prompt can onboard again. */
+  onReset(): void
 }
 
 export function registerOnboardingStateRpc(pi: SenpiExtensionAPI, store: OnboardingStateStore): void {
   const handle = pi.rpc?.handle
   if (handle === undefined) return
   const read = (): OnboardingStateResponse => {
-    const completedAt = readOnboardingCompletedAt(store.stateDir)
-    return { completed: completedAt !== null, completedAt }
+    const { completedAt, inProgress } = readOnboardingState(store.stateDir)
+    return { completed: completedAt !== null, completedAt, inProgress }
   }
   handle(ONBOARDING_STATE_GET_RPC_METHOD, read)
   handle(ONBOARDING_STATE_COMPLETE_RPC_METHOD, () => {
-    store.claimOnboarding(store.stateDir)
+    store.completeOnboarding(store.stateDir)
     return read()
   })
   handle(ONBOARDING_STATE_RESET_RPC_METHOD, () => {
-    store.releaseOnboarding(store.stateDir)
+    store.resetOnboarding(store.stateDir)
+    store.onReset()
     return read()
   })
 }

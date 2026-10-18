@@ -33,6 +33,8 @@ export function createOnboardingHarness(dir: string, sessionId = "session", mode
     claimOnboarding: () => state.claimOnboarding(dir),
     isOnboardingComplete: () => state.isOnboardingComplete(dir),
     releaseOnboarding: () => state.releaseOnboarding(dir),
+    completeOnboarding: () => state.completeOnboarding(dir),
+    resetOnboarding: () => state.resetOnboarding(dir),
     scan: async () => undefined,
     stateDir: dir,
   }

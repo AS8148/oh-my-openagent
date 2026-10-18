@@ -13,7 +13,9 @@ import { join } from "node:path"
 export const COOLDOWN_DAYS = 7
 const MS_PER_DAY = 86_400_000
 
+// The claim keeps its historical name: a marker an older engine wrote (version 1, no `claimedAt`) means completed.
 const ONBOARDING_MARKER = "onboarding-completed"
+const COMPLETION_MARKER = "onboarding-completion"
 const GLOBAL_DECLINE_FILE = "onboarding-declined-global"
 const PROJECT_DECLINE_DIR = "onboarding-declined-projects"
 const COOLDOWN_DIR = "onboarding-cooldowns"
@@ -24,10 +26,11 @@ export function claimOnboarding(stateDir: string): boolean {
   } catch {
     return false
   }
+  if (existsSync(join(stateDir, COMPLETION_MARKER))) return false
   try {
     writeFileSync(
       join(stateDir, ONBOARDING_MARKER),
-      JSON.stringify({ completedAt: new Date().toISOString(), version: 1 }),
+      JSON.stringify({ claimedAt: new Date().toISOString(), version: 2 }),
       { flag: "wx", mode: 0o600 },
     )
     return true
@@ -37,38 +40,105 @@ export function claimOnboarding(stateDir: string): boolean {
   }
 }
 
+/** Records that onboarding finished (TUI turn or RPC client); the first completion's time is kept. */
+export function completeOnboarding(stateDir: string): void {
+  mkdirSync(stateDir, { recursive: true })
+  try {
+    writeFileSync(
+      join(stateDir, COMPLETION_MARKER),
+      JSON.stringify({ completedAt: new Date().toISOString(), version: 2 }),
+      { flag: "wx", mode: 0o600 },
+    )
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error
+  }
+}
+
+/** Claimed or completed: either way no other process starts onboarding. */
 export function isOnboardingComplete(stateDir: string): boolean {
   try {
-    return existsSync(join(stateDir, ONBOARDING_MARKER))
+    return existsSync(join(stateDir, ONBOARDING_MARKER)) || existsSync(join(stateDir, COMPLETION_MARKER))
   } catch {
     return false
   }
 }
 
-/** When onboarding was completed (the marker's `completedAt`), or null when it is not. */
+export interface OnboardingStateSnapshot {
+  /** ISO time onboarding finished; null while it has not. */
+  readonly completedAt: string | null
+  /** A claim is held and onboarding has not finished. */
+  readonly inProgress: boolean
+}
+
+export function readOnboardingState(stateDir: string): OnboardingStateSnapshot {
+  const completedAt = readMarkerTime(stateDir, COMPLETION_MARKER) ?? readLegacyCompletion(stateDir)
+  if (completedAt !== null) return { completedAt, inProgress: false }
+  return { completedAt: null, inProgress: existsSync(join(stateDir, ONBOARDING_MARKER)) }
+}
+
+/** When onboarding was completed, or null when it is not (a held claim is not completion). */
 export function readOnboardingCompletedAt(stateDir: string): string | null {
+  return readOnboardingState(stateDir).completedAt
+}
+
+/** Drops this run's claim; a recorded completion stays. */
+export function releaseOnboarding(stateDir: string): void {
+  unlinkIfPresent(join(stateDir, ONBOARDING_MARKER))
+}
+
+/** Forgets onboarding entirely: the claim and the completion. */
+export function resetOnboarding(stateDir: string): void {
+  unlinkIfPresent(join(stateDir, COMPLETION_MARKER))
+  unlinkIfPresent(join(stateDir, ONBOARDING_MARKER))
+}
+
+function unlinkIfPresent(path: string): void {
+  try {
+    unlinkSync(path)
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error
+  }
+}
+
+function readMarkerTime(stateDir: string, name: string): string | null {
+  let raw: string
+  try {
+    raw = readFileSync(join(stateDir, name), "utf8")
+  } catch {
+    return null
+  }
+  const completedAt = parseRecord(raw)?.["completedAt"]
+  if (typeof completedAt === "string" && !Number.isNaN(Date.parse(completedAt))) return completedAt
+  return mtimeIso(join(stateDir, name))
+}
+
+// Before claims and completion were split, the claim marker itself meant completed.
+function readLegacyCompletion(stateDir: string): string | null {
   let raw: string
   try {
     raw = readFileSync(join(stateDir, ONBOARDING_MARKER), "utf8")
   } catch {
     return null
   }
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    const completedAt = isRecord(parsed) ? parsed["completedAt"] : undefined
-    if (typeof completedAt === "string" && !Number.isNaN(Date.parse(completedAt))) return completedAt
-  } catch {
-    // A marker from an older writer still means completed; its mtime is the best timestamp.
-  }
-  const mtime = getOnboardingMarkerMtime(stateDir)
-  return mtime === null ? null : new Date(mtime).toISOString()
+  const parsed = parseRecord(raw)
+  if (parsed !== undefined && typeof parsed["claimedAt"] === "string") return null
+  return readMarkerTime(stateDir, ONBOARDING_MARKER)
 }
 
-export function releaseOnboarding(stateDir: string): void {
+function parseRecord(raw: string): Record<string, unknown> | undefined {
   try {
-    unlinkSync(join(stateDir, ONBOARDING_MARKER))
-  } catch (error) {
-    if (errorCode(error) !== "ENOENT") throw error
+    const parsed: unknown = JSON.parse(raw)
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function mtimeIso(path: string): string | null {
+  try {
+    return new Date(statSync(path).mtimeMs).toISOString()
+  } catch {
+    return null
   }
 }
 

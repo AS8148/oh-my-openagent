@@ -10,7 +10,7 @@ import type { OnboardingScanEvent } from "./scan-contract"
 import type { OnboardingScanEnvironment } from "./scan-runtime"
 import { registerSessionHistoryRpc } from "./session-history-rpc"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
-import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
+import { claimOnboarding, completeOnboarding, isOnboardingComplete, releaseOnboarding, resetOnboarding } from "./state"
 import { registerOnboardingStateRpc } from "./state-rpc"
 import type { OnboardingUnderstandingSeams } from "./understand-start"
 import { createOnboardingMemoryTools, type TuiOnboardingScan } from "./tui-memory-tools"
@@ -19,6 +19,10 @@ export interface OnboardingComponentDependencies {
   claimOnboarding(stateDir: string): boolean
   isOnboardingComplete(stateDir: string): boolean
   releaseOnboarding(stateDir: string): void
+  /** Records a finished onboarding; omitted, a finished TUI turn records nothing (test fakes). */
+  completeOnboarding?(stateDir: string): void
+  /** Clears claim and completion for `omo.onboarding.state.reset`; defaults to `state.ts`. */
+  resetOnboarding?(stateDir: string): void
   /** Where the migration inventory's scan reads; defaults to what `omo setup` reads. */
   readonly scanEnvironment?: () => OnboardingScanEnvironment
   /** The whole inventory source; defaults to the shared scan runtime `omo setup` uses. */
@@ -58,8 +62,10 @@ async function defaultScan(environment: OnboardingScanEnvironment, stateDir: str
 
 const defaultDependencies: OnboardingComponentDependencies = {
   claimOnboarding,
+  completeOnboarding,
   isOnboardingComplete,
   releaseOnboarding,
+  resetOnboarding,
 }
 
 export function isSessionStartEvent(v: unknown): v is SessionStartEvent {
@@ -87,11 +93,14 @@ export function createOnboardingComponent(
         scanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment(), stateDir)))().catch(() => undefined)
         return scanned
       }
+      // An injected inventory replaces the scan's; the default scan then never starts for it.
+      const injectedFacts = dependencies.migrationFacts
+      let injected: Promise<string | undefined> | undefined
       const withInventory = async (base: string): Promise<string> => {
-        const result = await scan()
-        const facts = dependencies.migrationFacts === undefined
+        const result = injectedFacts !== undefined && dependencies.scan === undefined ? undefined : await scan()
+        const facts = injectedFacts === undefined
           ? result?.inventory
-          : await dependencies.migrationFacts().catch(() => undefined)
+          : await (injected ??= injectedFacts().catch(() => undefined))
         const parts = [base]
         if (facts !== undefined) parts.push(` Migration inventory (from the same scan omo setup runs): ${facts}`)
         if (result !== undefined) parts.push(`\n\n${result.context}`)
@@ -146,8 +155,9 @@ export function createOnboardingComponent(
       pi.registerTool({ ...memoryTools.apply })
       registerOnboardingStateRpc(pi, {
         stateDir,
-        claimOnboarding: dependencies.claimOnboarding,
-        releaseOnboarding: dependencies.releaseOnboarding,
+        completeOnboarding: dependencies.completeOnboarding ?? completeOnboarding,
+        resetOnboarding: dependencies.resetOnboarding ?? resetOnboarding,
+        onReset: () => { pending = undefined },
       })
       registerSessionHistoryRpc(pi)
 
@@ -211,7 +221,14 @@ export function createOnboardingComponent(
         if (!ownsRun(ctx) || !pending?.active) return
         // The host can join a late user abort onto the same agent_end object.
         if (readAgentEndOutcome(pending.end).blockedBy !== null) release(ctx)
-        else pending = null
+        else {
+          pending = null
+          try {
+            dependencies.completeOnboarding?.(stateDir)
+          } catch {
+            // Fail-open like the claim: the held claim still keeps this install from re-onboarding.
+          }
+        }
       })
       pi.on("input_disposition", (event, ctx) => {
         if (ownsRun(ctx) && pending && !pending.active
