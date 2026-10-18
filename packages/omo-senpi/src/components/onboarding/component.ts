@@ -5,6 +5,7 @@ import { getBuiltinSkillsRoot, getOmoNativeStateDir } from "../telemetry/product
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
 import { loadOnboardingScanRuntime } from "./scan-component"
 import type { OnboardingScanEnvironment } from "./scan-runtime"
+import { registerSessionHistoryRpc } from "./session-history-rpc"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
 
@@ -97,6 +98,7 @@ export function createOnboardingComponent(
       }
 
       pi.registerTool({ ...createOnboardingSessionHistoryTool({ stateDir }) })
+      registerSessionHistoryRpc(pi)
 
       pi.registerFlag("onboard", {
         type: "boolean",
