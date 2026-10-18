@@ -49,8 +49,10 @@ function writeSpec(dir: string, spec: unknown, mode = 0o644): string {
 
 // The checked-out spec's mode follows the checkout's umask (0664 under umask 002), which the reader
 // rightly refuses, so the built-spec tests read a 0644 copy of the shipped bytes from a scratch
-// mirror of the plugin root whose other entries link back to the real plugin.
+// mirror of the plugin root whose other entries link back to the real plugin. Windows skips the mode
+// check and may lack the symlink privilege, so it reads the real plugin root directly.
 function shippedPluginMirror(): string {
+  if (process.platform === "win32") return pluginRoot
   const mirror = scratchDir()
   const specName = "daemon-launch-spec.json"
   for (const entry of readdirSync(pluginRoot)) {
