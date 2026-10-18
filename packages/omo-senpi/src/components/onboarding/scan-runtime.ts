@@ -25,6 +25,9 @@ import {
 } from "./session-history"
 
 export { startOnboardingUnderstanding } from "./understand-start"
+export { createOnboardingUnderstandHandlers } from "./understand-handlers"
+export { runTuiOnboardingScan } from "./tui-scan-runtime"
+export { executeOnboardingSessionHistory } from "./session-history-tool-runtime"
 export { applyMemoryFacts } from "../memory/facts-apply-runtime"
 export { reconcileAppliedFactsBatches } from "../memory/facts-applied-reconcile"
 export { executeOnboardingMemoryApply, executeOnboardingUnderstand } from "./tui-memory-runtime"

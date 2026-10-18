@@ -1,12 +1,9 @@
-import { randomUUID } from "node:crypto"
-
 import type { ExtensionContext, SessionStartEvent } from "@code-yeongyu/senpi"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { getBuiltinSkillsRoot, getOmoNativeStateDir } from "../telemetry/product-identity"
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
 import { loadOnboardingScanRuntime } from "./scan-component"
-import type { OnboardingScanEvent } from "./scan-contract"
 import type { OnboardingScanEnvironment } from "./scan-runtime"
 import { registerSessionHistoryRpc } from "./session-history-rpc"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
@@ -41,24 +38,10 @@ export interface TuiScanResult extends TuiOnboardingScan {
   readonly inventory?: string
 }
 
-// The TUI reads this computer through the one shared scan (`omo setup`'s detection plus the engine
-// session history, through the lazy onboarding-scan runtime), so it never grows a second reader.
+// The scan runs in the lazy onboarding-scan runtime (`tui-scan-runtime.ts`).
 // Fail-open: a scan that cannot run onboards the user without it.
-// Its digests stay in memory with this process's cached scan, like the RPC scan's: nothing is on disk.
 async function defaultScan(environment: OnboardingScanEnvironment): Promise<TuiScanResult> {
-  const runtime = await loadOnboardingScanRuntime()
-  const scanId = randomUUID()
-  const events: OnboardingScanEvent[] = []
-  const { results, digests, projectRoots } = await runtime.runOnboardingScan(environment, { scanId, includeCustomProviders: true }, (event) => { events.push(event) })
-  const inventory = runtime.migrationFactsFromScan(results)
-  return {
-    scanId,
-    digests,
-    projectRoots,
-    ...(environment.env === undefined ? {} : { env: environment.env }),
-    context: runtime.onboardingScanContext(scanId, events),
-    ...(inventory === undefined ? {} : { inventory }),
-  }
+  return (await loadOnboardingScanRuntime()).runTuiOnboardingScan(environment)
 }
 
 const defaultDependencies: OnboardingComponentDependencies = {

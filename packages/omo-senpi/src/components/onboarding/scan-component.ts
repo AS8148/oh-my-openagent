@@ -24,6 +24,9 @@ import type {
   startOnboardingUnderstanding,
 } from "./scan-runtime"
 import { registerOnboardingUnderstanding, type OnboardingUnderstandingSeams } from "./understand-component"
+import type { createOnboardingUnderstandHandlers } from "./understand-handlers"
+import type { runTuiOnboardingScan } from "./tui-scan-runtime"
+import type { executeOnboardingSessionHistory } from "./session-history-tool-runtime"
 
 export * from "./scan-contract"
 export * from "./understand-contract"
@@ -44,6 +47,9 @@ export interface OnboardingScanRuntime extends TuiMemoryToolsRuntime {
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
   readonly onboardingScanContext: typeof onboardingScanContext
   readonly startOnboardingUnderstanding: typeof startOnboardingUnderstanding
+  readonly createOnboardingUnderstandHandlers: typeof createOnboardingUnderstandHandlers
+  readonly runTuiOnboardingScan: typeof runTuiOnboardingScan
+  readonly executeOnboardingSessionHistory: typeof executeOnboardingSessionHistory
   readonly applyMemoryFacts: typeof applyMemoryFacts
   readonly reconcileAppliedFactsBatches: typeof reconcileAppliedFactsBatches
 }
@@ -140,7 +146,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
           return { digests: outcome.digests, projectRoots: outcome.projectRoots }
         },
         ...(deps.understanding === undefined ? {} : { seams: deps.understanding }),
-      })
+      }, async () => (await loadRuntime()).createOnboardingUnderstandHandlers)
 
       handle(ONBOARDING_SCAN_RPC_METHOD, (request): OnboardingScanResponse => {
         const scanId = randomUUID()
@@ -219,13 +225,16 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const facts = loaded["migrationFactsFromScan"]
   const context = loaded["onboardingScanContext"]
   const understand = loaded["startOnboardingUnderstanding"]
+  const understandHandlers = loaded["createOnboardingUnderstandHandlers"]
+  const tuiScan = loaded["runTuiOnboardingScan"]
+  const historyTool = loaded["executeOnboardingSessionHistory"]
   const memoryFacts = loaded["applyMemoryFacts"]
   const appliedReconcile = loaded["reconcileAppliedFactsBatches"]
   const tuiUnderstand = loaded["executeOnboardingUnderstand"]
   const tuiApply = loaded["executeOnboardingMemoryApply"]
   const readState = loaded["readOnboardingState"]
   if (
-    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof memoryFacts !== "function" || typeof appliedReconcile !== "function" ||
+    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof understandHandlers !== "function" || typeof tuiScan !== "function" || typeof historyTool !== "function" || typeof memoryFacts !== "function" || typeof appliedReconcile !== "function" ||
     typeof tuiUnderstand !== "function" || typeof tuiApply !== "function" ||
     typeof context !== "function" || typeof readState !== "function"
   ) {
@@ -237,6 +246,9 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
     migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
     onboardingScanContext: (...args) => Reflect.apply(context, undefined, args),
     startOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
+    createOnboardingUnderstandHandlers: (...args) => Reflect.apply(understandHandlers, undefined, args),
+    runTuiOnboardingScan: (...args) => Reflect.apply(tuiScan, undefined, args),
+    executeOnboardingSessionHistory: (...args) => Reflect.apply(historyTool, undefined, args),
     applyMemoryFacts: (...args) => Reflect.apply(memoryFacts, undefined, args),
     reconcileAppliedFactsBatches: (...args) => Reflect.apply(appliedReconcile, undefined, args),
     executeOnboardingUnderstand: (...args) => Reflect.apply(tuiUnderstand, undefined, args),
