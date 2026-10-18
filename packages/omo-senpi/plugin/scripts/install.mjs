@@ -293,6 +293,7 @@ var REQUIRED_PLUGIN_ARTIFACTS = [
   join4("extensions", "omo-memory-doctor.js"),
   join4("extensions", "omo-memory-memfs.js"),
   join4("extensions", "omo-memory-palace.js"),
+  join4("extensions", "omo-session-history.js"),
   join4("extensions", "omo-thread-client.js"),
   join4("extensions", "assets.generated.json"),
   join4("extensions", "omo-member.js"),
