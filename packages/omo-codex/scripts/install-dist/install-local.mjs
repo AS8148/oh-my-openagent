@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:527a916b095e7882678cd45fa8dba16f9922aed3ca4a3ca54d64f6c544280ff8:1bbd909cb8d3d589608ddc1d0dee3256187ab544648655c199eef73d4119e6e0
+// omo-codex-install:5581ec57b0e128d758e69ba99c603828d7caaa14f4f5bd8fa2646952df2698af:195efd109bc0b0eff41fbddad79cfcbf5ca32ffda5c23e69dcf62f71f8af0213
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -10015,12 +10015,6 @@ var init_events = __esm(() => {
 // packages/telemetry-core/src/record-daily-active.ts
 var init_record_daily_active = () => {};
 
-// packages/telemetry-core/src/turn-trace-bridge.ts
-var REGISTRY;
-var init_turn_trace_bridge = __esm(() => {
-  REGISTRY = Symbol.for("omo.telemetry.turn-traceparent.v1");
-});
-
 // packages/telemetry-core/src/index.ts
 var init_src = __esm(() => {
   init_activity_state();
@@ -10032,7 +10026,6 @@ var init_src = __esm(() => {
   init_machine_id();
   init_posthog_client();
   init_record_daily_active();
-  init_turn_trace_bridge();
 });
 
 // packages/omo-codex/package.json
@@ -10040,7 +10033,7 @@ var package_default;
 var init_package = __esm(() => {
   package_default = {
     name: "@oh-my-opencode/omo-codex",
-    version: "5.1.34",
+    version: "5.1.35",
     type: "module",
     private: true,
     description: "Codex harness adapter for oh-my-openagent. Vendored Codex plugin namespace (omo) + TypeScript installer + telemetry.",
