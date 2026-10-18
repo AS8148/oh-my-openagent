@@ -3,7 +3,14 @@ import { join } from "node:path"
 
 import type { SenpiExtensionAPI } from "../../extension/types"
 import { registrySnapshot } from "../memory/facts-runner.test-support"
-import { ONBOARDING_SCAN_RPC_EVENT, ONBOARDING_SCAN_RPC_METHOD, createOnboardingScanComponent, type OnboardingScanEvent } from "./scan-component"
+import {
+  ONBOARDING_SCAN_RPC_EVENT,
+  ONBOARDING_SCAN_RPC_METHOD,
+  createOnboardingScanComponent,
+  loadOnboardingScanRuntime,
+  type OnboardingScanEvent,
+  type OnboardingScanRuntime,
+} from "./scan-component"
 import { encodeRecord, writeTranscript } from "./session-history/test-support"
 import { fakeModel, tempRoot, UNDERSTAND_MODEL, type FakeTurn } from "./understand.test-support"
 import {
@@ -51,7 +58,12 @@ async function profile() {
   }
 }
 
-function host(input: { readonly environment: Awaited<ReturnType<typeof profile>>["environment"]; readonly turn: FakeTurn; readonly withRegistry?: boolean }) {
+function host(input: {
+  readonly environment: Awaited<ReturnType<typeof profile>>["environment"]
+  readonly turn: FakeTurn
+  readonly withRegistry?: boolean
+  readonly loadRuntime?: () => Promise<OnboardingScanRuntime>
+}) {
   const handlers = new Map<string, Handler>()
   const sessionHandlers: Array<(payload: unknown, ctx?: unknown) => unknown> = []
   const scanEvents: OnboardingScanEvent[] = []
@@ -74,6 +86,7 @@ function host(input: { readonly environment: Awaited<ReturnType<typeof profile>>
   createOnboardingScanComponent({
     runtime: () => input.environment,
     understanding: { createRunner: model.createRunner },
+    ...(input.loadRuntime === undefined ? {} : { loadRuntime: input.loadRuntime }),
   }).register(pi, {} as never)
   if (input.withRegistry !== false) for (const handler of sessionHandlers) handler({}, { modelRegistry: registrySnapshot() })
 
@@ -153,6 +166,29 @@ describe("omo.onboarding.understand RPC (#10480)", () => {
 
     // then
     expect(response).toMatchObject({ kind: "unavailable" })
+    expect(rpc.starts).toHaveLength(0)
+  })
+
+  test("#given the onboarding runtime fails to load #when understanding is requested #then it answers unavailable with the reason and no model runs", async () => {
+    // given
+    const { environment } = await profile()
+    let loads = 0
+    const rpc = host({
+      environment,
+      turn: async () => "completed",
+      loadRuntime: async () => {
+        loads += 1
+        if (loads > 1) throw new Error("omo-onboarding-scan.js is missing")
+        return await loadOnboardingScanRuntime()
+      },
+    })
+    const scanId = await rpc.scan()
+
+    // when
+    const response = await rpc.call(ONBOARDING_UNDERSTAND_RPC_METHOD, { scanId, model: UNDERSTAND_MODEL, consent: true })
+
+    // then
+    expect(response).toEqual({ kind: "unavailable", reason: expect.stringContaining("omo-onboarding-scan.js is missing") })
     expect(rpc.starts).toHaveLength(0)
   })
 

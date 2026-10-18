@@ -282,6 +282,28 @@ describe("checkExtensionCurrent", () => {
     expect(await readFile(memoryPalaceOutputPath, "utf8")).not.toContain("#omo-memory-palace-runtime")
   })
 
+  test("#given the split extension build #when onboarding inputs are inspected #then the session-history scan loads only from its lazy entry", async () => {
+    const { mainInputs, sessionHistoryInputs, sessionHistoryOutputPath } = await sharedOutputs()
+    for (const suffix of [
+      "packages/omo-senpi/src/components/onboarding/session-history/runtime.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history/scan-session-history.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history/session-history-scanner.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history/transcript-parser.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history/digest-store.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(sessionHistoryInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+    for (const suffix of [
+      "packages/omo-senpi/src/components/onboarding/session-history-runtime-loader.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history-rpc.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history-tool.ts",
+    ]) {
+      expect(sessionHistoryInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+    }
+    expect(await readFile(sessionHistoryOutputPath, "utf8")).not.toContain("#omo-session-history-runtime")
+  })
+
   test("#given a packaged task import map #when generated artifacts are inspected #then the main bundle resolves its task sidecar", async () => {
     const outputs = await sharedOutputs()
     const main = await readFile(outputs.outputPath, "utf8")
@@ -291,6 +313,7 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-task-runtime")')
     expect(main).toContain('import("#omo-memory-memfs-runtime")')
     expect(main).toContain('import("#omo-memory-palace-runtime")')
+    expect(main).toContain('import("#omo-session-history-runtime")')
     expect(main).toContain('import("#omo-thread-client-runtime")')
     expect(task).toMatch(/^\/\/ omo:[A-Za-z0-9_-]{43}:[A-Za-z0-9_-]{43}/)
     expect(main).not.toContain('import("#omo-agent-toolkit-runtime")')
@@ -301,6 +324,7 @@ describe("checkExtensionCurrent", () => {
       "#omo-memory-doctor-runtime": "./extensions/omo-memory-doctor.js",
       "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
       "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
+      "#omo-session-history-runtime": "./extensions/omo-session-history.js",
       "#omo-thread-client-runtime": "./extensions/omo-thread-client.js",
       "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js",
     })

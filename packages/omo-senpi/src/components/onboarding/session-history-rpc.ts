@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto"
 
 import type { SenpiExtensionAPI } from "../../extension/types"
-import {
-  createSessionHistoryScanner,
-  type AgentHome,
-  type AgentSessionSource,
-  type CompletedTranscript,
-  type ImportedProject,
-  type RecentSessionOutcome,
-  type SessionHistoryOptions,
-  type SessionHistoryScanner,
+import type {
+  AgentHome,
+  AgentSessionSource,
+  CompletedTranscript,
+  ImportedProject,
+  RecentSessionOutcome,
+  SessionHistoryOptions,
+  SessionHistoryScanner,
 } from "./session-history"
+import { loadSessionHistoryRuntime, type SessionHistoryRuntimeLoader } from "./session-history-runtime-loader"
 
 /** Unary: answers the engine's project scan for the homes and projects the desktop names. */
 export const OMO_SESSION_PROJECTS_RPC_METHOD = "omo.onboarding.projects"
@@ -19,7 +19,9 @@ export const OMO_SESSION_THREADS_RPC_METHOD = "omo.onboarding.sessions"
 export const OMO_SESSION_THREADS_RPC_EVENT = "omo.onboarding.sessions.event"
 
 export interface SessionHistoryRpcOptions {
+  /** Test seam; production builds the scanner from the lazily loaded session-history runtime. */
   readonly createScanner?: (options: SessionHistoryOptions) => SessionHistoryScanner
+  readonly loadRuntime?: SessionHistoryRuntimeLoader
   readonly newScanId?: () => string
 }
 
@@ -39,14 +41,16 @@ export function registerSessionHistoryRpc(pi: SenpiExtensionAPI, options: Sessio
   const rpc = pi.rpc
   const handle = rpc?.handle
   if (rpc === undefined || handle === undefined) return
-  const createScanner = options.createScanner ?? createSessionHistoryScanner
+  const loadRuntime = options.loadRuntime ?? loadSessionHistoryRuntime
+  const createScanner = async (scanOptions: SessionHistoryOptions): Promise<SessionHistoryScanner> =>
+    options.createScanner?.(scanOptions) ?? (await loadRuntime()).createSessionHistoryScanner(scanOptions)
   const newScanId = options.newScanId ?? randomUUID
 
   handle(OMO_SESSION_PROJECTS_RPC_METHOD, async (data) => {
     const request = parseProjectsRequest(data)
     if (!("value" in request)) return request
     try {
-      return await createScanner(request.value).scanProjects()
+      return await (await createScanner(request.value)).scanProjects()
     } catch (cause) {
       return unavailable(reasonOf(cause))
     }
@@ -61,7 +65,8 @@ export function registerSessionHistoryRpc(pi: SenpiExtensionAPI, options: Sessio
     // The host writes the reply when this handler settles; starting on the next macrotask keeps it ahead of every event.
     setImmediate(async () => {
       try {
-        const run = createScanner({ homes, excludedDirectories, managedWorktreeDirectories }).recentSessions({ workspaceRoot, completed })
+        const scanner = await createScanner({ homes, excludedDirectories, managedWorktreeDirectories })
+        const run = scanner.recentSessions({ workspaceRoot, completed })
         for await (const outcome of run) emit({ kind: "outcome", outcome: wireOutcome(outcome) })
         emit({ kind: "done" })
       } catch (cause) {
