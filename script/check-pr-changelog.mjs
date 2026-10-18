@@ -70,7 +70,15 @@ export function fragmentReleaseTransition({ before, after, deletedFragments }) {
   const released = current[index + 1]
   const version = /^## \[(\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?)\](?:[ \t].*)?$/.exec(released?.heading ?? "")
   if (!version) return false
-  if (sectionsOf(before).some((section) => section.heading.startsWith(`## [${version[1]}]`))) return false
+  const previousSections = sectionsOf(before)
+  if (previousSections.some((section) => section.heading.startsWith(`## [${version[1]}]`))) return false
+  // Every pre-existing section must be identical: a release may not rewrite older released notes.
+  const currentRest = current.filter((_, position) => position !== index && position !== index + 1)
+  const previousRest = previousSections.filter((section) => !/^## \[Unreleased\](?:\s.*)?$/.test(section.heading))
+  if (currentRest.length !== previousRest.length) return false
+  for (let position = 0; position < currentRest.length; position += 1) {
+    if (currentRest[position].heading !== previousRest[position].heading || currentRest[position].body !== previousRest[position].body) return false
+  }
   return released.body === assembleUnreleasedBody(deletedFragments).trim()
 }
 
@@ -79,6 +87,15 @@ export function checkPrChangelog({ changedFiles, policy, previousPolicy = policy
   const handEdited = hasAddedUnreleasedLine(before, after, diff)
   const headingMissing = !/^## \[Unreleased\](?:\s.*)?$/m.test(after)
   const consumed = fragmentReleaseTransition({ before, after, deletedFragments })
+  // A PR that deletes fragments must BE a release: the CHANGELOG edit has to equal exactly
+  // what assembling those fragments produces; anything else fails instead of hiding behind the
+  // label or no-user-facing exits.
+  if (deletedFragments.length > 0 && !consumed) {
+    return { pass: false, reason: "deleted changelog fragments without the matching release edit in CHANGELOG.md", userFacingFiles }
+  }
+  if (consumed && userFacingFiles.length === 0) {
+    return { pass: true, reason: "consumed changelog fragments into a new release section", userFacingFiles }
+  }
   // A direct edit to ## [Unreleased] is the exact conflict source this gate exists to stop: it is
   // refused in every case, including a no-changelog label and a PR with no other user-facing files.
   // A renamed or missing heading is refused the same way: nothing legitimate ever removes it.
@@ -96,7 +113,11 @@ export function checkPrChangelog({ changedFiles, policy, previousPolicy = policy
     }
     return { pass: true, reason: `added ${fragmentPath(prNumber)}`, userFacingFiles }
   }
-  if (consumed) return { pass: true, reason: "consumed changelog fragments into a new release section", userFacingFiles }
+  // A release PR changes only CHANGELOG.md and fragments; user-facing code in the same PR is
+  // refused outright so a release can never smuggle a code change past the fragment requirement.
+  if (consumed && userFacingFiles.length > 0) {
+    return { pass: false, reason: "a release PR must not change user-facing files; move the change to its own PR with a fragment", userFacingFiles }
+  }
   return { pass: false, reason: "user-facing changes without a changelog fragment", userFacingFiles }
 }
 
@@ -134,9 +155,15 @@ export function main(argv) {
     ? { name: `${prNumber}.md`, content: git("show", `${head}:${ownPath}`) }
     : undefined
   const deletedNames = git("diff", "--no-renames", "--name-only", "--diff-filter=D", "-z", mergeBase, head, "--", FRAGMENT_DIR).split("\0").filter(Boolean)
-  const deletedFragments = deletedNames.length
-    ? readFragments(deletedNames.map((path) => path.slice(FRAGMENT_DIR.length + 1)), (name) => git("show", `${mergeBase}:${FRAGMENT_DIR}/${name}`))
-    : []
+  let deletedFragments = []
+  if (deletedNames.length > 0) {
+    try {
+      deletedFragments = readFragments(deletedNames.map((path) => path.slice(FRAGMENT_DIR.length + 1)), (name) => git("show", `${mergeBase}:${FRAGMENT_DIR}/${name}`))
+    } catch (error) {
+      console.log(`changelog-gate: FAIL - ${error.message}`)
+      return 1
+    }
+  }
   // Validate the whole fragment directory at the head, not just this PR's own file: a stray name
   // or an empty file fails here at review time instead of on release day.
   const headDirNames = git("ls-tree", "-r", "--name-only", head, "--", FRAGMENT_DIR)

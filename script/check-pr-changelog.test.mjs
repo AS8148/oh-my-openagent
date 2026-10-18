@@ -208,7 +208,7 @@ describe("fragment release transition", () => {
     expect(fragmentReleaseTransition({ after: `## [Unreleased]\n\n## [1.1.0]\n${notes}\n`, deletedFragments: [] })).toBe(false)
   })
   test("passes the gate for a release commit", () => {
-    const facts = { changedFiles: ["packages/omo-native/compile-entry.ts"], policy, before: beforeRelease, after: `## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n${notes}\n\n${history}`, diff: "" }
+    const facts = { changedFiles: ["changes/unreleased/1.md", "CHANGELOG.md"], policy, before: beforeRelease, after: `## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n${notes}\n\n${history}`, diff: "" }
     const result = checkPrChangelog({ ...facts, before: beforeRelease, deletedFragments: deleted })
     expect(result.pass).toBe(true)
     expect(result.reason).toContain("consumed changelog fragments")
@@ -289,6 +289,28 @@ test("CLI uses the PR merge base, checks the PR's own fragment, and refuses hand
   } finally {
     rmSync(repo, { recursive: true, force: true })
   }
+})
+
+
+test("a release PR that also changes user-facing code is refused", () => {
+  const facts = { changedFiles: ["packages/omo-native/compile-entry.ts", "changes/unreleased/1.md", "CHANGELOG.md"], policy, before: "## [Unreleased]\n\n## [1.0.0]\nOld.\n", after: "## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n**Fixed.** Existing fix.\n\n## [1.0.0]\nOld.\n", diff: "" }
+  const deleted = [{ pr: 1, content: "**Fixed.** Existing fix." }]
+  const result = checkPrChangelog({ ...facts, deletedFragments: deleted })
+  expect(result.pass).toBe(false)
+  expect(result.reason).toContain("must not change user-facing files")
+})
+
+test("a release PR cannot rewrite an older released section", () => {
+  const facts = { changedFiles: ["changes/unreleased/1.md", "CHANGELOG.md"], policy, before: "## [Unreleased]\n\n## [1.0.0]\nOld.\n", after: "## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n**Fixed.** Existing fix.\n\n## [1.0.0]\nEDITED.\n", diff: "" }
+  const deleted = [{ pr: 1, content: "**Fixed.** Existing fix." }]
+  expect(checkPrChangelog({ ...facts, deletedFragments: deleted }).pass).toBe(false)
+})
+
+test("deleting a fragment without the release edit is refused", () => {
+  const facts = { changedFiles: ["changes/unreleased/1.md"], policy, before: "## [Unreleased]\n\n## [1.0.0]\nOld.\n", after: "## [Unreleased]\n\n## [1.0.0]\nOld.\n", diff: "" }
+  const result = checkPrChangelog({ ...facts, deletedFragments: [{ pr: 1, content: "**Fixed.** Existing fix." }] })
+  expect(result.pass).toBe(false)
+  expect(result.reason).toContain("without the matching release edit")
 })
 
 test("workflow emits one real gate verdict for every label event and passes the merge queue", () => {
