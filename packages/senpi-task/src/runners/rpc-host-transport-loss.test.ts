@@ -330,13 +330,15 @@ describe("a child whose host transport drops", () => {
     await world.host.restart()
     await commandsSeen(world.host, "open_session", 4)
     world.host.allowReply("open_session")
-    const pendingPrompt = world.host.waitForCommand("prompt")
+    // Hold every prompt unanswered: the first parked child's revival then stays in flight (claimed
+    // resident, cause recorded) instead of racing these assertions to land and clear its cause.
+    world.host.withholdReply("prompt")
 
     // when
     clock.expire()
 
-    // then
-    await pendingPrompt
+    // then - the pending child's first prompt and the revival's continuation have both been sent
+    await commandsSeen(world.host, "prompt", 4)
     for (const parked of [first, second]) {
       expect(parent.store.load(parked.task_id)?.status).not.toBe("error")
       expect(concurrencyOf(parent).leaseState(parked.task_id, parked.notification.run_epoch)).toBeUndefined()
