@@ -3,6 +3,7 @@ import { join } from "node:path"
 import {
   GitMemoryRepo, createLockRecord, runFinalizationLockPath, withLock,
 } from "@oh-my-opencode/memory-core"
+import { reconcileAppliedFactsBatches } from "./facts-applied-reconcile"
 import { withFactsWriterLock } from "./facts-batch-apply"
 import { ledgerTargets } from "./facts-failure-recording"
 import { finalizeClaimedFactsRun } from "./facts-run-finalize"
@@ -75,8 +76,12 @@ export function createFactsRunMaintenance(
       warn: (message, fields) => options.logger?.warn(message, fields),
       receiptsDir: options.identity.paths.runtime,
     })
+    const appliedActive = await reconcileAppliedFactsBatches({
+      identity: options.identity, withWriterLock,
+      ...(options.logger === undefined ? {} : { logger: options.logger }),
+    })
     await prune()
-    return active
+    return active || appliedActive
   }
 
   return { reconcile, finalize }

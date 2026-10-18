@@ -13,6 +13,11 @@ export const MEMORY_FACTS_APPLY_RPC_METHOD = "omo.memory.facts.apply"
 export interface MemoryFactsApplyRequest {
   /** memory-core `record_fact` records; each is validated by `parseFactsExtractionRecord`. */
   readonly records: readonly unknown[]
+  /**
+   * Optional client-chosen batch id, so a retry after a timeout is idempotent: a batch already
+   * committed is answered from its receipt (same sha) and never written twice. Default: a fresh UUID.
+   */
+  readonly batchId?: string
 }
 
 export type MemoryFactsApplyResponse =

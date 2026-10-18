@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 
-import { MemorySecretError, parseFactsExtractionRecord, type FactsExtractionRecord, type FactsPeopleRouting } from "@oh-my-opencode/memory-core"
+import { MemorySecretError, parseFactsExtractionRecord, sanitizeToSlug, type FactsExtractionRecord, type FactsPeopleRouting } from "@oh-my-opencode/memory-core"
 
 import type { ComponentLogger } from "../../extension/types"
 import type { MemoryIdentityContext } from "./context"
@@ -18,6 +18,10 @@ export async function applyMemoryFacts(input: {
 }): Promise<MemoryFactsApplyResponse> {
   const raw = isRecord(input.request) ? input.request["records"] : undefined
   if (!Array.isArray(raw)) return { kind: "invalid", reason: "facts apply needs a records list" }
+  const clientBatchId = isRecord(input.request) ? input.request["batchId"] : undefined
+  if (clientBatchId !== undefined && (typeof clientBatchId !== "string" || !BATCH_ID.test(clientBatchId))) {
+    return { kind: "invalid", reason: "batchId must be a UUID v4" }
+  }
   const records: FactsExtractionRecord[] = []
   for (const [index, value] of raw.entries()) {
     try {
@@ -27,10 +31,10 @@ export async function applyMemoryFacts(input: {
     }
   }
   if (records.length === 0) return { outcome: "no_facts", affectedPaths: [] }
-  const batchId = (input.newBatchId ?? randomUUID)()
+  const batchId = clientBatchId ?? (input.newBatchId ?? randomUUID)()
   const context = input.context
   const apply = input.apply ?? ((call: FactsApplyCall) => applyFactsWithRetriesUnderLock({
-    identity: { id: context.identity, safeSlug: context.identity, paths: context.identityPaths },
+    identity: { id: context.identity, safeSlug: sanitizeToSlug(context.identity), paths: context.identityPaths },
     ...call,
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   }))
@@ -47,6 +51,9 @@ export async function applyMemoryFacts(input: {
   }
   return { outcome: "committed", sha: applied.sha, affectedPaths: applied.affectedPaths, batchId }
 }
+
+// memory-core's recovery accepts only UUID v4 batch ids; the id also names the envelope directory.
+const BATCH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)

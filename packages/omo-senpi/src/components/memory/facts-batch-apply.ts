@@ -10,6 +10,7 @@ import {
   buildDefaultSeedFiles,
   createLockRecord,
   findFactsBatchReceipt,
+  getProcessStartIdentity,
   memoryWriterLockPath,
   planFactsMutation,
   validateFactsRecovery,
@@ -25,7 +26,7 @@ import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 import type { ComponentLogger } from "../../extension/types"
 import { ensureIdentityRuntimeDirs } from "./context"
 import type { FactsRunLedger } from "./facts-runner-types"
-import { updateRunLedger, writeRunJsonAtomic } from "./worker/run-artifacts"
+import { readRunJson, updateRunLedger, writeRunJsonAtomic } from "./worker/run-artifacts"
 
 const WRITER_ATTEMPTS = 3
 
@@ -39,10 +40,29 @@ export async function withFactsWriterLock<T>(locksDir: string, operation: () => 
   return withLock(memoryWriterLockPath(locksDir), record, operation, { waitTimeoutMs: 2_000 })
 }
 
+/** What an applied batch's envelope keeps so a later process can finish it (`request.json`). */
+export interface AppliedFactsRequest {
+  readonly records: readonly FactsExtractionRecord[]
+  readonly people: FactsPeopleRouting
+}
+
+export function appliedFactsDir(factsDir: string): string {
+  return join(factsDir, "applied")
+}
+
+// Envelopes this process is applying right now, shared across the entry bundle and the sidecar.
+const ACTIVE_KEY = Symbol.for("omo.memory.facts.applied.active")
+export function activeAppliedBatches(): Set<string> {
+  const slot = globalThis as { [ACTIVE_KEY]?: Set<string> }
+  return (slot[ACTIVE_KEY] ??= new Set())
+}
+
 /**
  * Applies records that did not come from a queued extractor run (a reviewed onboarding selection)
  * through the same `applyFactsWithRetries` path: same lock, same person routing, same batch receipt.
- * The batch keeps its recovery envelope in `<facts>/applied/<batchId>/` only while it applies.
+ * The batch's recovery envelope lives in `<facts>/applied/<batchId>/`: removed when the apply
+ * returns, kept when it throws after planning (memory may be mid-write), so the facts maintenance
+ * reconcile (`facts-applied-reconcile.ts`) or a retry with the same batchId finishes it.
  */
 export async function applyFactsWithRetriesUnderLock(options: {
   readonly identity: MemoryIdentity
@@ -55,10 +75,14 @@ export async function applyFactsWithRetriesUnderLock(options: {
   await ensureIdentityRuntimeDirs(options.identity.paths)
   const repo = new GitMemoryRepo({ dir: options.identity.paths.repo, agentId: options.identity.id })
   if (!existsSync(join(repo.dir, ".git"))) await repo.init({ seedFiles: buildDefaultSeedFiles() })
-  const runDir = join(options.identity.paths.facts, "applied", options.batchId)
+  const runDir = join(appliedFactsDir(options.identity.paths.facts), options.batchId)
   await mkdir(runDir, { recursive: true, mode: 0o700 })
+  const ledgerPath = join(runDir, "ledger.json")
+  const owner = { pid: process.pid, processStart: await getProcessStartIdentity(process.pid) }
+  const kept = await readRunJson<FactsRunLedger>(ledgerPath).catch(() => undefined)
+  const resumed = kept?.batchId === options.batchId && kept.applyRecovery !== undefined
   const startedAt = (options.now ?? (() => new Date()))()
-  const ledger: FactsRunLedger = {
+  const ledger: FactsRunLedger = resumed ? { ...kept, ...owner } : {
     version: 1,
     runId: `apply-${options.batchId}`,
     kind: "facts",
@@ -68,9 +92,16 @@ export async function applyFactsWithRetriesUnderLock(options: {
     deadlineAt: startedAt.getTime(),
     batchId: options.batchId,
     queued: [],
+    ...owner,
   }
+  activeAppliedBatches().add(runDir)
+  let keep = false
   try {
-    await writeRunJsonAtomic(join(runDir, "ledger.json"), ledger)
+    if (!resumed) {
+      const request: AppliedFactsRequest = { records: options.records, people: options.people }
+      await writeRunJsonAtomic(join(runDir, "request.json"), request)
+    }
+    await writeRunJsonAtomic(ledgerPath, ledger)
     return await applyFactsWithRetries({
       runDir,
       ledger,
@@ -81,8 +112,15 @@ export async function applyFactsWithRetriesUnderLock(options: {
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       withWriterLock: (operation, attempt) => withFactsWriterLock(options.identity.paths.locks, operation, attempt, ledger.runId),
     })
+  } catch (error) {
+    const onDisk = await readRunJson<FactsRunLedger>(ledgerPath).catch(() => undefined)
+    keep = onDisk?.applyRecovery !== undefined
+    // This process stopped applying; an unowned envelope is any later reconcile's to finish.
+    if (onDisk !== undefined && keep) await writeRunJsonAtomic(ledgerPath, { ...onDisk, pid: undefined, processStart: undefined })
+    throw error
   } finally {
-    await rm(runDir, { recursive: true, force: true })
+    activeAppliedBatches().delete(runDir)
+    if (!keep) await rm(runDir, { recursive: true, force: true })
   }
 }
 
@@ -134,7 +172,7 @@ async function applyClaimed(options: {
   readonly logger?: ComponentLogger
 }): Promise<Applied> {
   const receipt = await findFactsBatchReceipt(options.repo, options.ledger.batchId)
-  if (receipt !== undefined) return { outcome: "committed", sha: receipt.sha, affectedPaths: receipt.paths ?? [] }
+  if (receipt !== undefined) return { outcome: "committed", sha: receipt.sha, affectedPaths: await receiptPaths(options.repo, receipt.sha, options.ledger.batchId) }
   const batch = { batchId: options.ledger.batchId, records: options.records }
   let recovery: FactsApplyRecovery
   if (options.ledger.applyRecovery !== undefined) {
@@ -162,6 +200,12 @@ async function applyClaimed(options: {
   return result.outcome === "parent_dirty"
     ? result
     : { outcome: "committed", sha: result.sha, affectedPaths: result.affectedPaths }
+}
+
+// A batch answered from its receipt (a retried client batchId) reports the paths that commit wrote.
+async function receiptPaths(repo: GitMemoryRepo, sha: string, batchId: string): Promise<readonly string[]> {
+  const commits = await repo.log({ includePaths: true, grep: [`Omo-Facts-Batch: ${batchId}`] })
+  return commits.find((commit) => commit.sha === sha)?.paths ?? []
 }
 
 function delay(_attempt: number, milliseconds: number): Promise<void> {
