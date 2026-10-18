@@ -13,6 +13,9 @@ import {
   ONBOARDING_APPLY_RPC_METHOD,
   ONBOARDING_SCAN_RPC_EVENT,
   ONBOARDING_SCAN_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_STOP_RPC_METHOD,
   createOnboardingScanComponent,
   type OnboardingApplyResponse,
   type OnboardingScanEvent,
@@ -164,7 +167,7 @@ function sourcesOf(events: readonly OnboardingScanEvent[]): string[] {
 describe("onboarding scan RPC", () => {
   test("#given the component registers #then it serves the scan and apply methods", () => {
     const host = register(emptyProfile())
-    expect([...host.handlers.keys()].sort()).toEqual([ONBOARDING_APPLY_RPC_METHOD, ONBOARDING_SCAN_RPC_METHOD].sort())
+    expect([...host.handlers.keys()].sort()).toEqual([ONBOARDING_APPLY_RPC_METHOD, ONBOARDING_SCAN_RPC_METHOD, ONBOARDING_UNDERSTAND_RPC_METHOD, ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD, ONBOARDING_UNDERSTAND_STOP_RPC_METHOD].sort())
     expect(ONBOARDING_SCAN_RPC_METHOD).toBe("omo.onboarding.scan")
     expect(ONBOARDING_APPLY_RPC_METHOD).toBe("omo.onboarding.apply")
     expect(ONBOARDING_SCAN_RPC_EVENT).toBe("omo.onboarding.scan.event")

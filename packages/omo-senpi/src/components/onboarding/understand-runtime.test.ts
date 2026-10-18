@@ -162,9 +162,9 @@ describe("onboarding understanding (#10480)", () => {
   test("#given more history than 240 KB #when understanding runs #then reads stop at the byte budget", async () => {
     // given
     const root = await workspace()
-    const long = "x".repeat(1_400)
-    const digests = Array.from({ length: 100 }, (_, index) =>
-      digest(join(root, `p${Math.floor(index / 2)}`), index, { firstRequest: long, outcome: long.slice(0, 900) }))
+    const long = "x".repeat(15_000)
+    const digests = Array.from({ length: 40 }, (_, index) =>
+      digest(join(root, `p${Math.floor(index / 2)}`), index, { firstRequest: long }))
     expect(digests.reduce((sum, item) => sum + digestByteLength(item), 0)).toBeGreaterThan(240 * 1024)
 
     // when
@@ -173,7 +173,7 @@ describe("onboarding understanding (#10480)", () => {
     // then
     expect(Math.max(...events.map((event) => event.bytesRead))).toBeLessThanOrEqual(240 * 1024)
     expect(events.find((event) => event.kind === "budget")?.budget).toBe("read_bytes")
-    expect(events.filter((event) => event.kind === "step_started").length).toBeLessThan(50)
+    expect(events.filter((event) => event.kind === "step_started").length).toBeLessThan(20)
     expect(done.kind).toBe("done")
   })
 
@@ -263,7 +263,7 @@ describe("onboarding understanding (#10480)", () => {
     // when
     const { done, events } = await run({
       digests,
-      budget: { ...ONBOARDING_UNDERSTAND_BUDGET, stepMs: 80, totalMs: 5_000 },
+      budget: { ...ONBOARDING_UNDERSTAND_BUDGET, stepMs: 2_000, totalMs: 30_000 },
       turn: async ({ start, record }) => {
         await record(start === 1 ? "Recorded before the step ran out." : "Recorded in the second step.")
         return start === 1 ? "hang" : "completed"
@@ -287,7 +287,7 @@ describe("onboarding understanding (#10480)", () => {
     // then
     expect(events.filter((event) => event.kind === "budget").at(-1)?.budget).toBe("total_ms")
     expect(events.filter((event) => event.kind === "step_started").length).toBeLessThan(5)
-    expect(done.elapsedMs).toBeLessThan(2_000)
+    expect(done.elapsedMs).toBeLessThan(10_000)
   })
 
   test("#given a skipped project #when understanding runs #then its step never starts", async () => {

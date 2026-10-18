@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
+import { resolveMemoryModelRegistry, type ChildModelRegistry } from "../memory/model-registry-resolver"
 import {
   ONBOARDING_APPLY_RPC_METHOD,
   ONBOARDING_APPLY_STAGES,
@@ -10,9 +11,11 @@ import {
   type OnboardingApplyStage,
   type OnboardingScanResponse,
 } from "./scan-contract"
-import type { applyOnboardingScan, migrationFactsFromScan, OnboardingScanEnvironment, runOnboardingScan } from "./scan-runtime"
+import type { applyOnboardingScan, migrationFactsFromScan, OnboardingScanEnvironment, runOnboardingScan, runOnboardingUnderstanding } from "./scan-runtime"
+import { registerOnboardingUnderstanding, type OnboardingUnderstandingSeams } from "./understand-component"
 
 export * from "./scan-contract"
+export * from "./understand-contract"
 
 declare const OMO_SENPI_BUNDLED: boolean
 
@@ -25,11 +28,13 @@ export interface OnboardingScanRuntime {
   readonly runOnboardingScan: typeof runOnboardingScan
   readonly applyOnboardingScan: typeof applyOnboardingScan
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
+  readonly runOnboardingUnderstanding: typeof runOnboardingUnderstanding
 }
 
 export interface OnboardingScanComponentDependencies {
   readonly runtime?: () => OnboardingScanEnvironment
   readonly loadRuntime?: () => Promise<OnboardingScanRuntime>
+  readonly understanding?: OnboardingUnderstandingSeams
 }
 
 type Scan = Promise<Awaited<ReturnType<typeof runOnboardingScan>> | undefined>
@@ -47,6 +52,19 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
       const environment = deps.runtime ?? (() => ({}))
       const loadRuntime = deps.loadRuntime ?? loadOnboardingScanRuntime
       const scans = new Map<string, Scan>()
+      let modelRegistry: ChildModelRegistry | undefined
+      if (typeof pi.on === "function") {
+        pi.on("session_start", (_payload, eventCtx) => {
+          modelRegistry = resolveMemoryModelRegistry(eventCtx) ?? modelRegistry
+        })
+      }
+      registerOnboardingUnderstanding(pi, handle, {
+        environment,
+        loadRun: async () => (await loadRuntime()).runOnboardingUnderstanding,
+        modelRegistry: () => modelRegistry,
+        scanSettled: async (scanId) => { await scans.get(scanId) },
+        ...(deps.understanding === undefined ? {} : { seams: deps.understanding }),
+      })
 
       handle(ONBOARDING_SCAN_RPC_METHOD, (request): OnboardingScanResponse => {
         const scanId = randomUUID()
@@ -99,10 +117,14 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const run = loaded["runOnboardingScan"]
   const apply = loaded["applyOnboardingScan"]
   const facts = loaded["migrationFactsFromScan"]
-  if (typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function") throw new Error("onboarding scan runtime is missing its scan or apply export")
+  const understand = loaded["runOnboardingUnderstanding"]
+  if (typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function") {
+    throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
+  }
   return {
     runOnboardingScan: (...args) => Reflect.apply(run, undefined, args),
     applyOnboardingScan: (...args) => Reflect.apply(apply, undefined, args),
     migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
+    runOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
   }
 }

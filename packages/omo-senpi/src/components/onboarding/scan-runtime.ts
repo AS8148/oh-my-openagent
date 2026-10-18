@@ -19,6 +19,8 @@ import {
   type SessionScanItem,
 } from "./session-history"
 
+export { runOnboardingUnderstanding } from "./understand-runtime"
+
 /** Where the scan reads and the apply writes; every field defaults to what `omo setup` uses. */
 export interface OnboardingScanEnvironment {
   readonly home?: string
