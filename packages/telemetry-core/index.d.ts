@@ -7,7 +7,13 @@ export type TelemetryCaptureProperties = Record<string, unknown>;
 export type TelemetryCaptureMessage = {
   readonly distinctId: string;
   readonly event: string;
+  readonly uuid?: string;
   readonly properties?: TelemetryCaptureProperties;
+};
+
+export type UuidV7Source = {
+  readonly now?: () => number;
+  readonly randomBytes?: (size: number) => Uint8Array;
 };
 
 export type TelemetryDiagnosticEvent =
@@ -15,25 +21,37 @@ export type TelemetryDiagnosticEvent =
   | "telemetry_activity_state_write_failed"
   | "telemetry_capture_failed"
   | "telemetry_cpu_info_unavailable"
+  | "telemetry_drop_flush_failed"
   | "telemetry_event_property_dropped"
   | "telemetry_event_property_rejected"
   | "telemetry_event_rejected"
+  | "telemetry_events_dropped_by_consent"
   | "telemetry_otlp_partial_success"
   | "telemetry_otlp_send_failed"
   | "telemetry_posthog_import_failed"
   | "telemetry_posthog_init_failed"
   | "telemetry_shutdown_failed"
+  | "telemetry_spool_purge_failed"
   | "telemetry_spool_purge_refused"
+  | "telemetry_spool_purge_skipped"
   | "telemetry_spool_sweep_failed"
   | "telemetry_spool_write_failed";
 
 export type TelemetryDiagnosticErrorKind = "error" | "non_error";
+
+/** Why the opt-out purge left a spool-named entry in place: it deletes only regular files of the current user. */
+export type TelemetrySpoolEntryKind = "directory" | "symlink" | "foreign_owner" | "other";
 
 export type TelemetryDiagnosticInput = {
   readonly event: TelemetryDiagnosticEvent;
   readonly source: string;
   readonly error?: unknown;
   readonly errorKind?: TelemetryDiagnosticErrorKind;
+  /** `telemetry_spool_purge_skipped` only: what kind of spool-named entry the purge left in place. */
+  readonly entryKind?: TelemetrySpoolEntryKind;
+  /** `telemetry_spool_purge_failed` only: the errno code (never the path) of one spool file the opt-out purge could not delete. */
+  readonly errorCode?: string;
+  readonly count?: number;
 };
 
 export type TelemetryProductConfig = {
@@ -73,6 +91,28 @@ export type TelemetryTransportOptions = {
   readonly disableRemoteConfig: boolean;
   readonly flushAt: number;
   readonly flushInterval: number;
+  readonly fetch?: TelemetryFetch;
+};
+
+export type TelemetryFetchOptions = {
+  readonly method: "GET" | "POST" | "PUT" | "PATCH";
+  readonly headers: { readonly [key: string]: string };
+  readonly body?: string | Blob | Uint8Array;
+  readonly signal?: AbortSignal;
+};
+
+export type TelemetryFetchResponse = {
+  readonly status: number;
+  readonly text: () => Promise<string>;
+  readonly json: () => Promise<unknown>;
+};
+
+export type TelemetryFetch = (url: string, options: TelemetryFetchOptions) => Promise<TelemetryFetchResponse>;
+
+export type ConsentGatedFetchInput = {
+  readonly isSendAllowed: () => boolean;
+  readonly onDropped?: (count: number) => void;
+  readonly fetch?: TelemetryFetch;
 };
 
 export type TelemetryTransport = {
@@ -174,6 +214,7 @@ export declare function createDefaultPostHogTransport(
   options: TelemetryTransportOptions,
 ): TelemetryTransport;
 export declare function isTelemetryClientEnabled(input: TelemetryClientEnabledInput): boolean;
+export declare function createConsentGatedFetch(input: ConsentGatedFetchInput): TelemetryFetch;
 export declare function createTelemetryClient(input: {
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void;
   readonly env?: TelemetryEnv;
@@ -189,6 +230,8 @@ export declare function shouldDisableTelemetry(input: {
 }): boolean;
 export declare function getTelemetryApiKey(env?: TelemetryEnv, defaultApiKey?: string): string;
 export declare function isConfiguredTelemetryApiKey(apiKey: string): boolean;
+export declare function createUuidV7Generator(source?: UuidV7Source): () => string;
+export declare function createEventId(): string;
 export declare function hasTelemetryApiKey(env?: TelemetryEnv, defaultApiKey?: string): boolean;
 export declare function getTelemetryHost(env?: TelemetryEnv, defaultHost?: string): string;
 export declare function getDefaultTelemetryOsProvider(): TelemetryOsProvider;
