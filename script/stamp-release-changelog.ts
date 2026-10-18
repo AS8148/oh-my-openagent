@@ -18,7 +18,9 @@ async function main(): Promise<void> {
   }
   const changelogPath = new URL("../CHANGELOG.md", import.meta.url)
   const fragmentDir = new URL(`../${FRAGMENT_DIR}/`, import.meta.url)
-  const names = (await readdir(fragmentDir)).filter((name) => name.endsWith(".md"))
+  const names = await readdir(fragmentDir)
+  // Every entry is validated (README.md allowed, <pr>.md required): a stray non-markdown name is
+  // refused here instead of being silently skipped at release time.
   const contents = new Map<string, string>()
   for (const name of names) contents.set(name, await Bun.file(new URL(name, fragmentDir)).text())
   const fragments = readFragments(names, (name) => {

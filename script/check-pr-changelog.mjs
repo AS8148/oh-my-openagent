@@ -19,7 +19,6 @@ export function hasAddedUnreleasedLine(before, after, diff) {
     }
     if (inUnreleased && line.trim() && !/^#{1,6}\s/.test(line.trim())) eligible.add(index + 1)
   }
-  const previousLines = new Set(before.split("\n").map((line) => line.trim()))
   let headLine = 0
   let inHunk = false
   for (const line of diff.split("\n")) {
@@ -28,7 +27,9 @@ export function hasAddedUnreleasedLine(before, after, diff) {
       headLine = Number(hunk[1])
       inHunk = true
     } else if (inHunk && line.startsWith("+")) {
-      if (eligible.has(headLine) && !previousLines.has(line.slice(1).trim())) return true
+      // Any added line inside Unreleased is a hand edit, including a copy of an older released
+      // line: between releases the section is always empty, so no legitimate addition exists.
+      if (eligible.has(headLine)) return true
       headLine += 1
     } else if (inHunk && line.startsWith(" ")) {
       headLine += 1
@@ -51,7 +52,7 @@ export function addedUnreleasedParagraphs(before, after, diff) {
 }
 
 function hasOwnPrLink(fragmentContent, prNumber) {
-  return new RegExp(`/pull/${prNumber}\\)`).test(fragmentContent)
+  return new RegExp(`code-yeongyu/oh-my-openagent/pull/${prNumber}\\)`).test(fragmentContent)
 }
 
 const sectionsOf = (text) => text.split(/(?=^##\s)/m).map((part) => {
@@ -76,12 +77,15 @@ export function fragmentReleaseTransition({ before, after, deletedFragments }) {
 export function checkPrChangelog({ changedFiles, policy, previousPolicy = policy, before, after, diff, labels = [], prNumber, fragment, deletedFragments = [] }) {
   const userFacingFiles = changedFiles.filter((path) => isUserFacingPath(path, policy) || isUserFacingPath(path, previousPolicy))
   const handEdited = hasAddedUnreleasedLine(before, after, diff)
+  const headingMissing = !/^## \[Unreleased\](?:\s.*)?$/m.test(after)
   const consumed = fragmentReleaseTransition({ before, after, deletedFragments })
   // A direct edit to ## [Unreleased] is the exact conflict source this gate exists to stop: it is
   // refused in every case, including a no-changelog label and a PR with no other user-facing files.
-  if (handEdited && !consumed) {
+  // A renamed or missing heading is refused the same way: nothing legitimate ever removes it.
+  if ((handEdited || headingMissing) && !consumed) {
     const hand = prNumber ? addedUnreleasedParagraphs(before, after, diff) : []
-    return { pass: false, reason: `hand-edited ## [Unreleased] (${hand.map((p) => p.split("\n")[0].slice(0, 60)).join(" | ")}); Unreleased is assembled from ${FRAGMENT_DIR}/ fragments at release time`, userFacingFiles }
+    const what = headingMissing ? "removed or renamed ## [Unreleased]" : `hand-edited ## [Unreleased] (${hand.map((p) => p.split("\n")[0].slice(0, 60)).join(" | ")})`
+    return { pass: false, reason: `${what}; Unreleased is assembled from ${FRAGMENT_DIR}/ fragments at release time`, userFacingFiles }
   }
   if (labels.includes(noChangelogLabel)) return { pass: true, reason: "no-changelog label present", userFacingFiles }
   if (userFacingFiles.length === 0) return { pass: true, reason: "no user-facing changes", userFacingFiles }
@@ -138,7 +142,7 @@ export function main(argv) {
   const headDirNames = git("ls-tree", "-r", "--name-only", head, "--", FRAGMENT_DIR)
     .split("\n")
     .map((path) => path.trim())
-    .filter((path) => path.endsWith(".md"))
+    .filter((path) => path.length > FRAGMENT_DIR.length + 1)
     .map((path) => path.slice(FRAGMENT_DIR.length + 1))
   try {
     readFragments(headDirNames, (name) => git("show", `${head}:${FRAGMENT_DIR}/${name}`))

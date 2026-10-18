@@ -76,7 +76,8 @@ describe("Unreleased added-line detection", () => {
     ["adds only blank", "## [Unreleased]\n\n", "@@ -0,0 +2 @@\n+", false],
     ["adds a released note", "## [Unreleased]\n\n## [1.0.0]\nNew note.\n", "@@ -0,0 +4 @@\n+New note.", false],
     ["has no section", "# Changelog\nNew note.\n", "@@ -0,0 +2 @@\n+New note.", false],
-    ["moves existing content", "## [Unreleased]\nExisting note.\n", "@@ -0,0 +2 @@\n+Existing note.", false],
+    ["re-adds an existing line inside Unreleased", "## [Unreleased]\nExisting note.\n", "@@ -0,0 +2 @@\n+Existing note.", true],
+    ["copies a released line into Unreleased", "## [Unreleased]\n\nOld note.\n\n## [1.0.0]\nOld note.\n", "@@ -0,0 +3 @@\n+Old note.", true],
     ["adds comment", "## [Unreleased]\n<!-- hidden -->\n", "@@ -0,0 +2 @@\n+<!-- hidden -->", false],
     ["adds multiline comment", "## [Unreleased]\n<!--\nhidden\n-->\n", "@@ -0,0 +3 @@\n+hidden", false],
     ["stops at any level-two heading", "## [Unreleased]\n## Notes\nNew note.\n", "@@ -0,0 +3 @@\n+New note.", false],
@@ -93,7 +94,7 @@ describe("Unreleased added-line detection", () => {
 })
 
 describe("gate verdict", () => {
-  const facts = { changedFiles: ["packages/omo-native/compile-entry.ts"], policy, before: "", after: "", diff: "" }
+  const facts = { changedFiles: ["packages/omo-native/compile-entry.ts"], policy, before: "## [Unreleased]\n\n## [1.0.0]\nOld.\n", after: "## [Unreleased]\n\n## [1.0.0]\nOld.\n", diff: "" }
   test("fails a runtime change despite unrelated labels", () => {
     expect(checkPrChangelog({ ...facts, labels: ["No-changelog", "ci:full-matrix"] }).pass).toBe(false)
   })
@@ -271,6 +272,20 @@ test("CLI uses the PR merge base, checks the PR's own fragment, and refuses hand
     expect(stray.stdout).toContain("999.md is empty")
     const strayLabelled = spawnSync(process.execPath, [script, "--repo", repo, "--base", advancedBase, "--pr", "7", "--labels", '["no-changelog"]'], { encoding: "utf8", cwd: "/tmp" })
     expect(strayLabelled.status).toBe(1)
+    rmSync(join(repo, "changes/unreleased/999.md"))
+    writeFileSync(join(repo, "changes/unreleased/notes.txt"), "stray")
+    git("add", ".")
+    git("commit", "-qm", "swap the empty fragment for a stray non-markdown file")
+    expect(runPr(advancedBase, "7").status).toBe(1)
+    rmSync(join(repo, "changes/unreleased/notes.txt"))
+    writeFileSync(join(repo, "CHANGELOG.md"), readFileSync(join(repo, "CHANGELOG.md"), "utf8").replace("## [Unreleased]", "## [unreleased]"))
+    git("add", ".")
+    git("commit", "-qm", "rename the Unreleased heading")
+    const renamed = runPr(advancedBase, "7")
+    expect(renamed.status).toBe(1)
+    expect(renamed.stdout).toContain("removed or renamed")
+    const renamedLabelled = spawnSync(process.execPath, [script, "--repo", repo, "--base", advancedBase, "--pr", "7", "--labels", '["no-changelog"]'], { encoding: "utf8", cwd: "/tmp" })
+    expect(renamedLabelled.status).toBe(1)
   } finally {
     rmSync(repo, { recursive: true, force: true })
   }
