@@ -278,7 +278,6 @@ jobs:
             echo "Check issue edit permissions and the matched label names."
           } >> "$GITHUB_STEP_SUMMARY"
 
-
   notice-skipped-signal:
     # Runs exactly when the consumer jobs skipped for a cancelled or skipped signal: if no
     # newer completed signal run covers the same head, say so loudly instead of exiting silently.
@@ -301,13 +300,12 @@ jobs:
               repo: context.repo.repo,
               workflow_id: 'pr-automation-signal.yml',
               head_sha: head,
-              status: 'completed',
               per_page: 100,
             });
             const thisId = context.payload.workflow_run.id;
             const newer = data.workflow_runs.filter((run) => run.id > thisId);
             if (newer.length > 0) {
-              core.info(`A newer completed PR Automation Signal run (${newer[0].run_number}) covers head ${head.slice(0, 10)}; this cancelled signal carries no result to act on.`);
+              core.info(`A newer PR Automation Signal run (${newer[0].run_number}) covers head ${head.slice(0, 10)}; this signal carried no result to act on.`);
               return;
             }
             core.warning(`No newer PR Automation Signal run for head ${head.slice(0, 10)}: the ${context.workflow} checks have NOT run for this head. Re-run with workflow_dispatch (pr_number) if this head still needs them.`);
@@ -327,4 +325,3 @@ jobs:
             echo "| Upstream conclusion | \`${{ github.event.workflow_run.conclusion }}\` |"
             echo "| Detail | see the notice step output above |"
           } >> "$GITHUB_STEP_SUMMARY"
-
