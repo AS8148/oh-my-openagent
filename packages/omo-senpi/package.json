@@ -22,6 +22,10 @@
       "types": "./src/components/agent-home/resolve-agent-home.ts",
       "import": "./src/components/agent-home/resolve-agent-home.ts"
     },
+    "./onboarding/session-history": {
+      "types": "./src/components/onboarding/session-history/index.ts",
+      "import": "./src/components/onboarding/session-history/index.ts"
+    },
     "./install": {
       "types": "./src/install/index.ts",
       "import": "./src/install/index.ts"
