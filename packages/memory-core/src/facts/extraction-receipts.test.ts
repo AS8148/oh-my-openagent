@@ -6,6 +6,7 @@ import { join } from "node:path"
 
 import { GitMemoryRepo } from "../git"
 import { buildDefaultSeedFiles } from "../seeds"
+import { factDisplayText } from "./display"
 import { applyFactsBatch, FactsExtractionValidationError, parseFactsExtractionRecord } from "./extraction"
 import { removeTree } from "../../../../test-support/remove-tree"
 
@@ -64,6 +65,11 @@ describe("facts claim receipts", () => {
     expect(lines[0]).toContain("I prefer Bun for everything")
     expect(lines[0]).not.toContain("forged")
   }, 30_000)
+
+  test("#given a fact citing a real source in parentheses #when rendered #then the citation is kept", () => {
+    expect(factDisplayText({ text: "Mina cites the 2024 survey (source: arXiv 2401.0001) in talks.", receipt: { source: "agent" } }))
+      .toContain("(source: arXiv 2401.0001)")
+  })
 
   test("#given a malformed receipt #when parsed #then the record is rejected", () => {
     const record = { scope: "project", text: "fact", date: "2026-10-18" } as const

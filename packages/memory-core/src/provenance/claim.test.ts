@@ -24,6 +24,12 @@ describe("claim receipts", () => {
     ["a qualifier", "remove plugins X and Y", "Maybe remove plugins X and Y later."],
     ["a Korean negation", "플러그인 X 지우기", "아직 플러그인 X 지우기는 하지 마"],
     ["a Korean question", "플러그인 X 지워도", "플러그인 X 지워도 될까"],
+    ["a curly-apostrophe negation", "delete the prod database", "Don\u2019t delete the prod database yet."],
+    ["a polite Korean question", "플러그인 X 지워도", "플러그인 X 지워도 될까요"],
+    ["a Korean deliberation", "플러그인 X 지울지", "플러그인 X 지울지 고민중"],
+    ["a first-person question without a mark", "remove plugins X and Y", "Should I remove plugins X and Y"],
+    ["an objection after the quote", "remove plugins X and Y", "remove plugins X and Y is a terrible idea."],
+    ["a refusal in the next sentence", "remove plugins X and Y", "You suggested remove plugins X and Y. No."],
   ])("#given a quote cut out of %s #when resolved #then it stays a suggestion", (_case, quote, said) => {
     expect(resolveClaimReceipt({ source: "user", userQuote: quote }, [said])).toEqual({ source: "agent", downgraded: true })
   })

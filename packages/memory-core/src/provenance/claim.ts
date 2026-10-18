@@ -2,6 +2,8 @@
 // words. Memory once stored an agent's suggestion as "the user agreed", and a later session acted on
 // it. A claim only keeps source "user" when its quote appears verbatim in a real user message.
 
+import { foldQuotes, isAffirmativeStatement } from "./consent"
+
 export const CLAIM_SOURCES = ["user", "agent", "inferred"] as const
 export type ClaimSource = (typeof CLAIM_SOURCES)[number]
 
@@ -44,23 +46,14 @@ export function enclosingUserSentence(quote: string, userTexts: readonly string[
   if (!UNSPACED_SCRIPT.test(needle) && needle.split(" ").length < MIN_QUOTE_WORDS) return undefined
   for (const text of userTexts) {
     if (!normalize(text).includes(needle)) continue
-    const sentence = sentencesOf(text).find((candidate) => normalize(candidate).includes(needle)) ?? text
-    // When in doubt the claim stays a suggestion: a question, or a negation/qualifier before the quote, is not consent.
-    if (!isAffirmativeStatement(normalize(sentence), needle)) return undefined
+    const sentences = sentencesOf(text)
+    const at = sentences.findIndex((candidate) => normalize(candidate).includes(needle))
+    const sentence = sentences[at] ?? text
+    const following = at >= 0 ? sentences[at + 1] : undefined
+    if (!isAffirmativeStatement(normalize(sentence), following === undefined ? undefined : normalize(following))) return undefined
     return capQuote(sentence)
   }
   return undefined
-}
-
-const QUESTION = /[?\uff1f]|(?:\uae4c|\ub098\uc694|\ub2c8|\uc744\uae4c|\ub97c\uae4c)\s*$/u
-const PREFIX_QUALIFIER = /\b(?:don'?t|do not|never|not|no|nor|shouldn'?t|should not|mustn'?t|can'?t|cannot|won'?t|wouldn'?t|stop|avoid|without|unless|if|whether|maybe|perhaps|might|probably|should we|could we|shall we|can we|do we|would you|not sure|later|wait|hold off|before)\b/u
-const KOREAN_NEGATION = /\uc9c0\s*\ub9c8|\ub9d0\uc544|\ub9d0\uace0|\ub9d0\uc790|\uc54a|\uc548\s|\ubabb\s|\uae08\uc9c0|\ubcf4\ub958|\ub098\uc911\uc5d0|\uc77c\ub2e8|\ud639\uc2dc|\uc544\ub9c8/u
-
-function isAffirmativeStatement(sentence: string, needle: string): boolean {
-  if (QUESTION.test(sentence)) return false
-  const prefix = sentence.slice(0, Math.max(0, sentence.indexOf(needle)))
-  if (PREFIX_QUALIFIER.test(prefix)) return false
-  return !KOREAN_NEGATION.test(sentence)
 }
 
 export function quoteAppearsInUserText(quote: string, userTexts: readonly string[]): boolean {
@@ -115,7 +108,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalize(text: string): string {
-  return text.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase()
+  return foldQuotes(text.normalize("NFKC")).replace(/\s+/g, " ").trim().toLowerCase()
 }
 
 function singleLine(text: string): string {
