@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 import type { SenpiExtensionAPI } from "../../extension/types"
 import { registrySnapshot } from "../memory/facts-runner.test-support"
 import {
+  ONBOARDING_APPLY_RPC_METHOD,
   ONBOARDING_SCAN_RPC_EVENT,
   ONBOARDING_SCAN_RPC_METHOD,
+  ONBOARDING_SCAN_TTL_MS,
   createOnboardingScanComponent,
+  createOnboardingScanStore,
+  type OnboardingScanStore,
   loadOnboardingScanRuntime,
   type OnboardingScanEvent,
   type OnboardingScanRuntime,
@@ -28,6 +33,18 @@ afterEach(async () => {
 })
 
 type Handler = (data: unknown) => unknown
+
+async function within<T>(label: string, pending: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`waited ${EVENT_TIMEOUT_MS}ms for ${label}, never happened`)), EVENT_TIMEOUT_MS)
+  })
+  try {
+    return await Promise.race([pending, expired])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 async function profile() {
   const root = await tempRoot("omo-understand-rpc-")
@@ -63,6 +80,8 @@ function host(input: {
   readonly turn: FakeTurn
   readonly withRegistry?: boolean
   readonly loadRuntime?: () => Promise<OnboardingScanRuntime>
+  readonly scanStore?: OnboardingScanStore
+  readonly now?: () => number
 }) {
   const handlers = new Map<string, Handler>()
   const sessionHandlers: Array<(payload: unknown, ctx?: unknown) => unknown> = []
@@ -87,6 +106,8 @@ function host(input: {
     runtime: () => input.environment,
     understanding: { createRunner: model.createRunner },
     ...(input.loadRuntime === undefined ? {} : { loadRuntime: input.loadRuntime }),
+    ...(input.scanStore === undefined ? {} : { scanStore: input.scanStore }),
+    ...(input.now === undefined ? {} : { now: input.now }),
   }).register(pi, {} as never)
   if (input.withRegistry !== false) for (const handler of sessionHandlers) handler({}, { modelRegistry: registrySnapshot() })
 
@@ -131,7 +152,82 @@ describe("omo.onboarding.understand RPC (#10480)", () => {
     // then
     expect(missing).toMatchObject({ kind: "invalid" })
     expect(refused).toMatchObject({ kind: "invalid" })
+    // Consent contract: the refusal names everything the stage sends off the machine.
+    expect(String(refused["reason"])).toContain("session digests")
+    expect(String(refused["reason"])).toContain("AGENTS.md")
     expect(rpc.starts).toHaveLength(0)
+  })
+
+  test("#given a finished scan #when nobody has consented #then nothing of the scan is on disk under the engine state dir", async () => {
+    // given
+    const { environment, stateDir } = await profile()
+    const rpc = host({ environment, turn: async () => "completed" })
+
+    // when
+    await rpc.scan()
+
+    // then
+    expect(existsSync(join(stateDir, "onboarding", "scans"))).toBe(false)
+  })
+
+  test("#given a scan older than its ten-minute retention #when understanding is requested #then its digests are gone and it is unavailable", async () => {
+    // given
+    const { environment } = await profile()
+    const scanStore = createOnboardingScanStore()
+    let now = 1_000_000_000_000
+    const rpc = host({ environment, turn: async () => "completed", scanStore, now: () => now })
+    const scanId = await rpc.scan()
+    now += ONBOARDING_SCAN_TTL_MS + 1
+
+    // when
+    const response = await rpc.call(ONBOARDING_UNDERSTAND_RPC_METHOD, { scanId, model: UNDERSTAND_MODEL, consent: true })
+
+    // then
+    expect(response).toMatchObject({ kind: "unavailable" })
+    expect(scanStore.scans.has(scanId)).toBe(false)
+    expect(rpc.starts).toHaveLength(0)
+  })
+
+  test("#given an applied scan #when understanding is requested #then its digests were released with it and it is unavailable", async () => {
+    // given
+    const { environment } = await profile()
+    const rpc = host({ environment, turn: async () => "completed" })
+    const scanId = await rpc.scan()
+    expect(await rpc.call(ONBOARDING_APPLY_RPC_METHOD, { scanId, stages: [] })).toMatchObject({ scanId, applied: [] })
+
+    // when
+    const response = await rpc.call(ONBOARDING_UNDERSTAND_RPC_METHOD, { scanId, model: UNDERSTAND_MODEL, consent: true })
+
+    // then
+    expect(response).toMatchObject({ kind: "unavailable" })
+    expect(rpc.starts).toHaveLength(0)
+  })
+
+  test("#given an understanding already running on a scan #when a second one is requested for that scan #then it is refused and only one model runs", async () => {
+    // given
+    const { environment } = await profile()
+    let release: (() => void) | undefined
+    const holding = new Promise<void>((resolve) => { release = resolve })
+    let entered: (() => void) | undefined
+    const running = new Promise<void>((resolve) => { entered = resolve })
+    const rpc = host({ environment, turn: async () => {
+      entered?.()
+      await holding
+      return "completed"
+    } })
+    const scanId = await rpc.scan()
+    const first = await rpc.call(ONBOARDING_UNDERSTAND_RPC_METHOD, { scanId, model: UNDERSTAND_MODEL, consent: true })
+    await within("the first model call", running)
+
+    // when
+    const second = await rpc.call(ONBOARDING_UNDERSTAND_RPC_METHOD, { scanId, model: UNDERSTAND_MODEL, consent: true })
+    release?.()
+    await rpc.understandDone(String(first["understandId"]))
+
+    // then
+    expect(typeof first["understandId"]).toBe("string")
+    expect(second).toMatchObject({ kind: "invalid" })
+    expect(rpc.starts).toHaveLength(1)
   })
 
   test("#given a finished scan and consent #when understanding is requested #then the caller's model reads the scan's digests and returns candidates", async () => {

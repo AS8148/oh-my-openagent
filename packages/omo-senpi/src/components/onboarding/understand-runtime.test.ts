@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, symlink, writeFile } from "node:fs/promises"
+import type { ChildSpec } from "@oh-my-opencode/senpi-task"
 import { join } from "node:path"
 
 import { registrySnapshot } from "../memory/facts-runner.test-support"
@@ -9,6 +10,7 @@ import { digest, fakeModel, snapshotTree, tempRoot, understandRunDirs, UNDERSTAN
 import { ONBOARDING_UNDERSTAND_BUDGET, type OnboardingUnderstandBudgetLimits, type OnboardingUnderstandEvent } from "./understand-contract"
 import { OnboardingUnderstandingControl } from "./understand-control"
 import { runOnboardingUnderstanding } from "./understand-runtime"
+import { startOnboardingUnderstanding } from "./understand-start"
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -27,14 +29,19 @@ async function run(input: {
   readonly control?: OnboardingUnderstandingControl
   readonly budget?: OnboardingUnderstandBudgetLimits
   readonly env?: NodeJS.ProcessEnv
+  readonly projectRoots?: ReadonlySet<string>
+  readonly now?: () => number
+  readonly onAbort?: (spec: ChildSpec) => Promise<void>
 }) {
-  const model = fakeModel(input.turn)
+  const model = fakeModel(input.turn, input.onAbort === undefined ? {} : { onAbort: input.onAbort })
   const events: OnboardingUnderstandEvent[] = []
   const done = await runOnboardingUnderstanding({
     understandId: "understand-1",
     scanId: "scan-1",
     model: UNDERSTAND_MODEL,
     digests: input.digests,
+    projectRoots: input.projectRoots ?? new Set(input.digests.map((item) => item.cwd)),
+    ...(input.now === undefined ? {} : { now: input.now }),
     modelRegistry: registrySnapshot(),
     control: input.control ?? new OnboardingUnderstandingControl(),
     createRunner: model.createRunner,
@@ -288,6 +295,126 @@ describe("onboarding understanding (#10480)", () => {
     expect(events.filter((event) => event.kind === "budget").at(-1)?.budget).toBe("total_ms")
     expect(events.filter((event) => event.kind === "step_started").length).toBeLessThan(5)
     expect(done.elapsedMs).toBeLessThan(10_000)
+  })
+
+  test("#given a project the scan did not list #when its step runs #then its AGENTS.md is never read", async () => {
+    // given
+    const root = await workspace()
+    const alpha = join(root, "alpha")
+    await mkdir(alpha)
+    await writeFile(join(alpha, "AGENTS.md"), "UNLISTED-PROJECT-RULES\n")
+
+    // when
+    const { starts, events } = await run({ digests: [digest(alpha, 1), digest(alpha, 2)], projectRoots: new Set(), turn: async () => "completed" })
+
+    // then
+    expect(starts).toHaveLength(1)
+    expect(starts[0]?.prompt).not.toContain("UNLISTED-PROJECT-RULES")
+    expect(starts[0]?.prompt).not.toContain("<agents_md")
+    expect(events.at(-1)?.bytesRead).toBe(digestByteLength(digest(alpha, 1)) + digestByteLength(digest(alpha, 2)))
+  })
+
+  test("#given a listed project whose AGENTS.md links outside it #when its step runs #then the linked file is never read", async () => {
+    // given
+    const root = await workspace()
+    const alpha = join(root, "alpha")
+    const outside = join(root, "outside")
+    await mkdir(alpha)
+    await mkdir(outside)
+    await writeFile(join(outside, "secret.md"), "OUTSIDE-THE-PROJECT\n")
+    await symlink(join(outside, "secret.md"), join(alpha, "AGENTS.md"))
+
+    // when
+    const { starts } = await run({ digests: [digest(alpha, 1), digest(alpha, 2)], projectRoots: new Set([alpha]), turn: async () => "completed" })
+
+    // then
+    expect(starts).toHaveLength(1)
+    expect(starts[0]?.prompt).not.toContain("OUTSIDE-THE-PROJECT")
+  })
+
+  test("#given a step whose child arrives after its deadline and writes while aborting #when the run ends #then no scratch directory is left behind", async () => {
+    // given
+    const root = await workspace()
+    const leftoversBefore = await understandRunDirs()
+    let lateWrite: (() => void) | undefined
+    const wrote = new Promise<void>((resolve) => { lateWrite = resolve })
+
+    // when
+    const { done } = await run({
+      digests: [digest(join(root, "a"), 1), digest(join(root, "a"), 2)],
+      budget: { ...ONBOARDING_UNDERSTAND_BUDGET, stepMs: 50, totalMs: 30_000 },
+      turn: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        return "hang"
+      },
+      onAbort: async (spec) => {
+        const sessionDir = String(spec.sessionDir)
+        await mkdir(sessionDir, { recursive: true })
+        await writeFile(join(sessionDir, "late-session.jsonl"), "written after abort\n")
+        lateWrite?.()
+      },
+    })
+    await wrote
+
+    // then
+    expect(done.kind).toBe("done")
+    expect(await understandRunDirs()).toEqual(leftoversBefore)
+  })
+
+  test("#given a failed step and no time left #when the retry would start #then the run ends at total_ms without a second model call", async () => {
+    // given
+    const root = await workspace()
+    let clock = 0
+
+    // when
+    const { done, events, starts } = await run({
+      digests: [digest(join(root, "a"), 1), digest(join(root, "a"), 2)],
+      budget: { ...ONBOARDING_UNDERSTAND_BUDGET, totalMs: 1_000 },
+      now: () => clock,
+      turn: async () => {
+        clock += 2_000
+        return "error"
+      },
+    })
+
+    // then
+    expect(starts).toHaveLength(1)
+    expect(kinds(events)).toEqual(["step_started", "step_failed", "budget", "done"])
+    expect(events[2]?.budget).toBe("total_ms")
+    expect(done.fallback).toBeUndefined()
+  })
+
+  test("#given a run that crashes after reading and recording #when it falls back #then done reports the usage it actually had", async () => {
+    // given
+    const root = await workspace()
+    const digests = [digest(join(root, "a"), 1), digest(join(root, "a"), 2)]
+    const model = fakeModel(async ({ record }) => {
+      await record("The user ships on Fridays.")
+      return "completed"
+    })
+    const events: OnboardingUnderstandEvent[] = []
+
+    // when
+    const started = await startOnboardingUnderstanding({
+      scanId: "scan-1",
+      model: UNDERSTAND_MODEL,
+      digests,
+      projectRoots: new Set(),
+      modelRegistry: registrySnapshot(),
+      env: { HOME: "/nonexistent-home" },
+      seams: { createRunner: model.createRunner },
+    }, (event) => {
+      events.push(event)
+      if (event.kind === "fact") throw new Error("client went away")
+    })
+    if ("kind" in started) throw new Error(`understanding did not start: ${started.reason}`)
+    await started.finished
+
+    // then
+    const done = events.at(-1)
+    expect(done).toMatchObject({ kind: "done", fallback: "scan_only", toolCalls: 1 })
+    expect(done?.bytesRead).toBe(digests.reduce((sum, item) => sum + digestByteLength(item), 0))
+    expect(done?.elapsedMs).toBeGreaterThanOrEqual(0)
   })
 
   test("#given a skipped project #when understanding runs #then its step never starts", async () => {
