@@ -117,7 +117,8 @@ that harness's own files by hand and fold what you find into the same plan:
 
 - Claude Code: `~/.claude/settings.json`, global and project `CLAUDE.md` files, MCP server
   definitions in `.mcp.json` or settings.
-- Codex: `~/.codex/config.toml` and any `AGENTS.md` files it manages.
+- Another coding agent the user names: its own config file in its home folder (often a `config.toml`)
+  and any `AGENTS.md` files it manages.
 - Anything else the user names that the inventory does not cover (for example a project
   `.mcp.json`, or an `AGENTS.md` another agent manages).
 
