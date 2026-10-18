@@ -71,8 +71,11 @@ describe("scanSessionHistory events (onboarding scan contract, issue A1)", () =>
 
     // then
     expect(reopened.map((digest) => digest.sessionKey)).toEqual(["codex:codex-one"])
-    expect((await stat(scanDir)).mode & 0o777).toBe(0o700)
-    expect((await stat(join(scanDir, "digests.jsonl"))).mode & 0o777).toBe(0o600)
+    // Windows has no POSIX permission bits, so the owner-only modes are only observable elsewhere.
+    if (process.platform !== "win32") {
+      expect((await stat(scanDir)).mode & 0o777).toBe(0o700)
+      expect((await stat(join(scanDir, "digests.jsonl"))).mode & 0o777).toBe(0o600)
+    }
     await expect(createSessionDigestStore({ stateDir }).list("../escape")).rejects.toThrow("invalid scanId")
   })
 
