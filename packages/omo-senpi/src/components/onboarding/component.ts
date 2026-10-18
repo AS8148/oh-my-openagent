@@ -12,7 +12,7 @@ import { registerSessionHistoryRpc } from "./session-history-rpc"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
 import { registerOnboardingStateRpc } from "./state-rpc"
-import type { OnboardingUnderstandingSeams } from "./understand-component"
+import type { OnboardingUnderstandingSeams } from "./understand-start"
 import { createOnboardingMemoryTools, type TuiOnboardingScan } from "./tui-memory-tools"
 
 export interface OnboardingComponentDependencies {
@@ -139,7 +139,7 @@ export function createOnboardingComponent(
       pi.registerTool({ ...createOnboardingSessionHistoryTool({ stateDir }) })
       const memoryTools = createOnboardingMemoryTools({
         scan,
-        loadRun: async () => (await loadOnboardingScanRuntime()).runOnboardingUnderstanding,
+        loadStart: async () => (await loadOnboardingScanRuntime()).startOnboardingUnderstanding,
         ...(dependencies.understanding === undefined ? {} : { seams: dependencies.understanding }),
       })
       pi.registerTool({ ...memoryTools.understand })

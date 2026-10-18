@@ -1,15 +1,10 @@
-import { randomUUID } from "node:crypto"
-
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { type Static, Type } from "typebox"
 
 import { sessionFactsApplier, type MemoryFactsApplyResponse } from "../memory/facts-apply-rpc"
 import { resolveMemoryModelRegistry } from "../memory/model-registry-resolver"
-import { createSessionDigestStore } from "./session-history"
-import type { OnboardingUnderstandingSeams } from "./understand-component"
 import type { OnboardingFactCandidate, OnboardingUnderstandEvent } from "./understand-contract"
-import { OnboardingUnderstandingControl } from "./understand-control"
-import type { runOnboardingUnderstanding } from "./understand-runtime"
+import type { OnboardingUnderstandingSeams, startOnboardingUnderstanding } from "./understand-start"
 
 export const ONBOARDING_UNDERSTAND_TOOL_NAME = "onboarding_understand"
 export const ONBOARDING_MEMORY_APPLY_TOOL_NAME = "onboarding_memory_apply"
@@ -22,7 +17,7 @@ export interface TuiOnboardingScan {
 
 export interface TuiMemoryToolsOptions {
   readonly scan: () => Promise<TuiOnboardingScan | undefined>
-  readonly loadRun: () => Promise<typeof runOnboardingUnderstanding>
+  readonly loadStart: () => Promise<typeof startOnboardingUnderstanding>
   readonly seams?: OnboardingUnderstandingSeams
 }
 
@@ -53,8 +48,8 @@ interface ToolCtx {
 }
 
 /**
- * TUI side of "understanding you": the same `runOnboardingUnderstanding` the `omo.onboarding.understand` RPC
- * runs, then the user's selection written through `omo.memory.facts.apply`'s applier. Candidates are held
+ * TUI side of "understanding you": the same `startOnboardingUnderstanding` the `omo.onboarding.understand` RPC
+ * runs (from the lazy onboarding-scan sidecar), then the user's selection written through `omo.memory.facts.apply`'s applier. Candidates are held
  * in memory only; nothing reaches memory until a selection names them.
  */
 export function createOnboardingMemoryTools(options: TuiMemoryToolsOptions): {
@@ -85,29 +80,30 @@ export function createOnboardingMemoryTools(options: TuiMemoryToolsOptions): {
       if (modelRegistry === undefined) return failure("This session exposes no model registry, so the understanding cannot run.")
       const scan = await options.scan().catch(() => undefined)
       if (scan === undefined) return failure("The onboarding scan did not run; continue with the scan rows only.")
-      const digests = await createSessionDigestStore({ stateDir: scan.stateDir }).list(scan.scanId)
-      if (digests.length === 0) return failure("The scan found no recent sessions to read.")
-
-      const understandId = randomUUID()
-      const control = new OnboardingUnderstandingControl()
-      const stop = (): void => control.stop()
-      signal?.addEventListener("abort", stop, { once: true })
+      let start: typeof startOnboardingUnderstanding
+      try {
+        start = await options.loadStart()
+      } catch (error) {
+        return failure(`The onboarding runtime could not load (${error instanceof Error ? error.message : String(error)}); continue with the scan rows only.`)
+      }
       const steps: string[] = []
+      const started = await start({
+        scanId: scan.scanId,
+        model,
+        stateDir: scan.stateDir,
+        modelRegistry,
+        ...(scan.env === undefined ? {} : { env: scan.env }),
+        ...(options.seams === undefined ? {} : { seams: options.seams }),
+      }, (event) => {
+        if (event.kind === "step_done" && event.step !== undefined) steps.push(event.step.label)
+      })
+      if ("kind" in started) return failure(started.reason)
+      const { understandId } = started
+      const stop = (): void => started.control.stop()
+      signal?.addEventListener("abort", stop, { once: true })
       let done: OnboardingUnderstandEvent
       try {
-        const run = await options.loadRun()
-        done = await run({
-          understandId,
-          scanId: scan.scanId,
-          model,
-          digests,
-          modelRegistry,
-          control,
-          ...(scan.env === undefined ? {} : { env: { ...scan.env } }),
-          ...options.seams,
-        }, (event) => {
-          if (event.kind === "step_done" && event.step !== undefined) steps.push(event.step.label)
-        })
+        done = await started.finished
       } finally {
         signal?.removeEventListener("abort", stop)
       }

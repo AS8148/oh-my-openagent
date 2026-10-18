@@ -26,7 +26,7 @@ export interface OnboardingUnderstandingStart {
 export interface OnboardingUnderstandingStarted {
   readonly understandId: string
   readonly control: Pick<OnboardingUnderstandingControl, "skip" | "stop">
-  readonly finished: Promise<void>
+  readonly finished: Promise<OnboardingUnderstandEvent>
 }
 
 export type OnboardingUnderstandingStartResult =
@@ -60,9 +60,10 @@ export async function startOnboardingUnderstanding(
       ...(input.env === undefined ? {} : { env: { ...input.env } }),
       ...input.seams,
     }, emit))
-    .catch((error: unknown) => {
-      emit({ understandId, scanId, kind: "done", bytesRead: 0, toolCalls: 0, elapsedMs: 0, candidates: [], fallback: "scan_only", reason: error instanceof Error ? error.message : String(error) })
+    .catch((error: unknown): OnboardingUnderstandEvent => {
+      const done: OnboardingUnderstandEvent = { understandId, scanId, kind: "done", bytesRead: 0, toolCalls: 0, elapsedMs: 0, candidates: [], fallback: "scan_only", reason: error instanceof Error ? error.message : String(error) }
+      emit(done)
+      return done
     })
-    .then(() => undefined)
   return { understandId, control, finished }
 }

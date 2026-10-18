@@ -18,7 +18,6 @@ import type {
   onboardingScanContext,
   OnboardingScanEnvironment,
   runOnboardingScan,
-  runOnboardingUnderstanding,
   staleSetupTargets,
   startOnboardingUnderstanding,
 } from "./scan-runtime"
@@ -42,7 +41,6 @@ export interface OnboardingScanRuntime {
   readonly applyOnboardingScan: typeof applyOnboardingScan
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
   readonly onboardingScanContext: typeof onboardingScanContext
-  readonly runOnboardingUnderstanding: typeof runOnboardingUnderstanding
   readonly startOnboardingUnderstanding: typeof startOnboardingUnderstanding
   readonly authWritesPending: typeof authWritesPending
   readonly staleSetupTargets: typeof staleSetupTargets
@@ -250,13 +248,12 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const run = loaded["runOnboardingScan"]
   const apply = loaded["applyOnboardingScan"]
   const facts = loaded["migrationFactsFromScan"]
-  const run2 = loaded["runOnboardingUnderstanding"]
   const context = loaded["onboardingScanContext"]
   const understand = loaded["startOnboardingUnderstanding"]
   const authPending = loaded["authWritesPending"]
   const staleTargets = loaded["staleSetupTargets"]
   if (
-    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof run2 !== "function" ||
+    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" ||
     typeof context !== "function" || typeof authPending !== "function" || typeof staleTargets !== "function"
   ) {
     throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
@@ -266,7 +263,6 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
     applyOnboardingScan: (...args) => Reflect.apply(apply, undefined, args),
     migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
     onboardingScanContext: (...args) => Reflect.apply(context, undefined, args),
-    runOnboardingUnderstanding: (...args) => Reflect.apply(run2, undefined, args),
     startOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
     authWritesPending: (...args) => Reflect.apply(authPending, undefined, args),
     staleSetupTargets: (...args) => Reflect.apply(staleTargets, undefined, args),
