@@ -70,7 +70,12 @@ function dropForeignPackageDirs(env, senpiRoot) {
   }
 }
 
-export function senpiEnvironment(senpiRoot) {
+/**
+ * The one environment every engine this launcher starts gets. `overrides` (a host call's own
+ * environment) is merged in here, before the last step, so nothing a caller passes can put back
+ * what this function removes.
+ */
+export function senpiEnvironment(senpiRoot, overrides = {}) {
   const env = { ...process.env }
   delete env.OMO_BIN
   delete env.SENPI_BIN
@@ -87,10 +92,6 @@ export function senpiEnvironment(senpiRoot) {
   // under bun. Handing that answer down stops the engine from making its own, conflicting choice.
   env.SENPI_RUNTIME = process.versions.bun ? "bun" : "node"
   env.SENPI_BRAND = JSON.stringify(brandProfile())
-  // Only the interactive launch writes this record of the herdr hint it set (herdr-agent-hint.js);
-  // no engine started here may inherit one from the parent environment.
-  delete env[HERDR_AGENT_MARKER]
-
   const binDir = nearestNodeBin(senpiRoot)
   if (binDir) {
     const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH"
@@ -102,5 +103,11 @@ export function senpiEnvironment(senpiRoot) {
   // Anything resolving the product by name must re-enter through this launcher, otherwise it
   // would reach the engine directly and lose the brand.
   env.OMO_BIN = join(packageRoot, "bin", "omo.js")
-  return env
+  const merged = { ...env, ...overrides }
+  // Only the interactive launch writes this record of the herdr hint it set (herdr-agent-hint.js),
+  // after this function returns. No engine started here may carry one from the parent environment
+  // or from a caller's overrides: the plugin would treat it as the launcher's and could remove a
+  // HERDR_AGENT the user set (#10448).
+  delete merged[HERDR_AGENT_MARKER]
+  return merged
 }

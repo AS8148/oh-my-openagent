@@ -108,7 +108,7 @@ export function engineHostCall(engineArgs, options) {
   const senpi = preparedSenpi()
   const result = spawnSync(process.execPath, [senpi.cliPath, ...engineArgs], {
     encoding: "utf8",
-    env: { ...senpiEnvironment(senpi.packageRoot), ...options.env },
+    env: senpiEnvironment(senpi.packageRoot, options.env),
     windowsHide: true,
   })
   return { exitCode: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
