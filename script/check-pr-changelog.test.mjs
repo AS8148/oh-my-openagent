@@ -134,6 +134,35 @@ describe("fragment gate", () => {
     const diff = `@@ -0,0 +3 @@\n+**Hand note.** Text (${link(123)}).`
     expect(checkPrChangelog({ ...facts, after, diff, fragment, prNumber: 123 }).pass).toBe(false)
   })
+  test("refuses a hand-edited Unreleased even with no other user-facing files", () => {
+    const after = `## [Unreleased]\n\n**Hand note.** Text (${link(123)}).\n\n## [1.0.0]\nOld.\n`
+    const diff = `@@ -0,0 +3 @@\n+**Hand note.** Text (${link(123)}).`
+    const result = checkPrChangelog({ ...facts, changedFiles: ["CHANGELOG.md"], after, diff, prNumber: 123 })
+    expect(result.pass).toBe(false)
+    expect(result.reason).toContain("hand-edited")
+  })
+  test("refuses a hand-edited Unreleased even with the no-changelog label", () => {
+    const after = `## [Unreleased]\n\n**Hand note.** Text (${link(123)}).\n\n## [1.0.0]\nOld.\n`
+    const diff = `@@ -0,0 +3 @@\n+**Hand note.** Text (${link(123)}).`
+    const result = checkPrChangelog({ ...facts, labels: ["no-changelog"], after, diff, prNumber: 123 })
+    expect(result.pass).toBe(false)
+    expect(result.reason).toContain("hand-edited")
+  })
+  test("a release consumption still passes with Unreleased edits in the diff", () => {
+    const notes = "**Fixed.** Existing fix."
+    const history = "## [1.0.0]\nOld note.\n"
+    const deleted = [{ pr: 1, content: notes }]
+    const result = checkPrChangelog({
+      ...facts,
+      changedFiles: ["packages/omo-native/compile-entry.ts", "changes/unreleased/1.md"],
+      labels: ["no-changelog"],
+      before: `## [Unreleased]\n\n${history}`,
+      after: `## [Unreleased]\n\n## [1.1.0] - 2026-10-11\n\n${notes}\n\n${history}`,
+      diff: "",
+      deletedFragments: deleted,
+    })
+    expect(result.pass).toBe(true)
+  })
   test("refuses a hand-edited Unreleased with no fragment at all", () => {
     const after = `## [Unreleased]\n\n**Hand note.** Text (${link(123)}).\n\n## [1.0.0]\nOld.\n`
     const diff = `@@ -0,0 +3 @@\n+**Hand note.** Text (${link(123)}).`
@@ -234,6 +263,14 @@ test("CLI uses the PR merge base, checks the PR's own fragment, and refuses hand
     expect(runPr("not-a-number").status).toBe(1)
     expect(run("--invalid-option").status).toBe(1)
     expect(run(base, "{}").status).toBe(1)
+    writeFileSync(join(repo, "changes/unreleased/999.md"), "   \n")
+    git("add", ".")
+    git("commit", "-qm", "add an empty stray fragment")
+    const stray = runPr(advancedBase, "7")
+    expect(stray.status).toBe(1)
+    expect(stray.stdout).toContain("999.md is empty")
+    const strayLabelled = spawnSync(process.execPath, [script, "--repo", repo, "--base", advancedBase, "--pr", "7", "--labels", '["no-changelog"]'], { encoding: "utf8", cwd: "/tmp" })
+    expect(strayLabelled.status).toBe(1)
   } finally {
     rmSync(repo, { recursive: true, force: true })
   }

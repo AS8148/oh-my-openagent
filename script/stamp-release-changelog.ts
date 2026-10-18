@@ -6,7 +6,7 @@
  * hand-written Unreleased content: Unreleased is machine-assembled from fragments (#9961).
  */
 import { readdir, rm } from "node:fs/promises"
-import { assembleUnreleasedBody, FRAGMENT_DIR, mergeUnreleased, readFragments, unreleasedBody } from "./changelog-fragments"
+import { assembleUnreleasedBody, FRAGMENT_DIR, mergeUnreleased, parseFragment, readFragments, unreleasedBody } from "./changelog-fragments"
 import { stampUnreleased } from "./changelog-release-notes"
 
 async function main(): Promise<void> {
@@ -35,7 +35,11 @@ async function main(): Promise<void> {
   }
   const stamped = stampUnreleased(mergeUnreleased(changelog, assembled), version, date)
   await Bun.write(changelogPath, stamped)
-  for (const fragment of fragments) await rm(new URL(`${fragment.pr}.md`, fragmentDir))
+  // Delete by the file name read from disk, not the reconstructed `<pr>.md`: a leading-zero alias
+  // parses as the same PR but deletes nothing if reconstructed.
+  for (const name of names) {
+    if (parseFragment(name, contents.get(name) ?? "") !== null) await rm(new URL(name, fragmentDir))
+  }
   console.error(`stamped ## [${version}] - ${date} from ${fragments.length} fragment(s): ${fragments.map((f) => `#${f.pr}`).join(", ")}`)
 }
 

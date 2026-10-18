@@ -75,6 +75,14 @@ export function fragmentReleaseTransition({ before, after, deletedFragments }) {
 
 export function checkPrChangelog({ changedFiles, policy, previousPolicy = policy, before, after, diff, labels = [], prNumber, fragment, deletedFragments = [] }) {
   const userFacingFiles = changedFiles.filter((path) => isUserFacingPath(path, policy) || isUserFacingPath(path, previousPolicy))
+  const handEdited = hasAddedUnreleasedLine(before, after, diff)
+  const consumed = fragmentReleaseTransition({ before, after, deletedFragments })
+  // A direct edit to ## [Unreleased] is the exact conflict source this gate exists to stop: it is
+  // refused in every case, including a no-changelog label and a PR with no other user-facing files.
+  if (handEdited && !consumed) {
+    const hand = prNumber ? addedUnreleasedParagraphs(before, after, diff) : []
+    return { pass: false, reason: `hand-edited ## [Unreleased] (${hand.map((p) => p.split("\n")[0].slice(0, 60)).join(" | ")}); Unreleased is assembled from ${FRAGMENT_DIR}/ fragments at release time`, userFacingFiles }
+  }
   if (labels.includes(noChangelogLabel)) return { pass: true, reason: "no-changelog label present", userFacingFiles }
   if (userFacingFiles.length === 0) return { pass: true, reason: "no user-facing changes", userFacingFiles }
   if (prNumber && fragment !== undefined) {
@@ -82,16 +90,9 @@ export function checkPrChangelog({ changedFiles, policy, previousPolicy = policy
     if (!hasOwnPrLink(fragment.content, prNumber)) {
       return { pass: false, reason: `changelog fragment ${fragmentPath(prNumber)} does not link this PR (https://github.com/code-yeongyu/oh-my-openagent/pull/${prNumber})`, userFacingFiles }
     }
-    if (hasAddedUnreleasedLine(before, after, diff)) {
-      return { pass: false, reason: `hand-edited ## [Unreleased] alongside ${fragmentPath(prNumber)}; Unreleased is assembled from fragments at release time`, userFacingFiles }
-    }
     return { pass: true, reason: `added ${fragmentPath(prNumber)}`, userFacingFiles }
   }
-  if (fragmentReleaseTransition({ before, after, deletedFragments })) return { pass: true, reason: "consumed changelog fragments into a new release section", userFacingFiles }
-  if (hasAddedUnreleasedLine(before, after, diff)) {
-    const hand = prNumber ? addedUnreleasedParagraphs(before, after, diff) : []
-    return { pass: false, reason: `hand-edited ## [Unreleased] (${hand.map((p) => p.split("\n")[0].slice(0, 60)).join(" | ")}); add ${fragmentPath(prNumber ?? 0)} instead`, userFacingFiles }
-  }
+  if (consumed) return { pass: true, reason: "consumed changelog fragments into a new release section", userFacingFiles }
   return { pass: false, reason: "user-facing changes without a changelog fragment", userFacingFiles }
 }
 
@@ -132,6 +133,19 @@ export function main(argv) {
   const deletedFragments = deletedNames.length
     ? readFragments(deletedNames.map((path) => path.slice(FRAGMENT_DIR.length + 1)), (name) => git("show", `${mergeBase}:${FRAGMENT_DIR}/${name}`))
     : []
+  // Validate the whole fragment directory at the head, not just this PR's own file: a stray name
+  // or an empty file fails here at review time instead of on release day.
+  const headDirNames = git("ls-tree", "-r", "--name-only", head, "--", FRAGMENT_DIR)
+    .split("\n")
+    .map((path) => path.trim())
+    .filter((path) => path.endsWith(".md"))
+    .map((path) => path.slice(FRAGMENT_DIR.length + 1))
+  try {
+    readFragments(headDirNames, (name) => git("show", `${head}:${FRAGMENT_DIR}/${name}`))
+  } catch (error) {
+    console.log(`changelog-gate: FAIL - ${error.message}`)
+    return 1
+  }
   const result = checkPrChangelog({
     changedFiles,
     policy: policyAt(head),

@@ -9,6 +9,7 @@ import {
   unreleasedBody,
 } from "./changelog-fragments"
 import { readdirSync, readFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -117,6 +118,13 @@ describe("migrated repository fragments", () => {
   })
   test("the working tree keeps Unreleased assembled only at release time", () => {
     expect(unreleasedBody(readFileSync(join(root, "CHANGELOG.md"), "utf8"))).toBe("")
+  })
+  test("migration: assembled entries are byte-identical to the pre-migration Unreleased section", () => {
+    const base = execFileSync("git", ["-C", root, "show", "ea18975e67:CHANGELOG.md"], { encoding: "utf8" })
+    const start = base.indexOf("## [Unreleased]")
+    const next = base.indexOf("\n## [", start + 10)
+    const paragraphs = base.slice(start + "## [Unreleased]".length, next).trim().split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).sort()
+    expect(assembleUnreleasedBody(fragments).split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).sort()).toEqual(paragraphs)
   })
   test("fragmentPath names the gate-checked file", () => {
     expect(fragmentPath(42)).toBe(`${FRAGMENT_DIR}/42.md`)
