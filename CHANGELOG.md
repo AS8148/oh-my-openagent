@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**`omo --help` no longer moves your OpenCode config before you start a session.** On a fresh install `--help` (and `--list-models` / `--list-tips`) loads the omo extension, and its startup migration moved `~/.config/opencode/oh-my-openagent.json` into `~/.omo/migration-backup-*`, so a 4.19.x OpenCode plugin fell back to its defaults. The migration now runs only on launches that can start a session, and `--help` still lists omo's own flags. Thanks to @bluet for the report and @twotnguyen for #10433. ([#10428](https://github.com/code-yeongyu/oh-my-openagent/issues/10428), [#10454](https://github.com/code-yeongyu/oh-my-openagent/pull/10454))
+
 **Built, tested and released on Bun 1.4.3.** CI, the release workflows and the devcontainer move from Bun 1.4.2 to 1.4.3, the current stable release, which fixes CVE-2026-48618 (TLS host names) and idle garbage collection in workers. ([#10432](https://github.com/code-yeongyu/oh-my-openagent/pull/10432))
 
 **OpenCode edition: Sisyphus names GPT-6.1 Sol and GPT-6 Luna as themselves.** On `gpt-6.1-sol` (and its `-fast`, dashed and Venice `gpt-61-sol` ids) and on `gpt-6-luna`, the Sisyphus and Sisyphus-Junior GPT prompts introduced the model as "a GPT-family model"; they now say "GPT-6.1 Sol" and "GPT-6 Luna". ([#10291](https://github.com/code-yeongyu/oh-my-openagent/issues/10291), [#10292](https://github.com/code-yeongyu/oh-my-openagent/pull/10292))
