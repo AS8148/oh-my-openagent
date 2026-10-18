@@ -65,6 +65,23 @@ describe("omo.memory.facts.apply", () => {
     expect(commit?.trailers["Generated-By"]).toBe("facts-extractor")
   }, 60_000)
 
+  test("#given the apply runtime cannot load #when the session applier is called #then it answers unavailable with the reason and writes nothing", async () => {
+    const { context, repo } = await boundIdentity()
+    const head = await repo.head()
+    const before = await snapshotTree(context.identityPaths.root)
+    const applier = createSessionFactsApplier({
+      resolveContext: () => context,
+      people: () => PEOPLE,
+      loadApply: () => Promise.reject(new Error("omo-onboarding-scan.js is missing")),
+    })
+
+    const response = await applier({ records: [PROJECT] }, "s1")
+
+    expect(response).toEqual({ kind: "unavailable", reason: expect.stringContaining("omo-onboarding-scan.js is missing") })
+    expect(await repo.head()).toBe(head)
+    expect(await snapshotTree(context.identityPaths.root)).toEqual(before)
+  }, 60_000)
+
   test("#given no bound session #when the RPC is called #then it answers unavailable", async () => {
     const host = rpcHost()
     createMemoryRpcBridge(host.pi, { resolveContext: () => undefined, activeRun: () => undefined, applyFacts: async () => ({ kind: "unavailable", reason: "x" }) })
