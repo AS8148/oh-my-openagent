@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Onboarding saves only the facts you keep, and the TUI and the desktop share one completion flag.** The facts you accept are written through memory's own write path, and finishing onboarding in either the TUI or the desktop marks it done for both. ([#10506](https://github.com/code-yeongyu/oh-my-openagent/pull/10506))
+
 **Onboarding can get to know you, once you agree.** After consent, the default model reads digests of your recent sessions and proposes facts about you and how you work; nothing is saved at this step. ([#10505](https://github.com/code-yeongyu/oh-my-openagent/pull/10505))
 
 **The engine can run `omo setup`'s detection for a client and apply only the stages you pick.** The new `omo.onboarding.scan` request streams what `omo setup` finds (sign-ins, custom providers, skills, MCP servers), and `omo.onboarding.apply` runs the same writers for the chosen stages only, refusing any target that changed since the scan and writing credentials through the engine's own store under its lock. ([#10496](https://github.com/code-yeongyu/oh-my-openagent/pull/10496))
