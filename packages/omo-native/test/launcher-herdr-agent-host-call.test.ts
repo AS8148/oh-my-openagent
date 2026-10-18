@@ -18,9 +18,14 @@ function write(path: string, content: string): void {
 }
 
 type Spawned = { argv: string[]; HERDR_AGENT: string | null; marker: string | null }
+type Run = { status: number | null; stderr: string; launches: Spawned[] }
 
-/** Runs a real omo command over a fake engine that records the environment of every launch. */
-function engineLaunches(args: readonly string[], env: Record<string, string>): Spawned[] {
+/**
+ * Runs a real omo command over a fake engine that records the environment of every launch. With
+ * `platform`, the launcher runs under that process.platform (as the launcher tests do for linux),
+ * so a platform-specific branch is exercised on every runner.
+ */
+function runOmo(args: readonly string[], env: Record<string, string>, platform?: NodeJS.Platform): Run {
   const root = mkdtempSync(join(tmpdir(), "omo-herdr-host-call-"))
   roots.push(root)
   const app = join(root, "app")
@@ -43,19 +48,32 @@ console.log("{}")
     "plugin/package.json", "plugin/extensions/omo.js", "plugin/runtime/lsp-daemon/dist/cli.js",
     "plugin/runtime/agent-toolkit/cli.js",
   ]) write(join(app, artifact), "fixture\n")
+  const entry = join(app, "probe.mjs")
+  write(entry, `${platform === undefined ? "" : `Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} })\n`}const { runLauncher } = await import("./bin/lib/launcher.js")
+await runLauncher(${JSON.stringify(args)})
+`)
   const capture = join(root, "engine-launches.jsonl")
   const home = join(root, "home")
   mkdirSync(home, { recursive: true })
   const { HERDR_ENV: _env, HERDR_AGENT: _agent, OMO_HERDR_AGENT_HINT: _marker, ...inherited } = process.env
-  const result = spawnSync(process.execPath, [join(app, "bin", "omo.js"), ...args], {
+  const result = spawnSync(process.execPath, [entry], {
     encoding: "utf8",
     env: {
       ...inherited, HOME: home, XDG_DATA_HOME: join(root, "xdg"), CLI_CAPTURE: capture,
       OMO_CODING_AGENT_DIR: join(root, "agent"), SENPI_CODING_AGENT_DIR: join(root, "agent"), ...env,
     },
   })
-  if (!existsSync(capture)) throw new Error(`no engine was started (${result.status}): ${result.stderr}`)
-  return readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Spawned)
+  const launches = existsSync(capture)
+    ? readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Spawned)
+    : []
+  return { status: result.status, stderr: result.stderr, launches }
+}
+
+const inheritedMarker = { HERDR_ENV: "1", HERDR_AGENT: "claude", OMO_HERDR_AGENT_HINT: "claude" }
+
+function expectUserValueKept(launches: Spawned[]): void {
+  expect(launches.length).toBeGreaterThan(0)
+  for (const launch of launches) expect({ HERDR_AGENT: launch.HERDR_AGENT, marker: launch.marker }).toEqual({ HERDR_AGENT: "claude", marker: null })
 }
 
 // A host call merges its caller's environment into the engine's (engineHostCall), and the daemon
@@ -63,12 +81,19 @@ console.log("{}")
 // not survive that merge: the task host and its RPC workers load the plugin, which would take a
 // marker that matches a user-set HERDR_AGENT as the launcher's and remove the user's value (#10448).
 describe("host calls never hand down an inherited herdr hint marker (#10448)", () => {
-  test.each([
-    ["daemon status", ["daemon", "status"]],
-    ["host status --all", ["host", "status", "--all"]],
-  ] as const)("#given a user-set HERDR_AGENT and a matching inherited marker #when `omo %s` starts the engine #then it keeps the user's value and gets no marker", (_name, args) => {
-    const launches = engineLaunches(args, { HERDR_ENV: "1", HERDR_AGENT: "claude", OMO_HERDR_AGENT_HINT: "claude" })
-    expect(launches.length).toBeGreaterThan(0)
-    for (const launch of launches) expect({ HERDR_AGENT: launch.HERDR_AGENT, marker: launch.marker }).toEqual({ HERDR_AGENT: "claude", marker: null })
+  test("#given a user-set HERDR_AGENT and a matching inherited marker #when `omo host status --all` starts the engine #then it keeps the user's value and gets no marker", () => {
+    expectUserValueKept(runOmo(["host", "status", "--all"], inheritedMarker).launches)
+  })
+
+  // `omo daemon` needs a unix socket, so it refuses on win32 before starting anything (below).
+  test.skipIf(process.platform === "win32")("#given a user-set HERDR_AGENT and a matching inherited marker #when `omo daemon status` starts the engine #then it keeps the user's value and gets no marker", () => {
+    expectUserValueKept(runOmo(["daemon", "status"], inheritedMarker).launches)
+  })
+
+  test("#given win32 #when `omo daemon status` runs with an inherited marker #then it refuses before starting any engine, so no marker can reach one", () => {
+    const run = runOmo(["daemon", "status"], inheritedMarker, "win32")
+    expect(run.launches).toEqual([])
+    expect(run.status).toBe(4)
+    expect(run.stderr).toContain("omo daemon: a task host needs a unix socket, which win32 does not provide")
   })
 })
