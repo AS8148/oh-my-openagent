@@ -3,6 +3,7 @@ import type { ExtensionContext, SessionStartEvent } from "@code-yeongyu/senpi"
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { getBuiltinSkillsRoot, getOmoNativeStateDir } from "../telemetry/product-identity"
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
+import { registerSessionHistoryRpc } from "./session-history-rpc"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
 
@@ -76,6 +77,7 @@ export function createOnboardingComponent(
       }
 
       pi.registerTool({ ...createOnboardingSessionHistoryTool({ stateDir }) })
+      registerSessionHistoryRpc(pi)
 
       pi.registerFlag("onboard", {
         type: "boolean",

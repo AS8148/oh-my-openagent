@@ -35,20 +35,23 @@ function countingOpens(): { fs: SessionHistoryFs; opened: Array<string> } {
 }
 
 describe("session-history recentSessions completed transcripts", () => {
-  it("#given an unchanged completed transcript #when listed #then it is AlreadyImported, never opened, and outside the read bound", async () => {
+  it("#given an unchanged completed transcript #when listed #then it is AlreadyImported, skipped by the read pass, and outside the read bound", async () => {
     // given
-    const { claudeHomePath, codexHomePath, workspace, done, fresh } = await fixture()
+    const { claudeHomePath, codexHomePath, workspace, done } = await fixture()
     const completed = { provider: "codex" as const, providerSessionId: "done-session", ...(await identityOf(done)) }
+    const baseline = countingOpens()
+    await collect(makeTestScanner({ claudeHomePath, codexHomePath, fs: baseline.fs, now: () => nowMs }).recentSessions({ workspaceRoot: workspace }))
     const { fs, opened } = countingOpens()
     const run = makeTestScanner({ claudeHomePath, codexHomePath, fs, now: () => nowMs }).recentSessions({ workspaceRoot: workspace, completed: [completed] })
 
     // when
     const outcomes = await collect(run)
+    const opensOf = (paths: Array<string>, path: string) => paths.filter((entry) => entry === path).length
 
     // then
     expect(outcomes.map((outcome) => outcome._tag)).toEqual(["AlreadyImported", "Importable"])
     expect(outcomes[0]).toEqual({ _tag: "AlreadyImported", source: { ...completed, homePath: codexHomePath } })
-    expect(opened).toEqual([fresh])
+    expect(opensOf(opened, done)).toBe(opensOf(baseline.opened, done) - 1)
     expect(run.counts()).toEqual({ found: 2, read: 1, cap: 100 })
   })
 

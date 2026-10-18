@@ -6,9 +6,9 @@ import { buildSessionDigest } from "./session-digest"
 import { realPathOr, statOrNull, type SessionHistoryFs } from "./session-history-fs"
 import type { CwdGroup } from "./transcript-cwd"
 import { parseAgentSessionRecords } from "./transcript-parser"
-import { readTranscriptRecords, transcriptIdentity } from "./transcript-reader"
+import { readTranscriptRecords, sameTranscriptIdentity, transcriptIdentity } from "./transcript-reader"
 import { extractDecodedCwd } from "./transcript-records"
-import type { AgentSessionSource, RecentSessionOutcome, RecentSessionsQuery, ScanCounts } from "./types"
+import type { AgentSessionSource, CompletedTranscript, RecentSessionOutcome, RecentSessionsQuery, ScanCounts, TranscriptSource } from "./types"
 
 export type SourcedGroup = CwdGroup & { readonly source: AgentSessionSource }
 
@@ -55,7 +55,8 @@ async function eligibleTranscripts(
 /**
  * Newest-first recent sessions of one project (or every non-excluded project). Each transcript is re-stat'ed
  * and re-read, and its own cwd rechecked, because a file can be replaced after discovery. Reads share the
- * per-call caps of 100 transcripts, 4 GiB and 100,000 records.
+ * per-call caps of 100 transcripts, 4 GiB and 100,000 records. A transcript still identical to one the caller
+ * names as completed is only stat'ed, never read, and does not count against those caps.
  */
 export function listRecentSessions(input: {
   readonly fs: SessionHistoryFs
@@ -66,6 +67,22 @@ export function listRecentSessions(input: {
 }): RecentSessionsRun {
   const counts = { found: 0, read: 0, cap: MAX_IMPORT_TRANSCRIPTS }
   const { fs, rules } = input
+  const completedByFile = new Map<string, Array<CompletedTranscript>>()
+  for (const completed of input.query.completed ?? []) {
+    const key = `${completed.provider}\0${completed.filePath}`
+    completedByFile.set(key, [...(completedByFile.get(key) ?? []), completed])
+  }
+  async function completedSource(entry: Eligible): Promise<TranscriptSource | null> {
+    const named = completedByFile.get(`${entry.group.source}\0${entry.filePath}`)
+    if (named === undefined) return null
+    const stats = await statOrNull(fs, entry.filePath)
+    if (stats === null || stats.type !== "File") return null
+    const identity = transcriptIdentity(entry.filePath, stats)
+    const match = named.find((completed) => sameTranscriptIdentity(completed, identity))
+    return match === undefined
+      ? null
+      : { ...identity, provider: entry.group.source, homePath: entry.group.homePath, providerSessionId: match.providerSessionId }
+  }
   async function* run(): AsyncGenerator<RecentSessionOutcome> {
     const eligible = await eligibleTranscripts(fs, rules, await input.groups(), input.query, input.now())
     counts.found = eligible.length
@@ -74,6 +91,12 @@ export function listRecentSessions(input: {
     let transcriptsRemaining = MAX_IMPORT_TRANSCRIPTS
     let recordsRemaining = MAX_IMPORT_RECORDS
     for (const entry of eligible) {
+      const imported = await completedSource(entry)
+      if (imported !== null) {
+        importedSessions.add(`${imported.provider}\0${imported.providerSessionId}`)
+        yield { _tag: "AlreadyImported", source: imported }
+        continue
+      }
       if (transcriptsRemaining === 0 || bytesRemaining === 0 || recordsRemaining === 0) {
         yield { _tag: "Skipped" }
         continue

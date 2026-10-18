@@ -8,11 +8,7 @@ import type { SessionHistoryFile, SessionHistoryFileStats, SessionHistoryFs } fr
 import { decodeTranscriptLine, shouldRetainDecodedRecord, type TranscriptRecord } from "./transcript-records"
 import type { AgentSessionSource, TranscriptSource } from "./types"
 
-export type TranscriptIdentity = Omit<TranscriptSource, "provider" | "homePath" | "providerSessionId"> & {
-  readonly device: number
-  readonly inode: number | null
-  readonly birthtimeMs: number | null
-}
+export type TranscriptIdentity = Omit<TranscriptSource, "provider" | "homePath" | "providerSessionId">
 
 export function transcriptIdentity(filePath: string, stats: SessionHistoryFileStats): TranscriptIdentity {
   return { filePath, size: stats.size, mtimeMs: stats.mtimeMs, device: stats.dev, inode: stats.ino, birthtimeMs: stats.birthtimeMs }
