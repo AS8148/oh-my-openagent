@@ -315,3 +315,16 @@ jobs:
               .addHeading(`${context.workflow}: checks skipped on a cancelled signal`)
               .addRaw(`No newer PR Automation Signal run exists for head ${head.slice(0, 10)}. The checks did not run. Use the workflow_dispatch input pr_number to run them for this PR.`)
               .write();
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Skipped-signal notice"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Event | \`${{ github.event_name }}\` |"
+            echo "| Upstream conclusion | \`${{ github.event.workflow_run.conclusion }}\` |"
+            echo "| Detail | see the notice step output above |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
