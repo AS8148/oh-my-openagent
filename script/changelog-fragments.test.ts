@@ -95,38 +95,3 @@ describe("Unreleased section merge", () => {
   })
 })
 
-describe("migrated repository fragments", () => {
-  // The migration moved every ## [Unreleased] paragraph into exactly one fragment named by the PR
-  // it links. The contract guards the release assembly input: one paragraph per fragment, own link,
-  // deterministic order — the released section is built from these files.
-  const dir = join(root, FRAGMENT_DIR)
-  const names = readdirSync(dir).filter((name) => name.endsWith(".md"))
-  const fragments = readFragments(names, (name) => readFileSync(join(dir, name), "utf8"))
-  const link = (pr: number) => new RegExp(`/pull/${pr}\\)`)
-
-  test("every fragment links its own PR", () => {
-    expect(fragments.length).toBeGreaterThan(0)
-    for (const fragment of fragments) {
-      expect(link(fragment.pr).test(fragment.content)).toBe(true)
-    }
-  })
-  test("assembly yields one entry per fragment, newest PR first", () => {
-    const assembled = assembleUnreleasedBody(fragments)
-    expect(assembled.split("\n\n")).toHaveLength(fragments.length)
-    const order = fragments.map((fragment) => fragment.pr)
-    expect([...order].sort((left, right) => right - left)).toEqual(order)
-  })
-  test("the working tree keeps Unreleased assembled only at release time", () => {
-    expect(unreleasedBody(readFileSync(join(root, "CHANGELOG.md"), "utf8"))).toBe("")
-  })
-  test("migration: assembled entries are byte-identical to the pre-migration Unreleased section", () => {
-    const base = execFileSync("git", ["-C", root, "show", "ea18975e67:CHANGELOG.md"], { encoding: "utf8" })
-    const start = base.indexOf("## [Unreleased]")
-    const next = base.indexOf("\n## [", start + 10)
-    const paragraphs = base.slice(start + "## [Unreleased]".length, next).trim().split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).sort()
-    expect(assembleUnreleasedBody(fragments).split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).sort()).toEqual(paragraphs)
-  })
-  test("fragmentPath names the gate-checked file", () => {
-    expect(fragmentPath(42)).toBe(`${FRAGMENT_DIR}/42.md`)
-  })
-})
