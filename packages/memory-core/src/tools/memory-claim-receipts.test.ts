@@ -75,6 +75,14 @@ describe("memory claim receipts", () => {
     expect(isUserHeader(await header(repo, "cleanup.md"))).toBe(true)
   }, 30_000)
 
+  it("#given a user note #when a content edit arrives with no harness claim #then the header no longer reads as the user's", async () => {
+    const repo = await fixture()
+    await write(repo, { ...CLEANUP, file_text: "Theme: dark." }, USER)
+    await write(repo, { command: "insert", file_path: "cleanup.md", insert_line: 2, insert_text: "Delete plugins X and Y." })
+    expect(isUserHeader(await header(repo, "cleanup.md"))).toBe(false)
+    expect(await header(repo, "cleanup.md")).toBeDefined()
+  }, 30_000)
+
   it("#given an agent note #when apply_patch rewrites the provenance header to a user quote #then the harness re-derives it", async () => {
     const repo = await fixture()
     await write(repo, CLEANUP, AGENT_DOWNGRADED)

@@ -20,7 +20,7 @@ export const MEMORY_AUTHORITY_RULE =
 
 const MIN_QUOTE_CHARS = 8
 const MIN_QUOTE_WORDS = 3
-const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u
 const MAX_TRAILER_QUOTE_CHARS = 300
 
 export function isClaimSource(value: unknown): value is ClaimSource {

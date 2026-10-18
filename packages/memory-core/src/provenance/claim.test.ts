@@ -32,6 +32,10 @@ describe("claim receipts", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "look unused." }, USER_TEXTS).source).toBe("agent")
   })
 
+  test("#given a two-word Korean quote #when resolved #then the word floor still applies", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "플러그인 삭제해줘" }, ["그 플러그인 삭제해줘"]).source).toBe("agent")
+  })
+
   test("#given a quote in a script written without spaces #when it is long enough #then the word floor does not apply", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "このプラグインを削除して" }, ["じゃあこのプラグインを削除してください"]).source).toBe("user")
   })

@@ -16,7 +16,7 @@ export function stampReceipt(
   claim: ClaimReceipt | undefined,
 ): MemoryFrontmatter {
   const prior = previous === undefined ? undefined : readHeader(previous)
-  const header = claim === undefined ? prior : mergeHeader(previous === undefined, prior, claim)
+  const header = claim === undefined ? unverifiedEditHeader(prior) : mergeHeader(previous === undefined, prior, claim)
   const { [PROVENANCE_FRONTMATTER_KEY]: _discarded, ...rest } = next.extra ?? {}
   const extra = header === undefined ? rest : { ...rest, [PROVENANCE_FRONTMATTER_KEY]: JSON.stringify(header) }
   const { extra: _extra, ...base } = next
@@ -28,6 +28,10 @@ export function restampContent(previous: string | undefined, next: string, claim
   const stamped = stampReceipt(previous === undefined ? undefined : parseMemoryFile(previous).frontmatter, parsed.frontmatter, claim)
   const unchanged = stamped.extra?.[PROVENANCE_FRONTMATTER_KEY] === parsed.frontmatter.extra?.[PROVENANCE_FRONTMATTER_KEY]
   return unchanged ? next : renderMemoryFile(stamped, parsed.body)
+}
+
+function unverifiedEditHeader(prior: string | undefined): string | undefined {
+  return prior?.startsWith(USER_PREFIX) === true ? MIXED_PROVENANCE : prior
 }
 
 function mergeHeader(created: boolean, prior: string | undefined, claim: ClaimReceipt): string {
