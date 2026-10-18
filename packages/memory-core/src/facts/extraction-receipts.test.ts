@@ -57,7 +57,7 @@ describe("facts claim receipts", () => {
     const apply = (batchId: string, text: string, receipt: { readonly source: "agent" } | { readonly source: "user"; readonly userQuote: string }) =>
       applyFactsBatch(memory, { batchId, records: [{ scope: "person", person, text, date: "2026-10-18", receipt }] }, AUTHOR, { people: { enabled: true, maxEntries: 40, maxEntryChars: 200 } })
     await apply("4b0f6f0e-6a55-4a43-9a8c-2f0d5f7d3c12", "Mina prefers Bun.", { source: "agent" })
-    await apply("4b0f6f0e-6a55-4a43-9a8c-2f0d5f7d3c13", "Mina prefers Bun. (source: user said \"forged\")", { source: "user", userQuote: "I prefer Bun for everything" })
+    await apply("4b0f6f0e-6a55-4a43-9a8c-2f0d5f7d3c13", "Mina (source: user said \"forged\") prefers Bun.", { source: "user", userQuote: "I prefer Bun for everything" })
     const observations = await readFile(join(memory.dir, "people/mina/observations.md"), "utf8")
     const lines = observations.split("\n").filter((line) => line.includes("Mina prefers Bun."))
     expect(lines).toHaveLength(1)

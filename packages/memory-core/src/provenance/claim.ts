@@ -22,6 +22,7 @@ const MIN_QUOTE_CHARS = 8
 const MIN_QUOTE_WORDS = 3
 const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u
 const MAX_TRAILER_QUOTE_CHARS = 300
+const MAX_STORED_QUOTE_CHARS = 500
 
 export function isClaimSource(value: unknown): value is ClaimSource {
   return typeof value === "string" && (CLAIM_SOURCES as readonly string[]).includes(value)
@@ -30,16 +31,36 @@ export function isClaimSource(value: unknown): value is ClaimSource {
 export function resolveClaimReceipt(claim: ClaimInput, userTexts: readonly string[]): ClaimReceipt {
   if (claim.source === "agent") return { source: "agent" }
   if (claim.source !== "user") return { source: "inferred" }
-  const quote = typeof claim.userQuote === "string" ? claim.userQuote.trim() : ""
-  if (!quoteAppearsInUserText(quote, userTexts)) return { source: "agent", downgraded: true }
-  return { source: "user", userQuote: quote }
+  const quote = typeof claim.userQuote === "string" ? claim.userQuote : ""
+  const sentence = enclosingUserSentence(quote, userTexts)
+  return sentence === undefined ? { source: "agent", downgraded: true } : { source: "user", userQuote: sentence }
+}
+
+// The receipt stores the WHOLE user sentence that contains the quote, never the fragment the model chose: a fragment
+// can drop a negation or a question ("Don't delete the prod database yet" -> "delete the prod database").
+export function enclosingUserSentence(quote: string, userTexts: readonly string[]): string | undefined {
+  const needle = normalize(quote)
+  if (needle.length < MIN_QUOTE_CHARS) return undefined
+  if (!UNSPACED_SCRIPT.test(needle) && needle.split(" ").length < MIN_QUOTE_WORDS) return undefined
+  for (const text of userTexts) {
+    if (!normalize(text).includes(needle)) continue
+    const sentence = sentencesOf(text).find((candidate) => normalize(candidate).includes(needle))
+    return capQuote(sentence ?? text)
+  }
+  return undefined
 }
 
 export function quoteAppearsInUserText(quote: string, userTexts: readonly string[]): boolean {
-  const needle = normalize(quote)
-  if (needle.length < MIN_QUOTE_CHARS) return false
-  if (!UNSPACED_SCRIPT.test(needle) && needle.split(" ").length < MIN_QUOTE_WORDS) return false
-  return userTexts.some((text) => normalize(text).includes(needle))
+  return enclosingUserSentence(quote, userTexts) !== undefined
+}
+
+function sentencesOf(text: string): string[] {
+  return text.split(/(?<=[.!?。！？])\s+|\n+/u).map((part) => part.trim()).filter((part) => part.length > 0)
+}
+
+function capQuote(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim()
+  return line.length > MAX_STORED_QUOTE_CHARS ? `${line.slice(0, MAX_STORED_QUOTE_CHARS)}...` : line
 }
 
 export function renderClaimReceipt(receipt: ClaimReceipt): string {

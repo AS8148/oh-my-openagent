@@ -10,12 +10,19 @@ const USER_TEXTS = ["Please look at the WordPress plugins and tell me which ones
 describe("claim receipts", () => {
   test("#given a user claim whose quote appears in a user message #when resolved #then it keeps the user source and the quote", () => {
     const receipt = resolveClaimReceipt({ source: "user", userQuote: "tell me which ones look unused" }, USER_TEXTS)
-    expect(receipt).toEqual({ source: "user", userQuote: "tell me which ones look unused" })
+    expect(receipt).toEqual({ source: "user", userQuote: USER_TEXTS[0] })
   })
 
   test("#given the #10488 flip: a user claim quoting the agent's own suggestion #when resolved #then it is downgraded to an agent suggestion", () => {
     const receipt = resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, USER_TEXTS)
     expect(receipt).toEqual({ source: "agent", downgraded: true })
+  })
+
+  test("#given a quote cut out of a negation or a question #when resolved #then the receipt keeps the whole user sentence", () => {
+    const negation = resolveClaimReceipt({ source: "user", userQuote: "delete the prod database" }, ["Don't delete the prod database yet. Ask me again tomorrow."])
+    expect(negation).toEqual({ source: "user", userQuote: "Don't delete the prod database yet." })
+    const question = resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, ["Should we remove plugins X and Y? I'm not sure."])
+    expect(question).toEqual({ source: "user", userQuote: "Should we remove plugins X and Y?" })
   })
 
   test("#given a user claim with no quote #when resolved #then it is downgraded", () => {

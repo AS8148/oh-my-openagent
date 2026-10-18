@@ -24,7 +24,7 @@ const TRANSCRIPT = [
   { type: "message", message: { role: "assistant", content: [{ type: "text", text: "I suggest removing plugins X and Y." }] } },
 ]
 
-async function dispatchMemoryCall(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function dispatchMemoryCall(input: Record<string, unknown>, branch?: readonly unknown[]): Promise<Record<string, unknown>> {
   const root = realpathSync.native(await mkdtemp(join(tmpdir(), "omo-memory-claim-")))
   roots.push(root)
   const identityPaths = buildIdentityPaths(root, "agent")
@@ -38,7 +38,7 @@ async function dispatchMemoryCall(input: Record<string, unknown>): Promise<Recor
     resolveContext: () => context,
     resolveSettings: () => ({ enabled: true, everyUserTurns: 10 }),
   }).register(pi)
-  const ctx = { sessionManager: { getSessionId: () => "s", getEntries: () => TRANSCRIPT } }
+  const ctx = { sessionManager: { getSessionId: () => "s", getEntries: () => TRANSCRIPT, ...(branch === undefined ? {} : { getBranch: () => branch }) } }
   await pi.dispatch("session_start", {}, ctx)
   const call = { type: "tool_call", toolCallId: "call-1", toolName: "memory", input }
   await pi.dispatch("tool_call", call, ctx)
@@ -55,7 +55,18 @@ describe("memory tool claim receipts", () => {
 
   test("#given a user claim quoting the user's own message #when the memory call starts #then the user receipt keeps the quote", async () => {
     const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "tell me which look unused" })
-    expect(provenance["claim"]).toEqual({ source: "user", userQuote: "tell me which look unused" })
+    expect(provenance["claim"]).toEqual({ source: "user", userQuote: "Review the site plugins and tell me which look unused." })
+  }, 30_000)
+
+  test("#given the quoted user message is only on an abandoned branch #when the memory call starts #then the claim is downgraded", async () => {
+    // given: the live branch holds only the assistant's suggestion
+    const liveBranch = [TRANSCRIPT[0], TRANSCRIPT[2]]
+
+    // when
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "tell me which look unused" }, liveBranch)
+
+    // then
+    expect(provenance["claim"]).toEqual({ source: "agent", downgraded: true })
   }, 30_000)
 
   test("#given a model-supplied claim object #when the memory call starts #then it is overwritten by the verified receipt", async () => {

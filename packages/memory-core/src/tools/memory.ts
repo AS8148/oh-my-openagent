@@ -180,7 +180,7 @@ async function updateDescription(root: string, params: MemoryToolParams): Promis
   const description = acceptableDescription(params.description, "update_description")
   const path = validateMemoryPath(root, source, { fieldName: "file_path" })
   const file = await loadEditable(path, source)
-  await writeFile(path, renderMemoryFile({ ...file.frontmatter, description }, file.body), "utf8")
+  await writeFile(path, renderMemoryFile(stampReceipt(file.frontmatter, { ...file.frontmatter, description }, params.provenance?.claim), file.body), "utf8")
   return affected(root, path)
 }
 

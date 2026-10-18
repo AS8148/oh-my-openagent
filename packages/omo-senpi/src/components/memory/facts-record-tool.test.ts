@@ -134,7 +134,7 @@ describe("facts record tool", () => {
 
       const [flip, real] = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
       expect(flip.receipt).toEqual({ source: "agent", downgraded: true })
-      expect(real.receipt).toEqual({ source: "user", userQuote: "tell me which look unused" })
+      expect(real.receipt).toEqual({ source: "user", userQuote: "Review the plugins and tell me which look unused." })
     } finally {
       await rm(root, { recursive: true, force: true })
     }
