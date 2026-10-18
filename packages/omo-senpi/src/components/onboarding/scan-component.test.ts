@@ -17,9 +17,11 @@ import {
   ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD,
   ONBOARDING_UNDERSTAND_STOP_RPC_METHOD,
   createOnboardingScanComponent,
+  createOnboardingScanStore,
   type OnboardingApplyResponse,
   type OnboardingScanEvent,
   type OnboardingScanResponse,
+  type OnboardingScanStore,
 } from "./scan-component"
 
 const roots: string[] = []
@@ -144,10 +146,20 @@ interface RegisterOptions {
   readonly now?: () => number
 }
 
+/** One session with a scan store of its own, so no test sees another test's retained scans. */
 function register(profile: Profile, options: RegisterOptions = {}) {
+  return registerSession(profile, createOnboardingScanStore(), options)
+}
+
+/**
+ * One session of an engine process. Sessions given the same store share retained scans the way
+ * sessions of one process do; `undefined` is production wiring, the process-wide store.
+ */
+function registerSession(profile: Profile, store: OnboardingScanStore | undefined, options: RegisterOptions = {}) {
   const host = fakeHost()
   createOnboardingScanComponent({
     runtime: () => ({ home: profile.home, env: profile.env, agentDir: profile.agentDir }),
+    ...(store === undefined ? {} : { scanStore: store }),
     ...(options.authStore === undefined ? {} : { authStore: options.authStore }),
     ...(options.now === undefined ? {} : { now: options.now }),
   }).register(host.pi, {} as never)
@@ -453,6 +465,105 @@ describe("onboarding apply credential writes", () => {
     const auth = JSON.parse(readFileSync(authPath(profile), "utf8")) as Record<string, { refresh?: string; key?: string }>
     expect(auth.anthropic?.refresh).toBe("r2")
     expect(auth.openai?.key).toBe(SECRET)
+  })
+})
+
+describe("onboarding scan and apply across sessions of one process", () => {
+  // The desktop scans on one control session, which closes when the stream ends, then applies on a
+  // new one: the retained scan has to outlive the session that ran it.
+  test("#given a scan on session A #when session B applies it #then the apply succeeds and writes", async () => {
+    const profile = openCodeProfile()
+    // Production wiring: neither session is handed a store, so both use the process-wide one.
+    const a = registerSession(profile, undefined)
+    const b = registerSession(profile, undefined)
+    const { scanId } = await a.scan({})
+
+    const response = await b.apply({ scanId, stages: ["assets"] })
+
+    expect(response).toEqual(expect.objectContaining({ scanId, applied: ["assets"] }))
+    const servers = (JSON.parse(readFileSync(join(profile.agentDir, "mcp.json"), "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers
+    expect(servers.ctx).toBeDefined()
+  })
+
+  test("#given session B captured no credential store #when it applies session A's scan #then credentials go through the store the process captured last", async () => {
+    const profile = openCodeProfile()
+    const store = createOnboardingScanStore()
+    const a = registerSession(profile, store)
+    const log: string[] = []
+    await a.dispatchEvent("session_start", { type: "session_start", reason: "startup" }, {
+      modelRegistry: { authStorage: fileStore(authPath(profile), log) },
+    })
+    const { scanId } = await a.scan({})
+    const b = registerSession(profile, store)
+
+    const response = await b.apply({ scanId, stages: ["credentials"] })
+
+    expect(response).toEqual(expect.objectContaining({ applied: ["credentials"] }))
+    expect(log).toContain("enter:openai")
+    const auth = JSON.parse(readFileSync(authPath(profile), "utf8")) as { openai?: { type?: string; key?: string } }
+    expect(auth.openai).toEqual({ type: "api_key", key: SECRET })
+  })
+
+  test("#given session B applied session A's scan #when either session applies it again #then both answer unavailable", async () => {
+    const profile = openCodeProfile()
+    const store = createOnboardingScanStore()
+    const a = registerSession(profile, store)
+    const b = registerSession(profile, store)
+    const { scanId } = await a.scan({})
+    expect(await b.apply({ scanId, stages: ["assets"] })).toEqual(expect.objectContaining({ applied: ["assets"] }))
+
+    expect(await b.apply({ scanId, stages: ["assets"] })).toEqual(expect.objectContaining({ kind: "unavailable" }))
+    expect(await a.apply({ scanId, stages: ["assets"] })).toEqual(expect.objectContaining({ kind: "unavailable" }))
+  })
+
+  test("#given simultaneous applies of one scan from two sessions #when both run #then exactly one succeeds", async () => {
+    const profile = openCodeProfile()
+    const store = createOnboardingScanStore()
+    const a = registerSession(profile, store)
+    const b = registerSession(profile, store)
+    const { scanId } = await a.scan({})
+
+    const responses = await Promise.all([
+      a.apply({ scanId, stages: ["assets"] }),
+      b.apply({ scanId, stages: ["assets"] }),
+    ])
+
+    expect(responses.filter((response) => "applied" in response && (response as { applied: readonly string[] }).applied.includes("assets"))).toHaveLength(1)
+    expect(responses.filter((response) => "kind" in response && response.kind === "unavailable")).toHaveLength(1)
+  })
+
+  test("#given session A's scan is older than ten minutes #when session B applies it #then it answers stale with the expiry reason and writes nothing", async () => {
+    const profile = openCodeProfile()
+    const store = createOnboardingScanStore()
+    let now = 1_000_000_000_000
+    const a = registerSession(profile, store, { now: () => now })
+    const b = registerSession(profile, store, { now: () => now })
+    const { scanId } = await a.scan({})
+    now += 10 * 60_000 + 1
+
+    const response = await b.apply({ scanId, stages: ["credentials"] })
+
+    expect(response).toEqual(expect.objectContaining({ kind: "stale" }))
+    expect((response as { reason?: string }).reason).toContain("expired")
+    expect(existsSync(profile.agentDir)).toBe(false)
+  })
+
+  test("#given a target changed after session A's scan #when session B applies it #then it answers stale and the user's edit survives", async () => {
+    const profile = openCodeProfile()
+    const store = createOnboardingScanStore()
+    const a = registerSession(profile, store)
+    const b = registerSession(profile, store)
+    const { scanId } = await a.scan({})
+    const mcp = join(profile.agentDir, "mcp.json")
+    write(mcp, JSON.stringify({ mcpServers: { "user-server": { type: "local", command: ["npx", "x"] } } }, null, 2))
+
+    const response = await b.apply({ scanId, stages: ["assets"] })
+
+    expect(response).toEqual(expect.objectContaining({ kind: "stale" }))
+    expect((response as { paths?: readonly string[] }).paths).toContain(mcp)
+    const servers = (JSON.parse(readFileSync(mcp, "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers
+    expect(servers["user-server"]).toBeDefined()
+    expect(servers.ctx).toBeUndefined()
   })
 })
 
