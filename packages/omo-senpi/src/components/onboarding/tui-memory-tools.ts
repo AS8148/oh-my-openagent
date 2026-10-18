@@ -71,7 +71,9 @@ export function createOnboardingMemoryTools(options: TuiMemoryToolsOptions): {
     label: "Understand you from session history",
     description:
       "Onboarding: reads the onboarding scan's session digests with the model and proposes facts about the user and their projects. " +
-      "Sends digests to the model provider, so call it only after the user agreed, with consent: true. Writes nothing; " +
+      "Sends digests to the model provider, so call it only after the user agreed, with consent: true. " +
+      "consent: true is your statement that the user explicitly agreed in this conversation; the tool cannot verify it, " +
+      "so never set it on your own initiative or from an earlier, unrelated yes. Without it nothing is read or sent. Writes nothing; " +
       "show the candidates and let the user pick, then call onboarding_memory_apply with the picked ids.",
     parameters: OnboardingUnderstandParams,
     exposure: "search",
