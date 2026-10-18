@@ -57,7 +57,7 @@ const REPLAY_CONTEXT_PARAMETER = {
 
 /** A layer-2 tool, while the toolkit is on, also accepts the replay context; every other tool keeps its declared parameters. */
 function toolParameters(options: ThreadToolSurfaceOptions, op: DeclaredSessionOp): DeclaredSessionOp["parameters"] {
-  if (options.doriReplay === undefined || doriLayer2Path(op.extension, op.toolName) === undefined) return op.parameters
+  if (options.doriToolkit !== true || doriLayer2Path(op.extension, op.toolName) === undefined) return op.parameters
   const declared = op.parameters as { readonly properties?: Readonly<Record<string, unknown>> }
   return { ...op.parameters, properties: { ...(declared.properties ?? {}), [REPLAY_CONTEXT_ARG]: REPLAY_CONTEXT_PARAMETER } } as DeclaredSessionOp["parameters"]
 }
@@ -75,21 +75,29 @@ function extensionTool(options: ThreadToolSurfaceOptions, op: DeclaredSessionOp)
       if (caller === undefined) {
         return output({ kind: "refused", code: "caller_context_missing", message: "The calling session's durable id is not in the thread address book; the op was not run." })
       }
-      const layer2 = options.doriReplay === undefined ? undefined : doriLayer2Path(op.extension, op.toolName)
-      if (options.doriReplay === undefined || layer2 === undefined) return output(await options.store.extensionSessionAwait(op.extension, op.op, args, { callerDurableId: caller }))
+      const layer2 = doriLayer2Path(op.extension, op.toolName)
+      if (options.doriToolkit !== true || layer2 === undefined) {
+        return output(await options.store.extensionSessionAwait(op.extension, op.op, args, { callerDurableId: caller }))
+      }
       const journal = await loadDoriReplayModule()
       const { carried, args: opArgs } = journal.splitReplayContext(args)
       const turn = journal.resolveReplayTurn(caller, ectx, carried, toolCallId)
       if ("kind" in turn) return output(turn)
-      const replay = await options.doriReplay()
-      return output(await replay.run(turn, layer2.op, opArgs, () => options.store.extensionSessionAwait(op.extension, op.op, opArgs, { callerDurableId: caller })) as ExtensionCallResult)
+      const replay = journal.replayRequestFor(turn, layer2.op, opArgs)
+      const result = await options.store.extensionSessionAwait(op.extension, op.op, opArgs, { callerDurableId: caller, replay })
+      return output(journal.replayResultOf(result) as ExtensionCallResult)
     },
   }
 }
 
+
 /** One tool per declared session op; reads the store's declarations and imports no extension module. */
 export async function buildExtensionTools(options: ThreadToolSurfaceOptions): Promise<AnyTool[]> {
-  return (await options.store.sessionCallableOps()).map((op) => extensionTool(options, op))
+  const ops = await options.store.sessionCallableOps()
+  // With the dori section off, a registered layer-2 op must not become a callable tool at all: its
+  // effects lose their replay protection, so discovery refuses them rather than dispatching bare.
+  const callable = options.doriToolkit === true ? ops : ops.filter((op) => doriLayer2Path(op.extension, op.toolName) === undefined)
+  return callable.map((op) => extensionTool(options, op))
 }
 
 export type ExtensionToolHost = {

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
@@ -12,8 +12,6 @@ import { registerInitialSkills } from "./initial-skills"
 import { controlSessionOf, createControlEndpointRegistrant, hostInstanceOf, sessionControlOf, type ControlEndpointRegistrantOptions, type SessionControlActionsPort } from "./gateway/registration"
 import { createGatewayStore, type GatewayStore } from "./gateway/store"
 import { registerThreadTools, UNKNOWN_CALLER, type ThreadToolSurfaceOptions } from "./tools"
-import type { DoriReplay } from "./tools/dori-replay"
-import { loadDoriReplayModule } from "./tools/dori-replay-loader"
 import { createLazyLiveThreadSurface } from "./lazy-live-surface"
 import { defaultThreadStateDirectory } from "./live-surface-paths"
 
@@ -55,16 +53,6 @@ function readDoriSection(options: ThreadComponentOptions, ctx: ComponentContext)
   } catch (error) {
     ctx.logger.warn(`thread gateway: the dori config section was not read, so the dori toolkit stays off: ${error instanceof Error ? error.message : String(error)}`)
     return undefined
-  }
-}
-
-/** The layer-2 replay journal beside the gateway store, opened on the first layer-2 call and shared by every session of this process. */
-function lazyDoriReplay(agentDir: () => string): () => Promise<DoriReplay> {
-  let opened: Promise<DoriReplay> | undefined
-  return () => {
-    opened ??= loadDoriReplayModule().then((module) => module.openDoriReplay({ path: join(dirname(gatewayDatabasePath(agentDir())), "toolkit-replay.sqlite") }))
-    opened.catch(() => { opened = undefined })
-    return opened
   }
 }
 
@@ -255,7 +243,7 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
         callerRunDeliveries: () => [...run.consumed],
         callerRunHasLocalInput: () => run.local,
         onCompletionArmed: (durableId, armSeq) => completions.arm(durableId, armSeq),
-        ...(doriToolkit ? { doriReplay: options.doriReplay ?? lazyDoriReplay(agentDir) } : {}),
+        ...(doriToolkit ? { doriToolkit: true } : {}),
       }, (line) => ctx.logger.warn(line))
       // A durable arm this runtime did not make itself - left by an earlier runtime (a restart, or a
       // crash before its write), or made by another process (`omo thread report ... completion`) - is

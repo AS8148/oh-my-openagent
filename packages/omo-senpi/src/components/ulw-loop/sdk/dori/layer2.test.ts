@@ -62,6 +62,7 @@ test("#given calls from an eval cell #when they run #then each carries that cell
 
 test("#given concurrent calls whose answers arrive in reverse #when a fresh kernel replays the cell #then the indexes follow program order both times", async () => {
   const run = async () => {
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for("omo.doriToolkitCellCounters")]
     const pending: (() => void)[] = []
     const { host, calls } = fakeHost({}, (resolve) => { pending.push(resolve); if (pending.length === 3) for (const release of pending.reverse()) release() })
     const toolkit = withDoriLayer2(base, host)
@@ -83,6 +84,14 @@ test("#given two cells #when each calls #then each counts its own indexes from z
   await inCell("toolu_cellA", 'await toolkit.reply.mark({}); await toolkit.reply.mark({})', { toolkit })
   await inCell("toolu_cellB", "await toolkit.reply.mark({})", { toolkit })
   expect(calls.map(replayOf)).toEqual([{ cell: "toolu_cellA", index: 0 }, { cell: "toolu_cellA", index: 1 }, { cell: "toolu_cellB", index: 0 }])
+})
+
+test("#given two toolkit views in one kernel #when the same cell calls through each #then they share the cell's counter", async () => {
+  const { host, calls } = fakeHost()
+  const first = withDoriLayer2(base, host)
+  const second = withDoriLayer2(base, host)
+  await inCell("toolu_cellC", "const { toolkitA, toolkitB } = globalThis.__doriCellScope; await toolkitA.reply.mark({}); await toolkitB.reply.mark({})", { toolkitA: first, toolkitB: second })
+  expect(calls.map(replayOf)).toEqual([{ cell: "toolu_cellC", index: 0 }, { cell: "toolu_cellC", index: 1 }])
 })
 
 test("#given a call made outside any eval cell #when it runs #then it carries no replay context and the engine decides", async () => {

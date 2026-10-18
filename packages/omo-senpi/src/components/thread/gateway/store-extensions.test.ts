@@ -30,6 +30,7 @@ describe("store extension migrations", () => {
     try {
       db.exec("DROP TABLE thread_creations")
       db.exec("DROP TABLE extension_registrations")
+      db.exec("DROP TABLE toolkit_replay_receipts")
       db.exec("DELETE FROM extension_objects WHERE owner IS NULL AND name NOT IN (SELECT name FROM sqlite_schema)")
       db.exec("PRAGMA user_version = 6")
     } finally {

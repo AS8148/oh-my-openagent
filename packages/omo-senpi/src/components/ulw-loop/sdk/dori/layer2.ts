@@ -118,10 +118,11 @@ async function callLayer2(host: KernelToolHost, tool: string, args: Readonly<Rec
   return result as DoriCallResult
 }
 
-type CellCounters = Map<string, number>
+/** Kernel-wide, so every wrapper in one kernel shares a cell's counter: re-importing the layer or a second toolkit view never restarts a cell's indexes. */
+const CELL_COUNTERS = Symbol.for("omo.doriToolkitCellCounters")
 
 /** Index and cell are taken synchronously at the call, before any await, so concurrent calls keep program order. */
-function layerFunction(host: KernelToolHost, counters: CellCounters, path: readonly string[]): DoriFunction {
+function layerFunction(host: KernelToolHost, counters: Map<string, number>, path: readonly string[]): DoriFunction {
   const invoke = (args: Readonly<Record<string, unknown>> = {}) => {
     const cell = callingCell()
     if (cell === undefined) return callLayer2(host, `${TOOL_PREFIX}${path.join("_")}`, args)
@@ -137,7 +138,7 @@ function layerFunction(host: KernelToolHost, counters: CellCounters, path: reado
   }) as unknown as DoriFunction
 }
 
-function namespaceObject(host: KernelToolHost, counters: CellCounters, namespace: DoriToolkitNamespace): DoriNamespace {
+function namespaceObject(host: KernelToolHost, counters: Map<string, number>, namespace: DoriToolkitNamespace): DoriNamespace {
   return new Proxy(Object.freeze({}), {
     get(target, property) {
       if (typeof property !== "string" || property === "then") return Reflect.get(target, property)
@@ -174,7 +175,8 @@ async function describeLayer2(host: KernelToolHost): Promise<DoriLayer2Help> {
 
 /** The toolkit with the eleven namespaces added and `help()` listing the registered functions with their signatures. */
 export function withDoriLayer2<Base extends { readonly help: () => Promise<{ readonly ok: boolean }> }>(base: Base, host: KernelToolHost = kernelToolHost()): Base & DoriLayer2 {
-  const counters: CellCounters = new Map()
+  const counters = ((globalThis as { [key: symbol]: unknown })[CELL_COUNTERS] as Map<string, number> | undefined) ?? new Map<string, number>()
+  ;(globalThis as { [key: symbol]: unknown })[CELL_COUNTERS] = counters
   const namespaces = Object.fromEntries(DORI_TOOLKIT_NAMESPACES.map((namespace) => [namespace, namespaceObject(host, counters, namespace)])) as DoriLayer2
   const help = async () => {
     const response = await base.help()

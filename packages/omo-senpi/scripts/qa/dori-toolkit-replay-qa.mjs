@@ -35,7 +35,7 @@ const mockProvider = join(packageRoot, "scripts/qa/task-e2e-mock-provider.ts")
 const parameters = { type: "object", additionalProperties: false, properties: { note: { type: "string" } } }
 const SDK_IMPORT = 'const { agentToolkit } = await import(`${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js`)'
 const FIRST_CELL = `${SDK_IMPORT}; print("QA_KEYS " + JSON.stringify(Object.keys(agentToolkit))); const help = await agentToolkit.help(); print("QA_HELP " + JSON.stringify(help.result.layer2)); const mark = await agentToolkit.reply.mark({ note: "qa" }); const posts = await Promise.all([agentToolkit.send.post({ note: "p1" }), agentToolkit.send.post({ note: "p2" })]); print("QA_FIRST " + JSON.stringify({ mark, posts }))`
-const OFF_CELL = `${SDK_IMPORT}; print("QA_KEYS " + JSON.stringify(Object.keys(agentToolkit)))`
+const OFF_CELL = `${SDK_IMPORT}; print("QA_KEYS " + JSON.stringify(Object.keys(agentToolkit))); print("QA_TOOLS " + JSON.stringify((await tool_schema()).tools.filter(name => name.startsWith("ext_dori_"))))`
 const FORGED_CELL = `${SDK_IMPORT}; try { print("QA_EVAL_RESULT " + JSON.stringify(await agentToolkit.reply.mark({ note: "qa" }))) } catch (error) { print("QA_EVAL_ERROR " + JSON.stringify({ name: error.name, code: error.code })) }`
 const QA_CELL = "cell-qa-1"
 const OLD_CELL = "cell-qa-old"
@@ -159,11 +159,11 @@ function storeRows(agentDir) {
 }
 
 function journalRows(agentDir) {
-  const path = join(agentDir, "gateway", "toolkit-replay.sqlite")
+  const path = join(agentDir, "gateway", "gateway.sqlite")
   if (!existsSync(path)) return []
-  const db = new Database(path)
+  const db = new Database(path, { readonly: true })
   try {
-    return db.query("SELECT replay_key, op, args_sha256, state FROM toolkit_replay ORDER BY replay_key").all()
+    return db.query("SELECT replay_key, op, args_sha256 FROM toolkit_replay_receipts ORDER BY replay_key").all()
   } finally {
     db.close()
   }
@@ -229,7 +229,8 @@ async function supervise() {
     const off = await run("off")
     phases.push(off)
     const offKeys = tagged(off.output, "QA_KEYS")[0] ?? []
-    check("off: no dori section means no namespace properties", off.code === 0 && offKeys.length > 0 && !offKeys.includes("reply") && !offKeys.includes("work"), JSON.stringify(offKeys))
+    const offTools = tagged(off.output, "QA_TOOLS")[0] ?? []
+    check("off: no dori section means no namespace properties and no dori tools at all", off.code === 0 && offKeys.length > 0 && !offKeys.includes("reply") && !offKeys.includes("work") && offTools.length === 0, `keys=${JSON.stringify(offKeys)} tools=${JSON.stringify(offTools)}`)
 
     writeFileSync(configPath, JSON.stringify({ dori: {} }))
     const prepare = await run("prepare")

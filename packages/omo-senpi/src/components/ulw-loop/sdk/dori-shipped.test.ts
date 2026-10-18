@@ -59,9 +59,9 @@ test("#given the shipped SDK with its dori sidecar #when it is imported with the
 }, 30_000)
 
 test("#given the shipped extension #when its bundles are read #then the replay journal lives only in the runtime/dori sidecar", () => {
-  const schema = "CREATE TABLE IF NOT EXISTS toolkit_replay"
-  expect(readFileSync(builtExtension, "utf8")).not.toContain(schema)
-  expect(readFileSync(builtSdk, "utf8")).not.toContain("omo_toolkit_replay")
-  expect(readFileSync(builtReplay, "utf8")).toContain(schema)
-  expect(readFileSync(builtLayer, "utf8")).toContain("omo_toolkit_replay")
+  expect(readFileSync(builtExtension, "utf8")).not.toContain("replay_differs=")
+  expect(readFileSync(builtExtension, "utf8")).not.toContain("ToolkitReplayStopError")
+  expect(readFileSync(builtSdk, "utf8")).not.toContain("ToolkitReplayStopError")
+  expect(readFileSync(builtReplay, "utf8")).toContain("replay_differs=")
+  expect(readFileSync(builtLayer, "utf8")).toContain("ToolkitReplayStopError")
 })

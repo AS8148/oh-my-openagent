@@ -1,24 +1,19 @@
 /**
- * The replay journal of the agent toolkit's layer-2 calls (engine side). It ships as its own sidecar
- * (`runtime/dori/replay.js`) and is loaded only while the `dori` section is on. A call's identity is
- * its turn, its call index, its op and its canonical arguments: `["turn", turnId, callIndex]` is
- * claimed with the op and an argument hash before the host op runs. A recorded identity returns its
- * result without dispatching; the same key with another op or other arguments stops as a typed
- * divergence; a key claimed by a run that never recorded stops as pending, because re-sending could
- * deliver twice; and a turn older than the seven-day window never dispatches again, whether or not
- * its rows were pruned.
+ * The layer-2 toolkit replay identity (engine side; ships as `runtime/dori/replay.js`). The engine
+ * derives every part of it from its own data - the stamped caller, the assistant entry on its branch,
+ * the tool call that is the calling cell - and the op's receipt is committed with the op in the
+ * gateway store, so a committed effect is recorded at the point of effect and a retry whose response
+ * was lost returns the recorded result instead of running again.
  */
 import { createHash } from "node:crypto"
-import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
 
-import { Sql, type SqliteConnection } from "../gateway/sql"
 import { DORI_REPLAY_CONTEXT_ARG } from "../../ulw-loop/sdk/dori-gate"
-import { TOOLKIT_REPLAY_RETENTION_MS, toolkitReplayKey } from "../../ulw-loop/sdk/dori/replay-key"
+import { toolkitReplayKey } from "../../ulw-loop/sdk/dori/replay-key"
+import type { StoreExtensionResult, ToolkitReplayRequest } from "../gateway/store-extensions"
 
 export const REPLAY_CONTEXT_ARG = DORI_REPLAY_CONTEXT_ARG
 
-export type ReplayStopCode = "toolkit_replay_divergence" | "toolkit_replay_pending" | "toolkit_replay_expired" | "toolkit_replay_turn_unknown"
+export type ReplayStopCode = "toolkit_replay_divergence" | "toolkit_replay_expired" | "toolkit_replay_turn_unknown"
 
 export type ReplayStop = {
   readonly kind: "replay_stopped"
@@ -32,34 +27,6 @@ export type ReplayStop = {
 
 /** One call's place: the turn the calling cell started in, when that turn was written, and the call's index in the cell. */
 export type ReplayTurn = { readonly turnId: string; readonly turnAt: number; readonly callIndex: number }
-
-export interface DoriReplay {
-  run(turn: ReplayTurn, op: string, args: unknown, dispatch: () => Promise<unknown>): Promise<unknown>
-  close(): void
-}
-
-type Claim =
-  | { readonly kind: "claimed" }
-  | { readonly kind: "recorded"; readonly result: unknown }
-  | { readonly kind: "diverged"; readonly recordedOp: string; readonly differs: readonly ("op" | "args")[] }
-  | { readonly kind: "pending" }
-
-const BUSY_TIMEOUT_MS = 5_000
-
-const SCHEMA = `CREATE TABLE IF NOT EXISTS toolkit_replay (
-  replay_key TEXT PRIMARY KEY,
-  op TEXT NOT NULL,
-  args_sha256 TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('pending', 'recorded')),
-  result_json TEXT,
-  turn_at INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS toolkit_replay_turn_at ON toolkit_replay (turn_at);`
-
-function stop(code: ReplayStopCode, message: string, fields: Omit<ReplayStop, "kind" | "code" | "message"> = {}): ReplayStop {
-  return { kind: "replay_stopped", code, message, ...fields }
-}
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> => typeof value === "object" && value !== null && !Array.isArray(value)
 
@@ -113,73 +80,28 @@ export function resolveReplayTurn(callerDurableId: string, ectx: unknown, carrie
   return stop("toolkit_replay_turn_unknown", `Cell ${cell} is not a tool call on the calling session's branch, so this engine did not issue its turn; the call was not run.`)
 }
 
-function inTransaction<T>(sql: Sql, body: () => T): T {
-  sql.exec("BEGIN IMMEDIATE")
-  try {
-    const value = body()
-    sql.exec("COMMIT")
-    return value
-  } catch (error) {
-    sql.exec("ROLLBACK")
-    throw error
-  }
+/** The durable request the store commits with the op: key, op, canonical arguments hash, and the turn's time. */
+export function replayRequestFor(turn: ReplayTurn, op: string, args: unknown): ToolkitReplayRequest {
+  return { key: toolkitReplayKey(turn.turnId, turn.callIndex), op, args_sha256: argsHash(args), turn_at: turn.turnAt }
 }
 
-function claim(sql: Sql, key: string, op: string, hash: string, turnAt: number, now: number): Claim {
-  return inTransaction(sql, () => {
-    sql.run("DELETE FROM toolkit_replay WHERE turn_at < ?", [now - TOOLKIT_REPLAY_RETENTION_MS])
-    const row = sql.one(["op", "args_sha256", "state", "result_json"], "SELECT op, args_sha256, state, result_json FROM toolkit_replay WHERE replay_key = ?", [key])
-    if (row === undefined) {
-      sql.run("INSERT INTO toolkit_replay (replay_key, op, args_sha256, state, turn_at, created_at) VALUES (?, ?, ?, 'pending', ?, ?)", [key, op, hash, turnAt, now])
-      return { kind: "claimed" }
-    }
-    const differs = [...(row.op === op ? [] : ["op" as const]), ...(row.args_sha256 === hash ? [] : ["args" as const])]
-    if (differs.length > 0) return { kind: "diverged", recordedOp: String(row.op), differs }
-    if (row.state !== "recorded") return { kind: "pending" }
-    return { kind: "recorded", result: JSON.parse(String(row.result_json)) as unknown }
-  })
+function stop(code: ReplayStopCode, message: string, fields: Omit<ReplayStop, "kind" | "code" | "message"> = {}): ReplayStop {
+  return { kind: "replay_stopped", code, message, ...fields }
 }
 
-export async function openDoriReplay(options: { readonly path: string; readonly now?: () => number }): Promise<DoriReplay> {
-  mkdirSync(dirname(options.path), { recursive: true, mode: 0o700 })
-  const sqlite = await import("node:sqlite")
-  const connection = new sqlite.DatabaseSync(options.path, { timeout: BUSY_TIMEOUT_MS }) as unknown as SqliteConnection
-  const sql = new Sql(connection)
-  sql.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`)
-  sql.exec("PRAGMA journal_mode = WAL")
-  sql.exec(SCHEMA)
-  const now = options.now ?? Date.now
-  sql.run("DELETE FROM toolkit_replay WHERE turn_at < ?", [now() - TOOLKIT_REPLAY_RETENTION_MS])
-  let closed = false
-  return {
-    async run(turn, op, args, dispatch) {
-      const key = toolkitReplayKey(turn.turnId, turn.callIndex)
-      const at = now()
-      if (at - turn.turnAt > TOOLKIT_REPLAY_RETENTION_MS) {
-        return stop("toolkit_replay_expired", `Call ${key} (${op}) belongs to a turn older than the seven-day replay window; it was not run again.`, { key, attempted_op: op })
-      }
-      const claimed = claim(sql, key, op, argsHash(args), turn.turnAt, at)
-      if (claimed.kind === "recorded") return claimed.result
-      if (claimed.kind === "diverged") {
-        return stop("toolkit_replay_divergence", `Replayed call ${key} differs from what this turn recorded at that index (${claimed.differs.join(" and ")}: recorded ${claimed.recordedOp}, now ${op}); the replay stopped without running it.`, { key, differs: claimed.differs, recorded_op: claimed.recordedOp, attempted_op: op })
-      }
-      if (claimed.kind === "pending") {
-        return stop("toolkit_replay_pending", `Call ${key} (${op}) was started by an earlier run that never recorded its result; its outcome is unknown, so it was not sent again.`, { key, attempted_op: op })
-      }
-      let result: unknown
-      try {
-        result = await dispatch()
-      } catch (error) {
-        sql.run("DELETE FROM toolkit_replay WHERE replay_key = ? AND state = 'pending'", [key])
-        throw error
-      }
-      sql.run("UPDATE toolkit_replay SET state = 'recorded', result_json = ? WHERE replay_key = ?", [JSON.stringify(result ?? null), key])
-      return result
-    },
-    close() {
-      if (closed) return
-      closed = true
-      connection.close()
-    },
-  }
+/** The store's refusal carries the structured stop in a stable machine-readable tail; both sides are pinned by tests. */
+const DIFFERENCE_MATCH = /^Replayed call (\["turn".*?\]) differs from what its key recorded; it was not run again\. replay_differs=([a-z,]+) recorded_op=(\S+) attempted_op=(\S+)/
+
+/**
+ * A store refusal from the replay path, as the layer-2 tool's answer: the typed stop carries the key,
+ * what differed and the recorded op. Anything else returns the store's own result unchanged.
+ */
+export function replayResultOf(result: StoreExtensionResult<unknown>): StoreExtensionResult<unknown> | ReplayStop {
+  if (result.kind !== "refused") return result
+  if (result.code === "toolkit_replay_expired") return stop("toolkit_replay_expired", result.message)
+  if (result.code !== "toolkit_replay_divergence") return result
+  const match = DIFFERENCE_MATCH.exec(result.message)
+  if (match === null) return result
+  const differs = match[2].split(",").filter((part) => part === "op" || part === "args") as ("op" | "args")[]
+  return stop("toolkit_replay_divergence", result.message, { key: match[1], differs, recorded_op: match[3], attempted_op: match[4] })
 }

@@ -250,6 +250,24 @@ export const GATEWAY_MIGRATIONS: readonly (readonly string[])[] = [
      SELECT s.type, s.name, NULL FROM sqlite_schema s
      WHERE NOT EXISTS (SELECT 1 FROM extension_objects e WHERE e.type = s.type AND e.name = s.name COLLATE NOCASE)`,
   ],
+
+  // v9 (#10458 review T1): durable receipts of the agent toolkit's layer-2 calls. Written INSIDE the
+  // op's own transaction, so a committed effect and its recorded result are one unit: a retry whose
+  // response was lost returns the recorded result instead of running the effect again.
+  [
+    `CREATE TABLE toolkit_replay_receipts (
+      replay_key TEXT PRIMARY KEY,
+      op TEXT NOT NULL,
+      args_sha256 TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      turn_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+    "CREATE INDEX toolkit_replay_receipts_turn_at ON toolkit_replay_receipts (turn_at)",
+    `INSERT OR IGNORE INTO extension_objects (type, name, owner)
+     SELECT s.type, s.name, NULL FROM sqlite_schema s
+     WHERE NOT EXISTS (SELECT 1 FROM extension_objects e WHERE e.type = s.type AND e.name = s.name COLLATE NOCASE)`,
+  ],
 ]
 
-export const GATEWAY_TABLES = ["deliveries", "receipts", "causal_roots", "causal_edges", "rate_buckets", "session_meta", "bindings", "outbox", "gateway_meta", "outbox_cursors", "completion_arms", "extension_schema", "extension_objects", "thread_creations", "extension_registrations"] as const
+export const GATEWAY_TABLES = ["deliveries", "receipts", "causal_roots", "causal_edges", "rate_buckets", "session_meta", "bindings", "outbox", "gateway_meta", "outbox_cursors", "completion_arms", "extension_schema", "extension_objects", "thread_creations", "extension_registrations", "toolkit_replay_receipts"] as const

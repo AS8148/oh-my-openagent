@@ -79,6 +79,7 @@ function downgradeToV2(agentDir: string, before: (db: Database) => void = () => 
     db.run("DROP TABLE extension_objects")
     db.run("DROP TABLE thread_creations")
     db.run("DROP TABLE extension_registrations")
+    db.run("DROP TABLE toolkit_replay_receipts")
     db.run("PRAGMA user_version = 2")
   } finally {
     db.close()
