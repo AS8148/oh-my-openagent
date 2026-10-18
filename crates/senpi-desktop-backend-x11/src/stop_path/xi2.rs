@@ -57,8 +57,8 @@ fn unavailable(reason: &str) -> StopPathError {
 
 /// XI 2.0 withholds raw events while another client grabs the keyboard, so
 /// an app holding a grab would swallow the chord; XI 2.1 delivers them anyway.
-pub(super) const fn raw_events_survive_grabs(major: u16, _minor: u16) -> bool {
-    major >= 2
+pub(super) const fn raw_events_survive_grabs(major: u16, minor: u16) -> bool {
+    major > 2 || (major == 2 && minor >= 1)
 }
 
 impl Session {

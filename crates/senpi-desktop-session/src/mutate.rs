@@ -196,15 +196,19 @@ impl Worker {
     /// may race it.
     fn stop_observed(&self, cancelled: &dyn Fn() -> bool) -> Option<DesktopError> {
         let cancelled = cancelled();
-        if self.safety.supervisor.is_suspended() {
-            Some(DesktopError::from(GateError::Suspended))
-        } else if cancelled {
-            Some(DesktopError::new(
+        interruption(&self.safety.supervisor, &self.stop_policy())
+            .or_else(|| cancelled.then(|| DesktopError::new(
                 ErrorCode::Cancelled,
                 "the request was cancelled before any input was sent",
-            ))
-        } else {
-            None
+            )))
+    }
+
+    pub(crate) fn stop_policy(&self) -> StopPolicy {
+        StopPolicy {
+            allow_host_relay_only: self
+                .options
+                .as_ref()
+                .is_some_and(|options| options.allow_host_relay_only_stop),
         }
     }
 
@@ -226,12 +230,7 @@ impl Worker {
     }
 
     fn gate(&mut self, mutation: &Mutation<'_>) -> CoreResult<()> {
-        let policy = StopPolicy {
-            allow_host_relay_only: self
-                .options
-                .as_ref()
-                .is_some_and(|options| options.allow_host_relay_only_stop),
-        };
+        let policy = self.stop_policy();
         let input_granted = input_may_proceed(&self.refresh_capabilities().input_permission);
         let lock = match self.backend().and_then(|backend| backend.screen_locked()) {
             Ok(true) => LockState::Locked,
@@ -256,6 +255,20 @@ impl Worker {
             other => other.map_err(DesktopError::from),
         }
     }
+}
+
+/// Why an action already under way must stop now, if it must: a stop the
+/// user latched, else a stop path that no longer authorizes input (it died,
+/// its heartbeat went stale, or it cannot hear the chord). The second never
+/// latches a stop, because nobody pressed one.
+pub(crate) fn interruption(supervisor: &Supervisor, policy: &StopPolicy) -> Option<DesktopError> {
+    let status = supervisor.status();
+    if supervisor.is_suspended() || status.suspended {
+        return Some(DesktopError::from(GateError::Suspended));
+    }
+    status
+        .stop_path_unavailable(policy)
+        .map(|reason| DesktopError::from(GateError::StopPathUnavailable { reason }))
 }
 
 /// `prompt-or-granted` (Wayland before the first input) lets the action
