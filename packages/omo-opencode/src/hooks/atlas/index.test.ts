@@ -2473,8 +2473,9 @@ session_id: ses_untrusted_999
 
       beforeEach(() => {
         capturedTimers.clear()
-        // Start on the real clock: the prompt gate's module-wide holds are stamped with Date.now(), and a
-        // hold written on the real clock by earlier work never expires on a clock that starts in 1970 (#10474).
+        // Start on the real clock: the prompt gate's module-wide semantic-dedupe record is stamped with
+        // Date.now(), and one written on the real clock by an earlier dispatch that settled late never
+        // expires on a clock that starts in 1970 (#10474).
         fakeNow = originalDateNow()
         Date.now = () => fakeNow
 
@@ -2512,9 +2513,9 @@ session_id: ses_untrusted_999
         Date.now = originalDateNow
       })
 
-      // A retry that reschedules itself lands back in capturedTimers, which this loop is iterating, so an
-      // ungated chain would never end; fail at the cap instead of spinning until the host runs out of
-      // memory (#10474).
+      // A timer that reschedules itself lands back in capturedTimers, which this loop is iterating, so a
+      // self-rescheduling chain would never end; fail at the cap instead of spinning until the host runs
+      // out of memory (#10474).
       const MAX_TIMERS_PER_FIRE = 20
 
       async function firePendingTimers(): Promise<void> {
@@ -2522,7 +2523,7 @@ session_id: ses_untrusted_999
         for (const [id, entry] of capturedTimers) {
           if (!entry.cleared) {
             if (++fired > MAX_TIMERS_PER_FIRE) {
-              throw new Error(`runaway: more than ${MAX_TIMERS_PER_FIRE} retry timers fired in one pass`)
+              throw new Error(`runaway: more than ${MAX_TIMERS_PER_FIRE} captured timers fired in one pass`)
             }
             capturedTimers.delete(id)
             fakeNow += 6000
@@ -2662,7 +2663,7 @@ session_id: ses_untrusted_999
 
       test("gate state stamped on the real clock by earlier work does not trap the retry loop", async () => {
         // given - an earlier hook (a previous test whose dispatch settled late) dispatched on the real
-        // clock, leaving real-time semantic-dedupe and post-dispatch hold records in the shared gate
+        // clock, leaving a real-time semantic-dedupe record in the shared prompt gate
         const planPath = join(TEST_DIR, "test-plan.md")
         writeFileSync(planPath, "# Plan\n- [ ] Task 1\n- [x] Task 2")
         writeBoulderState(TEST_DIR, {
