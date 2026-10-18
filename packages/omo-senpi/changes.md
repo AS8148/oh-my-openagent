@@ -1,6 +1,6 @@
 ## 2026-10-18 - Session-history tests hold on Windows (#10479)
 
-Three session-history tests failed on the Windows CI runner and nowhere else. The case-variant test now expects one project on win32, where `normalizeProjectPathForComparison` folds case on purpose because Windows paths are case-insensitive. The relative-cwd test uses a literal relative path; deriving it with `relative(resolve(), workspace)` returned an absolute `C:\...` path when the checkout and temp dir sat on different drives. The owner-only mode assertions (0o700 / 0o600) run only off Windows, which has no POSIX permission bits. No production code changed.
+Three session-history tests failed on the Windows CI runner and nowhere else. The case-variant test now expects one project on win32, where `normalizeProjectPathForComparison` folds case on purpose because Windows paths are case-insensitive. The relative-cwd test no longer derives its path with `relative(resolve(), workspace)`, which returned an absolute `C:\...` path when the checkout and temp dir sat on different drives; it records a literal relative cwd and maps it (and its resolved form) to a real temp directory through the injected `stat`, so only the absolute-path guard in `project-paths.ts` can drop it, on every platform. The owner-only mode assertions (0o700 / 0o600) run only off Windows, which has no POSIX permission bits. No production code changed.
 
 ## 2026-10-18 - Agent-session discovery moves into the engine (#10479)
 
