@@ -11,6 +11,7 @@
     "#omo-thread-client-runtime": "./extensions/omo-thread-client.js",
     "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
     "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
+    "#omo-session-history-runtime": "./extensions/omo-session-history.js",
     "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js"
   },
   "keywords": [

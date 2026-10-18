@@ -4,16 +4,15 @@ import { join } from "node:path"
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { type Static, Type } from "typebox"
 
-import {
-  createSessionDigestStore,
-  scanSessionHistory,
-  type ProjectCandidate,
-  type ScanCounts,
-  type SessionDigest,
-  type SessionHistoryOptions,
-  type SessionHistoryScanEvent,
-  type SessionHistoryScanSource,
+import type {
+  ProjectCandidate,
+  ScanCounts,
+  SessionDigest,
+  SessionHistoryOptions,
+  SessionHistoryScanEvent,
+  SessionHistoryScanSource,
 } from "./session-history"
+import { loadSessionHistoryRuntime, type SessionHistoryRuntimeLoader } from "./session-history-runtime-loader"
 
 export const ONBOARDING_SESSION_HISTORY_TOOL_NAME = "onboarding_session_history"
 
@@ -49,6 +48,8 @@ export interface CreateOnboardingSessionHistoryToolOptions {
   /** Test seam: fixture homes, fs, clock. Production uses the module's defaults. */
   readonly scanOptions?: SessionHistoryOptions
   readonly newScanId?: () => string
+  /** Test seam; production imports the scan runtime on the first call. */
+  readonly loadRuntime?: SessionHistoryRuntimeLoader
 }
 
 /**
@@ -60,6 +61,7 @@ export function createOnboardingSessionHistoryTool(
   options: CreateOnboardingSessionHistoryToolOptions,
 ): ToolDefinition<typeof OnboardingSessionHistoryParams, OnboardingSessionHistoryDetails> {
   const newScanId = options.newScanId ?? (() => `tui-${randomUUID()}`)
+  const loadRuntime = options.loadRuntime ?? loadSessionHistoryRuntime
   return {
     name: ONBOARDING_SESSION_HISTORY_TOOL_NAME,
     label: "Scan agent session history",
@@ -74,6 +76,7 @@ export function createOnboardingSessionHistoryTool(
     allowLazyActivation: true,
     executionMode: "sequential",
     async execute(_toolCallId, params): Promise<AgentToolResult<OnboardingSessionHistoryDetails>> {
+      const { createSessionDigestStore, scanSessionHistory } = await loadRuntime()
       const scanId = newScanId()
       const digestStore = createSessionDigestStore({ stateDir: options.stateDir })
       const events = scanSessionHistory({
