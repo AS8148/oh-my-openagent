@@ -14,10 +14,11 @@ import { isSessionSampled, resolveRawTurnSampleRate } from "./session-summary-sa
 /** The part of the telemetry sidecar the entry bundle loads lazily: the recorder and its storage. */
 export type SummaryRuntime = Pick<
   typeof import("./session-summary-recovery"),
-  "createSessionSummaryRecorder" | "createSummaryStorage" | "currentProcessOwner" | "purgeUnconsentedQueue"
+  "createSessionSummaryRecorder" | "createSummaryStorage" | "currentProcessOwner"
 >
 export type LoadSummaryRuntime = () => Promise<SummaryRuntime>
 export const loadSummaryRuntime: LoadSummaryRuntime = () => import("#omo-telemetry-recovery-runtime")
+
 
 /** What the component's transport facade shares with every registration of one loaded extension. */
 export type NativeCaptureState = {

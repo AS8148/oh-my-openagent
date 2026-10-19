@@ -2,6 +2,7 @@ import { join } from "node:path"
 import type { EventTelemetryProperties } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, listNames, readJsonOrCorrupt, removeFile, writeJsonAtomic } from "./session-summary-files"
+import { summaryDir } from "./session-summary-purge"
 import { createOwnerRegistry, parseOwner, type ProcessOwner } from "./session-summary-owner"
 import { parseTelemetrySessionRole, type TelemetrySessionRole } from "./session-role"
 import { SUMMARY_EPOCH_SHAPE, isSummaryWindow, type SummaryWindow } from "./session-summary-window"
@@ -85,9 +86,7 @@ export type SummaryStorage = {
 const SAFE_NAME = /^[A-Za-z0-9:_-]{1,128}$/
 const SAFE_UUID = /^[0-9a-f-]{36}$/
 
-export function summaryDir(stateDir: string): string {
-  return join(stateDir, "session-summary")
-}
+export { purgeUnconsentedQueue, summaryDir } from "./session-summary-purge"
 
 export function createSummaryStorage(input: {
   readonly stateDir: string
@@ -207,23 +206,6 @@ function parseScope(value: unknown): ConsentScope | undefined {
   return typeof cwd === "string" ? { cwd } : undefined
 }
 
-/**
- * Deletes every queued window and pending event that may never be sent: no `enabled` consent mark, or a
- * scope whose consent, read now, is off. Runs where no summary state may be created (an opted-out session),
- * so it only reads and deletes, never writes.
- */
-export function purgeUnconsentedQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean): void {
-  const dir = summaryDir(stateDir)
-  const pendingDir = join(dir, "pending")
-  const purge = (path: string, parse: (value: unknown) => SendableRecord | undefined): void => {
-    const record = parseRead(readJsonOrCorrupt(path), parse)
-    if (record !== undefined && record !== CORRUPT && !isRecordSendable(record, isScopeConsented)) removeFile(path)
-  }
-  for (const name of listNames(dir)) if (name.endsWith(".json")) purge(join(dir, name), parseWindowRecord)
-  for (const name of listNames(pendingDir)) if (name.endsWith(".json")) purge(join(pendingDir, name), parsePendingRecord)
-}
-
-type SendableRecord = Parameters<typeof isRecordSendable>[0]
 
 function fileName(sessionHash: string): string {
   return SAFE_NAME.test(sessionHash) ? sessionHash.replaceAll(":", "_") : Buffer.from(sessionHash).toString("hex").slice(0, 128)
