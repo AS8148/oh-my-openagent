@@ -241,4 +241,3 @@ export class MinimalTracerProvider implements TracerProvider {
     this.processor.shutdown()
   }
 }
-
