@@ -161,7 +161,12 @@ export class SyncEngine {
     const before = await journal.updateState({ eventHead: Math.max(this.eventHead, (await journal.state()).eventHead) })
     if (before.cycle !== null) {
       const resumed = before.cycle
-      await deps.lock.withLock(() => advance(deps, journal, resumed))
+      await deps.lock.withLock(async () => {
+        // A cycle resumed at merged re-renders its keys over the working files: capture any edit made
+        // since the crash first, so it merges into the doc instead of being overwritten.
+        if (resumed.stage === "merged") await capture(deps, journal, resumed)
+        await advance(deps, journal, resumed)
+      })
     }
     let applied = 0
     let memories = 0

@@ -33,12 +33,15 @@ const readWorking = (root: string, key: string): Promise<string | null> =>
 
 const sameItem = (a: WireItem, b: WireItem): boolean => a.key === b.key && a.ops === b.ops
 
-export async function capture(deps: EngineDeps, journal: SyncJournal): Promise<number> {
+export async function capture(deps: EngineDeps, journal: SyncJournal, resuming: CycleRecord | null = null): Promise<number> {
   const keys = [...new Set([...deps.store.keys(), ...(await workingKeys(deps.repo.root))])].sort()
   const captured: WireItem[] = []
   const texts = new Map<string, string | null>()
   for (const key of keys) {
     const text = await readWorking(deps.repo.root, key)
+    // Resuming a cycle that crashed mid-render: a file already holding the merged doc's text is
+    // the engine's own render, not a local edit, and capturing it would re-express remote ops.
+    if (resuming?.keys.includes(key) === true && deps.store.render(key, text) === text) continue
     const ops = await deps.store.capture(key, text)
     if (ops === null) continue
     captured.push({ key, ops: toBase64(ops) })
