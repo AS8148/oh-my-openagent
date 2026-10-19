@@ -308,7 +308,9 @@ describe("checkExtensionCurrent", () => {
     const syncText = await readFile(memorySyncOutputPath, "utf8")
     const referenced = MEMORY_SYNC_ASSET_NAMES.filter((name) => syncText.includes(name))
     expect(referenced).toEqual([...MEMORY_SYNC_ASSET_NAMES])
-    const emitted = (await readdir(dirname(memorySyncOutputPath))).filter((name) => !/\.(?:m?js|json|md)$/.test(name))
+    const emitted = (await readdir(dirname(memorySyncOutputPath), { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && !/\.(?:m?js|json|md)$/.test(entry.name))
+      .map((entry) => entry.name)
     expect(emitted.sort()).toEqual([...MEMORY_SYNC_ASSET_NAMES].sort())
   })
 
