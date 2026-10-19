@@ -40,8 +40,7 @@ const FINGERPRINT_PROBES = [
 let fingerprint: string | undefined
 
 function tokenizerFingerprint(): string {
-  const probes = FINGERPRINT_PROBES.map((body) => recallDocumentTerms({ path: "", description: "", body }))
-  fingerprint ??= sha1(JSON.stringify({ version: TOKENIZER_VERSION, probes }))
+  fingerprint ??= sha1(JSON.stringify({ version: TOKENIZER_VERSION, probes: FINGERPRINT_PROBES.map((body) => recallDocumentTerms({ path: "", description: "", body })) }))
   return fingerprint
 }
 
