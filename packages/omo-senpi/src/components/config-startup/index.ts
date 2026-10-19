@@ -24,7 +24,7 @@ import { loadSenpiOmoConfig, type SenpiOmoConfigResult } from "../config-resolut
 import {
   DORI_MIGRATION_RUNTIME_ARTIFACT,
   loadDoriSectionRename,
-  mentionsLegacyGatewayKey,
+  mayDeclareLegacyGatewayKey,
   NO_DORI_SECTION_RENAME,
   type DoriSectionRenameLoader,
 } from "./dori-migration-loader"
@@ -110,22 +110,24 @@ export async function prepareDoriSectionRename(
 ): Promise<PreparedDoriSectionRename> {
   const homeDir = homeDirectory(options)
   if (homeDir.length === 0) return { rename: NO_DORI_SECTION_RENAME }
-  const readText = (path: string): string => {
+  // A target that does not exist yet has nothing to rename; any other read or discovery failure counts as a yes, so
+  // an unreadable old config still reaches the real rename (and its error), never a silent skip.
+  const mayNeedRename = (path: string): boolean => {
     try {
-      return options.fileSystem === undefined ? readFileSync(path, "utf-8") : options.fileSystem.readFileSync(path, "utf-8")
-    } catch {
-      return ""
+      const text = options.fileSystem === undefined ? readFileSync(path, "utf-8") : options.fileSystem.readFileSync(path, "utf-8")
+      return mayDeclareLegacyGatewayKey(text)
+    } catch (error) {
+      return (error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT"
     }
   }
-  let targets: readonly string[]
+  let needed: boolean
   try {
-    targets = createLegacyConfigMigrationPlans({ ...legacyPlanOptions(options, homeDir), doriSectionRename: NO_DORI_SECTION_RENAME })
-      .filter((plan) => plan.id === DORI_SECTION_RENAME_MIGRATION_ID)
-      .map((plan) => plan.targetPath)
+    needed = createLegacyConfigMigrationPlans({ ...legacyPlanOptions(options, homeDir), doriSectionRename: NO_DORI_SECTION_RENAME })
+      .some((plan) => plan.id === DORI_SECTION_RENAME_MIGRATION_ID && mayNeedRename(plan.targetPath))
   } catch {
-    return { rename: NO_DORI_SECTION_RENAME }
+    needed = true
   }
-  if (!targets.some((path) => mentionsLegacyGatewayKey(readText(path)))) return { rename: NO_DORI_SECTION_RENAME }
+  if (!needed) return { rename: NO_DORI_SECTION_RENAME }
   try {
     return { rename: await load() }
   } catch (error) {

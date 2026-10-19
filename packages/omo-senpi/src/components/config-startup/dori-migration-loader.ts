@@ -8,8 +8,11 @@ export type DoriSectionRenameLoader = () => Promise<DoriSectionRename>
 
 export const DORI_MIGRATION_RUNTIME_ARTIFACT = "extensions/omo-dori-migration.js"
 
-/** A cheap textual probe: a `"gateway":` key anywhere means the real rename must decide. */
-export const mentionsLegacyGatewayKey = (text: string): boolean => /"gateway"\s*:/u.test(text)
+/**
+ * A deliberately loose probe that may say yes wrongly (the sidecar then loads and renames nothing) but never says
+ * no wrongly: any `gateway` substring, or any `\u` escape (JSON can spell a key's letters only that other way).
+ */
+export const mayDeclareLegacyGatewayKey = (text: string): boolean => text.includes("gateway") || text.includes("\\u")
 
 /** Stands in for the rename when no config mentions the old section: the plan stays listed and is skipped. */
 export const NO_DORI_SECTION_RENAME: DoriSectionRename = {

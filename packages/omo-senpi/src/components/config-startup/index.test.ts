@@ -494,6 +494,46 @@ describe("gateway -> dori rename sidecar", () => {
     expect(await prepareDoriSectionRename(preparationOptions(fileSystem), async () => { throw new Error("must not load") })).toEqual({ rename: NO_DORI_SECTION_RENAME })
   })
 
+  test.each([
+    ["pretty-printed", '{\n  "gateway": {\n    "scopes": ["slack"]\n  }\n}\n'],
+    ["minified", '{"gateway":{"scopes":["slack"]}}'],
+    ["JSONC with comments, one between key and colon", '// legacy\n{\n  /* section */ "gateway" /* c */ : { "scopes": ["slack"], }, // trailing\n}\n'],
+    ["a unicode-escaped key", '{"gate\\u0077ay":{"scopes":["slack"]}}'],
+    ["a harness block", '{"[senpi]":{"gateway":{"scopes":["slack"]}}}'],
+    ["a profile", '{"profiles":{"work":{"gateway":{"scopes":["slack"]}}}}'],
+  ])("#given a gateway section written as %s #when startup prepares and migrates #then the sidecar loads and no gateway key survives", async (_form, text) => {
+    // given
+    const fileSystem = memoryFileSystem()
+    fileSystem.files.set("/home/alice/.omo/omo.jsonc", text)
+    let imports = 0
+    const load = async () => { imports += 1; return doriSectionRename }
+
+    // when
+    const prepared = await prepareDoriSectionRename(preparationOptions(fileSystem), load)
+    const result = runSenpiStartupMigration({ ...preparationOptions(fileSystem), doriSectionRename: prepared.rename })
+
+    // then
+    expect(imports).toBe(1)
+    expect(result.error).toBeUndefined()
+    const migrated = JSON.stringify(parse(fileSystem.files.get("/home/alice/.omo/omo.jsonc") ?? ""))
+    expect(migrated).toContain('"dori":{"scopes":["slack"]}')
+    expect(migrated).not.toContain('"gateway"')
+  })
+
+  test("#given a config file that exists but cannot be read #when startup prepares the rename #then it loads the sidecar rather than skip", async () => {
+    // given
+    const fileSystem = memoryFileSystem()
+    fileSystem.files.set("/home/alice/.omo/omo.jsonc", "{}")
+    const unreadable = { ...fileSystem, readFileSync: () => { throw fileError("EACCES", "permission denied") } }
+    let imports = 0
+
+    // when
+    await prepareDoriSectionRename({ ...preparationOptions(fileSystem), fileSystem: unreadable }, async () => { imports += 1; return doriSectionRename })
+
+    // then
+    expect(imports).toBe(1)
+  })
+
   test("#given the sidecar is missing from the payload #when a gateway config starts #then the warning names the artifact and the remedy", async () => {
     // given
     const fileSystem = memoryFileSystem()
