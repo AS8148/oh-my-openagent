@@ -1438,6 +1438,9 @@
           "display_name": {
             "type": "string"
           },
+          "caution": {
+            "type": "string"
+          },
           "family": {
             "type": "string",
             "enum": [
@@ -3796,6 +3799,9 @@
               "display_name": {
                 "type": "string"
               },
+              "caution": {
+                "type": "string"
+              },
               "family": {
                 "type": "string",
                 "enum": [
@@ -6014,6 +6020,9 @@
             "type": "object",
             "properties": {
               "display_name": {
+                "type": "string"
+              },
+              "caution": {
                 "type": "string"
               },
               "family": {
@@ -8236,6 +8245,9 @@
               "display_name": {
                 "type": "string"
               },
+              "caution": {
+                "type": "string"
+              },
               "family": {
                 "type": "string",
                 "enum": [
@@ -10452,6 +10464,9 @@
               "type": "object",
               "properties": {
                 "display_name": {
+                  "type": "string"
+                },
+                "caution": {
                   "type": "string"
                 },
                 "family": {
@@ -12674,6 +12689,9 @@
                     "display_name": {
                       "type": "string"
                     },
+                    "caution": {
+                      "type": "string"
+                    },
                     "family": {
                       "type": "string",
                       "enum": [
@@ -14894,6 +14912,9 @@
                     "display_name": {
                       "type": "string"
                     },
+                    "caution": {
+                      "type": "string"
+                    },
                     "family": {
                       "type": "string",
                       "enum": [
@@ -17112,6 +17133,9 @@
                   "type": "object",
                   "properties": {
                     "display_name": {
+                      "type": "string"
+                    },
+                    "caution": {
                       "type": "string"
                     },
                     "family": {
