@@ -208,5 +208,64 @@ describe("submitReport", () => {
     expect(keys[0]).toBe(`feedback-${draft.draftId}`)
     expect(keys[1]).toBe(keys[0])
   })
+
+  test("#given a key kept from a send whose answer was lost #when a fresh draft is sent with that key #then the request carries the kept key, not one from the new draft", async () => {
+    const { sent, transport } = recordingTransport(201, { id: "rpt_1" })
+
+    await submitReport({
+      draft,
+      kind: "bug",
+      description: "x",
+      redact: redactTokens,
+      client,
+      env: {},
+      stateDir: tempDir(),
+      apiOrigin: "https://api.example.test",
+      accessToken: null,
+      transport,
+      idempotencyKey: "feedback-drf_original",
+    })
+
+    expect(new Headers(sent[0]?.init.headers).get("idempotency-key")).toBe("feedback-drf_original")
+  })
+
+  test("#given a kept key the intake already holds with another body #when the retry is answered 409 conflict #then the result is already-sent, so the user is not told it failed", async () => {
+    const { transport } = recordingTransport(409, { error: { code: "conflict" } })
+
+    const result = await submitReport({
+      draft,
+      kind: "bug",
+      description: "x",
+      redact: redactTokens,
+      client,
+      env: {},
+      stateDir: tempDir(),
+      apiOrigin: "https://api.example.test",
+      accessToken: null,
+      transport,
+      idempotencyKey: "feedback-drf_original",
+    })
+
+    expect(result).toEqual({ kind: "already-sent" })
+  })
+
+  test("#given no kept key #when the intake answers 409 conflict #then it is a refusal, not already-sent", async () => {
+    const { transport } = recordingTransport(409, { error: { code: "conflict" } })
+
+    const result = await submitReport({
+      draft,
+      kind: "bug",
+      description: "x",
+      redact: redactTokens,
+      client,
+      env: {},
+      stateDir: tempDir(),
+      apiOrigin: "https://api.example.test",
+      accessToken: null,
+      transport,
+    })
+
+    expect(result).toEqual({ kind: "refused", reason: "unavailable" })
+  })
 })
 

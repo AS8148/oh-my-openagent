@@ -39,6 +39,7 @@ function host(options: { withRedactor: boolean; extraEnv?: Record<string, string
   const homeDir = mkdtempSync(join(tmpdir(), "omo-feedback-home-"))
   dirs.push(homeDir)
   const sent: string[] = []
+  const requests: RequestInit[] = []
   const component = createFeedbackComponent({
     env: { HOME: homeDir, OMO_CODING_AGENT_DIR: join(stateDir, "agent"), DO_NOT_TRACK: "1", ...options.extraEnv },
     ...(options.noStateDir === true ? {} : { stateDir }),
@@ -47,10 +48,11 @@ function host(options: { withRedactor: boolean; extraEnv?: Record<string, string
     channel: "beta",
     transport: async (_url, init) => {
       sent.push(String(init.body))
+      requests.push(init)
       return new Response(JSON.stringify({ id: "rpt_9" }), { status: 201 })
     },
   })
-  return { pi, api, handlers, component, sent, stateDir, homeDir }
+  return { pi, api, handlers, component, sent, requests, stateDir, homeDir }
 }
 
 const sessionCtx = {
@@ -341,6 +343,19 @@ describe("feedback component", () => {
 
     expect(typeof draft.draftId).toBe("string")
     expect(draft.sections.map((section) => section.id)).not.toContain("session")
+  })
+
+  test("#given the desktop retries with the key it kept from an unknown send #when submit runs on a freshly prepared draft #then the kept key is used, and a malformed key is ignored", async () => {
+    const { api, handlers, component, requests: sent } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+
+    const first = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { draftId: string }
+    await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: first.draftId, description: "x", idempotencyKey: "feedback-drf_kept-1" })
+    const second = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { draftId: string }
+    await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: second.draftId, description: "x", idempotencyKey: "not a key\nx" })
+
+    expect(new Headers(sent[0]?.headers).get("idempotency-key")).toBe("feedback-drf_kept-1")
+    expect(new Headers(sent[1]?.headers).get("idempotency-key")).toBe(`feedback-${second.draftId}`)
   })
 })
 

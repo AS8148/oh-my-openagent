@@ -214,6 +214,7 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
         const kind: unknown = Reflect.get(Object(input), "kind")
         const description: unknown = Reflect.get(Object(input), "description")
         const accessToken: unknown = Reflect.get(Object(input), "accessToken")
+        const idempotencyKey: unknown = Reflect.get(Object(input), "idempotencyKey")
         const result = await submitReport({
           draft: stored.draft,
           kind: kind === "feedback" || kind === "other" ? kind : "bug",
@@ -227,6 +228,7 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
           transport: options.transport ?? ((url, init) => fetch(url, init)),
           ...(stored.installHash === undefined ? {} : { installHash: stored.installHash }),
           ...(stored.sessionHash === undefined ? {} : { sessionHash: stored.sessionHash }),
+          ...(typeof idempotencyKey === "string" ? { idempotencyKey } : {}),
         })
         if (result.kind !== "refused" || result.reason === "secret-detected" || result.reason === "too-large") drafts.delete(stored.draft.draftId)
         return result
@@ -301,6 +303,8 @@ export function resultMessage(result: SubmitResult): string {
       return `Thanks. Your report was sent (${result.reportId}).`
     case "saved":
       return `Uploads are off, so the report was saved to ${result.path}.`
+    case "already-sent":
+      return "Your earlier report already reached the OmO team, so it was not sent again."
     case "refused":
       return {
         "secret-detected": "The report still looked like it contained a password or key, so nothing was sent. Remove it from the description and try again.",

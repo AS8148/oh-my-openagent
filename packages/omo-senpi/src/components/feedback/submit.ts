@@ -21,6 +21,7 @@ export type ReportTransport = (url: string, init: RequestInit) => Promise<Respon
 export type SubmitResult =
   | { readonly kind: "sent"; readonly reportId: string }
   | { readonly kind: "saved"; readonly path: string }
+  | { readonly kind: "already-sent" }
   | { readonly kind: "refused"; readonly reason: "secret-detected" | "too-large" | "rate-limited" | "unavailable" }
 
 export interface SubmitOptions {
@@ -36,7 +37,16 @@ export interface SubmitOptions {
   readonly transport: ReportTransport
   readonly installHash?: string
   readonly sessionHash?: string
+  /**
+   * The key of an earlier send whose answer was lost (kept by the caller across restarts). Retrying a fresh draft under
+   * it lets the intake keep one report: the same body answers the first receipt, and another body is a 409 conflict,
+   * which here means the first send already landed.
+   */
+  readonly idempotencyKey?: string
 }
+
+/** Keys this component issues (`feedback-<draftId>`); anything else from a caller is ignored. */
+export const FEEDBACK_IDEMPOTENCY_KEY = /^feedback-[A-Za-z0-9_-]{4,96}$/
 
 const isOn = (value: string | undefined): boolean =>
   value !== undefined && !["", "0", "false", "no", "off"].includes(value.trim().toLowerCase())
@@ -113,7 +123,8 @@ export async function submitReport(options: SubmitOptions): Promise<SubmitResult
     }
   }
 
-  const headers = new Headers({ "content-type": "application/json", "idempotency-key": `feedback-${options.draft.draftId}` })
+  const keptKey = options.idempotencyKey !== undefined && FEEDBACK_IDEMPOTENCY_KEY.test(options.idempotencyKey) ? options.idempotencyKey : undefined
+  const headers = new Headers({ "content-type": "application/json", "idempotency-key": keptKey ?? `feedback-${options.draft.draftId}` })
   if (options.accessToken !== null) headers.set("authorization", `Bearer ${options.accessToken}`)
   let response: Response
   try {
@@ -128,6 +139,7 @@ export async function submitReport(options: SubmitOptions): Promise<SubmitResult
   const answer: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     const code: unknown = Reflect.get(Object(Reflect.get(Object(answer), "error")), "code")
+    if (keptKey !== undefined && response.status === 409 && code === "conflict") return { kind: "already-sent" }
     return refusalFor(response.status, code)
   }
   const reportId: unknown = Reflect.get(Object(answer), "id")
