@@ -137,7 +137,7 @@ describe("omo config git_master section", () => {
 
   test("#given git_env_prefix with multiple assignments #when parsed #then the value is accepted", () => {
     // given
-    const config = { git_master: { git_env_prefix: "GIT_MASTER=1 OMO_AGENT=omo" } }
+    const config = { git_master: { git_env_prefix: "GIT_MASTER=1 OMO_AGENT=x" } }
 
     // when
     const result = OmoConfigSchema.safeParse(config)
@@ -145,7 +145,7 @@ describe("omo config git_master section", () => {
     // then
     expect(result.success).toBe(true)
     if (!result.success) return
-    expect(result.data.git_master?.git_env_prefix).toBe("GIT_MASTER=1 OMO_AGENT=omo")
+    expect(result.data.git_master?.git_env_prefix).toBe("GIT_MASTER=1 OMO_AGENT=x")
   })
 
   test("#given a git_master layer without git_env_prefix #when parsed as a layer #then no default is injected", () => {

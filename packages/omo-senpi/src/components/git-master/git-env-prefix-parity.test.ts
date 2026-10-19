@@ -9,7 +9,7 @@ import { isValidGitEnvPrefix } from "@oh-my-opencode/skills-loader-core/config/g
 const CANDIDATES = [
   "",
   "GIT_MASTER=1",
-  "GIT_MASTER=1 OMO_AGENT=omo",
+  "GIT_MASTER=1 OMO_AGENT=x",
   "A=",
   "_X=a-b_c",
   "GIT_MASTER=1;",
