@@ -15,6 +15,7 @@ import type {
   applyRetainedScan,
   migrationFactsFromScan,
   OnboardingScanEnvironment,
+  onboardingHistorySummary,
   runOnboardingScan,
 } from "./scan-runtime"
 import type { createOnboardingUnderstandingHandlers, OnboardingUnderstandingHandlers } from "./understand-component"
@@ -42,6 +43,7 @@ export interface OnboardingScanRuntime {
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
   readonly applyRetainedScan: typeof applyRetainedScan
   readonly createOnboardingUnderstandingHandlers: typeof createOnboardingUnderstandingHandlers
+  readonly onboardingHistorySummary: typeof onboardingHistorySummary
 }
 
 /** The engine's own credential store (senpi `AuthStorage`), narrowed to the surface an apply uses. */
@@ -219,17 +221,15 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const bundled = typeof OMO_SENPI_BUNDLED !== "undefined" && OMO_SENPI_BUNDLED
   const loaded: unknown = await import(new URL(bundled ? ONBOARDING_SCAN_RUNTIME_FILE : "scan-runtime.ts", import.meta.url).href)
   if (!isRecord(loaded)) throw new Error("onboarding scan runtime did not load")
-  const run = loaded["runOnboardingScan"]
-  const facts = loaded["migrationFactsFromScan"]
-  const apply = loaded["applyRetainedScan"]
-  const understand = loaded["createOnboardingUnderstandingHandlers"]
-  if (typeof run !== "function" || typeof facts !== "function" || typeof apply !== "function" || typeof understand !== "function") {
-    throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
-  }
-  return {
-    runOnboardingScan: (...args) => Reflect.apply(run, undefined, args),
-    migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
-    applyRetainedScan: (...args) => Reflect.apply(apply, undefined, args),
-    createOnboardingUnderstandingHandlers: (...args) => Reflect.apply(understand, undefined, args),
-  }
+  const missing = RUNTIME_EXPORTS.filter((name) => typeof loaded[name] !== "function")
+  if (missing.length > 0) throw new Error(`onboarding scan runtime is missing ${missing.join(", ")}`)
+  return loaded as unknown as OnboardingScanRuntime
 }
+
+const RUNTIME_EXPORTS: readonly (keyof OnboardingScanRuntime)[] = [
+  "runOnboardingScan",
+  "migrationFactsFromScan",
+  "applyRetainedScan",
+  "createOnboardingUnderstandingHandlers",
+  "onboardingHistorySummary",
+]

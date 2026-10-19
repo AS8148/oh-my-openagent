@@ -16,6 +16,7 @@ import type { OnboardingEngineAuthStore } from "./scan-component"
 import type { OnboardingApplyResponse, OnboardingApplyStage, OnboardingScanEvent, OnboardingScanItem, OnboardingScanSource } from "./scan-contract"
 import {
   createMemorySessionDigestStore,
+  createSessionHistoryScanner,
   MAX_TRANSCRIPTS_PER_SOURCE,
   scanSessionHistory,
   type ProjectCandidate,
@@ -57,7 +58,12 @@ type EventBody = Omit<OnboardingScanEvent, "scanId" | "elapsedMs">
  */
 export async function runOnboardingScan(
   environment: OnboardingScanEnvironment,
-  options: { readonly scanId: string; readonly includeCustomProviders: boolean },
+  options: {
+    readonly scanId: string
+    readonly includeCustomProviders: boolean
+    /** False runs only `omo setup`'s sources: the TUI inventory never reads session history. */
+    readonly sessions?: boolean
+  },
   emit: (event: OnboardingScanEvent) => void,
 ): Promise<OnboardingScanOutcome> {
   const startedAt = performance.now()
@@ -87,7 +93,7 @@ export async function runOnboardingScan(
   // Nothing is persisted before consent: the digests stay in memory, with the retained scan.
   const digestStore = createMemorySessionDigestStore()
   const projectRoots = new Set<string>()
-  const history = scanSessionHistory({
+  const history = options.sessions === false ? [] : scanSessionHistory({
     homeDir: home,
     env,
     ...environment.sessionHistory,
@@ -111,6 +117,58 @@ export async function runOnboardingScan(
   send({ kind: "done", source: "all", counts: { found, read, cap: null } })
   const plans = (await collectSetupPlans(results.filter((result) => result.error === undefined))).plans
   return { plans, results, digests: await digestStore.list(options.scanId), projectRoots }
+}
+
+/** The newest sessions the TUI onboarding summarizes; the scan reads no further once it has these. */
+export const ONBOARDING_HISTORY_MAX_SESSIONS = 12
+/** Wall-clock budget for that background summary; whatever arrived by then is all it reports. */
+export const ONBOARDING_HISTORY_BUDGET_MS = 10_000
+/** Only sessions this recent describe what the user is working on now. */
+export const ONBOARDING_HISTORY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
+const HISTORY_CLIP = 160
+
+/**
+ * The TUI onboarding's background view of this machine's agent history: the newest
+ * `ONBOARDING_HISTORY_MAX_SESSIONS` recent sessions, read within `budgetMs`, as one context line.
+ * Undefined when nothing arrived in time. It never runs on the first prompt's path.
+ */
+export async function onboardingHistorySummary(
+  environment: OnboardingScanEnvironment,
+  budgetMs: number = ONBOARDING_HISTORY_BUDGET_MS,
+): Promise<string | undefined> {
+  const scanner = createSessionHistoryScanner({
+    homeDir: environment.home ?? homedir(),
+    env: environment.env ?? process.env,
+    ...environment.sessionHistory,
+  })
+  const run = scanner.recentSessions({ recentWindowMs: ONBOARDING_HISTORY_WINDOW_MS })[Symbol.asyncIterator]()
+  const digests: SessionDigest[] = []
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<"deadline">((resolve) => {
+    timer = setTimeout(resolve, budgetMs, "deadline")
+  })
+  try {
+    while (digests.length < ONBOARDING_HISTORY_MAX_SESSIONS) {
+      const step = run.next()
+      // A step still pending at the deadline is abandoned; its late rejection must not surface.
+      step.catch(() => undefined)
+      const next = await Promise.race([step, deadline])
+      if (next === "deadline" || next.done === true) break
+      if (next.value._tag === "Importable") digests.push(next.value.digest)
+    }
+  } finally {
+    clearTimeout(timer)
+    void run.return?.(undefined)?.catch(() => undefined)
+  }
+  if (digests.length === 0) return undefined
+  const lines = digests.map((digest) =>
+    `${digest.lastActiveAt.slice(0, 10)} ${digest.source} ${digest.cwd}: ${clip(digest.firstRequest || digest.title)}${digest.outcome === "" ? "" : ` -> ${clip(digest.outcome)}`}`)
+  return `Recent agent sessions on this machine (newest ${digests.length}, from a background scan; onboarding_session_history has more): ${lines.join("; ")}`
+}
+
+function clip(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim()
+  return line.length > HISTORY_CLIP ? `${line.slice(0, HISTORY_CLIP)}...` : line
 }
 
 function historyItem(item: ProjectCandidate | SessionScanItem): OnboardingScanItem {
