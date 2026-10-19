@@ -8,7 +8,7 @@
 import { randomBytes } from "node:crypto"
 import { join } from "node:path"
 
-import { mkdir, rm } from "../../../fs/resilient"
+import { existsSync, mkdir, rm } from "../../../fs/resilient"
 import { createNodeGitExec, type GitExec } from "../../../git/exec"
 import type { SyncRepo } from "../ports"
 
@@ -47,7 +47,14 @@ export function createGitSyncRepo(options: GitSyncRepoOptions): SyncRepo {
     await mkdir(dir, { recursive: true })
     try {
       await run(parent === null ? ["read-tree", "--empty"] : ["read-tree", parent], env)
-      if (paths.length > 0) await run(["add", "-A", "--", ...paths], env)
+      // A path on disk is staged as is; a missing one is removed from the index if tracked and is a
+      // no-op otherwise. `git add` on a path in neither HEAD nor the working tree exits 128, which
+      // once wedged a device that received a create and a delete of a file it never had.
+      const present: string[] = []
+      const missing: string[] = []
+      for (const path of paths) (existsSync(join(root, path)) ? present : missing).push(path)
+      if (present.length > 0) await run(["add", "-A", "--", ...present], env)
+      if (missing.length > 0) await run(["rm", "--cached", "-q", "--ignore-unmatch", "--", ...missing], env)
       return await run(["write-tree"], env)
     } finally {
       await rm(index, { force: true })
