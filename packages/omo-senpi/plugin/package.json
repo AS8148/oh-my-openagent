@@ -12,6 +12,7 @@
     "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
     "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
     "#omo-session-history-runtime": "./extensions/omo-session-history.js",
+    "#omo-memory-sync-runtime": "./extensions/omo-memory-sync.js",
     "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js"
   },
   "keywords": [

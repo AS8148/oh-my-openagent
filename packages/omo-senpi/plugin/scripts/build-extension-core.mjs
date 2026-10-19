@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
-import { builtinModules } from "node:module"
-import { dirname, join } from "node:path"
+import { builtinModules, createRequire } from "node:module"
+import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import {
@@ -82,11 +82,30 @@ const memoryDoctorEntryPath = join(packageRoot, "src", "components", "memory", "
 const memoryMemfsEntryPath = join(packageRoot, "src", "components", "memory", "commands", "memfs-runtime.ts")
 const memoryPalaceEntryPath = join(packageRoot, "src", "components", "memory", "palace", "runtime.ts")
 const sessionHistoryEntryPath = join(packageRoot, "src", "components", "onboarding", "session-history", "runtime.ts")
+// The sync engine sidecar carries the Loro runtime; its wasm is emitted beside it under this fixed name
+// (the engine's loader reads it relative to its own module), so omo.js never pulls Loro in.
+const memorySyncEntryPath = join(packageRoot, "src", "components", "memory", "sync-runtime.ts")
+export const MEMORY_SYNC_WASM_NAME = "loro_wasm_bg.wasm"
+// Every file the sync sidecar loads from beside itself; a build test fails on any undeclared asset.
+export const MEMORY_SYNC_ASSET_NAMES = [MEMORY_SYNC_WASM_NAME, "CaseFolding.txt"]
+// Where each asset comes from, for the freshness check.
+export function memorySyncAssetSources() {
+  return {
+    [MEMORY_SYNC_WASM_NAME]: loroWasmSourcePath(),
+    "CaseFolding.txt": join(repoRoot, "packages", "memory-core", "src", "sync", "item", "CaseFolding.txt"),
+  }
+}
+// The wasm the INSTALLED Loro package ships: the freshness check pins the committed copy to it, so a Loro
+// bump without a rebuild is reported stale instead of shipping an old binary.
+export function loroWasmSourcePath() {
+  return createRequire(join(repoRoot, "packages", "memory-core", "package.json")).resolve(`loro-crdt/bundler/${MEMORY_SYNC_WASM_NAME}`)
+}
 const threadClientEntryPath = join(packageRoot, "src", "components", "thread", "live-surface.ts")
 const memoryDoctorOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-doctor.js")
 const memoryMemfsOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-memfs.js")
 const memoryPalaceOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-palace.js")
 const sessionHistoryOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-session-history.js")
+const memorySyncOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-sync.js")
 const threadClientOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-thread-client.js")
 // The computer-use prelude JSON: bundled modules read it from beside the bundle (extensions/), the
 // same contract as the staged personas, so omo.js carries none of the ~29 KB of prelude text (#9113).
@@ -102,6 +121,7 @@ const externalSpecifiers = [
   "#omo-memory-memfs-runtime",
   "#omo-memory-palace-runtime",
   "#omo-session-history-runtime",
+  "#omo-memory-sync-runtime",
   "#omo-thread-client-runtime",
   "#omo-agent-toolkit-sdk",
   ...SENPI_LOADER_ALIASES,
@@ -139,6 +159,7 @@ export const extensionBuildPaths = {
   memoryMemfsOutputPath,
   memoryPalaceOutputPath,
   sessionHistoryOutputPath,
+  memorySyncOutputPath,
   threadClientOutputPath,
   gatewayStoreWorkerOutputPath,
   gatewayRulesExtensionOutputPath,
@@ -164,6 +185,7 @@ export function resolveOutputs(options) {
     memoryMemfsOutput: sibling(options.memoryMemfsOutputPath, memoryMemfsOutputPath, "omo-memory-memfs.js"),
     memoryPalaceOutput: sibling(options.memoryPalaceOutputPath, memoryPalaceOutputPath, "omo-memory-palace.js"),
     sessionHistoryOutput: sibling(options.sessionHistoryOutputPath, sessionHistoryOutputPath, "omo-session-history.js"),
+    memorySyncOutput: sibling(options.memorySyncOutputPath, memorySyncOutputPath, "omo-memory-sync.js"),
     threadClientOutput: sibling(options.threadClientOutputPath, threadClientOutputPath, "omo-thread-client.js"),
     computerUseOutput: sibling(options.computerUseOutputPath, computerUseOutputPath, "omo-computer-use.js"),
     gatewayStoreWorkerOutput: sibling(options.gatewayStoreWorkerOutputPath, gatewayStoreWorkerOutputPath, GATEWAY_STORE_WORKER_NAME),
@@ -196,6 +218,7 @@ export async function buildExtension(options = {}) {
     memoryMemfsOutput,
     memoryPalaceOutput,
     sessionHistoryOutput,
+    memorySyncOutput,
     threadClientOutput,
     gatewayStoreWorkerOutput,
     gatewayRulesExtensionOutput,
@@ -213,6 +236,7 @@ export async function buildExtension(options = {}) {
   const memoryMemfsInputs = await buildEntry(memoryMemfsEntryPath, memoryMemfsOutput, buildDefines)
   const memoryPalaceInputs = await buildEntry(memoryPalaceEntryPath, memoryPalaceOutput, buildDefines)
   const sessionHistoryInputs = await buildEntry(sessionHistoryEntryPath, sessionHistoryOutput, buildDefines)
+  const memorySyncInputs = await buildEntry(memorySyncEntryPath, memorySyncOutput, buildDefines, externalSpecifiers, { assets: true })
   const threadClientInputs = await buildEntry(threadClientEntryPath, threadClientOutput, buildDefines)
   const computerUseInputs = await buildEntry(computerUseEntryPath, computerUseOutput, buildDefines)
   const gatewayStoreWorkerInputs = await buildEntry(gatewayStoreWorkerEntryPath, gatewayStoreWorkerOutput, buildDefines, sdkExternalSpecifiers)
@@ -239,6 +263,7 @@ export async function buildExtension(options = {}) {
     memoryMemfsInputs,
     memoryPalaceInputs,
     sessionHistoryInputs,
+    memorySyncInputs,
     threadClientInputs,
     gatewayStoreWorkerInputs,
     gatewayRulesExtensionInputs,
@@ -246,12 +271,17 @@ export async function buildExtension(options = {}) {
   }
 }
 
-async function buildEntry(entry, output, buildDefines, externals = externalSpecifiers) {
+// `assets`: the entry imports files (the Loro wasm) through Bun's file loader, which is a second output
+// that --outfile cannot write; --outdir with fixed names puts the entry at `output` and each asset beside it.
+async function buildEntry(entry, output, buildDefines, externals = externalSpecifiers, { assets = false } = {}) {
   await mkdir(dirname(output), { recursive: true })
   const metafile = `${output}.meta.json`
+  const target = assets
+    ? ["--outdir", dirname(output), "--entry-naming", basename(output), "--asset-naming", "[name].[ext]"]
+    : ["--outfile", output]
   try {
     runBuildCommand(resolveBunExecutable(), [
-      "build", entry, "--target", "node", "--format", "esm", "--outfile", output,
+      "build", entry, "--target", "node", "--format", "esm", ...target,
       "--minify-syntax", "--minify-whitespace", `--metafile=${metafile}`,
       ...Object.entries(buildDefines).flatMap(([name, value]) => ["--define", `${name}=${JSON.stringify(value)}`]),
       ...externals.flatMap((specifier) => ["--external", specifier]),
