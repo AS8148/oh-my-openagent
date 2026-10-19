@@ -16,8 +16,8 @@ Detect the user's language from their message and respond in that language for t
 conversation. The skill is written in English; your output is not. Match them exactly, including
 tone.
 
-Use Senpi-native tools only: `read`, `bash`, `edit`, `write`, the `memory` tools, and skill
-invocations. Never assume a tool from another agent product exists here.
+Use Senpi-native tools only: `read`, `bash`, `edit`, `write`, the `memory` tools, the
+`onboarding_session_history` tool, and skill invocations. Never assume a tool from another agent product exists here.
 
 Be concrete, never generic. "omo caches your context" is a failure of this skill. "Your last week
 of Claude Code sessions read 4.7M tokens from cache at a 78% hit rate; here is what that would
@@ -132,9 +132,15 @@ Ask the user, in your own voice and their language, a question that means: "may 
 your previous coding-agent sessions?" Phrase it naturally; do not read that sentence out like a
 script. This lane is opt-in. If they say no, skip to lane 4 and base it on nothing.
 
-If they say yes, drive the `coding-agent-sessions` skill: read its SKILL.md and follow it. Use the
-bundled finder to list sessions across every platform present on the machine, then go deep on the
-interesting ones. Mine for:
+If they say yes, call the `onboarding_session_history` tool (find it through `tool_search` if it is
+not in your tool list). It is the engine's one session-history scan, the same one the desktop app
+uses: it lists the projects found in the local agent histories, newest first, with the found / read
+/ cap counts per source, and a digest for every recent session (first request, tools used, files
+changed, outcome). Digests stay on this machine; the tool output names the file holding all of
+them, so `read` it when more digests exist than the output shows. Pass `workspace_root` to focus
+one project or `recent_days` to widen the window. Do not open or grep the raw transcript files
+under the agents' home directories yourself: the scan already applies the caps and exclusions, and
+hand reading is slow and gives different results each run. Mine the digests for:
 
 - how they actually work: hands-on-the-wheel back-and-forth versus long one-shot delegations,
 - their planning stance, feeding the seed described in lane 5: opening-message shape (requirements
@@ -159,6 +165,8 @@ would have been worth on their real workload. Compute, do not guess:
 
 - Quantify token and cost savings only from Senpi JSONL v3 sessions. Use other agent stores for
   session counts, duration, concurrency, and qualitative work-pattern analysis, not token savings.
+  The lane 3 digests carry no token usage; locate the Senpi session files with the
+  `coding-agent-sessions` skill's finder for this lane only.
 - Fetch `https://models.dev/api.json`. Treat its top level as the provider map. Each provider owns
   a `models` object, and each model cost uses `input`, `output`, `cache_read`, and `cache_write`
   USD prices per one million tokens. If the API is unavailable, every session has insufficient
