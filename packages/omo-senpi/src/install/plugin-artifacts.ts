@@ -15,6 +15,7 @@ export const REQUIRED_PLUGIN_ARTIFACTS: readonly string[] = [
   join("extensions", "omo-memory-memfs.js"),
   join("extensions", "omo-memory-palace.js"),
   join("extensions", "omo-session-history.js"),
+  join("extensions", "omo-dori-migration.js"),
   // The sync engine sidecar and the Loro wasm it loads from beside itself.
   join("extensions", "omo-memory-sync.js"),
   join("extensions", "loro_wasm_bg.wasm"),

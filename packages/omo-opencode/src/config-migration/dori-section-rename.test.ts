@@ -5,6 +5,7 @@ import { join, posix } from "node:path"
 import { parse } from "jsonc-parser"
 import { loadOmoConfig, runMigrations } from "@oh-my-opencode/omo-config-core"
 import { createLegacyConfigMigrationPlans, executeLegacyConfigMigrationPlan } from "./index"
+import { doriSectionRename } from "./dori-section-rename"
 
 const roots: string[] = []
 afterEach(() => {
@@ -25,6 +26,7 @@ function fixture(document: Record<string, unknown>, legacyFiles: Readonly<Record
     writeFileSync(path, content)
   }
   const plans = createLegacyConfigMigrationPlans({
+    doriSectionRename,
     cwd, homeDir, environment: { HOME: homeDir }, pathOperations: posix, platform: "linux",
   })
   const plan = plans.find((candidate) => candidate.id === "2026-10-dori-section-rename" && candidate.targetPath === targetPath)

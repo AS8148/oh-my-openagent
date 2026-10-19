@@ -23,6 +23,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryMemfsOutput,
     memoryPalaceOutput,
     sessionHistoryOutput,
+    doriMigrationOutput,
     memorySyncOutput,
     threadClientOutput,
     gatewayStoreWorkerOutput,
@@ -50,6 +51,7 @@ export async function checkExtensionCurrent(options = {}) {
   const currentMemoryMemfs = await readBuiltEntry(memoryMemfsOutput)
   const currentMemoryPalace = await readBuiltEntry(memoryPalaceOutput)
   const currentSessionHistory = await readBuiltEntry(sessionHistoryOutput)
+  const currentDoriMigration = await readBuiltEntry(doriMigrationOutput)
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
   const currentMemorySync = await readBuiltEntry(memorySyncOutput)
   if (currentMemorySync === undefined) return { ok: false, reason: "missing-output", output: memorySyncOutput }
@@ -65,6 +67,7 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentMemoryMemfs === undefined) return { ok: false, reason: "missing-output", output: memoryMemfsOutput }
   if (currentMemoryPalace === undefined) return { ok: false, reason: "missing-output", output: memoryPalaceOutput }
   if (currentSessionHistory === undefined) return { ok: false, reason: "missing-output", output: sessionHistoryOutput }
+  if (currentDoriMigration === undefined) return { ok: false, reason: "missing-output", output: doriMigrationOutput }
   if (currentThreadClient === undefined) return { ok: false, reason: "missing-output", output: threadClientOutput }
   const currentComputerUse = await readBuiltEntry(computerUseOutput)
   if (currentComputerUse === undefined) return { ok: false, reason: "missing-output", output: computerUseOutput }
@@ -88,6 +91,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryMemfsOutputPath: join(tempRoot, "omo-memory-memfs.js"),
     memoryPalaceOutputPath: join(tempRoot, "omo-memory-palace.js"),
     sessionHistoryOutputPath: join(tempRoot, "omo-session-history.js"),
+    doriMigrationOutputPath: join(tempRoot, "omo-dori-migration.js"),
     memorySyncOutputPath: join(tempRoot, "omo-memory-sync.js"),
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
     computerUseOutputPath: join(tempRoot, "omo-computer-use.js"),
@@ -110,6 +114,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentMemoryMemfs, expected.memoryMemfsOutputPath, memoryMemfsOutput],
       [currentMemoryPalace, expected.memoryPalaceOutputPath, memoryPalaceOutput],
       [currentSessionHistory, expected.sessionHistoryOutputPath, sessionHistoryOutput],
+      [currentDoriMigration, expected.doriMigrationOutputPath, doriMigrationOutput],
       [currentMemorySync, expected.memorySyncOutputPath, memorySyncOutput],
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
       [currentComputerUse, expected.computerUseOutputPath, computerUseOutput],

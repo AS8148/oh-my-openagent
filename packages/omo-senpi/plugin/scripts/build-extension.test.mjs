@@ -370,6 +370,20 @@ describe("checkExtensionCurrent", () => {
     }
   }, 60000)
 
+  test("#given the split extension build #when config-startup inputs are inspected #then the gateway -> dori rename loads only from its lazy entry", async () => {
+    const { mainInputs, doriMigrationInputs, doriMigrationOutputPath } = await sharedOutputs()
+    for (const suffix of [
+      "packages/omo-senpi/src/components/config-startup/dori-migration-runtime.ts",
+      "packages/omo-opencode/src/config-migration/dori-section-rename.ts",
+      "packages/omo-config-core/src/schema/legacy-dori-section.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(doriMigrationInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+    expect(doriMigrationInputs.some((input) => toPortableBuildPath(input).endsWith("packages/omo-senpi/src/components/config-startup/dori-migration-loader.ts"))).toBe(false)
+    expect(await readFile(doriMigrationOutputPath, "utf8")).not.toContain("#omo-dori-migration-runtime")
+  })
+
   test("#given a packaged task import map #when generated artifacts are inspected #then the main bundle resolves its task sidecar", async () => {
     const outputs = await sharedOutputs()
     const main = await readFile(outputs.outputPath, "utf8")
@@ -380,6 +394,7 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-memory-memfs-runtime")')
     expect(main).toContain('import("#omo-memory-palace-runtime")')
     expect(main).toContain('import("#omo-session-history-runtime")')
+    expect(main).toContain('import("#omo-dori-migration-runtime")')
     expect(main).toContain('import("#omo-thread-client-runtime")')
     expect(main).toContain('import("#omo-memory-sync-runtime")')
     expect(task).toMatch(/^\/\/ omo:[A-Za-z0-9_-]{43}:[A-Za-z0-9_-]{43}/)
@@ -392,6 +407,7 @@ describe("checkExtensionCurrent", () => {
       "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
       "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
       "#omo-session-history-runtime": "./extensions/omo-session-history.js",
+      "#omo-dori-migration-runtime": "./extensions/omo-dori-migration.js",
       "#omo-memory-sync-runtime": "./extensions/omo-memory-sync.js",
       "#omo-thread-client-runtime": "./extensions/omo-thread-client.js",
       "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js",

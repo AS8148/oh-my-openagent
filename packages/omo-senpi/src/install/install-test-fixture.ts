@@ -35,6 +35,7 @@ export async function createPluginFixture(options: { readonly runtime?: boolean 
   await writeFixtureFile(join(pluginPath, "extensions", "omo-memory-memfs.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "omo-memory-palace.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "omo-session-history.js"), "export {}\n")
+  await writeFixtureFile(join(pluginPath, "extensions", "omo-dori-migration.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "omo-memory-sync.js"), "export {}\n")
   await writeFixtureFile(join(pluginPath, "extensions", "loro_wasm_bg.wasm"), "")
   await writeFixtureFile(join(pluginPath, "extensions", "CaseFolding.txt"), "")
