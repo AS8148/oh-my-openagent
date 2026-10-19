@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-5.1.36 was prepared but never published; everything listed for it ships in this release. ([#10552](https://github.com/code-yeongyu/oh-my-openagent/pull/10552))
-
 **A busy task child no longer holds its whole transcript in memory while it works.** The memory component read the session's full history at the start of every run, though it needs it only the first time a session binds. On a reopened compacted session that read re-parses the whole transcript file and keeps it until the session goes idle, so each long-running child held about four times its transcript for every run; it is now read only when a session binds. ([#10556](https://github.com/code-yeongyu/oh-my-openagent/issues/10556), [senpi#3110](https://github.com/code-yeongyu/senpi/issues/3110))
+
+## [5.1.37] - 2026-10-19
+
+5.1.36 was prepared but never published; everything listed for it ships in this release. ([#10552](https://github.com/code-yeongyu/oh-my-openagent/pull/10552))
 
 **The engine moves to senpi 2026.10.19: a hung extension handler no longer freezes a session, and queued input survives a crash.** An extension handler that never settles on a lifecycle event is named in the session after 60 s and released after 20 min, or at once on Esc or the turn deadline. Input queued with a client id is written to the session file before it is queued and delivered exactly once. The mouse wheel scrolls the transcript again while a question prompt is waiting, Alt+Q restores queued messages on WSL, and the /btw panel no longer repeats a running eval's output in the scrollback. Anthropic requests of 4096+ characters to `api.anthropic.com` are now sent gzip-compressed, as Claude Code does. ([senpi#3650](https://github.com/code-yeongyu/senpi/issues/3650), [senpi#3549](https://github.com/code-yeongyu/senpi/issues/3549), [senpi#3604](https://github.com/code-yeongyu/senpi/issues/3604), [senpi#3628](https://github.com/code-yeongyu/senpi/issues/3628), [senpi#3649](https://github.com/code-yeongyu/senpi/issues/3649), [senpi#3643](https://github.com/code-yeongyu/senpi/issues/3643), [#10552](https://github.com/code-yeongyu/oh-my-openagent/pull/10552))
 
