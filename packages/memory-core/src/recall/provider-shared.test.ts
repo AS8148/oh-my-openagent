@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { realpathSync } from "node:fs"
+import { realpathSync, symlinkSync } from "node:fs"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -79,6 +79,22 @@ describe("RecallCorpusCache shared mode", () => {
     expect(afterReader).toBe(afterWriter)
     expect(afterReader.revision).not.toBe(before.revision)
     expect(afterReader.documents.map((document) => document.path)).toContain("reference/after.md")
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
+
+  it("#given one repository reached through a symlinked path #when two sessions load it #then they share one corpus", async () => {
+    // given
+    const { dir } = await createRepo("Linked")
+    const linkParent = realpathSync.native(await mkdtemp(join(tmpdir(), "recall-shared-link-")))
+    tempDirs.push(linkParent)
+    const linked = join(linkParent, "memory")
+    symlinkSync(dir, linked, "dir")
+
+    // when
+    const direct = await new RecallCorpusCache({ shared: true }).load(new GitMemoryRepo({ dir, agentId: "session-a" }))
+    const viaLink = await new RecallCorpusCache({ shared: true }).load(new GitMemoryRepo({ dir: linked, agentId: "session-b" }))
+
+    // then
+    expect(viaLink).toBe(direct)
   }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given an unshared cache #when it loads a repository a shared cache already holds #then it keeps a private corpus", async () => {

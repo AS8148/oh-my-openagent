@@ -9,6 +9,7 @@
 // process per file. A memory repo with thousands of files moves HEAD on every memory write, and
 // reading it one `git show` per file from every live session was a machine-wide git storm.
 
+import { realpathSync } from "node:fs"
 import { join } from "node:path"
 
 import { readFile, stat } from "../fs/resilient"
@@ -120,6 +121,16 @@ const releaseSharedCache = new FinalizationRegistry<{ readonly dir: string; read
     if (sharedCaches.get(dir) === ref) sharedCaches.delete(dir)
   },
 )
+
+// One repository reached through a symlink, `/tmp` vs `/private/tmp`, or a trailing slash is still one
+// corpus; keying by the spelled path gave each spelling its own copy and silently lost the sharing.
+function sharedKey(dir: string): string {
+  try {
+    return realpathSync.native(dir)
+  } catch {
+    return dir
+  }
+}
 
 function acquireSharedCache(dir: string, options: RecallCorpusCacheOptions): RecallCorpusCache {
   const live = sharedCaches.get(dir)?.deref()
@@ -234,10 +245,11 @@ export class RecallCorpusCache {
   }
 
   private sharedFor(dir: string): RecallCorpusCache {
-    let cache = this.held.get(dir)
+    const key = sharedKey(dir)
+    let cache = this.held.get(key)
     if (cache === undefined) {
-      cache = acquireSharedCache(dir, this.options)
-      this.held.set(dir, cache)
+      cache = acquireSharedCache(key, this.options)
+      this.held.set(key, cache)
     }
     return cache
   }
