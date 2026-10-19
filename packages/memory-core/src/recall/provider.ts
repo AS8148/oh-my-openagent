@@ -14,6 +14,7 @@ import { join } from "node:path"
 import { readFile, realpathSync, stat } from "../fs/resilient"
 import type { GitMemoryRepo } from "../git"
 import { parseMemoryFile } from "../memfs"
+import { RecallTermPersistence } from "./bm25-persist"
 
 export interface RecallDocument {
   readonly path: string
@@ -112,6 +113,8 @@ export interface RecallCorpusCacheOptions {
    * cache that loaded the repository is alive.
    */
   readonly shared?: boolean
+  /** Told when the persisted recall terms cannot be read or saved; recall itself is unaffected. */
+  readonly onTermStoreError?: (error: unknown) => void
 }
 
 const sharedCaches = new Map<string, WeakRef<RecallCorpusCache>>()
@@ -134,7 +137,7 @@ function sharedKey(dir: string): string {
 function acquireSharedCache(dir: string, options: RecallCorpusCacheOptions): RecallCorpusCache {
   const live = sharedCaches.get(dir)?.deref()
   if (live !== undefined) return live
-  const cache = new RecallCorpusCache(options.head === undefined ? {} : { head: options.head })
+  const cache = new RecallCorpusCache({ ...options, shared: false })
   const ref = new WeakRef(cache)
   sharedCaches.set(dir, ref)
   releaseSharedCache.register(cache, { dir, ref })
@@ -189,6 +192,7 @@ export class RecallCorpusCache {
   private entry: RecallCorpusCacheEntry | undefined
   private probe: HeadProbe | undefined
   private blobs: { readonly dir: string; readonly loaded: LoadedBlobs } | undefined
+  private terms: RecallTermPersistence | undefined
   private readonly resolveHead: (repo: GitMemoryRepo) => Promise<string | null>
   private readonly options: RecallCorpusCacheOptions
   /** Shared mode only: the process-wide caches this instance keeps alive, one per repository. */
@@ -257,6 +261,8 @@ export class RecallCorpusCache {
     const previous = this.blobs?.dir === repo.dir ? this.blobs.loaded : new Map<string, LoadedBlob>()
     const { corpus, loaded } = await loadCorpusAtRevision(repo, revision, previous)
     this.blobs = { dir: repo.dir, loaded }
+    if (this.terms?.dir !== repo.dir) this.terms = new RecallTermPersistence(repo.dir, this.options.onTermStoreError ?? (() => undefined))
+    await this.terms.attach(corpus.documents)
     return corpus
   }
 }

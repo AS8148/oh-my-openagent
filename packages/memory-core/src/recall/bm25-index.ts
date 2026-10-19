@@ -3,7 +3,8 @@
 // (each memory write) rebuilt all of it. Terms are interned to ids in one process-wide dictionary,
 // each document keeps two sorted typed arrays, and those arrays are cached per document object, which
 // RecallCorpusCache reuses across HEAD moves for every unchanged blob. A rebuild therefore tokenizes
-// only the changed notes and recounts document frequency from the cached arrays.
+// only the changed notes and recounts document frequency from the cached arrays. A new process can
+// also take a document's arrays from the persisted term store (bm25-store.ts) instead of tokenizing it.
 
 import type { RecallDocument } from "./provider"
 
@@ -12,12 +13,22 @@ export interface DocumentTermsInput {
   readonly length: number
 }
 
-export interface DocumentTerms {
-  readonly generation: number
+/** One document's terms outside the process dictionary: ids index a term list the holder carries. */
+export interface StoredDocumentTerms {
   /** Term ids, ascending. */
   readonly ids: Uint32Array
   readonly counts: Uint32Array
   readonly length: number
+}
+
+export interface DocumentTerms extends StoredDocumentTerms {
+  readonly generation: number
+}
+
+/** Documents' terms against a compact term list holding exactly the terms they use. */
+export interface RecallTermsSnapshot {
+  readonly terms: readonly string[]
+  readonly documents: readonly StoredDocumentTerms[]
 }
 
 export interface RecallBm25Index {
@@ -41,14 +52,17 @@ const recentLive: number[] = []
 
 let generation = 0
 let dictionary = new Map<string, number>()
+let vocabulary: string[] = []
 const DOCUMENT_TERMS = new WeakMap<RecallDocument, DocumentTerms>()
 const INDEXES = new WeakMap<readonly RecallDocument[], RecallBm25Index>()
+const ENCODED_LISTENERS = new WeakMap<readonly RecallDocument[], () => void>()
 
 function intern(term: string): number {
   const known = dictionary.get(term)
   if (known !== undefined) return known
   const id = dictionary.size
   dictionary.set(term, id)
+  vocabulary.push(term)
   return id
 }
 
@@ -66,16 +80,21 @@ function encode(input: DocumentTermsInput): DocumentTerms {
   return { generation, ids, counts: ordered, length: input.length }
 }
 
-function termsFor(document: RecallDocument, read: (document: RecallDocument) => DocumentTermsInput): DocumentTerms {
+function currentTerms(document: RecallDocument): DocumentTerms | undefined {
   const cached = DOCUMENT_TERMS.get(document)
-  if (cached !== undefined && cached.generation === generation) return cached
-  const terms = encode(read(document))
-  DOCUMENT_TERMS.set(document, terms)
-  return terms
+  return cached !== undefined && cached.generation === generation ? cached : undefined
 }
 
 function build(documents: readonly RecallDocument[], read: (document: RecallDocument) => DocumentTermsInput): RecallBm25Index {
-  const encoded = documents.map((document) => termsFor(document, read))
+  let fresh = 0
+  const encoded = documents.map((document) => {
+    const cached = currentTerms(document)
+    if (cached !== undefined) return cached
+    fresh += 1
+    const terms = encode(read(document))
+    DOCUMENT_TERMS.set(document, terms)
+    return terms
+  })
   const documentFrequency = new Uint32Array(dictionary.size)
   let live = 0
   let totalLength = 0
@@ -91,9 +110,11 @@ function build(documents: readonly RecallDocument[], read: (document: RecallDocu
   if (dictionary.size > 2 * Math.max(...recentLive) + DICTIONARY_SLACK) {
     generation += 1
     dictionary = new Map()
+    vocabulary = []
     recentLive.length = 0
     return build(documents, read)
   }
+  if (fresh > 0) ENCODED_LISTENERS.get(documents)?.()
   const terms = dictionary
   return {
     generation,
@@ -134,4 +155,66 @@ export function termCount(terms: DocumentTerms, id: number): number {
     else high = middle - 1
   }
   return 0
+}
+
+/**
+ * Calls `listener` after an index of `documents` is built that had to tokenize at least one of them,
+ * so a holder of a persisted copy (bm25-persist.ts) knows that copy is missing documents.
+ */
+export function onRecallDocumentsEncoded(documents: readonly RecallDocument[], listener: () => void): void {
+  ENCODED_LISTENERS.set(documents, listener)
+}
+
+/**
+ * Adopts stored terms for documents that have none yet, so building their index tokenizes nothing.
+ * Ids index `terms`; in a process whose dictionary is still empty they become the dictionary's ids
+ * as they are, otherwise each document is moved onto the dictionary's ids and re-sorted.
+ */
+export function seedRecallDocumentTerms(
+  terms: readonly string[],
+  entries: Iterable<readonly [RecallDocument, StoredDocumentTerms]>,
+): void {
+  const mapping = Uint32Array.from(terms, intern)
+  const identity = mapping.every((id, position) => id === position)
+  for (const [document, stored] of entries) {
+    if (currentTerms(document) !== undefined) continue
+    DOCUMENT_TERMS.set(document, { generation, ...(identity ? stored : remap(stored, mapping)) })
+  }
+}
+
+function remap(stored: StoredDocumentTerms, mapping: Uint32Array): StoredDocumentTerms {
+  const moved = (position: number): number => mapping[stored.ids[position] ?? 0] ?? 0
+  const order = Array.from(stored.ids, (_, position) => position).sort((left, right) => moved(left) - moved(right))
+  return {
+    ids: Uint32Array.from(order, moved),
+    counts: Uint32Array.from(order, (position) => stored.counts[position] ?? 0),
+    length: stored.length,
+  }
+}
+
+/**
+ * The current terms of `documents` against a term list of only the terms they use, ids kept in
+ * dictionary order so each document's ids stay ascending. `undefined` while any of them has no
+ * current terms, as after a dictionary replacement before the next build.
+ */
+export function snapshotRecallDocumentTerms(documents: readonly RecallDocument[]): RecallTermsSnapshot | undefined {
+  const encoded: DocumentTerms[] = []
+  for (const document of documents) {
+    const terms = currentTerms(document)
+    if (terms === undefined) return undefined
+    encoded.push(terms)
+  }
+  const compact = new Uint32Array(vocabulary.length)
+  const used = new Uint8Array(vocabulary.length)
+  for (const { ids } of encoded) for (const id of ids) used[id] = 1
+  const terms: string[] = []
+  used.forEach((flag, id) => {
+    if (flag === 0) return
+    compact[id] = terms.length
+    terms.push(vocabulary[id] ?? "")
+  })
+  return {
+    terms,
+    documents: encoded.map(({ ids, counts, length }) => ({ ids: ids.map((id) => compact[id] ?? 0), counts, length })),
+  }
 }

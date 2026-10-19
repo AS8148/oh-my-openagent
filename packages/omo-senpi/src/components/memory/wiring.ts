@@ -74,7 +74,8 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   // One corpus cache for both: the sidecar's read-only memory tool reads the corpus the candidates came from.
   // Shared: every session on a multi-session host registers this component, and a private cache
   // per session held one parsed corpus and BM25 index per live session (senpi#3110).
-  const corpusCache = new RecallCorpusCache({ shared: true })
+  const onTermStoreError = (error: unknown): void => options.logger?.warn("omo-senpi memory recall term store skipped", { error: String(error) })
+  const corpusCache = new RecallCorpusCache({ shared: true, onTermStoreError })
 
   const recallWiring = createMemoryRecallWiring({
     resolveContext,
