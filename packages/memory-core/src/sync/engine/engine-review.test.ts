@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
+import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 
 import { CrashInjected } from "./engine"
 import { type Device, GIT_TEST_TIMEOUT, makeDevice } from "./engine-harness.test-support"
@@ -244,3 +246,31 @@ for (const content of ["again\n", "one\n"]) {
     expect([await a.read("x.md"), await b.read("x.md")]).toEqual([content, content])
   }, GIT_TEST_TIMEOUT)
 }
+
+// L1 (#10548 round-4 review): a crash at `staged` leaves a .staged file with no record; a later
+// delete record reusing that seq must not read the leftover as "landed".
+test("Loro store: a leftover staged file from a crashed step does not make a later delete look landed", async () => {
+  const server = new FakeSyncServer()
+  const a = await makeDevice(server, "a", undefined, { realStore: true })
+  const b = await makeDevice(server, "b", undefined, { realStore: true })
+  devices.push(a, b)
+  await a.write("x.md", "one\n")
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  await a.write("x.md", null)
+  await a.engine.runCycle()
+  await b.restart(crashAt("merged"))
+  await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+  const cycle = (await b.engine.state()).cycle
+  if (cycle === null) throw new Error("no cycle in flight")
+  // What a crash at `staged` of an earlier attempt leaves: a staged file with no record.
+  const renders = join(b.repo.gitDir, "omo-sync", "renders", cycle.id)
+  await mkdir(renders, { recursive: true })
+  await writeFile(join(renders, "00000001.staged"), "stale\n")
+  await b.restart(crashAt("render-intent"))
+  await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+  await b.restart()
+  await b.engine.runCycle()
+  await a.engine.runCycle()
+  expect([await a.read("x.md"), await b.read("x.md")]).toEqual([null, null])
+}, GIT_TEST_TIMEOUT)

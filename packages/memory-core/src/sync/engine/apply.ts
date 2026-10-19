@@ -17,7 +17,7 @@
 // on: the landed render (inv. 5), or the old baseline when the render never landed.
 
 import { createHash, randomBytes } from "node:crypto"
-import { existsSync, mkdir, readdir, readFile, rename } from "../../fs/resilient"
+import { existsSync, mkdir, readdir, readFile, rename, rm } from "../../fs/resilient"
 import { dirname, join, relative, sep } from "node:path"
 
 import { syncJournalDirectory } from "../../journal/fsync"
@@ -136,11 +136,14 @@ async function land(journal: SyncJournal, root: string, cycleId: string, record:
     if (existsSync(target)) await rename(target, staged)
     else await writeAtomic(staged, "")
     await syncJournalDirectory(dirname(target))
+    await syncJournalDirectory(dirname(staged))
     return
   }
   await mkdir(dirname(target), { recursive: true })
   await rename(staged, target)
   await syncJournalDirectory(dirname(target))
+  // Invariant 4 reads the staged file's absence, so that side of the rename must be durable too.
+  await syncJournalDirectory(dirname(staged))
 }
 
 export async function advance(deps: EngineDeps, journal: SyncJournal, start: CycleRecord): Promise<void> {
@@ -160,6 +163,9 @@ export async function advance(deps: EngineDeps, journal: SyncJournal, start: Cyc
       if (prior !== undefined && prior.frontier === frontier && journal.renderLanded(cycle.id, prior) && textHash(working) === prior.hash) continue
       const text = deps.store.render(key, working)
       const record: RenderRecord = { seq: await journal.nextRenderSeq(cycle.id), key, frontier, hash: textHash(text), text }
+      // A crash at `staged` leaves a staged file with no record at this seq; it must not survive
+      // into a delete record, where a present staged file means "landed" (invariant 4).
+      await rm(journal.stagedPath(cycle.id, record.seq), { force: true })
       if (text !== null) await writeAtomic(journal.stagedPath(cycle.id, record.seq), text)
       deps.fault?.("staged")
       await journal.appendRender(cycle.id, record)

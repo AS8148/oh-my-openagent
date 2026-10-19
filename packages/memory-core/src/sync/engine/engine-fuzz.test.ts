@@ -29,7 +29,7 @@ function prng(seed: number): () => number {
 const FILES = ["a.md", "b.md", "notes/c.md"]
 const STEPS = 24
 
-async function run(seed: number, deletes: boolean, realStore = false) {
+async function run(seed: number, deletes: boolean, realStore = false, points: readonly string[] = INBOUND_POINTS) {
   const random = prng(seed)
   const pick = <T>(xs: readonly T[]): T => xs[Math.floor(random() * xs.length)] as T
   const server = new FakeSyncServer()
@@ -53,7 +53,7 @@ async function run(seed: number, deletes: boolean, realStore = false) {
       // resume; a person may edit (or delete) any file between them, including one just rendered.
       const crashes = 1 + Math.floor(random() * 3)
       for (let c = 0; c < crashes; c += 1) {
-        const point = pick(INBOUND_POINTS)
+        const point = pick(points)
         const nth = 1 + Math.floor(random() * 3)
         let seen = 0
         await device.restart((at) => {
@@ -119,4 +119,11 @@ for (const seed of [1, 2, 3]) {
 for (const seed of [11, 12, 13, 14, 15, 16, 17, 18]) {
   test(`Loro store, seed ${seed}: random write/multi-crash runs agree byte for byte, keep every line and duplicate none`, () => run(seed, false, true), 180_000)
   test(`Loro store, seed ${seed + 100}: random create/edit/delete/multi-crash runs agree byte for byte and duplicate nothing`, () => run(seed + 100, true, true), 180_000)
+}
+
+// The render window alone (a leftover staged file, a record without its landing, a landed render),
+// with deletes, so a staged leftover can meet a delete record (#10548 round-4 L1).
+const RENDER_WINDOW = ["staged", "render-intent", "render-key"]
+for (const seed of [61, 62, 63, 64]) {
+  test(`Loro store, seed ${seed}: crashes inside the render window with deletes agree byte for byte`, () => run(seed, true, true, RENDER_WINDOW), 180_000)
 }
