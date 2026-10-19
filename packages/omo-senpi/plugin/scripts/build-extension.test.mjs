@@ -1,12 +1,17 @@
 import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { appendFile, readFile, rm, utimes, writeFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { spawnSync } from "node:child_process"
+import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join, parse } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { PERSONA_ASSET_FILES } from "@oh-my-opencode/memory-core/personas"
 
 import {
   checkExtensionCurrent,
+  loroWasmSourcePath,
+  MEMORY_SYNC_ASSET_NAMES,
+  MEMORY_SYNC_WASM_NAME,
   resolveBunExecutable,
   toPortableBuildPath,
 } from "./build-extension.mjs"
@@ -304,6 +309,67 @@ describe("checkExtensionCurrent", () => {
     expect(await readFile(sessionHistoryOutputPath, "utf8")).not.toContain("#omo-session-history-runtime")
   })
 
+  test("#given the split extension build #when sync inputs are inspected #then the Loro engine and its wasm live only in the sync sidecar", async () => {
+    const { mainInputs, memorySyncInputs, memorySyncOutputPath, outputPath } = await sharedOutputs()
+    for (const suffix of [
+      "packages/memory-core/src/crdt/loro-runtime.ts",
+      "packages/memory-core/src/sync/engine/index.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(memorySyncInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+    const wasm = await readFile(join(dirname(memorySyncOutputPath), MEMORY_SYNC_WASM_NAME))
+    const source = await readFile(loroWasmSourcePath())
+    expect(Buffer.compare(wasm, source)).toBe(0)
+    expect(await readFile(memorySyncOutputPath, "utf8")).toContain(MEMORY_SYNC_WASM_NAME)
+    expect(await readFile(outputPath, "utf8")).not.toContain(MEMORY_SYNC_WASM_NAME)
+  })
+
+  test("#given the sync sidecar build #when its output dir is listed #then every emitted asset is a declared sidecar asset", async () => {
+    const { memorySyncOutputPath } = await sharedOutputs()
+    const syncText = await readFile(memorySyncOutputPath, "utf8")
+    const referenced = MEMORY_SYNC_ASSET_NAMES.filter((name) => syncText.includes(name))
+    expect(referenced).toEqual([...MEMORY_SYNC_ASSET_NAMES])
+    const emitted = (await readdir(dirname(memorySyncOutputPath), { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && !/\.(?:m?js|json|md)$/.test(entry.name))
+      .map((entry) => entry.name)
+    expect(emitted.sort()).toEqual([...MEMORY_SYNC_ASSET_NAMES].sort())
+  })
+
+  test("#given the sync sidecar packed with npm pack #when the installed package imports #omo-memory-sync-runtime under Node #then Loro initializes from the packed wasm", async () => {
+    const { memorySyncOutputPath } = await sharedOutputs()
+    const work = await mkdtemp(join(tmpdir(), "omo-sync-sidecar-pack-"))
+    try {
+      const pkg = join(work, "pkg")
+      await mkdir(join(pkg, "extensions"), { recursive: true })
+      await cp(join(pluginRoot, "package.json"), join(pkg, "package.json"))
+      await cp(memorySyncOutputPath, join(pkg, "extensions", "omo-memory-sync.js"))
+      for (const asset of MEMORY_SYNC_ASSET_NAMES) await cp(join(dirname(memorySyncOutputPath), asset), join(pkg, "extensions", asset))
+      const packed = spawnSync("npm", ["pack", "--silent", "--pack-destination", work], { cwd: pkg, encoding: "utf8", shell: process.platform === "win32" })
+      expect(packed.status, packed.stderr).toBe(0)
+      const tarball = join(work, packed.stdout.trim().split("\n").at(-1))
+      const installed = join(work, "installed")
+      await mkdir(installed)
+      const untar = spawnSync("tar", ["-xzf", tarball, "-C", installed], { encoding: "utf8" })
+      expect(untar.status, untar.stderr).toBe(0)
+      const root = join(installed, "package")
+      const listed = await readdir(join(root, "extensions"))
+      for (const asset of MEMORY_SYNC_ASSET_NAMES) expect(listed).toContain(asset)
+      const probe = join(root, "sync-probe.mjs")
+      await writeFile(probe, [
+        'const sidecar = await import("#omo-memory-sync-runtime")',
+        'if (typeof sidecar.openDeviceSync !== "function") throw new Error("openDeviceSync missing")',
+        "await sidecar.checkSyncRuntime()",
+        'console.log("sync-sidecar-ok")',
+      ].join("\n"))
+      const run = spawnSync("node", [probe], { cwd: parse(process.cwd()).root, encoding: "utf8", shell: process.platform === "win32" })
+      expect(run.stdout, run.stderr).toContain("sync-sidecar-ok")
+      expect(run.status, run.stderr).toBe(0)
+    } finally {
+      await rm(work, { recursive: true, force: true })
+    }
+  }, 60000)
+
   test("#given a packaged task import map #when generated artifacts are inspected #then the main bundle resolves its task sidecar", async () => {
     const outputs = await sharedOutputs()
     const main = await readFile(outputs.outputPath, "utf8")
@@ -315,6 +381,7 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-memory-palace-runtime")')
     expect(main).toContain('import("#omo-session-history-runtime")')
     expect(main).toContain('import("#omo-thread-client-runtime")')
+    expect(main).toContain('import("#omo-memory-sync-runtime")')
     expect(task).toMatch(/^\/\/ omo:[A-Za-z0-9_-]{43}:[A-Za-z0-9_-]{43}/)
     expect(main).not.toContain('import("#omo-agent-toolkit-runtime")')
     expect(manifest.imports).not.toHaveProperty("#omo-agent-toolkit-runtime")
@@ -325,6 +392,7 @@ describe("checkExtensionCurrent", () => {
       "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
       "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
       "#omo-session-history-runtime": "./extensions/omo-session-history.js",
+      "#omo-memory-sync-runtime": "./extensions/omo-memory-sync.js",
       "#omo-thread-client-runtime": "./extensions/omo-thread-client.js",
       "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js",
     })
