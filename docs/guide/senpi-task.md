@@ -97,6 +97,20 @@ Named teams come from the project `teams` block in `omo.json` or `<project>/.omo
 
 There is no `team_wait` tool. When the next step depends on a reply, send with `task_send`, end the turn, and let the steered team-message notification resume the conversation when the reply arrives. Durable reservation and processed-message state prevent an inbox message from being lost during delivery or restart reconciliation.
 
+## Nesting depth and independent verification
+
+A child cannot spawn children of its own by default: `task.max_depth` is `1`, so a spawn from a child fails with `depth 2, beyond max_depth 1`. This keeps the delegation tree flat. Every child, its cost and its result stay visible to the session that started the work, and a worker cannot quietly turn itself into an orchestrator.
+
+When a worker's result should be checked independently (a source comparison, a second read of a diff, a review), the parent starts the verifier as a sibling:
+
+1. The parent spawns the worker and waits for its completion notification.
+2. The parent spawns a read-only verifier (for example `explore`, or a review category) with the worker's result as input: pass the worker's task id, the files it changed, or its output. Do not paste a summary of what the worker claims.
+3. The parent compares the two results and decides. If the verifier finds a problem, the parent steers the worker with `task_send` or starts a fix.
+
+The verifier never sees the worker's reasoning, only its output and the repository. That separation is what makes the check independent. A worker that asked its own child to verify it would choose what that child sees.
+
+Raise `task.max_depth` only when deeper trees are the point of the workflow (see the [`task` reference](../reference/omo-json.md#task)). A higher limit applies to every agent in the session, not only to verifiers.
+
 ## Configuration
 
 ### Checkout isolation
