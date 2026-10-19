@@ -185,4 +185,28 @@ describe("submitReport", () => {
 
     expect(result).toEqual({ kind: "refused", reason: "unavailable" })
   })
+
+  test("#given the same draft sent twice #when the report is submitted #then both requests carry the same idempotency key so the intake keeps one report", async () => {
+    const { sent, transport } = recordingTransport(201, { id: "rpt_1" })
+    const options = {
+      draft,
+      kind: "bug" as const,
+      description: "x",
+      redact: redactTokens,
+      client,
+      env: {},
+      stateDir: tempDir(),
+      apiOrigin: "https://api.example.test",
+      accessToken: null,
+      transport,
+    }
+
+    await submitReport(options)
+    await submitReport(options)
+
+    const keys = sent.map((request) => new Headers(request.init.headers).get("idempotency-key"))
+    expect(keys[0]).toBe(`feedback-${draft.draftId}`)
+    expect(keys[1]).toBe(keys[0])
+  })
 })
+

@@ -268,5 +268,15 @@ describe("feedback component", () => {
 
     expect(sent.map((body) => JSON.parse(body).kind)).toEqual(["bug", "feedback"])
   })
+
+  test("#given the desktop reports from a thread that is not an OmO session #when it asks for no session #then no conversation is attached even though a session is live", async () => {
+    const { pi, api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    await pi.dispatch("session_start", {}, sessionCtx)
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({ sessionId: null })) as { sections: { id: string }[] }
+
+    expect(draft.sections.map((section) => section.id)).not.toContain("session")
+  })
 })
 

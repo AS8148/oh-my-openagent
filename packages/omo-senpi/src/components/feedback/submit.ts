@@ -113,7 +113,7 @@ export async function submitReport(options: SubmitOptions): Promise<SubmitResult
     }
   }
 
-  const headers = new Headers({ "content-type": "application/json" })
+  const headers = new Headers({ "content-type": "application/json", "idempotency-key": `feedback-${options.draft.draftId}` })
   if (options.accessToken !== null) headers.set("authorization", `Bearer ${options.accessToken}`)
   let response: Response
   try {

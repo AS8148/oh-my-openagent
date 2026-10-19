@@ -151,6 +151,7 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
       })
       const sessionForRpc = (input: unknown): SessionLike | undefined => {
         const requested: unknown = Reflect.get(Object(input), "sessionId")
+        if (requested === null) return undefined
         if (typeof requested === "string") return liveSessions.get(requested)
         return latestSessionId === undefined ? undefined : liveSessions.get(latestSessionId)
       }
