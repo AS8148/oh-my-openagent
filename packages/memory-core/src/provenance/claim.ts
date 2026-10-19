@@ -2,7 +2,7 @@
 // words. Memory once stored an agent's suggestion as "the user agreed", and a later session acted on
 // it. A claim only keeps source "user" when its quote appears verbatim in a real user message.
 
-import { foldQuotes, isAffirmativeStatement } from "./consent"
+import { foldQuotes, isAffirmativeStatement, isCourtesyCloser } from "./consent"
 
 export const CLAIM_SOURCES = ["user", "agent", "inferred"] as const
 export type ClaimSource = (typeof CLAIM_SOURCES)[number]
@@ -49,9 +49,10 @@ export function enclosingUserSentence(quote: string, userTexts: readonly string[
     const sentences = sentencesOf(text)
     const at = sentences.findIndex((candidate) => normalize(candidate).includes(needle))
     const sentence = sentences[at] ?? text
-    // Every later sentence of the same message counts: "Remove X. Thanks. Never mind." is a retraction too.
-    const following = at >= 0 && at + 1 < sentences.length ? sentences.slice(at + 1).join(" ") : undefined
-    if (!isAffirmativeStatement(normalize(sentence), following === undefined ? undefined : normalize(following))) return undefined
+    // The quoted sentence must be the user's LAST word in that message. Retractions after it are an open set (five review
+    // rounds kept finding more), so any later sentence leaves the claim a suggestion instead of trying to list them.
+    if (at >= 0 && !sentences.slice(at + 1).every(isCourtesyCloser)) return undefined
+    if (!isAffirmativeStatement(normalize(sentence))) return undefined
     return capQuote(sentence)
   }
   return undefined

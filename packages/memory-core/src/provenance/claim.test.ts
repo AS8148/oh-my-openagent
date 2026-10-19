@@ -66,9 +66,8 @@ describe("claim receipts", () => {
     ["플러그인 X 지워. 그만큼 중요해", "플러그인 X 지워"],
     ["플러그인 X 지워. 안에 있는 것도 지워", "플러그인 X 지워"],
     ["Remove plugins X and Y. Thanks. Then push it.", "remove plugins X and Y"],
-  ])("#given %s #when resolved #then a plain follow-up stays the user's and a written prohibition does not", (said, quote) => {
-    const expected = said.includes("맙시다") ? "agent" : "user"
-    expect(resolveClaimReceipt({ source: "user", userQuote: quote }, [said]).source).toBe(expected)
+  ])("#given %s #when resolved #then any later sentence (or a written prohibition) leaves it a suggestion", (said, quote) => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: quote }, [said]).source).toBe("agent")
   })
 
   test("#given a fragment of an affirmative user sentence #when resolved #then the receipt stores the whole sentence", () => {
