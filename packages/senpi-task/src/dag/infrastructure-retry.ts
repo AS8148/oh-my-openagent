@@ -13,7 +13,7 @@ export type InfrastructureRetries = {
   readonly retry: (nodeId: DagNodeId, task: TaskRecord) => void
   readonly pending: (nodeId?: DagNodeId) => boolean
   readonly takeReady: () => boolean
-  readonly dispose: () => void
+  readonly cancelPendingTimers: () => void
 }
 
 type RetriedEvent = Extract<DagRunEvent, { readonly type: "dag.node.retried" }>
@@ -115,7 +115,7 @@ export function createInfrastructureRetries(
       ready = false
       return value
     },
-    dispose() {
+    cancelPendingTimers() {
       disposed = true
       for (const cancel of timers.values()) cancel()
       timers.clear()

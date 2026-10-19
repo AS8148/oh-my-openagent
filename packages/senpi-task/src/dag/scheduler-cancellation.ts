@@ -11,7 +11,7 @@ export async function cancelRun(context: SchedulerContext, runId: DagRunId, reas
   if (context.cancellationOperation !== undefined) return context.cancellationOperation
 
   context.cancellationStarted = true
-  context.infrastructureRetries.dispose()
+  context.infrastructureRetries.cancelPendingTimers()
   context.resolveCancellationRequested()
   context.cancellationOperation = performCancellation(context, reason)
   return context.cancellationOperation

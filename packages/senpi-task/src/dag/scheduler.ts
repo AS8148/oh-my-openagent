@@ -174,7 +174,7 @@ export function createDagScheduler(options: DagSchedulerOptions): DagScheduler {
     cancel: (runId, reason) => cancelRun(context, runId, reason),
     suspend: async () => {
       context.suspended = true
-      context.infrastructureRetries.dispose()
+      context.infrastructureRetries.cancelPendingTimers()
       context.resolveCancellationRequested()
       unsubscribeCommits()
       for (const nodeId of [...context.promotionWatches.keys()]) disposePromotionWatch(context, nodeId)
