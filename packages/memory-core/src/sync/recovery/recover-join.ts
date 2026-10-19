@@ -69,9 +69,10 @@ export const appendAndConfirmJoin = async (
 
 /**
  * Confirms an acknowledged rotation on a fresh anchored reload (#10412 review r2 M2, #10450): the
- * keyring head must be the rotation this device sent, at `epoch`, with this device still a member.
- * An epoch check alone accepts a fork where a lost device approved this one and rotated itself,
- * holding the new epoch's key.
+ * verified keyring must contain the rotation this device sent, at `epoch`, and this device must still
+ * be a member at the head. An epoch check alone accepts a fork where a lost device approved this one
+ * and rotated itself, holding the new epoch's key. The head may be a later record that descends from
+ * our rotation (#10611): a member's approval or enrollment landing before the reload is not a fork.
  */
 export const rotationStored = async (
 	{
@@ -90,10 +91,13 @@ export const rotationStored = async (
 ): Promise<boolean> => {
 	const stored = await loadServedChain(transport, account, rejections, anchor);
 	if (!stored.ok) return false;
-	const { authority, head } = stored.state;
+	const { authority, received } = stored.state;
+	const ours = received.find((entry) => entry.keyring_link === sent.keyring_link);
 	return (
-		head?.keyring_link === sent.keyring_link &&
-		authority?.epoch === epoch &&
+		ours?.epoch === epoch &&
+		authority !== null &&
+		authority.epoch >= epoch &&
+		!authority.cancelled.has(ours.digest) &&
 		authority.members.get(device.id)?.signing_public_key ===
 			device.signing_public_key
 	);

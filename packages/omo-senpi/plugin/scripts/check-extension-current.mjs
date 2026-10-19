@@ -15,12 +15,14 @@ export async function checkExtensionCurrent(options = {}) {
     supervisorOutput,
     advisorRuntimeOutput,
     sidePanelRuntimeOutput,
+    onboardingScanRuntimeOutput,
     toolkitSdkOutput,
     rollbackRuntimeOutput,
     computerUseOutput,
     memoryDoctorOutput,
     memoryMemfsOutput,
     memoryPalaceOutput,
+    sessionHistoryOutput,
     memorySyncOutput,
     threadClientOutput,
     gatewayStoreWorkerOutput,
@@ -42,9 +44,12 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentAdvisorRuntime === undefined) return { ok: false, reason: "missing-output", output: advisorRuntimeOutput }
   const currentSidePanelRuntime = await readBuiltEntry(sidePanelRuntimeOutput)
   if (currentSidePanelRuntime === undefined) return { ok: false, reason: "missing-output", output: sidePanelRuntimeOutput }
+  const currentOnboardingScanRuntime = await readBuiltEntry(onboardingScanRuntimeOutput)
+  if (currentOnboardingScanRuntime === undefined) return { ok: false, reason: "missing-output", output: onboardingScanRuntimeOutput }
   const currentMemoryDoctor = await readBuiltEntry(memoryDoctorOutput)
   const currentMemoryMemfs = await readBuiltEntry(memoryMemfsOutput)
   const currentMemoryPalace = await readBuiltEntry(memoryPalaceOutput)
+  const currentSessionHistory = await readBuiltEntry(sessionHistoryOutput)
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
   const currentMemorySync = await readBuiltEntry(memorySyncOutput)
   if (currentMemorySync === undefined) return { ok: false, reason: "missing-output", output: memorySyncOutput }
@@ -59,6 +64,7 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentMemoryDoctor === undefined) return { ok: false, reason: "missing-output", output: memoryDoctorOutput }
   if (currentMemoryMemfs === undefined) return { ok: false, reason: "missing-output", output: memoryMemfsOutput }
   if (currentMemoryPalace === undefined) return { ok: false, reason: "missing-output", output: memoryPalaceOutput }
+  if (currentSessionHistory === undefined) return { ok: false, reason: "missing-output", output: sessionHistoryOutput }
   if (currentThreadClient === undefined) return { ok: false, reason: "missing-output", output: threadClientOutput }
   const currentComputerUse = await readBuiltEntry(computerUseOutput)
   if (currentComputerUse === undefined) return { ok: false, reason: "missing-output", output: computerUseOutput }
@@ -75,11 +81,13 @@ export async function checkExtensionCurrent(options = {}) {
     supervisorOutputPath: join(tempRoot, "memory-run-supervisor.mjs"),
     advisorRuntimeOutputPath: join(tempRoot, "omo-init-deep-advisor.js"),
     sidePanelRuntimeOutputPath: join(tempRoot, "omo-side-panel.js"),
+    onboardingScanRuntimeOutputPath: join(tempRoot, "omo-onboarding-scan.js"),
     toolkitSdkOutputPath: join(tempRoot, "runtime", "agent-toolkit-sdk", "sdk.js"),
     rollbackRuntimeOutputPath: join(tempRoot, "runtime", "rollback-migrate.js"),
     memoryDoctorOutputPath: join(tempRoot, "omo-memory-doctor.js"),
     memoryMemfsOutputPath: join(tempRoot, "omo-memory-memfs.js"),
     memoryPalaceOutputPath: join(tempRoot, "omo-memory-palace.js"),
+    sessionHistoryOutputPath: join(tempRoot, "omo-session-history.js"),
     memorySyncOutputPath: join(tempRoot, "omo-memory-sync.js"),
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
     computerUseOutputPath: join(tempRoot, "omo-computer-use.js"),
@@ -97,9 +105,11 @@ export async function checkExtensionCurrent(options = {}) {
       [currentSupervisor, expected.supervisorOutputPath, supervisorOutput],
       [currentAdvisorRuntime, expected.advisorRuntimeOutputPath, advisorRuntimeOutput],
       [currentSidePanelRuntime, expected.sidePanelRuntimeOutputPath, sidePanelRuntimeOutput],
+      [currentOnboardingScanRuntime, expected.onboardingScanRuntimeOutputPath, onboardingScanRuntimeOutput],
       [currentMemoryDoctor, expected.memoryDoctorOutputPath, memoryDoctorOutput],
       [currentMemoryMemfs, expected.memoryMemfsOutputPath, memoryMemfsOutput],
       [currentMemoryPalace, expected.memoryPalaceOutputPath, memoryPalaceOutput],
+      [currentSessionHistory, expected.sessionHistoryOutputPath, sessionHistoryOutput],
       [currentMemorySync, expected.memorySyncOutputPath, memorySyncOutput],
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
       [currentComputerUse, expected.computerUseOutputPath, computerUseOutput],
