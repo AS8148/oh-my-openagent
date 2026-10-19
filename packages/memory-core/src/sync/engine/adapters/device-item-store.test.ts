@@ -81,3 +81,21 @@ test("a deleted file captures as a delete, and the item renders as gone", async 
   await a.apply("x.md", gone)
   expect(a.render("x.md", NOTE)).toBeNull()
 })
+
+test("a remote item applied and persisted before it was ever materialised survives a restart", async () => {
+  const src = await (await device("src")).open()
+  await src.load()
+  const ops = await src.capture("x.md", NOTE)
+  if (ops === null) throw new Error("no ops")
+  const d = await device("a")
+  const first = await d.open()
+  await first.load()
+  // A crash after the verified batch is applied and persisted, but before the cycle reaches
+  // committed (where markMaterialized runs): the item has CRDT state and no baseline yet.
+  await first.apply("x.md", ops)
+  await first.persist()
+  const again = await d.open()
+  await again.load()
+  expect(again.keys()).toEqual(["x.md"])
+  expect(again.render("x.md", null)).toBe(NOTE)
+})

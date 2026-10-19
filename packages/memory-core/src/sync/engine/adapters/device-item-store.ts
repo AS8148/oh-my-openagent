@@ -68,10 +68,13 @@ export function createDeviceItemStore(options: DeviceItemStoreOptions): ItemStor
       })
       const index = await readJson<Record<string, Baseline>>(join(crdt, "baselines.json"), {})
       baselines = new Map(Object.entries(index))
+      // Every persisted doc's key, materialised or not: an item applied from a verified batch has
+      // CRDT state before it has a baseline, and a crash in between must not drop that state.
+      const docKeys = await readJson<string[]>(join(crdt, "docs.json"), [])
       docs.clear()
       const names = await readdir(join(crdt, "docs")).catch(() => [] as string[])
       const { LoroDoc } = await loadLoroRuntime()
-      const byFile = new Map([...baselines.keys()].map((k) => [fileOf(k), k]))
+      const byFile = new Map([...new Set([...baselines.keys(), ...docKeys])].map((k) => [fileOf(k), k]))
       for (const name of names) {
         const key = byFile.get(name.replace(/\.loro$/, ""))
         if (key === undefined) continue
@@ -107,6 +110,7 @@ export function createDeviceItemStore(options: DeviceItemStoreOptions): ItemStor
       if (doc === undefined || !isLive(doc)) return null
       return diskText === null ? renderItem(doc) : renderForDisk(doc, diskText)
     },
+    baseline: (key) => baselines.get(key)?.text ?? null,
     async markMaterialized(key, text) {
       const doc = await docOf(key)
       if (text !== null) await recordMaterialized(theDevice(), key, doc, itemFrontier(doc), text)
@@ -126,6 +130,7 @@ export function createDeviceItemStore(options: DeviceItemStoreOptions): ItemStor
         if (doc !== undefined) await writeAtomic(join(crdt, "docs", `${fileOf(key)}.loro`), doc.export({ mode: "snapshot" }))
       }
       dirty.clear()
+      await writeJson(join(crdt, "docs.json"), [...docs.keys()].sort())
       await writeJson(join(crdt, "baselines.json"), Object.fromEntries(baselines))
     },
   }
