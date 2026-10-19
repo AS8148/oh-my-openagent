@@ -49,13 +49,31 @@ async function run(seed: number, deletes: boolean, realStore = false) {
     } else if (roll < 0.55 && deletes) {
       await device.write(pick(FILES), null)
     } else if (roll < 0.7) {
-      const point = pick(INBOUND_POINTS)
-      await device.restart((at) => {
-        if (at === point) throw new CrashInjected(point)
-      })
-      await device.engine.runCycle().catch((error: unknown) => {
-        if (!(error instanceof CrashInjected)) throw error
-      })
+      // 1-3 crashes in a row, each at a random point and occurrence, so later ones land inside a
+      // resume; a person may edit (or delete) any file between them, including one just rendered.
+      const crashes = 1 + Math.floor(random() * 3)
+      for (let c = 0; c < crashes; c += 1) {
+        const point = pick(INBOUND_POINTS)
+        const nth = 1 + Math.floor(random() * 3)
+        let seen = 0
+        await device.restart((at) => {
+          if (at === point && (seen += 1) === nth) throw new CrashInjected(`${point}#${nth}`)
+        })
+        await device.engine.runCycle().catch((error: unknown) => {
+          if (!(error instanceof CrashInjected)) throw error
+        })
+        if (random() < 0.6) {
+          const file = pick(FILES)
+          if (deletes && random() < 0.2) {
+            await device.write(file, null)
+          } else {
+            const text = `line-${seed}-${(line += 1)}`
+            const current = (await device.read(file)) ?? ""
+            await device.write(file, `${current}${text}\n`)
+            written.set(file, (written.get(file) ?? new Set()).add(text))
+          }
+        }
+      }
       await device.restart()
     } else {
       await device.engine.runCycle()
@@ -63,6 +81,8 @@ async function run(seed: number, deletes: boolean, realStore = false) {
   }
   for (let round = 0; round < 3; round += 1) for (const device of pair) await device.engine.runCycle()
   const [a, b] = pair as [Device, Device]
+  for (const device of pair) expect(await device.workingTempFiles()).toEqual([])
+  for (const device of pair) expect(await device.renderJournals()).toEqual([])
   if (realStore) {
     const files = await a.workingFiles()
     expect(await b.workingFiles()).toEqual(files)
@@ -74,7 +94,7 @@ async function run(seed: number, deletes: boolean, realStore = false) {
       expect([file, lines.length]).toEqual([file, new Set(lines).size])
       all.push(...lines)
     }
-    for (const lines of written.values()) for (const l of lines) expect([l, all.includes(l)]).toEqual([l, true])
+    if (!deletes) for (const lines of written.values()) for (const l of lines) expect([l, all.includes(l)]).toEqual([l, true])
     for (const device of pair) expect((await device.engine.state()).cycle).toBeNull()
     return
   }
@@ -97,5 +117,6 @@ for (const seed of [1, 2, 3]) {
 }
 
 for (const seed of [11, 12, 13, 14, 15, 16, 17, 18]) {
-  test(`Loro store, seed ${seed}: random write/interrupt runs agree byte for byte, keep every line and duplicate none`, () => run(seed, false, true), 180_000)
+  test(`Loro store, seed ${seed}: random write/multi-crash runs agree byte for byte, keep every line and duplicate none`, () => run(seed, false, true), 180_000)
+  test(`Loro store, seed ${seed + 100}: random create/edit/delete/multi-crash runs agree byte for byte and duplicate nothing`, () => run(seed + 100, true, true), 180_000)
 }
