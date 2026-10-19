@@ -3,6 +3,8 @@ import type { ExtensionContext, SessionStartEvent } from "@code-yeongyu/senpi"
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { getBuiltinSkillsRoot, getOmoNativeStateDir } from "../telemetry/product-identity"
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
+import { loadOnboardingScanRuntime } from "./scan-component"
+import type { OnboardingScanEnvironment } from "./scan-runtime"
 import { registerSessionHistoryRpc } from "./session-history-rpc"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
@@ -11,6 +13,19 @@ export interface OnboardingComponentDependencies {
   claimOnboarding(stateDir: string): boolean
   isOnboardingComplete(stateDir: string): boolean
   releaseOnboarding(stateDir: string): void
+  /** Where the migration inventory's scan reads; defaults to what `omo setup` reads. */
+  readonly scanEnvironment?: () => OnboardingScanEnvironment
+  /** The whole inventory source; defaults to the shared scan runtime `omo setup` uses. */
+  readonly migrationFacts?: () => Promise<string | undefined>
+}
+
+// The migration inventory comes from the one shared scan (`omo setup`'s own detection, through the
+// lazy onboarding-scan runtime), so the TUI never grows a second config reader. Fail-open: a scan
+// that cannot run onboards the user without an inventory.
+async function defaultMigrationFacts(environment: () => OnboardingScanEnvironment): Promise<string | undefined> {
+  const runtime = await loadOnboardingScanRuntime()
+  const { results } = await runtime.runOnboardingScan(environment(), { scanId: "onboarding-tui", includeCustomProviders: true }, () => {})
+  return runtime.migrationFactsFromScan(results)
 }
 
 const defaultDependencies: OnboardingComponentDependencies = {
@@ -37,6 +52,15 @@ export function createOnboardingComponent(
     register(pi: SenpiExtensionAPI, _ctx: ComponentContext): void {
       const stateDir = getOmoNativeStateDir(process.env)
       const tour = `Follow ${getBuiltinSkillsRoot()}/onboarding/SKILL.md.`
+      const scanEnvironment = dependencies.scanEnvironment ?? (() => ({}))
+      // The inventory loads lazily (#10478): the scan runs once, only after a claim actually succeeds
+      // - never at register(), so sessions that never onboard pay none of its cost.
+      let migrationInventory: Promise<string | undefined> | undefined
+      const withInventory = async (base: string): Promise<string> => {
+        migrationInventory ??= (dependencies.migrationFacts ?? (() => defaultMigrationFacts(scanEnvironment)))().catch(() => undefined)
+        const facts = await migrationInventory
+        return facts === undefined ? base : `${base} Migration inventory (from the same scan omo setup runs): ${facts}`
+      }
       const force = () => pi.getFlag("onboard") === true && !processState[forcedKey]
       // Undefined is unclaimed; null is a successfully completed onboarding turn.
       let pending: {
@@ -96,7 +120,7 @@ export function createOnboardingComponent(
         try {
           await pi.sendMessage({
             customType: "omo-onboarding:bootstrap",
-            content: `${tour} Greet first.`,
+            content: await withInventory(`${tour} Greet first.`),
             display: false,
           }, { triggerTurn: true, deliverAs: "followUp" })
         } catch (error) {
@@ -106,7 +130,7 @@ export function createOnboardingComponent(
       })
 
       // Deliberately not previewSafe: previews must never acquire install-wide state.
-      pi.on("before_agent_start", (event, ctx) => {
+      pi.on("before_agent_start", async (event, ctx) => {
         if (!isRecord(event) || event.trigger !== "prompt" || event.preview === true || !eligible(ctx)) return
         const forced = force()
         if (!claim(ctx, forced)) return
@@ -116,9 +140,9 @@ export function createOnboardingComponent(
           message: {
             customType: "omo-onboarding:context",
             display: false,
-            content: forced
+            content: await withInventory(forced
               ? `${tour} Tour using their message.`
-              : `Answer fully; greet in their language; offer a one-line tour. On request/acceptance: ${tour}`,
+              : `Answer fully; greet in their language; offer a one-line tour. On request/acceptance: ${tour}`),
           },
         }
       })
