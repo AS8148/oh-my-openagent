@@ -99,7 +99,7 @@ There is no `team_wait` tool. When the next step depends on a reply, send with `
 
 ## Nesting depth and independent verification
 
-A child cannot spawn children of its own by default: `task.max_depth` is `1`, so a spawn from a child fails with `depth 2, beyond max_depth 1`. This keeps the delegation tree flat. Every child, its cost and its result stay visible to the session that started the work, and a worker cannot quietly turn itself into an orchestrator.
+A child cannot spawn children of its own by default: `task.max_depth` is `1`, so a spawn from a child fails with an error containing `depth 2, beyond max_depth 1`. This keeps the delegation tree flat. Every child, its cost and its result stay visible to the session that started the work, and a worker cannot quietly turn itself into an orchestrator.
 
 When a worker's result should be checked independently (a source comparison, a second read of a diff, a review), the parent starts the verifier as a sibling:
 
@@ -109,7 +109,12 @@ When a worker's result should be checked independently (a source comparison, a s
 
 The verifier never sees the worker's reasoning, only its output and the repository. That separation is what makes the check independent. A worker that asked its own child to verify it would choose what that child sees.
 
-Raise `task.max_depth` only when deeper trees are the point of the workflow (see the [`task` reference](../reference/omo-json.md#task)). A higher limit applies to every agent in the session, not only to verifiers.
+If one agent genuinely needs to delegate further, use the narrowest control that fits (see the [`agents` reference](../reference/omo-json.md#agents)):
+
+- `agents.<name>.max_depth` raises the limit for that one agent and leaves the session value alone.
+- An agent's `allowed_subagents` lets it start the agent types it lists at any depth, and nothing else.
+
+Raising `task.max_depth` (see the [`task` reference](../reference/omo-json.md#task)) is the last resort. It applies to every agent in the session, so any worker can then start its own children: the tree gets deeper, cost and running work spread across levels the session that started the work no longer sees directly, and a worker can again verify itself.
 
 ## Configuration
 
