@@ -1,12 +1,21 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join, relative } from "node:path"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import type { SenpiExtensionAPI } from "../../extension/types"
 import type { FeedbackDraft } from "./draft"
-import { createFeedbackComponent, FEEDBACK_PREPARE_RPC_METHOD, FEEDBACK_SUBMIT_RPC_METHOD, noticeFor } from "./index"
+import { createFeedbackComponent, FEEDBACK_PREPARE_RPC_METHOD, FEEDBACK_SUBMIT_RPC_METHOD } from "./index"
+import { noticeFor } from "./runtime"
+
+// The report and ledger are private on every platform because they live inside the per-user state root. POSIX also gets
+// owner-only mode bits; NTFS has no mode bits, and the file inherits the per-user directory's ACL, which statSync cannot read.
+const expectUserOnly = (path: string, root: string): void => {
+  const inside = relative(root, path)
+  expect(inside === "" || inside.startsWith("..") || isAbsolute(inside)).toBe(false)
+  if (process.platform !== "win32") expect(statSync(path).mode & 0o077).toBe(0)
+}
 
 type Handler = (data: unknown) => unknown | Promise<unknown>
 
@@ -170,7 +179,7 @@ describe("feedback component", () => {
     expect(result.kind).toBe("saved")
     expect(result.path.startsWith(join(stateDir, "agent"))).toBe(true)
     expect(existsSync(join(homeDir, ".omo"))).toBe(false)
-    expect(statSync(result.path).mode & 0o077).toBe(0)
+    expectUserOnly(result.path, join(stateDir, "agent"))
     expect(noticeFor((await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as FeedbackDraft)).not.toContain("logs")
   })
 

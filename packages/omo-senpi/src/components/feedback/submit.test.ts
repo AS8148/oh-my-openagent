@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join, relative } from "node:path"
 
 import { buildDraft, type UploadRedactor } from "./draft"
 import { submitReport, type ReportTransport } from "./submit"
+
+// The report and ledger are private on every platform because they live inside the per-user state root. POSIX also gets
+// owner-only mode bits; NTFS has no mode bits, and the file inherits the per-user directory's ACL, which statSync cannot read.
+const expectUserOnly = (path: string, root: string): void => {
+  const inside = relative(root, path)
+  expect(inside === "" || inside.startsWith("..") || isAbsolute(inside)).toBe(false)
+  if (process.platform !== "win32") expect(statSync(path).mode & 0o077).toBe(0)
+}
 
 const redactTokens: UploadRedactor = (text) => {
   let count = 0
@@ -75,7 +83,7 @@ describe("submitReport", () => {
     expect(new Headers(request?.init.headers).get("authorization")).toBeNull()
     const ledger = readFileSync(join(stateDir, "feedback", "sent.json"), "utf8")
     expect(JSON.parse(ledger)).toEqual([{ id: "rpt_1", deleteToken: "dt_secret", createdAt: expect.any(String) }])
-    expect(statSync(join(stateDir, "feedback", "sent.json")).mode & 0o077).toBe(0)
+    expectUserOnly(join(stateDir, "feedback", "sent.json"), stateDir)
   })
 
   test("#given the organization turned feedback uploads off #when the report is submitted #then nothing is sent and the report is saved as a private file", async () => {
@@ -100,7 +108,7 @@ describe("submitReport", () => {
     if (result.kind !== "saved") throw new Error("expected a saved report")
     const saved = JSON.parse(readFileSync(result.path, "utf8"))
     expect(saved.sections[0]).toEqual({ id: "description", text: "idea" })
-    expect(statSync(result.path).mode & 0o077).toBe(0)
+    expectUserOnly(result.path, stateDir)
   })
 
   test("#given the service rejects a secret it still found #when the report is submitted #then the user is told why and no report id is claimed", async () => {
