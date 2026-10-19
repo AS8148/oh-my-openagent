@@ -19,7 +19,8 @@ const wired = new WeakMap<SyncEntry, ChainEntry>()
 
 /**
  * One entry's wire form, made once per verified entry and frozen, so checking a new entry does not
- * re-serialize the whole verified history before it.
+ * re-serialize the whole verified history before it. The cache is keyed by identity, so the history
+ * passed to receiverRefusal must hold only verified, frozen entries that can never change.
  */
 const wireOnce = (entry: SyncEntry): ChainEntry => {
   const known = wired.get(entry)

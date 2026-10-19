@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join, relative } from "node:path"
+import { dirname, join, relative, sep } from "node:path"
 import * as resilient from "../../fs/resilient"
 import * as durable from "../../journal/fsync"
 import { creatorAnchor, type PinCandidate } from "./anchor.ts"
@@ -146,7 +146,7 @@ describe("publishing the pin is durable, and a lost race is decided by the winne
     const root = join(dir, "trust-anchor")
     const [syncFile, syncDirectory, rename] = [durable.syncJournalFile, durable.syncJournalDirectory, resilient.rename]
     const calls: string[] = []
-    const name = (path: unknown) => (relative(root, String(path)) || ".").replace(/\.\d+\.[0-9a-f]{12}\.tmp/, ".tmp")
+    const name = (path: unknown) => (relative(root, String(path)) || ".").split(sep).join("/").replace(/\.\d+\.[0-9a-f]{12}\.tmp/, ".tmp")
     spyOn(durable, "syncJournalFile").mockImplementation(async (path) => {
       calls.push(`file ${name(path)}`)
       await syncFile(path)
