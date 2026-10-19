@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 import { mkdir, readFile, rename, rm, writeFile } from "../../fs/resilient";
+import { syncJournalDirectory, syncJournalFile } from "../../journal/fsync";
 
 /**
  * The persisted read-only state of a recovered device (#10412 review M3). Recovery writes it before
@@ -54,17 +55,20 @@ export const loadWriteHold = async (
 	};
 };
 
-/** Records that writes are held for `account`; written atomically, mode 0600. */
+/**
+ * Records that writes are held for `account`, mode 0600, durably (#10450): the staged file is
+ * fsynced before the rename and the directories after it, so a power loss right after the join
+ * cannot lose the hold.
+ */
 export const holdWrites = async (
 	stateDir: string,
 	account: string,
 	credentialId: string,
 ): Promise<void> => {
 	const target = holdPath(stateDir, account);
-	await mkdir(join(stateDir, "recovery-hold"), {
-		recursive: true,
-		mode: 0o700,
-	});
+	const dir = join(stateDir, "recovery-hold");
+	await mkdir(dir, { recursive: true, mode: 0o700 });
+	await syncJournalDirectory(stateDir);
 	const staging = `${target}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
 	const body = { version: 1, account, credential_id: credentialId };
 	try {
@@ -72,10 +76,12 @@ export const holdWrites = async (
 			flag: "wx",
 			mode: 0o600,
 		});
+		await syncJournalFile(staging);
 		await rename(staging, target);
 	} finally {
 		await rm(staging, { force: true });
 	}
+	await syncJournalDirectory(dir);
 };
 
 /** Releases the hold once a rotation is stored and verified; a missing hold is already released. */
@@ -84,4 +90,5 @@ export const releaseWriteHold = async (
 	account: string,
 ): Promise<void> => {
 	await rm(holdPath(stateDir, account), { force: true });
+	await syncJournalDirectory(join(stateDir, "recovery-hold"));
 };
