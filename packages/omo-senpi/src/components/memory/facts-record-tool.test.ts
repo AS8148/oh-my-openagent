@@ -130,7 +130,7 @@ describe("facts record tool", () => {
       const tool = createFactsRecordTool({ userTexts: ["Review the plugins and tell me which look unused."], extractionPath: path })
 
       await tool.execute("flip", { scope: "project", text: "User agreed to remove plugins X and Y.", date: "2026-10-18", source: "user", user_quote: "remove plugins X and Y" })
-      await tool.execute("real", { scope: "project", text: "User wants an unused-plugin review.", date: "2026-10-18", source: "user", user_quote: "tell me which look unused" })
+      await tool.execute("real", { scope: "project", text: "User wants an unused-plugin review.", date: "2026-10-18", source: "user", user_quote: "Review the plugins and tell me which look unused." })
 
       const [flip, real] = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
       expect(flip.receipt).toEqual({ source: "agent", downgraded: true })

@@ -54,7 +54,7 @@ describe("memory tool claim receipts", () => {
   }, 30_000)
 
   test("#given a user claim quoting the user's own message #when the memory call starts #then the user receipt keeps the quote", async () => {
-    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "tell me which look unused" })
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "Review the site plugins and tell me which look unused" })
     expect(provenance["claim"]).toEqual({ source: "user", userQuote: "Review the site plugins and tell me which look unused." })
   }, 30_000)
 

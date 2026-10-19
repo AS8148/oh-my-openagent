@@ -8,9 +8,13 @@ import {
 const USER_TEXTS = ["Please look at the WordPress plugins and tell me which ones look unused."]
 
 describe("claim receipts", () => {
-  test("#given a user claim whose quote appears in a user message #when resolved #then it keeps the user source and the quote", () => {
-    const receipt = resolveClaimReceipt({ source: "user", userQuote: "tell me which ones look unused" }, USER_TEXTS)
+  test("#given a user claim quoting the user's whole message #when resolved #then it keeps the user source and the message", () => {
+    const receipt = resolveClaimReceipt({ source: "user", userQuote: "look at the WordPress plugins and tell me which ones look unused" }, USER_TEXTS)
     expect(receipt).toEqual({ source: "user", userQuote: USER_TEXTS[0] })
+  })
+
+  test("#given a quote of only part of the user's message #when resolved #then it stays a suggestion", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "tell me which ones look unused" }, USER_TEXTS)).toEqual({ source: "agent", downgraded: true })
   })
 
   test("#given the #10488 flip: a user claim quoting the agent's own suggestion #when resolved #then it is downgraded to an agent suggestion", () => {
@@ -70,9 +74,9 @@ describe("claim receipts", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: quote }, [said]).source).toBe("agent")
   })
 
-  test("#given a fragment of an affirmative user sentence #when resolved #then the receipt stores the whole sentence", () => {
-    expect(resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y" }, ["Thanks. Please remove plugins X and Y now."]))
-      .toEqual({ source: "user", userQuote: "Please remove plugins X and Y now." })
+  test("#given the whole message apart from courtesy closers #when resolved #then the receipt stores the whole message", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y now" }, ["Thanks. Please remove plugins X and Y now."]))
+      .toEqual({ source: "user", userQuote: "Thanks. Please remove plugins X and Y now." })
   })
 
   test("#given a user claim with no quote #when resolved #then it is downgraded", () => {
@@ -80,25 +84,29 @@ describe("claim receipts", () => {
   })
 
   test("#given a quote that differs only in whitespace and case #when resolved #then it still matches", () => {
-    const receipt = resolveClaimReceipt({ source: "user", userQuote: "  Tell me   which ones\nlook UNUSED " }, USER_TEXTS)
+    const receipt = resolveClaimReceipt({ source: "user", userQuote: "  Please LOOK at the WordPress plugins and tell me   which ones\nlook UNUSED " }, USER_TEXTS)
     expect(receipt.source).toBe("user")
   })
 
-  test("#given a quote too short to identify the user's words #when resolved #then it is downgraded", () => {
-    expect(resolveClaimReceipt({ source: "user", userQuote: "ok" }, ["ok"]).source).toBe("agent")
+  test("#given a short whole message #when quoted whole #then it verifies, and a short fragment does not", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "응 해줘" }, ["응 해줘"]).source).toBe("user")
+    expect(resolveClaimReceipt({ source: "user", userQuote: "yes, do it" }, ["Yes, do it!"]).source).toBe("user")
     expect(resolveClaimReceipt({ source: "user", userQuote: "look unused." }, USER_TEXTS).source).toBe("agent")
-  })
-
-  test("#given a two-word Korean quote #when resolved #then the word floor still applies", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "플러그인 삭제해줘" }, ["그 플러그인 삭제해줘"]).source).toBe("agent")
   })
 
-  test("#given a quote in a script written without spaces #when it is long enough #then the word floor does not apply", () => {
-    expect(resolveClaimReceipt({ source: "user", userQuote: "このプラグインを削除して" }, ["じゃあこのプラグインを削除してください"]).source).toBe("user")
+  test("#given a quote that is only punctuation or a closer #when resolved #then it is downgraded", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "Thanks!" }, ["Thanks!"]).source).toBe("agent")
+    expect(resolveClaimReceipt({ source: "user", userQuote: "..." }, ["..."]).source).toBe("agent")
+  })
+
+  test("#given a script written without spaces #when quoted whole #then it verifies, and a part of it does not", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "じゃあこのプラグインを削除してください" }, ["じゃあこのプラグインを削除してください"]).source).toBe("user")
+    expect(resolveClaimReceipt({ source: "user", userQuote: "このプラグインを削除して" }, ["じゃあこのプラグインを削除してください"]).source).toBe("agent")
   })
 
   test("#given an agent or inferred claim #when resolved #then the source is kept and any quote is dropped", () => {
-    expect(resolveClaimReceipt({ source: "agent", userQuote: "tell me which ones look unused" }, USER_TEXTS)).toEqual({ source: "agent" })
+    expect(resolveClaimReceipt({ source: "agent", userQuote: USER_TEXTS[0] }, USER_TEXTS)).toEqual({ source: "agent" })
     expect(resolveClaimReceipt({ source: "inferred" }, USER_TEXTS)).toEqual({ source: "inferred" })
   })
 

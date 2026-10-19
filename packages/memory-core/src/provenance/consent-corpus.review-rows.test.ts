@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test"
 
-import { isCourtesyCloser } from "./consent"
 import { EN_INSTRUCTION, EN_QUOTE, HANGUL, inSentence, KO_INSTRUCTION, KO_QUOTE, source, stripEnd } from "./consent-corpus.shapes"
 import REVIEW_ROW_CLASSES from "./consent-corpus.review-rows.classes.json"
 import REVIEW_ROWS from "./consent-corpus.review-rows.json"
 
 // Rows extracted mechanically from every review receipt of #10498 (scripts/extract-consent-corpus.ts; append-only). As a
-// later sentence every row is a suggestion by the last-word rule alone, so that shape proves nothing. Each row is instead
-// classified by hand in consent-corpus.review-rows.classes.json and asserted in a shape the last-word rule does NOT decide:
+// later sentence every row is a suggestion by the whole-message rule alone, so that shape proves nothing. Each row is instead
+// classified by hand in consent-corpus.review-rows.classes.json and asserted where the whole-message rule does NOT
+// decide, because the quote is the whole message:
 // - retraction: inside the quoted words (the quote is the whole message), must stay a suggestion;
 // - question-lead: opening the quoted instruction, must stay a suggestion;
 // - message-agent / message-user: the row is a whole user message quoted whole, a suggestion / the user's;
@@ -44,7 +44,6 @@ describe("consent corpus: every phrase any review quoted", () => {
   })
   test.each(rowsOf("closer"))("instruction followed by closer %p stays the user's", (phrase) => {
     const [instruction, quote] = HANGUL.test(phrase) ? [KO_INSTRUCTION, KO_QUOTE] : [EN_INSTRUCTION, EN_QUOTE]
-    expect(isCourtesyCloser(phrase) || phrase.split(/(?<=[.!])\s+/u).every(isCourtesyCloser)).toBe(true)
     expect(source(`${instruction} ${phrase}`, quote)).toBe("user")
   })
 })

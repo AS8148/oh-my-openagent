@@ -1,7 +1,7 @@
 // Whether a user sentence reads as the user's own affirmative instruction or statement (#10488). The rule is "when in
 // doubt, it stays a suggestion": a question, any negation, hedge or objection anywhere in the sentence, a sentence that
-// talks about the agent's suggestion all mean the words are not consent; claim.ts also refuses a quote followed by any
-// later sentence or clause.
+// talks about the agent's suggestion all mean the words are not consent; claim.ts also refuses a quote that is not the
+// user's whole message.
 // A false "suggestion" costs one confirmation; a false "user said" is the incident this guards against.
 
 // A Korean question often has no mark: 될까, 지워도 되나, 지워줄래. Permission without a mark (지워도 돼) stays a
@@ -14,9 +14,10 @@ const NEGATION_OR_HEDGE = /\b(?:don'?t|do not|doesn'?t|does not|didn'?t|did not|
 // conjugation of a refusal or prohibition (아니야, 아닙니다, 하지 마세요, 지우지 맙시다, 잠깐만, 안 돼) still hits.
 const KOREAN_NEGATION_OR_HEDGE = /지\s*마|지\s*말|지\s*맙|말아|말고|말자|말기|말라|않|안\s|안돼|못\s|금지|보류|나중에|혹시|아마|고민|생각\s*중|다시\s*생각|모르|아니(?!면|라\s+\S)|아닙|아님|아냐|아닌|아뇨|ㄴㄴ|\u1102\u1102|노노|싫|별로|틀렸|잘못|대신|잠깐|잠시|기다려|그만(?!큼)|취소(?!된)|멈춰|멈추|냅둬|놔둬|그대로\s*둬|그냥\s*두|(?:^|\s)둬|(?:^|\s)마라|(?:^|\s)두세요|필요\s*없|관둬|관두|농담|장난|되돌|원래대로|다음에\s*하|아직(?:이|은|\s*[.!]*$)|안\s*할|놉|패스(?!워드)|없던\s*걸로|스톱|네가\s*(?:말|추천|제안)|추천한|제안한/u
 
-// 됐 is a retraction only as an interjection: alone or opening a clause (됐어, 아 됐어, 그건 됐고) or right after an
-// instruction (지워 됐어). Elsewhere it is a plain past tense the user may state (백업 다 됐어, 완료됐으니, 됐으면).
-const DWAESS_RETRACTION = /(?:^|[.!?。！？,;，；、~]\s*|(?:[아어워해줘봐라]|세요|해요|줘요|그건|그거|이제|그냥|아)\s+)됐(?!으니|으면|으므로|을)/u
+// 됐 that ENDS a message or opens a clause is an interjection ("never mind": 근데 됐어, 아 됐어, 됐어 그냥); 됐 followed by
+// more of the message is a plain past tense (백업 다 됐어 플러그인 X 지워). A bare statement that ends in 됐어 therefore
+// stays a suggestion: when in doubt, it is not consent.
+const DWAESS_RETRACTION = /(?:^|[.!?。！？,;，；、~]\s*)됐|됐[가-힣]*[\s.!?~]*$|(?:[아어워해줘봐라]|세요|해요|줘요|그건|그거|이제|그냥)\s+됐(?!으니|으면|으므로|을)/u
 
 export function foldQuotes(text: string): string {
   return text.replace(/[\u2018\u2019\u201B\u2032\uFF07]/gu, "'").replace(/[\u201C\u201D\u201F\u2033\uFF02]/gu, '"')
@@ -26,12 +27,10 @@ function negatesOrHedges(sentence: string): boolean {
   return NEGATION_OR_HEDGE.test(sentence) || KOREAN_NEGATION_OR_HEDGE.test(sentence) || DWAESS_RETRACTION.test(sentence)
 }
 
-// Lead decision (#10498): a CLOSED list of pure courtesy closers that do not count as a later sentence. Nothing else.
-const COURTESY_CLOSERS = new Set(["thanks", "thank you", "고마워", "감사합니다", "부탁해"])
-
-export function isCourtesyCloser(sentence: string): boolean {
-  return COURTESY_CLOSERS.has(foldQuotes(sentence.normalize("NFKC")).toLowerCase().replace(/[\s.!~]+$/u, "").trim())
-}
+// Lead decision (#10498): the CLOSED list of courtesy closers that may surround a quoted user message. Nothing else.
+export const COURTESY_CLOSERS: readonly string[] = [
+  "thanks", "thank you", "thx", "please", "pls", "고마워요", "고마워", "감사합니다", "감사해요", "부탁드립니다", "부탁드려요", "부탁해요", "부탁해",
+]
 
 export function isAffirmativeStatement(sentence: string): boolean {
   if (QUESTION.test(sentence) || QUESTION_LEAD.test(sentence)) return false
