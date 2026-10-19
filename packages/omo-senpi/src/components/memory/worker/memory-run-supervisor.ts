@@ -29,6 +29,7 @@ import {
   type SupervisorChildExit,
 } from "./supervisor-process-identity"
 import { publishRunOutcome } from "./run-outcome-publication"
+import { signalSpawnedChild } from "@oh-my-opencode/utils/runtime"
 
 async function readRelease(): Promise<boolean> {
   for await (const chunk of process.stdin) {
@@ -60,7 +61,7 @@ async function runChildBootstrap(runDir: string): Promise<void> {
   })
   writeBootstrapStatus({ code: child.pid ?? null, signal: "MODEL_PID" })
   const cascadeGraceful = () => {
-    if (platform === "win32" || process.platform === "win32") child.kill()
+    if (platform === "win32" || process.platform === "win32") signalSpawnedChild(child)
   }
   process.on("SIGTERM", cascadeGraceful)
   process.on("SIGINT", cascadeGraceful)
