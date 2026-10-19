@@ -97,10 +97,8 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
     target.set(sessionId, new Set([skill]))
   }
 
-  pi.on("tool_result", (payload, eventCtx) => {
-    const event = asToolResultEvent(payload)
-    if (event === undefined || event.isError) return
-    const sessionId = extractSessionId(eventCtx)
+  const observeToolResult = (event: ToolResultEvent, sessionId: string | undefined): void => {
+    if (event.isError) return
     if (event.toolName === "read") record(invokedBySession, sessionId, skillNameFromPath(event.path))
     if (sessionId === undefined) return
     const touched = planArtifactPathsTouched(event)
@@ -115,16 +113,9 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
       const prior = touches.get(path)
       touches.set(path, { count: (prior?.count ?? 0) + 1, lastTouchedAt: planTouchSequence })
     }
-  })
+  }
 
-  pi.on("input", (payload, eventCtx) => {
-    const event = asInputEvent(payload)
-    if (event === undefined) return
-    // Extension-injected text is code the model can drive; it must never arm a gate that exists to
-    // prove a HUMAN asked. An absent source means a plain host that only delivers user input.
-    if (event.source === AGENT_MANUFACTURABLE_INPUT_SOURCE) return
-    const text = event.text
-    const sessionId = extractSessionId(eventCtx)
+  const observeUserInput = (text: string, sessionId: string | undefined): void => {
     if (text.startsWith(SKILL_COMMAND_PREFIX)) {
       // Mirror senpi's parse (see the ultrawork component): the skill name runs to the first space.
       const spaceIndex = text.indexOf(" ")
@@ -146,14 +137,63 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
       if (pattern.test(visible)) record(requestedBySession, sessionId, skill)
     }
     if (isOwnWordsPlanRequest(visible)) record(requestedBySession, sessionId, "ulw-plan")
+  }
+
+  const forget = (sessionId: string): void => {
+    invokedBySession.delete(sessionId)
+    requestedBySession.delete(sessionId)
+    planTouchesBySession.delete(sessionId)
+  }
+
+  pi.on("tool_result", (payload, eventCtx) => {
+    const event = asToolResultEvent(payload)
+    if (event !== undefined) observeToolResult(event, extractSessionId(eventCtx))
+  })
+
+  pi.on("input", (payload, eventCtx) => {
+    const event = asInputEvent(payload)
+    if (event === undefined) return
+    // Extension-injected text is code the model can drive; it must never arm a gate that exists to
+    // prove a HUMAN asked. An absent source means a plain host that only delivers user input.
+    if (event.source === AGENT_MANUFACTURABLE_INPUT_SOURCE) return
+    observeUserInput(event.text, extractSessionId(eventCtx))
+  })
+
+  // A restarted or restored session has no live events for its past turns, so its own transcript is
+  // replayed through the same observers. Tool results replay from any engine. A user entry replays
+  // only when the engine recorded the `input` event's source on it: an entry with no source cannot
+  // be told apart from injected input, so it never arms the user-request channel.
+  pi.on("session_start", (_payload, eventCtx) => {
+    const sessionId = extractSessionId(eventCtx)
+    if (sessionId === undefined) return
+    forget(sessionId)
+    const calls = new Map<string, { readonly name: string; readonly args: unknown }>()
+    for (const message of persistedMessages(eventCtx)) {
+      const role = message["role"]
+      if (role === "user") {
+        const source = message["inputSource"]
+        if (typeof source !== "string" || source === AGENT_MANUFACTURABLE_INPUT_SOURCE) continue
+        observeUserInput(userText(message["content"]), sessionId)
+      } else if (role === "assistant") {
+        for (const call of toolCalls(message["content"])) calls.set(call.id, call)
+      } else if (role === "toolResult") {
+        const callId = message["toolCallId"]
+        const call = typeof callId === "string" ? calls.get(callId) : undefined
+        if (call === undefined) continue
+        const event = asToolResultEvent({
+          type: "tool_result",
+          toolName: call.name,
+          input: call.args,
+          isError: message["isError"],
+        })
+        if (event !== undefined) observeToolResult(event, sessionId)
+      }
+    }
   })
 
   pi.on("session_shutdown", (_payload, eventCtx) => {
     const sessionId = extractSessionId(eventCtx)
-    if (sessionId === undefined) return
-    invokedBySession.delete(sessionId)
-    requestedBySession.delete(sessionId)
-    planTouchesBySession.delete(sessionId)
+    if (sessionId !== undefined) forget(sessionId)
   })
 
   return {
@@ -182,6 +222,35 @@ function extractSessionId(eventCtx: unknown): string | undefined {
   if (typeof getSessionId !== "function") return undefined
   const id: unknown = getSessionId.call(eventCtx["sessionManager"])
   return typeof id === "string" && id.length > 0 ? id : undefined
+}
+
+function persistedMessages(eventCtx: unknown): readonly Record<string, unknown>[] {
+  if (!isRecord(eventCtx) || !isRecord(eventCtx["sessionManager"])) return []
+  const manager = eventCtx["sessionManager"]
+  const read = typeof manager["getBranch"] === "function" ? manager["getBranch"] : manager["getEntries"]
+  if (typeof read !== "function") return []
+  const entries: unknown = read.call(manager)
+  if (!Array.isArray(entries)) return []
+  return entries.flatMap((entry: unknown) =>
+    isRecord(entry) && entry["type"] === "message" && isRecord(entry["message"]) ? [entry["message"]] : [],
+  )
+}
+
+function userText(content: unknown): string {
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content
+    .flatMap((block: unknown) => (isRecord(block) && block["type"] === "text" && typeof block["text"] === "string" ? [block["text"]] : []))
+    .join("\n")
+}
+
+function toolCalls(content: unknown): readonly { readonly id: string; readonly name: string; readonly args: unknown }[] {
+  if (!Array.isArray(content)) return []
+  return content.flatMap((block: unknown) =>
+    isRecord(block) && block["type"] === "toolCall" && typeof block["id"] === "string" && typeof block["name"] === "string"
+      ? [{ id: block["id"], name: block["name"], args: block["arguments"] }]
+      : [],
+  )
 }
 
 type ToolResultEvent = {
