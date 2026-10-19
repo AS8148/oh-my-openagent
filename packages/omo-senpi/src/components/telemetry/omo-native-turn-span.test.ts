@@ -10,6 +10,8 @@ import {
   type InspectedLogRecord,
   type InspectedSpan,
   type OtlpTelemetryTransport,
+  type OtlpWireProjection,
+  type WireAttributes,
 } from "@oh-my-opencode/telemetry-core/otlp"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
@@ -22,6 +24,20 @@ import {
   createTransportRecorder,
   withTempAgentDir,
 } from "./telemetry.test-support"
+
+// The transport requires a schema artifact's projection; this mirrors telemetry-core's test stand-in
+// (every primitive that passes the key rule becomes `omo.<name>`), which is not exported to other packages.
+const NON_WIRE_KEYS = new Set(["$os", "$os_version", "$process_person_profile", "$session_id", "ci", "event_id", "install_hash", "package_version", "platform", "product_name", "schema_version", "surface"])
+const testProjection: OtlpWireProjection = (_event, properties) => {
+  const attributes: WireAttributes = {}
+  for (const [key, value] of Object.entries(properties)) {
+    if (NON_WIRE_KEYS.has(key) || key.startsWith("$")) continue
+    if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
+      attributes[`omo.${key}`] = value
+    }
+  }
+  return attributes
+}
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
@@ -49,6 +65,7 @@ function otlpCollector(options: { readonly liveShutdown?: boolean } = {}): Colle
       spoolRoot: root,
       resource: { "service.name": "omo-senpi", "service.version": "1.0.0" },
       scope: { name: "omo-senpi", version: "1.0.0" },
+      project: testProjection,
       env: {},
       endpoint: "https://collector.test",
       autoStart: false,
