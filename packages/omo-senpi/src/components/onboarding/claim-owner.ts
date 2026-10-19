@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto"
-import { linkSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
+import { createHash, randomUUID } from "node:crypto"
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -13,6 +13,9 @@ import { isOnboardingCompletionRecorded, ONBOARDING_MARKER, readOnboardingComple
 
 // A claim written before claims recorded their owner cannot be probed; past this age it is abandoned.
 export const OWNERLESS_CLAIM_STALE_MS = 24 * 3_600_000
+
+// Takeover locks whose holders died form a chain; past this length the takeover yields.
+const MAX_TAKEOVER_CHAIN = 16
 
 export interface ClaimOwnerSeams {
   readonly pid?: number
@@ -57,39 +60,59 @@ export async function claimOnboardingOwned(stateDir: string, seams: ClaimOwnerSe
     const held = readRaw(marker)
     if (held === null) return writeClaim(marker, record)
     if (await claimHolderLive(held, seams)) return false
-    if (!takeOverClaim(marker, held)) return false
-    if (isOnboardingCompletionRecorded(stateDir)) return false
-    return writeClaim(marker, record)
+    return await takeOverClaim(stateDir, marker, held, JSON.stringify(record), seams)
   } catch {
     return false
   }
 }
 
 function writeClaim(marker: string, record: Record<string, unknown>): boolean {
+  return writeExclusive(marker, JSON.stringify(record))
+}
+
+function writeExclusive(path: string, content: string): boolean {
   try {
-    writeFileSync(marker, JSON.stringify(record), { flag: "wx", mode: 0o600 })
+    writeFileSync(path, content, { flag: "wx", mode: 0o600 })
     return true
   } catch {
     return false
   }
 }
 
-// Moves the judged-dead claim aside atomically. Only one contender's rename can move a given file;
-// if the file it moved is no longer the claim it judged (a fresh claim landed meanwhile), it is put
-// back and the takeover yields.
-function takeOverClaim(marker: string, judged: string): boolean {
-  const aside = `${marker}.stale.${process.pid}.${randomUUID()}`
+/**
+ * Replaces the judged-dead claim only while holding the takeover lock for exactly that claim: an
+ * exclusively created file named by a hash of the judged bytes, holding our own claim record. A lock
+ * whose holder died (judged by the same owner rule) is passed by locking the dead holder's record in
+ * turn, so exactly one live contender holds the end of the chain. The holder re-reads the marker and
+ * renames its claim over it only when the marker still holds the judged bytes, so a live claim is
+ * never moved or removed and the marker is never absent.
+ */
+async function takeOverClaim(stateDir: string, marker: string, judged: string, mine: string, seams: ClaimOwnerSeams): Promise<boolean> {
+  let target = judged
+  for (let link = 0; link < MAX_TAKEOVER_CHAIN; link += 1) {
+    const lock = `${marker}.takeover.${createHash("sha256").update(target).digest("hex").slice(0, 32)}`
+    if (writeExclusive(lock, mine)) return replaceJudgedClaim(stateDir, marker, judged, mine, lock)
+    const holder = readRaw(lock)
+    if (holder === null) continue
+    if (await claimHolderLive(holder, seams)) return false
+    target = holder
+  }
+  return false
+}
+
+function replaceJudgedClaim(stateDir: string, marker: string, judged: string, mine: string, lock: string): boolean {
+  const staged = `${marker}.claim.${randomUUID()}`
   try {
-    renameSync(marker, aside)
+    if (readRaw(marker) !== judged || isOnboardingCompletionRecorded(stateDir)) return false
+    if (!writeExclusive(staged, mine)) return false
+    renameSync(staged, marker)
+    return true
   } catch {
     return false
+  } finally {
+    try { unlinkSync(staged) } catch { /* renamed into place, or never written */ }
+    try { unlinkSync(lock) } catch { /* already gone */ }
   }
-  const moved = readRaw(aside)
-  if (moved !== judged) {
-    try { linkSync(aside, marker) } catch { /* a newer claim already holds the marker */ }
-  }
-  try { unlinkSync(aside) } catch { /* already gone */ }
-  return moved === judged
 }
 
 function readRaw(path: string): string | null {
