@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { realpathSync } from "node:fs"
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { removeTree } from "../../../../test-support/remove-tree"
@@ -165,5 +165,26 @@ describe("persisted recall terms", () => {
     expect(fromStore).toEqual(rankAll((await loadRecallCorpus(repo)).documents))
     expect(lighthouse.map((candidate) => candidate.path)).toEqual(["reference/n000.md"])
     expect(decodeRecallTermStore(new Uint8Array(await readFile(store)))?.documents.size).toBe(220)
+  }, TIMEOUT)
+
+  it("#given temp files left by a dead save and by a live one #when the store is saved #then only the stale one is removed", async () => {
+    // given
+    const { dir, repo, store } = await createRepo()
+    const stale = `${store}.1.dead.tmp`
+    const live = `${store}.2.live.tmp`
+    await writeFile(stale, "x")
+    await writeFile(live, "x")
+    const hourAgo = new Date(Date.now() - 3_600_000)
+    await utimes(stale, hourAgo, hourAgo)
+
+    // when
+    const documents = (await loadRecallCorpus(repo)).documents
+    const persistence = await persisted(dir, documents)
+    rankAll(documents)
+    await persistence.settled()
+
+    // then
+    const left = (await readdir(join(dir, ".git"))).filter((name) => name.startsWith(RECALL_TERM_STORE_NAME))
+    expect(left.sort()).toEqual([RECALL_TERM_STORE_NAME, `${RECALL_TERM_STORE_NAME}.2.live.tmp`])
   }, TIMEOUT)
 })

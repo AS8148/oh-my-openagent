@@ -1,7 +1,7 @@
 // Binary codec of the persisted recall term store. The store is a derived cache: a decode that finds
 // anything wrong returns `undefined` and recall tokenizes the documents again, never trusting a part.
 //
-// Layout, little-endian u32 words unless noted:
+// Layout, native-endian u32 words unless noted (a store from a host of the other endianness fails the magic check):
 //   header      MAGIC, FORMAT_VERSION, fingerprint bytes, term bytes, term count, document count, entry count
 //   fingerprint UTF-8, the tokenizer fingerprint the terms were made with
 //   terms       UTF-8, the terms joined by "\n" (a term is letters, marks and digits only), padded to 4 bytes
@@ -54,8 +54,9 @@ export function encodeRecallTermStore(store: RecallTermStore): Uint8Array {
 
 /** `undefined` for anything but a complete, consistent store of this format. */
 export function decodeRecallTermStore(input: Uint8Array): RecallTermStore | undefined {
-  // A Uint32Array view needs a 4-byte aligned offset; a Buffer from the pool may not have one.
-  const bytes = input.byteOffset % 4 === 0 ? input : input.slice()
+  // A Uint32Array view needs a 4-byte aligned offset; a Buffer from the pool may not have one. The
+  // constructor copies (Buffer#slice would return a view at the same misaligned offset).
+  const bytes = input.byteOffset % 4 === 0 ? input : new Uint8Array(input)
   if (bytes.length < HEADER_WORDS * 4) return undefined
   const [magic, version, fingerprintBytes = 0, termBytes = 0, termCount = 0, documentCount = 0, entries = 0] =
     new Uint32Array(bytes.buffer, bytes.byteOffset, HEADER_WORDS)

@@ -8,9 +8,9 @@
 //   - written atomically (temp file + rename) after a build that had to tokenize, off the prompt path.
 
 import { createHash, randomUUID } from "node:crypto"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
-import { readFile, rename, rm, stat, writeFile } from "../fs/resilient"
+import { readdir, readFile, rename, rm, stat, writeFile } from "../fs/resilient"
 import { recallDocumentTerms } from "./bm25"
 import {
   onRecallDocumentsEncoded,
@@ -22,6 +22,10 @@ import { decodeRecallTermStore, encodeRecallTermStore } from "./bm25-store"
 import type { RecallDocument } from "./provider"
 
 export const RECALL_TERM_STORE_NAME = "omo-recall-bm25-terms.bin"
+/** Bump with any change to how recall turns text into terms; the probes below may not exercise it. */
+const TOKENIZER_VERSION = 1
+/** A temp file this old belongs to a save whose process died before its rename. */
+const STALE_TEMP_MS = 10 * 60_000
 
 /**
  * Texts whose terms cover every tokenizer rule: CJK runs and bigrams, stand-alone Han characters,
@@ -36,7 +40,8 @@ const FINGERPRINT_PROBES = [
 let fingerprint: string | undefined
 
 function tokenizerFingerprint(): string {
-  fingerprint ??= sha1(JSON.stringify(FINGERPRINT_PROBES.map((body) => recallDocumentTerms({ path: "", description: "", body }))))
+  const probes = FINGERPRINT_PROBES.map((body) => recallDocumentTerms({ path: "", description: "", body }))
+  fingerprint ??= sha1(JSON.stringify({ version: TOKENIZER_VERSION, probes }))
   return fingerprint
 }
 
@@ -97,6 +102,14 @@ export class RecallTermPersistence {
       if (!isMissing(error)) this.onError(error)
       return
     }
+    try {
+      this.seed(documents, bytes)
+    } catch (error) {
+      this.onError(error)
+    }
+  }
+
+  private seed(documents: readonly RecallDocument[], bytes: Uint8Array): void {
     const store = decodeRecallTermStore(bytes)
     if (store === undefined || store.fingerprint !== tokenizerFingerprint()) return
     const entries: Array<readonly [RecallDocument, StoredDocumentTerms]> = []
@@ -143,6 +156,7 @@ export class RecallTermPersistence {
       if (document !== undefined) keyed.set(documentKey(document), terms)
     })
     const bytes = encodeRecallTermStore({ fingerprint: tokenizerFingerprint(), terms: snapshot.terms, documents: keyed })
+    await sweepStaleTemps(path)
     const temp = `${path}.${process.pid}.${randomUUID()}.tmp`
     try {
       await writeFile(temp, bytes)
@@ -151,5 +165,17 @@ export class RecallTermPersistence {
       await rm(temp, { force: true })
       throw error
     }
+  }
+}
+
+/** Removes temp files of saves that died before their rename; a live save's temp file is younger. */
+async function sweepStaleTemps(path: string): Promise<void> {
+  const dir = dirname(path)
+  const prefix = `${basename(path)}.`
+  for (const name of await readdir(dir)) {
+    if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue
+    const temp = join(dir, name)
+    const info = await stat(temp).catch(() => undefined)
+    if (info !== undefined && Date.now() - info.mtimeMs > STALE_TEMP_MS) await rm(temp, { force: true })
   }
 }

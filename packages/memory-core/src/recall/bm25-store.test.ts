@@ -26,14 +26,16 @@ function plain(decoded: RecallTermStore | undefined): unknown {
 // Storage contract: the store outlives the process that wrote it, so every byte the next process
 // reads back must either round-trip exactly or reject the whole store.
 describe("recall term store codec", () => {
-  it("#given a store #when encoded and decoded, also from an unaligned buffer #then it reads back exactly", () => {
+  it("#given a store #when encoded and decoded, also from an unaligned array or Buffer #then it reads back exactly", () => {
     // given
     const bytes = encodeRecallTermStore(store())
     const unaligned = new Uint8Array(bytes.length + 1).subarray(1)
     unaligned.set(bytes)
+    const unalignedBuffer = Buffer.alloc(bytes.length + 1).subarray(1)
+    unalignedBuffer.set(bytes)
 
     // when
-    const decoded = [decodeRecallTermStore(bytes), decodeRecallTermStore(unaligned)]
+    const decoded = [decodeRecallTermStore(bytes), decodeRecallTermStore(unaligned), decodeRecallTermStore(unalignedBuffer)]
 
     // then
     for (const result of decoded) expect(plain(result)).toEqual(plain(store()))
