@@ -68,8 +68,8 @@ describe("RecallCorpusCache shared mode", () => {
     const writer = new RecallCorpusCache({ shared: true })
     const reader = new RecallCorpusCache({ shared: true })
     const before = await reader.load(repo)
-    await writeFile(join(dir, "notes/after.md"), "---\ndescription: After\n---\nNew.\n")
-    await repo.commitWrite(["notes/after.md"], "add note", { agentId: "recall-agent", authorName: "Recall Agent" })
+    await writeFile(join(dir, "reference/after.md"), "---\ndescription: After\n---\nNew.\n")
+    await repo.commitWrite(["reference/after.md"], "add note", { agentId: "recall-agent", authorName: "Recall Agent" })
 
     // when
     const afterWriter = await writer.load(repo)
@@ -78,7 +78,7 @@ describe("RecallCorpusCache shared mode", () => {
     // then
     expect(afterReader).toBe(afterWriter)
     expect(afterReader.revision).not.toBe(before.revision)
-    expect(afterReader.documents.map((document) => document.path)).toContain("notes/after.md")
+    expect(afterReader.documents.map((document) => document.path)).toContain("reference/after.md")
   }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given an unshared cache #when it loads a repository a shared cache already holds #then it keeps a private corpus", async () => {
