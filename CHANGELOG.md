@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**A running session sees memory that arrived by sync.** When synced commits change memory a session pinned, the existing "memory changed" notice now ends with "synced from <device>", naming the devices whose sync commits touched a listed note (an unknown one reads "another device"). The pinned system block keeps its bytes, and there is no new notice type. ([#10178](https://github.com/code-yeongyu/oh-my-openagent/issues/10178), [#10549](https://github.com/code-yeongyu/oh-my-openagent/pull/10549))
+**A running session sees memory that arrived by sync.** When synced commits change memory a session pinned, the existing "memory changed" notice now ends with "synced from <device>", naming the devices whose sync commits touched a shown note, as the signed-in account's device list names them (a device it cannot name reads "another device"). The pinned system block keeps its bytes, and there is no new notice type. ([#10178](https://github.com/code-yeongyu/oh-my-openagent/issues/10178), [#10549](https://github.com/code-yeongyu/oh-my-openagent/pull/10549))
 
 **The warning for a `categories` entry named after an agent no longer flags agents that already have their own models.** A markdown agent that declares its own model is now left alone by the agent loader, and the warning now says that the key keeps working for `task(category: ...)` and that giving the agent its own models silences it ([#10386](https://github.com/code-yeongyu/oh-my-openagent/pull/10386)).
 

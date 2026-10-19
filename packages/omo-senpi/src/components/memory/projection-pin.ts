@@ -11,6 +11,7 @@ import {
   projectedChangesBetween,
   revisionExists,
   type GitMemoryRepo,
+  type MemoryCommit,
   type ProjectedChanges,
 } from "@oh-my-opencode/memory-core"
 
@@ -110,34 +111,48 @@ export function createProjectionPins(options: ProjectionPinsOptions = {}): Proje
 
       live.set(sessionId, { record: state, epoch: refreshEpoch })
       if (state.noticedThrough === head) return { revision: state.revision }
-      const changes = await projectedChangesBetween(repo, state.noticedThrough, head, { excludeSessionId: sessionId })
+      let rangeCommits: readonly MemoryCommit[] = []
+      const changes = await projectedChangesBetween(repo, state.noticedThrough, head, {
+        excludeSessionId: sessionId,
+        onCommits: (commits) => {
+          rangeCommits = commits
+        },
+      })
       const advanced: ProjectionPinRecord = { ...state, noticedThrough: head }
       live.set(sessionId, { record: advanced, epoch: refreshEpoch })
       record(advanced)
       if (isEmptyProjectedChanges(changes)) return { revision: state.revision }
-      const sources = await syncedSources(repo, state.noticedThrough, head, changes, deviceName)
+      const sources = syncedSources(rangeCommits, changes, deviceName)
       return sources.length === 0 ? { revision: state.revision, changes } : { revision: state.revision, changes, sources }
     },
   }
 }
 
-/** Device names behind the sync commits in the range that touched a path the notice lists. */
-async function syncedSources(
-  repo: GitMemoryRepo,
-  base: string | null,
-  head: string | null,
+/** The paths the notice line actually shows (the first MAX_LISTED_PATHS, in group order). */
+function shownPaths(changes: ProjectedChanges): Set<string> {
+  return new Set([...changes.added, ...changes.updated, ...changes.removed].slice(0, MAX_LISTED_PATHS))
+}
+
+/** A device name as it may appear in the prompt: one line, no control characters, bounded. */
+function promptSafeName(name: string): string | undefined {
+  const clean = name.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ").replace(/\s+/g, " ").trim().slice(0, 64)
+  return clean.length === 0 ? undefined : clean
+}
+
+/** Device names behind the sync commits in the range (read once, by the change scan) that touched a shown path. */
+function syncedSources(
+  commits: readonly MemoryCommit[],
   changes: ProjectedChanges,
   deviceName: (principal: string) => string | undefined,
-): Promise<string[]> {
-  if (head === null) return []
-  const listed = new Set([...changes.added, ...changes.updated, ...changes.removed])
-  const commits = await repo.log({ range: base === null ? head : `${base}..${head}`, includePaths: true })
+): string[] {
+  const listed = shownPaths(changes)
   const names = new Set<string>()
   for (const commit of commits) {
     const principals = commit.trailers[SYNC_PRINCIPALS_TRAILER]
     if (principals === undefined || !(commit.paths ?? []).some((path) => listed.has(path))) continue
     for (const principal of principals.split(",").map((p) => p.trim()).filter((p) => p.length > 0)) {
-      names.add(deviceName(principal) ?? UNKNOWN_DEVICE)
+      const known = deviceName(principal)
+      names.add((known === undefined ? undefined : promptSafeName(known)) ?? UNKNOWN_DEVICE)
     }
   }
   return [...names].sort((a, b) => a.localeCompare(b))
