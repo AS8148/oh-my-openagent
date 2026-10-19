@@ -11,6 +11,7 @@
     "#omo-thread-client-runtime": "./src/components/thread/live-surface.ts",
     "#omo-memory-memfs-runtime": "./src/components/memory/commands/memfs-runtime.ts",
     "#omo-memory-palace-runtime": "./src/components/memory/palace/runtime.ts",
+    "#omo-session-history-runtime": "./src/components/onboarding/session-history/runtime.ts",
     "#omo-memory-sync-runtime": "./src/components/memory/sync-runtime.ts",
     "#omo-agent-toolkit-sdk": "./src/extension/agent-toolkit-sdk.ts"
   },
@@ -22,6 +23,10 @@
     "./agent-home": {
       "types": "./src/components/agent-home/resolve-agent-home.ts",
       "import": "./src/components/agent-home/resolve-agent-home.ts"
+    },
+    "./onboarding/session-history": {
+      "types": "./src/components/onboarding/session-history/index.ts",
+      "import": "./src/components/onboarding/session-history/index.ts"
     },
     "./install": {
       "types": "./src/install/index.ts",
@@ -54,6 +59,7 @@
     "@oh-my-opencode/senpi-desktop-tool": "workspace:*",
     "@oh-my-opencode/senpi-task": "workspace:*",
     "@oh-my-opencode/shared-skills": "workspace:*",
+    "@oh-my-opencode/skills-loader-core": "workspace:*",
     "@oh-my-opencode/team-core": "workspace:*",
     "@oh-my-opencode/telemetry-core": "workspace:*",
     "@oh-my-opencode/utils": "workspace:*",

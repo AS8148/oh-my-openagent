@@ -32,6 +32,8 @@ export interface MemoryWiringOptions {
   readonly refreshStatus?: typeof refreshMemoryStatus
   /** Injectable animation timers; tests drive frames without touching the wall clock. */
   readonly footerTimers?: MemoryFooterTimers
+  /** A sync principal's device name for the memory notice's "synced from"; production passes the sync runner's. */
+  readonly deviceName?: (principal: string) => string | undefined
 }
 
 export interface MemoryWiring {
