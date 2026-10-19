@@ -1,3 +1,13 @@
+## 2026-10-19 - Stage the shared DAG infrastructure retry runtime (#10605)
+
+Regenerated `plugin/extensions/omo-task.js` with `bun run build:senpi-plugin`.
+The bundled task engine now carries the shared scheduler's two bounded
+infrastructure retries, durable backoff metadata, and retry diagnostics. TUI and
+desktop continue to use that same engine; no adapter-specific retry path was
+added. Manual prompt overrides keep their pre-amendment eligibility check.
+The protocol field audit reads the extracted `event-types.ts` union so its
+overflow-payload equality assertion continues to inspect the shipped contract.
+
 ## 2026-10-14 - Preserve planning requests across same-process session transitions
 
 The task skill-invocation tracker hands authenticated request, invocation and plan-artifact records to replacement trackers keyed by session ID. Reload, new, resume and fork transitions retain the prior session's evidence; quit and unknown shutdown reasons discard it. Extension-injected inputs still cannot authorize review, and ulw-execute still forbids review.
