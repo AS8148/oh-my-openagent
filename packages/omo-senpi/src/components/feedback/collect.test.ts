@@ -36,6 +36,17 @@ describe("blankConfigSecrets", () => {
       mcp: { github: { env: { GITHUB_TOKEN: "<redacted>" }, command: "gh-mcp" } },
     })
   })
+
+  test("#given budget settings and a bare key field #when a config is prepared #then token limits stay readable and the key is blanked", () => {
+    expect(blankConfigSecrets({ max_tokens: 4096, maxTokens: 2048, context_token_limit: 200000, key: "abc", refreshToken: "r", accessToken: "a" })).toEqual({
+      max_tokens: 4096,
+      maxTokens: 2048,
+      context_token_limit: 200000,
+      key: "<redacted>",
+      refreshToken: "<redacted>",
+      accessToken: "<redacted>",
+    })
+  })
 })
 
 describe("transcriptText", () => {
@@ -133,6 +144,28 @@ describe("engineLogText", () => {
 
     expect(text).not.toContain("private text")
     expect(text).toContain("turn_ok")
+    cleanup()
+  })
+
+  test("#given log lines with content nested, in arrays or under logger keys #when logs are collected #then only allowlisted fields of each line are kept", () => {
+    const dir = agentDir()
+    const now = new Date("2026-10-19T03:00:00.000Z")
+    writeFileSync(
+      join(dir, "logs", "session.log"),
+      [
+        JSON.stringify({ ts: "2026-10-19T02:59:00.000Z", level: "info", event: "turn", data: { text: "NESTED-SECRET-TEXT" } }),
+        JSON.stringify({ ts: "2026-10-19T02:59:01.000Z", level: "info", event: "turn", messages: ["ARRAY-TEXT"] }),
+        JSON.stringify({ ts: "2026-10-19T02:59:02.000Z", level: "warn", msg: "MSG-TEXT", query: "QUERY-TEXT", cwd: "/private/cwd", error: { message: "ERROR-TEXT", name: "TypeError" } }),
+        JSON.stringify({ ts: "2026-10-19T02:59:03.000Z", level: "error", event: "turn_failed", durationMs: 31400, reason: "tool_timeout" }),
+      ].join("\n"),
+    )
+
+    const text = engineLogText(dir, now)
+
+    for (const leaked of ["NESTED-SECRET-TEXT", "ARRAY-TEXT", "MSG-TEXT", "QUERY-TEXT", "/private/cwd", "ERROR-TEXT"]) expect(text).not.toContain(leaked)
+    expect(text).toContain("turn_failed")
+    expect(text).toContain("tool_timeout")
+    expect(text).toContain("31400")
     cleanup()
   })
 

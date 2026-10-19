@@ -11,6 +11,7 @@ import { feedbackUploadsDisabled, submitReport, type ReportClient, type ReportTr
 export const FEEDBACK_PREPARE_RPC_METHOD = "omo.feedback.prepare"
 export const FEEDBACK_SUBMIT_RPC_METHOD = "omo.feedback.submit"
 const DRAFT_TTL_MS = 30 * 60 * 1000
+const MAX_DRAFTS = 8
 const DEFAULT_API_ORIGIN = "https://api.omo.dev"
 
 export interface FeedbackComponentOptions {
@@ -61,22 +62,65 @@ const hostRedactor = (pi: SenpiExtensionAPI): UploadRedactor | undefined => {
 const clientSections = (input: unknown): CollectedSection[] => {
   const raw: unknown = Reflect.get(Object(input), "sections")
   if (!Array.isArray(raw)) return []
-  const allowed = new Set(["logs", "crash", "identity"])
+  const allowed = new Set(["logs", "crash"])
   return raw.flatMap((entry: unknown) => {
     const id: unknown = Reflect.get(Object(entry), "id")
     const text: unknown = Reflect.get(Object(entry), "text")
     if (typeof id !== "string" || !allowed.has(id) || typeof text !== "string") return []
-    return [{ id: id as CollectedSection["id"], text, ...(id === "identity" ? { verbatim: true } : {}) }]
+    return [{ id: id as CollectedSection["id"], text }]
   })
 }
 
-const mergeSections = (host: readonly CollectedSection[], client: readonly CollectedSection[]): CollectedSection[] => {
+const ID_VALUE = /^[A-Za-z0-9_.:@-]{1,128}$/
+const EMAIL_VALUE = /^[^\s@]{1,64}@[^\s@]{1,190}$/
+const IDENTITY_FIELDS = [
+  ["account", "accountId", "id"],
+  ["user", "userId", "id"],
+  ["email", "email", "email"],
+  ["name", "displayName", "free"],
+  ["plan", "plan", "id"],
+  ["device", "deviceId", "id"],
+  ["device name", "deviceName", "free"],
+] as const
+
+const singleLine = (value: string): string | undefined => {
+  const line = value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim()
+  return line === "" || line.length > 120 ? undefined : line
+}
+
+/** Builds the desktop's identity lines from named fields only: ids and the email must match their shape, free-text fields are redacted. */
+export const clientIdentityLines = (input: unknown, redact: UploadRedactor): readonly string[] => {
+  const identity: unknown = Reflect.get(Object(input), "identity")
+  if (identity === null || typeof identity !== "object") return []
+  return IDENTITY_FIELDS.flatMap(([label, key, shape]) => {
+    const value: unknown = Reflect.get(identity, key)
+    if (typeof value !== "string") return []
+    if (shape === "id") return ID_VALUE.test(value) ? [`${label.padEnd(12)}${value}`] : []
+    if (shape === "email") return EMAIL_VALUE.test(value) ? [`${label.padEnd(12)}${value}`] : []
+    const line = singleLine(value)
+    return line === undefined ? [] : [`${label.padEnd(12)}${redact(line).text}`]
+  })
+}
+
+const mergeSections = (host: readonly CollectedSection[], client: readonly CollectedSection[], identityLines: readonly string[]): CollectedSection[] => {
   const merged = new Map(host.map((section) => [section.id, section]))
   for (const section of client) {
     const existing = merged.get(section.id)
     merged.set(section.id, existing === undefined ? section : { ...section, text: `${section.text}\n${existing.text}` })
   }
+  if (identityLines.length > 0) {
+    const existing = merged.get("identity")
+    merged.set("identity", { id: "identity", verbatim: true, text: [...identityLines, ...(existing === undefined ? [] : [existing.text])].join("\n") })
+  }
   return [...merged.values()]
+}
+
+const sessionIdOf = (ctx: SessionLike | undefined): string | undefined => {
+  try {
+    return ctx?.sessionManager?.getSessionId?.()
+  } catch {
+    return undefined
+  }
 }
 
 export const FEEDBACK_UNAVAILABLE = "Feedback needs an OmO runtime that can remove secrets before upload. Update OmO and try again."
@@ -91,10 +135,25 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
       const senpiVersion = options.senpiVersion ?? pi.hostVersion ?? "unknown"
       const channel = options.channel ?? (omoVersion.includes("-") ? "beta" : "latest")
       const drafts = new Map<string, StoredDraft>()
-      let lastSession: SessionLike | undefined
+      const liveSessions = new Map<string, SessionLike>()
+      let latestSessionId: string | undefined
       pi.on("session_start", (_payload, ctx) => {
-        lastSession = ctx as SessionLike | undefined
+        const id = sessionIdOf(ctx as SessionLike | undefined)
+        if (id === undefined) return
+        liveSessions.set(id, ctx as SessionLike)
+        latestSessionId = id
       })
+      pi.on("session_shutdown", (_payload, ctx) => {
+        const id = sessionIdOf(ctx as SessionLike | undefined)
+        if (id === undefined) return
+        liveSessions.delete(id)
+        if (latestSessionId === id) latestSessionId = undefined
+      })
+      const sessionForRpc = (input: unknown): SessionLike | undefined => {
+        const requested: unknown = Reflect.get(Object(input), "sessionId")
+        if (typeof requested === "string") return liveSessions.get(requested)
+        return latestSessionId === undefined ? undefined : liveSessions.get(latestSessionId)
+      }
 
       const prepare = (session: SessionLike | undefined, input: unknown): FeedbackDraft | { kind: "unavailable"; reason: string } => {
         const redact = hostRedactor(pi)
@@ -110,12 +169,17 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
         const signedIn = typeof Reflect.get(Object(input), "accessToken") === "string"
         const draft = buildDraft({
           draftId: `drf_${randomUUID()}`,
-          collected: mergeSections(host.sections, clientSections(input)),
+          collected: mergeSections(host.sections, clientSections(input), clientIdentityLines(input, redact)),
           redact,
           destination: feedbackUploadsDisabled(env) ? "local" : "intake",
           signedIn,
         })
         for (const [id, stored] of drafts) if (stored.expiresAt < now().getTime()) drafts.delete(id)
+        while (drafts.size >= MAX_DRAFTS) {
+          const oldest = drafts.keys().next().value
+          if (oldest === undefined) break
+          drafts.delete(oldest)
+        }
         drafts.set(draft.draftId, {
           draft,
           client: { app: env.OMO_NATIVE_SURFACE === "desktop" ? "desktop" : "cli", omo: omoVersion, senpi: senpiVersion, os: process.platform, arch: process.arch, locale: Intl.DateTimeFormat().resolvedOptions().locale, channel },
@@ -131,11 +195,10 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
         const stored = typeof draftId === "string" ? drafts.get(draftId) : undefined
         const redact = hostRedactor(pi)
         if (stored === undefined || redact === undefined) return { kind: "refused", reason: "unavailable" }
-        drafts.delete(stored.draft.draftId)
         const kind: unknown = Reflect.get(Object(input), "kind")
         const description: unknown = Reflect.get(Object(input), "description")
         const accessToken: unknown = Reflect.get(Object(input), "accessToken")
-        return submitReport({
+        const result = await submitReport({
           draft: stored.draft,
           kind: kind === "feedback" || kind === "other" ? kind : "bug",
           description: typeof description === "string" ? description : "",
@@ -149,12 +212,14 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
           ...(stored.installHash === undefined ? {} : { installHash: stored.installHash }),
           ...(stored.sessionHash === undefined ? {} : { sessionHash: stored.sessionHash }),
         })
+        if (result.kind !== "refused" || result.reason === "secret-detected" || result.reason === "too-large") drafts.delete(stored.draft.draftId)
+        return result
       }
 
-      pi.rpc?.handle?.(FEEDBACK_PREPARE_RPC_METHOD, (input) => prepare(lastSession, input))
+      pi.rpc?.handle?.(FEEDBACK_PREPARE_RPC_METHOD, (input) => prepare(sessionForRpc(input), input))
       pi.rpc?.handle?.(FEEDBACK_SUBMIT_RPC_METHOD, submit)
 
-      const runCommand = async (args: string, ctx: unknown): Promise<void> => {
+      const runCommand = async (kind: FeedbackKind, args: string, ctx: unknown): Promise<void> => {
         const ui = Reflect.get(Object(ctx), "ui") as
           | { input(title: string, placeholder?: string): Promise<string | undefined>; select(title: string, options: string[]): Promise<string | undefined>; notify(message: string, type?: string): void }
           | undefined
@@ -176,17 +241,20 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
           if (choice !== "Send report") return
           break
         }
-        const result = await submit({ draftId: prepared.draftId, kind: "bug" satisfies FeedbackKind, description })
+        const result = await submit({ draftId: prepared.draftId, kind, description })
         ui.notify(resultMessage(result), result.kind === "refused" ? "error" : "info")
       }
 
-      for (const name of ["feedback", "bug"]) {
-        pi.registerCommand(name, {
-          description: "Report a problem or send feedback to the OmO team",
-          argumentHint: "[what went wrong]",
-          handler: runCommand,
-        })
-      }
+      pi.registerCommand("feedback", {
+        description: "Send feedback or an idea to the OmO team",
+        argumentHint: "[your feedback]",
+        handler: (args: string, ctx: unknown) => runCommand("feedback", args, ctx),
+      })
+      pi.registerCommand("bug", {
+        description: "Report a problem to the OmO team",
+        argumentHint: "[what went wrong]",
+        handler: (args: string, ctx: unknown) => runCommand("bug", args, ctx),
+      })
     },
   }
 }

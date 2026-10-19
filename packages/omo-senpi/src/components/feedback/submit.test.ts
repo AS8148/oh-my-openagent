@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -164,5 +164,25 @@ describe("submitReport", () => {
     })
 
     expect(result).toEqual({ kind: "refused", reason })
+  })
+
+  test("#given the report folder cannot be created #when uploads are off and the report is saved #then the user gets a refusal instead of a crash", async () => {
+    const stateDir = tempDir()
+    writeFileSync(join(stateDir, "feedback"), "not a directory")
+
+    const result = await submitReport({
+      draft,
+      kind: "bug",
+      description: "x",
+      redact: redactTokens,
+      client,
+      env: { OMO_DISABLE_FEEDBACK: "1" },
+      stateDir,
+      apiOrigin: "https://api.example.test",
+      accessToken: null,
+      transport: async () => new Response("{}", { status: 201 }),
+    })
+
+    expect(result).toEqual({ kind: "refused", reason: "unavailable" })
   })
 })

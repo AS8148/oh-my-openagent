@@ -160,4 +160,113 @@ describe("feedback component", () => {
     expect(noticeFor(draft as unknown as FeedbackDraft)).toContain("recent logs")
     expect(readdirSync(logs)).toEqual(["session.log"])
   })
+
+  test("#given a desktop client sends free text as an identity section #when the report is prepared #then that text is not trusted: it is either dropped or redacted, never sent verbatim", async () => {
+    const { pi, api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    await pi.dispatch("session_start", {}, sessionCtx)
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({
+      sections: [{ id: "identity", text: "note sk-abcdefghijklmnop" }],
+    })) as { sections: { id: string; text: string }[] }
+
+    expect(JSON.stringify(draft)).not.toContain("sk-abcdefghijklmnop")
+  })
+
+  test("#given structured identity fields from the desktop #when the report is prepared #then the engine renders them, keeps the email, redacts free-text fields and drops malformed ids", async () => {
+    const { pi, api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    await pi.dispatch("session_start", {}, sessionCtx)
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({
+      identity: { accountId: "acc_1", userId: "usr 1\ninjected", email: "dana@example.com", displayName: "Dana sk-abcdefghijklmnop", plan: "pro", deviceId: "dev_1", deviceName: "Dana's Mac" },
+    })) as { sections: { id: string; text: string }[] }
+
+    const identity = draft.sections.find((section) => section.id === "identity")?.text ?? ""
+    expect(identity).toContain("acc_1")
+    expect(identity).toContain("dana@example.com")
+    expect(identity).toContain("Dana's Mac")
+    expect(identity).not.toContain("sk-abcdefghijklmnop")
+    expect(identity).not.toContain("injected")
+  })
+
+  test("#given two sessions started on one host and the first shut down #when the desktop prepares for a named session #then that session's transcript is used and a shut-down session is never read", async () => {
+    const { pi, api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const sessionFor = (id: string, text: string, disposed: { value: boolean }) => ({
+      cwd: "/tmp/project",
+      sessionManager: {
+        getSessionId: () => id,
+        getBranch: () => {
+          if (disposed.value) throw new Error(`session ${id} was disposed`)
+          return [{ type: "message", timestamp: "2026-10-19T02:00:00.000Z", message: { role: "user", content: [{ type: "text", text }] } }]
+        },
+      },
+    })
+    const aDisposed = { value: false }
+    const a = sessionFor("ses_a", "message from A", aDisposed)
+    const b = sessionFor("ses_b", "message from B", { value: false })
+    await pi.dispatch("session_start", {}, a)
+    await pi.dispatch("session_start", {}, b)
+
+    const forA = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({ sessionId: "ses_a" })) as { sections: { id: string; text: string }[] }
+    expect(forA.sections.find((section) => section.id === "session")?.text).toContain("message from A")
+
+    await pi.dispatch("session_shutdown", {}, a)
+    aDisposed.value = true
+    const afterShutdown = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({ sessionId: "ses_a" })) as { sections: { id: string; text: string }[] }
+    expect(afterShutdown.sections.find((section) => section.id === "session")).toBeUndefined()
+  })
+
+  test("#given a send that failed because the service was unavailable #when the user tries again with the same draft #then it is sent", async () => {
+    const pi = new FakeExtensionAPI()
+    const handlers = new Map<string, Handler>()
+    const api = pi as unknown as SenpiExtensionAPI
+    Object.assign(api, {
+      rpc: { emit: () => undefined, handle: (name: string, handler: Handler) => handlers.set(name, handler) },
+      redactForUpload: (text: string) => ({ text, counts: {} }),
+    })
+    const stateDir = mkdtempSync(join(tmpdir(), "omo-feedback-retry-"))
+    dirs.push(stateDir)
+    let calls = 0
+    const component = createFeedbackComponent({
+      env: { OMO_CODING_AGENT_DIR: join(stateDir, "agent"), DO_NOT_TRACK: "1" },
+      stateDir,
+      transport: async () => {
+        calls++
+        return calls === 1 ? new Response("{}", { status: 503 }) : new Response(JSON.stringify({ id: "rpt_retry" }), { status: 201 })
+      },
+    })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { draftId: string }
+
+    const first = await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: draft.draftId, description: "x" })
+    const second = await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: draft.draftId, description: "x" })
+
+    expect(first).toEqual({ kind: "refused", reason: "unavailable" })
+    expect(second).toEqual({ kind: "sent", reportId: "rpt_retry" })
+  })
+
+  test("#given a client that prepares many drafts #when it keeps preparing #then the engine keeps only a bounded number and the oldest stops being submittable", async () => {
+    const { api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const ids: string[] = []
+    for (let index = 0; index < 20; index++) ids.push(((await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { draftId: string }).draftId)
+
+    expect(await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: ids[0], description: "x" })).toEqual({ kind: "refused", reason: "unavailable" })
+    expect(await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: ids.at(-1), description: "x" })).toEqual({ kind: "sent", reportId: "rpt_9" })
+  })
+
+  test("#given the TUI #when the user runs /bug and /feedback #then they are sent as a bug and as feedback", async () => {
+    const { pi, api, component, sent } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const ctx = { ...sessionCtx, ui: { input: async () => undefined, select: async () => "Send report", notify: () => undefined } }
+    const handlerOf = (name: string) => pi.commands.find((entry) => entry.name === name)?.options.handler as (args: string, ctx: unknown) => Promise<void>
+
+    await handlerOf("bug")("it broke", ctx)
+    await handlerOf("feedback")("an idea", ctx)
+
+    expect(sent.map((body) => JSON.parse(body).kind)).toEqual(["bug", "feedback"])
+  })
 })
+

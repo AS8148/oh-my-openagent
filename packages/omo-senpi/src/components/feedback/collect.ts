@@ -4,7 +4,13 @@ import { join } from "node:path"
 export const TRANSCRIPT_MESSAGE_LIMIT = 50
 const TOOL_RESULT_KEEP = 1200
 
-const SECRET_KEY = /(api[-_]?key|token|secret|password|passwd|authorization|cookie|credential|private[-_]?key|client[-_]?secret)/i
+const SECRET_KEY_WORD = /(^|_)(api_?key|key|keys|token|tokens|access_token|refresh_token|id_token|secret|secrets|password|passwd|passphrase|authorization|auth|cookie|cookies|credential|credentials|private_key|client_secret|bearer|session_key)$/
+const NOT_SECRET = /(^|_)(max|min|limit|count|budget|window|length|size|context)(_|$)/
+
+const isSecretKey = (key: string): boolean => {
+  const snake = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/-/g, "_").toLowerCase()
+  return SECRET_KEY_WORD.test(snake) && !NOT_SECRET.test(snake)
+}
 const SECRET_CONTAINERS = new Set(["headers", "env"])
 
 const blankUserinfo = (value: string): string => value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^@/\s]+@/i, "$1<redacted>@")
@@ -19,7 +25,7 @@ export function blankConfigSecrets(value: unknown, insideSecretContainer = false
   if (value !== null && typeof value === "object") {
     const out: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(value)) {
-      if (insideSecretContainer || SECRET_KEY.test(key)) {
+      if (insideSecretContainer || isSecretKey(key)) {
         out[key] = child !== null && typeof child === "object" ? blankConfigSecrets(child, true) : "<redacted>"
         continue
       }
@@ -79,7 +85,12 @@ export function transcriptText(entries: readonly unknown[]): string {
 export const LOG_WINDOW_MS = 15 * 60 * 1000
 const LOG_LINES_PER_FILE = 200
 const LOG_TAIL_BYTES = 512 * 1024
-const CONTENT_KEYS = ["text", "content", "prompt", "messages", "message", "input", "output"]
+const LOG_FIELDS = [
+  "ts", "timestamp", "level", "event", "component", "source", "kind", "type", "reason", "code", "status", "outcome",
+  "durationMs", "elapsedMs", "latencyMs", "ms", "attempt", "attempts", "turn", "from", "to", "chainKey", "model", "provider",
+  "sessionId", "threadId", "taskId", "requestId", "pid", "exitCode", "signal",
+] as const
+const LOG_STRING_MAX = 160
 
 const tailText = (path: string): string => {
   const size = statSync(path).size
@@ -88,21 +99,29 @@ const tailText = (path: string): string => {
   return start === 0 ? text : text.slice(text.indexOf("\n") + 1)
 }
 
-const keepLine = (line: string, since: number): boolean => {
+const projectLine = (line: string, since: number): string | undefined => {
   let parsed: unknown
   try {
     parsed = JSON.parse(line)
   } catch {
-    return false
+    return undefined
   }
-  const ts = Date.parse(String(Reflect.get(Object(parsed), "ts") ?? Reflect.get(Object(parsed), "timestamp") ?? ""))
-  if (Number.isNaN(ts) || ts < since) return false
-  return !CONTENT_KEYS.some((key) => typeof Reflect.get(Object(parsed), key) === "string")
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  const ts = Date.parse(String(Reflect.get(parsed, "ts") ?? Reflect.get(parsed, "timestamp") ?? ""))
+  if (Number.isNaN(ts) || ts < since) return undefined
+  const kept: Record<string, string | number | boolean> = {}
+  for (const field of LOG_FIELDS) {
+    const value: unknown = Reflect.get(parsed, field)
+    if (typeof value === "number" || typeof value === "boolean") kept[field] = value
+    else if (typeof value === "string" && value.length <= LOG_STRING_MAX && !/[\r\n]/.test(value)) kept[field] = value
+  }
+  return JSON.stringify(kept)
 }
 
 /**
- * The engine's own logs (`<agent dir>/logs/*.log`, rotations skipped) for the last 15 minutes. Lines that carry
- * conversation content are dropped: they can belong to any session, and the reported conversation has its own section.
+ * The engine's own logs (`<agent dir>/logs/*.log`, rotations skipped) for the last 15 minutes. Each line keeps only
+ * allowlisted, content-free fields (time, level, event, ids, durations, outcome): log lines can belong to any session,
+ * and the reported conversation has its own section.
  */
 export function engineLogText(agentDir: string, now: Date): string {
   const dir = join(agentDir, "logs")
@@ -121,7 +140,13 @@ export function engineLogText(agentDir: string, now: Date): string {
     } catch {
       continue
     }
-    const lines = text.split("\n").filter((line) => keepLine(line, since)).slice(-LOG_LINES_PER_FILE)
+    const lines = text
+      .split("\n")
+      .flatMap((line) => {
+        const projected = projectLine(line, since)
+        return projected === undefined ? [] : [projected]
+      })
+      .slice(-LOG_LINES_PER_FILE)
     if (lines.length > 0) blocks.push(`## ${name}\n${lines.join("\n")}`)
   }
   return blocks.join("\n\n")

@@ -104,9 +104,13 @@ export async function submitReport(options: SubmitOptions): Promise<SubmitResult
   const json = JSON.stringify(body)
 
   if (feedbackUploadsDisabled(options.env)) {
-    const path = join(feedbackDir(options.stateDir), `report-${options.draft.draftId}.json`)
-    privateWrite(path, json)
-    return { kind: "saved", path }
+    try {
+      const path = join(feedbackDir(options.stateDir), `report-${options.draft.draftId}.json`)
+      privateWrite(path, json)
+      return { kind: "saved", path }
+    } catch {
+      return { kind: "refused", reason: "unavailable" }
+    }
   }
 
   const headers = new Headers({ "content-type": "application/json" })
@@ -130,7 +134,11 @@ export async function submitReport(options: SubmitOptions): Promise<SubmitResult
   if (typeof reportId !== "string") return { kind: "refused", reason: "unavailable" }
   const deleteToken: unknown = Reflect.get(Object(answer), "deleteToken")
   if (typeof deleteToken === "string") {
-    rememberDeleteToken(options.stateDir, { id: reportId, deleteToken, createdAt: new Date().toISOString() })
+    try {
+      rememberDeleteToken(options.stateDir, { id: reportId, deleteToken, createdAt: new Date().toISOString() })
+    } catch {
+      // The report was accepted; losing the local delete token only means the user deletes it by signing in.
+    }
   }
   return { kind: "sent", reportId }
 }
