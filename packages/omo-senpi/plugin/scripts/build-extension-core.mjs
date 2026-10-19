@@ -98,11 +98,13 @@ export function loroWasmSourcePath() {
   return createRequire(join(repoRoot, "packages", "memory-core", "package.json")).resolve(`loro-crdt/bundler/${MEMORY_SYNC_WASM_NAME}`)
 }
 const threadClientEntryPath = join(packageRoot, "src", "components", "thread", "live-surface.ts")
+const feedbackEntryPath = join(packageRoot, "src", "components", "feedback", "runtime.ts")
 const memoryDoctorOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-doctor.js")
 const memoryMemfsOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-memfs.js")
 const memoryPalaceOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-palace.js")
 const memorySyncOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-sync.js")
 const threadClientOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-thread-client.js")
+const feedbackOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-feedback.js")
 // The computer-use prelude JSON: bundled modules read it from beside the bundle (extensions/), the
 // same contract as the staged personas, so omo.js carries none of the ~29 KB of prelude text (#9113).
 export const COMPUTER_PRELUDE_ASSET_NAME = "assets.generated.json"
@@ -118,6 +120,7 @@ const externalSpecifiers = [
   "#omo-memory-palace-runtime",
   "#omo-memory-sync-runtime",
   "#omo-thread-client-runtime",
+  "#omo-feedback-runtime",
   "#omo-agent-toolkit-sdk",
   ...SENPI_LOADER_ALIASES,
   ...builtinModuleNames,
@@ -154,6 +157,7 @@ export const extensionBuildPaths = {
   memoryPalaceOutputPath,
   memorySyncOutputPath,
   threadClientOutputPath,
+  feedbackOutputPath,
   gatewayStoreWorkerOutputPath,
   gatewayRulesExtensionOutputPath,
 }
@@ -178,6 +182,7 @@ export function resolveOutputs(options) {
     memoryPalaceOutput: sibling(options.memoryPalaceOutputPath, memoryPalaceOutputPath, "omo-memory-palace.js"),
     memorySyncOutput: sibling(options.memorySyncOutputPath, memorySyncOutputPath, "omo-memory-sync.js"),
     threadClientOutput: sibling(options.threadClientOutputPath, threadClientOutputPath, "omo-thread-client.js"),
+    feedbackOutput: sibling(options.feedbackOutputPath, feedbackOutputPath, "omo-feedback.js"),
     computerUseOutput: sibling(options.computerUseOutputPath, computerUseOutputPath, "omo-computer-use.js"),
     gatewayStoreWorkerOutput: sibling(options.gatewayStoreWorkerOutputPath, gatewayStoreWorkerOutputPath, GATEWAY_STORE_WORKER_NAME),
     gatewayRulesExtensionOutput: sibling(options.gatewayRulesExtensionOutputPath, gatewayRulesExtensionOutputPath, GATEWAY_RULES_EXTENSION_NAME),
@@ -209,6 +214,7 @@ export async function buildExtension(options = {}) {
     memoryPalaceOutput,
     memorySyncOutput,
     threadClientOutput,
+    feedbackOutput,
     gatewayStoreWorkerOutput,
     gatewayRulesExtensionOutput,
   } = resolveOutputs(options)
@@ -225,6 +231,7 @@ export async function buildExtension(options = {}) {
   const memoryPalaceInputs = await buildEntry(memoryPalaceEntryPath, memoryPalaceOutput, buildDefines)
   const memorySyncInputs = await buildEntry(memorySyncEntryPath, memorySyncOutput, buildDefines, externalSpecifiers, { assets: true })
   const threadClientInputs = await buildEntry(threadClientEntryPath, threadClientOutput, buildDefines)
+  const feedbackInputs = await buildEntry(feedbackEntryPath, feedbackOutput, buildDefines)
   const computerUseInputs = await buildEntry(computerUseEntryPath, computerUseOutput, buildDefines)
   const gatewayStoreWorkerInputs = await buildEntry(gatewayStoreWorkerEntryPath, gatewayStoreWorkerOutput, buildDefines, sdkExternalSpecifiers)
   const gatewayRulesExtensionInputs = await buildEntry(gatewayRulesExtensionEntryPath, gatewayRulesExtensionOutput, buildDefines)
@@ -250,6 +257,7 @@ export async function buildExtension(options = {}) {
     memoryPalaceInputs,
     memorySyncInputs,
     threadClientInputs,
+    feedbackInputs,
     gatewayStoreWorkerInputs,
     gatewayRulesExtensionInputs,
     threadSdkInputs,

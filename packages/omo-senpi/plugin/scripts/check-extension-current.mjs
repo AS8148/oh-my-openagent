@@ -23,6 +23,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryPalaceOutput,
     memorySyncOutput,
     threadClientOutput,
+    feedbackOutput,
     gatewayStoreWorkerOutput,
     threadSdkOutput,
   } = resolveOutputs(options)
@@ -46,6 +47,7 @@ export async function checkExtensionCurrent(options = {}) {
   const currentMemoryMemfs = await readBuiltEntry(memoryMemfsOutput)
   const currentMemoryPalace = await readBuiltEntry(memoryPalaceOutput)
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
+  const currentFeedback = await readBuiltEntry(feedbackOutput)
   const currentMemorySync = await readBuiltEntry(memorySyncOutput)
   if (currentMemorySync === undefined) return { ok: false, reason: "missing-output", output: memorySyncOutput }
   // Each committed sidecar asset must be byte-identical to its source: the wasm to the INSTALLED Loro
@@ -60,6 +62,7 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentMemoryMemfs === undefined) return { ok: false, reason: "missing-output", output: memoryMemfsOutput }
   if (currentMemoryPalace === undefined) return { ok: false, reason: "missing-output", output: memoryPalaceOutput }
   if (currentThreadClient === undefined) return { ok: false, reason: "missing-output", output: threadClientOutput }
+  if (currentFeedback === undefined) return { ok: false, reason: "missing-output", output: feedbackOutput }
   const currentComputerUse = await readBuiltEntry(computerUseOutput)
   if (currentComputerUse === undefined) return { ok: false, reason: "missing-output", output: computerUseOutput }
   const currentGatewayStoreWorker = await readBuiltEntry(gatewayStoreWorkerOutput)
@@ -82,6 +85,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryPalaceOutputPath: join(tempRoot, "omo-memory-palace.js"),
     memorySyncOutputPath: join(tempRoot, "omo-memory-sync.js"),
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
+    feedbackOutputPath: join(tempRoot, "omo-feedback.js"),
     computerUseOutputPath: join(tempRoot, "omo-computer-use.js"),
     gatewayStoreWorkerOutputPath: join(tempRoot, GATEWAY_STORE_WORKER_NAME),
     threadSdkOutputPath: join(tempRoot, THREAD_SDK_RELATIVE_PATH),
@@ -102,6 +106,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentMemoryPalace, expected.memoryPalaceOutputPath, memoryPalaceOutput],
       [currentMemorySync, expected.memorySyncOutputPath, memorySyncOutput],
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
+      [currentFeedback, expected.feedbackOutputPath, feedbackOutput],
       [currentComputerUse, expected.computerUseOutputPath, computerUseOutput],
       [currentGatewayStoreWorker, expected.gatewayStoreWorkerOutputPath, gatewayStoreWorkerOutput],
       [currentThreadSdk, expected.threadSdkOutputPath, threadSdkOutput],

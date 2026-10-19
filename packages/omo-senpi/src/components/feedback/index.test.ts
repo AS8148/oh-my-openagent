@@ -99,6 +99,32 @@ describe("feedback component", () => {
     expect(body).toContain("renderer crashed")
   })
 
+  test("#given the feedback sidecar fails to load #when the desktop prepares and the user runs /bug #then both get a clear error naming the missing artifact instead of a crash", async () => {
+    const pi = new FakeExtensionAPI()
+    const handlers = new Map<string, Handler>()
+    const api = pi as unknown as SenpiExtensionAPI
+    Object.assign(api, {
+      rpc: { emit: () => undefined, handle: (name: string, handler: Handler) => handlers.set(name, handler) },
+      redactForUpload: (text: string) => ({ text, counts: {} }),
+    })
+    const component = createFeedbackComponent({
+      env: { DO_NOT_TRACK: "1" },
+      omoVersion: "5.1.36",
+      senpiVersion: "2026.10.18-1",
+      loadRuntime: () => Promise.reject(new Error("Cannot find module '#omo-feedback-runtime'")),
+    })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const notices: { message: string; type?: string }[] = []
+    const ctx = { ...sessionCtx, ui: { input: async () => "x", select: async () => "Send report", notify: (message: string, type?: string) => notices.push({ message, type }) } }
+
+    await expect(Promise.resolve(handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({}))).rejects.toThrow("extensions/omo-feedback.js")
+    await (pi.commands.find((entry) => entry.name === "bug")?.options.handler as (args: string, ctx: unknown) => Promise<void>)("it broke", ctx)
+
+    expect(notices).toHaveLength(1)
+    expect(notices[0]?.type).toBe("error")
+    expect(notices[0]?.message).toContain("Cannot find module '#omo-feedback-runtime'")
+  })
+
   test("#given a draft that was already submitted #when it is submitted again #then nothing more is sent", async () => {
     const { pi, api, handlers, component, sent } = host({ withRedactor: true })
     await component.register(api, { logger: console, config: { getFlag: () => undefined } })

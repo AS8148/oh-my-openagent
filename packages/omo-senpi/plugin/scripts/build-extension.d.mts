@@ -12,6 +12,7 @@ export interface BuildExtensionOptions {
   memoryPalaceOutputPath?: string
   memorySyncOutputPath?: string
   threadClientOutputPath?: string
+  feedbackOutputPath?: string
   computerUseOutputPath?: string
   gatewayStoreWorkerOutputPath?: string
   threadSdkOutputPath?: string
@@ -28,6 +29,7 @@ export function buildExtension(options?: BuildExtensionOptions): Promise<{
   memoryPalaceInputs: string[]
   memorySyncInputs: string[]
   threadClientInputs: string[]
+  feedbackInputs: string[]
   computerUseInputs: string[]
   toolkitSdkInputs: string[]
   rollbackRuntimeInputs: string[]

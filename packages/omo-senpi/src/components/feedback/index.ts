@@ -1,17 +1,15 @@
-import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 
 import type { OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { createOmoNativeProductConfig } from "../telemetry/product-identity"
-import { collectHostSections, type HostSessionView } from "./collect-host"
-import { buildDraft, type CollectedSection, type FeedbackDraft, type FeedbackKind, type UploadRedactor } from "./draft"
-import { feedbackUploadsDisabled, submitReport, type ReportClient, type ReportTransport, type SubmitResult } from "./submit"
+import type { FeedbackDraft, FeedbackKind, UploadRedactor } from "./draft"
+import { feedbackRuntimeLoadFailure, loadFeedbackRuntime, type FeedbackRuntimeLoader } from "./runtime-loader"
+import type { FeedbackCore, FeedbackSessionLike } from "./runtime"
+import type { ReportTransport, SubmitResult } from "./submit"
 
 export const FEEDBACK_PREPARE_RPC_METHOD = "omo.feedback.prepare"
 export const FEEDBACK_SUBMIT_RPC_METHOD = "omo.feedback.submit"
-const DRAFT_TTL_MS = 30 * 60 * 1000
-const MAX_DRAFTS = 8
 const DEFAULT_API_ORIGIN = "https://api.omo.dev"
 
 export interface FeedbackComponentOptions {
@@ -22,39 +20,10 @@ export interface FeedbackComponentOptions {
   readonly senpiVersion?: string
   readonly channel?: string
   readonly now?: () => Date
+  readonly loadRuntime?: FeedbackRuntimeLoader
 }
 
-interface SessionLike {
-  readonly cwd?: unknown
-  readonly sessionManager?: { getSessionId?(): string; getBranch?(): readonly unknown[] }
-  readonly model?: { readonly provider?: unknown; readonly id?: unknown }
-}
-
-interface StoredDraft {
-  readonly draft: FeedbackDraft
-  readonly client: ReportClient
-  readonly installHash?: string
-  readonly sessionHash?: string
-  readonly expiresAt: number
-}
-
-const sessionView = (ctx: SessionLike | undefined): HostSessionView | undefined => {
-  if (ctx?.sessionManager?.getBranch === undefined) return undefined
-  let entries: readonly unknown[]
-  try {
-    entries = ctx.sessionManager.getBranch()
-  } catch {
-    return undefined
-  }
-  const provider = typeof ctx.model?.provider === "string" ? ctx.model.provider : undefined
-  const id = typeof ctx.model?.id === "string" ? ctx.model.id : undefined
-  return {
-    entries,
-    ...(typeof ctx.cwd === "string" ? { cwd: ctx.cwd } : {}),
-    ...(ctx.sessionManager.getSessionId === undefined ? {} : { sessionId: ctx.sessionManager.getSessionId() }),
-    ...(id === undefined ? {} : { model: provider === undefined ? id : `${provider}/${id}` }),
-  }
-}
+type SessionLike = FeedbackSessionLike
 
 const hostRedactor = (pi: SenpiExtensionAPI): UploadRedactor | undefined => {
   const redact = pi.redactForUpload
@@ -63,71 +32,6 @@ const hostRedactor = (pi: SenpiExtensionAPI): UploadRedactor | undefined => {
     const result = redact(text)
     return { text: result.text, count: Object.values(result.counts).reduce((sum, n) => sum + n, 0) }
   }
-}
-
-const clientSections = (input: unknown): CollectedSection[] => {
-  const raw: unknown = Reflect.get(Object(input), "sections")
-  if (!Array.isArray(raw)) return []
-  const allowed = new Set(["logs", "crash"])
-  return raw.flatMap((entry: unknown) => {
-    const id: unknown = Reflect.get(Object(entry), "id")
-    const text: unknown = Reflect.get(Object(entry), "text")
-    if (typeof id !== "string" || !allowed.has(id) || typeof text !== "string") return []
-    return [{ id: id as CollectedSection["id"], text }]
-  })
-}
-
-const ID_VALUE = /^[A-Za-z0-9_.:@-]{1,128}$/
-const EMAIL_VALUE = /^[^\s@]{1,64}@[^\s@]{1,190}$/
-const IDENTITY_FIELDS = [
-  ["account", "accountId", "id"],
-  ["user", "userId", "id"],
-  ["email", "email", "email"],
-  ["name", "displayName", "free"],
-  ["plan", "plan", "id"],
-  ["device", "deviceId", "id"],
-  ["device name", "deviceName", "free"],
-] as const
-
-const singleLine = (value: string): string | undefined => {
-  const line = value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim()
-  return line === "" || line.length > 120 ? undefined : line
-}
-
-/**
- * Builds the desktop's identity lines from named fields only. Every value goes through the upload redactor and is
- * dropped when the redactor finds anything in it; ids and the email must also match their shape. The email is checked
- * as its two halves so the redactor's own email rule does not remove the address we are collecting on purpose.
- */
-export const clientIdentityLines = (input: unknown, redact: UploadRedactor): readonly string[] => {
-  const identity: unknown = Reflect.get(Object(input), "identity")
-  if (identity === null || typeof identity !== "object") return []
-  const clean = (value: string): boolean => redact(value).count === 0
-  return IDENTITY_FIELDS.flatMap(([label, key, shape]) => {
-    const value: unknown = Reflect.get(identity, key)
-    if (typeof value !== "string") return []
-    if (shape === "id") return ID_VALUE.test(value) && clean(value) ? [`${label.padEnd(12)}${value}`] : []
-    if (shape === "email") {
-      if (!EMAIL_VALUE.test(value)) return []
-      const at = value.lastIndexOf("@")
-      return clean(value.slice(0, at)) && clean(value.slice(at + 1)) ? [`${label.padEnd(12)}${value}`] : []
-    }
-    const line = singleLine(value)
-    return line !== undefined && clean(line) ? [`${label.padEnd(12)}${line}`] : []
-  })
-}
-
-const mergeSections = (host: readonly CollectedSection[], client: readonly CollectedSection[], identityLines: readonly string[]): CollectedSection[] => {
-  const merged = new Map(host.map((section) => [section.id, section]))
-  for (const section of client) {
-    const existing = merged.get(section.id)
-    merged.set(section.id, existing === undefined ? section : { ...section, text: `${section.text}\n${existing.text}` })
-  }
-  if (identityLines.length > 0) {
-    const existing = merged.get("identity")
-    merged.set("identity", { id: "identity", verbatim: true, text: [...identityLines, ...(existing === undefined ? [] : [existing.text])].join("\n") })
-  }
-  return [...merged.values()]
 }
 
 const sessionIdOf = (ctx: SessionLike | undefined): string | undefined => {
@@ -149,7 +53,6 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
       const omoVersion = options.omoVersion ?? createOmoNativeProductConfig().packageVersion
       const senpiVersion = options.senpiVersion ?? pi.hostVersion ?? "unknown"
       const channel = options.channel ?? (omoVersion.includes("-") ? "beta" : "latest")
-      const drafts = new Map<string, StoredDraft>()
       const liveSessions = new Map<string, SessionLike>()
       let latestSessionId: string | undefined
       pi.on("session_start", (_payload, ctx) => {
@@ -171,67 +74,39 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
         return latestSessionId === undefined ? undefined : liveSessions.get(latestSessionId)
       }
 
-      const prepare = (session: SessionLike | undefined, input: unknown): FeedbackDraft | { kind: "unavailable"; reason: string } => {
-        const redact = hostRedactor(pi)
-        if (redact === undefined) return { kind: "unavailable", reason: FEEDBACK_UNAVAILABLE }
-        const host = collectHostSections({
+      const loadRuntime = options.loadRuntime ?? loadFeedbackRuntime
+      let core: FeedbackCore | undefined
+      const coreOf = async (): Promise<FeedbackCore> => {
+        if (core !== undefined) return core
+        let runtime
+        try {
+          runtime = await loadRuntime()
+        } catch (error) {
+          throw new Error(feedbackRuntimeLoadFailure(error))
+        }
+        core ??= runtime.createFeedbackCore({
           env,
+          now,
           omoVersion,
           senpiVersion,
           channel,
-          now: now(),
-          ...(sessionView(session) === undefined ? {} : { session: sessionView(session) }),
+          stateDir: () => options.stateDir ?? join(resolveAgentHome({ env }), "omo-senpi"),
+          apiOrigin: () => env.OMO_SERVICE_API_URL ?? DEFAULT_API_ORIGIN,
+          transport: options.transport ?? ((url, init) => fetch(url, init)),
         })
-        const signedIn = typeof Reflect.get(Object(input), "accessToken") === "string"
-        const draft = buildDraft({
-          draftId: `drf_${randomUUID()}`,
-          collected: mergeSections(host.sections, clientSections(input), clientIdentityLines(input, redact)),
-          redact,
-          destination: feedbackUploadsDisabled(env) ? "local" : "intake",
-          signedIn,
-        })
-        for (const [id, stored] of drafts) if (stored.expiresAt < now().getTime()) drafts.delete(id)
-        while (drafts.size >= MAX_DRAFTS) {
-          const oldest = drafts.keys().next().value
-          if (oldest === undefined) break
-          drafts.delete(oldest)
-        }
-        drafts.set(draft.draftId, {
-          draft,
-          client: { app: env.OMO_NATIVE_SURFACE === "desktop" ? "desktop" : "cli", omo: omoVersion, senpi: senpiVersion, os: process.platform, arch: process.arch, locale: Intl.DateTimeFormat().resolvedOptions().locale, channel },
-          ...(host.installHash === undefined ? {} : { installHash: host.installHash }),
-          ...(host.sessionHash === undefined ? {} : { sessionHash: host.sessionHash }),
-          expiresAt: now().getTime() + DRAFT_TTL_MS,
-        })
-        return draft
+        return core
+      }
+
+      const prepare = async (session: SessionLike | undefined, input: unknown): Promise<FeedbackDraft | { kind: "unavailable"; reason: string }> => {
+        const redact = hostRedactor(pi)
+        if (redact === undefined) return { kind: "unavailable", reason: FEEDBACK_UNAVAILABLE }
+        return (await coreOf()).prepare(session, input, redact)
       }
 
       const submit = async (input: unknown): Promise<SubmitResult> => {
-        const draftId: unknown = Reflect.get(Object(input), "draftId")
-        const stored = typeof draftId === "string" ? drafts.get(draftId) : undefined
         const redact = hostRedactor(pi)
-        if (stored === undefined || redact === undefined) return { kind: "refused", reason: "unavailable" }
-        const kind: unknown = Reflect.get(Object(input), "kind")
-        const description: unknown = Reflect.get(Object(input), "description")
-        const accessToken: unknown = Reflect.get(Object(input), "accessToken")
-        const idempotencyKey: unknown = Reflect.get(Object(input), "idempotencyKey")
-        const result = await submitReport({
-          draft: stored.draft,
-          kind: kind === "feedback" || kind === "other" ? kind : "bug",
-          description: typeof description === "string" ? description : "",
-          redact,
-          client: stored.client,
-          env,
-          stateDir: options.stateDir ?? join(resolveAgentHome({ env }), "omo-senpi"),
-          apiOrigin: env.OMO_SERVICE_API_URL ?? DEFAULT_API_ORIGIN,
-          accessToken: typeof accessToken === "string" ? accessToken : null,
-          transport: options.transport ?? ((url, init) => fetch(url, init)),
-          ...(stored.installHash === undefined ? {} : { installHash: stored.installHash }),
-          ...(stored.sessionHash === undefined ? {} : { sessionHash: stored.sessionHash }),
-          ...(typeof idempotencyKey === "string" ? { idempotencyKey } : {}),
-        })
-        if (result.kind !== "refused" || result.reason === "secret-detected" || result.reason === "too-large") drafts.delete(stored.draft.draftId)
-        return result
+        if (redact === undefined) return { kind: "refused", reason: "unavailable" }
+        return (await coreOf()).submit(input, redact)
       }
 
       pi.rpc?.handle?.(FEEDBACK_PREPARE_RPC_METHOD, (input) => prepare(sessionForRpc(input), input))
@@ -242,7 +117,13 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
           | { input(title: string, placeholder?: string): Promise<string | undefined>; select(title: string, options: string[]): Promise<string | undefined>; notify(message: string, type?: string): void }
           | undefined
         if (ui === undefined) return
-        const prepared = prepare(ctx as SessionLike, {})
+        let prepared: Awaited<ReturnType<typeof prepare>>
+        try {
+          prepared = await prepare(ctx as SessionLike, {})
+        } catch (error) {
+          ui.notify(error instanceof Error ? error.message : String(error), "error")
+          return
+        }
         if ("kind" in prepared) {
           ui.notify(prepared.reason, "warning")
           return
