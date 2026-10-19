@@ -1,7 +1,7 @@
 import { dirname } from "node:path"
 
 import { createOtlpTelemetryTransport } from "./otlp-sender"
-import { capture, TEST_SCOPE, testResource } from "./otlp-test-support"
+import { capture, TEST_SCOPE, testResource, testWireProjection } from "./otlp-test-support"
 
 const [dir, endpoint] = process.argv.slice(2)
 if (dir === undefined || endpoint === undefined) throw new Error("usage: otlp-timeout-child.ts <spool dir> <endpoint>")
@@ -13,7 +13,7 @@ const transport = createOtlpTelemetryTransport({
   spoolDir: dir,
   spoolRoot: dirname(dir),
   resource: testResource(),
-  scope: TEST_SCOPE,
+  scope: TEST_SCOPE, project: testWireProjection,
   env: {},
   endpoint,
   requestTimeoutMs: 200,
