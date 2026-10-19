@@ -183,8 +183,17 @@ impl Worker {
     /// cancellation is observed first.
     fn admit(&self, cancelled: &dyn Fn() -> bool) -> CoreResult<MutexGuard<'static, ()>> {
         loop {
-            if let Some(stopped) = self.stop_observed(cancelled) {
-                return Err(stopped);
+            // Before the gate: only a stop or a cancellation ends the wait;
+            // the gate itself reports (and enriches) a stop path that is down.
+            let is_cancelled = cancelled();
+            if self.safety.supervisor.is_suspended() {
+                return Err(DesktopError::from(GateError::Suspended));
+            }
+            if is_cancelled {
+                return Err(DesktopError::new(
+                    ErrorCode::Cancelled,
+                    "the request was cancelled before any input was sent",
+                ));
             }
             if let Some(transaction) = INPUT_TRANSACTION.try_lock_for(ADMISSION_POLL) {
                 return Ok(transaction);
@@ -192,8 +201,9 @@ impl Worker {
         }
     }
 
-    /// `Suspended` before `Cancelled`: the probe runs first because a stop
-    /// may race it.
+    /// After the gate passed: `Suspended`, then a stop path that stopped
+    /// authorizing input, then `Cancelled`; the probe runs first because a
+    /// stop may race it.
     fn stop_observed(&self, cancelled: &dyn Fn() -> bool) -> Option<DesktopError> {
         let cancelled = cancelled();
         interruption(&self.safety.supervisor, &self.stop_policy())
