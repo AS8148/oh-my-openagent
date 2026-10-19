@@ -1,18 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { isAbsolute, join, relative } from "node:path"
+import { join } from "node:path"
 
 import { buildDraft, type UploadRedactor } from "./draft"
 import { submitReport, type ReportTransport } from "./submit"
+import { expectUserOnly } from "./report-file.test-support"
 
-// The report and ledger are private on every platform because they live inside the per-user state root. POSIX also gets
-// owner-only mode bits; NTFS has no mode bits, and the file inherits the per-user directory's ACL, which statSync cannot read.
-const expectUserOnly = (path: string, root: string): void => {
-  const inside = relative(root, path)
-  expect(inside === "" || inside.startsWith("..") || isAbsolute(inside)).toBe(false)
-  if (process.platform !== "win32") expect(statSync(path).mode & 0o077).toBe(0)
-}
 
 const redactTokens: UploadRedactor = (text) => {
   let count = 0
