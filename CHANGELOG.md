@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Sessions on one host share a single copy of memory recall's notes and search index.** Every session that recalls memory loaded the whole memory and built its own search index, so on a shared host (the background task host, the desktop daemon) each live session held its own copy: on a real host with a 6,666-note memory each extra session added about 120 MB of heap. Sessions that recall from the same memory now share one copy, released when the last of them ends, including when they reach it through a symlinked path; with 11 sessions the host went from 1,435 MB to 328 MB of heap. The notes found and their order are unchanged. ([#10544](https://github.com/code-yeongyu/oh-my-openagent/issues/10544), [#10545](https://github.com/code-yeongyu/oh-my-openagent/pull/10545))
 
+## [5.1.38] - 2026-10-19
+
 5.1.37 was tagged but its publish stopped on Linux (the release binaries outgrew their size budget), so its main packages never reached npm; everything listed for it ships in this release. ([#10566](https://github.com/code-yeongyu/oh-my-openagent/pull/10566))
 
 **Release binaries may be up to 182 MiB.** The per-platform size budget moves from 160 MiB to 182 MiB after measuring what grew: the Bun 1.4.3 runtime adds 9.5 MB to every binary and the senpi update about 1.25 MB, so linux-x64 reached 173.4 MB. Nothing was bundled by mistake. ([#10566](https://github.com/code-yeongyu/oh-my-openagent/pull/10566))
