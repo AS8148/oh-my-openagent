@@ -1,7 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { dirname, join, resolve, sep } from "node:path";
 
-import { mkdir, readFile, rename, rm, writeFile } from "../../fs/resilient";
+import {
+	lstat,
+	mkdir,
+	readFile,
+	rename,
+	rm,
+	writeFile,
+} from "../../fs/resilient";
 import { syncJournalDirectory, syncJournalFile } from "../../journal/fsync";
 
 /**
@@ -56,9 +63,28 @@ export const loadWriteHold = async (
 };
 
 /**
+ * The topmost missing directory on the way to `stateDir`, or undefined when it exists. It is read
+ * before `mkdir`, not from `mkdir`'s return value: an EINTR retry of a `mkdir` whose first attempt
+ * created the directories returns undefined, which would skip the parent fsync (#10611 review).
+ */
+const topmostMissing = async (stateDir: string): Promise<string | undefined> => {
+	let missing: string | undefined;
+	for (let dir = resolve(stateDir); ; dir = dirname(dir)) {
+		try {
+			await lstat(dir);
+			return missing;
+		} catch (error) {
+			if (!isMissing(error)) throw error;
+		}
+		missing = dir;
+		if (dirname(dir) === dir) return missing;
+	}
+};
+
+/**
  * The directories to fsync so `stateDir` and its `recovery-hold` entry are durable (#10611): when
- * `mkdir` created `stateDir` or an ancestor (`created`, its topmost new directory), each new entry is
- * fsynced in the directory that holds it, from the parent of `created` down to `stateDir`.
+ * `stateDir` or an ancestor was missing (`created`, the topmost one), each new entry is fsynced in
+ * the directory that holds it, from the parent of `created` down to `stateDir`.
  */
 const entriesToSync = (stateDir: string, created: string | undefined): string[] => {
 	const state = resolve(stateDir);
@@ -83,7 +109,8 @@ export const holdWrites = async (
 ): Promise<void> => {
 	const target = holdPath(stateDir, account);
 	const dir = join(stateDir, "recovery-hold");
-	const created = await mkdir(dir, { recursive: true, mode: 0o700 });
+	const created = await topmostMissing(stateDir);
+	await mkdir(dir, { recursive: true, mode: 0o700 });
 	for (const entry of entriesToSync(stateDir, created))
 		await syncJournalDirectory(entry);
 	const staging = `${target}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;

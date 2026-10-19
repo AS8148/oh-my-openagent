@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdir as mkdirOnce } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import * as Resilient from "../../fs/resilient";
 import * as Fsync from "../../journal/fsync";
@@ -87,6 +88,37 @@ describe("the write hold survives a power loss (#10450)", () => {
 			"sync-file staging",
 			"sync-dir hold",
 		]);
+		expect(await loadWriteHold(stateDir, "acct")).toEqual({
+			held: true,
+			credentialId: "cred",
+		});
+	});
+
+	test("an EINTR retry of the mkdir that created the state directory still fsyncs it into its parent (#10611 review)", async () => {
+		const parent = freshStateDir();
+		const stateDir = join(parent, "state");
+		const synced: string[] = [];
+		let interrupted = 0;
+		const syncDir = Fsync.syncJournalDirectory;
+		spies.push(
+			spyOn(Resilient, "mkdir").mockImplementation((path, options) =>
+				Resilient.retryOnEintr(async (): Promise<undefined> => {
+					await mkdirOnce(path, options);
+					if (interrupted === 0) {
+						interrupted += 1;
+						throw Object.assign(new Error("interrupted system call"), { code: "EINTR" });
+					}
+					return undefined;
+				}),
+			),
+			spyOn(Fsync, "syncJournalDirectory").mockImplementation(async (path) => {
+				synced.push(path);
+				return syncDir(path);
+			}),
+		);
+		await holdWrites(stateDir, "acct", "cred");
+		expect(interrupted).toBe(1);
+		expect(synced.slice(0, 2)).toEqual([parent, stateDir]);
 		expect(await loadWriteHold(stateDir, "acct")).toEqual({
 			held: true,
 			credentialId: "cred",
