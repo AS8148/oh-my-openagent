@@ -16,14 +16,17 @@ import type { OnboardingEngineAuthStore } from "./scan-component"
 import type { OnboardingApplyResponse, OnboardingApplyStage, OnboardingScanEvent, OnboardingScanItem, OnboardingScanSource } from "./scan-contract"
 import {
   createMemorySessionDigestStore,
-  createSessionHistoryScanner,
+  defaultAgentHomes,
   MAX_TRANSCRIPTS_PER_SOURCE,
+  nodeSessionHistoryFs,
   scanSessionHistory,
   type ProjectCandidate,
   type SessionDigest,
   type SessionHistoryOptions,
   type SessionScanItem,
 } from "./session-history"
+import { newestSessionDigests } from "./session-history/newest-sessions"
+import { createProjectPathRules } from "./session-history/project-paths"
 
 export { createOnboardingUnderstandingHandlers } from "./understand-component"
 
@@ -119,9 +122,9 @@ export async function runOnboardingScan(
   return { plans, results, digests: await digestStore.list(options.scanId), projectRoots }
 }
 
-/** The newest sessions the TUI onboarding summarizes; the scan reads no further once it has these. */
+/** The newest sessions the TUI onboarding summarizes, and the most transcripts it opens. */
 export const ONBOARDING_HISTORY_MAX_SESSIONS = 12
-/** Wall-clock budget for that background summary; whatever arrived by then is all it reports. */
+/** Wall-clock budget for that background summary; it aborts every pending read and reports what it had. */
 export const ONBOARDING_HISTORY_BUDGET_MS = 10_000
 /** Only sessions this recent describe what the user is working on now. */
 export const ONBOARDING_HISTORY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
@@ -129,37 +132,29 @@ const HISTORY_CLIP = 160
 
 /**
  * The TUI onboarding's background view of this machine's agent history: the newest
- * `ONBOARDING_HISTORY_MAX_SESSIONS` recent sessions, read within `budgetMs`, as one context line.
- * Undefined when nothing arrived in time. It never runs on the first prompt's path.
+ * `ONBOARDING_HISTORY_MAX_SESSIONS` recent sessions as one context line. Discovery only lists and stats
+ * to order transcripts; at most that many are opened. At `budgetMs` every pending filesystem call is
+ * aborted and nothing more is read. Undefined when nothing was read in time. It never runs on the first
+ * prompt's path.
  */
 export async function onboardingHistorySummary(
   environment: OnboardingScanEnvironment,
   budgetMs: number = ONBOARDING_HISTORY_BUDGET_MS,
 ): Promise<string | undefined> {
-  const scanner = createSessionHistoryScanner({
+  const options: SessionHistoryOptions = {
     homeDir: environment.home ?? homedir(),
     env: environment.env ?? process.env,
     ...environment.sessionHistory,
-  })
-  const run = scanner.recentSessions({ recentWindowMs: ONBOARDING_HISTORY_WINDOW_MS })[Symbol.asyncIterator]()
-  const digests: SessionDigest[] = []
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<"deadline">((resolve) => {
-    timer = setTimeout(resolve, budgetMs, "deadline")
-  })
-  try {
-    while (digests.length < ONBOARDING_HISTORY_MAX_SESSIONS) {
-      const step = run.next()
-      // A step still pending at the deadline is abandoned; its late rejection must not surface.
-      step.catch(() => undefined)
-      const next = await Promise.race([step, deadline])
-      if (next === "deadline" || next.done === true) break
-      if (next.value._tag === "Importable") digests.push(next.value.digest)
-    }
-  } finally {
-    clearTimeout(timer)
-    void run.return?.(undefined)?.catch(() => undefined)
   }
+  const digests: SessionDigest[] = await newestSessionDigests({
+    fs: options.fs ?? nodeSessionHistoryFs,
+    createRules: (fs) => createProjectPathRules({ ...options, fs }),
+    homes: options.homes ?? defaultAgentHomes(options.env ?? process.env, options.homeDir),
+    nowMs: (options.now ?? Date.now)(),
+    recentWindowMs: ONBOARDING_HISTORY_WINDOW_MS,
+    limit: ONBOARDING_HISTORY_MAX_SESSIONS,
+    signal: AbortSignal.timeout(budgetMs),
+  })
   if (digests.length === 0) return undefined
   const lines = digests.map((digest) =>
     `${digest.lastActiveAt.slice(0, 10)} ${digest.source} ${digest.cwd}: ${clip(digest.firstRequest || digest.title)}${digest.outcome === "" ? "" : ` -> ${clip(digest.outcome)}`}`)

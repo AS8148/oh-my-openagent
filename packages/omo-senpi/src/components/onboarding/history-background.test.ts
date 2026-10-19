@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createOnboardingComponent, type OnboardingComponentDependencies } from "./component"
+import { nodeSessionHistoryFs, type SessionHistoryFile, type SessionHistoryFileStats, type SessionHistoryFs } from "./session-history"
 import * as state from "./state"
 import { createOnboardingHarness } from "./test-harness"
 
@@ -186,4 +187,115 @@ describe("onboarding session history in the background", () => {
 
     expect(summary).toBeUndefined()
   })
+
+  test("#given 3000 Claude Code and 3000 Codex transcripts #when the background summary runs #then it opens at most the newest 12 transcripts", async () => {
+    // Bound: listing and stat-ing directory entries is the cheap ordering step and may touch every file;
+    // opening a transcript (a read) is the expensive step and may happen for at most the 12 sessions summarized.
+    const { onboardingHistorySummary, ONBOARDING_HISTORY_MAX_SESSIONS } = await import("./scan-runtime")
+    const calls = { readDirectory: 0, stat: 0, realPath: 0, readFileString: 0, open: 0 }
+    const opened = new Set<string>()
+    const fs: SessionHistoryFs = {
+      readDirectory: (path) => (calls.readDirectory++, nodeSessionHistoryFs.readDirectory(path)),
+      stat: (path) => (calls.stat++, nodeSessionHistoryFs.stat(path)),
+      realPath: (path) => (calls.realPath++, nodeSessionHistoryFs.realPath(path)),
+      readFileString: (path) => (calls.readFileString++, nodeSessionHistoryFs.readFileString(path)),
+      open: (path) => {
+        calls.open++
+        opened.add(path)
+        return nodeSessionHistoryFs.open(path)
+      },
+    }
+
+    const summary = await onboardingHistorySummary({ home, env: { HOME: home }, sessionHistory: { fs, omoSessionsRoots: [] } }, WAIT_MS)
+
+    expect(calls.open).toBeLessThanOrEqual(ONBOARDING_HISTORY_MAX_SESSIONS)
+    expect(opened.size).toBeLessThanOrEqual(ONBOARDING_HISTORY_MAX_SESSIONS)
+    expect(calls.readFileString).toBe(0)
+    expect(summary).toContain(`newest ${ONBOARDING_HISTORY_MAX_SESSIONS},`)
+    expect(summary).toContain(newestPrompt("claude", 0))
+    expect(summary).toContain(newestPrompt("codex", 0))
+    expect(summary).not.toContain(newestPrompt("claude", ONBOARDING_HISTORY_MAX_SESSIONS))
+  }, WAIT_MS)
+
+  test("#given a filesystem that answers slowly #when the time budget fires #then no filesystem call is made afterwards and the summary resolves", async () => {
+    const { onboardingHistorySummary } = await import("./scan-runtime")
+    const gated = createGatedFs("/fake-home")
+
+    // The 50 ms budget is the behavior under test; every fs call stays pending until released.
+    const summary = await onboardingHistorySummary(
+      { home: "/fake-home", env: { HOME: "/fake-home" }, sessionHistory: { fs: gated.fs, omoSessionsRoots: [] } },
+      50,
+    )
+    const callsAtDeadline = gated.calls.length
+    expect(callsAtDeadline).toBeGreaterThan(0)
+
+    // Release everything that was pending at the deadline; an abandoned walk would now issue its next call.
+    await gated.releaseAll()
+
+    expect(summary).toBeUndefined()
+    expect(gated.calls.slice(callsAtDeadline)).toEqual([])
+  })
 })
+
+/**
+ * An in-memory agent home whose every call waits for an explicit release, so the test decides when
+ * the filesystem answers. `releaseAll` settles each pending call, then lets queued microtasks and one
+ * macrotask turn run, which is enough for any continuation to issue its next call.
+ */
+function createGatedFs(homeDir: string) {
+  const projects = `${homeDir}/.claude/projects`
+  const project = `${projects}/-work`
+  const files = new Map<string, string>()
+  for (let index = 0; index < 4; index++) {
+    files.set(`${project}/s-${index}.jsonl`, `${JSON.stringify({ type: "user", cwd: "/work", sessionId: `s-${index}`, message: { role: "user", content: "hi" } })}\n`)
+  }
+  const directories = new Map<string, string[]>([
+    [projects, ["-work"]],
+    [project, [...files.keys()].map((path) => path.slice(project.length + 1))],
+  ])
+  const now = Date.now()
+  const statOf = (path: string): SessionHistoryFileStats => {
+    const file = files.get(path)
+    if (file !== undefined) return { type: "File", size: file.length, mtimeMs: now, dev: 1, ino: path.length, birthtimeMs: now }
+    if (directories.has(path) || path === "/work" || path === homeDir) return { type: "Directory", size: 0, mtimeMs: now, dev: 1, ino: path.length + 1000, birthtimeMs: now }
+    throw Object.assign(new Error(`ENOENT ${path}`), { code: "ENOENT" })
+  }
+  const calls: string[] = []
+  const pending: Array<() => void> = []
+  const gate = async <T>(label: string, answer: () => T): Promise<T> => {
+    calls.push(label)
+    await new Promise<void>((resolve) => pending.push(resolve))
+    return answer()
+  }
+  const file = (path: string): SessionHistoryFile => {
+    let offset = 0
+    return {
+      read: (size) => gate(`read ${path}`, () => {
+        const bytes = new TextEncoder().encode(files.get(path) ?? "").subarray(offset, offset + size)
+        offset += bytes.byteLength
+        return bytes.byteLength === 0 ? null : bytes
+      }),
+      stat: () => gate(`fstat ${path}`, () => statOf(path)),
+      close: () => Promise.resolve(),
+    }
+  }
+  const fs: SessionHistoryFs = {
+    readDirectory: (path) => gate(`readdir ${path}`, () => {
+      const entries = directories.get(path)
+      if (entries === undefined) throw Object.assign(new Error(`ENOENT ${path}`), { code: "ENOENT" })
+      return entries
+    }),
+    stat: (path) => gate(`stat ${path}`, () => statOf(path)),
+    realPath: (path) => gate(`realpath ${path}`, () => path),
+    readFileString: (path) => gate(`readFile ${path}`, () => files.get(path) ?? ""),
+    open: (path) => gate(`open ${path}`, () => file(path)),
+  }
+  return {
+    fs,
+    calls,
+    async releaseAll(): Promise<void> {
+      for (const release of pending.splice(0)) release()
+      await new Promise((resolve) => setImmediate(resolve))
+    },
+  }
+}

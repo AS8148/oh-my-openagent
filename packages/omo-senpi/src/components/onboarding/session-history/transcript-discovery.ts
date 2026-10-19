@@ -21,11 +21,12 @@ class OperationBudget {
   constructor(
     private readonly fs: SessionHistoryFs,
     private remaining: number,
+    private readonly signal?: AbortSignal,
   ) {}
 
   get exhausted(): boolean {
-    if (this.remaining <= 0) this.truncated = true
-    return this.remaining <= 0
+    if (this.remaining <= 0 || this.signal?.aborted === true) this.truncated = true
+    return this.truncated
   }
 
   async readDirectory(directory: string): Promise<ReadonlyArray<string>> {
@@ -35,6 +36,7 @@ class OperationBudget {
   }
 
   async statTranscript(filePath: string, homePath: string): Promise<TranscriptCandidate | null> {
+    if (this.signal?.aborted === true) return null
     this.remaining -= 1
     const stats = await statOrNull(this.fs, filePath)
     if (stats === null || stats.type !== "File" || stats.mtimeMs === null) return null
@@ -46,8 +48,9 @@ export async function discoverClaudeTranscripts(
   fs: SessionHistoryFs,
   homePath: string,
   operationBudget: number,
+  signal?: AbortSignal,
 ): Promise<DiscoveredTranscripts> {
-  const budget = new OperationBudget(fs, operationBudget)
+  const budget = new OperationBudget(fs, operationBudget, signal)
   const projectsDir = join(homePath, "projects")
   const transcripts: Array<TranscriptCandidate> = []
   for (const projectDirectory of await budget.readDirectory(projectsDir)) {
@@ -70,8 +73,9 @@ export async function discoverCodexTranscripts(
   fs: SessionHistoryFs,
   homePath: string,
   operationBudget: number,
+  signal?: AbortSignal,
 ): Promise<DiscoveredTranscripts> {
-  const budget = new OperationBudget(fs, operationBudget)
+  const budget = new OperationBudget(fs, operationBudget, signal)
   const sessionsDir = join(homePath, "sessions")
   const transcripts: Array<TranscriptCandidate> = []
   for (const year of newestFirst(await budget.readDirectory(sessionsDir))) {
