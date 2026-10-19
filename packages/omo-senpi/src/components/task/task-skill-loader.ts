@@ -8,7 +8,11 @@ import { buildSkillPrepend, createFsSkillLoader, type SkillLoader } from "@oh-my
 
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { loadSenpiOmoConfig } from "../config-resolution"
-import { buildGitMasterAttributionDirective } from "../git-master/directive"
+import {
+  detectGitMasterShell,
+  resolveGitMasterSkillAdditions,
+  type GitMasterShellType,
+} from "../git-master/skill-content"
 
 const GIT_MASTER_SKILL_NAME = "git-master"
 
@@ -17,6 +21,7 @@ export interface TaskSkillLoaderOptions {
   readonly homeDir?: string
   readonly pluginSkillsDirs?: readonly string[]
   readonly loadSettings?: (cwd: string) => OmoGitMasterSettings
+  readonly detectShell?: () => GitMasterShellType
 }
 
 /**
@@ -39,21 +44,22 @@ function defaultLoadSettings(cwd: string): OmoGitMasterSettings {
   return resolveOmoGitMasterSettings(loadSenpiOmoConfig({ cwd }).config)
 }
 
-function withGitMasterAttribution(
+function withGitMasterSettings(
   loader: SkillLoader,
   loadSettings: (cwd: string) => OmoGitMasterSettings,
+  detectShell: () => GitMasterShellType,
 ): SkillLoader {
   return (names, cwd) => {
     const resolution = loader(names, cwd)
     const resolvedSkills = resolution.skills ?? []
     if (!resolvedSkills.some((skill) => skill.name === GIT_MASTER_SKILL_NAME)) return resolution
-    const directive = buildGitMasterAttributionDirective(loadSettings(cwd))
-    if (directive === undefined) return resolution
-    const skills = resolvedSkills.map((skill) =>
-      skill.name === GIT_MASTER_SKILL_NAME
-        ? { ...skill, content: `${skill.content}\n\n${directive}` }
-        : skill,
-    )
+    const additions = resolveGitMasterSkillAdditions(loadSettings(cwd), detectShell())
+    if (additions === undefined) return resolution
+    const skills = resolvedSkills.map((skill) => {
+      if (skill.name !== GIT_MASTER_SKILL_NAME) return skill
+      const content = additions.rewriteSkillText(skill.content)
+      return { ...skill, content: additions.directive === undefined ? content : `${content}\n\n${additions.directive}` }
+    })
     return { ...resolution, skills, prepend: buildSkillPrepend(skills, "") }
   }
 }
@@ -63,10 +69,11 @@ export function createTaskSkillLoader(options: TaskSkillLoaderOptions = {}): Ski
   const agentDir = options.agentDir ?? resolveAgentHome({ env: process.env, homeDir })
   const pluginSkillsDirs = options.pluginSkillsDirs ?? packagedSkillDirs(import.meta.url)
   const loadSettings = options.loadSettings ?? defaultLoadSettings
+  const detectShell = options.detectShell ?? detectGitMasterShell
   const loader = createFsSkillLoader({
     homeDir,
     agentDir,
     extraDirs: pluginSkillsDirs,
   })
-  return withGitMasterAttribution(loader, loadSettings)
+  return withGitMasterSettings(loader, loadSettings, detectShell)
 }

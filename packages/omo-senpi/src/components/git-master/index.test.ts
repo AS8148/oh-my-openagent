@@ -242,10 +242,13 @@ describe("omo-senpi git-master attribution component", () => {
     expect(appended).not.toMatch(CO_AUTHOR_TRAILER_PATTERN)
   })
 
-  it("#given the deprecated co-author flag enabled without the footer #when a git-master SKILL.md read result arrives #then the result is untouched", async () => {
+  it("#given the deprecated co-author flag enabled without the footer or env prefix #when a git-master SKILL.md read result arrives #then the result is untouched", async () => {
     // given
     const pi = new FakeExtensionAPI()
-    await registerWithSettings(pi, OmoGitMasterSettingsSchema.parse({ commit_footer: false, include_co_authored_by: true }))
+    await registerWithSettings(
+      pi,
+      OmoGitMasterSettingsSchema.parse({ commit_footer: false, include_co_authored_by: true, git_env_prefix: "" }),
+    )
 
     // when
     const transform = await dispatchRead(pi, readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md"))
