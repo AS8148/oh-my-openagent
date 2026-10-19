@@ -7,7 +7,7 @@ import { removeTree } from "../../../../test-support/remove-tree"
 import { GitMemoryRepo } from "../git"
 import { RECALL_TERM_STORE_NAME, RecallTermPersistence } from "./bm25-persist"
 import { decodeRecallTermStore, encodeRecallTermStore } from "./bm25-store"
-import { loadRecallCorpus, type RecallDocument } from "./provider"
+import { loadRecallCorpus, RecallCorpusCache, type RecallDocument } from "./provider"
 import { selectRecallCandidates } from "./select"
 import type { RecallStrategy } from "./strategy"
 
@@ -89,6 +89,23 @@ async function persisted(dir: string, documents: readonly RecallDocument[]): Pro
 }
 
 describe("persisted recall terms", () => {
+  // RecallCorpusCache.settled() is the public wait a caller uses before it removes or hands off a repository:
+  // without it the save started by a ranking can still be writing into `.git` when the directory goes away.
+  it("#given a cache whose ranking started a save #when settled resolves #then the store is written and no temp file remains", async () => {
+    // given
+    const { dir, repo, store } = await createRepo()
+    const cache = new RecallCorpusCache()
+    rankAll((await cache.load(repo)).documents)
+
+    // when
+    await cache.settled()
+
+    // then
+    expect((await stat(store)).isFile()).toBe(true)
+    const temps = (await readdir(join(dir, ".git"))).filter((name) => name.startsWith(`${RECALL_TERM_STORE_NAME}.`))
+    expect(temps).toEqual([])
+  }, TIMEOUT)
+
   it("#given a store written by an earlier process #when a new process ranks #then every candidate equals the tokenized ranking and nothing is re-tokenized", async () => {
     // given
     const { dir, store } = await createRepo()

@@ -193,6 +193,8 @@ export class RecallCorpusCache {
   private probe: HeadProbe | undefined
   private blobs: { readonly dir: string; readonly loaded: LoadedBlobs } | undefined
   private terms: RecallTermPersistence | undefined
+  /** Every repository's persisted terms this cache attached, so `settled()` covers a save started before a switch. */
+  private readonly attached = new Set<RecallTermPersistence>()
   private readonly resolveHead: (repo: GitMemoryRepo) => Promise<string | null>
   private readonly options: RecallCorpusCacheOptions
   /** Shared mode only: the process-wide caches this instance keeps alive, one per repository. */
@@ -240,6 +242,14 @@ export class RecallCorpusCache {
     }
   }
 
+  /** Settles once no persisted-terms save started by this cache, or a shared cache it holds, is running. */
+  async settled(): Promise<void> {
+    await Promise.all([
+      ...[...this.attached].map((terms) => terms.settled()),
+      ...[...this.held.values()].map((cache) => cache.settled()),
+    ])
+  }
+
   clear(): void {
     this.held.clear()
     this.entry = undefined
@@ -261,7 +271,10 @@ export class RecallCorpusCache {
     const previous = this.blobs?.dir === repo.dir ? this.blobs.loaded : new Map<string, LoadedBlob>()
     const { corpus, loaded } = await loadCorpusAtRevision(repo, revision, previous)
     this.blobs = { dir: repo.dir, loaded }
-    if (this.terms?.dir !== repo.dir) this.terms = new RecallTermPersistence(repo.dir, this.options.onTermStoreError ?? (() => undefined))
+    if (this.terms?.dir !== repo.dir) {
+      this.terms = new RecallTermPersistence(repo.dir, this.options.onTermStoreError ?? (() => undefined))
+      this.attached.add(this.terms)
+    }
     await this.terms.attach(corpus.documents)
     return corpus
   }
