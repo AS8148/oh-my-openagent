@@ -57,12 +57,8 @@ function appendedTextOf(transform: ToolResultTransform): string {
 async function registerWithSettings(
   pi: FakeExtensionAPI,
   settings: OmoGitMasterSettings,
-  detectShell?: () => "unix" | "powershell" | "cmd" | "csh",
 ): Promise<void> {
-  const component = createGitMasterAttributionComponent({
-    loadSettings: () => settings,
-    ...(detectShell === undefined ? {} : { detectShell }),
-  })
+  const component = createGitMasterAttributionComponent({ loadSettings: () => settings })
   await component.register(pi, createTestContext(pi))
 }
 
@@ -148,54 +144,49 @@ describe("omo-senpi git-master attribution component", () => {
     expect(text).toContain("\necho done")
   })
 
-  it("#given a powershell host #when a git-master SKILL.md read result arrives #then the section uses the powershell env form and bash blocks stay unprefixed", async () => {
+  it("#given senpi started from a non-bash login shell #when a git-master SKILL.md read result arrives #then the prefix uses the bash form senpi's bash tool runs", async () => {
+    // given
+    const saved = { SHELL: process.env["SHELL"], PSModulePath: process.env["PSModulePath"] }
+    try {
+      for (const loginShell of ["/bin/tcsh", "/usr/local/bin/fish", "/bin/zsh"]) {
+        process.env["SHELL"] = loginShell
+        process.env["PSModulePath"] = "C:\\Program Files\\PowerShell\\Modules"
+        const pi = new FakeExtensionAPI()
+        await registerWithSettings(pi, defaultSettings())
+        const payload = readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md")
+        payload.content = [{ type: "text", text: "# Git Master\n\n```bash\ngit status\n```" }]
+
+        // when
+        const transform = await dispatchRead(pi, payload)
+
+        // then
+        const text = transform?.content[0]?.text ?? ""
+        expect(text).toContain("\nGIT_MASTER=1 git status\n```")
+        expect(text).not.toContain("setenv")
+        expect(text).not.toContain("$env:")
+      }
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  })
+
+  it("#given a skill file with YAML frontmatter #when a git-master SKILL.md read result arrives #then the prefix section follows the frontmatter", async () => {
     // given
     const pi = new FakeExtensionAPI()
-    await registerWithSettings(pi, defaultSettings(), () => "powershell")
+    await registerWithSettings(pi, defaultSettings())
+    const payload = readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md")
+    payload.content = [{ type: "text", text: "---\nname: git-master\ndescription: x\n---\n# Git Master\n" }]
 
     // when
-    const payload = readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md")
-    payload.content = [
-      { type: "text", text: "# Git Master\n\n```bash\ngit status\n```" },
-    ]
     const transform = await dispatchRead(pi, payload)
 
     // then
-    expect(transform).toBeDefined()
-    if (transform === undefined) return
-    const text = transform.content[0]?.text ?? ""
-    expect(text).toContain("$env:GIT_MASTER='1';")
-    expect(text).toContain("```pwsh")
-    expect(text).toContain("\ngit status")
-    expect(text).not.toContain("GIT_MASTER=1 git status")
-  })
-
-  it("#given a csh host #when a git-master SKILL.md read result arrives #then the section uses the setenv form", async () => {
-    // given
-    const pi = new FakeExtensionAPI()
-    await registerWithSettings(pi, defaultSettings(), () => "csh")
-
-    // when
-    const transform = await dispatchRead(pi, readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md"))
-
-    // then
-    expect(transform).toBeDefined()
-    if (transform === undefined) return
-    expect(transform.content[0]?.text ?? "").toContain("setenv GIT_MASTER 1;")
-  })
-
-  it("#given a cmd host #when a git-master SKILL.md read result arrives #then the section uses the cmd set form", async () => {
-    // given
-    const pi = new FakeExtensionAPI()
-    await registerWithSettings(pi, defaultSettings(), () => "cmd")
-
-    // when
-    const transform = await dispatchRead(pi, readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md"))
-
-    // then
-    expect(transform).toBeDefined()
-    if (transform === undefined) return
-    expect(transform.content[0]?.text ?? "").toContain('set GIT_MASTER="1" &&')
+    const text = transform?.content[0]?.text ?? ""
+    expect(text.startsWith("---\nname: git-master\ndescription: x\n---\n")).toBe(true)
+    expect(text.indexOf("<git_env_prefix>")).toBeGreaterThan(text.indexOf("description: x"))
   })
 
   it("#given a read of an unrelated file #when the result arrives #then the result is untouched", async () => {

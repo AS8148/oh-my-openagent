@@ -18,7 +18,8 @@ const CO_AUTHOR_MARKER = "Co-authored-by:"
 const FOOTER_MARKER = "Ultraworked with"
 const SKILL_BODY_MARKER = "GIT MASTER LIVE QA BODY"
 const PREFIX_SECTION_MARKER = "GIT COMMAND PREFIX (MANDATORY)"
-const PREFIXED_COMMAND_MARKER = "GIT_MASTER=1 git commit -m"
+// Only the rewrite of the seeded bash block can produce this line; the injected section has no `git add -A .`.
+const PREFIXED_COMMAND_MARKER = "GIT_MASTER=1 git add -A ."
 
 function findOnPath(bin) {
   if (bin.includes("/")) return existsSync(bin) ? bin : null

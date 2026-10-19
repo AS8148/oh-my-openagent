@@ -168,24 +168,32 @@ describe("createTaskSkillLoader", () => {
     expect(resolution.prepend).not.toContain("Ultraworked with")
   })
 
-  test("#given a powershell host #when the git-master skill is loaded #then the section uses the powershell env form and bash blocks stay unprefixed", () => {
-    const cwd = tempDir()
-    const pluginSkillsDir = tempDir()
-    writeSkill(pluginSkillsDir, "GIT MASTER BODY\n\n```bash\ngit status\n```", "git-master")
+  test("#given senpi started from a non-bash login shell #when the git-master skill is loaded #then the prefix uses the bash form senpi's bash tool runs", () => {
+    const saved = { SHELL: process.env["SHELL"], PSModulePath: process.env["PSModulePath"] }
+    try {
+      process.env["SHELL"] = "/bin/tcsh"
+      process.env["PSModulePath"] = "C:\\Program Files\\PowerShell\\Modules"
+      const cwd = tempDir()
+      const pluginSkillsDir = tempDir()
+      writeSkill(pluginSkillsDir, "GIT MASTER BODY\n\n```bash\ngit status\n```", "git-master")
 
-    const loader = createTaskSkillLoader({
-      agentDir: tempDir(),
-      homeDir: tempDir(),
-      pluginSkillsDirs: [pluginSkillsDir],
-      detectShell: () => "powershell",
-      loadSettings: () => OmoGitMasterSettingsSchema.parse({}),
-    })
-    const resolution = loader(["git-master"], cwd)
+      const loader = createTaskSkillLoader({
+        agentDir: tempDir(),
+        homeDir: tempDir(),
+        pluginSkillsDirs: [pluginSkillsDir],
+        loadSettings: () => OmoGitMasterSettingsSchema.parse({}),
+      })
+      const resolution = loader(["git-master"], cwd)
 
-    expect(resolution.prepend).toContain("$env:GIT_MASTER='1';")
-    expect(resolution.prepend).toContain("```pwsh")
-    expect(resolution.prepend).toContain("\ngit status")
-    expect(resolution.prepend).not.toContain("GIT_MASTER=1 git status")
+      expect(resolution.prepend).toContain("\nGIT_MASTER=1 git status\n```")
+      expect(resolution.prepend).not.toContain("setenv")
+      expect(resolution.prepend).not.toContain("$env:")
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
   })
 
   test("#given the footer opted in #when a non-git-master skill is loaded #then no directive is injected", () => {
