@@ -3,6 +3,11 @@
 // stage merged), with no render journal. Such a record is read here so a resumed cycle still
 // adopts the renders that landed as baselines (apply.ts invariant 5), instead of capturing them
 // back as this device's own edits.
+//
+// This is weaker than invariant 5. Those records never stored the doc's frontier, so adoption can
+// only check that the doc still renders to the recorded text, not that it is still at the version
+// the render came from: an edit that leaves the same text is indistinguishable. Only keys the store
+// already knows are adopted, so a damaged or hand-edited record cannot create an item (#10620).
 
 import type { EngineDeps } from "./engine-deps"
 import type { CycleRecord } from "./journal"
@@ -37,8 +42,9 @@ export async function adoptLegacyRenders(
   recorded: ReadonlySet<string>,
   readWorking: (key: string) => Promise<string | null>,
 ): Promise<void> {
+  const known = new Set(deps.store.keys())
   for (const [key, render] of legacyRenders(cycle)) {
-    if (recorded.has(key)) continue
+    if (recorded.has(key) || !known.has(key)) continue
     if (deps.store.render(key, render.text) !== render.text) continue
     if (!render.landed && (await readWorking(key)) !== render.text) continue
     await deps.store.markMaterialized(key, render.text)
