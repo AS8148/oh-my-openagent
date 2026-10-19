@@ -249,6 +249,8 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
     guard: "",
     call: "rmSync(path)", reason: SUMMARY_REMOVAL,
   },
+  { file: "session-summary-purge.ts", fn: "purgeUnconsentedQueue", guard: "if(all)", call: "rmSync(dir)", reason: "a machine-wide opt-out deletes the whole summary queue; it removes data and adds none" },
+  { file: "session-summary-purge.ts", fn: "remove", guard: "", call: "unlinkSync(path)", reason: SUMMARY_REMOVAL },
   {
     file: "session-summary-files.ts", fn: "renameIfPresent",
     guard: "",

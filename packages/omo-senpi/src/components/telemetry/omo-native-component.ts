@@ -3,6 +3,7 @@ import {
   createConsentGatedFetch,
   createDefaultPostHogTransport,
   createEventTelemetryClient,
+  isTelemetryClientEnabled,
 } from "@oh-my-opencode/telemetry-core"
 import type {
   EventTelemetryClient,
@@ -36,11 +37,11 @@ import { createOmoNativeTurnHandler } from "./omo-native-turns"
 import {
   SUMMARY_SHUTDOWN_WAIT_MS,
   createNativeSummaryRecorder,
-  loadSummaryRuntime,
   settleWithin,
   type NativeCaptureState,
 } from "./omo-native-summary-wiring"
 import { isTelemetryHostWarmup, resolveTelemetrySessionRole } from "./session-role-resolver"
+import { purgeUnconsentedQueue } from "./session-summary-purge"
 import type { ConsentScope } from "./session-summary-storage"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
@@ -181,7 +182,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       pi.on("session_shutdown", async (payload, eventCtx) => {
         consentCwd = cwdOf(eventCtx)
         if (summary === undefined) {
-          await purgeQueue(stateDir, (scope) => readConsent(scope.cwd), options)
+          purgeQueue(stateDir, (scope) => readConsent(scope.cwd), !isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }), options)
           return
         }
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
@@ -394,9 +395,11 @@ function forwardValidatedCapture(transport: TelemetryTransport, message: Telemet
 
 // Queued records that may never be sent (no consent mark, or a scope that has opted out since) are deleted
 // even by a session that records nothing itself.
-async function purgeQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean, options: OmoNativeTelemetryComponentOptions): Promise<void> {
+// It runs in the entry bundle on node:fs alone, so an opted-out session loads no telemetry code at all; a
+// machine-wide opt-out deletes the whole queue.
+function purgeQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean, machineOptOut: boolean, options: OmoNativeTelemetryComponentOptions): void {
   try {
-    ;(await loadSummaryRuntime()).purgeUnconsentedQueue(stateDir, isScopeConsented)
+    purgeUnconsentedQueue(stateDir, isScopeConsented, machineOptOut)
   } catch (error) {
     options.diagnostics?.({
       event: "telemetry_activity_state_write_failed",

@@ -5,7 +5,8 @@ import { join } from "node:path"
 import { CHECKPOINT_MAX_TURNS } from "./omo-native-session-summary"
 import { CORRUPT } from "./session-summary-files"
 import { withRecoveryOps } from "./session-summary-recovery-storage"
-import { OWNER_STALE_MS, SUMMARY_TTL_MS, purgeUnconsentedQueue, summaryDir } from "./session-summary-storage"
+import { PENDING_CAP, RESENDS_PER_SWEEP, RESEND_BACKOFF_MS } from "./session-summary-recovery"
+import { OWNER_STALE_MS, SUMMARY_TTL_MS, purgeUnconsentedQueue, summaryDir, type SummaryStorage } from "./session-summary-storage"
 import { createTempStateDirs, createTestRecorder, rows, summaryTurn } from "./session-summary.test-support"
 
 // Protocol contract (plan todo 8): a window is claimed only when its heartbeat is older than 5 minutes AND
@@ -195,3 +196,47 @@ function readWindow(recorder: ReturnType<typeof createTestRecorder>, sessionHash
   if (record === undefined || record === CORRUPT || record.windowId === null) throw new Error(`no open window for ${sessionHash}`)
   return { ...record, windowId: record.windowId }
 }
+
+// A long outage must not grow the write-ahead spool without bound or hammer the endpoint (#10225 review).
+const queuePending = (storage: SummaryStorage, count: number, owner = { pid: 999_100, bootId: "gone" }): string[] =>
+  Array.from({ length: count }, (_, index) => {
+    const uuid = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`
+    storage.writePending({ consent: "enabled", scope: {}, uuid, sessionHash: "s", owner, createdAt: T0 + index, properties: { turns: 1 } })
+    return uuid
+  })
+
+describe("session_summary spool bounds", () => {
+  test("#given more pending events than the cap from a dead owner #when a sweep runs against an unreachable endpoint #then the oldest are dropped and counted, and one sweep starts a bounded number of sends", async () => {
+    const dir = stateDirs.make()
+    const sweeper = createTestRecorder({ dir, pid: 111_200, startAt: T0 + STALE, ack: false })
+    const uuids = queuePending(sweeper.storage, PENDING_CAP + 30)
+
+    await sweeper.summary.recover()
+
+    const left = new Set(sweeper.storage.pendingUuids())
+    expect(left.size).toBe(PENDING_CAP)
+    expect(uuids.slice(0, 30).some((uuid) => left.has(uuid))).toBe(false)
+    expect(sweeper.published).toHaveLength(RESENDS_PER_SWEEP)
+
+    await sweeper.summary.recordTurn("s2", summaryTurn())
+    await sweeper.summary.finish("s2", "quit")
+    expect(sweeper.published.at(-1)?.properties.dropped_events).toBe(30)
+  })
+
+  test("#given an event its own process keeps failing to send #when sweeps run every minute #then each re-send waits twice as long as the last", async () => {
+    const dir = stateDirs.make()
+    const own = createTestRecorder({ dir, pid: 111_300, startAt: T0, ack: false })
+    queuePending(own.storage, 1, own.storage.owner)
+    const sweepAfter = async (ms: number): Promise<number> => {
+      own.advance(ms)
+      await own.summary.recover()
+      return own.published.length
+    }
+
+    expect(await sweepAfter(0)).toBe(1)
+    expect(await sweepAfter(RESEND_BACKOFF_MS.first - 1)).toBe(1)
+    expect(await sweepAfter(1)).toBe(2)
+    expect(await sweepAfter(RESEND_BACKOFF_MS.first)).toBe(2)
+    expect(await sweepAfter(RESEND_BACKOFF_MS.first)).toBe(3)
+  })
+})

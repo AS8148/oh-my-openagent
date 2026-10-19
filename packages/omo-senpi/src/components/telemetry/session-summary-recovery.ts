@@ -1,3 +1,5 @@
+import { statSync } from "node:fs"
+import { join } from "node:path"
 import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, removeFile, renameIfPresent } from "./session-summary-files"
@@ -26,8 +28,17 @@ export { sendSummaryRecord } from "./session-summary-delivery"
 export { createImmediateSender } from "@oh-my-opencode/telemetry-core/immediate-send"
 // The recorder itself (windows, storage, publisher) loads here too, on a session's first turn or shutdown.
 export { createSessionSummaryRecorder } from "./omo-native-session-summary"
-export { createSummaryStorage, purgeUnconsentedQueue } from "./session-summary-storage"
+export { createSummaryStorage } from "./session-summary-storage"
 export { currentProcessOwner } from "./session-summary-owner"
+
+/** At most this many events wait for delivery; past it the oldest are dropped and counted in `dropped_events`. */
+export const PENDING_CAP = 200
+/** And at most this many bytes of them. */
+export const PENDING_CAP_BYTES = 1024 * 1024
+/** A sweep starts at most this many re-sends; the rest wait for a later sweep. */
+export const RESENDS_PER_SWEEP = 20
+/** Re-sends of one event back off from one minute, doubling, up to an hour between attempts. */
+export const RESEND_BACKOFF_MS = { first: 60_000, max: 60 * 60_000 } as const
 
 export type SummaryRecovery = {
   /** One pass over the summary directory; safe to run concurrently from any number of processes. */
@@ -140,8 +151,46 @@ export function createSummaryRecovery(input: {
     }
   }
 
+  // Per event: when its next re-send may start, and the delay after that. A sent event leaves the directory.
+  const backoff = new Map<string, { readonly at: number; readonly delay: number }>()
+  const mayResend = (uuid: string): boolean => {
+    const next = backoff.get(uuid)
+    return next === undefined || storage.now() >= next.at
+  }
+  const resendQueued = (uuid: string): void => {
+    const delay = Math.min((backoff.get(uuid)?.delay ?? RESEND_BACKOFF_MS.first / 2) * 2, RESEND_BACKOFF_MS.max)
+    backoff.set(uuid, { at: storage.now() + delay, delay })
+  }
+
+  // Oldest first, past either cap: a long outage cannot grow the spool without bound.
+  const dropOverCap = (uuids: readonly string[]): ReadonlySet<string> => {
+    const aged = uuids.map((uuid) => {
+      const record: ReadResult<PendingRecord> = storage.readPending(uuid)
+      const readable = record !== undefined && record !== CORRUPT ? record : undefined
+      return { uuid, readable, createdAt: readable?.createdAt ?? 0, bytes: fileBytes(join(storage.dir, "pending", `${uuid}.json`)) }
+    }).sort((left, right) => left.createdAt - right.createdAt)
+    let files = aged.length
+    let bytes = aged.reduce((total, entry) => total + entry.bytes, 0)
+    const dropped = new Set<string>()
+    for (const entry of aged) {
+      if (files <= PENDING_CAP && bytes <= PENDING_CAP_BYTES) break
+      if (publisher.isInFlight(entry.uuid)) continue
+      storage.removePending(entry.uuid)
+      backoff.delete(entry.uuid)
+      dropped.add(entry.uuid)
+      files -= 1
+      bytes -= entry.bytes
+      if (entry.readable !== undefined && isRecordSendable(entry.readable, isScopeConsented)) publisher.countDropped(1)
+    }
+    return dropped
+  }
+
   const sweepPending = (): void => {
-    for (const uuid of storage.pendingUuids()) {
+    const uuids = storage.pendingUuids()
+    const dropped = dropOverCap(uuids)
+    let resends = 0
+    for (const uuid of uuids) {
+      if (dropped.has(uuid)) continue
       const record = storage.readPending(uuid)
       if (record === undefined || publisher.isInFlight(uuid)) continue
       // Written by an opted-out session, or before consent marks existed: deleted unsent, never counted.
@@ -154,11 +203,14 @@ export function createSummaryRecovery(input: {
         if (isRecordSendable(record, isScopeConsented)) publisher.countDropped(1)
         continue
       }
+      if (record !== CORRUPT && !isSelf(record) && storage.isOwnerAlive(record.owner)) continue
+      if (resends >= RESENDS_PER_SWEEP || !mayResend(uuid)) continue
+      resends += 1
+      resendQueued(uuid)
       if (record !== CORRUPT && isSelf(record)) {
         void publisher.deliver(record)
         continue
       }
-      if (record !== CORRUPT && storage.isOwnerAlive(record.owner)) continue
       const claimed = storage.claimPending(uuid)
       if (claimed !== undefined) resendClaimedPending(uuid, claimed)
     }
@@ -194,6 +246,14 @@ export function createSummaryRecovery(input: {
       sweepPending()
       sweepWindows()
     },
+  }
+}
+
+function fileBytes(path: string): number {
+  try {
+    return statSync(path).size
+  } catch {
+    return 0
   }
 }
 
