@@ -1,6 +1,6 @@
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { appendFile } from "@oh-my-opencode/memory-core/fs"
-import { parseFactsExtractionRecord, resolveClaimReceipt, USER_QUOTE_RULE, type ConsentExchange, type FactsPayload } from "@oh-my-opencode/memory-core"
+import { parseFactsExtractionRecord, resolveClaimReceipt, USER_QUOTE_RULE, type ConsentExchange, type FactsPayload, type TranscriptEntry } from "@oh-my-opencode/memory-core"
 import { Type, type Static } from "typebox"
 
 export const FACTS_RECORD_TOOL_NAME = "record_fact"
@@ -83,19 +83,25 @@ export function createFactsRecordTool(input: FactsRecordToolInput): FactsRecordT
   }
 }
 
-// A user entry counts as a reply only when the entry right before it in the same queue entry (reasoning aside) is the
-// assistant's: that assistant text is the proposal it answered.
+// A user entry counts as a reply only when the entry right before it (reasoning aside) is a non-empty assistant message:
+// that text is the proposal it answered. For the first user entry of a queue entry, the one before it is the queue
+// entry's lead (the previous delta's last entry), so the usual "proposal, then ok in the next turn" still pairs after
+// the previous queue entry was consumed. An image-only (empty) user message, a tool step or an error breaks adjacency.
 export function payloadExchanges(payload: FactsPayload): ConsentExchange[] {
   return payload.entries.flatMap((entry) => {
     const exchanges: ConsentExchange[] = []
-    let proposal: string | undefined
+    let proposal = proposalText(entry.lead)
     for (const item of entry.entries) {
       if (item.kind === "reasoning") continue
-      if (item.kind === "user" && proposal !== undefined) exchanges.push({ proposal, reply: item.text })
-      proposal = item.kind === "assistant" ? item.text : undefined
+      if (item.kind === "user" && proposal !== undefined && item.text.trim().length > 0) exchanges.push({ proposal, reply: item.text })
+      proposal = proposalText(item)
     }
     return exchanges
   })
+}
+
+function proposalText(item: TranscriptEntry | undefined): string | undefined {
+  return item?.kind === "assistant" && item.text.trim().length > 0 ? item.text : undefined
 }
 
 function errorResult(reason: string): FactsRecordToolResult {

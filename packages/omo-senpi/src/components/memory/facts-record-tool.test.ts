@@ -171,4 +171,18 @@ describe("payload consent exchanges", () => {
       line("user", "ok", "5"),
     ]))).toEqual([{ proposal: "Shall I delete plugin X?", reply: "yes delete it" }])
   })
+
+  test("#given a queue entry that starts with the user's reply #when its lead is the assistant proposal #then the reply pairs with it", () => {
+    const withLead = (lead: ReturnType<typeof line> | undefined, items: readonly ReturnType<typeof line>[]): FactsPayload => {
+      const base = payload(items)
+      const [only] = base.entries
+      if (only === undefined) throw new Error("no entry")
+      return { ...base, entries: [lead === undefined ? only : { ...only, lead }] }
+    }
+    expect(payloadExchanges(withLead(line("assistant", "Shall I delete plugin X?", "0"), [line("user", "ok", "1")])))
+      .toEqual([{ proposal: "Shall I delete plugin X?", reply: "ok" }])
+    expect(payloadExchanges(withLead(line("user", "", "0"), [line("user", "ok", "1")]))).toEqual([])
+    expect(payloadExchanges(withLead(undefined, [line("user", "ok", "1")]))).toEqual([])
+    expect(payloadExchanges(payload([line("assistant", "Shall I?", "1"), line("user", "", "2"), line("user", "ok", "3")]))).toEqual([])
+  })
 })

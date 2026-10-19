@@ -1,6 +1,6 @@
 import type { ConsentExchange } from "@oh-my-opencode/memory-core"
 
-import { textOf, userText } from "./recall-session-read"
+import { textOf, userTurnText } from "./recall-session-read"
 
 // The one exchange a memory write may cite as consent (lead ruling on #10498): the newest user message on the active
 // branch, and only when the message right before it is the assistant's proposal. The assistant message that is making
@@ -23,7 +23,8 @@ type ConversationMessage =
   | { readonly role: "assistant"; readonly text: string; readonly toolCallIds: readonly string[] }
 
 function conversationMessage(entry: unknown): ConversationMessage[] {
-  const user = userText(entry)
+  // An image-only (empty-text) user message is still a user turn: it is not consent and it breaks adjacency.
+  const user = userTurnText(entry)
   if (user !== undefined) return [{ role: "user", text: user }]
   if (!isRecord(entry) || entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "assistant") return []
   const content = entry.message.content

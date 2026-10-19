@@ -88,6 +88,17 @@ describe("memory tool claim receipts", () => {
     expect(provenance["claim"]).toEqual({ source: "agent", downgraded: true })
   }, 30_000)
 
+  test("#given an image-only user message between the proposal and the 'ok' #when the memory call starts #then the 'ok' no longer answers the proposal", async () => {
+    const branch = [
+      TRANSCRIPT[0],
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Proposal A: remove plugin X." }] } },
+      { type: "message", message: { role: "user", content: [{ type: "image", data: "", mimeType: "image/png" }] } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "ok" }] } },
+    ]
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "ok" }, branch)
+    expect(provenance["claim"]).toEqual({ source: "agent", downgraded: true })
+  }, 30_000)
+
   test("#given an 'ok' right after proposal A #when the memory call starts #then the receipt names proposal A", async () => {
     const branch = [
       TRANSCRIPT[0],
