@@ -147,3 +147,36 @@ test("a missing sync sidecar leaves the runner idle with a typed sync-unavailabl
   expect(errors).toEqual([])
   await runner.release(paths.repo)
 })
+
+test("a release followed at once by an acquire of the same repo waits for the close and keeps sync running", async () => {
+  const paths = await identity()
+  let leased = false
+  const infos: string[] = []
+  let started = 0
+  const open = async (): Promise<DeviceSync | null> => {
+    if (leased) return null
+    leased = true
+    return {
+      engine: { start: () => { started += 1 } } as unknown as DeviceSync["engine"],
+      status: async (): Promise<EngineStatus> => ({ kind: "never_synced" }),
+      notifyLocalCommit: () => undefined,
+      close: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        leased = false
+      },
+    }
+  }
+  const runner = createSyncRunner({
+    logger: { info: (m: string) => infos.push(m), warn: () => undefined, error: () => undefined },
+    resolveSession: async () => session,
+    open,
+    watchHead: () => () => undefined,
+  })
+  await runner.acquire("agent", paths, { enabled: true })
+  void runner.release(paths.repo)
+  await runner.acquire("agent", paths, { enabled: true })
+  expect(started).toBe(2)
+  expect(await runner.status(paths.repo)).toEqual({ kind: "never_synced" })
+  expect(infos.filter((m) => m.includes("another OmO process"))).toEqual([])
+  await runner.release(paths.repo)
+})

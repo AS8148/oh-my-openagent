@@ -87,6 +87,8 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   const watchHead = options.watchHead ?? watchHeadLog
   const { logger } = options
   const repos = new Map<string, Held>()
+  // A repo whose last session released it, until its engine has closed and dropped the device lease.
+  const closing = new Map<string, Promise<void>>()
 
   const start = async (identity: string, paths: MemoryIdentityPaths): Promise<Running | SyncUnavailableStatus | null> => {
     const session = await resolveSession(identity)
@@ -126,6 +128,9 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   return {
     async acquire(identity, paths, settings) {
       if (!settings.enabled) return
+      // A session rebinding the repo right after the previous one released it would otherwise race
+      // the old engine's lease and stay idle; wait for that close first.
+      await closing.get(paths.repo)
       const held = repos.get(paths.repo)
       if (held !== undefined) {
         held.users += 1
@@ -144,10 +149,19 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
       held.users -= 1
       if (held.users > 0) return
       repos.delete(repo)
-      const running = await held.ready
-      if (running === null || !("device" in running)) return
-      running.unwatch()
-      await running.device.close()
+      const done = (async () => {
+        const running = await held.ready
+        if (running === null || !("device" in running)) return
+        running.unwatch()
+        await running.device.close()
+      })()
+      const settled = done.catch(() => undefined)
+      closing.set(repo, settled)
+      try {
+        await done
+      } finally {
+        if (closing.get(repo) === settled) closing.delete(repo)
+      }
     },
     async status(repo) {
       const running = await repos.get(repo)?.ready
