@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:0225183624a7baed8112ff63baf6a33549e99266ba5309dec9069e3c9397a11c:ad5954d6e47a077152512a2a170f2f61a859f813fd5f3d4a08100c69efdd02f0
+// omo-codex-install:f26094cc994df527fa26034d5aea1cc1ac3d1332a54a390edfa7041b32ad80b0:db0540bf73f6ea181a271aca2f26ec8c9cdc244ce660e52c9f2655c4b63ac4eb
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -19706,7 +19706,6 @@ function isRecord6(value) {
 }
 var OmoModelProfileInputSchema = object({
   display_name: string2().optional(),
-  caution: string2().optional(),
   family: _enum(["daily", "geeky"]).optional(),
   tier: _enum(["normal", "heavy"]).optional(),
   models: array(union([string2(), OmoFallbackModelObjectSchema])).optional()
