@@ -10,7 +10,7 @@ import { GitMemoryRepo, buildDefaultSeedFiles, buildIdentityPaths, type FactsPeo
 
 import { createMemoryIdentityContext } from "./context"
 import { applyMemoryFacts } from "./facts-apply-runtime"
-import { applyFactsWithRetriesUnderLock } from "./facts-batch-apply"
+import { applyFactsWithRetriesUnderLock, withFactsWriterLock } from "./facts-batch-apply"
 
 const PEOPLE: FactsPeopleRouting = { enabled: true, maxEntries: 40, maxEntryChars: 200 }
 const PROJECT = { scope: "project" as const, text: "The project runs tests with bun.", date: "2026-10-18" }
@@ -79,6 +79,32 @@ describe("facts/applied recovery envelopes", () => {
     expect(await batchCommits(repo, batchId)).toBe(1)
     expect(existsSync(envelope)).toBe(false)
     expect(await readdir(join(identity.paths.facts, "applied"))).toEqual([])
+  }, 60_000)
+
+  test("#given a kept envelope #when a same-batchId retry finds the memory-write lock busy #then the envelope and its recovery survive for maintenance to finish", async () => {
+    const { root, identity, repo } = await memory()
+    const hooks = join(root, "failing-hooks")
+    await mkdir(hooks)
+    await writeFile(join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 })
+    execFileSync("git", ["-C", identity.paths.repo, "config", "core.hooksPath", hooks], { windowsHide: true })
+    const batchId = randomUUID()
+    await expect(applyFactsWithRetriesUnderLock({ identity, batchId, records: [PROJECT], people: PEOPLE })).rejects.toThrow()
+    execFileSync("git", ["-C", identity.paths.repo, "config", "--unset", "core.hooksPath"], { windowsHide: true })
+
+    const envelope = join(identity.paths.facts, "applied", batchId)
+    const retried = await withFactsWriterLock(identity.paths.locks, () => applyFactsWithRetriesUnderLock({ identity, batchId, records: [PROJECT], people: PEOPLE }), 1, "holder")
+
+    expect(retried).toBeUndefined()
+    expect(existsSync(envelope)).toBe(true)
+    const ledger = JSON.parse(await readFile(join(envelope, "ledger.json"), "utf8")) as { applyRecovery?: unknown; pid?: number }
+    expect(ledger.applyRecovery).toBeDefined()
+    expect(ledger.pid).toBeUndefined()
+    expect(await batchCommits(repo, batchId)).toBe(0)
+
+    const run = await runChild(root)
+    expect(run).toEqual({ code: 0, output: "" })
+    expect(await batchCommits(repo, batchId)).toBe(1)
+    expect(existsSync(envelope)).toBe(false)
   }, 60_000)
 
   test("#given a client batchId #when the same request is applied twice #then it commits once and the retry is answered from the receipt", async () => {
