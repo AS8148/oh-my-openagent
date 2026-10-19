@@ -3,11 +3,7 @@ import { context } from "@opentelemetry/api"
 import { createTelemetryProviders, type TelemetryProviders } from "./otel-providers"
 import { BatchSender } from "./otlp-batch-sender"
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "./otlp-http"
-import {
-  isOtlpTelemetryEnabled,
-  resolveOtlpEndpoint,
-  type WireAttributes,
-} from "./otlp-config"
+import { resolveOtlpEndpoint, type WireAttributes } from "./otlp-config"
 import {
   createBatchId,
   SPOOL_CAP_BYTES,
@@ -17,11 +13,11 @@ import {
   type SpoolContext,
 } from "./otlp-spool-dir"
 import { SpoolCap } from "./otlp-spool-cap"
-import { type PurgeReport, purgeSpool } from "./otlp-spool-purge"
+import { purgeReport, purgeSpool } from "./otlp-spool-purge"
 import { abortableSleep, delay } from "./otlp-sleep"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { SpoolWriter } from "./otlp-wal"
-import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent, TelemetrySpoolEntryKind } from "./types"
+import type { TelemetryCaptureMessage, TelemetryDiagnosticEvent } from "./types"
 
 const SEAL_BYTES = 200 * 1024
 const LEASE_RENEW_INTERVAL_MS = 60_000
@@ -37,37 +33,12 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-/** Each entry the purge leaves behind becomes one diagnostic, by kind or errno code, never by path. */
-function purgeReport(diagnostics: CreateOtlpTelemetryTransportInput["diagnostics"], source: string): PurgeReport {
-  return {
-    onSkipped: (entryKind: TelemetrySpoolEntryKind) => diagnostics?.({ event: "telemetry_spool_purge_skipped", source, entryKind }),
-    onFailed: (errorCode: string) => diagnostics?.({ event: "telemetry_spool_purge_failed", source, errorCode }),
-  }
-}
-
 /**
- * The collector transport; null whenever any opt-out applies. An opt-out creates nothing on disk and
- * purges whatever earlier consented runs left in the spool (see `purgeSpool` for the race rules).
+ * The enabled path only: `createOtlpTelemetryTransport` in otlp-entry.ts reads the opt-outs and consent
+ * first and imports this module only when telemetry is on, so a disabled run loads none of it.
  */
-export function createOtlpTelemetryTransport(input: CreateOtlpTelemetryTransportInput): OtlpTelemetryTransport | null {
-  const env = input.env ?? process.env
-  if (!isOtlpTelemetryEnabled({ env, productEnvPrefix: input.productEnvPrefix })) {
-    try {
-      const source = input.source ?? "otlp"
-      if (purgeSpool(input.spoolDir, input.spoolRoot, purgeReport(input.diagnostics, source)) === "refused") {
-        input.diagnostics?.({ event: "telemetry_spool_purge_refused", source })
-      }
-    } catch (error) {
-      input.diagnostics?.({
-        event: "telemetry_spool_sweep_failed",
-        source: input.source ?? "otlp",
-        error,
-        errorKind: error instanceof Error ? "error" : "non_error",
-      })
-    }
-    return null
-  }
-  return new OtlpSender(input, resolveOtlpEndpoint(env, input.endpoint)).transport
+export function startOtlpTransport(input: CreateOtlpTelemetryTransportInput): OtlpTelemetryTransport {
+  return new OtlpSender(input, resolveOtlpEndpoint(input.env ?? process.env, input.endpoint)).transport
 }
 
 class OtlpSender {
@@ -90,6 +61,7 @@ class OtlpSender {
       resource: input.resource,
       scope: input.scope,
       spoolDir: input.spoolDir,
+      spans: input.spans,
       ...(input.bootId === undefined ? {} : { bootId: input.bootId }),
       ...(input.pid === undefined ? {} : { pid: input.pid }),
       ...(input.clock === undefined ? {} : { clock: input.clock }),
@@ -128,7 +100,7 @@ class OtlpSender {
     })
     this.transport = {
       sampling: { rawTurnRate: 1 },
-      providers: this.#providers,
+      tracer: this.#providers.tracer,
       endpoint,
       ready: input.autoStart === false ? Promise.resolve() : this.#start(),
       capture: (message) => this.#capture(message),
@@ -183,7 +155,7 @@ class OtlpSender {
       eventName: `omo.${name}`,
       attributes: {
         ...attributes,
-        "log.record.uid": typeof uid === "string" ? uid : (this.#input.createEventId ?? Bun.randomUUIDv7)(),
+        "log.record.uid": typeof uid === "string" ? uid : (this.#input.createEventId ?? (() => createBatchId(this.#ctx.nowMs())))(),
       },
       context: context.active(),
     })
@@ -199,11 +171,13 @@ class OtlpSender {
     const properties = message.properties ?? {}
     const project = this.#input.project
     const eventId = properties["event_id"]
-    const session = properties["$session_id"]
+    // `session.id` and every other attribute come from the caller's projection (the per-event allowlist).
+    // The record's identity keys go last, uid then session, the order the collector's shared fixture pins.
+    const { "session.id": session, ...projected } = project(message.event, properties)
     this.#emit(message.event, {
-      ...project(message.event, properties),
+      ...projected,
       ...(typeof eventId === "string" && eventId.length > 0 ? { "log.record.uid": eventId } : {}),
-      ...(typeof session === "string" && session.length > 0 ? { "session.id": session } : {}),
+      ...(session === undefined ? {} : { "session.id": session }),
     })
   }
 

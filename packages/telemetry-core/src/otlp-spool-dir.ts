@@ -23,57 +23,15 @@ export type SpoolContext = {
   readonly onDrop: (reason: DropReason, records: number) => void
 }
 
-export type SpoolEntry =
-  | { readonly kind: "active"; readonly name: string; readonly signal: Signal; readonly pid: number; readonly bootId: string }
-  | { readonly kind: "batch"; readonly name: string; readonly signal: Signal; readonly batchId: string }
-  | {
-    readonly kind: "sending"
-    readonly name: string
-    readonly signal: Signal
-    readonly batchId: string
-    readonly claimer: string
-    readonly leaseExpiresMs: number
-  }
-  | { readonly kind: "other"; readonly name: string }
-
-const ACTIVE = /^active-(logs|traces)-([0-9]+)-([0-9a-f]{32})\.otlp$/
-const BATCH = /^batch-(logs|traces)-([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12})\.otlp$/
-const SENDING =
-  /^batch-(logs|traces)-([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12})\.sending-([0-9a-f]{32})-([0-9]+)$/
-
-function signalOf(value: string | undefined): Signal {
-  return value === "traces" ? "traces" : "logs"
-}
-
-export function parseSpoolName(name: string): SpoolEntry {
-  const active = ACTIVE.exec(name)
-  if (active !== null) {
-    return { kind: "active", name, signal: signalOf(active[1]), pid: Number(active[2]), bootId: active[3] ?? "" }
-  }
-  const batch = BATCH.exec(name)
-  if (batch !== null) return { kind: "batch", name, signal: signalOf(batch[1]), batchId: batch[2] ?? "" }
-  const sending = SENDING.exec(name)
-  if (sending !== null) {
-    return {
-      kind: "sending",
-      name,
-      signal: signalOf(sending[1]),
-      batchId: sending[2] ?? "",
-      claimer: sending[3] ?? "",
-      leaseExpiresMs: Number(sending[4]),
-    }
-  }
-  return { kind: "other", name }
-}
-
-/** True only for names the spool itself creates (the builders below); the opt-out purge deletes nothing else. */
-export const isSpoolFileName = (name: string): boolean => parseSpoolName(name).kind !== "other"
-
-export const activeName = (signal: Signal, pid: number, bootId: string): string =>
-  `active-${signal}-${pid}-${bootId}.otlp`
-export const batchName = (signal: Signal, batchId: string): string => `batch-${signal}-${batchId}.otlp`
-const sendingName = (signal: Signal, batchId: string, bootId: string, leaseExpiresMs: number): string =>
-  `batch-${signal}-${batchId}.sending-${bootId}-${leaseExpiresMs}`
+export {
+  QUARANTINE_DIR,
+  activeName,
+  batchName,
+  isSpoolFileName,
+  parseSpoolName,
+  type SpoolEntry,
+} from "./otlp-spool-names"
+import { activeName, batchName, parseSpoolName, QUARANTINE_DIR, sendingName, type SpoolEntry } from "./otlp-spool-names"
 
 const HEX = Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0"))
 
@@ -235,7 +193,6 @@ export function dropFile(ctx: SpoolContext, name: string, reason: DropReason): v
   if (deleteFile(ctx.dir, name)) ctx.onDrop(reason, records)
 }
 
-export const QUARANTINE_DIR = "quarantine"
 
 /**
  * Corrupt files are kept for inspection but are bounded like everything else: they count toward the
@@ -297,6 +254,11 @@ export function sweepSpool(ctx: SpoolContext): void {
       } else if (stat !== null && now - stat.mtimeMs >= DEAD_OWNER_IDLE_MS) {
         tryRename(ctx.dir, entry.name, batchName(entry.signal, createBatchId(stat.birthMs)))
       }
+    } else if (entry.kind === "active" && entry.pid !== ctx.pid) {
+      // A live pid may be a later process that reused it: an active file nobody appended to for the age
+      // limit is abandoned whoever holds the pid now.
+      const stat = fileStat(ctx.dir, entry.name)
+      if (stat !== null && now - stat.mtimeMs > ctx.maxAgeMs) dropFile(ctx, entry.name, "expired")
     }
   }
   for (const entry of listSpool(ctx.dir)) {

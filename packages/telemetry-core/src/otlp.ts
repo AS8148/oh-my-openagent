@@ -19,7 +19,7 @@ export {
 } from "./otlp-config"
 export type { ResourceAttributes } from "./otlp-encode"
 export { BACKOFF_MS, GZIP_THRESHOLD_BYTES, MAX_BODY_BYTES, MAX_RETRY_AFTER_MS, type OtlpFetch } from "./otlp-http"
-export { createOtlpTelemetryTransport } from "./otlp-sender"
+export { startOtlpTransport } from "./otlp-sender"
 export type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 export { SPOOL_CAP_BYTES, SPOOL_MAX_AGE_MS, type DropReason } from "./otlp-spool-dir"
 export { readSpoolRequest, type Signal, type SpoolRequest } from "./otlp-spool-file"

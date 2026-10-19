@@ -148,6 +148,8 @@ export class SpoolWriter {
   }
 }
 
+const EVENT_NAME = /^omo\.[a-z][a-z0-9_]{0,62}$/
+
 function wireAttributes<T>(attributes: Readonly<Record<string, T>>): Record<string, T> {
   return Object.fromEntries(Object.entries(attributes).filter(([key]) => isWireAttributeKey(key)))
 }
@@ -163,7 +165,9 @@ export class WalLogRecordProcessor implements LogRecordProcessor {
 
   onEmit(record: ReadableLogRecord): void {
     const encode = (): Uint8Array =>
-      toBinary(LogRecordSchema, encodeLogRecord({ ...record, body: undefined, attributes: wireAttributes(record.attributes) }))
+      toBinary(LogRecordSchema, encodeLogRecord({ ...record, body: undefined, severityText: "", attributes: wireAttributes(record.attributes) }))
+    // No free-text slot: a record's name must be an `omo.<bare name>` event, or it is not written.
+    if (record.eventName === undefined || !EVENT_NAME.test(record.eventName)) return
     if (this.writer.append(encode)) this.#onAppended(this.writer)
   }
 
@@ -172,17 +176,26 @@ export class WalLogRecordProcessor implements LogRecordProcessor {
   }
 }
 
+/** Per span name, the attribute keys that span may carry (the schema artifact's span allowlist). */
+export type SpanAllowlist = Readonly<Record<string, readonly string[]>>
+
 export class WalSpanProcessor implements SpanProcessor {
   readonly writer: SpoolWriter
   readonly #onAppended: (writer: SpoolWriter) => void
+  readonly #spans: SpanAllowlist
 
-  constructor(writer: SpoolWriter, onAppended: (writer: SpoolWriter) => void) {
+  constructor(writer: SpoolWriter, onAppended: (writer: SpoolWriter) => void, spans: SpanAllowlist) {
     this.writer = writer
     this.#onAppended = onAppended
+    this.#spans = spans
   }
 
   onEnd(span: ReadableSpan): void {
-    const encode = (): Uint8Array => toBinary(SpanSchema, encodeSpan({ ...span, attributes: wireAttributes(span.attributes) }))
+    // A span name outside the allowlist is not written; a listed span keeps only its listed attributes.
+    const allowed = Object.hasOwn(this.#spans, span.name) ? new Set(this.#spans[span.name]) : undefined
+    if (allowed === undefined) return
+    const attributes = Object.fromEntries(Object.entries(wireAttributes(span.attributes)).filter(([key]) => allowed.has(key)))
+    const encode = (): Uint8Array => toBinary(SpanSchema, encodeSpan({ ...span, attributes }))
     if (this.writer.append(encode)) this.#onAppended(this.writer)
   }
 

@@ -4,7 +4,7 @@ import { dirname } from "node:path"
 
 import { create, toBinary } from "@bufbuild/protobuf"
 
-import { createOtlpTelemetryTransport } from "./otlp-sender"
+import { createOtlpTelemetryTransport } from "./otlp-entry"
 import { ExportLogsServiceResponseSchema } from "./otlp-proto/opentelemetry/proto/collector/logs/v1/logs_service_pb.js"
 import {
   attributeMap,
@@ -16,7 +16,7 @@ import {
   recordingFetch,
   spoolNames,
   TEST_SCOPE,
-  testResource, testWireProjection } from "./otlp-test-support"
+  testResource, testWireProjection, TEST_SPANS } from "./otlp-test-support"
 import type { TelemetryDiagnosticInput } from "./types"
 
 const roots: (() => void)[] = []
@@ -72,14 +72,14 @@ describe("OTLP sender", () => {
     expect(logRecordsOf(decodeLogs(calls[1]?.body ?? new Uint8Array())).length).toBe(19)
   }, 30_000)
 
-  test("#given OTEL_EXPORTER_OTLP_ENDPOINT points elsewhere #then it is ignored; OMO_TELEMETRY_ENDPOINT overrides the configured endpoint", () => {
+  test("#given OTEL_EXPORTER_OTLP_ENDPOINT points elsewhere #then it is ignored; OMO_TELEMETRY_ENDPOINT overrides the configured endpoint", async () => {
     // given
     const dir = root()
 
     // when
     const ignored = makeTransport(dir, { env: { OTEL_EXPORTER_OTLP_ENDPOINT: "http://evil.test", OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://evil.test" } })
     const overridden = makeTransport(dir, { env: { OMO_TELEMETRY_ENDPOINT: "https://staging.test/" } })
-    const defaulted = createOtlpTelemetryTransport({ productEnvPrefix: "OMO_TEST", ingestKey: "k", spoolDir: dir, spoolRoot: dirname(dir), resource: testResource(), scope: TEST_SCOPE, project: testWireProjection, env: {}, autoStart: false })
+    const defaulted = await createOtlpTelemetryTransport({ productEnvPrefix: "OMO_TEST", ingestKey: "k", spoolDir: dir, spoolRoot: dirname(dir), resource: testResource(), scope: TEST_SCOPE, project: testWireProjection, spans: TEST_SPANS, env: {}, autoStart: false })
 
     // then
     expect(ignored.endpoint).toBe("https://collector.test")
@@ -87,15 +87,15 @@ describe("OTLP sender", () => {
     expect(defaulted?.endpoint).toBe("https://t.omo.dev")
   })
 
-  test("#given OTEL_SDK_DISABLED=true or DO_NOT_TRACK=1 #then no transport is built and no spool directory exists", () => {
+  test("#given OTEL_SDK_DISABLED=true or DO_NOT_TRACK=1 #then no transport is built and no spool directory exists", async () => {
     // given
     const dir = root()
-    const base = { productEnvPrefix: "OMO_TEST", ingestKey: "k", spoolDir: dir, spoolRoot: dirname(dir), resource: testResource(), scope: TEST_SCOPE, project: testWireProjection, autoStart: false }
+    const base = { productEnvPrefix: "OMO_TEST", ingestKey: "k", spoolDir: dir, spoolRoot: dirname(dir), resource: testResource(), scope: TEST_SCOPE, project: testWireProjection, spans: TEST_SPANS, autoStart: false }
 
     // when
-    const otelDisabled = createOtlpTelemetryTransport({ ...base, env: { OTEL_SDK_DISABLED: "TRUE" } })
-    const doNotTrack = createOtlpTelemetryTransport({ ...base, env: { DO_NOT_TRACK: "1" } })
-    const productOptOut = createOtlpTelemetryTransport({ ...base, env: { OMO_TEST_SEND_ANONYMOUS_TELEMETRY: "0" } })
+    const otelDisabled = await createOtlpTelemetryTransport({ ...base, env: { OTEL_SDK_DISABLED: "TRUE" } })
+    const doNotTrack = await createOtlpTelemetryTransport({ ...base, env: { DO_NOT_TRACK: "1" } })
+    const productOptOut = await createOtlpTelemetryTransport({ ...base, env: { OMO_TEST_SEND_ANONYMOUS_TELEMETRY: "0" } })
 
     // then
     expect([otelDisabled, doNotTrack, productOptOut]).toEqual([null, null, null])

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { chownSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-import { createOtlpTelemetryTransport } from "./otlp-sender"
+import { createOtlpTelemetryTransport } from "./otlp-entry"
 import { createBatchId } from "./otlp-spool-dir"
 import {
   capture,
@@ -13,7 +13,7 @@ import {
   recordingFetch,
   spoolNames,
   TEST_SCOPE,
-  testResource, testWireProjection } from "./otlp-test-support"
+  testResource, testWireProjection, TEST_SPANS } from "./otlp-test-support"
 import type { CreateOtlpTelemetryTransportInput } from "./otlp-transport-types"
 import type { TelemetryDiagnosticInput } from "./types"
 
@@ -38,14 +38,14 @@ function seedSpool(dir: string): void {
   writeFileSync(join(dir, "quarantine", `batch-logs-${createBatchId(now)}.otlp`), "corrupt")
 }
 
-function optOut(spoolDir: string, spoolRoot: string, diagnostics: TelemetryDiagnosticInput[]): void {
-  const transport = createOtlpTelemetryTransport({
+async function optOut(spoolDir: string, spoolRoot: string, diagnostics: TelemetryDiagnosticInput[]): Promise<void> {
+  const transport = await createOtlpTelemetryTransport({
     productEnvPrefix: "OMO_TEST",
     ingestKey: "k",
     spoolDir,
     spoolRoot,
     resource: testResource(),
-    scope: TEST_SCOPE, project: testWireProjection,
+    scope: TEST_SCOPE, project: testWireProjection, spans: TEST_SPANS,
     env: { DO_NOT_TRACK: "1" },
     diagnostics: (input) => diagnostics.push(input),
     autoStart: false,
@@ -65,7 +65,7 @@ const currentUid = typeof process.getuid === "function" ? process.getuid() : und
 const spoolRootIsRequired: undefined extends CreateOtlpTelemetryTransportInput["spoolRoot"] ? false : true = true
 
 describe("the opt-out purge skips every spool-named entry that is not a regular file of the current user, and keeps going", () => {
-  test("#given a spool-named directory between the spool's files #when the purge runs #then the directory survives untouched, every spool file is deleted, and one skip is reported with its kind and no path", () => {
+  test("#given a spool-named directory between the spool's files #when the purge runs #then the directory survives untouched, every spool file is deleted, and one skip is reported with its kind and no path", async () => {
     // given
     const dir = root()
     seedSpool(dir)
@@ -75,7 +75,7 @@ describe("the opt-out purge skips every spool-named entry that is not a regular 
     const diagnostics: TelemetryDiagnosticInput[] = []
 
     // when
-    optOut(dir, dirname(dir), diagnostics)
+    await optOut(dir, dirname(dir), diagnostics)
 
     // then
     expect(spoolNames(dir)).toEqual([named.slice(dir.length + 1)])
@@ -84,7 +84,7 @@ describe("the opt-out purge skips every spool-named entry that is not a regular 
     expect(diagnostics.filter((d) => d.event === "telemetry_spool_sweep_failed")).toEqual([])
   })
 
-  test("#given a spool-named symlink to a directory #when the purge runs #then the link and its target are untouched, the rest is purged, and the skip is reported as a symlink", () => {
+  test("#given a spool-named symlink to a directory #when the purge runs #then the link and its target are untouched, the rest is purged, and the skip is reported as a symlink", async () => {
     // given
     const dir = root()
     seedSpool(dir)
@@ -96,7 +96,7 @@ describe("the opt-out purge skips every spool-named entry that is not a regular 
     const diagnostics: TelemetryDiagnosticInput[] = []
 
     // when
-    optOut(dir, dirname(dir), diagnostics)
+    await optOut(dir, dirname(dir), diagnostics)
 
     // then
     expect(spoolNames(dir)).toEqual([linkName])
@@ -104,7 +104,7 @@ describe("the opt-out purge skips every spool-named entry that is not a regular 
     expect(skipped(diagnostics).map((d) => d.entryKind)).toEqual(["symlink"])
   })
 
-  test.skipIf(currentUid !== 0)("#given a spool-named file owned by another user (needs root to chown) #when the purge runs #then it survives and the skip is reported as foreign_owner", () => {
+  test.skipIf(currentUid !== 0)("#given a spool-named file owned by another user (needs root to chown) #when the purge runs #then it survives and the skip is reported as foreign_owner", async () => {
     // given
     const dir = root()
     seedSpool(dir)
@@ -114,7 +114,7 @@ describe("the opt-out purge skips every spool-named entry that is not a regular 
     const diagnostics: TelemetryDiagnosticInput[] = []
 
     // when
-    optOut(dir, dirname(dir), diagnostics)
+    await optOut(dir, dirname(dir), diagnostics)
 
     // then
     expect(spoolNames(dir)).toEqual([foreign])
@@ -123,7 +123,7 @@ describe("the opt-out purge skips every spool-named entry that is not a regular 
 })
 
 describe("the opt-out purge refuses a spool directory it does not own or that lies outside the caller's spool root", () => {
-  test.skipIf(currentUid === undefined)("#given the spool directory belongs to another user #when the purge runs #then it is refused, counted, and nothing is deleted", () => {
+  test.skipIf(currentUid === undefined)("#given the spool directory belongs to another user #when the purge runs #then it is refused, counted, and nothing is deleted", async () => {
     // given
     const dir = root()
     seedSpool(dir)
@@ -133,7 +133,7 @@ describe("the opt-out purge refuses a spool directory it does not own or that li
 
     // when
     try {
-      optOut(dir, dirname(dir), diagnostics)
+      await optOut(dir, dirname(dir), diagnostics)
     } finally {
       uid.mockRestore()
     }
@@ -155,7 +155,7 @@ describe("the opt-out purge refuses a spool directory it does not own or that li
     const transport = makeTransport(dir, { spoolRoot, consent: () => false, diagnostics: (input) => midRun.push(input) })
 
     // when
-    optOut(dir, spoolRoot, atStart)
+    await optOut(dir, spoolRoot, atStart)
     await transport.flush()
 
     // then
@@ -167,7 +167,7 @@ describe("the opt-out purge refuses a spool directory it does not own or that li
 })
 
 describe("the opt-out purge deletes only what the spool created, only inside a verified spool directory", () => {
-  test("#given foreign files and a foreign subdirectory next to the spool's own files #when the purge runs #then only the spool's own files go and the foreign ones survive", () => {
+  test("#given foreign files and a foreign subdirectory next to the spool's own files #when the purge runs #then only the spool's own files go and the foreign ones survive", async () => {
     // given
     const dir = root()
     seedSpool(dir)
@@ -178,7 +178,7 @@ describe("the opt-out purge deletes only what the spool created, only inside a v
     const diagnostics: TelemetryDiagnosticInput[] = []
 
     // when
-    optOut(dir, dirname(dir), diagnostics)
+    await optOut(dir, dirname(dir), diagnostics)
 
     // then
     expect(spoolNames(dir)).toEqual(["notes.txt", "projects", "quarantine"])
@@ -187,7 +187,7 @@ describe("the opt-out purge deletes only what the spool created, only inside a v
     expect(refusals(diagnostics)).toBe(0)
   })
 
-  test("#given the spool directory is a symlink #when the purge runs #then it is refused, counted, and the link target is untouched", () => {
+  test("#given the spool directory is a symlink #when the purge runs #then it is refused, counted, and the link target is untouched", async () => {
     // given
     const base = root()
     const target = join(dirname(base), "elsewhere")
@@ -197,7 +197,7 @@ describe("the opt-out purge deletes only what the spool created, only inside a v
     const diagnostics: TelemetryDiagnosticInput[] = []
 
     // when
-    optOut(base, dirname(base), diagnostics)
+    await optOut(base, dirname(base), diagnostics)
 
     // then
     expect(spoolNames(target)).toEqual(before)
@@ -205,7 +205,7 @@ describe("the opt-out purge deletes only what the spool created, only inside a v
     expect(refusals(diagnostics)).toBe(1)
   })
 
-  test("#given a spool directory whose real path escapes the expected spool root #when the purge runs #then it is refused, counted, and nothing is deleted", () => {
+  test("#given a spool directory whose real path escapes the expected spool root #when the purge runs #then it is refused, counted, and nothing is deleted", async () => {
     // given
     const base = root()
     const spoolRoot = join(dirname(base), "root")
@@ -219,7 +219,7 @@ describe("the opt-out purge deletes only what the spool created, only inside a v
     const diagnostics: TelemetryDiagnosticInput[] = []
 
     // when
-    optOut(dir, spoolRoot, diagnostics)
+    await optOut(dir, spoolRoot, diagnostics)
 
     // then
     expect(spoolNames(join(outside, "telemetry-spool"))).toEqual(before)
@@ -229,19 +229,19 @@ describe("the opt-out purge deletes only what the spool created, only inside a v
 
 describe("opt-out purges the spool", () => {
   for (const env of [{ DO_NOT_TRACK: "1" }, { OTEL_SDK_DISABLED: "true" }, { OMO_TEST_SEND_ANONYMOUS_TELEMETRY: "0" }]) {
-    test(`#given a spool left by earlier runs #when the process starts opted out (${Object.keys(env)[0]}) #then every batch, claim, WAL and quarantined file is deleted`, () => {
+    test(`#given a spool left by earlier runs #when the process starts opted out (${Object.keys(env)[0]}) #then every batch, claim, WAL and quarantined file is deleted`, async () => {
       // given
       const dir = root()
       seedSpool(dir)
 
       // when
-      const transport = createOtlpTelemetryTransport({
+      const transport = await createOtlpTelemetryTransport({
         productEnvPrefix: "OMO_TEST",
         ingestKey: "k",
         spoolDir: dir,
         spoolRoot: dirname(dir),
         resource: testResource(),
-        scope: TEST_SCOPE, project: testWireProjection,
+        scope: TEST_SCOPE, project: testWireProjection, spans: TEST_SPANS,
         env,
         autoStart: false,
       })

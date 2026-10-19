@@ -6,7 +6,7 @@ import { gunzipSync } from "node:zlib"
 import { fromBinary } from "@bufbuild/protobuf"
 
 import { type OtlpWireProjection, type WireAttributes, isWireAttributeKey } from "./otlp-config"
-import { createOtlpTelemetryTransport } from "./otlp-sender"
+import { startOtlpTransport } from "./otlp-sender"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { OtlpFetch } from "./otlp-http"
 import {
@@ -21,9 +21,17 @@ import type { AnyValue, KeyValue } from "./otlp-proto/opentelemetry/proto/common
 
 export const TEST_SCOPE = { name: "omo-senpi", version: "3.17.0" } as const
 
-/** Test stand-in for a schema artifact's projection: every primitive that passes the key rule becomes `omo.<name>`. */
+/** Test stand-in for a schema artifact's span allowlist. */
+export const TEST_SPANS = { "omo.turn": ["gen_ai.request.model", "n", "nan"] } as const
+
+/**
+ * Test stand-in for a schema artifact's projection: `$session_id` maps to the semconv `session.id`, as the
+ * artifact's wire keys do, and every other primitive that passes the key rule becomes `omo.<name>`.
+ */
 export const testWireProjection: OtlpWireProjection = (_event, properties) => {
   const attributes: WireAttributes = {}
+  const session = properties["$session_id"]
+  if (typeof session === "string" && session.length > 0) attributes["session.id"] = session
   for (const [key, value] of Object.entries(properties)) {
     if (!isWireAttributeKey(key)) continue
     if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
@@ -82,7 +90,7 @@ export function makeTransport(
   dir: string,
   overrides: Partial<CreateOtlpTelemetryTransportInput> = {},
 ): OtlpTelemetryTransport {
-  const transport = createOtlpTelemetryTransport({
+  return startOtlpTransport({
     productEnvPrefix: "OMO_TEST",
     ingestKey: "test-ingest-key",
     spoolDir: dir,
@@ -96,10 +104,9 @@ export function makeTransport(
     random: () => 0,
     fetch: recordingFetch().fetch,
     project: testWireProjection,
+    spans: TEST_SPANS,
     ...overrides,
   })
-  if (transport === null) throw new Error("transport unexpectedly disabled")
-  return transport
 }
 
 export function decodeLogs(body: Uint8Array): ExportLogsServiceRequest {

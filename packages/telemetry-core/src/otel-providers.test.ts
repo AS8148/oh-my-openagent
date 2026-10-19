@@ -7,7 +7,7 @@ import { logs } from "@opentelemetry/api-logs"
 import { createTelemetryProviders, getActiveTraceContext } from "./otel-providers"
 import { createTelemetryResource } from "./otel-resource"
 import { readSpoolRequest } from "./otlp-spool-file"
-import { attributeMap, createSpoolRoot, decodeLogs, decodeTraces, logRecordsOf, TEST_SCOPE, testResource } from "./otlp-test-support"
+import { attributeMap, createSpoolRoot, decodeLogs, decodeTraces, logRecordsOf, TEST_SCOPE, TEST_SPANS, testResource } from "./otlp-test-support"
 
 const roots: (() => void)[] = []
 afterEach(() => {
@@ -17,7 +17,7 @@ afterEach(() => {
 function providers() {
   const root = createSpoolRoot("telemetry-core-otel-")
   roots.push(root.cleanup)
-  const created = createTelemetryProviders({ resource: testResource(), scope: TEST_SCOPE, spoolDir: root.dir })
+  const created = createTelemetryProviders({ resource: testResource(), scope: TEST_SCOPE, spoolDir: root.dir, spans: TEST_SPANS })
   return { root, created }
 }
 
