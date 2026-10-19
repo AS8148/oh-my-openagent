@@ -131,6 +131,15 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `computer_use_engine_error` | `backend` | `string` | `quartz`, `x11`, `wayland`, `win32`, `fake`, `unavailable`, `other` |
 | `computer_use_engine_error` | `code` | `string` | `PermissionDenied`, `CaptureFailed`, `InputFailed`, `BackgroundUnavailable`, `WindowNotFound`, `InvalidTarget`, `InvalidKey`, `InvalidCoordinateFrame`, `StaleRef`, `AxUnsupported`, `AxFailed`, `Timeout`, `Closed`, `Internal`, `StopPathUnavailable`, `Suspended`, `ScreenLocked`, `Cancelled`, `CursorRestoreFailed`, `FocusRestoreFailed`, `TransactionFailed`, `InputBusy`, `ControlRequired`, `CaptureUnavailable`, `native-unavailable`, `quarantined`, `abi-mismatch`, `other` |
 | `computer_use_engine_error` | `host_platform` | `string` | `darwin`, `linux`, `win32`, `other` |
+| `handoff_hint` | `$session_id` | `string` | - |
+| `handoff_hint` | `action` | `string` | `shown`, `accepted`, `dismissed` |
+| `handoff_hint` | `context_tokens` | `number` | - |
+| `handoff_hint` | `fresh_usd` | `number` | - |
+| `handoff_hint` | `model_id` | `string` | `qwen3.6-flash`, `qwen3.8-max-preview`, `claude-fable-5`, `claude-fable-5-1`, `claude-haiku-4-5`, `claude-haiku-5-5`, `claude-opus-4-6`, `claude-opus-5`, `claude-opus-5-5`, `claude-sonnet-5`, `claude-sonnet-5-5`, `qwen3.7-plus`, `gpt-5.6-luna-fast`, `gpt-5.6-sol`, `gpt-5.6-sol-fast`, `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-luna`, `gpt-6-luna-fast`, `gpt-6-sol`, `gpt-6-sol-fast`, `gpt-6.1-sol`, `gpt-6.1-sol-fast`, `deepseek-flash`, `deepseek-v4-flash`, `deepseek-v4-pro`, `gemini-3.1-pro`, `gemini-3.6-flash`, `gemini-4-argon`, `grok-4.6`, `grok-4.7`, `k3`, `kimi-for-coding-highspeed`, `kimi-k3`, `glm-5.2`, `glm-5.3`, `mimo-v2.5-pro`, `mimo-v2.6-pro`, `minimax-m2.7`, `minimax-m3`, `grok-4.20-0309-non-reasoning`, `mimo-v2.6-flash`, `glm-5.3-flash`, `custom` |
+| `handoff_hint` | `next_reply_usd` | `number` | - |
+| `handoff_hint` | `provider` | `string` | `alibaba-token-plan`, `alibaba-token-plan-cn`, `anthropic`, `anthropic-api`, `anthropic-subscription`, `bailian-coding-plan`, `chatgpt-subscription`, `claude-sdk-oauth`, `deepseek`, `google`, `google-vertex`, `github-copilot`, `kimi-coding`, `kimi-for-coding`, `moonshotai`, `openai`, `openai-codex`, `opencode`, `opencode-go`, `qwen-token-plan`, `qwen-token-plan-cn`, `vercel`, `xai`, `xiaomi`, `zai`, `zai-coding-cn`, `zai-coding-plan`, `custom` |
+| `handoff_hint` | `saving_usd` | `number` | - |
+| `handoff_hint` | `subscription` | `boolean` | - |
 | `kibitzer_summary` | `$session_id` | `string` | - |
 | `kibitzer_summary` | `buffered_cooldown` | `number` | - |
 | `kibitzer_summary` | `buffered_no_new_candidate` | `number` | - |
@@ -270,6 +279,10 @@ Every event above also carries these properties.
 `computer_use_permission_denied` separates OS capability blocks from OmO permission rules. `scope = os` reports which fixed capability is unavailable (`capture`, `input`, or `ax`) after activation. `scope = tier` reports a denied `computer:read` or `computer:exec` request. It never includes the permission rule, feedback, tool arguments, screen state, or requested action.
 
 `computer_use_engine_error` reports the frozen desktop protocol error code, startup diagnostics (`native-unavailable`, `quarantined`, `abi-mismatch`), or `other`. Error messages, recovery hints, engine paths, coordinates, window data, application names, and typed text stay local. Backend and `host_platform` values are allowlisted; unknown values become `other`. The field is named `host_platform` because the shared telemetry envelope already owns `platform = omo-senpi`.
+
+### Handoff-hint events
+
+`handoff_hint` records the cost hint OmO shows when a large session's prompt cache has expired (senpi#3230). `action` is `shown` when the one-line hint appears, `accepted` when the user starts a fresh session from it, and `dismissed` when the user picks Keep going. `context_tokens`, `next_reply_usd`, `fresh_usd` and `saving_usd` are the numbers the hint itself displayed (rounded to cents); `subscription` says whether the dollars were API-price equivalents on a subscription. The handoff brief, the session's text, file paths and the old session's path never leave the machine.
 
 ### Parallelism v2 interpretation
 
