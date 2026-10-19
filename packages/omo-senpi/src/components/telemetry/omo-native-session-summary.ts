@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto"
 import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import type { TelemetrySessionRole } from "./session-role"
-import { CORRUPT, removeFile } from "./session-summary-files"
-import { createSummaryPublisher, type PublishSummary } from "./session-summary-publisher"
-import { createLazySummaryRecovery, type LoadSummaryRecovery } from "./session-summary-lazy-recovery"
+import { CORRUPT } from "./session-summary-files"
+import type { SummaryPublish } from "./session-summary-delivery"
+import { createSummaryPublisher } from "./session-summary-publisher"
+import { createLazySummaryRecovery, memoizeLoad, type LoadSummaryRecovery } from "./session-summary-lazy-recovery"
 import { isSessionSampled } from "./session-summary-sampling"
 import { isRecordSendable, type ConsentScope, type SummaryStorage, type WindowRecord } from "./session-summary-storage"
 import { addTurn, newSummaryEpoch, openWindow, type EndedBy, type SummaryTurn, type SummaryWindow } from "./session-summary-window"
@@ -38,7 +39,8 @@ export type SessionSummaryOptions = {
    */
   readonly scheduleConsentCheck?: (check: () => void) => () => void
   readonly storage: SummaryStorage
-  readonly publish: PublishSummary
+  /** The capture state publishes through the sidecar, so the entry bundle carries no publish code. */
+  readonly publish: SummaryPublish
   readonly sessionRole: TelemetrySessionRole
   /** Read when a window opens; the component resolves config, env and sink lazily behind it. */
   readonly sampleRate: () => number
@@ -47,7 +49,7 @@ export type SessionSummaryOptions = {
   readonly scheduleHeartbeat?: ScheduleHeartbeat
   /** Events the transport knows it dropped since the last call (todo 21 wires the OTLP sender's counter). */
   readonly droppedEvents?: () => number
-  /** Loads the recovery sweep; defaults to the `#omo-telemetry-recovery-runtime` sidecar. */
+  /** Loads the recovery sweep and the send step; defaults to the `#omo-telemetry-recovery-runtime` sidecar. */
   readonly loadRecovery?: LoadSummaryRecovery
 }
 
@@ -66,7 +68,7 @@ export type SessionSummaryRecorder = {
   readonly dispose: () => void
 }
 
-type Live = {
+export type LiveWindow = {
   key: string
   epoch: string
   seq: number
@@ -81,14 +83,18 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
   const isConsented = options.isConsented ?? (() => true)
   const consentScope = options.consentScope ?? (() => ({}))
   const isScopeConsented = options.isScopeConsented ?? (() => true)
+  // A normal turn loads nothing: the sidecar is loaded when a window closes, a sweep has work, or a session
+  // continues a window another process wrote (only the sidecar can tell whether that owner is alive).
+  const loadSidecar = memoizeLoad(options.loadRecovery ?? (() => import("#omo-telemetry-recovery-runtime")))
   const publisher = createSummaryPublisher({
     storage,
     publish: options.publish,
+    loadDelivery: loadSidecar,
     isScopeConsented,
     ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
     ...(options.droppedEvents === undefined ? {} : { transportDropped: options.droppedEvents }),
   })
-  const live = new Map<string, Live>()
+  const live = new Map<string, LiveWindow>()
   // Window files this process wrote, by session; the periodic consent check runs only while one exists.
   const onDisk = new Map<string, string>()
   const recovery = createLazySummaryRecovery({
@@ -96,8 +102,8 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     publisher,
     isScopeConsented,
     ownWindowKeys: () => onDisk.values(),
+    load: loadSidecar,
     ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
-    ...(options.loadRecovery === undefined ? {} : { load: options.loadRecovery }),
   })
   let disarmConsentCheck: (() => void) | undefined
   let swept = false
@@ -119,16 +125,9 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     if (onDisk.get(sessionHash) === key) track(sessionHash, undefined)
   }
 
-  const report = (error: unknown): void => {
-    options.diagnostics?.({
-      event: "telemetry_activity_state_write_failed",
-      source: "omo-native-session-summary",
-      error: error instanceof Error ? error : new Error(String(error)),
-      errorKind: error instanceof Error ? "error" : "non_error",
-    })
-  }
+  const report = (error: unknown): void => publisher.report("telemetry_activity_state_write_failed", error)
 
-  const recordOf = (sessionHash: string, entry: Live): WindowRecord => ({
+  const recordOf = (sessionHash: string, entry: LiveWindow): WindowRecord => ({
     consent: "enabled",
     scope: consentScope(),
     sessionHash,
@@ -142,7 +141,7 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     window: entry.window,
   })
 
-  const persist = (sessionHash: string, entry: Live): void => {
+  const persist = (sessionHash: string, entry: LiveWindow): void => {
     try {
       storage.writeWindow(entry.key, recordOf(sessionHash, entry))
       track(sessionHash, entry.key)
@@ -173,6 +172,12 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
   const heartbeat = (): void => {
     purgeIfOptedOut()
     if (!isConsented()) return
+    // An idle session writes no window, so the tick itself keeps this owner's entry (boot id, start time) on disk.
+    try {
+      storage.register()
+    } catch (error) {
+      report(error)
+    }
     for (const [sessionHash, entry] of live) if (entry.window !== null) persist(sessionHash, entry)
     void runSweep()
   }
@@ -200,12 +205,27 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     return runSweep()
   }
 
+  const isOwn = (owner: WindowRecord["owner"]) => owner.pid === storage.owner.pid && owner.bootId === storage.owner.bootId
+
+  // Before a session adopts a window another process wrote, the sidecar (owner liveness, claims) must be loaded.
+  const loadLivenessFor = (sessionHash: string): Promise<unknown> | undefined => {
+    if (live.has(sessionHash) || recovery.runtime() !== undefined) return undefined
+    const stored = storage.readWindow(storage.windowKey(sessionHash))
+    return typeof stored === "object" && !isOwn(stored.owner) ? recovery.load().catch(report) : undefined
+  }
+
+  // What a turn or shutdown waits for first: the first sweep, then the liveness check it may need.
+  const ready = (sessionHash: string): Promise<unknown> | undefined => {
+    const sweeping = sweepOnce()
+    return sweeping === undefined ? loadLivenessFor(sessionHash) : sweeping.then(() => loadLivenessFor(sessionHash))
+  }
+
   const ensureHeartbeat = (): void => {
     if (stopHeartbeat !== undefined) return
     stopHeartbeat = (options.scheduleHeartbeat ?? scheduleUnrefInterval)(heartbeat, HEARTBEAT_INTERVAL_MS)
   }
 
-  const liveFor = (sessionHash: string): Live => {
+  const liveFor = (sessionHash: string): LiveWindow => {
     const cached = live.get(sessionHash)
     if (cached !== undefined) return cached
     const entry = adopt(sessionHash)
@@ -217,9 +237,9 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
   // of a dead owner (claimed first, so two resuming processes never both continue it). Continuing a file keeps
   // its epoch and seq; anything else (no usable file, a LIVE process's file, a lost claim) starts a new epoch at
   // seq 0, so an own copy beside another process's window can never publish that window's (epoch, seq).
-  const adopt = (sessionHash: string): Live => {
+  const adopt = (sessionHash: string): LiveWindow => {
     const key = storage.windowKey(sessionHash)
-    const fresh = (entryKey = key, epoch = newSummaryEpoch(), seq = 0): Live => ({
+    const fresh = (entryKey = key, epoch = newSummaryEpoch(), seq = 0): LiveWindow => ({
       key: entryKey, epoch, seq, sampleRate: options.sampleRate(), windowId: null, window: null,
     })
     const ownCopy = storage.windowKey(sessionHash, true)
@@ -230,29 +250,14 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
       storage.removeWindow(key)
       return fresh()
     }
-    if (stored.owner.pid === storage.owner.pid && stored.owner.bootId === storage.owner.bootId) {
+    if (isOwn(stored.owner)) {
       return { key, epoch: stored.epoch ?? newSummaryEpoch(), seq: stored.seq, sampleRate: stored.sampleRate, windowId: stored.windowId, window: stored.window }
     }
-    if (storage.isOwnerAlive(stored.owner)) return fresh(ownCopy)
-    const claimed = storage.claimWindow(key)
-    // Another process won the claim and now continues the shared file: this one keeps its own copy beside it.
-    if (claimed === undefined) return fresh(ownCopy)
-    const record = claimed.record
-    if (record === undefined || record === CORRUPT || !isRecordSendable(record, isScopeConsented)) {
-      removeFile(claimed.claimPath)
-      return fresh()
-    }
-    const epoch = record.epoch ?? newSummaryEpoch()
-    const published = record.windowId !== null && storage.hasPending(record.windowId)
-    const entry: Live = published || record.window === null
-      ? fresh(key, epoch, published ? record.seq + 1 : record.seq)
-      : { key, epoch, seq: record.seq, sampleRate: record.sampleRate, windowId: record.windowId, window: record.window }
-    persist(sessionHash, entry)
-    removeFile(claimed.claimPath)
-    return entry
+    // Without the sidecar (its load failed, already reported) the owner counts as alive: nothing is claimed.
+    return recovery.runtime()?.adopt({ key, ownCopy, stored, isScopeConsented, fresh, persist: (entry) => persist(sessionHash, entry) }) ?? fresh(ownCopy)
   }
 
-  const close = (sessionHash: string, entry: Live, endedBy: EndedBy, keepFile: boolean): void => {
+  const close = (sessionHash: string, entry: LiveWindow, endedBy: EndedBy, keepFile: boolean): void => {
     const window = entry.window ?? openWindow(now(), 0)
     const windowId = entry.windowId ?? randomUUID()
     const seq = entry.seq
@@ -280,8 +285,8 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     },
     async recordTurn(sessionHash, turn) {
       if (!isConsented()) return discard(sessionHash)
-      const sweeping = sweepOnce()
-      if (sweeping !== undefined) await sweeping
+      const waiting = ready(sessionHash)
+      if (waiting !== undefined) await waiting
       ensureHeartbeat()
       const entry = liveFor(sessionHash)
       const at = now()
@@ -300,8 +305,8 @@ export function createSessionSummaryRecorder(options: SessionSummaryOptions): Se
     },
     async finish(sessionHash, reason) {
       if (!isConsented()) return discard(sessionHash)
-      const sweeping = sweepOnce()
-      if (sweeping !== undefined) await sweeping
+      const waiting = ready(sessionHash)
+      if (waiting !== undefined) await waiting
       const entry = liveFor(sessionHash)
       live.delete(sessionHash)
       if (live.size === 0) {

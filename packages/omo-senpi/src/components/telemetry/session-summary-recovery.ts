@@ -2,6 +2,9 @@ import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, removeFile, renameIfPresent } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
+import type { LiveWindow } from "./omo-native-session-summary"
+import { adoptForeignWindow } from "./session-summary-adopt"
+import { withRecoveryOps, type RecoveryStorage } from "./session-summary-recovery-storage"
 import { newSummaryEpoch } from "./session-summary-window"
 import {
   OWNER_STALE_MS,
@@ -15,6 +18,13 @@ import {
   type WindowRecord,
 } from "./session-summary-storage"
 
+// The sidecar's whole surface: this file is the `#omo-telemetry-recovery-runtime` entry, and the bundle maps
+// telemetry-core's `#telemetry-immediate-send` here too, so every lazily loaded telemetry part shares one file.
+// The sender comes from its own module, not the telemetry-core barrel, so posthog-node stays out of the sidecar.
+export { adoptForeignWindow, withRecoveryOps }
+export { sendSummaryRecord } from "./session-summary-delivery"
+export { createImmediateSender } from "@oh-my-opencode/telemetry-core/immediate-send"
+
 export type SummaryRecovery = {
   /** One pass over the summary directory; safe to run concurrently from any number of processes. */
   readonly sweep: () => void
@@ -23,7 +33,7 @@ export type SummaryRecovery = {
 }
 
 export function createSummaryRecovery(input: {
-  readonly storage: SummaryStorage
+  readonly storage: RecoveryStorage
   readonly publisher: SummaryPublisher
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   /** Consent re-read for a record's originating scope before it is sent or continued; defaults to consented. */
@@ -62,7 +72,8 @@ export function createSummaryRecovery(input: {
       return undefined
     }
     const nextSeq = record.window === null ? record.seq : record.seq + 1
-    const epoch = record.epoch ?? newSummaryEpoch()
+    // Published and continued under a new epoch: an owner misjudged dead that still publishes never repeats a pair.
+    const epoch = newSummaryEpoch()
     // A dead process's own copy is never continued (its key names that process), so it is not recreated.
     const keepNumbering = () => {
       if (!storage.isOwnCopyKey(key)) {
@@ -179,5 +190,25 @@ export function createSummaryRecovery(input: {
       sweepPending()
       sweepWindows()
     },
+  }
+}
+
+export type RecoveryRuntime = {
+  readonly sweep: () => void
+  /** Continues another process's window for this session (see `adoptForeignWindow`). */
+  readonly adopt: (input: Omit<Parameters<typeof adoptForeignWindow>[0], "storage">) => LiveWindow
+}
+
+/** The recorder's whole recovery side, built once on the first sidecar load. */
+export function createRecoveryRuntime(input: {
+  readonly storage: SummaryStorage
+  readonly publisher: SummaryPublisher
+  readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
+  readonly isScopeConsented?: (scope: ConsentScope) => boolean
+}): RecoveryRuntime {
+  const storage = withRecoveryOps(input.storage)
+  return {
+    sweep: createSummaryRecovery({ ...input, storage }).sweep,
+    adopt: (args) => adoptForeignWindow({ storage, ...args }),
   }
 }

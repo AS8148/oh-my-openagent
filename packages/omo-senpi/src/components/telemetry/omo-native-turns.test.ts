@@ -35,6 +35,7 @@ function createRecorder(): {
     handle: createOmoNativeTurnHandler({
       client,
       diagnostics: (input) => diagnostics.push(input),
+      isConsented: () => true,
       sessionId: "hashed-session",
       sessionRole: "root",
       summary: createTestRecorder({ dir: stateDirs.make(), sampleRate: 1 }).summary,
@@ -44,7 +45,7 @@ function createRecorder(): {
 
 test("#given a known model routed through an unknown provider #when the summary records it #then the model stays named and only the provider is custom", async () => {
   const recorder = createTestRecorder({ dir: stateDirs.make(), sampleRate: 0 })
-  const handle = createOmoNativeTurnHandler({ client: { captureEvent: () => undefined }, sessionId: "s", sessionRole: "root", summary: recorder.summary })
+  const handle = createOmoNativeTurnHandler({ client: { captureEvent: () => undefined }, isConsented: () => true, sessionId: "s", sessionRole: "root", summary: recorder.summary })
 
   handle(turnEvent({ provider: "my-private-gateway", model: "gpt-5.6-sol" }))
   await recorder.summary.finish("s", "quit")
@@ -60,6 +61,7 @@ describe("integer cost accounting", () => {
     const recorder = createTestRecorder({ dir: stateDirs.make(), sampleRate: 1 })
     const handle = createOmoNativeTurnHandler({
       client: { captureEvent: (name, properties) => captured.push({ name, properties }) },
+      isConsented: () => true,
       sessionId: "s",
       sessionRole: "root",
       summary: recorder.summary,
@@ -93,6 +95,36 @@ describe("integer cost accounting", () => {
     expect(forward.summaryTotal).toBe(sumOfTurns)
     expect(backward.summaryTotal).toBe(sumOfTurns)
   })
+})
+
+// Sampling is decided per session, long before a turn is sent. Consent must be read again at send time:
+// a session that was sampled while opted in and is then opted out must not send a raw turn.
+test("#given a sampled session whose consent is withdrawn between sampling and send #when the turn ends #then no turn_completed is sent", () => {
+  // given
+  const sent: string[] = []
+  let consent = true
+  const { summary } = createTestRecorder({ dir: stateDirs.make(), sampleRate: 1 })
+  const handle = createOmoNativeTurnHandler({
+    client: { captureEvent: (name) => sent.push(name) },
+    isConsented: () => consent,
+    sessionId: "sampled",
+    sessionRole: "root",
+    summary: {
+      ...summary,
+      isRawTurnSampled: (sessionHash) => {
+        const sampled = summary.isRawTurnSampled(sessionHash)
+        consent = false
+        return sampled
+      },
+    },
+  })
+
+  // when
+  handle(turnEvent())
+
+  // then
+  expect(consent).toBe(false)
+  expect(sent).toEqual([])
 })
 
 function turnEvent(input: {

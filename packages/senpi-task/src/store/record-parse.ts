@@ -9,6 +9,7 @@ import { AWAITING_INPUT_REASONS } from "../state/types"
 import { parseTaskId } from "../state/id"
 import {
   parseNotification,
+  parseOptionalEffectiveModel,
   parseOptionalIsolation,
   parseOptionalHostSession,
   parseOptionalOwner,
@@ -62,6 +63,10 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const finalResponse = readOptionalString(value, "final_response")
   const isolation = parseOptionalIsolation(value)
   const errorMessage = readOptionalString(value, "error_message")
+  const stopReason = readOptionalString(value, "stop_reason")
+  if (stopReason !== undefined && stopReason !== "deadline") throw new Error("stop_reason must be deadline")
+  const deadline = value["deadline"]
+  if (deadline !== undefined && !isRecord(deadline)) throw new Error("deadline is not an object")
   const startedAt = readOptionalString(value, "started_at")
   const terminalAt = readOptionalString(value, "terminal_at")
   const killed = readOptionalBoolean(value, "killed")
@@ -72,7 +77,7 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const fallbackAttempts = parseOptionalResolvedModelArray(value, "fallback_attempts")
   const resolvedModel = parseOptionalResolvedModel(value, "resolved_model")
   const resolvedTier = isRecord(value["resolved_model"]) ? readOptionalString(value["resolved_model"], "service_tier") : undefined
-  const effectiveModel = parseOptionalResolvedModel(value, "effective_model")
+  const effectiveModel = parseOptionalEffectiveModel(value)
   const effectiveTier = isRecord(value["effective_model"]) ? readOptionalString(value["effective_model"], "service_tier") : undefined
   const spawnSpec = parseOptionalSpawnSpec(value)
   const owner = parseOptionalOwner(value)
@@ -91,6 +96,8 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const revivalDeferredReason = readOptionalString(value, "revival_deferred_reason")
   const recoveryDeadlineAt = readOptionalNumber(value, "recovery_deadline_at")
   const failureKind = readOptionalTaskStartFailureKind(value)
+  // An unknown cause (a newer build's) is dropped: the record still parses and the interrupt stays silent.
+  const interruptCause = value.interrupt_cause === "session_replaced" ? "session_replaced" : undefined
   const failureReason = readOptionalTaskStartFailureReason(value)
   const hostSession = parseOptionalHostSession(value)
   validateHostSessionConsistency(runnerKind, hostSession)
@@ -103,6 +110,7 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
 
   return {
     ...(value.effect_seq === undefined ? {} : { effect_seq: readNumber(value, "effect_seq") }),
+    ...(value.last_effect_id === undefined ? {} : { last_effect_id: readString(value, "last_effect_id") }),
     ...(value.uncertain_inputs === undefined ? {} : { uncertain_inputs: parseUncertainInputs(value.uncertain_inputs) }),
     task_id: parseTaskId(readString(value, "task_id")),
     status,
@@ -149,7 +157,10 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
     ...(finalResponse === undefined ? {} : { final_response: finalResponse }),
     ...(isolation === undefined ? {} : { isolation }),
     ...(errorMessage === undefined ? {} : { error_message: errorMessage }),
+    ...(stopReason === undefined ? {} : { stop_reason: stopReason }),
+    ...(deadline === undefined ? {} : { deadline }),
     ...(failureKind === undefined ? {} : { failure_kind: failureKind }),
+    ...(interruptCause === undefined ? {} : { interrupt_cause: interruptCause }),
     ...(failureReason === undefined ? {} : { failure_reason: failureReason }),
     ...(killed === undefined ? {} : { killed }),
     ...(runStats === undefined ? {} : { run_stats: runStats }),

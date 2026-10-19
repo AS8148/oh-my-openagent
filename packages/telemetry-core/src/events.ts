@@ -140,14 +140,13 @@ export function createEventTelemetryClient(
         projected[key] = typeof value === "string" ? value.slice(0, 64) : value
       }
 
-      // event_id is minted here so a product cannot supply it through properties; PostHog dedupes on
-      // `uuid`, so mirroring it there makes a direct and a relayed delivery of one event collapse. A caller
-      // re-sending a persisted event (session_summary pending files) passes its stable uuid, which then
-      // doubles as event_id so the collector dedupes the re-send too.
       const uuid = options?.uuid
       if (uuid !== undefined && !EVENT_UUID.test(uuid)) {
         report("telemetry_event_property_rejected", new Error("invalid event uuid"))
       }
+      // event_id is minted last so no event property can supply it; PostHog dedupes on `uuid`, so
+      // mirroring it there makes a direct and a relayed delivery of one event collapse. A re-send passes
+      // the uuid it first carried, so its event_id stays that same id.
       const eventId = uuid !== undefined && EVENT_UUID.test(uuid) ? uuid : createEventId()
       const payload: TelemetryCaptureMessage = {
         distinctId: input.distinctId,

@@ -1,4 +1,4 @@
-import type { PostHogOptions } from "posthog-node";
+import type { PostHog, PostHogOptions } from "posthog-node";
 
 export declare const DEFAULT_POSTHOG_HOST: "https://us.i.posthog.com";
 export declare const DEFAULT_POSTHOG_API_KEY: "phc_CFJhj5HyvA62QPhvyaUCtaq23aUfznnijg5VaaGkNk74";
@@ -24,9 +24,11 @@ export type TelemetryDiagnosticEvent =
   | "telemetry_activity_state_write_failed"
   | "telemetry_capture_failed"
   | "telemetry_cpu_info_unavailable"
+  | "telemetry_drop_flush_failed"
   | "telemetry_event_property_dropped"
   | "telemetry_event_property_rejected"
   | "telemetry_event_rejected"
+  | "telemetry_events_dropped_by_consent"
   | "telemetry_posthog_import_failed"
   | "telemetry_posthog_init_failed"
   | "telemetry_shutdown_failed";
@@ -38,6 +40,7 @@ export type TelemetryDiagnosticInput = {
   readonly source: string;
   readonly error?: unknown;
   readonly errorKind?: TelemetryDiagnosticErrorKind;
+  readonly count?: number;
 };
 
 export type TelemetryProductConfig = {
@@ -77,6 +80,28 @@ export type TelemetryTransportOptions = {
   readonly disableRemoteConfig: boolean;
   readonly flushAt: number;
   readonly flushInterval: number;
+  readonly fetch?: TelemetryFetch;
+};
+
+export type TelemetryFetchOptions = {
+  readonly method: "GET" | "POST" | "PUT" | "PATCH";
+  readonly headers: { readonly [key: string]: string };
+  readonly body?: string | Blob | Uint8Array;
+  readonly signal?: AbortSignal;
+};
+
+export type TelemetryFetchResponse = {
+  readonly status: number;
+  readonly text: () => Promise<string>;
+  readonly json: () => Promise<unknown>;
+};
+
+export type TelemetryFetch = (url: string, options: TelemetryFetchOptions) => Promise<TelemetryFetchResponse>;
+
+export type ConsentGatedFetchInput = {
+  readonly isSendAllowed: () => boolean;
+  readonly onDropped?: (count: number) => void;
+  readonly fetch?: TelemetryFetch;
 };
 
 export type TelemetryTransport = {
@@ -190,6 +215,15 @@ export declare class TelemetryDeliveryError extends Error {
   readonly status: number | undefined;
   constructor(status: number | undefined, cause?: unknown);
 }
+/** One-at-a-time immediate sender; resolves on a 2xx answer, otherwise rejects with `TelemetryDeliveryError`. */
+export declare function createImmediateSender(
+  apiKey: string,
+  options: PostHogOptions,
+  PostHogClient: typeof PostHog,
+): {
+  readonly send: (message: TelemetryCaptureMessage) => Promise<void>;
+  readonly shutdown: () => Promise<void>;
+};
 /** The transport options plus posthog-node's own knobs (fetch, retries, timeouts), passed through as given. */
 export type PostHogTransportOptions = TelemetryTransportOptions & PostHogOptions;
 export declare function createDefaultPostHogTransport(
@@ -197,6 +231,7 @@ export declare function createDefaultPostHogTransport(
   options: PostHogTransportOptions,
 ): TelemetryTransport;
 export declare function isTelemetryClientEnabled(input: TelemetryClientEnabledInput): boolean;
+export declare function createConsentGatedFetch(input: ConsentGatedFetchInput): TelemetryFetch;
 export declare function createTelemetryClient(input: {
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void;
   readonly env?: TelemetryEnv;

@@ -84,7 +84,7 @@ export function registerMemoryStatic(input: {
     nudgeWiring.register(pi)
     noticeWiring.register(pi)
   }
-  const projectionPins = createProjectionPins()
+  const projectionPins = createProjectionPins(options.deviceName === undefined ? {} : { deviceName: options.deviceName })
   const entryApi = hasMemoryCapabilities(pi) ? pi : undefined
   const promptHandler = createPromptHandler({
     resolveContext,
@@ -216,7 +216,7 @@ export function registerMemoryStatic(input: {
         if (result === null) throw new Error("reflection reservation rejected")
         if (result.status === "parked") throw new Error("manual reflection must bypass the park gate")
         if (result.status === "active") {
-          runtime.launch(result.run)
+          void runtime.launch(result.run)
           await onReflectionLaunch?.(identity.identity, result.run)
         }
         return { disposition: result.status === "active" ? "reserved" : "pending", runId: result.run.runId }

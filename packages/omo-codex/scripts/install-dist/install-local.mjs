@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:d48645f5c1c234da3595ac46de498743d637141045b280a02dd47e5a222a0644:c45b105beaf5591ccb1602d58580b947d9315c968eca58e5e095da606e8ffa79
+// omo-codex-install:f26094cc994df527fa26034d5aea1cc1ac3d1332a54a390edfa7041b32ad80b0:db0540bf73f6ea181a271aca2f26ec8c9cdc244ce660e52c9f2655c4b63ac4eb
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -234,6 +234,9 @@ var init_activity_state = __esm(() => {
   capturedDaysByStateDir = new Map;
 });
 
+// packages/telemetry-core/src/consent-gated-fetch.ts
+var init_consent_gated_fetch = () => {};
+
 // packages/telemetry-core/src/constants.ts
 var DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com", DEFAULT_POSTHOG_API_KEY = "phc_CFJhj5HyvA62QPhvyaUCtaq23aUfznnijg5VaaGkNk74", UNCONFIGURED_POSTHOG_API_KEY = "phc_REPLACE_ME_OMO_NATIVE";
 
@@ -281,6 +284,7 @@ function toDiagnosticRecord(input, now) {
     timestamp: now.toISOString(),
     event: input.event,
     source: input.source,
+    ...input.count === undefined ? {} : { count: input.count },
     ...serializeError(input.error, input.errorKind)
   };
 }
@@ -373,7 +377,7 @@ function shouldDisableTelemetry(input) {
   const env = input.env ?? process.env;
   const globalPrefix = input.globalEnvPrefix ?? "OMO";
   const prefixes = Array.from(new Set([globalPrefix, input.productEnvPrefix]));
-  if (isDisableFlag(env["DO_NOT_TRACK"])) {
+  if (isDisableFlag(env["DO_NOT_TRACK"]) || isDisableFlag(env[`${globalPrefix}_DISABLE_TELEMETRY`])) {
     return true;
   }
   for (const prefix of prefixes) {
@@ -403,6 +407,47 @@ var TRUTHY_DISABLE_VALUES, SEND_OPT_OUT_VALUES;
 var init_env = __esm(() => {
   TRUTHY_DISABLE_VALUES = ["1", "true", "yes"];
   SEND_OPT_OUT_VALUES = ["0", "false", "no", "yes"];
+});
+
+// packages/telemetry-core/src/event-id.ts
+import { randomBytes as nodeRandomBytes } from "node:crypto";
+function createUuidV7Generator(source = {}) {
+  const now = source.now ?? Date.now;
+  const randomBytes = source.randomBytes ?? ((size) => new Uint8Array(nodeRandomBytes(size)));
+  let lastMs = -1;
+  let counter = 0;
+  return () => {
+    const random = randomBytes(10);
+    const wallMs = Math.floor(now());
+    if (wallMs > lastMs) {
+      lastMs = wallMs;
+      counter = (random[0] << 8 | random[1]) & COUNTER_SEED_MASK;
+    } else if (counter < MAX_COUNTER) {
+      counter += 1;
+    } else {
+      lastMs += 1;
+      counter = (random[0] << 8 | random[1]) & COUNTER_SEED_MASK;
+    }
+    const bytes = new Uint8Array(16);
+    let timestamp = lastMs;
+    for (let index = 5;index >= 0; index -= 1) {
+      bytes[index] = timestamp % 256;
+      timestamp = Math.floor(timestamp / 256);
+    }
+    bytes[6] = 112 | counter >> 8;
+    bytes[7] = counter & 255;
+    bytes[8] = 128 | random[2] & 63;
+    bytes.set(random.subarray(3, 10), 9);
+    return formatUuid(bytes);
+  };
+}
+function formatUuid(bytes) {
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+var MAX_COUNTER = 4095, COUNTER_SEED_MASK = 2047, fallbackEventId;
+var init_event_id = __esm(() => {
+  fallbackEventId = createUuidV7Generator();
 });
 
 // node_modules/.bun/posthog-node@5.52.4/node_modules/posthog-node/dist/extensions/error-tracking/modifiers/module.node.mjs
@@ -9789,85 +9834,20 @@ function getTelemetryDistinctId(machineIdPrefix, osProvider = getDefaultTelemetr
 }
 var init_machine_id = () => {};
 
-// packages/telemetry-core/src/posthog-immediate-send.ts
-function createImmediateSender(apiKey, options) {
-  const baseFetch = options.fetch ?? ((url, init) => fetch(url, init));
-  let current;
-  const trackedFetch = async (url, init) => {
-    const attempt = current;
-    try {
-      const response = await baseFetch(url, init);
-      if (attempt !== undefined)
-        attempt.status = response.status;
-      return response;
-    } catch (error) {
-      if (attempt !== undefined)
-        attempt.error = error;
-      throw error;
-    }
-  };
-  const client = new PostHog(apiKey, { ...options, fetch: trackedFetch, fetchRetryCount: 0 });
-  let queue = Promise.resolve();
-  const sendOne = async (message) => {
-    const attempt = {};
-    current = attempt;
-    try {
-      await client.captureImmediate(message);
-    } finally {
-      current = undefined;
-    }
-    const { status } = attempt;
-    if (status === undefined || status < 200 || status >= 300)
-      throw new TelemetryDeliveryError(status, attempt.error);
-  };
-  return {
-    send(message) {
-      const result = queue.then(() => sendOne(message));
-      queue = result.catch(() => {
-        return;
-      });
-      return result;
-    },
-    async shutdown() {
-      await client.shutdown();
-    }
-  };
-}
-var PERMANENT_STATUSES, TelemetryDeliveryError;
-var init_posthog_immediate_send = __esm(() => {
-  init_index_node();
-  PERMANENT_STATUSES = new Set([400, 413]);
-  TelemetryDeliveryError = class TelemetryDeliveryError extends Error {
-    permanent;
-    status;
-    constructor(status, cause) {
-      super(status === undefined ? "telemetry event was not delivered (no response)" : `telemetry event was rejected with HTTP ${status}`, { cause });
-      this.name = "TelemetryDeliveryError";
-      this.status = status;
-      this.permanent = status !== undefined && PERMANENT_STATUSES.has(status);
-    }
-  };
-});
-
 // packages/telemetry-core/src/posthog-client.ts
 class PostHogTelemetryTransport {
   #client;
-  #immediate;
   constructor(apiKey, options) {
     this.#client = new PostHog(apiKey, options);
-    this.#immediate = createImmediateSender(apiKey, options);
   }
   capture(message) {
     this.#client.capture(message);
-  }
-  captureImmediate(message) {
-    return this.#immediate.send(message);
   }
   async flush() {
     await this.#client.flush();
   }
   async shutdown() {
-    await Promise.all([this.#client.shutdown(), this.#immediate.shutdown()]);
+    await this.#client.shutdown();
   }
 }
 function createDefaultPostHogTransport(apiKey, options) {
@@ -10005,7 +9985,6 @@ var init_posthog_client = __esm(() => {
   init_index_node();
   init_env();
   init_machine_id();
-  init_posthog_immediate_send();
   NO_OP_CLIENT = {
     enabled: false,
     trackActive: () => {
@@ -10037,8 +10016,10 @@ var init_record_daily_active = () => {};
 // packages/telemetry-core/src/index.ts
 var init_src = __esm(() => {
   init_activity_state();
+  init_consent_gated_fetch();
   init_diagnostics();
   init_env();
+  init_event_id();
   init_events();
   init_machine_id();
   init_posthog_client();
@@ -10050,7 +10031,7 @@ var package_default;
 var init_package = __esm(() => {
   package_default = {
     name: "@oh-my-opencode/omo-codex",
-    version: "5.1.33",
+    version: "5.1.38",
     type: "module",
     private: true,
     description: "Codex harness adapter for oh-my-openagent. Vendored Codex plugin namespace (omo) + TypeScript installer + telemetry.",
@@ -10085,7 +10066,7 @@ var init_package = __esm(() => {
       "@oh-my-opencode/utils": "workspace:*"
     },
     devDependencies: {
-      "bun-types": "1.4.2"
+      "bun-types": "1.4.3"
     }
   };
 });
@@ -19968,8 +19949,7 @@ var OmoTeamsConfigLayerSchema = record(string2(), OmoTeamSpecLayerSchema);
 
 // packages/omo-config-core/src/schema/telemetry.ts
 var OmoTelemetrySettingsShape = {
-  enabled: boolean2(),
-  rawTurnSampleRate: number2().min(0).max(1)
+  enabled: boolean2()
 };
 var OmoTelemetrySettingsLayerSchema = object(OmoTelemetrySettingsShape).partial().strict();
 var OmoTelemetrySettingsSchema = OmoTelemetrySettingsLayerSchema.extend({

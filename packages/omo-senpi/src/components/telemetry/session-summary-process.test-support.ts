@@ -3,6 +3,7 @@ import { createInterface } from "node:readline"
 
 import { createSessionSummaryRecorder } from "./omo-native-session-summary"
 import { currentProcessOwner } from "./session-summary-owner"
+import { readProcessStartTime } from "./session-summary-process-start"
 import { createSummaryStorage, type SummaryStorage } from "./session-summary-storage"
 import { summaryTurn } from "./session-summary.test-support"
 
@@ -11,14 +12,21 @@ import { summaryTurn } from "./session-summary.test-support"
 // it answers `ok <n>` after command n has fully settled, so the test never sleeps or polls.
 //   turn <session> <turnIndex> <totalTokens>   finish <session> <reason>   advance <ms>   heartbeat   recover
 // SUMMARY_MODE: ack | throw-after-send | die-after-send | die-before-pending
+// SUMMARY_PLATFORM (optional): the platform the start-time probe answers for, e.g. win32 (no readable start time)
 
 const stateDir = requiredEnv("SUMMARY_STATE_DIR")
 const sink = requiredEnv("SUMMARY_SINK")
 const mode = process.env["SUMMARY_MODE"] ?? "ack"
+const platform = process.env["SUMMARY_PLATFORM"]
 let clock = Number(requiredEnv("SUMMARY_NOW"))
 let heartbeat: (() => void) | undefined
 
-const realStorage = createSummaryStorage({ stateDir, owner: currentProcessOwner(), now: () => clock })
+const realStorage = createSummaryStorage({
+  stateDir,
+  owner: currentProcessOwner(),
+  now: () => clock,
+  ...(platform === undefined ? {} : { processStartTime: (pid: number) => readProcessStartTime(pid, platform as typeof process.platform) }),
+})
 const storage: SummaryStorage = mode === "die-before-pending"
   ? { ...realStorage, writePending: () => process.kill(process.pid, "SIGKILL") }
   : realStorage

@@ -1,4 +1,6 @@
-import { TelemetryDeliveryError, type EventTelemetryProperties, type TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
+import type { EventTelemetryProperties, TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
+
+import type { sendSummaryRecord, SummaryPublish } from "./session-summary-delivery"
 
 import type { TelemetrySessionRole } from "./session-role"
 import { isRecordSendable, type ConsentScope, type PendingRecord, type RecordConsent, type SummaryStorage } from "./session-summary-storage"
@@ -38,13 +40,19 @@ export type SummaryPublisher = {
   readonly deliver: (record: PendingRecord) => Promise<void>
   readonly isInFlight: (uuid: string) => boolean
   readonly countDropped: (count: number) => void
+  /** The summary's one diagnostic path, shared with the recorder. */
+  readonly report: (event: TelemetryDiagnosticInput["event"], error: unknown) => void
   /** Resolves once every delivery started so far has been acknowledged or given up. */
   readonly settled: () => Promise<void>
 }
 
+/** Loads the send step; the recorder passes the recovery sidecar, so a run that never closes a window skips it. */
+export type LoadSummaryDelivery = () => Promise<{ readonly sendSummaryRecord: typeof sendSummaryRecord }>
+
 export function createSummaryPublisher(input: {
   readonly storage: SummaryStorage
-  readonly publish: PublishSummary
+  readonly publish: SummaryPublish
+  readonly loadDelivery: LoadSummaryDelivery
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly transportDropped?: () => number
   /** Consent for the scope a record came from, read now; defaults to consented. */
@@ -70,15 +78,17 @@ export function createSummaryPublisher(input: {
     return total
   }
 
+  const countDropped = (count: number): void => {
+    dropped += count
+  }
+
+  // A failed load keeps the pending file, exactly like a failed send, and the next delivery loads again.
   const send = async (record: PendingRecord): Promise<void> => {
     try {
-      if (await input.publish({ uuid: record.uuid, properties: record.properties, timestamp: record.createdAt })) input.storage.removePending(record.uuid)
+      const { sendSummaryRecord } = await input.loadDelivery()
+      await sendSummaryRecord(record, { storage: input.storage, publish: input.publish, report, countDropped })
     } catch (error) {
       report("telemetry_capture_failed", error)
-      if (error instanceof TelemetryDeliveryError && error.permanent) {
-        input.storage.removePending(record.uuid)
-        dropped += 1
-      }
     } finally {
       inFlight.delete(record.uuid)
     }
@@ -101,13 +111,12 @@ export function createSummaryPublisher(input: {
 
   return {
     deliver,
+    report,
     isInFlight: (uuid) => inFlight.has(uuid),
     settled: async () => {
       await Promise.all([...running])
     },
-    countDropped(count) {
-      dropped += count
-    },
+    countDropped,
     async publishWindow(closed, advanceSeq) {
       if (closed.consent !== "enabled") return
       const record: PendingRecord = {

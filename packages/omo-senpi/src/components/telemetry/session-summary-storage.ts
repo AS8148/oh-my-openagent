@@ -1,9 +1,8 @@
-import { linkSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { EventTelemetryProperties } from "@oh-my-opencode/telemetry-core"
 
-import { CORRUPT, listNames, readJsonOrCorrupt, removeFile, renameIfPresent, writeJsonAtomic } from "./session-summary-files"
-import { createOwnerRegistry, parseOwner, processIsAlive, type ProcessOwner } from "./session-summary-owner"
+import { CORRUPT, listNames, readJsonOrCorrupt, removeFile, writeJsonAtomic } from "./session-summary-files"
+import { createOwnerRegistry, parseOwner, type ProcessOwner } from "./session-summary-owner"
 import { parseTelemetrySessionRole, type TelemetrySessionRole } from "./session-role"
 import { SUMMARY_EPOCH_SHAPE, isSummaryWindow, type SummaryWindow } from "./session-summary-window"
 
@@ -61,35 +60,30 @@ export type PendingRecord = {
 export type Claimed<T> = { readonly record: T; readonly claimPath: string }
 export type ReadResult<T> = T | typeof CORRUPT | undefined
 
+/**
+ * What every run needs. The parts only recovery uses (owner liveness, leftovers, exclusive create, pending
+ * window and pending claims) are added by `withRecoveryOps` in the recovery sidecar, from `dir`, `register` and `probes`.
+ */
 export type SummaryStorage = {
+  readonly dir: string
   readonly owner: ProcessOwner
   readonly now: () => number
-  readonly isOwnerAlive: (owner: ProcessOwner) => boolean
+  /** The liveness probes recovery tells a dead owner apart with; absent ones default to the real probes. */
+  readonly probes: { readonly isPidAlive?: (pid: number) => boolean; readonly processStartTime?: (pid: number) => string | null }
+  /** Writes (or refreshes, at most once a minute) this process's owner entry. */
+  readonly register: () => void
   readonly windowKey: (sessionHash: string, ownCopy?: boolean) => string
-  /** A key one process wrote beside another process's window; nobody continues it once its writer is gone. */
-  readonly isOwnCopyKey: (key: string) => boolean
   readonly readWindow: (key: string) => ReadResult<WindowRecord>
   readonly writeWindow: (key: string, record: WindowRecord) => void
-  /** Exclusive create: never replaces a window another process wrote in the meantime. */
-  readonly createWindow: (key: string, record: WindowRecord) => boolean
   readonly removeWindow: (key: string) => void
   readonly windowKeys: () => readonly string[]
-  readonly claimWindow: (key: string) => Claimed<ReadResult<WindowRecord>> | undefined
   readonly writePending: (record: PendingRecord) => void
-  readonly readPending: (uuid: string) => ReadResult<PendingRecord>
   readonly removePending: (uuid: string) => void
-  readonly hasPending: (uuid: string) => boolean
   readonly pendingUuids: () => readonly string[]
-  readonly claimPending: (uuid: string) => Claimed<ReadResult<PendingRecord>> | undefined
-  readonly leftovers: () => readonly Leftover[]
 }
-
-export type Leftover = { readonly path: string; readonly owner: ProcessOwner; readonly kind: "temp" | "window-claim" | "pending-claim" }
 
 const SAFE_NAME = /^[A-Za-z0-9:_-]{1,128}$/
 const SAFE_UUID = /^[0-9a-f-]{36}$/
-const TEMP_FILE = /^.+\.(\d+)-([A-Za-z0-9-]{1,64})\.tmp$/
-const CLAIM_FILE = /^.+\.claimed-(\d+)-([A-Za-z0-9-]{1,64})$/
 
 export function summaryDir(stateDir: string): string {
   return join(stateDir, "session-summary")
@@ -110,14 +104,12 @@ export function createSummaryStorage(input: {
   const registry = createOwnerRegistry({
     dir,
     owner,
-    isPidAlive: input.isPidAlive ?? processIsAlive,
     ...(input.processStartTime === undefined ? {} : { processStartTime: input.processStartTime }),
     now,
   })
-  const claimSuffix = `.claimed-${owner.pid}-${owner.bootId}`
   const windowPath = (key: string) => join(dir, `${key}.json`)
   const pendingPath = (uuid: string) => join(pendingDir, `${uuid}.json`)
-  // The registry entry's heartbeat is what keeps an owner alive where its start time cannot be compared.
+  // The registry entry (boot id, start time) is what tells this owner from a later process on the same pid.
   let registeredAt: number | undefined
   const ensureRegistered = () => {
     if (registeredAt !== undefined && now() - registeredAt < OWNER_ENTRY_REFRESH_MS) return
@@ -125,67 +117,30 @@ export function createSummaryStorage(input: {
     registry.register()
   }
 
-  const claim = <T>(path: string, parse: (value: unknown) => T | undefined): Claimed<ReadResult<T>> | undefined => {
-    const claimPath = `${path}${claimSuffix}`
-    if (!renameIfPresent(path, claimPath)) return undefined
-    return { claimPath, record: parseRead(readJsonOrCorrupt(claimPath), parse) }
-  }
-
   return {
+    dir,
     owner,
     now,
-    isOwnerAlive: registry.isAlive,
+    probes: input,
+    register: ensureRegistered,
     windowKey: (sessionHash, ownCopy = false) => `${fileName(sessionHash)}${ownCopy ? `@${owner.bootId}` : ""}`,
-    isOwnCopyKey: (key) => key.includes("@"),
     readWindow: (key) => parseRead(readJsonOrCorrupt(windowPath(key)), parseWindowRecord),
     writeWindow(key, record) {
       ensureRegistered()
       writeJsonAtomic(windowPath(key), { v: 2, ...record }, owner)
     },
-    createWindow(key, record) {
-      ensureRegistered()
-      mkdirSync(dir, { recursive: true, mode: 0o700 })
-      const temp = `${windowPath(key)}.${owner.pid}-${owner.bootId}.tmp`
-      writeFileSync(temp, JSON.stringify({ v: 2, ...record }), { mode: 0o600 })
-      try {
-        linkSync(temp, windowPath(key))
-        return true
-      } catch {
-        return false
-      } finally {
-        unlinkSync(temp)
-      }
-    },
     removeWindow: (key) => removeFile(windowPath(key)),
     windowKeys: () => listNames(dir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -".json".length)),
-    claimWindow: (key) => claim(windowPath(key), parseWindowRecord),
     writePending(record) {
       ensureRegistered()
       writeJsonAtomic(pendingPath(record.uuid), { v: 2, ...record }, owner)
     },
-    readPending: (uuid) => parseRead(readJsonOrCorrupt(pendingPath(uuid)), parsePendingRecord),
     removePending: (uuid) => removeFile(pendingPath(uuid)),
-    hasPending: (uuid) => listNames(pendingDir).some((name) => name === `${uuid}.json` || name.startsWith(`${uuid}.json.claimed-`)),
     pendingUuids: () => listNames(pendingDir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -".json".length)),
-    claimPending: (uuid) => claim(pendingPath(uuid), parsePendingRecord),
-    leftovers: () => [
-      ...collectLeftovers(dir, "window-claim"),
-      ...collectLeftovers(pendingDir, "pending-claim"),
-    ],
   }
 }
 
-function collectLeftovers(dir: string, claimKind: "window-claim" | "pending-claim"): Leftover[] {
-  return listNames(dir).flatMap((name): Leftover[] => {
-    const claimMatch = CLAIM_FILE.exec(name)
-    const match = claimMatch ?? TEMP_FILE.exec(name)
-    const owner = match === null ? undefined : parseOwner({ pid: Number(match[1]), bootId: match[2] })
-    if (owner === undefined) return []
-    return [{ path: join(dir, name), owner, kind: claimMatch === null ? "temp" : claimKind }]
-  })
-}
-
-function parseRead<T>(value: unknown, parse: (value: unknown) => T | undefined): ReadResult<T> {
+export function parseRead<T>(value: unknown, parse: (value: unknown) => T | undefined): ReadResult<T> {
   if (value === undefined) return undefined
   if (value === CORRUPT) return CORRUPT
   return parse(value) ?? CORRUPT
@@ -220,7 +175,7 @@ export function parseWindowRecord(value: unknown): WindowRecord | undefined {
   }
 }
 
-function parsePendingRecord(value: unknown): PendingRecord | undefined {
+export function parsePendingRecord(value: unknown): PendingRecord | undefined {
   if (typeof value !== "object" || value === null || Reflect.get(value, "v") !== 2) return undefined
   const owner = parseOwner(Reflect.get(value, "owner"))
   const uuid: unknown = Reflect.get(value, "uuid")

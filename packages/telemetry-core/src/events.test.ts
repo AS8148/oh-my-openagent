@@ -235,8 +235,9 @@ describe("event telemetry client", () => {
   })
 
   // Protocol contract: a caller-supplied uuid reaches the wire so a re-sent event (session_summary's ack-gated
-  // pending file) deduplicates in PostHog; a malformed uuid is dropped with a diagnostic, never sent.
-  test("#given an event uuid #when captured #then a valid uuid is both the transport uuid and event_id, and a malformed or absent one gets a fresh uuidv7", () => {
+  // pending file) deduplicates in PostHog; a malformed uuid is rejected with a diagnostic and replaced by a
+  // freshly minted id, as is a missing one, and the id on the wire is always the event's event_id.
+  test("#given an event uuid #when captured #then a valid uuid reaches the transport and a malformed one is replaced", () => {
     const recorder = createRecorder()
     const diagnostics: TelemetryDiagnosticInput[] = []
     const client = createClient(recorder, diagnostics)
@@ -247,14 +248,10 @@ describe("event telemetry client", () => {
     client.captureEvent("session_started", { reason: "b" }, { uuid: "not-a-uuid" })
     client.captureEvent("session_started", { reason: "c" })
 
-    const [stable, malformed, absent] = recorder.messages
-    expect(stable?.uuid).toBe(uuid)
-    expect(stable?.properties?.["event_id"]).toBe(uuid)
-    for (const message of [malformed, absent]) {
-      expect(message?.uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-      expect(message?.properties?.["event_id"]).toBe(message?.uuid)
-    }
-    expect(malformed?.uuid).not.toBe(absent?.uuid)
+    const sent = recorder.messages.map((message) => message.uuid)
+    expect(sent[0]).toBe(uuid)
+    expect(sent.slice(1).every((id) => typeof id === "string" && id !== uuid && id !== "not-a-uuid")).toBe(true)
+    expect(recorder.messages.map((message) => message.properties?.event_id)).toEqual(sent)
     // A re-sent event keeps its original time: PostHog's dedup key is the uuid within the event's day.
     expect(recorder.messages.map((message) => message.timestamp?.getTime())).toEqual([createdAt.getTime(), undefined, undefined])
     expect(diagnostics.map((input) => input.event)).toEqual(["telemetry_event_property_rejected"])

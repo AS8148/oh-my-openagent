@@ -27,12 +27,12 @@ type Fixture = {
   readonly exited: Promise<number | null>
 }
 
-function startFixture(dir: string, now: number, mode = "ack"): Fixture {
+function startFixture(dir: string, now: number, mode = "ack", platform?: typeof process.platform): Fixture {
   const proc = Bun.spawn([process.execPath, FIXTURE], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "inherit",
-    env: { ...process.env, SUMMARY_STATE_DIR: dir, SUMMARY_SINK: join(dir, "sink.jsonl"), SUMMARY_NOW: String(now), SUMMARY_MODE: mode },
+    env: { ...process.env, SUMMARY_STATE_DIR: dir, SUMMARY_SINK: join(dir, "sink.jsonl"), SUMMARY_NOW: String(now), SUMMARY_MODE: mode, ...(platform === undefined ? {} : { SUMMARY_PLATFORM: platform }) },
   })
   const lines: string[] = []
   const waiters: Array<() => void> = []
@@ -119,12 +119,12 @@ describe("session_summary across killed processes", () => {
     expect(rows[0]?.properties).toMatchObject({ $session_id: "s1", ended_by: "recovered", turns: 2, total_tokens: 42, summary_seq: 0 })
   })
 
-  test("(b) #given two live processes on one session hash #when the second sweeps past the stale threshold #then it never claims the first's window", async () => {
+  test.each([["the host platform", undefined], ["the win32 probe (no readable start time)", "win32" as const]])("(b) #given two live processes on one session hash on %s #when the second sweeps past the stale threshold #then it never claims the first's window", async (_label, platform) => {
     const dir = stateDirs.make()
-    const owner = startFixture(dir, T0)
+    const owner = startFixture(dir, T0, "ack", platform)
     expect(await owner.send("turn s1 0 10")).toBe("ok")
 
-    const other = startFixture(dir, T0 + STALE * 3)
+    const other = startFixture(dir, T0 + STALE * 3, "ack", platform)
     expect(await other.send("recover")).toBe("ok")
     expect(await other.send("turn s1 5 7")).toBe("ok")
     expect(await other.send("finish s1 quit")).toBe("ok")
