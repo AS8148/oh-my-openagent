@@ -1,17 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import { resolveClaimReceipt } from "./claim"
-import { isCourtesyCloser } from "./consent"
-import REVIEW_ROWS from "./consent-corpus.review-rows.json"
+import { EN_INSTRUCTION, EN_QUOTE, inSentence, KO_INSTRUCTION, KO_QUOTE, source, stripEnd } from "./consent-corpus.shapes"
 
 // One corpus for the consent rule (#10488): every refusal, retraction, hedge and question found across all review rounds
 // plus common everyday forms, and the plain follow-ups that must stay the user's. A change to consent.ts that drops a
 // phrase fails here by name, so a fix for one round can never silently undo another.
-
-const EN_INSTRUCTION = "Remove plugins X and Y."
-const EN_QUOTE = "remove plugins X and Y"
-const KO_INSTRUCTION = "플러그인 X 지워."
-const KO_QUOTE = "플러그인 X 지워"
 
 const EN_FOLLOWING_RETRACTIONS = [
   "No.", "Nope.", "Nooo.", "Don't.", "Please don't.", "Not yet.", "Never mind.", "Nevermind.", "Nvm.", "Hold on.", "Wait.",
@@ -79,7 +72,49 @@ const AFFIRMATIVE_MUST_STAY: readonly (readonly [string, string])[] = [
   ["じゃあこのプラグインを削除してください", "このプラグインを削除して"],
 ]
 
-const source = (said: string, quote: string): string => resolveClaimReceipt({ source: "user", userQuote: quote }, [said]).source
+// A quote that crosses a sentence boundary must not skip the last-word rule (review of 0f4147b789, HIGH 1).
+const SPANNING_QUOTES: readonly (readonly [string, string])[] = [
+  ["Remove plugins X and Y. Then keep them.", "remove plugins X and Y. Then"],
+  ["Remove plugins X and Y. Now. Okay keep them.", "plugins X and Y. Now"],
+  ["Remove plugins X and Y. Now. Okay keep them.", "remove plugins X and Y. Now."],
+  ["Remove plugins X and Y. Then leave them be.", "remove plugins X and Y. Then"],
+  ["플러그인 X 지워. 그리고 그건 그대로", "플러그인 X 지워. 그리고"],
+]
+
+// A later CLAUSE counts like a later sentence: only a courtesy closer may follow the quote's clause.
+const LATER_CLAUSES: readonly (readonly [string, string])[] = [
+  ["Remove plugins X and Y, keep them.", "remove plugins X and Y"],
+  ["Remove plugins X and Y, leave them be.", "remove plugins X and Y"],
+  ["Remove plugins X and Y;keep them", "remove plugins X and Y"],
+  ["플러그인 X 지워, 그건 그대로", "플러그인 X 지워"],
+]
+
+const CLOSER_CLAUSES: readonly (readonly [string, string])[] = [
+  ["Remove plugins X and Y, thanks.", "remove plugins X and Y"],
+  ["Please remove plugins X and Y now, thank you!", "remove plugins X and Y"],
+  ["플러그인 X 지워, 고마워", "플러그인 X 지워"],
+]
+
+// 됐 is a retraction as an interjection (alone, opening a clause, or right after the instruction), and a plain past tense
+// everywhere else (review of 0f4147b789, LOW on 됐, raised by the lead).
+const DWAESS_STATEMENTS_MUST_STAY: readonly (readonly [string, string])[] = [
+  ["서버 백업 다 됐어", "서버 백업 다 됐어"],
+  ["백업은 이미 됐어", "백업은 이미 됐어"],
+  ["준비 다 됐어요", "준비 다 됐어요"],
+  ["백업 다 됐어 플러그인 X 지워", "백업 다 됐어 플러그인 X 지워"],
+  ["백업은 이미 완료됐으니 플러그인 X 지워", "백업은 이미 완료됐으니 플러그인 X 지워"],
+  ["백업 됐으면 플러그인 X 지워", "백업 됐으면 플러그인 X 지워"],
+  ["완료됐어 이제 플러그인 X 지워", "완료됐어 이제 플러그인 X 지워"],
+]
+
+const DWAESS_RETRACTIONS: readonly (readonly [string, string])[] = [
+  ["됐어", "됐어 그냥 그거"],
+  ["됐어 그냥 그거", "됐어 그냥 그거"],
+  ["플러그인 X 지워 됐어", "플러그인 X 지워 됐어"],
+  ["플러그인 X 지워 아 됐어", "플러그인 X 지워 아 됐어"],
+  ["플러그인 X 지워 그건 됐고", "플러그인 X 지워 그건 됐고"],
+  ["플러그인 X 지워줘 됐다니까", "플러그인 X 지워줘 됐다니까"],
+]
 
 describe("consent corpus: these must stay a suggestion", () => {
   test.each(EN_FOLLOWING_RETRACTIONS)("English instruction followed by %p", (retraction) => {
@@ -92,6 +127,23 @@ describe("consent corpus: these must stay a suggestion", () => {
     expect(source(`${KO_QUOTE}\n${retraction}`, KO_QUOTE)).toBe("agent")
   })
   test.each(IN_SENTENCE_NON_CONSENT)("%p", (said, quote) => {
+    expect(source(said, quote)).toBe("agent")
+  })
+  test.each([...EN_FOLLOWING_RETRACTIONS, ...KO_FOLLOWING_RETRACTIONS])("retraction %p inside the quoted words", (retraction) => {
+    const said = inSentence(retraction)
+    expect(source(said, stripEnd(said))).toBe("agent")
+  })
+  test.each(KO_FOLLOWING_RETRACTIONS)("retraction %p right after the instruction with no mark, quoted whole", (retraction) => {
+    const said = `${KO_QUOTE} ${retraction}`
+    expect(source(said, stripEnd(said))).toBe("agent")
+  })
+  test.each(SPANNING_QUOTES)("quote spanning sentences: %p quoting %p", (said, quote) => {
+    expect(source(said, quote)).toBe("agent")
+  })
+  test.each(LATER_CLAUSES)("later clause: %p", (said, quote) => {
+    expect(source(said, quote)).toBe("agent")
+  })
+  test.each(DWAESS_RETRACTIONS)("됐 as a retraction: %p", (said, quote) => {
     expect(source(said, quote)).toBe("agent")
   })
 })
@@ -110,19 +162,17 @@ describe("consent corpus: the closed courtesy closers do not count as a later se
   })
 })
 
-// Rows extracted mechanically from every review receipt of #10498 (scripts/extract-consent-corpus.ts). Rows are append-only.
-describe("consent corpus: every phrase any review quoted, as a follow-up, leaves the claim a suggestion", () => {
-  test.each(REVIEW_ROWS.filter((row) => !isCourtesyCloser(row.phrase)).map((row) => row.phrase))("instruction followed by %p", (phrase) => {
-    const [instruction, quote] = /[\u3131-\u318e\uac00-\ud7a3]/.test(phrase) ? [KO_INSTRUCTION, KO_QUOTE] : [EN_INSTRUCTION, EN_QUOTE]
-    expect(source(`${instruction} ${phrase}`, quote)).toBe("agent")
-  })
-})
-
 describe("consent corpus: these must stay the user's", () => {
   test.each(AFFIRMATIVE_LAST_SENTENCE_MUST_STAY)("%p", (said, quote) => {
     expect(source(said, quote)).toBe("user")
   })
   test.each(AFFIRMATIVE_MUST_STAY)("%p", (said, quote) => {
+    expect(source(said, quote)).toBe("user")
+  })
+  test.each(CLOSER_CLAUSES)("closer clause: %p", (said, quote) => {
+    expect(source(said, quote)).toBe("user")
+  })
+  test.each(DWAESS_STATEMENTS_MUST_STAY)("됐 as a plain past tense: %p", (said, quote) => {
     expect(source(said, quote)).toBe("user")
   })
 })

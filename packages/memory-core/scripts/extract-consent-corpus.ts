@@ -1,6 +1,7 @@
 // Mechanically extracts every example phrase a review receipt quotes (backtick or double-quoted spans) into the consent
 // corpus fixture (#10488 / #10498). Rows are only ever added: phrases already in the fixture are kept even when a later
-// receipt no longer mentions them, so no change can pass by deleting a row.
+// receipt no longer mentions them, so no change can pass by deleting a row. Sorted by code point, so every host writes
+// the same file.
 // Usage: bun packages/memory-core/scripts/extract-consent-corpus.ts <fixture.json> <receipt.md>...
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
@@ -28,7 +29,7 @@ if (import.meta.main) {
   const rows = new Map<string, Set<string>>();
   if (existsSync(fixture)) for (const r of JSON.parse(readFileSync(fixture, "utf8")) as Row[]) rows.set(r.phrase, new Set(r.sources));
   for (const receipt of receipts) for (const p of phrasesOf(readFileSync(receipt, "utf8"))) (rows.get(p) ?? rows.set(p, new Set()).get(p))?.add(basename(receipt));
-  const sorted = [...rows].sort(([a], [b]) => a.localeCompare(b)).map(([phrase, s]) => ({ phrase, sources: [...s].sort() }));
+  const sorted = [...rows].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([phrase, s]) => ({ phrase, sources: [...s].sort() }));
   writeFileSync(fixture, `${JSON.stringify(sorted, null, 2)}\n`);
   console.log(`${sorted.length} rows`);
 }

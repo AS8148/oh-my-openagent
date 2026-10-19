@@ -47,15 +47,34 @@ export function enclosingUserSentence(quote: string, userTexts: readonly string[
   for (const text of userTexts) {
     if (!normalize(text).includes(needle)) continue
     const sentences = sentencesOf(text)
-    const at = sentences.findIndex((candidate) => normalize(candidate).includes(needle))
-    const sentence = sentences[at] ?? text
-    // The quoted sentence must be the user's LAST word in that message. Retractions after it are an open set (five review
-    // rounds kept finding more), so any later sentence leaves the claim a suggestion instead of trying to list them.
-    if (at >= 0 && !sentences.slice(at + 1).every(isCourtesyCloser)) return undefined
-    if (!isAffirmativeStatement(normalize(sentence))) return undefined
-    return capQuote(sentence)
+    const [first, last] = quotedSentences(sentences, needle)
+    // The quoted words must be the user's LAST word in that message. Retractions after them are an open set (five review
+    // rounds kept finding more), so any later sentence, or later clause of the same sentence, leaves the claim a
+    // suggestion instead of trying to list them. Only the closed courtesy closers may follow.
+    if (!sentences.slice(last + 1).every(isCourtesyCloser)) return undefined
+    const span = sentences.slice(first, last + 1).join(" ")
+    const said = normalize(span)
+    const [rest = "", ...laterClauses] = said.slice(said.indexOf(needle) + needle.length).split(CLAUSE_BREAK)
+    if (!laterClauses.every((clause) => clause.trim() === "" || isCourtesyCloser(clause))) return undefined
+    // A quote that crosses a sentence boundary must also run to the end of the sentence it stops in: "Remove X. Then"
+    // out of "Remove X. Then keep them." would otherwise cut the retraction off.
+    if (first !== last && /[\p{L}\p{N}]/u.test(rest)) return undefined
+    if (!isAffirmativeStatement(said)) return undefined
+    return capQuote(span)
   }
   return undefined
+}
+
+const CLAUSE_BREAK = /[,;\uff0c\uff1b\u3001]/u
+
+// The fewest consecutive sentences whose text contains the quote; a quote that spans sentences takes all of them.
+function quotedSentences(sentences: readonly string[], needle: string): readonly [number, number] {
+  for (let size = 1; size <= sentences.length; size += 1) {
+    for (let first = 0; first + size <= sentences.length; first += 1) {
+      if (normalize(sentences.slice(first, first + size).join(" ")).includes(needle)) return [first, first + size - 1]
+    }
+  }
+  return [0, sentences.length - 1]
 }
 
 export function quoteAppearsInUserText(quote: string, userTexts: readonly string[]): boolean {
