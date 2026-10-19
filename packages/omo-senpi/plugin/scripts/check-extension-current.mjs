@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { artifactsMatch } from "./build-artifact.mjs"
-import { buildExtension, COMPUTER_PRELUDE_ASSET_NAME, extensionBuildPaths, GATEWAY_STORE_WORKER_NAME, loroWasmSourcePath, MEMORY_SYNC_WASM_NAME, resolveOutputs, THREAD_SDK_RELATIVE_PATH } from "./build-extension-core.mjs"
+import { buildExtension, COMPUTER_PRELUDE_ASSET_NAME, extensionBuildPaths, GATEWAY_STORE_WORKER_NAME, memorySyncAssetSources, resolveOutputs, THREAD_SDK_RELATIVE_PATH } from "./build-extension-core.mjs"
 import { findStaleRuntimePersona } from "./persona-artifacts.mjs"
 
 export async function checkExtensionCurrent(options = {}) {
@@ -48,12 +48,14 @@ export async function checkExtensionCurrent(options = {}) {
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
   const currentMemorySync = await readBuiltEntry(memorySyncOutput)
   if (currentMemorySync === undefined) return { ok: false, reason: "missing-output", output: memorySyncOutput }
-  // The committed wasm must be byte-identical to the installed Loro package's: a Loro bump without a
-  // rebuild leaves a stale binary beside a sidecar built from the new glue.
-  const syncWasmOutput = join(dirname(memorySyncOutput), MEMORY_SYNC_WASM_NAME)
-  const currentSyncWasm = await readFile(syncWasmOutput).catch(() => undefined)
-  if (currentSyncWasm === undefined) return { ok: false, reason: "missing-output", output: syncWasmOutput }
-  if (sha256(currentSyncWasm) !== sha256(await readFile(loroWasmSourcePath()))) return { ok: false, reason: "stale-output", output: syncWasmOutput }
+  // Each committed sidecar asset must be byte-identical to its source: the wasm to the INSTALLED Loro
+  // package's (a Loro bump without a rebuild would leave a stale binary beside new glue).
+  for (const [name, source] of Object.entries(memorySyncAssetSources())) {
+    const assetOutput = join(dirname(memorySyncOutput), name)
+    const current = await readFile(assetOutput).catch(() => undefined)
+    if (current === undefined) return { ok: false, reason: "missing-output", output: assetOutput }
+    if (sha256(current) !== sha256(await readFile(source))) return { ok: false, reason: "stale-output", output: assetOutput }
+  }
   if (currentMemoryDoctor === undefined) return { ok: false, reason: "missing-output", output: memoryDoctorOutput }
   if (currentMemoryMemfs === undefined) return { ok: false, reason: "missing-output", output: memoryMemfsOutput }
   if (currentMemoryPalace === undefined) return { ok: false, reason: "missing-output", output: memoryPalaceOutput }

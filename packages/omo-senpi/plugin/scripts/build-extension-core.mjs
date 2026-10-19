@@ -83,6 +83,15 @@ const memoryPalaceEntryPath = join(packageRoot, "src", "components", "memory", "
 // (the engine's loader reads it relative to its own module), so omo.js never pulls Loro in.
 const memorySyncEntryPath = join(packageRoot, "src", "components", "memory", "sync-runtime.ts")
 export const MEMORY_SYNC_WASM_NAME = "loro_wasm_bg.wasm"
+// Every file the sync sidecar loads from beside itself; a build test fails on any undeclared asset.
+export const MEMORY_SYNC_ASSET_NAMES = [MEMORY_SYNC_WASM_NAME, "CaseFolding.txt"]
+// Where each asset comes from, for the freshness check.
+export function memorySyncAssetSources() {
+  return {
+    [MEMORY_SYNC_WASM_NAME]: loroWasmSourcePath(),
+    "CaseFolding.txt": join(repoRoot, "packages", "memory-core", "src", "sync", "item", "CaseFolding.txt"),
+  }
+}
 // The wasm the INSTALLED Loro package ships: the freshness check pins the committed copy to it, so a Loro
 // bump without a rebuild is reported stale instead of shipping an old binary.
 export function loroWasmSourcePath() {

@@ -10,6 +10,7 @@ import { PERSONA_ASSET_FILES } from "@oh-my-opencode/memory-core/personas"
 import {
   checkExtensionCurrent,
   loroWasmSourcePath,
+  MEMORY_SYNC_ASSET_NAMES,
   MEMORY_SYNC_WASM_NAME,
   resolveBunExecutable,
   toPortableBuildPath,
@@ -302,6 +303,15 @@ describe("checkExtensionCurrent", () => {
     expect(await readFile(outputPath, "utf8")).not.toContain(MEMORY_SYNC_WASM_NAME)
   })
 
+  test("#given the sync sidecar build #when its output dir is listed #then every emitted asset is a declared sidecar asset", async () => {
+    const { memorySyncOutputPath } = await sharedOutputs()
+    const syncText = await readFile(memorySyncOutputPath, "utf8")
+    const referenced = MEMORY_SYNC_ASSET_NAMES.filter((name) => syncText.includes(name))
+    expect(referenced).toEqual([...MEMORY_SYNC_ASSET_NAMES])
+    const emitted = (await readdir(dirname(memorySyncOutputPath))).filter((name) => !/\.(?:m?js|json|md)$/.test(name))
+    expect(emitted.sort()).toEqual([...MEMORY_SYNC_ASSET_NAMES].sort())
+  })
+
   test("#given the sync sidecar packed with npm pack #when the installed package imports #omo-memory-sync-runtime under Node #then Loro initializes from the packed wasm", async () => {
     const { memorySyncOutputPath } = await sharedOutputs()
     const work = await mkdtemp(join(tmpdir(), "omo-sync-sidecar-pack-"))
@@ -310,7 +320,7 @@ describe("checkExtensionCurrent", () => {
       await mkdir(join(pkg, "extensions"), { recursive: true })
       await cp(join(pluginRoot, "package.json"), join(pkg, "package.json"))
       await cp(memorySyncOutputPath, join(pkg, "extensions", "omo-memory-sync.js"))
-      await cp(join(dirname(memorySyncOutputPath), MEMORY_SYNC_WASM_NAME), join(pkg, "extensions", MEMORY_SYNC_WASM_NAME))
+      for (const asset of MEMORY_SYNC_ASSET_NAMES) await cp(join(dirname(memorySyncOutputPath), asset), join(pkg, "extensions", asset))
       const packed = spawnSync("npm", ["pack", "--silent", "--pack-destination", work], { cwd: pkg, encoding: "utf8", shell: process.platform === "win32" })
       expect(packed.status, packed.stderr).toBe(0)
       const tarball = join(work, packed.stdout.trim().split("\n").at(-1))
@@ -320,15 +330,12 @@ describe("checkExtensionCurrent", () => {
       expect(untar.status, untar.stderr).toBe(0)
       const root = join(installed, "package")
       const listed = await readdir(join(root, "extensions"))
-      expect(listed).toContain(MEMORY_SYNC_WASM_NAME)
+      for (const asset of MEMORY_SYNC_ASSET_NAMES) expect(listed).toContain(asset)
       const probe = join(root, "sync-probe.mjs")
       await writeFile(probe, [
         'const sidecar = await import("#omo-memory-sync-runtime")',
         'if (typeof sidecar.openDeviceSync !== "function") throw new Error("openDeviceSync missing")',
-        "const { LoroDoc } = await sidecar.loadLoroRuntime()",
-        "const doc = new LoroDoc()",
-        'doc.getText("t").insert(0, "hi")',
-        "doc.commit()",
+        "await sidecar.checkSyncRuntime()",
         'console.log("sync-sidecar-ok")',
       ].join("\n"))
       const run = spawnSync("node", [probe], { cwd: parse(process.cwd()).root, encoding: "utf8", shell: process.platform === "win32" })
