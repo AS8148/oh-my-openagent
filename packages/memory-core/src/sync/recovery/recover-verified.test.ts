@@ -11,6 +11,7 @@ import {
 	approve,
 	createWorld,
 	type Device,
+	enrollAnother,
 	freshStateDir,
 	newDevice,
 	RP_ID,
@@ -110,6 +111,56 @@ describe("the post-rotation reload must show this device's own rotation (#10450)
 			);
 			expect(await loadWriteHold(stateDir, world.account)).toMatchObject({
 				held: true,
+			});
+		});
+	}
+});
+
+describe("a keyring record appended after our rotation still recovers (#10611)", () => {
+	const followers: ReadonlyArray<{
+		readonly name: string;
+		readonly append: (world: World, device: Device) => Promise<unknown>;
+	}> = [
+		{
+			name: "an approval",
+			append: async (world, device) =>
+				approve(world, await newDevice(), device),
+		},
+		{
+			name: "a recovery key enrollment",
+			append: (world, device) => enrollAnother(world, device),
+		},
+	];
+	for (const { name, append } of followers) {
+		test(`${name} landing before the reload ends recovered and releases the hold`, async () => {
+			const world = await createWorld();
+			const device = await newDevice();
+			const stateDir = freshStateDir();
+			const base = transportFor(world, device);
+			let followed = false;
+			const transport: RecoveryTransport = {
+				...base,
+				appendKeys: async (request) => {
+					const stored = await base.appendKeys(request);
+					if (stored.ok && request.record.kind === "rotation") {
+						await append(world, device);
+						followed = true;
+					}
+					return stored;
+				},
+			};
+			const events: string[] = [];
+			expect(
+				await recover(world, device, {
+					transport,
+					stateDir,
+					onEvent: (event) => events.push(event),
+				}),
+			).toMatchObject({ ok: true, state: "recovered", epoch: 2 });
+			expect(followed).toBe(true);
+			expect(events).toEqual(["sync.recovery.recovered"]);
+			expect(await loadWriteHold(stateDir, world.account)).toEqual({
+				held: false,
 			});
 		});
 	}

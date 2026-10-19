@@ -13,6 +13,7 @@
     "#omo-telemetry-recovery-runtime": "./extensions/omo-telemetry-recovery.js",
     "#telemetry-immediate-send": "./extensions/omo-telemetry-recovery.js",
     "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
+    "#omo-session-history-runtime": "./extensions/omo-session-history.js",
     "#omo-memory-sync-runtime": "./extensions/omo-memory-sync.js",
     "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js"
   },
