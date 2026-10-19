@@ -331,6 +331,24 @@ describe("onboarding scan RPC", () => {
     expect(JSON.parse(readFileSync(join(profile.agentDir, "models.json"), "utf8")).providers.myco).toBeDefined()
   })
 
+  test("#given a custom provider with a key and new credentials #when every stage applies #then the credentials write does not make the provider stage stale (#10496 review)", async () => {
+    const profile = openCodeProfile()
+    write(join(profile.home, ".local", "share", "opencode", "auth.json"), JSON.stringify({
+      openai: { type: "api", key: SECRET },
+      myco: { type: "api", key: `${SECRET}-myco` },
+    }))
+    const host = register(profile, { authStore: () => fileStore(authPath(profile)) })
+    const { scanId } = await host.scan({ includeCustomProviders: true })
+
+    const applied = await host.apply({ scanId, stages: ["credentials", "assets", "providers", "model-choices"] })
+
+    expect(applied).toEqual(expect.objectContaining({ applied: ["credentials", "assets", "providers", "model-choices"] }))
+    const auth = JSON.parse(readFileSync(authPath(profile), "utf8")) as Record<string, unknown>
+    expect(auth.openai).toBeDefined()
+    expect(auth.myco).toBeDefined()
+    expect(JSON.parse(readFileSync(join(profile.agentDir, "models.json"), "utf8")).providers.myco).toBeDefined()
+  })
+
   test("#given an empty profile #when a scan and an apply run #then they complete and write nothing", async () => {
     const profile = emptyProfile()
     const host = register(profile)

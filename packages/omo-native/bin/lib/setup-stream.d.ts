@@ -78,7 +78,7 @@ export class SetupStaleError extends Error {
 }
 
 /** The target paths of the given stages whose content changed since their plans read them (content hash, never mtime alone). */
-export function staleSetupTargets(plans: SetupPlans, stageIds: Iterable<SetupStageId>): string[]
+export function staleSetupTargets(plans: SetupPlans, stageIds: Iterable<SetupStageId>, written?: ReadonlySet<string>): string[]
 
 /** True when any of the given stages would write into a credential store. */
 export function authWritesPending(plans: SetupPlans, stageIds: Iterable<SetupStageId>): boolean
@@ -89,6 +89,6 @@ export function applySetupStages(
   report?: (line: string) => void,
   options?: SetupApplyOptions & {
     /** Re-checked right before each stage writes; a non-empty result refuses that stage with `SetupStaleError`. */
-    readonly staleGuard?: (stageId: SetupStageId) => readonly string[] | undefined
+    readonly staleGuard?: (stageId: SetupStageId, written: ReadonlySet<string>) => readonly string[] | undefined
   },
 ): Promise<Set<SetupStageId>>

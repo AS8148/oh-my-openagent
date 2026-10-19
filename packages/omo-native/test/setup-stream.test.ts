@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
+  staleSetupTargets,
   SETUP_SOURCES,
   applySetupStages,
   collectSetupPlans,
@@ -134,6 +135,17 @@ describe("setup-stream", () => {
     const auth = JSON.parse(readFileSync(join(agentDir, "auth.json"), "utf8"))
     expect(auth.anthropic.refresh).toBe("r2")
     expect(auth.openai).toBeUndefined()
+  })
+
+  test("#given a skill directory created after planning #when the stale targets are read #then it counts as changed (#10496 review)", async () => {
+    const { home, agentDir, env } = fixture()
+    const { loadModelCatalog } = catalogSpy()
+    const { plans } = await collectSetupPlans(scanSetup({ home, env, loadModelCatalog }, agentDir, { includeCustomProviders: true }))
+    const skillDir = join(agentDir, "skills", "my-skill")
+    expect(staleSetupTargets(plans, ["assets"])).not.toContain(skillDir)
+    mkdirSync(skillDir, { recursive: true })
+
+    expect(staleSetupTargets(plans, ["assets"])).toContain(skillDir)
   })
 
   test("#given a credential store #when apply runs with writeAuth #then keys land through the store and merge with what it already holds", async () => {
