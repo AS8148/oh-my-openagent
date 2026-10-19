@@ -46,21 +46,3 @@ const RESOURCE_OR_RELAY_KEYS = new Set([
 export function isWireAttributeKey(key: string): boolean {
   return !RESOURCE_OR_RELAY_KEYS.has(key) && !key.startsWith("$")
 }
-
-/**
- * The default projection: the key rule above, then every remaining primitive becomes
- * `omo.<bare name>`. It is NOT a per-event allowlist: the caller must pass only allowlisted
- * properties, or pass its schema artifact's projection as `project`, which maps each event's
- * allowlisted properties to their wire keys and drops everything else (the contract the engine
- * wiring relies on).
- */
-export const defaultWireProjection: OtlpWireProjection = (_event, properties) => {
-  const attributes: WireAttributes = {}
-  for (const [key, value] of Object.entries(properties)) {
-    if (!isWireAttributeKey(key)) continue
-    if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
-      attributes[`omo.${key}`] = value
-    }
-  }
-  return attributes
-}

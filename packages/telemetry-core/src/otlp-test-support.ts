@@ -5,6 +5,7 @@ import { gunzipSync } from "node:zlib"
 
 import { fromBinary } from "@bufbuild/protobuf"
 
+import { type OtlpWireProjection, type WireAttributes, isWireAttributeKey } from "./otlp-config"
 import { createOtlpTelemetryTransport } from "./otlp-sender"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { OtlpFetch } from "./otlp-http"
@@ -19,6 +20,18 @@ import {
 import type { AnyValue, KeyValue } from "./otlp-proto/opentelemetry/proto/common/v1/common_pb.js"
 
 export const TEST_SCOPE = { name: "omo-senpi", version: "3.17.0" } as const
+
+/** Test stand-in for a schema artifact's projection: every primitive that passes the key rule becomes `omo.<name>`. */
+export const testWireProjection: OtlpWireProjection = (_event, properties) => {
+  const attributes: WireAttributes = {}
+  for (const [key, value] of Object.entries(properties)) {
+    if (!isWireAttributeKey(key)) continue
+    if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
+      attributes[`omo.${key}`] = value
+    }
+  }
+  return attributes
+}
 
 export function testResource(version = "1.1.0"): Readonly<Record<string, string | number | boolean>> {
   return {
@@ -82,6 +95,7 @@ export function makeTransport(
     sleep: async () => undefined,
     random: () => 0,
     fetch: recordingFetch().fetch,
+    project: testWireProjection,
     ...overrides,
   })
   if (transport === null) throw new Error("transport unexpectedly disabled")

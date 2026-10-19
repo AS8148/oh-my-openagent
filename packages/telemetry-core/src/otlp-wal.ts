@@ -163,7 +163,7 @@ export class WalLogRecordProcessor implements LogRecordProcessor {
 
   onEmit(record: ReadableLogRecord): void {
     const encode = (): Uint8Array =>
-      toBinary(LogRecordSchema, encodeLogRecord({ ...record, attributes: wireAttributes(record.attributes) }))
+      toBinary(LogRecordSchema, encodeLogRecord({ ...record, body: undefined, attributes: wireAttributes(record.attributes) }))
     if (this.writer.append(encode)) this.#onAppended(this.writer)
   }
 

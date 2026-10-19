@@ -15,7 +15,11 @@ export type CreateOtlpTelemetryTransportInput = {
   readonly scope: InstrumentationScope
   readonly env?: TelemetryEnv
   readonly endpoint?: string
-  readonly project?: OtlpWireProjection
+  /**
+   * Required: the schema artifact's per-event allowlist, mapping each allowlisted property to its
+   * wire key and dropping everything else. There is no default, so a caller cannot ship unlisted properties.
+   */
+  readonly project: OtlpWireProjection
   readonly consent?: () => boolean
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly source?: string
