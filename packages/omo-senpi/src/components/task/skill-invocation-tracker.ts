@@ -170,9 +170,12 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
   pi.on("session_start", (_payload, eventCtx) => {
     const sessionId = extractSessionId(eventCtx)
     if (sessionId === undefined) return
+    // A host that cannot read the branch has nothing to replay; keep the live state rather than wipe it.
+    const persisted = persistedMessages(eventCtx)
+    if (persisted === undefined) return
     forget(sessionId)
     const calls = new Map<string, { readonly name: string; readonly args: unknown }>()
-    for (const { message, inputSource } of persistedMessages(eventCtx)) {
+    for (const { message, inputSource } of persisted) {
       const role = message["role"]
       if (role === "user") {
         if (typeof inputSource !== "string" || !REPLAY_TRUSTED_INPUT_SOURCES.has(inputSource)) continue
@@ -229,13 +232,13 @@ function extractSessionId(eventCtx: unknown): string | undefined {
 
 type PersistedMessage = { readonly message: Record<string, unknown>; readonly inputSource: unknown }
 
-function persistedMessages(eventCtx: unknown): readonly PersistedMessage[] {
-  if (!isRecord(eventCtx) || !isRecord(eventCtx["sessionManager"])) return []
+function persistedMessages(eventCtx: unknown): readonly PersistedMessage[] | undefined {
+  if (!isRecord(eventCtx) || !isRecord(eventCtx["sessionManager"])) return undefined
   const manager = eventCtx["sessionManager"]
   const read = typeof manager["getBranch"] === "function" ? manager["getBranch"] : manager["getEntries"]
-  if (typeof read !== "function") return []
+  if (typeof read !== "function") return undefined
   const entries: unknown = read.call(manager)
-  if (!Array.isArray(entries)) return []
+  if (!Array.isArray(entries)) return undefined
   return entries.flatMap((entry: unknown) =>
     isRecord(entry) && entry["type"] === "message" && isRecord(entry["message"])
       ? [{ message: entry["message"], inputSource: entry["inputSource"] }]

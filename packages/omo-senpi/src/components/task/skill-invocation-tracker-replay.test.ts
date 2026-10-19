@@ -177,6 +177,20 @@ describe("createSkillInvocationTracker - replay on session_start (omo#10378 2b)"
     expect(tracker.stateFor("sess-f").hasPlanArtifact()).toBe(false)
   })
 
+  test("#given a host whose session manager cannot read the branch #when session_start fires #then live state is kept, not wiped", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    const tracker = createSkillInvocationTracker(pi)
+    const liveCtx = { sessionManager: { getSessionId: () => "sess-live" } }
+    await pi.dispatch("input", { type: "input", text: "please ulw-plan this", source: "interactive" }, liveCtx)
+
+    // when
+    await pi.dispatch("session_start", { type: "session_start", reason: "reload" }, liveCtx)
+
+    // then
+    expect(tracker.stateFor("sess-live").hasUserRequested("ulw-plan")).toBe(true)
+  })
+
   test("#given session_start fires twice for one session #when replayed #then touch counts do not double", async () => {
     // given
     const pi = new FakeExtensionAPI()
