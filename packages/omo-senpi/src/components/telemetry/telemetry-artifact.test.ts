@@ -246,7 +246,7 @@ describe("telemetry schema artifacts", () => {
   })
 
   test("#given a property that has a semantic convention but no map entry #when generating #then the generator refuses", () => {
-    expect(() => buildTelemetryArtifacts({ ...OMO_NATIVE_EVENT_SCHEMAS, scratch_event: { $session_id: { type: "string" }, error_type: { type: "string", values: ["x"] } } }))
-      .toThrow("scratch_event.error_type has a semantic convention but no entry in semconv-map.json")
+    expect(() => buildTelemetryArtifacts({ ...OMO_NATIVE_EVENT_SCHEMAS, scratch_event: { $session_id: { type: "string" }, http_method: { type: "string", values: ["x"] } } }))
+      .toThrow("scratch_event.http_method has a semantic convention but no entry in semconv-map.json")
   })
 })

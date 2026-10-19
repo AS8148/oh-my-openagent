@@ -7,7 +7,7 @@ import { maskProviderAndModel } from "./product-identity"
 // Vendored byte-identically from sisyphuslabs/omo-telemetry@4c8069b7fd:jobs/backfill/fixtures/mask-model-vectors.json.
 // The collector tests against the same bytes, so client and collector masking cannot drift.
 const VECTORS_PATH = join(import.meta.dir, "fixtures", "mask-model-vectors.json")
-const VECTORS_SHA256 = "7142318f50f8f3ee8f58049aec8d7ee4cc82fa8c89265635347e737e6e153a1a"
+const VECTORS_SHA256 = "9286849ed54eae0bf682aa67d5d92432f55bb98960afa4c320832d9b6608ed3b"
 
 type MaskVector = {
   readonly provider: string

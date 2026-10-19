@@ -8,8 +8,8 @@ import { buildTelemetryArtifacts, canonicalJson, type ArtifactAttribute, type Te
 import { createOsProvider } from "./telemetry.test-support"
 import { wireViolations } from "./telemetry-wire.test-support"
 
-// Collector registry sisyphuslabs/omo-telemetry packages/schema-registry at eef2e2b52731fded2507048f4aa141f84736cc74 (main).
-const COLLECTOR_SEMCONV_CANONICAL_SHA256 = "246f23be0254c1ff03cacff2bcf238887f2f95e46e5fe1bed861d76b935044f6"
+// Collector registry sisyphuslabs/omo-telemetry packages/schema-registry at 207ea5a905d8c06cf9c3a782427204904c32c801 (main).
+const COLLECTOR_SEMCONV_CANONICAL_SHA256 = "2cf8b859a1fbad492a3ee51864f73762ea7263f34423d4965e7a557184d1f053"
 const COLLECTOR_ARTIFACT_SCHEMA_SHA256 = "18ebd67bbf785d83f1a339e79c6f5e6a5d7cc5c2e59f7ec9a33f51f4e60158d7"
 
 const REGISTRY = new URL("./schema-registry/", import.meta.url)

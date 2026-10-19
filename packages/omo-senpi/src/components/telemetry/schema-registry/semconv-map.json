@@ -241,6 +241,13 @@
       "posthog_name": "exit_code"
     },
     {
+      "wire_key": "error.type",
+      "location": "record",
+      "semconv": "stable",
+      "column": null,
+      "posthog_name": "error_type"
+    },
+    {
       "wire_key": "omo.prompt.is_real_user",
       "location": "record",
       "semconv": "ours",
@@ -293,6 +300,10 @@
         {
           "id": "google",
           "wire": "gcp.gemini"
+        },
+        {
+          "id": "google-vertex",
+          "wire": "gcp.vertex_ai"
         },
         {
           "id": "github-copilot",

@@ -324,4 +324,3 @@ export function artifactFileName(product: TelemetryArtifact["product"]): string 
 export function serializeArtifact(artifact: TelemetryArtifact): string {
   return `${JSON.stringify(artifact, null, 2)}\n`
 }
-
