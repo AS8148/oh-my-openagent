@@ -342,5 +342,49 @@ describe("feedback component", () => {
     expect(typeof draft.draftId).toBe("string")
     expect(draft.sections.map((section) => section.id)).not.toContain("session")
   })
+
+  test("#given a live session whose id can no longer be read #when the report is prepared #then a draft without the conversation comes back instead of an error", async () => {
+    const { pi, api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    let broken = false
+    await pi.dispatch("session_start", {}, {
+      sessionManager: {
+        getSessionId: () => {
+          if (broken) throw new Error("disposed")
+          return "ses_y"
+        },
+        getBranch: () => [],
+      },
+    })
+    broken = true
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { draftId?: string; sections: { id: string }[] }
+
+    expect(typeof draft.draftId).toBe("string")
+    expect(draft.sections.map((section) => section.id)).not.toContain("session")
+  })
+
+  test("#given a session that started again after another one #when the newest session shuts down #then the fallback is the most recently started live session", async () => {
+    const { pi, api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const sessionFor = (id: string, text: string) => ({
+      sessionManager: {
+        getSessionId: () => id,
+        getBranch: () => [{ type: "message", timestamp: "2026-10-19T02:00:00.000Z", message: { role: "user", content: [{ type: "text", text }] } }],
+      },
+    })
+    const a = sessionFor("ses_a", "message from A")
+    const b = sessionFor("ses_b", "message from B")
+    const c = sessionFor("ses_c", "message from C")
+    await pi.dispatch("session_start", {}, a)
+    await pi.dispatch("session_start", {}, b)
+    await pi.dispatch("session_start", {}, a)
+    await pi.dispatch("session_start", {}, c)
+    await pi.dispatch("session_shutdown", {}, c)
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { sections: { id: string; text: string }[] }
+
+    expect(draft.sections.find((section) => section.id === "session")?.text).toContain("message from A")
+  })
 })
 

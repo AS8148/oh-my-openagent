@@ -41,8 +41,10 @@ interface StoredDraft {
 const sessionView = (ctx: SessionLike | undefined): HostSessionView | undefined => {
   if (ctx?.sessionManager?.getBranch === undefined) return undefined
   let entries: readonly unknown[]
+  let sessionId: string | undefined
   try {
     entries = ctx.sessionManager.getBranch()
+    sessionId = ctx.sessionManager.getSessionId?.()
   } catch {
     return undefined
   }
@@ -51,7 +53,7 @@ const sessionView = (ctx: SessionLike | undefined): HostSessionView | undefined 
   return {
     entries,
     ...(typeof ctx.cwd === "string" ? { cwd: ctx.cwd } : {}),
-    ...(ctx.sessionManager.getSessionId === undefined ? {} : { sessionId: ctx.sessionManager.getSessionId() }),
+    ...(sessionId === undefined ? {} : { sessionId }),
     ...(id === undefined ? {} : { model: provider === undefined ? id : `${provider}/${id}` }),
   }
 }
@@ -155,6 +157,7 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
       pi.on("session_start", (_payload, ctx) => {
         const id = sessionIdOf(ctx as SessionLike | undefined)
         if (id === undefined) return
+        liveSessions.delete(id)
         liveSessions.set(id, ctx as SessionLike)
         latestSessionId = id
       })
