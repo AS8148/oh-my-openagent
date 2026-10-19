@@ -90,6 +90,10 @@ const WHOLE_MESSAGE_MUST_STAY: readonly (readonly [string, string])[] = [
   ["yes do it", "yes do it"],
   ["yes do it.", "yes do it"],
   ["응 해줘!", "응 해줘"],
+  ["ㅇㅇ 해줘", "ㅇㅇ 해줘"],
+  ["このプラグインを削除して〜", "このプラグインを削除して〜"],
+  ["削除して。", "削除して"],
+  ["플러그인 가 지워줘", "플러그인 가 지워줘"],
   ["응 해줘～", "응 해줘"],
   ["Yes, do it!", "Yes, do it"],
   ["Please remove plugins X and Y now.", "remove plugins X and Y now"],
@@ -129,6 +133,19 @@ describe("consent corpus: a message that is itself not consent stays a suggestio
     expect(source(`Delete the prod database ${tail}`, "Delete the prod database")).toBe("agent")
     expect(source(`Delete the prod database${tail}`, "Delete the prod database")).toBe("agent")
     expect(source(`Delete the prod database ${tail}`, `Delete the prod database ${tail}`)).toBe("agent")
+  })
+  test.each([
+    "Don\u034f't delete the prod database", "Do\ufe0fn't delete it", "Do\u180bn't delete it", "n\u0337o delete it",
+    "Delete the prod database\u20e0", "Do\u3164n't delete it", "Do\u115fn't delete it", "yes\u034f do it", "yes do it\u0300",
+    "yes do it\ufe0f",
+  ])("an invisible or combining mark in %p is not consent", (said) => {
+    expect(source(said, said)).toBe("agent")
+  })
+  test.each([
+    "ㅡㅡ", "ㅗ", "ㅠㅠ", "플러그인 X 지워 ㅡㅡ", "플러그인 X 지워 ㅗ", "Remove plugins X and Y 。。。", "Remove plugins X and Y \uff61\uff61\uff61",
+    "Remove plugins X and Y 、、、", "Remove plugins X and Y . .", "。。。", "、、",
+  ])("a reaction or a run of stops in %p is not consent", (said) => {
+    expect(source(said, said)).toBe("agent")
   })
   test("a colon or a zero-width character anywhere in the message is not consent", () => {
     expect(source("Do it now: remove plugins X and Y", "Do it now: remove plugins X and Y")).toBe("agent")

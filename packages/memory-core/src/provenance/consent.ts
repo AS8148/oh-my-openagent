@@ -23,12 +23,15 @@ export function foldQuotes(text: string): string {
   return text.replace(/[\u2018\u2019\u201B\u2032\uFF07]/gu, "'").replace(/[\u201C\u201D\u201F\u2033\uFF02]/gu, '"')
 }
 
-// Lead ruling: punctuation is refused by CLASS, not by list. A message is consent only if every character is a letter,
-// digit, combining mark, whitespace or one of a small allowlist ( . , ! ' " ~ - 。 、 ). Any other punctuation or symbol (a
-// question mark in any script, an emoji, an emoticon, an ellipsis, a colon or semicolon, an invisible format character)
-// can carry a question or a refusal the word scan cannot read, so it is not consent. A period counts only when it ends a
-// word (followed by whitespace, a digit or the end), so "T.T" and "-.-" are refused; ㅠ and ㅜ are crying jamo.
-const NON_CONSENT_MARK = /[^\p{L}\p{N}\p{M}\s.,!'"~\-\u3002\u3001]|\.(?![\s\d]|$)|[\u3160\u315c\u1172\u116e]/u
+// Lead ruling: characters are refused by CLASS, not by list. The scan sees NFKC text, so accented letters, Hangul
+// syllables and kana with voicing marks are already precomposed letters. A message is consent only if every character is
+// a letter, digit, whitespace or one of a small allowlist ( . , ! ' " ~ 〜 - 。 、 ). Everything else fails closed: a
+// question mark in any script, an emoji or symbol, an emoticon, an ellipsis, a colon or semicolon, ANY combining mark
+// (an invisible one can split "don't" so the word scan misses it, and some are prohibition overlays), and any
+// default-ignorable code point (zero-width characters, variation selectors, Hangul fillers). A period counts only when it
+// ends a word, and two stops in a row (。。。, 、、, . .) are an ellipsis. A Hangul vowel jamo on its own (ㅠ ㅜ ㅡ ㅗ) is a
+// reaction, never part of an instruction, while consonant jamo (ㅇㅇ, "yes") stay allowed.
+const NON_CONSENT_MARK = /[^\p{L}\p{N}\s.,!'"~\u301c\-\u3002\u3001]|\p{Default_Ignorable_Code_Point}|\.(?![\s\d]|$)|[.\u3002\u3001]\s*[.\u3002\u3001]|[\u314f-\u3163\u1161-\u1175]/u
 
 function negatesOrHedges(sentence: string): boolean {
   return NEGATION_OR_HEDGE.test(sentence) || KOREAN_NEGATION_OR_HEDGE.test(sentence) || DWAESS_RETRACTION.test(sentence) || NON_CONSENT_MARK.test(sentence)
