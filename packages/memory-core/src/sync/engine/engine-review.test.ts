@@ -94,7 +94,7 @@ test("Loro store: an edit to a file rendered before a mid-render crash is kept o
   expect([await a.read("y.md"), await b.read("y.md")]).toEqual(["uno\nde-a\n", "uno\nde-a\n"])
 }, GIT_TEST_TIMEOUT)
 
-test("Loro store: an edit to a file whose render was recorded but may not have landed is kept as a conflict copy", async () => {
+test("Loro store: an edit made after a crash between a render's record and its landing is captured against the old text, once", async () => {
   const server = new FakeSyncServer()
   const a = await makeDevice(server, "a", undefined, { realStore: true })
   const b = await makeDevice(server, "b", undefined, { realStore: true })
@@ -106,16 +106,14 @@ test("Loro store: an edit to a file whose render was recorded but may not have l
   await a.engine.runCycle()
   await b.restart(crashAt("render-intent"))
   await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
-  await b.write("x.md", "one\nfrom-b\n")
+  expect(await b.read("x.md")).toBe("one\n")
+  await b.write("x.md", "zero\none\n")
   await b.restart()
   await b.engine.runCycle()
   await a.engine.runCycle()
   await b.engine.runCycle()
-  expect(await b.read("x.md")).toBe("one\nfrom-a\n")
-  const copies = (await b.workingFiles()).filter((k) => k.startsWith("x.sync-conflict-"))
-  expect(copies).toHaveLength(1)
-  expect(await b.read(copies[0] as string)).toBe("one\nfrom-b\n")
-  expect(await a.read(copies[0] as string)).toBe("one\nfrom-b\n")
+  expect([await a.read("x.md"), await b.read("x.md")]).toEqual(["zero\none\nfrom-a\n", "zero\none\nfrom-a\n"])
+  expect((await b.workingFiles()).filter((k) => k.includes("sync-conflict"))).toEqual([])
 }, GIT_TEST_TIMEOUT)
 
 for (const realStore of [false, true]) {
@@ -138,5 +136,111 @@ for (const realStore of [false, true]) {
     // The fake store renders a line set (sorted); the Loro store must keep the order byte for byte.
     const shape = (text: string | null) => (realStore ? text : (text ?? "").split("\n").filter((l) => l !== "").sort().join("\n"))
     expect([shape(await a.read("a.md")), shape(await b.read("a.md"))]).toEqual([shape(expected), shape(expected)])
+  }, GIT_TEST_TIMEOUT)
+}
+
+// Round 4 (#10548): a second crash inside the resumed render must not drop the records the first
+// run wrote, or a later edit to an already-rendered file is captured against a stale baseline.
+const crashAtNth = (point: string, nth: number) => {
+  let seen = 0
+  return (at: string) => {
+    if (at === point && (seen += 1) === nth) throw new CrashInjected(`${point}#${nth}`)
+  }
+}
+
+test("Loro store: a crash during the resumed render keeps the first run's render records; a later edit is kept once", async () => {
+  const server = new FakeSyncServer()
+  const a = await makeDevice(server, "a", undefined, { realStore: true })
+  const b = await makeDevice(server, "b", undefined, { realStore: true })
+  devices.push(a, b)
+  await a.write("x.md", "one\n")
+  await a.write("y.md", "uno\n")
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  await a.write("x.md", "one\nfrom-a\n")
+  await a.write("y.md", "uno\nde-a\n")
+  await a.engine.runCycle()
+  // First run: x lands, the crash comes before y. The resume crashes again after recording y's render
+  // but before it lands, so the journal holds x's landed record and y's unlanded one.
+  await b.restart(crashAtNth("render-key", 1))
+  await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+  await b.restart(crashAtNth("render-intent", 1))
+  await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+  expect([await b.read("x.md"), await b.read("y.md")]).toEqual(["one\nfrom-a\n", "uno\n"])
+  await b.write("x.md", "one\nfrom-a\nfrom-b\n")
+  await b.write("y.md", "zero\nuno\n")
+  await b.restart()
+  await b.engine.runCycle()
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  expect([await a.read("x.md"), await b.read("x.md")]).toEqual(["one\nfrom-a\nfrom-b\n", "one\nfrom-a\nfrom-b\n"])
+  expect([await a.read("y.md"), await b.read("y.md")]).toEqual(["zero\nuno\nde-a\n", "zero\nuno\nde-a\n"])
+}, GIT_TEST_TIMEOUT)
+
+test("Loro store: crashes at record, then after the edit is captured and persisted, still converge exactly once", async () => {
+  const server = new FakeSyncServer()
+  const a = await makeDevice(server, "a", undefined, { realStore: true })
+  const b = await makeDevice(server, "b", undefined, { realStore: true })
+  devices.push(a, b)
+  await a.write("x.md", "one\n")
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  await a.write("x.md", "one\nfrom-a\n")
+  await a.engine.runCycle()
+  await b.restart(crashAtNth("render-intent", 1))
+  await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+  await b.write("x.md", "zero\none\n")
+  await b.restart(crashAtNth("persisted", 1))
+  await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+  await b.restart(crashAtNth("render-key", 1))
+  await b.engine.runCycle().catch((error: unknown) => {
+    if (!(error instanceof CrashInjected)) throw error
+  })
+  await b.restart()
+  await b.engine.runCycle()
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  expect([await a.read("x.md"), await b.read("x.md")]).toEqual(["zero\none\nfrom-a\n", "zero\none\nfrom-a\n"])
+  expect((await b.workingFiles()).filter((k) => k.includes("sync-conflict") || k.includes(".staged"))).toEqual([])
+}, GIT_TEST_TIMEOUT)
+
+// A deleted memory re-created by a person (found by the Loro delete fuzz): capture threw
+// CaptureBaselineError on every cycle, wedging the device.
+for (const content of ["again\n", "one\n"]) {
+  test(`Loro store: a file re-created after a local delete syncs (${content === "one\n" ? "same" : "new"} content)`, async () => {
+    const server = new FakeSyncServer()
+    const a = await makeDevice(server, "a", undefined, { realStore: true })
+    const b = await makeDevice(server, "b", undefined, { realStore: true })
+    devices.push(a, b)
+    await a.write("x.md", "one\n")
+    await a.engine.runCycle()
+    await b.engine.runCycle()
+    await a.write("x.md", null)
+    await a.engine.runCycle()
+    await b.engine.runCycle()
+    expect(await b.read("x.md")).toBeNull()
+    await a.write("x.md", content)
+    await a.engine.runCycle()
+    await b.engine.runCycle()
+    await a.engine.runCycle()
+    expect([await a.read("x.md"), await b.read("x.md")]).toEqual([content, content])
+  }, GIT_TEST_TIMEOUT)
+
+  test(`Loro store: a file re-created after a remote delete syncs (${content === "one\n" ? "same" : "new"} content)`, async () => {
+    const server = new FakeSyncServer()
+    const a = await makeDevice(server, "a", undefined, { realStore: true })
+    const b = await makeDevice(server, "b", undefined, { realStore: true })
+    devices.push(a, b)
+    await a.write("x.md", "one\n")
+    await a.engine.runCycle()
+    await b.engine.runCycle()
+    await a.write("x.md", null)
+    await a.engine.runCycle()
+    await b.engine.runCycle()
+    await b.write("x.md", content)
+    await b.engine.runCycle()
+    await a.engine.runCycle()
+    await b.engine.runCycle()
+    expect([await a.read("x.md"), await b.read("x.md")]).toEqual([content, content])
   }, GIT_TEST_TIMEOUT)
 }

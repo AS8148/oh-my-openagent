@@ -129,6 +129,8 @@ export interface Device {
   restart(fault?: EngineFault): Promise<void>
   syncCommits(): Promise<string[]>
   workingTempFiles(): Promise<string[]>
+  /** Cycle render journals left under .git/omo-sync/renders (none once every cycle ended). */
+  renderJournals(): Promise<string[]>
   /** Working-tree files (item keys), .git excluded. */
   workingFiles(): Promise<string[]>
   retiredJournals(): Promise<string[]>
@@ -193,6 +195,9 @@ export async function makeDevice(server: FakeSyncServer, name: string, fault?: E
     async syncCommits() {
       const out = await git(root, "log", "--format=%(trailers:key=Sync-Seq,valueonly)", "HEAD")
       return out.split("\n").filter((l) => l !== "")
+    },
+    async renderJournals() {
+      return readdir(join(root, ".git", "omo-sync", "renders")).catch(() => [] as string[])
     },
     async workingFiles() {
       const names = await readdir(root, { recursive: true, withFileTypes: true })

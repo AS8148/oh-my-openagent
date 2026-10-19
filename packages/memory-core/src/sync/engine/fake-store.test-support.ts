@@ -87,8 +87,10 @@ export class FakeItemStore implements ItemStore {
     return live.length === 0 ? null : `${live.join("\n")}\n`
   }
 
-  baseline(key: string): string | null {
-    return this.materialized.get(key) ?? null
+  async version(key: string): Promise<string> {
+    const item = this.items.get(key)
+    if (item === undefined) return ""
+    return hash(`${[...item.adds.keys()].sort().join(",")}|${[...item.killed].sort().join(",")}`)
   }
 
   async markMaterialized(key: string, text: string | null): Promise<void> {

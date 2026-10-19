@@ -2,14 +2,28 @@
 // before anything remote lands, apply verified batches in seq order, then drive the cycle record
 // merged -> rendered -> committed -> checkpointed. `advance` is the same code path for a fresh
 // cycle and for one resumed after a crash, so each stage is reached exactly once.
+//
+// Crash-resume protocol for the render (stage merged), with the invariants it keeps:
+//  1. Render records in renders/<cycle id>/ are append-only until the cycle ends (never rewritten).
+//  2. A record exists only after its staged render file is durable.
+//  3. A staged file is moved into place only after the record that describes it is durable.
+//  4. For the latest record of a key, its staged file is absent iff that render landed (a delete
+//     is the inverse: the working file is moved to the staged path).
+//  5. A key's baseline is set to a recorded render (text, frontier) only when that render landed
+//     and the item doc is still at that frontier; once a capture moved past it, it stays.
+//  6. Replaying advance from any durable state, any number of times, renders each key at most once
+//     per (key, frontier) and leaves the same working tree, docs and pending ops.
+// A person's edit made after a crash is therefore captured against exactly the text it was made
+// on: the landed render (inv. 5), or the old baseline when the render never landed.
 
 import { createHash, randomBytes } from "node:crypto"
-import { mkdir, readdir, readFile, rename, rm } from "../../fs/resilient"
-import { dirname, extname, join, relative, sep } from "node:path"
+import { existsSync, mkdir, readdir, readFile, rename } from "../../fs/resilient"
+import { dirname, join, relative, sep } from "node:path"
 
+import { syncJournalDirectory } from "../../journal/fsync"
 import { TEMP_MARK, writeAtomic } from "./atomic"
 import type { EngineDeps } from "./engine-deps"
-import { type CycleRecord, fromBase64, type RenderProgress, type SyncJournal, toBase64, type WireItem } from "./journal"
+import { type CycleRecord, fromBase64, type RenderRecord, type SyncJournal, toBase64, type WireItem } from "./journal"
 
 export interface Applied {
   readonly batches: number
@@ -35,48 +49,29 @@ const sameItem = (a: WireItem, b: WireItem): boolean => a.key === b.key && a.ops
 
 const textHash = (text: string | null): string => createHash("sha256").update(text === null ? "\u0000absent" : `t:${text}`).digest("hex")
 
-/** `notes/x.md` -> `notes/x.sync-conflict-<stamp>.md`: a sibling the next capture syncs as its own item. */
-const conflictKey = (key: string, stamp: number): string => {
-  const ext = extname(key)
-  return `${key.slice(0, key.length - ext.length)}.sync-conflict-${stamp}${ext}`
+const latestByKey = (records: readonly RenderRecord[]): Map<string, RenderRecord> => {
+  const latest = new Map<string, RenderRecord>()
+  for (const record of records) latest.set(record.key, record)
+  return latest
 }
 
-/**
- * Before a cycle crashed at stage merged resumes, classify each key against its recorded render
- * progress so a person's edit made after the crash is never overwritten or re-expressed:
- * - render landed (done): an unchanged file is the engine's own render (skip); an edited one gets
- *   the render as its baseline, so capture yields exactly the person's delta;
- * - render recorded but maybe not landed: a file equal to the render or the old baseline holds
- *   nothing new; anything else has an unknowable base, so it is kept as a conflict copy;
- * - no record: the file was never touched by the engine, and capture runs as usual.
- * Returns the keys capture must not read as edits.
- */
-async function reconcileResumedRender(deps: EngineDeps, journal: SyncJournal, cycle: CycleRecord): Promise<Set<string>> {
-  const skip = new Set<string>()
-  for (const [key, step] of Object.entries(cycle.progress ?? {}) as [string, RenderProgress][]) {
-    const text = await readWorking(deps.repo.root, key)
-    if (step.done) {
-      if (textHash(text) === step.hash) skip.add(key)
-      else await deps.store.markMaterialized(key, step.text)
-      continue
-    }
-    skip.add(key)
-    if (text === step.text || text === deps.store.baseline(key) || text === null) continue
-    const copy = conflictKey(key, deps.clock.now())
-    await renderInto(deps, journal, copy, text)
-    deps.log?.(`memory sync: kept an edit to ${key} made during an interrupted sync as ${copy}`)
+/** Invariant 5: a landed render becomes the baseline only while the doc is still at its frontier. */
+async function adoptLandedRenders(deps: EngineDeps, journal: SyncJournal, cycle: CycleRecord): Promise<void> {
+  for (const record of latestByKey(await journal.renders(cycle.id)).values()) {
+    if (!journal.renderLanded(cycle.id, record)) continue
+    if ((await deps.store.version(record.key)) !== record.frontier) continue
+    await deps.store.markMaterialized(record.key, record.text)
   }
-  return skip
 }
 
 export async function capture(deps: EngineDeps, journal: SyncJournal, resuming: CycleRecord | null = null): Promise<number> {
-  const skip = resuming === null ? new Set<string>() : await reconcileResumedRender(deps, journal, resuming)
+  // Resuming a cycle at merged: every render that landed is the base of any edit made since.
+  if (resuming !== null) await adoptLandedRenders(deps, journal, resuming)
   const keys = [...new Set([...deps.store.keys(), ...(await workingKeys(deps.repo.root))])].sort()
   const captured: WireItem[] = []
   const texts = new Map<string, string | null>()
   for (const key of keys) {
     const text = await readWorking(deps.repo.root, key)
-    if (skip.has(key)) continue
     const ops = await deps.store.capture(key, text)
     if (ops === null) continue
     captured.push({ key, ops: toBase64(ops) })
@@ -94,6 +89,7 @@ export async function capture(deps: EngineDeps, journal: SyncJournal, resuming: 
     await deps.store.markMaterialized(item.key, texts.get(item.key) ?? null)
   }
   await deps.store.persist()
+  deps.fault?.("persisted")
   return captured.length
 }
 
@@ -105,6 +101,8 @@ export async function applyVerified(deps: EngineDeps, journal: SyncJournal): Pro
   }
   const records = (await journal.incoming()).filter((r) => r.stage === "verified")
   if (records.length === 0) return { batches: 0, memories: 0 }
+  // A cycle that ended in a crash right after clearing its record leaves its renders behind.
+  await journal.clearRenders(null)
   const keys = new Set<string>()
   for (const record of records) {
     const items = record.items.map((i) => ({ key: i.key, ops: fromBase64(i.ops) }))
@@ -122,7 +120,6 @@ export async function applyVerified(deps: EngineDeps, journal: SyncJournal): Pro
     last,
     batches: records.map((r) => r.entry),
     keys: [...keys].sort(),
-    texts: {},
     treeId: null,
   }
   await journal.updateState({ cycle })
@@ -131,16 +128,19 @@ export async function applyVerified(deps: EngineDeps, journal: SyncJournal): Pro
   return { batches: records.filter((r) => !r.snapshot).length, memories: keys.size }
 }
 
-async function renderInto(deps: EngineDeps, journal: SyncJournal, key: string, text: string | null): Promise<void> {
-  const target = join(deps.repo.root, key)
-  if (text === null) {
-    await rm(target, { force: true })
+/** Move a staged render into place (or the working file aside, for a delete), durably. */
+async function land(journal: SyncJournal, root: string, cycleId: string, record: RenderRecord): Promise<void> {
+  const target = join(root, record.key)
+  const staged = journal.stagedPath(cycleId, record.seq)
+  if (record.text === null) {
+    if (existsSync(target)) await rename(target, staged)
+    else await writeAtomic(staged, "")
+    await syncJournalDirectory(dirname(target))
     return
   }
-  const staged = join(journal.tmpDir, `${TEMP_MARK}${randomBytes(6).toString("hex")}`)
-  await writeAtomic(staged, text)
   await mkdir(dirname(target), { recursive: true })
   await rename(staged, target)
+  await syncJournalDirectory(dirname(target))
 }
 
 export async function advance(deps: EngineDeps, journal: SyncJournal, start: CycleRecord): Promise<void> {
@@ -151,25 +151,24 @@ export async function advance(deps: EngineDeps, journal: SyncJournal, start: Cyc
     deps.fault?.(point)
   }
   if (cycle.stage === "merged") {
-    const texts: Record<string, string | null> = {}
-    const progress: Record<string, RenderProgress> = {}
-    const record = async () => {
-      cycle = { ...cycle, progress: { ...progress } }
-      await journal.updateState({ cycle })
-    }
+    const latest = latestByKey(await journal.renders(cycle.id))
     for (const key of cycle.keys) {
-      const text = deps.store.render(key, await readWorking(deps.repo.root, key))
-      texts[key] = text
-      progress[key] = { text, done: false }
-      await record()
+      const working = await readWorking(deps.repo.root, key)
+      const frontier = await deps.store.version(key)
+      const prior = latest.get(key)
+      // Invariant 6: this (key, frontier) already rendered, landed and untouched.
+      if (prior !== undefined && prior.frontier === frontier && journal.renderLanded(cycle.id, prior) && textHash(working) === prior.hash) continue
+      const text = deps.store.render(key, working)
+      const record: RenderRecord = { seq: await journal.nextRenderSeq(cycle.id), key, frontier, hash: textHash(text), text }
+      if (text !== null) await writeAtomic(journal.stagedPath(cycle.id, record.seq), text)
+      deps.fault?.("staged")
+      await journal.appendRender(cycle.id, record)
       deps.fault?.("render-intent")
-      await renderInto(deps, journal, key, text)
-      progress[key] = { text, done: true, hash: textHash(text) }
-      await record()
+      await land(journal, deps.repo.root, cycle.id, record)
       deps.fault?.("render-key")
     }
     const treeId = await deps.repo.stageTree(cycle.keys)
-    await save({ ...cycle, stage: "rendered", texts, treeId }, "rendered")
+    await save({ ...cycle, stage: "rendered", treeId }, "rendered")
   }
   if (cycle.stage === "rendered") {
     const range = `${cycle.first}-${cycle.last}`
@@ -183,11 +182,12 @@ export async function advance(deps: EngineDeps, journal: SyncJournal, start: Cyc
     await save({ ...cycle, stage: "committed" }, "committed")
   }
   if (cycle.stage === "committed") {
-    for (const key of cycle.keys) await deps.store.markMaterialized(key, cycle.texts[key] ?? null)
+    await adoptLandedRenders(deps, journal, cycle)
     await deps.store.persist()
     await journal.recordApplied(cycle.batches)
     await save({ ...cycle, stage: "checkpointed" }, "checkpointed")
   }
   for (const batch of cycle.batches) await journal.dropIncoming(batch.seq)
   await journal.updateState({ cycle: null })
+  await journal.clearRenders(null)
 }

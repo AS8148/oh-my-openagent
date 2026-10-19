@@ -20,6 +20,7 @@ import {
   itemFrontier,
   openItemDevice,
   recordMaterialized,
+  renderDocContent,
   renderForDisk,
   renderItem,
 } from "../../item"
@@ -43,6 +44,28 @@ export interface DeviceItemStoreOptions {
 const fileOf = (key: string): string => createHash("sha256").update(key).digest("hex")
 
 export function createDeviceItemStore(options: DeviceItemStoreOptions): ItemStore {
+  /**
+   * A person re-created a deleted item. The dead doc still holds its last content at its current
+   * frontier, so capture runs against exactly that (any new op past the tombstone makes the item
+   * live again). Re-created with that same content, the diff is empty, so one explicit no-change
+   * op revives it.
+   */
+  const revive = async (key: string, doc: LoroDoc, workingText: string): Promise<Uint8Array | null> => {
+    const ops = await captureOnDevice(theDevice(), key, doc, renderDocContent(doc), itemFrontier(doc), workingText)
+    if (ops !== null) return ops
+    const target = doc.fork()
+    try {
+      target.setPeerId(doc.peerId)
+      target.setRecordTimestamp(false)
+      const body = target.getText("body")
+      body.insert(0, "\u0000")
+      body.delete(0, 1)
+      target.commit()
+      return target.export({ mode: "update", from: doc.oplogVersion() })
+    } finally {
+      target.free()
+    }
+  }
   const crdt = join(options.syncDir, "crdt")
   const docs = new Map<string, LoroDoc>()
   let baselines = new Map<string, Baseline>()
@@ -98,6 +121,7 @@ export function createDeviceItemStore(options: DeviceItemStoreOptions): ItemStor
         dirty.add(key)
         return doc.export({ mode: "update", from })
       }
+      if (!isLive(doc) && doc.oplogVersion().toJSON().size > 0) return revive(key, doc, workingText)
       return captureOnDevice(theDevice(), key, doc, base.text ?? "", base.frontier, workingText)
     },
     async apply(key, ops) {
@@ -110,7 +134,10 @@ export function createDeviceItemStore(options: DeviceItemStoreOptions): ItemStor
       if (doc === undefined || !isLive(doc)) return null
       return diskText === null ? renderItem(doc) : renderForDisk(doc, diskText)
     },
-    baseline: (key) => baselines.get(key)?.text ?? null,
+    async version(key) {
+      const frontier = itemFrontier(await docOf(key)).map((id) => `${id.peer}:${id.counter}`).sort()
+      return frontier.join(",")
+    },
     async markMaterialized(key, text) {
       const doc = await docOf(key)
       if (text !== null) await recordMaterialized(theDevice(), key, doc, itemFrontier(doc), text)

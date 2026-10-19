@@ -7,7 +7,7 @@
 
 import { randomBytes } from "node:crypto"
 
-import { readdir, rename } from "../../fs/resilient"
+import { existsSync, readdir, rename, rm } from "../../fs/resilient"
 import { join } from "node:path"
 
 import { readJson, removeAtomic, TEMP_MARK, writeJson } from "./atomic"
@@ -36,21 +36,22 @@ export interface CycleRecord {
   readonly last: number
   readonly batches: readonly PulledEntry[]
   readonly keys: readonly string[]
-  /** Rendered text per touched item; null removes the file. */
-  readonly texts: Readonly<Record<string, string | null>>
   readonly treeId: string | null
-  /**
-   * Render progress at stage merged, per key: the render text is recorded before its file is
-   * replaced (done false), then its sha256 once the file landed (done true). A resume uses it to
-   * tell the engine's own render from a person's edit made after the crash.
-   */
-  readonly progress?: Readonly<Record<string, RenderProgress>>
 }
 
-export interface RenderProgress {
+/**
+ * One render step of a cycle, appended to `renders/<cycle id>/` and never rewritten. The render is
+ * staged at `stagedPath(id, seq)` BEFORE this record is written and moved into place after it, so
+ * whether it landed is decidable on any resume: a write landed iff its staged file is gone; a
+ * delete landed iff its staged file exists (the working file was moved there, or a marker was
+ * written when there was no file). `frontier` is the item doc's version the text was rendered at.
+ */
+export interface RenderRecord {
+  readonly seq: number
+  readonly key: string
+  readonly frontier: string
+  readonly hash: string
   readonly text: string | null
-  readonly done: boolean
-  readonly hash?: string
 }
 
 export interface EngineState {
@@ -125,6 +126,50 @@ export class SyncJournal {
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
     }
+  }
+
+  private rendersDir(id: string): string {
+    return join(this.dir, "renders", id)
+  }
+
+  /** Where the render of record `seq` is staged (writes) or moved aside to (deletes). */
+  stagedPath(id: string, seq: number): string {
+    return join(this.rendersDir(id), `${String(seq).padStart(8, "0")}.staged`)
+  }
+
+  async renders(id: string): Promise<RenderRecord[]> {
+    const dir = this.rendersDir(id)
+    const names = await readdir(dir).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return [] as string[]
+      throw error
+    })
+    const records: RenderRecord[] = []
+    for (const name of names) {
+      if (!name.endsWith(".json") || name.startsWith(TEMP_MARK)) continue
+      records.push(await readJson<RenderRecord>(join(dir, name), null as never))
+    }
+    return records.sort((a, b) => a.seq - b.seq)
+  }
+
+  /** The seq the next render record of this cycle takes (records are append-only). */
+  async nextRenderSeq(id: string): Promise<number> {
+    return ((await this.renders(id)).at(-1)?.seq ?? 0) + 1
+  }
+
+  appendRender(id: string, record: RenderRecord): Promise<void> {
+    return writeJson(join(this.rendersDir(id), `${String(record.seq).padStart(8, "0")}.json`), record)
+  }
+
+  renderLanded(id: string, record: RenderRecord): boolean {
+    const staged = existsSync(this.stagedPath(id, record.seq))
+    return record.text === null ? staged : !staged
+  }
+
+  /** Drops every cycle's render journal except `keep` (the cycle still in flight, if any). */
+  async clearRenders(keep: string | null): Promise<void> {
+    const root = join(this.dir, "renders")
+    const names = await readdir(root).catch(() => [] as string[])
+    for (const name of names) if (name !== keep) await rm(join(root, name), { recursive: true, force: true })
   }
 
   putIncoming(record: IncomingRecord): Promise<void> {
