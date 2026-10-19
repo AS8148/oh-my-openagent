@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A busy task child no longer holds its whole transcript in memory while it works.** The memory component read the session's full history at the start of every run, though it needs it only the first time a session binds. On a reopened compacted session that read re-parses the whole transcript file and keeps it until the session goes idle, so each long-running child held about four times its transcript for every run; it is now read only when a session binds. ([#10557](https://github.com/code-yeongyu/oh-my-openagent/pull/10557), [#10556](https://github.com/code-yeongyu/oh-my-openagent/issues/10556), [senpi#3110](https://github.com/code-yeongyu/senpi/issues/3110))
+
+## [5.1.38] - 2026-10-19
+
 5.1.37 was tagged but its publish stopped on Linux (the release binaries outgrew their size budget), so its main packages never reached npm; everything listed for it ships in this release. ([#10566](https://github.com/code-yeongyu/oh-my-openagent/pull/10566))
 
 **Release binaries may be up to 182 MiB.** The per-platform size budget moves from 160 MiB to 182 MiB after measuring what grew: the Bun 1.4.3 runtime adds 9.5 MB to every binary and the senpi update about 1.25 MB, so linux-x64 reached 173.4 MB. Nothing was bundled by mistake. ([#10566](https://github.com/code-yeongyu/oh-my-openagent/pull/10566))
@@ -56,8 +60,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **A memory that already exists on a device joins its synced space without losing anything.** Each project's synced memory gets one identity that every device computes the same way from the repository, so two devices enabling sync offline land in one space. When local files meet the space's copy, nothing is deleted: body lines are only added, a list keeps every element from both sides, and a frontmatter value that differs keeps both whole values side by side, never spliced together and never a conflict note in the file. Leftover hub conflict copies are folded in and removed only after a read-back proves every line made it. Nothing syncs to a server yet. ([#10206](https://github.com/code-yeongyu/oh-my-openagent/pull/10206))
 
 **`runtime_fallback` moves to the next model when a Cursor pool is spent.** cursor-opencode-provider reports a spent pool as `capacity_limit`, which the fallback classifier did not recognize, so the session ended on the error instead of trying the next rung of the chain. It is now treated like the `resource_exhausted` error it replaces. ([#10170](https://github.com/code-yeongyu/oh-my-openagent/issues/10170), [#10224](https://github.com/code-yeongyu/oh-my-openagent/pull/10224))
-
-**A busy task child no longer holds its whole transcript in memory while it works.** The memory component read the session's full history at the start of every run, though it needs it only the first time a session binds. On a reopened compacted session that read re-parses the whole transcript file and keeps it until the session goes idle, so each long-running child held about four times its transcript for every run; it is now read only when a session binds. ([#10557](https://github.com/code-yeongyu/oh-my-openagent/pull/10557), [#10556](https://github.com/code-yeongyu/oh-my-openagent/issues/10556), [senpi#3110](https://github.com/code-yeongyu/senpi/issues/3110))
 
 ## [5.1.37] - 2026-10-19
 
