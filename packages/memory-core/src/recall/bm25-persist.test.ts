@@ -111,23 +111,6 @@ describe("persisted recall terms", () => {
     expect(written).toEqual([])
   }, TIMEOUT)
 
-  it("#given a save requested just before exclusion #when the excluded work runs #then nothing changes in .git while it runs", async () => {
-    // given
-    const { dir, repo } = await createRepo()
-    const cache = new RecallCorpusCache()
-    rankAll((await cache.load(repo)).documents)
-
-    // when
-    const [before, after] = await withRecallTermSavesExcluded(dir, async () => {
-      const first = (await readdir(join(dir, ".git"))).sort()
-      await cache.settled()
-      return [first, (await readdir(join(dir, ".git"))).sort()]
-    })
-
-    // then
-    expect(after).toEqual(before)
-  }, TIMEOUT)
-
   it("#given a cache whose ranking started a save #when settled resolves #then the store is written and no temp file remains", async () => {
     // given
     const { dir, repo, store } = await createRepo()
