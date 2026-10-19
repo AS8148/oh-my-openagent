@@ -60,9 +60,10 @@ export function activeAppliedBatches(): Set<string> {
 /**
  * Applies records that did not come from a queued extractor run (a reviewed onboarding selection)
  * through the same `applyFactsWithRetries` path: same lock, same person routing, same batch receipt.
- * The batch's recovery envelope lives in `<facts>/applied/<batchId>/`: removed when the apply
- * returns, kept when it throws after planning (memory may be mid-write), so the facts maintenance
- * reconcile (`facts-applied-reconcile.ts`) or a retry with the same batchId finishes it.
+ * The batch's recovery envelope lives in `<facts>/applied/<batchId>/`: removed once the apply
+ * reaches a terminal outcome, kept whenever it ends otherwise (a throw, or a busy memory-write lock)
+ * with a planned recovery on disk, so the facts maintenance reconcile (`facts-applied-reconcile.ts`)
+ * or a retry with the same batchId finishes it.
  */
 export async function applyFactsWithRetriesUnderLock(options: {
   readonly identity: MemoryIdentity
@@ -95,14 +96,14 @@ export async function applyFactsWithRetriesUnderLock(options: {
     ...owner,
   }
   activeAppliedBatches().add(runDir)
-  let keep = false
+  let settled = false
   try {
     if (!resumed) {
       const request: AppliedFactsRequest = { records: options.records, people: options.people }
       await writeRunJsonAtomic(join(runDir, "request.json"), request)
     }
     await writeRunJsonAtomic(ledgerPath, ledger)
-    return await applyFactsWithRetries({
+    const applied = await applyFactsWithRetries({
       runDir,
       ledger,
       repo,
@@ -112,15 +113,15 @@ export async function applyFactsWithRetriesUnderLock(options: {
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       withWriterLock: (operation, attempt) => withFactsWriterLock(options.identity.paths.locks, operation, attempt, ledger.runId),
     })
-  } catch (error) {
-    const onDisk = await readRunJson<FactsRunLedger>(ledgerPath).catch(() => undefined)
-    keep = onDisk?.applyRecovery !== undefined
-    // This process stopped applying; an unowned envelope is any later reconcile's to finish.
-    if (onDisk !== undefined && keep) await writeRunJsonAtomic(ledgerPath, { ...onDisk, pid: undefined, processStart: undefined })
-    throw error
+    settled = applied !== undefined
+    return applied
   } finally {
+    // A throw or an exhausted lock is not terminal: the on-disk ledger, not this call's path, says
+    // whether a planned recovery exists. Kept envelopes are unowned, so any later reconcile finishes them.
+    const onDisk = settled ? undefined : await readRunJson<FactsRunLedger>(ledgerPath).catch(() => undefined)
+    if (onDisk?.applyRecovery !== undefined) await writeRunJsonAtomic(ledgerPath, { ...onDisk, pid: undefined, processStart: undefined })
     activeAppliedBatches().delete(runDir)
-    if (!keep) await rm(runDir, { recursive: true, force: true })
+    if (onDisk?.applyRecovery === undefined) await rm(runDir, { recursive: true, force: true })
   }
 }
 
