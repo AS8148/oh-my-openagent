@@ -278,5 +278,69 @@ describe("feedback component", () => {
 
     expect(draft.sections.map((section) => section.id)).not.toContain("session")
   })
+
+  test("#given token-shaped values in id and email identity fields #when the report is prepared #then they go through the redactor and are dropped instead of sent", async () => {
+    const pi = new FakeExtensionAPI()
+    const handlers = new Map<string, Handler>()
+    const api = pi as unknown as SenpiExtensionAPI
+    const redacted: string[] = []
+    Object.assign(api, {
+      rpc: { emit: () => undefined, handle: (name: string, handler: Handler) => handlers.set(name, handler) },
+      redactForUpload: (text: string) => {
+        redacted.push(text)
+        let n = 0
+        const out = text.replace(/(sk-proj-[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{8,})/g, () => {
+          n++
+          return "<redacted>"
+        })
+        return { text: out, counts: { credential: n } }
+      },
+    })
+    const stateDir = mkdtempSync(join(tmpdir(), "omo-feedback-idtok-"))
+    dirs.push(stateDir)
+    const component = createFeedbackComponent({ env: { OMO_CODING_AGENT_DIR: join(stateDir, "agent"), DO_NOT_TRACK: "1" }, stateDir })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({
+      identity: { accountId: "sk-proj-abcdefghijkl", userId: "ghp_abcdefghijklmnop", email: "ghp_abcdefghijklmnop@x.dev", deviceId: "dev_1", plan: "pro" },
+    })) as { sections: { id: string; text: string }[] }
+
+    const body = JSON.stringify(draft)
+    expect(body).not.toContain("sk-proj-abcdefghijkl")
+    expect(body).not.toContain("ghp_abcdefghijklmnop")
+    expect(draft.sections.find((section) => section.id === "identity")?.text).toContain("dev_1")
+    expect(redacted).toEqual(expect.arrayContaining(["sk-proj-abcdefghijkl", "ghp_abcdefghijklmnop", "dev_1", "pro"]))
+  })
+
+  test("#given the latest session shut down while another is still live #when the desktop omits the session #then the other live session is used", async () => {
+    const { pi, api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const sessionFor = (id: string, text: string) => ({
+      sessionManager: {
+        getSessionId: () => id,
+        getBranch: () => [{ type: "message", timestamp: "2026-10-19T02:00:00.000Z", message: { role: "user", content: [{ type: "text", text }] } }],
+      },
+    })
+    const a = sessionFor("ses_a", "message from A")
+    const b = sessionFor("ses_b", "message from B")
+    await pi.dispatch("session_start", {}, a)
+    await pi.dispatch("session_start", {}, b)
+    await pi.dispatch("session_shutdown", {}, b)
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { sections: { id: string; text: string }[] }
+
+    expect(draft.sections.find((section) => section.id === "session")?.text).toContain("message from A")
+  })
+
+  test("#given a live session whose history cannot be read #when the report is prepared #then a draft without the conversation comes back instead of an error", async () => {
+    const { pi, api, handlers, component } = host({ withRedactor: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    await pi.dispatch("session_start", {}, { sessionManager: { getSessionId: () => "ses_x", getBranch: () => { throw new Error("broken") } } })
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { draftId?: string; sections: { id: string }[] }
+
+    expect(typeof draft.draftId).toBe("string")
+    expect(draft.sections.map((section) => section.id)).not.toContain("session")
+  })
 })
 

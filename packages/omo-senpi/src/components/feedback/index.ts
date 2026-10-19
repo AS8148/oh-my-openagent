@@ -40,10 +40,16 @@ interface StoredDraft {
 
 const sessionView = (ctx: SessionLike | undefined): HostSessionView | undefined => {
   if (ctx?.sessionManager?.getBranch === undefined) return undefined
+  let entries: readonly unknown[]
+  try {
+    entries = ctx.sessionManager.getBranch()
+  } catch {
+    return undefined
+  }
   const provider = typeof ctx.model?.provider === "string" ? ctx.model.provider : undefined
   const id = typeof ctx.model?.id === "string" ? ctx.model.id : undefined
   return {
-    entries: ctx.sessionManager.getBranch(),
+    entries,
     ...(typeof ctx.cwd === "string" ? { cwd: ctx.cwd } : {}),
     ...(ctx.sessionManager.getSessionId === undefined ? {} : { sessionId: ctx.sessionManager.getSessionId() }),
     ...(id === undefined ? {} : { model: provider === undefined ? id : `${provider}/${id}` }),
@@ -88,17 +94,26 @@ const singleLine = (value: string): string | undefined => {
   return line === "" || line.length > 120 ? undefined : line
 }
 
-/** Builds the desktop's identity lines from named fields only: ids and the email must match their shape, free-text fields are redacted. */
+/**
+ * Builds the desktop's identity lines from named fields only. Every value goes through the upload redactor and is
+ * dropped when the redactor finds anything in it; ids and the email must also match their shape. The email is checked
+ * as its two halves so the redactor's own email rule does not remove the address we are collecting on purpose.
+ */
 export const clientIdentityLines = (input: unknown, redact: UploadRedactor): readonly string[] => {
   const identity: unknown = Reflect.get(Object(input), "identity")
   if (identity === null || typeof identity !== "object") return []
+  const clean = (value: string): boolean => redact(value).count === 0
   return IDENTITY_FIELDS.flatMap(([label, key, shape]) => {
     const value: unknown = Reflect.get(identity, key)
     if (typeof value !== "string") return []
-    if (shape === "id") return ID_VALUE.test(value) ? [`${label.padEnd(12)}${value}`] : []
-    if (shape === "email") return EMAIL_VALUE.test(value) ? [`${label.padEnd(12)}${value}`] : []
+    if (shape === "id") return ID_VALUE.test(value) && clean(value) ? [`${label.padEnd(12)}${value}`] : []
+    if (shape === "email") {
+      if (!EMAIL_VALUE.test(value)) return []
+      const at = value.lastIndexOf("@")
+      return clean(value.slice(0, at)) && clean(value.slice(at + 1)) ? [`${label.padEnd(12)}${value}`] : []
+    }
     const line = singleLine(value)
-    return line === undefined ? [] : [`${label.padEnd(12)}${redact(line).text}`]
+    return line !== undefined && clean(line) ? [`${label.padEnd(12)}${line}`] : []
   })
 }
 
@@ -147,7 +162,7 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
         const id = sessionIdOf(ctx as SessionLike | undefined)
         if (id === undefined) return
         liveSessions.delete(id)
-        if (latestSessionId === id) latestSessionId = undefined
+        if (latestSessionId === id) latestSessionId = [...liveSessions.keys()].at(-1)
       })
       const sessionForRpc = (input: unknown): SessionLike | undefined => {
         const requested: unknown = Reflect.get(Object(input), "sessionId")
