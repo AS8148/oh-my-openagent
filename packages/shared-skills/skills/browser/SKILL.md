@@ -25,7 +25,7 @@ When `OMO_BROWSER_ENGINE` is set (the OmO desktop app sets it for every session)
 | Value | What you do |
 |---|---|
 | `connected` | Use `connectBrowserSkill()` only. If the user's browser is not connected you get a "Connect your browser" error: relay it and stop. Never open another browser |
-| `builtin` | `const browser = await omowright.connectBuiltinBrowser(); const [tab] = await browser.listTargets(); const page = await browser.attachPage(tab.id); await page.goto(url)`: the app's in-app browser for this thread, the tab the user sees beside the chat, then the normal page API (snapshot, click, type). It has one tab: navigate it, do not open new tabs (`createAgentTabs` is refused here). Do not call `connectBrowserSkill()`. If it throws `browser_builtin_unavailable`, relay the message and stop |
+| `builtin` | The app's in-app browser for this thread, the tab the user sees beside the chat, and nothing else: `const browser = await omowright.connectBuiltinBrowser(); const [tab] = await browser.listTargets(); const page = await browser.attachPage(tab.id); await page.goto(url)`. Work in few calls: take `page.snapshot()` once, act on its refs, and chain several actions in one eval cell (`page.locator(ref).fill()`, `.click()`, `.selectOption(value)`, `.setInputFiles(path)`), snapshotting again only after the page changed. It has one tab: navigate it, never open new tabs. If `connectBuiltinBrowser()` throws `browser_builtin_unavailable`, this session has no browser: tell the user with its message and stop. Never fall back to the `computer` tool, `connectBrowserSkill()`, `tool_search`, or any other browser |
 | `none` | Do not do browser work. Say that agent browser access is off for this project |
 | unset | The table above, as before (terminal use) |
 
