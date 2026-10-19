@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Sessions on one host share a single copy of memory recall's notes and search index.** Every session that recalls memory loaded the whole memory and built its own search index, so on a shared host (the background task host, the desktop daemon) each live session held its own copy: on a real host with a 6,666-note memory each extra session added about 120 MB of heap. Sessions that recall from the same memory now share one copy, released when the last of them ends, including when they reach it through a symlinked path; with 11 sessions the host went from 1,435 MB to 328 MB of heap. The notes found and their order are unchanged. ([#10544](https://github.com/code-yeongyu/oh-my-openagent/issues/10544), [#10545](https://github.com/code-yeongyu/oh-my-openagent/pull/10545))
+
 **A busy task child no longer holds its whole transcript in memory while it works.** The memory component read the session's full history at the start of every run, though it needs it only the first time a session binds. On a reopened compacted session that read re-parses the whole transcript file and keeps it until the session goes idle, so each long-running child held about four times its transcript for every run; it is now read only when a session binds. ([#10557](https://github.com/code-yeongyu/oh-my-openagent/pull/10557), [#10556](https://github.com/code-yeongyu/oh-my-openagent/issues/10556), [senpi#3110](https://github.com/code-yeongyu/senpi/issues/3110))
 
 ## [5.1.38] - 2026-10-19
