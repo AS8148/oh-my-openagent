@@ -101,4 +101,16 @@ describe("createEngineUsageSource", () => {
     source.stop()
     expect(limits.listeners).toBe(0)
   })
+
+  test("#given the pool rotated to an account the engine has not read yet #when the turn refreshes #then the old account's numbers are not shown", () => {
+    const limits = engine([record("work", 41)])
+    let pinned = "work"
+    const source = createEngineUsageSource({ limits, readCredentials: () => claudeAuth(pinned, ["work", "home"]), now: () => NOW, onChange: () => {} })
+    pinned = "home"
+    source.refresh()
+
+    expect(source.snapshot().claude).toBeUndefined()
+    source.stop()
+    expect(limits.listeners).toBe(0)
+  })
 })
