@@ -4,10 +4,11 @@ import { randomUUID } from "node:crypto"
 import { existsSync, realpathSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { hostname, tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { assertRepoIntegrity, git } from "../concurrency/two-process-kit.test-support"
+import { createNodeGitExec } from "./exec"
 import { buildIdentityPaths } from "../identity"
 import { acquireLock, createLockRecord, getProcessStartIdentity, memoryWriterLockPath, releaseLock } from "../locks"
 import { exitedWithin, pidAlive, probeUntil } from "../locks/process-liveness.test-support"
@@ -89,6 +90,23 @@ async function sweepAsSuccessor(writerLockPath: string, repoDir: string, scans: 
     await releaseLock(writerLockPath, record)
   }
 }
+
+describe("the git-activity lock never recreates a removed memory home (omo #10322)", () => {
+  test.skipIf(process.platform === "win32")("#given an identity whose directory was removed #when a git command runs in its repo #then nothing is recreated", async () => {
+    // #given
+    const { root, paths } = await identityRepo("kernel-removed-home")
+    const identityDir = dirname(paths.repo)
+    await rm(identityDir, { recursive: true, force: true })
+
+    // #when
+    const result = await createNodeGitExec().run(["status"], { cwd: paths.repo, timeoutMs: 10_000 })
+
+    // #then
+    expect(result.code).toBe(128)
+    expect(existsSync(identityDir)).toBe(false)
+    expect(existsSync(root)).toBe(true)
+  })
+})
 
 describe("dead-writer git-lock reclaim on hosts whose /proc scans cannot answer (omo #10322)", () => {
   test.skipIf(process.platform === "win32")("#given a dead writer that ran its git under the activity lock #when its successor sweeps on a blind host #then the stranded lock is reclaimed", async () => {

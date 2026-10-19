@@ -14,7 +14,9 @@ import { GitError } from "./errors"
 // exits. The stranded-lock sweep takes it EXCLUSIVELY: acquired means no such process is alive,
 // and holding it across the unlink keeps a new git run from starting in between.
 
-export const GIT_ACTIVITY_LOCK_NAME = "git-activity.lock"
+// Not `*.lock`: every scanner of the locks directory (doctor, the dead-owner sweep) reads a `*.lock` as
+// a JSON lock record, and this file is an empty flock target that must never be reported or removed.
+export const GIT_ACTIVITY_LOCK_NAME = "git-activity.flock"
 
 // A sweep holds the exclusive lock only across a stat and an unlink, so a shared attempt that
 // keeps failing this long means the lock cannot be taken at all; git then must not run unseen.
@@ -41,15 +43,35 @@ export type GitActivityProbe =
   | { readonly kind: "busy" }
   | { readonly kind: "unavailable" }
 
+function errorCode(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined
+}
+
+async function mkdirIfMissing(dir: string): Promise<void> {
+  try {
+    await mkdir(dir)
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error
+  }
+}
+
+// Never recursive: a git run that outlives its memory home (a removed identity, a test root torn down)
+// must not recreate it, so a missing identity directory means there is no activity lock to hold.
 async function openActivityLock(repoDir: string): Promise<FileHandle | null> {
   const locksDir = identityLocksDirForRepo(repoDir)
   if (locksDir === null) return null
-  await mkdir(locksDir, { recursive: true })
-  return open(join(locksDir, GIT_ACTIVITY_LOCK_NAME), constants.O_RDWR | constants.O_CREAT, 0o600)
+  try {
+    await mkdirIfMissing(dirname(locksDir))
+    await mkdirIfMissing(locksDir)
+    return await open(join(locksDir, GIT_ACTIVITY_LOCK_NAME), constants.O_RDWR | constants.O_CREAT, 0o600)
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return null
+    throw error
+  }
 }
 
 function isReadOnlyFilesystem(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "EROFS"
+  return errorCode(error) === "EROFS"
 }
 
 /** Held around one git run in `repoDir`; null when the repo is outside the identity layout or the host has no kernel lock. */
