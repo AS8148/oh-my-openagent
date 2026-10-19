@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { pendingPackages, waitForRegistryVersions } from "./wait-registry-versions.mjs"
+import { pendingPackages, waitForRegistryVersions, type RegistryFetch } from "./wait-registry-versions.mjs"
 
-const registry = (served) => async (url) => {
-  const name = decodeURIComponent(new URL(url).pathname.split("/")[1])
+const registry = (served: Record<string, string>): RegistryFetch => async (url) => {
+  const name = decodeURIComponent(new URL(url).pathname.split("/")[1] ?? "")
   const version = served[name]
   return version === undefined ? new Response("not found", { status: 404 }) : Response.json({ name, version })
 }
@@ -22,7 +22,7 @@ describe("wait-registry-versions", () => {
 
   test("#given a package that lands on the second probe #when waiting #then it succeeds", async () => {
     let calls = 0
-    const late = async (url) => {
+    const late: RegistryFetch = async () => {
       calls++
       return calls === 1 ? new Response("", { status: 404 }) : Response.json({ version: "5.1.38" })
     }
@@ -35,8 +35,11 @@ describe("wait-registry-versions", () => {
   })
 
   test("#given a no-cache read #when probing #then the request asks the registry to bypass caches", async () => {
-    let seen
-    await pendingPackages(["omo-ai"], "5.1.38", async (_url, init) => { seen = init; return Response.json({ version: "5.1.38" }) })
-    expect(seen.headers["Cache-Control"]).toBe("no-cache")
+    const seen: { headers?: Record<string, string> }[] = []
+    await pendingPackages(["omo-ai"], "5.1.38", async (_url, init) => {
+      seen.push(init ?? {})
+      return Response.json({ version: "5.1.38" })
+    })
+    expect(seen[0]?.headers?.["Cache-Control"]).toBe("no-cache")
   })
 })
