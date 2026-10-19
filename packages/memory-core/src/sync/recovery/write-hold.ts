@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 import { mkdir, readFile, rename, rm, writeFile } from "../../fs/resilient";
 import { syncJournalDirectory, syncJournalFile } from "../../journal/fsync";
@@ -56,9 +56,25 @@ export const loadWriteHold = async (
 };
 
 /**
+ * The directories to fsync so `stateDir` and its `recovery-hold` entry are durable (#10611): when
+ * `mkdir` created `stateDir` or an ancestor (`created`, its topmost new directory), each new entry is
+ * fsynced in the directory that holds it, from the parent of `created` down to `stateDir`.
+ */
+const entriesToSync = (stateDir: string, created: string | undefined): string[] => {
+	const state = resolve(stateDir);
+	const dirs = [state];
+	if (created === undefined) return dirs;
+	const top = resolve(created);
+	if (state !== top && !state.startsWith(`${top}${sep}`)) return dirs;
+	for (let dir = state; dir !== top; dir = dirname(dir)) dirs.unshift(dirname(dir));
+	dirs.unshift(dirname(top));
+	return dirs;
+};
+
+/**
  * Records that writes are held for `account`, mode 0600, durably (#10450): the staged file is
  * fsynced before the rename and the directories after it, so a power loss right after the join
- * cannot lose the hold.
+ * cannot lose the hold. Directories the call creates are fsynced into their parents first (#10611).
  */
 export const holdWrites = async (
 	stateDir: string,
@@ -67,8 +83,9 @@ export const holdWrites = async (
 ): Promise<void> => {
 	const target = holdPath(stateDir, account);
 	const dir = join(stateDir, "recovery-hold");
-	await mkdir(dir, { recursive: true, mode: 0o700 });
-	await syncJournalDirectory(stateDir);
+	const created = await mkdir(dir, { recursive: true, mode: 0o700 });
+	for (const entry of entriesToSync(stateDir, created))
+		await syncJournalDirectory(entry);
 	const staging = `${target}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
 	const body = { version: 1, account, credential_id: credentialId };
 	try {

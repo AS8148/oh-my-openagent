@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import * as Resilient from "../../fs/resilient";
 import * as Fsync from "../../journal/fsync";
 import { createRejectionCounter } from "../crypto/rejection.ts";
@@ -49,6 +49,42 @@ describe("the write hold survives a power loss (#10450)", () => {
 			"sync-dir state",
 			"sync-file staging",
 			"rename",
+			"sync-dir hold",
+		]);
+		expect(await loadWriteHold(stateDir, "acct")).toEqual({
+			held: true,
+			credentialId: "cred",
+		});
+	});
+
+	test("a state directory the hold creates is fsynced into its parent before the hold is staged (#10611)", async () => {
+		const parent = freshStateDir();
+		const stateDir = join(parent, "state", "sync");
+		const names = new Map([
+			[parent, "parent"],
+			[dirname(stateDir), "middle"],
+			[stateDir, "state"],
+			[join(stateDir, "recovery-hold"), "hold"],
+		]);
+		const calls: string[] = [];
+		const syncFile = Fsync.syncJournalFile;
+		const syncDir = Fsync.syncJournalDirectory;
+		spies.push(
+			spyOn(Fsync, "syncJournalFile").mockImplementation(async (path) => {
+				calls.push("sync-file staging");
+				return syncFile(path);
+			}),
+			spyOn(Fsync, "syncJournalDirectory").mockImplementation(async (path) => {
+				calls.push(`sync-dir ${names.get(path) ?? path}`);
+				return syncDir(path);
+			}),
+		);
+		await holdWrites(stateDir, "acct", "cred");
+		expect(calls).toEqual([
+			"sync-dir parent",
+			"sync-dir middle",
+			"sync-dir state",
+			"sync-file staging",
 			"sync-dir hold",
 		]);
 		expect(await loadWriteHold(stateDir, "acct")).toEqual({
