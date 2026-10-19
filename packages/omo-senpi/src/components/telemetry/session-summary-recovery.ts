@@ -24,6 +24,10 @@ import {
 export { adoptForeignWindow, withRecoveryOps }
 export { sendSummaryRecord } from "./session-summary-delivery"
 export { createImmediateSender } from "@oh-my-opencode/telemetry-core/immediate-send"
+// The recorder itself (windows, storage, publisher) loads here too, on a session's first turn or shutdown.
+export { createSessionSummaryRecorder } from "./omo-native-session-summary"
+export { createSummaryStorage, purgeUnconsentedQueue } from "./session-summary-storage"
+export { currentProcessOwner } from "./session-summary-owner"
 
 export type SummaryRecovery = {
   /** One pass over the summary directory; safe to run concurrently from any number of processes. */

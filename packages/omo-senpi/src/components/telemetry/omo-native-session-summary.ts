@@ -66,6 +66,8 @@ export type SessionSummaryRecorder = {
   readonly purgeIfOptedOut: () => void
   /** Stops the periodic consent check; the session is going away. */
   readonly dispose: () => void
+  /** Resolves once the recorder can persist a turn synchronously (the lazy facade loads its sidecar). */
+  readonly prepare?: () => Promise<void>
 }
 
 export type LiveWindow = {
