@@ -23,12 +23,15 @@ export function foldQuotes(text: string): string {
   return text.replace(/[\u2018\u2019\u201B\u2032\uFF07]/gu, "'").replace(/[\u201C\u201D\u201F\u2033\uFF02]/gu, '"')
 }
 
-// A symbol, emoji, ellipsis, non-ASCII question mark or emoticon anywhere in the message (❓ 🤔 👎 ‽ ؟ ¿ … :( -_- ㅠ)
-// can carry a question or a refusal the word scan cannot read, so it is not consent. The tilde stays allowed (해줘~).
-const SYMBOL_HEDGE = /(?!~)\p{S}|[\u203d\u061f\u00bf\u2049\u2026]|\.{2,}|[:;=]['-]?[()[\]\/\\|]|-_-|t_t|[\u3160\u315c\u1172\u116e]/u
+// Lead ruling: punctuation is refused by CLASS, not by list. A message is consent only if every character is a letter,
+// digit, combining mark, whitespace or one of a small allowlist ( . , ! ' " ~ - 。 、 ). Any other punctuation or symbol (a
+// question mark in any script, an emoji, an emoticon, an ellipsis, a colon or semicolon, an invisible format character)
+// can carry a question or a refusal the word scan cannot read, so it is not consent. A period counts only when it ends a
+// word (followed by whitespace, a digit or the end), so "T.T" and "-.-" are refused; ㅠ and ㅜ are crying jamo.
+const NON_CONSENT_MARK = /[^\p{L}\p{N}\p{M}\s.,!'"~\-\u3002\u3001]|\.(?![\s\d]|$)|[\u3160\u315c\u1172\u116e]/u
 
 function negatesOrHedges(sentence: string): boolean {
-  return NEGATION_OR_HEDGE.test(sentence) || KOREAN_NEGATION_OR_HEDGE.test(sentence) || DWAESS_RETRACTION.test(sentence) || SYMBOL_HEDGE.test(sentence)
+  return NEGATION_OR_HEDGE.test(sentence) || KOREAN_NEGATION_OR_HEDGE.test(sentence) || DWAESS_RETRACTION.test(sentence) || NON_CONSENT_MARK.test(sentence)
 }
 
 // Lead decision (#10498): the CLOSED list of courtesy closers that may surround a quoted user message. Nothing else.

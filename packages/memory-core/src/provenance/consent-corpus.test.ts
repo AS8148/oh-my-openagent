@@ -63,7 +63,7 @@ const TRAILING_AFTER_QUOTE: readonly (readonly [string, string])[] = [
 
 // Review of 2eef95d5b0: the edges are trimmed of a CLOSED set only, so a question or refusal symbol after the quote is
 // never trimmed away, and a message carrying one is not consent even when quoted whole.
-const SYMBOL_TAILS = ["❓", "‽", "؟", "🤔", "👎", "🚫", "❌", "✗", "🙅", "...", "…", "-_-", ":(", "⁉"]
+const SYMBOL_TAILS = ["\uff1f", "?", "\u00bf", "\u2048", "\u2047", "\u{1f610}", "\u200b?", "(?)", ":", ";", "\u2e2e", "\u055e", "\u037e", "\u1801", "-.-", "o_O", "._.", "D:", "T.T", "❓", "‽", "؟", "🤔", "👎", "🚫", "❌", "✗", "🙅", "...", "…", "-_-", ":(", "⁉"]
 
 const FOLLOW_UPS_OF_ANY_KIND = [
   "Thanks. Then push it.", "Also update plugin Z.", "Also run the tests.", "Do it now.", "Nobody uses them.", "Notably, they are unused.",
@@ -129,6 +129,10 @@ describe("consent corpus: a message that is itself not consent stays a suggestio
     expect(source(`Delete the prod database ${tail}`, "Delete the prod database")).toBe("agent")
     expect(source(`Delete the prod database${tail}`, "Delete the prod database")).toBe("agent")
     expect(source(`Delete the prod database ${tail}`, `Delete the prod database ${tail}`)).toBe("agent")
+  })
+  test("a colon or a zero-width character anywhere in the message is not consent", () => {
+    expect(source("Do it now: remove plugins X and Y", "Do it now: remove plugins X and Y")).toBe("agent")
+    expect(source("Remove plugins\u200b X and Y", "Remove plugins\u200b X and Y")).toBe("agent")
   })
   test("a leading inverted question mark is not trimmed", () => {
     expect(source("¿Delete the prod database", "Delete the prod database")).toBe("agent")
