@@ -6,16 +6,18 @@ import type {
 } from "@oh-my-opencode/telemetry-core"
 
 import { loadSenpiOmoConfig } from "../config-resolution"
-import {
-  createSessionSummaryRecorder,
-  type SessionSummaryOptions,
-  type SessionSummaryRecorder,
-} from "./omo-native-session-summary"
+import type { SessionSummaryOptions, SessionSummaryRecorder } from "./omo-native-session-summary"
 import type { OmoNativeEventName } from "./product-identity"
 import type { TelemetrySessionRole } from "./session-role"
-import { currentProcessOwner } from "./session-summary-owner"
-import { resolveRawTurnSampleRate } from "./session-summary-sampling"
-import { createSummaryStorage } from "./session-summary-storage"
+import { isSessionSampled, resolveRawTurnSampleRate } from "./session-summary-sampling"
+
+/** The part of the telemetry sidecar the entry bundle loads lazily: the recorder and its storage. */
+export type SummaryRuntime = Pick<
+  typeof import("./session-summary-recovery"),
+  "createSessionSummaryRecorder" | "createSummaryStorage" | "currentProcessOwner" | "purgeUnconsentedQueue"
+>
+export type LoadSummaryRuntime = () => Promise<SummaryRuntime>
+export const loadSummaryRuntime: LoadSummaryRuntime = () => import("#omo-telemetry-recovery-runtime")
 
 /** What the component's transport facade shares with every registration of one loaded extension. */
 export type NativeCaptureState = {
@@ -47,22 +49,61 @@ export function createNativeSummaryRecorder(input: {
   readonly rawTurnSampleRate?: number
   readonly isPidAlive?: (pid: number) => boolean
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
+  readonly loadRuntime?: LoadSummaryRuntime
 }): SessionSummaryRecorder {
   const { state, env } = input
-  let sampleRate = input.rawTurnSampleRate
-  return createSessionSummaryRecorder({
-    ...input.consent,
-    storage: createSummaryStorage({
-      stateDir: input.stateDir,
-      owner: currentProcessOwner(),
-      ...(input.isPidAlive === undefined ? {} : { isPidAlive: input.isPidAlive }),
-    }),
-    publish: state,
-    sessionRole: input.sessionRole,
-    // The sink is fixed to PostHog until `telemetry.sink` exists; the collector sink forces 1.
-    sampleRate: () => (sampleRate ??= resolveRawTurnSampleRate({ sink: "posthog", configured: configuredSampleRate(input.cwd, env), env })),
-    ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
-  })
+  let configuredRate = input.rawTurnSampleRate
+  // The sink is fixed to PostHog until `telemetry.sink` exists; the collector sink forces 1.
+  const sampleRate = (): number =>
+    (configuredRate ??= resolveRawTurnSampleRate({ sink: "posthog", configured: configuredSampleRate(input.cwd, env), env }))
+  // The recorder, its storage and its publisher live in the sidecar: a session loads them on its first turn,
+  // recovery or shutdown, so starting the extension costs only this facade. Nothing reaches the disk before that.
+  let loading: Promise<SessionSummaryRecorder | undefined> | undefined
+  let loaded: SessionSummaryRecorder | undefined
+  const recorder = (): Promise<SessionSummaryRecorder | undefined> =>
+    (loading ??= (input.loadRuntime ?? loadSummaryRuntime)().then(
+      (runtime) =>
+        (loaded = runtime.createSessionSummaryRecorder({
+          ...input.consent,
+          storage: runtime.createSummaryStorage({
+            stateDir: input.stateDir,
+            owner: runtime.currentProcessOwner(),
+            ...(input.isPidAlive === undefined ? {} : { isPidAlive: input.isPidAlive }),
+          }),
+          publish: state,
+          sessionRole: input.sessionRole,
+          sampleRate,
+          ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
+        })),
+      (error: unknown) => {
+        loading = undefined
+        input.diagnostics?.({ event: "telemetry_capture_failed", source: "omo-native-summary", error, errorKind: error instanceof Error ? "error" : "non_error" })
+        return undefined
+      },
+    ))
+  return {
+    get sampleRate() {
+      return sampleRate()
+    },
+    isRawTurnSampled: (sessionHash) => isSessionSampled(sessionHash, sampleRate()),
+    recover: async () => {
+      if (input.consent.isConsented?.() === false) return
+      await (await recorder())?.recover()
+    },
+    // Once loaded, calls go straight through, so a turn's window is written before recordTurn returns.
+    recordTurn: (sessionHash, turn) =>
+      loaded !== undefined ? loaded.recordTurn(sessionHash, turn) : recorder().then((late) => late?.recordTurn(sessionHash, turn)),
+    finish: (sessionHash, reason) =>
+      loaded !== undefined ? loaded.finish(sessionHash, reason) : recorder().then((late) => late?.finish(sessionHash, reason)),
+    prepare: async () => {
+      await recorder()
+    },
+    purgeIfOptedOut: () => loaded?.purgeIfOptedOut(),
+    dispose: () => {
+      loaded?.dispose()
+      void loading?.then((late) => late?.dispose())
+    },
+  }
 }
 
 // `telemetry.rawTurnSampleRate` from omo.json; an unreadable config leaves the documented default.

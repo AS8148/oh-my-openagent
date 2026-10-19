@@ -36,11 +36,12 @@ import { createOmoNativeTurnHandler } from "./omo-native-turns"
 import {
   SUMMARY_SHUTDOWN_WAIT_MS,
   createNativeSummaryRecorder,
+  loadSummaryRuntime,
   settleWithin,
   type NativeCaptureState,
 } from "./omo-native-summary-wiring"
 import { isTelemetryHostWarmup, resolveTelemetrySessionRole } from "./session-role-resolver"
-import { purgeUnconsentedQueue, type ConsentScope } from "./session-summary-storage"
+import type { ConsentScope } from "./session-summary-storage"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
   OMO_NATIVE_SCHEMA_VERSION,
@@ -180,7 +181,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       pi.on("session_shutdown", async (payload, eventCtx) => {
         consentCwd = cwdOf(eventCtx)
         if (summary === undefined) {
-          purgeQueue(stateDir, (scope) => readConsent(scope.cwd), options)
+          await purgeQueue(stateDir, (scope) => readConsent(scope.cwd), options)
           return
         }
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
@@ -221,10 +222,12 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
         detachDelegation()
       })
 
-      pi.on("turn_end", (payload, eventCtx) => {
+      pi.on("turn_end", async (payload, eventCtx) => {
         if (!isTurnEndEvent(payload)) return
         consentCwd = cwdOf(eventCtx)
         if (summary === undefined) return
+        // The first turn waits for the summary sidecar, so its window is on disk when the turn ends.
+        await summary.prepare?.()
         const sessionHash = state.sessionHash ?? hashForContext(eventCtx, hashSession)
         createOmoNativeTurnHandler({
           client,
@@ -391,9 +394,9 @@ function forwardValidatedCapture(transport: TelemetryTransport, message: Telemet
 
 // Queued records that may never be sent (no consent mark, or a scope that has opted out since) are deleted
 // even by a session that records nothing itself.
-function purgeQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean, options: OmoNativeTelemetryComponentOptions): void {
+async function purgeQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean, options: OmoNativeTelemetryComponentOptions): Promise<void> {
   try {
-    purgeUnconsentedQueue(stateDir, isScopeConsented)
+    ;(await loadSummaryRuntime()).purgeUnconsentedQueue(stateDir, isScopeConsented)
   } catch (error) {
     options.diagnostics?.({
       event: "telemetry_activity_state_write_failed",
