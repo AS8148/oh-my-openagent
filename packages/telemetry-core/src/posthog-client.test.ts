@@ -198,6 +198,41 @@ describe("posthog telemetry client", () => {
     }
   })
 
+  test("#given a transport whose flush rejects #when daily active records #then the transport is still shut down", async () => {
+    // given
+    const stateDir = mkdtempSync(join(tmpdir(), "telemetry-core-flush-fails-"))
+    let shutdowns = 0
+    const transportFactory: TelemetryTransportFactory = () => ({
+      capture: () => undefined,
+      flush: async () => {
+        throw new Error("collector answered 500")
+      },
+      shutdown: async () => {
+        shutdowns += 1
+      },
+    })
+
+    try {
+      // when
+      const recorded = recordDailyActive({
+        env: { POSTHOG_API_KEY: "test-key" },
+        now: new Date("2026-05-25T01:02:03.000Z"),
+        osProvider: OS_PROVIDER,
+        product: PRODUCT,
+        reason: "session_start",
+        source: "plugin",
+        stateDir,
+        transportFactory,
+      })
+
+      // then
+      await expect(recorded).rejects.toThrow("collector answered 500")
+      expect(shutdowns).toBe(1)
+    } finally {
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
   test("#given no API key after trimming #when client is created #then transport is not constructed", () => {
     // given
     let transportCreated = false
@@ -288,7 +323,8 @@ describe("posthog telemetry client", () => {
     // given
     const bodies: string[] = []
     const options = {
-      host: "https://posthog.test",
+      // A loopback host: the injected fetch answers, and the test guard (#10394) refuses any other host.
+      host: "http://127.0.0.1:9",
       disableGeoip: true,
       enableExceptionAutocapture: false,
       enableLocalEvaluation: false,
