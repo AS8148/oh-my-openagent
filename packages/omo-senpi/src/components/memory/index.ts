@@ -87,6 +87,7 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
   return {
     name: "memory",
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
+      pi = diagTimedPi(pi)
       const resolveCwd = options.resolveCwd ?? (() => extensionCwd(pi))
       const cwd = resolveCwd()
       const bootConfig = resolveMemoryConfig(loadConfig({ cwd }))
@@ -337,4 +338,29 @@ function describeError(error: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+// DIAGNOSTIC ONLY (latency-pr4 lane, never shipped): times every memory pi.on handler to $OMO_MEMORY_HOOK_TIMING.
+function diagTimedPi(pi: SenpiExtensionAPI): SenpiExtensionAPI {
+  const { appendFileSync, existsSync } = require("node:fs") as typeof import("node:fs")
+  const file = process.env.OMO_MEMORY_HOOK_TIMING || (existsSync("/tmp/omo-memory-hook-timing.enable") ? "/tmp/omo-memory-hook-timing.jsonl" : "")
+  if (file === "") return pi
+  let seq = 0
+  const on = pi.on.bind(pi) as (event: string, handler: (...args: unknown[]) => unknown, opts?: unknown) => unknown
+  const wrapped = (event: string, handler: (...args: unknown[]) => unknown, opts?: unknown): unknown => {
+    const site = (new Error().stack ?? "").split("\n").slice(2, 4).map((line) => line.trim().replace(/^at /, "")).join(" <- ")
+    const id = `${event}#${seq++}`
+    return on(event, (...args: unknown[]) => {
+      const start = performance.now()
+      const write = (kind: string): void => {
+        try { appendFileSync(file, `${JSON.stringify({ pid: process.pid, id, event, site, kind, ms: Math.round((performance.now() - start) * 10) / 10 })}\n`) } catch {}
+      }
+      let result: unknown
+      try { result = handler(...args) } catch (error) { write("sync-throw"); throw error }
+      if (result instanceof Promise) return result.finally(() => write("async"))
+      write("sync")
+      return result
+    }, opts)
+  }
+  return new Proxy(pi, { get: (target, key, receiver) => (key === "on" ? wrapped : Reflect.get(target, key, receiver)) })
 }
