@@ -21,7 +21,7 @@ export interface RegisterValue {
  * `commitMessage`. Internal to captureOnDevice (device-capture.ts), the only capture entry point:
  * adoption's capture and its register values land together and replay under the same receipts.
  * A production caller anywhere else would build an update with no receipt, no replay guard and no
- * device check; adopt-values-entry-guard.test.ts fails on any such import (#10321).
+ * device check (#10321).
  *
  * @internal
  */
