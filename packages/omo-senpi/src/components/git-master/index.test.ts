@@ -57,8 +57,12 @@ function appendedTextOf(transform: ToolResultTransform): string {
 async function registerWithSettings(
   pi: FakeExtensionAPI,
   settings: OmoGitMasterSettings,
+  detectShell?: () => "unix" | "powershell" | "cmd" | "csh",
 ): Promise<void> {
-  const component = createGitMasterAttributionComponent({ loadSettings: () => settings })
+  const component = createGitMasterAttributionComponent({
+    loadSettings: () => settings,
+    ...(detectShell === undefined ? {} : { detectShell }),
+  })
   await component.register(pi, createTestContext(pi))
 }
 
@@ -66,7 +70,7 @@ const defaultSettings = (): OmoGitMasterSettings => OmoGitMasterSettingsSchema.p
 const footerOptIn = (): OmoGitMasterSettings => OmoGitMasterSettingsSchema.parse({ commit_footer: true })
 
 describe("omo-senpi git-master attribution component", () => {
-  it("#given default settings #when a git-master SKILL.md read result arrives #then the result is untouched", async () => {
+  it("#given default settings #when a git-master SKILL.md read result arrives #then the env-prefix section rides the skill content and no footer is appended", async () => {
     // given
     const pi = new FakeExtensionAPI()
     await registerWithSettings(pi, defaultSettings())
@@ -75,7 +79,15 @@ describe("omo-senpi git-master attribution component", () => {
     const transform = await dispatchRead(pi, readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md"))
 
     // then
-    expect(transform).toBeUndefined()
+    expect(transform).toBeDefined()
+    if (transform === undefined) return
+    expect(transform.content).toHaveLength(1)
+    const text = transform.content[0]?.text ?? ""
+    expect(text).toContain("GIT COMMAND PREFIX (MANDATORY)")
+    expect(text).toContain("GIT_MASTER=1 git status")
+    expect(text).toContain("NO EXCEPTIONS")
+    expect(text).not.toContain("Ultraworked with")
+    expect(text).not.toMatch(CO_AUTHOR_TRAILER_PATTERN)
   })
 
   it("#given the footer opted in #when a git-master SKILL.md read result arrives #then only the footer directive is appended", async () => {
@@ -97,12 +109,12 @@ describe("omo-senpi git-master attribution component", () => {
     expect(appended).not.toContain("users.noreply.github.com")
   })
 
-  it("#given both attribution settings disabled #when a git-master SKILL.md read result arrives #then the result is untouched", async () => {
+  it("#given both attribution settings disabled and the env prefix disabled #when a git-master SKILL.md read result arrives #then the result is untouched", async () => {
     // given
     const pi = new FakeExtensionAPI()
     await registerWithSettings(
       pi,
-      OmoGitMasterSettingsSchema.parse({ commit_footer: false, include_co_authored_by: false }),
+      OmoGitMasterSettingsSchema.parse({ commit_footer: false, include_co_authored_by: false, git_env_prefix: "" }),
     )
 
     // when
@@ -110,6 +122,80 @@ describe("omo-senpi git-master attribution component", () => {
 
     // then
     expect(transform).toBeUndefined()
+  })
+
+  it("#given default settings #when the skill body carries bash git commands #then every git command in the bash blocks is prefixed", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    await registerWithSettings(pi, defaultSettings())
+    const payload = readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md")
+    payload.content = [
+      {
+        type: "text",
+        text: "# Git Master\n\n```bash\ngit add -A .\ngit commit -m \"x\"\necho done\n```",
+      },
+    ]
+
+    // when
+    const transform = await dispatchRead(pi, payload)
+
+    // then
+    expect(transform).toBeDefined()
+    if (transform === undefined) return
+    const text = transform.content[0]?.text ?? ""
+    expect(text).toContain("GIT_MASTER=1 git add -A .")
+    expect(text).toContain("GIT_MASTER=1 git commit -m \"x\"")
+    expect(text).toContain("\necho done")
+  })
+
+  it("#given a powershell host #when a git-master SKILL.md read result arrives #then the section uses the powershell env form and bash blocks stay unprefixed", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    await registerWithSettings(pi, defaultSettings(), () => "powershell")
+
+    // when
+    const payload = readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md")
+    payload.content = [
+      { type: "text", text: "# Git Master\n\n```bash\ngit status\n```" },
+    ]
+    const transform = await dispatchRead(pi, payload)
+
+    // then
+    expect(transform).toBeDefined()
+    if (transform === undefined) return
+    const text = transform.content[0]?.text ?? ""
+    expect(text).toContain("$env:GIT_MASTER='1';")
+    expect(text).toContain("```pwsh")
+    expect(text).toContain("\ngit status")
+    expect(text).not.toContain("GIT_MASTER=1 git status")
+  })
+
+  it("#given a csh host #when a git-master SKILL.md read result arrives #then the section uses the setenv form", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    await registerWithSettings(pi, defaultSettings(), () => "csh")
+
+    // when
+    const transform = await dispatchRead(pi, readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md"))
+
+    // then
+    expect(transform).toBeDefined()
+    if (transform === undefined) return
+    expect(transform.content[0]?.text ?? "").toContain("setenv GIT_MASTER 1;")
+  })
+
+  it("#given a cmd host #when a git-master SKILL.md read result arrives #then the section uses the cmd set form", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    await registerWithSettings(pi, defaultSettings(), () => "cmd")
+
+    // when
+    const transform = await dispatchRead(pi, readResultPayload("/home/user/.omo/agent/skills/git-master/SKILL.md"))
+
+    // then
+    expect(transform).toBeDefined()
+    if (transform === undefined) return
+    expect(transform.content[0]?.text ?? "").toContain('set GIT_MASTER="1" &&')
   })
 
   it("#given a read of an unrelated file #when the result arrives #then the result is untouched", async () => {
