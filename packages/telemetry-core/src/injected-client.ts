@@ -9,7 +9,6 @@ import type {
   TelemetryProductConfig,
   TelemetryTransport,
   TelemetryTransportFactory,
-  TelemetryTransportOptions,
 } from "./types"
 
 export type CreateTelemetryClientInput = {

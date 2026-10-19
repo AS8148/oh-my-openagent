@@ -79,7 +79,10 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           schemaVersion: OMO_NATIVE_SCHEMA_VERSION,
           setTimeoutFn: options.setTimeoutFn,
           source: SOURCE,
-          transportFactory: options.transportFactory ?? createLazyPostHogTransportFactory(options),
+          transportFactory: options.transportFactory ?? createLazyPostHogTransportFactory({
+            diagnostics: options.diagnostics,
+            source: SOURCE,
+          }),
         })
         if (!client.enabled) return
 

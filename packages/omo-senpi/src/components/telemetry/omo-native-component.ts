@@ -93,7 +93,10 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
     },
   }
   const transportFactory = sharedTransportFactory(
-    options.transportFactory ?? createLazyPostHogTransportFactory(options),
+    options.transportFactory ?? createLazyPostHogTransportFactory({
+      diagnostics: options.diagnostics,
+      source: "omo-native-component",
+    }),
     state,
     options,
   )

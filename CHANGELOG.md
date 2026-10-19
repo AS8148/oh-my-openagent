@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**OmO loads the analytics SDK only when an event is captured.** PostHog now ships as a lazy sidecar instead of being parsed with the main extension; queued events retain their order, shutdown waits for pending captures, and consent checks are unchanged. ([#10640](https://github.com/code-yeongyu/oh-my-openagent/pull/10640))
+
 **The engine can run `omo setup`'s detection for a client and apply only the stages you pick.** The new `omo.onboarding.scan` request streams what `omo setup` finds (sign-ins, custom providers, skills, MCP servers), and `omo.onboarding.apply` runs the same writers for the chosen stages only, refusing any target that changed since the scan and writing credentials through the engine's own store under its lock. ([#10496](https://github.com/code-yeongyu/oh-my-openagent/pull/10496))
 
 **The engine finds your projects and recent sessions from other coding agents.** `omo.onboarding.projects` and `omo.onboarding.sessions` list the projects and recent Claude Code, Codex and omo sessions on this computer over RPC, so the desktop's first run and import read the same discovery the TUI uses instead of keeping a second scanner. A transcript the desktop already imported is skipped by identity (path, size, mtime, device, inode, birth time) and does not count against the 100-transcript cap. No model and no network are involved ([#10497](https://github.com/code-yeongyu/oh-my-openagent/pull/10497)).

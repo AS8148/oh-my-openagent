@@ -85,7 +85,10 @@ function createRecordDailyActiveInput(options: SenpiTelemetryOptions): RecordDai
   const env = options.env ?? process.env
   const baseInput = {
     diagnostics: options.diagnostics,
-    transportFactory: options.transportFactory ?? createLazyPostHogTransportFactory(options),
+    transportFactory: options.transportFactory ?? createLazyPostHogTransportFactory({
+      diagnostics: options.diagnostics,
+      source: SENPI_TELEMETRY_SOURCE,
+    }),
     env,
     product: createSenpiTelemetryProductConfig(),
     reason: SESSION_START_REASON,
