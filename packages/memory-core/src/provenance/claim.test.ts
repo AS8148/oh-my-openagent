@@ -76,8 +76,8 @@ describe("claim receipts", () => {
   })
 
   test("#given the whole message apart from courtesy closers #when resolved #then the receipt stores the whole message", () => {
-    expect(resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y now" }, ["Thanks. Please remove plugins X and Y now."]))
-      .toEqual({ source: "user", userQuote: "Thanks. Please remove plugins X and Y now." })
+    expect(resolveClaimReceipt({ source: "user", userQuote: "remove plugins X and Y now" }, ["Thanks please remove plugins X and Y now."]))
+      .toEqual({ source: "user", userQuote: "Thanks please remove plugins X and Y now." })
   })
 
   test("#given a user claim with no quote #when resolved #then it is downgraded", () => {
@@ -91,7 +91,7 @@ describe("claim receipts", () => {
 
   test("#given a short whole message #when quoted whole #then it verifies, and a short fragment does not", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "응 해줘" }, ["응 해줘"]).source).toBe("user")
-    expect(resolveClaimReceipt({ source: "user", userQuote: "yes, do it" }, ["Yes, do it!"]).source).toBe("user")
+    expect(resolveClaimReceipt({ source: "user", userQuote: "yes do it" }, ["Yes do it!"]).source).toBe("user")
     expect(resolveClaimReceipt({ source: "user", userQuote: "look unused." }, USER_TEXTS).source).toBe("agent")
     expect(resolveClaimReceipt({ source: "user", userQuote: "플러그인 삭제해줘" }, ["그 플러그인 삭제해줘"]).source).toBe("agent")
   })
@@ -101,8 +101,8 @@ describe("claim receipts", () => {
     expect(resolveClaimReceipt({ source: "user", userQuote: "..." }, ["..."]).source).toBe("agent")
   })
 
-  test("#given a script written without spaces #when quoted whole #then it verifies, and a part of it does not", () => {
-    expect(resolveClaimReceipt({ source: "user", userQuote: "じゃあこのプラグインを削除してください" }, ["じゃあこのプラグインを削除してください"]).source).toBe("user")
+  test("#given a script outside Latin and Hangul #when quoted whole or in part #then it is never auto-verified", () => {
+    expect(resolveClaimReceipt({ source: "user", userQuote: "じゃあこのプラグインを削除してください" }, ["じゃあこのプラグインを削除してください"]).source).toBe("agent")
     expect(resolveClaimReceipt({ source: "user", userQuote: "このプラグインを削除して" }, ["じゃあこのプラグインを削除してください"]).source).toBe("agent")
   })
 

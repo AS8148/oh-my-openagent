@@ -2,7 +2,7 @@
 // words. Memory once stored an agent's suggestion as "the user agreed", and a later session acted on
 // it. A claim only keeps source "user" when its quote is a whole real user message, verbatim.
 
-import { COURTESY_CLOSERS, foldQuotes, isAffirmativeStatement } from "./consent"
+import { COURTESY_CLOSERS, isAffirmativeStatement } from "./consent"
 
 export const CLAIM_SOURCES = ["user", "agent", "inferred"] as const
 export type ClaimSource = (typeof CLAIM_SOURCES)[number]
@@ -26,7 +26,7 @@ const MAX_STORED_QUOTE_CHARS = 500
 // The one instruction for every writer that records a user claim (memory tool, facts extractor). The rule it states is
 // enforced by quotedUserMessage below, so the wording and the check cannot drift apart.
 export const USER_QUOTE_RULE =
-  "Required when source is user: one whole user message from this conversation, copied verbatim (not a part of it). Only whitespace, '.', '!', '~' and a courtesy word such as thanks or please at the start or end may differ. A partial or unmatched quote is stored as an agent suggestion."
+  "Required when source is user: one whole user message from this conversation, copied verbatim (not a part of it). Only spaces, letter case, one final '.' or '!' and a courtesy word such as thanks or please at the start or end may differ; a message with other punctuation, symbols or scripts outside Latin and Hangul cannot be verified. A partial or unmatched quote is stored as an agent suggestion."
 
 export function isClaimSource(value: unknown): value is ClaimSource {
   return typeof value === "string" && (CLAIM_SOURCES as readonly string[]).includes(value)
@@ -40,17 +40,17 @@ export function resolveClaimReceipt(claim: ClaimInput, userTexts: readonly strin
   return message === undefined ? { source: "agent", downgraded: true } : { source: "user", userQuote: message }
 }
 
-// Lead ruling on #10498: a quote verifies ONLY when it is one user message in full, give or take whitespace, '.', '!',
-// '~' at the edges and the closed courtesy closers. Anything else in that message (a second sentence, another clause, a
-// retraction, an interjection) means the quote is not the user's whole instruction: no receipt, and the agent asks again.
-// There is no sentence or clause parsing, so no break character can be missed. A message that is itself a refusal, hedge
-// or question is still refused by the in-message scan. The receipt stores the message as the user wrote it.
+// Lead ruling on #10498: a quote verifies ONLY when it is one user message in full, give or take spaces, one final '.'
+// or '!' and the closed courtesy closers, AND that message passes a CLOSED character allowlist (VERIFIABLE_MESSAGE).
+// Anything else means no receipt, and the agent asks again: a false "not verified" costs one re-ask, a false "verified"
+// is the incident. There is no sentence or clause parsing and no Unicode folding, so no look-alike, invisible or
+// combining character can change what the scan reads. A message that is itself a refusal, hedge or question is still
+// refused by the word scan. The receipt stores the message as the user wrote it.
 export function quotedUserMessage(quote: string, userTexts: readonly string[]): string | undefined {
   const needle = bareMessage(quote)
   if (needle.length === 0) return undefined
-  const message = userTexts.find((text) => bareMessage(text) === needle)
-  // The scan reads the message as written too: trimming its edges must not drop a question mark.
-  if (message === undefined || !isAffirmativeStatement(needle) || !isAffirmativeStatement(normalize(message))) return undefined
+  const message = userTexts.find((text) => VERIFIABLE_MESSAGE.test(text) && bareMessage(text) === needle)
+  if (message === undefined || !isAffirmativeStatement(normalize(message))) return undefined
   return capQuote(message)
 }
 
@@ -58,20 +58,24 @@ export function quoteAppearsInUserText(quote: string, userTexts: readonly string
   return quotedUserMessage(quote, userTexts) !== undefined
 }
 
-// A CLOSED set of edge characters (lead ruling): whitespace, '.', '!', '~' (full-width forms fold to these under NFKC)
-// and '。'. A question mark, comma, emoji or any other symbol is never trimmed, so it can never hide behind a quote.
-const EDGE = /^[\s.!~\u3002]+|[\s.!~\u3002]+$/gu
-const LEADING_CLOSER = new RegExp(`^(?:${COURTESY_CLOSERS.join("|")})(?=[\\s\\p{P}\\p{S}]|$)`, "u")
-const TRAILING_CLOSER = new RegExp(`(?:^|(?<=[\\s\\p{P}\\p{S}]))(?:${COURTESY_CLOSERS.join("|")})$`, "u")
+// The ONLY characters a verifiable message may contain: ASCII letters, precomposed Hangul syllables (never jamo, so
+// reactions such as ㅋㅋ or a lone ㄴ fail), ASCII digits, the plain ASCII space, an ASCII apostrophe only between two
+// letters, and one '.' or '!' at the very end. Any other code point (other scripts, modifier letters, curly quotes,
+// commas, emoji, zero-width or combining characters, repeated punctuation) fails closed. Consent written outside Latin
+// and Hangul is simply not auto-verified; the user can still confirm in the session.
+const WORD_CHAR = "A-Za-z\uAC00-\uD7A3"
+const VERIFIABLE_MESSAGE = new RegExp(`^ *(?:[${WORD_CHAR}0-9 ]|(?<=[${WORD_CHAR}])'(?=[${WORD_CHAR}]))+[.!]? *$`, "u")
+const LEADING_CLOSER = new RegExp(`^(?:${COURTESY_CLOSERS.join("|")}) `, "u")
+const TRAILING_CLOSER = new RegExp(` (?:${COURTESY_CLOSERS.join("|")})$`, "u")
 
-// The message with whitespace and case folded and its edges trimmed of that closed set and the courtesy closers.
+// The message with spaces collapsed, case folded, the final '.' or '!' dropped and leading/trailing closers removed.
 function bareMessage(text: string): string {
-  let bare = normalize(text)
+  let bare = normalize(text).replace(/[.!]$/u, "").trim()
   for (let previous = ""; previous !== bare;) {
     previous = bare
-    bare = bare.replace(EDGE, "").replace(LEADING_CLOSER, "").replace(TRAILING_CLOSER, "")
+    bare = bare.replace(LEADING_CLOSER, "").replace(TRAILING_CLOSER, "").trim()
   }
-  return bare
+  return COURTESY_CLOSERS.includes(bare) ? "" : bare
 }
 
 function capQuote(text: string): string {
@@ -118,7 +122,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalize(text: string): string {
-  return foldQuotes(text.normalize("NFKC")).replace(/\s+/g, " ").trim().toLowerCase()
+  return text.replace(/\s+/g, " ").trim().toLowerCase()
 }
 
 function singleLine(text: string): string {

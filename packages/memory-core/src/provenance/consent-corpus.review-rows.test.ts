@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { EN_INSTRUCTION, EN_QUOTE, HANGUL, inSentence, KO_INSTRUCTION, KO_QUOTE, source, stripEnd } from "./consent-corpus.shapes"
+import { EN_QUOTE, HANGUL, inSentence, KO_QUOTE, source, stripEnd } from "./consent-corpus.shapes"
 import REVIEW_ROW_CLASSES from "./consent-corpus.review-rows.classes.json"
 import REVIEW_ROWS from "./consent-corpus.review-rows.json"
 
@@ -43,7 +43,7 @@ describe("consent corpus: every phrase any review quoted", () => {
     expect(source(said, said)).toBe("user")
   })
   test.each(rowsOf("closer"))("instruction followed by closer %p stays the user's", (phrase) => {
-    const [instruction, quote] = HANGUL.test(phrase) ? [KO_INSTRUCTION, KO_QUOTE] : [EN_INSTRUCTION, EN_QUOTE]
+    const [instruction, quote] = HANGUL.test(phrase) ? [KO_QUOTE, KO_QUOTE] : [EN_QUOTE, EN_QUOTE]
     expect(source(`${instruction} ${phrase}`, quote)).toBe("user")
   })
 })

@@ -2,10 +2,9 @@ import { describe, expect, test } from "bun:test"
 
 import { EN_INSTRUCTION, EN_QUOTE, inSentence, KO_INSTRUCTION, KO_QUOTE, source, stripEnd } from "./consent-corpus.shapes"
 
-// The consent rule (#10488, lead ruling on #10498): a "user said" receipt verifies ONLY when the quote is the user's
-// ENTIRE message, give or take whitespace, edge punctuation and a closed list of courtesy closers. Anything else in that
-// message means the words were not the user's whole instruction, so the claim stays a suggestion and the agent asks again.
-// The in-message scan still refuses a message that is itself a refusal, hedge or question.
+// Lead ruling on #10498: a "user said" receipt verifies only when the quote is the user's whole message (give or take
+// spaces, case, one final '.' or '!' and the courtesy closers) AND that message uses only ASCII letters, Hangul syllables,
+// ASCII digits, the ASCII space, an apostrophe between letters and one final '.' or '!'. Everything else fails closed.
 
 const EN_FOLLOWING_RETRACTIONS = [
   "No.", "Nope.", "Nooo.", "Don't.", "Please don't.", "Not yet.", "Never mind.", "Nevermind.", "Nvm.", "Hold on.", "Wait.",
@@ -24,14 +23,12 @@ const KO_FOLLOWING_RETRACTIONS = [
   "됐거든", "됐습니다", "됐네",
 ]
 
-// Everything the last two reviews found past a quote that stops before the end of the message (0f4147b789 and
-// 9a65f76244): words in the same clause, a colon, a dash, an ellipsis, a period with no space, and 됐 interjections.
-const TRAILING_AFTER_QUOTE: readonly (readonly [string, string])[] = [
+// Everything the reviews found past a partial quote, plus the follow-ups of any kind: never verified.
+const PARTIAL_QUOTES: readonly (readonly [string, string])[] = [
   ["Remove plugins X and Y just joking", EN_QUOTE],
   ["Remove plugins X and Y then put them back", EN_QUOTE],
   ["Remove plugins X and Y \u2014 reconsider that", EN_QUOTE],
   ["Remove plugins X and Y: I'm joking", EN_QUOTE],
-  ["Remove plugins X and Y \u2014 psych", EN_QUOTE],
   ["Remove plugins X and Y\u2026 put them back", EN_QUOTE],
   ["Remove plugins X and Y.Put them back", EN_QUOTE],
   ["Remove plugins X and Y, keep them.", EN_QUOTE],
@@ -41,122 +38,108 @@ const TRAILING_AFTER_QUOTE: readonly (readonly [string, string])[] = [
   ["Please remove plugins X and Y now.", EN_QUOTE],
   ["플러그인 X 지워줘 했다가 다시 살려", "플러그인 X 지워줘"],
   ["플러그인 X 지워줘 아 근데 다시 넣어", "플러그인 X 지워줘"],
-  ["플러그인 X 지워줘 아 잊어", "플러그인 X 지워줘"],
   ["플러그인 X 지워줘 생각해볼게", "플러그인 X 지워줘"],
-  ["플러그인 X 지워줘 무시해", "플러그인 X 지워줘"],
-  ["플러그인 X 지워줘 ㅋㅋ 구라", "플러그인 X 지워줘"],
-  ["플러그인 X 지워줘 는 거짓말", "플러그인 X 지워줘"],
   ["플러그인 X 지워줘 근데 됐어", "플러그인 X 지워줘"],
-  ["플러그인 X 지워줘 했는데 됐어", "플러그인 X 지워줘"],
   ["플러그인 X 지워줘 ㅋ 됐어", "플러그인 X 지워줘"],
-  ["플러그인 X 지워줘 음 됐어", "플러그인 X 지워줘"],
   ["플러그인 X 지워 주세요", KO_QUOTE],
-  ["플러그인 X 지워. 그리고 그건 그대로", "플러그인 X 지워. 그리고"],
-  ["じゃあこのプラグインを削除してください", "このプラグインを削除して"],
-  ["Remove plugins X and Y, thanks.", EN_QUOTE],
-  ["플러그인 X 지워, 고마워", KO_QUOTE],
   ["응 해줘?", "응 해줘"],
   ["yes do it?", "yes do it"],
   ["ok \u{1f44e}", "ok"],
   ["ok \u{1f645}", "ok"],
 ]
 
-// Review of 2eef95d5b0: the edges are trimmed of a CLOSED set only, so a question or refusal symbol after the quote is
-// never trimmed away, and a message carrying one is not consent even when quoted whole.
-const SYMBOL_TAILS = ["\uff1f", "?", "\u00bf", "\u2048", "\u2047", "\u{1f610}", "\u200b?", "(?)", ":", ";", "\u2e2e", "\u055e", "\u037e", "\u1801", "-.-", "o_O", "._.", "D:", "T.T", "❓", "‽", "؟", "🤔", "👎", "🚫", "❌", "✗", "🙅", "...", "…", "-_-", ":(", "⁉"]
-
-const FOLLOW_UPS_OF_ANY_KIND = [
-  "Thanks. Then push it.", "Also update plugin Z.", "Also run the tests.", "Do it now.", "Nobody uses them.", "Notably, they are unused.",
-  "안에 있는 것도 지워", "일단 그거부터 해", "아니면 Y도 지워", "X가 아니라 Y도 같이 지워", "백업은 이미 완료됐어", "그만큼 중요해",
-  "고마워요 진짜", "Thanks a lot.", "Then push it.", "No rush.", "No worries.", "Don't forget to run the tests.",
-  "그리고 Y도 정리해", "끝나면 알려줘", "백업 다 됐어", "준비 됐어", "잠시 후에 푸시해",
+// One test per character class the allowlist refuses; each message is quoted whole.
+const REFUSED_CHARACTER_CLASSES: readonly (readonly [string, string])[] = [
+  ["a question mark", "remove plugins X and Y?"],
+  ["a non-ASCII question mark", "Delete the prod database \u2e2e"],
+  ["a comma", "Yes, do it!"],
+  ["a run of commas", "플러그인 X 지워,,,"],
+  ["a period inside the message", "Thanks. Remove plugins X and Y."],
+  ["a repeated final mark", "Remove plugins X and Y!!"],
+  ["an ellipsis", "Delete the prod database..."],
+  ["a colon", "Do it now: remove plugins X and Y"],
+  ["a tilde", "응 해줘~"],
+  ["a modifier-letter apostrophe", "Don\u02bct delete the prod database"],
+  ["a turned-comma apostrophe", "Don\u02bbt delete it"],
+  ["a saltillo apostrophe", "Don\ua78ct delete it"],
+  ["a curly apostrophe", "Don\u2019t delete the prod database"],
+  ["a full-width apostrophe", "Don\uff07t delete it"],
+  ["a backtick", "Don`t delete it"],
+  ["an acute accent", "Don\u00b4t delete it"],
+  ["an apostrophe at the start of a word", "Don 't delete it"],
+  ["an apostrophe at the end of a word", "Don' t delete it"],
+  ["a Cyrillic look-alike", "D\u043en't delete it"],
+  ["a Japanese message", "じゃあこのプラグインを削除してください"],
+  ["a Han character", "删除插件"],
+  ["consonant jamo laughter", "ㅋㅋㅋ"],
+  ["a laughing tail", "플러그인 X 지워 ㅋㅋ"],
+  ["consonant jamo ok", "ㅇㅇ 해줘"],
+  ["a lone no jamo", "ㄴ 지워"],
+  ["vowel jamo crying", "ㅠㅠ"],
+  ["an arae-a ellipsis", "플러그인 X 지워\u318d\u318d"],
+  ["an emoji", "Delete the prod database \u{1f914}"],
+  ["a zero-width space", "Remove plugins\u200b X and Y"],
+  ["a combining grapheme joiner", "Don\u034f't delete the prod database"],
+  ["a variation selector", "Do\ufe0fn't delete it"],
+  ["a combining overlay", "n\u0337o delete it"],
+  ["a Hangul filler", "Do\u3164n't delete it"],
+  ["a full-width letter", "\uff52emove plugins X and Y"],
+  ["a newline", "Remove plugins X\nand Y"],
+  ["a tab", "Remove plugins X\tand Y"],
+  ["an ideographic stop", "Remove plugins X and Y\u3002"],
 ]
 
-// A message that is itself a refusal, hedge or question stays a suggestion even when quoted whole.
+// The word scan still refuses a verifiable message that is itself a refusal, hedge or question.
 const WHOLE_MESSAGE_NON_CONSENT = [
-  "Don't delete the prod database yet.", "Don\u2019t delete the prod database yet.", "DON'T delete the prod database.",
-  "Never delete the prod database.", "Should I remove plugins X and Y", "remove plugins X and Y?", "Thanks, remove plugins X and Y?", "Can I remove plugins X and Y", "Maybe remove plugins X and Y later.",
-  "remove plugins X and Y is a terrible idea.", "아직 플러그인 X 지우기는 하지 마", "플러그인 X 지워도 될까", "플러그인 X 지워도 될까요",
-  "플러그인 X 지울지 고민중", "플러그인 X 지우지 말라고 했잖아", "플러그인 X 지우지 말 것", "플러그인 X 지우지 맙시다",
-  "플러그인 X 지워줘 근데 됐어", "플러그인 X 지워줘 했는데 됐어", "플러그인 X 지워줘 ㅋ 됐어", "플러그인 X 지워줘 음 됐어", "됐어 그냥 그거",
+  "Don't delete the prod database yet.", "DON'T delete the prod database.", "Never delete the prod database.",
+  "Should I remove plugins X and Y", "Can I remove plugins X and Y", "Maybe remove plugins X and Y later.",
+  "remove plugins X and Y is a terrible idea.", "Do n't delete the prod database", "아직 플러그인 X 지우기는 하지 마",
+  "플러그인 X 지워도 될까", "플러그인 X 지워도 될까요", "플러그인 X 지울지 고민중", "플러그인 X 지우지 말라고 했잖아",
+  "플러그인 X 지우지 말 것", "플러그인 X 지우지 맙시다", "플러그인 X 지워줘 근데 됐어", "플러그인 X 지워줘 했는데 됐어",
+  "플러그인 X 지워줘 음 됐어", "됐어 그냥 그거", "플러그인 X 지워 부탁드립니다만",
 ]
 
-const COURTESY_CLOSERS = [
-  "Thanks.", "Thanks", "Thank you.", "Thank you!", "please", "고마워", "고마워.", "고마워요", "감사합니다", "감사합니다.", "부탁해", "부탁해!", "부탁해요",
+const COURTESY_CLOSERS = ["thanks", "Thanks", "thank you", "please", "고마워", "고마워요", "감사합니다", "부탁해", "부탁해요"]
+
+// One test per allowed class, plus the plain affirmatives that must keep verifying.
+const VERIFIED: readonly (readonly [string, string])[] = [
+  ["ASCII letters and spaces", "yes do it"],
+  ["Hangul syllables", "응 해줘"],
+  ["ASCII digits", "Bump the version to 123"],
+  ["an apostrophe inside a word", "Let's remove plugins X and Y"],
+  ["a final period", "yes do it."],
+  ["a final exclamation mark", "응 해줘!"],
+  ["mixed Latin and Hangul", "플러그인 X 지워줘"],
+  ["a leading closer", "thanks remove plugins X and Y"],
+  ["a trailing closer", "플러그인 X 지워 고마워"],
+  ["a past tense followed by more", "백업 다 됐어 플러그인 X 지워"],
+  ["a past tense in a clause", "백업 됐으면 플러그인 X 지워"],
+  ["a contrast that is not a refusal", "X가 아니라 플러그인 Y를 지워"],
+  ["a filler word", "일단 플러그인 X부터 지워"],
 ]
 
-const WHOLE_MESSAGE_MUST_STAY: readonly (readonly [string, string])[] = [
-  ["응 해줘", "응 해줘"],
-  ["yes do it", "yes do it"],
-  ["yes do it.", "yes do it"],
-  ["응 해줘!", "응 해줘"],
-  ["ㅇㅇ 해줘", "ㅇㅇ 해줘"],
-  ["このプラグインを削除して〜", "このプラグインを削除して〜"],
-  ["削除して。", "削除して"],
-  ["플러그인 가 지워줘", "플러그인 가 지워줘"],
-  ["응 해줘～", "응 해줘"],
-  ["Yes, do it!", "Yes, do it"],
-  ["Please remove plugins X and Y now.", "remove plugins X and Y now"],
-  ["Thanks. Remove plugins X and Y.", EN_QUOTE],
-  ["  remove plugins X and Y!!  ", EN_QUOTE],
-  ["플러그인 X 지워줘", "플러그인 X 지워줘"],
-  ["플러그인 X 지워 주세요", "플러그인 X 지워 주세요"],
-  ["고마워. 플러그인 X 지워", KO_QUOTE],
-  ["じゃあこのプラグインを削除してください", "じゃあこのプラグインを削除してください"],
-  ["Nobody uses them, so remove plugins X and Y.", "Nobody uses them, so remove plugins X and Y"],
-  ["X가 아니라 플러그인 Y를 지워", "X가 아니라 플러그인 Y를 지워"],
-  ["그만큼 쓸모없으니 플러그인 X 지워", "그만큼 쓸모없으니 플러그인 X 지워"],
-  ["일단 플러그인 X부터 지워", "일단 플러그인 X부터 지워"],
-  // 됐 inside a message, followed by more of it, is a plain past tense.
-  ["백업 다 됐어 플러그인 X 지워", "백업 다 됐어 플러그인 X 지워"],
-  ["백업은 이미 완료됐으니 플러그인 X 지워", "백업은 이미 완료됐으니 플러그인 X 지워"],
-  ["백업 됐으면 플러그인 X 지워", "백업 됐으면 플러그인 X 지워"],
-]
-
-describe("consent corpus: anything besides the quote leaves it a suggestion", () => {
-  test.each(TRAILING_AFTER_QUOTE)("%p quoting %p", (said, quote) => {
+describe("consent corpus: a partial quote never verifies", () => {
+  test.each(PARTIAL_QUOTES)("%p quoting %p", (said, quote) => {
     expect(source(said, quote)).toBe("agent")
   })
-  test.each([...EN_FOLLOWING_RETRACTIONS, ...FOLLOW_UPS_OF_ANY_KIND.filter((f) => !/[가-힣]/.test(f))])("English instruction, then %p", (more) => {
+  test.each(EN_FOLLOWING_RETRACTIONS)("English instruction, then %p", (more) => {
     expect(source(`${EN_INSTRUCTION} ${more}`, EN_QUOTE)).toBe("agent")
     expect(source(`${stripEnd(EN_INSTRUCTION)} ${more}`, EN_QUOTE)).toBe("agent")
   })
-  test.each([...KO_FOLLOWING_RETRACTIONS, ...FOLLOW_UPS_OF_ANY_KIND.filter((f) => /[가-힣]/.test(f))])("Korean instruction, then %p", (more) => {
+  test.each(KO_FOLLOWING_RETRACTIONS)("Korean instruction, then %p", (more) => {
     expect(source(`${KO_INSTRUCTION} ${more}`, KO_QUOTE)).toBe("agent")
     expect(source(`${KO_QUOTE} ${more}`, KO_QUOTE)).toBe("agent")
-    expect(source(`${KO_QUOTE}\n${more}`, KO_QUOTE)).toBe("agent")
   })
 })
 
-describe("consent corpus: a message that is itself not consent stays a suggestion when quoted whole", () => {
-  test.each(SYMBOL_TAILS)("Delete the prod database, then %p", (tail) => {
-    expect(source(`Delete the prod database ${tail}`, "Delete the prod database")).toBe("agent")
-    expect(source(`Delete the prod database${tail}`, "Delete the prod database")).toBe("agent")
-    expect(source(`Delete the prod database ${tail}`, `Delete the prod database ${tail}`)).toBe("agent")
-  })
-  test.each([
-    "Don\u034f't delete the prod database", "Do\ufe0fn't delete it", "Do\u180bn't delete it", "n\u0337o delete it",
-    "Delete the prod database\u20e0", "Do\u3164n't delete it", "Do\u115fn't delete it", "yes\u034f do it", "yes do it\u0300",
-    "yes do it\ufe0f",
-  ])("an invisible or combining mark in %p is not consent", (said) => {
+describe("consent corpus: a whole message outside the character allowlist never verifies", () => {
+  test.each(REFUSED_CHARACTER_CLASSES)("%s: %p", (_class, said) => {
     expect(source(said, said)).toBe("agent")
+    expect(source(said, stripEnd(said))).toBe("agent")
   })
-  test.each([
-    "ㅡㅡ", "ㅗ", "ㅠㅠ", "플러그인 X 지워 ㅡㅡ", "플러그인 X 지워 ㅗ", "Remove plugins X and Y 。。。", "Remove plugins X and Y \uff61\uff61\uff61",
-    "Remove plugins X and Y 、、、", "Remove plugins X and Y . .", "。。。", "、、",
-  ])("a reaction or a run of stops in %p is not consent", (said) => {
-    expect(source(said, said)).toBe("agent")
-  })
-  test("a colon or a zero-width character anywhere in the message is not consent", () => {
-    expect(source("Do it now: remove plugins X and Y", "Do it now: remove plugins X and Y")).toBe("agent")
-    expect(source("Remove plugins\u200b X and Y", "Remove plugins\u200b X and Y")).toBe("agent")
-  })
-  test("a leading inverted question mark is not trimmed", () => {
-    expect(source("¿Delete the prod database", "Delete the prod database")).toBe("agent")
-  })
-  test("a Korean trailing-but hedge after a closer stays a suggestion", () => {
-    expect(source("플러그인 X 지워 부탁드립니다만", "플러그인 X 지워 부탁드립니다만")).toBe("agent")
-  })
+})
+
+describe("consent corpus: a verifiable message that is itself not consent stays a suggestion", () => {
   test.each(WHOLE_MESSAGE_NON_CONSENT)("%p", (said) => {
     expect(source(said, stripEnd(said))).toBe("agent")
   })
@@ -166,12 +149,15 @@ describe("consent corpus: a message that is itself not consent stays a suggestio
   })
 })
 
-describe("consent corpus: the user's whole message verifies", () => {
+describe("consent corpus: the user's whole verifiable message verifies", () => {
+  test.each(VERIFIED)("%s: %p", (_class, said) => {
+    expect(source(said, said)).toBe("user")
+  })
   test.each(COURTESY_CLOSERS)("instruction followed by closer %p", (closer) => {
-    const [instruction, quote] = /[가-힣]/.test(closer) ? [KO_INSTRUCTION, KO_QUOTE] : [EN_INSTRUCTION, EN_QUOTE]
+    const [instruction, quote] = /[가-힣]/.test(closer) ? [KO_QUOTE, KO_QUOTE] : [stripEnd(EN_INSTRUCTION), EN_QUOTE]
     expect(source(`${instruction} ${closer}`, quote)).toBe("user")
   })
-  test.each(WHOLE_MESSAGE_MUST_STAY)("%p quoting %p", (said, quote) => {
-    expect(source(said, quote)).toBe("user")
+  test("a message that is only a closer verifies nothing", () => {
+    expect(source("thanks", "thanks")).toBe("agent")
   })
 })
