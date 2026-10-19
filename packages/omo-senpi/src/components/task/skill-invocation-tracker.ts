@@ -39,6 +39,10 @@ const EXPANDED_SKILL_BLOCK_BODY_PATTERNS: readonly RegExp[] = [
 ]
 // Input injected programmatically by an extension - never a human keystroke.
 const AGENT_MANUFACTURABLE_INPUT_SOURCE = "extension"
+// Replay trusts only the engine's own human-input sources, recorded on the session entry. Anything else
+// (absent, `extension`, an unknown or misspelled value, or a value written on the message itself) is
+// unknown origin and never arms the user-request channel.
+const REPLAY_TRUSTED_INPUT_SOURCES: ReadonlySet<string> = new Set(["interactive", "rpc"])
 const SKILL_MD_PATH_PATTERN = /[\\/]skills[\\/]([^\\/]+)[\\/]SKILL\.md$/i
 const PLAN_ARTIFACT_PATH_PATTERN = /(^|[\\/])\.omo[\\/]plans[\\/][^\\/]+\.md$/i
 const PLAN_ARTIFACT_PATCH_PATTERN = /\.omo[\\/]plans[\\/][^\s"'`]+\.md/i
@@ -161,18 +165,17 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
 
   // A restarted or restored session has no live events for its past turns, so its own transcript is
   // replayed through the same observers. Tool results replay from any engine. A user entry replays
-  // only when the engine recorded the `input` event's source on it: an entry with no source cannot
+  // only when the engine recorded a trusted `inputSource` on the entry: an entry with no source cannot
   // be told apart from injected input, so it never arms the user-request channel.
   pi.on("session_start", (_payload, eventCtx) => {
     const sessionId = extractSessionId(eventCtx)
     if (sessionId === undefined) return
     forget(sessionId)
     const calls = new Map<string, { readonly name: string; readonly args: unknown }>()
-    for (const message of persistedMessages(eventCtx)) {
+    for (const { message, inputSource } of persistedMessages(eventCtx)) {
       const role = message["role"]
       if (role === "user") {
-        const source = message["inputSource"]
-        if (typeof source !== "string" || source === AGENT_MANUFACTURABLE_INPUT_SOURCE) continue
+        if (typeof inputSource !== "string" || !REPLAY_TRUSTED_INPUT_SOURCES.has(inputSource)) continue
         observeUserInput(userText(message["content"]), sessionId)
       } else if (role === "assistant") {
         for (const call of toolCalls(message["content"])) calls.set(call.id, call)
@@ -224,7 +227,9 @@ function extractSessionId(eventCtx: unknown): string | undefined {
   return typeof id === "string" && id.length > 0 ? id : undefined
 }
 
-function persistedMessages(eventCtx: unknown): readonly Record<string, unknown>[] {
+type PersistedMessage = { readonly message: Record<string, unknown>; readonly inputSource: unknown }
+
+function persistedMessages(eventCtx: unknown): readonly PersistedMessage[] {
   if (!isRecord(eventCtx) || !isRecord(eventCtx["sessionManager"])) return []
   const manager = eventCtx["sessionManager"]
   const read = typeof manager["getBranch"] === "function" ? manager["getBranch"] : manager["getEntries"]
@@ -232,7 +237,9 @@ function persistedMessages(eventCtx: unknown): readonly Record<string, unknown>[
   const entries: unknown = read.call(manager)
   if (!Array.isArray(entries)) return []
   return entries.flatMap((entry: unknown) =>
-    isRecord(entry) && entry["type"] === "message" && isRecord(entry["message"]) ? [entry["message"]] : [],
+    isRecord(entry) && entry["type"] === "message" && isRecord(entry["message"])
+      ? [{ message: entry["message"], inputSource: entry["inputSource"] }]
+      : [],
   )
 }
 

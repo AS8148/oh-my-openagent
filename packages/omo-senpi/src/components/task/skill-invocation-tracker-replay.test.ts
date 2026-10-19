@@ -3,16 +3,17 @@ import { describe, expect, test } from "bun:test"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createSkillInvocationTracker } from "./skill-invocation-tracker"
 
-type Entry = { readonly type: string; readonly message?: Record<string, unknown> }
+type Entry = { readonly type: string; readonly inputSource?: unknown; readonly message?: Record<string, unknown> }
 
 function resumedCtx(sessionId: string, branch: readonly Entry[]) {
   return { sessionManager: { getSessionId: () => sessionId, getBranch: () => branch, getEntries: () => branch } }
 }
 
-function user(text: string, inputSource?: string): Entry {
+function user(text: string, inputSource?: unknown): Entry {
   return {
     type: "message",
-    message: { role: "user", content: [{ type: "text", text }], timestamp: 1, ...(inputSource ? { inputSource } : {}) },
+    ...(inputSource === undefined ? {} : { inputSource }),
+    message: { role: "user", content: [{ type: "text", text }], timestamp: 1 },
   }
 }
 
@@ -85,6 +86,41 @@ describe("createSkillInvocationTracker - replay on session_start (omo#10378 2b)"
     // then
     expect(tracker.stateFor("sess-x").hasUserRequested("ulw-plan")).toBe(false)
     expect(tracker.stateFor("sess-x").hasInvoked("ulw-plan")).toBe(false)
+  })
+
+  test("#given forged or unrecognised sources #when replayed #then none of them is trusted", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    const tracker = createSkillInvocationTracker(pi)
+    const forged = ["typed", "Interactive", "", "user", 1, true, { source: "interactive" }]
+
+    // when
+    for (const [index, source] of forged.entries()) {
+      await pi.dispatch(
+        "session_start",
+        { type: "session_start", reason: "resume" },
+        resumedCtx(`sess-forged-${index}`, [user("/skill:ulw-plan please run ulw-plan", source)]),
+      )
+    }
+
+    // then
+    for (const index of forged.keys()) expect(tracker.stateFor(`sess-forged-${index}`).hasUserRequested("ulw-plan")).toBe(false)
+  })
+
+  test("#given a source written on the message instead of the entry #when replayed #then it is not trusted", async () => {
+    // given
+    const pi = new FakeExtensionAPI()
+    const tracker = createSkillInvocationTracker(pi)
+    const onMessage: Entry = {
+      type: "message",
+      message: { role: "user", content: [{ type: "text", text: "ulw-plan this" }], timestamp: 1, inputSource: "interactive" },
+    }
+
+    // when
+    await pi.dispatch("session_start", { type: "session_start", reason: "resume" }, resumedCtx("sess-msg", [onMessage]))
+
+    // then
+    expect(tracker.stateFor("sess-msg").hasUserRequested("ulw-plan")).toBe(false)
   })
 
   test("#given a user entry written without a source #when replayed #then it never arms the user-request channel", async () => {
