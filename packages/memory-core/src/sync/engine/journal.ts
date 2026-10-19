@@ -39,6 +39,18 @@ export interface CycleRecord {
   /** Rendered text per touched item; null removes the file. */
   readonly texts: Readonly<Record<string, string | null>>
   readonly treeId: string | null
+  /**
+   * Render progress at stage merged, per key: the render text is recorded before its file is
+   * replaced (done false), then its sha256 once the file landed (done true). A resume uses it to
+   * tell the engine's own render from a person's edit made after the crash.
+   */
+  readonly progress?: Readonly<Record<string, RenderProgress>>
+}
+
+export interface RenderProgress {
+  readonly text: string | null
+  readonly done: boolean
+  readonly hash?: string
 }
 
 export interface EngineState {

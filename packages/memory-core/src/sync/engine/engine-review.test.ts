@@ -64,3 +64,79 @@ for (const realStore of [false, true]) {
     for (const line of ["one", "from-a", "from-b-after-crash"]) expect(onB).toContain(line)
   }, GIT_TEST_TIMEOUT)
 }
+
+// Round 3 (#10548 delta review): a crash in the middle of the render loop, then an edit to a file
+// the crashed cycle had already rendered. Compared byte for byte on the Loro store, where a
+// re-expressed remote line shows up as a duplicate.
+test("Loro store: an edit to a file rendered before a mid-render crash is kept once, with no duplicated remote line", async () => {
+  const server = new FakeSyncServer()
+  const a = await makeDevice(server, "a", undefined, { realStore: true })
+  const b = await makeDevice(server, "b", undefined, { realStore: true })
+  devices.push(a, b)
+  await a.write("x.md", "one\n")
+  await a.write("y.md", "uno\n")
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  await a.write("x.md", "one\nfrom-a\n")
+  await a.write("y.md", "uno\nde-a\n")
+  await a.engine.runCycle()
+  // x.md renders first (keys are sorted); the crash lands before y.md.
+  await b.restart(crashAt("render-key"))
+  await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+  expect(await b.read("x.md")).toBe("one\nfrom-a\n")
+  expect(await b.read("y.md")).toBe("uno\n")
+  await b.write("x.md", "one\nfrom-a\nfrom-b\n")
+  await b.restart()
+  await b.engine.runCycle()
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  expect([await a.read("x.md"), await b.read("x.md")]).toEqual(["one\nfrom-a\nfrom-b\n", "one\nfrom-a\nfrom-b\n"])
+  expect([await a.read("y.md"), await b.read("y.md")]).toEqual(["uno\nde-a\n", "uno\nde-a\n"])
+}, GIT_TEST_TIMEOUT)
+
+test("Loro store: an edit to a file whose render was recorded but may not have landed is kept as a conflict copy", async () => {
+  const server = new FakeSyncServer()
+  const a = await makeDevice(server, "a", undefined, { realStore: true })
+  const b = await makeDevice(server, "b", undefined, { realStore: true })
+  devices.push(a, b)
+  await a.write("x.md", "one\n")
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  await a.write("x.md", "one\nfrom-a\n")
+  await a.engine.runCycle()
+  await b.restart(crashAt("render-intent"))
+  await expect(b.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+  await b.write("x.md", "one\nfrom-b\n")
+  await b.restart()
+  await b.engine.runCycle()
+  await a.engine.runCycle()
+  await b.engine.runCycle()
+  expect(await b.read("x.md")).toBe("one\nfrom-a\n")
+  const copies = (await b.workingFiles()).filter((k) => k.startsWith("x.sync-conflict-"))
+  expect(copies).toHaveLength(1)
+  expect(await b.read(copies[0] as string)).toBe("one\nfrom-b\n")
+  expect(await a.read(copies[0] as string)).toBe("one\nfrom-b\n")
+}, GIT_TEST_TIMEOUT)
+
+for (const realStore of [false, true]) {
+  test.each(["git-commit", "rendered", "committed"])(`${realStore ? "Loro" : "fake"} store: an edit made after a crash at %s, to a file the cycle rendered, keeps the remote line and the edit`, async (point) => {
+    const server = new FakeSyncServer()
+    const a = await makeDevice(server, "a", undefined, { realStore })
+    const b = await makeDevice(server, "b", undefined, { realStore })
+    devices.push(a, b)
+    await b.write("a.md", "remote\n")
+    await b.engine.runCycle()
+    await a.restart(crashAt(point))
+    await expect(a.engine.runCycle()).rejects.toBeInstanceOf(CrashInjected)
+    expect(await a.read("a.md")).toBe("remote\n")
+    await a.write("a.md", "remote\nlocal\n")
+    await a.restart()
+    await a.engine.runCycle()
+    await b.engine.runCycle()
+    await a.engine.runCycle()
+    const expected = "remote\nlocal\n"
+    // The fake store renders a line set (sorted); the Loro store must keep the order byte for byte.
+    const shape = (text: string | null) => (realStore ? text : (text ?? "").split("\n").filter((l) => l !== "").sort().join("\n"))
+    expect([shape(await a.read("a.md")), shape(await b.read("a.md"))]).toEqual([shape(expected), shape(expected)])
+  }, GIT_TEST_TIMEOUT)
+}

@@ -3,13 +3,13 @@
 // merged -> rendered -> committed -> checkpointed. `advance` is the same code path for a fresh
 // cycle and for one resumed after a crash, so each stage is reached exactly once.
 
-import { randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import { mkdir, readdir, readFile, rename, rm } from "../../fs/resilient"
-import { dirname, join, relative, sep } from "node:path"
+import { dirname, extname, join, relative, sep } from "node:path"
 
 import { TEMP_MARK, writeAtomic } from "./atomic"
 import type { EngineDeps } from "./engine-deps"
-import { type CycleRecord, fromBase64, type SyncJournal, toBase64, type WireItem } from "./journal"
+import { type CycleRecord, fromBase64, type RenderProgress, type SyncJournal, toBase64, type WireItem } from "./journal"
 
 export interface Applied {
   readonly batches: number
@@ -33,15 +33,50 @@ const readWorking = (root: string, key: string): Promise<string | null> =>
 
 const sameItem = (a: WireItem, b: WireItem): boolean => a.key === b.key && a.ops === b.ops
 
+const textHash = (text: string | null): string => createHash("sha256").update(text === null ? "\u0000absent" : `t:${text}`).digest("hex")
+
+/** `notes/x.md` -> `notes/x.sync-conflict-<stamp>.md`: a sibling the next capture syncs as its own item. */
+const conflictKey = (key: string, stamp: number): string => {
+  const ext = extname(key)
+  return `${key.slice(0, key.length - ext.length)}.sync-conflict-${stamp}${ext}`
+}
+
+/**
+ * Before a cycle crashed at stage merged resumes, classify each key against its recorded render
+ * progress so a person's edit made after the crash is never overwritten or re-expressed:
+ * - render landed (done): an unchanged file is the engine's own render (skip); an edited one gets
+ *   the render as its baseline, so capture yields exactly the person's delta;
+ * - render recorded but maybe not landed: a file equal to the render or the old baseline holds
+ *   nothing new; anything else has an unknowable base, so it is kept as a conflict copy;
+ * - no record: the file was never touched by the engine, and capture runs as usual.
+ * Returns the keys capture must not read as edits.
+ */
+async function reconcileResumedRender(deps: EngineDeps, journal: SyncJournal, cycle: CycleRecord): Promise<Set<string>> {
+  const skip = new Set<string>()
+  for (const [key, step] of Object.entries(cycle.progress ?? {}) as [string, RenderProgress][]) {
+    const text = await readWorking(deps.repo.root, key)
+    if (step.done) {
+      if (textHash(text) === step.hash) skip.add(key)
+      else await deps.store.markMaterialized(key, step.text)
+      continue
+    }
+    skip.add(key)
+    if (text === step.text || text === deps.store.baseline(key) || text === null) continue
+    const copy = conflictKey(key, deps.clock.now())
+    await renderInto(deps, journal, copy, text)
+    deps.log?.(`memory sync: kept an edit to ${key} made during an interrupted sync as ${copy}`)
+  }
+  return skip
+}
+
 export async function capture(deps: EngineDeps, journal: SyncJournal, resuming: CycleRecord | null = null): Promise<number> {
+  const skip = resuming === null ? new Set<string>() : await reconcileResumedRender(deps, journal, resuming)
   const keys = [...new Set([...deps.store.keys(), ...(await workingKeys(deps.repo.root))])].sort()
   const captured: WireItem[] = []
   const texts = new Map<string, string | null>()
   for (const key of keys) {
     const text = await readWorking(deps.repo.root, key)
-    // Resuming a cycle that crashed mid-render: a file already holding the merged doc's text is
-    // the engine's own render, not a local edit, and capturing it would re-express remote ops.
-    if (resuming?.keys.includes(key) === true && deps.store.render(key, text) === text) continue
+    if (skip.has(key)) continue
     const ops = await deps.store.capture(key, text)
     if (ops === null) continue
     captured.push({ key, ops: toBase64(ops) })
@@ -117,9 +152,21 @@ export async function advance(deps: EngineDeps, journal: SyncJournal, start: Cyc
   }
   if (cycle.stage === "merged") {
     const texts: Record<string, string | null> = {}
+    const progress: Record<string, RenderProgress> = {}
+    const record = async () => {
+      cycle = { ...cycle, progress: { ...progress } }
+      await journal.updateState({ cycle })
+    }
     for (const key of cycle.keys) {
-      texts[key] = deps.store.render(key, await readWorking(deps.repo.root, key))
-      await renderInto(deps, journal, key, texts[key])
+      const text = deps.store.render(key, await readWorking(deps.repo.root, key))
+      texts[key] = text
+      progress[key] = { text, done: false }
+      await record()
+      deps.fault?.("render-intent")
+      await renderInto(deps, journal, key, text)
+      progress[key] = { text, done: true, hash: textHash(text) }
+      await record()
+      deps.fault?.("render-key")
     }
     const treeId = await deps.repo.stageTree(cycle.keys)
     await save({ ...cycle, stage: "rendered", texts, treeId }, "rendered")

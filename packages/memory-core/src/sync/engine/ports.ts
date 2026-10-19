@@ -145,6 +145,8 @@ export interface ItemStore {
    * render will replace (null when absent), so an unchanged model keeps the file's own style.
    */
   render(key: string, diskText: string | null): string | null
+  /** The item's materialised baseline text (null when absent); read-only. */
+  baseline(key: string): string | null
   /** recordMaterialized: the text the engine wrote is the item's new baseline. */
   markMaterialized(key: string, text: string | null): Promise<void>
   /** Import a compaction snapshot's state; local pending state is kept. */

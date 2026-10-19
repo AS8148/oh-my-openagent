@@ -4,7 +4,7 @@
 
 import { copyFile, cp, mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, relative, sep } from "node:path"
 
 import { createDeviceItemStore } from "./adapters/device-item-store"
 import { createGitSyncRepo } from "./adapters/git-sync-repo"
@@ -129,6 +129,8 @@ export interface Device {
   restart(fault?: EngineFault): Promise<void>
   syncCommits(): Promise<string[]>
   workingTempFiles(): Promise<string[]>
+  /** Working-tree files (item keys), .git excluded. */
+  workingFiles(): Promise<string[]>
   retiredJournals(): Promise<string[]>
   dispose(): Promise<void>
 }
@@ -191,6 +193,14 @@ export async function makeDevice(server: FakeSyncServer, name: string, fault?: E
     async syncCommits() {
       const out = await git(root, "log", "--format=%(trailers:key=Sync-Seq,valueonly)", "HEAD")
       return out.split("\n").filter((l) => l !== "")
+    },
+    async workingFiles() {
+      const names = await readdir(root, { recursive: true, withFileTypes: true })
+      return names
+        .filter((d) => d.isFile())
+        .map((d) => relative(root, join(d.parentPath, d.name)).split(sep).join("/"))
+        .filter((k) => !k.startsWith(".git/"))
+        .sort()
     },
     async workingTempFiles() {
       const names = await readdir(root, { recursive: true })
