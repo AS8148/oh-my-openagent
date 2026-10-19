@@ -19,7 +19,7 @@ use senpi_desktop_safety::{
 use serde_json::json;
 
 use super::{Mutation, INPUT_TRANSACTION};
-use crate::request::{Op, Response};
+use crate::request::Op;
 use crate::test_support::{
     delivery, foreground_click_mutation, grant_control, harness, op_names, two_windows, Harness,
 };
