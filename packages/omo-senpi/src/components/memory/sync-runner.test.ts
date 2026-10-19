@@ -8,7 +8,7 @@ import { join } from "node:path"
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import type { DeviceSync, EngineStatus, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
 
-import { SYNC_IDLE_NO_DEVICE_SESSION, SYNC_UNAVAILABLE, createSyncRunner, watchHeadLog } from "./sync-runner"
+import { SYNC_CLOSE_WAIT_EXCEEDED, SYNC_IDLE_NO_DEVICE_SESSION, SYNC_UNAVAILABLE, createSyncRunner, watchHeadLog } from "./sync-runner"
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -179,4 +179,31 @@ test("a release followed at once by an acquire of the same repo waits for the cl
   expect(await runner.status(paths.repo)).toEqual({ kind: "never_synced" })
   expect(infos.filter((m) => m.includes("another OmO process"))).toEqual([])
   await runner.release(paths.repo)
+})
+
+test("an acquire waiting on a close that never finishes gives up after the bound with a clear error", async () => {
+  const paths = await identity()
+  const errors: { message: string; code: unknown }[] = []
+  let opens = 0
+  const runner = createSyncRunner({
+    logger: { info: () => undefined, warn: () => undefined, error: (message: string, meta?: Record<string, unknown>) => errors.push({ message, code: meta?.code }) },
+    resolveSession: async () => session,
+    open: async (): Promise<DeviceSync | null> => {
+      opens += 1
+      return {
+        engine: { start: () => undefined } as unknown as DeviceSync["engine"],
+        status: async (): Promise<EngineStatus> => ({ kind: "never_synced" }),
+        notifyLocalCommit: () => undefined,
+        close: () => new Promise<void>(() => undefined),
+      }
+    },
+    watchHead: () => () => undefined,
+    closeWaitMs: 30,
+  })
+  await runner.acquire("agent", paths, { enabled: true })
+  void runner.release(paths.repo)
+  await runner.acquire("agent", paths, { enabled: true })
+  expect(errors.map((e) => e.code)).toEqual([SYNC_CLOSE_WAIT_EXCEEDED])
+  expect(errors[0]?.message).toContain("did not close")
+  expect(opens).toBe(2)
 })

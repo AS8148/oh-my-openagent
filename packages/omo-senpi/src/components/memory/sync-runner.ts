@@ -17,6 +17,10 @@ import type { ComponentLogger } from "../../extension/types"
 /** The one line a runner logs when this device has no session to sync with (no network, no state). */
 export const SYNC_IDLE_NO_DEVICE_SESSION = "sync idle: no device session"
 
+/** The error code a runner logs when a previous engine for the repo did not close within the bound. */
+export const SYNC_CLOSE_WAIT_EXCEEDED = "sync-close-wait-exceeded"
+const CLOSE_WAIT_MS = 10_000
+
 /** The status of a repo whose sync engine could not be loaded (the packaged sidecar is missing or broken). */
 export const SYNC_UNAVAILABLE = "sync-unavailable"
 
@@ -61,6 +65,8 @@ export interface SyncRunnerOptions {
   /** Loads the engine sidecar; the default is the packaged `#omo-memory-sync-runtime` import. */
   readonly loadRuntime?: () => Promise<SyncRuntime>
   readonly watchHead?: HeadWatch
+  /** How long an acquire waits for the repo's previous engine to close; default 10 s. */
+  readonly closeWaitMs?: number
 }
 
 interface Running {
@@ -130,7 +136,21 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
       if (!settings.enabled) return
       // A session rebinding the repo right after the previous one released it would otherwise race
       // the old engine's lease and stay idle; wait for that close first.
-      await closing.get(paths.repo)
+      const pending = closing.get(paths.repo)
+      if (pending !== undefined) {
+        const waitMs = options.closeWaitMs ?? CLOSE_WAIT_MS
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const closed = await Promise.race([
+          pending.then(() => true),
+          new Promise<false>((resolve) => {
+            timer = setTimeout(() => resolve(false), waitMs)
+          }),
+        ])
+        clearTimeout(timer)
+        if (!closed) {
+          logger.error(`memory sync: the previous engine for this memory did not close within ${waitMs} ms; starting anyway, and this device may stay idle if it still holds its lease`, { identity, code: SYNC_CLOSE_WAIT_EXCEEDED })
+        }
+      }
       const held = repos.get(paths.repo)
       if (held !== undefined) {
         held.users += 1
