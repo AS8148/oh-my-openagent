@@ -1,1 +1,1 @@
-export { openDeviceSync } from "@oh-my-opencode/memory-core/sync-engine"
+export { loadLoroRuntime, openDeviceSync } from "@oh-my-opencode/memory-core/sync-engine"

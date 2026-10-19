@@ -8,7 +8,7 @@ import { join } from "node:path"
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import type { DeviceSync, EngineStatus, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
 
-import { SYNC_IDLE_NO_DEVICE_SESSION, createSyncRunner, watchHeadLog } from "./sync-runner"
+import { SYNC_IDLE_NO_DEVICE_SESSION, SYNC_UNAVAILABLE, createSyncRunner, watchHeadLog } from "./sync-runner"
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -120,4 +120,30 @@ test("watchHeadLog reports a missing reflog instead of silently never firing", (
   const stop = watchHeadLog("/nonexistent/.git", () => undefined, (m) => warnings.push(m))
   stop()
   expect(warnings).toHaveLength(1)
+})
+
+test("a missing sync sidecar leaves the runner idle with a typed sync-unavailable status, not a crash", async () => {
+  const paths = await identity()
+  const warned: { message: string; code: unknown }[] = []
+  const errors: string[] = []
+  const missing = Object.assign(new Error("Cannot find module '#omo-memory-sync-runtime'"), { code: "ERR_MODULE_NOT_FOUND" })
+  const runner = createSyncRunner({
+    logger: {
+      info: () => undefined,
+      warn: (message: string, meta?: Record<string, unknown>) => warned.push({ message, code: meta?.code }),
+      error: (message: string) => errors.push(message),
+    },
+    resolveSession: async () => session,
+    loadRuntime: async () => {
+      throw missing
+    },
+    watchHead: () => () => undefined,
+  })
+  await runner.acquire("agent", paths, { enabled: true })
+  const status = await runner.status(paths.repo)
+  expect(status?.kind).toBe(SYNC_UNAVAILABLE)
+  expect(status !== null && "reason" in status ? status.reason : "").toContain("#omo-memory-sync-runtime")
+  expect(warned.map((w) => w.code)).toEqual([SYNC_UNAVAILABLE])
+  expect(errors).toEqual([])
+  await runner.release(paths.repo)
 })

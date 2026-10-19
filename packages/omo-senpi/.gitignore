@@ -9,6 +9,8 @@
 !/plugin/extensions/omo-memory-doctor.js
 !/plugin/extensions/omo-memory-memfs.js
 !/plugin/extensions/omo-memory-palace.js
+!/plugin/extensions/omo-memory-sync.js
+!/plugin/extensions/loro_wasm_bg.wasm
 !/plugin/extensions/omo-computer-use.js
 !/plugin/extensions/omo-init-deep-advisor.js
 !/plugin/extensions/omo-member.js

@@ -17,6 +17,16 @@ import type { ComponentLogger } from "../../extension/types"
 /** The one line a runner logs when this device has no session to sync with (no network, no state). */
 export const SYNC_IDLE_NO_DEVICE_SESSION = "sync idle: no device session"
 
+/** The status of a repo whose sync engine could not be loaded (the packaged sidecar is missing or broken). */
+export const SYNC_UNAVAILABLE = "sync-unavailable"
+
+export interface SyncUnavailableStatus {
+  readonly kind: typeof SYNC_UNAVAILABLE
+  readonly reason: string
+}
+
+type SyncRuntime = Pick<typeof import("#omo-memory-sync-runtime"), "openDeviceSync">
+
 export type SyncSessionResolver = (identity: string) => Promise<SyncSession | null>
 
 /** No device sign-in or device keys exist on this client yet (todos 13 and 14). */
@@ -48,6 +58,8 @@ export interface SyncRunnerOptions {
   readonly logger: Pick<ComponentLogger, "info" | "warn" | "error">
   readonly resolveSession?: SyncSessionResolver
   readonly open?: (options: OpenDeviceSyncOptions) => Promise<DeviceSync | null>
+  /** Loads the engine sidecar; the default is the packaged `#omo-memory-sync-runtime` import. */
+  readonly loadRuntime?: () => Promise<SyncRuntime>
   readonly watchHead?: HeadWatch
 }
 
@@ -58,28 +70,38 @@ interface Running {
 
 interface Held {
   users: number
-  readonly ready: Promise<Running | null>
+  readonly ready: Promise<Running | SyncUnavailableStatus | null>
 }
 
 export interface SyncRunner {
   acquire(identity: string, paths: MemoryIdentityPaths, settings: { readonly enabled: boolean }): Promise<void>
   release(repo: string): Promise<void>
-  status(repo: string): Promise<EngineStatus | null>
+  status(repo: string): Promise<EngineStatus | SyncUnavailableStatus | null>
 }
 
 export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   const resolveSession = options.resolveSession ?? noAccountSession
   // The engine (and the Loro wasm under it) loads only once a device has an account session.
-  const open = options.open ?? (async (o: OpenDeviceSyncOptions) => (await import("#omo-memory-sync-runtime")).openDeviceSync(o))
+  const loadRuntime = options.loadRuntime ?? (() => import("#omo-memory-sync-runtime"))
+  const open = options.open ?? (async (o: OpenDeviceSyncOptions) => (await loadRuntime()).openDeviceSync(o))
   const watchHead = options.watchHead ?? watchHeadLog
   const { logger } = options
   const repos = new Map<string, Held>()
 
-  const start = async (identity: string, paths: MemoryIdentityPaths): Promise<Running | null> => {
+  const start = async (identity: string, paths: MemoryIdentityPaths): Promise<Running | SyncUnavailableStatus | null> => {
     const session = await resolveSession(identity)
     if (session === null) {
       logger.info(SYNC_IDLE_NO_DEVICE_SESSION, { identity })
       return null
+    }
+    if (options.open === undefined) {
+      // A missing or unloadable sidecar is an install defect, not a sync failure: report it as a
+      // typed status and keep the session running without sync.
+      const loaded = await loadRuntime().then(() => null, (error: unknown) => String(error))
+      if (loaded !== null) {
+        logger.warn("memory sync unavailable: the sync engine sidecar could not be loaded", { identity, code: SYNC_UNAVAILABLE, reason: loaded })
+        return { kind: SYNC_UNAVAILABLE, reason: loaded }
+      }
     }
     const device = await open({
       repoDir: paths.repo,
@@ -123,13 +145,14 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
       if (held.users > 0) return
       repos.delete(repo)
       const running = await held.ready
-      if (running === null) return
+      if (running === null || !("device" in running)) return
       running.unwatch()
       await running.device.close()
     },
     async status(repo) {
       const running = await repos.get(repo)?.ready
-      return running === undefined || running === null ? null : running.device.status()
+      if (running === undefined || running === null) return null
+      return "device" in running ? running.device.status() : running
     },
   }
 }

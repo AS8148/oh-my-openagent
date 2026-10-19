@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { artifactsMatch } from "./build-artifact.mjs"
-import { buildExtension, COMPUTER_PRELUDE_ASSET_NAME, extensionBuildPaths, GATEWAY_STORE_WORKER_NAME, resolveOutputs, THREAD_SDK_RELATIVE_PATH } from "./build-extension-core.mjs"
+import { buildExtension, COMPUTER_PRELUDE_ASSET_NAME, extensionBuildPaths, GATEWAY_STORE_WORKER_NAME, loroWasmSourcePath, MEMORY_SYNC_WASM_NAME, resolveOutputs, THREAD_SDK_RELATIVE_PATH } from "./build-extension-core.mjs"
 import { findStaleRuntimePersona } from "./persona-artifacts.mjs"
 
 export async function checkExtensionCurrent(options = {}) {
@@ -20,6 +21,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryDoctorOutput,
     memoryMemfsOutput,
     memoryPalaceOutput,
+    memorySyncOutput,
     threadClientOutput,
     gatewayStoreWorkerOutput,
     threadSdkOutput,
@@ -44,6 +46,14 @@ export async function checkExtensionCurrent(options = {}) {
   const currentMemoryMemfs = await readBuiltEntry(memoryMemfsOutput)
   const currentMemoryPalace = await readBuiltEntry(memoryPalaceOutput)
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
+  const currentMemorySync = await readBuiltEntry(memorySyncOutput)
+  if (currentMemorySync === undefined) return { ok: false, reason: "missing-output", output: memorySyncOutput }
+  // The committed wasm must be byte-identical to the installed Loro package's: a Loro bump without a
+  // rebuild leaves a stale binary beside a sidecar built from the new glue.
+  const syncWasmOutput = join(dirname(memorySyncOutput), MEMORY_SYNC_WASM_NAME)
+  const currentSyncWasm = await readFile(syncWasmOutput).catch(() => undefined)
+  if (currentSyncWasm === undefined) return { ok: false, reason: "missing-output", output: syncWasmOutput }
+  if (sha256(currentSyncWasm) !== sha256(await readFile(loroWasmSourcePath()))) return { ok: false, reason: "stale-output", output: syncWasmOutput }
   if (currentMemoryDoctor === undefined) return { ok: false, reason: "missing-output", output: memoryDoctorOutput }
   if (currentMemoryMemfs === undefined) return { ok: false, reason: "missing-output", output: memoryMemfsOutput }
   if (currentMemoryPalace === undefined) return { ok: false, reason: "missing-output", output: memoryPalaceOutput }
@@ -68,6 +78,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryDoctorOutputPath: join(tempRoot, "omo-memory-doctor.js"),
     memoryMemfsOutputPath: join(tempRoot, "omo-memory-memfs.js"),
     memoryPalaceOutputPath: join(tempRoot, "omo-memory-palace.js"),
+    memorySyncOutputPath: join(tempRoot, "omo-memory-sync.js"),
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
     computerUseOutputPath: join(tempRoot, "omo-computer-use.js"),
     gatewayStoreWorkerOutputPath: join(tempRoot, GATEWAY_STORE_WORKER_NAME),
@@ -87,6 +98,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentMemoryDoctor, expected.memoryDoctorOutputPath, memoryDoctorOutput],
       [currentMemoryMemfs, expected.memoryMemfsOutputPath, memoryMemfsOutput],
       [currentMemoryPalace, expected.memoryPalaceOutputPath, memoryPalaceOutput],
+      [currentMemorySync, expected.memorySyncOutputPath, memorySyncOutput],
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
       [currentComputerUse, expected.computerUseOutputPath, computerUseOutput],
       [currentGatewayStoreWorker, expected.gatewayStoreWorkerOutputPath, gatewayStoreWorkerOutput],
@@ -120,4 +132,8 @@ async function readBuiltEntry(output) {
     if (isErrno(error, "ENOENT")) return undefined
     throw error
   }
+}
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex")
 }
