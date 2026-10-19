@@ -8,7 +8,7 @@ import { GitMemoryRepo } from "../git"
 import { RECALL_TERM_STORE_NAME, RecallTermPersistence } from "./bm25-persist"
 import { withRecallTermSavesExcluded } from "./bm25-persist-gate"
 import { decodeRecallTermStore, encodeRecallTermStore } from "./bm25-store"
-import { loadRecallCorpus, RecallCorpusCache, type RecallDocument } from "./provider"
+import { loadRecallCorpus, RecallCorpusCache, recallTermIndex, type RecallDocument } from "./provider"
 import { selectRecallCandidates } from "./select"
 import type { RecallStrategy } from "./strategy"
 
@@ -66,7 +66,7 @@ async function rankInNewProcess(dir: string): Promise<unknown> {
   await writeFile(script, `
     const core = await import(${JSON.stringify(join(import.meta.dir, "..", "index.ts"))})
     const { selectRecallCandidates } = await import(${JSON.stringify(join(import.meta.dir, "select.ts"))})
-    const corpus = await new core.RecallCorpusCache().load(new core.GitMemoryRepo({ dir: ${JSON.stringify(dir)}, agentId: "child" }))
+    const corpus = await new core.RecallCorpusCache({ termStore: () => import(${JSON.stringify(join(import.meta.dir, "bm25-persist.ts"))}) }).load(new core.GitMemoryRepo({ dir: ${JSON.stringify(dir)}, agentId: "child" }))
     const queries = ${JSON.stringify(QUERIES)}
     const strategies = ${JSON.stringify(STRATEGIES.map((strategy) => strategy ?? null))}
     console.log(JSON.stringify(strategies.flatMap((strategy) => queries.map((planned) => selectRecallCandidates(corpus.documents, planned, {
@@ -84,7 +84,7 @@ async function rankInNewProcess(dir: string): Promise<unknown> {
 async function persisted(dir: string, documents: readonly RecallDocument[]): Promise<RecallTermPersistence> {
   const persistence = new RecallTermPersistence(dir, (error) => {
     throw error
-  })
+  }, recallTermIndex)
   await persistence.attach(documents)
   return persistence
 }
@@ -96,7 +96,7 @@ describe("persisted recall terms", () => {
   it("#given a repository under exclusion #when a ranking starts a save inside it #then nothing is written into .git", async () => {
     // given
     const { dir, repo } = await createRepo()
-    const cache = new RecallCorpusCache()
+    const cache = new RecallCorpusCache({ termStore: () => import("./bm25-persist") })
     const documents = (await cache.load(repo)).documents
 
     // when
@@ -114,7 +114,7 @@ describe("persisted recall terms", () => {
   it("#given a cache whose ranking started a save #when settled resolves #then the store is written and no temp file remains", async () => {
     // given
     const { dir, repo, store } = await createRepo()
-    const cache = new RecallCorpusCache()
+    const cache = new RecallCorpusCache({ termStore: () => import("./bm25-persist") })
     rankAll((await cache.load(repo)).documents)
 
     // when

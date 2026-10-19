@@ -11,18 +11,26 @@ import { createHash, randomUUID } from "node:crypto"
 import { basename, dirname, join } from "node:path"
 
 import { readdir, readFile, rename, rm, stat, writeFile } from "../fs/resilient"
-import { recallDocumentTerms } from "./bm25"
-import {
-  onRecallDocumentsEncoded,
-  seedRecallDocumentTerms,
-  snapshotRecallDocumentTerms,
-  type StoredDocumentTerms,
-} from "./bm25-index"
+import type { recallDocumentTerms } from "./bm25"
+import type { onRecallDocumentsEncoded, RecallTermAccess, StoredDocumentTerms } from "./bm25-index"
 import { isRecallTermSaveExcluded, trackRecallTermSave } from "./bm25-persist-gate"
+
+export { withRecallTermSavesExcluded } from "./bm25-persist-gate"
 import { decodeRecallTermStore, encodeRecallTermStore } from "./bm25-store"
+import { seedRecallDocumentTerms, snapshotRecallDocumentTerms } from "./bm25-terms-transfer"
 import type { RecallDocument } from "./provider"
 
 export const RECALL_TERM_STORE_NAME = "omo-recall-bm25-terms.bin"
+
+/**
+ * The live BM25 index this persistence reads and seeds. It is passed in rather than imported: the store loads
+ * lazily in its own bundle, and a bundled copy of the index would hold terms the ranking never sees.
+ */
+export interface RecallTermIndex {
+  readonly onEncoded: typeof onRecallDocumentsEncoded
+  readonly access: RecallTermAccess
+  readonly terms: typeof recallDocumentTerms
+}
 /** Bump with any change to how recall turns text into terms; the probes below may not exercise it. */
 const TOKENIZER_VERSION = 1
 /** A temp file this old belongs to a save whose process died before its rename. */
@@ -40,8 +48,8 @@ const FINGERPRINT_PROBES = [
 ]
 let fingerprint: string | undefined
 
-function tokenizerFingerprint(): string {
-  fingerprint ??= sha1(JSON.stringify({ version: TOKENIZER_VERSION, probes: FINGERPRINT_PROBES.map((body) => recallDocumentTerms({ path: "", description: "", body })) }))
+function tokenizerFingerprint(terms: RecallTermIndex["terms"]): string {
+  fingerprint ??= sha1(JSON.stringify({ version: TOKENIZER_VERSION, probes: FINGERPRINT_PROBES.map((body) => terms({ path: "", description: "", body })) }))
   return fingerprint
 }
 
@@ -83,6 +91,7 @@ export class RecallTermPersistence {
   constructor(
     readonly dir: string,
     private readonly onError: (error: unknown) => void,
+    private readonly index: RecallTermIndex,
   ) {}
 
   /**
@@ -90,7 +99,7 @@ export class RecallTermPersistence {
    * terms again after any later build of `documents` that had to tokenize one of them.
    */
   async attach(documents: readonly RecallDocument[]): Promise<void> {
-    onRecallDocumentsEncoded(documents, () => this.save(documents))
+    this.index.onEncoded(documents, () => this.save(documents))
     if (this.primed) return
     this.primed = true
     const path = await storePath(this.dir)
@@ -111,13 +120,13 @@ export class RecallTermPersistence {
 
   private seed(documents: readonly RecallDocument[], bytes: Uint8Array): void {
     const store = decodeRecallTermStore(bytes)
-    if (store === undefined || store.fingerprint !== tokenizerFingerprint()) return
+    if (store === undefined || store.fingerprint !== tokenizerFingerprint(this.index.terms)) return
     const entries: Array<readonly [RecallDocument, StoredDocumentTerms]> = []
     for (const document of documents) {
       const stored = store.documents.get(documentKey(document))
       if (stored !== undefined) entries.push([document, stored])
     }
-    seedRecallDocumentTerms(store.terms, entries)
+    seedRecallDocumentTerms(this.index.access, store.terms, entries)
   }
 
   /** Settles once no save is running or queued; saves never reject. */
@@ -150,7 +159,7 @@ export class RecallTermPersistence {
   }
 
   private async write(documents: readonly RecallDocument[]): Promise<void> {
-    const snapshot = snapshotRecallDocumentTerms(documents)
+    const snapshot = snapshotRecallDocumentTerms(this.index.access, documents)
     const path = await storePath(this.dir)
     if (snapshot === undefined || path === undefined) return
     const keyed = new Map<string, StoredDocumentTerms>()
@@ -158,7 +167,7 @@ export class RecallTermPersistence {
       const document = documents[position]
       if (document !== undefined) keyed.set(documentKey(document), terms)
     })
-    const bytes = encodeRecallTermStore({ fingerprint: tokenizerFingerprint(), terms: snapshot.terms, documents: keyed })
+    const bytes = encodeRecallTermStore({ fingerprint: tokenizerFingerprint(this.index.terms), terms: snapshot.terms, documents: keyed })
     if (isRecallTermSaveExcluded(this.dir)) return
     await sweepStaleTemps(path)
     const temp = `${path}.${process.pid}.${randomUUID()}.tmp`

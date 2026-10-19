@@ -166,55 +166,26 @@ export function onRecallDocumentsEncoded(documents: readonly RecallDocument[], l
 }
 
 /**
- * Adopts stored terms for documents that have none yet, so building their index tokenizes nothing.
- * Ids index `terms`; in a process whose dictionary is still empty they become the dictionary's ids
- * as they are, otherwise each document is moved onto the dictionary's ids and re-sorted.
+ * The index internals a persisted store needs to seed and snapshot document terms. The store loads lazily in its
+ * own bundle (bm25-terms-transfer.ts holds the logic); only these accessors live with the index.
  */
-export function seedRecallDocumentTerms(
-  terms: readonly string[],
-  entries: Iterable<readonly [RecallDocument, StoredDocumentTerms]>,
-): void {
-  const mapping = Uint32Array.from(terms, intern)
-  const identity = mapping.every((id, position) => id === position)
-  for (const [document, stored] of entries) {
-    if (currentTerms(document) !== undefined) continue
-    DOCUMENT_TERMS.set(document, { generation, ...(identity ? stored : remap(stored, mapping)) })
-  }
+export interface RecallTermAccess {
+  current(document: RecallDocument): DocumentTerms | undefined
+  /** Sets `document`'s terms from a store when it has none in the current generation. */
+  adopt(document: RecallDocument, stored: StoredDocumentTerms): void
+  intern(term: string): number
+  term(id: number): string | undefined
+  readonly vocabularySize: number
 }
 
-function remap(stored: StoredDocumentTerms, mapping: Uint32Array): StoredDocumentTerms {
-  const moved = (position: number): number => mapping[stored.ids[position] ?? 0] ?? 0
-  const order = Array.from(stored.ids, (_, position) => position).sort((left, right) => moved(left) - moved(right))
-  return {
-    ids: Uint32Array.from(order, moved),
-    counts: Uint32Array.from(order, (position) => stored.counts[position] ?? 0),
-    length: stored.length,
-  }
-}
-
-/**
- * The current terms of `documents` against a term list of only the terms they use, ids kept in
- * dictionary order so each document's ids stay ascending. `undefined` while any of them has no
- * current terms, as after a dictionary replacement before the next build.
- */
-export function snapshotRecallDocumentTerms(documents: readonly RecallDocument[]): RecallTermsSnapshot | undefined {
-  const encoded: DocumentTerms[] = []
-  for (const document of documents) {
-    const terms = currentTerms(document)
-    if (terms === undefined) return undefined
-    encoded.push(terms)
-  }
-  const compact = new Uint32Array(vocabulary.length)
-  const used = new Uint8Array(vocabulary.length)
-  for (const { ids } of encoded) for (const id of ids) used[id] = 1
-  const terms: string[] = []
-  used.forEach((flag, id) => {
-    if (flag === 0) return
-    compact[id] = terms.length
-    terms.push(vocabulary[id] ?? "")
-  })
-  return {
-    terms,
-    documents: encoded.map(({ ids, counts, length }) => ({ ids: ids.map((id) => compact[id] ?? 0), counts, length })),
-  }
+export const recallTermAccess: RecallTermAccess = {
+  current: currentTerms,
+  adopt(document, stored) {
+    if (currentTerms(document) === undefined) DOCUMENT_TERMS.set(document, { generation, ...stored })
+  },
+  intern,
+  term: (id) => vocabulary[id],
+  get vocabularySize() {
+    return vocabulary.length
+  },
 }

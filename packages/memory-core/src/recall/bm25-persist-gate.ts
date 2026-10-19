@@ -5,8 +5,16 @@
 
 import { resolve } from "node:path"
 
-const excluded = new Map<string, number>()
-const writing = new Map<string, Set<Promise<void>>>()
+// One state per process, not per module copy: the restore that takes the gate and the store that honors it
+// load in different bundles, each with its own copy of this module.
+interface GateState {
+  readonly excluded: Map<string, number>
+  readonly writing: Map<string, Set<Promise<void>>>
+}
+const GATE_KEY = Symbol.for("omo.memory-core.recall-term-save-gate")
+const holder = globalThis as typeof globalThis & { [GATE_KEY]?: GateState }
+const state: GateState = (holder[GATE_KEY] ??= { excluded: new Map(), writing: new Map() })
+const { excluded, writing } = state
 
 export function isRecallTermSaveExcluded(dir: string): boolean {
   return excluded.has(resolve(dir))

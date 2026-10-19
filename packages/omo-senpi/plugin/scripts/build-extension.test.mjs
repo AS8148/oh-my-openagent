@@ -309,6 +309,21 @@ describe("checkExtensionCurrent", () => {
     expect(await readFile(sessionHistoryOutputPath, "utf8")).not.toContain("#omo-session-history-runtime")
   })
 
+  test("#given the split extension build #when recall inputs are inspected #then the persisted-terms store loads only from its lazy entry", async () => {
+    const { mainInputs, recallStoreInputs, recallStoreOutputPath } = await sharedOutputs()
+    for (const suffix of [
+      "packages/memory-core/src/recall/bm25-persist.ts",
+      "packages/memory-core/src/recall/bm25-store.ts",
+      "packages/memory-core/src/recall/bm25-persist-gate.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(recallStoreInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+    // The store seeds and reads the ranking's own index, which it is handed; a bundled copy would be a second index.
+    expect(recallStoreInputs.some((input) => toPortableBuildPath(input).endsWith("packages/memory-core/src/recall/bm25-index.ts"))).toBe(false)
+    expect(await readFile(recallStoreOutputPath, "utf8")).not.toContain("#omo-recall-store-runtime")
+  })
+
   test("#given the split extension build #when sync inputs are inspected #then the Loro engine and its wasm live only in the sync sidecar", async () => {
     const { mainInputs, memorySyncInputs, memorySyncOutputPath, outputPath } = await sharedOutputs()
     for (const suffix of [
@@ -380,6 +395,7 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-memory-memfs-runtime")')
     expect(main).toContain('import("#omo-memory-palace-runtime")')
     expect(main).toContain('import("#omo-session-history-runtime")')
+    expect(main).toContain('import("#omo-recall-store-runtime")')
     expect(main).toContain('import("#omo-thread-client-runtime")')
     expect(main).toContain('import("#omo-memory-sync-runtime")')
     expect(task).toMatch(/^\/\/ omo:[A-Za-z0-9_-]{43}:[A-Za-z0-9_-]{43}/)
@@ -392,6 +408,7 @@ describe("checkExtensionCurrent", () => {
       "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
       "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
       "#omo-session-history-runtime": "./extensions/omo-session-history.js",
+      "#omo-recall-store-runtime": "./extensions/omo-recall-store.js",
       "#omo-memory-sync-runtime": "./extensions/omo-memory-sync.js",
       "#omo-thread-client-runtime": "./extensions/omo-thread-client.js",
       "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js",

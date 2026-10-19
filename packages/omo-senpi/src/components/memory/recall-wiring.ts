@@ -30,6 +30,7 @@ import type { MemoryExtensionAPI } from "./capabilities"
 import type { MemoryIdentityContext } from "./context"
 import { resolveMemorySettings } from "./identity-runtime"
 import { createRecallDrain, type PendingNudgesPort } from "./recall-drain"
+import { loadRecallStoreRuntime } from "./recall-store-runtime-loader"
 import { createTranscriptMentionIndex } from "./recall-transcript-mentions"
 import {
   judgeTranscript,
@@ -244,5 +245,6 @@ export function createSharedRecallCorpusCache(logger: ComponentLogger | undefine
   return new RecallCorpusCache({
     shared: true,
     onTermStoreError: (error) => logger?.warn("omo-senpi memory recall term store skipped", { error: String(error) }),
+    termStore: loadRecallStoreRuntime,
   })
 }

@@ -14,7 +14,9 @@ import { join } from "node:path"
 import { readFile, realpathSync, stat } from "../fs/resilient"
 import type { GitMemoryRepo } from "../git"
 import { parseMemoryFile } from "../memfs"
-import { RecallTermPersistence } from "./bm25-persist"
+import { recallDocumentTerms } from "./bm25"
+import { onRecallDocumentsEncoded, recallTermAccess } from "./bm25-index"
+import type { RecallTermIndex, RecallTermPersistence } from "./bm25-persist"
 
 export interface RecallDocument {
   readonly path: string
@@ -115,6 +117,22 @@ export interface RecallCorpusCacheOptions {
   readonly shared?: boolean
   /** Told when the persisted recall terms cannot be read or saved; recall itself is unaffected. */
   readonly onTermStoreError?: (error: unknown) => void
+  /**
+   * Loads the persisted-terms store (`@oh-my-opencode/memory-core/recall-store`) on the first corpus load, so
+   * its codec stays out of a host's startup bundle. Without it every new process tokenizes the corpus.
+   */
+  readonly termStore?: () => Promise<RecallTermStoreModule>
+}
+
+export interface RecallTermStoreModule {
+  readonly RecallTermPersistence: typeof RecallTermPersistence
+}
+
+/** The live index a persisted store reads and seeds. */
+export const recallTermIndex: RecallTermIndex = {
+  onEncoded: onRecallDocumentsEncoded,
+  access: recallTermAccess,
+  terms: recallDocumentTerms,
 }
 
 const sharedCaches = new Map<string, WeakRef<RecallCorpusCache>>()
@@ -271,11 +289,22 @@ export class RecallCorpusCache {
     const previous = this.blobs?.dir === repo.dir ? this.blobs.loaded : new Map<string, LoadedBlob>()
     const { corpus, loaded } = await loadCorpusAtRevision(repo, revision, previous)
     this.blobs = { dir: repo.dir, loaded }
-    if (this.terms?.dir !== repo.dir) {
-      this.terms = new RecallTermPersistence(repo.dir, this.options.onTermStoreError ?? (() => undefined))
-      this.attached.add(this.terms)
-    }
-    await this.terms.attach(corpus.documents)
+    if (this.terms?.dir !== repo.dir) this.terms = await this.persistenceFor(repo.dir)
+    await this.terms?.attach(corpus.documents)
     return corpus
+  }
+
+  private async persistenceFor(dir: string): Promise<RecallTermPersistence | undefined> {
+    if (this.options.termStore === undefined) return undefined
+    const onError = this.options.onTermStoreError ?? (() => undefined)
+    try {
+      const store = await this.options.termStore()
+      const persistence = new store.RecallTermPersistence(dir, onError, recallTermIndex)
+      this.attached.add(persistence)
+      return persistence
+    } catch (error) {
+      onError(error)
+      return undefined
+    }
   }
 }

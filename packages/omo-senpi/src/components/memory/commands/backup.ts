@@ -7,7 +7,7 @@ import { existsSync } from "@oh-my-opencode/memory-core/fs"
 import { cp, readdir, rm } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 
-import { withRecallTermSavesExcluded } from "@oh-my-opencode/memory-core"
+import { withRecallTermSavesExcluded } from "@oh-my-opencode/memory-core/recall-store"
 
 import type { MemoryCommandDeps, MemoryCommandIdentity } from "./types"
 
