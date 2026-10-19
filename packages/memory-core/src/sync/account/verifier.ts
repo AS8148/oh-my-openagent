@@ -15,7 +15,7 @@ import type { AccountChain } from "./account-chain.ts"
 
 export const OPS_RECORD = 1
 
-const CHAIN_REFUSALS: Partial<Record<ChainRejection | "unavailable", RefusalCode>> = {
+const CHAIN_REFUSALS: Partial<Record<ChainRejection, RefusalCode>> = {
   link_mismatch: "chain_link",
   bad_signature: "signature",
   not_member: "signature",
@@ -58,12 +58,13 @@ export function createChainVerifier(input: {
       switch (position.kind) {
         case "refused":
           return refuse(CHAIN_REFUSALS[position.reason] ?? "malformed")
+        case "pending":
         case "unknown":
           return refuse("sequence_gap")
         case "keyring":
           return entry.kind === "keyring" ? { ok: true, payload: { items: [] }, batchId: `keyring:${entry.seq}` } : refuse("object_binding")
         case "vetoed":
-          return { ok: true, payload: { items: [] }, batchId: entry.batchId ?? `vetoed:${entry.seq}` }
+          return entry.kind === "batch" ? { ok: true, payload: { items: [] }, batchId: entry.batchId ?? `vetoed:${entry.seq}` } : refuse("object_binding")
         case "batch": {
           const batch = position.batch
           if (entry.kind !== "batch" || hexOfB64url(batch.digest) !== entry.digest) return refuse("content_hash")

@@ -1,13 +1,18 @@
 // This device's verified view of the account's sequence. It starts from the pinned trust anchor,
 // walks every served row through the client chain, and extends on demand as the engine pulls. A
-// row is usable only after the chain verified it; a refused row is remembered with its reason, and
-// nothing after it is verified. Epoch keys open only from wraps the verified chain minted.
+// row is usable only after the chain verified it. A cryptographic refusal is remembered with its
+// reason and nothing after it is verified. A row the device cannot read, or a keyring row whose
+// `/entries` and `/keys` answers disagree, is counted (reason only, never content) and holds the
+// rows after it as pending: each row links to the one before it, so nothing past an unresolved row
+// can be verified, and the next read retries. Epoch keys open only from wraps the verified chain
+// minted.
 
 import type { TrustAnchor } from "../crypto/anchor.ts"
 import { type AcceptedBatch, appendEntries, type ChainRejection, type ChainState, emptyChain } from "../crypto/chain.ts"
 import type { BatchEntry, KeyringEntry, SyncEntry } from "../crypto/entry.ts"
 import type { RejectionCounter } from "../crypto/rejection.ts"
 import type { DeviceKeyring } from "../keyring-port.ts"
+import type { ChainRow } from "../recovery/ports.ts"
 import { ownMaterial } from "../recovery/keyring-append.ts"
 import { committedWrap, expectedHistory } from "../recovery/served-chain.ts"
 import type { AccountHttp } from "./http.ts"
@@ -16,7 +21,8 @@ export type ChainPosition =
   | { readonly kind: "batch"; readonly batch: AcceptedBatch }
   | { readonly kind: "keyring" }
   | { readonly kind: "vetoed" }
-  | { readonly kind: "refused"; readonly reason: ChainRejection | "unavailable" }
+  | { readonly kind: "refused"; readonly reason: ChainRejection }
+  | { readonly kind: "pending" }
   | { readonly kind: "unknown" }
 
 export interface AccountChain {
@@ -33,6 +39,18 @@ export interface AccountChain {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
 
+const isServedRow = (value: unknown): value is ChainRow =>
+  isRecord(value) && Number.isSafeInteger(value["seq"]) && (value["kind"] === "batch" || value["kind"] === "keyring")
+
+// The chain entry for one served row, or null when the row is unreadable or is a keyring row whose
+// `/entries` digest or keyring link disagrees with the full record `/keys` served.
+const toEntry = (row: unknown, keys: ReadonlyMap<number, KeyringEntry>): SyncEntry | null => {
+  if (!isServedRow(row)) return null
+  if (row.kind === "batch") return { ...row, kind: "batch", keyring_link: null } satisfies BatchEntry
+  const full = keys.get(row.seq)
+  return full !== undefined && full.digest === row.digest && full.keyring_link === row.keyring_link ? full : null
+}
+
 export async function openAccountChain(input: {
   readonly account: string
   readonly anchor: TrustAnchor
@@ -45,31 +63,35 @@ export async function openAccountChain(input: {
   const positions = new Map<number, ChainPosition>()
   const links = new Map<number, string>()
   let refusedAt: number | null = null
+  let heldFrom: number | null = null
   const keys = new Map<number, Uint8Array<ArrayBuffer>>()
   let keysEpoch = -1
 
-  const extend = async (): Promise<void> => {
+  // One served page: every row up to the first one this device cannot use is walked through the
+  // chain; that row is counted and holds the rest. Returns how many rows the page carried.
+  const readPage = async (): Promise<number> => {
     const after = state.head?.seq ?? 0
     const rows = await http.listEntriesAfter(after)
-    if (rows === null || !rows.every(isRecord)) throw new Error("account sync: the entries read did not answer a list")
-    if (rows.length === 0) return
-    const keyring = rows.some((row) => row.kind === "keyring") ? await http.listKeys() : []
-    if (keyring === null || !keyring.every(isRecord)) throw new Error("account sync: the keyring read did not answer a list")
-    const bySeq = new Map(keyring.map((entry) => [entry.seq, entry]))
+    if (rows === null) throw new Error("account sync: the entries read did not answer a list")
+    if (rows.length === 0) return 0
+    const keyring = rows.some((row) => isRecord(row) && row["kind"] === "keyring") ? await http.listKeys() : []
+    if (keyring === null) throw new Error("account sync: the keyring read did not answer a list")
+    const bySeq = new Map(keyring.filter(isRecord).map((entry) => [entry.seq, entry]))
     const entries: SyncEntry[] = []
     for (const row of rows) {
-      if (row.kind === "batch") {
-        entries.push({ ...row, kind: "batch", keyring_link: null } satisfies BatchEntry)
-        continue
+      const entry = toEntry(row, bySeq)
+      if (entry === null) {
+        rejections.record(isServedRow(row) ? "keyring_mismatch" : "entry_unreadable")
+        heldFrom = after + entries.length + 1
+        break
       }
-      const full: KeyringEntry | undefined = bySeq.get(row.seq)
-      if (full === undefined || full.digest !== row.digest || full.keyring_link !== row.keyring_link) {
-        positions.set(row.seq, { kind: "refused", reason: "digest_mismatch" })
-        refusedAt = row.seq
-        return
-      }
-      entries.push(full)
+      entries.push(entry)
     }
+    if (entries.length > 0) await walk(entries)
+    return rows.length
+  }
+
+  const walk = async (entries: SyncEntry[]): Promise<void> => {
     const walked = await appendEntries(state, entries, rejections)
     for (const step of walked.steps) {
       if (step.kind === "batch") positions.set(step.batch.seq, { kind: "batch", batch: step.batch })
@@ -85,11 +107,24 @@ export async function openAccountChain(input: {
     }
   }
 
+  // Pages until `target` is verified, the server has no more rows, or a row stops the walk. The
+  // service serves at most one page per read, so a single read can miss rows (and membership).
+  const extend = async (target: number): Promise<void> => {
+    heldFrom = null
+    for (;;) {
+      const before = state.head?.seq ?? 0
+      const served = await readPage()
+      const head = state.head?.seq ?? 0
+      if (served === 0 || refusedAt !== null || heldFrom !== null || head >= target || head === before) return
+    }
+  }
+
   const reach = async (seq: number): Promise<ChainPosition> => {
-    if (refusedAt === null && (state.head?.seq ?? 0) < seq) await extend()
+    if (refusedAt === null && (state.head?.seq ?? 0) < seq) await extend(seq)
     const known = positions.get(seq)
     if (known !== undefined) return known
     if (refusedAt !== null && seq > refusedAt) return positions.get(refusedAt) ?? { kind: "unknown" }
+    if (heldFrom !== null && seq >= heldFrom) return { kind: "pending" }
     return { kind: "unknown" }
   }
 
@@ -108,7 +143,7 @@ export async function openAccountChain(input: {
     return keys.get(epoch) ?? null
   }
 
-  await extend()
+  await extend(Number.MAX_SAFE_INTEGER)
   return {
     account,
     state: () => state,
