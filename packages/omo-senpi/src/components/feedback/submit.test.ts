@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { buildDraft, type UploadRedactor } from "./draft"
 import { submitReport, type ReportTransport } from "./submit"
-import { expectUserOnly } from "./report-file.test-support"
+import { expectUserOnly, readWindowsAcl, unexpectedWindowsReaders } from "./report-file.test-support"
 
 
 const redactTokens: UploadRedactor = (text) => {
@@ -271,3 +272,14 @@ describe("submitReport", () => {
   })
 })
 
+describe.skipIf(process.platform !== "win32")("report-file privacy check on Windows", () => {
+  test("#given a saved file that Everyone may read #when the privacy check runs #then it names that reader and fails", () => {
+    const stateDir = tempDir()
+    const path = join(stateDir, "report.json")
+    writeFileSync(path, "{}")
+    expect(spawnSync("icacls", [path, "/grant", "*S-1-1-0:(R)"], { encoding: "utf8" }).status).toBe(0)
+
+    expect(unexpectedWindowsReaders(readWindowsAcl(path))).toEqual(["S-1-1-0"])
+    expect(() => expectUserOnly(path, stateDir)).toThrow()
+  })
+})
