@@ -4,41 +4,58 @@ import type { OnboardingScanEnvironment } from "./scan-runtime"
 import type { SessionDigest } from "./session-history"
 import {
   ONBOARDING_UNDERSTAND_RPC_EVENT,
-  ONBOARDING_UNDERSTAND_RPC_METHOD,
-  ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD,
-  ONBOARDING_UNDERSTAND_STOP_RPC_METHOD,
   type OnboardingUnderstandControlResponse,
   type OnboardingUnderstandEvent,
   type OnboardingUnderstandResponse,
 } from "./understand-contract"
-import type { OnboardingUnderstandingSeams, OnboardingUnderstandingStarted, startOnboardingUnderstanding } from "./understand-start"
+import { startOnboardingUnderstanding, type OnboardingUnderstandingSeams, type OnboardingUnderstandingStarted } from "./understand-start"
 
-export type { OnboardingUnderstandingSeams } from "./understand-start"
-
-/** What understanding may read from a retained scan: its in-memory digests and the project roots it listed. */
-export interface OnboardingScanForUnderstanding {
-  readonly digests: readonly SessionDigest[]
-  readonly projectRoots: ReadonlySet<string>
+/** A retained scan as the shell holds it: the outcome carries its in-memory digests and the project roots it listed. */
+export interface OnboardingRetainedScan {
+  readonly outcome: Promise<{ readonly digests: readonly SessionDigest[]; readonly projectRoots: ReadonlySet<string> } | undefined>
+  readonly finishedAt: number | undefined
 }
 
 export interface OnboardingUnderstandRegistration {
   readonly environment: () => OnboardingScanEnvironment
-  readonly loadStart: () => Promise<typeof startOnboardingUnderstanding>
   readonly modelRegistry: () => ChildModelRegistry | undefined
   /** Shared by every session of the process: one understanding per scan at a time. */
   readonly busyScans: Map<string, symbol>
-  /** The retained scan once it settles; undefined when it never ran, failed, expired, was evicted or applied. */
-  readonly scanForUnderstanding: (scanId: string) => Promise<OnboardingScanForUnderstanding | undefined>
+  /** The shell's retained scans: an expired one is dropped here, an evicted or applied one is already gone. */
+  readonly scans: Map<string, OnboardingRetainedScan>
+  readonly expired: (scan: OnboardingRetainedScan) => boolean
   readonly seams?: OnboardingUnderstandingSeams
 }
 
 const MODEL_SELECTOR = /^[^/\s]+\/\S+$/
 
-export function registerOnboardingUnderstanding(pi: SenpiExtensionAPI, handle: NonNullable<NonNullable<SenpiExtensionAPI["rpc"]>["handle"]>, deps: OnboardingUnderstandRegistration): void {
-  const runs = new Map<string, OnboardingUnderstandingStarted["control"]>()
-  const { busyScans } = deps
+/** The three understanding RPC answers; the shell registers the method names and delegates here. */
+export interface OnboardingUnderstandingHandlers {
+  readonly understand: (request: unknown) => Promise<OnboardingUnderstandResponse>
+  readonly skip: (request: unknown) => OnboardingUnderstandControlResponse
+  readonly stop: (request: unknown) => OnboardingUnderstandControlResponse
+}
 
-  handle(ONBOARDING_UNDERSTAND_RPC_METHOD, async (request): Promise<OnboardingUnderstandResponse> => {
+/**
+ * Ships in the lazy onboarding-scan sidecar with the rest of understanding, so `omo.js` carries only
+ * the method names. One instance per registered shell: its runs map scopes skip and stop.
+ */
+export function createOnboardingUnderstandingHandlers(pi: SenpiExtensionAPI, deps: OnboardingUnderstandRegistration): OnboardingUnderstandingHandlers {
+  const runs = new Map<string, OnboardingUnderstandingStarted["control"]>()
+  const { busyScans, scans } = deps
+  // The digests exist only in memory, with the retained scan: an expired, evicted or applied scan has none.
+  const scanForUnderstanding = async (scanId: string) => {
+    const held = scans.get(scanId)
+    const outcome = await held?.outcome
+    if (held === undefined || outcome === undefined || scans.get(scanId) !== held) return undefined
+    if (held.finishedAt === undefined || deps.expired(held)) {
+      scans.delete(scanId)
+      return undefined
+    }
+    return { digests: outcome.digests, projectRoots: outcome.projectRoots }
+  }
+
+  const understand = async (request: unknown): Promise<OnboardingUnderstandResponse> => {
     if (!isRecord(request) || request["consent"] !== true) {
       return { kind: "invalid", reason: "Understanding sends the scan's session digests and each scanned project's AGENTS.md to the model provider, so it needs consent: true." }
     }
@@ -56,22 +73,16 @@ export function registerOnboardingUnderstanding(pi: SenpiExtensionAPI, handle: N
     }
     let started: Awaited<ReturnType<typeof startOnboardingUnderstanding>> | undefined
     try {
-      const scan = await deps.scanForUnderstanding(scanId)
+      const scan = await scanForUnderstanding(scanId)
       if (scan === undefined) {
         return { kind: "unavailable", reason: "No retained scan with this id: it never ran, failed, expired after ten minutes, or was applied. Run omo.onboarding.scan again." }
       }
       const environment = deps.environment()
-      let start: typeof startOnboardingUnderstanding
-      try {
-        start = await deps.loadStart()
-      } catch (error) {
-        return { kind: "unavailable", reason: `The onboarding runtime could not load: ${error instanceof Error ? error.message : String(error)}` }
-      }
       const emit = (event: OnboardingUnderstandEvent): void => {
         if (event.kind === "done") release()
         pi.rpc?.emit(ONBOARDING_UNDERSTAND_RPC_EVENT, event)
       }
-      started = await start({
+      started = await startOnboardingUnderstanding({
         scanId,
         model,
         digests: scan.digests,
@@ -91,7 +102,7 @@ export function registerOnboardingUnderstanding(pi: SenpiExtensionAPI, handle: N
       release()
     })
     return { understandId }
-  })
+  }
 
   const control = (request: unknown, act: (run: OnboardingUnderstandingStarted["control"], body: Readonly<Record<string, unknown>>) => string | undefined): OnboardingUnderstandControlResponse => {
     const understandId = isRecord(request) ? request["understandId"] : undefined
@@ -101,16 +112,19 @@ export function registerOnboardingUnderstanding(pi: SenpiExtensionAPI, handle: N
     const invalid = act(run, request)
     return invalid === undefined ? { understandId, accepted: true } : { kind: "invalid", reason: invalid }
   }
-  handle(ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD, (request) => control(request, (run, body) => {
-    const project = body["project"]
-    if (typeof project !== "string" || project.length === 0) return "skip needs a project directory"
-    run.skip(project)
-    return undefined
-  }))
-  handle(ONBOARDING_UNDERSTAND_STOP_RPC_METHOD, (request) => control(request, (run) => {
-    run.stop()
-    return undefined
-  }))
+  return {
+    understand,
+    skip: (request) => control(request, (run, body) => {
+      const project = body["project"]
+      if (typeof project !== "string" || project.length === 0) return "skip needs a project directory"
+      run.skip(project)
+      return undefined
+    }),
+    stop: (request) => control(request, (run) => {
+      run.stop()
+      return undefined
+    }),
+  }
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

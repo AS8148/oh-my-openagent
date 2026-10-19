@@ -1,4 +1,5 @@
 import { homedir } from "node:os"
+import { resolve } from "node:path"
 
 import {
   applySetupStages,
@@ -11,7 +12,8 @@ import {
   type SetupPlans,
   type SetupStageResult,
 } from "../../../../omo-native/bin/lib/setup-stream.js"
-import type { OnboardingApplyStage, OnboardingScanEvent, OnboardingScanItem, OnboardingScanSource } from "./scan-contract"
+import type { OnboardingEngineAuthStore } from "./scan-component"
+import type { OnboardingApplyResponse, OnboardingApplyStage, OnboardingScanEvent, OnboardingScanItem, OnboardingScanSource } from "./scan-contract"
 import {
   createMemorySessionDigestStore,
   MAX_TRANSCRIPTS_PER_SOURCE,
@@ -22,7 +24,7 @@ import {
   type SessionScanItem,
 } from "./session-history"
 
-export { startOnboardingUnderstanding } from "./understand-start"
+export { createOnboardingUnderstandingHandlers } from "./understand-component"
 
 /** Where the scan reads and the apply writes; every field defaults to what `omo setup` uses. */
 export interface OnboardingScanEnvironment {
@@ -167,6 +169,76 @@ export async function applyOnboardingScan(
     }
     throw error
   }
+}
+
+/**
+ * `omo.onboarding.apply` once the shell has validated the request and the retained scan: staleness,
+ * the credential-store checks and the writers. It ships in this runtime so `omo.js` carries none of it.
+ */
+export async function applyRetainedScan(
+  scanId: string,
+  plans: SetupPlans,
+  requested: readonly OnboardingApplyStage[],
+  authStore: () => OnboardingEngineAuthStore | undefined,
+): Promise<OnboardingApplyResponse> {
+  // Staleness is answered before anything else: a target that changed since the scan means
+  // the plans no longer describe the machine, so no store is consulted and nothing is written.
+  const stale = staleSetupTargets(plans, requested)
+  if (stale.length > 0) {
+    return { kind: "stale", reason: `targets changed since the scan: ${stale.join(", ")}`, paths: stale }
+  }
+  if (authWritesPending(plans, requested)) {
+    const store = authStore()
+    if (store === undefined) {
+      return { kind: "unavailable", reason: "The engine's credential store is not available, so credentials cannot be imported here; run omo setup --yes instead." }
+    }
+    const target = authTargetOf(plans)
+    if (target === undefined || resolve(store.getStoragePath()) !== resolve(target)) {
+      return { kind: "unavailable", reason: `The engine's credential store (${store.getStoragePath()}) is not the planned target; run omo setup --yes instead.` }
+    }
+  }
+  const notices: string[] = []
+  const outcome = await applyOnboardingScan(plans, new Set(requested), {
+    ...(authStore() === undefined ? {} : {
+      writeAuth: (target, additions) => writeAuthThrough(authStore() as OnboardingEngineAuthStore, target, additions),
+    }),
+    report: (line) => notices.push(line),
+  })
+  if ("kind" in outcome) {
+    return outcome.applied === undefined
+      ? { kind: "stale", reason: outcome.reason, paths: outcome.paths }
+      : { kind: "stale", reason: outcome.reason, paths: outcome.paths, applied: outcome.applied }
+  }
+  return { scanId, applied: outcome.applied, ...(notices.length === 0 ? {} : { notices }) }
+}
+
+function authTargetOf(plans: Record<string, unknown>): string | undefined {
+  const credentials = isRecord(plans["credentials"]) ? plans["credentials"] : undefined
+  if (isRecord(credentials) && typeof credentials["target"] === "string") return credentials["target"]
+  const providers = isRecord(plans["providers"]) ? plans["providers"] : undefined
+  const paths = isRecord(providers) && isRecord(providers["paths"]) ? providers["paths"] : undefined
+  if (paths !== undefined && typeof paths["auth"] === "string") return paths["auth"]
+  return undefined
+}
+
+async function writeAuthThrough(
+  store: OnboardingEngineAuthStore,
+  target: string,
+  additions: readonly { readonly provider: string; readonly key: string }[],
+): Promise<void> {
+  if (resolve(store.getStoragePath()) !== resolve(target)) {
+    throw new Error(`the engine's credential store is not the planned target ${target}`)
+  }
+  for (const item of additions) {
+    // Under the store's lock: an entry the store already holds (a login or refresh that landed
+    // after the scan) is kept exactly as it is.
+    await store.modify(item.provider, (current: unknown) =>
+      current === undefined ? { type: "api_key", key: item.key } : undefined)
+  }
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 const FACT_GROUPS: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [
