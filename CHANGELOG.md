@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The side panel says, once, that its column needs the fullscreen TUI.** `side_panel.enabled` renders its right-hand column only in the fullscreen TUI (`--tui-mode fullscreen`, or `tuiMode` in senpi's settings); in the default regular mode the sections stay a block above the editor. The docs now say so at the top of the `side_panel` table, and the first regular-mode run with the panel on shows a one-time notice naming both ways to switch. ([#10560](https://github.com/code-yeongyu/oh-my-openagent/issues/10560), [#10565](https://github.com/code-yeongyu/oh-my-openagent/pull/10565))
+
 ## [5.1.37] - 2026-10-19
 
 5.1.36 was prepared but never published; everything listed for it ships in this release. ([#10552](https://github.com/code-yeongyu/oh-my-openagent/pull/10552))
