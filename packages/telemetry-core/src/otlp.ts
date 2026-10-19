@@ -15,7 +15,6 @@ export { inspectOtlpRequest, type InspectedAttributes, type InspectedLogRecord, 
 export { OTEL_SDK_LANGUAGE, OTEL_SDK_NAME, OTEL_SDK_VERSION, type InstrumentationScope } from "./otel-time"
 export {
   DEFAULT_OTLP_ENDPOINT,
-  defaultWireProjection,
   isOtlpTelemetryEnabled,
   resolveOtlpEndpoint,
   type OtlpWireProjection,

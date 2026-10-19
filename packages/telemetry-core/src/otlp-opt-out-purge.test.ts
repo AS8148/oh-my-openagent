@@ -13,8 +13,7 @@ import {
   recordingFetch,
   spoolNames,
   TEST_SCOPE,
-  testResource,
-} from "./otlp-test-support"
+  testResource, testWireProjection } from "./otlp-test-support"
 import type { CreateOtlpTelemetryTransportInput } from "./otlp-transport-types"
 import type { TelemetryDiagnosticInput } from "./types"
 
@@ -46,7 +45,7 @@ function optOut(spoolDir: string, spoolRoot: string, diagnostics: TelemetryDiagn
     spoolDir,
     spoolRoot,
     resource: testResource(),
-    scope: TEST_SCOPE,
+    scope: TEST_SCOPE, project: testWireProjection,
     env: { DO_NOT_TRACK: "1" },
     diagnostics: (input) => diagnostics.push(input),
     autoStart: false,
@@ -242,7 +241,7 @@ describe("opt-out purges the spool", () => {
         spoolDir: dir,
         spoolRoot: dirname(dir),
         resource: testResource(),
-        scope: TEST_SCOPE,
+        scope: TEST_SCOPE, project: testWireProjection,
         env,
         autoStart: false,
       })

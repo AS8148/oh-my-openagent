@@ -6,7 +6,6 @@ import { createTurnTracing } from "./otel-turn-span"
 import { BatchSender } from "./otlp-batch-sender"
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "./otlp-http"
 import {
-  defaultWireProjection,
   isOtlpTelemetryEnabled,
   resolveOtlpEndpoint,
   type WireAttributes,
@@ -202,7 +201,7 @@ class OtlpSender {
 
   #captureUnguarded(message: TelemetryCaptureMessage): void {
     const properties = message.properties ?? {}
-    const project = this.#input.project ?? defaultWireProjection
+    const project = this.#input.project
     const eventId = properties["event_id"]
     const session = properties["$session_id"]
     this.#emit(message.event, {
