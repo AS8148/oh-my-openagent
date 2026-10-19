@@ -22,6 +22,7 @@ const TRANSCRIPT = [
   { type: "custom", customType: ACCEPTED_TURNS_ENTRY_TYPE, data: { version: 1, sessionId: "s", priorUserTurns: 2, sessionBaselineTurns: 0 } },
   { type: "message", message: { role: "user", content: [{ type: "text", text: "Review the site plugins and tell me which look unused." }] } },
   { type: "message", message: { role: "assistant", content: [{ type: "text", text: "I suggest removing plugins X and Y." }] } },
+  { type: "message", message: { role: "user", content: [{ type: "text", text: "Yes delete it." }] } },
 ]
 
 async function dispatchMemoryCall(input: Record<string, unknown>, branch?: readonly unknown[]): Promise<Record<string, unknown>> {
@@ -53,9 +54,14 @@ describe("memory tool claim receipts", () => {
     expect(provenance["claim"]).toEqual({ source: "agent", downgraded: true })
   }, 30_000)
 
-  test("#given a user claim quoting the user's own message #when the memory call starts #then the user receipt keeps the quote", async () => {
+  test("#given a user claim quoting the user's whole consent message #when the memory call starts #then the user receipt keeps the message", async () => {
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "yes delete it" })
+    expect(provenance["claim"]).toEqual({ source: "user", userQuote: "Yes delete it." })
+  }, 30_000)
+
+  test("#given a user claim quoting a whole message that is not a consent phrase #when the memory call starts #then it is downgraded", async () => {
     const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "Review the site plugins and tell me which look unused" })
-    expect(provenance["claim"]).toEqual({ source: "user", userQuote: "Review the site plugins and tell me which look unused." })
+    expect(provenance["claim"]).toEqual({ source: "agent", downgraded: true })
   }, 30_000)
 
   test("#given the quoted user message is only on an abandoned branch #when the memory call starts #then the claim is downgraded", async () => {
@@ -63,7 +69,7 @@ describe("memory tool claim receipts", () => {
     const liveBranch = [TRANSCRIPT[0], TRANSCRIPT[2]]
 
     // when
-    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "tell me which look unused" }, liveBranch)
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "yes delete it" }, liveBranch)
 
     // then
     expect(provenance["claim"]).toEqual({ source: "agent", downgraded: true })

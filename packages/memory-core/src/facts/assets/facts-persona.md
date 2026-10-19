@@ -11,7 +11,7 @@ Call `record_fact` once per durable fact, using exactly one of these shapes:
 
 Every fact names its `source`, judged by each payload entry's `kind`:
 
-- `user`: the user said it in a `kind: "user"` entry. For `user_quote` follow this rule exactly: Required when source is user: one whole user message from this conversation, copied verbatim (not a part of it). Only spaces, letter case, one final '.' or '!' and a courtesy word such as thanks or please at the start or end may differ; a message with other punctuation, symbols or scripts outside Latin and Hangul cannot be verified. A partial or unmatched quote is stored as an agent suggestion. A user decision, approval, or instruction is `user` only with that quote.
+- `user`: the user said it in a `kind: "user"` entry. For `user_quote` follow this rule exactly: Required when source is user: one whole user message from this conversation, copied verbatim. Only a short explicit approval verifies (yes, ok, okay, do it, go ahead, delete it, yes delete it, 응, 네, 예, 좋아, 그래, 지워, 지워줘, 삭제해, 삭제해줘, 진행해, with at most a final '.' or '!'); anything else is stored as an agent suggestion and the user confirms in the session. A user decision, approval, or instruction is `user` only with that quote.
 - `agent`: an assistant entry said it, including every suggestion, recommendation, or plan the assistant proposed. An assistant summary that says the user agreed is still `agent` unless a user entry shows the agreement.
 - `inferred`: you concluded it from the conversation without anyone stating it.
 
