@@ -4,8 +4,8 @@ import type { OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { createOmoNativeProductConfig } from "../telemetry/product-identity"
 import type { FeedbackDraft, FeedbackKind, UploadRedactor } from "./draft"
-import { feedbackRuntimeLoadFailure, loadFeedbackRuntime, type FeedbackRuntimeLoader } from "./runtime-loader"
-import type { FeedbackCore, FeedbackSessionLike } from "./runtime"
+import { feedbackRuntimeLoadFailure, loadFeedbackRuntime, type FeedbackRuntimeLoader, type FeedbackRuntimeModule } from "./runtime-loader"
+import type { FeedbackCommandUi, FeedbackCore, FeedbackSessionLike } from "./runtime"
 import type { ReportTransport, SubmitResult } from "./submit"
 
 export const FEEDBACK_PREPARE_RPC_METHOD = "omo.feedback.prepare"
@@ -75,15 +75,20 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
       }
 
       const loadRuntime = options.loadRuntime ?? loadFeedbackRuntime
-      let core: FeedbackCore | undefined
-      const coreOf = async (): Promise<FeedbackCore> => {
-        if (core !== undefined) return core
-        let runtime
+      let runtimeModule: FeedbackRuntimeModule | undefined
+      const runtimeOf = async (): Promise<FeedbackRuntimeModule> => {
+        if (runtimeModule !== undefined) return runtimeModule
         try {
-          runtime = await loadRuntime()
+          runtimeModule = await loadRuntime()
         } catch (error) {
           throw new Error(feedbackRuntimeLoadFailure(error))
         }
+        return runtimeModule
+      }
+      let core: FeedbackCore | undefined
+      const coreOf = async (): Promise<FeedbackCore> => {
+        if (core !== undefined) return core
+        const runtime = await runtimeOf()
         core ??= runtime.createFeedbackCore({
           env,
           now,
@@ -113,35 +118,27 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
       pi.rpc?.handle?.(FEEDBACK_SUBMIT_RPC_METHOD, submit)
 
       const runCommand = async (kind: FeedbackKind, args: string, ctx: unknown): Promise<void> => {
-        const ui = Reflect.get(Object(ctx), "ui") as
-          | { input(title: string, placeholder?: string): Promise<string | undefined>; select(title: string, options: string[]): Promise<string | undefined>; notify(message: string, type?: string): void }
-          | undefined
+        const ui = Reflect.get(Object(ctx), "ui") as FeedbackCommandUi | undefined
         if (ui === undefined) return
-        let prepared: Awaited<ReturnType<typeof prepare>>
+        const redact = hostRedactor(pi)
+        if (redact === undefined) {
+          ui.notify(FEEDBACK_UNAVAILABLE, "warning")
+          return
+        }
+        let runtime: FeedbackRuntimeModule
         try {
-          prepared = await prepare(ctx as SessionLike, {})
+          runtime = await runtimeOf()
         } catch (error) {
           ui.notify(error instanceof Error ? error.message : String(error), "error")
           return
         }
-        if ("kind" in prepared) {
-          ui.notify(prepared.reason, "warning")
-          return
-        }
-        const description = args.trim() !== "" ? args.trim() : await ui.input("What went wrong?", "What happened, and what did you expect?")
-        if (description === undefined || description.trim() === "") return
-        const notice = noticeFor(prepared)
-        for (;;) {
-          const choice = await ui.select(notice, ["Send report", "See exactly what is sent", "Cancel"])
-          if (choice === "See exactly what is sent") {
-            ui.notify(prepared.sections.filter((s) => s.id !== "description").map((s) => `## ${s.title}\n${s.text}`).join("\n\n"), "info")
-            continue
-          }
-          if (choice !== "Send report") return
-          break
-        }
-        const result = await submit({ draftId: prepared.draftId, kind, description })
-        ui.notify(resultMessage(result), result.kind === "refused" ? "error" : "info")
+        await runtime.runFeedbackCommand({
+          kind,
+          args,
+          ui,
+          prepare: async () => (await coreOf()).prepare(ctx as SessionLike, {}, redact),
+          submit,
+        })
       }
 
       pi.registerCommand("feedback", {
@@ -158,40 +155,3 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
   }
 }
 
-const SECTION_PHRASES: Readonly<Partial<Record<string, string>>> = {
-  identity: "your account and this device",
-  environment: "app versions",
-  session: "this conversation's recent messages",
-  logs: "recent logs",
-  crash: "crash reports",
-  config: "your settings",
-}
-
-export function noticeFor(draft: FeedbackDraft): string {
-  const phrases = draft.sections.flatMap((section) => {
-    const phrase = SECTION_PHRASES[section.id]
-    return phrase === undefined ? [] : [phrase]
-  })
-  const included = phrases.length <= 1 ? phrases.join("") : `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1) ?? ""}`
-  return draft.destination === "intake"
-    ? `Sending also includes ${included}. Passwords, keys and tokens are removed first, and your memory is never sent. Only the OmO team can read it; it is kept ${draft.retentionDays} days.`
-    : `Uploads are turned off here (OMO_DISABLE_FEEDBACK), so the report, with ${included}, is saved as a file you can send yourself.`
-}
-
-export function resultMessage(result: SubmitResult): string {
-  switch (result.kind) {
-    case "sent":
-      return `Thanks. Your report was sent (${result.reportId}).`
-    case "saved":
-      return `Uploads are off, so the report was saved to ${result.path}.`
-    case "already-sent":
-      return "Your earlier report already reached the OmO team, so it was not sent again."
-    case "refused":
-      return {
-        "secret-detected": "The report still looked like it contained a password or key, so nothing was sent. Remove it from the description and try again.",
-        "too-large": "The report is too large to send. Try again from a shorter conversation.",
-        "rate-limited": "Too many reports in a short time. Try again in a few minutes.",
-        unavailable: "The report could not be sent right now. Check your connection and try again.",
-      }[result.reason]
-  }
-}

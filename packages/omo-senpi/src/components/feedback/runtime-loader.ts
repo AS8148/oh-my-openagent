@@ -3,7 +3,7 @@
 
 import type * as FeedbackRuntime from "./runtime"
 
-export type FeedbackRuntimeModule = Pick<typeof FeedbackRuntime, "createFeedbackCore">
+export type FeedbackRuntimeModule = Pick<typeof FeedbackRuntime, "createFeedbackCore" | "runFeedbackCommand">
 export type FeedbackRuntimeLoader = () => Promise<FeedbackRuntimeModule>
 
 export const FEEDBACK_RUNTIME_ARTIFACT = "extensions/omo-feedback.js"
