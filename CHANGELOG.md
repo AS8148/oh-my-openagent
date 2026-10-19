@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A busy task child no longer holds its whole transcript in memory while it works.** The memory component read the session's full history at the start of every run, though it needs it only the first time a session binds. On a reopened compacted session that read re-parses the whole transcript file and keeps it until the session goes idle, so each long-running child held about four times its transcript for every run; it is now read only when a session binds. ([#10557](https://github.com/code-yeongyu/oh-my-openagent/pull/10557), [#10556](https://github.com/code-yeongyu/oh-my-openagent/issues/10556), [senpi#3110](https://github.com/code-yeongyu/senpi/issues/3110))
+
 ## [5.1.38] - 2026-10-19
 
 5.1.37 was tagged but its publish stopped on Linux (the release binaries outgrew their size budget), so its main packages never reached npm; everything listed for it ships in this release. ([#10566](https://github.com/code-yeongyu/oh-my-openagent/pull/10566))
