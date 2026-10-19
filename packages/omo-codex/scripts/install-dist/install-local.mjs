@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:064ed9d89c849865ef2176f94fb5f5a9844f51844340f2628c1979db7558fafb:c59ca571c13ef650f3f0084384ef71e138eb102d193ffa281f67e2478dd5700c
+// omo-codex-install:f26094cc994df527fa26034d5aea1cc1ac3d1332a54a390edfa7041b32ad80b0:db0540bf73f6ea181a271aca2f26ec8c9cdc244ce660e52c9f2655c4b63ac4eb
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -284,8 +284,6 @@ function toDiagnosticRecord(input, now) {
     timestamp: now.toISOString(),
     event: input.event,
     source: input.source,
-    ...input.entryKind === undefined ? {} : { entry_kind: input.entryKind },
-    ...input.errorCode === undefined ? {} : { error_code: input.errorCode },
     ...input.count === undefined ? {} : { count: input.count },
     ...serializeError(input.error, input.errorKind)
   };
@@ -10015,12 +10013,6 @@ var init_events = __esm(() => {
 // packages/telemetry-core/src/record-daily-active.ts
 var init_record_daily_active = () => {};
 
-// packages/telemetry-core/src/turn-trace-bridge.ts
-var REGISTRY;
-var init_turn_trace_bridge = __esm(() => {
-  REGISTRY = Symbol.for("omo.telemetry.turn-traceparent.v1");
-});
-
 // packages/telemetry-core/src/index.ts
 var init_src = __esm(() => {
   init_activity_state();
@@ -10032,7 +10024,6 @@ var init_src = __esm(() => {
   init_machine_id();
   init_posthog_client();
   init_record_daily_active();
-  init_turn_trace_bridge();
 });
 
 // packages/omo-codex/package.json
@@ -10040,7 +10031,7 @@ var package_default;
 var init_package = __esm(() => {
   package_default = {
     name: "@oh-my-opencode/omo-codex",
-    version: "5.1.35",
+    version: "5.1.38",
     type: "module",
     private: true,
     description: "Codex harness adapter for oh-my-openagent. Vendored Codex plugin namespace (omo) + TypeScript installer + telemetry.",
@@ -10075,7 +10066,7 @@ var init_package = __esm(() => {
       "@oh-my-opencode/utils": "workspace:*"
     },
     devDependencies: {
-      "bun-types": "1.4.2"
+      "bun-types": "1.4.3"
     }
   };
 });
