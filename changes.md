@@ -1,3 +1,7 @@
+## 2026-10-18 - Web Deploy runs on dev pushes only
+
+`.github/workflows/web-deploy.yml` no longer triggers on pushes to `master`. The site deploys from `dev`; a `master` push is the release-state merge, and the `omo-production` environment's branch protection refused it, so the workflow failed on every release. `workflow_dispatch` and the `dev` push trigger (with its `packages/web/**`, `docs/**` and workflow paths) are unchanged.
+
 
 
 ## 2026-10-18 - Adopt senpi 2026.10.18-1
