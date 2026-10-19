@@ -9,10 +9,9 @@
 // process per file. A memory repo with thousands of files moves HEAD on every memory write, and
 // reading it one `git show` per file from every live session was a machine-wide git storm.
 
-import { realpathSync } from "node:fs"
 import { join } from "node:path"
 
-import { readFile, stat } from "../fs/resilient"
+import { readFile, realpathSync, stat } from "../fs/resilient"
 import type { GitMemoryRepo } from "../git"
 import { parseMemoryFile } from "../memfs"
 
@@ -126,7 +125,7 @@ const releaseSharedCache = new FinalizationRegistry<{ readonly dir: string; read
 // corpus; keying by the spelled path gave each spelling its own copy and silently lost the sharing.
 function sharedKey(dir: string): string {
   try {
-    return realpathSync.native(dir)
+    return realpathSync(dir)
   } catch {
     return dir
   }
