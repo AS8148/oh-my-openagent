@@ -1,3 +1,17 @@
+## 2026-10-14 - Preserve planning requests across same-process session transitions
+
+The task skill-invocation tracker hands authenticated request, invocation and plan-artifact records to replacement trackers keyed by session ID. Reload, new, resume and fork transitions retain the prior session's evidence; quit and unknown shutdown reasons discard it. Extension-injected inputs still cannot authorize review, and ulw-execute still forbids review.
+
+The adoption marker is cleared on shutdown so returning through the same tracker also restores evidence. The new same-tracker regression failed before this correction; focused tracker tests and adapter typecheck passed afterward. This is an in-process handoff, not persistence across application restarts.
+
+The handoff store lives in its own module, `skill-invocation-handoff.ts`. A generation takes a record when it adopts it, and the store keeps at most 256 sessions (oldest first out), so sessions the user left and never revisited cannot pile up in a long-running host. A forked child gets a new session id and does not inherit the parent's approval; only returning to the parent restores it. The reload case was proven on a real senpi 2026.10.13 RPC host: with `reload` between two plan-reviewer spawns, this build allowed the second spawn in 2 of 2 runs while dev denied it in 2 of 2 (senpi keeps the extension module across a reload, so the module-level store is shared).
+
+## 2026-10-17 - `omo --help` no longer runs the OpenCode config migration (#10428)
+
+Thanks to @bluet for the report and the clean reproduction, and to @twotnguyen for #10433, which first routed `--help` around the extension. Senpi loads every extension to list their flags for `--help`, and it builds the runtime for `--list-models` and `--list-tips` before exiting, so `config-startup` ran the legacy migration on those launches and moved `~/.config/opencode/oh-my-openagent.json` into `~/.omo/migration-backup-*` before the user ever started a session. A 4.19.x OpenCode plugin then ran on its defaults. The migration guide says the move happens the first time omo starts a session.
+
+`config-startup` now skips its migration and config notices when the engine was started only for `--help`/`-h`, `--list-models` or `--list-tips` (`metadata-launch.ts`). The argv walk mirrors senpi's `cli/args.js`: an option's value is never read as an option (`--name -h` still starts a session), a `--multi-session`/`--listen` host always migrates, and arguments after `--` are message text. Every launch that can start a session migrates as before. `metadata-launch.test.ts` runs the real migration over a temp home for each case and checks the legacy file's bytes and mtime on metadata launches.
+
 ## 2026-10-12 - Thread QA rides the neutral senpi qa-shared helpers (#10033)
 
 The thread-tools harness and runner no longer import senpi's app-server-named QA library. `scripts/qa/thread-tools/lib/harness.mjs` resolves `scripts/qa-shared/lib/{env,fake-model,cleanup}.mjs` from the senpi checkout (the prerequisite extraction in senpi #3177) and `run-all.mjs`'s legacy precondition checks the same path, so the suite keeps its coverage instead of silently skipping once the old helper location is removed. The ulw-loop delegation guidance and `docs/reference/mass-ulw-protocol.md` stop naming the retired protocol; the DAG widget's non-TUI suppression test uses the rpc mode fixture. No behavior changes: the harness still drives the real `--mode rpc --multi-session` host.
