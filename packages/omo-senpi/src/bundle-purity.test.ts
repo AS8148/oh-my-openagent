@@ -15,6 +15,7 @@ const builtThreadClientExtensionPath = join(packageRoot, "plugin", "extensions",
 const builtFeedbackExtensionPath = join(packageRoot, "plugin", "extensions", "omo-feedback.js")
 const builtMemoryMemfsExtensionPath = join(packageRoot, "plugin", "extensions", "omo-memory-memfs.js")
 const builtMemoryPalaceExtensionPath = join(packageRoot, "plugin", "extensions", "omo-memory-palace.js")
+const builtSessionHistoryExtensionPath = join(packageRoot, "plugin", "extensions", "omo-session-history.js")
 const builtComputerUseExtensionPath = join(packageRoot, "plugin", "extensions", "omo-computer-use.js")
 
 const EXPECTED_SENPI_LOADER_ALIASES = [
@@ -60,7 +61,7 @@ describe("omo-senpi bundle purity", () => {
 
   it("#given built extension artifacts #when static imports are inspected #then only senpi peers and node builtins remain external", () => {
     const allowed = new Set<string>(SENPI_LOADER_ALIASES)
-    for (const path of [builtExtensionPath, builtTaskExtensionPath, builtComputerUseExtensionPath, builtMemoryDoctorExtensionPath, builtMemoryMemfsExtensionPath, builtMemoryPalaceExtensionPath, builtThreadClientExtensionPath, builtFeedbackExtensionPath]) {
+    for (const path of [builtExtensionPath, builtTaskExtensionPath, builtComputerUseExtensionPath, builtMemoryDoctorExtensionPath, builtMemoryMemfsExtensionPath, builtMemoryPalaceExtensionPath, builtSessionHistoryExtensionPath, builtThreadClientExtensionPath, builtFeedbackExtensionPath]) {
       expect(existsSync(path), `missing built extension at ${path}`).toBe(true)
       const imports = collectStaticImportSpecifiers(readFileSync(path, "utf8"))
       const forbidden = imports.filter((specifier) => !specifier.startsWith("node:") && !allowed.has(specifier))

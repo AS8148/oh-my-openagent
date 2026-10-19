@@ -21,6 +21,7 @@ export const ACCOUNT = "acc_test"
 export const GIT_TEST_TIMEOUT = 30_000
 
 const execFileAsync = promisify(execFile)
+const GIT_MAX_BUFFER = 64 * 1024 * 1024
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
   return gitWith(cwd, {}, ...args)
@@ -28,11 +29,17 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 
 async function gitWith(cwd: string, env: Record<string, string>, ...args: string[]): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("git", args, { cwd, env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", ...env } })
+    const { stdout } = await execFileAsync("git", args, {
+      cwd,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", ...env },
+      maxBuffer: GIT_MAX_BUFFER,
+    })
     return stdout.trim()
   } catch (error) {
-    const stderr = error instanceof Error && "stderr" in error ? String(error.stderr) : String(error)
-    throw new Error(`git ${args.join(" ")} failed: ${stderr.trim()}`)
+    const stderr = error instanceof Error && "stderr" in error ? String(error.stderr).trim() : ""
+    const code = error instanceof Error && "code" in error ? String(error.code) : "unknown"
+    const detail = stderr === "" ? `exit ${code}${error instanceof Error ? `: ${error.message}` : ""}` : stderr
+    throw new Error(`git ${args.join(" ")} failed: ${detail}`)
   }
 }
 

@@ -302,6 +302,28 @@ describe("checkExtensionCurrent", () => {
     expect(await readFile(memoryPalaceOutputPath, "utf8")).not.toContain("#omo-memory-palace-runtime")
   })
 
+  test("#given the split extension build #when onboarding inputs are inspected #then the session-history scan loads only from its lazy entry", async () => {
+    const { mainInputs, sessionHistoryInputs, sessionHistoryOutputPath } = await sharedOutputs()
+    for (const suffix of [
+      "packages/omo-senpi/src/components/onboarding/session-history/runtime.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history/scan-session-history.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history/session-history-scanner.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history/transcript-parser.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history/digest-store.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(sessionHistoryInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+    for (const suffix of [
+      "packages/omo-senpi/src/components/onboarding/session-history-runtime-loader.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history-rpc.ts",
+      "packages/omo-senpi/src/components/onboarding/session-history-tool.ts",
+    ]) {
+      expect(sessionHistoryInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+    }
+    expect(await readFile(sessionHistoryOutputPath, "utf8")).not.toContain("#omo-session-history-runtime")
+  })
+
   test("#given the split extension build #when sync inputs are inspected #then the Loro engine and its wasm live only in the sync sidecar", async () => {
     const { mainInputs, memorySyncInputs, memorySyncOutputPath, outputPath } = await sharedOutputs()
     for (const suffix of [
@@ -372,6 +394,7 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-task-runtime")')
     expect(main).toContain('import("#omo-memory-memfs-runtime")')
     expect(main).toContain('import("#omo-memory-palace-runtime")')
+    expect(main).toContain('import("#omo-session-history-runtime")')
     expect(main).toContain('import("#omo-thread-client-runtime")')
     expect(main).toContain('import("#omo-memory-sync-runtime")')
     expect(main).toContain('import("#omo-feedback-runtime")')
@@ -384,6 +407,7 @@ describe("checkExtensionCurrent", () => {
       "#omo-memory-doctor-runtime": "./extensions/omo-memory-doctor.js",
       "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
       "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
+      "#omo-session-history-runtime": "./extensions/omo-session-history.js",
       "#omo-memory-sync-runtime": "./extensions/omo-memory-sync.js",
       "#omo-feedback-runtime": "./extensions/omo-feedback.js",
       "#omo-thread-client-runtime": "./extensions/omo-thread-client.js",
