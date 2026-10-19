@@ -80,6 +80,7 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
         env,
         now,
         logger: ctx.logger,
+        deviceName: (principal) => syncRunner.deviceName(principal),
         ...(options.createRuntime === undefined ? {} : { createRuntime: options.createRuntime }),
         ...(options.refreshStatus === undefined ? {} : { refreshStatus: options.refreshStatus }),
         // Reuse the boot snapshot: registration must not add a loadConfig() call, because the
