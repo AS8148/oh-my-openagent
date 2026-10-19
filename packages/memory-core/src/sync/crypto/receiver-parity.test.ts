@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, spyOn, test } from "bun:test"
 import { type AppendOutcome, appendEntries, type ChainState, emptyChain } from "./chain.ts"
 import type { KeyringEntry, SyncEntry } from "./entry.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { importSnapshot, type SnapshotRecord } from "./snapshot.ts"
-import { buildFork } from "./testing/fork.ts"
+import { buildFork, rotation } from "./testing/fork.ts"
 import { ACCOUNT, appendBatch, appendKeyring, chain, deviceId, epochKey, keyringFor, keys, mainChain, objects, principalKeys, readBytes, record, fixtureAnchor } from "./testing/sync-v1.test-support.ts"
 import { buildBatch } from "./build.ts"
 import { b64urlDecode, sha256B64 } from "./vendor/sync-format/jcs.ts"
@@ -142,5 +142,29 @@ describe("snapshot import matches the merged receiver", () => {
     }
     expect((await sealedAt(1)).ok).toBe(true)
     expect((await sealedAt(2)).ok).toBe(false)
+  })
+})
+
+describe("the receiver check does not re-read the verified chain for every new entry", () => {
+  test("a long chain is serialized for the receiver about once, not once per later entry", async () => {
+    let state = await verified(mainUntil("post_join_rotation").concat(record("post_join_rotation")))
+    const entries: KeyringEntry[] = []
+    for (let i = 0; i < 48; i++) {
+      const next = await rotation(state, "A")
+      const { outcome } = await run([next], state)
+      if (!outcome.ok) throw new Error(`rotation ${i} refused: ${outcome.reason}`)
+      state = outcome.state
+      entries.push(next)
+    }
+    const walked = [...mainUntil("post_join_rotation"), record("post_join_rotation"), ...entries]
+    const stringify = spyOn(JSON, "stringify")
+    try {
+      expect((await run(walked)).outcome.ok).toBe(true)
+      const serialized = stringify.mock.results.reduce((sum, result) => sum + (typeof result.value === "string" ? result.value.length : 0), 0)
+      const chainBytes = JSON.stringify(walked).length
+      expect(serialized).toBeLessThan(3 * chainBytes)
+    } finally {
+      mock.restore()
+    }
   })
 })

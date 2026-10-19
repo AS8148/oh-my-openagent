@@ -1,4 +1,5 @@
 import type { SyncEntry } from "./entry.ts"
+import { frozenCopy } from "./frozen.ts"
 import type { ChainEntry } from "./vendor/sync-format/chain.ts"
 import { foldRefusal, type ReceiverRefusal } from "./vendor/sync-format/fold.ts"
 import { receiveKeyringChain } from "./vendor/sync-format/receive.ts"
@@ -14,6 +15,22 @@ import { receiveKeyringChain } from "./vendor/sync-format/receive.ts"
  */
 export const wire = (entries: ReadonlyArray<SyncEntry>): ReadonlyArray<ChainEntry> => JSON.parse(JSON.stringify(entries))
 
+const wired = new WeakMap<SyncEntry, ChainEntry>()
+
+/**
+ * One entry's wire form, made once per verified entry and frozen, so checking a new entry does not
+ * re-serialize the whole verified history before it.
+ */
+const wireOnce = (entry: SyncEntry): ChainEntry => {
+  const known = wired.get(entry)
+  if (known !== undefined) return known
+  const [fresh] = wire([entry])
+  if (fresh === undefined) throw new Error("unreachable: one entry wires to one entry")
+  const frozen = frozenCopy(fresh, () => false)
+  wired.set(entry, frozen)
+  return frozen
+}
+
 /** A receiver refusal, or the receiver refusing an already-verified history entry instead of this one. */
 export type ReceiverCheck = ReceiverRefusal | "receiver_seq_mismatch"
 
@@ -26,7 +43,7 @@ export const receiverRefusal = async (
   history: ReadonlyArray<SyncEntry>,
   entry: SyncEntry,
 ): Promise<ReceiverCheck | null> => {
-  const list = wire([...history, entry])
+  const list = [...history.map(wireOnce), ...wire([entry])]
   const isFork = entry.kind === "keyring" && entry.body.kind === "fork-resolution"
   const received = isFork ? await receiveKeyringChain(list) : foldRefusal(list)
   if (received.ok) return null

@@ -127,11 +127,13 @@ export const emptyChain = (account: string, anchor: ChainAnchor): ChainState =>
 
 /**
  * Moves an anchored state's head forward to a snapshot position whose keyring head is the one this
- * state verified (snapshot import only); any other position, or an unanchored state, gets null.
+ * state verified (snapshot import only); any other position, or an unanchored state, gets null. At
+ * the same seq the head may not move sideways: only the verified link itself is accepted there.
  */
 export const atVerifiedHead = (state: ChainState, head: Head): ChainState | null => {
   if (!isChainState(state) || !state.anchored || state.head === null) return null
   if (head.keyring_link !== state.head.keyring_link || head.seq < state.head.seq) return null
+  if (head.seq === state.head.seq && head.link !== state.head.link) return null
   return mintState({ ...state, head })
 }
 
