@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Plan review keeps going while it is still finding real problems.** The high-accuracy `ulw-plan` review no longer stops at a fixed five rounds. Another round runs while the previous round raised a new blocker-eligible finding or confirmed an earlier blocker fixed; a round that does neither and still does not approve stops the review, reports the outstanding blockers and asks you. A long review that keeps finding real defects, or that is working through its blockers one at a time, now reaches approval on its own, and a review stuck repeating itself still stops. ([#10378](https://github.com/code-yeongyu/oh-my-openagent/issues/10378))
+**Plan review keeps going while it is still finding real problems.** The high-accuracy `ulw-plan` review no longer stops at a fixed five rounds. Another round runs while the previous round raised a new blocker-eligible finding or confirmed an earlier blocker fixed; a round that does neither and still does not approve stops the review, reports the outstanding blockers and asks you. A long review that keeps finding real defects, or that is working through its blockers one at a time, now reaches approval on its own, and a review stuck repeating itself still stops. ([#10378](https://github.com/code-yeongyu/oh-my-openagent/issues/10378), [#10551](https://github.com/code-yeongyu/oh-my-openagent/pull/10551))
 
 ## [5.1.38] - 2026-10-19
 
