@@ -67,7 +67,11 @@ export interface Transport {
   /** Reserve exactly `size` bytes with this SHA-256; returns the upload id. */
   reserve(size: number, digest: string): Promise<string>
   upload(uploadId: string, bytes: Uint8Array): Promise<void>
-  /** Append the uploaded object at `baseSeq + 1`; a repost of `batchId` answers its original seq. */
+  /**
+   * Append the uploaded object at `baseSeq + 1`. A repost of `batchId` answers its original seq,
+   * and the server must check that BEFORE the base: a push resumed after a crash reposts with a base
+   * that its own landed append has already moved, and answering "stale" there would duplicate it.
+   */
   append(request: AppendRequest): Promise<AppendResult>
   /** Subscribe to the account event stream; returns the unsubscribe. */
   subscribe(handlers: StreamHandlers): () => void
