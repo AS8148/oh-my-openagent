@@ -1,13 +1,14 @@
-export type RegistryFetch = (url: string, init?: { headers?: Record<string, string>; cache?: string }) => Promise<Response>
+export type RegistryFetch = (url: string, init?: { headers?: Record<string, string>; cache?: string; signal?: AbortSignal }) => Promise<Response>
+export type PendingSpec = { spec: string; reason: string }
 
-export declare function pendingPackages(packages: readonly string[], version: string, fetchImpl?: RegistryFetch): Promise<string[]>
-
+export declare function parseSpec(spec: string): { name: string; version: string }
+export declare function pendingSpecs(specs: readonly string[], fetchImpl?: RegistryFetch): Promise<PendingSpec[]>
 export declare function waitForRegistryVersions(options: {
-  readonly packages: readonly string[]
-  readonly version: string
-  readonly attempts: number
+  readonly specs: readonly string[]
+  readonly deadlineMs: number
   readonly delayMs: number
   readonly fetchImpl?: RegistryFetch
+  readonly now?: () => number
   readonly sleep?: (ms: number) => Promise<void>
   readonly log?: (line: string) => void
-}): Promise<{ ok: boolean; pending: string[] }>
+}): Promise<{ ok: boolean; pending: PendingSpec[] }>
