@@ -31,7 +31,15 @@ export interface SyncUnavailableStatus {
 
 type SyncRuntime = Pick<typeof import("#omo-memory-sync-runtime"), "openDeviceSync">
 
-export type SyncSessionResolver = (identity: string) => Promise<SyncSession | null>
+/**
+ * A device's account session. `deviceName` maps a sync principal to the name the account's device
+ * list gives it; the device sign-in resolver supplies it, and the memory notice shows the name.
+ */
+export interface DeviceSyncSession extends SyncSession {
+  readonly deviceName?: (principal: string) => string | undefined
+}
+
+export type SyncSessionResolver = (identity: string) => Promise<DeviceSyncSession | null>
 
 /** No device sign-in or device keys exist on this client yet (todos 13 and 14). */
 export const noAccountSession: SyncSessionResolver = async () => null
@@ -83,6 +91,8 @@ export interface SyncRunner {
   acquire(identity: string, paths: MemoryIdentityPaths, settings: { readonly enabled: boolean }): Promise<void>
   release(repo: string): Promise<void>
   status(repo: string): Promise<EngineStatus | SyncUnavailableStatus | null>
+  /** A sync principal's device name, from the account sessions this runner resolved; undefined when unknown. */
+  deviceName(principal: string): string | undefined
 }
 
 export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
@@ -93,11 +103,14 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   const watchHead = options.watchHead ?? watchHeadLog
   const { logger } = options
   const repos = new Map<string, Held>()
+  // Device-name lookups of the sessions resolved so far, by identity (principals are per account).
+  const nameLookups = new Map<string, (principal: string) => string | undefined>()
   // A repo whose last session released it, until its engine has closed and dropped the device lease.
   const closing = new Map<string, Promise<void>>()
 
   const start = async (identity: string, paths: MemoryIdentityPaths): Promise<Running | SyncUnavailableStatus | null> => {
     const session = await resolveSession(identity)
+    if (session?.deviceName !== undefined) nameLookups.set(identity, session.deviceName)
     if (session === null) {
       logger.info(SYNC_IDLE_NO_DEVICE_SESSION, { identity })
       return null
@@ -182,6 +195,13 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
       } finally {
         if (closing.get(repo) === settled) closing.delete(repo)
       }
+    },
+    deviceName(principal) {
+      for (const lookup of nameLookups.values()) {
+        const name = lookup(principal)
+        if (name !== undefined) return name
+      }
+      return undefined
     },
     async status(repo) {
       const running = await repos.get(repo)?.ready
