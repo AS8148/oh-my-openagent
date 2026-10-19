@@ -9,7 +9,7 @@
 
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { detectHarnesses } from "./setup-detect.js"
 import { applyCredentials, credentialCounts, credentialPlanLines, credentialQuestion, opencodeOauthProviders, planCredentials } from "./setup-credentials.js"
 import { applyAssets, assetCounts, assetPlanLines, assetQuestion, planAssets } from "./setup-assets-import.js"
@@ -140,11 +140,26 @@ function staleTarget(path, expectedBytes) {
   return targetDigest(current) !== targetDigest(expectedBytes)
 }
 
-/** The target paths of the given stages whose content changed since their plans read them. */
-export function staleSetupTargets(plans, stageIds) {
+// A skill directory planned as new is stale once anything exists at its path: it is a directory, so
+// reading it as a file would always look absent (#10496 review).
+function staleAbsentPath(path) {
+  return existsSync(path)
+}
+
+/**
+ * The target paths of the given stages whose content changed since their plans read them. Paths in
+ * `written` were rewritten by an earlier stage of the same apply (the credentials stage and the
+ * provider keys share auth.json), so they are not the user's change and do not count (#10496 review).
+ */
+export function staleSetupTargets(plans, stageIds, written = new Set()) {
   const changed = new Set()
   const mark = (path, expectedBytes) => {
+    if (written.has(resolve(path))) return
     if (staleTarget(path, expectedBytes)) changed.add(path)
+  }
+  const markAbsent = (path) => {
+    if (written.has(resolve(path))) return
+    if (staleAbsentPath(path)) changed.add(path)
   }
   for (const id of stageIds) {
     if (id === "credentials") {
@@ -155,7 +170,7 @@ export function staleSetupTargets(plans, stageIds) {
       const plan = plans.assets
       if (plan?.present !== true || plan.pending === 0) continue
       if (plan.result.target.malformed !== true) mark(plan.paths.mcp, plan.result.target.bytes)
-      for (const skill of plan.result.skills.added) mark(join(plan.paths.skills, skill.name), undefined)
+      for (const skill of plan.result.skills.added) markAbsent(join(plan.paths.skills, skill.name))
     } else if (id === "providers") {
       const plan = plans.providers
       if (plan?.present !== true || plan.pending === 0) continue
@@ -170,6 +185,15 @@ export function staleSetupTargets(plans, stageIds) {
     }
   }
   return [...changed]
+}
+
+/** The files a stage writes when it applies (resolved), so later stages of one apply can tell them apart. */
+function stageWrittenPaths(plans, id) {
+  if (id === "credentials") return plans.credentials?.target === undefined ? [] : [plans.credentials.target]
+  if (id === "assets") return plans.assets?.paths?.mcp === undefined ? [] : [plans.assets.paths.mcp, ...(plans.assets.result?.skills?.added ?? []).map((skill) => join(plans.assets.paths.skills, skill.name))]
+  if (id === "providers") return [plans.providers?.paths?.models, plans.providers?.paths?.auth].filter((path) => path !== undefined)
+  if (id === "model-choices") return (plans.modelChoices?.items ?? []).map((item) => item.target?.path).filter((path) => path !== undefined)
+  return []
 }
 
 /** True when any of the given stages would write into a credential store. */
@@ -190,6 +214,9 @@ export function authWritesPending(plans, stageIds) {
  */
 export async function applySetupStages(plans, confirm, report = () => {}, options = {}) {
   const applied = new Set()
+  // Files this apply already rewrote: a later stage's stale check must not mistake them for a
+  // user's change (the credentials stage and the provider keys share auth.json; #10496 review).
+  const written = new Set()
   for (const stage of setupStages(plans)) {
     if (stage.id === "model-choices" && stage.plan !== undefined && plans.planChoices !== undefined && (plans.providers?.pending ?? 0) > 0 && !applied.has("providers")) {
       const shown = new Set(plans.modelChoices.notices)
@@ -200,11 +227,12 @@ export async function applySetupStages(plans, confirm, report = () => {}, option
     if (stage.plan === undefined || stage.plan.pending === 0) continue
     if (!await confirm(stage)) continue
     if (options.staleGuard !== undefined) {
-      const stale = options.staleGuard(stage.id)
+      const stale = options.staleGuard(stage.id, written)
       if (stale !== undefined && stale.length > 0) throw new SetupStaleError(stale, [...applied])
     }
     await stage.apply(stage.plan, { ...options, report })
     applied.add(stage.id)
+    for (const path of stageWrittenPaths(plans, stage.id)) written.add(resolve(path))
   }
   return applied
 }

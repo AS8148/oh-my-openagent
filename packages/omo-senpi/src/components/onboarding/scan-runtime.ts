@@ -103,7 +103,8 @@ export async function applyOnboardingScan(
   try {
     const applied = [...await applySetupStages(plans, (stage) => stages.has(stage.id), report, {
       ...(options.writeAuth === undefined ? {} : { writeAuth: options.writeAuth }),
-      staleGuard: (stageId: string) => staleSetupTargets(plans, [stageId as OnboardingApplyStage]),
+      // Files an earlier stage of this apply wrote are not a change since the scan (#10496 review).
+      staleGuard: (stageId: string, written: ReadonlySet<string>) => staleSetupTargets(plans, [stageId as OnboardingApplyStage], written),
     })]
     return { applied, notices }
   } catch (error) {
