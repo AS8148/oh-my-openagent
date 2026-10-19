@@ -59,6 +59,9 @@ export async function restoreRepoBackup(
 ): Promise<RestoreResult> {
   const source = join(backupRoot(identity), name)
   const repoDir = identity.identityPaths.repo
+  // A recall ranking may still be saving its term store into `.git`: replacing the tree under it would leave
+  // that write landing in a half-restored repository.
+  await deps.recallSettled?.()
   const safetyBackup = existsSync(repoDir) ? await createRepoBackup(deps, identity) : undefined
   await rm(repoDir, { recursive: true, force: true })
   await cp(source, repoDir, { recursive: true })

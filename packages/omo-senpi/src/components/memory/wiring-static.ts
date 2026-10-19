@@ -197,6 +197,7 @@ export function registerMemoryStatic(input: {
     contextForSession: (sessionId) => asCommandIdentity(resolveContext(sessionId)),
     resolveIdentity: () => (activeSession.current === undefined ? undefined : asCommandIdentity(resolveContext(activeSession.current))),
     loadSettings: loadCommandSettings,
+    recallSettled: () => recallWiring.settled(),
     bustPromptCache: () => {
       promptCache.clear()
       projectionPins.requestRefresh()

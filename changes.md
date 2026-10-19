@@ -10,6 +10,8 @@ The save a ranking starts runs after the call returns, so `RecallCorpusCache.set
 
 The memory wiring's session shutdown also waits for it, as the raced step `recall-store-settle` (`wiring.ts`), so a quit does not leave a save writing into `.git`; the shared cache is built by `createSharedRecallCorpusCache` in `recall-wiring.ts` and is the only cache the wiring uses, so a process has one save per repository at a time. The save needs no lock with git: it writes only its own file (`.git/omo-recall-bm25-terms.bin`), which git never reads or writes, through a temp name unique to the process and a rename, so concurrent saves from other processes each leave a whole store and the last one wins.
 
+`/memfs restore` (`restoreRepoBackup`) awaits the same settle (`MemoryCommandDeps.recallSettled`, wired to the recall wiring's `settled()` in `wiring-static.ts`) before it backs up, deletes and re-copies the repository, so a pending save cannot land in a half-restored tree (#10628).
+
 ## 2026-10-19 - Release binary size budget 160 -> 182 MiB, measured
 
 omo 5.1.37's publish failed on Linux: linux-x64 and linux-x64-baseline built at 173,365,216 bytes and linux-arm64 at 170,969,896, over the 160 MiB budget (5.1.35's linux-x64 was 162,899,424). The growth is the Bun 1.4.3 runtime, not a stray asset: an empty `bun build --compile --target=bun-linux-x64` is 81,315,296 bytes on 1.4.2 and 90,798,048 on 1.4.3 (+9,482,752), and senpi 2026.10.16 -> 2026.10.19 adds about 1.25 MB of package files. `MAX_BINARY_BYTES` in `script/build-omo-binary.ts` and the matching check in `publish-platform.yml` move to 182 MiB, the measured size plus about 10%; the 5 MiB headroom warning is unchanged.

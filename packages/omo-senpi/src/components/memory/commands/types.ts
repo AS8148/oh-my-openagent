@@ -100,6 +100,8 @@ export interface MemoryCommandDeps {
   /** Environment handed to command-spawned children; defaults to process.env. */
   env?: NodeJS.ProcessEnv
   now?(): number
+  /** Waits out a recall term-store save still writing into the repository's `.git`; restore awaits it first. */
+  recallSettled?(): Promise<void>
   /** Doctor stale-lock liveness probe; defaults to signal-0. */
   isProcessAlive?(pid: number): boolean
 }
