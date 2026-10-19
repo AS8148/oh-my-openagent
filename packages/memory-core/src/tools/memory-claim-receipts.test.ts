@@ -12,7 +12,7 @@ import { removeTree } from "../../../../test-support/remove-tree"
 
 const AUTHOR: GitCommitAuthor = { agentId: "agent-claim-test", authorName: "Claim Test", authorEmail: "claim@example.com" }
 const AGENT_DOWNGRADED: ClaimReceipt = { source: "agent", downgraded: true }
-const USER: ClaimReceipt = { source: "user", userQuote: "use the dark theme please" }
+const USER: ClaimReceipt = { source: "user", userQuote: "use the dark theme please", approves: "0123456789abcdef" }
 const roots: string[] = []
 
 afterEach(async () => {
@@ -69,7 +69,7 @@ describe("memory claim receipts", () => {
 
   it("#given a user note #when another user-verified edit lands #then it stays the user's with the latest quote", async () => {
     const repo = await fixture()
-    await write(repo, { ...CLEANUP, file_text: "Theme: light." }, { source: "user", userQuote: "set the theme to light" })
+    await write(repo, { ...CLEANUP, file_text: "Theme: light." }, { source: "user", userQuote: "set the theme to light", approves: "0123456789abcdef" })
     await write(repo, { command: "str_replace", file_path: "cleanup.md", old_string: "light", new_string: "dark" }, USER)
     expect(await header(repo, "cleanup.md")).toContain("use the dark theme please")
     expect(isUserHeader(await header(repo, "cleanup.md"))).toBe(true)

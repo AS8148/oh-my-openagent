@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { runInProcessMemoryChild, type InProcessMemoryChildState, type MemoryChildResult, type StartChildInput } from "./in-process-memory-child"
-import { createFactsRecordTool, FACTS_RECORD_TOOL_NAME, payloadUserTexts } from "./facts-record-tool"
+import { createFactsRecordTool, FACTS_RECORD_TOOL_NAME, payloadExchanges } from "./facts-record-tool"
 import type { FactsQueuedKey } from "./facts-failure-recording"
 import { type ReflectionModelCandidate, type ReflectionModelResolution } from "./worker/resolve-model"
 import type { ChildModelRegistry } from "@oh-my-opencode/senpi-task"
@@ -85,7 +85,7 @@ async function launchCandidate(
     },
   })
   const tool = createFactsRecordTool({
-    extractionPath, state, userTexts: payloadUserTexts(input.payload),
+    extractionPath, state, exchanges: payloadExchanges(input.payload),
     ...(guard === undefined ? {} : { maxBytes: FACTS_RECORD_BYTES, maxRecords: FACTS_RECORD_LIMIT, onFailure: guard.fail }),
   })
   const createSession = guard?.createSession ?? input.options.createSession

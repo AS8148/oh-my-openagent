@@ -1,6 +1,8 @@
 // Claim receipts (#10488): who a remembered statement came from, checked against the user's own
 // words. Memory once stored an agent's suggestion as "the user agreed", and a later session acted on
-// it. A claim only keeps source "user" when its quote is a whole real user message, verbatim.
+// it. A claim only keeps source "user" when its quote is the user's whole reply to the proposal it approves.
+
+import { createHash } from "node:crypto"
 
 import { isConsentPhrase } from "./consent"
 
@@ -8,13 +10,21 @@ export const CLAIM_SOURCES = ["user", "agent", "inferred"] as const
 export type ClaimSource = (typeof CLAIM_SOURCES)[number]
 
 export type ClaimReceipt =
-  | { readonly source: "user"; readonly userQuote: string }
+  | { readonly source: "user"; readonly userQuote: string; readonly approves: string }
   | { readonly source: "agent"; readonly downgraded?: true }
   | { readonly source: "inferred" }
 
 export interface ClaimInput {
   readonly source?: unknown
   readonly userQuote?: unknown
+}
+
+// One assistant proposal and the user message that DIRECTLY answered it (the next message on the same branch, with
+// nothing in between). Only such a reply can carry consent, and the receipt names the proposal it approved, so an "ok"
+// to an earlier question or to a different proposal never authorizes this write (lead ruling on #10498).
+export interface ConsentExchange {
+  readonly proposal: string
+  readonly reply: string
 }
 
 export const MEMORY_AUTHORITY_RULE =
@@ -26,18 +36,26 @@ const MAX_STORED_QUOTE_CHARS = 500
 // The one instruction for every writer that records a user claim (memory tool, facts extractor). The rule it states is
 // enforced by quotedUserMessage below, so the wording and the check cannot drift apart.
 export const USER_QUOTE_RULE =
-  "Required when source is user: one whole user message from this conversation, copied verbatim. Only a short explicit approval verifies (yes, ok, okay, do it, go ahead, delete it, yes delete it, 응, 네, 예, 좋아, 그래, 지워, 지워줘, 삭제해, 삭제해줘, 진행해, with at most a final '.' or '!'); anything else is stored as an agent suggestion and the user confirms in the session."
+  "Required when source is user: the user's whole reply to your proposal (their next message after it), copied verbatim. Only a short explicit approval verifies (yes, ok, okay, do it, go ahead, delete it, yes delete it, 응, 네, 예, 좋아, 그래, 지워, 지워줘, 삭제해, 삭제해줘, 진행해, with at most a final '.' or '!'); anything else is stored as an agent suggestion and the user confirms in the session."
 
 export function isClaimSource(value: unknown): value is ClaimSource {
   return typeof value === "string" && (CLAIM_SOURCES as readonly string[]).includes(value)
 }
 
-export function resolveClaimReceipt(claim: ClaimInput, userTexts: readonly string[]): ClaimReceipt {
+export function resolveClaimReceipt(claim: ClaimInput, exchanges: readonly ConsentExchange[]): ClaimReceipt {
   if (claim.source === "agent") return { source: "agent" }
   if (claim.source !== "user") return { source: "inferred" }
   const quote = typeof claim.userQuote === "string" ? claim.userQuote : ""
-  const message = quotedUserMessage(quote, userTexts)
-  return message === undefined ? { source: "agent", downgraded: true } : { source: "user", userQuote: message }
+  for (const exchange of exchanges) {
+    const message = quotedUserMessage(quote, [exchange.reply])
+    if (message !== undefined) return { source: "user", userQuote: message, approves: proposalId(exchange.proposal) }
+  }
+  return { source: "agent", downgraded: true }
+}
+
+// A stable id for the proposal a consent answered: the first 16 hex digits of SHA-256 over its whitespace-collapsed text.
+export function proposalId(proposal: string): string {
+  return createHash("sha256").update(proposal.replace(/\s+/g, " ").trim()).digest("hex").slice(0, 16)
 }
 
 // Lead's final design on #10498: a quote verifies ONLY when it is one user message in full (case and spacing folded,
@@ -50,10 +68,6 @@ export function quotedUserMessage(quote: string, userTexts: readonly string[]): 
   if (!isConsentPhrase(needle)) return undefined
   const message = userTexts.find((text) => VERIFIABLE_MESSAGE.test(text) && bareMessage(text) === needle)
   return message === undefined ? undefined : capQuote(message)
-}
-
-export function quoteAppearsInUserText(quote: string, userTexts: readonly string[]): boolean {
-  return quotedUserMessage(quote, userTexts) !== undefined
 }
 
 // The ONLY characters a verifiable message may contain: ASCII letters, precomposed Hangul syllables (never jamo), ASCII
@@ -74,7 +88,7 @@ function capQuote(text: string): string {
 
 export function renderClaimReceipt(receipt: ClaimReceipt): string {
   switch (receipt.source) {
-    case "user": return `user said "${singleLine(receipt.userQuote)}"`
+    case "user": return `user said "${singleLine(receipt.userQuote)}" approving proposal ${receipt.approves}`
     case "agent": return receipt.downgraded === true
       ? "agent suggestion, not a user decision (claimed as the user's, but no matching user words)"
       : "agent suggestion, not a user decision"
@@ -84,7 +98,7 @@ export function renderClaimReceipt(receipt: ClaimReceipt): string {
 
 export function claimReceiptTrailers(receipt: ClaimReceipt): string[] {
   const trailers = [`Omo-Claim-Source: ${receipt.source}`]
-  if (receipt.source === "user") trailers.push(`Omo-User-Quote: ${singleLine(receipt.userQuote)}`)
+  if (receipt.source === "user") trailers.push(`Omo-User-Quote: ${singleLine(receipt.userQuote)}`, `Omo-Claim-Approves: ${receipt.approves}`)
   if (receipt.source === "agent" && receipt.downgraded === true) trailers.push("Omo-Claim-Downgraded: unverified-user-quote")
   return trailers
 }
@@ -95,7 +109,10 @@ export function parseClaimReceipt(value: unknown): ClaimReceipt | undefined {
   const keys = Object.keys(record)
   if (record.source === "user") {
     if (typeof record.userQuote !== "string" || record.userQuote.trim().length === 0) return undefined
-    return keys.every((key) => key === "source" || key === "userQuote") ? { source: "user", userQuote: record.userQuote } : undefined
+    if (typeof record.approves !== "string" || !PROPOSAL_ID.test(record.approves)) return undefined
+    return keys.every((key) => key === "source" || key === "userQuote" || key === "approves")
+      ? { source: "user", userQuote: record.userQuote, approves: record.approves }
+      : undefined
   }
   if (record.source === "agent") {
     if (!keys.every((key) => key === "source" || key === "downgraded")) return undefined
@@ -105,6 +122,8 @@ export function parseClaimReceipt(value: unknown): ClaimReceipt | undefined {
   if (record.source === "inferred") return keys.length === 1 ? { source: "inferred" } : undefined
   return undefined
 }
+
+const PROPOSAL_ID = /^[0-9a-f]{16}$/u
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)

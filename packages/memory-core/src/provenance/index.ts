@@ -4,9 +4,9 @@ export {
   isClaimSource,
   MEMORY_AUTHORITY_RULE,
   parseClaimReceipt,
-  quoteAppearsInUserText,
+  proposalId,
   renderClaimReceipt,
   resolveClaimReceipt,
   USER_QUOTE_RULE,
 } from "./claim"
-export type { ClaimInput, ClaimReceipt, ClaimSource } from "./claim"
+export type { ClaimInput, ClaimReceipt, ClaimSource, ConsentExchange } from "./claim"

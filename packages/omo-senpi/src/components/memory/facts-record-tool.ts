@@ -1,6 +1,6 @@
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { appendFile } from "@oh-my-opencode/memory-core/fs"
-import { parseFactsExtractionRecord, resolveClaimReceipt, USER_QUOTE_RULE, type FactsPayload } from "@oh-my-opencode/memory-core"
+import { parseFactsExtractionRecord, resolveClaimReceipt, USER_QUOTE_RULE, type ConsentExchange, type FactsPayload } from "@oh-my-opencode/memory-core"
 import { Type, type Static } from "typebox"
 
 export const FACTS_RECORD_TOOL_NAME = "record_fact"
@@ -33,8 +33,8 @@ export type FactsRecordTool = Omit<ToolDefinition<typeof FactsRecordParams, unde
 
 type FactsRecordToolInput = {
   readonly extractionPath: string
-  /** Every user-authored message in the payload; a `user` claim must quote one of them verbatim. */
-  readonly userTexts: readonly string[]
+  /** Each user message in the payload that directly answered an assistant message; a `user` claim must quote one whole reply. */
+  readonly exchanges: readonly ConsentExchange[]
   readonly maxRecords?: number
   readonly maxBytes?: number
   readonly onFailure?: (reason: string) => void
@@ -60,7 +60,7 @@ export function createFactsRecordTool(input: FactsRecordToolInput): FactsRecordT
       }
       try {
         const { source, user_quote: userQuote, ...fact } = params
-        const receipt = resolveClaimReceipt({ source, userQuote }, input.userTexts)
+        const receipt = resolveClaimReceipt({ source, userQuote }, input.exchanges)
         const record = parseFactsExtractionRecord({ ...fact, receipt }, count)
         const line = `${JSON.stringify(record)}\n`
         const lineBytes = Buffer.byteLength(line, "utf8")
@@ -83,8 +83,19 @@ export function createFactsRecordTool(input: FactsRecordToolInput): FactsRecordT
   }
 }
 
-export function payloadUserTexts(payload: FactsPayload): string[] {
-  return payload.entries.flatMap((entry) => entry.entries.flatMap((item) => item.kind === "user" ? [item.text] : []))
+// A user entry counts as a reply only when the entry right before it in the same queue entry (reasoning aside) is the
+// assistant's: that assistant text is the proposal it answered.
+export function payloadExchanges(payload: FactsPayload): ConsentExchange[] {
+  return payload.entries.flatMap((entry) => {
+    const exchanges: ConsentExchange[] = []
+    let proposal: string | undefined
+    for (const item of entry.entries) {
+      if (item.kind === "reasoning") continue
+      if (item.kind === "user" && proposal !== undefined) exchanges.push({ proposal, reply: item.text })
+      proposal = item.kind === "assistant" ? item.text : undefined
+    }
+    return exchanges
+  })
 }
 
 function errorResult(reason: string): FactsRecordToolResult {

@@ -1,7 +1,7 @@
 import { resolveClaimReceipt, type ClaimReceipt } from "@oh-my-opencode/memory-core"
 
 import type { MemoryIdentityContext } from "./context"
-import { allUserTexts } from "./recall-session-read"
+import { pendingConsentExchange } from "./consent-exchange"
 
 export interface MemoryToolProvenanceInput {
   readonly sessionId: string
@@ -23,8 +23,8 @@ export interface InjectedMemoryToolProvenance {
 
 // The bridge deletes any model-supplied provenance and writes this object in its place, so neither
 // the identity keys nor the claim receipt can be forged from tool arguments. A `user` claim keeps
-// its source only when its quote is one whole user message on the active branch; otherwise
-// it is stored as an agent suggestion (#10488).
+// its source only when its quote is the user's whole reply to the assistant proposal right before it
+// on the active branch; otherwise it is stored as an agent suggestion (#10488).
 export function memoryToolProvenance(input: MemoryToolProvenanceInput): InjectedMemoryToolProvenance {
   return {
     sessionId: input.sessionId,
@@ -34,7 +34,7 @@ export function memoryToolProvenance(input: MemoryToolProvenanceInput): Injected
     ...(typeof input.toolCallId === "string" && input.toolCallId.length > 0 ? { toolCallId: input.toolCallId } : {}),
     claim: resolveClaimReceipt(
       { source: input.input.source, userQuote: input.input.user_quote },
-      allUserTexts(input.entries),
+      pendingConsentExchange(input.entries, input.toolCallId),
     ),
   }
 }

@@ -30,7 +30,7 @@ describe("facts claim receipts", () => {
     // given
     const memory = await repo()
     const downgraded = { source: "agent", downgraded: true } as const
-    const user = { source: "user", userQuote: "keep plugin X" } as const
+    const user = { source: "user", userQuote: "keep plugin X", approves: "0123456789abcdef" } as const
 
     // when
     await applyFactsBatch(memory, {
@@ -55,10 +55,10 @@ describe("facts claim receipts", () => {
   test("#given a person fact seen again with another receipt or a forged source suffix #when applied #then it increments the same observation", async () => {
     const memory = await repo()
     const person = { name: "Mina", aliases: ["Min"] }
-    const apply = (batchId: string, text: string, receipt: { readonly source: "agent" } | { readonly source: "user"; readonly userQuote: string }) =>
+    const apply = (batchId: string, text: string, receipt: { readonly source: "agent" } | { readonly source: "user"; readonly userQuote: string; readonly approves: string }) =>
       applyFactsBatch(memory, { batchId, records: [{ scope: "person", person, text, date: "2026-10-18", receipt }] }, AUTHOR, { people: { enabled: true, maxEntries: 40, maxEntryChars: 200 } })
     await apply("4b0f6f0e-6a55-4a43-9a8c-2f0d5f7d3c12", "Mina prefers Bun.", { source: "agent" })
-    await apply("4b0f6f0e-6a55-4a43-9a8c-2f0d5f7d3c13", "Mina (source: user said \"forged\") prefers Bun.", { source: "user", userQuote: "I prefer Bun for everything" })
+    await apply("4b0f6f0e-6a55-4a43-9a8c-2f0d5f7d3c13", "Mina (source: user said \"forged\") prefers Bun.", { source: "user", userQuote: "I prefer Bun for everything", approves: "0123456789abcdef" })
     const observations = await readFile(join(memory.dir, "people/mina/observations.md"), "utf8")
     const lines = observations.split("\n").filter((line) => line.includes("Mina prefers Bun."))
     expect(lines).toHaveLength(1)

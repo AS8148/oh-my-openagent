@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
+import { buildIdentityPaths, proposalId } from "@oh-my-opencode/memory-core"
 
 import { createMemoryBinding } from "./binding"
 import { createMemoryIdentityContext } from "./context"
@@ -56,7 +56,46 @@ describe("memory tool claim receipts", () => {
 
   test("#given a user claim quoting the user's whole consent message #when the memory call starts #then the user receipt keeps the message", async () => {
     const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "yes delete it" })
-    expect(provenance["claim"]).toEqual({ source: "user", userQuote: "Yes delete it." })
+    expect(provenance["claim"]).toEqual({ source: "user", userQuote: "Yes delete it.", approves: proposalId("I suggest removing plugins X and Y.") })
+  }, 30_000)
+
+  test("#given the assistant message making this tool call is already on the branch #when the memory call starts #then the reply before it still counts", async () => {
+    const inFlight = { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "memory", arguments: {} }] } }
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "yes delete it" }, [...TRANSCRIPT, inFlight])
+    expect(provenance["claim"]).toEqual({ source: "user", userQuote: "Yes delete it.", approves: proposalId("I suggest removing plugins X and Y.") })
+  }, 30_000)
+
+  test("#given an 'ok' to an unrelated earlier question and then a new proposal #when the memory call starts #then the 'ok' does not authorize it", async () => {
+    const branch = [
+      TRANSCRIPT[0],
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Want a summary first?" }] } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "ok" }] } },
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "I suggest removing plugins X and Y." }] } },
+    ]
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "ok" }, branch)
+    expect(provenance["claim"]).toEqual({ source: "agent", downgraded: true })
+  }, 30_000)
+
+  test("#given an 'ok' right after proposal A #when the agent then proposes B and saves it #then the 'ok' does not authorize B", async () => {
+    const branch = [
+      TRANSCRIPT[0],
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Proposal A: remove plugin X." }] } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "ok" }] } },
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Proposal B: also remove plugin Y." }] } },
+      { type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "memory", arguments: {} }] } },
+    ]
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "ok" }, branch)
+    expect(provenance["claim"]).toEqual({ source: "agent", downgraded: true })
+  }, 30_000)
+
+  test("#given an 'ok' right after proposal A #when the memory call starts #then the receipt names proposal A", async () => {
+    const branch = [
+      TRANSCRIPT[0],
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Proposal A: remove plugin X." }] } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "ok" }] } },
+    ]
+    const provenance = await dispatchMemoryCall({ reason: "save", source: "user", user_quote: "ok" }, branch)
+    expect(provenance["claim"]).toEqual({ source: "user", userQuote: "ok", approves: proposalId("Proposal A: remove plugin X.") })
   }, 30_000)
 
   test("#given a user claim quoting a whole message that is not a consent phrase #when the memory call starts #then it is downgraded", async () => {

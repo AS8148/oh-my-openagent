@@ -3,7 +3,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { createFactsRecordTool } from "./facts-record-tool"
+import { proposalId, type FactsPayload } from "@oh-my-opencode/memory-core"
+
+import { createFactsRecordTool, payloadExchanges } from "./facts-record-tool"
 
 describe("facts record tool", () => {
   test("#given a one-record budget #when calls race #then the count is reserved before append", async () => {
@@ -12,7 +14,7 @@ describe("facts record tool", () => {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
       const failures: string[] = []
-      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path, maxRecords: 1, onFailure: (reason) => failures.push(reason) })
+      const tool = createFactsRecordTool({ exchanges: [], extractionPath: path, maxRecords: 1, onFailure: (reason) => failures.push(reason) })
       const record = { scope: "project" as const, text: "fact", date: "2026-08-10" }
       const results = await Promise.all([tool.execute("one", record), tool.execute("two", record)])
       expect(results.filter((result) => result.isError === true)).toHaveLength(1)
@@ -29,7 +31,7 @@ describe("facts record tool", () => {
       const record = { scope: "project" as const, text: "é🌍", date: "2026-08-10" }
       const line = `${JSON.stringify({ ...record, receipt: { source: "inferred" } })}\n`
       const failures: string[] = []
-      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path, maxBytes: Buffer.byteLength(line), onFailure: (reason) => failures.push(reason) })
+      const tool = createFactsRecordTool({ exchanges: [], extractionPath: path, maxBytes: Buffer.byteLength(line), onFailure: (reason) => failures.push(reason) })
       const results = await Promise.all([tool.execute("one", record), tool.execute("two", record)])
       expect(results.filter((result) => result.isError === true)).toHaveLength(1)
       expect(failures).toHaveLength(1)
@@ -41,7 +43,7 @@ describe("facts record tool", () => {
     const failures: string[] = []
     const root = await mkdtemp(join(tmpdir(), "facts-record-tool-"))
     try {
-      const tool = createFactsRecordTool({ userTexts: [], extractionPath: root, onFailure: (reason) => failures.push(reason) })
+      const tool = createFactsRecordTool({ exchanges: [], extractionPath: root, onFailure: (reason) => failures.push(reason) })
       expect((await tool.execute("one", { scope: "project", text: "fact", date: "2026-08-10" })).isError).toBe(true)
       expect(failures).toHaveLength(1)
     } finally { await rm(root, { recursive: true, force: true }) }
@@ -49,7 +51,7 @@ describe("facts record tool", () => {
 
   test("#given the registered record_fact schema #when inspected #then it is a top-level object for provider tool contracts", () => {
     // given
-    const tool = createFactsRecordTool({ userTexts: [], extractionPath: "/tmp/facts-record-tool-test.jsonl" })
+    const tool = createFactsRecordTool({ exchanges: [], extractionPath: "/tmp/facts-record-tool-test.jsonl" })
 
     // when / then
     expect(tool.parameters.type).toBe("object")
@@ -62,7 +64,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "seed\n")
-      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path })
+      const tool = createFactsRecordTool({ exchanges: [], extractionPath: path })
 
       // when
       const malformed = JSON.parse('[{"scope":"project","text":"missing"},{"scope":"other","text":"bad","date":"2026-08-10"},{"scope":"person","person":"bad","text":"bad","date":"2026-08-10"}]')
@@ -86,7 +88,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
-      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path })
+      const tool = createFactsRecordTool({ exchanges: [], extractionPath: path })
 
       // when
       await tool.execute("person", { scope: "person", person: { name: "Mina", aliases: ["Min"] }, text: "Mina prefers Bun.", date: "2026-08-10" })
@@ -108,7 +110,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
-      const tool = createFactsRecordTool({ userTexts: [], extractionPath: path })
+      const tool = createFactsRecordTool({ exchanges: [], extractionPath: path })
       tool.deactivate()
 
       // when
@@ -127,7 +129,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
-      const tool = createFactsRecordTool({ userTexts: ["Review the plugins and tell me which look unused.", "yes delete it"], extractionPath: path })
+      const tool = createFactsRecordTool({ exchanges: [{ proposal: "I suggest removing plugins X and Y.", reply: "yes delete it" }, { proposal: "Anything else?", reply: "Review the plugins and tell me which look unused." }], extractionPath: path })
 
       await tool.execute("flip", { scope: "project", text: "User agreed to remove plugins X and Y.", date: "2026-10-18", source: "user", user_quote: "remove plugins X and Y" })
       await tool.execute("real", { scope: "project", text: "User wants an unused-plugin review.", date: "2026-10-18", source: "user", user_quote: "yes delete it" })
@@ -138,9 +140,35 @@ describe("facts record tool", () => {
       expect(wholeNotConsent.receipt).toEqual({ source: "agent", downgraded: true })
       expect(flip.receipt).toEqual({ source: "agent", downgraded: true })
       expect(partial.receipt).toEqual({ source: "agent", downgraded: true })
-      expect(real.receipt).toEqual({ source: "user", userQuote: "yes delete it" })
+      expect(real.receipt).toEqual({ source: "user", userQuote: "yes delete it", approves: proposalId("I suggest removing plugins X and Y.") })
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe("payload consent exchanges", () => {
+  const line = (kind: "user" | "assistant" | "reasoning", text: string, id: string) => ({ kind, text, captured_at: "2026-10-19T00:00:00.000Z", source_line_id: id, source_message_id: id })
+  const payload = (items: readonly ReturnType<typeof line>[]): FactsPayload => ({
+    version: 1,
+    identity: "i",
+    today: "2026-10-19",
+    knownPeople: [],
+    primaryHuman: { slug: "human", aliases: [] },
+    entries: [{
+      version: 1, identity: "i", sessionId: "s", conversationId: "s", enqueuedAt: "2026-10-19T00:00:00.000Z",
+      range: { start_message_id: "a", end_message_id: "z", start_line: 0, end_snapshot_line: 0 },
+      entries: items,
+    }],
+  })
+
+  test("#given a user reply right after an assistant proposal #when exchanges are read #then that pair is the only consent candidate", () => {
+    expect(payloadExchanges(payload([
+      line("user", "ok", "1"),
+      line("assistant", "Shall I delete plugin X?", "2"),
+      line("reasoning", "thinking", "3"),
+      line("user", "yes delete it", "4"),
+      line("user", "ok", "5"),
+    ]))).toEqual([{ proposal: "Shall I delete plugin X?", reply: "yes delete it" }])
   })
 })

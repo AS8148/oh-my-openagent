@@ -86,14 +86,7 @@ export function userTexts(entries: readonly unknown[]): string[] {
   return texts
 }
 
-export function allUserTexts(entries: readonly unknown[]): string[] {
-  return entries.flatMap((entry) => {
-    const text = userText(entry)
-    return text === undefined ? [] : [text]
-  })
-}
-
-function userText(entry: unknown): string | undefined {
+export function userText(entry: unknown): string | undefined {
   if (!isRecord(entry)) return undefined
   if (entry.type === "custom_message" || entry.type === "custom") return undefined
   if (entry.type !== "message") return undefined
