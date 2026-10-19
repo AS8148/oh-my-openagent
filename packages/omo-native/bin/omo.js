@@ -23,6 +23,9 @@ try {
     if (["login", "logout", "whoami"].includes(process.argv[2])) {
       const { runServiceAuthCommand } = await import("./lib/service-auth.generated.js")
       await runServiceAuthCommand(process.argv.slice(2))
+    } else if (process.argv[2] === "sync") {
+      const { runSyncCommand } = await import("./lib/service-auth.generated.js")
+      await runSyncCommand(process.argv.slice(2))
     } else if (process.argv[2] === "setup") await runSetup(process.argv.slice(3))
     else await runLauncher()
   }
