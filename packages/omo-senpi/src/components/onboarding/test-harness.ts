@@ -3,11 +3,25 @@ import { createOnboardingComponent } from "./component"
 import * as state from "./state"
 import type { OmoSenpiComponent } from "../../extension/types"
 
+/** Identity readers a test injects to stand in for live, dead, or pid-reused claim owners. */
+export interface ClaimOwnerSeams {
+  readonly pid?: number
+  readonly getPidLiveness?: (pid: number) => "alive" | "dead" | "unknown"
+  readonly getProcessStartIdentity?: (pid: number) => Promise<string | null>
+  readonly now?: () => number
+}
+
 class OnboardingAPI extends FakeExtensionAPI {
   sessionKind: "interactive" | "worker" = "interactive"
 }
 
-export function createOnboardingHarness(dir: string, sessionId = "session", mode = "rpc", component?: OmoSenpiComponent) {
+export function createOnboardingHarness(
+  dir: string,
+  sessionId = "session",
+  mode = "rpc",
+  component?: OmoSenpiComponent,
+  claimOwnerSeams?: ClaimOwnerSeams,
+) {
   const pi = new OnboardingAPI()
   const rpcHandlers = new Map<string, (request: unknown) => unknown>()
   pi.rpc = {
@@ -37,6 +51,7 @@ export function createOnboardingHarness(dir: string, sessionId = "session", mode
     resetOnboarding: () => state.resetOnboarding(dir),
     scan: async () => undefined,
     stateDir: dir,
+    ...(claimOwnerSeams === undefined ? {} : { claimOwnerSeams }),
   }
   ;(component ?? createOnboardingComponent(dependencies)).register(pi, {
     logger: { info() {}, warn() {}, error() {} },

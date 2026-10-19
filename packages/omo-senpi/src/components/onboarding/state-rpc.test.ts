@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -9,7 +9,7 @@ import {
   ONBOARDING_STATE_RESET_RPC_METHOD,
   type OnboardingStateResponse,
 } from "./state-rpc"
-import { createOnboardingHarness } from "./test-harness"
+import { createOnboardingHarness, type ClaimOwnerSeams } from "./test-harness"
 import * as state from "./state"
 
 const dirs: string[] = []
@@ -112,5 +112,105 @@ describe("omo.onboarding.state.*", () => {
     const first = await desktop.rpc(ONBOARDING_STATE_COMPLETE_RPC_METHOD) as OnboardingStateResponse
     const second = await desktop.rpc(ONBOARDING_STATE_COMPLETE_RPC_METHOD) as OnboardingStateResponse
     expect(second).toEqual(first)
+  })
+})
+
+// A claim's owner (#10481 round 2): the claim marker records the claiming process (pid + start
+// identity), so a claim left by a process that died mid-onboarding stops reporting in progress and
+// can be taken over. Owners are simulated through injected identity readers.
+describe("onboarding claim owner liveness", () => {
+  const NOW = Date.parse("2026-10-19T00:00:00.000Z")
+  const HOUR = 3_600_000
+  const DEAD_TUI = 4242
+
+  function seams(selfPid: number, alive: Record<number, string>, now = NOW): ClaimOwnerSeams {
+    return {
+      pid: selfPid,
+      getPidLiveness: (pid) => (pid in alive ? "alive" : "dead"),
+      getProcessStartIdentity: async (pid) => alive[pid] ?? null,
+      now: () => now,
+    }
+  }
+
+  function writeClaim(dir: string, owner?: { pid: number; processStart: string | null }, claimedAt = NOW): void {
+    const record = { claimedAt: new Date(claimedAt).toISOString(), version: 2, ...(owner === undefined ? {} : { owner }) }
+    writeFileSync(join(dir, "onboarding-completed"), JSON.stringify(record))
+  }
+
+  function claimOwnerPid(dir: string): unknown {
+    const record = JSON.parse(readFileSync(join(dir, "onboarding-completed"), "utf8")) as { owner?: { pid?: unknown } }
+    return record.owner?.pid
+  }
+
+  test("#given a claim whose owner process is gone #when the desktop reads the state #then it is not in progress", async () => {
+    const dir = stateDir()
+    writeClaim(dir, { pid: DEAD_TUI, processStart: "proc-start-epoch:100" })
+    const desktop = createOnboardingHarness(dir, "desktop", "rpc", undefined, seams(5151, { 5151: "proc-start-epoch:500" }))
+    expect(await desktop.rpc(ONBOARDING_STATE_GET_RPC_METHOD)).toEqual({ completed: false, completedAt: null, inProgress: false })
+  })
+
+  test("#given a claim whose owner process is gone #when a new TUI prompts #then it takes the claim over and onboards", async () => {
+    const dir = stateDir()
+    writeClaim(dir, { pid: DEAD_TUI, processStart: "proc-start-epoch:100" })
+    const live = seams(5151, { 5151: "proc-start-epoch:500" })
+    const tui = createOnboardingHarness(dir, "tui", "tui", undefined, live)
+    expect(onboardingContexts(await tui.prompt())).toBe(1)
+    expect(claimOwnerPid(dir)).toBe(5151)
+    expect(await tui.rpc(ONBOARDING_STATE_GET_RPC_METHOD)).toEqual({ completed: false, completedAt: null, inProgress: true })
+  })
+
+  test("#given a dead claim #when the desktop completes #then completion is recorded and nothing is in progress", async () => {
+    const dir = stateDir()
+    writeClaim(dir, { pid: DEAD_TUI, processStart: "proc-start-epoch:100" })
+    const desktop = createOnboardingHarness(dir, "desktop", "rpc", undefined, seams(5151, { 5151: "proc-start-epoch:500" }))
+    const completed = await desktop.rpc(ONBOARDING_STATE_COMPLETE_RPC_METHOD) as OnboardingStateResponse
+    expect(completed.completed).toBe(true)
+    expect(completed.inProgress).toBe(false)
+  })
+
+  test("#given a claim whose owner is alive with the recorded start identity #when read and claimed #then it stays in progress and blocks", async () => {
+    const dir = stateDir()
+    writeClaim(dir, { pid: DEAD_TUI, processStart: "proc-start-epoch:100" })
+    const live = seams(5151, { [DEAD_TUI]: "proc-start-epoch:100", 5151: "proc-start-epoch:500" })
+    const tui = createOnboardingHarness(dir, "tui", "tui", undefined, live)
+    expect(await tui.rpc(ONBOARDING_STATE_GET_RPC_METHOD)).toEqual({ completed: false, completedAt: null, inProgress: true })
+    expect(onboardingContexts(await tui.prompt())).toBe(0)
+    expect(claimOwnerPid(dir)).toBe(DEAD_TUI)
+  })
+
+  test("#given the owner pid was reused by another process #when read and claimed #then the claim counts as dead and is taken over", async () => {
+    const dir = stateDir()
+    writeClaim(dir, { pid: DEAD_TUI, processStart: "proc-start-epoch:100" })
+    const reused = seams(5151, { [DEAD_TUI]: "proc-start-epoch:900", 5151: "proc-start-epoch:500" })
+    const tui = createOnboardingHarness(dir, "tui", "tui", undefined, reused)
+    expect(await tui.rpc(ONBOARDING_STATE_GET_RPC_METHOD)).toEqual({ completed: false, completedAt: null, inProgress: false })
+    expect(onboardingContexts(await tui.prompt())).toBe(1)
+    expect(claimOwnerPid(dir)).toBe(5151)
+  })
+
+  test("#given an ownerless claim from an older build #when it is younger than 24 hours #then it still blocks, and once older it is abandoned", async () => {
+    const recent = stateDir()
+    writeClaim(recent, undefined, NOW - HOUR)
+    const recentTui = createOnboardingHarness(recent, "tui", "tui", undefined, seams(5151, { 5151: "proc-start-epoch:500" }))
+    expect(await recentTui.rpc(ONBOARDING_STATE_GET_RPC_METHOD)).toEqual({ completed: false, completedAt: null, inProgress: true })
+    expect(onboardingContexts(await recentTui.prompt())).toBe(0)
+
+    const stale = stateDir()
+    writeClaim(stale, undefined, NOW - 24 * HOUR)
+    const staleTui = createOnboardingHarness(stale, "tui", "tui", undefined, seams(5151, { 5151: "proc-start-epoch:500" }))
+    expect(await staleTui.rpc(ONBOARDING_STATE_GET_RPC_METHOD)).toEqual({ completed: false, completedAt: null, inProgress: false })
+    expect(onboardingContexts(await staleTui.prompt())).toBe(1)
+    expect(claimOwnerPid(stale)).toBe(5151)
+  })
+
+  test("#given a dead claim #when two processes claim at once #then exactly one takes it over", async () => {
+    const dir = stateDir()
+    writeClaim(dir, { pid: DEAD_TUI, processStart: "proc-start-epoch:100" })
+    const alive = { 5151: "proc-start-epoch:500", 6161: "proc-start-epoch:600" }
+    const first = createOnboardingHarness(dir, "first", "tui", undefined, seams(5151, alive))
+    const second = createOnboardingHarness(dir, "second", "tui", undefined, seams(6161, alive))
+    const [a, b] = await Promise.all([first.prompt(), second.prompt()])
+    expect(onboardingContexts(a) + onboardingContexts(b)).toBe(1)
+    expect([5151, 6161]).toContain(claimOwnerPid(dir) as number)
   })
 })
