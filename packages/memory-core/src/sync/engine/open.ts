@@ -55,7 +55,8 @@ export async function openDeviceSync(options: OpenDeviceSyncOptions): Promise<De
   const repo = createGitSyncRepo({ root: options.repoDir })
   const syncDir = join(repo.gitDir, "omo-sync")
   await mkdir(syncDir, { recursive: true })
-  const leasePath = join(syncDir, "engine.lock")
+  // Outside omo-sync/: retiring a copied journal renames that directory, which must not move the lease.
+  const leasePath = join(repo.gitDir, "omo-sync-engine.lock")
   const lease = await createLockRecord("memory sync engine")
   try {
     await acquireLock(leasePath, lease, { waitTimeoutMs: 0 })

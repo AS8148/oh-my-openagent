@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rename, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -59,3 +59,16 @@ test("two devices over HTTP converge through the production adapters, and the st
   expect(await Bun.file(join(db.repo, "note.md")).text()).toBe("---\ndescription: n\n---\nhello\n")
   expect(await b.status()).toMatchObject({ kind: "synced", updatedWhileOffline: 1 })
 }, 60_000)
+
+test("retiring the journal directory does not release the live engine lease", async () => {
+  const server = startWireServer({ token: "t", devices: { a: "dev-a" } })
+  cleanup.push(() => server.stop())
+  const dirs = await deviceDirs("a")
+  const options = { repoDir: dirs.repo, stateDir: dirs.state, locksDir: dirs.locks, session: session(server, "a"), machineId: "m-a" }
+  const first = await openDeviceSync(options)
+  if (first === null) throw new Error("the first open was refused")
+  cleanup.push(() => first.close())
+  // What SyncJournal.retire() does to a copied repo's journal while this engine holds its lease.
+  await rename(join(dirs.repo, ".git", "omo-sync"), join(dirs.repo, ".git", "omo-sync.retired-test"))
+  expect(await openDeviceSync(options)).toBeNull()
+})
