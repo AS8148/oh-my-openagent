@@ -166,7 +166,7 @@ export async function sweepStrandedGitLockFiles(dir: string, settleMs = GIT_LOCK
   const activity = await probeGitActivityIdle(dir)
   if (activity.kind === "busy") return keepAll(present, "repo-in-use")
   try {
-    const kernelVouches = activity.kind === "idle" && previous.git_activity_lock === true
+    const kernelVouches = activity.kind === "idle" && activity.vouches && previous.git_activity_lock === true
     if (users === null && !kernelVouches) return keepAll(present, "repo-in-use")
     const removed: string[] = []
     const kept: KeptGitLock[] = []

@@ -106,6 +106,22 @@ describe("the git-activity lock never recreates a removed memory home (omo #1032
     expect(existsSync(identityDir)).toBe(false)
     expect(existsSync(root)).toBe(true)
   })
+
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("#given a memory home whose lock directory this user cannot write #when a read-only git command runs #then it still runs (omo #10604 review LOW 3)", async () => {
+    // #given
+    const { paths } = await identityRepo("kernel-unwritable-locks")
+    await chmod(paths.locks, 0o500)
+
+    try {
+      // #when
+      const result = await createNodeGitExec().run(["status", "--porcelain"], { cwd: paths.repo, timeoutMs: 10_000 })
+
+      // #then
+      expect(result.code).toBe(0)
+    } finally {
+      await chmod(paths.locks, 0o700)
+    }
+  })
 })
 
 describe("dead-writer git-lock reclaim on hosts whose /proc scans cannot answer (omo #10322)", () => {

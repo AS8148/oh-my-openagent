@@ -5,6 +5,7 @@ import { AGENTS_DIRNAME, REPO_DIRNAME, RUNTIME_DIRNAME } from "../identity"
 import { constants, mkdir, open, type FileHandle } from "../fs/resilient"
 import { tryLockExclusive, tryLockShared } from "../locks/os-file-lock"
 import { GitError } from "./errors"
+import { isOnLocalFilesystem } from "./local-filesystem"
 
 // omo #10322: which memory-core git processes are alive in a memory repository is answered by the
 // kernel, not by /proc (whose same-uid entries are unreadable on systemd desktops, sshd sessions
@@ -13,6 +14,8 @@ import { GitError } from "./errors"
 // leave behind - the orphans of a SIGKILLed writer included - keep it held until the last of them
 // exits. The stranded-lock sweep takes it EXCLUSIVELY: acquired means no such process is alive,
 // and holding it across the unlink keeps a new git run from starting in between.
+// Scope: it covers memory-core's own git only. A git started outside memory-core (a user's or an
+// IDE's, or an older omo build's) never holds it, so idle never proves such a process gone.
 
 // Not `*.lock`: every scanner of the locks directory (doctor, the dead-owner sweep) reads a `*.lock` as
 // a JSON lock record, and this file is an empty flock target that must never be reported or removed.
@@ -38,8 +41,10 @@ export interface GitActivityHold {
   readonly release: () => Promise<void>
 }
 
+// `vouches`: idle may stand in for an unanswerable /proc scan, because the lock file lives on a
+// local filesystem whose flock git inherits (local-filesystem.ts). Busy is safe to act on anywhere.
 export type GitActivityProbe =
-  | { readonly kind: "idle"; readonly release: () => Promise<void> }
+  | { readonly kind: "idle"; readonly vouches: boolean; readonly release: () => Promise<void> }
   | { readonly kind: "busy" }
   | { readonly kind: "unavailable" }
 
@@ -70,8 +75,11 @@ async function openActivityLock(repoDir: string): Promise<FileHandle | null> {
   }
 }
 
-function isReadOnlyFilesystem(error: unknown): boolean {
-  return errorCode(error) === "EROFS"
+// git cannot create a lock file on a read-only memory home, so nothing can strand there; a home this
+// user may not write (EACCES/EPERM) cannot strand one either (omo #10604 review LOW 3).
+function cannotWriteMemoryHome(error: unknown): boolean {
+  const code = errorCode(error)
+  return code === "EROFS" || code === "EACCES" || code === "EPERM"
 }
 
 /** Held around one git run in `repoDir`; null when the repo is outside the identity layout or the host has no kernel lock. */
@@ -80,21 +88,26 @@ export async function holdGitActivityShared(repoDir: string): Promise<GitActivit
   try {
     handle = await openActivityLock(repoDir)
   } catch (error) {
-    // git cannot create a lock file on a read-only memory home either, so nothing can strand there.
-    if (isReadOnlyFilesystem(error)) return null
+    if (cannotWriteMemoryHome(error)) return null
     throw error
   }
   if (handle === null) return null
   const deadline = Date.now() + GIT_ACTIVITY_SHARED_WAIT_MS
   for (;;) {
     const outcome = await tryLockShared(handle.fd)
-    if (outcome === "acquired") {
+    if (outcome.kind === "acquired") {
       const held = handle
       return { fd: held.fd, release: () => held.close() }
     }
-    if (outcome === "unavailable") {
+    // The filesystem cannot take the lock at all: git runs as it did before the lock existed, and the
+    // sweep's exclusive attempt on the same file cannot take it either, so it never vouches.
+    if (outcome.kind === "unavailable") {
       await handle.close()
       return null
+    }
+    if (outcome.kind === "failed") {
+      await handle.close()
+      throw new GitActivityLockError(`The memory repository's git-activity lock failed with errno ${outcome.errno}: ${repoDir}`)
     }
     if (Date.now() >= deadline) {
       await handle.close()
@@ -109,7 +122,12 @@ export async function probeGitActivityIdle(repoDir: string): Promise<GitActivity
   const handle = await openActivityLock(repoDir).catch(() => null)
   if (handle === null) return { kind: "unavailable" }
   const outcome = await tryLockExclusive(handle.fd)
-  if (outcome === "acquired") return { kind: "idle", release: () => handle.close() }
+  if (outcome.kind === "acquired") {
+    const locksDir = identityLocksDirForRepo(repoDir)
+    const vouches = locksDir !== null && (await isOnLocalFilesystem(locksDir))
+    return { kind: "idle", vouches, release: () => handle.close() }
+  }
   await handle.close()
-  return outcome === "busy" ? { kind: "busy" } : { kind: "unavailable" }
+  // A failed attempt is never read as idle: the sweep keeps every lock it would have vouched for.
+  return outcome.kind === "busy" ? { kind: "busy" } : { kind: "unavailable" }
 }
