@@ -4,6 +4,7 @@ import type { Authority } from "../crypto/fold.ts";
 import type { RecoveryKey } from "../crypto/parse.ts";
 import type { RejectionCounter } from "../crypto/rejection.ts";
 import type {
+	KeyringAppendRequest,
 	RecoverBridgeResult,
 	RecoveryTransport,
 	TransportRefusal,
@@ -64,4 +65,36 @@ export const appendAndConfirmJoin = async (
 		return { ok: false, reason: "join-unconfirmed" };
 	}
 	return { ok: true, authority, head: afterHead, pin, usedKey };
+};
+
+/**
+ * Confirms an acknowledged rotation on a fresh anchored reload (#10412 review r2 M2, #10450): the
+ * keyring head must be the rotation this device sent, at `epoch`, with this device still a member.
+ * An epoch check alone accepts a fork where a lost device approved this one and rotated itself,
+ * holding the new epoch's key.
+ */
+export const rotationStored = async (
+	{
+		transport,
+		account,
+		rejections,
+	}: {
+		readonly transport: RecoveryTransport;
+		readonly account: string;
+		readonly rejections: RejectionCounter;
+	},
+	anchor: ChainAnchor,
+	sent: KeyringAppendRequest,
+	epoch: number,
+	device: { readonly id: string; readonly signing_public_key: string },
+): Promise<boolean> => {
+	const stored = await loadServedChain(transport, account, rejections, anchor);
+	if (!stored.ok) return false;
+	const { authority, head } = stored.state;
+	return (
+		head?.keyring_link === sent.keyring_link &&
+		authority?.epoch === epoch &&
+		authority.members.get(device.id)?.signing_public_key ===
+			device.signing_public_key
+	);
 };

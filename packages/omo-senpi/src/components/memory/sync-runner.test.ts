@@ -207,3 +207,19 @@ test("an acquire waiting on a close that never finishes gives up after the bound
   expect(errors[0]?.message).toContain("did not close")
   expect(opens).toBe(2)
 })
+
+test("the runner answers device names from the session its resolver returned, and nothing before a session exists", async () => {
+  const paths = await identity()
+  const fake = fakeOpen()
+  const runner = createSyncRunner({
+    logger,
+    resolveSession: async () => ({ ...session, deviceName: (principal: string) => (principal === "device:dev-mini" ? "Mac mini" : undefined) }),
+    open: fake.open,
+    watchHead: () => () => undefined,
+  })
+  expect(runner.deviceName("device:dev-mini")).toBeUndefined()
+  await runner.acquire("agent", paths, { enabled: true })
+  expect(runner.deviceName("device:dev-mini")).toBe("Mac mini")
+  expect(runner.deviceName("device:other")).toBeUndefined()
+  await runner.release(paths.repo)
+})
