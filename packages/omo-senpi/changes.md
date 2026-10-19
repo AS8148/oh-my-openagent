@@ -1,3 +1,5 @@
+## 2026-10-19 - An apply's own credentials write no longer makes its provider stage stale (#10496)
+
 Review #10496 round 2: `applyOnboardingScan` passes the written-path set from `applySetupStages` into its stale guard, so an apply's own credentials write no longer makes its provider stage stale. Covered by the every-stage apply test with a custom-provider key (scan-component.test.ts), which failed before the fix with `kind: "stale"`. The engine-store path (AuthStorage.modify) makes no auth.json backup, unlike the CLI writer; it only adds providers that are absent and never edits an existing entry.
 
 ## 2026-10-18 - Onboarding "understanding you" over session digests (#10480)
