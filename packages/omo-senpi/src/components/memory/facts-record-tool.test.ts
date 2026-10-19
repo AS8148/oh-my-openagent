@@ -131,9 +131,11 @@ describe("facts record tool", () => {
 
       await tool.execute("flip", { scope: "project", text: "User agreed to remove plugins X and Y.", date: "2026-10-18", source: "user", user_quote: "remove plugins X and Y" })
       await tool.execute("real", { scope: "project", text: "User wants an unused-plugin review.", date: "2026-10-18", source: "user", user_quote: "Review the plugins and tell me which look unused." })
+      await tool.execute("partial", { scope: "project", text: "User asked which plugins look unused.", date: "2026-10-18", source: "user", user_quote: "tell me which look unused" })
 
-      const [flip, real] = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
+      const [flip, real, partial] = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
       expect(flip.receipt).toEqual({ source: "agent", downgraded: true })
+      expect(partial.receipt).toEqual({ source: "agent", downgraded: true })
       expect(real.receipt).toEqual({ source: "user", userQuote: "Review the plugins and tell me which look unused." })
     } finally {
       await rm(root, { recursive: true, force: true })

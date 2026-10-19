@@ -23,6 +23,11 @@ export const MEMORY_AUTHORITY_RULE =
 const MAX_TRAILER_QUOTE_CHARS = 300
 const MAX_STORED_QUOTE_CHARS = 500
 
+// The one instruction for every writer that records a user claim (memory tool, facts extractor). The rule it states is
+// enforced by quotedUserMessage below, so the wording and the check cannot drift apart.
+export const USER_QUOTE_RULE =
+  "Required when source is user: one whole user message from this conversation, copied verbatim (not a part of it). Only whitespace, '.', '!', '~' and a courtesy word such as thanks or please at the start or end may differ. A partial or unmatched quote is stored as an agent suggestion."
+
 export function isClaimSource(value: unknown): value is ClaimSource {
   return typeof value === "string" && (CLAIM_SOURCES as readonly string[]).includes(value)
 }
@@ -35,8 +40,8 @@ export function resolveClaimReceipt(claim: ClaimInput, userTexts: readonly strin
   return message === undefined ? { source: "agent", downgraded: true } : { source: "user", userQuote: message }
 }
 
-// Lead ruling on #10498: a quote verifies ONLY when it is one user message in full, give or take whitespace, edge
-// punctuation and the closed courtesy closers. Anything else in that message (a second sentence, another clause, a
+// Lead ruling on #10498: a quote verifies ONLY when it is one user message in full, give or take whitespace, '.', '!',
+// '~' at the edges and the closed courtesy closers. Anything else in that message (a second sentence, another clause, a
 // retraction, an interjection) means the quote is not the user's whole instruction: no receipt, and the agent asks again.
 // There is no sentence or clause parsing, so no break character can be missed. A message that is itself a refusal, hedge
 // or question is still refused by the in-message scan. The receipt stores the message as the user wrote it.
@@ -53,11 +58,13 @@ export function quoteAppearsInUserText(quote: string, userTexts: readonly string
   return quotedUserMessage(quote, userTexts) !== undefined
 }
 
-const EDGE = /^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu
+// A CLOSED set of edge characters (lead ruling): whitespace, '.', '!', '~' (full-width forms fold to these under NFKC)
+// and '。'. A question mark, comma, emoji or any other symbol is never trimmed, so it can never hide behind a quote.
+const EDGE = /^[\s.!~\u3002]+|[\s.!~\u3002]+$/gu
 const LEADING_CLOSER = new RegExp(`^(?:${COURTESY_CLOSERS.join("|")})(?=[\\s\\p{P}\\p{S}]|$)`, "u")
 const TRAILING_CLOSER = new RegExp(`(?:^|(?<=[\\s\\p{P}\\p{S}]))(?:${COURTESY_CLOSERS.join("|")})$`, "u")
 
-// The message with whitespace and case folded and its edges trimmed of punctuation, symbols and courtesy closers.
+// The message with whitespace and case folded and its edges trimmed of that closed set and the courtesy closers.
 function bareMessage(text: string): string {
   let bare = normalize(text)
   for (let previous = ""; previous !== bare;) {

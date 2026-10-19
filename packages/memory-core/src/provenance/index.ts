@@ -7,5 +7,6 @@ export {
   quoteAppearsInUserText,
   renderClaimReceipt,
   resolveClaimReceipt,
+  USER_QUOTE_RULE,
 } from "./claim"
 export type { ClaimInput, ClaimReceipt, ClaimSource } from "./claim"

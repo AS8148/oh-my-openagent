@@ -6,6 +6,7 @@ import {
   runMemoryTool,
   type MemoryToolCommit,
   type MemoryToolProvenance,
+  USER_QUOTE_RULE,
 } from "@oh-my-opencode/memory-core"
 import { Type, type Static, type TSchema } from "typebox"
 
@@ -49,7 +50,7 @@ export const MemoryToolParams = Type.Object({
   file_text: Type.Optional(Type.String({ description: "Initial body text for create." })),
   input: Type.Optional(Type.String({ description: "Codex-style patch text for apply_patch." })),
   source: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("agent"), Type.Literal("inferred")], { description: "Who the saved content came from: user (the user said it), agent (your own suggestion or statement), inferred (your conclusion). Omitted means inferred. Saved as the note's provenance receipt." })),
-  user_quote: Type.Optional(Type.String({ description: "Required when source is user: one whole user message from this session, copied verbatim (not a part of it). A quote that is only part of a message, or that matches no message, records the write as an agent suggestion." })),
+  user_quote: Type.Optional(Type.String({ description: USER_QUOTE_RULE })),
 })
 
 /** One path touched by the commit, with the line counts `git show --numstat` reported for it. */

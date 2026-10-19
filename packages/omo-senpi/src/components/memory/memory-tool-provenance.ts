@@ -23,7 +23,7 @@ export interface InjectedMemoryToolProvenance {
 
 // The bridge deletes any model-supplied provenance and writes this object in its place, so neither
 // the identity keys nor the claim receipt can be forged from tool arguments. A `user` claim keeps
-// its source only when its quote appears verbatim in a user message on the active branch; otherwise
+// its source only when its quote is one whole user message on the active branch; otherwise
 // it is stored as an agent suggestion (#10488).
 export function memoryToolProvenance(input: MemoryToolProvenanceInput): InjectedMemoryToolProvenance {
   return {

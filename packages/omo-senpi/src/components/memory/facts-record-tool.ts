@@ -1,6 +1,6 @@
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { appendFile } from "@oh-my-opencode/memory-core/fs"
-import { parseFactsExtractionRecord, resolveClaimReceipt, type FactsPayload } from "@oh-my-opencode/memory-core"
+import { parseFactsExtractionRecord, resolveClaimReceipt, USER_QUOTE_RULE, type FactsPayload } from "@oh-my-opencode/memory-core"
 import { Type, type Static } from "typebox"
 
 export const FACTS_RECORD_TOOL_NAME = "record_fact"
@@ -16,9 +16,7 @@ const FactsRecordParams = Type.Object({
   source: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("agent"), Type.Literal("inferred")], {
     description: "Who the fact came from: user (the user said it), agent (an assistant suggestion or statement), inferred (a conclusion drawn from the conversation). Omitted means inferred.",
   })),
-  user_quote: Type.Optional(Type.String({
-    description: "Required when source is user: the user's own words, copied verbatim from a user message. Without a matching quote the fact is stored as an agent suggestion.",
-  })),
+  user_quote: Type.Optional(Type.String({ description: USER_QUOTE_RULE })),
 }, { additionalProperties: false })
 
 type FactsRecordParams = Static<typeof FactsRecordParams>

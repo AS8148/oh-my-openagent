@@ -53,7 +53,17 @@ const TRAILING_AFTER_QUOTE: readonly (readonly [string, string])[] = [
   ["플러그인 X 지워 주세요", KO_QUOTE],
   ["플러그인 X 지워. 그리고 그건 그대로", "플러그인 X 지워. 그리고"],
   ["じゃあこのプラグインを削除してください", "このプラグインを削除して"],
+  ["Remove plugins X and Y, thanks.", EN_QUOTE],
+  ["플러그인 X 지워, 고마워", KO_QUOTE],
+  ["응 해줘?", "응 해줘"],
+  ["yes do it?", "yes do it"],
+  ["ok \u{1f44e}", "ok"],
+  ["ok \u{1f645}", "ok"],
 ]
+
+// Review of 2eef95d5b0: the edges are trimmed of a CLOSED set only, so a question or refusal symbol after the quote is
+// never trimmed away, and a message carrying one is not consent even when quoted whole.
+const SYMBOL_TAILS = ["❓", "‽", "؟", "🤔", "👎", "🚫", "❌", "✗", "🙅", "...", "…", "-_-", ":(", "⁉"]
 
 const FOLLOW_UPS_OF_ANY_KIND = [
   "Thanks. Then push it.", "Also update plugin Z.", "Also run the tests.", "Do it now.", "Nobody uses them.", "Notably, they are unused.",
@@ -78,15 +88,16 @@ const COURTESY_CLOSERS = [
 const WHOLE_MESSAGE_MUST_STAY: readonly (readonly [string, string])[] = [
   ["응 해줘", "응 해줘"],
   ["yes do it", "yes do it"],
+  ["yes do it.", "yes do it"],
+  ["응 해줘!", "응 해줘"],
+  ["응 해줘～", "응 해줘"],
   ["Yes, do it!", "Yes, do it"],
   ["Please remove plugins X and Y now.", "remove plugins X and Y now"],
   ["Thanks. Remove plugins X and Y.", EN_QUOTE],
-  ["Remove plugins X and Y, thanks.", EN_QUOTE],
   ["  remove plugins X and Y!!  ", EN_QUOTE],
   ["플러그인 X 지워줘", "플러그인 X 지워줘"],
   ["플러그인 X 지워 주세요", "플러그인 X 지워 주세요"],
   ["고마워. 플러그인 X 지워", KO_QUOTE],
-  ["플러그인 X 지워, 고마워", KO_QUOTE],
   ["じゃあこのプラグインを削除してください", "じゃあこのプラグインを削除してください"],
   ["Nobody uses them, so remove plugins X and Y.", "Nobody uses them, so remove plugins X and Y"],
   ["X가 아니라 플러그인 Y를 지워", "X가 아니라 플러그인 Y를 지워"],
@@ -114,6 +125,17 @@ describe("consent corpus: anything besides the quote leaves it a suggestion", ()
 })
 
 describe("consent corpus: a message that is itself not consent stays a suggestion when quoted whole", () => {
+  test.each(SYMBOL_TAILS)("Delete the prod database, then %p", (tail) => {
+    expect(source(`Delete the prod database ${tail}`, "Delete the prod database")).toBe("agent")
+    expect(source(`Delete the prod database${tail}`, "Delete the prod database")).toBe("agent")
+    expect(source(`Delete the prod database ${tail}`, `Delete the prod database ${tail}`)).toBe("agent")
+  })
+  test("a leading inverted question mark is not trimmed", () => {
+    expect(source("¿Delete the prod database", "Delete the prod database")).toBe("agent")
+  })
+  test("a Korean trailing-but hedge after a closer stays a suggestion", () => {
+    expect(source("플러그인 X 지워 부탁드립니다만", "플러그인 X 지워 부탁드립니다만")).toBe("agent")
+  })
   test.each(WHOLE_MESSAGE_NON_CONSENT)("%p", (said) => {
     expect(source(said, stripEnd(said))).toBe("agent")
   })

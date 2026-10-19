@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   claimReceiptTrailers,
   resolveClaimReceipt,
+  USER_QUOTE_RULE,
 } from "./claim"
 
 const USER_TEXTS = ["Please look at the WordPress plugins and tell me which ones look unused."]
@@ -126,4 +127,8 @@ describe("claim receipts", () => {
     ])
   })
 
+  test("#given the facts extractor persona #when shipped #then it states the same user_quote rule the verifier enforces", async () => {
+    const persona = await Bun.file(new URL("../facts/assets/facts-persona.md", import.meta.url)).text()
+    expect(persona).toContain(USER_QUOTE_RULE)
+  })
 })
