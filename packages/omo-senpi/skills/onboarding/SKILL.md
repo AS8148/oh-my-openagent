@@ -98,30 +98,39 @@ memory tools as you learn it.
 Ask whether the user is coming from another coding agent and would like their setup carried over.
 This lane is opt-in. If they say no, skip to lane 3.
 
-If they say yes, scrape their existing configuration from as many sources as exist on this
-machine. Check at least:
+If they say yes, start from the migration inventory that arrived with this skill's context (the
+`Migration inventory` sentence): the engine already ran the same detection `omo setup` uses, and it
+lists every sign-in it found (API keys to import, OAuth logins to sign in again, unmapped
+providers), every custom provider, every global skill, and every MCP server from the sources it
+covers - OpenCode, the oh-my-pi and gajae-code credential stores, and the engine's own files. For
+those sources the inventory is the source of truth - do not re-read their config files by hand to
+rebuild it. Show the user what `omo setup --dry-run` would do with it.
 
-- Claude Code: `~/.claude/settings.json`, project and global `CLAUDE.md` files, MCP server
+The scan does not know every harness. When the user is coming from one it does not detect, read
+that harness's own files by hand and fold what you find into the same plan:
+
+- Claude Code: `~/.claude/settings.json`, global and project `CLAUDE.md` files, MCP server
   definitions in `.mcp.json` or settings.
-- Co&#x64;ex: <code>~/.co&#x64;ex/config.toml</code>, any `AGENTS.md` files it manages.
-- OpenCode / oh-my-openagent: `~/.config/opencode/opencode.json`,
-  `~/.config/opencode/oh-my-opencode.jsonc`, project `.mcp.json`, and existing `AGENTS.md` files.
-- Anything else the user names.
+- Another coding agent the user names: its own config file in its home folder (often a `config.toml`)
+  and any `AGENTS.md` files it manages.
+- Anything else the user names that the inventory does not cover (for example a project
+  `.mcp.json`, or an `AGENTS.md` another agent manages).
+
+Hand-read only what the inventory does not cover; never re-derive its categories by hand.
 
 Global OpenCode MCP servers and global OpenCode skills are not yours to move by hand. `omo setup`
 imports them: MCP servers from `~/.config/opencode/opencode.json[c]` into the engine's global
 `~/.omo/agent/mcp.json`, and skills from `~/.config/opencode/skills/` into `~/.omo/agent/skills/`,
 converted to the shapes omo reads, consent-gated, and never overwriting a name that already exists.
-Run `omo setup --dry-run` to show the user exactly what would land. Once they accept, run
-`omo setup --yes`: your shell is not a terminal, so plain `omo setup` stops at its consent prompt
-and imports nothing.
+Once they accept, run `omo setup --yes`: your shell is not a terminal, so plain `omo setup` stops
+at its consent prompt and imports nothing.
 Copying a global server into a project `.mcp.json` yourself is a bug: it disappears the moment the
 user opens any other directory.
 
-Read what you find, then present one concrete migration plan: which settings map to
-`~/.omo/omo.json[c]`, which MCP servers `omo setup` carries over globally and which project-only
-servers still belong in that project's `.mcp.json`, which `CLAUDE.md` content becomes project
-`AGENTS.md` content, and which personal facts belong in memory instead of files.
+Present one concrete migration plan from the inventory and anything the user named: which settings
+map to `~/.omo/omo.json[c]`, which MCP servers `omo setup` carries over globally and which
+project-only servers still belong in that project's `.mcp.json`, which `CLAUDE.md` content becomes
+project `AGENTS.md` content, and which personal facts belong in memory instead of files.
 Show the plan and WAIT for the user to accept it. Apply nothing before they say yes. If they accept
 part of it, apply that part only. Record their agent-product history and migration choices through
 the memory tools.

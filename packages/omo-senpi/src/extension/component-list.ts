@@ -16,7 +16,7 @@ import { createLspComponent } from "../components/lsp"
 import { createMemoryComponent } from "../components/memory"
 import { createModelProfileComponent } from "../components/model-profile"
 import { createNativeBadgeComponent } from "../components/native-badge"
-import { createOnboardingComponent } from "../components/onboarding"
+import { createOnboardingComponent, createOnboardingScanComponent } from "../components/onboarding"
 import { createQuestionGatesComponent } from "../components/question-gates"
 import { createSkillCommandsComponent } from "../components/skill-commands"
 import { createSidePanelComponent } from "../components/side-panel"
@@ -45,6 +45,7 @@ export function createOmoSenpiComponents(taskComponent: OmoSenpiComponent): OmoS
     createNativeBadgeComponent(),
     createOnboardingComponent(),
     createInitDeepAdvisorComponent(),
+    createOnboardingScanComponent(),
     createSidePanelComponent(),
     createOmoNativeTelemetryComponent(),
     createUltraworkComponent(),

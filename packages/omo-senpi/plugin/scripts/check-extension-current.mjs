@@ -15,6 +15,7 @@ export async function checkExtensionCurrent(options = {}) {
     supervisorOutput,
     advisorRuntimeOutput,
     sidePanelRuntimeOutput,
+    onboardingScanRuntimeOutput,
     toolkitSdkOutput,
     rollbackRuntimeOutput,
     computerUseOutput,
@@ -44,6 +45,8 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentAdvisorRuntime === undefined) return { ok: false, reason: "missing-output", output: advisorRuntimeOutput }
   const currentSidePanelRuntime = await readBuiltEntry(sidePanelRuntimeOutput)
   if (currentSidePanelRuntime === undefined) return { ok: false, reason: "missing-output", output: sidePanelRuntimeOutput }
+  const currentOnboardingScanRuntime = await readBuiltEntry(onboardingScanRuntimeOutput)
+  if (currentOnboardingScanRuntime === undefined) return { ok: false, reason: "missing-output", output: onboardingScanRuntimeOutput }
   const currentMemoryDoctor = await readBuiltEntry(memoryDoctorOutput)
   const currentMemoryMemfs = await readBuiltEntry(memoryMemfsOutput)
   const currentMemoryPalace = await readBuiltEntry(memoryPalaceOutput)
@@ -81,6 +84,7 @@ export async function checkExtensionCurrent(options = {}) {
     supervisorOutputPath: join(tempRoot, "memory-run-supervisor.mjs"),
     advisorRuntimeOutputPath: join(tempRoot, "omo-init-deep-advisor.js"),
     sidePanelRuntimeOutputPath: join(tempRoot, "omo-side-panel.js"),
+    onboardingScanRuntimeOutputPath: join(tempRoot, "omo-onboarding-scan.js"),
     toolkitSdkOutputPath: join(tempRoot, "runtime", "agent-toolkit-sdk", "sdk.js"),
     rollbackRuntimeOutputPath: join(tempRoot, "runtime", "rollback-migrate.js"),
     memoryDoctorOutputPath: join(tempRoot, "omo-memory-doctor.js"),
@@ -105,6 +109,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentSupervisor, expected.supervisorOutputPath, supervisorOutput],
       [currentAdvisorRuntime, expected.advisorRuntimeOutputPath, advisorRuntimeOutput],
       [currentSidePanelRuntime, expected.sidePanelRuntimeOutputPath, sidePanelRuntimeOutput],
+      [currentOnboardingScanRuntime, expected.onboardingScanRuntimeOutputPath, onboardingScanRuntimeOutput],
       [currentMemoryDoctor, expected.memoryDoctorOutputPath, memoryDoctorOutput],
       [currentMemoryMemfs, expected.memoryMemfsOutputPath, memoryMemfsOutput],
       [currentMemoryPalace, expected.memoryPalaceOutputPath, memoryPalaceOutput],
