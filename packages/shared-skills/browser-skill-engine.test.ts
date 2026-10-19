@@ -1,6 +1,9 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   BROWSER_CONFIRMATION_POLICY,
   BrowserActionDeclinedError,
@@ -255,6 +258,70 @@ describe("browser engine selection", () => {
     expect(error).toBeInstanceOf(BrowserEngineRefusal)
     expect((error as BrowserEngineRefusal).code).toBe("browser_engine_builtin")
     expect(raw.connectCalls).toEqual([])
+  })
+
+  test("#given the app grants its built-in browser #when the skill connects #then it attaches to the granted endpoint with the token file's token, and re-acquires on refresh", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-toolkit-test-"))
+    try {
+      const tokenFile = join(dir, "browser.token")
+      writeFileSync(tokenFile, "first-token\n", { mode: 0o600 })
+      const grant = { endpoint: "http://127.0.0.1:41234/toolkit/browser", tokenFile }
+      const toolkitCalls: Json[] = []
+      const host = {
+        ...fakeHost(),
+        async callTool(tool: string, args: Json): Promise<Json> {
+          toolkitCalls.push({ tool, args })
+          return { details: { ok: true, grant } }
+        },
+      }
+      const attached: Array<{ url: string; options: { client: { authorizer: { resolveAuthorization: (o?: { forceRefresh?: boolean }) => Promise<string> } } } }> = []
+      const raw = { ...fakeRaw(async () => fakeSession()), connect: async (url: string, options: never) => { attached.push({ url, options }); return { kind: "connection" } } }
+      const guarded = guardOmowright(raw, { env: { OMO_BROWSER_ENGINE: "builtin" }, host }) as unknown as { connectBuiltinBrowser: () => Promise<unknown> }
+
+      expect(await guarded.connectBuiltinBrowser()).toEqual({ kind: "connection" })
+      expect(attached[0]?.url).toBe(grant.endpoint)
+      const authorizer = attached[0]!.options.client.authorizer
+      expect(await authorizer.resolveAuthorization()).toBe("Bearer first-token")
+      writeFileSync(tokenFile, "rotated-token\n", { mode: 0o600 })
+      expect(await authorizer.resolveAuthorization({ forceRefresh: true })).toBe("Bearer rotated-token")
+      expect(toolkitCalls).toEqual([
+        { tool: "omo_desktop_toolkit", args: { op: "acquire", toolkit: "browser" } },
+        { tool: "omo_desktop_toolkit", args: { op: "acquire", toolkit: "browser" } },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("#given the app does not grant its built-in browser #when the skill connects #then it is refused with the reason and no browser is attached", async () => {
+    for (const [details, expected] of [
+      [{ ok: false, reason: "unavailable" }, "does not give this session"],
+      [{ ok: false, reason: "timeout" }, "did not answer"],
+      [undefined, "does not give this session"],
+    ] as const) {
+      const host = { ...fakeHost(), async callTool(): Promise<Json> { return details === undefined ? {} : { details } } }
+      const raw = fakeRaw(async () => fakeSession())
+      const guarded = guardOmowright(raw, { env: { OMO_BROWSER_ENGINE: "builtin" }, host }) as unknown as { connectBuiltinBrowser: () => Promise<unknown> }
+
+      const error = await guarded.connectBuiltinBrowser().then(() => undefined, (cause: unknown) => cause)
+
+      expect(error).toBeInstanceOf(BrowserEngineRefusal)
+      expect((error as BrowserEngineRefusal).code).toBe("browser_builtin_unavailable")
+      expect((error as Error).message).toContain(expected)
+      expect(raw.launched).toEqual([])
+    }
+  })
+
+  test("#given a session on the user's own browser #when connectBuiltinBrowser is called #then it is refused and nothing is acquired", async () => {
+    const host = fakeHost()
+    const raw = fakeRaw(async () => fakeSession())
+    const guarded = guardOmowright(raw, { env: { OMO_BROWSER_ENGINE: "connected" }, host }) as unknown as { connectBuiltinBrowser: () => Promise<unknown> }
+
+    const error = await guarded.connectBuiltinBrowser().then(() => undefined, (cause: unknown) => cause)
+
+    expect((error as BrowserEngineRefusal).code).toBe("browser_engine_not_builtin")
+    expect(host.log).toEqual([])
+    expect(raw.launched).toEqual([])
   })
 
   test("#given browser access is off #when the skill connects #then a refusal that says so and nothing is called", async () => {

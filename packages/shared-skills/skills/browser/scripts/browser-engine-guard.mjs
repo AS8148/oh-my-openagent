@@ -1,8 +1,16 @@
+import { readFile } from "node:fs/promises"
+
 export const BROWSER_CONFIRMATION_POLICY = "ask-before-irreversible"
 export const BROWSER_ENGINE_ENV = "OMO_BROWSER_ENGINE"
 export const BROWSER_STATE_EVENT = "omo.browser.state"
 
 const BRIDGE_TOOL = "omo_browser_bridge"
+const TOOLKIT_TOOL = "omo_desktop_toolkit"
+const BUILTIN_UNAVAILABLE = {
+  unavailable: "This app does not give this session its built-in browser. Tell the user; do not use another browser.",
+  timeout: "The app did not answer the request for its built-in browser. Tell the user; do not use another browser.",
+  invalid_grant: "The app answered the request for its built-in browser with something unusable. Tell the user; do not use another browser.",
+}
 const ENGINES = new Set(["connected", "builtin", "none"])
 const NOT_CONNECTED_CODES = new Set(["no_browser_connected", "no_daemon", "unsupported"])
 const CLASSIFY_HTML_BYTES = 4096
@@ -441,7 +449,7 @@ export function guardOmowright(raw, { env = process.env, host } = {}) {
       throw new BrowserEngineRefusal("browser_engine_none", "Agent browser access is off for this project. Tell the user; do not try another browser.")
     }
     if (engine === "builtin") {
-      throw new BrowserEngineRefusal("browser_engine_builtin", "This session uses the app's built-in browser. Do not call connectBrowserSkill(); use the app's in-app browser tools.")
+      throw new BrowserEngineRefusal("browser_engine_builtin", "This session uses the app's built-in browser. Do not call connectBrowserSkill(); call connectBuiltinBrowser() instead.")
     }
     const context = { engine, sessionId: undefined }
     const bridge = createBridge(host, context)
@@ -460,9 +468,40 @@ export function guardOmowright(raw, { env = process.env, host } = {}) {
     return session
   }
 
+  const acquireBuiltinBrowser = async () => {
+    let details
+    try {
+      details = (await host?.callTool(TOOLKIT_TOOL, { op: "acquire", toolkit: "browser" }))?.details
+    } catch {
+      details = undefined
+    }
+    if (details?.ok !== true) {
+      const reason = typeof details?.reason === "string" ? details.reason : "unavailable"
+      throw new BrowserEngineRefusal("browser_builtin_unavailable", BUILTIN_UNAVAILABLE[reason] ?? `The app refused its built-in browser (${reason}). Tell the user; do not use another browser.`)
+    }
+    const token = (await readFile(details.grant.tokenFile, "utf8")).trim()
+    return { endpoint: details.grant.endpoint, authorization: `Bearer ${token}` }
+  }
+
+  // The app's in-app browser for this thread: a CDP endpoint that shows only this thread's tabs. The token is read
+  // from the file the grant names, so it never passes through a tool result.
+  const connectBuiltinBrowser = async (options = {}) => {
+    if (engine !== "builtin") {
+      throw new BrowserEngineRefusal("browser_engine_not_builtin", `connectBuiltinBrowser() is only for the app's built-in browser; this session's engine is "${engine}".`)
+    }
+    let current = await acquireBuiltinBrowser()
+    const authorizer = {
+      async resolveAuthorization({ forceRefresh } = {}) {
+        if (forceRefresh) current = await acquireBuiltinBrowser()
+        return current.authorization
+      },
+    }
+    return await raw.connect(current.endpoint, { ...options, client: { ...options.client, authorizer } })
+  }
+
   const bskSnapshot = (session, options) => raw.bskSnapshot(GUARDED_SESSIONS.get(session) ?? session, options)
 
-  return allowlistedLibrary(raw, engine, { connectBrowserSkill, bskSnapshot })
+  return allowlistedLibrary(raw, engine, { connectBrowserSkill, connectBuiltinBrowser, bskSnapshot })
 }
 
 function ownedBrowserRefusal(engine) {

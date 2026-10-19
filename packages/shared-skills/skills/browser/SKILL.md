@@ -25,7 +25,7 @@ When `OMO_BROWSER_ENGINE` is set (the OmO desktop app sets it for every session)
 | Value | What you do |
 |---|---|
 | `connected` | Use `connectBrowserSkill()` only. If the user's browser is not connected you get a "Connect your browser" error: relay it and stop. Never open another browser |
-| `builtin` | Do not call `connectBrowserSkill()`; use the app's in-app browser tools |
+| `builtin` | `const browser = await omowright.connectBuiltinBrowser()`: the app's in-app browser for this thread, the tab the user sees beside the chat, driven with the normal OmOWright page API (`createAgentTabs(browser).create(url)`, snapshot, click, type). Do not call `connectBrowserSkill()`. If it throws `browser_builtin_unavailable`, relay the message and stop |
 | `none` | Do not do browser work. Say that agent browser access is off for this project |
 | unset | The table above, as before (terminal use) |
 

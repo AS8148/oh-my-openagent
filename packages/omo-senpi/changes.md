@@ -1,3 +1,11 @@
+## 2026-10-19 - desktop-toolkit component: the session's channel to toolkits the app hosts for its thread
+
+`src/components/desktop-toolkit/` registers the eval-only tool `omo_desktop_toolkit` (`{op:"acquire", toolkit}`). It answers `unavailable` at once unless the opener listed the toolkit in `open_session.context.omo_toolkits` (comma-separated) and the host has `pi.rpc`; otherwise it emits `omo.toolkit.request {requestId, toolkit}` and waits up to 15 s for the app's `extension_request omo.toolkit.grant {requestId, grant | refusal}`. A grant must be `{endpoint: http://127.0.0.1:<port>/..., tokenFile: <absolute path>}` with no userinfo or query; anything else settles as `invalid_grant`. A late or foreign `requestId` is refused (`accepted:false`). Registered right after `browser-bridge`.
+
+Why: sisyphuslabs/omo-desktop-app#3292. The token stays in a 0600 file because an eval cell's tool results stream to the desktop as `tool_execution_end` and the desktop logs them.
+
+Must not break: never return a token in this tool's result; keep the per-session pending map (two sessions must not settle each other's request). Live proof: `scripts/qa/desktop-toolkit-rpc-e2e.mjs` (granted / not-offered / app-silent).
+
 ## 2026-10-21 - Gateway, onboarding and task-host hooks allow prompt previews (#10356)
 
 All three before-agent-start handlers register as preview-safe. Gateway previews read committed operating rules through a read-only connection without starting a worker, registering migrations, or changing warning and activation latches. Onboarding previews compute the same addition, migration inventory included, without claiming the completion marker, changing widgets, consuming the forced-tour flag, or starting the background session-history read. Task-host previews return without capturing runtime context, registering a store, or warming or launching a host. AST and composed-extension audits cover literal and dynamic registrations; component tests cover semantic and durable state preservation, and a real-engine test checks prefix readiness.
@@ -105,6 +113,7 @@ Three session-history tests failed on the Windows CI runner and nowhere else. Th
 ## 2026-10-18 - Agent-session discovery moves into the engine (#10479)
 
 Project and session discovery from Claude Code (`CLAUDE_CONFIG_DIR` or `~/.claude`), Codex (`CODEX_HOME` or `~/.codex`) and omo CLI session histories now lives once in the engine, under `src/components/onboarding/session-history/` (package export `./onboarding/session-history`), ported from the desktop server's `AgentSessionScanner` with its caps unchanged: newest-first, 5,000 transcripts per source, 20,000 discovery and metadata operations, 64 MiB and 100,000 metadata records per source, and the importer's 100 transcripts, 4 GiB and 100,000 records per call. The recent-session window stays 30 days by default and is a parameter (`recentWindowMs`). `scanSessionHistory` yields the onboarding scan event shape (`source_started` / `item` / `source_done` / `source_failed` with `counts: {found, read, cap}`) for the `projects` and `sessions` sources, and writes one digest per session (first request, tools used, files changed, outcome, at most 4 KB) to `<state dir>/onboarding/scans/<scanId>/digests.jsonl` (0700/0600); events carry only the digest size. Discovery reads files only: no model call and no network I/O. The desktop scanner's tests are ported as parity tests; the RPC registration is #10478.
+||||||| parent of ebdf30681a (feat(senpi): desktop toolkit channel and connectBuiltinBrowser() for the app's built-in browser (#10601))
 
 ## 2026-10-14 - Preserve planning requests across same-process session transitions
 
