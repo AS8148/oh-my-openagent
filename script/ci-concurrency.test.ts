@@ -25,11 +25,19 @@ describe("CI concurrency", () => {
   const group = ci.concurrency.group
   const cancel = String(ci.concurrency["cancel-in-progress"])
 
-  test("#given two pushes to dev #when the second starts #then the first is neither in its group nor cancelled", () => {
+  test("#given two pushes to dev #when the second starts #then they share the dev group and the running one is not cancelled", () => {
     const first = { ...base, event_name: "push", sha: "a".repeat(40) }
     const second = { ...base, event_name: "push", sha: "b".repeat(40) }
-    expect(evaluate(group, first)).not.toBe(evaluate(group, second))
+    // One group keeps at most one running and one pending dev run; no cancel-in-progress lets the running one finish.
+    expect(evaluate(group, first)).toBe(evaluate(group, second))
     expect(evaluate(cancel, second)).toBe("false")
+  })
+
+  test("#given the same commit pushed to master and dev #when both run #then they are in different groups", () => {
+    const sha = "c".repeat(40)
+    const dev = { ...base, event_name: "push", sha }
+    const master = { ...base, ref: "refs/heads/master", event_name: "push", sha }
+    expect(evaluate(group, dev)).not.toBe(evaluate(group, master))
   })
 
   test("#given two runs of one PR #when the second starts #then it shares the group and cancels the first", () => {
