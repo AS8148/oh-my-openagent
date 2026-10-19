@@ -18,6 +18,7 @@ import {
   snapshotRecallDocumentTerms,
   type StoredDocumentTerms,
 } from "./bm25-index"
+import { isRecallTermSaveExcluded, trackRecallTermSave } from "./bm25-persist-gate"
 import { decodeRecallTermStore, encodeRecallTermStore } from "./bm25-store"
 import type { RecallDocument } from "./provider"
 
@@ -125,11 +126,13 @@ export class RecallTermPersistence {
   }
 
   private save(documents: readonly RecallDocument[]): void {
+    if (isRecallTermSaveExcluded(this.dir)) return
     this.queued = documents
     if (this.writing !== undefined) return
     this.writing = this.drain().finally(() => {
       this.writing = undefined
     })
+    trackRecallTermSave(this.dir, this.writing)
   }
 
   private async drain(): Promise<void> {
@@ -137,6 +140,7 @@ export class RecallTermPersistence {
     await new Promise<void>((resolve) => setImmediate(resolve))
     for (let documents = this.queued; documents !== undefined; documents = this.queued) {
       this.queued = undefined
+      if (isRecallTermSaveExcluded(this.dir)) continue
       try {
         await this.write(documents)
       } catch (error) {
@@ -155,10 +159,15 @@ export class RecallTermPersistence {
       if (document !== undefined) keyed.set(documentKey(document), terms)
     })
     const bytes = encodeRecallTermStore({ fingerprint: tokenizerFingerprint(), terms: snapshot.terms, documents: keyed })
+    if (isRecallTermSaveExcluded(this.dir)) return
     await sweepStaleTemps(path)
     const temp = `${path}.${process.pid}.${randomUUID()}.tmp`
     try {
       await writeFile(temp, bytes)
+      if (isRecallTermSaveExcluded(this.dir)) {
+        await rm(temp, { force: true })
+        return
+      }
       await rename(temp, path)
     } catch (error) {
       await rm(temp, { force: true })

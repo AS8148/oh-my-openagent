@@ -111,8 +111,6 @@ export interface MemoryRecallWiring {
     snapshot: RecallSessionSnapshot,
     extraTexts?: readonly string[],
   ): Promise<CollectedRecallCandidates | undefined>
-  /** Settles once no term-store save started by this wiring's corpus cache is running. */
-  settled(): Promise<void>
 }
 
 // A memory worker child must never receive recall hints: it reasons ABOUT memory, and an injected
@@ -226,7 +224,6 @@ export function createMemoryRecallWiring(options: MemoryRecallWiringOptions): Me
         return undefined
       }
     },
-    settled: () => corpusCache.settled(),
   }
 }
 

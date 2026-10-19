@@ -12,7 +12,7 @@ import {
   type FakeCommandContext,
   type FakeDeps,
 } from "./commands.test-support"
-import { backupTimestamp, restoreRepoBackup } from "./backup"
+import { backupTimestamp } from "./backup"
 import { registerMemfsCommand } from "./memfs"
 import { removeTree } from "../../../../../../test-support/remove-tree"
 
@@ -27,7 +27,6 @@ const SEEDS = [
 ]
 
 interface Harness {
-  readonly identity: Awaited<ReturnType<typeof tempIdentity>>["identity"]
   readonly root: string
   readonly identityRoot: string
   readonly repoDir: string
@@ -47,7 +46,6 @@ async function harness(options: { readonly hasUI?: boolean } = {}): Promise<Harn
   const pi = new MemoryFakeExtensionAPI()
   registerMemfsCommand(pi, deps)
   return {
-    identity,
     root,
     identityRoot: join(root, "agents", "test-identity"),
     repoDir: identity.identityPaths.repo,
@@ -115,31 +113,6 @@ describe("/memfs restore", () => {
     expect(restored).toContain("seeded persona")
     expect(text).toContain("restored")
     expect((await backupNames(identityRoot)).length).toBe(2)
-  })
-
-  test("#given a recall term-store save still writing into .git #when restore runs #then the repository is replaced only after the save settles", async () => {
-    // given
-    const { identity, identityRoot, repoDir, pi, ctx, deps } = await harness()
-    await invoke(pi, "memfs", "backup", ctx)
-    const [backupName = ""] = await backupNames(identityRoot)
-    const persona = join(repoDir, "system", "persona.md")
-    await writeFile(persona, "---\ndescription: Persona\n---\nlocal edit\n")
-    let releaseSave!: () => void
-    const save = new Promise<void>((resolve) => { releaseSave = resolve })
-    let awaited!: () => void
-    const saveAwaited = new Promise<"awaited">((resolve) => { awaited = () => resolve("awaited") })
-
-    // when
-    const restoring = restoreRepoBackup({ ...deps, recallSettled: () => { awaited(); return save } }, identity, backupName)
-    const first = await Promise.race([saveAwaited, restoring.then(() => "restored" as const)])
-    const duringSave = await readFile(persona, "utf8")
-    releaseSave()
-    await restoring
-
-    // then
-    expect(first).toBe("awaited")
-    expect(duringSave).toContain("local edit")
-    expect(await readFile(persona, "utf8")).toContain("seeded persona")
   })
 
   test("#given no backups #when restore runs #then an actionable error is returned", async () => {

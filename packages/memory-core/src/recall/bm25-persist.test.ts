@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { removeTree } from "../../../../test-support/remove-tree"
 import { GitMemoryRepo } from "../git"
 import { RECALL_TERM_STORE_NAME, RecallTermPersistence } from "./bm25-persist"
+import { withRecallTermSavesExcluded } from "./bm25-persist-gate"
 import { decodeRecallTermStore, encodeRecallTermStore } from "./bm25-store"
 import { loadRecallCorpus, RecallCorpusCache, type RecallDocument } from "./provider"
 import { selectRecallCandidates } from "./select"
@@ -91,6 +92,42 @@ async function persisted(dir: string, documents: readonly RecallDocument[]): Pro
 describe("persisted recall terms", () => {
   // RecallCorpusCache.settled() is the public wait a caller uses before it removes or hands off a repository:
   // without it the save started by a ranking can still be writing into `.git` when the directory goes away.
+  // A restore replaces the repository under the store: the exclusion is what keeps a save out of the half-restored tree.
+  it("#given a repository under exclusion #when a ranking starts a save inside it #then nothing is written into .git", async () => {
+    // given
+    const { dir, repo } = await createRepo()
+    const cache = new RecallCorpusCache()
+    const documents = (await cache.load(repo)).documents
+
+    // when
+    await withRecallTermSavesExcluded(dir, async () => {
+      rankAll(documents)
+      await cache.settled()
+    })
+    await cache.settled()
+
+    // then
+    const written = (await readdir(join(dir, ".git"))).filter((name) => name.startsWith(RECALL_TERM_STORE_NAME))
+    expect(written).toEqual([])
+  }, TIMEOUT)
+
+  it("#given a save requested just before exclusion #when the excluded work runs #then nothing changes in .git while it runs", async () => {
+    // given
+    const { dir, repo } = await createRepo()
+    const cache = new RecallCorpusCache()
+    rankAll((await cache.load(repo)).documents)
+
+    // when
+    const [before, after] = await withRecallTermSavesExcluded(dir, async () => {
+      const first = (await readdir(join(dir, ".git"))).sort()
+      await cache.settled()
+      return [first, (await readdir(join(dir, ".git"))).sort()]
+    })
+
+    // then
+    expect(after).toEqual(before)
+  }, TIMEOUT)
+
   it("#given a cache whose ranking started a save #when settled resolves #then the store is written and no temp file remains", async () => {
     // given
     const { dir, repo, store } = await createRepo()

@@ -10,7 +10,7 @@ The save a ranking starts runs after the call returns, so `RecallCorpusCache.set
 
 The memory wiring's session shutdown also waits for it, as the raced step `recall-store-settle` (`wiring.ts`), so a quit does not leave a save writing into `.git`; the shared cache is built by `createSharedRecallCorpusCache` in `recall-wiring.ts` and is the only cache the wiring uses, so a process has one save per repository at a time. The save needs no lock with git: it writes only its own file (`.git/omo-recall-bm25-terms.bin`), which git never reads or writes, through a temp name unique to the process and a rename, so concurrent saves from other processes each leave a whole store and the last one wins.
 
-`/memfs restore` (`restoreRepoBackup`) awaits the same settle (`MemoryCommandDeps.recallSettled`, wired to the recall wiring's `settled()` in `wiring-static.ts`) before it backs up, deletes and re-copies the repository, so a pending save cannot land in a half-restored tree (#10628).
+`/memfs restore` (`restoreRepoBackup`) holds the repository's exclusive term-store gate (`withRecallTermSavesExcluded`, `recall/bm25-persist-gate.ts`) for the whole backup, delete and copy: saves already writing finish first, and no save of the process starts or lands in the repository until the restore is done (one requested meanwhile is dropped; the next build saves again), so a save cannot land in a half-restored tree (#10628). Saves from another process are not covered by this in-process gate.
 
 ## 2026-10-19 - Release binary size budget 160 -> 182 MiB, measured
 
