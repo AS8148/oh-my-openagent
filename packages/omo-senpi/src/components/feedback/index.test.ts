@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import type { SenpiExtensionAPI } from "../../extension/types"
-import { createFeedbackComponent, FEEDBACK_PREPARE_RPC_METHOD, FEEDBACK_SUBMIT_RPC_METHOD } from "./index"
+import type { FeedbackDraft } from "./draft"
+import { createFeedbackComponent, FEEDBACK_PREPARE_RPC_METHOD, FEEDBACK_SUBMIT_RPC_METHOD, noticeFor } from "./index"
 
 type Handler = (data: unknown) => unknown | Promise<unknown>
 
@@ -14,7 +15,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-function host(options: { withRedactor: boolean }) {
+function host(options: { withRedactor: boolean; extraEnv?: Record<string, string>; noStateDir?: boolean }) {
   const pi = new FakeExtensionAPI()
   const handlers = new Map<string, Handler>()
   const api = pi as unknown as SenpiExtensionAPI
@@ -39,8 +40,8 @@ function host(options: { withRedactor: boolean }) {
   dirs.push(homeDir)
   const sent: string[] = []
   const component = createFeedbackComponent({
-    env: { HOME: homeDir, OMO_AGENT_DIR: join(homeDir, ".omo", "agent"), DO_NOT_TRACK: "1" },
-    stateDir,
+    env: { HOME: homeDir, OMO_CODING_AGENT_DIR: join(stateDir, "agent"), DO_NOT_TRACK: "1", ...options.extraEnv },
+    ...(options.noStateDir === true ? {} : { stateDir }),
     omoVersion: "5.1.36",
     senpiVersion: "2026.10.18-1",
     channel: "beta",
@@ -49,7 +50,7 @@ function host(options: { withRedactor: boolean }) {
       return new Response(JSON.stringify({ id: "rpt_9" }), { status: 201 })
     },
   })
-  return { pi, api, handlers, component, sent }
+  return { pi, api, handlers, component, sent, stateDir, homeDir }
 }
 
 const sessionCtx = {
@@ -128,5 +129,35 @@ describe("feedback component", () => {
     expect(sent).toHaveLength(1)
     expect(JSON.parse(sent[0] ?? "{}").sections[0]).toEqual({ id: "description", text: "the answer stopped" })
     expect(notices.at(-1)).toContain("rpt_9")
+  })
+
+  test("#given uploads are off and a custom agent dir #when a report is saved #then the file lands under that agent dir, never under HOME", async () => {
+    const { pi, api, handlers, component, stateDir, homeDir } = host({ withRedactor: true, extraEnv: { OMO_DISABLE_FEEDBACK: "1" }, noStateDir: true })
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    await pi.dispatch("session_start", {}, sessionCtx)
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { draftId: string }
+
+    const result = (await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: draft.draftId, description: "x" })) as { kind: string; path: string }
+
+    expect(result.kind).toBe("saved")
+    expect(result.path.startsWith(join(stateDir, "agent"))).toBe(true)
+    expect(existsSync(join(homeDir, ".omo"))).toBe(false)
+    expect(statSync(result.path).mode & 0o077).toBe(0)
+    expect(noticeFor((await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as FeedbackDraft)).not.toContain("logs")
+  })
+
+  test("#given recent engine log lines #when a report is prepared #then a logs section carries them and the TUI notice names logs", async () => {
+    const { pi, api, handlers, component, stateDir } = host({ withRedactor: true })
+    const logs = join(stateDir, "agent", "logs")
+    mkdirSync(logs, { recursive: true })
+    writeFileSync(join(logs, "session.log"), `${JSON.stringify({ ts: new Date().toISOString(), level: "error", event: "turn_failed" })}\n`)
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    await pi.dispatch("session_start", {}, sessionCtx)
+
+    const draft = (await handlers.get(FEEDBACK_PREPARE_RPC_METHOD)?.({})) as { sections: { id: string; text: string }[] }
+
+    expect(draft.sections.find((section) => section.id === "logs")?.text).toContain("turn_failed")
+    expect(noticeFor(draft as unknown as FeedbackDraft)).toContain("recent logs")
+    expect(readdirSync(logs)).toEqual(["session.log"])
   })
 })

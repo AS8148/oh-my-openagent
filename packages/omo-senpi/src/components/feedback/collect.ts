@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync, statSync } from "node:fs"
+import { join } from "node:path"
+
 export const TRANSCRIPT_MESSAGE_LIMIT = 50
 const TOOL_RESULT_KEEP = 1200
 
@@ -64,8 +67,63 @@ export function transcriptText(entries: readonly unknown[]): string {
     if (Reflect.get(Object(entry), "type") !== "message") continue
     const message: unknown = Reflect.get(Object(entry), "message")
     const role = String(Reflect.get(Object(message), "role") ?? "unknown")
-    const body = textOf(Reflect.get(Object(message), "content")).replace(/\s+/g, " ").trim()
-    lines.push(`${role}${clock(Reflect.get(Object(entry), "timestamp"))}: ${shorten(body)}`)
+    const body = shorten(textOf(Reflect.get(Object(message), "content")).trim())
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== "")
+      .join("\n  ")
+    lines.push(`${role}${clock(Reflect.get(Object(entry), "timestamp"))}: ${body}`)
   }
   return lines.slice(-TRANSCRIPT_MESSAGE_LIMIT).join("\n")
 }
+
+export const LOG_WINDOW_MS = 15 * 60 * 1000
+const LOG_LINES_PER_FILE = 200
+const LOG_TAIL_BYTES = 512 * 1024
+const CONTENT_KEYS = ["text", "content", "prompt", "messages", "message", "input", "output"]
+
+const tailText = (path: string): string => {
+  const size = statSync(path).size
+  const start = Math.max(0, size - LOG_TAIL_BYTES)
+  const text = readFileSync(path).subarray(start).toString("utf8")
+  return start === 0 ? text : text.slice(text.indexOf("\n") + 1)
+}
+
+const keepLine = (line: string, since: number): boolean => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(line)
+  } catch {
+    return false
+  }
+  const ts = Date.parse(String(Reflect.get(Object(parsed), "ts") ?? Reflect.get(Object(parsed), "timestamp") ?? ""))
+  if (Number.isNaN(ts) || ts < since) return false
+  return !CONTENT_KEYS.some((key) => typeof Reflect.get(Object(parsed), key) === "string")
+}
+
+/**
+ * The engine's own logs (`<agent dir>/logs/*.log`, rotations skipped) for the last 15 minutes. Lines that carry
+ * conversation content are dropped: they can belong to any session, and the reported conversation has its own section.
+ */
+export function engineLogText(agentDir: string, now: Date): string {
+  const dir = join(agentDir, "logs")
+  let names: string[]
+  try {
+    names = readdirSync(dir).filter((name) => name.endsWith(".log")).sort()
+  } catch {
+    return ""
+  }
+  const since = now.getTime() - LOG_WINDOW_MS
+  const blocks: string[] = []
+  for (const name of names) {
+    let text: string
+    try {
+      text = tailText(join(dir, name))
+    } catch {
+      continue
+    }
+    const lines = text.split("\n").filter((line) => keepLine(line, since)).slice(-LOG_LINES_PER_FILE)
+    if (lines.length > 0) blocks.push(`## ${name}\n${lines.join("\n")}`)
+  }
+  return blocks.join("\n\n")
+}
+

@@ -5,7 +5,8 @@ import { shouldDisableTelemetry } from "@oh-my-opencode/telemetry-core"
 
 import { loadSenpiOmoConfig } from "../config-resolution"
 import { getOmoNativeAttribution, hashSessionId } from "../telemetry/product-identity"
-import { blankConfigSecrets, transcriptText } from "./collect"
+import { resolveAgentHome } from "../agent-home/resolve-agent-home"
+import { blankConfigSecrets, engineLogText, transcriptText } from "./collect"
 import type { CollectedSection } from "./draft"
 
 export interface HostSessionView {
@@ -62,6 +63,8 @@ export function collectHostSections(facts: HostFacts): HostCollection {
     { id: "environment", text: environment },
     { id: "config", text: JSON.stringify(blankConfigSecrets(loaded.config), null, 2) },
   ]
+  const logs = engineLogText(resolveAgentHome({ env: facts.env }), facts.now)
+  if (logs !== "") sections.push({ id: "logs", text: logs })
   if (facts.session !== undefined) {
     const header = [
       `session ${facts.session.sessionId ?? "unknown"} · model ${facts.session.model ?? "unknown"}`,

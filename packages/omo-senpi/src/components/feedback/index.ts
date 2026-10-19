@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
+import { join } from "node:path"
 
 import type { OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
+import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { createOmoNativeProductConfig } from "../telemetry/product-identity"
 import { collectHostSections, type HostSessionView } from "./collect-host"
 import { buildDraft, type CollectedSection, type FeedbackDraft, type FeedbackKind, type UploadRedactor } from "./draft"
@@ -140,7 +142,7 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
           redact,
           client: stored.client,
           env,
-          stateDir: options.stateDir ?? `${env.HOME ?? ""}/.omo/agent/omo-senpi`,
+          stateDir: options.stateDir ?? join(resolveAgentHome({ env }), "omo-senpi"),
           apiOrigin: env.OMO_SERVICE_API_URL ?? DEFAULT_API_ORIGIN,
           accessToken: typeof accessToken === "string" ? accessToken : null,
           transport: options.transport ?? ((url, init) => fetch(url, init)),
@@ -189,8 +191,21 @@ export function createFeedbackComponent(options: FeedbackComponentOptions = {}):
   }
 }
 
+const SECTION_PHRASES: Readonly<Partial<Record<string, string>>> = {
+  identity: "your account and this device",
+  environment: "app versions",
+  session: "this conversation's recent messages",
+  logs: "recent logs",
+  crash: "crash reports",
+  config: "your settings",
+}
+
 export function noticeFor(draft: FeedbackDraft): string {
-  const included = "your account, this device, app versions, this conversation's recent messages, recent logs and crash reports, and your settings"
+  const phrases = draft.sections.flatMap((section) => {
+    const phrase = SECTION_PHRASES[section.id]
+    return phrase === undefined ? [] : [phrase]
+  })
+  const included = phrases.length <= 1 ? phrases.join("") : `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1) ?? ""}`
   return draft.destination === "intake"
     ? `Sending also includes ${included}. Passwords, keys and tokens are removed first, and your memory is never sent. Only the OmO team can read it; it is kept ${draft.retentionDays} days.`
     : `Uploads are turned off here (OMO_DISABLE_FEEDBACK), so the report, with ${included}, is saved as a file you can send yourself.`
