@@ -5,6 +5,8 @@
   "private": true,
   "description": "Harness-neutral telemetry primitives for oh-my-opencode products.",
   "exports": {
+    "./injected": "./src/injected.ts",
+    "./posthog-transport": "./src/posthog-transport.ts",
     ".": {
       "types": "./index.d.ts",
       "import": "./src/index.ts"
