@@ -3,7 +3,9 @@
 // clock. `restart` builds a fresh engine over the same directories, as a process restart would.
 
 import { copyFile, cp, mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises"
+import { execFile } from "node:child_process"
 import { tmpdir } from "node:os"
+import { promisify } from "node:util"
 import { dirname, join, relative, sep } from "node:path"
 
 import { createDeviceItemStore } from "./adapters/device-item-store"
@@ -18,15 +20,20 @@ export const ACCOUNT = "acc_test"
 /** Every engine test drives real git processes; under machine load a cycle can take seconds. */
 export const GIT_TEST_TIMEOUT = 30_000
 
+const execFileAsync = promisify(execFile)
+
 async function git(cwd: string, ...args: string[]): Promise<string> {
   return gitWith(cwd, {}, ...args)
 }
 
 async function gitWith(cwd: string, env: Record<string, string>, ...args: string[]): Promise<string> {
-  const child = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", ...env } })
-  const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
-  if (code !== 0) throw new Error(`git ${args.join(" ")} failed: ${err.trim()}`)
-  return out.trim()
+  try {
+    const { stdout } = await execFileAsync("git", args, { cwd, env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", ...env } })
+    return stdout.trim()
+  } catch (error) {
+    const stderr = error instanceof Error && "stderr" in error ? String(error.stderr) : String(error)
+    throw new Error(`git ${args.join(" ")} failed: ${stderr.trim()}`)
+  }
 }
 
 export async function gitRepo(root: string, existing = false): Promise<SyncRepo> {
