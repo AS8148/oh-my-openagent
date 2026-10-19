@@ -14,8 +14,8 @@ export const COOLDOWN_DAYS = 7
 const MS_PER_DAY = 86_400_000
 
 // The claim keeps its historical name: a marker an older engine wrote (version 1, no `claimedAt`) means completed.
-const ONBOARDING_MARKER = "onboarding-completed"
-const COMPLETION_MARKER = "onboarding-completion"
+export const ONBOARDING_MARKER = "onboarding-completed"
+export const COMPLETION_MARKER = "onboarding-completion"
 const GLOBAL_DECLINE_FILE = "onboarding-declined-global"
 const PROJECT_DECLINE_DIR = "onboarding-declined-projects"
 const COOLDOWN_DIR = "onboarding-cooldowns"
@@ -63,22 +63,14 @@ export function isOnboardingComplete(stateDir: string): boolean {
   }
 }
 
-export interface OnboardingStateSnapshot {
-  /** ISO time onboarding finished; null while it has not. */
-  readonly completedAt: string | null
-  /** A claim is held and onboarding has not finished. */
-  readonly inProgress: boolean
-}
-
-export function readOnboardingState(stateDir: string): OnboardingStateSnapshot {
-  const completedAt = readMarkerTime(stateDir, COMPLETION_MARKER) ?? readLegacyCompletion(stateDir)
-  if (completedAt !== null) return { completedAt, inProgress: false }
-  return { completedAt: null, inProgress: existsSync(join(stateDir, ONBOARDING_MARKER)) }
-}
-
 /** When onboarding was completed, or null when it is not (a held claim is not completion). */
 export function readOnboardingCompletedAt(stateDir: string): string | null {
-  return readOnboardingState(stateDir).completedAt
+  return readMarkerTime(stateDir, COMPLETION_MARKER) ?? readLegacyCompletion(stateDir)
+}
+
+/** A recorded completion exists; a held claim (live or not) is judged by the sidecar's `claim-owner.ts`. */
+export function isOnboardingCompletionRecorded(stateDir: string): boolean {
+  return existsSync(join(stateDir, COMPLETION_MARKER))
 }
 
 /** Drops this run's claim; a recorded completion stays. */

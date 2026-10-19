@@ -16,6 +16,7 @@ import type { reconcileAppliedFactsBatches } from "../memory/facts-applied-recon
 import type { TuiMemoryToolsRuntime } from "./tui-memory-tools"
 import type {
   applyRetainedScan,
+  claimOnboardingOwned,
   migrationFactsFromScan,
   onboardingScanContext,
   OnboardingScanEnvironment,
@@ -44,6 +45,7 @@ export interface OnboardingScanRuntime extends TuiMemoryToolsRuntime {
   readonly runOnboardingScan: typeof runOnboardingScan
   readonly applyRetainedScan: typeof applyRetainedScan
   readonly readOnboardingState: typeof readOnboardingState
+  readonly claimOnboardingOwned: typeof claimOnboardingOwned
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
   readonly onboardingScanContext: typeof onboardingScanContext
   readonly startOnboardingUnderstanding: typeof startOnboardingUnderstanding
@@ -233,10 +235,11 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const tuiUnderstand = loaded["executeOnboardingUnderstand"]
   const tuiApply = loaded["executeOnboardingMemoryApply"]
   const readState = loaded["readOnboardingState"]
+  const claimOwned = loaded["claimOnboardingOwned"]
   if (
     typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof understandHandlers !== "function" || typeof tuiScan !== "function" || typeof historyTool !== "function" || typeof memoryFacts !== "function" || typeof appliedReconcile !== "function" ||
     typeof tuiUnderstand !== "function" || typeof tuiApply !== "function" ||
-    typeof context !== "function" || typeof readState !== "function"
+    typeof context !== "function" || typeof readState !== "function" || typeof claimOwned !== "function"
   ) {
     throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
   }
@@ -254,5 +257,6 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
     executeOnboardingUnderstand: (...args) => Reflect.apply(tuiUnderstand, undefined, args),
     executeOnboardingMemoryApply: (...args) => Reflect.apply(tuiApply, undefined, args),
     readOnboardingState: (...args) => Reflect.apply(readState, undefined, args),
+    claimOnboardingOwned: (...args) => Reflect.apply(claimOwned, undefined, args),
   }
 }

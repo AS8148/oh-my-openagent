@@ -31,7 +31,7 @@ export { executeOnboardingSessionHistory } from "./session-history-tool-runtime"
 export { applyMemoryFacts } from "../memory/facts-apply-runtime"
 export { reconcileAppliedFactsBatches } from "../memory/facts-applied-reconcile"
 export { executeOnboardingMemoryApply, executeOnboardingUnderstand } from "./tui-memory-runtime"
-export { readOnboardingState } from "./state"
+export { claimOnboardingOwned, readOnboardingState } from "./claim-owner"
 
 /** Where the scan reads and the apply writes; every field defaults to what `omo setup` uses. */
 export interface OnboardingScanEnvironment {

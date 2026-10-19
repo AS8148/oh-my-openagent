@@ -1,4 +1,5 @@
 import type { SenpiExtensionAPI } from "../../extension/types"
+import type { ClaimOwnerSeams } from "./claim-owner"
 import { loadOnboardingScanRuntime } from "./scan-component"
 
 export const ONBOARDING_STATE_GET_RPC_METHOD = "omo.onboarding.state.get"
@@ -24,6 +25,8 @@ export interface OnboardingStateStore {
   resetOnboarding(stateDir: string): void
   /** Clears this process's own onboarding run so its next prompt can onboard again. */
   onReset(): void
+  /** Identity readers for judging a held claim's owner; defaults to the real process table. */
+  readonly claimOwnerSeams?: ClaimOwnerSeams
 }
 
 export function registerOnboardingStateRpc(pi: SenpiExtensionAPI, store: OnboardingStateStore): void {
@@ -32,7 +35,7 @@ export function registerOnboardingStateRpc(pi: SenpiExtensionAPI, store: Onboard
   // The marker reader ships in the onboarding-scan sidecar; the writes stay here, synchronous, so a
   // complete or reset lands before the sidecar is even asked for.
   const read = async (): Promise<OnboardingStateResponse> => {
-    const { completedAt, inProgress } = (await loadOnboardingScanRuntime()).readOnboardingState(store.stateDir)
+    const { completedAt, inProgress } = await (await loadOnboardingScanRuntime()).readOnboardingState(store.stateDir, store.claimOwnerSeams)
     return { completed: completedAt !== null, completedAt, inProgress }
   }
   handle(ONBOARDING_STATE_GET_RPC_METHOD, read)

@@ -7,13 +7,21 @@ import { loadOnboardingScanRuntime } from "./scan-component"
 import type { OnboardingScanEnvironment } from "./scan-runtime"
 import { registerSessionHistoryRpc } from "./session-history-rpc"
 import { createOnboardingSessionHistoryTool } from "./session-history-tool"
-import { claimOnboarding, completeOnboarding, isOnboardingComplete, releaseOnboarding, resetOnboarding } from "./state"
+import type { ClaimOwnerSeams } from "./claim-owner"
+import {
+  claimOnboarding,
+  completeOnboarding,
+  isOnboardingComplete,
+  isOnboardingCompletionRecorded,
+  releaseOnboarding,
+  resetOnboarding,
+} from "./state"
 import { registerOnboardingStateRpc } from "./state-rpc"
 import type { OnboardingUnderstandingSeams } from "./understand-start"
 import { createOnboardingMemoryTools, type TuiOnboardingScan } from "./tui-memory-tools"
 
 export interface OnboardingComponentDependencies {
-  claimOnboarding(stateDir: string): boolean
+  claimOnboarding(stateDir: string, claimOwnerSeams?: ClaimOwnerSeams): boolean | Promise<boolean>
   isOnboardingComplete(stateDir: string): boolean
   releaseOnboarding(stateDir: string): void
   /** Records a finished onboarding; omitted, a finished TUI turn records nothing (test fakes). */
@@ -28,6 +36,8 @@ export interface OnboardingComponentDependencies {
   readonly scan?: () => Promise<TuiScanResult | undefined>
   /** Fake-model seams for the understanding the TUI runs. */
   readonly understanding?: OnboardingUnderstandingSeams
+  /** Identity readers for claim owners; defaults to the real process table. */
+  readonly claimOwnerSeams?: ClaimOwnerSeams
   /** Install-wide state dir; defaults to the engine's. */
   readonly stateDir?: string
 }
@@ -45,11 +55,25 @@ async function defaultScan(environment: OnboardingScanEnvironment): Promise<TuiS
 }
 
 const defaultDependencies: OnboardingComponentDependencies = {
-  claimOnboarding,
+  claimOnboarding: claimWithOwner,
   completeOnboarding,
   isOnboardingComplete,
   releaseOnboarding,
   resetOnboarding,
+}
+
+// The owner-recording claim (pid + start identity, dead-owner takeover) ships in the onboarding-scan
+// sidecar; it loads only on an install without a recorded completion. A sidecar that cannot load falls
+// back to the plain claim, which still keeps two sessions from onboarding at once.
+async function claimWithOwner(stateDir: string, seams?: ClaimOwnerSeams): Promise<boolean> {
+  if (isOnboardingCompletionRecorded(stateDir)) return false
+  let runtime
+  try {
+    runtime = await loadOnboardingScanRuntime()
+  } catch {
+    return claimOnboarding(stateDir)
+  }
+  return runtime.claimOnboardingOwned(stateDir, seams)
 }
 
 export function isSessionStartEvent(v: unknown): v is SessionStartEvent {
@@ -119,9 +143,16 @@ export function createOnboardingComponent(
         pending = undefined
         if (eligible(ctx) && !dependencies.isOnboardingComplete(stateDir)) showWelcome(ctx)
       }
-      const claim = (ctx: ExtensionContext, forced: boolean): boolean => {
-        if (pending !== undefined) return false
-        const owned = dependencies.claimOnboarding(stateDir)
+      let claiming = false
+      const claim = async (ctx: ExtensionContext, forced: boolean): Promise<boolean> => {
+        if (pending !== undefined || claiming) return false
+        claiming = true
+        let owned: boolean
+        try {
+          owned = await dependencies.claimOnboarding(stateDir, dependencies.claimOwnerSeams)
+        } finally {
+          claiming = false
+        }
         if (!owned && !forced) return false
         processState[forcedKey] ||= forced
         pending = { id: ctx.sessionManager.getSessionId(), owned, active: false }
@@ -142,6 +173,7 @@ export function createOnboardingComponent(
         completeOnboarding: dependencies.completeOnboarding ?? completeOnboarding,
         resetOnboarding: dependencies.resetOnboarding ?? resetOnboarding,
         onReset: () => { pending = undefined },
+        ...(dependencies.claimOwnerSeams === undefined ? {} : { claimOwnerSeams: dependencies.claimOwnerSeams }),
       })
       registerSessionHistoryRpc(pi)
 
@@ -158,7 +190,7 @@ export function createOnboardingComponent(
           if (!dependencies.isOnboardingComplete(stateDir)) showWelcome(ctx)
           return
         }
-        if (!claim(ctx, true)) return
+        if (!(await claim(ctx, true))) return
         try {
           await pi.sendMessage({
             customType: "omo-onboarding:bootstrap",
@@ -175,7 +207,7 @@ export function createOnboardingComponent(
       pi.on("before_agent_start", async (event, ctx) => {
         if (!isRecord(event) || event.trigger !== "prompt" || event.preview === true || !eligible(ctx)) return
         const forced = force()
-        if (!claim(ctx, forced)) return
+        if (!(await claim(ctx, forced))) return
         if (ctx.sessionManager.getBranch().some((entry) =>
           entry.type === "custom_message" && entry.customType === "omo-onboarding:context")) return
         return {

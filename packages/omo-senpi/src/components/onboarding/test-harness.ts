@@ -1,15 +1,11 @@
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createOnboardingComponent } from "./component"
 import * as state from "./state"
+import { claimOnboardingOwned } from "./claim-owner"
 import type { OmoSenpiComponent } from "../../extension/types"
+import type { ClaimOwnerSeams } from "./claim-owner"
 
-/** Identity readers a test injects to stand in for live, dead, or pid-reused claim owners. */
-export interface ClaimOwnerSeams {
-  readonly pid?: number
-  readonly getPidLiveness?: (pid: number) => "alive" | "dead" | "unknown"
-  readonly getProcessStartIdentity?: (pid: number) => Promise<string | null>
-  readonly now?: () => number
-}
+export type { ClaimOwnerSeams }
 
 class OnboardingAPI extends FakeExtensionAPI {
   sessionKind: "interactive" | "worker" = "interactive"
@@ -44,7 +40,7 @@ export function createOnboardingHarness(
     },
   }
   const dependencies = {
-    claimOnboarding: () => state.claimOnboarding(dir),
+    claimOnboarding: (_stateDir: string, seams?: ClaimOwnerSeams) => claimOnboardingOwned(dir, seams),
     isOnboardingComplete: () => state.isOnboardingComplete(dir),
     releaseOnboarding: () => state.releaseOnboarding(dir),
     completeOnboarding: () => state.completeOnboarding(dir),
