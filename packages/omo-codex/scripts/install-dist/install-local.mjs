@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:10ded22625020498b8100a80dc42f329e2c00e4a910109f7e8a975b0e9e8ad3d:2be15be3e18cc2cc74f35c3fb58e05e4f69365a4c9c637c5d67c727e8f54a402
+// omo-codex-install:bbc1ffab60b38b00f077eb89cf0af5487bb98766f65a17843e1aa8776b655413:0b969f35071686497aa2810fffcb0c16e788ca75397e0a61d01a37c1f9a38139
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -9834,98 +9834,20 @@ function getTelemetryDistinctId(machineIdPrefix, osProvider = getDefaultTelemetr
 }
 var init_machine_id = () => {};
 
-// packages/telemetry-core/src/telemetry-delivery-error.ts
-var PERMANENT_STATUSES, TelemetryDeliveryError;
-var init_telemetry_delivery_error = __esm(() => {
-  PERMANENT_STATUSES = new Set([400, 413]);
-  TelemetryDeliveryError = class TelemetryDeliveryError extends Error {
-    permanent;
-    status;
-    constructor(status, cause) {
-      super(status === undefined ? "telemetry event was not delivered (no response)" : `telemetry event was rejected with HTTP ${status}`, { cause });
-      this.name = "TelemetryDeliveryError";
-      this.status = status;
-      this.permanent = status !== undefined && PERMANENT_STATUSES.has(status);
-    }
-  };
-});
-
-// packages/telemetry-core/src/posthog-immediate-send.ts
-function createImmediateSender(apiKey, options, PostHogClient) {
-  const baseFetch = options.fetch ?? ((url, init) => fetch(url, init));
-  let current;
-  const trackedFetch = async (url, init) => {
-    const attempt = current;
-    try {
-      const response = await baseFetch(url, init);
-      if (attempt !== undefined)
-        attempt.status = response.status;
-      return response;
-    } catch (error) {
-      if (attempt !== undefined)
-        attempt.error = error;
-      throw error;
-    }
-  };
-  const client = new PostHogClient(apiKey, { ...options, fetch: trackedFetch, fetchRetryCount: 0 });
-  let queue = Promise.resolve();
-  const sendOne = async (message) => {
-    const attempt = {};
-    current = attempt;
-    try {
-      await client.captureImmediate(message);
-    } finally {
-      current = undefined;
-    }
-    const { status } = attempt;
-    if (status === undefined || status < 200 || status >= 300)
-      throw new TelemetryDeliveryError(status, attempt.error);
-  };
-  return {
-    send(message) {
-      const result = queue.then(() => sendOne(message));
-      queue = result.catch(() => {
-        return;
-      });
-      return result;
-    },
-    async shutdown() {
-      await client.shutdown();
-    }
-  };
-}
-var init_posthog_immediate_send = __esm(() => {
-  init_telemetry_delivery_error();
-});
-
 // packages/telemetry-core/src/posthog-client.ts
 class PostHogTelemetryTransport {
   #client;
-  #apiKey;
-  #options;
-  #immediate;
   constructor(apiKey, options) {
     this.#client = new PostHog(apiKey, options);
-    this.#apiKey = apiKey;
-    this.#options = options;
   }
   capture(message) {
     this.#client.capture(message);
-  }
-  captureImmediate(message) {
-    this.#immediate ??= Promise.resolve().then(() => (init_posthog_immediate_send(), {})).then(({}) => createImmediateSender(this.#apiKey, this.#options, PostHog)).catch((error) => {
-      this.#immediate = undefined;
-      throw error;
-    });
-    return this.#immediate.then((sender) => sender.send(message));
   }
   async flush() {
     await this.#client.flush();
   }
   async shutdown() {
-    await Promise.all([this.#client.shutdown(), this.#immediate?.then((sender) => sender.shutdown(), () => {
-      return;
-    })]);
+    await this.#client.shutdown();
   }
 }
 function createDefaultPostHogTransport(apiKey, options) {
@@ -19536,14 +19458,20 @@ var OmoComputerSettingsLayerSchema = object({
 var OmoComputerSettingsSchema = OmoComputerSettingsLayerSchema;
 
 // packages/omo-config-core/src/schema/git-master.ts
+var GIT_ENV_ASSIGNMENT_PATTERN = /^(?:[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_-]*)(?: [A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_-]*)*$/;
+var GitEnvPrefixSchema = string2().refine((value) => value === "" || GIT_ENV_ASSIGNMENT_PATTERN.test(value), {
+  message: 'git_env_prefix must be empty or use shell-safe env assignments like "GIT_MASTER=1"'
+});
 var OmoGitMasterSettingsShape = {
   commit_footer: union([boolean2(), string2()]),
-  include_co_authored_by: boolean2()
+  include_co_authored_by: boolean2(),
+  git_env_prefix: GitEnvPrefixSchema
 };
 var OmoGitMasterSettingsLayerSchema = object(OmoGitMasterSettingsShape).partial().strict();
 var OmoGitMasterSettingsSchema = OmoGitMasterSettingsLayerSchema.extend({
   commit_footer: union([boolean2(), string2()]).default(false),
-  include_co_authored_by: boolean2().default(false)
+  include_co_authored_by: boolean2().default(false),
+  git_env_prefix: GitEnvPrefixSchema.default("GIT_MASTER=1")
 }).strict();
 
 // packages/omo-config-core/src/schema/harness.ts
@@ -20027,8 +19955,7 @@ var OmoTeamsConfigLayerSchema = record(string2(), OmoTeamSpecLayerSchema);
 
 // packages/omo-config-core/src/schema/telemetry.ts
 var OmoTelemetrySettingsShape = {
-  enabled: boolean2(),
-  rawTurnSampleRate: number2().min(0).max(1)
+  enabled: boolean2()
 };
 var OmoTelemetrySettingsLayerSchema = object(OmoTelemetrySettingsShape).partial().strict();
 var OmoTelemetrySettingsSchema = OmoTelemetrySettingsLayerSchema.extend({
