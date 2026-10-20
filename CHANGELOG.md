@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Onboarding can get to know you, once you agree.** After consent, the default model reads digests of your recent sessions and proposes facts about you and how you work; nothing is saved at this step. ([#10505](https://github.com/code-yeongyu/oh-my-openagent/pull/10505))
+
 **A DAG node whose child dies on infrastructure is retried instead of taking its whole branch down.** When a mass-ulw node's child stops answering its heartbeats or loses its host session, the node is now retried automatically, at most twice, with a backoff. Its dependents are skipped only if the retries fail too. Before, one starved wave failed and every later node was skipped (an overloaded machine skipped 54 of 61 nodes). Task failures and cancelled nodes behave as before, and the TUI and the desktop app share this behaviour ([#10605](https://github.com/code-yeongyu/oh-my-openagent/issues/10605), [#10616](https://github.com/code-yeongyu/oh-my-openagent/pull/10616)).
 
 **OmO loads the analytics SDK only when an event is captured.** PostHog now ships as a lazy sidecar instead of being parsed with the main extension; queued events retain their order, shutdown waits for pending captures, and consent checks are unchanged. ([#10640](https://github.com/code-yeongyu/oh-my-openagent/pull/10640))
