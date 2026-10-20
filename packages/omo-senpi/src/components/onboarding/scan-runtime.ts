@@ -16,16 +16,19 @@ import type { OnboardingEngineAuthStore } from "./scan-component"
 import type { OnboardingApplyResponse, OnboardingApplyStage, OnboardingScanEvent, OnboardingScanItem, OnboardingScanSource } from "./scan-contract"
 import {
   createMemorySessionDigestStore,
+  defaultAgentHomes,
   MAX_TRANSCRIPTS_PER_SOURCE,
+  nodeSessionHistoryFs,
   scanSessionHistory,
   type ProjectCandidate,
   type SessionDigest,
   type SessionHistoryOptions,
   type SessionScanItem,
 } from "./session-history"
+import { newestSessionDigests } from "./session-history/newest-sessions"
+import { createProjectPathRules } from "./session-history/project-paths"
 
-export { startOnboardingUnderstanding } from "./understand-start"
-export { createOnboardingUnderstandHandlers } from "./understand-handlers"
+export { createOnboardingUnderstandingHandlers } from "./understand-component"
 export { runTuiOnboardingScan } from "./tui-scan-runtime"
 export { executeOnboardingSessionHistory } from "./session-history-tool-runtime"
 export { applyMemoryFacts } from "../memory/facts-apply-runtime"
@@ -64,7 +67,12 @@ type EventBody = Omit<OnboardingScanEvent, "scanId" | "elapsedMs">
  */
 export async function runOnboardingScan(
   environment: OnboardingScanEnvironment,
-  options: { readonly scanId: string; readonly includeCustomProviders: boolean },
+  options: {
+    readonly scanId: string
+    readonly includeCustomProviders: boolean
+    /** False runs only `omo setup`'s sources: the TUI inventory never reads session history. */
+    readonly sessions?: boolean
+  },
   emit: (event: OnboardingScanEvent) => void,
 ): Promise<OnboardingScanOutcome> {
   const startedAt = performance.now()
@@ -94,7 +102,7 @@ export async function runOnboardingScan(
   // Nothing is persisted before consent: the digests stay in memory, with the retained scan.
   const digestStore = createMemorySessionDigestStore()
   const projectRoots = new Set<string>()
-  const history = scanSessionHistory({
+  const history = options.sessions === false ? [] : scanSessionHistory({
     homeDir: home,
     env,
     ...environment.sessionHistory,
@@ -118,6 +126,50 @@ export async function runOnboardingScan(
   send({ kind: "done", source: "all", counts: { found, read, cap: null } })
   const plans = (await collectSetupPlans(results.filter((result) => result.error === undefined))).plans
   return { plans, results, digests: await digestStore.list(options.scanId), projectRoots }
+}
+
+/** The newest sessions the TUI onboarding summarizes, and the most transcripts it opens. */
+export const ONBOARDING_HISTORY_MAX_SESSIONS = 12
+/** Wall-clock budget for that background summary; it aborts every pending read and reports what it had. */
+export const ONBOARDING_HISTORY_BUDGET_MS = 10_000
+/** Only sessions this recent describe what the user is working on now. */
+export const ONBOARDING_HISTORY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000
+const HISTORY_CLIP = 160
+
+/**
+ * The TUI onboarding's background view of this machine's agent history: the newest
+ * `ONBOARDING_HISTORY_MAX_SESSIONS` recent sessions as one context line. Discovery only lists and stats
+ * to order transcripts; at most that many are opened. At `budgetMs` every pending filesystem call is
+ * aborted and nothing more is read. Undefined when nothing was read in time. It never runs on the first
+ * prompt's path.
+ */
+export async function onboardingHistorySummary(
+  environment: OnboardingScanEnvironment,
+  budgetMs: number = ONBOARDING_HISTORY_BUDGET_MS,
+): Promise<string | undefined> {
+  const options: SessionHistoryOptions = {
+    homeDir: environment.home ?? homedir(),
+    env: environment.env ?? process.env,
+    ...environment.sessionHistory,
+  }
+  const digests: SessionDigest[] = await newestSessionDigests({
+    fs: options.fs ?? nodeSessionHistoryFs,
+    createRules: (fs) => createProjectPathRules({ ...options, fs }),
+    homes: options.homes ?? defaultAgentHomes(options.env ?? process.env, options.homeDir),
+    nowMs: (options.now ?? Date.now)(),
+    recentWindowMs: ONBOARDING_HISTORY_WINDOW_MS,
+    limit: ONBOARDING_HISTORY_MAX_SESSIONS,
+    signal: AbortSignal.timeout(budgetMs),
+  })
+  if (digests.length === 0) return undefined
+  const lines = digests.map((digest) =>
+    `${digest.lastActiveAt.slice(0, 10)} ${digest.source} ${digest.cwd}: ${clip(digest.firstRequest || digest.title)}${digest.outcome === "" ? "" : ` -> ${clip(digest.outcome)}`}`)
+  return `Recent agent sessions on this machine (newest ${digests.length}, from a background scan; onboarding_session_history has more): ${lines.join("; ")}`
+}
+
+function clip(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim()
+  return line.length > HISTORY_CLIP ? `${line.slice(0, HISTORY_CLIP)}...` : line
 }
 
 function historyItem(item: ProjectCandidate | SessionScanItem): OnboardingScanItem {
@@ -179,9 +231,8 @@ export async function applyOnboardingScan(
 }
 
 /**
- * `omo.onboarding.apply` for a scan the shell already took out of its store: staleness first, then
- * the engine credential store check, then the writers. Ships in the sidecar so the entry bundle
- * carries only the request validation and the scan bookkeeping.
+ * `omo.onboarding.apply` once the shell has validated the request and the retained scan: staleness,
+ * the credential-store checks and the writers. It ships in this runtime so `omo.js` carries none of it.
  */
 export async function applyRetainedScan(
   scanId: string,
@@ -191,11 +242,11 @@ export async function applyRetainedScan(
 ): Promise<OnboardingApplyResponse> {
   // Staleness is answered before anything else: a target that changed since the scan means
   // the plans no longer describe the machine, so no store is consulted and nothing is written.
-  const stale = staleSetupTargets(plans, [...requested])
+  const stale = staleSetupTargets(plans, requested)
   if (stale.length > 0) {
     return { kind: "stale", reason: `targets changed since the scan: ${stale.join(", ")}`, paths: stale }
   }
-  if (authWritesPending(plans, [...requested])) {
+  if (authWritesPending(plans, requested)) {
     const store = authStore()
     if (store === undefined) {
       return { kind: "unavailable", reason: "The engine's credential store is not available, so credentials cannot be imported here; run omo setup --yes instead." }
@@ -221,10 +272,10 @@ export async function applyRetainedScan(
 }
 
 function authTargetOf(plans: Record<string, unknown>): string | undefined {
-  const credentials = isPlainRecord(plans["credentials"]) ? plans["credentials"] : undefined
-  if (isPlainRecord(credentials) && typeof credentials["target"] === "string") return credentials["target"]
-  const providers = isPlainRecord(plans["providers"]) ? plans["providers"] : undefined
-  const paths = isPlainRecord(providers) && isPlainRecord(providers["paths"]) ? providers["paths"] : undefined
+  const credentials = isRecord(plans["credentials"]) ? plans["credentials"] : undefined
+  if (isRecord(credentials) && typeof credentials["target"] === "string") return credentials["target"]
+  const providers = isRecord(plans["providers"]) ? plans["providers"] : undefined
+  const paths = isRecord(providers) && isRecord(providers["paths"]) ? providers["paths"] : undefined
   if (paths !== undefined && typeof paths["auth"] === "string") return paths["auth"]
   return undefined
 }
@@ -245,7 +296,7 @@ async function writeAuthThrough(
   }
 }
 
-function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
@@ -279,22 +330,26 @@ export function onboardingScanContext(scanId: string, events: readonly Onboardin
   for (const failed of events.filter((event) => event.kind === "source_failed")) {
     lines.push(`! ${failed.source} could not be read: ${failed.reason ?? "unknown error"}`)
   }
-  lines.push(`Value summary: ${valueSummary(items.flatMap((event) => (event.item === undefined ? [] : [event.item])))}`)
+  // A setup-only scan (sessions: false) never read session history, so it states no session count.
+  const readSessions = events.some((event) => event.source === "sessions" || event.source === "projects")
+  lines.push(`Value summary: ${valueSummary(items.flatMap((event) => (event.item === undefined ? [] : [event.item])), readSessions)}`)
   return lines.join("\n")
 }
 
-function valueSummary(rows: readonly OnboardingScanItem[]): string {
+function valueSummary(rows: readonly OnboardingScanItem[], readSessions: boolean): string {
   const count = (kind: string): number => rows.filter((row) => row.kind === kind).length
   const sessions = count("session")
   const projects = count("project")
-  const parts = [`${sessions} recent ${sessions === 1 ? "session" : "sessions"} across ${projects} ${projects === 1 ? "project" : "projects"}`]
+  const parts = readSessions
+    ? [`${sessions} recent ${sessions === 1 ? "session" : "sessions"} across ${projects} ${projects === 1 ? "project" : "projects"}`]
+    : []
   for (const [label, kinds] of SUMMARY_KINDS) {
     const found = rows.filter((row) => kinds.has(row.kind))
     if (found.length === 0) continue
     const carried = found.filter((row) => row.state === "import" || row.state === "login").length
     parts.push(`${found.length} ${label} (${carried} to carry over)`)
   }
-  return `${parts.join("; ")}.`
+  return parts.length === 0 ? "nothing found to carry over." : `${parts.join("; ")}.`
 }
 
 const FACT_GROUPS: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [

@@ -106,7 +106,7 @@ const recordsBoth: FakeTurn = async ({ record }) => {
 }
 
 describe("TUI onboarding: shared scan, understanding, select-before-write", () => {
-  test("#given recent agent sessions #when the first prompt is onboarded #then the context carries the shared scan: its id, one row per found item, and the value summary, with no digest on disk", async () => {
+  test("#given recent agent sessions #when the first prompt is onboarded #then the context carries the shared setup scan (its id and value summary) but no session row, and no digest is on disk", async () => {
     const profile = await machine()
     const { h } = tuiOnboarding(profile, recordsBoth)
     await h.start()
@@ -116,11 +116,12 @@ describe("TUI onboarding: shared scan, understanding, select-before-write", () =
     const scanId = /Onboarding scan ([\w-]+)/.exec(content)?.[1]
     expect(scanId).toBeDefined()
     expect(existsSync(join(profile.stateDir, "onboarding", "scans"))).toBe(false)
+    // The first prompt awaits only omo setup's sources; session digests are read when understanding runs.
     const rows = content.split("\n").filter((line) => line.startsWith("- "))
-    expect(rows.filter((row) => row.startsWith("- sessions "))).toHaveLength(2)
-    for (const key of ["codex:codex-0", "codex:codex-1"]) expect(rows.some((row) => row.includes(key))).toBe(true)
-    expect(rows.filter((row) => row.startsWith("- projects "))).toHaveLength(1)
-    expect(content).toMatch(/2 recent sessions/)
+    expect(rows.filter((row) => row.startsWith("- sessions ") || row.startsWith("- projects "))).toHaveLength(0)
+    for (const key of ["codex:codex-0", "codex:codex-1"]) expect(content.includes(key)).toBe(false)
+    expect(content).toMatch(/^Value summary: /m)
+    expect(content).not.toMatch(/recent sessions? across/)
   }, 60_000)
 
   test("#given the understanding found two facts #when the user selects one #then memory gets exactly that one through the facts commit, and nothing was written before the selection", async () => {

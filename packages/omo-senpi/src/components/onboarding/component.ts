@@ -40,6 +40,8 @@ export interface OnboardingComponentDependencies {
   readonly claimOwnerSeams?: ClaimOwnerSeams
   /** Install-wide state dir; defaults to the engine's. */
   readonly stateDir?: string
+  /** The bounded background summary of this machine's agent sessions; defaults to the scan runtime's. */
+  readonly sessionHistory?: () => Promise<string | undefined>
 }
 
 export interface TuiScanResult extends TuiOnboardingScan {
@@ -48,10 +50,10 @@ export interface TuiScanResult extends TuiOnboardingScan {
   readonly inventory?: string
 }
 
-// The scan runs in the lazy onboarding-scan runtime (`tui-scan-runtime.ts`).
-// Fail-open: a scan that cannot run onboards the user without it.
-async function defaultScan(environment: OnboardingScanEnvironment): Promise<TuiScanResult> {
-  return (await loadOnboardingScanRuntime()).runTuiOnboardingScan(environment)
+// The scan runs in the lazy onboarding-scan runtime (`tui-scan-runtime.ts`), so the TUI never grows a
+// second config reader. Fail-open: a scan that cannot run onboards the user without it.
+async function defaultScan(environment: OnboardingScanEnvironment, sessions: boolean): Promise<TuiScanResult> {
+  return (await loadOnboardingScanRuntime()).runTuiOnboardingScan(environment, { sessions })
 }
 
 const defaultDependencies: OnboardingComponentDependencies = {
@@ -95,17 +97,35 @@ export function createOnboardingComponent(
       const stateDir = dependencies.stateDir ?? getOmoNativeStateDir(process.env)
       const tour = `Follow ${getBuiltinSkillsRoot()}/onboarding/SKILL.md.`
       const scanEnvironment = dependencies.scanEnvironment ?? (() => ({}))
-      // Started on the first onboarding turn, once per process: other sessions never pay for it.
-      let scanned: Promise<TuiScanResult | undefined> | undefined
-      const scan = (): Promise<TuiScanResult | undefined> => {
-        scanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment())))().catch(() => undefined)
-        return scanned
+      // The first onboarding turn awaits only `omo setup`'s sources (sessions: false): its rows, value
+      // summary and migration inventory. Session digests are read by a second scan that starts only
+      // when onboarding_understand runs, after consent. Both run once per process, never at register().
+      let inventoryScanned: Promise<TuiScanResult | undefined> | undefined
+      const inventoryScan = (): Promise<TuiScanResult | undefined> => {
+        inventoryScanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment(), false)))().catch(() => undefined)
+        return inventoryScanned
+      }
+      let understandingScanned: Promise<TuiScanResult | undefined> | undefined
+      const understandingScan = (): Promise<TuiScanResult | undefined> => {
+        understandingScanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment(), true)))().catch(() => undefined)
+        return understandingScanned
       }
       // An injected inventory replaces the scan's; the default scan then never starts for it.
       const injectedFacts = dependencies.migrationFacts
       let injected: Promise<string | undefined> | undefined
+      let history: Promise<void> | undefined
       const withInventory = async (base: string): Promise<string> => {
-        const result = injectedFacts !== undefined && dependencies.scan === undefined ? undefined : await scan()
+        // Session history is never awaited here: it starts with the claim, runs bounded in the
+        // background and rides the next turn when it lands; a hang or failure just leaves it out.
+        history ??= (dependencies.sessionHistory
+          ?? (async () => (await loadOnboardingScanRuntime()).onboardingHistorySummary(scanEnvironment())))()
+          .then((content) => {
+            if (content !== undefined && pending !== undefined) {
+              return pi.sendMessage({ customType: "omo-onboarding:history", content, display: false }, { deliverAs: "nextTurn" })
+            }
+          })
+          .catch(() => undefined)
+        const result = injectedFacts !== undefined && dependencies.scan === undefined ? undefined : await inventoryScan()
         const facts = injectedFacts === undefined
           ? result?.inventory
           : await (injected ??= injectedFacts().catch(() => undefined))
@@ -162,7 +182,7 @@ export function createOnboardingComponent(
 
       pi.registerTool({ ...createOnboardingSessionHistoryTool({ stateDir }) })
       const memoryTools = createOnboardingMemoryTools({
-        scan,
+        scan: understandingScan,
         loadRuntime: loadOnboardingScanRuntime,
         ...(dependencies.understanding === undefined ? {} : { seams: dependencies.understanding }),
       })

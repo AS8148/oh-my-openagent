@@ -20,12 +20,17 @@ import type {
   migrationFactsFromScan,
   onboardingScanContext,
   OnboardingScanEnvironment,
+  onboardingHistorySummary,
   readOnboardingState,
   runOnboardingScan,
-  startOnboardingUnderstanding,
 } from "./scan-runtime"
-import { registerOnboardingUnderstanding, type OnboardingUnderstandingSeams } from "./understand-component"
-import type { createOnboardingUnderstandHandlers } from "./understand-handlers"
+import type { createOnboardingUnderstandingHandlers, OnboardingUnderstandingHandlers } from "./understand-component"
+import {
+  ONBOARDING_UNDERSTAND_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_STOP_RPC_METHOD,
+} from "./understand-contract"
+import type { OnboardingUnderstandingSeams } from "./understand-start"
 import type { runTuiOnboardingScan } from "./tui-scan-runtime"
 import type { executeOnboardingSessionHistory } from "./session-history-tool-runtime"
 
@@ -48,8 +53,8 @@ export interface OnboardingScanRuntime extends TuiMemoryToolsRuntime {
   readonly claimOnboardingOwned: typeof claimOnboardingOwned
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
   readonly onboardingScanContext: typeof onboardingScanContext
-  readonly startOnboardingUnderstanding: typeof startOnboardingUnderstanding
-  readonly createOnboardingUnderstandHandlers: typeof createOnboardingUnderstandHandlers
+  readonly createOnboardingUnderstandingHandlers: typeof createOnboardingUnderstandingHandlers
+  readonly onboardingHistorySummary: typeof onboardingHistorySummary
   readonly runTuiOnboardingScan: typeof runTuiOnboardingScan
   readonly executeOnboardingSessionHistory: typeof executeOnboardingSessionHistory
   readonly applyMemoryFacts: typeof applyMemoryFacts
@@ -130,25 +135,36 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
           }
         })
       }
-      const expired = (entry: HeldScan): boolean => entry.finishedAt !== undefined && now() - entry.finishedAt > ONBOARDING_SCAN_TTL_MS
-      registerOnboardingUnderstanding(pi, handle, {
+      const expired = (entry: Pick<HeldScan, "finishedAt">): boolean => entry.finishedAt !== undefined && now() - entry.finishedAt > ONBOARDING_SCAN_TTL_MS
+      // Understanding's handlers ship in the lazy runtime: the first understanding call loads them, once
+      // per shell (concurrent first calls share one load), so its runs map scopes skip and stop. A failed
+      // load is not kept; the next call retries.
+      let understandingHandlers: Promise<OnboardingUnderstandingHandlers> | undefined
+      const understanding = async (): Promise<OnboardingUnderstandingHandlers | string> => {
+        const pending = understandingHandlers ??= loadRuntime().then((runtime) => runtime.createOnboardingUnderstandingHandlers(pi, understandingDeps))
+        try {
+          return await pending
+        } catch (error) {
+          if (understandingHandlers === pending) understandingHandlers = undefined
+          return `The onboarding runtime could not load: ${error instanceof Error ? error.message : String(error)}`
+        }
+      }
+      const understandingDeps: Parameters<typeof createOnboardingUnderstandingHandlers>[1] = {
         environment,
-        loadStart: async () => (await loadRuntime()).startOnboardingUnderstanding,
         modelRegistry: () => modelRegistry,
         busyScans: shared.understanding,
-        // The digests exist only in memory, with the retained scan: an expired, evicted or applied scan has none.
-        scanForUnderstanding: async (scanId) => {
-          const held = scans.get(scanId)
-          const outcome = await held?.outcome
-          if (held === undefined || outcome === undefined || scans.get(scanId) !== held) return undefined
-          if (held.finishedAt === undefined || expired(held)) {
-            scans.delete(scanId)
-            return undefined
-          }
-          return { digests: outcome.digests, projectRoots: outcome.projectRoots }
-        },
+        scans,
+        expired,
         ...(deps.understanding === undefined ? {} : { seams: deps.understanding }),
-      }, async () => (await loadRuntime()).createOnboardingUnderstandHandlers)
+      }
+      const delegate = (pick: (handlers: OnboardingUnderstandingHandlers) => (request: unknown) => unknown) =>
+        async (request: unknown): Promise<unknown> => {
+          const handlers = await understanding()
+          return typeof handlers === "string" ? { kind: "unavailable", reason: handlers } : await pick(handlers)(request)
+        }
+      handle(ONBOARDING_UNDERSTAND_RPC_METHOD, delegate((handlers) => handlers.understand))
+      handle(ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD, delegate((handlers) => handlers.skip))
+      handle(ONBOARDING_UNDERSTAND_STOP_RPC_METHOD, delegate((handlers) => handlers.stop))
 
       handle(ONBOARDING_SCAN_RPC_METHOD, (request): OnboardingScanResponse => {
         const scanId = randomUUID()
@@ -201,10 +217,9 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
         if (held.finishedAt === undefined || expired(held)) {
           return { kind: "stale", reason: "The scan expired; retained scans live ten minutes. Run omo.onboarding.scan again.", paths: [] }
         }
-        // The stale, credential-store and write checks ship in the sidecar; the scan was taken
-        // above, synchronously, so two applies racing on one scan can never both run.
-        const runtime = await loadRuntime()
-        return runtime.applyRetainedScan(scanId, plans.plans, stages.filter(isApplyStage), authStore)
+        // Everything past the expiry check needs the runtime, so it ships there: the auth checks and the writers.
+        // The scan was taken out of the store above, synchronously, so two applies racing on one scan never both run.
+        return await (await loadRuntime()).applyRetainedScan(scanId, plans.plans, stages.filter(isApplyStage), authStore)
       })
     },
   }
@@ -222,41 +237,24 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const bundled = typeof OMO_SENPI_BUNDLED !== "undefined" && OMO_SENPI_BUNDLED
   const loaded: unknown = await import(new URL(bundled ? ONBOARDING_SCAN_RUNTIME_FILE : "scan-runtime.ts", import.meta.url).href)
   if (!isRecord(loaded)) throw new Error("onboarding scan runtime did not load")
-  const run = loaded["runOnboardingScan"]
-  const apply = loaded["applyRetainedScan"]
-  const facts = loaded["migrationFactsFromScan"]
-  const context = loaded["onboardingScanContext"]
-  const understand = loaded["startOnboardingUnderstanding"]
-  const understandHandlers = loaded["createOnboardingUnderstandHandlers"]
-  const tuiScan = loaded["runTuiOnboardingScan"]
-  const historyTool = loaded["executeOnboardingSessionHistory"]
-  const memoryFacts = loaded["applyMemoryFacts"]
-  const appliedReconcile = loaded["reconcileAppliedFactsBatches"]
-  const tuiUnderstand = loaded["executeOnboardingUnderstand"]
-  const tuiApply = loaded["executeOnboardingMemoryApply"]
-  const readState = loaded["readOnboardingState"]
-  const claimOwned = loaded["claimOnboardingOwned"]
-  if (
-    typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof understand !== "function" || typeof understandHandlers !== "function" || typeof tuiScan !== "function" || typeof historyTool !== "function" || typeof memoryFacts !== "function" || typeof appliedReconcile !== "function" ||
-    typeof tuiUnderstand !== "function" || typeof tuiApply !== "function" ||
-    typeof context !== "function" || typeof readState !== "function" || typeof claimOwned !== "function"
-  ) {
-    throw new Error("onboarding scan runtime is missing its scan, apply or understanding export")
-  }
-  return {
-    runOnboardingScan: (...args) => Reflect.apply(run, undefined, args),
-    applyRetainedScan: (...args) => Reflect.apply(apply, undefined, args),
-    migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
-    onboardingScanContext: (...args) => Reflect.apply(context, undefined, args),
-    startOnboardingUnderstanding: (...args) => Reflect.apply(understand, undefined, args),
-    createOnboardingUnderstandHandlers: (...args) => Reflect.apply(understandHandlers, undefined, args),
-    runTuiOnboardingScan: (...args) => Reflect.apply(tuiScan, undefined, args),
-    executeOnboardingSessionHistory: (...args) => Reflect.apply(historyTool, undefined, args),
-    applyMemoryFacts: (...args) => Reflect.apply(memoryFacts, undefined, args),
-    reconcileAppliedFactsBatches: (...args) => Reflect.apply(appliedReconcile, undefined, args),
-    executeOnboardingUnderstand: (...args) => Reflect.apply(tuiUnderstand, undefined, args),
-    executeOnboardingMemoryApply: (...args) => Reflect.apply(tuiApply, undefined, args),
-    readOnboardingState: (...args) => Reflect.apply(readState, undefined, args),
-    claimOnboardingOwned: (...args) => Reflect.apply(claimOwned, undefined, args),
-  }
+  const missing = RUNTIME_EXPORTS.filter((name) => typeof loaded[name] !== "function")
+  if (missing.length > 0) throw new Error(`onboarding scan runtime is missing ${missing.join(", ")}`)
+  return loaded as unknown as OnboardingScanRuntime
 }
+
+const RUNTIME_EXPORTS: readonly (keyof OnboardingScanRuntime)[] = [
+  "runOnboardingScan",
+  "migrationFactsFromScan",
+  "applyRetainedScan",
+  "createOnboardingUnderstandingHandlers",
+  "onboardingHistorySummary",
+  "onboardingScanContext",
+  "readOnboardingState",
+  "claimOnboardingOwned",
+  "runTuiOnboardingScan",
+  "executeOnboardingSessionHistory",
+  "applyMemoryFacts",
+  "reconcileAppliedFactsBatches",
+  "executeOnboardingUnderstand",
+  "executeOnboardingMemoryApply",
+]

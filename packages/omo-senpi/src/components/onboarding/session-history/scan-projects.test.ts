@@ -1,6 +1,6 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, dirname, join } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { afterEach, describe, expect, it } from "bun:test"
 
 import { nodeSessionHistoryFs } from "./session-history-fs"
@@ -149,7 +149,7 @@ describe("session-history scanProjects (parity with desktop AgentSessionScanner.
     ])
   })
 
-  it("#given case variants with distinct identities #when scanned #then keeps both", async () => {
+  it("#given case variants with distinct identities #when scanned #then keeps both off Windows and folds them on Windows", async () => {
     // given
     const claudeHomePath = await temp.make("claude-home-")
     const codexHomePath = await temp.make("codex-home-")
@@ -193,10 +193,14 @@ describe("session-history scanProjects (parity with desktop AgentSessionScanner.
     // given
     const claudeHomePath = await temp.make("claude-home-")
     const codexHomePath = await temp.make("codex-home-")
-    await writeTranscript({ filePath: join(claudeHomePath, "projects", "-relative", "session.jsonl"), contents: claudeSessionLine(join("relative", "workspace")), mtimeMs: Date.parse("2026-01-01T00:00:00.000Z") })
+    const workspace = await temp.make("workspace-relative-")
+    const relativeCwd = join("relative", basename(workspace))
+    await writeTranscript({ filePath: join(claudeHomePath, "projects", "-relative", "session.jsonl"), contents: claudeSessionLine(relativeCwd), mtimeMs: Date.parse("2026-01-01T00:00:00.000Z") })
+    // The relative cwd resolves to a real directory, so only the absolute-path guard can drop it (no cross-drive path on Windows).
+    const fs = { ...nodeSessionHistoryFs, stat: (filePath: string) => nodeSessionHistoryFs.stat(filePath === relativeCwd || filePath === resolve(relativeCwd) ? workspace : filePath) }
 
     // when / then
-    expect((await runScan({ claudeHomePath, codexHomePath })).candidates).toEqual([])
+    expect((await runScan({ claudeHomePath, codexHomePath, fs })).candidates).toEqual([])
   })
 
   it("#given a cwd that no longer exists #when scanned #then drops it", async () => {

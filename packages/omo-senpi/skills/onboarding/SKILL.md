@@ -21,7 +21,8 @@ Use Senpi-native tools only: `read`, `bash`, `edit`, `write`, the `memory` tools
 
 Your context carries the `Onboarding scan` block: the engine already ran the one scan the desktop
 app and `omo setup` use, with one row per item it found on this computer (sign-ins, providers, MCP
-servers, skills, model choices, projects, recent sessions) and a `Value summary` line. When you
+servers, skills, model choices) and a `Value summary` line. Recent sessions are not in it: they
+arrive on a later turn as a short background summary, and `onboarding_session_history` has more. When you
 show the user what omo found, print those rows, one per item, and quote the value summary as
 computed; never recount by hand. Never assume a tool from another agent product exists here.
 
