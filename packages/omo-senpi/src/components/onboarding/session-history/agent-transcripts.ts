@@ -39,7 +39,7 @@ export function defaultAgentHomes(env: Readonly<Record<string, string | undefine
   ]
 }
 
-async function uniqueHomes(rules: ProjectPathRules, homes: ReadonlyArray<AgentHome>, source: AgentSessionSource) {
+export async function uniqueHomes(rules: ProjectPathRules, homes: ReadonlyArray<AgentHome>, source: AgentSessionSource) {
   const seen = new Set<string>()
   const unique: Array<string> = []
   for (const home of homes) {
