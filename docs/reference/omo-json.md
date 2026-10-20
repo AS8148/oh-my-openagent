@@ -173,7 +173,7 @@ Commit identity: commits omo causes in your repository carry your own git `user.
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `commit_footer` | boolean \| string | `false` | Opt in to the "Ultraworked with [omo](https://github.com/code-yeongyu/oh-my-openagent)" footer in the commit body. A string replaces the builtin footer text. |
-| `include_co_authored_by` | boolean | `true` | Adds `Co-authored-by: sisyphus-dev-ai <sisyphus-dev-ai@users.noreply.github.com>` to every commit git-master writes. It goes through `git -c trailer.ifexists=addIfDifferent commit --trailer`, so a commit message that already carries it (an amend, a reworded or squashed commit) keeps a single copy. `false` leaves it out. |
+| `include_co_authored_by` | boolean | `true` | Adds `Co-authored-by: sisyphus-dev-ai <sisyphus-dev-ai@users.noreply.github.com>` to every commit git-master writes. It goes through `git -c trailer.ifexists=addIfDifferent commit --trailer`, so a commit message that already carries it (an amend or a reworded commit) keeps a single copy; after a squash git-master rewrites the joined message once so it keeps one. Needs git 2.32 or newer (`git commit --trailer`). `false` leaves it out. |
 | `git_env_prefix` | string | `"GIT_MASTER=1"` | Space-separated `NAME=value` assignments (letters, digits, `_`, `-`) put before every git command git-master runs. `""` turns the prefix off. Same key and default as the OpenCode plugin's `git_master.git_env_prefix`. |
 
 To opt in to the body footer:

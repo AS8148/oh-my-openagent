@@ -80,6 +80,26 @@ describe("omo-senpi git-master attribution directive", () => {
     expect(occurrences(git(repo, ["log", "-1", "--format=%B"]), TRAILER)).toBe(1)
   })
 
+  test("#given two trailered commits joined by an interactive squash #when the message is rewritten with the instructed amend #then the squashed commit keeps one trailer", () => {
+    // given
+    const directive = buildGitMasterAttributionDirective(OmoGitMasterSettingsSchema.parse({})) ?? ""
+    const command = exampleCommitCommand(directive)
+    const repo = scratchRepo()
+    runInRepo(repo, command.replace("{Commit Message}", "feat: part one"))
+    writeFileSync(join(repo, "file.txt"), "content\nmore\n")
+    git(repo, ["add", "file.txt"])
+    runInRepo(repo, command.replace("{Commit Message}", "feat: part two"))
+    runInRepo(repo, `GIT_SEQUENCE_EDITOR="sed -i.bak '2s/^pick/squash/'" GIT_EDITOR=true git rebase -q -i --root`)
+    const squashedTrailers = occurrences(git(repo, ["log", "-1", "--format=%B"]), TRAILER)
+
+    // when
+    runInRepo(repo, command.replace(" commit ", " commit --amend ").replace("{Commit Message}", "feat: both parts"))
+
+    // then
+    expect(squashedTrailers).toBe(2)
+    expect(git(repo, ["log", "-1", "--format=%B"]).trim()).toBe(`feat: both parts\n\n${TRAILER}`)
+  })
+
   test("#given include_co_authored_by false and no footer #when the directive is built #then no directive is emitted", () => {
     // given
     const settings = OmoGitMasterSettingsSchema.parse({ include_co_authored_by: false })

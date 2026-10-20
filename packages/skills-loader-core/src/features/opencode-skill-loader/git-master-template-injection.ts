@@ -50,7 +50,8 @@ export const SISYPHUS_CO_AUTHOR_TRAILER =
 
 /**
  * `addIfDifferent` makes git itself keep a single copy of the trailer: a message that already
- * carries it (an amend, a reworded or squashed commit) is not given a second one.
+ * carries it (an amend or a reworded commit) is not given a second one. A squash joins messages
+ * without `--trailer` and keeps both copies, so the instruction asks for one rewrite afterwards.
  */
 const DEDUP_TRAILER_GIT_OPTION = "-c trailer.ifexists=addIfDifferent"
 
@@ -58,6 +59,8 @@ export const CO_AUTHOR_TRAILER_INSTRUCTION = [
 	`**Co-author trailer, exactly once:** \`${SISYPHUS_CO_AUTHOR_TRAILER}\`.`,
 	`Pass it with \`--trailer\`, never inside \`-m\`, and run the commit as \`git ${DEDUP_TRAILER_GIT_OPTION} commit ...\`,`,
 	"so a message that already carries it keeps a single copy.",
+	"A squash joins messages without `--trailer` and can leave two copies, so after squashing rewrite the message once",
+	"with the same command plus `--amend` and a fresh `-m` that does not repeat the trailer.",
 ].join(" ")
 
 export const NO_CO_AUTHOR_INSTRUCTION = "Do NOT add a Co-authored-by trailer."

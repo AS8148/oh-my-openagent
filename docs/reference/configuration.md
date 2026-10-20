@@ -934,7 +934,7 @@ Configure git commit behavior:
 { "git_master": { "include_co_authored_by": true, "commit_footer": false, "git_env_prefix": "GIT_MASTER=1" } }
 ```
 
-`include_co_authored_by` (default `true`) adds `Co-authored-by: sisyphus-dev-ai <sisyphus-dev-ai@users.noreply.github.com>` to every commit git-master writes, exactly once: it is passed with `git -c trailer.ifexists=addIfDifferent commit --trailer`, so amending or rewording a commit that already has it does not add a second copy. Set it to `false` to keep the trailer out of your history. `commit_footer` (default `false`) opts in to an "Ultraworked with Sisyphus" footer in the commit body; a string replaces the builtin text. Either way, commits keep your own git author and committer.
+`include_co_authored_by` (default `true`) adds `Co-authored-by: sisyphus-dev-ai <sisyphus-dev-ai@users.noreply.github.com>` to every commit git-master writes, exactly once: it is passed with `git -c trailer.ifexists=addIfDifferent commit --trailer`, so amending or rewording a commit that already has it does not add a second copy, and after a squash git-master rewrites the joined message once. It needs git 2.32 or newer. Set it to `false` to keep the trailer out of your history. `commit_footer` (default `false`) opts in to an "Ultraworked with Sisyphus" footer in the commit body; a string replaces the builtin text. Either way, commits keep your own git author and committer.
 
 This key configures the OpenCode plugin inside `[opencode]`. The Senpi harness reads the typed shared `git_master` section instead, documented in the [omo.json reference](./omo-json.md#git_master-native-harness).
 
