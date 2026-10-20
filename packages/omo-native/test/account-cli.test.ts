@@ -8,7 +8,7 @@ import { appendEntries, emptyChain } from "../../memory-core/src/sync/crypto/cha
 import { createRejectionCounter } from "../../memory-core/src/sync/crypto/rejection.ts"
 import { pinTrustAnchor } from "../../memory-core/src/sync/crypto/trust-pin.ts"
 import { createWorld, removeWorldStateDirs } from "../../memory-core/src/sync/recovery/testing/world.test-support.ts"
-import type { CredentialStore } from "../../omo-opencode/src/cli/service-auth/keystore"
+import { createCredentialStore, type CredentialStore } from "../../omo-opencode/src/cli/service-auth/keystore"
 import type { Credentials } from "../../omo-opencode/src/cli/service-auth/protocol"
 import { ACCOUNT_EXIT, runAccountVerb } from "../account-cli"
 
@@ -169,5 +169,25 @@ describe("omo account", () => {
     const forgot = await run(store, ["forget"])
     expect(forgot.out).toEqual([{ forgotten: true }])
     expect(current()).toBeNull()
+  })
+})
+
+describe("omo account on a locked OS credential store (desktop#3509)", () => {
+  test("every verb reports keychain locked as its own exit code, never a generic failure", async () => {
+    const locked = () => Promise.reject(Object.assign(new Error("SecKeychain write failed (-25308)"), { code: "ERR_SECRETS_PLATFORM_ERROR" }))
+    const store = createCredentialStore("http://127.0.0.1:1", { get: locked, set: locked, delete: locked }, "darwin")
+    for (const [args, stdin] of [[["show"]], [["token"]], [["export"]], [["forget"]], [["adopt"], JSON.stringify(credential("dev_x", 60_000))]] as const) {
+      const result = await run(store, [...args], stdin === undefined ? {} : { stdin })
+      expect({ args, code: result.code, out: result.out }).toEqual({ args, code: ACCOUNT_EXIT.keychainLocked, out: [{ keychain: "locked" }] })
+      expect(result.err.join("\n")).toContain("macOS Keychain is locked")
+    }
+  })
+
+  test("any other credential-store failure stays a generic failure", async () => {
+    const broken = () => Promise.reject(new Error("boom"))
+    const store = createCredentialStore("http://127.0.0.1:1", { get: broken, set: broken, delete: broken }, "darwin")
+    const result = await run(store, ["show"])
+    expect(result.code).toBe(ACCOUNT_EXIT.failed)
+    expect(result.out).toEqual([])
   })
 })

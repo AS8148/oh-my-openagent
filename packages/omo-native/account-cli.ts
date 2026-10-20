@@ -1,14 +1,14 @@
 import { resolveMemoryRoot } from "../memory-core/src/identity/layout"
 import { loadTrustAnchor } from "../memory-core/src/sync/crypto/trust-pin.ts"
 import { syncPinDir } from "../memory-core/src/sync/pin-dir"
-import { createCredentialStore, type CredentialStore } from "../omo-opencode/src/cli/service-auth/keystore"
+import { createCredentialStore, type CredentialStore, KeychainLockedError } from "../omo-opencode/src/cli/service-auth/keystore"
 import { type Credentials, credentialSchema, serviceOrigin, SignInError } from "../omo-opencode/src/cli/service-auth/protocol"
 import { createSession } from "../omo-opencode/src/cli/service-auth/session"
 
 // `omo account` lets the desktop share this machine's one OS-keychain credential with `omo login`
 // (one sync device per machine). It is a machine interface: one JSON line on stdout, secrets only on
 // stdin and stdout, and the exit code carries the outcome.
-export const ACCOUNT_EXIT = { ok: 0, failed: 1, invalid: 2, conflict: 3, signedOut: 4, ended: 5, uncertain: 6 } as const
+export const ACCOUNT_EXIT = { ok: 0, failed: 1, invalid: 2, conflict: 3, signedOut: 4, ended: 5, uncertain: 6, keychainLocked: 7 } as const
 
 export interface AccountCommandDependencies {
   readonly api: string
@@ -119,6 +119,10 @@ export async function runAccountVerb(dependencies: AccountCommandDependencies, a
   try {
     return await runVerb(dependencies, args)
   } catch (error) {
+    if (error instanceof KeychainLockedError) {
+      dependencies.error(error.message)
+      return reply(dependencies, { keychain: "locked" }, ACCOUNT_EXIT.keychainLocked)
+    }
     dependencies.error(error instanceof SignInError || error instanceof Error ? error.message : "omo account: the operation failed")
     return ACCOUNT_EXIT.failed
   }

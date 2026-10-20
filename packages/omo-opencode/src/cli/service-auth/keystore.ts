@@ -13,6 +13,14 @@ export type CredentialStore = {
   readonly clear: () => Promise<void>
 }
 
+export class KeychainLockedError extends SignInError {}
+
+// The OS store refused because it is locked and may not ask the person (macOS errSecInteractionNotAllowed,
+// a locked libsecret keyring). Callers must surface this as its own outcome, never as a prompt.
+const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|\bis locked\b/i
+const isLocked = (error: unknown): boolean =>
+  error instanceof Error && (LOCKED.test(error.message) || LOCKED.test(String((error as { code?: unknown }).code ?? "")))
+
 export function credentialId(api: string): string {
   return createHash("sha256").update(serviceOrigin(api)).digest("hex")
 }
@@ -28,11 +36,13 @@ export function createCredentialStore(
     : platform === "win32" ? "Windows Credential Manager" : null
   if (platformName === null) throw new SignInError("This platform has no supported OS credential store.")
   const key = { service: "omo-cli", name: credentialId(api) }
-  const unavailable = () => new SignInError(`Cannot access ${platformName}. Unlock or enable the OS credential store and try again. Credentials are never saved to a file.`)
+  const unavailable = (error: unknown) => isLocked(error)
+    ? new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
+    : new SignInError(`Cannot access ${platformName}. Unlock or enable the OS credential store and try again. Credentials are never saved to a file.`)
   return {
     async read() {
       let value: string | null
-      try { value = await secrets.get(key) } catch { throw unavailable() }
+      try { value = await secrets.get(key) } catch (error) { throw unavailable(error) }
       if (value === null) return null
       try { return credentialSchema.parse(JSON.parse(value)) } catch {
         throw new SignInError("Stored sign-in data is invalid. Run omo logout, then omo login.")
@@ -40,10 +50,10 @@ export function createCredentialStore(
     },
     async write(value) {
       // One OS-store replacement commits the rotating token and its access token together.
-      try { await secrets.set({ ...key, value: JSON.stringify(credentialSchema.parse(value)) }) } catch { throw unavailable() }
+      try { await secrets.set({ ...key, value: JSON.stringify(credentialSchema.parse(value)) }) } catch (error) { throw unavailable(error) }
     },
     async clear() {
-      try { await secrets.delete(key) } catch { throw unavailable() }
+      try { await secrets.delete(key) } catch (error) { throw unavailable(error) }
     },
   }
 }
