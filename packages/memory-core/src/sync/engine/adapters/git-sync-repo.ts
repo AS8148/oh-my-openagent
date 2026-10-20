@@ -34,7 +34,7 @@ export function createGitSyncRepo(options: GitSyncRepoOptions): SyncRepo {
   const gitDir = join(root, ".git")
   const run = async (argv: readonly string[], env?: NodeJS.ProcessEnv, stdin?: string): Promise<string> => {
     const result = await exec.run(argv, { cwd: root, timeoutMs: TIMEOUT_MS, ...(env === undefined ? {} : { env: { ...process.env, ...env } }), ...(stdin === undefined ? {} : { stdin }) })
-    if (result.code !== 0) throw new SyncCommitError(`git ${argv[0]} failed (${result.code}): ${result.stderr.trim()}`)
+    if (result.code !== 0) throw new SyncCommitError(`git ${argv.find((arg) => !arg.startsWith("-") && !arg.includes("=")) ?? argv[0]} failed (${result.code}): ${result.stderr.trim()}`)
     return result.stdout.trim()
   }
   const head = async (): Promise<string | null> => {

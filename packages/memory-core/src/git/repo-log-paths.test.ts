@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { realpathSync } from "node:fs"
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { createNodeGitExec, GitMemoryRepo, type GitExec } from "./index"
@@ -139,14 +139,23 @@ describe("GitMemoryRepo log reads under user git config", () => {
     const { dir, repo } = await repoWithRootSpacedRenameAndMerge(countingExec().exec)
     await commitSigned(dir, { "reference/signed.md": "s\n" }, "signed one", 1_700_000_000)
     await commitSigned(dir, { "reference/signed.md": "t\n" }, "signed two", 1_700_000_100)
-    const plain = { log: await repo.log({ limit: 5 }), paths: await repo.log({ limit: 5, includePaths: true }), head: await repo.headCommitTimestamp() }
+    const head = (await run(dir, ["rev-parse", "HEAD"])).trim()
+    const read = async (reader: GitMemoryRepo) => ({
+      log: await reader.log({ limit: 5 }),
+      paths: await reader.log({ limit: 5, includePaths: true }),
+      head: await reader.headCommitTimestamp(),
+      times: Object.fromEntries(await reader.pathCommitTimes(head)),
+    })
+    const plain = await read(repo)
     await run(dir, ["config", "log.showSignature", "true"])
+    await rm(join(dir, ".git", "omo-path-commit-times.json"), { force: true })
 
     // when
-    const configured = { log: await repo.log({ limit: 5 }), paths: await repo.log({ limit: 5, includePaths: true }), head: await repo.headCommitTimestamp() }
+    const configured = await read(new GitMemoryRepo({ dir, agentId: "agent", exec: countingExec().exec }))
 
     // then
     expect(plain.head).toBe(1_700_000_100)
+    expect(plain.times["reference/signed.md"]).toBe(1_700_000_100)
     expect(plain.log.slice(0, 2).map((commit) => commit.subject)).toEqual(["signed two", "signed one"])
     expect(configured).toEqual(plain)
   })
