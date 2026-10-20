@@ -16,8 +16,10 @@ const TEMPLATE = "omo-senpi:before_agent_start:v3:cache-agent"
 const OPTIONS = { agentId: "cache-agent" }
 const STORE_FILE_PREFIX = "omo-memory-block-"
 const tempDirs: string[] = []
+const caches: MemoryBlockCache[] = []
 
 afterEach(async () => {
+  await Promise.all(caches.splice(0).map((cache) => cache.settled()))
   await Promise.all(tempDirs.splice(0).map((dir) => removeTree(dir, { maxRetries: 10, retryDelay: 200 })))
 })
 
@@ -64,8 +66,13 @@ function counting(repo: GitMemoryRepo): { repo: GitMemoryRepo; work: GitWork } {
 
 const store = () => import("./block-persist")
 
+function tracked(cache: MemoryBlockCache): MemoryBlockCache {
+  caches.push(cache)
+  return cache
+}
+
 function persistedCache(): MemoryBlockCache {
-  return new MemoryBlockCache({ store })
+  return tracked(new MemoryBlockCache({ store }))
 }
 
 async function settle(cache: MemoryBlockCache): Promise<void> {
@@ -124,17 +131,17 @@ describe("MemoryBlockCache persisted blocks", () => {
     // given
     const { repo } = await createRepo()
     const revision = await repo.head()
-    const first = new MemoryBlockCache({ store, build: "build-a" })
+    const first = tracked(new MemoryBlockCache({ store, build: "build-a" }))
     await first.compile(repo, TEMPLATE, OPTIONS, revision)
     await settle(first)
 
     // when
     const otherBuild = counting(repo)
-    await new MemoryBlockCache({ store, build: "build-b" }).compile(otherBuild.repo, TEMPLATE, OPTIONS, revision)
+    await tracked(new MemoryBlockCache({ store, build: "build-b" })).compile(otherBuild.repo, TEMPLATE, OPTIONS, revision)
     const otherIdentity = counting(repo)
-    await new MemoryBlockCache({ store, build: "build-a" }).compile(otherIdentity.repo, TEMPLATE, { agentId: "other-agent" }, revision)
+    await tracked(new MemoryBlockCache({ store, build: "build-a" })).compile(otherIdentity.repo, TEMPLATE, { agentId: "other-agent" }, revision)
     const sameInputs = counting(repo)
-    await new MemoryBlockCache({ store, build: "build-a" }).compile(sameInputs.repo, TEMPLATE, OPTIONS, revision)
+    await tracked(new MemoryBlockCache({ store, build: "build-a" })).compile(sameInputs.repo, TEMPLATE, OPTIONS, revision)
 
     // then
     expect(otherBuild.work.lsTree).toBeGreaterThan(0)
