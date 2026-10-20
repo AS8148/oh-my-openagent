@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:aaf603cab424d54f54b502d05269e0a7d9dd78f997bdb89521d0556b561a5c56:3ac169ea51f88229ca4d23bf351c7a58c50cfcc9786656663afb3df1c6620af1
+// omo-codex-install:60bd72b680fdafe4d65396282ef5122bc7dd56141c064c6a75b95e6db276dc42:64cabd3c0f2c401b406fede933132ef341dcf58f9627a21bce2275e0525e9b8b
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -19637,9 +19637,11 @@ var OmoMemoryAgentOverridesSchema = object({
   projection: OmoMemoryProjectionLayerSchema.optional(),
   compile_warn_tokens: number2().int().positive().optional()
 }).strict();
+var OmoMemoryAutoIdentitySchema = _enum(["path", "git"]);
 var OmoMemorySettingsSchema = object({
   enabled: boolean2().default(true),
   agent: string2().min(1).default("auto"),
+  auto_identity: OmoMemoryAutoIdentitySchema.default("path"),
   reflection: OmoMemoryReflectionSchema.default({
     enabled: true,
     trigger: { step_count: 25, on_compaction: true },
@@ -19680,6 +19682,7 @@ var OmoMemorySettingsSchema = object({
 var OmoMemorySettingsLayerSchema = object({
   enabled: boolean2().optional(),
   agent: string2().min(1).optional(),
+  auto_identity: OmoMemoryAutoIdentitySchema.optional(),
   reflection: OmoMemoryReflectionLayerSchema.optional(),
   nudge: OmoMemoryNudgeLayerSchema.optional(),
   facts: OmoMemoryFactsLayerSchema.optional(),
