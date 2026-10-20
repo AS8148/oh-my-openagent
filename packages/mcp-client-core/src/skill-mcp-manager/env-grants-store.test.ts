@@ -1,6 +1,8 @@
-// Bun port of senpi a747be4db1: test/suite/regressions/3796-grants-store.test.ts.
+// Bun port of senpi 1cbe1594e353126ab8016bb0183ab82ffc5715d5: test/suite/regressions/3796-grants-store.test.ts.
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test"
 import * as fs from "node:fs"
+import * as fsPromises from "node:fs/promises"
+import * as timers from "node:timers/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { unsafeTestValue } from "../../../../test-support/unsafe-test-value"
@@ -13,8 +15,10 @@ const restorers: (() => void)[] = []
 const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
 const label = { project: "/synthetic/project", skill: "carrier", server: "probe" }
 const identity = declarationDigest({ command: "synthetic-probe" })
+const platform = Object.getOwnPropertyDescriptor(process, "platform")!
 beforeEach(() => { root = fs.mkdtempSync(join(tmpdir(), "omo-10693-store-")) })
 afterEach(() => {
+  Object.defineProperty(process, "platform", platform)
   stop?.()
   stop = undefined
   for (const restore of restorers.splice(0)) restore()
@@ -91,6 +95,69 @@ test("failed rename leaves no grant, temporary file or lock", async () => {
   expect((await read(path)).grants).toEqual({})
   expect(fs.readdirSync(root)).toEqual(["mcp-env-grants.json"])
 })
+
+for (const code of ["EPERM", "EACCES", "EBUSY"]) {
+  test(`retries a Windows ${code} replace without repeating the grant mutation`, async () => {
+    // given
+    const path = resolveGrantsStorePath(root)
+    await addGrant(path, identity, label, ["OLD"])
+    Object.defineProperty(process, "platform", { value: "win32" })
+    const error = Object.assign(new Error("synthetic open handle"), { code })
+    const rename = spyOn(fsPromises, "rename").mockRejectedValueOnce(error).mockRejectedValueOnce(error)
+    const delay = spyOn(timers, "setTimeout").mockResolvedValue(undefined)
+    restorers.push(() => rename.mockRestore(), () => delay.mockRestore())
+    // when
+    const snapshot = await addGrant(path, identity, label, ["NEW"])
+    // then
+    expect(rename).toHaveBeenCalledTimes(3)
+    expect(delay.mock.calls.map(([ms]) => ms)).toEqual([50, 100])
+    expect(snapshot.generation).toBe(2)
+    expect((await read(path)).grants[identity]?.names).toEqual(["NEW", "OLD"])
+    expect(fs.readdirSync(root)).toEqual(["mcp-env-grants.json"])
+  })
+}
+
+test("bounds Windows replace retries, preserves the old store and releases the lock", async () => {
+  // given
+  const path = resolveGrantsStorePath(root)
+  await addGrant(path, identity, label, ["OLD"])
+  Object.defineProperty(process, "platform", { value: "win32" })
+  const error = Object.assign(new Error("synthetic open handle"), { code: "EPERM" })
+  const rename = spyOn(fsPromises, "rename").mockRejectedValue(error)
+  const delay = spyOn(timers, "setTimeout").mockResolvedValue(undefined)
+  restorers.push(() => rename.mockRestore(), () => delay.mockRestore())
+  // when / then
+  await expect(addGrant(path, identity, label, ["NEW"])).rejects.toBe(error)
+  expect(rename).toHaveBeenCalledTimes(6)
+  expect(delay.mock.calls.map(([ms]) => ms)).toEqual([50, 100, 200, 400, 800])
+  expect((await read(path)).generation).toBe(1)
+  expect((await read(path)).grants[identity]?.names).toEqual(["OLD"])
+  expect(fs.readdirSync(root)).toEqual(["mcp-env-grants.json"])
+  rename.mockRestore()
+  await addGrant(path, identity, label, ["AFTER"])
+  expect((await read(path)).generation).toBe(2)
+})
+
+for (const [os, code] of [
+  ["linux", "EPERM"],
+  ["linux", "EACCES"],
+  ["linux", "EBUSY"],
+  ["win32", "ENOENT"],
+]) {
+  test(`does not retry ${code} on ${os}`, async () => {
+    // given
+    Object.defineProperty(process, "platform", { value: os })
+    const error = Object.assign(new Error("synthetic rename failure"), { code })
+    const rename = spyOn(fsPromises, "rename").mockRejectedValue(error)
+    const delay = spyOn(timers, "setTimeout").mockResolvedValue(undefined)
+    restorers.push(() => rename.mockRestore(), () => delay.mockRestore())
+    // when / then
+    await expect(addGrant(resolveGrantsStorePath(root), identity, label, ["NEW"])).rejects.toBe(error)
+    expect(rename).toHaveBeenCalledTimes(1)
+    expect(delay).not.toHaveBeenCalled()
+    expect(fs.readdirSync(root)).toEqual([])
+  })
+}
 
 test("watches creation and atomic replacements from before the store exists", async () => {
   const path = resolveGrantsStorePath(join(root, "not-created-yet"))

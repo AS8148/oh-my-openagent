@@ -179,7 +179,15 @@ describe("legacy skill containment at discovery and reread", () => {
     const open = fs.openSync
     let injected = false
     const hook = spyOn(fs, "openSync").mockImplementation((file, flags, mode) => {
-      if (file === fs.realpathSync.native(path) && !injected) {
+      let matches = false
+      if (!injected) {
+        try {
+          matches = fs.realpathSync.native(file) === fs.realpathSync.native(path)
+        } catch {
+          // Let the real open report inaccessible or missing paths.
+        }
+      }
+      if (matches) {
         injected = true
         fs.renameSync(path, `${path}.original`)
         symlinkSync(join(f.outside, "SKILL.md"), path)

@@ -1,4 +1,4 @@
-// Vendored from code-yeongyu/senpi@c7ac4b1a8674e03a9e85caf6c89c7ff12b1008b7.
+// Vendored from code-yeongyu/senpi@1cbe1594e353126ab8016bb0183ab82ffc5715d5.
 // Source of truth: packages/coding-agent/src/core/extensions/builtin/mcp/env-grants-store.ts.
 // Replace this copy with the engine export after the senpi release.
 /**
@@ -35,6 +35,7 @@ import { type FSWatcher, watch } from "node:fs";
 import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import lockfile from "proper-lockfile";
 
 export interface GrantLabel {
@@ -133,7 +134,22 @@ async function update(path: string, mutate: (grants: Record<string, Grant>) => v
 		const file = await open(temporary, "wx", 0o600);
 		try { await file.writeFile(`${JSON.stringify(next)}\n`); await file.sync(); }
 		finally { await file.close(); }
-		await rename(temporary, path);
+		for (let attempt = 0; ; attempt++) {
+			try {
+				await rename(temporary, path);
+				break;
+			} catch (error) {
+				// Windows readers (including antivirus) can temporarily deny replacement.
+				if (
+					process.platform !== "win32" ||
+					!record(error) ||
+					!["EPERM", "EACCES", "EBUSY"].includes(String(error.code)) ||
+					attempt >= 5
+				)
+					throw error;
+				await delay(50 * 2 ** attempt);
+			}
+		}
 		if (process.platform !== "win32") {
 			const directory = await open(dirname(path), "r");
 			try { await directory.sync(); } finally { await directory.close(); }
