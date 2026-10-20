@@ -13,6 +13,9 @@ import {
   ONBOARDING_APPLY_RPC_METHOD,
   ONBOARDING_SCAN_RPC_EVENT,
   ONBOARDING_SCAN_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_STOP_RPC_METHOD,
   createOnboardingScanComponent,
   createOnboardingScanStore,
   type OnboardingApplyResponse,
@@ -269,7 +272,7 @@ function sourcesOf(events: readonly OnboardingScanEvent[]): string[] {
 describe("onboarding scan RPC", () => {
   test("#given the component registers #then it serves the scan and apply methods", () => {
     const host = register(emptyProfile())
-    expect([...host.handlers.keys()].sort()).toEqual([ONBOARDING_APPLY_RPC_METHOD, ONBOARDING_SCAN_RPC_METHOD].sort())
+    expect([...host.handlers.keys()].sort()).toEqual([ONBOARDING_APPLY_RPC_METHOD, ONBOARDING_SCAN_RPC_METHOD, ONBOARDING_UNDERSTAND_RPC_METHOD, ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD, ONBOARDING_UNDERSTAND_STOP_RPC_METHOD].sort())
     expect(ONBOARDING_SCAN_RPC_METHOD).toBe("omo.onboarding.scan")
     expect(ONBOARDING_APPLY_RPC_METHOD).toBe("omo.onboarding.apply")
     expect(ONBOARDING_SCAN_RPC_EVENT).toBe("omo.onboarding.scan.event")
@@ -279,7 +282,7 @@ describe("onboarding scan RPC", () => {
     const host = register(openCodeProfile())
     const { scanId, events } = await host.scan({})
 
-    expect(sourcesOf(events)).toEqual(["detect", "credentials", "assets", "model-choices"])
+    expect(sourcesOf(events)).toEqual(["detect", "credentials", "assets", "model-choices", "projects", "sessions"])
     for (const event of events) {
       expect(event.scanId).toBe(scanId)
       expect(typeof event.elapsedMs).toBe("number")
@@ -304,7 +307,7 @@ describe("onboarding scan RPC", () => {
   test("#given includeCustomProviders #when a scan runs #then the provider source streams too", async () => {
     const host = register(openCodeProfile())
     const { events } = await host.scan({ includeCustomProviders: true })
-    expect(sourcesOf(events)).toEqual(["detect", "providers", "credentials", "assets", "model-choices"])
+    expect(sourcesOf(events)).toEqual(["detect", "providers", "credentials", "assets", "model-choices", "projects", "sessions"])
     expect(events.filter((event) => event.kind === "item").map((event) => event.item)).toContainEqual(expect.objectContaining({ id: "myco", kind: "provider", state: "import" }))
   })
 

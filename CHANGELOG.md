@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Onboarding can get to know you, once you agree.** After consent, the default model reads digests of your recent sessions and proposes facts about you and how you work; nothing is saved at this step. ([#10505](https://github.com/code-yeongyu/oh-my-openagent/pull/10505))
+
 **A signed-in device now reaches memory sync.** Memory sync used to stay idle on every device, because nothing gave it the device's sign-in. It now reads the device `omo login` signed in, and the key pair that device registered, then opens the account's sync for that memory. A device that is signed in but has not joined the account's memory yet says so instead of reporting no sign-in. When the device signs out or is removed, sync closes and goes back to idle. ([#10625](https://github.com/code-yeongyu/oh-my-openagent/issues/10625), [#10630](https://github.com/code-yeongyu/oh-my-openagent/pull/10630))
 
 **Memory sync can verify and seal real batches.** The sync engine now has a production verifier and sealer: each row another device appended is checked against this device's verified copy of the account chain, then opened with the epoch key the device holds, and only that memory's own notes reach it. Outgoing batches are encrypted, signed and linked the same way. Nothing uses this yet; the device sign-in that opens a session comes next. ([#10625](https://github.com/code-yeongyu/oh-my-openagent/issues/10625), [#10627](https://github.com/code-yeongyu/oh-my-openagent/pull/10627))
