@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { createServer, type Socket } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fakeHostTransport } from "../__fixtures__/fake-host-transport"
 
 type Frame = Record<string, unknown>
 export type ContractHostOptions = {
@@ -27,6 +28,7 @@ export type ContractHost = {
 export async function withContractHost(options: ContractHostOptions, exercise: (host: ContractHost) => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "rpc-client-"))
   const socket = join(root, "rpc.sock")
+  const transport = fakeHostTransport(socket)
   const launchId = randomUUID()
   const key = randomBytes(32)
   const recordPath = join(root, "rpc", "keys", launchId)
@@ -44,12 +46,12 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
   let preset = "read-only"
   const durableId = options.durableId ?? "dur-selected"
   const session = () => ({ sessionId: "rpc-1", durableSessionId: durableId, cwd: root, name: "target" })
-  const server = createServer((client) => {
+  const server = createServer((client) => transport.authenticate(client, () => {
     const connection = nextConnection++
     sockets.add(client)
     client.once("close", () => sockets.delete(client))
     let buffer = ""
-    let authenticated = options.auth !== true
+    let authenticated = process.platform === "win32" || options.auth !== true
     let attached = false
     let expectedProof = ""
     const respond = (frame: Frame, data: unknown = {}, error?: string) => client.write(`${JSON.stringify({
@@ -65,7 +67,7 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         frames.push({ connection, frame })
         if (frame.type === "get_protocol_info") {
           const capabilities = options.legacy ? [] : ["attach_session", "release_attachment", "release_caller_aware"]
-          if (options.auth) {
+          if (options.auth && process.platform !== "win32") {
             const clientNonce = (frame.auth as { client_nonce?: string } | undefined)?.client_nonce
             if (typeof clientNonce !== "string" || !/^[0-9a-f]{64}$/.test(clientNonce)) {
               respond(frame, undefined, "auth_required")
@@ -117,10 +119,10 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
           : frame.type === "interrupt" ? { interrupted: true } : {})
       }
     })
-  })
+  }))
   try {
     const listening = once(server, "listening", { signal: AbortSignal.timeout(2000) })
-    server.listen(socket)
+    server.listen(transport.listenAddress)
     await listening
     await exercise({ socket, root, recordPath, frames, mutations, permissionPreset: () => preset })
   } finally {

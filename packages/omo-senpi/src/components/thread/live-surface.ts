@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process"
 import { createConnection, type Socket } from "node:net"
 import { existsSync, readFileSync } from "node:fs"
-import { join, resolve } from "node:path"
-import { authenticateRpcHost, withRpcSocket } from "@oh-my-opencode/senpi-task/rpc-socket-client"
+import { resolve } from "node:path"
+import { authenticateRpcHost, resolveRpcSocketTransport, withRpcSocket } from "@oh-my-opencode/senpi-task/rpc-socket-client"
 import { resolveThreadSocket } from "./live-surface-paths"
 import type { SenpiExtensionAPI } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
@@ -58,6 +58,7 @@ type RequestOptions = {
   readonly keyRoot?: () => string
   readonly durableSessionId?: string
   readonly openedName?: string
+  readonly rpcHost?: boolean
 }
 const MUTATIONS = new Set(["prompt", "interrupt", "set_session_name", "set_model", "set_thinking_level", "wake", "release_session", "extension_ui_response"])
 
@@ -73,8 +74,11 @@ const MUTATIONS = new Set(["prompt", "interrupt", "set_session_name", "set_model
  */
 async function requestFrame(socketPath: string, command: Record<string, unknown>, connect: ThreadSocketConnect, options: RequestOptions = {}): Promise<RpcFrame> {
   return await withRpcSocket(socketPath, { connect, secret: options.secret, timeoutMs: options.timeoutMs ?? REQUEST_TIMEOUT_MS }, async (request) => {
-    if (options.secret !== undefined) return await request(command)
-    const info = await authenticateRpcHost(request, socketPath, options.keyRoot!, command.type === "get_protocol_info" ? command : undefined)
+    if (options.rpcHost !== true) return await request(command)
+    const protocolRequest = command.type === "get_protocol_info" ? command : undefined
+    const info = options.secret === undefined
+      ? await authenticateRpcHost(request, socketPath, options.keyRoot!, protocolRequest)
+      : await request(protocolRequest ?? { type: "get_protocol_info", observe: true })
     if (command.type === "get_protocol_info") return info
     const protocol = dataRecord(info, "get_protocol_info")
     const capabilities = new Set(Array.isArray(protocol.capabilities) ? protocol.capabilities : [])
@@ -258,13 +262,20 @@ export function createLiveThreadSurface(_pi: SenpiExtensionAPI | undefined, opti
   const callFrame = async (socket: string, type: string, data: Record<string, unknown> = {}, timeoutMs?: number, durableSessionId?: string, openedName?: string): Promise<RpcFrame> => {
     const tui = kindOf(socket) === "tui"
     if (tui && !LEGACY_TUI_COMMANDS.has(type) && !(await learnTuiCommands(socket)).has(type)) throw new Error(`unsupported:${type}`)
-    if (!exists(socket)) throw new Error(`host_unavailable:${socket}`)
+    let dial = connect
     let secret: Uint8Array | undefined
     if (tui) {
+      if (!exists(socket)) throw new Error(`host_unavailable:${socket}`)
       try { secret = readSecret(socket) } catch { throw new Error(`host_unavailable:${socket}`) }
+    } else {
+      const transport = await resolveRpcSocketTransport(socket)
+      if (transport === undefined || (process.platform !== "win32" && !exists(socket))) throw new Error(`host_unavailable:${socket}`)
+      secret = transport.secret
+      if (transport.address !== socket) dial = () => connect(transport.address)
     }
-    return await requestFrame(socket, { type, ...data }, connect, {
+    return await requestFrame(socket, { type, ...data }, dial, {
       timeoutMs: timeoutMs ?? (tui ? TUI_REQUEST_TIMEOUT_MS : undefined), secret, durableSessionId, openedName,
+      rpcHost: !tui,
       keyRoot: () => options.keyRoot ?? (env.SENPI_RPC_KEY_ROOT?.trim() || resolveAgentHome({ env })),
     })
   }
