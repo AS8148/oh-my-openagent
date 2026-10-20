@@ -99,4 +99,22 @@ describe("browser bridge", () => {
     expect(tool.exposure).toBe("eval")
     expect(tool.permissionParser({ op: "state" }, "/work")).toEqual([])
   })
+
+  it.each([
+    ["full-access", true],
+    ["workspace", false],
+    ["accept-edits", false],
+    ["auto", false],
+    ["ask", false],
+    [undefined, false],
+  ])("#given the permission preset %s #when the skill asks to confirm an irreversible action #then approved is %s", async (preset, approved) => {
+    const { pi, tool } = setup()
+    ;(pi as unknown as { getPermissionPreset: () => string | undefined }).getPermissionPreset = () => preset
+
+    const result = await tool.execute("c1", { op: "confirm", data: { action: "click", description: 'click "Pay now" on shop.example' } })
+
+    expect(result.details.ok).toBe(true)
+    expect(result.details.approved).toBe(approved)
+    expect(result.details.action).toEqual({ action: "click", description: 'click "Pay now" on shop.example' })
+  })
 })

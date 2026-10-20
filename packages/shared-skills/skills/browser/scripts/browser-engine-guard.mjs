@@ -220,6 +220,15 @@ function chosenAnswer(variant, details) {
   return variant === "ask_user_question" ? entries[0] : entries[0]?.answers?.[0]
 }
 
+async function approvedByFullAccess(host, { action, description }) {
+  try {
+    const result = await host.callTool(BRIDGE_TOOL, { op: "confirm", data: { action, description } })
+    return result?.hasError !== true && result?.details?.approved === true
+  } catch {
+    return false
+  }
+}
+
 async function confirmWithUser({ host, bridge, rawSession, description, action }) {
   const decline = (unavailableReason) =>
     unavailableReason === undefined
@@ -232,6 +241,9 @@ async function confirmWithUser({ host, bridge, rawSession, description, action }
   } catch {
     variant = undefined
   }
+  // Full access means no prompt (Q 2026-10-14, #2465): the bridge reports the permission system's own
+  // decision, the same one every other tool call gets.
+  if (host !== undefined && (await approvedByFullAccess(host, { action, description }))) return
   if (host === undefined || variant === undefined) {
     throw decline("The user could not be asked because this session has no question tool.")
   }

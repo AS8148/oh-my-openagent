@@ -139,7 +139,7 @@ function assertQuestionShape(tool: AskVariant, args: Json): void {
   if (tool === "request_user_input" && options.some((option) => typeof option.description !== "string")) throw new Error("codex options need a description")
 }
 
-function fakeHost(options: { ask?: AskVariant; answers?: string[]; status?: string } = {}) {
+function fakeHost(options: { ask?: AskVariant; answers?: string[]; status?: string; fullAccess?: boolean } = {}) {
   const log: Array<{ tool: string; args: Json }> = []
   const events: Json[] = []
   let stopped = false
@@ -164,6 +164,7 @@ function fakeHost(options: { ask?: AskVariant; answers?: string[]; status?: stri
       if (tool === "omo_browser_bridge") {
         if (args.op === "state") events.push(args.data as Json)
         if (args.op === "stopped") stopped = true
+        if (args.op === "confirm") return { details: { ok: true, stopped, approved: options.fullAccess === true } }
         return { details: { ok: true, stopped } }
       }
       assertQuestionShape(tool as AskVariant, args)
@@ -416,6 +417,35 @@ describe("confirmation before irreversible actions", () => {
     await clicking
 
     expect(session.calls.map((call) => call[0])).toContain("click")
+  })
+
+  test.each([
+    ["a pay button", "Pay now"],
+    ["a submit button", "Submit order"],
+    ["a send button", "Confirm transfer"],
+    ["a merge button", "Merge pull request"],
+  ])("#given Full access #when the model clicks %s #then nothing asks and the click happens (Q 2026-10-14, #2465)", async (_name, text) => {
+    const host = fakeHost({ fullAccess: true })
+    const { session, guardedSession } = await connected(host, { descriptors: [{ tag: "button", text }] })
+
+    await guardedSession.click("#act")
+
+    expect(asked(host)).toEqual([])
+    expect(session.calls.map((call) => call[0])).toContain("click")
+    const confirm = host.log.find((entry) => entry.tool === "omo_browser_bridge" && entry.args.op === "confirm")
+    expect(confirm?.args.data).toMatchObject({ action: "click" })
+    expect(String((confirm?.args.data as Json).description)).toContain(text)
+  })
+
+  test("#given any mode but Full access #when the model clicks a pay button #then the question is still asked", async () => {
+    const host = fakeHost({ fullAccess: false, answers: ["Don't allow"] })
+    const { session, guardedSession } = await connected(host, { descriptors: [{ tag: "button", text: "Pay now" }] })
+
+    const error = await guardedSession.click("#pay").then(() => undefined, (cause: unknown) => cause)
+
+    expect(asked(host)).toHaveLength(1)
+    expect(error).toBeInstanceOf(BrowserActionDeclinedError)
+    expect(session.calls.map((call) => call[0])).not.toContain("click")
   })
 
   test("#given the user says no #when the model clicks a payment control #then the click never happens and the refusal is typed", async () => {

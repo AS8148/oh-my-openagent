@@ -1,3 +1,7 @@
+## 2026-10-20 - The browser bridge says when Full access approves an irreversible browser action (#2465)
+
+`omo_browser_bridge` gains the `confirm` op: `approved` is true only when the permission system enforces Full access for this session (`isFullAccess`, the same `getPermissionPreset` decision computer use reads). The browser skill's irreversible-action confirm asks it first and skips its question only then. The call and the action description stay in the session's tool activity. Every other preset, and a host without the permission system, keeps the question. Q's rule (2026-10-14): under Full access nothing prompts.
+
 ## 2026-10-21 - Gateway, onboarding and task-host hooks allow prompt previews (#10356)
 
 All three before-agent-start handlers register as preview-safe. Gateway previews read committed operating rules through a read-only connection without starting a worker, registering migrations, or changing warning and activation latches. Onboarding previews compute the same addition, migration inventory included, without claiming the completion marker, changing widgets, consuming the forced-tour flag, or starting the background session-history read. Task-host previews return without capturing runtime context, registering a store, or warming or launching a host. AST and composed-extension audits cover literal and dynamic registrations; component tests cover semantic and durable state preservation, and a real-engine test checks prefix readiness.
@@ -17,6 +21,7 @@ The tool-result path never blocks on the filesystem: the switches are read once 
 ## 2026-10-21 - Sender workspace and project on gateway deliveries (#10794)
 
 `renderDeliveryText` starts with the sender's workspace/project and optional lane/session. Resolution uses the sender runtime's environment, then git-origin owner and configured path prefixes from `provenance.workspaces` in the normal profile-selected config. Tool arguments cannot supply provenance. For a bound external chat or the CLI, the sender is the connector process, so the provenance is that process's workspace and project, not the human author's (the author stays in the binding header). Schema v8 requires provenance on new delivery inserts without rewriting historical envelopes; old rows remain readable and render `From (provenance not recorded)`. Older writers that omit provenance must upgrade before inserting into a v8 store. Legacy mailbox imports have no recoverable sender context and are explicitly `unclassified / legacy-mailbox`.
+||||||| parent of 611b16f9c0 (fix(browser): Full access approves irreversible browser actions without asking (#2465))
 
 ## 2026-10-19 - The feedback core is a lazy sidecar, so omo.js stays inside its byte budget (#10546)
 

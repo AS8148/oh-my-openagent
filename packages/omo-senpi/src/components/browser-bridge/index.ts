@@ -1,4 +1,5 @@
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
+import { isFullAccess } from "../computer-use/full-access"
 
 export const BROWSER_BRIDGE_TOOL_NAME = "omo_browser_bridge"
 export const BROWSER_STATE_EVENT = "omo.browser.state"
@@ -7,7 +8,7 @@ export const BROWSER_STOP_RPC = "omo.browser.stop"
 const PARAMETERS = {
   type: "object",
   properties: {
-    op: { type: "string", enum: ["state", "status", "stopped"] },
+    op: { type: "string", enum: ["state", "status", "stopped", "confirm"] },
     data: { type: "object", additionalProperties: true },
   },
   required: ["op"],
@@ -25,6 +26,10 @@ function isStatePayload(value: unknown): value is Record<string, unknown> {
   return typeof engine === "string" && typeof status === "string"
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 function reply(details: Record<string, unknown>) {
   return { content: [{ type: "text", text: JSON.stringify(details) }], details }
 }
@@ -33,7 +38,8 @@ function reply(details: Record<string, unknown>) {
  * The browser skill's channel to the app, one instance per session. The skill runs in an eval cell
  * and cannot publish a session event or hear the app's Stop itself, so it calls this eval-only tool:
  * `state` republishes a browser state as `omo.browser.state`, `stopped` records that the user
- * stopped browser use, and `status` reports whether they did. The app's Stop arrives as the
+ * stopped browser use, `status` reports whether they did, and `confirm` says whether Full access
+ * approves an irreversible browser action without asking. The app's Stop arrives as the
  * `omo.browser.stop` request and holds until the user sends their next message.
  */
 export function createBrowserBridgeComponent(): OmoSenpiComponent {
@@ -60,6 +66,14 @@ export function createBrowserBridgeComponent(): OmoSenpiComponent {
           if (params.op === "stopped") {
             stopped = true
             return reply({ ok: true, stopped })
+          }
+          if (params.op === "confirm") {
+            // Q 2026-10-14 (#2465): under Full access nothing prompts. The browser skill's
+            // irreversible-action confirm asks here first and skips its question only when the
+            // permission system enforces Full access for this session; the call and its description
+            // stay in the activity log.
+            const approved = isFullAccess(pi)
+            return reply({ ok: true, stopped, approved, ...(approved ? { approvedBy: "full-access" } : {}), ...(isRecord(params.data) ? { action: params.data } : {}) })
           }
           return reply({ ok: true, stopped })
         },

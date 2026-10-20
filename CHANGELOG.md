@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Full access no longer asks before pay, submit or send-style actions in your browser.** With Full access, the agent goes ahead and the action still shows in the thread's activity. In every other mode it asks first, as before.
+
 **The engine publishes its OpenTelemetry schema artifact.** `telemetry-schema.json` describes exactly what an OTel client of the engine may send, generated from the event schemas and kept byte-exact by a drift gate, so the telemetry collector can pin and enforce it. It is separate from the anonymous PostHog events, which are unchanged ([#10980](https://github.com/code-yeongyu/oh-my-openagent/pull/10980)).
 
 **Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
@@ -122,6 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **OmO counts how often you had to repeat a standing instruction ([#10780](https://github.com/code-yeongyu/oh-my-openagent/issues/10780), [#10786](https://github.com/code-yeongyu/oh-my-openagent/pull/10786)).** Rules like "never filter the monitor output" now live in `system/agreements.md` with a count. When you correct the agent on something an agreement already covers, the count goes up; after the third time (`memory.agreements.needs_human_threshold`) the agent is told the rule keeps being broken and you see a notice. `/agreements` lists them and lets you add your own, acknowledge one, or drop one; the agreements you add can only be changed by you. The design is inspired by dinobot by roach (PolyForm Noncommercial 1.0.0); no dinobot code was used.
 
 **The launcher deletes a legacy `~/.omo/credentials.json` left by an intermediate sign-in build.** The file held the device's private keys and account refresh material in plaintext, sometimes world-readable; upgrading removes it. Only the exact legacy shape is removed. ([#10697](https://github.com/code-yeongyu/oh-my-openagent/issues/10697), [#10698](https://github.com/code-yeongyu/oh-my-openagent/pull/10698))
+||||||| parent of 611b16f9c0 (fix(browser): Full access approves irreversible browser actions without asking (#2465))
 
 **Report a problem from inside OmO ([#10546](https://github.com/code-yeongyu/oh-my-openagent/pull/10546)).** `/feedback` (or `/bug`) sends a bug report or an idea to the OmO team in one step: your description plus your account, this device, versions, this conversation's recent messages, recent logs and your settings. Passwords, keys and tokens are removed first with the same redactor `/share` uses, your memory is never sent, and `OMO_DISABLE_FEEDBACK=1` saves the report as a local file instead of uploading it. The desktop app's Report a problem dialog uses the same report.
 
