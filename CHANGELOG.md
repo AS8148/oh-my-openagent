@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Onboarding can get to know you, once you agree.** After consent, the default model reads digests of your recent sessions and proposes facts about you and how you work; nothing is saved at this step. ([#10505](https://github.com/code-yeongyu/oh-my-openagent/pull/10505))
+
 **Memory sync can verify and seal real batches.** The sync engine now has a production verifier and sealer: each row another device appended is checked against this device's verified copy of the account chain, then opened with the epoch key the device holds, and only that memory's own notes reach it. Outgoing batches are encrypted, signed and linked the same way. Nothing uses this yet; the device sign-in that opens a session comes next. ([#10625](https://github.com/code-yeongyu/oh-my-openagent/issues/10625), [#10627](https://github.com/code-yeongyu/oh-my-openagent/pull/10627))
 
 **OmO loads the analytics SDK only when an event is captured.** PostHog now ships as a lazy sidecar instead of being parsed with the main extension; queued events retain their order, shutdown waits for pending captures, and consent checks are unchanged. ([#10640](https://github.com/code-yeongyu/oh-my-openagent/pull/10640))
