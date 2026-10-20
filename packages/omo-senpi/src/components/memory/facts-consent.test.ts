@@ -42,11 +42,16 @@ async function recordedReceipt(after: readonly RawMessage[], quote: string): Pro
   const replyEntry = pending[1]
   if (replyEntry === undefined) throw new Error("no reply entry")
 
+  expect(replyEntry.lead).toBeDefined()
+  return launchAndRead({ version: 1, identity: identity.id, today: "2026-10-19", entries: [replyEntry], knownPeople: [], primaryHuman: { slug: "human", aliases: [] } }, quote, { root, identity, queue })
+}
+
+async function launchAndRead(payload: Parameters<typeof launchFactsInProcess>[0]["payload"], quote: string, fx: Awaited<ReturnType<typeof fixture>>): Promise<unknown> {
+  const { root, identity, queue } = fx
   const runId = "facts-consent"
   const runDir = join(root, runId)
   await mkdir(runDir)
   await writeRunJsonAtomic(join(runDir, "ledger.json"), { version: 1, runId, kind: "facts" })
-  expect(replyEntry.lead).toBeDefined()
   const createSession: CreateChildSession = async (options: CreateAgentSessionOptions) => {
     const listeners = new Set<ChildSessionListener>()
     const recordFact = (options.customTools ?? []).find((tool) => tool.name === FACTS_RECORD_TOOL_NAME)
@@ -73,7 +78,7 @@ async function recordedReceipt(after: readonly RawMessage[], quote: string): Pro
   await launchFactsInProcess({
     runId,
     runDir,
-    payload: { version: 1, identity: identity.id, today: "2026-10-19", entries: [replyEntry], knownPeople: [], primaryHuman: { slug: "human", aliases: [] } },
+    payload,
     resolution: { kind: "resolved", category: "quick", model: "omo-mock/mock-1", fallbacks: [] },
     modelRegistry: registrySnapshot([{ id: "mock-1" }]),
     options,
@@ -99,6 +104,11 @@ describe("facts consent end to end", () => {
     await recordedReceipt([text("user", "yes delete it")], "yes delete it")
     expect(prompts.length).toBeGreaterThan(0)
     expect(prompts.join("\n")).not.toContain('"lead"')
+  }, 30_000)
+
+  test("#given a plain-text payload (onboarding session digests) #when the facts child records a user claim #then it is stored as an agent suggestion", async () => {
+    const fx = await fixture()
+    expect(await launchAndRead("Session digest: the user said yes delete it after the plugin review.", "yes delete it", fx)).toEqual({ source: "agent", downgraded: true })
   }, 30_000)
 
   test("#given a deletion proposal #when the user replies 'maybe' #then the fact is stored as an agent suggestion and the user must confirm", async () => {

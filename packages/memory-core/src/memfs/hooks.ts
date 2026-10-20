@@ -1,16 +1,18 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "../fs/resilient"
 import { isAbsolute, join, resolve } from "node:path"
+import { COMMIT_MSG_HOOK_SCRIPT } from "./hooks-commit-msg"
 import { POST_COMMIT_HOOK_SCRIPT, PRE_COMMIT_HOOK_SCRIPT } from "./hooks-scripts"
 
 const HOOK_MODE = 0o755
 
 export interface InstalledHook {
-  name: "pre-commit" | "post-commit"
+  name: "pre-commit" | "commit-msg" | "post-commit"
   path: string
 }
 
 const HOOKS: readonly { name: InstalledHook["name"]; script: string }[] = [
   { name: "pre-commit", script: PRE_COMMIT_HOOK_SCRIPT },
+  { name: "commit-msg", script: COMMIT_MSG_HOOK_SCRIPT },
   { name: "post-commit", script: POST_COMMIT_HOOK_SCRIPT },
 ]
 

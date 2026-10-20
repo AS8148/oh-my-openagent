@@ -87,6 +87,8 @@ For each learning that survived Phase 2, make surgical, well-placed changes.
 **Archiving retired context**: use the single non-system root file `ARCHIVE.md` when content should no longer be load-bearing but may still be useful as historical context. Shrink or remove the active source, then append a concise dated entry to `ARCHIVE.md`. Delete (don't archive) content the user asked to forget, sensitive or wrong content, or junk with no future-reference value.
 
 **Discovery paths**: when adding or moving content, update `[[path]]` cross-references so related files stay connected. Keep description frontmatter accurate.
+Never write, copy or edit a `provenance:` frontmatter line. It is a claim receipt only the memory tool writes, and the commit hook refuses a hand-written one; when you move or merge a note, leave that line out of the new file.
+
 
 ### Skills (only when a reusable workflow appears)
 

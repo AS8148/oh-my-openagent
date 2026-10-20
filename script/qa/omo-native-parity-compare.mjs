@@ -40,7 +40,7 @@ export const PARITY_STEPS = [
   { id: "memory", tool: "memory", arguments: { command: "create", reason: "parity", file_path: "reference/parity.md", description: "parity note", file_text: "parity 42" } },
   // The note as the memory repository stored it: proves a memory write commits through the real pre-commit hook with the
   // claim receipt header stamped (#10498 shipped a header the hook's key allowlist rejected, failing every write).
-  { id: "memory-note", tool: "eval", arguments: { language: "js", code: "const r = await tool.bash({ command: 'f=$(find \"$HOME\" -path \"*/repo/reference/parity.md\" 2>/dev/null | head -1); head -4 \"$f\"' }); print(r.text)", summary: "parity memory note" } },
+  { id: "memory-note", tool: "eval", arguments: { language: "js", code: "const r = await tool.bash({ command: 'f=$(find \"$HOME\" -path \"*/repo/reference/parity.md\" 2>/dev/null | head -1); awk \"NR == 1 || !done { print } NR > 1 && /^---$/ { done = 1 }\" \"$f\"' }); print(r.text)", summary: "parity memory note" } },
   { id: "task", tool: "task", arguments: { prompt: "parity child", category: "quick", task_summary: "parity child", run_in_background: false } },
 ]
 

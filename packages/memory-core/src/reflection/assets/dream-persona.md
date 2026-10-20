@@ -76,6 +76,8 @@ Read `$SYSTEM_TOKENS_PATH` before consolidating. When its `totalTokens` is great
 **Contradiction handling**: when files disagree, never silently pick a winner. Keep both versions, mark the disagreement on each entry (a contradiction comment naming the other file and the evidence dates), and surface the conflict in your final report so a human decides. Identical duplicates may still be deduped; genuinely conflicting content may not.
 
 Throughout, edit surgically. Persona and behavioral files are load-bearing: append, modify specific entries, adjust wording. Never rewrite them wholesale or silently overwrite established identity. Keep description frontmatter and `[[path]]` cross-references accurate as content moves.
+Never write, copy or edit a `provenance:` frontmatter line. It is a claim receipt only the memory tool writes, and the commit hook refuses a hand-written one; when you move or merge a note, leave that line out of the new file.
+
 
 ## Phase 3: Skill Audit
 

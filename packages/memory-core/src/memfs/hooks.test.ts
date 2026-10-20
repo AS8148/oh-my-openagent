@@ -6,6 +6,7 @@ import type { ClaimReceipt } from "../provenance"
 import { stampReceipt } from "../tools/claim-frontmatter"
 import { renderMemoryFile } from "./frontmatter"
 import { installHooks, resolveHooksDir } from "./hooks"
+import { COMMIT_MSG_HOOK_SCRIPT } from "./hooks-commit-msg"
 import { POST_COMMIT_HOOK_SCRIPT, PRE_COMMIT_HOOK_SCRIPT } from "./hooks-scripts"
 import { commit, createRepo, removeTempDirs, run, tempDir, writeFiles } from "./hooks.test-support"
 
@@ -40,7 +41,7 @@ describe("installHooks", () => {
     const installed = installHooks(dir)
 
     // then
-    expect(installed.map((hook) => hook.name)).toEqual(["pre-commit", "post-commit"])
+    expect(installed.map((hook) => hook.name)).toEqual(["pre-commit", "commit-msg", "post-commit"])
     expect(await readFile(hookPath, "utf8")).toBe(first)
     if (process.platform !== "win32") {
       for (const hook of installed) {
@@ -57,14 +58,14 @@ describe("installHooks", () => {
     const bashOnly = [/<<</, /echo -e/, /(^|[\s=(])\$'/, /disown/, /env bash/]
 
     // when
-    await writeFiles(dir, { "pre-commit": PRE_COMMIT_HOOK_SCRIPT, "post-commit": POST_COMMIT_HOOK_SCRIPT })
+    await writeFiles(dir, { "pre-commit": PRE_COMMIT_HOOK_SCRIPT, "commit-msg": COMMIT_MSG_HOOK_SCRIPT, "post-commit": POST_COMMIT_HOOK_SCRIPT })
 
     // then
-    for (const script of [PRE_COMMIT_HOOK_SCRIPT, POST_COMMIT_HOOK_SCRIPT]) {
+    for (const script of [PRE_COMMIT_HOOK_SCRIPT, COMMIT_MSG_HOOK_SCRIPT, POST_COMMIT_HOOK_SCRIPT]) {
       expect(script.startsWith("#!/bin/sh\n")).toBe(true)
       for (const construct of bashOnly) expect(script).not.toMatch(construct)
     }
-    for (const hook of ["pre-commit", "post-commit"]) {
+    for (const hook of ["pre-commit", "commit-msg", "post-commit"]) {
       expect((await run(["sh", "-n", hook], dir)).code).toBe(0)
     }
   })
@@ -119,7 +120,7 @@ describe("pre-commit hook", () => {
     const result = await commit(dir, {
       "reference/approved.md": stamp({ source: "user", userQuote: "Yes delete it.", approves: "0123456789abcdef" }),
       "reference/suggested.md": stamp({ source: "agent", downgraded: true }),
-    })
+    }, "memory write\n\nOmo-Writer: memory-tool")
 
     // then
     expect(result.stdout + result.stderr).not.toContain("unknown frontmatter key")
