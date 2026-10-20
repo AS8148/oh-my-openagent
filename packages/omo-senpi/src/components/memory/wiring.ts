@@ -15,6 +15,7 @@ import { createConfiguredFactsApplier, publishSessionFactsApplier } from "./fact
 import { createKibitzerComposition, type KibitzerComposition } from "./kibitzer"
 import { createPressureDreamAdmission } from "./pressure-dream-admission"
 import { createMemoryRecallWiring, createSharedRecallCorpusCache } from "./recall-wiring"
+import { createProjectMemoryScope } from "./project-memory-nudge"
 import { branchEntryCount, sessionIdFrom } from "./wiring-context"
 import { createMemoryUserActivity } from "./user-activity"
 import { logBindReconcileFailure } from "./bind-reconcile-log"
@@ -74,6 +75,15 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   const deliveryRef: { current?: KibitzerComposition["delivery"] } = {}
   // One corpus cache for both: the sidecar's read-only memory tool reads the corpus the candidates came from.
   const corpusCache = (options.createCorpusCache ?? createSharedRecallCorpusCache)(options.logger)
+
+  const projectScope = createProjectMemoryScope({
+    resolveContext,
+    switches: () => resolveMemorySettings(options.loadConfig({ cwd: options.cwd() }).config.memory).project_scope,
+    fallbackCwd: options.cwd,
+    env: options.env,
+    corpusCache,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+  })
 
   const recallWiring = createMemoryRecallWiring({
     resolveContext,
@@ -143,6 +153,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   return {
     registerStatic(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
       userActivity.register(pi)
+      projectScope.register(pi)
       const applyFacts = createConfiguredFactsApplier(options, (sessionId) => resolveContext(sessionId ?? activeSession.current ?? ""))
       reflectionLive.registerRpc(pi, resolveContext, applyFacts)
       publishSessionFactsApplier(applyFacts)

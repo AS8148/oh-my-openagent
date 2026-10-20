@@ -137,6 +137,7 @@ export function createSessionBinder(deps: SessionBinderDeps): SessionBinder {
       identityPaths: run.paths,
       durableRoot: run.durableRoot,
       binding,
+      projectScope: { memoryRoot, autoIdentity: sessionConfig.auto_identity },
     })
     memoryModuleSupervisor.acquire()
     if (!oneShot) {
