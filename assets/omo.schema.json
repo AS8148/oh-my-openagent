@@ -901,6 +901,10 @@
         "include_co_authored_by": {
           "default": false,
           "type": "boolean"
+        },
+        "git_env_prefix": {
+          "default": "GIT_MASTER=1",
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -2352,6 +2356,10 @@
           "type": "string",
           "minLength": 1
         },
+        "showCursor": {
+          "type": "boolean",
+          "description": "Show the display-only macOS cursor overlay (default: true; false hides it)"
+        },
         "max_width": {
           "type": "integer",
           "exclusiveMinimum": 0,
@@ -3320,6 +3328,9 @@
             },
             "include_co_authored_by": {
               "type": "boolean"
+            },
+            "git_env_prefix": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -4574,6 +4585,10 @@
             "display": {
               "type": "string",
               "minLength": 1
+            },
+            "showCursor": {
+              "type": "boolean",
+              "description": "Show the display-only macOS cursor overlay (default: true; false hides it)"
             },
             "max_width": {
               "type": "integer",
@@ -5543,6 +5558,9 @@
             },
             "include_co_authored_by": {
               "type": "boolean"
+            },
+            "git_env_prefix": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -6797,6 +6815,10 @@
             "display": {
               "type": "string",
               "minLength": 1
+            },
+            "showCursor": {
+              "type": "boolean",
+              "description": "Show the display-only macOS cursor overlay (default: true; false hides it)"
             },
             "max_width": {
               "type": "integer",
@@ -7766,6 +7788,9 @@
             },
             "include_co_authored_by": {
               "type": "boolean"
+            },
+            "git_env_prefix": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -9021,6 +9046,10 @@
               "type": "string",
               "minLength": 1
             },
+            "showCursor": {
+              "type": "boolean",
+              "description": "Show the display-only macOS cursor overlay (default: true; false hides it)"
+            },
             "max_width": {
               "type": "integer",
               "exclusiveMinimum": 0,
@@ -9987,6 +10016,9 @@
               },
               "include_co_authored_by": {
                 "type": "boolean"
+              },
+              "git_env_prefix": {
+                "type": "string"
               }
             },
             "additionalProperties": false
@@ -11242,6 +11274,10 @@
                 "type": "string",
                 "minLength": 1
               },
+              "showCursor": {
+                "type": "boolean",
+                "description": "Show the display-only macOS cursor overlay (default: true; false hides it)"
+              },
               "max_width": {
                 "type": "integer",
                 "exclusiveMinimum": 0,
@@ -12210,6 +12246,9 @@
                   },
                   "include_co_authored_by": {
                     "type": "boolean"
+                  },
+                  "git_env_prefix": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -13464,6 +13503,10 @@
                   "display": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "showCursor": {
+                    "type": "boolean",
+                    "description": "Show the display-only macOS cursor overlay (default: true; false hides it)"
                   },
                   "max_width": {
                     "type": "integer",
@@ -14433,6 +14476,9 @@
                   },
                   "include_co_authored_by": {
                     "type": "boolean"
+                  },
+                  "git_env_prefix": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -15687,6 +15733,10 @@
                   "display": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "showCursor": {
+                    "type": "boolean",
+                    "description": "Show the display-only macOS cursor overlay (default: true; false hides it)"
                   },
                   "max_width": {
                     "type": "integer",
@@ -16656,6 +16706,9 @@
                   },
                   "include_co_authored_by": {
                     "type": "boolean"
+                  },
+                  "git_env_prefix": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -17910,6 +17963,10 @@
                   "display": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "showCursor": {
+                    "type": "boolean",
+                    "description": "Show the display-only macOS cursor overlay (default: true; false hides it)"
                   },
                   "max_width": {
                     "type": "integer",

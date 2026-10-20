@@ -29,13 +29,14 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.3"
 
       - name: Check this PR's Unreleased addition
         env:
           EVENT_NAME: ${{ github.event_name }}
           CHANGELOG_GATE_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          CHANGELOG_GATE_PR: ${{ github.event.pull_request.number }}
           CHANGELOG_GATE_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
           if [ "$EVENT_NAME" = "merge_group" ]; then
