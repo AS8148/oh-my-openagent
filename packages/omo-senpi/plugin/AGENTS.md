@@ -25,6 +25,8 @@ The single Pi package `@code-yeongyu/omo-senpi`: one generated extension entry, 
 
 ## CONVENTIONS
 
+- `#omo-telemetry-posthog-runtime` maps to `extensions/omo-telemetry-posthog.js`: the PostHog SDK stays outside `omo.js` and loads only after a capture. The 256-event buffer preserves order, reports oldest-event drops once at flush/shutdown, and failed imports back off for 60 seconds. Freshness checks and required-artifact/install fixtures cover the sidecar; the packed-install test proves that the published omo-ai layout resolves it.
+
 - Dag RPC wire payloads are snake_case (`run_id`, `node_id`); the JavaScript API is camelCase (`runId`, `nodeIds`). Deliberate wire/API boundary.
 - Bundles carry `// omo:<fingerprint>` build markers; freshness checks compare markers and source digests, and paths inside artifacts are made portable at build time.
 
