@@ -389,6 +389,8 @@ describe("checkExtensionCurrent", () => {
     const outputs = await sharedOutputs()
     const main = await readFile(outputs.outputPath, "utf8")
     const task = await readFile(outputs.taskOutputPath, "utf8")
+    // The ack-gated immediate sender is loaded by the PostHog transport, which ships in the PostHog sidecar.
+    const posthog = await readFile(outputs.telemetryPosthogOutputPath, "utf8")
     const manifest = JSON.parse(await readFile(join(pluginRoot, "package.json"), "utf8"))
 
     expect(main).toContain('import("#omo-task-runtime")')
@@ -398,7 +400,7 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-telemetry-posthog-runtime")')
     expect(main).toContain('import("#omo-thread-client-runtime")')
     expect(main).toContain('import("#omo-telemetry-recovery-runtime")')
-    expect(main).toContain('import("#telemetry-immediate-send")')
+    expect(posthog).toContain('import("#telemetry-immediate-send")')
     expect(main).toContain('import("#omo-memory-sync-runtime")')
     expect(task).toMatch(/^\/\/ omo:[A-Za-z0-9_-]{43}:[A-Za-z0-9_-]{43}/)
     expect(main).not.toContain('import("#omo-agent-toolkit-runtime")')
