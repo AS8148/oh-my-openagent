@@ -26,6 +26,22 @@ const has = (cmd: string, args: string[]) => spawnSync(cmd, args, { stdio: "igno
 const canRun = process.platform === "linux" && has("dbus-run-session", ["--version"]) && has("gdbus", ["help"])
   && has("python3", ["-c", "from gi.repository import Gio"])
 
+describe("probeSecretServiceLock without gdbus", () => {
+  // #10658 review: a minimal install without libglib2.0-bin has no gdbus; that says nothing about the keyring.
+  test("is unknown, never absent", async () => {
+    const path = process.env.PATH
+    const emptyBin = mkdtempSync(join(tmpdir(), "omo-no-gdbus-"))
+    process.env.PATH = emptyBin
+    try {
+      const { probeSecretServiceLock } = await import("./secret-service-lock")
+      expect(await probeSecretServiceLock()).toBe("unknown")
+    } finally {
+      process.env.PATH = path
+      rmSync(emptyBin, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("parseLockedReply", () => {
   test("reads gdbus's Locked property reply", () => {
     expect(parseLockedReply("(<true>,)\n")).toBe("locked")

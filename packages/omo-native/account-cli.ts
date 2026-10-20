@@ -65,10 +65,15 @@ async function token(dependencies: AccountCommandDependencies): Promise<number> 
     if (current === null) return reply(dependencies, { signedIn: false }, ACCOUNT_EXIT.signedOut)
     return reply(dependencies, { accessToken, accessTokenExpiresAt: current.accessTokenExpiresAt, device: deviceOf(current) })
   } catch (error) {
+    // A keychain that locked (or vanished) mid-refresh keeps its own outcome (exit 7/8 via runAccountVerb).
+    if (error instanceof KeychainLockedError || error instanceof SecretServiceUnavailableError) throw error
     const after = await dependencies.store.read()
     dependencies.error(error instanceof Error ? error.message : "omo account token: the refresh failed")
     // The refusal code tells the desktop why the sign-in ended (desktop#3522); the message never leaves stderr.
-    if (after === null) return error instanceof SessionEnded ? reply(dependencies, { ended: { code: error.code } }, ACCOUNT_EXIT.ended) : ACCOUNT_EXIT.ended
+    // Any other error with the item gone means another process signed out (forget/logout) meanwhile.
+    if (after === null) return error instanceof SessionEnded
+      ? reply(dependencies, { ended: { code: error.code } }, ACCOUNT_EXIT.ended)
+      : reply(dependencies, { signedIn: false }, ACCOUNT_EXIT.signedOut)
     if (after.refreshState === "uncertain") return ACCOUNT_EXIT.uncertain
     return ACCOUNT_EXIT.failed
   }

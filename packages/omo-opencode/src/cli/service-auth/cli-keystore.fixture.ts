@@ -20,7 +20,8 @@ Object.defineProperty(Bun, "secrets", { value: { get, set, delete: remove } })
 // The fake keystore stands in for an unlocked keyring; on Linux the CLI asks the Secret Service over D-Bus
 // whether the default collection is locked before any secret call, so answer that probe the same way.
 if (process.platform === "linux") {
-  const bin = join(process.env.HOME ?? "", ".fake-gdbus")
+  if (!process.env.HOME) throw new Error("a temporary HOME is required")
+  const bin = join(process.env.HOME, ".fake-gdbus")
   mkdirSync(bin, { recursive: true })
   writeFileSync(join(bin, "gdbus"), "#!/bin/sh\necho '(<false>,)'\n")
   chmodSync(join(bin, "gdbus"), 0o755)

@@ -8,7 +8,7 @@ import { appendEntries, emptyChain } from "../../memory-core/src/sync/crypto/cha
 import { createRejectionCounter } from "../../memory-core/src/sync/crypto/rejection.ts"
 import { pinTrustAnchor } from "../../memory-core/src/sync/crypto/trust-pin.ts"
 import { createWorld, removeWorldStateDirs } from "../../memory-core/src/sync/recovery/testing/world.test-support.ts"
-import { createCredentialStore, type CredentialStore } from "../../omo-opencode/src/cli/service-auth/keystore"
+import { createCredentialStore, type CredentialStore, KeychainLockedError } from "../../omo-opencode/src/cli/service-auth/keystore"
 import type { Credentials } from "../../omo-opencode/src/cli/service-auth/protocol"
 import { ACCOUNT_EXIT, runAccountVerb } from "../account-cli"
 
@@ -199,8 +199,22 @@ describe("omo account on a locked OS credential store (desktop#3509)", () => {
 
 describe("omo account on Linux, where a locked Secret Service read looks empty (desktop#3509)", () => {
   const empty = { get: async () => null, set: async () => {}, delete: async () => true }
-  const linuxStore = (lock: "locked" | "unlocked" | "absent", secrets = empty) =>
-    createCredentialStore("http://127.0.0.1:1", secrets, "linux", async () => lock)
+  const linuxStore = (lock: "locked" | "unlocked" | "absent" | "unknown", secrets: Parameters<typeof createCredentialStore>[1] = empty, notices: string[] = []) =>
+    createCredentialStore("http://127.0.0.1:1", secrets, "linux", async () => lock, (message) => { notices.push(message) })
+  const memorySecretApi = () => {
+    const values = new Map<string, string>()
+    return {
+      get: async ({ name }: { name: string }) => values.get(name) ?? null,
+      set: async ({ name, value }: { name: string; value: string }) => { values.set(name, value) },
+      delete: async ({ name }: { name: string }) => values.delete(name),
+    }
+  }
+  const loginShowLogout = async (store: ReturnType<typeof createCredentialStore>) => [
+    (await run(store, ["adopt"], { stdin: JSON.stringify(credential("dev_f", 60_000)) })).code,
+    (await run(store, ["show"])).out[0],
+    (await run(store, ["forget"])).code,
+    (await run(store, ["show"])).out[0],
+  ]
 
   test("a locked default collection is keychain_locked for show, token and adopt, never signed out", async () => {
     for (const [args, stdin] of [[["show"]], [["token"]], [["adopt"], JSON.stringify(credential("dev_l", 60_000))]] as const) {
@@ -223,9 +237,59 @@ describe("omo account on Linux, where a locked Secret Service read looks empty (
     expect(calls).toEqual([])
   })
 
-  test("no reachable Secret Service is its own outcome, never signed out", async () => {
-    const result = await run(linuxStore("absent"), ["show"])
-    expect({ code: result.code, out: result.out }).toEqual({ code: ACCOUNT_EXIT.keychainUnavailable, out: [{ keychain: "unavailable" }] })
+  // #10658 review: only a LOCKED answer may stop the store. A probe that cannot answer (no gdbus on a minimal
+  // install, no Secret Service name, a slow bus) falls back to libsecret as before, with one notice.
+  test("a probe that cannot answer never blocks login, show or logout: libsecret is used with one notice", async () => {
+    for (const lock of ["absent", "unknown"] as const) {
+      const notices: string[] = []
+      expect(await loginShowLogout(linuxStore(lock, memorySecretApi(), notices))).toEqual([
+        ACCOUNT_EXIT.ok, { signedIn: true, device: { id: "dev_f", name: "device dev_f" }, refreshState: "ok" }, ACCOUNT_EXIT.ok, { signedIn: false },
+      ])
+      expect(notices).toHaveLength(1)
+    }
+  })
+
+  test("login and logout on Linux with no gdbus on PATH still succeed through the real probe", async () => {
+    const path = process.env.PATH
+    const emptyBin = mkdtempSync(join(tmpdir(), "omo-no-gdbus-"))
+    homes.push(emptyBin)
+    process.env.PATH = emptyBin
+    try {
+      const store = createCredentialStore("http://127.0.0.1:1", memorySecretApi(), "linux", undefined, () => {})
+      expect(await loginShowLogout(store)).toEqual([
+        ACCOUNT_EXIT.ok, { signedIn: true, device: { id: "dev_f", name: "device dev_f" }, refreshState: "ok" }, ACCOUNT_EXIT.ok, { signedIn: false },
+      ])
+    } finally {
+      process.env.PATH = path
+    }
+  })
+
+  test("a sign-out by another process during token reads as signed out (4), not as an ended session", async () => {
+    let reads = 0
+    const store: CredentialStore = {
+      read: async () => (reads++ === 0 ? credential("dev_r", -60_000) : null),
+      write: async () => {},
+      clear: async () => {},
+    }
+    const result = await run(store, ["token"])
+    expect({ code: result.code, out: result.out }).toEqual({ code: ACCOUNT_EXIT.signedOut, out: [{ signedIn: false }] })
+  })
+
+  test("a keychain that locks mid-refresh keeps its own outcome (7), even when the read after it succeeds", async () => {
+    const store: CredentialStore = {
+      read: async () => credential("dev_k", -60_000),
+      write: async () => { throw new KeychainLockedError("macOS Keychain is locked.") },
+      clear: async () => {},
+    }
+    const result = await run(store, ["token"])
+    expect({ code: result.code, out: result.out }).toEqual({ code: ACCOUNT_EXIT.keychainLocked, out: [{ keychain: "locked" }] })
+  })
+
+  test("an unlocked answer is asked once per process, not before every secret call", async () => {
+    let probes = 0
+    const store = createCredentialStore("http://127.0.0.1:1", memorySecretApi(), "linux", async () => { probes += 1; return "unlocked" }, () => {})
+    await loginShowLogout(store)
+    expect(probes).toBe(1)
   })
 
   test("an unlocked collection with no item is still signed out", async () => {

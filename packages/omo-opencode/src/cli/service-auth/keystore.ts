@@ -19,7 +19,7 @@ export class SecretServiceUnavailableError extends SignInError {}
 
 // The OS store refused because it is locked and may not ask the person (macOS errSecInteractionNotAllowed,
 // a locked libsecret keyring). Callers must surface this as its own outcome, never as a prompt.
-const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|\bis locked\b|locked collection/i
+const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|locked collection/i
 const isLocked = (error: unknown): boolean =>
   error instanceof Error && (LOCKED.test(error.message) || LOCKED.test(String((error as { code?: unknown }).code ?? "")))
 
@@ -32,6 +32,7 @@ export function createCredentialStore(
   secrets: SecretApi | null = typeof Bun === "undefined" ? null : Bun.secrets,
   platform: NodeJS.Platform = process.platform,
   lockProbe: SecretServiceLockProbe = probeSecretServiceLock,
+  notice: (message: string) => void = (message) => { process.stderr.write(`${message}\n`) },
 ): CredentialStore {
   if (!secrets) throw new SignInError("OmO sign-in needs Bun 1.4 or newer with OS credential storage. No file fallback is available.")
   const platformName = platform === "darwin" ? "macOS Keychain"
@@ -43,12 +44,21 @@ export function createCredentialStore(
     ? new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
     : new SignInError(`Cannot access ${platformName}. Unlock or enable the OS credential store and try again. Credentials are never saved to a file.`)
   // libsecret answers a locked collection by asking the keyring to show its unlock prompt, so on Linux the
-  // Locked property is read over D-Bus BEFORE any secret call; a locked or missing store is never touched.
+  // Locked property is read over D-Bus BEFORE any secret call and a locked collection is never touched. When the
+  // probe cannot answer (no gdbus binary, no Secret Service name on the bus, a bus that did not reply) the store
+  // falls back to asking libsecret directly, exactly as before the probe existed: login must never depend on gdbus.
+  // An unlocked answer holds for the rest of this short-lived process.
+  let unlocked = false
+  let noticed = false
   const assertUsable = async () => {
-    if (platform !== "linux") return
+    if (platform !== "linux" || unlocked) return
     const lock = await lockProbe()
     if (lock === "locked") throw new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
-    if (lock === "absent") throw new SecretServiceUnavailableError(`No ${platformName} is running. Start a keyring (for example gnome-keyring) and try again. Credentials are never saved to a file.`)
+    if (lock === "unlocked") { unlocked = true; return }
+    if (!noticed) {
+      noticed = true
+      notice("omo: could not check whether the keyring is locked (gdbus or the Secret Service did not answer); using libsecret directly.")
+    }
   }
   return {
     async read() {
