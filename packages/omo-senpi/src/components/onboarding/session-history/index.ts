@@ -7,7 +7,7 @@ export {
   MAX_TRANSCRIPTS_PER_SOURCE,
 } from "./constants"
 export { defaultAgentHomes } from "./agent-transcripts"
-export { createSessionDigestStore, type SessionDigestStore } from "./digest-store"
+export { createMemorySessionDigestStore, createSessionDigestStore, type SessionDigestStore } from "./digest-store"
 export type { RecentSessionsRun } from "./recent-sessions"
 export {
   scanSessionHistory,

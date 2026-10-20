@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Onboarding can get to know you, once you agree.** After consent, the default model reads digests of your recent sessions and proposes facts about you and how you work; nothing is saved at this step. ([#10505](https://github.com/code-yeongyu/oh-my-openagent/pull/10505))
+
 **Memory sync can join a new device.** `omo sync enable` turns memory sync on for the device and, if the account already syncs, asks a device that already syncs to approve it. `omo sync approve` on that device answers the request. Both screens show the same 6-digit code, and the new device is admitted only after the person confirms the codes match. A relay that swaps keys produces a different code and is refused. `omo sync recover` points to passkey recovery in the desktop app. ([#10625](https://github.com/code-yeongyu/oh-my-openagent/issues/10625), [#10634](https://github.com/code-yeongyu/oh-my-openagent/pull/10634))
 
 **A signed-in device now reaches memory sync.** Memory sync used to stay idle on every device, because nothing gave it the device's sign-in. It now reads the device `omo login` signed in, and the key pair that device registered, then opens the account's sync for that memory. A device that is signed in but has not joined the account's memory yet says so instead of reporting no sign-in. When the device signs out or is removed, sync closes and goes back to idle. ([#10625](https://github.com/code-yeongyu/oh-my-openagent/issues/10625), [#10630](https://github.com/code-yeongyu/oh-my-openagent/pull/10630))
