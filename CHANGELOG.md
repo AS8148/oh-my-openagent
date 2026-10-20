@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**git-master credits sisyphus-dev-ai on its commits again, once per commit, and you can turn it off.** Every commit git-master writes ends with `Co-authored-by: sisyphus-dev-ai <sisyphus-dev-ai@users.noreply.github.com>`. Git adds the trailer itself (`git -c trailer.ifexists=addIfDifferent commit --trailer`), so amending or rewording a commit that already carries it keeps a single copy. `git_master.include_co_authored_by` in `omo.json` is a working switch again and defaults to `true`; set it to `false` to leave the trailer out. The commit footer stays opt-in, your own git author and committer are unchanged, and the `GIT_MASTER=1` prefix applies to the commit command as before. This works the same in the Native harness (reading the skill or `load_skills`) and the OpenCode plugin ([#10713](https://github.com/code-yeongyu/oh-my-openagent/issues/10713)).
+
 **A DAG node whose child dies on infrastructure is retried instead of taking its whole branch down.** When a mass-ulw node's child stops answering its heartbeats or loses its host session, the node is now retried automatically, at most twice, with a backoff. Its dependents are skipped only if the retries fail too. Before, one starved wave failed and every later node was skipped (an overloaded machine skipped 54 of 61 nodes). Task failures and cancelled nodes behave as before, and the TUI and the desktop app share this behaviour ([#10605](https://github.com/code-yeongyu/oh-my-openagent/issues/10605), [#10616](https://github.com/code-yeongyu/oh-my-openagent/pull/10616)).
 
 ## [5.1.40] - 2026-10-20

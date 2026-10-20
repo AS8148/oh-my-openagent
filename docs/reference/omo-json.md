@@ -105,7 +105,7 @@ No default profiles ship. A profile exists only when you write one under `profil
   "model_profiles": {}, // record<string, ModelProfile>, named model chains picked by intent (Native harness)
   "model_profile": "",  // active profile id or a literal provider/model pin (Native harness)
   "memory": {},         // MemorySettings (Native harness)
-  "git_master": { "commit_footer": false }, // opt-in commit footer (Native harness); no Co-authored-by trailer is ever emitted
+  "git_master": { "include_co_authored_by": true, "commit_footer": false }, // sisyphus-dev-ai co-author trailer (on by default) and opt-in commit footer (Native harness)
   "telemetry": { "enabled": true }, // telemetry (Native harness), enabled by default
   "disabled_skills": [], // skill names hidden on every harness, unioned across layers
   "[opencode]": {},     // OpenCode plugin config, freeform (see configuration.md)
@@ -166,14 +166,14 @@ Facts extraction does not launch or drain pending work at startup or relaunch. A
 
 ### `git_master` (Native harness)
 
-The optional `git_master` block controls how the `git-master` skill runs git in Senpi (`schema/git-master.ts`). When the agent works with the skill — reading it in the main session or loading it into a task child via `load_skills` — omo adds a mandatory "GIT COMMAND PREFIX" section and prefixes every `git` command in the skill's bash blocks with `git_env_prefix`, so your own git hooks can tell git-master is acting (for example, a hook that checks `GIT_MASTER`). The prefix always uses the bash form (`GIT_MASTER=1 git ...`), because Senpi's bash tool runs bash (Git Bash on Windows) whatever your login shell is. It also appends a commit-footer directive when you opt in.
+The optional `git_master` block controls how the `git-master` skill runs git in Senpi (`schema/git-master.ts`). When the agent works with the skill — reading it in the main session or loading it into a task child via `load_skills` — omo adds a mandatory "GIT COMMAND PREFIX" section and prefixes every `git` command in the skill's bash blocks with `git_env_prefix`, so your own git hooks can tell git-master is acting (for example, a hook that checks `GIT_MASTER`). The prefix always uses the bash form (`GIT_MASTER=1 git ...`), because Senpi's bash tool runs bash (Git Bash on Windows) whatever your login shell is. It also appends a commit-attribution directive: the co-author trailer by default, plus the body footer when you opt in.
 
-Commit-identity contract: commits omo causes in your repository carry your own git `user.name` / `user.email` as author and committer, and omo never adds a `Co-authored-by` trailer or any other GitHub-resolvable automation identity. A default install adds only the git command prefix.
+Commit identity: commits omo causes in your repository carry your own git `user.name` / `user.email` as author and committer. By default git-master also adds `Co-authored-by: sisyphus-dev-ai <sisyphus-dev-ai@users.noreply.github.com>` once per commit, which GitHub shows as a co-author; set `include_co_authored_by: false` to leave it out.
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `commit_footer` | boolean \| string | `false` | Opt in to the "Ultraworked with [omo](https://github.com/code-yeongyu/oh-my-openagent)" footer in the commit body. A string replaces the builtin footer text. |
-| `include_co_authored_by` | boolean | `false` | Deprecated no-op, accepted so existing configs keep validating. omo does not emit a `Co-authored-by` trailer regardless of this value. |
+| `include_co_authored_by` | boolean | `true` | Adds `Co-authored-by: sisyphus-dev-ai <sisyphus-dev-ai@users.noreply.github.com>` to every commit git-master writes. It goes through `git -c trailer.ifexists=addIfDifferent commit --trailer`, so a commit message that already carries it (an amend, a reworded or squashed commit) keeps a single copy. `false` leaves it out. |
 | `git_env_prefix` | string | `"GIT_MASTER=1"` | Space-separated `NAME=value` assignments (letters, digits, `_`, `-`) put before every git command git-master runs. `""` turns the prefix off. Same key and default as the OpenCode plugin's `git_master.git_env_prefix`. |
 
 To opt in to the body footer:
@@ -182,6 +182,16 @@ To opt in to the body footer:
 {
   "git_master": {
     "commit_footer": true
+  }
+}
+```
+
+To leave the co-author trailer out:
+
+```jsonc
+{
+  "git_master": {
+    "include_co_authored_by": false
   }
 }
 ```
