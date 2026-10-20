@@ -302,7 +302,6 @@ export const OmoMemorySettingsSchema = z.object({
 }).strict()
 
 export const OmoMemorySettingsLayerSchema = z.object({
-  project_scope: OmoMemoryProjectScopeLayerSchema.optional(),
   enabled: z.boolean().optional(),
   agent: z.string().min(1).optional(),
   auto_identity: OmoMemoryAutoIdentitySchema.optional(),
@@ -317,6 +316,7 @@ export const OmoMemorySettingsLayerSchema = z.object({
   sync: OmoMemorySyncLayerSchema.optional(),
   search: OmoMemorySearchLayerSchema.optional(),
   recall: OmoMemoryRecallLayerSchema.optional(),
+  project_scope: OmoMemoryProjectScopeLayerSchema.optional(),
   projection: OmoMemoryProjectionLayerSchema.optional(),
   compile_warn_tokens: z.number().int().positive().optional(),
   agents: z.record(z.string(), OmoMemoryAgentOverridesSchema).optional(),
