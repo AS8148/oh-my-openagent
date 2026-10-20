@@ -71,7 +71,7 @@ test.each(["gap", "recreation"])("latest-state observer invalidates live project
   expect(live).toHaveBeenCalledTimes(1)
 })
 
-test("revoke rejects a pending materialization before its handshake can complete", async () => {
+test.each(["store", "manager"])("%s invalidation rejects a pending materialization before its handshake can complete", async (kind) => {
   // given
   const started = Promise.withResolvers<void>()
   const release = Promise.withResolvers<void>()
@@ -109,7 +109,12 @@ test("revoke rejects a pending materialization before its handshake can complete
   try {
     await started.promise
     // when
-    await store.revoke()
+    if (kind === "store") await store.revoke()
+    else {
+      const [digest] = Object.keys(await store.list())
+      if (!digest) throw new Error("No granted declaration to invalidate")
+      await manager.invalidateIdentity(digest)
+    }
     // then
     await rejected
     expect(manager.isConnected(info)).toBe(false)
