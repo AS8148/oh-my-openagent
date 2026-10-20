@@ -64,6 +64,7 @@ async function tuiEndpoint(socketPath: string, session: { id: string; path: stri
       if (newline < 0) return
       const frame = JSON.parse(text.slice(0, newline)) as Frame
       pending = Buffer.from(text.slice(newline + 1), "utf8")
+      if (frame.type === "get_protocol_info") { socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, data: {} })}\n`); return }
       frames.push(frame)
       const reply = (body: Record<string, unknown>) => socket.end(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, ...body })}\n`)
       switch (frame.type) {
@@ -127,7 +128,7 @@ async function hostEndpoint(socketPath: string, replies: Readonly<Record<string,
       const data = Object.hasOwn(replies, type) ? replies[type] : type === "list_sessions"
         ? { sessions: [{ sessionId: "rpc-1", durableSessionId: "dur-host", cwd: process.cwd(), name: "host-thread", status: "open", kind: "interactive" }] }
         : frame.type === "wake" ? { admitted: [] } : {}
-      socket.end(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, data })}\n`)
+      socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, data })}\n`)
     })
   })
   await listen(server, socketPath, sockets)
@@ -178,8 +179,8 @@ describe("thread tools over a terminal (tui) endpoint", () => {
     const threads = threadsOf(await w.run("thread_list", { all_scope: true }))
 
     // then
-    expect(threads.find((thread) => thread.thread_id === "dur-tui")).toMatchObject({ name: "my-tui", surface: "tui", alive: true, status: "live", created_at: "2026-09-28T04:19:00.000Z", endpoint: { kind: "tui", socket: tui, routing_id: "dur-tui" } })
-    expect(threads.find((thread) => thread.thread_id === "dur-host")).toMatchObject({ surface: "daemon", endpoint: { kind: "rpc_host", socket: legacy, routing_id: "rpc-1" } })
+    expect(threads.find((thread) => thread.thread_id === "dur-tui")).toMatchObject({ name: "my-tui", surface: "tui", alive: true, status: "live", created_at: "2026-09-28T04:19:00.000Z", endpoint: { kind: "tui", socket: tui, routing_id: "dur-tui", durable_session_id: "dur-tui" } })
+    expect(threads.find((thread) => thread.thread_id === "dur-host")).toMatchObject({ surface: "daemon", endpoint: { kind: "rpc_host", socket: legacy, routing_id: "rpc-1", durable_session_id: "dur-host" } })
     expect(terminal.rejected.count).toBe(0)
     expect(terminal.frames.map((frame) => frame.type).sort()).toEqual(["get_protocol_info", "list_sessions"])
     expect(terminal.frames.some((frame) => "observe" in frame)).toBe(false)
@@ -326,10 +327,10 @@ describe("thread tools over a terminal (tui) endpoint", () => {
     const w = surfaceFor(legacy, [{ socket: legacy, reachable: true, session_paths: [], endpoint_kind: "rpc_host", alive: true, reason: null }, { socket: tui, reachable: true, session_paths: [], endpoint_kind: "tui", alive: true, reason: null }])
 
     // when
-    const tuiWake = await w.surface.gateway.wake({ kind: "tui", socket: tui, routing_id: "dur-tui" }, ["d1"])
-    const hostWake = await w.surface.gateway.wake({ kind: "rpc_host", socket: legacy, routing_id: "rpc-1" }, ["d2"])
-    const liveness = await w.surface.gateway.classifyLiveness?.({ kind: "tui", socket: tui, routing_id: "dur-tui" })
-    const release = await (w.surface.gateway.releaseSession?.({ kind: "tui", socket: tui, routing_id: "dur-tui" }, { reason: "takeover" }) ?? Promise.resolve(undefined)).then(() => "released", (error: unknown) => (error instanceof Error ? error.message : String(error)))
+    const tuiWake = await w.surface.gateway.wake({ kind: "tui", socket: tui, routing_id: "dur-tui", durable_session_id: "dur-tui" }, ["d1"])
+    const hostWake = await w.surface.gateway.wake({ kind: "rpc_host", socket: legacy, routing_id: "rpc-1", durable_session_id: "dur-host" }, ["d2"])
+    const liveness = await w.surface.gateway.classifyLiveness?.({ kind: "tui", socket: tui, routing_id: "dur-tui", durable_session_id: "dur-tui" })
+    const release = await (w.surface.gateway.releaseSession?.({ kind: "tui", socket: tui, routing_id: "dur-tui", durable_session_id: "dur-tui" }, { reason: "takeover" }) ?? Promise.resolve(undefined)).then(() => "released", (error: unknown) => (error instanceof Error ? error.message : String(error)))
 
     // then
     expect(tuiWake).toEqual({ admitted: [{ delivery_id: "d1", kind: "started" }] })
@@ -345,7 +346,7 @@ describe("thread tools over a terminal (tui) endpoint", () => {
   test("#given a host whose release reply says released but names no session path #when the session is released #then it is a failed release, not a success to relaunch from", async () => {
     const dir = tempDir("thr-tui-")
     const legacy = join(dir, "rpc.sock")
-    const endpoint = { kind: "rpc_host", socket: legacy, routing_id: "rpc-1" } as const
+    const endpoint = { kind: "rpc_host", socket: legacy, routing_id: "rpc-1", durable_session_id: "dur-host" } as const
     await hostEndpoint(legacy, { release_session: { released: true, attachments: 0, dropped: { deliveries: [], user_messages: [] } } })
     const w = surfaceFor(legacy, [{ socket: legacy, reachable: true, session_paths: [], endpoint_kind: "rpc_host", alive: true, reason: null }])
     expect(await w.surface.gateway.releaseSession?.(endpoint, { reason: "takeover" })).toEqual({ success: false, error: "release_failed" })

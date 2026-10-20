@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { chmodSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { askHost } from "./host-request"
 import { withContractHost, type ContractHost, type ContractHostOptions } from "./testing/contract-host"
 
@@ -37,7 +37,8 @@ describe("raw task host challenge-response", () => {
     ["directory mode", (_path, root) => chmodSync(`${root}/rpc/keys`, 0o755)],
     ["key root mode", (_path, root) => chmodSync(root, 0o755)],
     ["symlink", (path, root) => { const bytes = readFileSync(path); rmSync(path); writeFileSync(`${root}/record`, bytes, { mode: 0o600 }); symlinkSync(`${root}/record`, path) }],
-    ["directory record", (path) => { rmSync(path); symlinkSync(".", path) }],
+    ["directory record", (path) => { rmSync(path); mkdirSync(path, { mode: 0o700 }) }],
+    ["unreadable mode", (path) => chmodSync(path, 0o000)],
     ["invalid JSON", (path) => writeFileSync(path, "not-json")],
     ["short key", (path) => { const row = JSON.parse(readFileSync(path, "utf8")); row.key = "ab"; writeFileSync(path, JSON.stringify(row)) }],
     ["wrong launch", (path) => { const row = JSON.parse(readFileSync(path, "utf8")); row.launch_id = "00000000-0000-4000-8000-000000000000"; writeFileSync(path, JSON.stringify(row)) }],
@@ -47,6 +48,17 @@ describe("raw task host challenge-response", () => {
     await withContractHost({ auth: true, prepareRecord }, async (host) => {
       await expect(warm(host)).rejects.toThrow("unsafe_key_record")
       expect(host.frames.map(({ frame }) => frame.type)).toEqual(["get_protocol_info"])
+    })
+  })
+
+  test("#given records belonging to another uid #when warm runs #then ownership is refused", async () => {
+    await withContractHost({ auth: true }, async (host) => {
+      const uid = process.getuid!()
+      const getuid = spyOn(process, "getuid").mockReturnValue(uid + 1)
+      try {
+        await expect(warm(host)).rejects.toThrow("unsafe_key_record")
+        expect(host.frames.map(({ frame }) => frame.type)).toEqual(["get_protocol_info"])
+      } finally { getuid.mockRestore() }
     })
   })
 

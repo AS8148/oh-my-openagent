@@ -41,6 +41,10 @@
       "types": "./src/runners/rpc/spawn.ts",
       "import": "./src/runners/rpc/spawn.ts"
     },
+    "./rpc-socket-client": {
+      "types": "./src/runners/rpc-host/socket-client.ts",
+      "import": "./src/runners/rpc-host/socket-client.ts"
+    },
     "./rpc-model-admission": {
       "types": "./src/runners/rpc/model-admission.ts",
       "import": "./src/runners/rpc/model-admission.ts"

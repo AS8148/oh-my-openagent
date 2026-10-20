@@ -35,10 +35,11 @@ async function withRpc(
       if (newline < 0) return
       const frame = JSON.parse(buffer.slice(0, newline)) as Record<string, unknown>
       buffer = buffer.slice(newline + 1)
+      if (frame.type === "get_protocol_info") { socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, data: {} })}\n`); return }
       frames.push(frame)
       const answer = typeof response === "function" ? response(frame) : response
       const lines = [...preamble(String(frame.id)), { id: frame.id, type: "response", command: frame.type, ...answer }]
-      socket.end(lines.map((line) => `${JSON.stringify(line)}\n`).join(""))
+      socket.write(lines.map((line) => `${JSON.stringify(line)}\n`).join(""))
     })
   })
   try {

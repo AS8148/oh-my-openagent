@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
-import { createConnection } from "node:net"
-import { win32 } from "node:path"
+import { homedir } from "node:os"
+import { join, win32 } from "node:path"
+import { authenticateRpcHost, RpcIdentityError, withRpcSocket } from "./socket-client"
 
 const WINDOWS_PIPE_PREFIX = "\\\\.\\pipe\\senpi-rpc-"
 const WINDOWS_SECRET_BYTES = 32
@@ -15,37 +16,24 @@ export type HostReply = Readonly<Record<string, unknown>>
  * runner uses the logical socket path directly on POSIX and its authenticated named-pipe transport
  * on Windows.
  */
-export async function askHost(socket: string, request: HostReply, timeoutMs: number): Promise<HostReply | undefined> {
+export async function askHost(socket: string, request: HostReply, timeoutMs: number, options: { readonly keyRoot?: string; readonly agentDir?: string } = {}): Promise<HostReply | undefined> {
   const transport = await resolveTransport(socket)
   if (transport === undefined) return undefined
-  return new Promise((resolve) => {
-    const connection = createConnection(transport.address)
-    let buffer = ""
-    let settled = false
-    const finish = (reply: HostReply | undefined): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      connection.destroy()
-      resolve(reply)
-    }
-    const timeout = setTimeout(() => finish(undefined), timeoutMs)
-    connection.setEncoding("utf8")
-    connection.once("connect", () => {
-      if (transport.secret !== undefined) connection.write(transport.secret)
-      connection.write(`${JSON.stringify(request)}\n`)
-    })
-    connection.on("data", (chunk: string) => {
-      buffer += chunk
-      for (let newline = buffer.indexOf("\n"); newline !== -1; newline = buffer.indexOf("\n")) {
-        const reply = replyTo(buffer.slice(0, newline), request.id)
-        buffer = buffer.slice(newline + 1)
-        if (reply !== undefined) return finish(reply)
+  const agentDir = options.agentDir ?? [process.env.OMO_CODING_AGENT_DIR, process.env.SENPI_CODING_AGENT_DIR, process.env.PI_CODING_AGENT_DIR]
+    .map((value) => value?.trim()).find(Boolean) ?? join(process.env.HOME ?? homedir(), ".omo", "agent")
+  const keyRoot = options.keyRoot ?? (process.env.SENPI_RPC_KEY_ROOT?.trim() || agentDir)
+  try {
+    return await withRpcSocket(transport.address, { timeoutMs, secret: transport.secret }, async (send) => {
+      if (process.platform !== "win32") {
+        const info = await authenticateRpcHost(send, socket, keyRoot, request.type === "get_protocol_info" ? request : undefined)
+        if (request.type === "get_protocol_info") return info
       }
+      return await send(request)
     })
-    connection.once("error", () => finish(undefined))
-    connection.once("close", () => finish(undefined))
-  })
+  } catch (error) {
+    if (error instanceof RpcIdentityError) throw error
+    return undefined
+  }
 }
 
 export function isRecord(value: unknown): value is HostReply {
@@ -69,14 +57,4 @@ async function resolveTransport(
     .digest("hex")
     .slice(0, 32)
   return { address: `${WINDOWS_PIPE_PREFIX}${name}`, secret }
-}
-
-function replyTo(line: string, id: unknown): HostReply | undefined {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(line)
-  } catch {
-    return undefined
-  }
-  return isRecord(parsed) && parsed.id === id ? parsed : undefined
 }

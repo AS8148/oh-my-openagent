@@ -23,6 +23,20 @@ const operations: readonly [string, (client: LiveThreadSurface, host: ContractHo
 ]
 
 describe("thread RPC connection-local fenced mutations", () => {
+  test.each(["environment", "option"] as const)("#given a separate client profile #when the key root comes from %s #then authentication leaves the target preset untouched", async (source) => {
+    await withContractHost({ auth: true }, async (host) => {
+      const client = createLiveThreadSurface(undefined, {
+        env: { OMO_CODING_AGENT_DIR: `${host.root}/profile-b`, SENPI_RPC_SOCKET: host.socket,
+          ...(source === "environment" ? { SENPI_RPC_KEY_ROOT: host.root } : {}) },
+        ...(source === "option" ? { keyRoot: host.root } : {}),
+        statusAll: async () => undefined, registry: async () => [],
+      })
+      await client.setSessionName("rpc-1", "renamed", "dur-selected")
+      expect(host.mutations).toMatchObject([{ type: "set_session_name" }])
+      expect(host.permissionPreset()).toBe("read-only")
+    })
+  })
+
   test("#given an authenticated enforcing host #when a thread mutation runs #then proof succeeds before attachment", async () => {
     await withContractHost({ auth: true }, async (host) => {
       await Reflect.apply(surface(host).setSessionName, undefined, ["rpc-1", "renamed", "dur-selected"])
@@ -33,12 +47,12 @@ describe("thread RPC connection-local fenced mutations", () => {
   })
 
   test.each(operations)("#given an enforcing host #when %s runs #then it attaches the selected identity on the same connection", async (command, run) => {
-    await withContractHost({}, async (host) => {
+    await withContractHost({ auth: true }, async (host) => {
       await run(surface(host), host)
       expect(host.mutations.map((frame) => frame.type)).toEqual([command])
       const mutation = host.frames.find((entry) => entry.frame.type === command)!
       expect(host.frames.filter((entry) => entry.connection === mutation.connection).map((entry) => entry.frame.type))
-        .toEqual(["get_protocol_info", "attach_session", command, "release_attachment"])
+        .toEqual(["get_protocol_info", "authenticate", "attach_session", command, "release_attachment"])
       expect(host.frames.find((entry) => entry.frame.type === "attach_session")?.frame)
         .toMatchObject({ sessionId: "rpc-1", durableSessionId: "dur-selected" })
       expect(host.permissionPreset()).toBe("read-only")
