@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
-import { createOnboardingHarness } from "./test-harness"
+import { createOnboardingHarness, hermeticScanEnvironment } from "./test-harness"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
 import { createOnboardingComponent } from "./component"
 
@@ -161,6 +161,7 @@ describe("onboarding entry", () => {
           claimOnboarding: () => claimOnboarding(dir),
           isOnboardingComplete: () => isOnboardingComplete(dir),
           releaseOnboarding: () => releaseOnboarding(dir),
+          scanEnvironment: hermeticScanEnvironment(dir),
         })
         const h = createOnboardingHarness(dir, reason, mode, component)
         h.pi.setFlag("onboard", true)

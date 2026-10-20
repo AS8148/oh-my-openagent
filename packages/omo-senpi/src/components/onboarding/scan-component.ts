@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
+import { resolveMemoryModelRegistry, type ChildModelRegistry } from "../memory/model-registry-resolver"
 import {
   ONBOARDING_APPLY_RPC_METHOD,
   ONBOARDING_APPLY_STAGES,
@@ -11,16 +12,22 @@ import {
   type OnboardingScanResponse,
 } from "./scan-contract"
 import type {
-  applyOnboardingScan,
-  authWritesPending,
+  applyRetainedScan,
   migrationFactsFromScan,
   OnboardingScanEnvironment,
+  onboardingHistorySummary,
   runOnboardingScan,
-  staleSetupTargets,
 } from "./scan-runtime"
-import { resolve } from "node:path"
+import type { createOnboardingUnderstandingHandlers, OnboardingUnderstandingHandlers } from "./understand-component"
+import {
+  ONBOARDING_UNDERSTAND_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD,
+  ONBOARDING_UNDERSTAND_STOP_RPC_METHOD,
+} from "./understand-contract"
+import type { OnboardingUnderstandingSeams } from "./understand-start"
 
 export * from "./scan-contract"
+export * from "./understand-contract"
 
 declare const OMO_SENPI_BUNDLED: boolean
 
@@ -33,10 +40,10 @@ export const ONBOARDING_SCAN_TTL_MS = 10 * 60_000
 
 export interface OnboardingScanRuntime {
   readonly runOnboardingScan: typeof runOnboardingScan
-  readonly applyOnboardingScan: typeof applyOnboardingScan
   readonly migrationFactsFromScan: typeof migrationFactsFromScan
-  readonly authWritesPending: typeof authWritesPending
-  readonly staleSetupTargets: typeof staleSetupTargets
+  readonly applyRetainedScan: typeof applyRetainedScan
+  readonly createOnboardingUnderstandingHandlers: typeof createOnboardingUnderstandingHandlers
+  readonly onboardingHistorySummary: typeof onboardingHistorySummary
 }
 
 /** The engine's own credential store (senpi `AuthStorage`), narrowed to the surface an apply uses. */
@@ -48,6 +55,7 @@ export interface OnboardingEngineAuthStore {
 export interface OnboardingScanComponentDependencies {
   readonly runtime?: () => OnboardingScanEnvironment
   readonly loadRuntime?: () => Promise<OnboardingScanRuntime>
+  readonly understanding?: OnboardingUnderstandingSeams
   /** The engine's credential store apply writes through; defaults to the one `session_start` reports. */
   readonly authStore?: () => OnboardingEngineAuthStore | undefined
   readonly now?: () => number
@@ -67,11 +75,13 @@ interface HeldScan {
  */
 export interface OnboardingScanStore {
   readonly scans: Map<string, HeldScan>
+  /** Scans with an understanding run in progress, whichever session started it. */
+  readonly understanding: Map<string, symbol>
   latestAuthStore: OnboardingEngineAuthStore | undefined
 }
 
 export function createOnboardingScanStore(): OnboardingScanStore {
-  return { scans: new Map(), latestAuthStore: undefined }
+  return { scans: new Map(), understanding: new Map(), latestAuthStore: undefined }
 }
 
 const processScanStore = createOnboardingScanStore()
@@ -91,21 +101,55 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
       const now = deps.now ?? (() => Date.now())
       const shared = deps.scanStore ?? processScanStore
       const scans = shared.scans
+      let modelRegistry: ChildModelRegistry | undefined
       // The engine's own AuthStorage (modelRegistry.authStorage): an apply's credential writes go
       // through its lock, so a token refresh that lands mid-apply is merged, never reverted. A
       // session that captured none (a fresh control session) uses the one the process captured last.
       let capturedStore: OnboardingEngineAuthStore | undefined
       const authStore = deps.authStore ?? (() => capturedStore ?? shared.latestAuthStore)
-      pi.on("session_start", (_event, ctx) => {
-        const registry = isRecord(ctx) && isRecord(ctx["modelRegistry"]) ? ctx["modelRegistry"] : undefined
-        const candidate = isRecord(registry?.["authStorage"]) ? registry?.["authStorage"] : undefined
-        if (
-          candidate !== undefined && typeof candidate["getStoragePath"] === "function" && typeof candidate["modify"] === "function"
-        ) {
-          capturedStore = candidate as unknown as OnboardingEngineAuthStore
-          shared.latestAuthStore = capturedStore
+      if (typeof pi.on === "function") {
+        pi.on("session_start", (_payload, eventCtx) => {
+          modelRegistry = resolveMemoryModelRegistry(eventCtx) ?? modelRegistry
+          const registry = isRecord(eventCtx) && isRecord(eventCtx["modelRegistry"]) ? eventCtx["modelRegistry"] : undefined
+          const candidate = isRecord(registry?.["authStorage"]) ? registry?.["authStorage"] : undefined
+          if (
+            candidate !== undefined && typeof candidate["getStoragePath"] === "function" && typeof candidate["modify"] === "function"
+          ) {
+            capturedStore = candidate as unknown as OnboardingEngineAuthStore
+            shared.latestAuthStore = capturedStore
+          }
+        })
+      }
+      const expired = (entry: Pick<HeldScan, "finishedAt">): boolean => entry.finishedAt !== undefined && now() - entry.finishedAt > ONBOARDING_SCAN_TTL_MS
+      // Understanding's handlers ship in the lazy runtime: the first understanding call loads them, once
+      // per shell (concurrent first calls share one load), so its runs map scopes skip and stop. A failed
+      // load is not kept; the next call retries.
+      let understandingHandlers: Promise<OnboardingUnderstandingHandlers> | undefined
+      const understanding = async (): Promise<OnboardingUnderstandingHandlers | string> => {
+        const pending = understandingHandlers ??= loadRuntime().then((runtime) => runtime.createOnboardingUnderstandingHandlers(pi, understandingDeps))
+        try {
+          return await pending
+        } catch (error) {
+          if (understandingHandlers === pending) understandingHandlers = undefined
+          return `The onboarding runtime could not load: ${error instanceof Error ? error.message : String(error)}`
         }
-      })
+      }
+      const understandingDeps: Parameters<typeof createOnboardingUnderstandingHandlers>[1] = {
+        environment,
+        modelRegistry: () => modelRegistry,
+        busyScans: shared.understanding,
+        scans,
+        expired,
+        ...(deps.understanding === undefined ? {} : { seams: deps.understanding }),
+      }
+      const delegate = (pick: (handlers: OnboardingUnderstandingHandlers) => (request: unknown) => unknown) =>
+        async (request: unknown): Promise<unknown> => {
+          const handlers = await understanding()
+          return typeof handlers === "string" ? { kind: "unavailable", reason: handlers } : await pick(handlers)(request)
+        }
+      handle(ONBOARDING_UNDERSTAND_RPC_METHOD, delegate((handlers) => handlers.understand))
+      handle(ONBOARDING_UNDERSTAND_SKIP_RPC_METHOD, delegate((handlers) => handlers.skip))
+      handle(ONBOARDING_UNDERSTAND_STOP_RPC_METHOD, delegate((handlers) => handlers.stop))
 
       handle(ONBOARDING_SCAN_RPC_METHOD, (request): OnboardingScanResponse => {
         const scanId = randomUUID()
@@ -115,7 +159,13 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
         // read when the final `done` event is emitted - inside the scan - so an apply racing in
         // right after the events never sees a stale-or-missing finish time.
         const emit = (event: unknown): void => {
-          if (isRecord(event) && event["kind"] === "done") held.finishedAt = now()
+          if (isRecord(event) && event["kind"] === "done") {
+            held.finishedAt = now()
+            // Release the scan, digests included, once it has expired even if no later call prunes it.
+            setTimeout(() => {
+              if (scans.get(scanId) === held) scans.delete(scanId)
+            }, ONBOARDING_SCAN_TTL_MS).unref?.()
+          }
           pi.rpc?.emit(ONBOARDING_SCAN_RPC_EVENT, event)
         }
         held.outcome = new Promise((resolve) => setTimeout(resolve, 0))
@@ -127,8 +177,7 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
           })
         scans.set(scanId, held)
         for (const [id, entry] of scans) {
-          if (entry === held) continue
-          if (entry.finishedAt !== undefined && now() - entry.finishedAt > ONBOARDING_SCAN_TTL_MS) scans.delete(id)
+          if (entry !== held && expired(entry)) scans.delete(id)
         }
         const retained = [...scans.keys()].filter((id) => {
           const entry = scans.get(id)
@@ -150,67 +199,13 @@ export function createOnboardingScanComponent(deps: OnboardingScanComponentDepen
         scans.delete(scanId)
         const plans = await held.outcome
         if (plans === undefined) return { kind: "unavailable", reason: "The scan failed before it planned anything." }
-        if (held.finishedAt === undefined || now() - held.finishedAt > ONBOARDING_SCAN_TTL_MS) {
+        if (held.finishedAt === undefined || expired(held)) {
           return { kind: "stale", reason: "The scan expired; retained scans live ten minutes. Run omo.onboarding.scan again.", paths: [] }
         }
-        const runtime = await loadRuntime()
-        const requested = stages.filter(isApplyStage)
-        // Staleness is answered before anything else: a target that changed since the scan means
-        // the plans no longer describe the machine, so no store is consulted and nothing is written.
-        const stale = runtime.staleSetupTargets(plans.plans, requested)
-        if (stale.length > 0) {
-          return { kind: "stale", reason: `targets changed since the scan: ${stale.join(", ")}`, paths: stale }
-        }
-        if (runtime.authWritesPending(plans.plans, requested)) {
-          const store = authStore()
-          if (store === undefined) {
-            return { kind: "unavailable", reason: "The engine's credential store is not available, so credentials cannot be imported here; run omo setup --yes instead." }
-          }
-          const target = authTargetOf(plans.plans)
-          if (target === undefined || resolve(store.getStoragePath()) !== resolve(target)) {
-            return { kind: "unavailable", reason: `The engine's credential store (${store.getStoragePath()}) is not the planned target; run omo setup --yes instead.` }
-          }
-        }
-        const notices: string[] = []
-        const outcome = await runtime.applyOnboardingScan(plans.plans, new Set(requested), {
-          ...(authStore() === undefined ? {} : {
-            writeAuth: (target, additions) => writeAuthThrough(authStore() as OnboardingEngineAuthStore, target, additions),
-          }),
-          report: (line) => notices.push(line),
-        })
-        if ("kind" in outcome) {
-          return outcome.applied === undefined
-            ? { kind: "stale", reason: outcome.reason, paths: outcome.paths }
-            : { kind: "stale", reason: outcome.reason, paths: outcome.paths, applied: outcome.applied }
-        }
-        return { scanId, applied: outcome.applied, ...(notices.length === 0 ? {} : { notices }) }
+        // Everything past the expiry check needs the runtime, so it ships there: the auth checks and the writers.
+        return await (await loadRuntime()).applyRetainedScan(scanId, plans.plans, stages.filter(isApplyStage), authStore)
       })
     },
-  }
-}
-
-function authTargetOf(plans: Record<string, unknown>): string | undefined {
-  const credentials = isRecord(plans["credentials"]) ? plans["credentials"] : undefined
-  if (isRecord(credentials) && typeof credentials["target"] === "string") return credentials["target"]
-  const providers = isRecord(plans["providers"]) ? plans["providers"] : undefined
-  const paths = isRecord(providers) && isRecord(providers["paths"]) ? providers["paths"] : undefined
-  if (paths !== undefined && typeof paths["auth"] === "string") return paths["auth"]
-  return undefined
-}
-
-async function writeAuthThrough(
-  store: OnboardingEngineAuthStore,
-  target: string,
-  additions: readonly { readonly provider: string; readonly key: string }[],
-): Promise<void> {
-  if (resolve(store.getStoragePath()) !== resolve(target)) {
-    throw new Error(`the engine's credential store is not the planned target ${target}`)
-  }
-  for (const item of additions) {
-    // Under the store's lock: an entry the store already holds (a login or refresh that landed
-    // after the scan) is kept exactly as it is.
-    await store.modify(item.provider, (current: unknown) =>
-      current === undefined ? { type: "api_key", key: item.key } : undefined)
   }
 }
 
@@ -226,19 +221,15 @@ export async function loadOnboardingScanRuntime(): Promise<OnboardingScanRuntime
   const bundled = typeof OMO_SENPI_BUNDLED !== "undefined" && OMO_SENPI_BUNDLED
   const loaded: unknown = await import(new URL(bundled ? ONBOARDING_SCAN_RUNTIME_FILE : "scan-runtime.ts", import.meta.url).href)
   if (!isRecord(loaded)) throw new Error("onboarding scan runtime did not load")
-  const run = loaded["runOnboardingScan"]
-  const apply = loaded["applyOnboardingScan"]
-  const facts = loaded["migrationFactsFromScan"]
-  const authPending = loaded["authWritesPending"]
-  const staleTargets = loaded["staleSetupTargets"]
-  if (typeof run !== "function" || typeof apply !== "function" || typeof facts !== "function" || typeof authPending !== "function" || typeof staleTargets !== "function") {
-    throw new Error("onboarding scan runtime is missing its scan or apply export")
-  }
-  return {
-    runOnboardingScan: (...args) => Reflect.apply(run, undefined, args),
-    applyOnboardingScan: (...args) => Reflect.apply(apply, undefined, args),
-    migrationFactsFromScan: (...args) => Reflect.apply(facts, undefined, args),
-    authWritesPending: (...args) => Reflect.apply(authPending, undefined, args),
-    staleSetupTargets: (...args) => Reflect.apply(staleTargets, undefined, args),
-  }
+  const missing = RUNTIME_EXPORTS.filter((name) => typeof loaded[name] !== "function")
+  if (missing.length > 0) throw new Error(`onboarding scan runtime is missing ${missing.join(", ")}`)
+  return loaded as unknown as OnboardingScanRuntime
 }
+
+const RUNTIME_EXPORTS: readonly (keyof OnboardingScanRuntime)[] = [
+  "runOnboardingScan",
+  "migrationFactsFromScan",
+  "applyRetainedScan",
+  "createOnboardingUnderstandingHandlers",
+  "onboardingHistorySummary",
+]
