@@ -3,6 +3,7 @@ import type { LoadedSkill } from "../../features/opencode-skill-loader"
 import { isDisabledSkillAlias } from "../../features/opencode-skill-loader/skill-discovery"
 import { dirname, join } from "node:path"
 import { existsSync } from "node:fs"
+import { log } from "../../shared/logger"
 import { parseFrontmatter } from "@oh-my-opencode/utils"
 import {
   readSkillFileChecked, skillProvenance, readMcpJsonFromDirChecked, parseSkillMcpConfigFromFrontmatter,
@@ -43,6 +44,21 @@ function nativeSkillScope(_native: NativeSkillEntry): LoadedSkill["scope"] {
   return "config"
 }
 
+// A host row's file is re-read only to apply the link check. An unreadable file (EACCES, a delete race) keeps
+// the content the host already loaded, as before #10693; only a blocked link is refused.
+function readHostSkillFile(native: NativeSkillEntry, provenance: Parameters<typeof readSkillFileChecked>[1]): string {
+  try { return readSkillFileChecked(native.location, provenance) } catch (error) {
+    if (error instanceof SkillLinkBlockedError || !(error instanceof Error)) throw error
+    return native.content
+  }
+}
+
+// One native row that cannot be loaded skips only itself; it never drops the rows after it (#10693 review L2).
+function skipUnloadableNative(nativeName: string, error: unknown): void {
+  if (!(error instanceof Error)) throw error
+  log("[skill] native skill skipped", { name: nativeName, error: error.name })
+}
+
 function nativeSkillToLoadedSkill(native: NativeSkillEntry, directory = process.cwd()): LoadedSkill {
   const provenance = skillProvenance(native.location, "config", {
     kind: native.location === "<built-in>" ? "builtin" : "host",
@@ -51,7 +67,7 @@ function nativeSkillToLoadedSkill(native: NativeSkillEntry, directory = process.
   const checked = provenance.kind === "project-auto"
     ? readSkillFileChecked(native.location, provenance) : undefined
   const raw = checked ?? (provenance.kind !== "builtin" && existsSync(native.location)
-    ? readSkillFileChecked(native.location, provenance) : native.content)
+    ? readHostSkillFile(native, provenance) : native.content)
   const sidecar = provenance.kind === "builtin" ? undefined : readMcpJsonFromDirChecked(dirname(native.location), provenance)
   return {
     name: native.name,
@@ -101,7 +117,8 @@ export function mergeNativeSkills(
         onRejected?.(nativeName, error)
         continue
       }
-      throw error
+      skipUnloadableNative(nativeName, error)
+      continue
     }
     skills.push(loadedSkill)
     knownNames.add(nativeName)
@@ -126,7 +143,8 @@ export function mergeNativeSkillInfos(
         onRejected?.(nativeName, error)
         continue
       }
-      throw error
+      skipUnloadableNative(nativeName, error)
+      continue
     }
     skillInfos.push({
       name: native.name,
