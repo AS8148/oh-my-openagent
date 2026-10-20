@@ -26,3 +26,8 @@ export function fenceRun(record: TaskRecord, refEpoch: number): RunFence {
 export function nextRunEpoch(record: TaskRecord): number {
   return Math.max(record.notification.run_epoch, record.burnt_epoch ?? 0) + 1
 }
+
+// The run_start_epoch of the record's current run; legacy records (before the field) fall back to run_epoch.
+export function currentRunStartEpoch(record: TaskRecord | null): number | undefined {
+  return record === null ? undefined : record.run_start_epoch ?? record.notification.run_epoch
+}

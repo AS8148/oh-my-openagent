@@ -5,6 +5,7 @@ import {
   HOST_TURN_RESUMED_EVENT,
   type ListScope,
   type ListedTask,
+  type LiveRunStats,
   type ManagedChildEvent,
   type TaskRecord,
   type TaskRunStats,
@@ -18,7 +19,8 @@ import {
   isTerminal,
   LIVE_STATUS_REFRESH_MS,
 } from "./status-row-format"
-import { subagentTreeCostUsd } from "./subagent-tree-cost"
+import { createTreeCostFeed } from "./subagent-cost-feed"
+import type { StoreMutation } from "./store-mutation-observer"
 
 export { buildWidgetRows, formatTaskRow } from "./status-row-format"
 
@@ -35,6 +37,8 @@ export interface StatusUiManager {
   subscribeChild?(taskId: string, listener: (event: ManagedChildEvent) => void): () => void
   // In-flight turns/tools/tok-s for a live child; absent rows simply omit the stats tokens.
   runStatsSnapshot?(taskId: string): TaskRunStats | undefined
+  // In-flight stats tagged with their run, for the footer's subagent tree cost (senpi#2471).
+  liveRunStats?(taskId: string): LiveRunStats | undefined
 }
 
 // The captured-UI facts the sync reads: the live ui handle (undefined when none is captured, so every
@@ -71,6 +75,8 @@ export interface TaskStatusUi {
   scheduleSync(): void
   // Immediate render (used on session/model events and internally by the debounce timer).
   syncNow(): void
+  // One store mutation (from the store wrapper): updates the footer's subagent tree cost in place.
+  observeRecord(change: StoreMutation): void
   // Cancel any pending debounce timer so shutdown does not leave a render scheduled past teardown.
   dispose(): void
 }
@@ -87,10 +93,10 @@ export function createTaskStatusUi(deps: TaskStatusUiDeps): TaskStatusUi {
   const liveActivity = new Map<string, string>()
   const subscriptions = new Map<string, () => void>()
   let cachedRecords: readonly TaskRecord[] = []
-  let publishedTreeCost: string | undefined
   let pending: TimerHandle | undefined
   let liveRefresh: TimerHandle | undefined
   const reportedRenderFaults = new Set<string>()
+  const treeCost = createTreeCostFeed(deps)
 
   // Render runs from bare timer callbacks; an uncontained throw escapes as an uncaughtException
   // and kills the host process (the beta.20 pi-tui incident). Warn once per distinct fault so the
@@ -135,7 +141,6 @@ export function createTaskStatusUi(deps: TaskStatusUiDeps): TaskStatusUi {
       clearLiveRefresh()
       return
     }
-    const treeRunning = publishTreeCost(ui)
     const records = cachedRecords
     const background = deps.manager.wasBackground === undefined
       ? []
@@ -148,34 +153,15 @@ export function createTaskStatusUi(deps: TaskStatusUiDeps): TaskStatusUi {
       ? buildWidgetRows(records, residentTaskIds)
       : backgroundWidgetRows(background, liveActivity, renderedAt, liveStats, terminalWidth, residentTaskIds)
     if (rows.length === 0) {
-      if (treeRunning) scheduleLiveRefresh()
-      else clearLiveRefresh()
+      clearLiveRefresh()
       ui.setWidget(UI_KEY, undefined)
       return
     }
     ui.setWidget(UI_KEY, rows, { placement: "belowEditor" })
     // Only a live child needs the 250 ms repaint; a parked one renders a still row.
-    if (treeRunning || (deps.manager.wasBackground !== undefined && background.some((record) => !isTerminal(record.status) && !isSuspended(record)))) {
+    if (deps.manager.wasBackground !== undefined && background.some((record) => !isTerminal(record.status) && !isSuspended(record))) {
       scheduleLiveRefresh()
     } else clearLiveRefresh()
-  }
-
-  // The footer's subagent figure (senpi#2471): the whole tree's spend, re-sent only when it changes.
-  // Returns whether a run in this tree is live here, so the 250 ms repaint keeps the figure moving.
-  function publishTreeCost(ui: CapturedUi): boolean {
-    const sessionId = deps.runtime.sessionId()
-    if (ui.setSubagentCost === undefined || sessionId === undefined) return false
-    const tree = deps.manager.list({ scope: "all" }).map((entry) => entry.record).filter((record) => record.root_session_id === sessionId)
-    const liveStats = deps.manager.runStatsSnapshot?.bind(deps.manager)
-    const cost = subagentTreeCostUsd(tree, sessionId, liveStats)
-    const reported = cost > 0 ? cost : undefined
-    // Keyed by session: senpi clears the figure with the footer statuses on a session switch.
-    const published = `${sessionId}:${reported ?? "none"}`
-    if (published !== publishedTreeCost) {
-      publishedTreeCost = published
-      ui.setSubagentCost(reported)
-    }
-    return tree.some((record) => !isTerminal(record.status) && liveStats?.(record.task_id) !== undefined)
   }
 
   function scheduleSync(): void {
@@ -237,6 +223,7 @@ export function createTaskStatusUi(deps: TaskStatusUiDeps): TaskStatusUi {
   }
 
   function dispose(): void {
+    treeCost.dispose()
     if (pending !== undefined) {
       timers.clear(pending)
       pending = undefined
@@ -248,7 +235,15 @@ export function createTaskStatusUi(deps: TaskStatusUiDeps): TaskStatusUi {
     cachedRecords = []
   }
 
-  return { scheduleSync, syncNow: () => containRenderFault(syncNow), dispose }
+  return {
+    scheduleSync,
+    syncNow: () => containRenderFault(() => {
+      treeCost.ensureSeeded()
+      syncNow()
+    }),
+    observeRecord: (change) => containRenderFault(() => treeCost.observe(change)),
+    dispose,
+  }
 }
 
 function activityFromEvent(event: ManagedChildEvent): string | undefined {

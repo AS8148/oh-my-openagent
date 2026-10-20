@@ -2,6 +2,9 @@ import type { ManagedChildEvent } from "./manager/child-handle"
 import type { CostReportStatus, TaskRunStats, TokenCoverageStatus } from "./state"
 
 export type RunStatsTracker = {
+  // The run_start_epoch of the run this tracker measures, when its creator knows it: a consumer that
+  // also reads the persisted record keys each run's spend by this, so one run never counts twice.
+  readonly runStartEpoch?: number
   accept(event: ManagedChildEvent): boolean
   snapshot(now: number): TaskRunStats
 }
@@ -12,7 +15,7 @@ export type RunStatsTracker = {
 // An assistant message_end whose stopReason is "error" or "aborted" is a FAILED turn: it contributes
 // no tokens, cost, usage coverage or generation time - only the failed_turns count - but it still
 // re-anchors the window, so a failure's wall time never inflates a later window.
-export function createRunStatsTracker(startedAt: number, now: () => number = Date.now): RunStatsTracker {
+export function createRunStatsTracker(startedAt: number, now: () => number = Date.now, runStartEpoch?: number): RunStatsTracker {
   let turns = 0
   let failedTurns = 0
   let toolCalls = 0
@@ -33,6 +36,7 @@ export function createRunStatsTracker(startedAt: number, now: () => number = Dat
   let anonymousEvalRuns = 0
 
   return {
+    ...(runStartEpoch === undefined ? {} : { runStartEpoch }),
     accept(event) {
       if (event.type === "tool_execution_start") {
         toolCalls += 1

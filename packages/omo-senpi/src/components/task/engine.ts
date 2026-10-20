@@ -37,6 +37,7 @@ import {
 } from "./category-config-generation"
 import { createCategoryUnavailableWarningPlanner } from "./category-unavailable-warning"
 import { createTaskStoreChain } from "./engine-store-chain"
+import type { StoreMutation } from "./store-mutation-observer"
 import { createEngineKernelTools } from "./engine-kernel-tools"
 import { composeEngineHostWiring } from "./engine-host-wiring"
 import { createEngineLiveness } from "./engine-liveness"
@@ -90,7 +91,7 @@ export interface TaskEngine {
   readonly appendTaskEvent: (taskId: string, event: PersistedTaskEvent) => void
   // Subscribe to every store mutation (spawn/transition/replace/remove). The UI status sync attaches
   // here so the footer/widget refresh on background task activity. Returns an unsubscribe.
-  onStoreMutation(listener: () => void): () => void
+  onStoreMutation(listener: (change: StoreMutation) => void): () => void
 }
 
 export interface ComposeTaskEngineDeps {

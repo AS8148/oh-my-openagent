@@ -11,6 +11,7 @@ import type {
   ResolvedModelRecord,
   TaskRecord,
   TaskRunStats,
+  LiveRunStats,
   TaskStartFailureKind,
   TaskStartFailureReason,
   TaskStatus,
@@ -335,6 +336,8 @@ export type TaskManager = {
   // in-flight turns/tool-calls/tok-s; the record only carries run_stats once terminal.
   // Optional so downstream structural fakes keep compiling; the concrete manager always implements it.
   runStatsSnapshot?(taskId: string): TaskRunStats | undefined
+  // The same live stats tagged with the run they measure, so a consumer reading records too never counts a run twice.
+  liveRunStats?(taskId: string): LiveRunStats | undefined
   // W1-V F3: prune a live handle (and its per-epoch release/background bookkeeping) so the lifecycle
   // destruction port and eviction path never leave a stale handle behind or grow #live unbounded.
   forget(taskId: string, options: ForgetOptions): void

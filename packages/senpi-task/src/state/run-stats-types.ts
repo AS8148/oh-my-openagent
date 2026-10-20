@@ -49,3 +49,6 @@ export type TaskRunStats = {
   /** Provenance of `runtime_ms`: measured by the live tracker, or reconstructed from record timestamps. */
   readonly duration_status?: DurationSourceStatus
 }
+
+/** In-flight stats of one run, tagged with that run's run_start_epoch (TaskManager.liveRunStats). */
+export type LiveRunStats = { readonly runStartEpoch: number; readonly stats: TaskRunStats }

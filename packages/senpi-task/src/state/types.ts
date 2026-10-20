@@ -165,6 +165,7 @@ export type {
   CostReportStatus,
   DurationSourceStatus,
   TaskRunStats,
+  LiveRunStats,
   TokenCoverageStatus,
 } from "./run-stats-types"
 export { isSpawnSpecV1 } from "./record-types"
