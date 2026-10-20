@@ -1,3 +1,7 @@
+## 2026-10-20 - Runtime fallback QA retains child identity after compaction (#10076)
+
+The runtime-fallback fake provider identifies its parent by the distinct `parent` model id, rather than a child identity sentence in context. A compaction request omits that sentence and previously consumed the parent's script, yielding a false child success on the limited model. The regression drives the registered provider with a compacted child context and proves that the parent script remains untouched. Production routing and fallback are not changed by this fixture correction.
+
 ## 2026-10-20 - A failed onboarding scan is retried instead of being kept for the whole process (#10481)
 
 The TUI onboarding's once-per-process memos (the setup scan behind the first onboarding turn, the understanding scan `onboarding_understand` reads, an injected migration inventory, and the background session-history summary) kept a failed run as their answer, so one transient failure made onboarding report "the scan did not run" for the rest of the process. They now keep only a success: callers that arrive while a run is in flight still share it, a rejected run answers `undefined` to them (onboarding stays fail-open) and is dropped, and the next call starts a fresh run.
