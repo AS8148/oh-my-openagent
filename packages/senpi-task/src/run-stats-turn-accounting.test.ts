@@ -184,7 +184,7 @@ describe("run stats failed-turn accounting", () => {
     expect(snapshot.turns).toBe(2)
     expect(snapshot.total_tokens).toBe(1_100)
     expect(snapshot.cost_usd).toBeCloseTo(0.00184, 10)
-    expect(snapshot.cost_status).toBe("reported")
+    expect(snapshot.cost_status).toBe("partial")
     expect(snapshot.token_status).toBe("partial")
   })
 

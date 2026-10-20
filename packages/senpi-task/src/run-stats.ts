@@ -138,7 +138,7 @@ export function createRunStatsTracker(startedAt: number, now: () => number = Dat
         // execution time. Reconstructed durations (reconciled records) are the consumer's job.
         duration_status: "monotonic",
         token_status: tokenCoverage(turns, turnsReportingUsage),
-        cost_status: costStatus(sawCost, costReported),
+        cost_status: costStatus(sawCost, costReported, turnsReportingUsage < turns),
         ...positiveFiniteTotal("output_tokens", outputTokens),
         ...positiveFiniteTotal("input_tokens", inputTokens),
         ...positiveFiniteTotal("cache_read_tokens", cacheReadTokens),
@@ -169,8 +169,8 @@ function tokenCoverage(turns: number, turnsReportingUsage: number): TokenCoverag
 
 // A cost the provider never reported is unavailable, not zero; a reported-but-non-finite sum is
 // invalid, so aggregates can exclude it instead of poisoning a SUM with NaN/Infinity.
-function costStatus(sawCost: boolean, costReported: boolean): CostReportStatus {
-  if (costReported) return "reported"
+function costStatus(sawCost: boolean, costReported: boolean, someTurnsUnreported: boolean): CostReportStatus {
+  if (costReported) return someTurnsUnreported ? "partial" : "reported"
   return sawCost ? "invalid" : "unavailable"
 }
 
