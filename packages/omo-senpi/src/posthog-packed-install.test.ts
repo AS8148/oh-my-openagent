@@ -17,8 +17,16 @@ async function run(cmd: string[], cwd: string): Promise<string> {
   const stderr = new Response(child.stderr).text()
   const status = await child.exited
   if (child.signalCode !== null) throw new Error(`${cmd.join(" ")} was killed (${child.signalCode}) after its 120 s timeout`)
-  expect(status, `${cmd.join(" ")}\n${await stderr}`).toBe(0)
+  // The same surviving process can hold the pipes after a failing npm.cmd exits on its own, so the
+  // failure report waits for stderr only briefly instead of hanging to the test limit (#10672).
+  if (status !== 0) throw new Error(`${cmd.join(" ")} exited ${status}\n${await settledWithin(stderr, 5_000)}`)
   return stdout
+}
+
+async function settledWithin(text: Promise<string>, ms: number): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<string>(resolve => { timer = setTimeout(resolve, ms, "(stderr still open after exit; output withheld)") })
+  try { return await Promise.race([text, late]) } finally { clearTimeout(timer) }
 }
 
 it("packs and installs omo-ai, then resolves its shipped PostHog sidecar and receives one real event", async () => {
