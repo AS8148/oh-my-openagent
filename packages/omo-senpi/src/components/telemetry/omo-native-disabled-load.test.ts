@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { TelemetryEnv } from "@oh-my-opencode/telemetry-core"
@@ -28,6 +28,9 @@ const DISABLED: readonly (readonly [string, (agentDir: string) => { readonly env
 // module mocks after every test, so it is registered before each one.)
 const sidecarLoads = { count: 0 }
 const SIDECAR_EXPORTS = ["adoptForeignWindow","withRecoveryOps","sendSummaryRecord","createImmediateSender","createSessionSummaryRecorder","createSummaryStorage","currentProcessOwner","PENDING_CAP","PENDING_CAP_BYTES","RESENDS_PER_SWEEP","RESEND_BACKOFF_MS","createSummaryRecovery","createRecoveryRuntime","purgeUnconsentedQueue"] as const
+afterEach(() => {
+  mock.restore()
+})
 beforeEach(() => {
   mock.module("#omo-telemetry-recovery-runtime", () =>
     Object.fromEntries(SIDECAR_EXPORTS.map((name) => [name, () => {
