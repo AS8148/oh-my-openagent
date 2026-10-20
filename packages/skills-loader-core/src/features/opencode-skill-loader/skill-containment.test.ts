@@ -208,4 +208,22 @@ describe("legacy skill containment at discovery and reread", () => {
     // then
     expect(loaded.map((s) => s.name)).toEqual(sameDirectory ? ["case-alias"] : [])
   })
+
+  test("the user allowed walk stops at a named skill leaf just as its loader does", async () => {
+    // given
+    const f = fixture()
+    const userRoot = join(f.root, "user")
+    skill(join(userRoot, "leaf", "leaf.md"))
+    skill(join(f.outside, "SKILL.md"))
+    symlinkSync(f.outside, join(userRoot, "leaf", "unused-assets"))
+    symlinkSync(f.outside, join(f.skillsDir, "escape"))
+    // when
+    const user = await loadSkillsFromDir({ skillsDir: userRoot, scope: "user" })
+    const project = await loadSkillsFromDir(Object.assign({
+      skillsDir: f.skillsDir, scope: "project" as const,
+    }, { provenance: { kind: "project-auto", selectedRoot: f.skillsDir, projectRoot: f.project, userRoots: [userRoot] } }))
+    // then
+    expect(user.map((s) => s.name)).toEqual(["leaf"])
+    expect(project).toEqual([])
+  })
 })
