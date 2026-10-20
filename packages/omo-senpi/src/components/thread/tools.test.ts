@@ -72,6 +72,16 @@ function runner(f: ReturnType<typeof fixture>, callerSessionId = "unknown-caller
 }
 
 describe("thread tool registration", () => {
+  test("#given a selected session #when model discovery observes a replacement #then the mutation retains the selected durable id", async () => {
+    const f = fixture()
+    f.getAvailableModels.mockImplementation(async () => {
+      f.sessions[0] = { ...f.sessions[0], durableSessionId: "replacement" }
+      return f.models
+    })
+    expect(await runner(f)("thread_set_model", { thread: "dur-peer", model: "openai/gpt-x" })).toMatchObject({ kind: "ok" })
+    expect(f.setModel.mock.calls[0]).toEqual(["route-peer", "openai", "gpt-x", "dur-peer"])
+  })
+
   test("registers exactly the seventeen contract tools with search metadata", () => {
     const tools: Record<string, unknown>[] = []
     const f = fixture()
