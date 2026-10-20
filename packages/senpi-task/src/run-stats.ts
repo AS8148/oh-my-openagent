@@ -90,11 +90,12 @@ export function createRunStatsTracker(startedAt: number, now: () => number = Dat
       generationMs += window
       windowStart = timestamp
       const usage = readUsage(event.message)
-      if (Object.keys(usage).length > 0) turnsReportingUsage += 1
+      const reported = reportsUsage(usage)
+      if (reported) turnsReportingUsage += 1
       if (window === 0 && (usage.output ?? 0) > 0) collapsedWindows += 1
       outputTokens += usage.output ?? 0
       totalTokens += usage.total ?? 0
-      if (usage.cost !== undefined) {
+      if (reported && usage.cost !== undefined) {
         costUsd += usage.cost
         sawCost = true
       }
@@ -221,6 +222,13 @@ function readUsage(message: Record<string, unknown>): UsageFacts {
       firstFiniteNonNegativeNumber(usage.cacheWrite, usage.cache_creation_input_tokens),
     ),
   }
+}
+
+// senpi attaches a zero-filled usage object to every assistant message and overwrites it only when
+// the provider streams usage, so an all-zero block means the provider reported nothing: counting it
+// would turn "no usage" into a reported $0 (#10724). A zero-priced model still reports its tokens.
+function reportsUsage(usage: UsageFacts): boolean {
+  return Object.values(usage).some((value) => value > 0)
 }
 
 // Senpi reports cost either as a plain number or as a per-bucket breakdown carrying `.total`.
