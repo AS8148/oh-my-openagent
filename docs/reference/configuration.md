@@ -582,7 +582,8 @@ Put the setting in the user config (`~/.omo/omo.jsonc`). Tools such as Orca crea
 the main checkout, where its project `.omo/omo.jsonc` is not found. Sessions that are already bound
 keep their current memory; new sessions pick up the shared one. Changing `auto_identity` (on or
 off) rebinds the identity for new worktree sessions, and with it which memory sync stream they join:
-a worktree session with `"git"` reads, writes and syncs the main checkout's memory. A worktree opened through a symlinked
+a worktree session with `"git"` reads and writes the main checkout's memory, and also syncs it
+when `memory.sync.enabled` is on and the device is signed in. A worktree opened through a symlinked
 path still maps to its main checkout. Git records the real path of the main checkout, though, so a
 main checkout opened through a symlinked path resolves differently from its worktrees; use an
 explicit `agent` name in that case.
