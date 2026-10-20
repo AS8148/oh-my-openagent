@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import dgram from "node:dgram"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import http from "node:http"
 import https from "node:https"
 import net from "node:net"
@@ -616,8 +616,10 @@ describe("onboarding apply ordering and notice routing", () => {
     const profile = openCodeProfile()
     const host = register(profile)
     const { scanId } = await host.scan({})
-    mkdirSync(profile.agentDir, { recursive: true })
-    chmodSync(profile.agentDir, 0o555)
+    // A regular file where the agent directory should be: nothing can be created under it on any OS.
+    // A 0o555 directory only refuses writes on POSIX; Windows ignores the mode bits (#10650).
+    mkdirSync(dirname(profile.agentDir), { recursive: true })
+    writeFileSync(profile.agentDir, "")
     const written: string[] = []
     const originalWrite = process.stdout.write
     process.stdout.write = ((chunk: unknown) => { written.push(String(chunk)); return true }) as typeof process.stdout.write
@@ -626,7 +628,7 @@ describe("onboarding apply ordering and notice routing", () => {
       response = await host.apply({ scanId, stages: ["model-choices"] })
     } finally {
       process.stdout.write = originalWrite
-      chmodSync(profile.agentDir, 0o755)
+      rmSync(profile.agentDir, { force: true })
     }
 
     expect(written).toEqual([])
