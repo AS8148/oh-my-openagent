@@ -3,6 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { creatorAnchor } from "../../memory-core/src/sync/crypto/anchor.ts"
+import { appendEntries, emptyChain } from "../../memory-core/src/sync/crypto/chain.ts"
+import { createRejectionCounter } from "../../memory-core/src/sync/crypto/rejection.ts"
+import { pinTrustAnchor } from "../../memory-core/src/sync/crypto/trust-pin.ts"
+import { createWorld, removeWorldStateDirs } from "../../memory-core/src/sync/recovery/testing/world.test-support.ts"
 import type { CredentialStore } from "../../omo-opencode/src/cli/service-auth/keystore"
 import type { Credentials } from "../../omo-opencode/src/cli/service-auth/protocol"
 import { ACCOUNT_EXIT, runAccountVerb } from "../account-cli"
@@ -11,6 +16,7 @@ const homes: string[] = []
 afterAll(() => {
   for (const home of homes) rmSync(home, { recursive: true, force: true })
 })
+afterAll(removeWorldStateDirs)
 
 const credential = (deviceId: string, expiresInMs: number, refreshToken = `rt-${deviceId}`): Credentials => ({
   accessToken: `at-${deviceId}-${expiresInMs}`,
@@ -31,15 +37,17 @@ function memoryStore(initial: Credentials | null) {
   return { store, current: () => value }
 }
 
-function run(store: CredentialStore, args: string[], options: { stdin?: string; api?: string } = {}) {
+function run(store: CredentialStore, args: string[], options: { stdin?: string; api?: string; pinDir?: string } = {}) {
   const home = mkdtempSync(join(tmpdir(), "omo-account-cli-"))
   homes.push(home)
+  const pinDir = options.pinDir ?? join(home, "sync-device")
   const out: string[] = []
   const err: string[] = []
   return runAccountVerb({
     api: options.api ?? "http://127.0.0.1:1",
     store,
     home,
+    pinDir: () => pinDir,
     readStdin: async () => options.stdin ?? "",
     output: (line) => out.push(line),
     error: (line) => err.push(line),
@@ -135,6 +143,24 @@ describe("omo account", () => {
     expect((await run(store, ["export"])).code).toBe(ACCOUNT_EXIT.signedOut)
     expect((await run(store, ["show"])).out).toEqual([{ signedIn: false }])
   })
+
+  test("show --account reports whether this device joined memory sync for that account, from its trust pin", async () => {
+    const world = await createWorld("acct-show")
+    const pinDir = mkdtempSync(join(tmpdir(), "omo-account-pins-"))
+    homes.push(pinDir)
+    const { store } = memoryStore(credential("dev_a", 3_600_000))
+
+    const before = await run(store, ["show", "--account", world.account], { pinDir })
+    expect(before.out[0]).toMatchObject({ signedIn: true, sync: "not_joined" })
+
+    const walked = await appendEntries(emptyChain(world.account, creatorAnchor(world.account, world.owner.keyring)), world.server.chain(world.account), createRejectionCounter())
+    if (!walked.ok || walked.state.pin === null) throw new Error("the fixture genesis does not anchor")
+    await pinTrustAnchor(pinDir, world.account, walked.state.pin)
+    const after = await run(store, ["show", "--account", world.account], { pinDir })
+    expect(after.out[0]).toMatchObject({ signedIn: true, sync: "joined" })
+
+    expect((await run(store, ["show", "--account"], { pinDir })).code).toBe(ACCOUNT_EXIT.invalid)
+  }, 30_000)
 
   test("export returns the stored credential and forget clears it", async () => {
     const held = credential("dev_a", 3_600_000)

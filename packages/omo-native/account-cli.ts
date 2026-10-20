@@ -1,3 +1,6 @@
+import { resolveMemoryRoot } from "../memory-core/src/identity/layout"
+import { loadTrustAnchor } from "../memory-core/src/sync/crypto/trust-pin.ts"
+import { syncPinDir } from "../memory-core/src/sync/pin-dir"
 import { createCredentialStore, type CredentialStore } from "../omo-opencode/src/cli/service-auth/keystore"
 import { type Credentials, credentialSchema, serviceOrigin, SignInError } from "../omo-opencode/src/cli/service-auth/protocol"
 import { createSession } from "../omo-opencode/src/cli/service-auth/session"
@@ -11,6 +14,7 @@ export interface AccountCommandDependencies {
   readonly api: string
   readonly store: CredentialStore
   readonly home?: string
+  readonly pinDir: () => string
   readonly readStdin: () => Promise<string>
   readonly output: (line: string) => void
   readonly error: (line: string) => void
@@ -69,13 +73,28 @@ async function token(dependencies: AccountCommandDependencies): Promise<number> 
   }
 }
 
+// A trust pin is written only after the device verified its membership, so a pin means this device
+// joined memory sync for that account.
+async function syncStateOf(pinDir: string, account: string): Promise<"joined" | "not_joined" | "corrupt_pin"> {
+  const pin = await loadTrustAnchor(pinDir, account)
+  if (pin.ok) return "joined"
+  return pin.reason === "corrupt_pin" ? "corrupt_pin" : "not_joined"
+}
+
 async function runVerb(dependencies: AccountCommandDependencies, args: readonly string[]): Promise<number> {
   const [verb, ...flags] = args
   switch (verb) {
     case "show": {
       const current = await dependencies.store.read()
-      return reply(dependencies, current === null ? { signedIn: false }
-        : { signedIn: true, device: deviceOf(current), refreshState: current.refreshState ?? "ok" })
+      const accountAt = flags.indexOf("--account")
+      const account = accountAt === -1 ? undefined : flags[accountAt + 1]
+      if (accountAt !== -1 && (account === undefined || account === "")) {
+        dependencies.error("omo account show: --account needs an account id")
+        return ACCOUNT_EXIT.invalid
+      }
+      const sync = account === undefined ? {} : { sync: await syncStateOf(dependencies.pinDir(), account) }
+      return reply(dependencies, current === null ? { signedIn: false, ...sync }
+        : { signedIn: true, device: deviceOf(current), refreshState: current.refreshState ?? "ok", ...sync })
     }
     case "adopt":
       return adopt(dependencies, flags.includes("--replace"))
@@ -91,7 +110,7 @@ async function runVerb(dependencies: AccountCommandDependencies, args: readonly 
       return reply(dependencies, { forgotten: true })
     }
     default:
-      dependencies.error("usage: omo account show|adopt [--replace]|token|export|forget")
+      dependencies.error("usage: omo account show [--account <id>]|adopt [--replace]|token|export|forget")
       return ACCOUNT_EXIT.invalid
   }
 }
@@ -110,6 +129,7 @@ export async function runAccountCommand(args: readonly string[]): Promise<void> 
   process.exitCode = await runAccountVerb({
     api,
     get store() { return createCredentialStore(api) },
+    pinDir: () => syncPinDir(resolveMemoryRoot(process.env, process.cwd())),
     readStdin: () => new Response(Bun.stdin.stream()).text(),
     output: (line) => process.stdout.write(`${line}\n`),
     error: (line) => process.stderr.write(`${line}\n`),
