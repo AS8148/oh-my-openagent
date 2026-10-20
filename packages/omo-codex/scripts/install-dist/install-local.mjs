@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:bbc1ffab60b38b00f077eb89cf0af5487bb98766f65a17843e1aa8776b655413:0b969f35071686497aa2810fffcb0c16e788ca75397e0a61d01a37c1f9a38139
+// omo-codex-install:0177c14a68c1c71025adc9bcdc3e8a9aaf4654c312f8fd995acf848529797d9f:ada479a8d3cbc67690b104cac59f437671d5fb43e592a3682d53299a97744c7b
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -284,6 +284,8 @@ function toDiagnosticRecord(input, now) {
     timestamp: now.toISOString(),
     event: input.event,
     source: input.source,
+    ...input.entryKind === undefined ? {} : { entry_kind: input.entryKind },
+    ...input.errorCode === undefined ? {} : { error_code: input.errorCode },
     ...input.count === undefined ? {} : { count: input.count },
     ...serializeError(input.error, input.errorKind)
   };
