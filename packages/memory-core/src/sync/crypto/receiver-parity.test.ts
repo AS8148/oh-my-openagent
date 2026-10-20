@@ -5,7 +5,7 @@ import { createRejectionCounter } from "./rejection.ts"
 import { importSnapshot, type SnapshotRecord } from "./snapshot.ts"
 import { buildFork, rotation } from "./testing/fork.ts"
 import { envelopeRefusal } from "./envelope.ts"
-import { receiverPass, receiverRefusal, wire } from "./receiver.ts"
+import { receiverRefusal, takeReceiver, wire } from "./receiver.ts"
 import { ACCOUNT, appendBatch, appendKeyring, chain, deviceId, epochKey, keyringFor, keys, mainChain, objects, principalKeys, readBytes, record, fixtureAnchor } from "./testing/sync-v1.test-support.ts"
 import { buildBatch } from "./build.ts"
 import { b64urlDecode, sha256B64 } from "./vendor/sync-format/jcs.ts"
@@ -259,7 +259,7 @@ describe("the receiver walks the chain once per pull, not once per entry", () =>
     for (const batch of variants) {
       expect(envelopeRefusal(batch)).toBeNull()
       const whole = vendorFold.foldRefusal(wire([...history, batch]))
-      expect((await receiverPass(history, [batch]))(batch)).toBe(whole.ok ? null : whole.reason)
+      expect((await takeReceiver({}, history)).batch(batch)).toBe(whole.ok ? null : whole.reason)
       expect(await receiverRefusal(history, batch)).toBe(whole.ok ? null : whole.reason)
     }
   })
@@ -301,6 +301,18 @@ describe("the receiver checks one new entry in constant work (#10655)", () => {
       expect(perAppend[999]).toBe(perAppend[9])
     })
   }, 60000)
+
+  test("a replayed or lower-seq keyring entry is still refused, with the whole-list fold's reason", async () => {
+    const history = mainChain()
+    const receiver = await takeReceiver({}, history)
+    const replays = [history.at(-1), history[Math.floor(history.length / 2)], history[0]]
+    for (const replay of replays) {
+      if (replay === undefined) throw new Error("fixture main chain is short")
+      const oracle = await receiverRefusal(history, replay)
+      expect(oracle).toBe("seq_not_increasing")
+      expect(await receiver.keyring(replay)).toBe(oracle)
+    }
+  })
 })
 
 describe("an entry later in a pull never changes the verdict of an earlier one", () => {
