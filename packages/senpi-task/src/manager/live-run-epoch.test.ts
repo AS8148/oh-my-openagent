@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { coldReviveHarness } from "../lifecycle/__fixtures__/cold-revive-harness"
-import type { TaskRecord } from "../state"
+import { LEGACY_RUN_START_EPOCH, type TaskRecord } from "../state"
 import { bounded, fixture, poolInput } from "../workpool/__fixtures__/admission"
 import { FakeRunner, baseSpec, cleanupProjects, flush, makeManager } from "./__fixtures__/manager-fakes"
 
@@ -15,7 +15,7 @@ function expectTaggedWithCurrentRun(
   record: TaskRecord | null | undefined,
 ): void {
   if (record === null || record === undefined) throw new Error("record vanished")
-  expect(manager.liveRunStats?.(record.task_id)?.runStartEpoch).toBe(record.run_start_epoch ?? -1)
+  expect(manager.liveRunStats?.(record.task_id)?.runStartEpoch).toBe(record.run_start_epoch ?? LEGACY_RUN_START_EPOCH)
 }
 
 describe("every run-stats tracker is tagged with the run it measures", () => {
