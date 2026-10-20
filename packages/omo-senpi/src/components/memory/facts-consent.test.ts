@@ -46,7 +46,7 @@ async function recordedReceipt(after: readonly RawMessage[], quote: string): Pro
   return launchAndRead({ version: 1, identity: identity.id, today: "2026-10-19", entries: [replyEntry], knownPeople: [], primaryHuman: { slug: "human", aliases: [] } }, quote, { root, identity, queue })
 }
 
-async function launchAndRead(payload: Parameters<typeof launchFactsInProcess>[0]["payload"], quote: string, fx: Awaited<ReturnType<typeof fixture>>): Promise<unknown> {
+async function launchAndRead(payload: Parameters<typeof launchFactsInProcess>[0]["payload"], quote: string, fx: Pick<Awaited<ReturnType<typeof fixture>>, "root" | "identity" | "queue">): Promise<unknown> {
   const { root, identity, queue } = fx
   const runId = "facts-consent"
   const runDir = join(root, runId)
