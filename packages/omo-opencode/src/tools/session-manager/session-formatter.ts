@@ -1,5 +1,5 @@
 import type { SessionInfo, SessionMessage, SearchResult } from "./types"
-import { getSessionInfo, readSessionMessages } from "./storage"
+import { forEachSessionMessagePage, getSessionInfo } from "./storage"
 import { describeSessionError, formatSkippedSessions, type SkippedSession } from "./session-error"
 
 export async function formatSessionList(sessionIDs: string[]): Promise<string> {
@@ -154,54 +154,69 @@ export async function filterSessionsByDate(
   return results
 }
 
+// Scans newest messages first, one page at a time, and stops at maxResults or when the signal aborts.
 export async function searchInSession(
   sessionID: string,
   query: string,
   caseSensitive = false,
-  maxResults?: number
+  maxResults?: number,
+  signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  const messages = await readSessionMessages(sessionID)
   const results: SearchResult[] = []
-
   const searchQuery = caseSensitive ? query : query.toLowerCase()
+  const isFull = (): boolean => maxResults !== undefined && maxResults > 0 && results.length >= maxResults
 
-  for (const msg of messages) {
-    if (maxResults && results.length >= maxResults) break
+  await forEachSessionMessagePage(
+    sessionID,
+    (messages) => {
+      for (let index = messages.length - 1; index >= 0 && !isFull(); index--) {
+        const result = matchMessage(sessionID, messages[index], searchQuery, caseSensitive)
+        if (result) results.push(result)
+      }
+      return !isFull()
+    },
+    signal,
+  )
 
-    let matchCount = 0
-    const excerpts: string[] = []
+  return results
+}
 
-    for (const part of msg.parts) {
-      if (part.type === "text" && part.text) {
-        const text = caseSensitive ? part.text : part.text.toLowerCase()
-        const matches = text.split(searchQuery).length - 1
-        if (matches > 0) {
-          matchCount += matches
+function matchMessage(
+  sessionID: string,
+  msg: SessionMessage,
+  searchQuery: string,
+  caseSensitive: boolean,
+): SearchResult | null {
+  let matchCount = 0
+  const excerpts: string[] = []
 
-          const index = text.indexOf(searchQuery)
-          if (index !== -1) {
-            const start = Math.max(0, index - 50)
-            const end = Math.min(text.length, index + searchQuery.length + 50)
-            let excerpt = part.text.substring(start, end)
-            if (start > 0) excerpt = "..." + excerpt
-            if (end < text.length) excerpt = excerpt + "..."
-            excerpts.push(excerpt)
-          }
+  for (const part of msg.parts) {
+    if (part.type === "text" && part.text) {
+      const text = caseSensitive ? part.text : part.text.toLowerCase()
+      const matches = text.split(searchQuery).length - 1
+      if (matches > 0) {
+        matchCount += matches
+
+        const index = text.indexOf(searchQuery)
+        if (index !== -1) {
+          const start = Math.max(0, index - 50)
+          const end = Math.min(text.length, index + searchQuery.length + 50)
+          let excerpt = part.text.substring(start, end)
+          if (start > 0) excerpt = "..." + excerpt
+          if (end < text.length) excerpt = excerpt + "..."
+          excerpts.push(excerpt)
         }
       }
     }
-
-    if (matchCount > 0) {
-      results.push({
-        session_id: sessionID,
-        message_id: msg.id,
-        role: msg.role,
-        excerpt: excerpts[0] || "",
-        match_count: matchCount,
-        timestamp: msg.time?.created,
-      })
-    }
   }
 
-  return results
+  if (matchCount === 0) return null
+  return {
+    session_id: sessionID,
+    message_id: msg.id,
+    role: msg.role,
+    excerpt: excerpts[0] || "",
+    match_count: matchCount,
+    timestamp: msg.time?.created,
+  }
 }
