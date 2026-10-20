@@ -88,7 +88,9 @@ async function launchCandidate(
     },
   })
   const tool = createFactsRecordTool({
-    extractionPath, state, exchanges: payloadExchanges(input.payload),
+    extractionPath, state,
+    // A text payload (onboarding session digests) has no proposal and reply turns, so it can never carry consent.
+    exchanges: typeof input.payload === "string" ? [] : payloadExchanges(input.payload),
     ...(guard === undefined ? {} : { maxBytes: FACTS_RECORD_BYTES, maxRecords: FACTS_RECORD_LIMIT, onFailure: guard.fail }),
     ...(input.recordLimits === undefined ? {} : input.recordLimits),
   })
