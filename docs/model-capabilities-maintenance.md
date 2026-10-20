@@ -28,17 +28,22 @@ This project treats model capability resolution as a layered system:
 - the scheduled `refresh-model-capabilities` workflow (`bun run build:model-capabilities`, fetched from `models.dev`), and
 - feature PRs that add one scoped entry for a model the upstream catalog does not carry yet (for example #10187 added `gemini-4-argon`).
 
-Hand-scoped entries must survive the scheduled refresh. A refresh merges: it adds or updates upstream entries and keeps committed entries upstream lacks, unless a PR retires them on purpose. A refresh that overwrites the file drops those entries; the refresh PR open at the time of writing (#7531) was missing 501 of them (#10665).
+Today the refresh **overwrites** the file: `script/build-model-capabilities.ts` writes the fetched `models.dev` snapshot over it and keeps nothing from the committed copy. A refresh PR therefore deletes every hand-scoped entry upstream lacks; the refresh PR open at the time of writing (#7531) was missing 501 entries that `dev` carries.
 
-When you add an entry by hand, keep it to the entry itself: do not regenerate the whole file from `models.dev` in a feature PR, and leave `generatedAt` alone. When you review a refresh PR, check the removed entries before merging.
+Hand-scoped entries must survive the refresh, so the refresh has to change to a merge: add or update upstream entries, and keep committed entries upstream lacks unless a PR retires them on purpose. That change is not made yet; it is tracked in #10665.
+
+Until it lands:
+
+- When you add an entry by hand, keep it to the entry itself: do not regenerate the whole file from `models.dev` in a feature PR, and leave `generatedAt` alone.
+- When you review a refresh PR, check its removed entries and restore any hand-scoped ones before merging.
 
 ## Guardrails
 
-`bun run test:model-capabilities` enforces the following invariants:
+`collectModelCapabilityGuardrailIssues()` in `packages/model-core/src/model-capability-guardrails.ts` reports these issue kinds:
 
-- exact alias targets must exist in the bundled snapshot
-- exact alias keys must not silently become canonical `models.dev` IDs
-- pattern aliases must not rewrite canonical snapshot IDs
-- built-in requirement models must stay canonical and snapshot-backed
+- exact alias targets missing from the bundled snapshot
+- exact alias keys that became canonical `models.dev` IDs
+- pattern aliases that rewrite canonical snapshot IDs
+- built-in requirement models that rely on an alias or are missing from the snapshot
 
-The scheduled `refresh-model-capabilities` workflow runs these guardrails before opening an automated snapshot refresh PR.
+`bun run test:model-capabilities` checks that the detector finds each kind on synthetic snapshots. Against the bundled snapshot it asserts only that a short list of built-in models is not missing from it (`model-capability-guardrails.test.ts`); it does not fail on every issue the detector reports for the real file. The scheduled `refresh-model-capabilities` workflow runs that suite before it opens a refresh PR, so the same limit applies there.
