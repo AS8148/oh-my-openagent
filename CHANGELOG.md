@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Git worktrees of one repository can share the main checkout's memory.** Set `memory.auto_identity: "git"` (for example in `~/.omo/omo.jsonc`, so worktrees created outside the main checkout see it) and every linked worktree, including the ones Orca creates per agent, reads and writes the main checkout's memory instead of starting empty. The main checkout keeps its existing memory, sessions that are already bound keep theirs, and the default `"path"` leaves behavior unchanged. ([#9659](https://github.com/code-yeongyu/oh-my-openagent/issues/9659))
+**Git worktrees of one repository can share the main checkout's memory.** Set `memory.auto_identity: "git"` (for example in `~/.omo/omo.jsonc`, so worktrees created outside the main checkout see it) and every linked worktree, including the ones Orca creates per agent, reads and writes the main checkout's memory instead of starting empty. The main checkout keeps its existing memory, sessions that are already bound keep theirs, and the default `"path"` leaves behavior unchanged. ([#9659](https://github.com/code-yeongyu/oh-my-openagent/issues/9659), [#10047](https://github.com/code-yeongyu/oh-my-openagent/pull/10047))
 
 ## [5.1.39] - 2026-10-20
 
