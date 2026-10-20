@@ -88,7 +88,10 @@ test("separate atomic writers converge and revoke closes a live legacy transport
     await manager.getOrCreateClient(info, config)
     expect(environments.at(-1)?.AUTH_HEADER).toBe("synthetic-cross-value")
     const pending = manager.getOrCreateClient({ ...info, sessionID: "cross-process-pending" }, config)
-    const rejected = expect(pending).rejects.toThrow("policy changed")
+    const rejected = pending.then(
+      () => Promise.reject(new Error("Pending materialization resolved instead of failing on the policy change")),
+      (error: unknown) => { expect(error instanceof Error ? error.message : String(error)).toContain("policy changed") },
+    )
     await bounded(started.promise)
     await runWriter(root, `await revoke(${JSON.stringify(path)},${JSON.stringify(identity)});`)
     await bounded(Promise.all([closed.promise, rejected]))
