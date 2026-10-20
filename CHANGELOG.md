@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**After OmO stops unexpectedly, the next launch offers once to send a problem report ([#10645](https://github.com/code-yeongyu/oh-my-openagent/issues/10645)).** Only a crash or other abnormal exit counts; sign-in, permission and usage-limit problems never trigger it. The question appears once, after the screen is drawn, only in an interactive TUI (not in the desktop app). Nothing is sent unless you say yes and confirm the usual preview, and you can turn the question off for good.
+**After OmO stops unexpectedly, the next launch offers once to send a problem report ([#10645](https://github.com/code-yeongyu/oh-my-openagent/issues/10645), [#10722](https://github.com/code-yeongyu/oh-my-openagent/pull/10722)).** Only a crash or other abnormal exit counts; sign-in, permission and usage-limit problems never trigger it. The question appears once, after the screen is drawn, only in an interactive TUI (not in the desktop app). Nothing is sent unless you say yes and confirm the usual preview, and you can turn the question off for good.
 
 **Report a problem from inside OmO ([#10546](https://github.com/code-yeongyu/oh-my-openagent/pull/10546)).** `/feedback` (or `/bug`) sends a bug report or an idea to the OmO team in one step: your description plus your account, this device, versions, this conversation's recent messages, recent logs and your settings. Passwords, keys and tokens are removed first with the same redactor `/share` uses, your memory is never sent, and `OMO_DISABLE_FEEDBACK=1` saves the report as a local file instead of uploading it. The desktop app's Report a problem dialog uses the same report.
 
