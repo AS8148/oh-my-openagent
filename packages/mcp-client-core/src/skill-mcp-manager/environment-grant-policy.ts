@@ -25,6 +25,7 @@ export class EnvironmentGrantPolicy {
   private readonly pending = new Map<string, PendingGrant>()
   private readonly live = new Map<string, { names: readonly string[]; version: number; controller: AbortController }>()
   private readonly notices = new Map<string, string>()
+  private readonly noticeMessages = new Map<string, string>()
   private readonly decisions = new Map<string, Promise<PreparedPolicy | undefined>>()
   private readonly declarations = new Map<string, string>()
   private reconciliation: Promise<void> = Promise.resolve()
@@ -82,16 +83,17 @@ export class EnvironmentGrantPolicy {
       const policy = resolveProjectEnvironment(raw, names, explicit)
       const digest = policyHash({
         identity, provenance: info.provenance, names, generation: this.snapshot?.generation,
-        revision: this.snapshot?.revision, explicit,
+        revision: this.snapshot?.revision, explicit, withheld: policy.withheld,
       })
       const live = this.live.get(identity) ?? { names, version: 0, controller: new AbortController() }
       this.live.set(identity, live)
+      if (policy.withheld.length === 0) this.noticeMessages.delete(identity)
       if (policy.withheld.length > 0 && this.notices.get(identity) !== digest) {
         this.notices.set(identity, digest)
         const id = randomBytes(6).toString("hex")
         this.pending.set(id, { digest: identity, names: policy.withheld, info, raw })
         const message = `Project MCP server ${info.serverName} (skill ${info.skillName}) withheld ${policy.withheld.length} environment names: ${policy.withheld.join(", ")}. Grant and save permanently: /omo-mcp-env-grant ${id} (all displayed names), or /omo-mcp-env-grant ${id} NAME [NAME...].`
-        this.notices.set(`${info.sessionID}:${info.skillName}:${info.serverName}`, message)
+        this.noticeMessages.set(identity, message)
         log("[skill-mcp-env] " + message)
         this.notify?.(message, info)
       }
@@ -105,7 +107,8 @@ export class EnvironmentGrantPolicy {
   version(identity: string): number { return this.live.get(identity)?.version ?? 0 }
 
   notice(info: SkillMcpClientInfo): string | undefined {
-    return this.notices.get(`${info.sessionID}:${info.skillName}:${info.serverName}`)
+    const identity = this.declarations.get(`${info.sessionID}:${info.skillName}:${info.serverName}`)
+    return identity ? this.noticeMessages.get(identity) : undefined
   }
 
   async grant(id: string, subset?: readonly string[]): Promise<string> {

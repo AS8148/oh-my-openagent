@@ -1,5 +1,5 @@
 import { existsSync, realpathSync, readdirSync, statSync } from "node:fs"
-import { dirname, join, resolve, sep } from "node:path"
+import { basename, dirname, join, resolve, sep } from "node:path"
 import { homedir } from "node:os"
 import { sharedSkillsRootPath } from "@oh-my-opencode/shared-skills"
 import { getClaudeConfigDir, getOpenCodeConfigDirs, detectWorktreePath } from "../../shared"
@@ -99,7 +99,7 @@ export function userAllowedPaths(provenance: SkillProvenance): { roots: string[]
       if (!statSync(canonical).isDirectory()) { files.push(canonical); return }
       roots.push(canonical)
       if (ancestry.has(canonical)) return
-      if (!sourceRoot && existsSync(join(path, "SKILL.md"))) return
+      if (!sourceRoot && (existsSync(join(path, "SKILL.md")) || existsSync(join(path, `${basename(path)}.md`)))) return
       const next = new Set([...ancestry, canonical])
       for (const entry of readdirSync(path, { withFileTypes: true })) {
         if (entry.name.startsWith(".")) continue
