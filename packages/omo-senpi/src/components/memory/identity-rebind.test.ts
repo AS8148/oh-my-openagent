@@ -11,6 +11,7 @@ import { resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
 import { createMemoryBinding } from "./binding"
 import { MEMORY_BINDING_CUSTOM_TYPE, createMemoryComponent, memoryModuleSupervisor } from "./index"
 import { componentContext, loadedMemoryConfig, memorySettings, MemoryFakeExtensionAPI, sessionContext } from "./memory.test-support"
+import type { SyncRunner } from "./sync-runner"
 import { rmSyncEfaultTolerant } from "./teardown.test-support"
 
 const roots: string[] = []
@@ -150,7 +151,7 @@ describe("memory identity rebind", () => {
 })
 
 describe("memory identity with auto_identity git (#9659)", () => {
-  test("#given auto_identity git #when a fresh session starts in a linked worktree #then it binds the main checkout's identity", async () => {
+  test("#given auto_identity git #when a fresh session starts in a linked worktree #then it binds and syncs the main checkout's identity", async () => {
     // given
     const { main, worktree } = linkedWorktree()
     const env = { OMO_MEMORY_HOME: memoryRoot() }
@@ -158,11 +159,23 @@ describe("memory identity with auto_identity git (#9659)", () => {
     const pi = new MemoryFakeExtensionAPI()
     const notifications: Array<{ message: string; level: string }> = []
     const before = memoryModuleSupervisor.refCount
+    // The bound identity also keys the end-to-end encrypted sync stream, so a worktree session
+    // must join the main checkout's stream, not open a per-worktree one.
+    const syncAcquired: Array<{ identity: string; repo: string }> = []
+    const syncRunner: SyncRunner = {
+      acquire: async (identity, paths) => {
+        syncAcquired.push({ identity, repo: paths.repo })
+      },
+      release: async () => {},
+      status: async () => null,
+      deviceName: () => undefined,
+    }
     createMemoryComponent({
       env,
       loadConfig: () => loadedMemoryConfig(memorySettings({ auto_identity: "git" })),
       now: () => 789,
       resolveCwd: () => worktree,
+      syncRunner,
       createRuntime: () => {
         throw new Error("bind-only test does not create an identity runtime")
       },
@@ -176,7 +189,9 @@ describe("memory identity with auto_identity git (#9659)", () => {
     expect(pi.entries).toEqual([{
       customType: MEMORY_BINDING_CUSTOM_TYPE,
       data: createMemoryBinding({ identity: mainIdentity.id, repoPath: mainIdentity.paths.repo, boundAt: 789 }),
+      options: { startupBookkeeping: true },
     }])
+    expect(syncAcquired).toEqual([{ identity: mainIdentity.id, repo: mainIdentity.paths.repo }])
     expect(memoryModuleSupervisor.refCount).toBe(before + 1)
     memoryModuleSupervisor.release()
   })
@@ -205,6 +220,7 @@ describe("memory identity with auto_identity git (#9659)", () => {
     expect(pi.entries).toEqual([{
       customType: MEMORY_BINDING_CUSTOM_TYPE,
       data: createMemoryBinding({ identity: explicit.id, repoPath: explicit.paths.repo, boundAt: 791 }),
+      options: { startupBookkeeping: true },
     }])
     memoryModuleSupervisor.release()
     expect(memoryModuleSupervisor.refCount).toBe(before)
@@ -237,6 +253,7 @@ describe("memory identity with auto_identity git (#9659)", () => {
     expect(pi.entries).toEqual([{
       customType: MEMORY_BINDING_CUSTOM_TYPE,
       data: { identity: perWorktree.id, repoPathHash: (recorded.data as { repoPathHash: string }).repoPathHash, boundAt: 790 },
+      options: { startupBookkeeping: true },
     }])
     expect(memoryModuleSupervisor.refCount).toBe(before + 1)
     memoryModuleSupervisor.release()
