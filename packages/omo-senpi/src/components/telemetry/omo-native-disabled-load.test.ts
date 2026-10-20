@@ -107,19 +107,35 @@ describe("telemetry turned off loads and writes nothing", () => {
     })
   }
 
-  test("#given a summary queue an earlier opted-in run left #when a machine-wide opt-out session quits #then the whole queue is deleted without loading the sidecar", async () => {
+  const seedQueue = (stateDir: string) => {
+    const pending = join(summaryDir(stateDir), "pending")
+    mkdirSync(pending, { recursive: true })
+    const record = { v: 2, consent: "enabled", scope: {}, uuid: "0b6c5d3e-2f1a-4c8b-9d7e-6a5b4c3d2e1f" }
+    writeFileSync(join(pending, `${record.uuid}.json`), JSON.stringify(record))
+    writeFileSync(join(summaryDir(stateDir), "hashed_old.json"), JSON.stringify({ v: 2, consent: "enabled", scope: {} }))
+  }
+
+  test("#given a summary queue an opted-in run left #when the persisted setting is off and a session quits #then the queue is deleted without loading the sidecar", async () => {
     await withTempAgentDir(async (agentDir) => {
       const stateDir = join(agentDir, "omo-senpi", "omo-native")
-      const pending = join(summaryDir(stateDir), "pending")
-      mkdirSync(pending, { recursive: true })
-      const record = { v: 2, consent: "enabled", scope: {}, uuid: "0b6c5d3e-2f1a-4c8b-9d7e-6a5b4c3d2e1f" }
-      writeFileSync(join(pending, `${record.uuid}.json`), JSON.stringify(record))
-      writeFileSync(join(summaryDir(stateDir), "hashed_old.json"), JSON.stringify({ v: 2, consent: "enabled", scope: {} }))
+      seedQueue(stateDir)
+
+      const loads = await runDisabledSession(agentDir, stateDir, DISABLED[1]![1](agentDir))
+
+      expect(loads).toEqual({ sidecar: 0, transport: 0 })
+      expect(readdirSync(summaryDir(stateDir), { recursive: true, encoding: "utf8" }).filter((name) => name.endsWith(".json"))).toEqual([])
+    })
+  })
+
+  test("#given a summary queue an opted-in run left #when a session opted out by environment variable quits #then that per-process opt-out leaves the queue and loads no sidecar", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const stateDir = join(agentDir, "omo-senpi", "omo-native")
+      seedQueue(stateDir)
 
       const loads = await runDisabledSession(agentDir, stateDir, DISABLED[0]![1](agentDir))
 
       expect(loads).toEqual({ sidecar: 0, transport: 0 })
-      expect(existsSync(summaryDir(stateDir))).toBe(false)
+      expect(readdirSync(summaryDir(stateDir), { recursive: true, encoding: "utf8" }).filter((name) => name.endsWith(".json")).sort()).toEqual(["hashed_old.json", "pending/0b6c5d3e-2f1a-4c8b-9d7e-6a5b4c3d2e1f.json"])
     })
   })
 })

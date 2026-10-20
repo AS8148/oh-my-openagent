@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs"
+import { readdirSync, readFileSync, unlinkSync } from "node:fs"
 import { join } from "node:path"
 
 // The opted-out side of session_summary, kept in the entry bundle with node:fs only: turning telemetry off
@@ -18,15 +18,12 @@ export function hasQueuedSummaryFiles(stateDir: string): boolean {
 
 /**
  * Deletes every queued window and pending event that may never be sent: no `enabled` consent mark, or a scope
- * whose consent, read now, is off. It only reads and deletes, never writes. `all` (a machine-wide opt-out)
- * deletes the whole directory, whatever each record says.
+ * whose PERSISTED consent (the config files every process reads), read now, is off. It only reads and deletes,
+ * never writes. An opt-out set by environment variable belongs to one process, so it is never passed in here:
+ * other sessions that consented keep their windows and pending events.
  */
-export function purgeUnconsentedQueue(stateDir: string, isScopeConsented: (scope: QueuedScope) => boolean, all = false): void {
+export function purgeUnconsentedQueue(stateDir: string, isScopeConsented: (scope: QueuedScope) => boolean): void {
   const dir = summaryDir(stateDir)
-  if (all) {
-    rmSync(dir, { recursive: true, force: true })
-    return
-  }
   for (const folder of [dir, join(dir, "pending")]) {
     for (const name of names(folder)) {
       if (!name.endsWith(".json")) continue

@@ -2,7 +2,6 @@ import type { TurnEndEvent } from "@code-yeongyu/senpi"
 import {
   createConsentGatedFetch,
   createEventTelemetryClient,
-  isTelemetryClientEnabled,
 } from "@oh-my-opencode/telemetry-core/injected"
 import { createLazyPostHogTransportFactory } from "./lazy-posthog"
 import type {
@@ -28,6 +27,7 @@ import { registerOmoNativeParallelSummary } from "./omo-native-parallel-summary"
 import { createOmoNativePromptComponent } from "./omo-native-prompt"
 import {
   createOmoNativeSessionComponent,
+  isOmoNativeTelemetryConfigEnabled,
   isOmoNativeTelemetryEnabled,
   type OmoNativeSessionOptions,
 } from "./omo-native-session"
@@ -185,7 +185,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       pi.on("session_shutdown", async (payload, eventCtx) => {
         consentCwd = cwdOf(eventCtx)
         if (summary === undefined) {
-          purgeQueue(stateDir, (scope) => readConsent(scope.cwd), !isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }), options)
+          purgeQueue(stateDir, (scope) => isOmoNativeTelemetryConfigEnabled(consentOptions, scope.cwd === undefined ? {} : { cwd: scope.cwd }, env), options)
           return
         }
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
@@ -398,11 +398,13 @@ function forwardValidatedCapture(transport: TelemetryTransport, message: Telemet
 
 // Queued records that may never be sent (no consent mark, or a scope that has opted out since) are deleted
 // even by a session that records nothing itself.
-// It runs in the entry bundle on node:fs alone, so an opted-out session loads no telemetry code at all; a
-// machine-wide opt-out deletes the whole queue.
-function purgeQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean, machineOptOut: boolean, options: OmoNativeTelemetryComponentOptions): void {
+// It runs in the entry bundle on node:fs alone, so an opted-out session loads no telemetry code at all.
+// Consent here is the persisted setting only: an opt-out set by environment variable (DO_NOT_TRACK,
+// OMO_DISABLE_TELEMETRY, ...) is this process's own and must not delete what consented sessions queued. An
+// opted-out session never creates a recorder, so it has no window, owner entry or pending file of its own.
+function purgeQueue(stateDir: string, isScopeConsented: (scope: ConsentScope) => boolean, options: OmoNativeTelemetryComponentOptions): void {
   try {
-    purgeUnconsentedQueue(stateDir, isScopeConsented, machineOptOut)
+    purgeUnconsentedQueue(stateDir, isScopeConsented)
   } catch (error) {
     options.diagnostics?.({
       event: "telemetry_activity_state_write_failed",
