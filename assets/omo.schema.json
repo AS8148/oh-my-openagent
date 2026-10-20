@@ -901,6 +901,10 @@
         "include_co_authored_by": {
           "default": false,
           "type": "boolean"
+        },
+        "git_env_prefix": {
+          "default": "GIT_MASTER=1",
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -3319,6 +3323,9 @@
             },
             "include_co_authored_by": {
               "type": "boolean"
+            },
+            "git_env_prefix": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -5542,6 +5549,9 @@
             },
             "include_co_authored_by": {
               "type": "boolean"
+            },
+            "git_env_prefix": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -7765,6 +7775,9 @@
             },
             "include_co_authored_by": {
               "type": "boolean"
+            },
+            "git_env_prefix": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -9986,6 +9999,9 @@
               },
               "include_co_authored_by": {
                 "type": "boolean"
+              },
+              "git_env_prefix": {
+                "type": "string"
               }
             },
             "additionalProperties": false
@@ -12209,6 +12225,9 @@
                   },
                   "include_co_authored_by": {
                     "type": "boolean"
+                  },
+                  "git_env_prefix": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -14432,6 +14451,9 @@
                   },
                   "include_co_authored_by": {
                     "type": "boolean"
+                  },
+                  "git_env_prefix": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -16655,6 +16677,9 @@
                   },
                   "include_co_authored_by": {
                     "type": "boolean"
+                  },
+                  "git_env_prefix": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
