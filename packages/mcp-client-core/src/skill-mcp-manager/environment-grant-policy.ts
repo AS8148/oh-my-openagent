@@ -55,10 +55,8 @@ export class EnvironmentGrantPolicy {
       for (const [identity, live] of this.live) {
         const names = [...(next.grants[identity]?.names ?? [])].sort()
         if (gap || policyHash(names) !== policyHash(live.names)) {
-          live.version++
           live.names = names
-          live.controller.abort()
-          live.controller = new AbortController()
+          this.invalidateIdentity(identity)
           await this.invalidate(identity)
         }
       }
@@ -105,6 +103,14 @@ export class EnvironmentGrantPolicy {
   }
 
   version(identity: string): number { return this.live.get(identity)?.version ?? 0 }
+
+  invalidateIdentity(identity: string): void {
+    const live = this.live.get(identity)
+    if (!live) return
+    live.version++
+    live.controller.abort()
+    live.controller = new AbortController()
+  }
 
   notice(info: SkillMcpClientInfo): string | undefined {
     const identity = this.declarations.get(`${info.sessionID}:${info.skillName}:${info.serverName}`)

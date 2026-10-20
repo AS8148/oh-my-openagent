@@ -6,6 +6,7 @@ import { getOrCreateClient, getOrCreateClientWithRetryImpl } from "./connection"
 import { handlePostRequestAuthError, handleStepUpIfNeeded } from "./oauth-handler"
 import { EnvironmentGrantPolicy } from "./environment-grant-policy"
 import type { GrantStore } from "./env-grant-store"
+import { policyHash } from "./project-env-policy"
 import type {
   McpClient,
   OAuthProviderFactory,
@@ -21,11 +22,12 @@ export interface SkillMcpClientOptions {
 
 export function buildSkillMcpClientKey(info: SkillMcpClientInfo, options?: SkillMcpClientOptions): string {
   const baseKey = `${info.sessionID}:${info.skillName}:${info.serverName}`
+  const authorityKey = info.provenance ? `${baseKey}::provenance=${policyHash(info.provenance)}` : baseKey
   if (!options?.cdpUrl) {
-    return baseKey
+    return authorityKey
   }
 
-  return `${baseKey}::cdp=${options.cdpUrl}`
+  return `${authorityKey}::cdp=${options.cdpUrl}`
 }
 
 export class SkillMcpManager {
@@ -50,10 +52,18 @@ export class SkillMcpManager {
       disposed: false,
       createOAuthProvider: options.createOAuthProvider ?? ((providerOptions) => new McpOAuthProvider(providerOptions)),
     }
-    this.state.environmentPolicy = new EnvironmentGrantPolicy(options.grantStore, options.onEnvironmentNotice, (identity) => this.invalidateIdentity(identity))
+    this.state.environmentPolicy = new EnvironmentGrantPolicy(options.grantStore, options.onEnvironmentNotice, (identity) => this.closeIdentityClients(identity))
   }
 
   async invalidateIdentity(identity: string): Promise<void> {
+    this.state.environmentPolicy?.invalidateIdentity(identity)
+    await this.closeIdentityClients(identity)
+  }
+
+  private async closeIdentityClients(identity: string): Promise<void> {
+    for (const key of this.state.pendingConnections.keys()) {
+      if (key.includes(`::identity=${identity}::`)) this.state.pendingConnections.delete(key)
+    }
     for (const key of this.state.clients.keys()) {
       if (key.includes(`::identity=${identity}::`)) await forceReconnect(this.state, key)
     }
