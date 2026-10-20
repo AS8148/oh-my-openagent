@@ -36,7 +36,7 @@ export function parseRawZ(output: string): StagedEntry[] {
 }
 
 export function stagedEntries(cwd: string): StagedEntry[] {
-  const listed = git(cwd, ["-c", "core.quotePath=false", "diff", "--cached", "-M", "-C", "-z", "--raw", "--no-abbrev", "--diff-filter=ACMR"])
+  const listed = git(cwd, ["-c", "core.quotePath=false", "diff", "--cached", "-M", "-C", "-z", "--raw", "--no-abbrev"])
   if (listed === undefined) throw new Error("memory hook: could not list the staged paths")
   return parseRawZ(listed)
 }

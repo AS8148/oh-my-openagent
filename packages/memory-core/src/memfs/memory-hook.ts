@@ -12,7 +12,7 @@ const MEMORY_WRITER_TRAILER = /^Omo-Writer: memory-tool$/m
 // git quotes a path holding any of these even with core.quotePath=false, and the shell checks read
 // git's newline-separated lists; refusing such names keeps every list the shell sees exact.
 const GIT_QUOTED_PATH = /["\\\u0000-\u001f\u007f]/
-const SYMLINK_MODE = "120000"
+const REGULAR_FILE_MODES = new Set(["100644", "100755"])
 const RECEIPT_REFUSAL = "the provenance header is a claim receipt only the memory tool writes; remove that line (or save the note with the memory tool)"
 
 // The value the reader would take for the header: the last `provenance` entry of the frontmatter,
@@ -22,16 +22,19 @@ export function provenanceOf(content: string | undefined): string | undefined {
   return contentFrontmatterEntries(content)?.filter((entry) => entry.key === PROVENANCE_FRONTMATTER_KEY).at(-1)?.value
 }
 
+// Every staged entry is inspected, whatever its change type (A C D M R T U X) or path: a deletion is
+// fine; anything else must be a regular-file blob, so a type change, symlink or submodule can never
+// carry content around the receipt checks.
 export function preCommitFailures(cwd: string, entries: readonly StagedEntry[] = stagedEntries(cwd)): string[] {
   const failures: string[] = []
-  for (const { path, dstBlob, dstMode } of entries) {
+  for (const { status, path, dstBlob, dstMode } of entries) {
     if (GIT_QUOTED_PATH.test(path)) {
       failures.push(`  ${JSON.stringify(path)}: memory file names cannot hold quotes, backslashes or control characters; rename it`)
       continue
     }
-    if (!path.endsWith(".md")) continue
-    if (dstMode === SYMLINK_MODE) {
-      failures.push(`  ${path}: a memory note cannot be a symbolic link; commit the file itself`)
+    if (status.startsWith("D")) continue
+    if (!REGULAR_FILE_MODES.has(dstMode)) {
+      failures.push(`  ${path}: a memory file must be a regular file (not a symbolic link, submodule or unknown type, git status ${status}); commit the file itself`)
       continue
     }
     const staged = readBlob(cwd, dstBlob)
@@ -39,6 +42,7 @@ export function preCommitFailures(cwd: string, entries: readonly StagedEntry[] =
       failures.push(`  ${path}: the staged file could not be read`)
       continue
     }
+    if (!path.endsWith(".md") && provenanceOf(staged) === undefined) continue
     for (const key of duplicateFrontmatterKeys(staged)) failures.push(`  ${path}: duplicate frontmatter key '${key}'; keep one`)
   }
   return failures
@@ -49,7 +53,11 @@ export function commitMessageFailures(cwd: string, message: string, entries: rea
   const heads = mergeHeads(cwd)
   const failures: string[] = []
   for (const entry of entries) {
-    if (!entry.path.endsWith(".md")) continue
+    if (entry.status.startsWith("D")) continue
+    if (!REGULAR_FILE_MODES.has(entry.dstMode)) {
+      failures.push(`  ${entry.path}: a memory file must be a regular file (not a symbolic link, submodule or unknown type, git status ${entry.status})`)
+      continue
+    }
     const staged = readBlob(cwd, entry.dstBlob)
     if (staged === undefined) {
       failures.push(`  ${entry.path}: the staged file could not be read`)
