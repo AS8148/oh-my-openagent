@@ -60,6 +60,7 @@
     "test": "bun test src/*.test.ts src/**/*.test.ts"
   },
   "dependencies": {
+    "@oh-my-opencode/skills-loader-core": "workspace:*",
     "@oh-my-opencode/delegate-core": "workspace:*",
     "@oh-my-opencode/isolation-core": "workspace:*",
     "@oh-my-opencode/omo-config-core": "workspace:*",

@@ -15,6 +15,7 @@ import { getSystemMcpServerNames } from "../features/claude-code-mcp-loader";
 import {
   builtinSkillsToCommandDefinitionRecord,
   discoverConfigSourceSkills,
+  getSkillSourceProvenance,
   isDisabledSkillAlias,
   isDisabledSkillName,
   loadGlobalAgentsSkills,
@@ -34,6 +35,7 @@ import type { PluginComponents } from "./plugin-components-loader";
 import { adaptHostSkillConfig } from "../shared/host-skill-config";
 import { collectDisabledSkillAliases } from "../plugin/skill-context";
 import type { LoadedSkill } from "../features/opencode-skill-loader/types";
+import { detectWorktreePath } from "@oh-my-opencode/skills-loader-core/shared/project-discovery-dirs";
 
 export async function applyCommandConfig(params: {
   config: Record<string, unknown>;
@@ -68,6 +70,7 @@ export async function applyCommandConfig(params: {
   }
 
   const hostSkillConfig = adaptHostSkillConfig(params.config.skills);
+  const sourceProvenance = getSkillSourceProvenance(params.pluginConfig.skills);
   const [
     configSourceSkills,
     hostConfigSkills,
@@ -89,6 +92,7 @@ export async function applyCommandConfig(params: {
     discoverConfigSourceSkills({
       config: hostSkillConfig,
       configDir: params.ctx.directory,
+      provenance: { ...sourceProvenance, kind: "host", selectedRoot: params.ctx.directory, projectRoot: sourceProvenance?.projectRoot ?? detectWorktreePath(params.ctx.directory) ?? params.ctx.directory },
     }),
     includeClaudeCommands ? loadUserCommands() : Promise.resolve({}),
     includeClaudeCommands ? loadProjectCommands(params.ctx.directory) : Promise.resolve({}),
@@ -96,13 +100,17 @@ export async function applyCommandConfig(params: {
     loadOpencodeProjectCommands(params.ctx.directory),
     includeClaudeSkills ? loadUserSkills() : Promise.resolve({}),
     includeClaudeSkills ? loadGlobalAgentsSkills() : Promise.resolve({}),
-    includeClaudeSkills ? loadProjectSkills(params.ctx.directory) : Promise.resolve({}),
-    includeClaudeSkills ? loadProjectAgentsSkills(params.ctx.directory) : Promise.resolve({}),
+    includeClaudeSkills ? loadProjectSkills(params.ctx.directory, sourceProvenance) : Promise.resolve({}),
+    includeClaudeSkills ? loadProjectAgentsSkills(params.ctx.directory, sourceProvenance) : Promise.resolve({}),
     loadOpencodeGlobalSkills(),
-    loadOpencodeProjectSkills(params.ctx.directory),
+    loadOpencodeProjectSkills(params.ctx.directory, sourceProvenance),
   ]);
 
   params.config.command = {
+    "omo-mcp-env-grant": {
+      description: "Grant and save permanently the displayed environment names for one MCP declaration",
+      template: "$ARGUMENTS",
+    },
     ...builtinSkillCommands,
     ...builtinCommands,
     ...skillsToCommandDefinitionRecord(filterDisabledLoadedSkills(configSourceSkills, disabledSkills)),

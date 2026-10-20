@@ -5,6 +5,7 @@ import { getConnectionType } from "./connection-type"
 import { createHttpClient } from "./http-client"
 import { createStdioClient } from "./stdio-client"
 import type { McpClient, SkillMcpClientConnectionParams, SkillMcpClientInfo, SkillMcpManagerState } from "./types"
+import { EnvironmentGrantPolicy } from "./environment-grant-policy"
 
 function removeClientIfCurrent(state: SkillMcpManagerState, clientKey: string, client: McpClient): void {
   const managed = state.clients.get(clientKey)
@@ -20,8 +21,27 @@ export async function getOrCreateClient(params: {
   clientKey: string
   info: SkillMcpClientInfo
   config: ClaudeCodeMcpServer
+  sessionEnv?: Readonly<Record<string, string>>
+  cdpUrl?: string
 }): Promise<McpClient> {
-  const { state, clientKey, info, config } = params
+  const { state } = params
+  const disconnectGenAtEntry = state.disconnectedSessions.get(params.info.sessionID) ?? 0
+  const shutdownGenAtEntry = state.shutdownGeneration
+  state.inFlightConnections.set(params.info.sessionID, (state.inFlightConnections.get(params.info.sessionID) ?? 0) + 1)
+  try {
+  const refreshed = await params.info.revalidateDeclaration?.()
+  if (params.info.revalidateDeclaration && !refreshed) throw new Error("The MCP declaration is no longer available.")
+  const info = refreshed ? { ...params.info, sourcePath: refreshed.sourcePath, sourceKind: refreshed.sourceKind } : params.info
+  const config = refreshed?.config ?? params.config
+  state.environmentPolicy ??= new EnvironmentGrantPolicy(undefined, undefined, async (identity) => {
+    for (const key of state.clients.keys()) if (key.includes(`::identity=${identity}::`)) await forceReconnect(state, key)
+  })
+  const policy = await state.environmentPolicy.prepare(info, config, params.sessionEnv)
+  const clientKey = policy ? `${params.clientKey}::identity=${policy.identity}::policy=${policy.digest}` : params.clientKey
+  if (state.shutdownGeneration !== shutdownGenAtEntry ||
+    (state.disconnectedSessions.get(info.sessionID) ?? 0) !== disconnectGenAtEntry) {
+    throw new Error(`Session "${info.sessionID}" disconnected during MCP policy resolution.`)
+  }
 
   if (state.disposed) {
     throw new Error(`MCP manager for "${info.sessionID}" has been shut down, cannot create new connections.`)
@@ -39,15 +59,21 @@ export async function getOrCreateClient(params: {
     return pending
   }
 
-  const isTrusted = !PROJECT_SCOPES.has(info.scope ?? "")
-  const expandedConfig = expandEnvVarsInObject(config, { trusted: isTrusted })
+  const isTrusted = info.scope === "host" ? info.hostUserTrusted === true : !PROJECT_SCOPES.has(info.scope ?? "")
+  const resolvedConfig = policy?.config ?? expandEnvVarsInObject(config, { trusted: isTrusted })
+  const expandedConfig = params.cdpUrl
+    ? { ...resolvedConfig, args: [...(resolvedConfig.args ?? []), "--cdp-endpoint", params.cdpUrl] }
+    : resolvedConfig
   let currentConnectionPromise!: Promise<McpClient>
-  state.inFlightConnections.set(info.sessionID, (state.inFlightConnections.get(info.sessionID) ?? 0) + 1)
   currentConnectionPromise = (async () => {
-    const disconnectGenAtStart = state.disconnectedSessions.get(info.sessionID) ?? 0
-    const shutdownGenAtStart = state.shutdownGeneration
+    const disconnectGenAtStart = disconnectGenAtEntry
+    const shutdownGenAtStart = shutdownGenAtEntry
 
-    const client = await createClient({ state, clientKey, info, config: expandedConfig })
+    const client = await createClient({ state, clientKey, info, config: expandedConfig, environment: policy?.environment, policySignal: policy?.signal })
+    if (policy && state.environmentPolicy?.version(policy.identity) !== policy.version) {
+      await forceReconnect(state, clientKey)
+      throw new Error("MCP environment policy changed during connection; retry with the current grant snapshot.")
+    }
 
     const isStale = state.pendingConnections.has(clientKey) && state.pendingConnections.get(clientKey) !== currentConnectionPromise
     if (isStale) {
@@ -92,12 +118,14 @@ export async function getOrCreateClient(params: {
     if (state.pendingConnections.get(clientKey) === currentConnectionPromise) {
       state.pendingConnections.delete(clientKey)
     }
-    const remaining = (state.inFlightConnections.get(info.sessionID) ?? 1) - 1
+  }
+  } finally {
+    const remaining = (state.inFlightConnections.get(params.info.sessionID) ?? 1) - 1
     if (remaining <= 0) {
-      state.inFlightConnections.delete(info.sessionID)
-      state.disconnectedSessions.delete(info.sessionID)
+      state.inFlightConnections.delete(params.info.sessionID)
+      state.disconnectedSessions.delete(params.info.sessionID)
     } else {
-      state.inFlightConnections.set(info.sessionID, remaining)
+      state.inFlightConnections.set(params.info.sessionID, remaining)
     }
   }
 }
@@ -107,6 +135,8 @@ export async function getOrCreateClientWithRetryImpl(params: {
   clientKey: string
   info: SkillMcpClientInfo
   config: ClaudeCodeMcpServer
+  sessionEnv?: Readonly<Record<string, string>>
+  cdpUrl?: string
 }): Promise<McpClient> {
   const { state, clientKey } = params
 
@@ -126,6 +156,8 @@ async function createClient(params: {
   clientKey: string
   info: SkillMcpClientInfo
   config: ClaudeCodeMcpServer
+  environment?: Record<string, string>
+  policySignal?: AbortSignal
 }): Promise<McpClient> {
   const { info, config } = params
   const connectionType = getConnectionType(config)

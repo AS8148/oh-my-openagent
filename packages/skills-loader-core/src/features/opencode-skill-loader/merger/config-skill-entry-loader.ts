@@ -1,14 +1,15 @@
 import type { LoadedSkill, SkillMetadata } from "../types"
 import type { SkillDefinition } from "../../../types"
 import type { CommandDefinition } from "@oh-my-opencode/claude-code-compat-core/claude-code-command-loader/types"
-import { existsSync, readFileSync } from "fs"
+import { existsSync } from "fs"
 import { dirname, isAbsolute, resolve } from "path"
 import { homedir } from "os"
-import { isWithinProject, parseFrontmatter } from "@oh-my-opencode/utils"
+import { parseFrontmatter } from "@oh-my-opencode/utils"
 import { sanitizeModelField } from "@oh-my-opencode/model-core"
-import { log } from "../../../shared"
 import { resolveSkillPathReferences } from "../../../shared/skill-path-resolver"
 import { parseAllowedTools } from "../allowed-tools-parser"
+import { readSkillFileChecked } from "../checked-skill-read"
+import { skillProvenance, SkillLinkBlockedError, reportSkillBlocked, type SkillProvenance } from "../skill-provenance"
 
 function resolveFilePath(from: string, configDir?: string): string {
   let filePath = from
@@ -29,13 +30,14 @@ function resolveFilePath(from: string, configDir?: string): string {
   return resolve(baseDir, filePath)
 }
 
-function loadSkillFromFile(filePath: string): { template: string; metadata: SkillMetadata } | null {
+function loadSkillFromFile(filePath: string, provenance: SkillProvenance): { template: string; metadata: SkillMetadata } | null {
   try {
     if (!existsSync(filePath)) return null
-    const content = readFileSync(filePath, "utf-8")
+    const content = readSkillFileChecked(filePath, provenance)
     const { data, body } = parseFrontmatter<SkillMetadata>(content)
     return { template: body, metadata: data }
   } catch (error) {
+    if (error instanceof SkillLinkBlockedError) reportSkillBlocked(error)
     if (error instanceof Error) return null
     return null
   }
@@ -44,26 +46,17 @@ function loadSkillFromFile(filePath: string): { template: string; metadata: Skil
 export function configEntryToLoadedSkill(
   name: string,
   entry: SkillDefinition,
-  configDir?: string
+  configDir?: string,
+  sourceProvenance?: SkillProvenance,
 ): LoadedSkill | null {
   let template = entry.template || ""
   let fileMetadata: SkillMetadata = {}
   let sourcePath: string | undefined
+  const provenance = sourceProvenance ?? skillProvenance(configDir ?? process.cwd(), "project")
 
   if (entry.from) {
     sourcePath = resolveFilePath(entry.from, configDir)
-    const projectRoot = configDir || process.cwd()
-
-    if (!isWithinProject(sourcePath, projectRoot)) {
-      log("[config-skill-entry-loader] Rejected skill entry file outside project root", {
-        from: entry.from,
-        filePath: sourcePath,
-        projectRoot,
-      })
-      return null
-    }
-
-    const loaded = loadSkillFromFile(sourcePath)
+    const loaded = loadSkillFromFile(sourcePath, provenance)
     if (loaded) {
       template = loaded.template
       fileMetadata = loaded.metadata
@@ -105,6 +98,7 @@ $ARGUMENTS
 
   return {
     name,
+    provenance,
     path: sourcePath,
     resolvedPath,
     definition,

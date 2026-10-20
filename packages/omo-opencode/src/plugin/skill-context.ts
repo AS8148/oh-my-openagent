@@ -20,10 +20,13 @@ import {
   mergeSkills,
   normalizeSkillAliasName,
   readOpencodeConfigSkills,
+  getSkillSourceProvenance,
 } from "../features/opencode-skill-loader"
 import { resolveActiveBuiltinSkills } from "@oh-my-opencode/skills-loader-core/builtin-skills"
 import { getSystemMcpServerNames } from "../features/claude-code-mcp-loader"
 import { adaptHostSkillConfig } from "../shared/host-skill-config"
+import { detectWorktreePath } from "@oh-my-opencode/skills-loader-core/shared/project-discovery-dirs"
+import { subscribeSkillDiagnostics, type SkillDiagnosticSink } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/skill-provenance"
 
 export type SkillContext = {
   mergedSkills: LoadedSkill[]
@@ -80,8 +83,11 @@ export async function createSkillContext(args: {
    * plugins. When omitted, falls back to reading the on-disk opencode config.
    */
   hostSkills?: { paths?: string[]; urls?: string[] }
+  onDiagnostic?: SkillDiagnosticSink
 }): Promise<SkillContext> {
   const { directory, pluginConfig, hostSkills } = args
+  const unsubscribe = args.onDiagnostic ? subscribeSkillDiagnostics(args.onDiagnostic) : undefined
+  try {
 
   const browserProvider: BrowserAutomationProvider =
     pluginConfig.browser_automation_engine?.provider ?? "playwright"
@@ -98,6 +104,7 @@ export async function createSkillContext(args: {
   })
 
   const includeClaudeSkills = pluginConfig.claude_code?.skills !== false
+  const sourceProvenance = getSkillSourceProvenance(pluginConfig.skills)
   const hostSkillConfig = adaptHostSkillConfig(hostSkills ?? readOpencodeConfigSkills(directory))
   const [
     configSourceSkills,
@@ -117,12 +124,13 @@ export async function createSkillContext(args: {
     discoverConfigSourceSkills({
       config: hostSkillConfig,
       configDir: directory,
+      provenance: { ...sourceProvenance, kind: "host", selectedRoot: directory, projectRoot: detectWorktreePath(directory) ?? directory },
     }),
     includeClaudeSkills ? discoverUserClaudeSkills() : Promise.resolve([]),
     discoverOpencodeGlobalSkills(),
-    includeClaudeSkills ? discoverProjectClaudeSkills(directory) : Promise.resolve([]),
-    discoverOpencodeProjectSkills(directory),
-    discoverProjectAgentsSkills(directory),
+    includeClaudeSkills ? discoverProjectClaudeSkills(directory, sourceProvenance) : Promise.resolve([]),
+    discoverOpencodeProjectSkills(directory, sourceProvenance),
+    discoverProjectAgentsSkills(directory, sourceProvenance),
     discoverGlobalAgentsSkills(),
     discoverSharedSkills(),
   ])
@@ -201,5 +209,8 @@ export async function createSkillContext(args: {
     availableSkills,
     browserProvider,
     disabledSkills,
+  }
+  } finally {
+    unsubscribe?.()
   }
 }

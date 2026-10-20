@@ -24,9 +24,15 @@ import {
   mergeNativeSkillInfos,
   mergeNativeSkills,
 } from "./native-skills"
+import { reportSkillBlocked, SkillLinkBlockedError } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader"
 
 export function createSkillTool(options: SkillLoadOptions): ToolDefinition {
   let cachedDescription: string | null = null
+  const rejectedSkills = new Map<string, SkillLinkBlockedError>()
+  const onRejected = (name: string, error: SkillLinkBlockedError) => {
+    rejectedSkills.set(name, error)
+    reportSkillBlocked(error)
+  }
 
   const getBaseSkills = async (context?: ToolContext): Promise<LoadedSkill[]> => {
     if (shouldInvalidateSkillCacheForSession(context?.sessionID)) {
@@ -51,8 +57,12 @@ export function createSkillTool(options: SkillLoadOptions): ToolDefinition {
     if (options.nativeSkills) {
       try {
         const nativeAll = await options.nativeSkills.all()
-        mergeNativeSkills(skills, nativeAll, options.disabledSkills)
+        mergeNativeSkills(skills, nativeAll, options.disabledSkills, options.directory, onRejected)
       } catch (error) {
+        if (error instanceof SkillLinkBlockedError) {
+          reportSkillBlocked(error)
+          throw error
+        }
         if (!(error instanceof Error)) throw error
       }
     }
@@ -100,7 +110,7 @@ export function createSkillTool(options: SkillLoadOptions): ToolDefinition {
         if (isPromiseLike(nativeAll)) {
           needsAsyncRefresh = true
         } else {
-          mergeNativeSkillInfos(skillInfos, nativeAll, options.disabledSkills)
+          mergeNativeSkillInfos(skillInfos, nativeAll, options.disabledSkills, options.directory, onRejected)
         }
       } catch (error) {
         if (!(error instanceof Error)) throw error
@@ -144,6 +154,8 @@ export function createSkillTool(options: SkillLoadOptions): ToolDefinition {
         await mergeNativeSkillsInto(skills)
         matchedSkill = matchSkillByName(skills, requestedName)
       }
+      const rejection = rejectedSkills.get(requestedName.toLowerCase())
+      if (!matchedSkill && rejection) throw rejection
 
       cachedDescription = formatCombinedDescription(skills.map(loadedSkillToInfo), commands, {
         includeSkills: options.includeSkillsInDescription,
@@ -189,7 +201,8 @@ export function createSkillTool(options: SkillLoadOptions): ToolDefinition {
           const mcpInfo = await formatMcpCapabilities(
             matchedSkill,
             options.mcpManager,
-            sessionID
+            sessionID,
+            ctx?.directory ?? options.directory,
           )
           if (mcpInfo) {
             output.push(mcpInfo)

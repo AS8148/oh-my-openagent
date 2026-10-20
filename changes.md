@@ -1,3 +1,9 @@
+## 2026-10-20 - Contain legacy and task skill links and scope skill MCP environments (#10693)
+
+Legacy discovery keeps the spelled project path and its provenance through config sources, directory traversal, native fallback and invocation. Project reads use a canonical containment check and a checked descriptor, including MCP sidecars; user skill roots and sibling skill aliases remain supported. Task skill loading uses the same boundary and reports rejected links in its result.
+
+Project-policy MCP servers receive the finite safe environment base, declared values, caller-supplied values and per-declaration grants. User-policy servers keep the previous environment filter and expansion. Withheld names appear in the tool output, OpenCode toast and log with the exact `/omo-mcp-env-grant` command. The grant boundary uses the shared store interface and declaration identity; generation gaps and store recreation invalidate project connections, including pending handshakes. This boundary assumes a filesystem stable during loading; descriptor checks detect some concurrent replacements, not every ancestor swap.
+
 ## 2026-10-20 - Adopt senpi 2026.10.19-2 for the 5.1.39 cut
 
 All exact senpi pins (root, `omo-native`, `omo-senpi` peer/dev and its `senpi-ai`/`senpi-tui` aliases, `senpi-task`, the pin and package-shape tests, the provider-map derivation comment and the catalog-coverage comment) move from `2026.10.19` to `2026.10.19-2`, with the lockfile regenerated. The provider-map registry, catalog-coverage and chain-provider tests pass unchanged against the new engine, so the map needs no re-derivation. The committed Senpi plugin bundles were regenerated on the canonical linux/amd64 build (bun 1.4.3): only `omo.js` and `omo-onboarding-scan.js` change, both in the provider map they inline (`omo-native/bin/lib/provider-map.json`), whose derivation comment now names senpi 2026.10.19-2; `omo.js` is 1,396,195 bytes, inside its 1,424,569 budget.
