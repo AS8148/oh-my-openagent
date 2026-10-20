@@ -75,6 +75,15 @@ test("merges concurrent atomic writers and revokes only the selected identity", 
   expect(fs.readdirSync(root)).toEqual(["mcp-env-grants.json"])
 })
 
+test("keeps valid non-identifier environment names and rejects names with = or NUL", async () => {
+  const path = resolveGrantsStorePath(root)
+  await addGrant(path, identity, label, ["ProgramFiles(x86)", "odd-name"])
+  expect((await read(path)).grants[identity]?.names).toEqual(["ProgramFiles(x86)", "odd-name"])
+  await expect(addGrant(path, identity, label, ["A=B"])).rejects.toThrow()
+  await expect(addGrant(path, identity, label, ["A\0B"])).rejects.toThrow()
+  expect((await read(path)).generation).toBe(1)
+})
+
 test("failed rename leaves no grant, temporary file or lock", async () => {
   const path = resolveGrantsStorePath(root)
   fs.mkdirSync(path)
