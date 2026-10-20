@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { startFakeHost } from "./__fixtures__/fake-host"
 import { askHost } from "./host-request"
 import { withContractHost, type ContractHost, type ContractHostOptions } from "./testing/contract-host"
 
@@ -7,7 +8,7 @@ const warm = (host: ContractHost) => Reflect.apply(askHost, undefined, [
   host.socket, { type: "warm", id: "warm-contract", cwd: host.root, kind: "worker" }, 2000, { keyRoot: host.root },
 ]) as ReturnType<typeof askHost>
 
-describe("raw task host challenge-response", () => {
+describe.skipIf(process.platform === "win32")("POSIX raw task host challenge-response", () => {
   test("#given an enforcing authenticated host #when warm is sent #then authenticate succeeds before warm", async () => {
     await withContractHost({ auth: true }, async (host) => {
       expect(await warm(host)).toMatchObject({ success: true, data: { warmed: true } })
@@ -73,4 +74,15 @@ describe("raw task host challenge-response", () => {
       } finally { warning.mockRestore() }
     })
   })
+})
+
+test.skipIf(process.platform !== "win32")("#given a Windows task host #when warm is sent #then the raw pipe secret transport remains unchanged", async () => {
+  const host = await startFakeHost()
+  try {
+    const reply = await askHost(host.socketPath, { type: "warm", id: "warm-contract", cwd: process.cwd(), kind: "worker" }, 2000)
+    expect(reply).toMatchObject({ success: true, data: { state: "warmed" } })
+    expect(host.commands.map((command) => command.type)).toEqual(["warm"])
+  } finally {
+    await host.stop()
+  }
 })
