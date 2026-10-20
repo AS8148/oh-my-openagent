@@ -124,18 +124,23 @@ describe("omo account", () => {
     }
   })
 
-  test("a refused refresh ends the session: the item is cleared and token exits 5", async () => {
-    const service = fakeService(() => Response.json(
-      { error: { code: "reauth_required", message: "reused", retryable: false, requestId: "r" } }, { status: 401 }))
-    try {
-      const { store, current } = memoryStore(credential("dev_a", 1_000))
-      const result = await run(store, ["token"], { api: service.api })
-      expect(result.code).toBe(ACCOUNT_EXIT.ended)
-      expect(current()).toBeNull()
-    } finally {
-      service.stop()
-    }
-  })
+  // The desktop tells the person why the sign-in ended (desktop#3522), so exit 5 names the service's
+  // refusal code; the service message never reaches stdout.
+  test.each(["reauth_required", "unauthorized", "invalid_grant", "account_deleted"])(
+    "a refused refresh (%s) ends the session: the item is cleared and token exits 5 naming the code", async (code) => {
+      const service = fakeService(() => Response.json(
+        { error: { code, message: "rt-first leaked", retryable: false, requestId: "r" } }, { status: code === "account_deleted" ? 410 : 401 }))
+      try {
+        const { store, current } = memoryStore(credential("dev_a", 1_000))
+        const result = await run(store, ["token"], { api: service.api })
+        expect(result.code).toBe(ACCOUNT_EXIT.ended)
+        expect(result.out).toEqual([{ ended: { code } }])
+        expect(JSON.stringify(result.out)).not.toContain("rt-first")
+        expect(current()).toBeNull()
+      } finally {
+        service.stop()
+      }
+    })
 
   test("signed out: token and export exit 4, show says signed out", async () => {
     const { store } = memoryStore(null)

@@ -3,7 +3,7 @@ import { loadTrustAnchor } from "../memory-core/src/sync/crypto/trust-pin.ts"
 import { syncPinDir } from "../memory-core/src/sync/pin-dir"
 import { createCredentialStore, type CredentialStore, KeychainLockedError, SecretServiceUnavailableError } from "../omo-opencode/src/cli/service-auth/keystore"
 import { type Credentials, credentialSchema, serviceOrigin, SignInError } from "../omo-opencode/src/cli/service-auth/protocol"
-import { createSession } from "../omo-opencode/src/cli/service-auth/session"
+import { createSession, SessionEnded } from "../omo-opencode/src/cli/service-auth/session"
 
 // `omo account` lets the desktop share this machine's one OS-keychain credential with `omo login`
 // (one sync device per machine). It is a machine interface: one JSON line on stdout, secrets only on
@@ -67,7 +67,8 @@ async function token(dependencies: AccountCommandDependencies): Promise<number> 
   } catch (error) {
     const after = await dependencies.store.read()
     dependencies.error(error instanceof Error ? error.message : "omo account token: the refresh failed")
-    if (after === null) return ACCOUNT_EXIT.ended
+    // The refusal code tells the desktop why the sign-in ended (desktop#3522); the message never leaves stderr.
+    if (after === null) return error instanceof SessionEnded ? reply(dependencies, { ended: { code: error.code } }, ACCOUNT_EXIT.ended) : ACCOUNT_EXIT.ended
     if (after.refreshState === "uncertain") return ACCOUNT_EXIT.uncertain
     return ACCOUNT_EXIT.failed
   }
