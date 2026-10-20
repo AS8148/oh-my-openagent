@@ -33,6 +33,7 @@ import { registerEngineRuntimeModules } from "./engine-runtime-modules"
 import { applyCachedClaudeCode } from "../omo-senpi/src/components/claude-code/index"
 import { buildSenpiArgs, shouldPrintCompiledBanner } from "./compile-args"
 import { runLoroSmoke } from "./loro-smoke"
+import { runAccountCommand } from "./account-cli"
 import { runSyncCommand } from "./sync-cli"
 import { spawnSync } from "node:child_process"
 import { compiledRollbackMigration } from "./compiled-rollback"
@@ -141,6 +142,10 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
   }
   if (args[0] === "sync") {
     await runSyncCommand(args)
+    return true
+  }
+  if (args[0] === "account") {
+    await runAccountCommand(args)
     return true
   }
   const packageJson = readJson(join(execDir, "package.json")) as { version: string; omoBuild?: unknown }

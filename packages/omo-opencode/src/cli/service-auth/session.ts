@@ -66,6 +66,9 @@ export function createSession(options: {
     signal,
     async ready() { await store.read() },
     async save(value: Credentials) { await locked(() => store.write(value)) },
+    async update<T>(action: (current: Credentials | null) => Promise<T>): Promise<T> {
+      return locked(async () => action(await store.read()))
+    },
     async logout(): Promise<boolean> {
       return locked(async () => {
         try {

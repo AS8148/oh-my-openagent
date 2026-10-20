@@ -1,0 +1,147 @@
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import type { CredentialStore } from "../../omo-opencode/src/cli/service-auth/keystore"
+import type { Credentials } from "../../omo-opencode/src/cli/service-auth/protocol"
+import { ACCOUNT_EXIT, runAccountVerb } from "../account-cli"
+
+const homes: string[] = []
+afterAll(() => {
+  for (const home of homes) rmSync(home, { recursive: true, force: true })
+})
+
+const credential = (deviceId: string, expiresInMs: number, refreshToken = `rt-${deviceId}`): Credentials => ({
+  accessToken: `at-${deviceId}-${expiresInMs}`,
+  accessTokenExpiresAt: new Date(Date.now() + expiresInMs).toISOString(),
+  refreshToken,
+  device: { id: deviceId, name: `device ${deviceId}` },
+  signingPrivateKey: "c2lnbmluZw==",
+  sealingPrivateKey: "c2VhbGluZw==",
+})
+
+function memoryStore(initial: Credentials | null) {
+  let value = initial
+  const store: CredentialStore = {
+    read: async () => value,
+    write: async (next) => { value = next },
+    clear: async () => { value = null },
+  }
+  return { store, current: () => value }
+}
+
+function run(store: CredentialStore, args: string[], options: { stdin?: string; api?: string } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "omo-account-cli-"))
+  homes.push(home)
+  const out: string[] = []
+  const err: string[] = []
+  return runAccountVerb({
+    api: options.api ?? "http://127.0.0.1:1",
+    store,
+    home,
+    readStdin: async () => options.stdin ?? "",
+    output: (line) => out.push(line),
+    error: (line) => err.push(line),
+  }, args).then((code) => ({ code, out: out.map((line) => JSON.parse(line) as Record<string, unknown>), err }))
+}
+
+function fakeService(answer: (body: Record<string, unknown>) => Response) {
+  const refreshTokens: string[] = []
+  const server = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      if (new URL(req.url).pathname !== "/v1/session/refresh") return new Response(null, { status: 404 })
+      const body = (await req.json()) as Record<string, unknown>
+      refreshTokens.push(String(body.refreshToken))
+      return answer(body)
+    },
+  })
+  return { api: `http://127.0.0.1:${server.port}`, refreshTokens, stop: () => server.stop(true) }
+}
+
+describe("omo account", () => {
+  test("adopt stores the credential and show reports the device without any secret", async () => {
+    const { store, current } = memoryStore(null)
+    const adopted = await run(store, ["adopt"], { stdin: JSON.stringify(credential("dev_a", 3_600_000)) })
+    expect(adopted.code).toBe(ACCOUNT_EXIT.ok)
+    expect(current()?.device.id).toBe("dev_a")
+
+    const shown = await run(store, ["show"])
+    expect(shown.out).toEqual([{ signedIn: true, device: { id: "dev_a", name: "device dev_a" }, refreshState: "ok" }])
+    expect(JSON.stringify(shown.out)).not.toContain("rt-dev_a")
+  })
+
+  test("adopt refuses a different device, writes nothing, and --replace takes over", async () => {
+    const held = credential("dev_cli", 3_600_000)
+    const { store, current } = memoryStore(held)
+    const refused = await run(store, ["adopt"], { stdin: JSON.stringify(credential("dev_desk", 3_600_000)) })
+    expect(refused.code).toBe(ACCOUNT_EXIT.conflict)
+    expect(refused.out).toEqual([{ conflict: { device: { id: "dev_cli", name: "device dev_cli" } } }])
+    expect(current()).toEqual(held)
+
+    const replaced = await run(store, ["adopt", "--replace"], { stdin: JSON.stringify(credential("dev_desk", 3_600_000)) })
+    expect(replaced.code).toBe(ACCOUNT_EXIT.ok)
+    expect(current()?.device.id).toBe("dev_desk")
+  })
+
+  test("adopting the same device keeps the newer token, so an older copy cannot roll the refresh token back", async () => {
+    const newer = credential("dev_a", 3_600_000, "rt-newer")
+    const { store, current } = memoryStore(newer)
+    const adopted = await run(store, ["adopt"], { stdin: JSON.stringify(credential("dev_a", 60_000, "rt-older")) })
+    expect(adopted.code).toBe(ACCOUNT_EXIT.ok)
+    expect(current()?.refreshToken).toBe("rt-newer")
+  })
+
+  test("adopt rejects input that is not a credential", async () => {
+    const { store, current } = memoryStore(null)
+    const result = await run(store, ["adopt"], { stdin: "{\"accessToken\":\"x\"}" })
+    expect(result.code).toBe(ACCOUNT_EXIT.invalid)
+    expect(current()).toBeNull()
+  })
+
+  test("token refreshes an expiring credential once and returns the new access token", async () => {
+    const service = fakeService(() => Response.json({
+      accessToken: "at-fresh", accessTokenExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), refreshToken: "rt-next",
+    }))
+    try {
+      const { store, current } = memoryStore(credential("dev_a", 1_000, "rt-first"))
+      const result = await run(store, ["token"], { api: service.api })
+      expect(result.code).toBe(ACCOUNT_EXIT.ok)
+      expect(result.out[0]).toMatchObject({ accessToken: "at-fresh", device: { id: "dev_a" } })
+      expect(service.refreshTokens).toEqual(["rt-first"])
+      expect(current()?.refreshToken).toBe("rt-next")
+    } finally {
+      service.stop()
+    }
+  })
+
+  test("a refused refresh ends the session: the item is cleared and token exits 5", async () => {
+    const service = fakeService(() => Response.json(
+      { error: { code: "reauth_required", message: "reused", retryable: false, requestId: "r" } }, { status: 401 }))
+    try {
+      const { store, current } = memoryStore(credential("dev_a", 1_000))
+      const result = await run(store, ["token"], { api: service.api })
+      expect(result.code).toBe(ACCOUNT_EXIT.ended)
+      expect(current()).toBeNull()
+    } finally {
+      service.stop()
+    }
+  })
+
+  test("signed out: token and export exit 4, show says signed out", async () => {
+    const { store } = memoryStore(null)
+    expect((await run(store, ["token"])).code).toBe(ACCOUNT_EXIT.signedOut)
+    expect((await run(store, ["export"])).code).toBe(ACCOUNT_EXIT.signedOut)
+    expect((await run(store, ["show"])).out).toEqual([{ signedIn: false }])
+  })
+
+  test("export returns the stored credential and forget clears it", async () => {
+    const held = credential("dev_a", 3_600_000)
+    const { store, current } = memoryStore(held)
+    expect((await run(store, ["export"])).out).toEqual([held])
+    const forgot = await run(store, ["forget"])
+    expect(forgot.out).toEqual([{ forgotten: true }])
+    expect(current()).toBeNull()
+  })
+})
