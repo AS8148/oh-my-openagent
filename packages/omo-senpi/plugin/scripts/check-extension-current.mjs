@@ -24,6 +24,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryPalaceOutput,
     sessionHistoryOutput,
     recallStoreOutput,
+    telemetryPosthogOutput,
     memorySyncOutput,
     threadClientOutput,
     gatewayStoreWorkerOutput,
@@ -52,6 +53,7 @@ export async function checkExtensionCurrent(options = {}) {
   const currentMemoryPalace = await readBuiltEntry(memoryPalaceOutput)
   const currentSessionHistory = await readBuiltEntry(sessionHistoryOutput)
   const currentRecallStore = await readBuiltEntry(recallStoreOutput)
+  const currentTelemetryPosthog = await readBuiltEntry(telemetryPosthogOutput)
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
   const currentMemorySync = await readBuiltEntry(memorySyncOutput)
   if (currentMemorySync === undefined) return { ok: false, reason: "missing-output", output: memorySyncOutput }
@@ -68,6 +70,7 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentMemoryPalace === undefined) return { ok: false, reason: "missing-output", output: memoryPalaceOutput }
   if (currentSessionHistory === undefined) return { ok: false, reason: "missing-output", output: sessionHistoryOutput }
   if (currentRecallStore === undefined) return { ok: false, reason: "missing-output", output: recallStoreOutput }
+  if (currentTelemetryPosthog === undefined) return { ok: false, reason: "missing-output", output: telemetryPosthogOutput }
   if (currentThreadClient === undefined) return { ok: false, reason: "missing-output", output: threadClientOutput }
   const currentComputerUse = await readBuiltEntry(computerUseOutput)
   if (currentComputerUse === undefined) return { ok: false, reason: "missing-output", output: computerUseOutput }
@@ -92,6 +95,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryPalaceOutputPath: join(tempRoot, "omo-memory-palace.js"),
     sessionHistoryOutputPath: join(tempRoot, "omo-session-history.js"),
     recallStoreOutputPath: join(tempRoot, "omo-recall-store.js"),
+    telemetryPosthogOutputPath: join(tempRoot, "omo-telemetry-posthog.js"),
     memorySyncOutputPath: join(tempRoot, "omo-memory-sync.js"),
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
     computerUseOutputPath: join(tempRoot, "omo-computer-use.js"),
@@ -115,6 +119,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentMemoryPalace, expected.memoryPalaceOutputPath, memoryPalaceOutput],
       [currentSessionHistory, expected.sessionHistoryOutputPath, sessionHistoryOutput],
       [currentRecallStore, expected.recallStoreOutputPath, recallStoreOutput],
+      [currentTelemetryPosthog, expected.telemetryPosthogOutputPath, telemetryPosthogOutput],
       [currentMemorySync, expected.memorySyncOutputPath, memorySyncOutput],
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
       [currentComputerUse, expected.computerUseOutputPath, computerUseOutput],
