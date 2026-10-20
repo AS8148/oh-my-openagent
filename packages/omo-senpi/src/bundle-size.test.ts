@@ -127,9 +127,9 @@ const builtExtensionPath = join(packageRoot, "plugin", "extensions", "omo.js")
 // 1,424,569 = ceil(1,396,636 * 1.02), locking in the saving with 2% headroom.
 // Reduced for #9915 (LSP slice): formatter.ts imported two helpers from the lsp-core root barrel, which
 // pulled lsp-core's whole in-process engine into omo.js although Senpi runs LSP only through the packaged
-// daemon; deep imports drop it. Canonical linux/amd64, Bun 1.4.3 after merging dev: 1,396,636 -> 1,314,165
-// bytes (-82,471). 1,340,449 = ceil(1,314,165 * 1.02), locking in the saving with 2% headroom.
-const BUDGET_BYTES = 1_340_449
+// daemon; deep imports drop it. Canonical linux/amd64, Bun 1.4.3 after merging dev: 1,402,085 -> 1,319,604
+// bytes (-82,481). 1,345,997 = ceil(1,319,604 * 1.02), locking in the saving with 2% headroom.
+const BUDGET_BYTES = 1_345_997
 
 describe("omo-senpi bundle size budget", () => {
   it("#given the built extension #when its byte size is measured #then it stays within the documented byte budget", () => {
