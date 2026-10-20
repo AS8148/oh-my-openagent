@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**OmO's extension no longer carries an LSP engine it never runs.** The native LSP tools and post-edit diagnostics already go through the packaged LSP daemon, but the formatter's import pulled lsp-core's whole in-process engine into `omo.js`; importing only the two helpers it uses shrinks the extension by about 82 KB, with no change in behavior. ([#10659](https://github.com/code-yeongyu/oh-my-openagent/pull/10659))
+
 **OmO loads the analytics SDK only when an event is captured.** PostHog now ships as a lazy sidecar instead of being parsed with the main extension; queued events retain their order, shutdown waits for pending captures, and consent checks are unchanged. ([#10640](https://github.com/code-yeongyu/oh-my-openagent/pull/10640))
 
 **git-master marks its git commands again, and models load it again for git work.** On native OmO, loading the git-master skill (reading it, or `load_skills` in a task) once more puts `GIT_MASTER=1` in front of every git command it runs, as the OpenCode plugin did, so your own git hooks can tell git-master is acting. Set `git_master.git_env_prefix` in `omo.json` to change the assignments or `""` to turn it off. The skill's description again says to use it for any git operation, which is what made models load it on the plugin. ([#10613](https://github.com/code-yeongyu/oh-my-openagent/issues/10613), [#10618](https://github.com/code-yeongyu/oh-my-openagent/pull/10618))
