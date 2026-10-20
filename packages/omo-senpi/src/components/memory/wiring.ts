@@ -34,11 +34,16 @@ export type { MemorySessionStateLike, MemoryWiring, MemoryWiringOptions } from "
 export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   // Persisted compiled blocks: a relaunch reads the block of a commit an earlier process compiled (the store ships
   // in the lazily loaded recall-store sidecar). Keyed by the build, so an upgrade never reads an older build's bytes.
-  const promptCache = new MemoryBlockCache({
+  const blockBuild = memoryBlockBuild()
+  const promptCache = new MemoryBlockCache(blockBuild === undefined ? {} : {
     store: loadRecallStoreRuntime,
-    build: memoryBlockBuild(),
+    build: blockBuild,
     onStoreError: (error) => options.logger?.warn("omo-senpi persisted memory block unavailable; compiling instead", {
       error: error instanceof Error ? error.message : String(error),
+    }),
+    onDegraded: ({ revision, reasons }) => options.logger?.warn("omo-senpi memory block compiled from incomplete git reads; used for this turn only, not persisted", {
+      revision,
+      reasons,
     }),
   })
   const promptPrebuild: { current?: (context: MemoryIdentityContext) => Promise<void> } = {}
@@ -217,8 +222,9 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
     },
 
     async afterBind(pi, sessionId, identity, eventCtx): Promise<void> {
-      // Off the prompt path: the first prompt shares this compile, or reads what it persisted.
-      void promptPrebuild.current?.(identity).catch((error: unknown) => {
+      // Off the prompt path: a NEW session's first prompt shares this compile of HEAD, or reads what it persisted.
+      // A resumed session is pinned to its recorded revision, which may not be HEAD; it gets no prebuild.
+      if (branchEntryCount(eventCtx) === 0) void promptPrebuild.current?.(identity).catch((error: unknown) => {
         options.logger?.warn("omo-senpi memory block prebuild failed; the first prompt compiles it", {
           error: error instanceof Error ? error.message : String(error),
         })

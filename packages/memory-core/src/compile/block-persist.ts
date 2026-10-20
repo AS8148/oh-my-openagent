@@ -16,8 +16,11 @@ import { isRecallTermSaveExcluded, trackRecallTermSave } from "../recall/bm25-pe
 
 export const MEMORY_BLOCK_STORE_PREFIX = "omo-memory-block-"
 const FORMAT_VERSION = 1
-/** Entries kept per repository: the newest few commits' blocks are all a session or a relaunch reads. */
-const KEEP_ENTRIES = 16
+/**
+ * Entries kept per repository, shared by every identity, limits setting and value kind (a block and an estimate per
+ * commit): the newest commits' entries are all a session or a relaunch reads.
+ */
+const KEEP_ENTRIES = 32
 /** A temp file this old belongs to a write whose process died before its rename. */
 const STALE_TEMP_MS = 10 * 60_000
 

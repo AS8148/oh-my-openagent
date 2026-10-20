@@ -15,7 +15,11 @@ A relaunch's first prompt compiled the memory block again: on a 6,867-file memor
 - **Prebuild.** The prompt handler gained `prebuild(context)`, started fire-and-forget by `afterBind`: it compiles the HEAD block and estimate a new session's first prompt needs. The prompt shares that in-flight compile, so it is never slower than without the prebuild.
 - **Build identity.** `memoryBlockBuild()` is the package version plus the running bundle's size and mtime.
 - **Shutdown.** A `memory-block-settle` step waits for pending writes.
-- **Tests.** `cache-persist.test.ts` covers: a fresh process reads with zero `lsTree`/`show`/`pathCommitTimes`; a changed revision, limits, identity or build recompiles; entries stay out of every commit and index; a damaged entry is rewritten; restore exclusion; a store that never loads.
+- **Degraded compiles are never stored (review H1).** `compileMemoryBlockWithReads` reports one reason per git read that failed and made the compile fall back: commit times unavailable (name order), or a system file such as `system/persona.md` left out. `remember` stores a value only when its compute says `persist`; a degraded block serves that turn only and is logged via `onDegraded`, and the next process compiles the commit again.
+- **Source runs persist nothing (M2).** `memoryBlockBuild()` returns `undefined` without a bundle-defined package version, and the wiring then builds an in-memory-only cache, because a source run's compiler changes are invisible to the key.
+- **Prebuild only for new sessions (M1).** A resumed session is pinned to its recorded revision, so it gets no HEAD prebuild that could compete with its own compile.
+- **Shutdown and memory (L2, L3).** `settled()` also waits for in-flight compiles that may store a value. The per-revision pressure promise is dropped once settled; its value stays in the numeric memo. The store keeps 32 entries (L4).
+- **Tests.** `cache-persist.test.ts` also injects `GitTimeoutError` into `pathCommitTimes` and into `show(system/persona.md)`: nothing is stored and a fresh process compiles the full block. It covers: a fresh process reads with zero `lsTree`/`show`/`pathCommitTimes`; a changed revision, limits, identity or build recompiles; entries stay out of every commit and index; a damaged entry is rewritten; restore exclusion; a store that never loads.
 
 ## 2026-10-19 - Recall keeps its BM25 terms on disk and builds excerpts only for returned candidates
 

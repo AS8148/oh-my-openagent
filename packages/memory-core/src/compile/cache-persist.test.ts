@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs"
 import { mkdtemp, readdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { GitMemoryRepo } from "../git"
+import { GitMemoryRepo, GitTimeoutError } from "../git"
 import { withRecallTermSavesExcluded } from "../recall/bm25-persist-gate"
 import { MemoryBlockCache } from "./cache"
 import { removeTree } from "../../../../test-support/remove-tree"
@@ -163,6 +163,41 @@ describe("MemoryBlockCache persisted blocks", () => {
     expect((await storeFiles(dir)).length).toBe(1)
     expect(await repo.status()).toBe("")
     expect((await repo.lsTree("HEAD")).some((path) => path.includes(STORE_FILE_PREFIX))).toBe(false)
+  })
+
+  it("#given a git read times out during the compile #when the block is compiled #then that turn gets the fallback block, nothing is stored, and a fresh process compiles the full block", async () => {
+    for (const failing of ["pathCommitTimes", "show"] as const) {
+      // given
+      const { dir, repo } = await createRepo()
+      const revision = await repo.head()
+      const full = await new MemoryBlockCache().compile(repo, TEMPLATE, OPTIONS, revision)
+      const flaky = new Proxy(repo, {
+        get(target, property, receiver) {
+          const value = Reflect.get(target, property, receiver)
+          if (typeof value !== "function") return value
+          if (property === failing) {
+            return (...args: unknown[]) =>
+              failing === "show" && args[1] !== "system/persona.md"
+                ? value.apply(target, args)
+                : Promise.reject(new GitTimeoutError([failing], 1))
+          }
+          return value.bind(target)
+        },
+      })
+      const degraded = persistedCache()
+
+      // when
+      const fallback = await degraded.compile(flaky, TEMPLATE, OPTIONS, revision)
+      await settle(degraded)
+      const relaunch = counting(repo)
+      const recompiled = await persistedCache().compile(relaunch.repo, TEMPLATE, OPTIONS, revision)
+
+      // then
+      if (failing === "show") expect(fallback).not.toBe(full)
+      expect(await storeFiles(dir), failing).toEqual([])
+      expect(relaunch.work.lsTree, failing).toBeGreaterThan(0)
+      expect(recompiled, failing).toBe(full)
+    }
   })
 
   it("#given a damaged stored block #when a new process compiles #then it compiles the correct bytes and rewrites the entry for the next process", async () => {

@@ -86,12 +86,20 @@ export function createMemoryPromptHandler(options: MemoryPromptInjectionOptions)
   // Persisted with the compiled block: a relaunch reads the estimate of a commit instead of listing its tree again.
   // One estimate per revision is in flight at a time, so a prompt and a prebuild share it.
   const estimatePressure = (repo: GitMemoryRepo, revision: string): Promise<number> => {
+    const known = pressureEstimates.get(revision)
+    if (known !== undefined) return Promise.resolve(known)
     let pending = pressureInFlight.get(revision)
     if (pending === undefined) {
+      // estimateSystemTokens throws on a failed read, so a stored estimate is always the commit's own.
       pending = cache.remember(repo, "system-token-estimate", revision, async () =>
-        String(await estimateSystemTokensCached(repo, revision, pressureEstimates))).then(Number)
+        ({ value: String(await estimateSystemTokensCached(repo, revision, pressureEstimates)), persist: true }))
+        .then((stored) => {
+          const tokens = Number(stored)
+          pressureEstimates.set(revision, tokens)
+          return tokens
+        })
       pressureInFlight.set(revision, pending)
-      pending.catch(() => pressureInFlight.delete(revision))
+      void pending.finally(() => pressureInFlight.delete(revision)).catch(() => undefined)
     }
     return pending
   }
