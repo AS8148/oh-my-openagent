@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { readdir, readFile } from "node:fs/promises"
-import { join, relative } from "node:path"
+import { join, relative, sep } from "node:path"
 
 // Architecture contract (#10726 review): every memory-core git read whose `log` / `show -s` / `diff-tree`
 // output is parsed spreads STABLE_LOG_OUTPUT, so a user's git config cannot change what it parses.
@@ -75,7 +75,7 @@ describe("STABLE_LOG_OUTPUT coverage", () => {
 
     // when
     const reads = (await Promise.all(files.map(async (file) =>
-      parsedGitReads(await readFile(file, "utf8")).map((read) => ({ ...read, file: relative(SOURCE_ROOT, file) })),
+      parsedGitReads(await readFile(file, "utf8")).map((read) => ({ ...read, file: relative(SOURCE_ROOT, file).split(sep).join("/") })),
     ))).flat()
 
     // then
