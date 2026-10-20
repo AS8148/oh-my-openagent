@@ -122,7 +122,12 @@ const builtExtensionPath = join(packageRoot, "plugin", "extensions", "omo.js")
 // dependency manifests are unchanged. Committed dev measures 1,539,513 bytes; the #10184 branch measures
 // 1,547,296 (+7,783) after minification (linux/arm64, node 24 + bun 1.4.2). 1,550,000 is the measured need
 // plus a 2,704-byte margin, so later growth still has to justify itself rather than ride on slack.
-const BUDGET_BYTES = 1_550_000
+// Reduced 1,550,000 -> 1,497,000 for #9915 (LSP slice): formatter.ts imported two helpers from the
+// @oh-my-opencode/lsp-core root barrel, which pulled lsp-core's whole in-process engine (manager, client,
+// transport, workspace edits) into omo.js although Senpi runs LSP only through the packaged daemon. Deep
+// imports drop it: 1,549,814 -> 1,467,387 bytes (-82,427), regenerated in the canonical linux/amd64 node 24
+// container with bun 1.4.3. 1,497,000 is the measured size + 2%, per #9915's rule for reducing PRs.
+const BUDGET_BYTES = 1_497_000
 
 describe("omo-senpi bundle size budget", () => {
   it("#given the built extension #when its byte size is measured #then it stays within the documented byte budget", () => {
