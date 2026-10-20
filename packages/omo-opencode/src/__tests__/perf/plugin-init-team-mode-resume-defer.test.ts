@@ -5,8 +5,11 @@ import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { describe, expect, it } from "bun:test"
 import { unsafeTestValue } from "../../../../../test-support/unsafe-test-value"
+import { listActiveTeams } from "../../features/team-mode/team-state-store/store"
+import { loadPluginConfig } from "../../plugin-config"
 
 const HUNG_LEAD_SESSION_ID = "ses_999999999fffeeRegrTestHang0"
+const SEEDED_TEAM_RUN_ID = "11111111-2222-4333-8444-555555555555"
 // Circuit breaker only: a correct init settles on its own, so this never decides a passing run.
 const INIT_CIRCUIT_BREAKER_MS = 30_000
 
@@ -53,7 +56,7 @@ async function importFreshPluginModule(): Promise<(typeof import("../../index"))
 }
 
 function seedStaleActiveRuntime(omoBaseDir: string): void {
-  const teamRunId = "11111111-2222-4333-8444-555555555555"
+  const teamRunId = SEEDED_TEAM_RUN_ID
   const runtimeDir = join(omoBaseDir, "runtime", teamRunId)
   mkdirSync(runtimeDir, { recursive: true })
   const runtimeState = {
@@ -117,6 +120,13 @@ describe("plugin init defers team-mode resume", () => {
     process.env.OPENCODE_CONFIG_DIR = configDirectory
 
     try {
+      // the fixture must reach the resume path: team mode loads ON and the stale active run is listed
+      const teamModeConfig = loadPluginConfig(projectDirectory, undefined).team_mode
+      expect(teamModeConfig?.enabled).toBe(true)
+      if (teamModeConfig === undefined) throw new Error("fixture did not load team_mode")
+      const activeTeams = await listActiveTeams(teamModeConfig)
+      expect(activeTeams.map((team) => [team.teamRunId, team.status])).toContainEqual([SEEDED_TEAM_RUN_ID, "active"])
+
       const pluginModule = await importFreshPluginModule()
       const input = createPluginInput(projectDirectory, createHeldSessionGetClient())
 
