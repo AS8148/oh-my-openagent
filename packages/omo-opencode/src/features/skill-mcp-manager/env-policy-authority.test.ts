@@ -132,3 +132,17 @@ test("a shared authority decision exposes its notice to both requesting sessions
   expect(f.manager.getEnvironmentNotice(f.info)).toContain("GITHUB_TOKEN")
   expect(f.manager.getEnvironmentNotice(other)).toContain("GITHUB_TOKEN")
 })
+
+test("legacy user-policy clients with different provenance records cannot reuse one child", async () => {
+  // given
+  const f = fixture()
+  const first = { ...f.info, scope: "user", provenance: { kind: "user" as const, selectedRoot: "/synthetic/user-first" } }
+  const second = { ...first, provenance: { ...first.provenance, selectedRoot: "/synthetic/user-second" } }
+  await f.manager.getOrCreateClient(first, f.config)
+  // when
+  await f.manager.getOrCreateClient(second, { ...f.config, command: "second-user-command" })
+  // then
+  expect(f.transports.map((transport) => transport.command)).toEqual(["synthetic-command", "second-user-command"])
+  expect(f.transports.map((transport) => transport.env?.AUTH_HEADER)).toEqual(["synthetic-first-value", "synthetic-first-value"])
+  expect(f.notices).toEqual([])
+})
