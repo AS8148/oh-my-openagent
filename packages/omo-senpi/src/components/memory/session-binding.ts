@@ -12,6 +12,7 @@ import { logBindReconcileFailure } from "./bind-reconcile-log"
 import type { MemoryExtensionAPI } from "./capabilities"
 import { createMemoryIdentityContext, type MemoryIdentityContext } from "./context"
 import { adoptSessionIdentity } from "./identity-adoption"
+import { revokeProjectMemoryReads } from "./project-memory-grants"
 import { memoryModuleSupervisor } from "./supervisor"
 import type { SyncRunner } from "./sync-runner"
 import { isOneShotSurface, resolveIdentityRunPaths, type IdentityRunPaths } from "./transient-identity"
@@ -154,6 +155,7 @@ export function createSessionBinder(deps: SessionBinderDeps): SessionBinder {
 
 export function releaseSession(state: SessionState | undefined, syncRunner?: SyncRunner): void {
   if (state?.context === undefined) return
+  revokeProjectMemoryReads(state.context)
   memoryModuleSupervisor.release()
   state.context = undefined
   if (state.syncRepo !== undefined && syncRunner !== undefined) void syncRunner.release(state.syncRepo)
