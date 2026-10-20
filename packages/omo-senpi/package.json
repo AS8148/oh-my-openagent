@@ -5,6 +5,7 @@
   "private": true,
   "description": "Senpi harness adapter for oh-my-openagent.",
   "imports": {
+    "#omo-telemetry-posthog-runtime": "./src/components/telemetry/posthog-runtime.ts",
     "#omo-task-runtime": "./src/extension/omo-task.ts",
     "#omo-computer-use-runtime": "./src/components/computer-use/runtime.ts",
     "#omo-memory-doctor-runtime": "./src/components/memory/commands/doctor-runtime.ts",
@@ -59,6 +60,7 @@
     "@oh-my-opencode/senpi-desktop-tool": "workspace:*",
     "@oh-my-opencode/senpi-task": "workspace:*",
     "@oh-my-opencode/shared-skills": "workspace:*",
+    "@oh-my-opencode/skills-loader-core": "workspace:*",
     "@oh-my-opencode/team-core": "workspace:*",
     "@oh-my-opencode/telemetry-core": "workspace:*",
     "@oh-my-opencode/utils": "workspace:*",
