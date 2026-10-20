@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:f26094cc994df527fa26034d5aea1cc1ac3d1332a54a390edfa7041b32ad80b0:db0540bf73f6ea181a271aca2f26ec8c9cdc244ce660e52c9f2655c4b63ac4eb
+// omo-codex-install:bbc1ffab60b38b00f077eb89cf0af5487bb98766f65a17843e1aa8776b655413:0b969f35071686497aa2810fffcb0c16e788ca75397e0a61d01a37c1f9a38139
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -19458,14 +19458,20 @@ var OmoComputerSettingsLayerSchema = object({
 var OmoComputerSettingsSchema = OmoComputerSettingsLayerSchema;
 
 // packages/omo-config-core/src/schema/git-master.ts
+var GIT_ENV_ASSIGNMENT_PATTERN = /^(?:[A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_-]*)(?: [A-Za-z_][A-Za-z0-9_]*=[A-Za-z0-9_-]*)*$/;
+var GitEnvPrefixSchema = string2().refine((value) => value === "" || GIT_ENV_ASSIGNMENT_PATTERN.test(value), {
+  message: 'git_env_prefix must be empty or use shell-safe env assignments like "GIT_MASTER=1"'
+});
 var OmoGitMasterSettingsShape = {
   commit_footer: union([boolean2(), string2()]),
-  include_co_authored_by: boolean2()
+  include_co_authored_by: boolean2(),
+  git_env_prefix: GitEnvPrefixSchema
 };
 var OmoGitMasterSettingsLayerSchema = object(OmoGitMasterSettingsShape).partial().strict();
 var OmoGitMasterSettingsSchema = OmoGitMasterSettingsLayerSchema.extend({
   commit_footer: union([boolean2(), string2()]).default(false),
-  include_co_authored_by: boolean2().default(false)
+  include_co_authored_by: boolean2().default(false),
+  git_env_prefix: GitEnvPrefixSchema.default("GIT_MASTER=1")
 }).strict();
 
 // packages/omo-config-core/src/schema/harness.ts
