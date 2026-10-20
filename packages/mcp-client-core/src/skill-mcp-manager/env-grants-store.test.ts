@@ -115,6 +115,7 @@ test("fallback reconciles skipped revoke/regrant and file recreation conservativ
   const stream = observationStream()
   stop = await observe(path, stream.listener)
   expect(intervalMs).toBe(5000)
+  expect(watch).toHaveBeenCalled()
   await revoke(path, identity)
   await addGrant(path, identity, label, ["ODD_DSN"])
   const skipped = stream.next((event) => event.snapshot.generation === 3)
