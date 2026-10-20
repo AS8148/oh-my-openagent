@@ -36,7 +36,8 @@ The text you used to prepend to that log.
   `changelog-gate` workflow checks every block (`script/package-log-gate.ts`).
 - `bun script/compile-package-logs.ts compile` writes the blocks into their logs, newest PR on top,
   and leaves each fragment with only its paragraph (a fragment with no paragraph is deleted). The
-  release stamp does the same for any block still waiting, so nothing is lost at release.
+  release stamp does the same for any block still waiting. A release needs at least one paragraph: if
+  every fragment is blocks-only the stamp refuses and writes nothing, and the blocks wait for the hourly job.
 - Only the paragraph goes into `CHANGELOG.md`. The marker grammar matches omo-desktop-app's
   `changes/unreleased`, so the root changelog can move to the same compile later without a second migration.
 - A branch that still prepends to a package log converts with

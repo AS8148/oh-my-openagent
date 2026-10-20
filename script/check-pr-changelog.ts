@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { checkPrChangelog, fetchBaseIfMissing, FRAGMENT_DIR, fragmentPath } from "./changelog-gate-rules.ts";
 import { GATE_CONFIG } from "./changelog-gate.config.ts";
 import { checkPackageLogs } from "./package-log-gate.ts";
+import { isReleaseStatePr } from "./release-pr-marker.ts";
 
 function run(): number {
   const base = process.env["CHANGELOG_GATE_BASE"];
@@ -11,7 +12,9 @@ function run(): number {
   const actor = process.env["CHANGELOG_GATE_ACTOR"] ?? "";
   const prRaw = process.env["CHANGELOG_GATE_PR"] ?? "";
   const labels: readonly string[] = JSON.parse(process.env["CHANGELOG_GATE_LABELS"] ?? "[]");
-  const isReleaseWorkflow = process.env["CHANGELOG_GATE_RELEASE"] === "1";
+  // The release marker is publish.yml's own title/body/branch triple, never the branch name alone (#10709).
+  const isReleaseWorkflow = process.env["CHANGELOG_GATE_RELEASE"] === "1"
+    && isReleaseStatePr({ branch, title: process.env["CHANGELOG_GATE_TITLE"] ?? "", body: process.env["CHANGELOG_GATE_BODY"] ?? "" });
   if (!base) throw new Error("missing CHANGELOG_GATE_BASE");
   if (prRaw && !/^\d+$/.test(prRaw)) throw new Error("CHANGELOG_GATE_PR must be a PR number");
   const prNumber = prRaw ? Number(prRaw) : 0;
@@ -78,7 +81,8 @@ function run(): number {
   console.log(`changelog-gate: ${result.pass ? "PASS" : "FAIL"} - ${result.reason}`);
   const packageLogs = checkPackageLogs({
     addedFiles, modifiedFiles, deletedFiles,
-    isRelease: isReleaseWorkflow || (GATE_CONFIG.releaseBranchPattern.test(branch) && GATE_CONFIG.releaseActors.some((releaseActor) => releaseActor === actor)),
+    // The SAME release predicate as the shared gate: the release marker AND the release branch AND the release actor (#10682 review HIGH).
+    isRelease: isReleaseWorkflow && GATE_CONFIG.releaseBranchPattern.test(branch) && GATE_CONFIG.releaseActors.some((releaseActor) => releaseActor === actor),
     fragment: addedFragment?.content ?? null,
     existsAtHead: (path) => existsAt(head, path),
   });

@@ -14,7 +14,8 @@
  */
 
 const MARKER = /^<!-- changes-log: (\S+) -->$/
-const PACKAGE_LOG = /^packages\/[^/]+\/changes\.md$/
+// One plain package segment: no ".", "..", "%" escapes or other characters a URL resolver could reinterpret.
+const PACKAGE_LOG = /^packages\/(?!\.\.?\/)[A-Za-z0-9_][A-Za-z0-9._-]*\/changes\.md$/
 const DATED_HEADING = /^## \d{4}-\d{2}-\d{2} (?:-|—) \S/
 const CONFLICT_MARKER = /^(?:<{7}|\|{7}|={7}|>{7})(?:\s|$)/m
 

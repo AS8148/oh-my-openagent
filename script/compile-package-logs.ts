@@ -11,7 +11,7 @@
 import { execFileSync } from "node:child_process"
 import { readdir, rm } from "node:fs/promises"
 import { FRAGMENT_DIR, fragmentPath, readFragments } from "./changelog-fragments"
-import { blockFromPrepend, compileBlocks, markerLine } from "./package-log-blocks.ts"
+import { blockFromPrepend, compileBlocks, markerLine, splitFragment } from "./package-log-blocks.ts"
 
 const root = new URL("../", import.meta.url)
 const at = (path: string) => new URL(path, root)
@@ -23,8 +23,8 @@ async function compile(): Promise<void> {
   const fragments = readFragments(names, (name) => contents.get(name) ?? "")
   const logs = new Map<string, string | null>()
   for (const fragment of fragments) {
-    for (const match of fragment.content.matchAll(/^<!-- changes-log: (\S+) -->$/gm)) {
-      const path = match[1] ?? ""
+    for (const block of splitFragment(fragment.content).blocks) {
+      const path = block.log
       const file = Bun.file(at(path))
       logs.set(path, (await file.exists()) ? await file.text() : null)
     }
@@ -40,14 +40,17 @@ async function compile(): Promise<void> {
 
 async function fromDiff(base: string, pr: number): Promise<void> {
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root.pathname, encoding: "utf8" })
-  const edited = git("diff", "--name-only", `${base}...HEAD`, "--", "packages/*/changes.md").split("\n").filter(Boolean)
+  // The merge base, not the base tip: dev's logs move after this branch forked (#10682 review MEDIUM 2), and the gate
+  // diffs against the merge base too, so restoring the tip's bytes would still read as an edit.
+  const mergeBase = git("merge-base", base, "HEAD").trim()
+  const edited = git("diff", "--name-only", `${mergeBase}...HEAD`, "--", "packages/*/changes.md").split("\n").filter(Boolean)
   if (edited.length === 0) throw new Error("this branch edits no package log")
   const blocks: string[] = []
   for (const log of edited) {
-    const block = blockFromPrepend(log, git("show", `${base}:${log}`), git("show", `HEAD:${log}`))
+    const block = blockFromPrepend(log, git("show", `${mergeBase}:${log}`), git("show", `HEAD:${log}`))
     if (block === null) throw new Error(`${log} was edited below its top; move that text by hand`)
     blocks.push(`${markerLine(block.log)}\n${block.body}`)
-    git("checkout", base, "--", log)
+    git("checkout", mergeBase, "--", log)
   }
   const target = at(fragmentPath(pr))
   const file = Bun.file(target)
