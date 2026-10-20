@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:742cce7d212a50af417eaa6bdf31703e1a13b397a4e960cd62dee06e729a674b:6661e0513ea7da6871c8f1094dcd6e19bb90eb51bc3fcc07e8801ce48e942d17
+// omo-codex-install:b408b576ee9f2c827cd2733d966cd724fd27f029332824185037c443d3f8dd57:45ee374af9a88da9712fc3e3f8e220dbdc302cebb6f4025884612f07180b8a02
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -284,8 +284,6 @@ function toDiagnosticRecord(input, now) {
     timestamp: now.toISOString(),
     event: input.event,
     source: input.source,
-    ...input.entryKind === undefined ? {} : { entry_kind: input.entryKind },
-    ...input.errorCode === undefined ? {} : { error_code: input.errorCode },
     ...input.count === undefined ? {} : { count: input.count },
     ...serializeError(input.error, input.errorKind)
   };
@@ -10038,7 +10036,7 @@ var package_default;
 var init_package = __esm(() => {
   package_default = {
     name: "@oh-my-opencode/omo-codex",
-    version: "5.1.39",
+    version: "5.1.40",
     type: "module",
     private: true,
     description: "Codex harness adapter for oh-my-openagent. Vendored Codex plugin namespace (omo) + TypeScript installer + telemetry.",
