@@ -166,7 +166,8 @@ export async function getSdkSessionMessages(
 // from the newest end.
 export const SDK_MESSAGE_PAGE_SIZE = 100
 
-export type SessionMessagePage = { messages: SessionMessage[]; nextCursor?: string }
+// cursorReadable is false when the response exposed no headers, so whether older pages exist is unknown.
+export type SessionMessagePage = { messages: SessionMessage[]; nextCursor?: string; cursorReadable: boolean }
 
 export async function getSdkSessionMessagePage(
   client: PluginInput["client"],
@@ -180,7 +181,12 @@ export async function getSdkSessionMessagePage(
     () => client.session.messages({ path: { id: sessionID }, query, ...(signal ? { signal } : {}) }),
     signal,
   )
-  return { messages: toSessionMessages(response), nextCursor: getNextCursorHeader(response) }
+  const headers = getResponseHeaders(response)
+  return {
+    messages: toSessionMessages(response),
+    nextCursor: headers?.get("x-next-cursor") || undefined,
+    cursorReadable: headers !== undefined,
+  }
 }
 
 // Visits pages newest-first; each page is in ascending order. Stops when `visit` returns false,
@@ -191,16 +197,16 @@ export async function forEachSdkSessionMessagePage(
   visit: (messages: SessionMessage[]) => boolean | void,
   options: { pageSize?: number; signal?: AbortSignal } = {},
 ): Promise<void> {
+  const pageSize = options.pageSize ?? SDK_MESSAGE_PAGE_SIZE
   let before: string | undefined
   while (true) {
     options.signal?.throwIfAborted()
-    const page = await getSdkSessionMessagePage(
-      client,
-      sessionID,
-      { limit: options.pageSize ?? SDK_MESSAGE_PAGE_SIZE, before },
-      options.signal,
-    )
+    const page = await getSdkSessionMessagePage(client, sessionID, { limit: pageSize, before }, options.signal)
     if (page.messages.length === 0) return
+    // A full page whose cursor cannot be read would end the walk early and silently truncate the session.
+    if (!page.cursorReadable && page.messages.length >= pageSize) {
+      throw new Error(`Cannot page session ${sessionID}: the message response exposed no headers, so older messages may remain unread`)
+    }
     if (visit(page.messages) === false) return
     if (!page.nextCursor || page.nextCursor === before) return
     before = page.nextCursor
@@ -233,10 +239,12 @@ export async function getSdkSessionMessageWindow(
   return oldest
 }
 
-function getNextCursorHeader(response: unknown): string | undefined {
+// Duck-typed rather than `instanceof Response`, which fails for a Response from another realm or fetch polyfill.
+function getResponseHeaders(response: unknown): { get(name: string): string | null } | undefined {
   if (!response || typeof response !== "object" || !("response" in response)) return undefined
-  const headers = response.response instanceof Response ? response.response.headers : undefined
-  return headers?.get("x-next-cursor") || undefined
+  const raw = (response as { response?: { headers?: unknown } }).response?.headers
+  if (!raw || typeof (raw as { get?: unknown }).get !== "function") return undefined
+  return raw as { get(name: string): string | null }
 }
 
 function toSessionMessages(response: unknown): SessionMessage[] {

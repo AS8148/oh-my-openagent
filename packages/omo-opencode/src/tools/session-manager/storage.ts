@@ -185,7 +185,7 @@ export async function readSessionTranscript(sessionID: string): Promise<number> 
   return getFileSessionTranscript(sessionID)
 }
 
-export async function getSessionInfo(sessionID: string): Promise<SessionInfo | null> {
+export async function getSessionInfo(sessionID: string, signal?: AbortSignal): Promise<SessionInfo | null> {
   if (isSqliteBackend() && sdkClient) {
     try {
       // Counted page by page so the session is never held whole.
@@ -203,7 +203,7 @@ export async function getSessionInfo(sessionID: string): Promise<SessionInfo | n
             if (!lastMessage || date > lastMessage) lastMessage = date
           }
         }
-      })
+      }, { signal })
       if (messageCount > 0) {
         const todos = await readSessionTodos(sessionID)
         const transcriptEntries = await readSessionTranscript(sessionID)
@@ -221,6 +221,7 @@ export async function getSessionInfo(sessionID: string): Promise<SessionInfo | n
         }
       }
     } catch (error) {
+      signal?.throwIfAborted()
       if (!shouldReadFileSession(error)) throw error
       log("[session-manager] reading file session info after SDK error", { error: describeSessionError(error), sessionID })
     }

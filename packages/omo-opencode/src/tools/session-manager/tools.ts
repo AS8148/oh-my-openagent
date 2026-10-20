@@ -223,7 +223,7 @@ export function createSessionManagerTools(
     },
     execute: async (args: SessionInfoArgs, _context) => {
       try {
-        const info = await resolvedDeps.getSessionInfo(args.session_id)
+        const info = await resolvedDeps.getSessionInfo(args.session_id, _context.abort)
 
         if (!info) {
           return `Session not found: ${args.session_id}`

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test"
-import { mkdirSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
@@ -32,7 +32,10 @@ mock.module("../../shared/opencode-storage-detection", () => ({
 }))
 
 mock.module("../../shared/opencode-message-dir", () => ({
-  getMessageDir: () => null,
+  getMessageDir: (sessionID: string) => {
+    const dir = join(TEST_DIR, "message", sessionID)
+    return existsSync(dir) ? dir : null
+  },
 }))
 
 afterAll(() => {
@@ -44,10 +47,12 @@ const { resetStorageClient } = await import("./storage")
 
 type Request = { sessionID: string; limit?: number; before?: string; signal?: AbortSignal }
 
+type HeaderShape = "response" | "foreign-response" | "none"
+
 // Serves GET /session/:id/message the way OpenCode's MessageV2.page does: `limit` returns the newest
 // `limit` messages in ascending order plus an X-Next-Cursor header when older ones remain; no limit
 // returns everything.
-function createFakeServer(sessions: Record<string, number>) {
+function createFakeServer(sessions: Record<string, number>, headerShape: HeaderShape = "response") {
   const requests: Request[] = []
   let fetchedMessages = 0
   let largestResponse = 0
@@ -72,6 +77,8 @@ function createFakeServer(sessions: Record<string, number>) {
         fetchedMessages += data.length
         largestResponse = Math.max(largestResponse, data.length)
         const headers = new Headers(request.limit && start > 0 ? { "X-Next-Cursor": String(start) } : {})
+        if (headerShape === "none") return { data }
+        if (headerShape === "foreign-response") return { data, response: { status: 200, headers } }
         return { data, response: new Response(null, { headers }) }
       },
       todo: async () => ({ data: [] }),
@@ -94,14 +101,50 @@ function createFakeServer(sessions: Record<string, number>) {
   }
 }
 
-function createContext(): ToolContext {
+// Like fetch, a gated request rejects as soon as its signal aborts.
+function blockRequest(server: ReturnType<typeof createFakeServer>, requestNumber: number) {
+  let seen = 0
+  let releaseRead!: () => void
+  const blocked = new Promise<Request>((resolveBlocked) => {
+    server.setGate({
+      onRequest: (request) => {
+        seen++
+        if (seen !== requestNumber) return Promise.resolve()
+        resolveBlocked(request)
+        return new Promise<void>((resolveRead, rejectRead) => {
+          releaseRead = resolveRead
+          request.signal?.addEventListener("abort", () => rejectRead(request.signal?.reason), { once: true })
+        })
+      },
+    })
+  })
+  return { blocked, release: () => releaseRead() }
+}
+
+function writeFileSession(sessionID: string, count: number): void {
+  for (let index = 0; index < count; index++) {
+    const messageID = `msg_${String(index).padStart(6, "0")}`
+    mkdirSync(join(TEST_DIR, "message", sessionID), { recursive: true })
+    writeFileSync(
+      join(TEST_DIR, "message", sessionID, `${messageID}.json`),
+      JSON.stringify({ id: messageID, role: "user", time: { created: 1_000 + index } }),
+    )
+    mkdirSync(join(TEST_DIR, "part", messageID), { recursive: true })
+    writeFileSync(
+      join(TEST_DIR, "part", messageID, "prt_0.json"),
+      JSON.stringify({ id: "prt_0", type: "text", text: `file message ${index}${index === 0 ? " needle-oldest" : ""}` }),
+    )
+  }
+}
+
+function createContext(abort: AbortSignal = new AbortController().signal): ToolContext {
   return {
     sessionID: "ses_caller",
     messageID: "msg_caller",
     agent: "test-agent",
     directory: TEST_DIR,
     worktree: TEST_DIR,
-    abort: new AbortController().signal,
+    abort,
     metadata: () => {},
     ask: async () => {},
   }
@@ -190,25 +233,15 @@ describe("session-manager paging (#10738)", () => {
     //#given
     jest.useFakeTimers()
     const server = createFakeServer({ ses_a: SESSION_SIZE, ses_b: SESSION_SIZE, ses_c: SESSION_SIZE })
-    let releaseRead!: () => void
-    const readBlocked = new Promise<Request>((resolveBlocked) => {
-      server.setGate({
-        onRequest: (request) =>
-          new Promise<void>((resolveRead) => {
-            releaseRead = resolveRead
-            resolveBlocked(request)
-          }),
-      })
-    })
+    const gate = blockRequest(server, 1)
     const { session_search } = createTools(server, ["ses_a", "ses_b", "ses_c"])
     const output = session_search.execute({ query: "zz-no-match" }, createContext())
     const blocked = await Promise.race([
-      readBlocked,
+      gate.blocked,
       output.then(() => {
         throw new Error("search settled before its first read was observed")
       }),
     ])
-    server.setGate(undefined)
 
     //#when
     jest.advanceTimersByTime(60_000)
@@ -218,9 +251,109 @@ describe("session-manager paging (#10738)", () => {
     expect(result).toContain("timed out")
     expect(blocked.signal?.aborted).toBe(true)
     const requestsAtTimeout = server.requests.length
-    releaseRead()
+    gate.release()
     jest.useRealTimers()
     await new Promise<void>((drained) => setImmediate(drained))
     expect(server.requests.length).toBe(requestsAtTimeout)
+  })
+
+  test.each([
+    ["session_info", { session_id: "ses_big" }],
+    ["session_read", { session_id: "ses_big", limit: 2 }],
+  ] as const)("#given %s walking a long session #when the caller aborts mid-walk #then it returns without the blocked page and reads nothing more", async (toolName: "session_info" | "session_read", args: { session_id: string; limit?: number }) => {
+    //#given
+    const server = createFakeServer({ ses_big: SESSION_SIZE })
+    const gate = blockRequest(server, 3)
+    const caller = new AbortController()
+    const tools = createTools(server)
+    const output = tools[toolName].execute(args, createContext(caller.signal))
+    const blocked = await Promise.race([
+      gate.blocked,
+      output.then(() => {
+        throw new Error(`${toolName} settled before the walk reached its third request`)
+      }),
+    ])
+
+    //#when
+    caller.abort(new Error("cancelled by caller"))
+    const result = await output
+
+    //#then
+    expect(result).toContain("cancelled by caller")
+    expect(blocked.signal?.aborted).toBe(true)
+    expect(server.requests.length).toBe(3)
+    expect(server.fetchedMessages).toBeLessThanOrEqual(201)
+  })
+
+  test("#given a long session #when session_read asks for the first 150 messages #then the window spans the page boundary exactly", async () => {
+    //#given
+    const server = createFakeServer({ ses_big: SESSION_SIZE })
+    const { session_read } = createTools(server)
+
+    //#when
+    const output = await session_read.execute({ session_id: "ses_big", limit: 150 }, createContext())
+
+    //#then
+    const indexes = (String(output).match(/ses_big message (\d+)/g) ?? []).map((match: string) => Number(match.split(" ").pop()))
+    expect(indexes).toEqual(Array.from({ length: 150 }, (_, index) => index))
+  })
+
+  test.each([true, false])("#given a 30-message session #when session_read asks for 50 with from_end=%p #then all 30 come back in order", async (fromEnd: boolean) => {
+    //#given
+    const server = createFakeServer({ ses_small: 30 })
+    const { session_read } = createTools(server)
+
+    //#when
+    const output = await session_read.execute({ session_id: "ses_small", limit: 50, from_end: fromEnd }, createContext())
+
+    //#then
+    const indexes = (String(output).match(/ses_small message (\d+)/g) ?? []).map((match: string) => Number(match.split(" ").pop()))
+    expect(indexes).toEqual(Array.from({ length: 30 }, (_, index) => index))
+  })
+
+  test("#given responses whose headers come from another Response implementation #when session_info counts a long session #then it still follows the cursor to the end", async () => {
+    //#given
+    const server = createFakeServer({ ses_big: 250 }, "foreign-response")
+    const { session_info } = createTools(server)
+
+    //#when
+    const output = await session_info.execute({ session_id: "ses_big" }, createContext())
+
+    //#then
+    expect(output).toContain("Messages: 250")
+  })
+
+  test("#given responses with no readable headers #when a full page arrives #then the walk fails loudly instead of truncating", async () => {
+    //#given
+    const server = createFakeServer({ ses_big: 250, ses_small: 30 }, "none")
+    const { session_info } = createTools(server)
+
+    //#when
+    const full = await session_info.execute({ session_id: "ses_big" }, createContext())
+    const short = await session_info.execute({ session_id: "ses_small" }, createContext())
+
+    //#then
+    expect(full).toContain("Error: ")
+    expect(full).toContain("Cannot page session ses_big")
+    expect(short).toContain("Messages: 30")
+  })
+
+  test("#given a session only in file storage #when it is read, counted and searched #then the file pages give the same windows and newest-first order", async () => {
+    //#given
+    writeFileSession("ses_file", 150)
+    const server = createFakeServer({})
+    const { session_read, session_info, session_search } = createTools(server)
+
+    //#when
+    const last = await session_read.execute({ session_id: "ses_file", limit: 2, from_end: true }, createContext())
+    const info = await session_info.execute({ session_id: "ses_file" }, createContext())
+    const newest = await session_search.execute({ query: "file message", session_id: "ses_file", limit: 2 }, createContext())
+    const oldest = await session_search.execute({ query: "needle-oldest", session_id: "ses_file" }, createContext())
+
+    //#then
+    expect(String(last).match(/file message \d+/g)).toEqual(["file message 148", "file message 149"])
+    expect(info).toContain("Messages: 150")
+    expect(String(newest).match(/msg_\d+/g)).toEqual(["msg_000149", "msg_000148"])
+    expect(oldest).toContain("msg_000000")
   })
 })
