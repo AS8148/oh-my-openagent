@@ -46,6 +46,8 @@ The collector transport (telemetry-collector plan, todo 21). Kept off the main b
 
 ## NOTES
 
+- The `./injected` entry exposes SDK-free clients and daily-active recording with a required `transportFactory`; the default root exports remain synchronous wrappers around the same implementations. `posthog-transport.ts` owns the SDK import and is exposed as `./posthog-transport` for lazy sidecar entries. Keep the subpath declaration files aligned with the root's maintained public types.
+
 - **At most once per UTC day per machine.** `getDailyActiveCaptureState` compares last-active UTC day in the state file; same day → `captureDaily: false`, nothing sent.
 - **`$process_person_profile: false`** hardcoded on every capture — no PostHog person profiles.
 - **Distinct id = `sha256(prefix + hostname)`** — never the raw hostname.
