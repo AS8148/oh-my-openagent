@@ -13,6 +13,7 @@ import { planOpencodeProviders } from "../bin/lib/setup-opencode-providers.js"
 import { teardownRoots } from "./teardown.test-support"
 
 const SOURCE_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)))
+const REPO_NODE_MODULES = resolve(SOURCE_ROOT, "..", "..", "node_modules")
 const roots: string[] = []
 
 afterEach(() => teardownRoots(roots))
@@ -31,6 +32,9 @@ function fixture(): Fixture {
   mkdirSync(join(root, "home"), { recursive: true })
   mkdirSync(join(root, "tmp"), { recursive: true })
   cpSync(join(SOURCE_ROOT, "bin"), join(app, "bin"), { recursive: true })
+  // The installed omo-ai resolves its pinned engine from its own node_modules; the copied app gets the
+  // workspace's, so reading the engine's model list stays offline (a junction needs no privilege on Windows).
+  symlinkSync(REPO_NODE_MODULES, join(app, "node_modules"), "junction")
   write(join(app, "package.json"), JSON.stringify({ name: "omo-ai", version: "test", type: "module" }))
   return {
     home: join(root, "home"),
@@ -47,11 +51,7 @@ function opencode(item: Fixture, config: unknown, auth?: unknown): void {
   if (auth !== undefined) write(join(item.dataHome, "opencode", "auth.json"), JSON.stringify(auth))
 }
 
-// The launcher runs from a copied app with no node_modules, so Bun auto-installs the engine's dependencies
-// on first import and extracts them under the temp dir. On Windows those extraction directories outlive the
-// child (#9766 guard: `.typebox`, `.openai`, `.client-bedrock-runtime`), so the child gets its own temp dir
-// inside the fixture root, which teardown removes. The Bun install cache stays the host's: it is a cache, not a temp
-// leak, and a fresh per-file cache would make the first engine-importing case install cold (#10210's timeout).
+// The child gets its own temp dir inside the fixture root, which teardown removes (#9766).
 function childEnv(item: Fixture): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -75,7 +75,9 @@ function childEnv(item: Fixture): NodeJS.ProcessEnv {
 }
 
 function run(item: Fixture, args: string[]) {
-  const result = spawnSync(process.execPath, [item.launcher, ...args], { encoding: "utf8", env: childEnv(item) })
+  // --no-install: a module the copied app cannot resolve fails the run instead of Bun fetching it from the
+  // registry into the fixture home, a cold network install on every run that timed out on Windows (#10210).
+  const result = spawnSync(process.execPath, ["--no-install", item.launcher, ...args], { encoding: "utf8", env: childEnv(item) })
   if (result.error) throw result.error
   return result
 }
@@ -398,6 +400,9 @@ describe("omo setup opencode catalog provider import (#10158)", () => {
         ])
         expect(readAuthStore(join(item.agentDir, "auth.json")).entries.neuralwatt).toMatchObject({ type: "api_key" })
         expect(result.stdout).toContain("providers-imported: neuralwatt")
+        expect(result.stdout).not.toContain("could not read the engine's model list")
+        expect(result.stdout).toContain("model-choices-carried: default model")
+        expect(readJson(join(item.agentDir, "settings.json"))).toMatchObject({ defaultProvider: "neuralwatt", defaultModel: "kimi-k2.5" })
         expect(result.stdout).not.toContain("providers omo does not serve (neuralwatt)")
         expect(result.stdout).not.toContain("provider neuralwatt is not one omo serves")
       })
@@ -517,10 +522,16 @@ describe("omo setup e2e temp isolation (#9766)", () => {
     expect(realpathSync(child.stdout.trim())).toBe(realpathSync(item.tmp))
   })
 
-  test("#given a setup run #when the child is spawned #then it keeps the host's warm Bun install cache instead of a cold per-file one (#10210)", () => {
-    const env = childEnv(fixture())
+  test("#given a setup run that reads the engine's model list #when it finishes #then the child installed nothing and left nothing in its home or temp dir (#10210)", () => {
+    const item = fixture()
+    opencode(item, { model: "neuralwatt/kimi-k2.5" }, { neuralwatt: { type: "api", key: "nw-key" } })
+    write(join(item.home, ".cache", "opencode", "models.json"), JSON.stringify(NEURALWATT_CATALOG))
 
-    expect([env.BUN_INSTALL, env.BUN_INSTALL_CACHE_DIR]).toEqual([process.env.BUN_INSTALL, process.env.BUN_INSTALL_CACHE_DIR])
+    const result = run(item, ["setup", "--yes"])
+
+    expect(result.status).toBe(0)
+    expect(existsSync(join(item.home, ".bun"))).toBe(false)
+    expect(readdirSync(item.tmp)).toEqual([])
   })
 })
 
