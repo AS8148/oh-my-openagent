@@ -71,6 +71,8 @@ export type OmoNativeTelemetryComponentOptions = OmoNativeSessionOptions & {
   readonly consentNow?: () => number
   /** Periodic consent check while a summary window is on disk; defaults to an unref'd interval. */
   readonly scheduleConsentCheck?: (check: () => void) => () => void
+  /** The account home the shared-queue purge reads the persisted setting from; injected by tests. */
+  readonly accountHomeDir?: string
 }
 
 /** A consent read is reused for this long on the per-turn path; the periodic check always reads fresh. */
@@ -185,7 +187,7 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       pi.on("session_shutdown", async (payload, eventCtx) => {
         consentCwd = cwdOf(eventCtx)
         if (summary === undefined) {
-          purgeQueue(stateDir, (scope) => isOmoNativeTelemetryConfigEnabled(consentOptions, scope.cwd === undefined ? {} : { cwd: scope.cwd }, env), options)
+          purgeQueue(stateDir, (scope) => isOmoNativeTelemetryConfigEnabled(consentOptions, scope.cwd === undefined ? {} : { cwd: scope.cwd }, env, options.accountHomeDir), options)
           return
         }
         const reason = isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
