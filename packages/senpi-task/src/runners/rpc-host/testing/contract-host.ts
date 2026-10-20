@@ -2,6 +2,7 @@ import { createHmac, randomBytes, randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, type Socket } from "node:net"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 type Frame = Record<string, unknown>
@@ -24,7 +25,7 @@ export type ContractHost = {
 
 /** Enforces the public v1 wire contract, including connection-local attachment ownership. */
 export async function withContractHost(options: ContractHostOptions, exercise: (host: ContractHost) => Promise<void>): Promise<void> {
-  const root = mkdtempSync("/tmp/rpc-client-")
+  const root = mkdtempSync(join(tmpdir(), "rpc-client-"))
   const socket = join(root, "rpc.sock")
   const launchId = randomUUID()
   const key = randomBytes(32)
