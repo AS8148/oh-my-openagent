@@ -17,6 +17,8 @@ export interface OnboardingComponentDependencies {
   readonly scanEnvironment?: () => OnboardingScanEnvironment
   /** The whole inventory source; defaults to the shared scan runtime `omo setup` uses. */
   readonly migrationFacts?: () => Promise<string | undefined>
+  /** The bounded background summary of this machine's agent sessions; defaults to the scan runtime's. */
+  readonly sessionHistory?: () => Promise<string | undefined>
 }
 
 // The migration inventory comes from the one shared scan (`omo setup`'s own detection, through the
@@ -24,7 +26,7 @@ export interface OnboardingComponentDependencies {
 // that cannot run onboards the user without an inventory.
 async function defaultMigrationFacts(environment: () => OnboardingScanEnvironment): Promise<string | undefined> {
   const runtime = await loadOnboardingScanRuntime()
-  const { results } = await runtime.runOnboardingScan(environment(), { scanId: "onboarding-tui", includeCustomProviders: true }, () => {})
+  const { results } = await runtime.runOnboardingScan(environment(), { scanId: "onboarding-tui", includeCustomProviders: true, sessions: false }, () => {})
   return runtime.migrationFactsFromScan(results)
 }
 
@@ -56,7 +58,18 @@ export function createOnboardingComponent(
       // The inventory loads lazily (#10478): the scan runs once, only after a claim actually succeeds
       // - never at register(), so sessions that never onboard pay none of its cost.
       let migrationInventory: Promise<string | undefined> | undefined
+      let history: Promise<void> | undefined
       const withInventory = async (base: string): Promise<string> => {
+        // Session history is never awaited here: it starts with the claim, runs bounded in the
+        // background and rides the next turn when it lands; a hang or failure just leaves it out.
+        history ??= (dependencies.sessionHistory
+          ?? (async () => (await loadOnboardingScanRuntime()).onboardingHistorySummary(scanEnvironment())))()
+          .then((content) => {
+            if (content !== undefined && pending !== undefined) {
+              return pi.sendMessage({ customType: "omo-onboarding:history", content, display: false }, { deliverAs: "nextTurn" })
+            }
+          })
+          .catch(() => undefined)
         migrationInventory ??= (dependencies.migrationFacts ?? (() => defaultMigrationFacts(scanEnvironment)))().catch(() => undefined)
         const facts = await migrationInventory
         return facts === undefined ? base : `${base} Migration inventory (from the same scan omo setup runs): ${facts}`
