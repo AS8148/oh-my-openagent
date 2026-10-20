@@ -1,45 +1,43 @@
-// Claim receipt guard (#10488, lead ruling on #10498): the `provenance` frontmatter header is written only by the memory
-// tool, which re-derives it from a verified claim. A commit that ADDS or CHANGES the header in a memory note must carry
-// the memory tool's `Omo-Writer: memory-tool` trailer; otherwise the commit is refused, so a hand-written "user said"
-// header cannot enter the repository by text. Unchanged headers (body edits, renames, normalisation), removed headers
-// (removal only lowers trust) and a merge that brings in a header exactly as committed on the merged branch pass.
-// Memory sync writes with commit-tree and runs no hooks. The trailer is a convention: a deliberate `git commit` that
-// forges it still passes; a non-forgeable signal is a tracked follow-up.
-// It runs as commit-msg because only that hook sees the message. POSIX sh; no shell `${...}` (this is String.raw).
+// Claim receipt guard (#10488, lead rulings on #10498). The `provenance` frontmatter header is a claim
+// receipt only the memory tool writes. When the engine installs the hooks it hands them a checker (its
+// own runtime and the bundled memory-run-supervisor entry, `--memory-hook <stage>`), and both hooks then
+// run memfs/memory-hook.ts on the STAGED blobs with the same frontmatter reader parseMemoryFile uses:
+// pre-commit refuses duplicate frontmatter keys and file names git must quote; commit-msg refuses a
+// commit that adds or raises a header unless the message carries `Omo-Writer: memory-tool`.
+// Without a checker (the engine is gone or moved) commit-msg falls back to refusing any added line
+// shaped like a provenance key, which fails closed. The trailer is a convention a deliberate
+// `git commit` can type; a non-forgeable signal is #10739. POSIX sh; String.raw, no `${...}`.
+
+export interface MemoryHookChecker {
+  readonly execPath: string
+  readonly script: string
+}
+
 export const COMMIT_MSG_HOOK_SCRIPT = String.raw`#!/bin/sh
 # Refuse a hand-written claim receipt header in memory notes. Installed by omo memory-core; regenerated on startup.
 grep -q '^Omo-Writer: memory-tool$' "$1" && exit 0
-
-git_dir=$(git rev-parse --git-dir)
-merge_head=""
-[ -f "$git_dir/MERGE_HEAD" ] && merge_head=$(head -1 "$git_dir/MERGE_HEAD")
-TAB=$(printf '\t')
-
-provenance_of() {
-  # $1 = file content. Prints the top-level provenance value, or nothing.
-  closing=$(printf '%s\n' "$1" | tail -n +2 | grep -n '^---$' | head -1 | cut -d: -f1)
-  [ -z "$closing" ] && return 0
-  printf '%s\n' "$1" | tail -n +2 | head -n $((closing - 1)) | grep '^provenance:' | head -1 | cut -d: -f2- | sed 's/^ *//;s/ *$//'
-}
-
-refused=$(
-  git diff --cached -M --name-status --diff-filter=ACMR |
-    while IFS="$TAB" read -r status first second; do
-      case "$status" in (R*) old="$first"; file="$second" ;; (*) old="$first"; file="$first" ;; esac
-      printf '%s\n' "$file" | grep -qE '^(memory/)?(system|reference|people)/.*\.md$' || continue
-      staged=$(provenance_of "$(git show ":$file" 2>/dev/null)")
-      [ -z "$staged" ] && continue
-      [ "$staged" = "$(provenance_of "$(git show "HEAD:$old" 2>/dev/null)")" ] && continue
-      if [ -n "$merge_head" ]; then
-        [ "$staged" = "$(provenance_of "$(git show "$merge_head:$file" 2>/dev/null)")" ] && continue
-      fi
-      printf '  %s: the provenance header is a claim receipt only the memory tool writes; remove that line (or save the note with the memory tool)\n' "$file"
-    done
-)
-if [ -n "$refused" ]; then
+if git diff --cached -U0 --no-color --no-ext-diff | grep -q -E '^\+[[:space:]]*provenance[[:space:]]*:'; then
   echo "Claim receipt validation failed:"
-  printf '%s\n' "$refused"
+  echo "  the provenance header is a claim receipt only the memory tool writes; remove that line (or save the note with the memory tool)"
   exit 1
 fi
 exit 0
 `
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`
+
+// The checker block goes right after the shebang. commit-msg hands its decision to the checker;
+// pre-commit runs it first and keeps its own value and secret checks afterwards.
+export function withMemoryHookChecker(script: string, stage: "pre-commit" | "commit-msg", checker: MemoryHookChecker | undefined): string {
+  if (checker === undefined) return script
+  const newline = script.indexOf("\n")
+  const block = [
+    `omo_hook_runtime=${shellQuote(checker.execPath)}`,
+    `omo_hook_script=${shellQuote(checker.script)}`,
+    'if [ -f "$omo_hook_runtime" ] && [ -f "$omo_hook_script" ]; then',
+    `  BUN_BE_BUN=1 "$omo_hook_runtime" "$omo_hook_script" --memory-hook ${stage}${stage === "commit-msg" ? ' "$1"' : ""} || exit 1`,
+    ...(stage === "commit-msg" ? ["  exit 0"] : []),
+    "fi",
+  ].join("\n")
+  return `${script.slice(0, newline + 1)}${block}\n${script.slice(newline + 1)}`
+}
