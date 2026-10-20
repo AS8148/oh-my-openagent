@@ -96,7 +96,7 @@ For A12, at each viewport, record the elements that really scroll and attach the
 ```js
 await page.evaluate(() => [...document.querySelectorAll("*")]
   .filter((el) => /auto|scroll/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight)
-  .map((el) => el.id ? "#" + el.id : el.tagName.toLowerCase() + (el.className ? "." + String(el.className).trim().split(/\s+/).join(".") : ""))
+  .map((el) => el.id ? "#" + el.id : el.tagName.toLowerCase() + (el.getAttribute("class") ? "." + el.getAttribute("class").trim().split(/\s+/).join(".") : ""))
   .concat(document.scrollingElement.scrollHeight > innerHeight ? ["document"] : []))
 ```
 
@@ -127,7 +127,7 @@ This is the platform baseline, distilled from Apple's Human Interface Guidelines
 - A9 One readable column at 390 with no horizontal scroll of primary content; nothing clips or overlaps at 1440/1920 or under empty, long-label and unbroken-string content.
 - A10 Content that continues out of view shows a cue (partial item, fade, chevron).
 - A11 (mac) Nothing important lives only at the window's bottom edge; the minimum window size keeps toolbar and content legible; the sidebar collapses when the window narrows.
-- A12 Layout contract: every changed screen or region has a `Layout:` line in `DESIGN.md` (the `frontend` skill's StyleGallery log); the capture shows that pattern's structure; the scroll-owner probe finds exactly the logged owner scrolling; none of the line's anti-patterns appear. A missing line, a different scroll owner, or a present anti-pattern is a FAIL; a logged skip still owes the scroll-owner check.
+- A12 Layout contract: every changed screen or region has a `Layout:` line (in `DESIGN.md`, or in the change description when the project has none; the `frontend` skill's StyleGallery log); the capture shows that pattern's structure; the logged owner is the region's main scroller in the probe output, and every other scroller listed is nested inside it for its own content (a code block, a dropdown, a composer) or is named in the line too; none of the line's anti-patterns appear. A missing line, a different main scroller, an unexplained sibling scroller, or a present anti-pattern is a FAIL; a logged skip still owes the scroll-owner check.
 
 **B. Hierarchy**
 - B1 One primary action per view, in the prominent style (accent on its background, not its glyph); peers differ by style, never by size.
@@ -148,7 +148,7 @@ This is the platform baseline, distilled from Apple's Human Interface Guidelines
 - C8 Useful label text (ids, errors, addresses, paths) is selectable.
 
 **D. Touch and pointer targets**
-- D1 Touch targets are at least 44x44 pt with 8-12 pt between neighbours; pointer targets are padded about 10 px beyond the glyph.
+- D1 Touch targets are at least 44x44 pt (44 CSS px on the web) with 8-12 pt between neighbours; pointer targets are padded about 10 px beyond the glyph.
 - D2 (phone) Tab bar: about 49 pt plus the safe area, icon above a one-word label, every tab visible, the active tab matches the route, no tab disabled or hidden.
 - D3 Toolbar: at most three groups, standard back and close glyphs, one prominent primary action at the trailing end, text-labelled actions kept apart from glyph actions.
 - D4 Adjacent bar buttons have continuous hit areas.
