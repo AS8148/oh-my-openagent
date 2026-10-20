@@ -4,9 +4,12 @@ import type { KeyringEntry, SyncEntry } from "./entry.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { importSnapshot, type SnapshotRecord } from "./snapshot.ts"
 import { buildFork, rotation } from "./testing/fork.ts"
+import { envelopeRefusal } from "./envelope.ts"
+import { receiverPass, receiverRefusal, wire } from "./receiver.ts"
 import { ACCOUNT, appendBatch, appendKeyring, chain, deviceId, epochKey, keyringFor, keys, mainChain, objects, principalKeys, readBytes, record, fixtureAnchor } from "./testing/sync-v1.test-support.ts"
 import { buildBatch } from "./build.ts"
 import { b64urlDecode, sha256B64 } from "./vendor/sync-format/jcs.ts"
+import * as vendorFold from "./vendor/sync-format/fold.ts"
 import { signFramed } from "./vendor/sync-format/keys.ts"
 import { snapshotPreimage } from "./vendor/sync-format/snapshot.ts"
 
@@ -165,6 +168,91 @@ describe("the receiver check does not re-read the verified chain for every new e
       expect(serialized).toBeLessThan(3 * chainBytes)
     } finally {
       mock.restore()
+    }
+  })
+})
+
+describe("the receiver walks the chain once per pull, not once per entry", () => {
+  const ROTATIONS = 1000
+  const BATCHES = 500
+  const recoveredPrefix = (): KeyringEntry[] => [...mainUntil("post_join_rotation"), record("post_join_rotation")]
+  const rotations = async (count: number): Promise<{ readonly entries: KeyringEntry[]; readonly state: ChainState }> => {
+    let state = await verified(recoveredPrefix())
+    const entries: KeyringEntry[] = []
+    for (let i = 0; i < count; i++) {
+      const next = await rotation(state, "A")
+      const { outcome } = await run([next], state)
+      if (!outcome.ok) throw new Error(`rotation ${i} refused: ${outcome.reason}`)
+      state = outcome.state
+      entries.push(next)
+    }
+    return { entries, state }
+  }
+  const walkedDuring = async (work: () => Promise<void>): Promise<number> => {
+    const fold = spyOn(vendorFold, "foldRefusal")
+    try {
+      await work()
+      return fold.mock.calls.reduce((sum, [entries]) => sum + entries.length, 0)
+    } finally {
+      mock.restore()
+    }
+  }
+
+  test("a 1,000-rotation pull folds each entry a bounded number of times", async () => {
+    const { entries } = await rotations(ROTATIONS)
+    const pull = [...recoveredPrefix(), ...entries]
+    const walked = await walkedDuring(async () => {
+      expect((await run(pull)).outcome.ok).toBe(true)
+    })
+    expect(walked).toBeLessThanOrEqual(2 * pull.length)
+  })
+
+  test("a 500-batch pull after a long keyring chain does not re-fold the keyring for each batch", async () => {
+    const { entries, state } = await rotations(200)
+    const epoch = state.authority?.epoch ?? 0
+    let head = headOf(state)
+    const batches: SyncEntry[] = []
+    for (let i = 0; i < BATCHES; i++) {
+      const batch = await appendBatch(head, objects.objects[0]?.sha256 ?? "", epoch, keyringFor("recovered"))
+      batches.push(batch)
+      head = { seq: batch.seq, link: batch.link, keyring_link: head.keyring_link }
+    }
+    const walked = await walkedDuring(async () => {
+      const { outcome } = await run(batches, state)
+      expect(outcome.ok ? outcome.steps.filter((step) => step.kind === "batch").length : outcome.reason).toBe(BATCHES)
+    })
+    expect(walked).toBeLessThanOrEqual(2 * (recoveredPrefix().length + entries.length + BATCHES))
+  })
+
+  test("a snapshot import over a 1,000-rotation keyring prefix folds the prefix a bounded number of times", async () => {
+    const { entries } = await rotations(ROTATIONS)
+    const covered = [...recoveredPrefix(), ...entries]
+    const last = covered.at(-1)
+    if (last === undefined) throw new Error("empty prefix")
+    const golden: SnapshotRecord = JSON.parse(new TextDecoder().decode(readBytes("snapshot.json")))
+    const record = { ...golden, covers_seq: last.seq, link: last.link, keyring_head: last.keyring_link }
+    const walked = await walkedDuring(async () => {
+      const imported = await importSnapshot(ACCOUNT, fixtureAnchor(), covered, record, [], epochKey, createRejectionCounter())
+      expect(imported.ok ? "imported" : imported.reason).not.toBe("keyring_prefix_refused")
+    })
+    expect(walked).toBeLessThanOrEqual(2 * covered.length)
+  })
+
+  test("a batch checked alone gets the same verdict as the receiver over the whole verified history", async () => {
+    const history = mainChain()
+    const state = await verified(history)
+    const fresh = await appendBatch(headOf(state), objects.objects[0]?.sha256 ?? "", 3, keyringFor("owner"))
+    const variants: ReadonlyArray<SyncEntry> = [
+      fresh,
+      { ...fresh, seq: headOf(state).seq },
+      { ...fresh, seq: 1 },
+      JSON.parse(JSON.stringify({ ...fresh, author: { kind: "recovery", credential_id: "c" } })),
+    ]
+    for (const batch of variants) {
+      expect(envelopeRefusal(batch)).toBeNull()
+      const whole = vendorFold.foldRefusal(wire([...history, batch]))
+      expect((await receiverPass(history, [batch]))(batch)).toBe(whole.ok ? null : whole.reason)
+      expect(await receiverRefusal(history, batch)).toBe(whole.ok ? null : whole.reason)
     }
   })
 })

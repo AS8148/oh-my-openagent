@@ -1,7 +1,8 @@
 import type { SyncEntry } from "./entry.ts"
 import { frozenCopy } from "./frozen.ts"
 import type { ChainEntry } from "./vendor/sync-format/chain.ts"
-import { foldRefusal, type ReceiverRefusal } from "./vendor/sync-format/fold.ts"
+import { envelopeRefusal } from "./envelope.ts"
+import { foldRefusal, type ReceivedChain, type ReceiverRefusal } from "./vendor/sync-format/fold.ts"
 import { receiveKeyringChain } from "./vendor/sync-format/receive.ts"
 
 /**
@@ -35,18 +36,56 @@ const wireOnce = (entry: SyncEntry): ChainEntry => {
 /** A receiver refusal, or the receiver refusing an already-verified history entry instead of this one. */
 export type ReceiverCheck = ReceiverRefusal | "receiver_seq_mismatch"
 
+/** The receiver's verdict for one entry of the pull a ReceiverPass was built for. */
+export type ReceiverPass = (entry: SyncEntry) => ReceiverCheck | null
+
+const firstRefusalAt = (received: ReceivedChain, entry: SyncEntry, ours: ReadonlySet<number>): ReceiverCheck | null => {
+  if (received.ok || received.seq > entry.seq) return null
+  return received.seq === entry.seq && ours.has(received.seq) ? received.reason : "receiver_seq_mismatch"
+}
+
 /**
- * The receiver's refusal of `entry` appended after the already-verified keyring `history`; null
- * only when the receiver accepts the whole list. A refusal at any other seq means the verified
- * history and the receiver disagree, which must never happen, so it refuses this entry too.
+ * The merged receiver run ONCE over the already-verified keyring `history` and the keyring entries of
+ * `entries`, in order, up to the first malformed one. Its verdict for each entry equals running it over
+ * the history plus every earlier entry of the pull, because the fold judges a record only by the records
+ * before it and the walk stops at the first refusal; so a pull costs one pass, not one pass per entry.
+ * A batch entry's receiver checks read only its own fields and the sequence order, so it is folded alone
+ * and its seq is compared with the last keyring seq before it. An entry the pass was not built for is refused.
  */
-export const receiverRefusal = async (
-  history: ReadonlyArray<SyncEntry>,
-  entry: SyncEntry,
-): Promise<ReceiverCheck | null> => {
+export const receiverPass = async (history: ReadonlyArray<SyncEntry>, entries: ReadonlyArray<SyncEntry>): Promise<ReceiverPass> => {
+  const keyring: SyncEntry[] = []
+  const lastSeqBefore = new Map<SyncEntry, number>()
+  let lastSeq = history.reduce((max, entry) => Math.max(max, entry.seq), 0)
+  for (const entry of entries) {
+    if (envelopeRefusal(entry) !== null) break
+    if (entry.kind === "keyring") {
+      keyring.push(entry)
+      lastSeq = Math.max(lastSeq, entry.seq)
+    } else {
+      lastSeqBefore.set(entry, lastSeq)
+    }
+  }
+  const list = [...history.map(wireOnce), ...wire(keyring)]
+  const hasFork = keyring.some((entry) => entry.kind === "keyring" && entry.body.kind === "fork-resolution")
+  const received = hasFork ? await receiveKeyringChain(list) : foldRefusal(list)
+  const ours = new Set(keyring.map((entry) => entry.seq))
+  const inPull = new Set<SyncEntry>(keyring)
+  return (entry) => {
+    if (inPull.has(entry)) return firstRefusalAt(received, entry, ours)
+    const before = lastSeqBefore.get(entry)
+    if (before === undefined) return "receiver_seq_mismatch"
+    if (entry.seq <= before) return "seq_not_increasing"
+    return firstRefusalAt(foldRefusal(wire([entry])), entry, new Set([entry.seq]))
+  }
+}
+
+/**
+ * The receiver's refusal of `entry` appended after the already-verified keyring `history`; null only when
+ * the receiver accepts the whole list. A refusal at any other seq means the verified history and the
+ * receiver disagree, which must never happen, so it refuses this entry too.
+ */
+export const receiverRefusal = async (history: ReadonlyArray<SyncEntry>, entry: SyncEntry): Promise<ReceiverCheck | null> => {
   const list = [...history.map(wireOnce), ...wire([entry])]
   const isFork = entry.kind === "keyring" && entry.body.kind === "fork-resolution"
-  const received = isFork ? await receiveKeyringChain(list) : foldRefusal(list)
-  if (received.ok) return null
-  return received.seq === entry.seq ? received.reason : "receiver_seq_mismatch"
+  return firstRefusalAt(isFork ? await receiveKeyringChain(list) : foldRefusal(list), entry, new Set([entry.seq]))
 }
