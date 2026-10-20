@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The engine moves to senpi 2026.10.19-2: quitting finishes within 2 seconds, idle hosts stay quiet, and long sessions stop holding finished tool output.** Quitting waits at most 2 s in total on extensions' shutdown handlers (set by `sessionShutdownQuitBudgetMs`) instead of up to 10 s. An Anthropic 400 caused by the request's own shape retries once on the same model instead of switching models. A socket client that falls behind recovers on the same connection instead of being dropped. An idle RPC host no longer wakes every second, finished tool cards rebuild their output on demand instead of keeping it, and `senpi -p` no longer hangs on a stdin that is open but never written. The shipped Claude fallback chains no longer step down to Opus 4.8 or 4.6. It also carries senpi 2026.10.19-1: closing a session closes what an extension left open, subscription limits are known before the first turn, and a command that never started can no longer kill the terminal's foreground job. ([#PR](https://github.com/code-yeongyu/oh-my-openagent/pull/PR))
+
 **Onboarding can get to know you, once you agree.** After consent, the default model reads digests of your recent sessions and proposes facts about you and how you work; nothing is saved at this step. ([#10505](https://github.com/code-yeongyu/oh-my-openagent/pull/10505))
 
 **OmO loads the analytics SDK only when an event is captured.** PostHog now ships as a lazy sidecar instead of being parsed with the main extension; queued events retain their order, shutdown waits for pending captures, and consent checks are unchanged. ([#10640](https://github.com/code-yeongyu/oh-my-openagent/pull/10640))
