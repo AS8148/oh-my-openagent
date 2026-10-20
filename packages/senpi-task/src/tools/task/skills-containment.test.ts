@@ -51,9 +51,27 @@ test("task discovered read cannot use a project symlink's frontmatter name to es
   const loader = createFsSkillLoader({ homeDir: f.homeDir, loadSkillsFromDir })
   // when
   const result = loader(["indirect"], f.cwd)
-  // then
+  // then: the link's target is never read, so its frontmatter name cannot match and the request stays missing
+  // rather than borrowing the "alias" link's block as its reason (#10693 review L1)
   expect(result.resolved).toEqual([])
-  expect(JSON.stringify(result)).toContain("outside the project")
+  expect(result.prepend).not.toContain("SYNTHETIC PRIVATE BODY")
+  expect(JSON.stringify(result)).not.toContain("outside the project")
+})
+
+test("task reports a nonexistent skill missing instead of another skill's blocked link", () => {
+  // given: one escaping link next to the requested name that does not exist (#10693 review L1)
+  const f = fixture()
+  const skills = join(f.cwd, ".agents", "skills")
+  mkdirSync(skills, { recursive: true })
+  symlinkSync(f.outside, join(skills, "escape"))
+  const loader = createFsSkillLoader({ homeDir: f.homeDir, loadSkillsFromDir })
+  // when
+  const ghost = loader(["ghost"], f.cwd)
+  const escape = loader(["escape"], f.cwd)
+  // then
+  expect(ghost.resolved).toEqual([])
+  expect(JSON.stringify(ghost)).not.toContain("outside the project")
+  expect(JSON.stringify(escape)).toContain("outside the project")
 })
 
 test("task user discovery retains user scope and unrestricted user links", () => {

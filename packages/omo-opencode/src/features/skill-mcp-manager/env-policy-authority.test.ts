@@ -30,9 +30,10 @@ function fixture() {
     listPrompts: async () => ({ prompts: [] }), callTool: async () => ({ content: [] }),
     readResource: async () => ({ contents: [] }), getPrompt: async () => ({ messages: [] }),
   })
-  const transport = () => ({ start: async () => {}, send: async () => {}, close: async () => {} })
+  const closed: string[] = []
+  const transport = (label = "") => ({ start: async () => {}, send: async () => {}, close: async () => { closed.push(label) } })
   setStdioClientDependenciesForTesting({
-    createClient, createTransport: (options) => { transports.push(options); return transport() },
+    createClient, createTransport: (options) => { transports.push(options); return transport(options.command) },
   })
   setHttpClientDependenciesForTesting({
     createClient, createTransport: (url) => { urls.push(url.toString()); return transport() },
@@ -63,7 +64,7 @@ function fixture() {
     if (!id) throw new Error("No exact grant command")
     await manager.grantEnvironment(id, ["GITHUB_TOKEN"])
   }
-  return { manager, info, config, store, transports, urls, notices, grant }
+  return { manager, info, config, store, transports, closed, urls, notices, grant }
 }
 
 test.each(["repository", "command", "NODE_OPTIONS"])("a grant cannot cross a changed %s authority", async (change) => {
@@ -145,4 +146,28 @@ test("legacy user-policy clients with different provenance records cannot reuse 
   expect(f.transports.map((transport) => transport.command)).toEqual(["synthetic-command", "second-user-command"])
   expect(f.transports.map((transport) => transport.env?.AUTH_HEADER)).toEqual(["synthetic-first-value", "synthetic-first-value"])
   expect(f.notices).toEqual([])
+})
+
+test("one grant write re-scopes only the server whose environment changed", async () => {
+  // given: three live project MCP servers; only "fixture" has a withheld name (#10693 review M1)
+  const { manager, info, config, transports, closed, notices, grant } = fixture()
+  const others = ["alpha", "beta"].map((name) => ({
+    info: { ...info, skillName: name, serverName: name, sourcePath: `/synthetic/first/${name}/SKILL.md` },
+    config: { command: `synthetic-${name}` },
+  }))
+  for (const other of others) await manager.getOrCreateClient(other.info, other.config)
+  await manager.getOrCreateClient(info, config)
+  const live = () => transports.length - closed.length
+  expect(live()).toBe(3)
+  const noticesBefore = notices.length
+  // when: one grant write bumps the shared store generation
+  await grant()
+  await manager.getOrCreateClient(info, config)
+  for (const other of others) await manager.getOrCreateClient(other.info, other.config)
+  // then: still exactly three live processes; only the granted server restarted, the others kept theirs
+  expect(live()).toBe(3)
+  expect(transports.filter((options) => options.command === "synthetic-command")).toHaveLength(2)
+  expect(closed).toEqual(["synthetic-command"])
+  for (const other of others) expect(transports.filter((options) => options.command === other.config.command)).toHaveLength(1)
+  expect(notices.slice(noticesBefore).filter((message) => /server (alpha|beta) /.test(message))).toEqual([])
 })

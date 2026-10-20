@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 
 import type { loadSkillsFromDir as discoverSkillsFromDir } from "@code-yeongyu/senpi"
 
@@ -85,6 +85,10 @@ function readSkillFile(name: string, path: string, provenance: SkillProvenance):
   }
 }
 
+function blockedSkillName(path: string): string {
+  return basename(path) === "SKILL.md" ? basename(dirname(path)) : basename(path, ".md")
+}
+
 function directSkill(name: string, dir: string, provenance: SkillProvenance): LoadedSkill | undefined {
   const candidates = [join(dir, name, "SKILL.md"), join(dir, `${name}.md`)]
   const path = candidates.find(existsSync)
@@ -107,7 +111,10 @@ function discoveredSkill(
       projectCache.set(dir, discovery)
     }
     const skill = discovery.skills.get(name)
-    if (!skill && discovery.blocked[0]) throw discovery.blocked[0]
+    // Only a blocked link that belongs to the requested skill explains its absence; another skill's link
+    // would name the wrong file, so an unrelated miss stays "missing" (#10693 review L1).
+    const blocked = skill ? undefined : discovery.blocked.find((error) => blockedSkillName(error.diagnostic.path) === name)
+    if (blocked) throw blocked
     return skill === undefined ? undefined : readSkillFile(name, skill.location ?? "", provenance)
   }
   let discovery = cache.get(dir)

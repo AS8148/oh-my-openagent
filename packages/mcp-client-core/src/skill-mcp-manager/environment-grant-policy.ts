@@ -78,10 +78,10 @@ export class EnvironmentGrantPolicy {
       await this.refresh()
       const names = [...(this.snapshot?.grants[identity]?.names ?? [])].sort()
       const policy = resolveProjectEnvironment(raw, names, explicit)
-      const digest = policyHash({
-        identity, provenance: info.provenance, names, generation: this.snapshot?.generation,
-        revision: this.snapshot?.revision, explicit, withheld: policy.withheld,
-      })
+      // No store generation or revision here: an unrelated grant bumps both and would give every other project
+      // server a new client key (a second child) and a repeated notice. Changes that matter to this identity
+      // reach it through refresh() invalidation instead (#10693).
+      const digest = policyHash({ identity, provenance: info.provenance, names, explicit, withheld: policy.withheld })
       const live = this.live.get(identity) ?? { names, version: 0, controller: new AbortController() }
       this.live.set(identity, live)
       if (policy.withheld.length === 0) this.noticeMessages.delete(identity)
