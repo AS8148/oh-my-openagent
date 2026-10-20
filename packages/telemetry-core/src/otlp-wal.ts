@@ -1,4 +1,4 @@
-import { closeSync, ftruncateSync, mkdirSync, openSync, writeSync } from "node:fs"
+import { closeSync, mkdirSync, openSync, truncateSync, writeSync } from "node:fs"
 import { join } from "node:path"
 
 import { toBinary } from "@bufbuild/protobuf"
@@ -90,7 +90,11 @@ export class SpoolWriter {
    * lost, and the next append starts a new one.
    */
   #rollback(fd: number): void {
-    const truncate = this.#input.truncate ?? ftruncateSync
+    // By path, not by fd: the file is open for append, and on Windows an append-only handle cannot be
+    // truncated (ftruncate fails with EPERM), which would abandon the file over one torn frame. Appends
+    // land at the new end either way.
+    const path = join(this.#input.dir, this.name)
+    const truncate = this.#input.truncate ?? ((_fd: number, length: number) => truncateSync(path, length))
     try {
       truncate(fd, this.bytes)
     } catch (error) {

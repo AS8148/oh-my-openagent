@@ -11,7 +11,7 @@ import { join } from "node:path"
 
 const ENTRY = join(import.meta.dir, "otlp-entry.ts")
 const RUNTIME = join(import.meta.dir, "otlp-sender.ts")
-const HEAVY = /\/(otlp-sender-core|otel-providers|otel-minimal-(logs|trace)|otlp-wal|otlp-spool-(dir|file|cap)|otlp-encode|otlp-http|otlp-batch-sender)\.ts$|\/otlp-proto\//
+const HEAVY = /[\\/](otlp-sender-core|otel-providers|otel-minimal-(logs|trace)|otlp-wal|otlp-spool-(dir|file|cap)|otlp-encode|otlp-http|otlp-batch-sender)\.ts$|[\\/]otlp-proto[\\/]/
 
 const roots: string[] = []
 afterEach(() => {
@@ -73,7 +73,7 @@ describe("the OTLP entry loads nothing while telemetry is off", () => {
   test("#given telemetry on and consented #when a transport is requested #then the sender loads (the spy sees it)", async () => {
     const run = await loadedModules({}, true)
     expect(run.result).toBe("RESULT transport")
-    expect(run.loaded.some((path) => path.endsWith("/otlp-sender-core.ts"))).toBe(true)
+    expect(run.loaded.some((path) => path.replaceAll("\\", "/").endsWith("/otlp-sender-core.ts"))).toBe(true)
   }, 30_000)
 })
 
@@ -97,7 +97,7 @@ describe("the OTLP runtime refuses to start while telemetry is off, whoever call
   test("#given telemetry on and consented #when startOtlpTransport is called directly #then the sender loads", async () => {
     const run = await loadedModules({}, true, VIA_RUNTIME)
     expect(run.result).toBe("RESULT transport")
-    expect(run.loaded.some((path) => path.endsWith("/otlp-sender-core.ts"))).toBe(true)
+    expect(run.loaded.some((path) => path.replaceAll("\\", "/").endsWith("/otlp-sender-core.ts"))).toBe(true)
   }, 30_000)
 
   test("#given the package manifest #when its exports are read #then ./otlp is the only OTLP subpath", async () => {
