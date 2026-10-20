@@ -4,8 +4,9 @@ import type { CommandDefinition } from "@oh-my-opencode/claude-code-compat-core/
 import { existsSync } from "fs"
 import { dirname, isAbsolute, resolve } from "path"
 import { homedir } from "os"
-import { parseFrontmatter } from "@oh-my-opencode/utils"
+import { isWithinProject, parseFrontmatter } from "@oh-my-opencode/utils"
 import { sanitizeModelField } from "@oh-my-opencode/model-core"
+import { log } from "../../../shared"
 import { resolveSkillPathReferences } from "../../../shared/skill-path-resolver"
 import { parseAllowedTools } from "../allowed-tools-parser"
 import { readSkillFileChecked } from "../checked-skill-read"
@@ -56,6 +57,17 @@ export function configEntryToLoadedSkill(
 
   if (entry.from) {
     sourcePath = resolveFilePath(entry.from, configDir)
+    const projectRoot = configDir || process.cwd()
+    // The config entry's own root check stays in front of the link check: provenance alone does not
+    // bound a `from:` path that names a file outside the config directory (#10693).
+    if (!isWithinProject(sourcePath, projectRoot)) {
+      log("[config-skill-entry-loader] Rejected skill entry file outside project root", {
+        from: entry.from,
+        filePath: sourcePath,
+        projectRoot,
+      })
+      return null
+    }
     const loaded = loadSkillFromFile(sourcePath, provenance)
     if (loaded) {
       template = loaded.template
