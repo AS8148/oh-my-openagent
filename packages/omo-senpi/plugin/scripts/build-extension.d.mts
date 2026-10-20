@@ -11,6 +11,7 @@ export interface BuildExtensionOptions {
   memoryMemfsOutputPath?: string
   memoryPalaceOutputPath?: string
   sessionHistoryOutputPath?: string
+  telemetryPosthogOutputPath?: string
   memorySyncOutputPath?: string
   threadClientOutputPath?: string
   telemetryRecoveryOutputPath?: string
@@ -29,6 +30,7 @@ export function buildExtension(options?: BuildExtensionOptions): Promise<{
   memoryMemfsInputs: string[]
   memoryPalaceInputs: string[]
   sessionHistoryInputs: string[]
+  telemetryPosthogInputs: string[]
   memorySyncInputs: string[]
   threadClientInputs: string[]
   telemetryRecoveryInputs: string[]

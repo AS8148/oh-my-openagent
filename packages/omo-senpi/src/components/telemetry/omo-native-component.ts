@@ -1,10 +1,10 @@
 import type { TurnEndEvent } from "@code-yeongyu/senpi"
 import {
   createConsentGatedFetch,
-  createDefaultPostHogTransport,
   createEventTelemetryClient,
   isTelemetryClientEnabled,
-} from "@oh-my-opencode/telemetry-core"
+} from "@oh-my-opencode/telemetry-core/injected"
+import { createLazyPostHogTransportFactory } from "./lazy-posthog"
 import type {
   EventTelemetryClient,
   TelemetryCaptureMessage,
@@ -94,7 +94,10 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
     },
   }
   const transportFactory = sharedTransportFactory(
-    options.transportFactory ?? createDefaultPostHogTransport,
+    options.transportFactory ?? createLazyPostHogTransportFactory({
+      diagnostics: options.diagnostics,
+      source: "omo-native-component",
+    }),
     state,
     options,
   )
