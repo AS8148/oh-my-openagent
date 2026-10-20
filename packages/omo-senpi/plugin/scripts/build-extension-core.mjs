@@ -82,6 +82,7 @@ const memoryDoctorEntryPath = join(packageRoot, "src", "components", "memory", "
 const memoryMemfsEntryPath = join(packageRoot, "src", "components", "memory", "commands", "memfs-runtime.ts")
 const memoryPalaceEntryPath = join(packageRoot, "src", "components", "memory", "palace", "runtime.ts")
 const sessionHistoryEntryPath = join(packageRoot, "src", "components", "onboarding", "session-history", "runtime.ts")
+const recallStoreEntryPath = join(packageRoot, "src", "components", "memory", "recall-store-runtime.ts")
 const telemetryPosthogEntryPath = join(packageRoot, "src", "components", "telemetry", "posthog-runtime.ts")
 // The sync engine sidecar carries the Loro runtime; its wasm is emitted beside it under this fixed name
 // (the engine's loader reads it relative to its own module), so omo.js never pulls Loro in.
@@ -106,6 +107,7 @@ const memoryDoctorOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? plugi
 const memoryMemfsOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-memfs.js")
 const memoryPalaceOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-palace.js")
 const sessionHistoryOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-session-history.js")
+const recallStoreOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-recall-store.js")
 const telemetryPosthogOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-posthog.js")
 const memorySyncOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-sync.js")
 const threadClientOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-thread-client.js")
@@ -123,6 +125,7 @@ const externalSpecifiers = [
   "#omo-memory-memfs-runtime",
   "#omo-memory-palace-runtime",
   "#omo-session-history-runtime",
+  "#omo-recall-store-runtime",
   "#omo-telemetry-posthog-runtime",
   "#omo-memory-sync-runtime",
   "#omo-thread-client-runtime",
@@ -162,6 +165,7 @@ export const extensionBuildPaths = {
   memoryMemfsOutputPath,
   memoryPalaceOutputPath,
   sessionHistoryOutputPath,
+  recallStoreOutputPath,
   telemetryPosthogOutputPath,
   memorySyncOutputPath,
   threadClientOutputPath,
@@ -189,6 +193,7 @@ export function resolveOutputs(options) {
     memoryMemfsOutput: sibling(options.memoryMemfsOutputPath, memoryMemfsOutputPath, "omo-memory-memfs.js"),
     memoryPalaceOutput: sibling(options.memoryPalaceOutputPath, memoryPalaceOutputPath, "omo-memory-palace.js"),
     sessionHistoryOutput: sibling(options.sessionHistoryOutputPath, sessionHistoryOutputPath, "omo-session-history.js"),
+    recallStoreOutput: sibling(options.recallStoreOutputPath, recallStoreOutputPath, "omo-recall-store.js"),
     telemetryPosthogOutput: sibling(options.telemetryPosthogOutputPath, telemetryPosthogOutputPath, "omo-telemetry-posthog.js"),
     memorySyncOutput: sibling(options.memorySyncOutputPath, memorySyncOutputPath, "omo-memory-sync.js"),
     threadClientOutput: sibling(options.threadClientOutputPath, threadClientOutputPath, "omo-thread-client.js"),
@@ -223,6 +228,7 @@ export async function buildExtension(options = {}) {
     memoryMemfsOutput,
     memoryPalaceOutput,
     sessionHistoryOutput,
+    recallStoreOutput,
     telemetryPosthogOutput,
     memorySyncOutput,
     threadClientOutput,
@@ -242,6 +248,7 @@ export async function buildExtension(options = {}) {
   const memoryMemfsInputs = await buildEntry(memoryMemfsEntryPath, memoryMemfsOutput, buildDefines)
   const memoryPalaceInputs = await buildEntry(memoryPalaceEntryPath, memoryPalaceOutput, buildDefines)
   const sessionHistoryInputs = await buildEntry(sessionHistoryEntryPath, sessionHistoryOutput, buildDefines)
+  const recallStoreInputs = await buildEntry(recallStoreEntryPath, recallStoreOutput, buildDefines)
   const telemetryPosthogInputs = await buildEntry(telemetryPosthogEntryPath, telemetryPosthogOutput, buildDefines)
   const memorySyncInputs = await buildEntry(memorySyncEntryPath, memorySyncOutput, buildDefines, externalSpecifiers, { assets: true })
   const threadClientInputs = await buildEntry(threadClientEntryPath, threadClientOutput, buildDefines)
@@ -270,6 +277,7 @@ export async function buildExtension(options = {}) {
     memoryMemfsInputs,
     memoryPalaceInputs,
     sessionHistoryInputs,
+    recallStoreInputs,
     telemetryPosthogInputs,
     memorySyncInputs,
     threadClientInputs,
