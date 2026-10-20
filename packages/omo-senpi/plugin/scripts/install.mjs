@@ -293,6 +293,8 @@ var REQUIRED_PLUGIN_ARTIFACTS = [
   join4("extensions", "omo-memory-doctor.js"),
   join4("extensions", "omo-memory-memfs.js"),
   join4("extensions", "omo-memory-palace.js"),
+  join4("extensions", "omo-session-history.js"),
+  join4("extensions", "omo-telemetry-posthog.js"),
   join4("extensions", "omo-memory-sync.js"),
   join4("extensions", "loro_wasm_bg.wasm"),
   join4("extensions", "CaseFolding.txt"),
