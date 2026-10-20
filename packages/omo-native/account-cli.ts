@@ -140,9 +140,11 @@ export async function runAccountVerb(dependencies: AccountCommandDependencies, a
 
 export async function runAccountCommand(args: readonly string[]): Promise<void> {
   const api = serviceOrigin(process.env.OMO_SERVICE_API_URL ?? "https://api.omo.dev")
+  // One store per command: its keyring check and fallback notice are per store (#10658 review).
+  let store: CredentialStore | undefined
   process.exitCode = await runAccountVerb({
     api,
-    get store() { return createCredentialStore(api) },
+    get store() { return store ??= createCredentialStore(api) },
     pinDir: () => syncPinDir(resolveMemoryRoot(process.env, process.cwd())),
     readStdin: () => new Response(Bun.stdin.stream()).text(),
     output: (line) => process.stdout.write(`${line}\n`),

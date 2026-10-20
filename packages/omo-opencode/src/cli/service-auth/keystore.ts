@@ -20,6 +20,9 @@ export class SecretServiceUnavailableError extends SignInError {}
 // The OS store refused because it is locked and may not ask the person (macOS errSecInteractionNotAllowed,
 // a locked libsecret keyring). Callers must surface this as its own outcome, never as a prompt.
 const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|locked collection/i
+const UNLOCKED_REUSE_MS = 30_000
+// The fallback notice is once per PROCESS: a command (or a host) may build several stores (#10658 review).
+let fallbackNoticed = false
 const isLocked = (error: unknown): boolean =>
   error instanceof Error && (LOCKED.test(error.message) || LOCKED.test(String((error as { code?: unknown }).code ?? "")))
 
@@ -47,16 +50,16 @@ export function createCredentialStore(
   // Locked property is read over D-Bus BEFORE any secret call and a locked collection is never touched. When the
   // probe cannot answer (no gdbus binary, no Secret Service name on the bus, a bus that did not reply) the store
   // falls back to asking libsecret directly, exactly as before the probe existed: login must never depend on gdbus.
-  // An unlocked answer holds for the rest of this short-lived process.
-  let unlocked = false
-  let noticed = false
+  // An unlocked answer is reused for a short while: one CLI command probes once, while a long-lived host (the
+  // senpi memory session) still notices a keyring that auto-locked later.
+  let unlockedUntil = 0
   const assertUsable = async () => {
-    if (platform !== "linux" || unlocked) return
+    if (platform !== "linux" || Date.now() < unlockedUntil) return
     const lock = await lockProbe()
     if (lock === "locked") throw new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
-    if (lock === "unlocked") { unlocked = true; return }
-    if (!noticed) {
-      noticed = true
+    if (lock === "unlocked") { unlockedUntil = Date.now() + UNLOCKED_REUSE_MS; return }
+    if (!fallbackNoticed) {
+      fallbackNoticed = true
       notice("omo: could not check whether the keyring is locked (gdbus or the Secret Service did not answer); using libsecret directly.")
     }
   }

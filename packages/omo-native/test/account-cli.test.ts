@@ -239,13 +239,12 @@ describe("omo account on Linux, where a locked Secret Service read looks empty (
 
   // #10658 review: only a LOCKED answer may stop the store. A probe that cannot answer (no gdbus on a minimal
   // install, no Secret Service name, a slow bus) falls back to libsecret as before, with one notice.
-  test("a probe that cannot answer never blocks login, show or logout: libsecret is used with one notice", async () => {
+  // The notice itself is once per process; account-cli-entry.test.ts counts it through the real `omo account`.
+  test("a probe that cannot answer never blocks login, show or logout: libsecret is used", async () => {
     for (const lock of ["absent", "unknown"] as const) {
-      const notices: string[] = []
-      expect(await loginShowLogout(linuxStore(lock, memorySecretApi(), notices))).toEqual([
+      expect(await loginShowLogout(linuxStore(lock, memorySecretApi()))).toEqual([
         ACCOUNT_EXIT.ok, { signedIn: true, device: { id: "dev_f", name: "device dev_f" }, refreshState: "ok" }, ACCOUNT_EXIT.ok, { signedIn: false },
       ])
-      expect(notices).toHaveLength(1)
     }
   })
 

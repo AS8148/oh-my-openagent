@@ -48,7 +48,9 @@ export function createCliAccountSource(options: {
     let store: CredentialStore
     let credentials: Credentials | null
     try {
-      store = options.store ?? createCredentialStore(api)
+      // A host runs under a TUI: the CLI's keyring-fallback notice must not write over it, and the fallback is
+      // the same libsecret path the CLI uses (#10658 review).
+      store = options.store ?? createCredentialStore(api, undefined, undefined, undefined, () => {})
       credentials = await store.read()
     } catch (error) {
       // A host with no usable OS credential store (plain Node, a locked or absent keyring) cannot be
