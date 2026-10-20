@@ -6,6 +6,7 @@ import { createHttpClient } from "./http-client"
 import { createStdioClient } from "./stdio-client"
 import type { McpClient, SkillMcpClientConnectionParams, SkillMcpClientInfo, SkillMcpManagerState } from "./types"
 import { EnvironmentGrantPolicy } from "./environment-grant-policy"
+import { usesProjectEnvironment } from "./project-env-policy"
 
 function removeClientIfCurrent(state: SkillMcpManagerState, clientKey: string, client: McpClient): void {
   const managed = state.clients.get(clientKey)
@@ -32,14 +33,22 @@ export async function getOrCreateClient(params: {
     if (state.disposed) {
       throw new Error(`MCP manager for "${params.info.sessionID}" has been shut down, cannot create new connections.`)
     }
-    const refreshed = await params.info.revalidateDeclaration?.()
-    if (params.info.revalidateDeclaration && !refreshed) throw new Error("The MCP declaration is no longer available.")
-    const info = refreshed ? { ...params.info, sourcePath: refreshed.sourcePath, sourceKind: refreshed.sourceKind } : params.info
-    const config = refreshed?.config ?? params.config
-    state.environmentPolicy ??= new EnvironmentGrantPolicy(undefined, undefined, async (identity) => {
-      for (const key of state.clients.keys()) if (key.includes(`::identity=${identity}::`)) await forceReconnect(state, key)
-    })
-    const policy = await state.environmentPolicy.prepare(info, config, params.sessionEnv)
+    // Only re-validated or project-scoped declarations await anything before the pending entry is
+    // registered; every other server keeps the synchronous registration concurrent callers and
+    // disconnects rely on (#10693).
+    let info = params.info
+    let config = params.config
+    let policy: Awaited<ReturnType<EnvironmentGrantPolicy["prepare"]>>
+    if (params.info.revalidateDeclaration || usesProjectEnvironment(params.info)) {
+      const refreshed = await params.info.revalidateDeclaration?.()
+      if (params.info.revalidateDeclaration && !refreshed) throw new Error("The MCP declaration is no longer available.")
+      info = refreshed ? { ...params.info, sourcePath: refreshed.sourcePath, sourceKind: refreshed.sourceKind } : params.info
+      config = refreshed?.config ?? params.config
+      state.environmentPolicy ??= new EnvironmentGrantPolicy(undefined, undefined, async (identity) => {
+        for (const key of state.clients.keys()) if (key.includes(`::identity=${identity}::`)) await forceReconnect(state, key)
+      })
+      policy = await state.environmentPolicy.prepare(info, config, params.sessionEnv)
+    }
     const clientKey = policy ? `${params.clientKey}::identity=${policy.identity}::policy=${policy.digest}` : params.clientKey
     if (state.shutdownGeneration !== shutdownGenAtEntry ||
       (state.disconnectedSessions.get(info.sessionID) ?? 0) !== disconnectGenAtEntry) {
