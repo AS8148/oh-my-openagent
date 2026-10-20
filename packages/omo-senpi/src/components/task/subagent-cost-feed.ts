@@ -7,8 +7,8 @@ import { createSubagentCostLedger } from "./subagent-cost-ledger"
 
 // The footer's subagent tree cost, fed by events: one seed per session (the only full read), then
 // each store mutation and each live child message_end updates its run's entry in the ledger, and the
-// figure is re-sent only when it changes. A run settling re-reads the tree once, so records a child
-// process wrote for its own children are picked up without watching another writer.
+// figure is re-sent only when it changes. A process child's run settling re-reads the tree once, so
+// records that child process wrote for its own children are picked up without watching another writer.
 export function createTreeCostFeed(deps: Pick<TaskStatusUiDeps, "manager" | "runtime">): { ensureSeeded(): void; observe(change: StoreMutation): void; dispose(): void } {
   const ledger = createSubagentCostLedger()
   const liveSubscriptions = new Map<string, () => void>()
@@ -88,9 +88,11 @@ export function createTreeCostFeed(deps: Pick<TaskStatusUiDeps, "manager" | "run
         ledger.remove(change.taskId)
         unsubscribe(change.taskId)
       } else if (belongs(change.record)) {
-        const settling = ledger.isUnsettled(change.taskId) && change.record.run_stats !== undefined
+        // Only a process child's own tasks are written by another process (unseen by this wrapper);
+        // an in-process child's tasks arrive here as mutations, so its settle needs no re-read.
+        const rereadTree = ledger.isUnsettled(change.taskId) && change.record.run_stats !== undefined && change.record.execution_mode !== "in-process"
         track(change.record)
-        if (settling) seed(sessionId)
+        if (rereadTree) seed(sessionId)
       }
       publish()
     },

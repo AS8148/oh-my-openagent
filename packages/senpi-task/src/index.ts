@@ -38,6 +38,7 @@ export {
   TOKEN_COVERAGE_STATUSES,
   createTaskRecord,
   currentRunStartEpoch,
+  LEGACY_RUN_START_EPOCH,
   markRecordLostForReconciliation,
   messageability,
   transitionTaskRecord,

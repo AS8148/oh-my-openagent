@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import type { LiveRunStats, TaskRecord, TaskRunStats, TaskStatus } from "@oh-my-opencode/senpi-task"
+import { LEGACY_RUN_START_EPOCH, type LiveRunStats, type TaskRecord, type TaskRunStats, type TaskStatus } from "@oh-my-opencode/senpi-task"
 
 import { createSubagentCostLedger } from "./subagent-cost-ledger"
 
@@ -89,5 +89,21 @@ describe("subagent cost ledger: one source per run (senpi#2471)", () => {
 
     // then
     expect(ledger.total()).toBe(0)
+  })
+
+  it("#given a legacy record without run_start_epoch #when its run_epoch moves mid-run #then its live run keeps counting under one fixed key", () => {
+    // given: a pre-field record reattached here; its tracker is tagged with the same fixed legacy key
+    const ledger = createSubagentCostLedger()
+    const legacy = record({ task_id: "st_old", status: "running" })
+    const { run_start_epoch: _dropped, ...withoutRunStart } = legacy
+    ledger.upsertRecord(withoutRunStart)
+    ledger.upsertLive("st_old", live(LEGACY_RUN_START_EPOCH, 0.2))
+
+    // when: a model fallback moves run_epoch inside the same run
+    ledger.upsertRecord({ ...withoutRunStart, notification: { run_epoch: 1, notified_epoch: -1 } })
+    ledger.upsertLive("st_old", live(LEGACY_RUN_START_EPOCH, 0.25))
+
+    // then
+    expect(ledger.total()).toBeCloseTo(0.25, 10)
   })
 })

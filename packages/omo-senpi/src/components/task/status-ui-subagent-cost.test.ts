@@ -71,9 +71,9 @@ describe("createTaskStatusUi subagent tree cost (senpi#2471)", () => {
     statusUi.observeRecord({ taskId: "st_live", record: settled })
 
     // then: 0.75 seeded, 1.0 live, still 1.0 after the handover (no double count), and only the seed
-    // plus the settle re-read touched the store
+    // read the whole tree (an in-process child's settle arrives as a mutation, so it needs no re-read)
     expect(costs).toEqual([0.75, 1])
-    expect(listCalls).toBe(2)
+    expect(listCalls).toBe(1)
   })
 
   it("#given an engine without setSubagentCost #when synced and mutated #then the tree is never scanned and nothing throws", () => {
