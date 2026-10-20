@@ -18,6 +18,7 @@ import {
   isTerminal,
   LIVE_STATUS_REFRESH_MS,
 } from "./status-row-format"
+import { subagentTreeCostUsd } from "./subagent-tree-cost"
 
 export { buildWidgetRows, formatTaskRow } from "./status-row-format"
 
@@ -86,6 +87,7 @@ export function createTaskStatusUi(deps: TaskStatusUiDeps): TaskStatusUi {
   const liveActivity = new Map<string, string>()
   const subscriptions = new Map<string, () => void>()
   let cachedRecords: readonly TaskRecord[] = []
+  let publishedTreeCost: string | undefined
   let pending: TimerHandle | undefined
   let liveRefresh: TimerHandle | undefined
   const reportedRenderFaults = new Set<string>()
@@ -133,6 +135,7 @@ export function createTaskStatusUi(deps: TaskStatusUiDeps): TaskStatusUi {
       clearLiveRefresh()
       return
     }
+    const treeRunning = publishTreeCost(ui)
     const records = cachedRecords
     const background = deps.manager.wasBackground === undefined
       ? []
@@ -145,15 +148,34 @@ export function createTaskStatusUi(deps: TaskStatusUiDeps): TaskStatusUi {
       ? buildWidgetRows(records, residentTaskIds)
       : backgroundWidgetRows(background, liveActivity, renderedAt, liveStats, terminalWidth, residentTaskIds)
     if (rows.length === 0) {
-      clearLiveRefresh()
+      if (treeRunning) scheduleLiveRefresh()
+      else clearLiveRefresh()
       ui.setWidget(UI_KEY, undefined)
       return
     }
     ui.setWidget(UI_KEY, rows, { placement: "belowEditor" })
     // Only a live child needs the 250 ms repaint; a parked one renders a still row.
-    if (deps.manager.wasBackground !== undefined && background.some((record) => !isTerminal(record.status) && !isSuspended(record))) {
+    if (treeRunning || (deps.manager.wasBackground !== undefined && background.some((record) => !isTerminal(record.status) && !isSuspended(record)))) {
       scheduleLiveRefresh()
     } else clearLiveRefresh()
+  }
+
+  // The footer's subagent figure (senpi#2471): the whole tree's spend, re-sent only when it changes.
+  // Returns whether a run in this tree is live here, so the 250 ms repaint keeps the figure moving.
+  function publishTreeCost(ui: CapturedUi): boolean {
+    const sessionId = deps.runtime.sessionId()
+    if (ui.setSubagentCost === undefined || sessionId === undefined) return false
+    const tree = deps.manager.list({ scope: "all" }).map((entry) => entry.record).filter((record) => record.root_session_id === sessionId)
+    const liveStats = deps.manager.runStatsSnapshot?.bind(deps.manager)
+    const cost = subagentTreeCostUsd(tree, sessionId, liveStats)
+    const reported = cost > 0 ? cost : undefined
+    // Keyed by session: senpi clears the figure with the footer statuses on a session switch.
+    const published = `${sessionId}:${reported ?? "none"}`
+    if (published !== publishedTreeCost) {
+      publishedTreeCost = published
+      ui.setSubagentCost(reported)
+    }
+    return tree.some((record) => !isTerminal(record.status) && liveStats?.(record.task_id) !== undefined)
   }
 
   function scheduleSync(): void {
