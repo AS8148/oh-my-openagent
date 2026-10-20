@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto"
 import type { ClaudeCodeMcpServer } from "@oh-my-opencode/claude-code-compat-core/claude-code-mcp-loader/types"
 import { declarationDigest, policyHash, resolveProjectEnvironment, usesProjectEnvironment } from "./project-env-policy"
-import { unavailableGrantStore, type EnvGrantSnapshot, type GrantStore } from "./env-grant-store"
+import { createFileGrantStore, type EnvGrantSnapshot, type GrantStore } from "./env-grant-store"
 import type { SkillMcpClientInfo } from "./types"
 import { log } from "../logger"
 
@@ -29,17 +29,15 @@ export class EnvironmentGrantPolicy {
   private readonly decisions = new Map<string, Promise<PreparedPolicy | undefined>>()
   private readonly declarations = new Map<string, string>()
   private reconciliation: Promise<void> = Promise.resolve()
-  private readonly unwatch: () => void
+  private unwatch: (() => void) | undefined
 
   constructor(
-    private readonly store: GrantStore = unavailableGrantStore,
+    private readonly store: GrantStore = createFileGrantStore(),
     private readonly notify?: (message: string, info: SkillMcpClientInfo) => void,
     private readonly invalidate: (identity: string) => Promise<void> = async () => {},
-  ) {
-    this.unwatch = store.watch(() => this.refresh())
-  }
+  ) {}
 
-  async refresh(): Promise<void> {
+  async refresh(conservative = false): Promise<void> {
     const run = this.reconciliation.then(async () => {
       let next: EnvGrantSnapshot
       try { next = await this.store.read() } catch (error) {
@@ -48,9 +46,9 @@ export class EnvironmentGrantPolicy {
       }
       const previous = this.snapshot
       this.snapshot = next
-      const gap = previous !== undefined && (
+      const gap = conservative || previous !== undefined && (
         next.generation < previous.generation || next.generation > previous.generation + 1 ||
-        next.revision !== previous.revision
+        (next.revision !== previous.revision && next.generation <= previous.generation)
       )
       for (const [identity, live] of this.live) {
         const names = [...(next.grants[identity]?.names ?? [])].sort()
@@ -69,6 +67,7 @@ export class EnvironmentGrantPolicy {
 
   prepare(info: SkillMcpClientInfo, raw: ClaudeCodeMcpServer, explicit: Readonly<Record<string, string>> = {}): Promise<PreparedPolicy | undefined> {
     if (!usesProjectEnvironment(info)) return Promise.resolve(undefined)
+    this.unwatch ??= this.store.watch((event) => this.refresh(event?.conservative))
     const identity = declarationDigest(info, raw)
     const decisionKey = `${identity}:${policyHash(explicit)}`
     const declarationKey = `${info.sessionID}:${info.skillName}:${info.serverName}`
@@ -140,5 +139,9 @@ export class EnvironmentGrantPolicy {
     return `Saved permanent MCP environment grant for ${pending.info.serverName}: ${names.join(", ")}.`
   }
 
-  close(): void { this.unwatch() }
+  close(): void {
+    this.unwatch?.()
+    this.unwatch = undefined
+    for (const identity of this.live.keys()) this.invalidateIdentity(identity)
+  }
 }

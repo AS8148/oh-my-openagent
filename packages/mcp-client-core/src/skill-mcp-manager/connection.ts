@@ -29,96 +29,99 @@ export async function getOrCreateClient(params: {
   const shutdownGenAtEntry = state.shutdownGeneration
   state.inFlightConnections.set(params.info.sessionID, (state.inFlightConnections.get(params.info.sessionID) ?? 0) + 1)
   try {
-  const refreshed = await params.info.revalidateDeclaration?.()
-  if (params.info.revalidateDeclaration && !refreshed) throw new Error("The MCP declaration is no longer available.")
-  const info = refreshed ? { ...params.info, sourcePath: refreshed.sourcePath, sourceKind: refreshed.sourceKind } : params.info
-  const config = refreshed?.config ?? params.config
-  state.environmentPolicy ??= new EnvironmentGrantPolicy(undefined, undefined, async (identity) => {
-    for (const key of state.clients.keys()) if (key.includes(`::identity=${identity}::`)) await forceReconnect(state, key)
-  })
-  const policy = await state.environmentPolicy.prepare(info, config, params.sessionEnv)
-  const clientKey = policy ? `${params.clientKey}::identity=${policy.identity}::policy=${policy.digest}` : params.clientKey
-  if (state.shutdownGeneration !== shutdownGenAtEntry ||
-    (state.disconnectedSessions.get(info.sessionID) ?? 0) !== disconnectGenAtEntry) {
-    throw new Error(`Session "${info.sessionID}" disconnected during MCP policy resolution.`)
-  }
-
-  if (state.disposed) {
-    throw new Error(`MCP manager for "${info.sessionID}" has been shut down, cannot create new connections.`)
-  }
-
-  const existing = state.clients.get(clientKey)
-  if (existing) {
-    existing.lastUsedAt = Date.now()
-    return existing.client
-  }
-
-  // Prevent race condition: if a connection is already in progress, wait for it
-  const pending = state.pendingConnections.get(clientKey)
-  if (pending) {
-    return pending
-  }
-
-  const isTrusted = info.scope === "host" ? info.hostUserTrusted === true : !PROJECT_SCOPES.has(info.scope ?? "")
-  const resolvedConfig = policy?.config ?? expandEnvVarsInObject(config, { trusted: isTrusted })
-  const expandedConfig = params.cdpUrl
-    ? { ...resolvedConfig, args: [...(resolvedConfig.args ?? []), "--cdp-endpoint", params.cdpUrl] }
-    : resolvedConfig
-  let currentConnectionPromise!: Promise<McpClient>
-  currentConnectionPromise = (async () => {
-    const disconnectGenAtStart = disconnectGenAtEntry
-    const shutdownGenAtStart = shutdownGenAtEntry
-
-    const client = await createClient({ state, clientKey, info, config: expandedConfig, environment: policy?.environment, policySignal: policy?.signal })
-    if (policy && state.environmentPolicy?.version(policy.identity) !== policy.version) {
-      await forceReconnect(state, clientKey)
-      throw new Error("MCP environment policy changed during connection; retry with the current grant snapshot.")
+    if (state.disposed) {
+      throw new Error(`MCP manager for "${params.info.sessionID}" has been shut down, cannot create new connections.`)
+    }
+    const refreshed = await params.info.revalidateDeclaration?.()
+    if (params.info.revalidateDeclaration && !refreshed) throw new Error("The MCP declaration is no longer available.")
+    const info = refreshed ? { ...params.info, sourcePath: refreshed.sourcePath, sourceKind: refreshed.sourceKind } : params.info
+    const config = refreshed?.config ?? params.config
+    state.environmentPolicy ??= new EnvironmentGrantPolicy(undefined, undefined, async (identity) => {
+      for (const key of state.clients.keys()) if (key.includes(`::identity=${identity}::`)) await forceReconnect(state, key)
+    })
+    const policy = await state.environmentPolicy.prepare(info, config, params.sessionEnv)
+    const clientKey = policy ? `${params.clientKey}::identity=${policy.identity}::policy=${policy.digest}` : params.clientKey
+    if (state.shutdownGeneration !== shutdownGenAtEntry ||
+      (state.disconnectedSessions.get(info.sessionID) ?? 0) !== disconnectGenAtEntry) {
+      throw new Error(`Session "${info.sessionID}" disconnected during MCP policy resolution.`)
     }
 
-    const isStale = state.pendingConnections.has(clientKey) && state.pendingConnections.get(clientKey) !== currentConnectionPromise
-    if (isStale) {
-      removeClientIfCurrent(state, clientKey, client)
-      try {
-        await client.close()
-      } catch (error) {
-        if (!(error instanceof Error)) {
-          throw error
-        }
+    if (state.disposed) {
+      throw new Error(`MCP manager for "${info.sessionID}" has been shut down, cannot create new connections.`)
+    }
+
+    const existing = state.clients.get(clientKey)
+    if (existing) {
+      existing.lastUsedAt = Date.now()
+      return existing.client
+    }
+
+    // Prevent race condition: if a connection is already in progress, wait for it
+    const pending = state.pendingConnections.get(clientKey)
+    if (pending) {
+      return pending
+    }
+
+    const isTrusted = info.scope === "host" ? info.hostUserTrusted === true : !PROJECT_SCOPES.has(info.scope ?? "")
+    const resolvedConfig = policy?.config ?? expandEnvVarsInObject(config, { trusted: isTrusted })
+    const expandedConfig = params.cdpUrl
+      ? { ...resolvedConfig, args: [...(resolvedConfig.args ?? []), "--cdp-endpoint", params.cdpUrl] }
+      : resolvedConfig
+    let currentConnectionPromise!: Promise<McpClient>
+    currentConnectionPromise = (async () => {
+      const disconnectGenAtStart = disconnectGenAtEntry
+      const shutdownGenAtStart = shutdownGenAtEntry
+
+      const client = await createClient({ state, clientKey, info, config: expandedConfig, environment: policy?.environment, policySignal: policy?.signal })
+      if (policy && state.environmentPolicy?.version(policy.identity) !== policy.version) {
+        await forceReconnect(state, clientKey)
+        throw new Error("MCP environment policy changed during connection; retry with the current grant snapshot.")
       }
-      throw new Error(`Connection for "${info.sessionID}" was superseded by a newer connection attempt.`)
-    }
 
-    if (state.shutdownGeneration !== shutdownGenAtStart) {
-      removeClientIfCurrent(state, clientKey, client)
-      try {
-        await client.close()
-      } catch (error) {
-        if (!(error instanceof Error)) {
-          throw error
+      const isStale = state.pendingConnections.has(clientKey) && state.pendingConnections.get(clientKey) !== currentConnectionPromise
+      if (isStale) {
+        removeClientIfCurrent(state, clientKey, client)
+        try {
+          await client.close()
+        } catch (error) {
+          if (!(error instanceof Error)) {
+            throw error
+          }
         }
+        throw new Error(`Connection for "${info.sessionID}" was superseded by a newer connection attempt.`)
       }
-      throw new Error(`Shutdown occurred during MCP connection for "${info.sessionID}"`)
+
+      if (state.shutdownGeneration !== shutdownGenAtStart) {
+        removeClientIfCurrent(state, clientKey, client)
+        try {
+          await client.close()
+        } catch (error) {
+          if (!(error instanceof Error)) {
+            throw error
+          }
+        }
+        throw new Error(`Shutdown occurred during MCP connection for "${info.sessionID}"`)
+      }
+
+      const currentDisconnectGen = state.disconnectedSessions.get(info.sessionID) ?? 0
+      if (currentDisconnectGen > disconnectGenAtStart) {
+        await forceReconnect(state, clientKey)
+        throw new Error(`Session "${info.sessionID}" disconnected during MCP connection setup.`)
+      }
+
+      return client
+    })()
+
+    state.pendingConnections.set(clientKey, currentConnectionPromise)
+
+    try {
+      const client = await currentConnectionPromise
+      return client
+    } finally {
+      if (state.pendingConnections.get(clientKey) === currentConnectionPromise) {
+        state.pendingConnections.delete(clientKey)
+      }
     }
-
-    const currentDisconnectGen = state.disconnectedSessions.get(info.sessionID) ?? 0
-    if (currentDisconnectGen > disconnectGenAtStart) {
-      await forceReconnect(state, clientKey)
-      throw new Error(`Session "${info.sessionID}" disconnected during MCP connection setup.`)
-    }
-
-    return client
-  })()
-
-  state.pendingConnections.set(clientKey, currentConnectionPromise)
-
-  try {
-    const client = await currentConnectionPromise
-    return client
-  } finally {
-    if (state.pendingConnections.get(clientKey) === currentConnectionPromise) {
-      state.pendingConnections.delete(clientKey)
-    }
-  }
   } finally {
     const remaining = (state.inFlightConnections.get(params.info.sessionID) ?? 1) - 1
     if (remaining <= 0) {

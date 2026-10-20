@@ -89,127 +89,127 @@ export async function createSkillContext(args: {
   const unsubscribe = args.onDiagnostic ? subscribeSkillDiagnostics(args.onDiagnostic) : undefined
   try {
 
-  const browserProvider: BrowserAutomationProvider =
-    pluginConfig.browser_automation_engine?.provider ?? "playwright"
-  const playwrightMcpArgs = pluginConfig.browser_automation_engine?.playwright_mcp_args
+    const browserProvider: BrowserAutomationProvider =
+      pluginConfig.browser_automation_engine?.provider ?? "playwright"
+    const playwrightMcpArgs = pluginConfig.browser_automation_engine?.playwright_mcp_args
 
-  const disabledSkills = collectDisabledSkillAliases(pluginConfig)
+    const disabledSkills = collectDisabledSkillAliases(pluginConfig)
 
-  const builtinSkills = resolveActiveBuiltinSkills({
-    browserProvider,
-    disabledSkills,
-    teamModeEnabled: pluginConfig.team_mode?.enabled ?? false,
-    playwrightMcpArgs,
-    systemMcpNames: getSystemMcpServerNames(),
-  })
+    const builtinSkills = resolveActiveBuiltinSkills({
+      browserProvider,
+      disabledSkills,
+      teamModeEnabled: pluginConfig.team_mode?.enabled ?? false,
+      playwrightMcpArgs,
+      systemMcpNames: getSystemMcpServerNames(),
+    })
 
-  const includeClaudeSkills = pluginConfig.claude_code?.skills !== false
-  const sourceProvenance = getSkillSourceProvenance(pluginConfig.skills)
-  const hostSkillConfig = adaptHostSkillConfig(hostSkills ?? readOpencodeConfigSkills(directory))
-  const [
-    configSourceSkills,
-    hostConfigSkills,
-    userSkills,
-    globalSkills,
-    projectSkills,
-    opencodeProjectSkills,
-    agentsProjectSkills,
-    agentsGlobalSkills,
-    sharedSkills,
-  ] = await Promise.all([
-    discoverConfigSourceSkills({
-      config: pluginConfig.skills,
-      configDir: directory,
-    }),
-    discoverConfigSourceSkills({
-      config: hostSkillConfig,
-      configDir: directory,
-      provenance: { ...sourceProvenance, kind: "host", selectedRoot: directory, projectRoot: detectWorktreePath(directory) ?? directory },
-    }),
-    includeClaudeSkills ? discoverUserClaudeSkills() : Promise.resolve([]),
-    discoverOpencodeGlobalSkills(),
-    includeClaudeSkills ? discoverProjectClaudeSkills(directory, sourceProvenance) : Promise.resolve([]),
-    discoverOpencodeProjectSkills(directory, sourceProvenance),
-    discoverProjectAgentsSkills(directory, sourceProvenance),
-    discoverGlobalAgentsSkills(),
-    discoverSharedSkills(),
-  ])
+    const includeClaudeSkills = pluginConfig.claude_code?.skills !== false
+    const sourceProvenance = getSkillSourceProvenance(pluginConfig.skills)
+    const hostSkillConfig = adaptHostSkillConfig(hostSkills ?? readOpencodeConfigSkills(directory))
+    const [
+      configSourceSkills,
+      hostConfigSkills,
+      userSkills,
+      globalSkills,
+      projectSkills,
+      opencodeProjectSkills,
+      agentsProjectSkills,
+      agentsGlobalSkills,
+      sharedSkills,
+    ] = await Promise.all([
+      discoverConfigSourceSkills({
+        config: pluginConfig.skills,
+        configDir: directory,
+      }),
+      discoverConfigSourceSkills({
+        config: hostSkillConfig,
+        configDir: directory,
+        provenance: { ...sourceProvenance, kind: "host", selectedRoot: directory, projectRoot: detectWorktreePath(directory) ?? directory },
+      }),
+      includeClaudeSkills ? discoverUserClaudeSkills() : Promise.resolve([]),
+      discoverOpencodeGlobalSkills(),
+      includeClaudeSkills ? discoverProjectClaudeSkills(directory, sourceProvenance) : Promise.resolve([]),
+      discoverOpencodeProjectSkills(directory, sourceProvenance),
+      discoverProjectAgentsSkills(directory, sourceProvenance),
+      discoverGlobalAgentsSkills(),
+      discoverSharedSkills(),
+    ])
 
-  // Host-config skills (read from opencode.jsonc skills.paths) take precedence
-  // over plugin-config skills when the same skill name is declared in both.
-  // This matches `command-config-handler.ts` where host entries are spread
-  // after plugin entries, and matches user expectation that opencode.jsonc is
-  // the source of truth. Both source lists share the same `"config"` scope,
-  // so `mergeSkills` cannot disambiguate them — we resolve the collision here
-  // before passing the merged list downstream.
-  const configSkillsHostWins = new Map<string, LoadedSkill>()
-  for (const skill of configSourceSkills) configSkillsHostWins.set(skill.name, skill)
-  for (const skill of hostConfigSkills) configSkillsHostWins.set(skill.name, skill)
-  const filteredConfigSourceSkills = filterProviderGatedSkills(
-    Array.from(configSkillsHostWins.values()),
-    browserProvider,
-  )
-  const filteredUserSkills = filterProviderGatedSkills(userSkills, browserProvider)
-  const filteredGlobalSkills = filterProviderGatedSkills(globalSkills, browserProvider)
-  const filteredProjectSkills = filterProviderGatedSkills(projectSkills, browserProvider)
-  const filteredOpencodeProjectSkills = filterProviderGatedSkills(
-    opencodeProjectSkills,
-    browserProvider,
-  )
-  const filteredAgentsProjectSkills = filterProviderGatedSkills(
-    agentsProjectSkills,
-    browserProvider,
-  )
-  const filteredAgentsGlobalSkills = filterProviderGatedSkills(
-    agentsGlobalSkills,
-    browserProvider,
-  )
-  const activeConfigSourceSkills = filterDisabledSkills(filteredConfigSourceSkills, disabledSkills)
-  const activeUserSkills = filterDisabledSkills(filteredUserSkills, disabledSkills)
-  const activeGlobalSkills = filterDisabledSkills(filteredGlobalSkills, disabledSkills)
-  const activeProjectSkills = filterDisabledSkills(filteredProjectSkills, disabledSkills)
-  const activeOpencodeProjectSkills = filterDisabledSkills(
-    filteredOpencodeProjectSkills,
-    disabledSkills,
-  )
-  const activeAgentsProjectSkills = filterDisabledSkills(
-    filteredAgentsProjectSkills,
-    disabledSkills,
-  )
-  const activeAgentsGlobalSkills = filterDisabledSkills(
-    filteredAgentsGlobalSkills,
-    disabledSkills,
-  )
-  const filteredSharedSkills = filterDisabledSkills(
-    filterProviderGatedSkills(sharedSkills, browserProvider),
-    disabledSkills,
-  )
-  const mergedSkills = mergeSkills(
-    builtinSkills,
-    pluginConfig.skills,
-    activeConfigSourceSkills,
-    [...activeUserSkills, ...activeAgentsGlobalSkills, ...filteredSharedSkills],
-    activeGlobalSkills,
-    [...activeProjectSkills, ...activeAgentsProjectSkills],
-    activeOpencodeProjectSkills,
-    {
-      configDir: directory,
-      isConfigEntryAllowed: (name) => !isDisabledConfigSkillEntryName(name, disabledSkills),
-    },
-  )
+    // Host-config skills (read from opencode.jsonc skills.paths) take precedence
+    // over plugin-config skills when the same skill name is declared in both.
+    // This matches `command-config-handler.ts` where host entries are spread
+    // after plugin entries, and matches user expectation that opencode.jsonc is
+    // the source of truth. Both source lists share the same `"config"` scope,
+    // so `mergeSkills` cannot disambiguate them — we resolve the collision here
+    // before passing the merged list downstream.
+    const configSkillsHostWins = new Map<string, LoadedSkill>()
+    for (const skill of configSourceSkills) configSkillsHostWins.set(skill.name, skill)
+    for (const skill of hostConfigSkills) configSkillsHostWins.set(skill.name, skill)
+    const filteredConfigSourceSkills = filterProviderGatedSkills(
+      Array.from(configSkillsHostWins.values()),
+      browserProvider,
+    )
+    const filteredUserSkills = filterProviderGatedSkills(userSkills, browserProvider)
+    const filteredGlobalSkills = filterProviderGatedSkills(globalSkills, browserProvider)
+    const filteredProjectSkills = filterProviderGatedSkills(projectSkills, browserProvider)
+    const filteredOpencodeProjectSkills = filterProviderGatedSkills(
+      opencodeProjectSkills,
+      browserProvider,
+    )
+    const filteredAgentsProjectSkills = filterProviderGatedSkills(
+      agentsProjectSkills,
+      browserProvider,
+    )
+    const filteredAgentsGlobalSkills = filterProviderGatedSkills(
+      agentsGlobalSkills,
+      browserProvider,
+    )
+    const activeConfigSourceSkills = filterDisabledSkills(filteredConfigSourceSkills, disabledSkills)
+    const activeUserSkills = filterDisabledSkills(filteredUserSkills, disabledSkills)
+    const activeGlobalSkills = filterDisabledSkills(filteredGlobalSkills, disabledSkills)
+    const activeProjectSkills = filterDisabledSkills(filteredProjectSkills, disabledSkills)
+    const activeOpencodeProjectSkills = filterDisabledSkills(
+      filteredOpencodeProjectSkills,
+      disabledSkills,
+    )
+    const activeAgentsProjectSkills = filterDisabledSkills(
+      filteredAgentsProjectSkills,
+      disabledSkills,
+    )
+    const activeAgentsGlobalSkills = filterDisabledSkills(
+      filteredAgentsGlobalSkills,
+      disabledSkills,
+    )
+    const filteredSharedSkills = filterDisabledSkills(
+      filterProviderGatedSkills(sharedSkills, browserProvider),
+      disabledSkills,
+    )
+    const mergedSkills = mergeSkills(
+      builtinSkills,
+      pluginConfig.skills,
+      activeConfigSourceSkills,
+      [...activeUserSkills, ...activeAgentsGlobalSkills, ...filteredSharedSkills],
+      activeGlobalSkills,
+      [...activeProjectSkills, ...activeAgentsProjectSkills],
+      activeOpencodeProjectSkills,
+      {
+        configDir: directory,
+        isConfigEntryAllowed: (name) => !isDisabledConfigSkillEntryName(name, disabledSkills),
+      },
+    )
 
-  const availableSkills: AvailableSkill[] = mergedSkills.map((skill) => ({
-    name: skill.name,
-    description: skill.definition.description ?? "",
-    location: mapScopeToLocation(skill.scope),
-  }))
+    const availableSkills: AvailableSkill[] = mergedSkills.map((skill) => ({
+      name: skill.name,
+      description: skill.definition.description ?? "",
+      location: mapScopeToLocation(skill.scope),
+    }))
 
-  return {
-    mergedSkills,
-    availableSkills,
-    browserProvider,
-    disabledSkills,
-  }
+    return {
+      mergedSkills,
+      availableSkills,
+      browserProvider,
+      disabledSkills,
+    }
   } finally {
     unsubscribe?.()
   }

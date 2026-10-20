@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto"
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
 import type { ClaudeCodeMcpServer } from "@oh-my-opencode/claude-code-compat-core/claude-code-mcp-loader/types"
 import { isAllowedMcpEnvVar } from "@oh-my-opencode/claude-code-compat-core/claude-code-mcp-loader/configure-allowed-env-vars"
 import { createCleanMcpEnvironment } from "./env-cleaner"
 import type { SkillMcpClientInfo } from "./types"
+import { declarationDigest as hashIdentity } from "./env-grants-store"
 
 export const SAFE_MCP_ENV_NAMES = [
   "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "TZ",
@@ -18,17 +18,7 @@ export const SAFE_MCP_ENV_NAMES = [
 const safe = new Set<string>(SAFE_MCP_ENV_NAMES)
 const packageExclusion = /^(?:NPM_CONFIG_|YARN_|PNPM_|NO_UPDATE_NOTIFIER$)/i
 
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`
-  }
-  return JSON.stringify(value) ?? "null"
-}
-export function policyHash(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex")
-}
+export const policyHash = hashIdentity
 function canonicalPath(path: string): string {
   try { return realpathSync.native(path) } catch (error) {
     if (!(error instanceof Error)) throw error
@@ -37,10 +27,10 @@ function canonicalPath(path: string): string {
 }
 export function declarationDigest(info: SkillMcpClientInfo, config: ClaudeCodeMcpServer): string {
   return policyHash({
-    source: canonicalPath(info.sourcePath ?? info.provenance?.selectedRoot ?? info.directory ?? "."),
+    sourcePath: canonicalPath(info.sourcePath ?? info.provenance?.selectedRoot ?? info.directory ?? "."),
     sourceKind: info.sourceKind ?? "frontmatter",
     projectRoot: canonicalPath(info.provenance?.projectRoot ?? info.directory ?? "."),
-    serverName: info.serverName, declaration: config, cwdBase: canonicalPath(info.directory ?? info.provenance?.projectRoot ?? "."),
+    serverName: info.serverName, raw: config, cwdBase: canonicalPath(info.directory ?? info.provenance?.projectRoot ?? "."),
   })
 }
 export function usesProjectEnvironment(info: SkillMcpClientInfo): boolean {

@@ -5,7 +5,7 @@ import { disconnectAll, disconnectSession, forceReconnect } from "./cleanup"
 import { getOrCreateClient, getOrCreateClientWithRetryImpl } from "./connection"
 import { handlePostRequestAuthError, handleStepUpIfNeeded } from "./oauth-handler"
 import { EnvironmentGrantPolicy } from "./environment-grant-policy"
-import type { GrantStore } from "./env-grant-store"
+import { createFileGrantStore, type GrantStore } from "./env-grant-store"
 import { policyHash } from "./project-env-policy"
 import type {
   McpClient,
@@ -36,6 +36,7 @@ export class SkillMcpManager {
   constructor(options: {
     createOAuthProvider?: OAuthProviderFactory
     grantStore?: GrantStore
+    configDir?: string
     onEnvironmentNotice?: (message: string, info: SkillMcpClientInfo) => void
   } = {}) {
     this.state = {
@@ -52,7 +53,7 @@ export class SkillMcpManager {
       disposed: false,
       createOAuthProvider: options.createOAuthProvider ?? ((providerOptions) => new McpOAuthProvider(providerOptions)),
     }
-    this.state.environmentPolicy = new EnvironmentGrantPolicy(options.grantStore, options.onEnvironmentNotice, (identity) => this.closeIdentityClients(identity))
+    this.state.environmentPolicy = new EnvironmentGrantPolicy(options.grantStore ?? createFileGrantStore(options.configDir), options.onEnvironmentNotice, (identity) => this.closeIdentityClients(identity))
   }
 
   async invalidateIdentity(identity: string): Promise<void> {
