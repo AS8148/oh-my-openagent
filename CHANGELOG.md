@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A relaunch's first prompt no longer recompiles your memory.** The compiled memory block and its size estimate are now saved by commit inside the memory repository's `.git` folder, never committed or synced, and read back on the next launch. On a 6,862-note memory this cut the memory step of a prompt from a median of about 178 ms to about 52 ms in the desktop app. A block built after a git read failed is used once and never saved. ([#10674](https://github.com/code-yeongyu/oh-my-openagent/pull/10674))
+
 **Onboarding can get to know you, once you agree.** After consent, the default model reads digests of your recent sessions and proposes facts about you and how you work; nothing is saved at this step. ([#10505](https://github.com/code-yeongyu/oh-my-openagent/pull/10505))
 
 **OmO loads the analytics SDK only when an event is captured.** PostHog now ships as a lazy sidecar instead of being parsed with the main extension; queued events retain their order, shutdown waits for pending captures, and consent checks are unchanged. ([#10640](https://github.com/code-yeongyu/oh-my-openagent/pull/10640))

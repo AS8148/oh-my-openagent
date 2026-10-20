@@ -1,4 +1,4 @@
-import { statSync } from "node:fs"
+import { statSync } from "@oh-my-opencode/memory-core/fs"
 import { fileURLToPath } from "node:url"
 
 declare const OMO_SENPI_PACKAGE_VERSION: string
