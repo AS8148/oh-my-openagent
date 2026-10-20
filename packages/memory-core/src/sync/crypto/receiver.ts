@@ -91,14 +91,28 @@ const held = new WeakMap<object, HistoryReceiver>()
 /**
  * The receiver positioned after `history`, the keyring entries `owner` (a verified chain state) has
  * verified. A receiver the owner holds is taken, so no second state can move it, and checking one new
- * entry then costs the same at any chain length; an owner holding none (a fresh state, or one a refused
- * walk left behind) gets one folded over `history` once.
+ * entry then costs the same at any chain length; an owner holding none gets one folded over `history`
+ * once. Only three states hold none: a fresh state (empty history), an older state reused after its
+ * receiver moved on to the state after it (no production caller does this), and the state left by an
+ * entry the receiver accepted but the client then refused (the receiver cannot be rewound). Each of
+ * these refolds once, then appends cost the same again.
  */
 export const takeReceiver = async (owner: object, history: ReadonlyArray<SyncEntry>): Promise<HistoryReceiver> => {
   const kept = held.get(owner)
   if (kept === undefined) return positionedAfter(history)
   held.delete(owner)
   return kept
+}
+
+/**
+ * Moves the receiver `from` holds to `to`, a state with the same verified keyring history, so a copy
+ * that only moves the head does not refold it. `from` holds none afterwards.
+ */
+export const passReceiver = (from: object, to: object): void => {
+  const kept = held.get(from)
+  if (kept === undefined) return
+  held.delete(from)
+  held.set(to, kept)
 }
 
 /** Hands `receiver` to `owner`, the verified chain state whose keyring history it is positioned after. */

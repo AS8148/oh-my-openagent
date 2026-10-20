@@ -6,7 +6,7 @@ import { type Authority, applyRecord, type FoldedRecord, isCancelledAdmission, i
 import { expectedEpoch, forcedRotationRefusal, keyWithinEpoch, type LinkMode, linksHold, signerKey } from "./chain-checks.ts"
 import { type ParsedBody, parseBody } from "./parse.ts"
 import type { RejectionCounter } from "./rejection.ts"
-import { holdReceiver, type ReceiverCheck, takeReceiver } from "./receiver.ts"
+import { holdReceiver, passReceiver, type ReceiverCheck, takeReceiver } from "./receiver.ts"
 import { checkRecordRules, type RuleRejection } from "./rules.ts"
 import { authorSigningKey, verifyRecordSig } from "./signatures.ts"
 
@@ -36,7 +36,7 @@ type ChainFields = {
   readonly head: Head | null
   readonly authority: Authority | null
   readonly history: ReadonlyArray<FoldedRecord>
-  /** Every verified keyring entry of an ANCHORED chain, wraps minted: the merged receiver re-reads them. */
+  /** Every verified keyring entry of an ANCHORED chain, wraps minted: a state holding no receiver folds one over them. */
   readonly received: ReadonlyArray<VerifiedKeyringEntry>
   /** The device's trust anchor; nothing is trusted and no wrap is minted until the chain meets it. */
   readonly anchor: ChainAnchor
@@ -134,7 +134,10 @@ export const atVerifiedHead = (state: ChainState, head: Head): ChainState | null
   if (!isChainState(state) || !state.anchored || state.head === null) return null
   if (head.keyring_link !== state.head.keyring_link || head.seq < state.head.seq) return null
   if (head.seq === state.head.seq && head.link !== state.head.link) return null
-  return mintState({ ...state, head })
+  const moved = mintState({ ...state, head })
+  // Same keyring history, so the receiver goes with the copy instead of being refolded on its first append.
+  passReceiver(state, moved)
+  return moved
 }
 
 const seenKeyring = (state: ChainState): ReadonlyArray<KeyringEntry> => [...state.received, ...state.unanchored]

@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, mock, spyOn, test } from "bun:test"
-import { type AppendOutcome, appendEntries, type ChainState, emptyChain } from "./chain.ts"
+import { type AppendOutcome, appendEntries, atVerifiedHead, type ChainState, emptyChain } from "./chain.ts"
 import type { KeyringEntry, SyncEntry } from "./entry.ts"
 import { createRejectionCounter } from "./rejection.ts"
 import { importSnapshot, type SnapshotRecord } from "./snapshot.ts"
@@ -15,7 +15,7 @@ import { signFramed } from "./vendor/sync-format/keys.ts"
 import { snapshotPreimage } from "./vendor/sync-format/snapshot.ts"
 
 // The client's local chain must refuse exactly what the merged omo-service receiver
-// (vendored sync-format receiveKeyringChain, 3bedb0a) refuses, and accept what it accepts.
+// (vendored sync-format receiveKeyringChain and createKeyringReceiver, 5de1455489) refuses, and accept what it accepts.
 
 const run = async (entries: ReadonlyArray<SyncEntry>, state: ChainState = emptyChain(ACCOUNT, fixtureAnchor())) => {
   const rejections = createRejectionCounter()
@@ -301,6 +301,22 @@ describe("the receiver checks one new entry in constant work (#10655)", () => {
       expect(perAppend[999]).toBe(perAppend[9])
     })
   }, 60000)
+
+  test("the state a snapshot import continues from keeps the receiver, so its first append does not re-fold the history", async () => {
+    let state = await verified([...mainUntil("post_join_rotation"), record("post_join_rotation")])
+    for (let i = 0; i < 50; i++) {
+      const { outcome } = await run([await rotation(state, "A")], state)
+      if (!outcome.ok) throw new Error(`rotation ${i} refused: ${outcome.reason}`)
+      state = outcome.state
+    }
+    const continued = atVerifiedHead(state, headOf(state))
+    if (continued === null) throw new Error("atVerifiedHead refused the verified head")
+    const next = await rotation(continued, "B")
+    await handedPerAppend(async (handed) => {
+      expect((await run([next], continued)).outcome.ok).toBe(true)
+      expect(handed()).toBeLessThanOrEqual(1)
+    })
+  })
 
   test("a replayed or lower-seq keyring entry is still refused, with the whole-list fold's reason", async () => {
     const history = mainChain()
