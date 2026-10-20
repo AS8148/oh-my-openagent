@@ -1,9 +1,10 @@
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { parseFrontmatter } from "@oh-my-opencode/utils"
+import { readSkillFileChecked } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/checked-skill-read"
 import {
-  checkSkillPath, readSkillFileChecked, SkillLinkBlockedError, type SkillProvenance,
-} from "@oh-my-opencode/skills-loader-core/opencode-skill-loader"
+  checkSkillPath, SkillLinkBlockedError, type SkillProvenance,
+} from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/skill-provenance"
 import type { LoadedSkill } from "./types"
 
 export type CheckedProjectSkills = {

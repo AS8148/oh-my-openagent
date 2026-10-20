@@ -7,10 +7,11 @@ import type { loadSkillsFromDir as discoverSkillsFromDir } from "@code-yeongyu/s
 import { senpiBarrel } from "../../lazy/senpi-barrel"
 import type { LoadedSkill, SkillLoader, SkillResolution } from "./types"
 import { readProjectSkills, type CheckedProjectSkills } from "./checked-project-skills"
+import { readSkillFileChecked } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/checked-skill-read"
 import {
-  checkSkillPath, readSkillFileChecked, skillProvenance, SkillLinkBlockedError,
+  checkSkillPath, skillProvenance, SkillLinkBlockedError,
   type SkillProvenance,
-} from "@oh-my-opencode/skills-loader-core/opencode-skill-loader"
+} from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/skill-provenance"
 
 export type FsSkillLoaderOptions = {
   readonly homeDir?: string
