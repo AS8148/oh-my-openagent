@@ -11,7 +11,7 @@ import {
   sha256B64,
 } from "./vendor/sync-format/jcs.ts"
 import { verifyFramedBytes } from "./vendor/sync-format/keys.ts"
-import { isStrictEd25519Signature, isStrongEd25519Key } from "./ed25519-key.ts"
+import { ed25519SignaturePrecheck, isStrongEd25519Key } from "./strict-25519/strict-25519.ts"
 
 export const decodeB64 = (value: JsonValue | undefined, length?: number): Uint8Array<ArrayBuffer> | null => {
   if (typeof value !== "string") return null
@@ -37,7 +37,7 @@ export const verifyTagged = async (
 ): Promise<boolean> => {
   const key = decodeB64(publicKey, 32)
   const sig = decodeB64(signature, 64)
-  if (key === null || sig === null || !isStrongEd25519Key(key) || !isStrictEd25519Signature(sig)) return false
+  if (key === null || sig === null || !ed25519SignaturePrecheck(key, sig).ok) return false
   return verifyFramedBytes(context, jcsBytes(payload), key, sig)
 }
 

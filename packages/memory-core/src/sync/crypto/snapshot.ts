@@ -2,7 +2,7 @@ import type { AnchorRejection, ChainAnchor } from "./anchor.ts"
 import { atVerifiedHead, type ChainState, emptyChain, verifyKeyringEntry } from "./chain.ts"
 import type { KeyringEntry } from "./entry.ts"
 import { isCancelledAdmission } from "./fold.ts"
-import { isStrictEd25519Signature } from "./ed25519-key.ts"
+import { ed25519SignaturePrecheck } from "./strict-25519/strict-25519.ts"
 import { openBatch } from "./open.ts"
 import { decodeB64 } from "./signatures.ts"
 import { receiverPass, wire } from "./receiver.ts"
@@ -86,7 +86,9 @@ export const importSnapshot = async (
   if (isCancelledAdmission(authority, snapshot.author.id)) return refuse("not_member")
   const verified = await verifySnapshotImport({ snapshot, chunks, entries: wire(covered) })
   if (!verified.ok) return refuse(REJECTION[verified.reason])
-  if (!isStrictEd25519Signature(decodeB64(snapshot.record_sig, 64) ?? new Uint8Array())) return refuse("bad_signature")
+  const empty = new Uint8Array()
+  const authorKey = decodeB64(snapshot.author.signing_public_key, 32) ?? empty
+  if (!ed25519SignaturePrecheck(authorKey, decodeB64(snapshot.record_sig, 64) ?? empty).ok) return refuse("bad_signature")
   const signingPublicKey = snapshot.author.signing_public_key
   const ctx = {
     account: snapshot.account,

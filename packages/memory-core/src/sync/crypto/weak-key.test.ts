@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { generateKeyPairSync } from "node:crypto"
 import type { DeviceKeyring } from "../keyring-port.ts"
 import { creatorAnchor } from "./anchor.ts"
 import { buildBatch } from "./build.ts"
 import { appendEntries, type ChainState, emptyChain } from "./chain.ts"
-import { isStrictEd25519Signature, isStrongEd25519Key } from "./ed25519-key.ts"
 import type { SyncEntry } from "./entry.ts"
 import { openBatch } from "./open.ts"
 import { type ParsedBody, parseBody } from "./parse.ts"
@@ -39,58 +37,6 @@ const weakKeyring = async (): Promise<DeviceKeyring> => {
 
 const run = (entries: ReadonlyArray<SyncEntry>, state: ChainState) => appendEntries(state, entries, createRejectionCounter())
 const refusal = (outcome: Awaited<ReturnType<typeof run>>) => (outcome.ok ? "accepted" : outcome.reason)
-const ff = "ff".repeat(30)
-const generatedKey = (): Uint8Array<ArrayBuffer> =>
-  Uint8Array.from(Buffer.from(generateKeyPairSync("ed25519").publicKey.export({ format: "jwk" }).x ?? "", "base64url"))
-
-describe("isStrongEd25519Key", () => {
-  test.each([
-    ["y = 0 (order 4)", "00".repeat(32)],
-    ["y = 0, x negative (order 4)", `${"00".repeat(31)}80`],
-    ["the identity (order 1)", `01${"00".repeat(31)}`],
-    ["the identity with the sign bit set (non-canonical)", `01${"00".repeat(30)}80`],
-    ["an order-8 point", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"],
-    ["its negation (order 8)", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85"],
-    ["the other order-8 point", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"],
-    ["its negation (order 8)", "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa"],
-    ["y = p - 1 (order 2)", `ec${ff}7f`],
-    ["y = p (non-canonical zero)", `ed${ff}7f`],
-    ["y = p + 1 (non-canonical one)", `ee${ff}7f`],
-    ["a y with no point on the curve", `02${"00".repeat(31)}`],
-    ["a valid key plus an order-8 point (mixed order)", "c51fa063c8acd6d17172fca4b9ae09f9778af8826bb715f227930bbbd439cd1a"],
-  ])("refuses %s", (_name, value) => {
-    expect(hex(value).length).toBe(32)
-    expect(isStrongEd25519Key(hex(value))).toBe(false)
-  })
-
-  test("accepts freshly generated keys and the fixture's real keys", () => {
-    for (let i = 0; i < 20; i++) expect(isStrongEd25519Key(generatedKey())).toBe(true)
-    for (const device of ["owner", "recovered"] as const) {
-      expect(isStrongEd25519Key(b64urlDecode(keyringFor(device).publicKeys().signing))).toBe(true)
-    }
-  })
-})
-
-describe("isStrictEd25519Signature (design 0003: R canonical and not small-order, S < L)", () => {
-  const L = 2n ** 252n + 27742317777372353535851937790883648493n
-  const scalar = (value: bigint): string => Buffer.from(Array.from({ length: 32 }, (_, i) => Number((value >> BigInt(8 * i)) & 0xffn))).toString("hex")
-  const realR = b64urlDecode(keyringFor("owner").publicKeys().signing)
-  const r = Buffer.from(realR).toString("hex")
-  test.each([
-    ["R = identity", `01${"00".repeat(31)}${scalar(1n)}`],
-    ["R of order 8", `26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05${scalar(1n)}`],
-    ["R non-canonical (y = p + 1)", `ee${ff}7f${scalar(1n)}`],
-    ["S = L", `${r}${scalar(L)}`],
-    ["S = L + 1", `${r}${scalar(L + 1n)}`],
-  ])("refuses %s", (_name, value) => {
-    expect(hex(value).length).toBe(64)
-    expect(isStrictEd25519Signature(hex(value))).toBe(false)
-  })
-
-  test("accepts a real signature's R with S below L", () => {
-    expect(isStrictEd25519Signature(hex(`${r}${scalar(L - 1n)}`))).toBe(true)
-  })
-})
 
 describe("every verify site refuses a signature under the identity key", () => {
   test("record signatures (keyring and batch entries) do not verify under it", async () => {

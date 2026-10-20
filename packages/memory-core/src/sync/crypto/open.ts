@@ -3,7 +3,7 @@ import { sha256B64 } from "./vendor/sync-format/jcs.ts"
 import { decodeObject, verifyObject } from "./vendor/sync-format/object.ts"
 import type { ObjectFailureReason, SyncObjectRecord } from "./vendor/sync-format/object-types.ts"
 import { decodeB64 } from "./signatures.ts"
-import { isStrictEd25519Signature, isStrongEd25519Key } from "./ed25519-key.ts"
+import { ed25519SignaturePrecheck, isStrongEd25519Key } from "./strict-25519/strict-25519.ts"
 
 export type BatchBinding = {
   readonly account: string
@@ -44,7 +44,7 @@ export const openBatch = async (
   const ctx = { account: binding.account, epoch: binding.epoch, authorId: binding.authorId, authorSigningPublicKey: signingKey }
   const verified = await verifyObject(bytes, ctx)
   if (!verified.ok) return refuse(verified.reason)
-  if (!isStrictEd25519Signature(bytes.subarray(bytes.length - 64))) return refuse("bad_signature")
+  if (!ed25519SignaturePrecheck(signingKey, bytes.subarray(bytes.length - 64)).ok) return refuse("bad_signature")
   const header = verified.header
   if (header.kind !== binding.kind) return refuse("kind_mismatch")
   const chunk = header.chunk
