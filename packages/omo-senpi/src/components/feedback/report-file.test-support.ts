@@ -11,22 +11,34 @@ export interface WindowsAclEntry {
   readonly type: "Allow" | "Deny"
 }
 
-/** The file's ACL as SIDs, read through Get-Acl so the check does not depend on localized account names. */
+/**
+ * The file's ACL as SIDs, so the check does not depend on localized account names. It reads the ACL through .NET
+ * rather than Get-Acl and passes no PSModulePath: a parent PowerShell 7 exports a PSModulePath that Windows PowerShell
+ * 5.1 cannot load its own modules from, which breaks every module cmdlet in the child.
+ */
 export const readWindowsAcl = (path: string): { readonly user: string; readonly entries: readonly WindowsAclEntry[] } => {
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    "$acl = Get-Acl -LiteralPath $env:OMO_ACL_PATH",
-    "$entries = @($acl.Access | ForEach-Object { @{ sid = $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; type = [string]$_.AccessControlType } })",
-    "@{ user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; entries = $entries } | ConvertTo-Json -Compress -Depth 3",
+    "'user=' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+    "$rules = [System.IO.FileInfo]::new($env:OMO_ACL_PATH).GetAccessControl().GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])",
+    "foreach ($rule in $rules) { 'rule=' + $rule.IdentityReference.Value + '|' + $rule.AccessControlType }",
   ].join("; ")
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath"))
   const result = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf8",
-    env: { ...process.env, OMO_ACL_PATH: path },
+    env: { ...env, OMO_ACL_PATH: path },
   })
-  if (result.status !== 0) throw new Error(`Get-Acl failed for ${path}: ${result.stderr}`)
-  const parsed = JSON.parse(result.stdout) as { user: string; entries: WindowsAclEntry[] | WindowsAclEntry | null }
-  const entries = parsed.entries === null ? [] : Array.isArray(parsed.entries) ? parsed.entries : [parsed.entries]
-  return { user: parsed.user, entries }
+  if (result.status !== 0) throw new Error(`reading the ACL failed for ${path}: ${result.stderr}`)
+  const lines = result.stdout.split(/\r?\n/)
+  const user = lines.find((line) => line.startsWith("user="))?.slice("user=".length)
+  if (user === undefined || user === "") throw new Error(`no current-user SID in the ACL output for ${path}: ${result.stdout}`)
+  const entries = lines.flatMap((line): WindowsAclEntry[] => {
+    if (!line.startsWith("rule=")) return []
+    const [sid, type] = line.slice("rule=".length).split("|")
+    return sid !== undefined && (type === "Allow" || type === "Deny") ? [{ sid, type }] : []
+  })
+  if (entries.length === 0) throw new Error(`no ACL entries read for ${path}: ${result.stdout}`)
+  return { user, entries }
 }
 
 export const unexpectedWindowsReaders = (acl: ReturnType<typeof readWindowsAcl>): readonly string[] => {
