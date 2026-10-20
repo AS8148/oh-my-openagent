@@ -241,3 +241,52 @@ describe("session_summary consent", () => {
     })
   })
 })
+
+// Lead ruling (2026-10-20): an opt-out set by environment variable belongs to one process. It must not
+// delete what another, consented session queued; only the persisted setting decides for everyone.
+function writeConsentedQueue(agentDir: string): string[] {
+  const dir = summaryDirOf(agentDir)
+  mkdirSync(join(dir, "pending"), { recursive: true })
+  const now = Date.now()
+  const owner = { pid: process.pid, bootId: "consented-session-boot" }
+  const uuid = "0395eae0-1111-4222-8333-944455556677"
+  writeFileSync(join(dir, "pending", `${uuid}.json`), JSON.stringify({
+    v: 2, consent: "enabled", scope: { cwd: "/repo" }, uuid, sessionHash: "hashed:consented", owner, createdAt: now,
+    properties: { $session_id: "hashed:consented", turns: 1, ended_by: "shutdown" },
+  }))
+  writeFileSync(join(dir, "hashed_consented.json"), JSON.stringify({
+    v: 2, consent: "enabled", scope: { cwd: "/repo" }, sessionHash: "hashed:consented", sessionRole: "root", owner,
+    heartbeatAt: now, epoch: "0123456789abcdef", seq: 1, sampleRate: 0.05, windowId: null, window: null,
+  }))
+  return queuedFilesOf(agentDir).sort()
+}
+
+describe("a per-process opt-out leaves other sessions' queue alone", () => {
+  for (const [label, env] of [
+    ["OMO_DISABLE_TELEMETRY=1", { OMO_DISABLE_TELEMETRY: "1" }],
+    ["DO_NOT_TRACK=1", { DO_NOT_TRACK: "1" }],
+    ["OMO_SENPI_SEND_ANONYMOUS_TELEMETRY=0", { OMO_SENPI_SEND_ANONYMOUS_TELEMETRY: "0" }],
+  ] as const) {
+    test(`#given a consented session's window and pending event #when another session opted out by ${label} runs #then both survive`, async () => {
+      await withTempAgentDir(async (agentDir) => {
+        const before = writeConsentedQueue(agentDir)
+        const recorder = createTransportRecorder()
+        await runSession(agentDir, recorder.factory, false, { env })
+
+        expect(recorder.messages).toEqual([])
+        expect(queuedFilesOf(agentDir).sort()).toEqual(before)
+      })
+    })
+  }
+
+  test("#given a consented session's queue #when the persisted setting turns telemetry off for its project #then the queue is purged", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      writeConsentedQueue(agentDir)
+      const recorder = createTransportRecorder()
+      await runSession(agentDir, recorder.factory, false, { configEnabled: false })
+
+      expect(recorder.messages).toEqual([])
+      expect(queuedFilesOf(agentDir)).toEqual([])
+    })
+  })
+})

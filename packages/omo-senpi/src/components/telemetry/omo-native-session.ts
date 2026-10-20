@@ -223,6 +223,19 @@ export function isOmoNativeTelemetryEnabled(
   return isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }) && configEnabled(options, eventCtx, env)
 }
 
+/**
+ * The persisted half of consent: the telemetry setting in the config files, for a scope's cwd. Environment
+ * opt-outs are left out on purpose: they belong to one process, while this decides for every process that
+ * shares the queue (see `purgeUnconsentedQueue`).
+ */
+export function isOmoNativeTelemetryConfigEnabled(
+  options: Pick<OmoNativeSessionOptions, "diagnostics" | "isConfigEnabled">,
+  eventCtx: unknown,
+  env: TelemetryEnv,
+): boolean {
+  return configEnabled(options, eventCtx, env)
+}
+
 function configEnabled(
   options: Pick<OmoNativeSessionOptions, "diagnostics" | "isConfigEnabled">,
   eventCtx: unknown,
