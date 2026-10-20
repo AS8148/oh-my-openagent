@@ -94,6 +94,7 @@ export function mergeNativeSkills(
   for (const native of nativeSkills) {
     const nativeName = normalizeSkillName(native.name)
     if (knownNames.has(nativeName)) continue
+    if (disabledSkillAliases && isDisabledSkillAlias(nativeSkillToAliasCheckSkill(native), disabledSkillAliases)) continue
     let loadedSkill: LoadedSkill
     try { loadedSkill = nativeSkillToLoadedSkill(native, directory) } catch (error) {
       if (error instanceof SkillLinkBlockedError) {
@@ -102,7 +103,6 @@ export function mergeNativeSkills(
       }
       throw error
     }
-    if (disabledSkillAliases && isDisabledSkillAlias(nativeSkillToAliasCheckSkill(native), disabledSkillAliases)) continue
     skills.push(loadedSkill)
     knownNames.add(nativeName)
   }
@@ -120,6 +120,7 @@ export function mergeNativeSkillInfos(
   for (const native of nativeSkills) {
     const nativeName = normalizeSkillName(native.name)
     if (knownNames.has(nativeName)) continue
+    if (disabledSkillAliases && isDisabledSkillAlias(nativeSkillToAliasCheckSkill(native), disabledSkillAliases)) continue
     try { nativeSkillToLoadedSkill(native, directory) } catch (error) {
       if (error instanceof SkillLinkBlockedError) {
         onRejected?.(nativeName, error)
@@ -127,7 +128,6 @@ export function mergeNativeSkillInfos(
       }
       throw error
     }
-    if (disabledSkillAliases && isDisabledSkillAlias(nativeSkillToAliasCheckSkill(native), disabledSkillAliases)) continue
     skillInfos.push({
       name: native.name,
       description: native.description,
