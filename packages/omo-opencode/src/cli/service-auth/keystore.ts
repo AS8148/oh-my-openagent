@@ -42,26 +42,31 @@ export function createCredentialStore(
   const unavailable = (error: unknown) => isLocked(error)
     ? new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
     : new SignInError(`Cannot access ${platformName}. Unlock or enable the OS credential store and try again. Credentials are never saved to a file.`)
+  // libsecret answers a locked collection by asking the keyring to show its unlock prompt, so on Linux the
+  // Locked property is read over D-Bus BEFORE any secret call; a locked or missing store is never touched.
+  const assertUsable = async () => {
+    if (platform !== "linux") return
+    const lock = await lockProbe()
+    if (lock === "locked") throw new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
+    if (lock === "absent") throw new SecretServiceUnavailableError(`No ${platformName} is running. Start a keyring (for example gnome-keyring) and try again. Credentials are never saved to a file.`)
+  }
   return {
     async read() {
+      await assertUsable()
       let value: string | null
       try { value = await secrets.get(key) } catch (error) { throw unavailable(error) }
-      if (value === null) {
-        if (platform !== "linux") return null
-        const lock = await lockProbe()
-        if (lock === "locked") throw new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
-        if (lock === "absent") throw new SecretServiceUnavailableError(`No ${platformName} is running. Start a keyring (for example gnome-keyring) and try again. Credentials are never saved to a file.`)
-        return null
-      }
+      if (value === null) return null
       try { return credentialSchema.parse(JSON.parse(value)) } catch {
         throw new SignInError("Stored sign-in data is invalid. Run omo logout, then omo login.")
       }
     },
     async write(value) {
       // One OS-store replacement commits the rotating token and its access token together.
+      await assertUsable()
       try { await secrets.set({ ...key, value: JSON.stringify(credentialSchema.parse(value)) }) } catch (error) { throw unavailable(error) }
     },
     async clear() {
+      await assertUsable()
       try { await secrets.delete(key) } catch (error) { throw unavailable(error) }
     },
   }

@@ -204,6 +204,20 @@ describe("omo account on Linux, where a locked Secret Service read looks empty (
     }
   })
 
+  test("a locked collection is never touched: no secret call, so the keyring has nothing to prompt for", async () => {
+    const calls: string[] = []
+    const watched = {
+      get: async () => { calls.push("get"); return null },
+      set: async () => { calls.push("set") },
+      delete: async () => { calls.push("delete"); return true },
+    }
+    for (const [args, stdin] of [[["show"]], [["forget"]], [["adopt"], JSON.stringify(credential("dev_n", 60_000))]] as const) {
+      const result = await run(linuxStore("locked", watched), [...args], stdin === undefined ? {} : { stdin })
+      expect(result.code).toBe(ACCOUNT_EXIT.keychainLocked)
+    }
+    expect(calls).toEqual([])
+  })
+
   test("no reachable Secret Service is its own outcome, never signed out", async () => {
     const result = await run(linuxStore("absent"), ["show"])
     expect({ code: result.code, out: result.out }).toEqual({ code: ACCOUNT_EXIT.keychainUnavailable, out: [{ keychain: "unavailable" }] })

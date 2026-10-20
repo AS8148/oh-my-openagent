@@ -28,7 +28,7 @@ describe("OS credential storage", () => {
       get: async () => { throw new Error(grant.refreshToken) },
       set: async () => { throw new Error(grant.refreshToken) },
       delete: async () => { throw new Error(grant.refreshToken) },
-    }, "linux")
+    }, "linux", async () => "unlocked")
     for (const action of [() => store.read(), () => store.write({ ...grant, ...privateKeys }), () => store.clear()]) {
       try { await action(); throw new Error("unexpected success") } catch (error) {
         expect(String(error)).toContain("Secret Service")
