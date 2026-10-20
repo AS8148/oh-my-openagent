@@ -10,6 +10,7 @@ import { ACCOUNT, appendBatch, appendKeyring, chain, deviceId, epochKey, keyring
 import { buildBatch } from "./build.ts"
 import { b64urlDecode, sha256B64 } from "./vendor/sync-format/jcs.ts"
 import * as vendorFold from "./vendor/sync-format/fold.ts"
+import * as vendorReceive from "./vendor/sync-format/receive.ts"
 import { signFramed } from "./vendor/sync-format/keys.ts"
 import { snapshotPreimage } from "./vendor/sync-format/snapshot.ts"
 
@@ -262,6 +263,44 @@ describe("the receiver walks the chain once per pull, not once per entry", () =>
       expect(await receiverRefusal(history, batch)).toBe(whole.ok ? null : whole.reason)
     }
   })
+})
+
+describe("the receiver checks one new entry in constant work (#10655)", () => {
+  // Every entry the vendored receiver is handed: the length of each list folded, plus one per entry
+  // an incremental receiver receives. Appending one entry must not hand it the verified history again.
+  const handedPerAppend = async (work: (handed: () => number) => Promise<void>): Promise<void> => {
+    let received = 0
+    const create = vendorReceive.createKeyringReceiver
+    const fold = spyOn(vendorFold, "foldRefusal")
+    const chain = spyOn(vendorReceive, "receiveKeyringChain")
+    spyOn(vendorReceive, "createKeyringReceiver").mockImplementation(() => {
+      const receiver = create()
+      return { ...receiver, receive: (entry) => ((received += 1), receiver.receive(entry)) }
+    })
+    const listed = (calls: ReadonlyArray<ReadonlyArray<unknown>>) => calls.reduce((sum, [entries]) => sum + (Array.isArray(entries) ? entries.length : 0), 0)
+    try {
+      await work(() => listed(fold.mock.calls) + listed(chain.mock.calls) + received)
+    } finally {
+      mock.restore()
+    }
+  }
+
+  test("appending one rotation hands the receiver the same few entries at every chain length up to 1,000", async () => {
+    await handedPerAppend(async (handed) => {
+      let state = await verified([...mainUntil("post_join_rotation"), record("post_join_rotation")])
+      const perAppend: number[] = []
+      for (let i = 0; i < 1000; i++) {
+        const next = await rotation(state, "A")
+        const before = handed()
+        const { outcome } = await run([next], state)
+        if (!outcome.ok) throw new Error(`rotation ${i} refused: ${outcome.reason}`)
+        perAppend.push(handed() - before)
+        state = outcome.state
+      }
+      expect(Math.max(...perAppend)).toBeLessThanOrEqual(1)
+      expect(perAppend[999]).toBe(perAppend[9])
+    })
+  }, 60000)
 })
 
 describe("an entry later in a pull never changes the verdict of an earlier one", () => {
