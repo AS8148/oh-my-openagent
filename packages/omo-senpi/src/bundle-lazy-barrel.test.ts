@@ -23,6 +23,7 @@ const BUNDLE_FILES = [
   "omo-memory-palace.js",
   "omo-session-history.js",
   "omo-dori-migration.js",
+  "omo-telemetry-posthog.js",
   "omo-memory-sync.js",
   "omo-thread-client.js",
 ] as const
