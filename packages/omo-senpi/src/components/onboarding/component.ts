@@ -99,36 +99,28 @@ export function createOnboardingComponent(
       const scanEnvironment = dependencies.scanEnvironment ?? (() => ({}))
       // The first onboarding turn awaits only `omo setup`'s sources (sessions: false): its rows, value
       // summary and migration inventory. Session digests are read by a second scan that starts only
-      // when onboarding_understand runs, after consent. Both run once per process, never at register().
-      let inventoryScanned: Promise<TuiScanResult | undefined> | undefined
-      const inventoryScan = (): Promise<TuiScanResult | undefined> => {
-        inventoryScanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment(), false)))().catch(() => undefined)
-        return inventoryScanned
-      }
-      let understandingScanned: Promise<TuiScanResult | undefined> | undefined
-      const understandingScan = (): Promise<TuiScanResult | undefined> => {
-        understandingScanned ??= (dependencies.scan ?? (() => defaultScan(scanEnvironment(), true)))().catch(() => undefined)
-        return understandingScanned
-      }
+      // when onboarding_understand runs, after consent. Each runs once per process, never at register(),
+      // and only a success is kept: a failed run answers undefined and the next call retries it.
+      const inventoryScan = onceUntilSuccess(dependencies.scan ?? (() => defaultScan(scanEnvironment(), false)))
+      const understandingScan = onceUntilSuccess(dependencies.scan ?? (() => defaultScan(scanEnvironment(), true)))
       // An injected inventory replaces the scan's; the default scan then never starts for it.
       const injectedFacts = dependencies.migrationFacts
-      let injected: Promise<string | undefined> | undefined
-      let history: Promise<void> | undefined
-      const withInventory = async (base: string): Promise<string> => {
-        // Session history is never awaited here: it starts with the claim, runs bounded in the
-        // background and rides the next turn when it lands; a hang or failure just leaves it out.
-        history ??= (dependencies.sessionHistory
+      const injected = injectedFacts === undefined ? undefined : onceUntilSuccess(injectedFacts)
+      // Session history is never awaited: it starts with the claim, runs bounded in the background and
+      // rides the next turn when it lands; a hang or failure just leaves it out until the next claim.
+      const history = onceUntilSuccess(async () => {
+        const content = await (dependencies.sessionHistory
           ?? (async () => (await loadOnboardingScanRuntime()).onboardingHistorySummary(scanEnvironment())))()
-          .then((content) => {
-            if (content !== undefined && pending !== undefined) {
-              return pi.sendMessage({ customType: "omo-onboarding:history", content, display: false }, { deliverAs: "nextTurn" })
-            }
-          })
-          .catch(() => undefined)
+        if (content !== undefined && pending !== undefined) {
+          await pi.sendMessage({ customType: "omo-onboarding:history", content, display: false }, { deliverAs: "nextTurn" })
+        }
+      })
+      const withInventory = async (base: string): Promise<string> => {
+        void history()
         const result = injectedFacts !== undefined && dependencies.scan === undefined ? undefined : await inventoryScan()
-        const facts = injectedFacts === undefined
+        const facts = injected === undefined
           ? result?.inventory
-          : await (injected ??= injectedFacts().catch(() => undefined))
+          : await injected()
         const parts = [base]
         if (facts !== undefined) parts.push(` Migration inventory (from the same scan omo setup runs): ${facts}`)
         if (result !== undefined) parts.push(`\n\n${result.context}`)
@@ -276,6 +268,19 @@ export function createOnboardingComponent(
         })
       }
     },
+  }
+}
+
+// Concurrent callers share one in-flight run and a success is kept for the process; a rejected run
+// answers undefined to everyone waiting on it and is dropped, so the next call starts a fresh one.
+function onceUntilSuccess<T>(run: () => Promise<T>): () => Promise<T | undefined> {
+  let kept: Promise<T> | undefined
+  return () => {
+    const current = kept ??= Promise.resolve().then(run)
+    return current.catch(() => {
+      if (kept === current) kept = undefined
+      return undefined
+    })
   }
 }
 
