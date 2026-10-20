@@ -61,6 +61,26 @@ async function repoWithRootSpacedRenameAndMerge(exec: GitExec): Promise<{ readon
   return { dir, repo: new GitMemoryRepo({ dir, agentId: "agent", exec }) }
 }
 
+// A commit carrying an SSH signature header, written without any signing tool: git reports a signature
+// for it under `log.showSignature` whatever the verifier says, which is all these tests need.
+async function commitSigned(dir: string, files: Record<string, string>, message: string, at: number): Promise<void> {
+  for (const [path, content] of Object.entries(files)) {
+    await mkdir(dirname(join(dir, path)), { recursive: true })
+    await writeFile(join(dir, path), content)
+  }
+  await run(dir, ["add", "-A"])
+  const tree = (await run(dir, ["write-tree"])).trim()
+  const parent = (await run(dir, ["rev-parse", "HEAD"])).trim()
+  const object = [
+    `tree ${tree}`, `parent ${parent}`, `author t <t@t> ${at} +0000`, `committer t <t@t> ${at} +0000`,
+    "gpgsig -----BEGIN SSH SIGNATURE-----", " U1NIU0lH", " -----END SSH SIGNATURE-----", "", message, "",
+  ].join("\n")
+  const objectPath = join(dir, ".git", "signed-commit")
+  await writeFile(objectPath, object)
+  const sha = (await run(dir, ["hash-object", "-t", "commit", "-w", objectPath])).trim()
+  await run(dir, ["update-ref", "HEAD", sha])
+}
+
 async function diffTreePaths(dir: string, sha: string): Promise<string[]> {
   return (await run(dir, ["diff-tree", "--no-commit-id", "--name-only", "-z", "-r", sha])).split("\0").filter(Boolean)
 }
@@ -96,5 +116,38 @@ describe("GitMemoryRepo.log includePaths", () => {
     expect(commits.map((commit) => commit.subject)).toEqual(["side edit"])
     expect(commits[0]?.paths).toEqual(await diffTreePaths(dir, commits[0]?.sha ?? ""))
     expect(commits[0]?.paths).toEqual(["reference/side.md", "system/persona.md"])
+  })
+})
+
+// Contract: the user's git config never changes what a memory log read returns (#10726 review).
+describe("GitMemoryRepo log reads under user git config", () => {
+  it("#given log.follow=true in the git config #when a single-path log reads paths #then it returns the commits like diff-tree", async () => {
+    // given
+    const { dir, repo } = await repoWithRootSpacedRenameAndMerge(countingExec().exec)
+    await run(dir, ["config", "log.follow", "true"])
+
+    // when
+    const commits = await repo.log({ paths: ["reference/side.md"], includePaths: true })
+
+    // then
+    expect(commits.map((commit) => commit.subject)).toEqual(["side edit"])
+    expect(commits[0]?.paths).toEqual(await diffTreePaths(dir, commits[0]?.sha ?? ""))
+  })
+
+  it("#given log.showSignature=true and signed commits #when log, log with paths and the HEAD time are read #then each answer equals the one without the setting", async () => {
+    // given
+    const { dir, repo } = await repoWithRootSpacedRenameAndMerge(countingExec().exec)
+    await commitSigned(dir, { "reference/signed.md": "s\n" }, "signed one", 1_700_000_000)
+    await commitSigned(dir, { "reference/signed.md": "t\n" }, "signed two", 1_700_000_100)
+    const plain = { log: await repo.log({ limit: 5 }), paths: await repo.log({ limit: 5, includePaths: true }), head: await repo.headCommitTimestamp() }
+    await run(dir, ["config", "log.showSignature", "true"])
+
+    // when
+    const configured = { log: await repo.log({ limit: 5 }), paths: await repo.log({ limit: 5, includePaths: true }), head: await repo.headCommitTimestamp() }
+
+    // then
+    expect(plain.head).toBe(1_700_000_100)
+    expect(plain.log.slice(0, 2).map((commit) => commit.subject)).toEqual(["signed two", "signed one"])
+    expect(configured).toEqual(plain)
   })
 })

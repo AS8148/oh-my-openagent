@@ -10,6 +10,7 @@ import { join } from "node:path"
 
 import { existsSync, mkdir, rm } from "../../../fs/resilient"
 import { createNodeGitExec, type GitExec } from "../../../git/exec"
+import { STABLE_LOG_OUTPUT } from "../../../git/stable-log-output"
 import type { SyncRepo } from "../ports"
 
 const SYNC_AUTHOR = { name: "OmO Sync", email: "sync@omo.invalid" }
@@ -86,7 +87,7 @@ export function createGitSyncRepo(options: GitSyncRepoOptions): SyncRepo {
     },
     async hasSyncCommit(range) {
       if ((await head()) === null) return false
-      const trailers = await run(["log", `-${TRAILER_SCAN}`, "--format=%(trailers:key=Sync-Seq,valueonly)", "HEAD"])
+      const trailers = await run([...STABLE_LOG_OUTPUT, "log", `-${TRAILER_SCAN}`, "--format=%(trailers:key=Sync-Seq,valueonly)", "HEAD"])
       return trailers.split("\n").includes(range)
     },
   }
