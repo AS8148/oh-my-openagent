@@ -1,4 +1,5 @@
 import type { ManagedChildEvent } from "./manager/child-handle"
+import { HOST_TURN_RESUMED_EVENT, TASK_AWAITING_INPUT_EVENT } from "./manager/host-turn-resumed"
 import { createRunStatsTracker } from "./run-stats"
 import type { ResolvedModelRecord } from "./state"
 import { composeStatusLine, formatStatusTarget, taskIdentityLabel } from "./status-line"
@@ -43,6 +44,7 @@ export function createChildProgress(
   target: ChildProgressTarget,
   startedAt: number,
   now: () => number = Date.now,
+  options?: { readonly awaitingInput?: boolean },
 ): ChildProgress {
   const tracker = createRunStatsTracker(startedAt, now)
   let currentTool: string | undefined
@@ -51,6 +53,8 @@ export function createChildProgress(
   let resolvedModel = target.resolvedModel
   let model = target.model
   let fallbackCount = 0
+  let turnResumed = false
+  let awaitingInput = options?.awaitingInput === true
 
   const activity = (stats: ReturnType<typeof tracker.snapshot>): string =>
     composeStatusLine({
@@ -63,12 +67,20 @@ export function createChildProgress(
         fallbackCount,
       }),
       stats,
-      verb: selectLiveActivityVerb({ tool: currentTool, turns: stats.turns, failedTurns: stats.failed_turns }),
+      verb: selectLiveActivityVerb({ tool: currentTool, turns: stats.turns, failedTurns: stats.failed_turns, turnResumed, awaitingInput }),
     })
 
   return {
     accept(event): boolean {
       const statsChanged = tracker.accept(event)
+      if (event.type === HOST_TURN_RESUMED_EVENT) {
+        turnResumed = true
+        return true
+      }
+      if (event.type === TASK_AWAITING_INPUT_EVENT) {
+        awaitingInput = true
+        return true
+      }
       if (event.type === "retry_fallback_applied" && event.to !== undefined) {
         resolvedModel = undefined
         model = event.to
@@ -115,14 +127,20 @@ export function createChildProgress(
 // The live-row verb for a child that has not settled: a tool in flight always leads ("running
 // <tool>"), and before the first successful assistant turn the row must not claim motion - it
 // reads "starting", or "retrying" once a failed assistant turn proved the child is alive. Only a
-// successful turn earns the plain "running".
+// successful turn - or a turn a host reattach found in flight and resumed - earns the plain "running".
+// A reattach that flagged the resumed session waiting (senpi#3266) overrides the idle verbs: the
+// child cannot move on its own, so the row reads "resumed, waiting for input" until real motion
+// (a tool start, an assistant message) proves the waiting is over.
 export function selectLiveActivityVerb(input: {
   readonly tool?: string
   readonly turns: number
   readonly failedTurns?: number
+  readonly turnResumed?: boolean
+  readonly awaitingInput?: boolean
 }): string {
   if (input.tool !== undefined) return `running ${input.tool}`
-  if (input.turns > 0) return "running"
+  if (input.turns > 0 || input.turnResumed === true) return "running"
+  if (input.awaitingInput === true) return "resumed, waiting for input"
   if ((input.failedTurns ?? 0) > 0) return "retrying"
   return "starting"
 }

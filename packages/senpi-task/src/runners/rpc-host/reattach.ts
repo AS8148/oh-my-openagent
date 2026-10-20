@@ -1,4 +1,5 @@
-import type { HostSessionIdentity, HostSessionPort } from "./handle-port"
+import type { HostSessionFacts, HostSessionIdentity, HostSessionPort } from "./handle-port"
+import type { HostParkReason } from "./session-client"
 
 /**
  * What a reattach produced: a fresh port on the daemon (a new connection, possibly a new host
@@ -12,13 +13,30 @@ export interface HostSessionReattached {
 }
 
 /**
- * The runner's side of transport recovery: re-ensure the daemon and reopen this session by path.
- * Resolves undefined when the retries are exhausted; the handle then ends the child as it always
- * did (`crashed`, `transport_gone`). Never throws.
+ * The recorded endpoint answered, but the session may not be reopened there or anywhere else: the
+ * child parks with this reason (the record goes `rpc_detached`) instead of ending.
  */
-export type HostSessionReattach = (session: HostSessionIdentity) => Promise<HostSessionReattached | undefined>
+export interface HostSessionReattachRefused {
+  readonly refused: HostParkReason
+}
+
+/**
+ * The runner's side of transport recovery: re-ensure the RECORDED endpoint (`session.socket`) and
+ * reopen this session by path there. Resolves undefined when the retries are exhausted; the handle
+ * then ends the child as it always did (`crashed`, `transport_gone`). Never throws.
+ */
+export type HostSessionReattach = (
+  session: HostSessionFacts,
+) => Promise<HostSessionReattached | HostSessionReattachRefused | undefined>
 
 /** A command met a dead transport: the senpi client's loss error, or the session client already emptied. */
+/** The RPC client's own deadline message: the peer accepted the connection and never answered. */
+export const RPC_RESPONSE_TIMEOUT_PREFIX = "Timeout waiting for response to "
+
+export function isRpcResponseTimeout(error: unknown): error is Error {
+  return error instanceof Error && error.message.startsWith(RPC_RESPONSE_TIMEOUT_PREFIX)
+}
+
 export function isTransportLossError(error: unknown): boolean {
   if (!(error instanceof Error) || !("code" in error)) return false
   return error.code === "rpc_transport_gone" || error.code === "session_detached"

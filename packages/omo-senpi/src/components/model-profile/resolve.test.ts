@@ -17,6 +17,7 @@ const SOL_FAST = "chatgpt-subscription/gpt-6-sol-fast"
 const SOL_COPILOT = "github-copilot/gpt-6-sol"
 const SOL_56 = "chatgpt-subscription/gpt-5.6-sol"
 const SOL_56_COPILOT = "github-copilot/gpt-5.6-sol"
+const SOL_61 = "chatgpt-subscription/gpt-6.1-sol"
 const ASTRA = "chatgpt-subscription/gpt-6-astra"
 
 const DAILY_NORMAL = {
@@ -132,7 +133,7 @@ describe("resolveModelProfile", () => {
     expect(result).toEqual({
       kind: "unavailable",
       profile: DAILY_NORMAL,
-      chain: [OPUS_SUBSCRIPTION, "kimi-coding/kimi-k3", "zai-coding-plan/glm-5.3"],
+      chain: [OPUS_SUBSCRIPTION, "kimi-coding/kimi-k3", "zai/glm-5.3"],
     })
   })
 
@@ -146,8 +147,8 @@ describe("resolveModelProfile", () => {
     expect(result).toEqual({
       kind: "unknown",
       name: "nope",
-      known: ["daily-heavy", "daily-normal", "geeky-heavy", "geeky-normal", "night-shift", "recommended"],
-      message: 'model_profile "nope" is not defined; known profiles: daily-heavy, daily-normal, geeky-heavy, geeky-normal, night-shift, recommended',
+      known: ["daily-heavy", "daily-normal", "geeky-heavy", "geeky-normal", "night-shift"],
+      message: 'model_profile "nope" is not defined; known profiles: daily-heavy, daily-normal, geeky-heavy, geeky-normal, night-shift',
     })
   })
 
@@ -157,7 +158,7 @@ describe("resolveModelProfile", () => {
     expect(result).toMatchObject({
       kind: "unknown",
       name: "",
-      known: ["daily-heavy", "daily-normal", "geeky-heavy", "geeky-normal", "recommended"],
+      known: ["daily-heavy", "daily-normal", "geeky-heavy", "geeky-normal"],
     })
   })
 })
@@ -192,9 +193,20 @@ describe("builtin chain routing", () => {
       expect(result).toMatchObject({
         kind: "unknown",
         name,
-        known: ["daily-heavy", "daily-normal", "geeky-heavy", "geeky-normal", "recommended"],
+        known: ["daily-heavy", "daily-normal", "geeky-heavy", "geeky-normal"],
       })
     }
+  })
+
+  it("resolves geeky-normal to gpt-6.1-sol medium when the subscription serves it next to gpt-5.6-sol", () => {
+    const result = resolveModelProfile({ active: "geeky-normal", availableModels: [SOL_56, SOL_61] })
+
+    expect(result).toMatchObject({
+      kind: "resolved",
+      provider: "chatgpt-subscription",
+      modelId: "gpt-6.1-sol",
+      reasoning: "medium",
+    })
   })
 
   it("resolves geeky-normal to gpt-5.6-sol medium when only Copilot serves it", () => {
@@ -245,6 +257,34 @@ describe("builtin chain routing", () => {
     })
   })
 
+  it("never serves a builtin lane from a gateway's copy of its models (#9146)", () => {
+    for (const active of ["daily-normal", "daily-heavy", "geeky-normal", "geeky-heavy"]) {
+      const result = resolveModelProfile({
+        active,
+        availableModels: [
+          "openrouter/anthropic/claude-opus-5.5",
+          "opengateway/anthropic/claude-fable-5-1",
+          "openrouter/moonshotai/kimi-k3",
+          "openrouter/openai/gpt-6-astra",
+          "openrouter/openai/gpt-5.6-sol",
+          "office-gateway/gpt-5.6-sol",
+        ],
+      })
+
+      expect(result.kind, active).toBe("unavailable")
+    }
+  })
+
+  it("lets a user's bare model id, which names no provider, match a gateway", () => {
+    const result = resolveModelProfile({
+      profiles: { mine: { models: ["gpt-5.6-sol"] } },
+      active: "mine",
+      availableModels: ["office-gateway/gpt-5.6-sol"],
+    })
+
+    expect(result).toMatchObject({ kind: "resolved", provider: "office-gateway", modelId: "gpt-5.6-sol" })
+  })
+
   it("keeps the ChatGPT subscription ahead of the openai API lane for geeky-heavy astra", () => {
     const result = resolveModelProfile({
       active: "geeky-heavy",
@@ -255,17 +295,17 @@ describe("builtin chain routing", () => {
       kind: "resolved",
       provider: "chatgpt-subscription",
       modelId: "gpt-6-astra",
-      reasoning: "xhigh",
+      reasoning: "high",
     })
   })
 
-  it("resolves geeky-heavy to astra xhigh", () => {
+  it("resolves geeky-heavy to astra high", () => {
     const result = resolveModelProfile({ active: "geeky-heavy", availableModels: [ASTRA, SOL_FAST] })
 
     expect(result).toMatchObject({
       kind: "resolved",
       modelId: "gpt-6-astra",
-      reasoning: "xhigh",
+      reasoning: "high",
     })
   })
 
@@ -346,5 +386,25 @@ describe("builtin chain routing", () => {
       reasoning: "high",
       skipped: [],
     })
+  })
+
+  it("picks zai/glm-5.3 on daily-normal when only a zai key serves glm", () => {
+    const result = resolveModelProfile({ active: "daily-normal", availableModels: ["zai/glm-5.3"] })
+
+    expect(result).toMatchObject({
+      kind: "resolved",
+      provider: "zai",
+      modelId: "glm-5.3",
+      reasoning: "max",
+    })
+  })
+
+  it("does not pick OpenCode zai-coding-plan on daily-normal", () => {
+    const result = resolveModelProfile({
+      active: "daily-normal",
+      availableModels: ["zai-coding-plan/glm-5.3"],
+    })
+
+    expect(result.kind).toBe("unavailable")
   })
 })

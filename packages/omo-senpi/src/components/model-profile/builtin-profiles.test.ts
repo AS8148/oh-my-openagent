@@ -2,11 +2,16 @@
 
 import { describe, expect, it } from "bun:test"
 
-import { BUILTIN_MODEL_PROFILES, DEFAULT_MODEL_PROFILE_ID } from "./builtin-profiles"
+import {
+  BUILTIN_MODEL_PROFILES,
+  DEFAULT_MODEL_PROFILE_ID,
+  DEFAULT_MODEL_PROFILE_ORDER,
+  RETIRED_MODEL_PROFILE_IDS,
+} from "./builtin-profiles"
 import { KNOWN_MODELS } from "../telemetry/model-vocabulary"
 
 const LANE_IDS = ["daily-normal", "daily-heavy", "geeky-normal", "geeky-heavy"] as const
-const EXPECTED_IDS = ["recommended", ...LANE_IDS] as const
+const EXPECTED_IDS = LANE_IDS
 
 const BANNED_VENDOR_TOKENS: readonly string[] = [["mini", "max"].join(""), ["gem", "ini"].join("")]
 
@@ -23,7 +28,8 @@ function chainOf(profile: string): readonly string[] {
 }
 
 describe("BUILTIN_MODEL_PROFILES", () => {
-  it("ships the recommended default then the four lane profiles in picker order", () => {
+  // Default + table contract (#10029): every builtin is a lane; there is no Recommended profile.
+  it("ships exactly the four lane profiles in picker order", () => {
     expect(Object.keys(BUILTIN_MODEL_PROFILES)).toEqual([...EXPECTED_IDS])
   })
 
@@ -39,32 +45,21 @@ describe("BUILTIN_MODEL_PROFILES", () => {
     }
   })
 
-  it("uses recommended, which is not a lane, as the unset-config default id", () => {
-    expect(DEFAULT_MODEL_PROFILE_ID).toBe("recommended")
-    const recommended = BUILTIN_MODEL_PROFILES[DEFAULT_MODEL_PROFILE_ID]
-    expect(recommended?.displayName).toBe("Recommended")
-    expect(recommended?.family).toBeUndefined()
-    expect(recommended?.tier).toBeUndefined()
-    expect(recommended?.rankedProvidersOnly).toBe(true)
+  it("starts unset config on Daily · Normal, then the other lanes in order; (#10029)", () => {
+    expect(DEFAULT_MODEL_PROFILE_ORDER).toEqual(["daily-normal", "daily-heavy", "geeky-normal", "geeky-heavy"])
+    expect(DEFAULT_MODEL_PROFILE_ID).toBe("daily-normal")
   })
 
-  // Mirrors senpi's RECOMMENDED_DEFAULT_MODELS (recommended-models/index.ts, senpi#2074), so the TUI
-  // and the desktop start from one order. Change both together.
-  it("orders recommended opus medium, fable xhigh, kimi max, astra xhigh, sol medium, glm max", () => {
-    expect(chainOf("recommended")).toEqual([
-      "claude-opus-5-5 medium",
-      "claude-fable-5-1 xhigh",
-      "kimi-k3 max",
-      "gpt-6-astra xhigh",
-      "gpt-6-sol medium",
-      "glm-5.3 max",
-    ])
+  // Migration contract: a saved config may still name the retired id; it must never be a builtin again.
+  it("retires recommended: no builtin carries that id", () => {
+    expect([...RETIRED_MODEL_PROFILE_IDS]).toEqual(["recommended"])
+    for (const id of RETIRED_MODEL_PROFILE_IDS) expect(BUILTIN_MODEL_PROFILES[id]).toBeUndefined()
   })
 
-  it("never lists a gateway aggregator on a recommended rung", () => {
+  it("never lists a gateway aggregator on a builtin rung", () => {
     const gateways = ["opengateway", "openrouter", "vercel-ai-gateway", "cloudflare-ai-gateway"]
-    const offenders = (BUILTIN_MODEL_PROFILES["recommended"]?.models ?? []).flatMap((rung) =>
-      rung.providers.filter((provider) => gateways.includes(provider)),
+    const offenders = rungs().flatMap((rung) =>
+      rung.providers.filter((provider) => gateways.includes(provider)).map((provider) => `${rung.profile}: ${provider}`),
     )
     expect(offenders).toEqual([])
   })
@@ -102,6 +97,15 @@ describe("BUILTIN_MODEL_PROFILES", () => {
     expect(misordered).toEqual([])
   })
 
+  it("heads every GLM rung with engine zai then zai-coding-cn", () => {
+    const glmRungs = rungs().filter((rung) => rung.model.startsWith("glm-"))
+    expect(glmRungs.length).toBeGreaterThan(0)
+    const misordered = glmRungs
+      .filter((rung) => rung.providers[0] !== "zai" || rung.providers[1] !== "zai-coding-cn")
+      .map((rung) => `${rung.profile}: ${rung.providers.join("|")}/${rung.model}`)
+    expect(misordered).toEqual([])
+  })
+
   it("heads every Claude rung with the anthropic-subscription lane", () => {
     const claudeRungs = rungs().filter((rung) => rung.model.startsWith("claude-"))
     expect(claudeRungs.length).toBeGreaterThan(0)
@@ -122,18 +126,20 @@ describe("BUILTIN_MODEL_PROFILES", () => {
     ])
   })
 
-  it("runs geeky-normal as gpt-5.6-sol medium on every GPT lane", () => {
+  it("runs geeky-normal as gpt-6.1-sol-fast then gpt-6.1-sol medium on the OpenAI lanes, then gpt-5.6-sol medium on every GPT lane", () => {
     expect(BUILTIN_MODEL_PROFILES["geeky-normal"]?.models).toEqual([
+      { providers: ["chatgpt-subscription", "openai"], model: "gpt-6.1-sol-fast", variant: "medium" },
+      { providers: ["chatgpt-subscription", "openai"], model: "gpt-6.1-sol", variant: "medium" },
       { providers: ["chatgpt-subscription", "openai", "github-copilot", "opencode"], model: "gpt-5.6-sol", variant: "medium" },
     ])
   })
 
-  it("runs geeky-heavy as astra xhigh with the same provider ranking as deep-high", () => {
+  it("runs geeky-heavy as astra high with the same provider ranking as deep-high", () => {
     expect(BUILTIN_MODEL_PROFILES["geeky-heavy"]?.models).toEqual([
       {
         providers: ["chatgpt-subscription", "openai", "github-copilot", "opencode"],
         model: "gpt-6-astra",
-        variant: "xhigh",
+        variant: "high",
       },
     ])
   })

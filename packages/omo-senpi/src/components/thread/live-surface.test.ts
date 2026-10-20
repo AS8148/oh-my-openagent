@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { once } from "node:events"
+import { EventEmitter, once } from "node:events"
 import { mkdtempSync, rmSync } from "node:fs"
 import { createServer, type Socket } from "node:net"
 import { join, resolve } from "node:path"
 import { TASK_HOST_SOCKET_ENV_NAMES } from "../../../../senpi-task/src/runners/rpc-host/daemon"
 import { createLiveThreadSurface, resolveThreadSocket, THREAD_SOCKET_ENV_NAMES } from "./live-surface"
 import type { ThreadHost } from "./tools"
+
+/** An engine that cannot enumerate endpoints: the surface reaches the legacy socket alone. */
+const NO_ENUMERATION = async () => undefined
+const NO_REGISTRY = async () => []
 
 /**
  * `preamble` frames are written BEFORE the correlated response, exactly as the multi-session host
@@ -41,7 +45,7 @@ async function withRpc(
     const listening = once(server, "listening", { signal: AbortSignal.timeout(2000) })
     server.listen(socketPath)
     await listening
-    await exercise(createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: socketPath } }), frames)
+    await exercise(createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: socketPath }, statusAll: NO_ENUMERATION, registry: NO_REGISTRY }), frames)
   } finally {
     const closed = once(server, "close", { signal: AbortSignal.timeout(2000) })
     for (const socket of sockets) socket.destroy()
@@ -80,10 +84,10 @@ describe("live thread socket discovery", () => {
     expect(resolveAgentHome({ env: {}, homeDir: "/h", exists: () => false })).toBe(join("/h", ".senpi", "agent"))
   })
   test("always constructs a surface when the socket is absent at registration", () => {
-    expect(createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: "/missing.sock" }, exists: () => false })).toBeDefined()
+    expect(createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: "/missing.sock" }, exists: () => false, statusAll: NO_ENUMERATION, registry: NO_REGISTRY })).toBeDefined()
   })
   test("returns typed host_unavailable when the socket is absent at call time", async () => {
-    const surface = createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: "/missing.sock" }, exists: () => false })
+    const surface = createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: "/missing.sock" }, exists: () => false, statusAll: NO_ENUMERATION, registry: NO_REGISTRY })
     await expect(surface.listSessions()).rejects.toThrow("host_unavailable:/missing.sock")
   })
 })
@@ -145,6 +149,44 @@ describe("live thread session-control RPCs", () => {
   })
 })
 
+describe("live thread frame decoding", () => {
+  test("#given a reply whose non-ASCII text arrives one byte per read #when it is decoded #then the text is identical to what the engine sent", async () => {
+    // given
+    const name = "한국어 모델 🙂 ｍｏｄｅｌ"
+    const socket = new EventEmitter() as EventEmitter & { write: (data: string | Uint8Array) => boolean; destroy: () => void }
+    socket.destroy = () => {}
+    socket.write = (data) => {
+      const text = typeof data === "string" ? data : ""
+      if (!text.endsWith("\n")) return true
+      const frame = JSON.parse(text) as { id: string }
+      const reply = Buffer.from(`${JSON.stringify({ id: frame.id, type: "response", success: true, data: { models: [{ provider: "p", id: "m", name }] } })}\n`)
+      queueMicrotask(() => { for (const byte of reply) socket.emit("data", Buffer.from([byte])) })
+      return true
+    }
+    const surface = createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: "/tmp/byte-split.sock" }, exists: () => true, statusAll: NO_ENUMERATION, registry: NO_REGISTRY, connect: () => { queueMicrotask(() => socket.emit("connect")); return socket as never } })
+
+    // when
+    const models = await surface.getAvailableModels?.("route-peer")
+
+    // then
+    expect(models).toEqual([{ provider: "p", id: "m", name }])
+  })
+})
+
+describe("live thread create with initial skills", () => {
+  test("#given initial skills #when a session is opened #then they ride on the open_session context and never as a wire field", async () => {
+    await withRpc(
+      (frame) => (frame.type === "open_session" ? { success: true, data: { sessionId: "rpc-new", state: { sessionId: "rpc-new", cwd: "/w" } } } : { success: true, data: { sessions: [] } }),
+      async (surface, frames) => {
+        await surface.openSession({ cwd: "/w", initialSkills: ["gateway-lead"] })
+        const open = frames.find((frame) => frame.type === "open_session")
+        expect(open).toMatchObject({ cwd: "/w", retain_on_disconnect: true, context: { initial_skills: JSON.stringify(["gateway-lead"]) } })
+        expect(open).not.toHaveProperty("initialSkills")
+      },
+    )
+  })
+})
+
 describe("live thread request correlation", () => {
   test("#given an open_session admission notice ahead of the reply #when openSession runs #then the queued frame is skipped and the correlated response is returned", async () => {
     await withRpc(
@@ -170,7 +212,7 @@ describe("live thread request correlation", () => {
       { success: true, data: { sessions: [{ sessionId: "route-a", cwd: "/w" }] } },
       async (surface) => {
         const sessions = await surface.listSessions()
-        expect(sessions).toEqual([{ sessionId: "route-a", cwd: "/w" }])
+        expect(sessions).toEqual([{ sessionId: "route-a", cwd: "/w", socket: surface.socket, endpoint_kind: "rpc_host", controls: ["send", "read", "rename", "set_model", "set_reasoning", "interrupt"] }])
       },
       () => [
         { type: "agent_start", sessionId: "route-other" },

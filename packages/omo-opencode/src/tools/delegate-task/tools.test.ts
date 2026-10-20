@@ -163,8 +163,8 @@ describe("sisyphus-task", () => {
 
       // when / #then
       expect(category).toBeDefined()
-      expect(category.model).toBe("anthropic/claude-fable-5-1")
-      expect(category.variant).toBe("max")
+      expect(category.model).toBe("google/gemini-4-argon")
+      expect(category.variant).toBe("low")
     })
 
     test("ultrabrain category has model and variant config", () => {
@@ -184,11 +184,11 @@ describe("sisyphus-task", () => {
 
       // when / #then
       expect(low).toBeDefined()
-      expect(low.model).toBe("openai/gpt-6-sol-fast")
+      expect(low.model).toBe("openai/gpt-6.1-sol")
       expect(low.variant).toBe("medium")
       expect(high).toBeDefined()
       expect(high.model).toBe("openai/gpt-6-astra")
-      expect(high.variant).toBe("xhigh")
+      expect(high.variant).toBe("high")
     })
 
     test("unspecified-high category uses Claude Opus 5.5 medium as primary", () => {
@@ -889,11 +889,13 @@ describe("sisyphus-task", () => {
     })
 
     test.each([
-      ["openai/gpt-6-sol-fast"],
-      ["openai/gpt-6-sol"],
-    ])("keeps deep-low open on either GPT-6 Sol tier (%s) while deep-high stays Astra-only", (solId) => {
-      // #given: deep-low gates on gpt-6-sol-fast OR gpt-6-sol; the builtin default config is the
-      // GPT-6 Sol Fast tier and the runtime chain walk (category-resolver) picks the rung the registry carries
+      ["openai/gpt-6.1-sol"],
+      ["openai/gpt-6.1-sol-fast"],
+      ["openai/gpt-5.6-sol-fast"],
+      ["openai/gpt-5.6-sol"],
+    ])("keeps deep-low open on any GPT-6.1 Sol or GPT-5.6 Sol tier (%s) while deep-high stays Astra-only", (solId) => {
+      // #given: deep-low gates on either GPT-6.1 Sol tier OR either GPT-5.6 Sol tier; the builtin default
+      // config is plain GPT-6.1 Sol and the runtime chain walk (category-resolver) picks the rung the registry carries
       const availableModels = new Set<string>([solId])
 
       // #when
@@ -904,14 +906,14 @@ describe("sisyphus-task", () => {
 
       // #then
       const resolved = expectResolvedCategoryConfig(result)
-      expect(resolved.config.model).toBe("openai/gpt-6-sol-fast")
+      expect(resolved.config.model).toBe("openai/gpt-6.1-sol")
       expect(resolved.config.variant).toBe("medium")
       expect(resolveCategoryConfig("deep-high", { systemDefaultModel: SYSTEM_DEFAULT_MODEL, availableModels })).toBeNull()
     })
 
-    test("gates deep-low closed when the registry only carries GPT-5.6 Sol", () => {
+    test("gates deep-low closed when the registry only carries GPT-6 Sol", () => {
       // #given
-      const availableModels = new Set<string>(["openai/gpt-5.6-sol"])
+      const availableModels = new Set<string>(["openai/gpt-6-sol"])
 
       // #when
       const result = resolveCategoryConfig("deep-low", {
@@ -937,7 +939,7 @@ describe("sisyphus-task", () => {
       // #then
       const resolved = expectResolvedCategoryConfig(result)
       expect(resolved.config.model).toBe("openai/gpt-6-astra")
-      expect(resolved.config.variant).toBe("xhigh")
+      expect(resolved.config.variant).toBe("high")
     })
 
     test("bypasses requiresModel when explicit user config provided", () => {
@@ -989,7 +991,7 @@ describe("sisyphus-task", () => {
 
       // then
       const resolved = expectResolvedCategoryConfig(result)
-      expect(resolved.config.model).toBe("anthropic/claude-fable-5-1")
+      expect(resolved.config.model).toBe("google/gemini-4-argon")
       expect(resolved.promptAppend).toContain("VISUAL/UI")
     })
 
@@ -1075,7 +1077,7 @@ describe("sisyphus-task", () => {
 
       // then - category's built-in model wins over inheritedModel
       const resolved = expectResolvedCategoryConfig(result)
-      expect(resolved.config.model).toBe("anthropic/claude-fable-5-1")
+      expect(resolved.config.model).toBe("google/gemini-4-argon")
     })
 
     test("systemDefaultModel is used as fallback when custom category has no model", () => {
@@ -1117,7 +1119,7 @@ describe("sisyphus-task", () => {
 
       // then
       const resolved = expectResolvedCategoryConfig(result)
-      expect(resolved.config.model).toBe("anthropic/claude-fable-5-1")
+      expect(resolved.config.model).toBe("google/gemini-4-argon")
     })
   })
 
@@ -3859,8 +3861,8 @@ describe("sisyphus-task", () => {
       
       // then - default model from DEFAULT_CATEGORIES is used
       const category = expectResolvedCategoryConfig(resolved)
-      expect(category.config.model).toBe("xiaomi/mimo-v2.6-pro")
-      expect(category.config.variant).toBe("max")
+      expect(category.config.model).toBe("anthropic/claude-sonnet-5-5")
+      expect(category.config.variant).toBe("medium")
     })
 
     test("category built-in model takes precedence over inheritedModel for builtin category", () => {
@@ -3997,7 +3999,7 @@ describe("sisyphus-task", () => {
       
       // then should use category's built-in model (Opus 5 high for visual-engineering)
       const category = expectResolvedCategoryConfig(resolved)
-      expect(category.model).toBe("anthropic/claude-fable-5-1")
+      expect(category.model).toBe("google/gemini-4-argon")
     })
 
     test("systemDefaultModel is used when no other model is available", () => {
@@ -4658,7 +4660,7 @@ describe("sisyphus-task", () => {
   })
 
   describe("session title and metadata format (OpenCode compatibility)", () => {
-    test("sync session title follows OpenCode format: '{description} (@{agent} subagent)'", async () => {
+    test("categorized sync session persists an OpenCode-compatible category-prefixed child title", async () => {
       // given
       const { createDelegateTask } = require("./tools")
       let createBody: CapturedSessionCreateBody = {}
@@ -4707,8 +4709,8 @@ describe("sisyphus-task", () => {
         toolContext
       )
 
-      // then - title should follow OpenCode format
-      expect(createBody.title).toBe("Implement feature X (@Sisyphus-Junior subagent)")
+      // then - title should prefix the category while preserving the OpenCode agent suffix
+      expect(createBody.title).toBe("[quick] Implement feature X (@Sisyphus-Junior subagent)")
     }, { timeout: 10000 })
 
     test("sync task output includes <task_metadata> block with session_id", async () => {

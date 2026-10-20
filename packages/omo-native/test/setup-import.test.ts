@@ -111,7 +111,7 @@ function run(item: Fixture, args: string[], ttyInput?: string) {
   // child; a surfaced spawn error must fail here instead of being read as empty output.
   const result = ttyInput === undefined
     ? spawnSync(process.execPath, [item.launcher, ...args], { encoding: "utf8", env })
-    : spawnSync("python3", [TTY_DRIVER, ttyInput, "[y/N]", process.execPath, item.launcher, ...args], { encoding: "utf8", env })
+    : spawnSync("python3", [TTY_DRIVER, ttyInput, "[Y/n]", process.execPath, item.launcher, ...args], { encoding: "utf8", env })
   if (result.error) throw result.error
   transcripts.push(`${result.stdout}${result.stderr}`)
   expectSourcesUntouched(before)
@@ -257,7 +257,7 @@ describe("omo setup credential inheritance", () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout).not.toContain("/login chatgpt-subscription")
-    expect(result.stdout).toContain("/login anthropic")
+    expect(result.stdout).toContain("/login anthropic-subscription")
   })
 
   test("#given a dry run with skipped credentials #when setup previews #then the same guidance is shown", () => {

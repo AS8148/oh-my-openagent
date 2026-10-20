@@ -1,6 +1,7 @@
 // allow: SIZE_OK - this is the DAG composition root: one manager/store graph must be shared by the
 // tool, scheduler, RPC, TUI, wake, and lifecycle adapters or live runs split into isolated islands.
 import {
+  awaitingInputDetails,
   createChildProgress,
   type ManagedChildEvent,
   type TaskManager,
@@ -152,6 +153,7 @@ export function createDagRuntime(deps: DagRuntimeDeps): DagRuntime {
       // manager decides, so no run is pinned to a guess.
       autoMode: () => deps.engine.host.executionModeGate.current(),
     },
+    ...(deps.engine.ancestry === undefined ? {} : { ancestry: deps.engine.ancestry }),
     ...(deps.nodeSpawnPolicy === undefined ? {} : { nodeSpawnPolicy: deps.nodeSpawnPolicy }),
     ...(dagSettings?.subscriber_ring === undefined ? {} : { subscriberRing: dagSettings.subscriber_ring }),
   }
@@ -356,6 +358,8 @@ export function createDagRuntime(deps: DagRuntimeDeps): DagRuntime {
           model: record.model,
         },
         Date.parse(record.created_at),
+        Date.now,
+        { awaitingInput: awaitingInputDetails(record) !== undefined },
       )
       activityTaskSubscriptions.set(taskId, deps.engine.manager.subscribeChild(taskId, (event: ManagedChildEvent) => {
         if (!progress.accept(event)) return
@@ -383,7 +387,11 @@ export function createDagRuntime(deps: DagRuntimeDeps): DagRuntime {
   const wakeSource = createDagWakeSource({ pi: deps.pi, manager: queryManager, sessionId: () => deps.engine.runtime.sessionId() })
   const wake = deps.coordinator === undefined
     ? undefined
-    : createDagWake({ coordinator: deps.coordinator, parentState: () => deps.engine.runtime.parentState() })
+    : createDagWake({
+      coordinator: deps.coordinator,
+      parentState: () => deps.engine.runtime.parentState(),
+      getReceiverModel: () => deps.engine.runtime.parentModel(),
+    })
   const terminalWakeSeq = new Map<DagRunId, number>()
   const pausedWakeSeq = new Map<DagRunId, number>()
 
@@ -439,6 +447,7 @@ export function createDagRuntime(deps: DagRuntimeDeps): DagRuntime {
     // what fences the claim is whether THIS runtime still schedules the run. A disposed predecessor
     // runtime in the same process (saved-session reopen, #8006) keeps its own map, so it never fences.
     isRunHeldInProcess: (runId) => schedulers.has(runId),
+    ...(deps.engine.ancestry === undefined ? {} : { ancestry: deps.engine.ancestry }),
     ...(deps.nodeSpawnPolicy === undefined ? {} : { nodeSpawnPolicy: deps.nodeSpawnPolicy }),
     ...(dagSettings?.subscriber_ring === undefined ? {} : { subscriberRing: dagSettings.subscriber_ring }),
     stopAdmission: (runId) => stoppedAdmissions.add(runId),
