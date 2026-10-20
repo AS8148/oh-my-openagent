@@ -37,7 +37,7 @@ jobs:
           CHANGELOG_GATE_BASE: ${{ github.event.pull_request.base.sha }}
           CHANGELOG_GATE_BASE_REF: ${{ github.event.pull_request.base.ref }}
           CHANGELOG_GATE_BRANCH: ${{ github.head_ref }}
-          CHANGELOG_GATE_ACTOR: ${{ github.actor }}
+          CHANGELOG_GATE_ACTOR: ${{ github.event.pull_request.user.login }}
           CHANGELOG_GATE_RELEASE: ${{ startsWith(github.head_ref, 'release/') && '1' || '0' }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           CHANGELOG_GATE_PR: ${{ github.event.pull_request.number }}

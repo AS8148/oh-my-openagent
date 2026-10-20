@@ -419,7 +419,7 @@ Adding `ci:full-matrix` launches `ci-full-matrix-label.yml`, which calls `ci.yml
 
 ## CHANGELOG FRAGMENTS
 
-Never edit `CHANGELOG.md` at all outside the release workflow — only the release PR may touch it, and it assembles the fragments into the release section and deletes them. A user-facing PR adds `changes/unreleased/<pr-number>.md` (body = the Unreleased paragraph, linking its own PR; see `changes/unreleased/README.md`). The `changelog-gate` workflow enforces this with the `no-changelog` label as the escape. The gate refuses any changelog touch on a normal PR; the `no-changelog` label waives the fragment requirement only for PRs with no user-facing paths; the release workflow (branch `release/*`, bot actor) is the only changelog editor (#9961).
+Never edit `CHANGELOG.md` or the root `changes.md` in a normal PR. A user-facing PR adds exactly one file, `changes/unreleased/<pr-number>.md` (body = the paragraph that used to go under `## [Unreleased]`, linking its own PR; notes that used to go in root `changes.md` go there too). Format: `docs/reference/changelog-fragments.md`. The `changelog-gate` workflow refuses any changelog touch on a normal PR and any edit to an existing fragment; the `no-changelog` label waives the fragment only for a PR with no user-facing paths. Only the release-state PR (branch `release/*`, opened by the release workflow as `sisyphus-dev-ai`) edits `CHANGELOG.md`: `script/stamp-release-changelog.ts` assembles the fragments into the release section and deletes them, and the PR may carry only the release artifacts listed in `script/changelog-gate.config.ts` (#9961).
 
 ## PR MERGE POLICY
 

@@ -6,7 +6,7 @@
  * hand-written Unreleased content: Unreleased is machine-assembled from fragments (#9961).
  */
 import { readdir, rm } from "node:fs/promises"
-import { assembleUnreleasedBody as legacyAssemble, FRAGMENT_DIR, mergeUnreleased, parseFragment, readFragments, unreleasedBody } from "./changelog-fragments"
+import { FRAGMENT_DIR, mergeUnreleased, parseFragment, readFragments, unreleasedBody } from "./changelog-fragments"
 import { stampUnreleased } from "./changelog-release-notes"
 import { assembleUnreleasedBody } from "./changelog-gate-rules.ts"
 

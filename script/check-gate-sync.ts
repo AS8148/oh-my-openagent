@@ -25,7 +25,7 @@ let failed = false;
 
 if (args[0] === "--expect") {
   const [, expected, file] = args;
-  if (!expected || !file) throw new Error("usage: bun script/check-gate-sync.ts --expect <sha256> <file>");
+  if (!expected || !file) throw new Error("usage: bun scripts/check-gate-sync.ts --expect <sha256> <file>");
   const actual = sha(readFileSync(file, "utf8"));
   const same = actual === expected;
   console.log(`${same ? "OK" : "DRIFT"} ${file} (pinned)`);

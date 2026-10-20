@@ -8,6 +8,9 @@ const POLICY = {
 };
 const base = {
   addedFragment: null,
+  addedChangelog: null,
+  addedChangelogMode: "100644",
+  baseHasChangelog: true,
   branch: "feat/thing",
   isReleaseWorkflow: false,
   actor: "someone",
@@ -103,6 +106,106 @@ describe("the simple rule (identical in every repo)", () => {
     expect(renamed.pass).toBe(false);
     expect(renamed.reason).toContain("immutable");
   });
+  test("bootstrap: a greenfield PR adds the empty skeleton and passes", () => {
+    const boot = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], addedChangelog: "# Changelog\n\n## [Unreleased]\n\n" },
+      POLICY,
+    );
+    expect(boot.pass).toBe(true);
+  });
+  test("bootstrap: an added changelog with entries fails; entries go in fragments", () => {
+    const withEntries = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], addedChangelog: "# Changelog\n\n## [Unreleased]\n\n**Note.** text (#7)\n" },
+      POLICY,
+    );
+    expect(withEntries.pass).toBe(false);
+    expect(withEntries.reason).toContain("empty skeleton");
+  });
+  test("bootstrap: recreating the changelog when the base already has one still refuses", () => {
+    const recreate = checkPrChangelog(
+      { ...base, baseHasChangelog: true, addedFiles: ["changes.md"], addedChangelog: "# Changelog\n\n## [Unreleased]\n\n" },
+      POLICY,
+    );
+    expect(recreate.pass).toBe(false);
+    expect(recreate.reason).toContain("only the release PR");
+  });
+  test("bootstrap: entries ABOVE the heading fail; only an optional # title passes", () => {
+    const aboveEntries = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], addedChangelog: "## [1.0.0]\n- **Big feature** shipped (#9)\n## [Unreleased]\n" },
+      POLICY,
+    );
+    expect(aboveEntries.pass).toBe(false);
+    const bulletTitle = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], addedChangelog: "# Changelog\n- **Feature** (#9)\n## [Unreleased]\n" },
+      POLICY,
+    );
+    expect(bulletTitle.pass).toBe(false);
+    const plainTitle = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], addedChangelog: "# Changelog\n## [Unreleased]\n" },
+      POLICY,
+    );
+    expect(plainTitle.pass).toBe(true);
+  });
+  test("bootstrap: adding BOTH changelog files fails; the exception needs the PR's single changelog path", () => {
+    const both = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md", "CHANGELOG.md"], addedChangelog: "# Changelog\n## [Unreleased]\n" },
+      POLICY,
+    );
+    expect(both.pass).toBe(false);
+    expect(both.reason).toContain("only the release PR");
+  });
+  test("bootstrap: an added changelog alongside a MODIFIED or DELETED one fails", () => {
+    const mixed = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], modifiedFiles: ["CHANGELOG.md"], addedChangelog: "# Changelog\n## [Unreleased]\n" },
+      POLICY,
+    );
+    expect(mixed.pass).toBe(false);
+    const removed = checkPrChangelog(
+      { ...base, addedFiles: ["changes.md"], deletedFiles: ["CHANGELOG.md"], baseHasChangelog: true, addedChangelog: "# Changelog\n## [Unreleased]\n" },
+      POLICY,
+    );
+    expect(removed.pass).toBe(false);
+  });
+  test("bootstrap: a symlinked changelog fails", () => {
+    const link = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], addedChangelog: "# Changelog\n## [Unreleased]\n", addedChangelogMode: "120000" },
+      POLICY,
+    );
+    expect(link.pass).toBe(false);
+    expect(link.reason).toContain("regular file");
+  });
+  test("bootstrap: CHANGELOG.md as the added name takes the same skeleton rule", () => {
+    const upper = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["CHANGELOG.md"], addedChangelog: "# Changelog\n## [Unreleased]\n" },
+      POLICY,
+    );
+    expect(upper.pass).toBe(true);
+  });
+  test("bootstrap: carriage-return, entry-as-title, comment-in-title and fake-heading titles all fail", () => {
+    const cases: readonly [string, boolean][] = [
+      ["# Changelog\r- **Big feature** shipped (#9)\r\n## [Unreleased]\n", false],
+      ["# Changelog: shipped OAuth login and billing (#9)\n## [Unreleased]\n", false],
+      ["# Changelog <!-- - **secret** (#9) -->\n## [Unreleased]\n", false],
+      ["# ## [1.0.0] - entries\n## [Unreleased]\n", false],
+      ["# Changelog\n## [Unreleased]\n", true],
+      ["## [Unreleased]\n", true],
+    ];
+    for (const [content, expected] of cases) {
+      const result = checkPrChangelog(
+        { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], addedChangelog: content },
+        POLICY,
+      );
+      expect(result.pass).toBe(expected);
+    }
+  });
+  test("bootstrap: a gitlink (160000) mode is refused alongside symlinks", () => {
+    const gitlink = checkPrChangelog(
+      { ...base, baseHasChangelog: false, addedFiles: ["changes.md"], addedChangelog: "# Changelog\n## [Unreleased]\n", addedChangelogMode: "160000" },
+      POLICY,
+    );
+    expect(gitlink.pass).toBe(false);
+    expect(gitlink.reason).toContain("regular file");
+  });
   test("a non-user-facing PR without fragments passes", () => {
     expect(checkPrChangelog({ ...base, modifiedFiles: ["README.md", "scripts/build.ts"] }, POLICY).pass).toBe(true);
   });
@@ -112,6 +215,9 @@ describe("release identity and consumption", () => {
   const releaseBase = {
     prNumber: 7,
     addedFragment: null,
+    addedChangelog: null,
+    addedChangelogMode: "100644",
+    baseHasChangelog: true,
     branch: "release/v1.2.0",
     isReleaseWorkflow: true,
     actor: "release-bot[bot]",
@@ -143,6 +249,19 @@ describe("release identity and consumption", () => {
     expect(withCode.pass).toBe(false);
     expect(withCode.reason).toContain("must not change user-facing files");
   });
+  test("declared release artifacts may ride a release PR; any other user-facing path still fails", () => {
+    const policy = { ...POLICY, releaseArtifacts: [/^apps\/[^/]+\/package\.json$/, /^bun\.lock$/] };
+    const release = { ...releaseBase, deletedFiles: ["changes/unreleased/7.md"] };
+    const bump = checkPrChangelog({ ...release, modifiedFiles: ["CHANGELOG.md", "apps/api/package.json", "bun.lock"] }, policy);
+    expect(bump).toEqual({ pass: true, reason: "release PR consumed the fragments" });
+    const sneak = checkPrChangelog({ ...release, modifiedFiles: ["CHANGELOG.md", "apps/api/package.json", "apps/api/src/index.ts"] }, policy);
+    expect(sneak.pass).toBe(false);
+    expect(sneak.reason).toContain("apps/api/src/index.ts");
+    // The same bump without the declaration is refused, and the declaration grants nothing outside a release.
+    expect(checkPrChangelog({ ...release, modifiedFiles: ["CHANGELOG.md", "apps/api/package.json"] }, POLICY).pass).toBe(false);
+    expect(checkPrChangelog({ ...base, modifiedFiles: ["apps/api/package.json"] }, policy).pass).toBe(false);
+  });
+
   test("a release without a changelog edit fails", () => {
     const noEdit = checkPrChangelog({ ...releaseBase, deletedFiles: ["changes/unreleased/7.md"] }, POLICY);
     expect(noEdit.pass).toBe(false);

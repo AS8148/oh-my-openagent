@@ -53,8 +53,25 @@ function run(): number {
   const addedFragment = ownPath && addedFiles.includes(ownPath)
     ? { content: git("show", `${head}:${ownPath}`) }
     : null;
+  // The module's bootstrap inputs: the base BRANCH head (never the merge base) decides whether a
+  // changelog already exists, and an added changelog is read from the head blob with its mode.
+  const existsAt = (rev: string, path: string): boolean => {
+    try {
+      git("cat-file", "-e", `${rev}:${path}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const baseHasChangelog = existsAt(baseHead, "CHANGELOG.md") || existsAt(baseHead, "changes.md");
+  const addedChangelogPath = addedFiles.find((path) => path === "CHANGELOG.md" || path === "changes.md");
+  const addedChangelog = addedChangelogPath ? git("show", `${head}:${addedChangelogPath}`) : null;
+  const addedChangelogMode = addedChangelogPath ? git("ls-tree", head, "--", addedChangelogPath).split(/\s/)[0] ?? "" : "100644";
   const result = checkPrChangelog(
-    { addedFiles, modifiedFiles, deletedFiles, branch, isReleaseWorkflow, actor, labels, prNumber, addedFragment, baseFragments, headFragments },
+    {
+      addedFiles, modifiedFiles, deletedFiles, branch, isReleaseWorkflow, actor, labels, prNumber, addedFragment,
+      addedChangelog, addedChangelogMode, baseHasChangelog, baseFragments, headFragments,
+    },
     GATE_CONFIG,
   );
   console.log(`changelog-gate: ${result.pass ? "PASS" : "FAIL"} - ${result.reason}`);
