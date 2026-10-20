@@ -17,6 +17,7 @@ import { deferUntilAfterFirstPaint } from "../../extension/startup-deferral"
 import type { OmoSenpiComponent } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { loadSenpiOmoConfig } from "../config-resolution"
+import { userInfo } from "node:os"
 import { getSenpiTelemetryStateDir, recordSenpiDailyActive } from "./index"
 import { createCategoryConfigCapture } from "./omo-native-category-config"
 import { bareOsVersion } from "./event-schema-constraints"
@@ -232,17 +233,26 @@ export function isOmoNativeTelemetryEnabled(
   return isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }) && configEnabled(options, eventCtx, env)
 }
 
+/** Env keys that pick which config a process reads: per-process choices, like the env opt-outs. */
+const CONFIG_SELECTION_ENV_KEYS = ["OMO_PROFILE", "OCX_PROFILE", "OPENCODE_CONFIG_DIR", "HOME", "USERPROFILE"] as const
+
 /**
  * The persisted half of consent: the telemetry setting in the config files, for a scope's cwd. Environment
  * opt-outs are left out on purpose: they belong to one process, while this decides for every process that
- * shares the queue (see `purgeUnconsentedQueue`).
+ * shares the queue (see `purgeUnconsentedQueue`). For the same reason the config is read with a neutral env:
+ * no profile selection and the account's own home, so a config only this process selects (`OMO_PROFILE`,
+ * `OCX_PROFILE`, `OPENCODE_CONFIG_DIR`, an overridden `HOME`) cannot judge other sessions' records.
  */
 export function isOmoNativeTelemetryConfigEnabled(
   options: Pick<OmoNativeSessionOptions, "diagnostics" | "isConfigEnabled">,
   eventCtx: unknown,
   env: TelemetryEnv,
+  accountHomeDir: string = userInfo().homedir,
 ): boolean {
-  return configEnabled(options, eventCtx, env)
+  const shared: Record<string, string | undefined> = { ...env }
+  for (const key of CONFIG_SELECTION_ENV_KEYS) delete shared[key]
+  shared.HOME = accountHomeDir
+  return configEnabled(options, eventCtx, shared)
 }
 
 function configEnabled(
