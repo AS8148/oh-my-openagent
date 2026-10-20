@@ -3,19 +3,19 @@ import { SkillMcpManager } from "./manager"
 import { setStdioClientDependenciesForTesting } from "./stdio-client"
 import type { McpClient } from "./types"
 
-type Grant = { digest: string; label: string; names: string[] }
+type Grant = { label: { project: string; skill: string; server: string }; names: readonly string[] }
 function latestStore() {
   let generation = 0
   let revision = "initial-file"
-  let grants: Grant[] = []
+  let grants: Record<string, Grant> = {}
   const listeners = new Set<() => void | Promise<void>>()
   const notify = async () => { await Promise.all([...listeners].map((listener) => listener())) }
   return {
-    read: async () => ({ generation, revision, grants }),
+    read: async () => ({ version: 1 as const, generation, revision, grants }),
     list: async () => grants,
     digest: async () => `${revision}:${generation}`,
-    add: async (grant: Grant) => { grants = [grant]; generation++; await notify() },
-    revoke: async () => { grants = []; generation++; await notify() },
+    add: async (digest: string, grant: Grant) => { grants = { [digest]: grant }; generation++; await notify() },
+    revoke: async () => { grants = {}; generation++; await notify() },
     watch: (listener: () => void | Promise<void>) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }

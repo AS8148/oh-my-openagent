@@ -4,10 +4,14 @@ import type { McpClient, McpTransport } from "./types"
 import { SkillMcpManager } from "./manager"
 import { setStdioClientDependenciesForTesting } from "./stdio-client"
 import { createSkillMcpTool } from "../../tools/skill-mcp/tools"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 const transports: StdioServerParameters[] = []
 const managers: SkillMcpManager[] = []
 const notices: string[] = []
+const roots: string[] = []
 const synthetic = {
   OMO_TEST_OPAQUE: "synthetic-opaque-value",
   OMO_TEST_DSN: "synthetic-dsn-value",
@@ -51,18 +55,19 @@ afterEach(async () => {
     else process.env[name] = value
   }
   original.clear()
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
-type Grant = { digest: string; label: string; names: string[] }
+type Grant = { label: { project: string; skill: string; server: string }; names: readonly string[] }
 function memoryStore() {
   let generation = 0
   const grants = new Map<string, Grant>()
   const listeners = new Set<() => void>()
   return {
-    read: async () => ({ generation, grants: [...grants.values()] }),
-    list: async () => [...grants.values()],
+    read: async () => ({ version: 1 as const, generation, grants: Object.fromEntries(grants) }),
+    list: async () => Object.fromEntries(grants),
     digest: async () => String(generation),
-    add: async (grant: Grant) => {
-      grants.set(grant.digest, { ...grant, names: [...new Set([...(grants.get(grant.digest)?.names ?? []), ...grant.names])].sort() })
+    add: async (digest: string, grant: Grant) => {
+      grants.set(digest, { ...grant, names: [...new Set([...(grants.get(digest)?.names ?? []), ...grant.names])].sort() })
       generation++
       for (const listener of listeners) listener()
     },
@@ -146,9 +151,13 @@ describe("project MCP policy at the real manager boundary", () => {
   test("skill_mcp result includes the exact names-only grant action", async () => {
     // given
     const m = manager()
+    const source = mkdtempSync(join(tmpdir(), "mcp-policy-source-"))
+    roots.push(source)
+    const path = join(source, "SKILL.md")
+    writeFileSync(path, `---\nmcp:\n  synthetic-server:\n    command: synthetic-command\n    env:\n      AUTH_HEADER: "\${GITHUB_TOKEN}"\n      LITERAL: synthetic-literal\n---\nFixture\n`)
     const skill = {
       name: "synthetic-skill", scope: "project" as const,
-      path: "/synthetic/project/skills/SKILL.md",
+      path,
       definition: { name: "synthetic-skill", template: "" },
       mcpConfig: { "synthetic-server": config },
     }
@@ -178,7 +187,7 @@ describe("project MCP policy at the real manager boundary", () => {
     // then
     expect(transports.at(-1)?.env?.AUTH_HEADER).toBe(synthetic.GITHUB_TOKEN)
     expect(transports.at(-1)?.env?.OMO_TEST_OPAQUE).toBeUndefined()
-    expect((await store.list())[0]?.names).toEqual(["GITHUB_TOKEN"])
+    expect(Object.values(await store.list())[0]?.names).toEqual(["GITHUB_TOKEN"])
     expect(JSON.stringify(await store.read())).not.toContain(synthetic.GITHUB_TOKEN)
   })
 
@@ -191,7 +200,7 @@ describe("project MCP policy at the real manager boundary", () => {
     if (!id) throw new Error("No pending grant action")
     // when / then
     await expect(m.grantEnvironment(id, ["UNDISPLAYED"])).rejects.toThrow()
-    expect(await store.list()).toEqual([])
+    expect(await store.list()).toEqual({})
   })
 
   test("revoke converges to the latest snapshot before the next connection starts", async () => {
@@ -203,14 +212,14 @@ describe("project MCP policy at the real manager boundary", () => {
     if (!id) throw new Error("No pending grant action")
     await m.grantEnvironment(id, ["GITHUB_TOKEN"])
     await m.getOrCreateClient(info("project"), config)
-    const [grant] = await store.list()
-    if (!grant) throw new Error("Grant did not persist")
+    const [digest] = Object.keys(await store.list())
+    if (!digest) throw new Error("Grant did not persist")
     // when
-    await store.revoke(grant.digest)
+    await store.revoke(digest)
     await m.getOrCreateClient(info("project"), config)
     // then
     expect(transports.at(-1)?.env?.AUTH_HEADER).toBe("${GITHUB_TOKEN}")
-    expect(await store.list()).toEqual([])
+    expect(await store.list()).toEqual({})
   })
 
   test("failed permanent grant writes never confirm or restore an environment value", async () => {
@@ -225,6 +234,6 @@ describe("project MCP policy at the real manager boundary", () => {
     await expect(m.grantEnvironment(id, ["GITHUB_TOKEN"])).rejects.toThrow("synthetic store write failure")
     await m.getOrCreateClient(info("project"), config)
     expect(transports.at(-1)?.env?.AUTH_HEADER).toBe("${GITHUB_TOKEN}")
-    expect(await store.list()).toEqual([])
+    expect(await store.list()).toEqual({})
   })
 })
