@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { credentialSchema, type Credentials, serviceOrigin, SignInError } from "./protocol"
+import { probeSecretServiceLock, type SecretServiceLockProbe } from "./secret-service-lock"
 
 type SecretKey = { readonly service: string; readonly name: string }
 export type SecretApi = {
@@ -14,10 +15,11 @@ export type CredentialStore = {
 }
 
 export class KeychainLockedError extends SignInError {}
+export class SecretServiceUnavailableError extends SignInError {}
 
 // The OS store refused because it is locked and may not ask the person (macOS errSecInteractionNotAllowed,
 // a locked libsecret keyring). Callers must surface this as its own outcome, never as a prompt.
-const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|\bis locked\b/i
+const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|\bis locked\b|locked collection/i
 const isLocked = (error: unknown): boolean =>
   error instanceof Error && (LOCKED.test(error.message) || LOCKED.test(String((error as { code?: unknown }).code ?? "")))
 
@@ -29,6 +31,7 @@ export function createCredentialStore(
   api: string,
   secrets: SecretApi | null = typeof Bun === "undefined" ? null : Bun.secrets,
   platform: NodeJS.Platform = process.platform,
+  lockProbe: SecretServiceLockProbe = probeSecretServiceLock,
 ): CredentialStore {
   if (!secrets) throw new SignInError("OmO sign-in needs Bun 1.4 or newer with OS credential storage. No file fallback is available.")
   const platformName = platform === "darwin" ? "macOS Keychain"
@@ -43,7 +46,13 @@ export function createCredentialStore(
     async read() {
       let value: string | null
       try { value = await secrets.get(key) } catch (error) { throw unavailable(error) }
-      if (value === null) return null
+      if (value === null) {
+        if (platform !== "linux") return null
+        const lock = await lockProbe()
+        if (lock === "locked") throw new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
+        if (lock === "absent") throw new SecretServiceUnavailableError(`No ${platformName} is running. Start a keyring (for example gnome-keyring) and try again. Credentials are never saved to a file.`)
+        return null
+      }
       try { return credentialSchema.parse(JSON.parse(value)) } catch {
         throw new SignInError("Stored sign-in data is invalid. Run omo logout, then omo login.")
       }

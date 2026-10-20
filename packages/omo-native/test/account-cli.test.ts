@@ -191,3 +191,33 @@ describe("omo account on a locked OS credential store (desktop#3509)", () => {
     expect(result.out).toEqual([])
   })
 })
+
+describe("omo account on Linux, where a locked Secret Service read looks empty (desktop#3509)", () => {
+  const empty = { get: async () => null, set: async () => {}, delete: async () => true }
+  const linuxStore = (lock: "locked" | "unlocked" | "absent", secrets = empty) =>
+    createCredentialStore("http://127.0.0.1:1", secrets, "linux", async () => lock)
+
+  test("a locked default collection is keychain_locked for show, token and adopt, never signed out", async () => {
+    for (const [args, stdin] of [[["show"]], [["token"]], [["adopt"], JSON.stringify(credential("dev_l", 60_000))]] as const) {
+      const result = await run(linuxStore("locked"), [...args], stdin === undefined ? {} : { stdin })
+      expect({ args, code: result.code, out: result.out }).toEqual({ args, code: ACCOUNT_EXIT.keychainLocked, out: [{ keychain: "locked" }] })
+    }
+  })
+
+  test("no reachable Secret Service is its own outcome, never signed out", async () => {
+    const result = await run(linuxStore("absent"), ["show"])
+    expect({ code: result.code, out: result.out }).toEqual({ code: ACCOUNT_EXIT.keychainUnavailable, out: [{ keychain: "unavailable" }] })
+  })
+
+  test("an unlocked collection with no item is still signed out", async () => {
+    const result = await run(linuxStore("unlocked"), ["show"])
+    expect({ code: result.code, out: result.out }).toEqual({ code: ACCOUNT_EXIT.ok, out: [{ signedIn: false }] })
+  })
+
+  test("libsecret's own locked-collection write error (measured on a real keyring) is keychain_locked", async () => {
+    const lockedWrite = () => Promise.reject(Object.assign(new Error("Cannot create an item in a locked collection (code: 2)"), { code: "ERR_SECRETS_PLATFORM_ERROR" }))
+    const store = linuxStore("unlocked", { ...empty, set: lockedWrite })
+    const result = await run(store, ["adopt"], { stdin: JSON.stringify(credential("dev_w", 60_000)) })
+    expect({ code: result.code, out: result.out }).toEqual({ code: ACCOUNT_EXIT.keychainLocked, out: [{ keychain: "locked" }] })
+  })
+})

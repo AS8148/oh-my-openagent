@@ -6,7 +6,7 @@ import { grant, memorySecrets, privateKeys } from "./test-support"
 describe("OS credential storage", () => {
   test.each(["darwin", "linux", "win32"] as const)("delegates %s storage exclusively to the in-process secret API", async platform => {
     const memory = memorySecrets()
-    const store = createCredentialStore("https://api.omo.dev", memory.api, platform)
+    const store = createCredentialStore("https://api.omo.dev", memory.api, platform, async () => "unlocked")
     const record = { ...grant, ...privateKeys }
     await store.write(record)
     expect(await store.read()).toMatchObject(record)
