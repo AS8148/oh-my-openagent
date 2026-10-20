@@ -46,19 +46,27 @@ const firstRefusalAt = (received: ReceivedChain, entry: SyncEntry, ours: Readonl
 
 /**
  * The merged receiver run ONCE over the already-verified keyring `history` and the keyring entries of
- * `entries`, in order, up to the first malformed one. Its verdict for each entry equals running it over
- * the history plus every earlier entry of the pull, because the fold judges a record only by the records
- * before it and the walk stops at the first refusal; so a pull costs one pass, not one pass per entry.
+ * `entries`, in order, up to the first malformed one or the first whose seq does not increase. Every seq in
+ * that walk names exactly one entry, so the receiver's first refusal (reported by seq) names one entry too:
+ * entries before it pass, it gets the reason, and nothing after it is ever reached. That equals running each
+ * entry over the history plus every earlier entry of the pull, because the fold judges a record only by the
+ * records before it; so a pull costs one pass, not one pass per entry. An entry whose seq does not increase
+ * gets the receiver's own `seq_not_increasing`, and nothing after it joins the walk.
  * A batch entry's receiver checks read only its own fields and the sequence order, so it is folded alone
  * and its seq is compared with the last keyring seq before it. An entry the pass was not built for is refused.
  */
 export const receiverPass = async (history: ReadonlyArray<SyncEntry>, entries: ReadonlyArray<SyncEntry>): Promise<ReceiverPass> => {
   const keyring: SyncEntry[] = []
   const lastSeqBefore = new Map<SyncEntry, number>()
+  let replayed: SyncEntry | null = null
   let lastSeq = history.reduce((max, entry) => Math.max(max, entry.seq), 0)
   for (const entry of entries) {
     if (envelopeRefusal(entry) !== null) break
     if (entry.kind === "keyring") {
+      if (entry.seq <= lastSeq) {
+        replayed = entry
+        break
+      }
       keyring.push(entry)
       lastSeq = Math.max(lastSeq, entry.seq)
     } else {
@@ -72,6 +80,7 @@ export const receiverPass = async (history: ReadonlyArray<SyncEntry>, entries: R
   const inPull = new Set<SyncEntry>(keyring)
   return (entry) => {
     if (inPull.has(entry)) return firstRefusalAt(received, entry, ours)
+    if (entry === replayed) return received.ok ? "seq_not_increasing" : "receiver_seq_mismatch"
     const before = lastSeqBefore.get(entry)
     if (before === undefined) return "receiver_seq_mismatch"
     if (entry.seq <= before) return "seq_not_increasing"
@@ -80,8 +89,8 @@ export const receiverPass = async (history: ReadonlyArray<SyncEntry>, entries: R
 }
 
 /**
- * The receiver's refusal of `entry` appended after the already-verified keyring `history`; null only when
- * the receiver accepts the whole list. A refusal at any other seq means the verified history and the
+ * The test oracle for receiverPass: the receiver's refusal of `entry` appended after the already-verified
+ * keyring `history`, by folding the whole list; null only when the receiver accepts the whole list. A refusal at any other seq means the verified history and the
  * receiver disagree, which must never happen, so it refuses this entry too.
  */
 export const receiverRefusal = async (history: ReadonlyArray<SyncEntry>, entry: SyncEntry): Promise<ReceiverCheck | null> => {

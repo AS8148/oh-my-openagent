@@ -1,4 +1,4 @@
-import { describe, expect, mock, spyOn, test } from "bun:test"
+import { beforeAll, describe, expect, mock, spyOn, test } from "bun:test"
 import { type AppendOutcome, appendEntries, type ChainState, emptyChain } from "./chain.ts"
 import type { KeyringEntry, SyncEntry } from "./entry.ts"
 import { createRejectionCounter } from "./rejection.ts"
@@ -188,6 +188,11 @@ describe("the receiver walks the chain once per pull, not once per entry", () =>
     }
     return { entries, state }
   }
+  let built: { readonly entries: KeyringEntry[]; readonly state: ChainState } | null = null
+  const thousand = async () => (built ??= await rotations(ROTATIONS))
+  beforeAll(async () => {
+    await thousand()
+  }, 60000)
   const walkedDuring = async (work: () => Promise<void>): Promise<number> => {
     const fold = spyOn(vendorFold, "foldRefusal")
     try {
@@ -199,7 +204,7 @@ describe("the receiver walks the chain once per pull, not once per entry", () =>
   }
 
   test("a 1,000-rotation pull folds each entry a bounded number of times", async () => {
-    const { entries } = await rotations(ROTATIONS)
+    const { entries } = await thousand()
     const pull = [...recoveredPrefix(), ...entries]
     const walked = await walkedDuring(async () => {
       expect((await run(pull)).outcome.ok).toBe(true)
@@ -208,7 +213,9 @@ describe("the receiver walks the chain once per pull, not once per entry", () =>
   })
 
   test("a 500-batch pull after a long keyring chain does not re-fold the keyring for each batch", async () => {
-    const { entries, state } = await rotations(200)
+    const { entries: all } = await thousand()
+    const entries = all.slice(0, 200)
+    const state = await verified([...recoveredPrefix(), ...entries])
     const epoch = state.authority?.epoch ?? 0
     let head = headOf(state)
     const batches: SyncEntry[] = []
@@ -225,7 +232,7 @@ describe("the receiver walks the chain once per pull, not once per entry", () =>
   })
 
   test("a snapshot import over a 1,000-rotation keyring prefix folds the prefix a bounded number of times", async () => {
-    const { entries } = await rotations(ROTATIONS)
+    const { entries } = await thousand()
     const covered = [...recoveredPrefix(), ...entries]
     const last = covered.at(-1)
     if (last === undefined) throw new Error("empty prefix")
@@ -254,5 +261,26 @@ describe("the receiver walks the chain once per pull, not once per entry", () =>
       expect((await receiverPass(history, [batch]))(batch)).toBe(whole.ok ? null : whole.reason)
       expect(await receiverRefusal(history, batch)).toBe(whole.ok ? null : whole.reason)
     }
+  })
+})
+
+describe("an entry later in a pull never changes the verdict of an earlier one", () => {
+  test.each([
+    ["a replay after two new rotations", (r1: KeyringEntry, r2: KeyringEntry) => [r1, r2, r1], 2],
+    ["a replay right after one new rotation", (r1: KeyringEntry, _r2: KeyringEntry) => [r1, r1], 1],
+    ["an older rotation after two new ones", (r1: KeyringEntry, r2: KeyringEntry) => [r1, r2, r1, r2], 2],
+  ] as const)("%s keeps the valid prefix and refuses only the bad entry", async (_name, shape, accepted) => {
+    const start = await verified([...mainUntil("post_join_rotation"), record("post_join_rotation")])
+    const r1 = await rotation(start, "A")
+    const after1 = (await run([r1], start)).outcome
+    if (!after1.ok) throw new Error("r1 refused")
+    const r2 = await rotation(after1.state, "B")
+    const pull = shape(r1, r2)
+    const { outcome, rejections } = await run(pull, start)
+    expect(outcome.ok).toBe(false)
+    expect(outcome.steps.length).toBe(accepted)
+    expect(outcome.state.head?.seq).toBe(headOf(start).seq + accepted)
+    expect(outcome.ok ? null : outcome.reason).toBe("link_mismatch")
+    expect(rejections.count()).toBe(1)
   })
 })
