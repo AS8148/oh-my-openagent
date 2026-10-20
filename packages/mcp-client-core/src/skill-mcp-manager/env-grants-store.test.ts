@@ -112,7 +112,7 @@ test("fallback reconciles skipped revoke/regrant and file recreation conservativ
   const watch = spyOn(fs, "watch").mockImplementation(() => { throw new Error("synthetic unavailable watch") })
   let tick: () => void = () => { throw new Error("Fallback interval was not armed") }
   let intervalMs: number | undefined
-  const interval = spyOn(globalThis, "setInterval").mockImplementation((callback, ms) => {
+  const interval = spyOn(globalThis, "setInterval").mockImplementation((callback: TimerHandler, ms?: number) => {
     tick = () => { if (typeof callback === "function") callback() }
     intervalMs = ms
     return unsafeTestValue<ReturnType<typeof setInterval>>({ unref() {} })
