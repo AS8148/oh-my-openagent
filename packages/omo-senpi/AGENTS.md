@@ -2,6 +2,8 @@
 
 Native Senpi TypeScript extension adapter for oh-my-openagent.
 
+Telemetry uses the SDK-free `@oh-my-opencode/telemetry-core/injected` entry. Its lazy transport imports `#omo-telemetry-posthog-runtime` only on the first capture; the source mapping targets `src/components/telemetry/posthog-runtime.ts`, while the plugin maps it to `extensions/omo-telemetry-posthog.js`. Keep build freshness, required installation artifacts, installer fixtures and bundle audits aligned with that sidecar.
+
 This package is adapter-only. It may depend on harness-neutral core packages plus the Senpi-coupled `@oh-my-opencode/senpi-task` engine, but those packages must not import Senpi, Pi packages, or this adapter through their harness-neutral entrypoints. The Senpi runtime boundary stays here.
 
 ## Anatomy
