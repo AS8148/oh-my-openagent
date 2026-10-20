@@ -63,9 +63,17 @@ export interface MemoryPromptInjectionOptions {
  * rebuilds it), while session-volatile recall and maintenance notices return as a late hidden
  * custom message. Unbound/disabled sessions return undefined so the handler chain passes through.
  */
-export function createMemoryPromptHandler(
-  options: MemoryPromptInjectionOptions,
-): (payload: unknown, eventCtx?: unknown) => Promise<BeforeAgentStartEventResult | undefined> {
+export interface MemoryPromptHandler {
+  (payload: unknown, eventCtx?: unknown): Promise<BeforeAgentStartEventResult | undefined>
+  /**
+   * Compiles the block (and its pressure estimate) a new session's first prompt will need, at HEAD, so the prompt
+   * finds it ready: in this process, or persisted for the next. The prompt shares the in-flight compile instead of
+   * starting its own, so a prompt that arrives first is never slower than without the prebuild.
+   */
+  prebuild(context: MemoryIdentityContext): Promise<void>
+}
+
+export function createMemoryPromptHandler(options: MemoryPromptInjectionOptions): MemoryPromptHandler {
   const cache = options.cache ?? new MemoryBlockCache()
   const pins = options.pins ?? createProjectionPins()
   const recordPin = options.recordPin ?? (() => undefined)
@@ -74,6 +82,19 @@ export function createMemoryPromptHandler(
   // this memo every prompt listed the tree and read every system blob again (one git process each):
   // 45 git spawns between Enter and the provider request in a 2.7k-commit identity.
   const pressureEstimates = new Map<string, number>()
+  const pressureInFlight = new Map<string, Promise<number>>()
+  // Persisted with the compiled block: a relaunch reads the estimate of a commit instead of listing its tree again.
+  // One estimate per revision is in flight at a time, so a prompt and a prebuild share it.
+  const estimatePressure = (repo: GitMemoryRepo, revision: string): Promise<number> => {
+    let pending = pressureInFlight.get(revision)
+    if (pending === undefined) {
+      pending = cache.remember(repo, "system-token-estimate", revision, async () =>
+        String(await estimateSystemTokensCached(repo, revision, pressureEstimates))).then(Number)
+      pressureInFlight.set(revision, pending)
+      pending.catch(() => pressureInFlight.delete(revision))
+    }
+    return pending
+  }
   async function noticeInput<T>(
     input: "nudge" | "soul",
     sessionId: string,
@@ -86,7 +107,11 @@ export function createMemoryPromptHandler(
       return undefined
     }
   }
-  return async (payload, eventCtx) => {
+  const blockOptions = (context: MemoryIdentityContext) => {
+    const projection = options.resolveProjectionLimits?.(context.identity)
+    return { agentId: context.identity, ...(projection === undefined ? {} : { projection }) }
+  }
+  const handler = async (payload: unknown, eventCtx?: unknown): Promise<BeforeAgentStartEventResult | undefined> => {
     const preview = isRecord(payload) && payload.preview === true
     const systemPrompt = readSystemPrompt(payload)
     if (systemPrompt === undefined) return undefined
@@ -110,17 +135,12 @@ export function createMemoryPromptHandler(
       ? { revision: await pins.peek(pinInput) }
       : await pins.advance({ ...pinInput, record: recordPin })
     if (turn.repinned !== undefined && turn.repinned !== "first-turn") options.onRepin?.(session.id, turn.repinned)
-    const projection = options.resolveProjectionLimits?.(context.identity)
-    const block = await cache.compile(repo, `${MEMORY_PROMPT_TEMPLATE}:${context.identity}`, {
-      agentId: context.identity,
-      ...(projection === undefined ? {} : { projection }),
-    }, turn.revision)
+    const block = await cache.compile(repo, `${MEMORY_PROMPT_TEMPLATE}:${context.identity}`, blockOptions(context), turn.revision)
     const pressureBlock = await addMemoryPressureMetadata(
       block,
-      repo,
       turn.revision,
       options.resolveCompileWarnTokens?.(context.identity),
-      pressureEstimates,
+      (revision) => estimatePressure(repo, revision),
     )
     const notice = renderMemoryNotice(session.compactedMessageCount, nudgeTurns, soulNotice, turn)
     const nextPrompt = replaceMemoryBlock(systemPrompt, markMemoryBlock(context.identity, pressureBlock))
@@ -134,21 +154,29 @@ export function createMemoryPromptHandler(
       },
     }
   }
+  return Object.assign(handler, {
+    async prebuild(context: MemoryIdentityContext): Promise<void> {
+      const repo = createRepo(context)
+      const head = await repo.head()
+      if (head === null) return
+      await cache.compile(repo, `${MEMORY_PROMPT_TEMPLATE}:${context.identity}`, blockOptions(context), head)
+      if (options.resolveCompileWarnTokens?.(context.identity) !== undefined) await estimatePressure(repo, head)
+    },
+  })
 }
 
 async function addMemoryPressureMetadata(
   block: string,
-  repo: GitMemoryRepo,
   revision: string | null,
   compileWarnTokens: number | undefined,
-  estimates: Map<string, number>,
+  estimate: (revision: string) => Promise<number>,
 ): Promise<string> {
   if (compileWarnTokens === undefined || revision === null) return block
-  const estimate = await estimateSystemTokensCached(repo, revision, estimates)
+  const tokens = await estimate(revision)
   const softThreshold = Math.floor(MEMORY_PRESSURE_SOFT_RATIO * compileWarnTokens)
-  if (estimate < softThreshold) return block
-  const percentage = Math.floor((estimate / compileWarnTokens) * 100)
-  const line = `- ${MEMORY_PRESSURE_METADATA_TOKEN} system/ ~${estimate}/${compileWarnTokens} tokens (${percentage}% of advisory); trim or demote stale system/ blocks via the memory tool or run /dream`
+  if (tokens < softThreshold) return block
+  const percentage = Math.floor((tokens / compileWarnTokens) * 100)
+  const line = `- ${MEMORY_PRESSURE_METADATA_TOKEN} system/ ~${tokens}/${compileWarnTokens} tokens (${percentage}% of advisory); trim or demote stale system/ blocks via the memory tool or run /dream`
   const metadataEnd = block.lastIndexOf("</memory_metadata>")
   if (metadataEnd < 0) return `${block}\n${line}`
   return `${block.slice(0, metadataEnd)}${line}\n${block.slice(metadataEnd)}`
