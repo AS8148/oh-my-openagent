@@ -70,3 +70,51 @@ test.each(["gap", "recreation"])("latest-state observer invalidates live project
   // then
   expect(live).toHaveBeenCalledTimes(1)
 })
+
+test("revoke rejects a pending materialization before its handshake can complete", async () => {
+  // given
+  const started = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let connections = 0
+  const close = mock(async () => {})
+  setStdioClientDependenciesForTesting({
+    createClient: (): McpClient => ({
+      connect: async () => {
+        if (++connections === 2) { started.resolve(); await release.promise }
+      },
+      close,
+      listTools: async () => ({ tools: [] }), listResources: async () => ({ resources: [] }),
+      listPrompts: async () => ({ prompts: [] }), callTool: async () => ({ content: [] }),
+      readResource: async () => ({ contents: [] }), getPrompt: async () => ({ messages: [] }),
+    }),
+    createTransport: () => ({ start: async () => {}, send: async () => {}, close: async () => {} }),
+  })
+  const store = latestStore()
+  const notices: string[] = []
+  const manager = new SkillMcpManager(Object.assign({}, {
+    grantStore: store, onEnvironmentNotice: (message: string) => notices.push(message),
+  }))
+  managers.push(manager)
+  const info = { sessionID: "pending-project", skillName: "fixture", serverName: "fixture", scope: "project" }
+  const config = { command: "synthetic", env: { AUTH_HEADER: "${GITHUB_TOKEN}" } }
+  await manager.getOrCreateClient(info, config)
+  const id = notices[0]?.match(/\/omo-mcp-env-grant ([a-zA-Z0-9_-]+)/)?.[1]
+  if (!id) throw new Error("No pending grant action")
+  await manager.grantEnvironment(id, ["GITHUB_TOKEN"])
+  const pending = manager.getOrCreateClient(info, config)
+  const rejected = expect(pending).rejects.toThrow("policy changed")
+  const deadline = AbortSignal.timeout(5000)
+  const onTimeout = () => started.reject(new Error("No pending handshake within 5 seconds"))
+  deadline.addEventListener("abort", onTimeout, { once: true })
+  try {
+    await started.promise
+    // when
+    await store.revoke()
+    // then
+    await rejected
+    expect(manager.isConnected(info)).toBe(false)
+  } finally {
+    deadline.removeEventListener("abort", onTimeout)
+    release.resolve()
+  }
+})

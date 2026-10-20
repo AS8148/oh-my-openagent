@@ -194,4 +194,18 @@ describe("legacy skill containment at discovery and reread", () => {
       hook.mockRestore()
     }
   })
+
+  test("canonical containment follows the real volume's case semantics without case folding", async () => {
+    // given
+    const f = fixture()
+    const differentlySpelled = join(f.root, "PROJECT")
+    mkdirSync(differentlySpelled, { recursive: true })
+    skill(join(differentlySpelled, "SKILL.md"))
+    symlinkSync(differentlySpelled, join(f.skillsDir, "case-alias"))
+    const sameDirectory = fs.realpathSync.native(differentlySpelled) === fs.realpathSync.native(f.project)
+    // when
+    const loaded = await loadSkillsFromDir({ skillsDir: f.skillsDir, scope: "project" })
+    // then
+    expect(loaded.map((s) => s.name)).toEqual(sameDirectory ? ["case-alias"] : [])
+  })
 })
