@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Stopping a language server on Windows no longer raises a stray broken-pipe error.** When an LSP server's pipe closed while OmO was shutting the server down, Windows could report the failed write after cleanup had already let go of it, and the EPIPE escaped as an unhandled error. Every pipe of a spawned language server now keeps an error handler for its whole life, so the failure is logged as ignored cleanup noise ([#9601](https://github.com/code-yeongyu/oh-my-openagent/issues/9601), [#10725](https://github.com/code-yeongyu/oh-my-openagent/pull/10725)).
 
+**Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
+
 ## [5.1.40] - 2026-10-20
 
 **Onboarding saves only the facts you keep, and the TUI and the desktop share one completion flag.** The facts you accept are written through memory's own write path, and finishing onboarding in either the TUI or the desktop marks it done for both. ([#10506](https://github.com/code-yeongyu/oh-my-openagent/pull/10506))
