@@ -29,7 +29,8 @@ test("retries seven infrastructure-failed roots before skipping their 54 depende
   expect(retries).toHaveLength(7)
   expect(retries.map((event) => event.automatic?.attempt)).toEqual(Array(7).fill(1))
   expect(result.diagnostics.filter((diagnostic) => diagnostic.kind === "node_flag")).toHaveLength(7)
-})
+  // 61 real task-manager runs on a file store: ~3 s alone, past bun's 5 s default when the host is loaded.
+}, 30_000)
 
 test("exhausts two infrastructure retries and skips only that root's descendants", async () => {
   // Given a broken branch and an independent branch, with a controlled backoff clock.
