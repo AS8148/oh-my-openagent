@@ -8,10 +8,19 @@ import type { CreateOtlpTelemetryTransportInput } from "./otlp-transport-types"
  */
 export function isOtlpTransportAllowed(input: CreateOtlpTelemetryTransportInput): boolean {
   if (!isOtlpTelemetryEnabled({ env: input.env ?? process.env, productEnvPrefix: input.productEnvPrefix })) return false
-  try {
-    return input.consent?.() ?? true
-  } catch (error) {
-    input.diagnostics?.({ event: "telemetry_consent_failed", source: input.source ?? "otlp", error, errorKind: error instanceof Error ? "error" : "non_error" })
-    return false
+  return safeConsent(input)()
+}
+
+/** `consent()` with the gate's rule applied on every call: a callback that throws counts as no consent. */
+export function safeConsent(input: CreateOtlpTelemetryTransportInput): () => boolean {
+  const consent = input.consent
+  if (consent === undefined) return () => true
+  return () => {
+    try {
+      return consent()
+    } catch (error) {
+      input.diagnostics?.({ event: "telemetry_consent_failed", source: input.source ?? "otlp", error, errorKind: error instanceof Error ? "error" : "non_error" })
+      return false
+    }
   }
 }

@@ -4,6 +4,7 @@ import { createTelemetryProviders, type TelemetryProviders } from "./otel-provid
 import { BatchSender } from "./otlp-batch-sender"
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "./otlp-http"
 import { resolveOtlpEndpoint, type WireAttributes } from "./otlp-config"
+import { safeConsent } from "./otlp-gate"
 import {
   createBatchId,
   SPOOL_CAP_BYTES,
@@ -57,7 +58,7 @@ class OtlpSender {
 
   constructor(input: CreateOtlpTelemetryTransportInput, endpoint: string) {
     this.#input = input
-    this.#consent = input.consent ?? (() => true)
+    this.#consent = safeConsent(input)
     this.#providers = createTelemetryProviders({
       resource: input.resource,
       scope: input.scope,
@@ -101,7 +102,10 @@ class OtlpSender {
     })
     // The startup sweep + pass runs first; a flush waits for it, so a batch sealed by an early flush is
     // never left behind by a pass that listed the spool before the seal.
-    this.#started = input.autoStart === false ? Promise.resolve() : this.#start()
+    // Settled, never rejected: a failed startup pass is reported once, and later flushes still run.
+    this.#started = input.autoStart === false
+      ? Promise.resolve()
+      : this.#start().catch((error: unknown) => this.#report("telemetry_otlp_send_failed", error))
     this.transport = {
       sampling: { rawTurnRate: 1 },
       tracer: this.#providers.tracer,

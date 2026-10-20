@@ -164,3 +164,65 @@ describe("the first flush after start", () => {
     await transport.shutdown()
   })
 })
+
+describe("startup and consent failures do not poison the sender", () => {
+  test("#given the startup pass rejects #when a later flush runs #then it resolves and sends the batch", async () => {
+    // given: a sealed batch left by an earlier process (consent stops its own pump right after the seal)
+    const dir = root()
+    let consentCalls = 0
+    const earlier = makeTransport(dir, { consent: () => ++consentCalls <= 2 })
+    capture(earlier, "feature_used", { feature: "a" })
+    await earlier.flush()
+    expect(spoolNames(dir).filter((name) => name.startsWith("batch-"))).toHaveLength(1)
+    // a clock that throws while the next process starts makes its startup claim reject
+    let clockDown = true
+    const { calls, fetch } = recordingFetch()
+    const diagnostics: TelemetryDiagnosticInput[] = []
+    const transport = makeTransport(dir, {
+      autoStart: true,
+      fetch,
+      nowMs: () => {
+        if (clockDown) throw new Error("clock unavailable")
+        return Date.now()
+      },
+      diagnostics: (input) => diagnostics.push(input),
+    })
+    await transport.ready
+    clockDown = false
+
+    // when
+    await transport.flush()
+
+    // then
+    expect(diagnostics.some((input) => input.event === "telemetry_otlp_send_failed")).toBe(true)
+    expect(calls).toHaveLength(1)
+    await transport.shutdown()
+  })
+
+  test("#given consent() starts throwing mid-run #when flush and shutdown run #then they resolve, treat it as no consent and purge", async () => {
+    // given
+    const dir = root()
+    let throwing = false
+    const diagnostics: TelemetryDiagnosticInput[] = []
+    const { calls, fetch } = recordingFetch()
+    const transport = makeTransport(dir, {
+      fetch,
+      consent: () => {
+        if (throwing) throw new Error("consent store unreadable")
+        return true
+      },
+      diagnostics: (input) => diagnostics.push(input),
+    })
+    capture(transport, "feature_used", { feature: "a" })
+
+    // when
+    throwing = true
+    await transport.flush()
+    await transport.shutdown()
+
+    // then
+    expect(calls).toHaveLength(0)
+    expect(spoolNames(dir).filter((name) => name.endsWith(".otlp"))).toEqual([])
+    expect(diagnostics.some((input) => input.event === "telemetry_consent_failed")).toBe(true)
+  })
+})
