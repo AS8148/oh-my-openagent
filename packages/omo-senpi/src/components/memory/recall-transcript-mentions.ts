@@ -68,12 +68,6 @@ interface MatcherSet {
 interface SessionMentions {
   documents: readonly MentionDocument[] | undefined
   readonly byEntryId: Map<string, ReadonlySet<string>>
-  /**
-   * Paths the corpus gained since the cached sets were computed. A moved HEAD keeps every cached set
-   * (a mention depends only on the entry and the path), drops the paths it removed, and tests only these
-   * against a cached entry, so a commit that adds no path rescans nothing.
-   */
-  readonly unscannedPaths: Map<string, readonly MentionMatcher[]>
 }
 
 /** The transcript delimiters a mention may end at (JSON-escaped whitespace and quotes included), not filename suffixes. */
@@ -142,7 +136,7 @@ class BranchMentionIndex implements TranscriptMentionIndex {
     const window = input.entries.slice(-RECALL_PATH_ENTRY_WINDOW)
     if (!matcherSet.perEntrySafe) return mentionsIn(JSON.stringify(window), matcherSet.matchers)
 
-    const session = this.sessionFor(input.sessionId, matcherSet)
+    const { session, added } = this.sessionFor(input.sessionId, matcherSet)
     const excluded = new Set<string>()
     const live = new Set<string>()
     for (let index = 0; index < window.length; index += 1) {
@@ -155,21 +149,16 @@ class BranchMentionIndex implements TranscriptMentionIndex {
       let found = session.byEntryId.get(id)
       if (found === undefined) {
         found = mentionsIn(JSON.stringify(entry) ?? "", matcherSet.matchers)
-      } else {
-        const unscanned = session.unscannedPaths.get(id)
-        if (unscanned !== undefined) found = new Set([...found, ...mentionsIn(JSON.stringify(entry) ?? "", unscanned)])
+      } else if (added.length > 0) {
+        found = new Set([...found, ...mentionsIn(JSON.stringify(entry) ?? "", added)])
       }
       session.byEntryId.set(id, found)
-      session.unscannedPaths.delete(id)
       live.add(id)
       for (const path of found) excluded.add(path)
     }
 
     for (const id of [...session.byEntryId.keys()]) {
-      if (!live.has(id)) {
-        session.byEntryId.delete(id)
-        session.unscannedPaths.delete(id)
-      }
+      if (!live.has(id)) session.byEntryId.delete(id)
     }
     return excluded
   }
@@ -181,15 +170,16 @@ class BranchMentionIndex implements TranscriptMentionIndex {
     return matcherSet
   }
 
-  private sessionFor(sessionId: string, matcherSet: MatcherSet): SessionMentions {
+  /** The session's cache, carried to this corpus, and the corpus paths its cached sets have not been tested for. */
+  private sessionFor(
+    sessionId: string,
+    matcherSet: MatcherSet,
+  ): { readonly session: SessionMentions; readonly added: readonly MentionMatcher[] } {
     const existing = this.sessions.get(sessionId)
-    const session = existing ?? {
-      documents: undefined,
-      byEntryId: new Map<string, ReadonlySet<string>>(),
-      unscannedPaths: new Map<string, readonly MentionMatcher[]>(),
-    }
+    const session = existing ?? { documents: undefined, byEntryId: new Map<string, ReadonlySet<string>>() }
+    let added: readonly MentionMatcher[] = []
     if (session.documents !== matcherSet.documents) {
-      this.reconcile(session, matcherSet)
+      added = this.reconcile(session, matcherSet)
       session.documents = matcherSet.documents
     }
     if (existing !== undefined) this.sessions.delete(sessionId)
@@ -199,21 +189,22 @@ class BranchMentionIndex implements TranscriptMentionIndex {
       if (oldest.done === true) break
       this.sessions.delete(oldest.value)
     }
-    return session
+    return { session, added }
   }
 
-  /** Carries the cached sets to a moved HEAD: removed paths leave every set, added paths are owed per entry. */
-  private reconcile(session: SessionMentions, matcherSet: MatcherSet): void {
-    if (session.documents === undefined) return
+  /**
+   * Carries the cached sets to a moved HEAD. A mention depends only on the entry and the path, so every
+   * cached set stays exact for the paths both corpora share: removed paths leave it, and the paths the new
+   * corpus added are returned for this same call to test against each cached entry still in the window.
+   */
+  private reconcile(session: SessionMentions, matcherSet: MatcherSet): readonly MentionMatcher[] {
+    if (session.documents === undefined) return []
     const previous = new Set(session.documents.map((document) => document.path))
-    const added = matcherSet.matchers.filter((matcher) => !previous.has(matcher.path))
     for (const [id, found] of session.byEntryId) {
       const kept = [...found].filter((path) => matcherSet.paths.has(path))
       if (kept.length !== found.size) session.byEntryId.set(id, new Set(kept))
-      if (added.length === 0) continue
-      const owed = session.unscannedPaths.get(id) ?? []
-      session.unscannedPaths.set(id, [...owed.filter((matcher) => matcherSet.paths.has(matcher.path)), ...added])
     }
+    return matcherSet.matchers.filter((matcher) => !previous.has(matcher.path))
   }
 }
 
