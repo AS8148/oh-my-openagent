@@ -262,6 +262,20 @@ describe("release identity and consumption", () => {
     expect(checkPrChangelog({ ...base, modifiedFiles: ["apps/api/package.json"] }, policy).pass).toBe(false);
   });
 
+  test("a global or sticky artifact pattern matches every path the same way", () => {
+    const policy = { ...POLICY, releaseArtifacts: [/^apps\/[^/]+\/package\.json$/gy] };
+    const files = ["CHANGELOG.md", "apps/api/package.json", "apps/web/package.json", "apps/cli/package.json"];
+    const bump = checkPrChangelog({ ...releaseBase, deletedFiles: ["changes/unreleased/7.md"], modifiedFiles: files }, policy);
+    expect(bump).toEqual({ pass: true, reason: "release PR consumed the fragments" });
+  });
+
+  test("an unanchored artifact pattern fails the release instead of exempting by substring", () => {
+    const policy = { ...POLICY, releaseArtifacts: [/package\.json$/] };
+    const result = checkPrChangelog({ ...releaseBase, deletedFiles: ["changes/unreleased/7.md"], modifiedFiles: ["CHANGELOG.md", "apps/api/package.json"] }, policy);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain("anchored");
+  });
+
   test("a release without a changelog edit fails", () => {
     const noEdit = checkPrChangelog({ ...releaseBase, deletedFiles: ["changes/unreleased/7.md"] }, POLICY);
     expect(noEdit.pass).toBe(false);

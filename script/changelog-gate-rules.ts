@@ -37,8 +37,10 @@ export type GatePolicy = {
   readonly userFacingRoots: readonly string[];
   /** Paths a release PR may carry besides the changelog and fragments, even under a
    * user-facing root: the version bumps, lockfile and generated bundles the release workflow
-   * itself writes, e.g. /^packages\/[^/]+\/package\.json$/. Anchor each pattern; any other
-   * user-facing path still fails a release PR. Absent means none. */
+   * itself writes, e.g. /^packages\/[^/]+\/package\.json$/. A pattern must start with ^ (an
+   * unanchored one fails the release); a match covers an add, a modify or a delete. Any other
+   * user-facing path still fails a release PR. Absent means none. Matched with `search`, which
+   * ignores lastIndex, so a /g or /y flag cannot change the answer between paths. */
   readonly releaseArtifacts?: readonly RegExp[];
 };
 
@@ -104,7 +106,11 @@ export function checkPrChangelog(input: GateInput, policy: GatePolicy): { pass: 
     input.isReleaseWorkflow && policy.releaseBranchPattern.test(input.branch) && policy.releaseActors.includes(input.actor);
   if (isRelease) {
     const artifacts = policy.releaseArtifacts ?? [];
-    const code = paths.filter((path) => isUserFacingPath(path, policy) && !artifacts.some((pattern) => pattern.test(path)));
+    const unanchored = artifacts.find((pattern) => !pattern.source.startsWith("^"));
+    if (unanchored) {
+      return { pass: false, reason: `releaseArtifacts pattern must be anchored with ^: /${unanchored.source}/` };
+    }
+    const code = paths.filter((path) => isUserFacingPath(path, policy) && !artifacts.some((pattern) => path.search(pattern) !== -1));
     if (code.length > 0) {
       return { pass: false, reason: `a release PR must not change user-facing files: ${code.slice(0, 3).join(", ")}` };
     }
