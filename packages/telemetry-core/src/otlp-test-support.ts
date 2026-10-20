@@ -6,7 +6,7 @@ import { gunzipSync } from "node:zlib"
 import { fromBinary } from "@bufbuild/protobuf"
 
 import { type OtlpWireProjection, type WireAttributes, isWireAttributeKey } from "./otlp-config"
-import { startOtlpTransport } from "./otlp-sender"
+import { createOtlpSender } from "./otlp-sender-core"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 import type { OtlpFetch } from "./otlp-http"
 import {
@@ -90,7 +90,7 @@ export function makeTransport(
   dir: string,
   overrides: Partial<CreateOtlpTelemetryTransportInput> = {},
 ): OtlpTelemetryTransport {
-  return startOtlpTransport({
+  return createOtlpSender({
     productEnvPrefix: "OMO_TEST",
     ingestKey: "test-ingest-key",
     spoolDir: dir,

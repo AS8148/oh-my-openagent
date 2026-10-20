@@ -1,4 +1,4 @@
-import { isOtlpTelemetryEnabled } from "./otlp-config"
+import { isOtlpTransportAllowed } from "./otlp-gate"
 import { purgeReport, purgeSpool } from "./otlp-spool-purge"
 import type { CreateOtlpTelemetryTransportInput, OtlpTelemetryTransport } from "./otlp-transport-types"
 
@@ -19,9 +19,7 @@ export type { SpanAllowlist } from "./otlp-wal"
 
 /** The collector transport, or null whenever an opt-out applies or consent is not given. */
 export async function createOtlpTelemetryTransport(input: CreateOtlpTelemetryTransportInput): Promise<OtlpTelemetryTransport | null> {
-  const env = input.env ?? process.env
-  const enabled = isOtlpTelemetryEnabled({ env, productEnvPrefix: input.productEnvPrefix }) && (input.consent?.() ?? true)
-  if (!enabled) {
+  if (!isOtlpTransportAllowed(input)) {
     purgeOnOptOut(input)
     return null
   }

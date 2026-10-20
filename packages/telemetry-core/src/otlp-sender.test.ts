@@ -133,3 +133,34 @@ describe("OTLP sender", () => {
     expect(transport.droppedEvents()).toBe(0)
   })
 })
+
+describe("the first flush after start", () => {
+  test("#given an auto-started transport #when an event is captured and flushed before the startup pass ends #then that flush sends the batch", async () => {
+    // given
+    const dir = root()
+    const { calls, fetch } = recordingFetch()
+    const transport = await createOtlpTelemetryTransport({
+      productEnvPrefix: "OMO_TEST",
+      ingestKey: "test-ingest-key",
+      spoolDir: dir,
+      spoolRoot: dirname(dir),
+      resource: testResource(),
+      scope: TEST_SCOPE, project: testWireProjection, spans: TEST_SPANS,
+      env: {},
+      endpoint: "https://collector.test",
+      sleep: async () => undefined,
+      random: () => 0,
+      fetch,
+    })
+    if (transport === null) throw new Error("transport unexpectedly disabled")
+
+    // when
+    capture(transport, "feature_used", { feature: "a" })
+    await transport.flush()
+
+    // then
+    expect(calls).toHaveLength(1)
+    expect(spoolNames(dir).filter((name) => name.startsWith("batch-"))).toEqual([])
+    await transport.shutdown()
+  })
+})
