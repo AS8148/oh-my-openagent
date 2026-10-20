@@ -1,10 +1,19 @@
+import { join } from "node:path"
+
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createOnboardingComponent } from "./component"
+import type { OnboardingScanEnvironment } from "./scan-runtime"
 import * as state from "./state"
 import type { OmoSenpiComponent } from "../../extension/types"
 
 class OnboardingAPI extends FakeExtensionAPI {
   sessionKind: "interactive" | "worker" = "interactive"
+}
+
+/** A scan environment rooted in an empty home under `dir`, so no test reads this machine's agent homes. */
+export function hermeticScanEnvironment(dir: string): () => OnboardingScanEnvironment {
+  const home = join(dir, "home")
+  return () => ({ home, env: { HOME: home }, agentDir: join(home, ".omo", "agent") })
 }
 
 export function createOnboardingHarness(dir: string, sessionId = "session", mode = "rpc", component?: OmoSenpiComponent) {
@@ -28,6 +37,7 @@ export function createOnboardingHarness(dir: string, sessionId = "session", mode
     claimOnboarding: () => state.claimOnboarding(dir),
     isOnboardingComplete: () => state.isOnboardingComplete(dir),
     releaseOnboarding: () => state.releaseOnboarding(dir),
+    scanEnvironment: hermeticScanEnvironment(dir),
   }
   ;(component ?? createOnboardingComponent(dependencies)).register(pi, {
     logger: { info() {}, warn() {}, error() {} },
