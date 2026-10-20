@@ -116,7 +116,7 @@ async function create(root: string, params: MemoryToolParams): Promise<AppliedCo
   const path = validateMemoryPath(root, source, { fieldName: "file_path" })
   if (existsSync(path)) throw toolError(`create: block already exists at ${source}`)
   await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, renderMemoryFile(stampReceipt(undefined, { description }, params.provenance?.claim), params.file_text ?? ""), "utf8")
+  await writeFile(path, renderMemoryFile(stampReceipt(undefined, { description }, params.file_text ?? "", params.provenance?.claim), params.file_text ?? ""), "utf8")
   return affected(root, path)
 }
 
@@ -129,7 +129,7 @@ async function strReplace(root: string, params: MemoryToolParams): Promise<Appli
   const index = file.body.indexOf(oldString)
   if (index < 0) throw toolError("str_replace: old_string was not found in the target memory block")
   const body = file.body.slice(0, index) + newString + file.body.slice(index + oldString.length)
-  await writeFile(path, renderMemoryFile(stampReceipt(file.frontmatter, file.frontmatter, params.provenance?.claim), body), "utf8")
+  await writeFile(path, renderMemoryFile(stampReceipt(file, file.frontmatter, body, params.provenance?.claim), body), "utf8")
   return affected(root, path)
 }
 
@@ -144,7 +144,7 @@ async function insert(root: string, params: MemoryToolParams): Promise<AppliedCo
   const lines = file.body.length > 0 ? file.body.split("\n") : []
   const line = Math.max(1, Math.floor(params.insert_line))
   lines.splice(Math.min(line - 1, lines.length), 0, ...text.split("\n"))
-  await writeFile(path, renderMemoryFile(stampReceipt(file.frontmatter, file.frontmatter, params.provenance?.claim), lines.join("\n")), "utf8")
+  await writeFile(path, renderMemoryFile(stampReceipt(file, file.frontmatter, lines.join("\n"), params.provenance?.claim), lines.join("\n")), "utf8")
   return affected(root, path)
 }
 
@@ -180,7 +180,7 @@ async function updateDescription(root: string, params: MemoryToolParams): Promis
   const description = acceptableDescription(params.description, "update_description")
   const path = validateMemoryPath(root, source, { fieldName: "file_path" })
   const file = await loadEditable(path, source)
-  await writeFile(path, renderMemoryFile(stampReceipt(file.frontmatter, { ...file.frontmatter, description }, params.provenance?.claim), file.body), "utf8")
+  await writeFile(path, renderMemoryFile(stampReceipt(file, { ...file.frontmatter, description }, file.body, params.provenance?.claim), file.body), "utf8")
   return affected(root, path)
 }
 

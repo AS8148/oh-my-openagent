@@ -114,7 +114,7 @@ describe("pre-commit hook", () => {
   it("#given a note stamped with a claim receipt by the memory tool #when it is committed #then the hook accepts the provenance header (#10488)", async () => {
     // given: exactly what the memory tool writes for a user receipt and for a downgraded claim
     const dir = await createRepo()
-    const stamp = (claim: ClaimReceipt): string => renderMemoryFile(stampReceipt(undefined, { description: "Cleanup" }, claim), "body\n")
+    const stamp = (claim: ClaimReceipt): string => renderMemoryFile(stampReceipt(undefined, { description: "Cleanup" }, "body\n", claim), "body\n")
 
     // when
     const result = await commit(dir, {

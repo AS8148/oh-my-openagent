@@ -1,45 +1,19 @@
-import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 
 import { PROVENANCE_FRONTMATTER_KEY, stampReceipt } from "../tools/claim-frontmatter"
 import { parseMemoryFile } from "./frontmatter"
 import { contentFrontmatterEntries, duplicateFrontmatterKeys } from "./frontmatter-entries"
+import { mergeHeads, readBlob, stagedEntries, treeBlob, type StagedEntry } from "./memory-hook-git"
 
 export type MemoryHookStage = "pre-commit" | "commit-msg"
-
-export interface StagedPath {
-  readonly status: string
-  readonly path: string
-  readonly from?: string
-}
+export { parseRawZ, type StagedEntry } from "./memory-hook-git"
 
 const MEMORY_WRITER_TRAILER = /^Omo-Writer: memory-tool$/m
 // git quotes a path holding any of these even with core.quotePath=false, and the shell checks read
 // git's newline-separated lists; refusing such names keeps every list the shell sees exact.
 const GIT_QUOTED_PATH = /["\\\u0000-\u001f\u007f]/
-
-export function parseNameStatusZ(output: string): StagedPath[] {
-  const tokens = output.split("\0")
-  const paths: StagedPath[] = []
-  let index = 0
-  while (index < tokens.length) {
-    const status = tokens[index++] ?? ""
-    if (status === "") break
-    const first = tokens[index++] ?? ""
-    if (status.startsWith("R") || status.startsWith("C")) {
-      paths.push({ status, from: first, path: tokens[index++] ?? "" })
-    } else {
-      paths.push({ status, path: first })
-    }
-  }
-  return paths
-}
-
-export function stagedPaths(cwd: string): StagedPath[] {
-  const listed = git(cwd, ["-c", "core.quotePath=false", "diff", "--cached", "-M", "-C", "-z", "--name-status", "--diff-filter=ACMR"])
-  if (listed === undefined) throw new Error("memory hook: could not list the staged paths")
-  return parseNameStatusZ(listed)
-}
+const SYMLINK_MODE = "120000"
+const RECEIPT_REFUSAL = "the provenance header is a claim receipt only the memory tool writes; remove that line (or save the note with the memory tool)"
 
 // The value the reader would take for the header: the last `provenance` entry of the frontmatter,
 // read by the same entry reader parseMemoryFile uses.
@@ -48,67 +22,61 @@ export function provenanceOf(content: string | undefined): string | undefined {
   return contentFrontmatterEntries(content)?.filter((entry) => entry.key === PROVENANCE_FRONTMATTER_KEY).at(-1)?.value
 }
 
-export function preCommitFailures(cwd: string, paths: readonly StagedPath[] = stagedPaths(cwd)): string[] {
+export function preCommitFailures(cwd: string, entries: readonly StagedEntry[] = stagedEntries(cwd)): string[] {
   const failures: string[] = []
-  for (const { path } of paths) {
+  for (const { path, dstBlob, dstMode } of entries) {
     if (GIT_QUOTED_PATH.test(path)) {
       failures.push(`  ${JSON.stringify(path)}: memory file names cannot hold quotes, backslashes or control characters; rename it`)
       continue
     }
     if (!path.endsWith(".md")) continue
-    for (const key of duplicateFrontmatterKeys(git(cwd, ["cat-file", "blob", `:${path}`]) ?? "")) {
-      failures.push(`  ${path}: duplicate frontmatter key '${key}'; keep one`)
+    if (dstMode === SYMLINK_MODE) {
+      failures.push(`  ${path}: a memory note cannot be a symbolic link; commit the file itself`)
+      continue
     }
+    const staged = readBlob(cwd, dstBlob)
+    if (staged === undefined) {
+      failures.push(`  ${path}: the staged file could not be read`)
+      continue
+    }
+    for (const key of duplicateFrontmatterKeys(staged)) failures.push(`  ${path}: duplicate frontmatter key '${key}'; keep one`)
   }
   return failures
 }
 
-export function commitMessageFailures(cwd: string, message: string, paths: readonly StagedPath[] = stagedPaths(cwd)): string[] {
+export function commitMessageFailures(cwd: string, message: string, entries: readonly StagedEntry[] = stagedEntries(cwd)): string[] {
   if (MEMORY_WRITER_TRAILER.test(message)) return []
-  const bases = ["HEAD", ...mergeHeads(cwd)]
+  const heads = mergeHeads(cwd)
   const failures: string[] = []
-  for (const { status, path, from } of paths) {
-    if (!path.endsWith(".md")) continue
-    const staged = git(cwd, ["cat-file", "blob", `:${path}`])
-    const header = provenanceOf(staged)
-    if (staged === undefined || header === undefined) continue
-    const accepted = bases.some((base, index) => {
-      const source = index === 0 && status.startsWith("R") && from !== undefined ? from : path
-      return keepsOrLowers(git(cwd, ["cat-file", "blob", `${base}:${source}`]), staged, header)
-    })
-    if (!accepted) {
-      failures.push(`  ${path}: the provenance header is a claim receipt only the memory tool writes; remove that line (or save the note with the memory tool)`)
+  for (const entry of entries) {
+    if (!entry.path.endsWith(".md")) continue
+    const staged = readBlob(cwd, entry.dstBlob)
+    if (staged === undefined) {
+      failures.push(`  ${entry.path}: the staged file could not be read`)
+      continue
     }
+    const header = provenanceOf(staged)
+    if (header !== undefined && !handCommitKeeps(cwd, entry, staged, header, heads)) failures.push(`  ${entry.path}: ${RECEIPT_REFUSAL}`)
   }
   return failures
 }
 
-// A hand commit may keep a header as it stands on a parent, or lower it exactly the way the memory
-// tool lowers it for an unverified edit (a user header becomes "mixed"); it can never raise one.
-function keepsOrLowers(base: string | undefined, staged: string, header: string): boolean {
-  const prior = provenanceOf(base)
-  if (prior === header) return true
-  if (base === undefined || prior === undefined) return false
-  try {
-    return stampReceipt(parseMemoryFile(base).frontmatter, parseMemoryFile(staged).frontmatter, undefined).extra?.[PROVENANCE_FRONTMATTER_KEY] === header
-  } catch {
-    return false
-  }
+// A hand commit (a merge included) leaves a note exactly as a parent has it, or writes the header the
+// memory tool would write for an unverified edit of that parent: a user header becomes "mixed", an
+// agent header stays, a new note gets none. A body merged from two sides was never approved as one.
+function handCommitKeeps(cwd: string, entry: StagedEntry, staged: string, header: string, heads: readonly string[]): boolean {
+  const ours = entry.status.startsWith("M") || entry.status.startsWith("R") ? readBlob(cwd, entry.srcBlob) : undefined
+  const theirs = heads.map((head) => readBlob(cwd, treeBlob(cwd, head, entry.path)))
+  return [ours, ...theirs].some((parent) => parent !== undefined && (parent === staged || lowered(parent, staged) === header))
 }
 
-function mergeHeads(cwd: string): string[] {
-  const path = git(cwd, ["rev-parse", "--git-path", "MERGE_HEAD"])?.trim()
-  if (path === undefined || path === "") return []
+function lowered(parent: string, staged: string): string | undefined {
   try {
-    return readFileSync(path.startsWith("/") || /^[A-Za-z]:/.test(path) ? path : `${cwd}/${path}`, "utf8").split("\n").map((line) => line.trim()).filter(Boolean)
+    const next = parseMemoryFile(staged)
+    return stampReceipt(parseMemoryFile(parent), next.frontmatter, next.body, undefined).extra?.[PROVENANCE_FRONTMATTER_KEY]
   } catch {
-    return []
+    return undefined
   }
-}
-
-function git(cwd: string, args: readonly string[]): string | undefined {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
-  return result.status === 0 ? result.stdout : undefined
 }
 
 // Entry for the memory hooks: `<runtime> <script> --memory-hook <stage> [message file]`, run by git in

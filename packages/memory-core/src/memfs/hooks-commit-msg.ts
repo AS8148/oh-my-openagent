@@ -26,18 +26,18 @@ exit 0
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`
 
-// The checker block goes right after the shebang. commit-msg hands its decision to the checker;
-// pre-commit runs it first and keeps its own value and secret checks afterwards.
+// pre-commit runs the checker right after the shebang and keeps its own value and secret checks
+// afterwards. commit-msg runs it after the trailer test, so a memory-tool write never depends on it.
 export function withMemoryHookChecker(script: string, stage: "pre-commit" | "commit-msg", checker: MemoryHookChecker | undefined): string {
   if (checker === undefined) return script
-  const newline = script.indexOf("\n")
+  const anchor = stage === "commit-msg" ? script.indexOf("\n", script.indexOf("Omo-Writer: memory-tool")) : script.indexOf("\n")
   const block = [
     `omo_hook_runtime=${shellQuote(checker.execPath)}`,
     `omo_hook_script=${shellQuote(checker.script)}`,
     'if [ -f "$omo_hook_runtime" ] && [ -f "$omo_hook_script" ]; then',
-    `  BUN_BE_BUN=1 "$omo_hook_runtime" "$omo_hook_script" --memory-hook ${stage}${stage === "commit-msg" ? ' "$1"' : ""} || exit 1`,
+    `  BUN_BE_BUN=1 "$omo_hook_runtime" "$omo_hook_script" --memory-hook ${stage}${stage === "commit-msg" ? ' "$1"' : ""} || { echo "  (no reason above? restart omo so it reinstalls its memory hooks)"; exit 1; }`,
     ...(stage === "commit-msg" ? ["  exit 0"] : []),
     "fi",
   ].join("\n")
-  return `${script.slice(0, newline + 1)}${block}\n${script.slice(newline + 1)}`
+  return `${script.slice(0, anchor + 1)}${block}\n${script.slice(anchor + 1)}`
 }
