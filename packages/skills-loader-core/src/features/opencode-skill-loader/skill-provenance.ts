@@ -31,11 +31,22 @@ export function pathIsInside(path: string, root: string): boolean {
 
 function spelledInsideProject(path: string, root: string): boolean {
   if (pathIsInside(path, root)) return true
-  if (path.length <= root.length || path[root.length] !== sep) return false
-  const prefix = path.slice(0, root.length)
-  if (prefix.toLowerCase() !== root.toLowerCase()) return false
-  // Normalize only the worktree prefix, never the link-bearing path below it.
-  try { return realpathSync.native(prefix) === realpathSync.native(root) } catch (error) {
+  // Compare ancestors, not the resolved skill path: /tmp and case aliases can
+  // spell the project root differently without making its escaping links trusted.
+  try {
+    const canonicalRoot = realpathSync.native(root)
+    let prefix = dirname(path)
+    while (true) {
+      try {
+        if (realpathSync.native(prefix) === canonicalRoot) return true
+      } catch (error) {
+        if (!(error instanceof Error)) throw error
+      }
+      const parent = dirname(prefix)
+      if (parent === prefix) return false
+      prefix = parent
+    }
+  } catch (error) {
     if (!(error instanceof Error)) throw error
     return false
   }

@@ -16,6 +16,7 @@ export async function loadSkillFromPath(options: {
   defaultName: string
   scope: SkillScope
   namePrefix?: string
+  skipMalformedFrontmatter?: boolean
   provenance?: SkillProvenance
   onDiagnostic?: SkillDiagnosticSink
 }): Promise<LoadedSkill | null> {
@@ -25,7 +26,7 @@ export async function loadSkillFromPath(options: {
   try {
     const content = readSkillFileChecked(options.skillPath, provenance)
     const { data, body, parseError } = parseFrontmatter<SkillMetadata>(content)
-    if (parseError) return null
+    if (parseError && options.skipMalformedFrontmatter) return null
 
     const frontmatterMcp = parseSkillMcpConfigFromFrontmatter(content)
     const mcpDirectory = dirname(options.skillPath)

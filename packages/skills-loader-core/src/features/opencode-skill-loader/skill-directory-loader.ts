@@ -14,6 +14,7 @@ export async function loadSkillsFromDir(options: {
   namePrefix?: string
   depth?: number
   maxDepth?: number
+  skipMalformedFrontmatter?: boolean
   provenance?: SkillProvenance
   onDiagnostic?: SkillDiagnosticSink
   ancestry?: ReadonlySet<string>
@@ -52,6 +53,7 @@ export async function loadSkillsFromDir(options: {
             const skill = await loadSkillFromPath({
               skillPath, resolvedPath: resolved, defaultName: entry.name, scope: options.scope,
               namePrefix, provenance: entryProvenance, onDiagnostic: options.onDiagnostic,
+              skipMalformedFrontmatter: options.skipMalformedFrontmatter,
             })
             if (skill && !skillMap.has(skill.name)) skillMap.set(skill.name, skill)
             break
@@ -67,6 +69,7 @@ export async function loadSkillsFromDir(options: {
           const skill = await loadSkillFromPath({
             skillPath: path, resolvedPath: canonical, defaultName: inferSkillNameFromFileName(path),
             scope: options.scope, namePrefix, provenance: entryProvenance, onDiagnostic: options.onDiagnostic,
+            skipMalformedFrontmatter: options.skipMalformedFrontmatter,
           })
           if (skill && !skillMap.has(skill.name)) skillMap.set(skill.name, skill)
         }

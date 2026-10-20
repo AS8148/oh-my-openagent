@@ -24,12 +24,12 @@ export async function loadSkillFromPathAsync(
   skillPath: string, resolvedPath: string, defaultName: string,
   scope: SkillScope, namePrefix = "", provenance?: SkillProvenance,
 ): Promise<LoadedSkill | null> {
-  return loadSkillFromPath({ skillPath, resolvedPath, defaultName, scope, namePrefix, provenance })
+  return loadSkillFromPath({ skillPath, resolvedPath, defaultName, scope, namePrefix, provenance, skipMalformedFrontmatter: true })
 }
 
 export async function discoverSkillsInDirAsync(
   skillsDir: string, scope: SkillScope = "opencode-project", namePrefix = "",
   depth = 0, maxDepth = 2, provenance?: SkillProvenance,
 ): Promise<LoadedSkill[]> {
-  return loadSkillsFromDir({ skillsDir, scope, namePrefix, depth, maxDepth, provenance })
+  return loadSkillsFromDir({ skillsDir, scope, namePrefix, depth, maxDepth, provenance, skipMalformedFrontmatter: true })
 }

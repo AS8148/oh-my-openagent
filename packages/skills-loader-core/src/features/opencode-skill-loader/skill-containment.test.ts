@@ -30,35 +30,37 @@ function skill(path: string) {
 }
 
 describe("legacy skill containment at discovery and reread", () => {
-  test.each(["folder", "file", "nested", "root"])("blocks escaping project %s with a reason", async (layout) => {
-    // given
-    const f = fixture()
-    skill(join(f.outside, "SKILL.md"))
-    let skillsDir = f.skillsDir
-    if (layout === "root") {
-      rmSync(skillsDir, { recursive: true })
-      symlinkSync(f.outside, skillsDir)
-    } else if (layout === "file") {
-      mkdirSync(join(skillsDir, "escape"))
-      symlinkSync(join(f.outside, "SKILL.md"), join(skillsDir, "escape", "SKILL.md"))
-    } else if (layout === "nested") {
-      mkdirSync(join(skillsDir, "group"))
-      symlinkSync(f.outside, join(skillsDir, "group", "escape"))
-    } else {
-      symlinkSync(f.outside, join(skillsDir, "escape"))
-    }
-    const diagnostics: { category: string; message: string }[] = []
-    // when
-    const loaded = await loadSkillsFromDir(Object.assign({
-      skillsDir, scope: "opencode-project" as const,
-    }, {
-      provenance: { kind: "project-auto", selectedRoot: skillsDir, projectRoot: f.project },
-      onDiagnostic: (diagnostic: { category: string; message: string }) => diagnostics.push(diagnostic),
-    }))
-    // then
-    expect(loaded).toEqual([])
-    expect(diagnostics.some((d) => d.category === "skill-link-blocked" && d.message.includes("outside the project"))).toBe(true)
-  })
+  // The core package's minimal Bun declarations omit test.each (#10693).
+  for (const layout of ["folder", "file", "nested", "root"]) {
+    test(`blocks escaping project ${layout} with a reason`, async () => {
+      // given
+      const f = fixture()
+      skill(join(f.outside, "SKILL.md"))
+      let skillsDir = f.skillsDir
+      if (layout === "root") {
+        rmSync(skillsDir, { recursive: true })
+        symlinkSync(f.outside, skillsDir)
+      } else if (layout === "file") {
+        mkdirSync(join(skillsDir, "escape"))
+        symlinkSync(join(f.outside, "SKILL.md"), join(skillsDir, "escape", "SKILL.md"))
+      } else if (layout === "nested") {
+        mkdirSync(join(skillsDir, "group"))
+        symlinkSync(f.outside, join(skillsDir, "group", "escape"))
+      } else {
+        symlinkSync(f.outside, join(skillsDir, "escape"))
+      }
+      const diagnostics: { category: string; message: string }[] = []
+      // when
+      const loaded = await loadSkillsFromDir({
+        skillsDir, scope: "opencode-project",
+        provenance: { kind: "project-auto", selectedRoot: skillsDir, projectRoot: f.project },
+        onDiagnostic: (diagnostic: { category: string; message: string }) => diagnostics.push(diagnostic),
+      })
+      // then
+      expect(loaded).toEqual([])
+      expect(diagnostics.some((d) => d.category === "skill-link-blocked" && d.message.includes("outside the project"))).toBe(true)
+    })
+  }
 
   test("rejects an escaping sidecar without consuming its declaration", async () => {
     // given
@@ -82,12 +84,12 @@ describe("legacy skill containment at discovery and reread", () => {
     skill(join(f.outside, "entry", "SKILL.md"))
     const config = { sources: [f.outside] }
     // when
-    const project = await discoverConfigSourceSkills(Object.assign({ config, configDir: f.project }, {
+    const project = await discoverConfigSourceSkills({ config, configDir: f.project,
       provenance: { kind: "project-auto", projectRoot: f.project, selectedRoot: f.outside },
-    }))
-    const user = await discoverConfigSourceSkills(Object.assign({ config, configDir: f.project }, {
+    })
+    const user = await discoverConfigSourceSkills({ config, configDir: f.project,
       provenance: { kind: "user", selectedRoot: f.outside },
-    }))
+    })
     // then
     expect(project).toEqual([])
     expect(user.map((s) => s.name)).toEqual(["entry"])
@@ -117,9 +119,10 @@ describe("legacy skill containment at discovery and reread", () => {
     skill(join(f.outside, "SKILL.md"))
     symlinkSync(f.outside, join(f.skillsDir, "installed"))
     // when
-    const loaded = await loadSkillsFromDir(Object.assign({
-      skillsDir: f.skillsDir, scope: "project" as const,
-    }, { provenance: { kind: "project-auto", selectedRoot: f.skillsDir, projectRoot: f.project, userRoots: [userRoot] } }))
+    const loaded = await loadSkillsFromDir({
+      skillsDir: f.skillsDir, scope: "project",
+      provenance: { kind: "project-auto", selectedRoot: f.skillsDir, projectRoot: f.project, userRoots: [userRoot] },
+    })
     // then
     expect(loaded.map((s) => s.name)).toEqual(["installed"])
   })
@@ -133,9 +136,10 @@ describe("legacy skill containment at discovery and reread", () => {
     symlinkSync(allowed, join(f.skillsDir, "allowed.md"))
     symlinkSync(join(f.outside, "sibling.md"), join(f.skillsDir, "sibling.md"))
     // when
-    const loaded = await loadSkillsFromDir(Object.assign({
-      skillsDir: f.skillsDir, scope: "project" as const,
-    }, { provenance: { kind: "project-auto", selectedRoot: f.skillsDir, projectRoot: f.project, userFiles: [allowed] } }))
+    const loaded = await loadSkillsFromDir({
+      skillsDir: f.skillsDir, scope: "project",
+      provenance: { kind: "project-auto", selectedRoot: f.skillsDir, projectRoot: f.project, userFiles: [allowed] },
+    })
     // then
     expect(loaded.map((s) => s.name)).toEqual(["allowed"])
   })
@@ -219,9 +223,10 @@ describe("legacy skill containment at discovery and reread", () => {
     symlinkSync(f.outside, join(f.skillsDir, "escape"))
     // when
     const user = await loadSkillsFromDir({ skillsDir: userRoot, scope: "user" })
-    const project = await loadSkillsFromDir(Object.assign({
-      skillsDir: f.skillsDir, scope: "project" as const,
-    }, { provenance: { kind: "project-auto", selectedRoot: f.skillsDir, projectRoot: f.project, userRoots: [userRoot] } }))
+    const project = await loadSkillsFromDir({
+      skillsDir: f.skillsDir, scope: "project",
+      provenance: { kind: "project-auto", selectedRoot: f.skillsDir, projectRoot: f.project, userRoots: [userRoot] },
+    })
     // then
     expect(user.map((s) => s.name)).toEqual(["leaf"])
     expect(project).toEqual([])

@@ -63,6 +63,22 @@ test.each(["root", "nested"])("native fallback cannot restore escaping project %
   await expect(tool.execute({ name: "escape" }, undefined)).rejects.toThrow("outside the project")
 })
 
+test("native fallback cannot restore a missing project descendant's cached bytes", async () => {
+  // given - unresolved descendants still retain project authority through root aliases (#10693).
+  const f = fixture()
+  const entry = {
+    name: "missing", description: "fixture",
+    location: join(f.project, ".opencode", "skills", "missing", "SKILL.md"),
+    content: "PRE-READ MISSING FIXTURE",
+  }
+  const tool = createSkillTool({
+    directory: f.project, skills: [], commands: [],
+    nativeSkills: { all: () => [entry], get: () => entry, dirs: () => [] },
+  })
+  // when / then
+  await expect(tool.execute({ name: "missing" }, undefined)).rejects.toThrow("outside the project")
+})
+
 test("native builtin row keeps its supplied descriptorless content", async () => {
   // given
   const f = fixture()

@@ -102,7 +102,11 @@ test.each(["store", "manager"])("%s invalidation rejects a pending materializati
   if (!id) throw new Error("No pending grant action")
   await manager.grantEnvironment(id, ["GITHUB_TOKEN"])
   const pending = manager.getOrCreateClient(info, config)
-  const rejected = expect(pending).rejects.toThrow("policy changed")
+  // Not expect(pending).rejects: bun waits on the promise there, and it only settles after the invalidation below (#10693).
+  const rejected = pending.then(
+    () => Promise.reject(new Error("Pending materialization resolved instead of failing on the policy change")),
+    (error: unknown) => { expect(error instanceof Error ? error.message : String(error)).toContain("policy changed") },
+  )
   const deadline = AbortSignal.timeout(5000)
   const onTimeout = () => started.reject(new Error("No pending handshake within 5 seconds"))
   deadline.addEventListener("abort", onTimeout, { once: true })
