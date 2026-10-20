@@ -51,10 +51,13 @@ function opencode(item: Fixture, config: unknown, auth?: unknown): void {
   if (auth !== undefined) write(join(item.dataHome, "opencode", "auth.json"), JSON.stringify(auth))
 }
 
-// The child gets its own temp dir inside the fixture root, which teardown removes (#9766).
+// The child gets its own temp dir inside the fixture root, which teardown removes (#9766). Bun's runtime
+// transpiler cache is off: by default it lands in `$HOME/.bun/install/cache/@t@` on Linux and Windows, so
+// the child would write into the fixture home whether or not it installed anything.
 function childEnv(item: Fixture): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
     TMPDIR: item.tmp,
     TEMP: item.tmp,
     TMP: item.tmp,
