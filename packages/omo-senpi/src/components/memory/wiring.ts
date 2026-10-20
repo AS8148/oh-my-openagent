@@ -90,6 +90,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
     resolveSettings: () => resolveMemorySettings(options.loadConfig({ cwd: options.cwd() }).config.memory),
     env: options.env,
     corpusCache,
+    projectCorpora: projectScope.recallCorpora,
     drainQueued: (sessionId, context) => deliveryRef.current?.drainForPrompt(sessionId, context) ?? [],
     ...(options.logger === undefined ? {} : { logger: options.logger }),
   })
@@ -164,6 +165,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
         resolveContext: (sessionId) => userActivity.hasInput(sessionId) ? resolveContext(sessionId) : undefined,
         recall: recallWiring,
         corpusCache,
+        projectScope,
         ...(ctx.idleCoordinator === undefined ? {} : { coordinator: ctx.idleCoordinator }),
         sendMessage: (message, sendOptions) => pi.sendMessage(message, sendOptions),
         appendEntry: (customType, data) => pi.appendEntry?.(customType, data),

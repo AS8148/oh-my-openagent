@@ -1,6 +1,6 @@
 import { qualifyProjectDocuments, type RecallCandidate, type RecallDocument } from "@oh-my-opencode/memory-core"
 
-/** One touched project's qualified notes, plus the touched file relative to that project's root. */
+/** One touched project's store-backed notes, plus the touched file relative to its root. */
 export interface ProjectRecallCorpus {
   readonly identityId: string
   readonly documents: readonly RecallDocument[]
