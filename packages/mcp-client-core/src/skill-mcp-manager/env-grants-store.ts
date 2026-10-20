@@ -1,4 +1,4 @@
-// Vendored from code-yeongyu/senpi@a747be4db18cf4950453d90e9de21d787301c28b.
+// Vendored from code-yeongyu/senpi@c7ac4b1a8674e03a9e85caf6c89c7ff12b1008b7.
 // Source of truth: packages/coding-agent/src/core/extensions/builtin/mcp/env-grants-store.ts.
 // Replace this copy with the engine export after the senpi release.
 /**
@@ -69,7 +69,7 @@ interface StoreState {
 	readonly valid: boolean;
 }
 const empty = (): GrantSnapshot => ({ version: 1, generation: 0, grants: {} });
-const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const namePattern = /^[^=\0]+$/;
 const digestPattern = /^[a-f0-9]{64}$/;
 
 export function resolveGrantsStorePath(configDir?: string): string {
