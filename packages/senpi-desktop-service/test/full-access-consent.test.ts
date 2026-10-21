@@ -5,6 +5,7 @@ import { exitOf, rejectionOf } from "./harness";
 // Every case waits on real child-process I/O; the guard only catches a hang, it never times behavior.
 const HANG_GUARD = { timeout: 30_000 };
 const CLICK = { target: "desktop", x: 10, y: 10, opts: {} };
+const CHORD = "ctrl+alt+shift+escape";
 
 afterEach(closeServices);
 
@@ -26,8 +27,9 @@ describe("full access as the consent for desktop input (#10788)", HANG_GUARD, ()
 	});
 
 	it("never grants while the user's stop is latched, and never resumes", async () => {
-		// Given
+		// Given: a chord is armed, as every host arms one before input
 		const desktop = await openGated({ value: true });
+		await desktop.service.ensureStopPath(CHORD);
 		await desktop.service.stop();
 
 		// When
@@ -55,8 +57,10 @@ describe("full access as the consent for desktop input (#10788)", HANG_GUARD, ()
 	});
 
 	it("keeps the stop latched across an engine restart, so full access cannot grant", async () => {
-		// Given: stopped, then the engine child dies
+		// Given: a chord is armed, then the user stops, then the engine child dies. The armed chord makes the
+		// new child answer stopPath.start unsuspended, which is what used to erase the remembered stop.
 		const desktop = await openGated({ value: true });
+		await desktop.service.ensureStopPath(CHORD);
 		await desktop.service.stop();
 		const [first] = desktop.log.children;
 		first?.kill();
@@ -90,6 +94,28 @@ describe("full access as the consent for desktop input (#10788)", HANG_GUARD, ()
 		expect(requested(desktop.log, "control.revoke")).toBe(1);
 		expect(asked).toBe(1);
 		expect(state.returnValue).toEqual({ active: false });
+	});
+
+	it("reads consent and sends in one step: full access ending after the caller's check still revokes first", async () => {
+		// Given: a live full-access grant, and a preset that answers full access exactly once more, then not
+		let reads = Number.POSITIVE_INFINITY;
+		const preset = {
+			get value() {
+				reads -= 1;
+				return reads >= 0;
+			},
+		};
+		const desktop = await openGated(preset);
+		await runCode(desktop.service, `await desktop.screenshot(); await desktop.click(10, 10);`);
+		reads = 1;
+
+		// When: the caller's fence still sees full access, the send does not
+		const error = await rejectionOf(desktop.service.call("click", CLICK));
+
+		// Then: the full-access grant was revoked before the click, which the engine refused
+		expect(error).toMatchObject({ data: { code: "ControlRequired" } });
+		expect(requested(desktop.log, "control.revoke")).toBe(1);
+		expect(admitted(desktop, "click")).toBe(1);
 	});
 
 	it("does not re-grant when the request was cancelled by the time the engine refused", async () => {

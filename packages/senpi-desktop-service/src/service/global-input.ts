@@ -62,29 +62,45 @@ export class FullAccessConsent {
 	/** Revokes a full-access grant once the session is no longer in full access; a failed revoke fails the call. */
 	async fence(connection: Connection): Promise<void> {
 		if (!this.#grants.automaticLive || this.#fullAccess()) return;
-		await this.#grants.revoke(() => connection.rpc.request("control.revoke", {}, { timeoutMs: REVOKE_TIMEOUT_MS }));
+		await this.#revoke(connection);
 	}
 
 	/**
 	 * Sends global input. In full access it grants first when no grant may be live, and retries exactly once when
 	 * the engine refused `ControlRequired` at admission (before any input), as after a stop the user resumed.
 	 * `Suspended`, cancellation, and every other failure are never retried, and resume is never sent.
+	 *
+	 * The consent read and the send are one step: every await (a revoke, a grant) loops back to read full access
+	 * again, and the request is written in the same synchronous turn as the read that admitted it.
 	 */
 	async send(connection: Connection, method: EngineMethod, params: unknown, options: CallOptions): Promise<unknown> {
-		const request = () => connection.rpc.request(method, params, options);
-		if (!this.#fullAccess()) return request();
-		if (!this.#grants.possiblyLive) await this.#grant(connection, method, options);
-		try {
-			return await request();
-		} catch (error) {
-			if (!isControlRequired(error) || !this.#fullAccess() || options.signal?.aborted === true) throw error;
+		let retried = false;
+		for (;;) {
+			throwIfCancelled(method, options);
+			const fullAccess = this.#fullAccess();
+			if (!fullAccess && this.#grants.automaticLive) {
+				await this.#revoke(connection);
+				continue;
+			}
+			if (fullAccess && !this.#grants.possiblyLive) {
+				await this.#grant(connection, options);
+				continue;
+			}
+			try {
+				return await connection.rpc.request(method, params, options);
+			} catch (error) {
+				if (!fullAccess || retried || !isControlRequired(error) || options.signal?.aborted === true) throw error;
+			}
+			retried = true;
+			await this.#grant(connection, options);
 		}
-		await this.#grant(connection, method, options);
-		return request();
 	}
 
-	async #grant(connection: Connection, method: EngineMethod, options: CallOptions): Promise<void> {
-		throwIfCancelled(method, options);
+	#revoke(connection: Connection): Promise<unknown> {
+		return this.#grants.revoke(() => connection.rpc.request("control.revoke", {}, { timeoutMs: REVOKE_TIMEOUT_MS }));
+	}
+
+	async #grant(connection: Connection, options: CallOptions): Promise<void> {
 		const params = { reason: FULL_ACCESS_GRANT_REASON, confirmationId: randomUUID() };
 		const signal = options.signal;
 		await this.#grants.grant(
@@ -92,8 +108,5 @@ export class FullAccessConsent {
 			false,
 			true,
 		);
-		// Permission and cancellation are read again after the await, before any input is sent.
-		await this.fence(connection);
-		throwIfCancelled(method, options);
 	}
 }
