@@ -5,7 +5,7 @@ import { buildTimeline, contentText } from "./evidence"
 import { type ClaimVerdict, isFlagged, matchClaims } from "./match"
 import { GATE_FLAGS_TAG, gateFlagsBlock, NUDGE_MESSAGE_TYPE, nudgeText, VERDICT_ENTRY_TYPE, type VerdictRecord } from "./verdict"
 
-export const CLAIM_RECEIPT_NUDGE_DISABLED_FLAG = "omo-senpi-claim-receipt-nudge-disabled"
+export const CLAIM_RECEIPT_NUDGE_FLAG = "omo-senpi-claim-receipt-nudge"
 
 const GATE_REVIEWER = /(?:^|-)gate-reviewer$/
 const MEMORY_CHILD_SENTINELS = ["SENPI_MEMORY_REFLECTION", "SENPI_MEMORY_FACTS"] as const
@@ -43,11 +43,14 @@ export function createClaimReceiptComponent(env: Readonly<Record<string, string 
   return {
     name: "claim-receipt",
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
-      pi.registerFlag(CLAIM_RECEIPT_NUDGE_DISABLED_FLAG, {
+      // Shadow mode by default: verdicts are recorded and logged, but nothing reaches the agent until replay precision
+      // on hand-labelled flags reaches 70% (#10802 tracks the false-positive classes still in the way).
+      pi.registerFlag(CLAIM_RECEIPT_NUDGE_FLAG, {
         type: "boolean",
         default: false,
-        description: "Keep claim-receipt verdicts and review-gate flags but stop showing the unsupported-claim nudge.",
+        description: "Show the unsupported-claim nudge and pass flagged claims to gate reviewers. Off by default: verdicts are only recorded.",
       })
+      const surfaced = (): boolean => ctx.config.getFlag(CLAIM_RECEIPT_NUDGE_FLAG) === true
       const sessions = new Map<string, SessionState>()
       const keyOf = (eventCtx: unknown): string => {
         const id = callManager(eventCtx, "getSessionId")
@@ -93,7 +96,7 @@ export function createClaimReceiptComponent(env: Readonly<Record<string, string 
 
         const verdicts = matchClaims(buildTimeline(branch), claims, answerAt)
         const flagged = verdicts.filter(isFlagged)
-        const nudged = flagged.length > 0 && state.nudgedEpoch !== state.epoch && ctx.config.getFlag(CLAIM_RECEIPT_NUDGE_DISABLED_FLAG) !== true
+        const nudged = flagged.length > 0 && state.nudgedEpoch !== state.epoch && surfaced()
         if (nudged) state.nudgedEpoch = state.epoch
         state.flagged = [...state.flagged, ...flagged].slice(-MAX_GATE_FLAGS)
         const answerEntryId = typeof answerEntry["id"] === "string" ? answerEntry["id"] : ""
@@ -106,7 +109,7 @@ export function createClaimReceiptComponent(env: Readonly<Record<string, string 
       })
 
       pi.on("tool_call", (payload: unknown, eventCtx: unknown): undefined => {
-        if (!isRecord(payload) || payload["toolName"] !== "task" || !isRecord(payload["input"])) return undefined
+        if (!surfaced() || !isRecord(payload) || payload["toolName"] !== "task" || !isRecord(payload["input"])) return undefined
         const flagged = sessions.get(keyOf(eventCtx))?.flagged ?? []
         if (flagged.length === 0) return undefined
         const input = payload["input"]

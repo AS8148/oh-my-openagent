@@ -5,13 +5,14 @@ import { describe, expect, it } from "bun:test"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import type { ComponentContext } from "../../extension/types"
 import { answer, editResult, type FixtureEntry, passingTest, userInput } from "./entries.test-support"
-import { CLAIM_RECEIPT_NUDGE_DISABLED_FLAG, createClaimReceiptComponent } from "./index"
+import { CLAIM_RECEIPT_NUDGE_FLAG, createClaimReceiptComponent } from "./index"
 import { NUDGE_MESSAGE_TYPE, VERDICT_ENTRY_TYPE } from "./verdict"
 
 type Draft = { readonly type: string; readonly customType: string; readonly data?: unknown; readonly content?: unknown; readonly display?: boolean }
 
-function setup(env: Record<string, string> = {}) {
+function setup(env: Record<string, string> = {}, nudge = true) {
   const pi = new FakeExtensionAPI()
+  if (nudge) pi.setFlag(CLAIM_RECEIPT_NUDGE_FLAG, true)
   const ctx: ComponentContext = {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     config: { getFlag: (name) => pi.getFlag(name) },
@@ -83,12 +84,16 @@ describe("claim-receipt component", () => {
     })
   })
 
-  describe("#given the nudge flag is disabled", () => {
-    it("#then the verdict is still recorded but no nudge is shown", async () => {
-      const { pi, finish } = setup()
-      pi.setFlag(CLAIM_RECEIPT_NUDGE_DISABLED_FLAG, true)
+  describe("#given the default shadow mode (nudge flag not set)", () => {
+    it("#then the flagged verdict is still recorded, but no nudge is shown and gate reviewers get no flags", async () => {
+      const { finish, toolCall, input } = setup({}, false)
+      await input("interactive")
       const result = await finish(unsupported())
       expect(result?.entries?.map((draft) => draft.customType)).toEqual(["other", VERDICT_ENTRY_TYPE])
+      expect(result?.entries?.[1]?.data).toMatchObject({ flagged: true, nudged: false, verdicts: [{ status: "unsupported", reason: "no-check" }] })
+      const gate = { toolName: "task", input: { subagent_type: "omo-native-gate-reviewer", prompt: "Review it." } }
+      await toolCall(gate)
+      expect(gate.input.prompt).toBe("Review it.")
     })
   })
 

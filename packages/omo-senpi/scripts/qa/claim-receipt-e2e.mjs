@@ -6,7 +6,10 @@
 //      and no second nudge appears;
 //   3. the next human turn's provider request carries the nudge text, so the agent actually sees it.
 //
-//   bun packages/omo-senpi/scripts/qa/claim-receipt-e2e.mjs <evidence-dir>
+// In `shadow` mode (the default launch, no flag) the same verdicts are recorded but no nudge is shown and nothing
+// reaches the next provider request; `nudge` launches with --omo-senpi-claim-receipt-nudge and proves 1-3 above.
+//
+//   bun packages/omo-senpi/scripts/qa/claim-receipt-e2e.mjs <evidence-dir> [nudge|shadow]
 import assert from "node:assert/strict"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
@@ -23,6 +26,9 @@ const repo = resolve(here, "../../../..")
 const evidence = process.argv[2]
 assert.ok(evidence, "provide the resolved senpi-qa evidence directory")
 mkdirSync(evidence, { recursive: true })
+const mode = process.argv[3] ?? "nudge"
+assert.ok(mode === "nudge" || mode === "shadow", `unknown mode ${mode}`)
+const nudgeOn = mode === "nudge"
 const before = { senpi: credentialDigest(join(homedir(), ".senpi/agent")), omo: credentialDigest(join(homedir(), ".omo/agent")) }
 const requests = []
 const server = startMockCompletionsServer({
@@ -58,7 +64,7 @@ try {
   }))
   const command = {
     file: process.execPath,
-    prefix: [join(repo, "node_modules/@code-yeongyu/senpi/dist/cli.js"), "--multi-session", "--session-runtime", "in-process", "--no-extensions", "-e", join(here, "claim-receipt-extension.ts")],
+    prefix: [join(repo, "node_modules/@code-yeongyu/senpi/dist/cli.js"), "--multi-session", "--session-runtime", "in-process", "--no-extensions", "-e", join(here, "claim-receipt-extension.ts"), ...(nudgeOn ? ["--omo-senpi-claim-receipt-nudge"] : [])],
   }
   session = launchRpc(command, sandbox, sandboxEnv(sandbox))
   let sequence = 0
@@ -89,14 +95,16 @@ try {
   const [first] = verdicts(afterFirst)
   assert.ok(first, JSON.stringify({ stderr: session.stderr(), types: afterFirst.map((e) => e.customType ?? e.message?.role ?? e.type) }))
   assert.equal(first.flagged, true)
-  assert.equal(first.nudged, true)
+  assert.equal(first.nudged, nudgeOn)
   assert.equal(first.verdicts[0].status, "unsupported")
   assert.equal(first.verdicts[0].reason, "no-check")
   const firstNudges = nudges(afterFirst)
-  assert.equal(firstNudges.length, 1)
-  assert.equal(firstNudges[0].display, true)
-  const answerIndex = afterFirst.findIndex((entry) => entry.id === first.answerEntryId)
-  assert.ok(answerIndex !== -1 && afterFirst.indexOf(firstNudges[0]) > answerIndex, "the nudge lands after the final answer")
+  assert.equal(firstNudges.length, nudgeOn ? 1 : 0)
+  if (nudgeOn) {
+    assert.equal(firstNudges[0].display, true)
+    const answerIndex = afterFirst.findIndex((entry) => entry.id === first.answerEntryId)
+    assert.ok(answerIndex !== -1 && afterFirst.indexOf(firstNudges[0]) > answerIndex, "the nudge lands after the final answer")
+  }
 
   await send("Please run the tests.")
   const afterSecond = await sessionEntries()
@@ -107,12 +115,12 @@ try {
   assert.equal(second.flagged, false, JSON.stringify({ verdict: second.verdicts[0], toolResults }))
   assert.equal(second.verdicts[0].status, "supported")
   assert.equal(second.verdicts[0].receipt.kind, "test")
-  assert.equal(nudges(afterSecond).length, 1, "a supported claim adds no nudge")
+  assert.equal(nudges(afterSecond).length, nudgeOn ? 1 : 0, "a supported claim adds no nudge")
 
   await send("Thanks.")
   assert.equal(requests.length, 4)
   const nudgeSeen = JSON.stringify(requests[1]).includes("claim-receipt")
-  assert.equal(nudgeSeen, true, "the next provider request after the nudge carries it into the model context")
+  assert.equal(nudgeSeen, nudgeOn, nudgeOn ? "the next provider request after the nudge carries it into the model context" : "shadow mode sends nothing to the model")
 
   await request({ type: "close_session", sessionId })
   cleanup = await teardown(session)
@@ -121,9 +129,10 @@ try {
   assert.deepEqual(after, before)
   const result = {
     verdict: "PASS",
+    mode,
     surface: "real pinned Senpi RPC (in-process session runtime) with the built claim-receipt component",
     providerRequests: requests.length,
-    first: { flagged: first.flagged, nudged: first.nudged, status: first.verdicts[0].status, reason: first.verdicts[0].reason, nudgeDisplay: firstNudges[0].display },
+    first: { flagged: first.flagged, nudged: first.nudged, status: first.verdicts[0].status, reason: first.verdicts[0].reason, nudgeDisplay: firstNudges[0]?.display ?? null },
     second: { flagged: second.flagged, status: second.verdicts[0].status, receiptKind: second.verdicts[0].receipt.kind },
     nudgeCount: nudges(afterSecond).length,
     nudgeInNextProviderRequest: nudgeSeen,
@@ -131,8 +140,8 @@ try {
     isolatedAgentDir: sandbox.agentDir,
     cleanup,
   }
-  writeFileSync(join(evidence, "claim-receipt-live.json"), `${JSON.stringify(result, null, 2)}\n`)
-  writeFileSync(join(evidence, "claim-receipt-live-session.jsonl"), `${(await Promise.resolve(afterSecond)).map((entry) => JSON.stringify(entry)).join("\n")}\n`)
+  writeFileSync(join(evidence, `claim-receipt-live-${mode}.json`), `${JSON.stringify(result, null, 2)}\n`)
+  writeFileSync(join(evidence, `claim-receipt-live-${mode}-session.jsonl`), `${(await Promise.resolve(afterSecond)).map((entry) => JSON.stringify(entry)).join("\n")}\n`)
   console.log(JSON.stringify(result))
 } finally {
   if (session && isAlive(session.pid)) await teardown(session)
