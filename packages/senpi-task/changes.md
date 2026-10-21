@@ -1,3 +1,10 @@
+## 2026-10-21 - A refused first prompt reports start_failed without waiting for the child's teardown (#10402)
+
+- `runners/rpc/start-cleanup.ts`: `discardUnstartedRpcHandle(handle, onFailure)` is the "decide first, tear down detached" primitive. It starts terminate-then-dispose and returns a promise that settles when teardown finishes and never rejects; a teardown failure goes to `onFailure`. `RpcProcessRunner.start` and the host session opener (`runners/rpc-host/session-open.ts`) throw the `child-prompt-failed` RunnerError as soon as the prompt is refused. Before, they awaited the process-tree teardown (Windows `taskkill`), which could outlast the manager's 250 ms `START_REPORT_WINDOW_MS`, so `TaskManager.start` reported a refused task as `started` with `starting: true`.
+- A resumed session's failed `switch_session` or input reconciliation still awaits the returned teardown before `start()` rejects: its retry reopens the same session file, which the old child must have released first.
+- `RpcProcessRunner` accepts `terminateChild` and hands it to the child handle (the port the handle already takes); the regression uses it to hold the teardown open.
+- `manager/start-failure-diagnostics.test.ts` adds the row that holds teardown past the window and asserts `start_failed`; it fails on every run without the fix. Suites that spawn real fake children release them through `runners/rpc/__fixtures__/release-child.ts`, which waits for a group the runner is already tearing down (macOS answers a second signal with EPERM).
+
 ## 2026-10-19 - Retry infrastructure-failed DAG nodes before cascading skips (#10605)
 
 The shared DAG scheduler retries an infrastructure-failed node at most twice, with
