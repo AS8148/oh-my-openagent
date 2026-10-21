@@ -56,6 +56,14 @@ const PASS_SIGNATURES: readonly RegExp[] = [
   /\tpass\t/,
 ]
 
+const HARNESS_REFUSAL = /\bTool \S+ not found\b|\bpermission denied by\b|\b(?:was|were) denied\b|\bblocked by (?:policy|the user|a hook)\b|\brequires approval\b|\b(?:aborted|cancelled) by the user\b/i
+
+/** A structured run that errored is a failed check only if it actually ran: a harness refusal is no evidence. */
+export function judgeStructured(errored: boolean, text: string): CheckOutcome {
+  if (!errored) return judgeOutput(text)
+  return HARNESS_REFUSAL.test(text) ? "unknown" : "failed"
+}
+
 export function judgeOutput(text: string): CheckOutcome {
   if (FAIL_SIGNATURES.some((pattern) => pattern.test(text))) return "failed"
   if (UNSETTLED_SIGNATURES.some((pattern) => pattern.test(text))) return "unknown"

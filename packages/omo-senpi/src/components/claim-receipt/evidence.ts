@@ -1,5 +1,5 @@
 import { extractMutatedFilePaths, MUTATION_TOOL_NAMES } from "../post-mutation/post-mutation"
-import { commandKinds, firstCommandOffset, isRelevantPath, judgeOutput } from "./signatures"
+import { commandKinds, firstCommandOffset, isRelevantPath, judgeOutput, judgeStructured } from "./signatures"
 
 export type CheckKind = "test" | "typecheck" | "lint" | "build" | "run" | "lsp"
 export type CheckOutcome = "passed" | "failed" | "unknown"
@@ -92,7 +92,7 @@ class TimelineBuilder {
     if (toolName === "bash" || toolName === "powershell") {
       const command = asString(args["command"])
       const kinds = commandKinds(command)
-      if (kinds.length > 0) this.addCheck(index, entryId, { kinds, command }, isError ? "failed" : judgeOutput(text))
+      if (kinds.length > 0) this.addCheck(index, entryId, { kinds, command }, judgeStructured(isError, text))
     }
   }
 
@@ -133,7 +133,7 @@ class TimelineBuilder {
       if (name === "monitor") this.#background.set(`desc:${asString(args["description"])}`, { kinds, command })
       return
     }
-    this.addCheck(at, entryId, { kinds, command }, call["ok"] === false ? "failed" : judgeOutput(preview))
+    this.addCheck(at, entryId, { kinds, command }, judgeStructured(call["ok"] === false, preview))
   }
 
   cell(callId: string, code: string, output: string, status: unknown, index: number, entryId: string): void {

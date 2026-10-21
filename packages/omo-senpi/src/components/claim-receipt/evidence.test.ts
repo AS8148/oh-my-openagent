@@ -105,6 +105,17 @@ describe("claim-receipt evidence timeline", () => {
     })
   })
 
+  describe("#given a check the harness refused before it ran", () => {
+    it("#then the refusal is not a failed check", () => {
+      const missing = [toolCall("b1", "bash", { command: "bun test" }), toolResult("b1", "bash", { isError: true, text: "Tool bash not found. Run bash inside an eval cell." })]
+      const denied = evalRun("b2", { code: "await tool.bash({ command: 'bun test' })" }, [hostBash("bun test", "Permission denied by policy: bash", false)])
+      const ran = [toolCall("b3", "bash", { command: "bun test" }), toolResult("b3", "bash", { isError: true, text: " 2 pass\n 1 fail" })]
+      expect(checks(missing)).toEqual([["test", "unknown", 1]])
+      expect(checks(denied)).toEqual([["test", "unknown", 1]])
+      expect(checks(ran)).toEqual([["test", "failed", 1]])
+    })
+  })
+
   describe("#given a managed lsp diagnostics result", () => {
     it("#then a clean report is a passed lsp check", () => {
       const entries = [toolCall("l1", "lsp_diagnostics", { filePath: "src" }), toolResult("l1", "lsp_diagnostics", { text: "Files scanned: 6\nFiles with errors: 0\nTotal diagnostics: 0" })]
