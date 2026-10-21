@@ -254,6 +254,21 @@ describe("checkExtensionCurrent", () => {
     }
   })
 
+  test("#given the split extension build #when feedback inputs are inspected #then the report core loads only from the lazy entry", async () => {
+    const { mainInputs, feedbackInputs } = await sharedOutputs()
+    for (const suffix of [
+      "packages/omo-senpi/src/components/feedback/runtime.ts",
+      "packages/omo-senpi/src/components/feedback/collect.ts",
+      "packages/omo-senpi/src/components/feedback/collect-host.ts",
+      "packages/omo-senpi/src/components/feedback/draft.ts",
+      "packages/omo-senpi/src/components/feedback/submit.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(feedbackInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+    expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith("packages/omo-senpi/src/components/feedback/index.ts"))).toBe(true)
+  })
+
   test("#given lazy thread registration #when bundle inputs are inspected #then live RPC implementation is confined to its sidecar", async () => {
     const { mainInputs, threadClientInputs } = await sharedOutputs()
     const suffix = "/components/thread/live-surface.ts"
@@ -307,6 +322,29 @@ describe("checkExtensionCurrent", () => {
       expect(sessionHistoryInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
     }
     expect(await readFile(sessionHistoryOutputPath, "utf8")).not.toContain("#omo-session-history-runtime")
+  })
+
+  test("#given the split extension build #when recall inputs are inspected #then the persisted-terms store loads only from its lazy entry", async () => {
+    const { mainInputs, recallStoreInputs, recallStoreOutputPath } = await sharedOutputs()
+    for (const suffix of [
+      "packages/memory-core/src/recall/bm25-persist.ts",
+      "packages/memory-core/src/recall/bm25-store.ts",
+      "packages/memory-core/src/recall/bm25-persist-gate.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(recallStoreInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+    // The store seeds and reads the ranking's own index, which it is handed; a bundled copy would be a second index.
+    expect(recallStoreInputs.some((input) => toPortableBuildPath(input).endsWith("packages/memory-core/src/recall/bm25-index.ts"))).toBe(false)
+    expect(await readFile(recallStoreOutputPath, "utf8")).not.toContain("#omo-recall-store-runtime")
+  })
+
+  test("#given the split extension build #when telemetry inputs are inspected #then PostHog lives only in its lazy sidecar", async () => {
+    const { mainInputs, telemetryPosthogInputs, telemetryPosthogOutputPath } = await sharedOutputs()
+    expect(mainInputs.some(input => /node_modules\/posthog-(?:node|core)\//.test(toPortableBuildPath(input)))).toBe(false)
+    expect(telemetryPosthogInputs.some(input => /node_modules\/posthog-node\//.test(toPortableBuildPath(input)))).toBe(true)
+    expect(mainInputs.some(input => toPortableBuildPath(input).endsWith("/telemetry/posthog-runtime.ts"))).toBe(false)
+    expect(await readFile(telemetryPosthogOutputPath, "utf8")).not.toContain("#omo-telemetry-posthog-runtime")
   })
 
   test("#given the split extension build #when sync inputs are inspected #then the Loro engine and its wasm live only in the sync sidecar", async () => {
@@ -380,8 +418,11 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-memory-memfs-runtime")')
     expect(main).toContain('import("#omo-memory-palace-runtime")')
     expect(main).toContain('import("#omo-session-history-runtime")')
+    expect(main).toContain('import("#omo-recall-store-runtime")')
+    expect(main).toContain('import("#omo-telemetry-posthog-runtime")')
     expect(main).toContain('import("#omo-thread-client-runtime")')
     expect(main).toContain('import("#omo-memory-sync-runtime")')
+    expect(main).toContain('import("#omo-feedback-runtime")')
     expect(task).toMatch(/^\/\/ omo:[A-Za-z0-9_-]{43}:[A-Za-z0-9_-]{43}/)
     expect(main).not.toContain('import("#omo-agent-toolkit-runtime")')
     expect(manifest.imports).not.toHaveProperty("#omo-agent-toolkit-runtime")
@@ -392,7 +433,10 @@ describe("checkExtensionCurrent", () => {
       "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
       "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
       "#omo-session-history-runtime": "./extensions/omo-session-history.js",
+      "#omo-recall-store-runtime": "./extensions/omo-recall-store.js",
+      "#omo-telemetry-posthog-runtime": "./extensions/omo-telemetry-posthog.js",
       "#omo-memory-sync-runtime": "./extensions/omo-memory-sync.js",
+      "#omo-feedback-runtime": "./extensions/omo-feedback.js",
       "#omo-thread-client-runtime": "./extensions/omo-thread-client.js",
       "#omo-agent-toolkit-sdk": "./runtime/agent-toolkit-sdk/sdk.js",
     })

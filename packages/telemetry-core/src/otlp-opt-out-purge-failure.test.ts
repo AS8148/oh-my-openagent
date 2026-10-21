@@ -3,9 +3,9 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 import { getTelemetryDiagnosticsFilePath, writeTelemetryDiagnostic } from "./diagnostics"
-import { createOtlpTelemetryTransport } from "./otlp-sender"
+import { createOtlpTelemetryTransport } from "./otlp-entry"
 import { createBatchId } from "./otlp-spool-dir"
-import { createSpoolRoot, spoolNames, TEST_SCOPE, testResource, testWireProjection } from "./otlp-test-support"
+import { createSpoolRoot, spoolNames, TEST_SCOPE, testResource, testWireProjection, TEST_SPANS } from "./otlp-test-support"
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
@@ -18,7 +18,7 @@ const canDenyUnlink = process.platform !== "win32" && typeof process.getuid === 
 describe("an opt-out purge that cannot delete its own spool file reports it as a failed deletion", () => {
   test.skipIf(!canDenyUnlink)(
     "#given a spool file of the current user in a spool directory that denies unlink #when the process starts opted out #then the file stays, and the diagnostics file records one telemetry_spool_purge_failed with the errno code and no path",
-    () => {
+    async () => {
       // given
       const created = createSpoolRoot("telemetry-core-purge-failure-")
       const spoolDir = created.dir
@@ -30,13 +30,13 @@ describe("an opt-out purge that cannot delete its own spool file reports it as a
       const diagnosticsDir = join(dirname(spoolDir), "diagnostics")
 
       // when
-      const transport = createOtlpTelemetryTransport({
+      const transport = await createOtlpTelemetryTransport({
         productEnvPrefix: "OMO_TEST",
         ingestKey: "k",
         spoolDir,
         spoolRoot: dirname(spoolDir),
         resource: testResource(),
-        scope: TEST_SCOPE, project: testWireProjection,
+        scope: TEST_SCOPE, project: testWireProjection, spans: TEST_SPANS,
         env: { DO_NOT_TRACK: "1" },
         diagnostics: (input) => writeTelemetryDiagnostic(input, { diagnosticsDir }),
         autoStart: false,

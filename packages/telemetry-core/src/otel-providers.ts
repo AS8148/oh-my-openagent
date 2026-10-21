@@ -10,12 +10,14 @@ import { MinimalTracerProvider } from "./otel-minimal-trace"
 import { systemClock, type InstrumentationScope, type OtelClock } from "./otel-time"
 import type { ResourceAttributes } from "./otlp-encode"
 import { encodeHeader } from "./otlp-spool-file"
-import { SpoolWriter, WalLogRecordProcessor, WalSpanProcessor } from "./otlp-wal"
+import { SpoolWriter, WalLogRecordProcessor, WalSpanProcessor, type SpanAllowlist } from "./otlp-wal"
 
 export type CreateTelemetryProvidersInput = {
   readonly resource: ResourceAttributes
   readonly scope: InstrumentationScope
   readonly spoolDir: string
+  /** Required: the spans the tracer may write and the attributes each may carry; anything else is dropped. */
+  readonly spans: SpanAllowlist
   readonly bootId?: string
   readonly pid?: number
   readonly clock?: OtelClock
@@ -74,7 +76,7 @@ export function createTelemetryProviders(input: CreateTelemetryProvidersInput): 
   const spanWriter = writer("traces")
   const clock = input.clock ?? systemClock
   const loggerProvider = new MinimalLoggerProvider({ processor: new WalLogRecordProcessor(logWriter, onAppended), clock })
-  const tracerProvider = new MinimalTracerProvider({ processor: new WalSpanProcessor(spanWriter, onAppended), clock })
+  const tracerProvider = new MinimalTracerProvider({ processor: new WalSpanProcessor(spanWriter, onAppended, input.spans), clock })
   return {
     loggerProvider,
     tracerProvider,

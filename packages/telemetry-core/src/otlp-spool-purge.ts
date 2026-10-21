@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync, realpathSync, rmdirSync, type Stats, unlinkSync } from "node:fs"
 import { isAbsolute, join, relative } from "node:path"
 
-import { isSpoolFileName, QUARANTINE_DIR } from "./otlp-spool-dir"
+import { isSpoolFileName, QUARANTINE_DIR } from "./otlp-spool-names"
 import type { TelemetryDiagnosticInput, TelemetrySpoolEntryKind } from "./types"
 
 /**
@@ -16,17 +16,6 @@ export type PurgeReport = {
   readonly onSkipped: (kind: TelemetrySpoolEntryKind) => void
   /** A regular spool file of the current user whose unlink failed while the entry stayed the same. */
   readonly onFailed: (code: string) => void
-}
-
-/** Each entry the purge leaves behind becomes one diagnostic, by kind or errno code, never by path. */
-export function diagnosticPurgeReport(
-  diagnostics: ((input: TelemetryDiagnosticInput) => void) | undefined,
-  source: string,
-): PurgeReport {
-  return {
-    onSkipped: (entryKind) => diagnostics?.({ event: "telemetry_spool_purge_skipped", source, entryKind }),
-    onFailed: (errorCode) => diagnostics?.({ event: "telemetry_spool_purge_failed", source, errorCode }),
-  }
 }
 
 /** Test seams for what an unprivileged test cannot stage: an entry swapped mid-purge, a file of another user. */
@@ -193,4 +182,12 @@ export function purgeSpool(
   removeIfEmpty(quarantine)
   removeIfEmpty(dir)
   return sweep.failed > 0 ? "incomplete" : "purged"
+}
+
+/** Each entry the purge leaves behind becomes one diagnostic, by kind or errno code, never by path. */
+export function purgeReport(diagnostics: ((input: TelemetryDiagnosticInput) => void) | undefined, source: string): PurgeReport {
+  return {
+    onSkipped: (entryKind: TelemetrySpoolEntryKind) => diagnostics?.({ event: "telemetry_spool_purge_skipped", source, entryKind }),
+    onFailed: (errorCode: string) => diagnostics?.({ event: "telemetry_spool_purge_failed", source, errorCode }),
+  }
 }

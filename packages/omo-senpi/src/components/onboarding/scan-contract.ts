@@ -5,7 +5,7 @@ export const ONBOARDING_SCAN_RPC_EVENT = "omo.onboarding.scan.event"
 /** Pull: `extension_request` with `OnboardingApplyRequest`; answers `OnboardingApplyResponse`. */
 export const ONBOARDING_APPLY_RPC_METHOD = "omo.onboarding.apply"
 
-export type OnboardingScanSource = "detect" | "providers" | "credentials" | "assets" | "model-choices"
+export type OnboardingScanSource = "detect" | "providers" | "credentials" | "assets" | "model-choices" | "projects" | "sessions"
 /** The stages `omo.onboarding.apply` accepts; `detect` only reads, so it has none. */
 export type OnboardingApplyStage = "credentials" | "assets" | "providers" | "model-choices"
 
@@ -21,6 +21,8 @@ export interface OnboardingScanItem {
   readonly kind: string
   readonly state: string
   readonly detail?: string
+  /** On a `sessions` item: the project directory the session ran in. */
+  readonly project?: string
 }
 
 export interface OnboardingScanCounts {
