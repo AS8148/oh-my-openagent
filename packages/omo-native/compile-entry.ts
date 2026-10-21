@@ -36,7 +36,7 @@ import { runLoroSmoke } from "./loro-smoke"
 import { spawnSync } from "node:child_process"
 import { compiledRollbackMigration } from "./compiled-rollback"
 import { refuseRetiredCommand } from "./bin/lib/retired-command.js"
-import { ExtraCaCertificatesError, installEngineCaTrust } from "./compiled-ca-trust"
+import { ExtraCaCertificatesError, gateFetchOnEngineCaTrust, installEngineCaTrust } from "./compiled-ca-trust"
 
 // The engine is imported via a RELATIVE string LITERAL, inlined at both import
 // sites, and both properties are load-bearing:
@@ -272,7 +272,13 @@ async function main(): Promise<void> {
   // exact argv `--version` or `--help` is answered, from static local data, before anything else runs
   // (#10236): the engine's own help loads extensions, which can install packages over the network.
   try {
-    installEngineCaTrust()
+    // `--version` / `--help` never touch the OS store; every other start reads it off the main thread
+    // and only the first outbound request waits for it, bounded (#10760).
+    const argv = process.argv.slice(2)
+    installEngineCaTrust(process.env, undefined, {
+      skipSystem: argv.length === 1 && (argv[0] === "--version" || argv[0] === "--help"),
+    })
+    gateFetchOnEngineCaTrust()
   } catch (error) {
     if (!(error instanceof ExtraCaCertificatesError)) throw error
     if (await answerUnderRefusedTrust(process.argv.slice(2))) {

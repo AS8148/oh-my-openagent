@@ -7,7 +7,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  engineCaTrustReady,
   ExtraCaCertificatesError,
+  gateFetchOnEngineCaTrust,
   installEngineCaTrust,
   MAX_EXTRA_CA_BYTES,
   parseExtraCaCertificates,
@@ -63,7 +65,7 @@ describe("installEngineCaTrust", () => {
   })
 
   // Diagnostics contract (#10236): the report must show what NODE_EXTRA_CA_CERTS contributed.
-  test("#given NODE_EXTRA_CA_CERTS loaded one CA #then the report counts it as ambient and installs it", () => {
+  test("#given NODE_EXTRA_CA_CERTS loaded one CA #then the report counts it as ambient and installs it", async () => {
     let installed: string[] = []
     const tls = {
       getCACertificates: (kind: string) => ({ bundled: ["B"], system: ["S"], extra: ["A"] })[kind] ?? [],
@@ -71,14 +73,94 @@ describe("installEngineCaTrust", () => {
         installed = certificates
       },
     }
-    expect(installEngineCaTrust({}, tls as never)).toEqual({ installed: true, bundled: 1, system: 1, ambient: 1, extra: 0 })
-    expect(installed).toEqual(["B", "S", "A"])
+    const loadSystem = async () => tls.getCACertificates("system")
+    expect(installEngineCaTrust({}, tls as never, { loadSystem })).toEqual({ installed: true, bundled: 1, system: 0, ambient: 1, extra: 0 })
+    expect(installed).toEqual(["B", "A"])
+    expect(await engineCaTrustReady(1_000)).toBe("loaded")
+    expect(installed).toEqual(["B", "A", "S"])
   })
 
-  test("#given a runtime without the trust APIs #then leaves it alone and still sets NODE_USE_SYSTEM_CA", () => {
+  test("#given a runtime without the trust APIs #then leaves it alone", () => {
     const env: NodeJS.ProcessEnv = {}
     expect(installEngineCaTrust(env, {} as never).installed).toBe(false)
+  })
+})
+
+// #10760: on some Macs the security server never answers getCACertificates("system"); that call
+// used to run synchronously at the top of every start and hung `omo --version` forever.
+describe("the OS store never blocks startup (#10760)", () => {
+  const fakeTls = () => {
+    const calls: string[] = []
+    const installs: string[][] = []
+    return {
+      calls,
+      installs,
+      tls: {
+        getCACertificates: (kind: string) => {
+          calls.push(kind)
+          return ({ bundled: ["B"], extra: ["A"], system: ["S"] } as Record<string, string[]>)[kind] ?? []
+        },
+        setDefaultCACertificates: (certificates: string[]) => {
+          installs.push(certificates)
+        },
+      },
+    }
+  }
+
+  test("#given --version or --help #then the OS store is never read", async () => {
+    const { calls, tls } = fakeTls()
+    let loads = 0
+    installEngineCaTrust({}, tls as never, { skipSystem: true, loadSystem: async () => (loads++, ["S"]) })
+    expect(await engineCaTrustReady(50)).toBe("skipped")
+    expect({ calls: calls.includes("system"), loads }).toEqual({ calls: false, loads: 0 })
+  })
+
+  test("#given a start #then install returns at once, without reading the OS store on the calling thread", () => {
+    const { calls, installs, tls } = fakeTls()
+    const env: NodeJS.ProcessEnv = {}
+    installEngineCaTrust(env, tls as never, { loadSystem: () => new Promise<string[]>(() => {}) })
+    expect(calls).not.toContain("system")
+    expect(installs).toEqual([["B", "A"]])
+    expect(env.NODE_USE_SYSTEM_CA).toBeUndefined()
+  })
+
+  test("#given an OS store that never answers #then the first request proceeds after the bound with bundled + extras, warned once", async () => {
+    const { installs, tls } = fakeTls()
+    const warnings: string[] = []
+    installEngineCaTrust({}, tls as never, { loadSystem: () => new Promise<string[]>(() => {}) })
+    const started = performance.now()
+    expect(await engineCaTrustReady(50, (message) => warnings.push(message))).toBe("timed-out")
+    expect(performance.now() - started).toBeLessThan(1_000)
+    expect(await engineCaTrustReady(50, (message) => warnings.push(message))).toBe("timed-out")
+    expect(installs).toEqual([["B", "A"]])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain("system certificate store did not answer")
+  })
+
+  test("#given a slow store that does answer #then later requests trust a system-only CA and children read the store", async () => {
+    const { installs, tls } = fakeTls()
+    const env: NodeJS.ProcessEnv = {}
+    let answer: (certificates: string[]) => void = () => {}
+    installEngineCaTrust(env, tls as never, { loadSystem: () => new Promise<string[]>((resolve) => (answer = resolve)) })
+    expect(await engineCaTrustReady(20, () => {})).toBe("timed-out")
+    answer(["S"])
+    expect(await engineCaTrustReady(1_000)).toBe("loaded")
+    expect(installs.at(-1)).toEqual(["B", "A", "S"])
     expect(env.NODE_USE_SYSTEM_CA).toBe("1")
+  })
+
+  test("#given the fetch gate #then the first fetch waits for the store and goes out with it installed", async () => {
+    const { installs, tls } = fakeTls()
+    let answer: (certificates: string[]) => void = () => {}
+    installEngineCaTrust({}, tls as never, { loadSystem: () => new Promise<string[]>((resolve) => (answer = resolve)) })
+    const seen: number[] = []
+    const target = { fetch: (async () => (seen.push(installs.length), new Response("ok"))) as unknown as typeof fetch }
+    gateFetchOnEngineCaTrust(target)
+    const first = target.fetch("https://example.invalid/")
+    answer(["S"])
+    await first
+    await target.fetch("https://example.invalid/")
+    expect(seen).toEqual([2, 2])
   })
 })
 
@@ -135,7 +217,7 @@ describe("compiled binary", () => {
     const entry = join(dir, "probe.ts")
     writeFileSync(
       entry,
-      `import { installEngineCaTrust } from ${JSON.stringify(join(import.meta.dir, "..", "compiled-ca-trust.ts"))}
+      `import { engineCaTrustReady, installEngineCaTrust } from ${JSON.stringify(join(import.meta.dir, "..", "compiled-ca-trust.ts"))}
 import { request } from "node:https"
 import { spawnSync } from "node:child_process"
 const [mode, port] = process.argv.slice(2)
@@ -149,12 +231,14 @@ if (mode === "daemon") {
 }
 if (mode === "bun-be-bun-tls") {
   installEngineCaTrust()
+  await engineCaTrustReady()
   const code = 'require("node:https").get("https://localhost:' + port + '/",r=>{r.resume();console.log("ok "+r.statusCode)}).on("error",e=>console.log("error "+e.code))'
   const child = spawnSync(process.execPath, ["-e", code], { env: { ...process.env, BUN_BE_BUN: "1" }, encoding: "utf8" })
   console.log(child.stdout.trim()); process.exit(0)
 }
 if (mode === "bun-be-bun") {
   installEngineCaTrust()
+  await engineCaTrustReady()
   const code = 'const t=require("node:tls");console.log(t.getCACertificates("default").length-t.getCACertificates("bundled").length,t.getCACertificates("system").length)'
   const child = spawnSync(process.execPath, ["-e", code], { env: { ...process.env, BUN_BE_BUN: "1" }, encoding: "utf8" })
   console.log(child.stdout.trim()); process.exit(0)
