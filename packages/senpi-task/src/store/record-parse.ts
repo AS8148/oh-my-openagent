@@ -256,6 +256,8 @@ function readOptionalBackgroundMode(record: Record<string, unknown>): Background
 
 function readTaskStatus(record: Record<string, unknown>): TaskRecord["status"] {
   const status = readString(record, "status")
+  // A paused task is stored as `running` + `paused: true` so an R0 reader still loads it.
+  if (status === "running" && record["paused"] === true) return "paused"
   switch (status) {
     case "pending":
     case "running":
