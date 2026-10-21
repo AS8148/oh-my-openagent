@@ -3,9 +3,10 @@
 // own runtime and the bundled memory-run-supervisor entry, `--memory-hook <stage>`), and both hooks then
 // run memfs/memory-hook.ts on the STAGED blobs with the same frontmatter reader parseMemoryFile uses:
 // pre-commit refuses duplicate frontmatter keys and file names git must quote; commit-msg refuses a
-// commit that adds or raises a header unless the message carries `Omo-Writer: memory-tool`.
-// Without a checker (the engine is gone or moved) commit-msg falls back to refusing any added line
-// shaped like a provenance key, which fails closed. The trailer is a convention a deliberate
+// commit that adds or raises a header unless the message carries `Omo-Writer: memory-tool`; both refuse
+// a look-alike key (`Provenance`, `"provenance"`) for every writer. Without a checker (the engine is gone
+// or moved) commit-msg falls back to refusing any added line shaped like a provenance key in any case
+// or quoting, which fails closed. The trailer is a convention a deliberate
 // `git commit` can type; a non-forgeable signal is #10739. POSIX sh; String.raw, no `${...}`.
 
 export interface MemoryHookChecker {
@@ -16,7 +17,7 @@ export interface MemoryHookChecker {
 export const COMMIT_MSG_HOOK_SCRIPT = String.raw`#!/bin/sh
 # Refuse a hand-written claim receipt header in memory notes. Installed by omo memory-core; regenerated on startup.
 grep -q '^Omo-Writer: memory-tool$' "$1" && exit 0
-if git diff --cached -U0 --no-color --no-ext-diff | grep -q -E '^\+[[:space:]]*provenance[[:space:]]*:'; then
+if git diff --cached -U0 --no-color --no-ext-diff | grep -q -i -E '^\+[[:space:]]*["'"'"']?provenance["'"'"']?[[:space:]]*:'; then
   echo "Claim receipt validation failed:"
   echo "  the provenance header is a claim receipt only the memory tool writes; remove that line (or save the note with the memory tool)"
   exit 1

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 
 import { PROVENANCE_FRONTMATTER_KEY, stampReceipt } from "../tools/claim-frontmatter"
 import { parseMemoryFile } from "./frontmatter"
-import { contentFrontmatterEntries, duplicateFrontmatterKeys } from "./frontmatter-entries"
+import { contentFrontmatterEntries, duplicateFrontmatterKeys, lookAlikeFrontmatterKeys } from "./frontmatter-entries"
 import { mergeHeads, readBlob, stagedEntries, treeBlob, type StagedEntry } from "./memory-hook-git"
 
 export type MemoryHookStage = "pre-commit" | "commit-msg"
@@ -42,14 +42,26 @@ export function preCommitFailures(cwd: string, entries: readonly StagedEntry[] =
       failures.push(`  ${path}: the staged file could not be read`)
       continue
     }
+    failures.push(...lookAlikeFailures(path, staged))
     if (!path.endsWith(".md") && provenanceOf(staged) === undefined) continue
     for (const key of duplicateFrontmatterKeys(staged)) failures.push(`  ${path}: duplicate frontmatter key '${key}'; keep one`)
   }
   return failures
 }
 
+// A key that reads as `provenance` but is not spelled exactly so (`Provenance`, `"provenance"`) is refused on every
+// path and for every writer, the memory tool included: its restamp never writes one, so only a forgery carries it.
+function lookAlikeFailures(path: string, staged: string): string[] {
+  return lookAlikeFrontmatterKeys(staged, PROVENANCE_FRONTMATTER_KEY).map((key) =>
+    `  ${path}: frontmatter key '${key}' reads as '${PROVENANCE_FRONTMATTER_KEY}'; only the memory tool writes that key, spelled exactly`)
+}
+
 export function commitMessageFailures(cwd: string, message: string, entries: readonly StagedEntry[] = stagedEntries(cwd)): string[] {
-  if (MEMORY_WRITER_TRAILER.test(message)) return []
+  if (MEMORY_WRITER_TRAILER.test(message)) return entries.flatMap((entry) => {
+    if (entry.status.startsWith("D") || !REGULAR_FILE_MODES.has(entry.dstMode)) return []
+    const staged = readBlob(cwd, entry.dstBlob)
+    return staged === undefined ? [`  ${entry.path}: the staged file could not be read`] : lookAlikeFailures(entry.path, staged)
+  })
   const heads = mergeHeads(cwd)
   const failures: string[] = []
   for (const entry of entries) {
@@ -63,6 +75,7 @@ export function commitMessageFailures(cwd: string, message: string, entries: rea
       failures.push(`  ${entry.path}: the staged file could not be read`)
       continue
     }
+    failures.push(...lookAlikeFailures(entry.path, staged))
     const header = provenanceOf(staged)
     if (header !== undefined && !handCommitKeeps(cwd, entry, staged, header, heads)) failures.push(`  ${entry.path}: ${RECEIPT_REFUSAL}`)
   }

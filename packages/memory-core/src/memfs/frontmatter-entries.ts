@@ -30,3 +30,13 @@ export function duplicateFrontmatterKeys(content: string): string[] {
   for (const { key } of contentFrontmatterEntries(content) ?? []) (seen.has(key) ? duplicates : seen).add(key)
   return [...duplicates]
 }
+
+// How a reader might take a key: case-folded, with surrounding quotes removed. A key that reads as
+// `canonical` but is not spelled exactly so (`Provenance`, `"provenance"`) is a look-alike.
+export function normalizedFrontmatterKey(key: string): string {
+  return key.replace(/^["']+|["']+$/g, "").trim().toLowerCase()
+}
+
+export function lookAlikeFrontmatterKeys(content: string, canonical: string): string[] {
+  return (contentFrontmatterEntries(content) ?? []).map((entry) => entry.key).filter((key) => key !== canonical && normalizedFrontmatterKey(key) === canonical)
+}
