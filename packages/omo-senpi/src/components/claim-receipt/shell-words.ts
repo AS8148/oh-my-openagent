@@ -2,6 +2,19 @@ const HEREDOC = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
 const QUOTED = /(?<!<<-?\s*)(?:'[^']*'|"(?:\\.|[^"\\])*")/g
 const SEPARATORS = new Set(["\n", ";", "|", "&", "(", ")", "`"])
 
+// A `#` that starts a word outside quotes begins a comment that runs to the end of the line.
+function withoutComment(line: string): string {
+  let quote: string | null = null
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index] as string
+    if (quote !== null) {
+      if (char === quote) quote = null
+    } else if (char === "'" || char === '"') quote = char
+    else if (char === "#" && (index === 0 || /\s/.test(line[index - 1] as string))) return line.slice(0, index)
+  }
+  return line
+}
+
 // A heredoc body is file content, not commands: keep the redirect line, drop every line up to the terminator.
 function stripHeredocBodies(input: string): string {
   const kept: string[] = []
@@ -11,8 +24,8 @@ function stripHeredocBodies(input: string): string {
       if (line.trim() === terminator) terminator = null
       continue
     }
-    kept.push(line)
-    terminator = HEREDOC.exec(line.replace(QUOTED, ""))?.[2] ?? null
+    kept.push(withoutComment(line))
+    terminator = HEREDOC.exec(withoutComment(line).replace(QUOTED, ""))?.[2] ?? null
   }
   return kept.join("\n")
 }

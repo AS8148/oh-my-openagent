@@ -10,8 +10,8 @@ const SHELL_KEYWORDS = new Set(["do", "then", "else", "elif", "if", "while", "un
 const PASSTHROUGH = new Set(["env", "time", "nohup", "command", "exec", "sudo"])
 // Wrapper options that take a value (`env -u NAME`, `sudo -u user`, `time -o file`), per env(1), sudo(8) and time(1).
 const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
-  env: new Set(["-u", "-C", "-S", "-P"]),
-  sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T"]),
+  env: new Set(["-u", "-C", "-P"]),
+  sudo: new Set(["-u", "-g", "-h", "-p", "-c", "-C", "-D", "-r", "-R", "-t", "-U", "-T"]),
   time: new Set(["-f", "-o"]),
 }
 const PYTHON_RUNNERS = new Set(["uv", "poetry", "pdm", "pipx", "hatch", "rye"])
@@ -114,6 +114,10 @@ function toolKinds(exe: string, rest: readonly string[]): InvokedKind[] {
 }
 
 function wrappedKinds(exe: string, rest: readonly string[], depth: number): InvokedKind[] | undefined {
+  if (exe === "env" && rest.includes("-S")) {
+    const split = rest.indexOf("-S")
+    return depth >= MAX_DEPTH ? [] : invokedKinds(rest.slice(split + 1).join(" "), depth + 1)
+  }
   if (PASSTHROUGH.has(exe)) return argvKinds(skipFlags(rest, 1, WRAPPER_VALUE_FLAGS[exe]), depth)
   if (PYTHON_RUNNERS.has(exe) && rest[1] === "run") return argvKinds(skipFlags(rest, 2), depth)
   if (PYTHONS.test(exe)) {

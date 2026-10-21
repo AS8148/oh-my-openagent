@@ -9,21 +9,26 @@ const LITERAL_PREFIX = /^(?:f|r|rf|fr|b)?$/i
 const INTERPOLATION = /\$\{[^}]*\}|\{[A-Za-z_][\w.]*\}/g
 const CONTEXT_WINDOW = 80
 // Positions that carry a command line, the only places a literal counts as one: the first argument of a runner call
-// (sh/run/exec/spawn/system/Popen/check_output, shell-named helpers such as s, sh2, shr, rd, q, ssh*, *_run), a runner
-// template tag ($`...`, sh`...`), a command-like field or variable (command:, cmd =, script:, job =, s = f"""...),
-// a [name, command] pair nested in a list, and the list of a for loop (`for c in ["bun test x", ...]`). Everything else is text, so an unknown position fails toward "not a command".
-const RUNNER = String.raw`(?:sh\w*|run\w*|exec\w*|spawn\w*|\w+_(?:run|sh|exec|cmd)|system|popen|Popen|check_output|check_call|call|shell|bash|zsh|ssh\w*|rsh|rd|q|s|\$)`
+// (sh/run/exec/spawn/system/Popen/check_output, and the named helpers s, q, rd, sh2, shr, sh_*, run_*, *_run), a runner
+// template tag ($`...`, sh`...`), a command-like field or variable (command:, cmds =, script:, job =, s = f"""...),
+// a [name, command] pair nested in a command list, and the list of a for loop (`for c in ["bun test x", ...]`).
+// Known misses: tuple loops, lists bound to other names and looped later, and argv passed as a later argument
+// (`execa("bun", ["test"])`). Everything else is text, so an unknown position fails toward "not a command".
+const RUNNER = String.raw`(?:sh|sh\d+|shr|shm|sh_\w+|run|run_\w+|\w+_run|exec|execa|execSync|exec_\w+|\w+_exec|spawn|spawnSync|system|popen|Popen|check_output|check_call|call|shell|bash|zsh|ssh|rsh|rd|q|s|\$)`
 const COMMAND_CONTEXT = new RegExp(
   [
     String.raw`(?:^|[^\w$])${RUNNER}\s*\(\s*(?:\[\s*)?[A-Za-z]{0,2}$`,
     String.raw`(?:^|[^\w])(?:\$|sh|run|exec)\s*$`,
-    String.raw`\b(?:command|commands|cmd|cmds|script|scripts|shell|job|jobs|steps?|s)\w*\s*[:=]\s*(?:\[\s*)?[A-Za-z]{0,2}$`,
-    String.raw`(?:\[|\],)\s*$`,
+    String.raw`\b(?:commands?|cmds?|scripts?|shell|jobs?|steps?|s)\s*[:=]\s*(?:\[\s*)?[A-Za-z]{0,2}$`,
     String.raw`\bfor\s*\(?\s*(?:const|let|var)?\s*\w+\s+(?:in|of)\s*$`,
   ].join("|"),
 )
 
-const isCommand = (code: string, at: number): boolean => COMMAND_CONTEXT.test(code.slice(Math.max(0, at - CONTEXT_WINDOW), at))
+// A [name, command] pair nested in a command list: the inner list right after the outer `[` or a previous `],`.
+const NESTED_PAIR = /(?:\[|\],)\s*$/
+const before = (code: string, at: number): string => code.slice(Math.max(0, at - CONTEXT_WINDOW), at)
+const isCommand = (code: string, at: number): boolean => COMMAND_CONTEXT.test(before(code, at))
+const isCommandList = (code: string, at: number): boolean => isCommand(code, at) || NESTED_PAIR.test(before(code, at))
 const unquote = (literal: string): string => literal.replace(QUOTES, "").replace(INTERPOLATION, "X")
 const shellQuote = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`
 const checkKinds = (line: string): CellCheckKind[] => invokedKinds(line).filter((kind): kind is CellCheckKind => kind !== "lookup")
@@ -41,12 +46,15 @@ function listWords(list: string): string[] {
   return words
 }
 
-// A list whose elements contain spaces is a list of whole command lines (`for c in ["bun test x", "tsgo"]: sh(c)`), so
-// each element is also read on its own; a plain argv list never has spaces inside its words.
+// A list is read as one argv, since a real argv starts with a bare executable. When its first element is itself a
+// command line (`for c in ["bun test x", "tsgo"]: sh(c)`) every element is a command line, and a [name, command] pair
+// (`["typecheck", "bun run typecheck"]`) contributes its command; a message argument inside an argv is never read.
 function listKinds(list: string): CellCheckKind[] {
   const words = listWords(list)
-  const lines = words.some((word) => /\s/.test(word)) ? words : []
-  return [...checkKinds(words.map(shellQuote).join(" ")), ...lines.flatMap(checkKinds)]
+  const [first = "", second = ""] = words
+  if (/\s/.test(first)) return words.flatMap(checkKinds)
+  const argv = checkKinds(words.map(shellQuote).join(" "))
+  return words.length === 2 && /^[\w:.-]+$/.test(first) && /\s/.test(second) ? [...argv, ...checkKinds(second)] : argv
 }
 
 /**
@@ -65,7 +73,7 @@ export function cellInvokedKinds(code: string): { kinds: CellCheckKind[]; offset
   const inLists: Array<readonly [number, number]> = []
   for (const match of code.matchAll(LIST_OF_STRINGS)) {
     inLists.push([match.index, match.index + match[0].length])
-    if (isCommand(code, match.index)) found(match.index, listKinds(match[0]))
+    if (isCommandList(code, match.index)) found(match.index, listKinds(match[0]))
   }
   for (const match of code.matchAll(STRING_LITERAL)) {
     if (inLists.some(([start, end]) => match.index >= start && match.index < end)) continue

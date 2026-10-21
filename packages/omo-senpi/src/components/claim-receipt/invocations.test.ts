@@ -81,6 +81,10 @@ describe("claim-receipt invocations", () => {
       expect(invokedKinds("x=`bun test x`")).toEqual(["test"])
       expect(invokedKinds("read a <<< foo\nbun test x")).toEqual(["test"])
       expect(invokedKinds('echo "<<EOF"\nbun test x')).toEqual(["test"])
+      expect(invokedKinds("env -S 'bun test x'")).toEqual(["test"])
+      expect(invokedKinds("sudo -c cls -R /root bun test x")).toEqual(["test"])
+      expect(invokedKinds("cat > f <<'EOF' # it's the script\nbun test x\nEOF")).not.toContain("test")
+      expect(invokedKinds("echo hi # it's a note\nbun test x")).toEqual(["test"])
     })
 
     it("#then CI status readouts count as test runs", () => {
