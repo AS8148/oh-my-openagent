@@ -127,6 +127,27 @@ describe("applyAgreementRecords: the cap", () => {
   })
 })
 
+describe("applyAgreementRecords: the cap within one batch", () => {
+  test("#given a ledger one below the cap with nothing committed evictable #when one batch adds two new agreements #then the second is refused rather than evicting the first, which was never committed", () => {
+    // given
+    const kept = item("Answer in Korean in the chat room", { n: 2 })
+
+    // when
+    const result = applyAgreementRecords(
+      [kept],
+      [
+        { action: "new", applies: "project", text: "Keep run roots out of tmp", date: "2026-10-21" },
+        { action: "new", applies: "project", text: "Quote remote commands", date: "2026-10-21" },
+      ],
+      { needsHumanThreshold: 3, maxItems: 2 },
+    )
+
+    // then
+    expect(result.items.map((entry) => entry.text).sort()).toEqual(["Answer in Korean in the chat room", "Keep run roots out of tmp"])
+    expect(result.events).toEqual([{ kind: "refused", date: "2026-10-21", text: "Quote remote commands" }])
+  })
+})
+
 describe("applyAgreementRecords: a reaffirm whose agreement was dropped meanwhile", () => {
   test("#given a reaffirm naming an id no longer in the ledger #when applied #then nothing changes and the stale reaffirm is reported as an event", () => {
     // given

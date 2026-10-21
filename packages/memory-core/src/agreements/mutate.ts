@@ -18,6 +18,7 @@ export function applyAgreementRecords(
   policy: AgreementsPolicy,
 ): AgreementsMutation {
   let items = [...existing]
+  const committed = new Set(existing.map((item) => item.id))
   const flagged = new Set<string>()
   const events: AgreementEvent[] = []
   const bump = (at: number, date: string, text: string | undefined): void => {
@@ -47,7 +48,7 @@ export function applyAgreementRecords(
       n: 1, since: record.date, last: record.date, status,
     }
     if (items.length >= policy.maxItems) {
-      const victim = evictionCandidate(items)
+      const victim = evictionCandidate(items.filter((item) => committed.has(item.id)))
       if (victim === undefined) {
         events.push({ kind: "refused", date: record.date, text: record.text })
         continue
@@ -61,7 +62,7 @@ export function applyAgreementRecords(
   return { items: sortAgreements(items), newlyFlagged: [...flagged], events }
 }
 
-/** At the cap only an agent item that was never reaffirmed and is not flagged may go: the oldest one. */
+/** At the cap only a committed agent item that was never reaffirmed and is not flagged may go: the oldest one. */
 function evictionCandidate(items: readonly AgreementItem[]): AgreementItem | undefined {
   return items
     .filter((item) => item.by === "agent" && item.status === "active" && item.n <= 1)

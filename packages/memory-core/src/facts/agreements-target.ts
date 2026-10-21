@@ -1,4 +1,3 @@
-
 import { agreementItemsOf, readAgreementsWorktree, renderAgreementsFile } from "../agreements/ledger-file"
 import { applyAgreementRecords, type AgreementEvent } from "../agreements/mutate"
 import type { AgreementExtractionRecord, AgreementsPolicy } from "../agreements/types"
