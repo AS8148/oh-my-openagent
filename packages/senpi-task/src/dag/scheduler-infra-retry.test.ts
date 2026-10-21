@@ -11,7 +11,7 @@ afterEach(() => {
   for (const fixture of fixtures.splice(0)) fixture.cleanup()
 })
 
-test("retries seven infrastructure-failed roots before skipping their fan-in dependents", async () => {
+test("retries seven infrastructure-failed roots so all their fan-in dependents run", async () => {
   // Given the production incident's seven first-wave failures, each gating every dependent. The fan-in,
   // not the incident's 54 dependents, is what a premature skip cascade would break.
   const roots = Array.from({ length: 7 }, (_, index) => `root-${index}`)
