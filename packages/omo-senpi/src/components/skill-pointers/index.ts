@@ -24,6 +24,10 @@ interface SkillPointerTarget {
   readonly instruction: string
   readonly extra?: (sessionScope: string | null) => string
   readonly companions?: readonly SkillCompanion[]
+  // A binding target enters its mode on a match instead of asking the model whether the user meant it:
+  // the quote, relay, negation, identifier, child-session and extension filters above already decided
+  // that, and the conditional pointer let the model skip mass-ulw entirely (#10810).
+  readonly binding?: true
 }
 
 // A companion is a skill the parent workflow runs on. It has no keyword of its own: it rides on
@@ -83,6 +87,7 @@ const TARGETS: readonly SkillPointerTarget[] = [
     pattern: skillNamePattern(MASS_ALIAS),
     expandedBlockPattern: /<skill\s+name="mass-ulw"/i,
     instruction: "dispatch each phase's dependency-ordered lanes as one run of the workflow tool composed in an eval cell, start a new run per phase rather than one graph for the whole job, and when a ulw-loop or ulw-execute contract is active let it own the goal",
+    binding: true,
   },
   {
     skillName: "ulw-plan",
@@ -106,6 +111,7 @@ const TARGETS: readonly SkillPointerTarget[] = [
     expandedBlockPattern: /<skill\s+name="ulw-research"/i,
     instruction: "orchestrate team-first maximum-saturation research",
     companions: [BROWSER_COMPANION, ULTIMATE_BROWSING_COMPANION],
+    binding: true,
   },
 ]
 
@@ -165,9 +171,13 @@ function handleInput(
   const alreadyLoaded = (skillName: string, expandedBlockPattern: RegExp): boolean =>
     skillName === commandSkillName || expandedBlockPattern.test(payload.text)
   const invoked = TARGETS.filter((target) => target.pattern.test(visible))
+  const massMode = invoked.some((target) => target.customType === MASS_ULW_CUSTOM_TYPE)
   const pointers: SkillPointerMessage[] = invoked
     .filter((target) => !alreadyLoaded(target.skillName, target.expandedBlockPattern))
-    .map((target) => ({ customType: target.customType, content: skillPointer(target, sessionScope) }))
+    .map((target) => ({
+      customType: target.customType,
+      content: target.binding === true ? skillMode(target, massMode) : skillPointer(target, sessionScope),
+    }))
   for (const parent of invoked) {
     for (const companion of parent.companions ?? []) {
       if (alreadyLoaded(companion.skillName, companion.expandedBlockPattern)) continue
@@ -213,8 +223,29 @@ function skillPointer(target: SkillPointerTarget, sessionScope: string | null): 
   return `<omo-${target.skillName}-pointer>This message mentions ${target.skillName}. If the user of this session is asking to run ${target.skillName}, read the ${target.skillName} skill at ${skillsRoot}${target.skillName}/SKILL.md with the read tool and follow it: ${target.instruction}. If ${target.skillName} is only being discussed, quoted, or relayed from another session, ignore this pointer.${extra}</omo-${target.skillName}-pointer>`
 }
 
+// Only text the session's own user typed reaches this point (see handleInput), so the block states the
+// mode as settled and names the first reads and the dispatch shape that satisfy it.
+function skillMode(target: SkillPointerTarget, massMode: boolean): string {
+  const skillsRoot = getBuiltinSkillsRoot()
+  const tag = `omo-${target.skillName}-mode`
+  const reads =
+    target.customType === MASS_ULW_CUSTOM_TYPE
+      ? `${skillsRoot}${target.skillName}/SKILL.md and its references/planning.md`
+      : `${skillsRoot}${target.skillName}/SKILL.md`
+  const dispatch =
+    target.customType === MASS_ULW_CUSTOM_TYPE
+      ? " The work runs as workflow runs started from an eval cell, their nodes executing in dependency-ordered waves; doing the job inline, or through one-off task spawns in place of workflow runs, does not satisfy this request. Where the ultrawork directive's general delegation guidance differs, this mode decides how lanes are dispatched."
+      : massMode
+        ? " mass-ulw mode is active in the same message, so run the research waves as its workflow runs."
+        : ""
+  return `<${tag}>The user of this session invoked ${target.skillName} in their own words, so this turn runs in ${target.skillName} mode. This is binding: quoted, relayed, negated and delegated mentions never produce this block. Before any other tool call this turn, read ${reads} in full with the read tool, then follow the skill: ${target.instruction}.${dispatch}</${tag}>`
+}
+
 function companionPointer(parent: SkillPointerTarget, companion: SkillCompanion): string {
   const skillsRoot = getBuiltinSkillsRoot()
+  if (parent.binding === true) {
+    return `<omo-${companion.skillName}-pointer>${parent.skillName} ${companion.role}. Read the ${companion.skillName} skill at ${skillsRoot}${companion.skillName}/SKILL.md with the read tool in the same turn as the ${parent.skillName} skill and ${companion.instruction}.</omo-${companion.skillName}-pointer>`
+  }
   return `<omo-${companion.skillName}-pointer>${parent.skillName} ${companion.role}. If the user of this session is asking to run ${parent.skillName}, read the ${companion.skillName} skill at ${skillsRoot}${companion.skillName}/SKILL.md with the read tool in the same turn as the ${parent.skillName} skill and ${companion.instruction}. If ${parent.skillName} is only being discussed, quoted, or relayed from another session, ignore this pointer.</omo-${companion.skillName}-pointer>`
 }
 

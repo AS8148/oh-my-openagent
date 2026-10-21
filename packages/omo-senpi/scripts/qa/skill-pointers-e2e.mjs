@@ -9,10 +9,10 @@ import { isolatedChildEnv } from "./sandbox-child-env.mjs"
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const mockProviderEntry = join(scriptDir, "mock-provider", "index.ts")
 
-const MASS_ULW_MARKER = "<omo-mass-ulw-pointer>"
+const MASS_ULW_MARKER = "<omo-mass-ulw-mode>"
 const ULW_PLAN_MARKER = "<omo-ulw-plan-pointer>"
 const ULW_LOOP_MARKER = "<omo-ulw-loop-pointer>"
-const ULW_RESEARCH_MARKER = "<omo-ulw-research-pointer>"
+const ULW_RESEARCH_MARKER = "<omo-ulw-research-mode>"
 const BROWSER_MARKER = "<omo-browser-pointer>"
 const ULTIMATE_BROWSING_MARKER = "<omo-ultimate-browsing-pointer>"
 
@@ -173,7 +173,7 @@ function inspectSession(agentDir) {
       }
       if (entry?.type === "custom_message" && typeof entry.content === "string") {
         if (entry.display === false) hiddenCustomMessages.push({ customType: entry.customType, content: entry.content })
-        else if (entry.content.includes("-pointer>")) visiblePointerMarkers += 1
+        else if (/-(?:pointer|mode)>/.test(entry.content)) visiblePointerMarkers += 1
       }
       if (entry?.type === "message" && entry.message?.role === "user") {
         userTexts.push(messageText(entry.message.content))
@@ -234,7 +234,7 @@ function runScenario(resolvedSenpi, scenario) {
       if (!transcript.includes(marker)) failures.push(`missing-transcript-marker:${marker}`)
     }
     if (session.visiblePointerMarkers > 0) failures.push("pointer-rendered-visible")
-    if (session.userTexts.some((text) => text.includes("-pointer>"))) failures.push("pointer-leaked-into-user-text")
+    if (session.userTexts.some((text) => /-(?:pointer|mode)>/.test(text))) failures.push("pointer-leaked-into-user-text")
 
     return { name: scenario.name, prompt: scenario.prompt, result: failures.length === 0 ? "PASS" : "FAIL", failures }
   } finally {

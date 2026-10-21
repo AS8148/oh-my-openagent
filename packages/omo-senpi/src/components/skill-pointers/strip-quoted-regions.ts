@@ -1,4 +1,4 @@
-const INJECTED_BLOCK = /<(omo-[a-z0-9-]+-pointer|ultrawork-mode|omo-ultrawork-reminder)>[\s\S]*?<\/\1>/gi
+const INJECTED_BLOCK = /<(omo-[a-z0-9-]+-(?:pointer|mode)|ultrawork-mode|omo-ultrawork-reminder)>[\s\S]*?<\/\1>/gi
 const INLINE_CODE = /(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g
 // A message relayed from another session opens with a sender header: a bracketed tag such as `[REPORT]` or
 // `[a -> b]`, or `Name (id), recipient:` / `Name (id) to recipient:`. Everything in it is someone else's text, so none of it is a request.

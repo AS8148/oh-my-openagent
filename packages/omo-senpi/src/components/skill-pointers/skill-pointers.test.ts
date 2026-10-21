@@ -105,7 +105,7 @@ describe("omo-senpi skill-pointers component", () => {
   })
 
   describe("#given a matching interactive prompt", () => {
-    it("#when the user requests a skill #then one hidden conditional pointer is injected", async () => {
+    it("#when the user requests mass-ulw #then one hidden binding mode block is injected", async () => {
       // given
       const pi = new FakeExtensionAPI()
       await registerSkillPointers(pi)
@@ -116,11 +116,10 @@ describe("omo-senpi skill-pointers component", () => {
       // then
       expectPointerInjections(pi, result, [{ customType: MASS_ULW_CUSTOM_TYPE, skillName: "mass-ulw" }])
       const content = pi.messages[0]?.message["content"]
-      expect(content).toEndWith("</omo-mass-ulw-pointer>")
-      expect(content).toContain("If the user of this session is asking to run mass-ulw")
+      expect(content).toEndWith("</omo-mass-ulw-mode>")
     })
 
-    it("#when the mass-ulw pointer is injected #then it points at the packaged skill", async () => {
+    it("#when the mass-ulw mode block is injected #then it points at the packaged skill", async () => {
       // given
       const pi = new FakeExtensionAPI()
       await registerSkillPointers(pi)
@@ -132,7 +131,7 @@ describe("omo-senpi skill-pointers component", () => {
       const content = pi.messages[0]?.message["content"]
       if (typeof content !== "string") throw new Error("expected string content")
       expect(content).toContain("mass-ulw/SKILL.md")
-      expect(content).toEndWith("</omo-mass-ulw-pointer>")
+      expect(content).toEndWith("</omo-mass-ulw-mode>")
     })
 
     it("#when ulw-loop and mass-ulw pointers are injected #then only ulw-loop teaches the eval SDK import", async () => {
@@ -197,6 +196,50 @@ describe("omo-senpi skill-pointers component", () => {
         { customType: BROWSER_CUSTOM_TYPE, skillName: "browser" },
         { customType: ULTIMATE_BROWSING_CUSTOM_TYPE, skillName: "ultimate-browsing" },
       ])
+    })
+  })
+
+  // #10810: the real run's prompt got an ignorable pointer, and the model never read mass-ulw or started a
+  // workflow run. The `<omo-*-mode>` tag is the machine sentinel for a binding block: the quote stripper
+  // keys on it so a pasted or relayed block never re-arms, and the live QA drivers count it.
+  describe("#given the #10810 reproduction prompt", () => {
+    const REPRO = "https://www.youtube.com/live/qt5p-_tE8d0 How is this possible? Recreate it in 3D. mass ulw research"
+
+    it("#when the session's own user sends it #then mass-ulw and ulw-research enter binding mode blocks, companions behind them", async () => {
+      // given
+      const pi = new FakeExtensionAPI()
+      await registerSkillPointers(pi)
+
+      // when
+      const result = await dispatchInput(pi, REPRO)
+
+      // then
+      expectPointerInjections(pi, result, [
+        { customType: MASS_ULW_CUSTOM_TYPE, skillName: "mass-ulw" },
+        { customType: ULW_RESEARCH_CUSTOM_TYPE, skillName: "ulw-research" },
+        { customType: BROWSER_CUSTOM_TYPE, skillName: "browser" },
+        { customType: ULTIMATE_BROWSING_CUSTOM_TYPE, skillName: "ultimate-browsing" },
+      ])
+      const [mass, research] = pi.messages.map((call) => String(call.message["content"]))
+      expect(mass).toStartWith("<omo-mass-ulw-mode>")
+      expect(mass).toEndWith("</omo-mass-ulw-mode>")
+      expect(research).toStartWith("<omo-ulw-research-mode>")
+      expect(research).toEndWith("</omo-ulw-research-mode>")
+    })
+
+    it("#when a prompt carries an injected mode block #then the block's own mention does not re-arm", async () => {
+      // given
+      const pi = new FakeExtensionAPI()
+      await registerSkillPointers(pi)
+
+      for (const tag of ["omo-mass-ulw-mode", "omo-ulw-research-mode"]) {
+        const text = `<${tag}>mass ulw research</${tag}>`
+
+        // when / then
+        expect(matchedSkillPointerNames(text)).toEqual([])
+        expect(await dispatchInput(pi, text)).toEqual({ action: "continue" })
+        expect(pi.messages).toHaveLength(0)
+      }
     })
   })
 })

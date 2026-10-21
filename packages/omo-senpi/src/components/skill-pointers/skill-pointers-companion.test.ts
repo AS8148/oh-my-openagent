@@ -86,7 +86,7 @@ describe("omo-senpi skill-pointers companion", () => {
         throw new Error("expected the queued prompt to be transformed")
       }
       expect(result.text.startsWith("ulw research the gateway options\n")).toBe(true)
-      expect(result.text.indexOf("<omo-ulw-research-pointer>")).toBeLessThan(result.text.indexOf("<omo-browser-pointer>"))
+      expect(result.text.indexOf("<omo-ulw-research-mode>")).toBeLessThan(result.text.indexOf("<omo-browser-pointer>"))
       expect(result.text.indexOf("<omo-browser-pointer>")).toBeLessThan(result.text.indexOf("<omo-ultimate-browsing-pointer>"))
       expect(result.text).toContain("browser/SKILL.md")
       expect(result.text).toContain("ultimate-browsing/SKILL.md")
