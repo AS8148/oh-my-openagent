@@ -143,7 +143,7 @@ export {
   resolveAvailableCategoryNames,
   resolveCategory,
 } from "./category"
-export { withoutExcludedModels } from "./model-exclusion"
+export { withoutExcludedFallbacks, withoutExcludedModels, withoutExcludedSelectors } from "./model-exclusion"
 export { resolveTaskAgents } from "./agents/task-agents"
 export type {
   BuiltinCategoryDefinition,

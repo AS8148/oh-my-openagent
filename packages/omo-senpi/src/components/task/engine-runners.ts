@@ -9,6 +9,8 @@ import {
   createRpcManagedRunner,
   parseExtensionEntries,
   selectPackageExtensionPaths,
+  withoutExcludedFallbacks,
+  withoutExcludedSelectors,
   type KernelToolBindingRegistry,
   type ManagedRunner,
   type RpcChildHandle,
@@ -83,7 +85,7 @@ function buildInProcessRunner(build: RunnerBuildContext): ManagedRunner {
     () => build.runtime.projectTrusted(),
     () => build.excludeModels,
   )
-  return createInProcessManagedRunner(inProcess, context)
+  return withoutExcludedFallbacks(createInProcessManagedRunner(inProcess, context), build.excludeModels)
 }
 
 // Package discovery reads settings and stats every installed package root. On a stuck mount that
@@ -156,10 +158,15 @@ function buildProcessRunner(build: RunnerBuildContext): ManagedRunner {
   const resolveInheritedExtensions = build.resolveInheritedExtensions ?? createInheritedExtensionsResolver(build)
   return createRpcManagedRunner({
     async start(spec) {
-      if (spec.extensions !== undefined) return runner.start(spec)
-      return runner.start({ ...spec, extensions: await resolveInheritedExtensions() })
+      const filtered = withoutExcludedRpcFallbacks(spec, build.excludeModels)
+      if (filtered.extensions !== undefined) return runner.start(filtered)
+      return runner.start({ ...filtered, extensions: await resolveInheritedExtensions() })
     },
   })
+}
+
+function withoutExcludedRpcFallbacks(spec: RpcRunnerSpec, excludeModels: readonly string[] | undefined): RpcRunnerSpec {
+  return spec.fallbackModels === undefined ? spec : { ...spec, fallbackModels: withoutExcludedSelectors(spec.fallbackModels, excludeModels) }
 }
 
 /**
@@ -173,9 +180,10 @@ export function buildRespawnRunner(
   const runner = buildProcessChildRunner(build)
   const resolveInheritedExtensions = build.resolveInheritedExtensions ?? createInheritedExtensionsResolver(build)
   return {
-    start: async (spec) => runner.start(
-      spec.extensions === undefined ? { ...spec, extensions: await resolveInheritedExtensions() } : spec,
-    ),
+    start: async (spec) => {
+      const filtered = withoutExcludedRpcFallbacks(spec, build.excludeModels)
+      return runner.start(filtered.extensions === undefined ? { ...filtered, extensions: await resolveInheritedExtensions() } : filtered)
+    },
   }
 }
 

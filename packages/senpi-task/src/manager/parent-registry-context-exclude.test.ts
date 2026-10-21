@@ -4,7 +4,10 @@ import { ModelRegistry, ModelRuntime } from "@code-yeongyu/senpi"
 
 import { RunnerError } from "../runners/in-process/runner-error"
 import { createRpcModelAdmission } from "../runners/rpc/model-admission"
+import { withoutExcludedFallbacks } from "../model-exclusion"
+import type { ChildSpec } from "../runners/in-process"
 import { createParentRegistrySessionContext, resolveResumeContext } from "./parent-registry-context"
+import { createInProcessManagedRunner } from "./runner"
 import type { ManagedStartSpec } from "./types"
 
 function spec(overrides: Partial<ManagedStartSpec> = {}): ManagedStartSpec {
@@ -55,6 +58,31 @@ describe("task children honor exclude_models on respawn and resume", () => {
     // then
     expect(refused.ok).toBe(false)
     expect(allowed.ok).toBe(true)
+  })
+
+  test("#given a resumed child whose persisted chain lists an excluded model #when resumed or respawned #then that model never reaches the child", async () => {
+    // given
+    const seen: ChildSpec[] = []
+    const stopped = new Error("stop before the session opens")
+    const capture = (child: ChildSpec) => {
+      seen.push(child)
+      return Promise.reject(stopped)
+    }
+    const runner = withoutExcludedFallbacks(createInProcessManagedRunner({ start: capture, resume: capture }), EXCLUDE)
+    const persisted = spec({
+      model: "omo-mock/opus-1",
+      fallbackModels: [
+        { source: "category", provider: "omo-mock", model_id: "fable-1", display: "omo-mock/fable-1" },
+        { source: "category", provider: "omo-mock", model_id: "glm-1", display: "omo-mock/glm-1" },
+      ],
+    })
+
+    // when
+    await expect(runner.resume?.(persisted, "/tmp/project/session.jsonl")).rejects.toBe(stopped)
+    await expect(runner.start(persisted)).rejects.toBe(stopped)
+
+    // then
+    expect(seen.map((child) => child.fallbackModels?.map((model) => model.model_id))).toEqual([["glm-1"], ["glm-1"]])
   })
 
   test("#given a process child on an excluded model #when admitted #then admission refuses it before any probe", async () => {
