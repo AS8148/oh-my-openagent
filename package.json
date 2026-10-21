@@ -151,7 +151,8 @@
     "build:ast-grep-mcp": "bun run --cwd packages/ast-grep-mcp build",
     "test:desktop": "bun script/check-cargo-pinned-deps.mjs && bun run --cwd packages/senpi-desktop-protocol test && bun run --cwd packages/senpi-desktop-engine test && bun run --cwd packages/senpi-desktop-prelude test && bun run --cwd packages/senpi-desktop-service test && bun run --cwd packages/senpi-desktop-tool test",
     "lint:ratchet": "bun script/lint-ratchet.ts",
-    "lint:ratchet:update": "bun script/lint-ratchet.ts --update"
+    "lint:ratchet:update": "bun script/lint-ratchet.ts --update",
+    "lint": "oxlint packages/lsp-tools-mcp packages/lsp-daemon packages/web packages/omo-codex/plugin/components/comment-checker packages/omo-codex/plugin/components/lazycodex-executor-verify packages/omo-codex/plugin/components/lsp packages/omo-codex/plugin/components/rules packages/omo-codex/plugin/components/telemetry packages/omo-codex/plugin/components/ultrawork packages/omo-codex/plugin/components/ulw-execute-continuation packages/omo-codex/plugin/components/ulw-loop"
   },
   "keywords": [
     "opencode",
