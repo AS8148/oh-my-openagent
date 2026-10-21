@@ -210,14 +210,13 @@ type UsageFacts = {
   readonly cacheWrite?: number
 }
 
-// A turn on a model with no known price carries `costUnknown` (senpi#3844): its zero cost is not a
-// reported $0, so the turn counts as one whose cost was not reported.
 function readUsage(message: Record<string, unknown>): UsageFacts {
   const usage = message.usage
   if (!isRecord(usage)) return {}
   return {
     ...optionalNumber("output", firstFiniteNonNegativeNumber(usage.output, usage.output_tokens)),
     ...optionalNumber("total", firstFiniteNonNegativeNumber(usage.totalTokens, usage.total_tokens)),
+    // A model with no known price marks its usage `costUnknown` (senpi#3844): that zero is not a reported $0.
     ...optionalNumber("cost", usage.costUnknown === true ? undefined : readCost(usage.cost)),
     ...optionalNumber("input", firstFiniteNonNegativeNumber(usage.input, usage.input_tokens)),
     ...optionalNumber("cacheRead", firstFiniteNonNegativeNumber(usage.cacheRead, usage.cache_read_input_tokens)),

@@ -87,7 +87,7 @@ function optionalTotal(key: string, value: number | undefined): DelegationProper
 }
 
 // A reported zero cost is a fact; an absent cost is not a zero. `cost_usd` therefore ships only
-// alongside `cost_status: "reported"` or `"partial"` (a lower bound: some turns reported no usage),
+// alongside `cost_status: "reported"` or `"partial"` (a lower bound: some turns reported no cost),
 // and a non-finite figure degrades to `invalid`.
 function costOf(stats: TaskRunStats | undefined): DelegationProperties {
   const status = stats?.cost_status ?? "unavailable"
