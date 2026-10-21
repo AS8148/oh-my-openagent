@@ -180,9 +180,11 @@
     "typescript/no-non-null-assertion": 1
   },
   "packages/omo-opencode/src/features/context-injector/injector.test.ts": {
+    "disable-directive": 4,
     "typescript/no-non-null-assertion": 8
   },
   "packages/omo-opencode/src/features/task-toast-manager/manager.test.ts": {
+    "disable-directive": 3,
     "typescript/no-explicit-any": 1
   },
   "packages/omo-opencode/src/features/task-toast-manager/manager.ts": {

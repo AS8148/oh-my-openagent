@@ -1,6 +1,6 @@
 import { expect, it } from "bun:test";
 
-import { compare, countByFile } from "./lint-ratchet.ts";
+import { compare, countByFile, countSuppressions, SUPPRESSION } from "./lint-ratchet.ts";
 
 const root = "/repo";
 
@@ -51,4 +51,27 @@ it("reports a count that goes down, so the baseline must be lowered in the same 
 it("accepts counts that match the baseline exactly", () => {
   const counts = { "packages/omo-opencode/src/a.ts": { "typescript/no-non-null-assertion": 2 } };
   expect(compare(counts, counts)).toEqual({ increases: [], decreases: [] });
+});
+
+it("counts every disable comment that could hide one of the three rules, in both linters' forms", () => {
+  // Built at runtime so this file holds no directive of its own for the gate to count.
+  const line = "/".repeat(2);
+  const block = ["/", "*"].join("");
+  const source = [
+    `${line} oxlint-disable-next-line typescript/no-explicit-any`,
+    `${line} eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- legacy`,
+    `${block} eslint-disable */`,
+    `const a = 1; ${line} oxlint-disable-line`,
+    `${line} oxlint-disable-next-line typescript/ban-ts-comment, eslint/no-console`,
+    `${line} oxlint-disable-next-line eslint/no-console -- unrelated rule, not counted`,
+    `const text = "oxlint-disable-next-line typescript/no-explicit-any";`,
+    `${block}\n  eslint-disable-next-line typescript/no-explicit-any\n*/`,
+  ].join("\n");
+  expect(countSuppressions("probe.ts", source)).toBe(6);
+  expect(countSuppressions("probe.ts", "const x = 1;\n")).toBe(0);
+});
+
+it("refuses a new disable comment like any other rise", () => {
+  const { increases } = compare({}, { "script/probe.ts": { [SUPPRESSION]: 1 } });
+  expect(increases).toEqual([{ file: "script/probe.ts", rule: SUPPRESSION, before: 0, after: 1 }]);
 });
