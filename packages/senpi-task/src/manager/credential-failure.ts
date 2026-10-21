@@ -1,4 +1,5 @@
 import type { ResolvedModelRecord, TaskRecord } from "../state"
+import { isParentModelRung } from "./parent-model-rung"
 
 // A provider answer that no other model on the SAME provider can fix: the stored credential is
 // rejected (401, an invalid key, a lapsed subscription) or can no longer be refreshed. Every
@@ -20,7 +21,8 @@ const MODEL_SCOPED = /\bmodels?\b/i
 // spent, so its other rungs fail the same way and go last.
 const USAGE_LIMIT =
   /quota|usage[_ ]limit|\bhit\s+your\b[^.]*\blimit\b|\b(?:session|weekly|monthly|daily|hourly|\d+[- ]hour)\s+limit\b|limit\s+exhausted|insufficient[_ ](?:quota|credits?|balance)|credit[_ ]balance|credits?[_ ]required|billing|blocking_limit/i
-const MODEL_SCOPED_LIMIT = /\bmodels?\b|\bpremium\b|\b(?:opus|sonnet|haiku|fable|mythos)\b/i
+// A `/model` command hint (senpi's own limit text says "Switch to another provider with /model") names no model.
+const MODEL_SCOPED_LIMIT = /(?<!\/)\bmodels?\b|\bpremium\b|\b(?:opus|sonnet|haiku|fable|mythos)\b/i
 
 export type UsageLimitScope = "model" | "account"
 
@@ -76,9 +78,14 @@ export type RuntimeFallbackCandidates = {
   readonly limit?: UsageLimitScope
 }
 
-/** The fallback list to walk after a failed turn: a dead credential drops the failed provider's rungs, an account-wide usage limit moves them last. */
+/**
+ * The fallback list to walk after a failed turn: a dead credential drops the failed provider's rungs, an
+ * account-wide usage limit moves them last. The parent session's model (#10750) is only a remedy for a
+ * spent or signed-out rung, so any other failure walks the category rungs alone.
+ */
 export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: string): RuntimeFallbackCandidates {
-  const fallbacks = record.fallback_models ?? []
+  const unusable = usageLimitScope(failureMessage) !== undefined || isCredentialFailure(failureMessage, modelIdOf(record))
+  const fallbacks = (record.fallback_models ?? []).filter((model) => unusable || !isParentModelRung(record, model))
   const provider = providerOf(record)
   if (provider !== undefined && isCredentialFailure(failureMessage, modelIdOf(record))) {
     return {
@@ -89,12 +96,13 @@ export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: st
   const limit = usageLimitScope(failureMessage)
   if (limit === undefined) return { remaining: fallbacks, skipped: [] }
   if (limit === "model" || provider === undefined) return { remaining: fallbacks, skipped: [], limit }
+  const spentParent = fallbacks.filter((model) => model.provider === provider && isParentModelRung(record, model))
   return {
     remaining: [
       ...fallbacks.filter((model) => model.provider !== provider),
-      ...fallbacks.filter((model) => model.provider === provider),
+      ...fallbacks.filter((model) => model.provider === provider && !spentParent.includes(model)),
     ],
-    skipped: [],
+    skipped: spentParent,
     limit,
   }
 }
