@@ -419,22 +419,23 @@ describe("confirmation before irreversible actions", () => {
     expect(session.calls.map((call) => call[0])).toContain("click")
   })
 
-  const irreversibleKinds: ReadonlyArray<[string, SessionScript, (session: Awaited<ReturnType<typeof connected>>["guardedSession"]) => Promise<unknown>, string]> = [
-    ["a pay button click", { descriptors: [{ tag: "button", text: "Pay now" }] }, (s) => s.click("#act"), "click"],
-    ["a submit button click", { descriptors: [{ tag: "button", text: "Submit order" }] }, (s) => s.click("#act"), "click"],
-    ["a transfer button click", { descriptors: [{ tag: "button", text: "Confirm transfer" }] }, (s) => s.click("#act"), "click"],
-    ["a merge button click", { descriptors: [{ tag: "button", text: "Merge pull request" }] }, (s) => s.click("#act"), "click"],
-    ["Enter in a message box", { descriptors: [{ tag: "div", text: "", editable: true }] }, (s) => s.press("Enter"), "press"],
+  const irreversibleKinds: ReadonlyArray<[string, SessionScript, (session: Awaited<ReturnType<typeof connected>>["guardedSession"]) => Promise<unknown>, string, string]> = [
+    ["a pay button click", { descriptors: [{ tag: "button", text: "Pay now" }] }, (s) => s.click("#act"), "click", 'click "Pay now"'],
+    ["a submit button click", { descriptors: [{ tag: "button", text: "Submit order" }] }, (s) => s.click("#act"), "click", 'click "Submit order"'],
+    ["a transfer button click", { descriptors: [{ tag: "button", text: "Confirm transfer" }] }, (s) => s.click("#act"), "click", 'click "Confirm transfer"'],
+    ["a merge button click", { descriptors: [{ tag: "button", text: "Merge pull request" }] }, (s) => s.click("#act"), "click", 'click "Merge pull request"'],
+    ["Enter in a message box", { descriptors: [{ tag: "div", text: "", editable: true }] }, (s) => s.press("Enter"), "press", "press Enter in a message box"],
     [
       "Enter in a form that sends",
       { descriptors: [{ tag: "input", text: "", form: { action: "https://mail.example/send", method: "post", submitLabels: ["Send message"] } }] },
       (s) => s.press("Enter"),
       "press",
+      'submit a form with "Send message"',
     ],
-    ["a script that clicks", {}, (s) => s.evaluate("document.querySelector('button.buy').click()"), "evaluate"],
+    ["a script that clicks", {}, (s) => s.evaluate("document.querySelector('button.buy').click()"), "evaluate", "run a script that can click, submit or send"],
   ]
 
-  test.each(irreversibleKinds)("#given Full access #when %s #then nothing asks and the action happens (Q 2026-10-14, #2465)", async (_name, script, act, action) => {
+  test.each(irreversibleKinds)("#given Full access #when %s #then nothing asks and the action happens (Q 2026-10-14, #2465)", async (_name, script, act, action, described) => {
     const host = fakeHost({ fullAccess: true })
     const { session, guardedSession } = await connected(host, script)
 
@@ -444,15 +445,17 @@ describe("confirmation before irreversible actions", () => {
     expect(session.calls.map((call) => call[0])).toContain(action)
     const confirm = host.log.find((entry) => entry.tool === "omo_browser_bridge" && entry.args.op === "confirm")
     expect(confirm?.args.data).toMatchObject({ action })
+    expect(String((confirm?.args.data as Json).description)).toContain(described)
   })
 
-  test.each(irreversibleKinds)("#given any mode but Full access #when %s #then the question is still asked and a no stops it", async (_name, script, act, action) => {
+  test.each(irreversibleKinds)("#given any mode but Full access #when %s #then the question is still asked and a no stops it", async (_name, script, act, action, described) => {
     const host = fakeHost({ fullAccess: false, answers: ["Don't allow"] })
     const { session, guardedSession } = await connected(host, script)
 
     const error = await act(guardedSession).then(() => undefined, (cause: unknown) => cause)
 
     expect(asked(host)).toHaveLength(1)
+    expect(JSON.stringify(asked(host)[0])).toContain(described.replaceAll('"', '\\"'))
     expect(error).toBeInstanceOf(BrowserActionDeclinedError)
     expect(session.calls.map((call) => call[0])).not.toContain(action)
   })
