@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:aaf603cab424d54f54b502d05269e0a7d9dd78f997bdb89521d0556b561a5c56:3ac169ea51f88229ca4d23bf351c7a58c50cfcc9786656663afb3df1c6620af1
+// omo-codex-install:b408b576ee9f2c827cd2733d966cd724fd27f029332824185037c443d3f8dd57:45ee374af9a88da9712fc3e3f8e220dbdc302cebb6f4025884612f07180b8a02
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -10036,7 +10036,7 @@ var package_default;
 var init_package = __esm(() => {
   package_default = {
     name: "@oh-my-opencode/omo-codex",
-    version: "5.1.38",
+    version: "5.1.40",
     type: "module",
     private: true,
     description: "Codex harness adapter for oh-my-openagent. Vendored Codex plugin namespace (omo) + TypeScript installer + telemetry.",
