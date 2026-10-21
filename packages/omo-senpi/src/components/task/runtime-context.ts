@@ -1,5 +1,5 @@
 import type { ChildModelRegistry, ParentState } from "@oh-my-opencode/senpi-task"
-import type { EnginePauseState, EngineRunHoldContext, RunRef } from "../../../../senpi-task/src/pause/ports"
+import { RELEASE_RUN_FENCE, type EnginePauseState, type EngineRunHoldContext, type RunRef } from "../../../../senpi-task/src/pause/ports"
 
 // Structural slice of senpi's ExtensionContext the task runtime reads. ExtensionContext satisfies it;
 // tests pass a tiny fake. `ui` lives on ExtensionContext (event/command contexts), NOT ExtensionAPI,
@@ -57,7 +57,7 @@ function asParentServiceTier(value: unknown): ParentServiceTier | undefined {
 export class TaskRuntimeContext {
   #cwd: string
   #modelRegistry: ChildModelRegistry | undefined
-  #modelContext: Pick<LiveTaskContext, "model" | "getPauseState" | "fenceRun"> | undefined
+  #modelContext: Pick<LiveTaskContext, "model" | "getPauseState" | "fenceRun" | typeof RELEASE_RUN_FENCE> | undefined
   #loadedExtensionPaths: readonly string[] = []
   #parentServiceTier: ParentServiceTier | undefined
   #idle = true
@@ -122,6 +122,15 @@ export class TaskRuntimeContext {
     const context = this.#modelContext
     if (context?.fenceRun === undefined) throw new Error("engine run fences are unavailable")
     context.fenceRun(runRef)
+  }
+
+  // Feature-detected: an engine without it keeps the fence until the next human input or
+  // resume_session. Answers whether the engine released it.
+  releaseRunFence(runRef: RunRef): boolean {
+    const release = this.#modelContext?.[RELEASE_RUN_FENCE]
+    if (release === undefined) return false
+    release(runRef)
+    return true
   }
 
   loadedExtensionPaths(): readonly string[] {

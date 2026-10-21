@@ -26,9 +26,14 @@ export type EngineResumeReceipt =
 
 export type EngineInheritReceipt = { readonly childSeq: number } | { readonly refused: "wrong_parent" }
 
+// The engine's extension-context method that releases a run's fence when the run is cancelled
+// (senpi#3871, releaseFences("run_cancelled", [runRef])). The ONE place its name is spelled.
+export const RELEASE_RUN_FENCE = "releaseRunFence"
+
 export type EngineRunHoldContext = {
   getPauseState?(): EnginePauseState
   fenceRun?(runRef: RunRef): void
+  readonly [RELEASE_RUN_FENCE]?: (runRef: RunRef) => void
 }
 
 export type EngineHoldChangedEvent = EnginePauseState & {

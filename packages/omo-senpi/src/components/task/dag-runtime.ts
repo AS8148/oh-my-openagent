@@ -45,7 +45,7 @@ import {
   type DagRunReentry,
 } from "../../../../senpi-task/src/dag/scheduler"
 import { createDagSkillMaterializer } from "../../../../senpi-task/src/dag/skills"
-import { createPausedNodeCancel, type PausedNodeHoldPort } from "./dag-paused-cancel"
+import { createPausedNodeCancel, endedChildClosure, endPausedRunChildren, type PausedNodeHoldPort } from "./dag-paused-cancel"
 import { createDagRuntimeControls } from "./dag-runtime-controls"
 import type { PausedChildRecoveryPort } from "../../../../senpi-task/src/dag/paused-child-recovery"
 import { createDagRunPauseSource, type DagGuidanceDelivery } from "./dag-run-pause-source"
@@ -217,11 +217,20 @@ export function createDagRuntime(deps: DagRuntimeDeps): DagRuntime {
     })
   }
 
+  const childClosure = deps.pausedNodeHoldPort ?? endedChildClosure(deps.engine.manager)
   const cancel = async (runId: DagRunId, reason?: string): Promise<void> => {
     const sessionId = deps.engine.runtime.sessionId() ?? ""
     const record = coreManager.record(runId, sessionId)
     if (TERMINAL_RUN_STATUSES.has(record.status)) return
+    // A user-stopped run has no live scheduler holding its children: end each paused child first,
+    // journal the run cancelled, and only then let the parent's fence for the run go.
+    const userStopped = record.status === "paused" && record.pause?.reason === "user_stop"
+    if (userStopped) await endPausedRunChildren(deps.engine.manager, record, childClosure)
     await controller(runId, sessionId).scheduler.cancel(runId, reason)
+    if (!userStopped) return
+    const runRef = { kind: "dag" as const, id: runId }
+    await deps.engine.runPause?.forgetRun(record.parentSessionId, runRef)
+    deps.engine.runtime.releaseRunFence(runRef)
   }
 
   /**
@@ -536,7 +545,7 @@ export function createDagRuntime(deps: DagRuntimeDeps): DagRuntime {
     }),
   }))
   const runtime: DagRuntime = {
-    cancelNode: createPausedNodeCancel(runId => ({ ...schedulerOptions, initialRecord: coreManager.record(runId, deps.engine.runtime.sessionId() ?? "") }), deps.pausedNodeHoldPort),
+    cancelNode: createPausedNodeCancel(runId => ({ ...schedulerOptions, initialRecord: coreManager.record(runId, deps.engine.runtime.sessionId() ?? "") }), childClosure),
     manager,
     wait,
     cancel,

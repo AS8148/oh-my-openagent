@@ -147,6 +147,10 @@ export function createEngineRunPause(ports: {
       })
     },
     register(source: RunPauseSource): () => void { sources.add(source); return () => { sources.delete(source) } },
+    // A cancelled run leaves the pause ledger: its participants are settled and dropped.
+    async forgetRun(parentSessionId: string, runRef: RunRef): Promise<void> {
+      if (registry.load(parentSessionId) !== undefined) await controller.cancel(parentSessionId, runRef)
+    },
   }
 }
 
