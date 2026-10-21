@@ -1,0 +1,73 @@
+const HEREDOC = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
+const SEPARATORS = new Set(["\n", ";", "|", "&", "(", ")"])
+
+// A heredoc body is file content, not commands: keep the redirect line, drop every line up to the terminator.
+function stripHeredocBodies(input: string): string {
+  const kept: string[] = []
+  let terminator: string | null = null
+  for (const line of input.split("\n")) {
+    if (terminator !== null) {
+      if (line.trim() === terminator) terminator = null
+      continue
+    }
+    kept.push(line)
+    terminator = HEREDOC.exec(line)?.[2] ?? null
+  }
+  return kept.join("\n")
+}
+
+/**
+ * Splits a shell command line into argv segments at `&&`, `||`, `;`, `|`, `&`, newlines and the parentheses of
+ * subshells and `$(...)` substitutions, honouring single and double quotes so a quoted `&&` or a quoted check name
+ * stays inside its argument. Heredoc bodies are dropped.
+ */
+export function shellSegments(input: string): string[][] {
+  const line = stripHeredocBodies(input)
+  const segments: string[][] = []
+  let argv: string[] = []
+  let word = ""
+  let inWord = false
+  let quote: "'" | '"' | null = null
+  const endWord = () => {
+    if (inWord) argv.push(word)
+    word = ""
+    inWord = false
+  }
+  const endSegment = () => {
+    endWord()
+    if (argv.length > 0) segments.push(argv)
+    argv = []
+  }
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index] as string
+    if (quote !== null) {
+      if (char === quote) quote = null
+      else word += char
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+      inWord = true
+      continue
+    }
+    if (char === "\\" && index + 1 < line.length) {
+      word += line[index + 1]
+      inWord = true
+      index += 1
+      continue
+    }
+    if (char === "$" && line[index + 1] === "(") continue
+    if (SEPARATORS.has(char)) {
+      endSegment()
+      continue
+    }
+    if (char === " " || char === "\t") {
+      endWord()
+      continue
+    }
+    word += char
+    inWord = true
+  }
+  endSegment()
+  return segments
+}

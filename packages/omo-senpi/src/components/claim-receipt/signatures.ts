@@ -1,7 +1,8 @@
 import type { CheckOutcome } from "./evidence"
 
 const FAIL_SIGNATURES: readonly RegExp[] = [
-  /(?<![0-9])[1-9]\d*\s+fail(?:ed|ures?)?\b/i,
+  /(?<![0-9])[1-9]\d*\s+fail(?:ed|ures?)?\b(?![=:])/i,
+  /\bfail(?:ed|ures?)?=(?:[1-9]|\[[^\]\s])/i,
   /^\(fail\)/m,
   /\bFAIL\b/,
   /\berror TS\d+/,
@@ -21,6 +22,7 @@ const UNSETTLED_SIGNATURES: readonly RegExp[] = [/\t(?:pending|queued|in_progres
 
 const PASS_SIGNATURES: readonly RegExp[] = [
   /(?<![0-9])0\s+fail(?:ed|ures?)?\b/i,
+  /\bfail(?:ed|ures?)?=(?:0\b|\[\])/i,
   /(?<![0-9])[1-9]\d*\s+pass(?:ed)?\b/i,
   /\bTests?:?\s+\d+ passed/,
   /\bTest Files\s+\d+ passed/,
@@ -50,7 +52,7 @@ export function judgeOutput(text: string): CheckOutcome {
   return "unknown"
 }
 
-const NON_CODE_PATH = /(?:^|\/)(?:\.omo|tmp|evidence|notepads?)\/|^\/(?:private\/)?tmp\/|\.(?:md|txt|log|jsonl|csv)$/i
+const NON_CODE_PATH = /(?:^|\/)(?:\.omo|omo-runs|tmp|evidence|notepads?)\/|^\/(?:private\/)?tmp\/|\.(?:md|txt|log|jsonl|csv)$/i
 
 export function isRelevantPath(path: string): boolean {
   return !NON_CODE_PATH.test(path)

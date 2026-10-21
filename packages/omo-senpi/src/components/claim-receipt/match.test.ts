@@ -90,6 +90,12 @@ describe("claim-receipt matcher", () => {
       })
     })
 
+    it("#then a file read does not count as a check for test, done or build claims", () => {
+      const read = [toolCall("k1", "read", { path: "src/a.ts" }), toolResult("k1", "read", { text: "code" })]
+      expect(verdictFor([...editResult("e1", "src/a.ts"), ...read], "All tests pass.")).toMatchObject({ status: "unsupported", reason: "no-check" })
+      expect(verdictFor([...read, ...editResult("e1", "src/a.ts")], "Done.")).toMatchObject({ status: "unsupported", reason: "no-check" })
+    })
+
     it("#then an exists claim is supported by a lookup and never failed by an unrelated check", () => {
       const read = [toolCall("k1", "read", { path: "src/config.ts" }), toolResult("k1", "read", { text: "flag" })]
       expect(verdictFor(read, "That flag already exists in config.ts.")).toMatchObject({ status: "supported", receipt: { kind: "lookup" } })

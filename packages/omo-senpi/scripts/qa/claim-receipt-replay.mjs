@@ -87,6 +87,7 @@ for (const file of files) {
         reason: verdict.reason,
         sentence: verdict.claim.sentence,
         receipt: verdict.receipt,
+        invalidatedBy: verdict.invalidatedBy,
       })
     }
   })

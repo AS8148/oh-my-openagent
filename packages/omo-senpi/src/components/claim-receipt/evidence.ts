@@ -1,5 +1,6 @@
 import { extractMutatedFilePaths, MUTATION_TOOL_NAMES } from "../post-mutation/post-mutation"
-import { cellInvokedKinds, invokedKinds } from "./invocations"
+import { cellInvokedKinds } from "./cell-commands"
+import { invokedKinds } from "./invocations"
 import { isRelevantPath, judgeOutput, judgeStructured } from "./signatures"
 
 export type CheckKind = "test" | "typecheck" | "lint" | "build" | "run" | "lsp" | "lookup"
@@ -198,7 +199,7 @@ class TimelineBuilder {
       return
     }
     if (customType === "senpi-monitor:notification") {
-      if (/\bkilled\b|\btimed[_ ]out\b/.test(content)) return
+      if (/\bwatcher (?:killed|timed_out)\b|\bwatcher\b[^\n]*\bkilled\b/.test(content)) return
       const ids = asArray(isRecord(details) ? details["monitors"] : undefined).map((monitor) => (isRecord(monitor) ? asString(monitor["id"]) : ""))
       const description = MONITOR_DESCRIPTION.exec(content)?.[1]
       const pending = ids.map((id) => this.#background.get(id)).find((value) => value !== undefined) ?? (description === undefined ? undefined : this.#background.get(`desc:${description}`))

@@ -36,9 +36,11 @@ function judge(claim: Claim, checks: readonly CheckEvidence[], edits: readonly E
   if (claim.kind === "exists") return judgeExists(claim, candidates, checks.length)
   const last = latest(candidates)
   if (last === undefined) {
-    // Checks of other kinds mean verification happened somewhere this session cannot see (remote runners, CI);
-    // only a session with no check at all, or a claim that quotes no observed result, is flagged.
-    if (claim.reported || checks.length > 0) return { claim, status: "unknown" }
+    // Check runs of other kinds mean verification happened somewhere this session cannot see (remote runners, CI);
+    // only a session with no check run at all, or a claim that quotes no observed result, is flagged. A lookup
+    // (reading or searching a file) is never a check run: it proves only that something exists.
+    const ranAnyCheck = checks.some((check) => check.kind !== "lookup")
+    if (claim.reported || ranAnyCheck) return { claim, status: "unknown" }
     return { claim, status: "unsupported", reason: "no-check" }
   }
   // A later check whose outcome is unknown cannot erase a failure that was visible before it, unless the claim

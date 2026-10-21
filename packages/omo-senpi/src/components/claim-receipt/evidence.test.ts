@@ -99,6 +99,11 @@ describe("claim-receipt evidence timeline", () => {
       ]
       expect(checks(refused)).toEqual([])
       expect(checks(timedOut)).toEqual([])
+      const testTimeout = [
+        ...start("bun test", "bash_8"),
+        customMessage("senpi-monitor:notification", "<system-reminder>Monitor event(t): (fail) x > y [5001ms] timed out after 5000ms\n 3 pass\n 1 fail\nwatcher completed (exit code 1)</system-reminder>", { monitors: [{ id: "bash_8" }] }),
+      ]
+      expect(checks(testTimeout)).toEqual([["test", "failed", 2]])
     })
 
     it("#then a monitor event for that id decides it, including one bundled inside a wake", () => {
@@ -112,6 +117,17 @@ describe("claim-receipt evidence timeline", () => {
       ]
       expect(checks(direct)).toEqual([["test", "passed", 2]])
       expect(checks(wake)).toEqual([["test", "passed", 2]])
+    })
+
+    it("#then key=value summaries are read by their value, never by the number before them", () => {
+      const settle = (line: string) => [
+        ...start("while true; do o=$(gh pr checks 9); done", "bash_4"),
+        customMessage("senpi-monitor:notification", `<system-reminder>Monitor event(CI settle): ${line}\nwatcher completed (exit code 0)</system-reminder>`, { monitors: [{ id: "bash_4" }] }),
+      ]
+      expect(checks(settle("CI_SETTLED total=46 fail=0"))).toEqual([["test", "passed", 2]])
+      expect(checks(settle("CI_SETTLED #1197 fail=[] #1198 fail=[]"))).toEqual([["test", "passed", 2]])
+      expect(checks(settle("CI_SETTLED total=46 fail=2"))).toEqual([["test", "failed", 2]])
+      expect(checks(settle("CI_SETTLED #1197 fail=[lint] #1198 fail=[]"))).toEqual([["test", "failed", 2]])
     })
   })
 
@@ -137,9 +153,34 @@ describe("claim-receipt evidence timeline", () => {
       expect(checks(bash("r4", "npx vitest run && pnpm run lint", "Found 0 errors"))).toEqual([["test", "passed", 1], ["lint", "passed", 1]])
     })
 
+    it("#then runners, task tools, scripts and wrapper flags still reach the real check", () => {
+      const kinds = (command: string) => checks(bash("w", command, " 3 pass\n 0 fail")).map(([kind]) => kind)
+      expect(kinds("uv run pytest tests/")).toEqual(["test"])
+      expect(kinds("python -m pytest -q")).toEqual(["test"])
+      expect(kinds("poetry run pytest")).toEqual(["test"])
+      expect(kinds("python3 -m mypy src")).toEqual(["typecheck"])
+      expect(kinds("make test")).toEqual(["test"])
+      expect(kinds("just lint")).toEqual(["lint"])
+      expect(kinds("bun run scripts/qa/claim-receipt-e2e.mjs out")).toEqual(["run"])
+      expect(kinds("bash packages/x/scripts/qa/run.sh")).toEqual(["run"])
+      expect(kinds("./scripts/qa/run.sh")).toEqual(["run"])
+      expect(kinds("env -i HOME=/h PATH=/p bun test x")).toEqual(["test"])
+      expect(kinds("time -p bun test x")).toEqual(["test"])
+    })
+
+    it("#then heredoc bodies are file contents, not commands", () => {
+      expect(checks(bash("h", "cat > run.sh <<'EOF'\nbun test x\nEOF", ""))).toEqual([])
+    })
+
     it("#then an eval cell counts only shell strings that invoke a check, not prose or greps about one", () => {
       expect(checks(evalRun("e1", { code: 'print("run bun test later")', output: " 3 pass\n 0 fail" }))).toEqual([])
       expect(checks(evalRun("e2", { code: "await sh(`grep -c vitest log.txt`)", output: " 3 pass\n 0 fail" }))).toEqual([])
+      expect(checks(evalRun("e5", { code: 'log("bun test passed")\nconst label = "tsc --noEmit"', output: " 3 pass\n 0 fail" }))).toEqual([])
+      expect(checks(evalRun("e6", { code: "r = subprocess.run(['bash','-c','bun test x'])", output: " 3 pass\n 0 fail" }))).toEqual([["test", "passed", 1]])
+      expect(checks(evalRun("e7", { code: "await tool.bash({ command: 'bun test x' })", output: " 3 pass\n 0 fail" }))).toEqual([["test", "passed", 1]])
+      expect(checks(evalRun("e8", { code: "print(await q(`gh pr checks 213 --repo o/r 2>&1 | head`))", output: "lint\tpass\t1m\te2e\tpass\t2m" }))).toEqual([["test", "passed", 1]])
+      expect(checks(evalRun("e9", { code: "const p = Bun.spawn(['gh', 'pr', 'checks', String(n)], { stdout: 'pipe' })", output: "lint\tpass\t1m" }))).toEqual([["test", "passed", 1]])
+      expect(checks(evalRun("e10", { code: "write(f'{R}/run.sh', 'bun test x')\nopen(f, 'w').write('tsc --noEmit')\nassert 'bun test' in s", output: " 3 pass\n 0 fail" }))).toEqual([])
       expect(checks(evalRun("e3", { code: "await sh(`cd ${WT} && bun test x`)", output: " 3 pass\n 0 fail" }))).toEqual([["test", "passed", 1]])
       const python = 'r = subprocess.run(f"""cd {W0} &&\n CI=1 bun test packages/x 2>&1 | tail -3""", shell=True)'
       expect(checks(evalRun("e4", { code: python, output: " 3 pass\n 0 fail" }))).toEqual([["test", "passed", 1]])
@@ -177,10 +218,15 @@ describe("claim-receipt evidence timeline", () => {
 
   describe("#given file edits", () => {
     it("#then marks code edits relevant and notes or evidence edits not relevant", () => {
-      const timeline = buildTimeline([...editResult("e1", "src/a.ts"), ...editResult("e2", ".omo/evidence/run/summary.md")])
+      const timeline = buildTimeline([
+        ...editResult("e1", "src/a.ts"),
+        ...editResult("e2", ".omo/evidence/run/summary.md"),
+        ...editResult("e3", "/Users/Shared/omo-runs/lane/rerun.sh"),
+      ])
       expect(timeline.edits.map((edit) => [edit.paths, edit.relevant])).toEqual([
         [["src/a.ts"], true],
         [[".omo/evidence/run/summary.md"], false],
+        [["/Users/Shared/omo-runs/lane/rerun.sh"], false],
       ])
     })
 
