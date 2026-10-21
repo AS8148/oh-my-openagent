@@ -50,6 +50,23 @@ describe("a non-limit failure never consumes the parent rung (#10750 review)", (
   })
 })
 
+describe("omo's own hop onto the parent's model (#10750 review round 2)", () => {
+  test("#given every category rung is spent #when omo hands the task to the parent's model #then the note shows before the relaunch records its route", () => {
+    // given
+    const spent: TaskRecord = { ...chainRecord(), fallback_models: [PARENT], effective_model: { ...A, source: "category" } }
+
+    // when
+    const handedOff = {
+      ...hop(spent, LIMIT).record,
+      parent_model_fallback: { from_model: A.display, reason: "usage_limit" as const, at: "2026-10-21T00:00:00.000Z" },
+    }
+
+    // then
+    expect(handedOff.effective_model).toMatchObject({ provider: PARENT.provider, model_id: PARENT.model_id })
+    expect(activeParentModelFallback(handedOff)?.reason).toBe("usage_limit")
+  })
+})
+
 describe("the parent-model note follows the child's current model (#10750 review)", () => {
   const moved = (): TaskRecord => ({
     ...chainRecord(),
