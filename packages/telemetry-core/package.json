@@ -20,10 +20,6 @@
     "./otlp": {
       "types": "./src/otlp-entry.ts",
       "import": "./src/otlp-entry.ts"
-    },
-    "./otlp-inspect": {
-      "types": "./src/otlp-inspect.ts",
-      "import": "./src/otlp-inspect.ts"
     }
   },
   "types": "./index.d.ts",

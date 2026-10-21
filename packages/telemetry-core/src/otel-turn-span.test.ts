@@ -26,7 +26,8 @@ function setup(consent: () => boolean = () => true) {
   const root = createSpoolRoot("telemetry-core-turn-")
   roots.push(root.cleanup)
   const recorder = recordingFetch()
-  const transport = makeTransport(root.dir, { fetch: recorder.fetch, consent })
+  const spans = { "omo.turn": [...Object.keys(TURN_ATTRIBUTES), "gen_ai.response.model"] }
+  const transport = makeTransport(root.dir, { fetch: recorder.fetch, consent, spans })
   return { transport, recorder }
 }
 

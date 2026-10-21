@@ -6,12 +6,14 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { readTurnTraceparent, type TelemetryTransportFactory } from "@oh-my-opencode/telemetry-core"
 import {
   createOtlpTelemetryTransport,
+  inspectOtlpRequest,
+  type InspectedLogRecord,
+  type InspectedSpan,
   type OtlpTelemetryTransport,
   type OtlpWireProjection,
   type SpanAllowlist,
   type WireAttributes,
 } from "@oh-my-opencode/telemetry-core/otlp"
-import { inspectOtlpRequest, type InspectedLogRecord, type InspectedSpan } from "@oh-my-opencode/telemetry-core/otlp-inspect"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { CONSENT_CACHE_MS, createOmoNativeTelemetryComponent } from "./omo-native-component"
@@ -25,7 +27,8 @@ import {
 } from "./telemetry.test-support"
 
 // The transport requires a schema artifact's projection; this mirrors telemetry-core's test stand-in
-// (every primitive that passes the key rule becomes `omo.<name>`), which is not exported to other packages.
+// (`$session_id` becomes `session.id`, every other primitive that passes the key rule `omo.<name>`), which is
+// not exported to other packages.
 const NON_WIRE_KEYS = new Set(["$os", "$os_version", "$process_person_profile", "$session_id", "ci", "event_id", "install_hash", "package_version", "platform", "product_name", "schema_version", "surface"])
 // Every attribute omo-native-turn-span sets on `omo.turn`; the transport drops anything not listed.
 const TURN_SPANS: SpanAllowlist = {
@@ -47,6 +50,8 @@ const TRANSPORT_POOL = 4
 
 const testProjection: OtlpWireProjection = (_event, properties) => {
   const attributes: WireAttributes = {}
+  const session = properties["$session_id"]
+  if (typeof session === "string" && session.length > 0) attributes["session.id"] = session
   for (const [key, value] of Object.entries(properties)) {
     if (NON_WIRE_KEYS.has(key) || key.startsWith("$")) continue
     if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
@@ -116,7 +121,7 @@ async function otlpCollector(options: { readonly liveShutdown?: boolean } = {}):
       const logs: InspectedLogRecord[] = []
       const spans: InspectedSpan[] = []
       for (const { url, body } of bodies) {
-        const inspected = inspectOtlpRequest(url.endsWith("/v1/traces") ? "traces" : "logs", body)
+        const inspected = await inspectOtlpRequest(url.endsWith("/v1/traces") ? "traces" : "logs", body)
         logs.push(...inspected.logs)
         spans.push(...inspected.spans)
       }
