@@ -143,6 +143,7 @@ export {
   resolveAvailableCategoryNames,
   resolveCategory,
 } from "./category"
+export { withoutExcludedModels } from "./model-exclusion"
 export type {
   BuiltinCategoryDefinition,
   CategoryModelSelection,

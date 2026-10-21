@@ -55,7 +55,7 @@ export function createTaskChildPlanner(
     }
 
     if (spec.model !== undefined && spec.model.length > 0) {
-      const pin = resolveExplicitPin(spec.model, resolveRegistry, resolveDefaultRoute)
+      const pin = resolveExplicitPin(spec.model, resolveRegistry, resolveDefaultRoute, omoConfig.exclude_models)
       if (pin.kind !== "resolved") return { kind: "error", error: pin.error }
       return {
         kind: "resolved",
@@ -107,7 +107,7 @@ function resolveAgentTarget(
   if (explicitModel !== undefined && explicitModel.length > 0) {
     const resolution = resolveAgent(agentName, agents, undefined, { modelOverride: explicitModel })
     if (resolution.kind !== "resolved") return undefined
-    const pin = resolveExplicitPin(explicitModel, resolveRegistry, resolveDefaultRoute)
+    const pin = resolveExplicitPin(explicitModel, resolveRegistry, resolveDefaultRoute, omoConfig.exclude_models)
     if (pin.kind !== "resolved") return { kind: "error", error: pin.error }
     return { kind: "resolved", plan: toAgentPlan(resolution, pin.metadata, pin.canonical) }
   }

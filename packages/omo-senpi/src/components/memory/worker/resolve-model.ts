@@ -2,6 +2,7 @@ import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 import {
   builtinCategoryChainCandidates,
   resolveCategory,
+  withoutExcludedModels,
   type SenpiModelPort,
   type SenpiModelRegistryPort,
 } from "@oh-my-opencode/senpi-task"
@@ -59,9 +60,12 @@ const THINKING_LEVELS: readonly ReflectionThinkingLevel[] = [
 export function resolveReflectionModel(
   category: string,
   config: OmoConfig,
-  registry: SenpiModelRegistryPort<SenpiModelPort> | undefined,
+  liveRegistry: SenpiModelRegistryPort<SenpiModelPort> | undefined,
   options: ReflectionResolveOptions = {},
 ): ReflectionModelResolution {
+  // exclude_models reaches every rung below: the category chain, a pin, the builtin rungs appended
+  // after it and the beyond-category ladder all read this one filtered view.
+  const registry = liveRegistry === undefined ? undefined : withoutExcludedModels(liveRegistry, config.exclude_models)
   if (!registry) {
     return resolveBeyondCategory(category, undefined, options)
       ?? { kind: "category_unavailable", category, cause: "no_registry" }
