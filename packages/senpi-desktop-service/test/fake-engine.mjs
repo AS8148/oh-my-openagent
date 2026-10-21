@@ -131,11 +131,15 @@ function handle(request) {
 	}
 	if (desktop !== undefined && params?.fake === undefined) {
 		if (method === stalled) return cancellable.add(id);
+		const refused = (code, message, rpcCode) => {
+			send({ method: "audit", params: { action: method, target: params?.target, delivery: "background", code, durationMs: 1 } });
+			return fail(id, code, message, rpcCode);
+		};
 		if (suspended && GLOBAL_INPUT.has(method) && process.env.FAKE_ENGINE_GLOBAL_INPUT_GATE === "1") {
-			return fail(id, "Suspended", "input is suspended", -32015);
+			return refused("Suspended", "input is suspended", -32015);
 		}
 		if (refusesGlobalInput(method, params)) {
-			return fail(id, "ControlRequired", "desktop input needs the control grant", -32022);
+			return refused("ControlRequired", "desktop input needs the control grant", -32022);
 		}
 		const outcome = desktop(method, params);
 		if (outcome !== undefined) {
