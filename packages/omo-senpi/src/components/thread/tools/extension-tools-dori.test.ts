@@ -111,6 +111,19 @@ test("#given a recorded call #when a replay sends the same op with different arg
   expect(storeRows(agentDir)).toHaveLength(1)
 })
 
+test("#given a recorded call #when its turn is replayed after the seven-day window #then it stops as expired and nothing dispatches again", async () => {
+  const { agentDir, on } = await setup()
+  await call(on(), "ext_dori_reply_mark")
+  const assistant = branch[1] as { timestamp: string }
+  assistant.timestamp = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+  try {
+    expect(await call(on(), "ext_dori_reply_mark")).toMatchObject({ kind: "replay_stopped", code: "toolkit_replay_expired" })
+  } finally {
+    assistant.timestamp = recent
+  }
+  expect(storeRows(agentDir)).toHaveLength(1)
+})
+
 test("#given a kernel cell that outlived its turn #when its call replays after the session moved on #then it keeps its original turn and returns the recorded result", async () => {
   const { agentDir, on } = await setup()
   const carried = { note: "n", omo_toolkit_replay: { cell: "cell-a", index: 0 } }
