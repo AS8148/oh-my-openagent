@@ -270,6 +270,8 @@ request("https://localhost:" + port + "/", (r) => { r.resume(); console.log("ok 
     writeFileSync(caFile, fixture("ca.pem"))
   })
   afterAll(async () => {
+    // A probe's keep-alive socket would hold close() open until it idles out; end every connection first.
+    server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))
     rmSync(dir, { recursive: true, force: true })
   })
