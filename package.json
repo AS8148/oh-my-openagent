@@ -149,7 +149,9 @@
     "test:windows-codex": "bun run test:codex",
     "build:git-bash-mcp": "bun run --cwd packages/git-bash-mcp build",
     "build:ast-grep-mcp": "bun run --cwd packages/ast-grep-mcp build",
-    "test:desktop": "bun script/check-cargo-pinned-deps.mjs && bun run --cwd packages/senpi-desktop-protocol test && bun run --cwd packages/senpi-desktop-engine test && bun run --cwd packages/senpi-desktop-prelude test && bun run --cwd packages/senpi-desktop-service test && bun run --cwd packages/senpi-desktop-tool test"
+    "test:desktop": "bun script/check-cargo-pinned-deps.mjs && bun run --cwd packages/senpi-desktop-protocol test && bun run --cwd packages/senpi-desktop-engine test && bun run --cwd packages/senpi-desktop-prelude test && bun run --cwd packages/senpi-desktop-service test && bun run --cwd packages/senpi-desktop-tool test",
+    "lint:ratchet": "bun script/lint-ratchet.ts",
+    "lint:ratchet:update": "bun script/lint-ratchet.ts --update"
   },
   "keywords": [
     "opencode",
@@ -231,6 +233,7 @@
     "jsonc-parser": "^3.3.1",
     "node-pty": "^1.1.0",
     "omowright": "github:code-yeongyu/omowright#f87ef4d63fe7b56fe117dbab246c8ad88dd8a780",
+    "oxlint": "1.89.0",
     "picocolors": "^1.1.1",
     "picomatch": "^4.0.7",
     "posthog-node": "^5.52.4",
