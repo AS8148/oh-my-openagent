@@ -50,7 +50,7 @@ describe("facts claim receipts", () => {
     const kept = bullets.find((line) => line.includes("User keeps plugin X."))
     expect(flipped).toContain("(source: ")
     expect(flipped).not.toContain("user said")
-    expect(kept).toContain('user said "keep plugin X"')
+    expect(kept).toContain('user replied "keep plugin X"')
     expect(bullets).toContain("- [2026-10-18] Legacy fact.")
   }, 30_000)
 

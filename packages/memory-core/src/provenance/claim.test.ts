@@ -68,7 +68,7 @@ describe("claim receipts", () => {
   })
   test("#given a user receipt #when rendered and parsed #then it names the approved proposal, and one without a valid proposal id is rejected", () => {
     const receipt = { source: "user", userQuote: "ok", approves: proposalId(PROPOSAL) } as const
-    expect(renderClaimReceipt(receipt)).toBe(`user said "ok" approving proposal ${proposalId(PROPOSAL)}`)
+    expect(renderClaimReceipt(receipt)).toBe(`user replied "ok" to proposal ${proposalId(PROPOSAL)}; a record, not the user's approval`)
     expect(parseClaimReceipt(receipt)).toEqual(receipt)
     expect(parseClaimReceipt({ source: "user", userQuote: "ok" })).toBeUndefined()
     expect(parseClaimReceipt({ source: "user", userQuote: "ok", approves: "not-a-hash" })).toBeUndefined()

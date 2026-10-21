@@ -11,7 +11,7 @@ type ReadResult = { readonly content: readonly Record<string, unknown>[] }
 // look-alikes, invisible characters and line or item splits all still trigger the notice. The notice is the only
 // thing this guard adds: lead decision C on #10498 removed every form of verified receipt, so nothing a file says
 // is attested and safety does not depend on this match.
-const USER_RECEIPT_TEXT = /["']?provenance["']?\s*:\s*(?:[|>][-+0-9]*\s*)?["']?user\s+said\b/
+const USER_RECEIPT_TEXT = /(?:["']?provenance["']?\s*:\s*(?:[|>][-+0-9]*\s*)?["']?|\(\s*source\s*:\s*)user\s+said\b/
 const RECEIPT_LIKE_TEXT = /verified\s*user\s*receipt/
 
 export function unverifiedReceiptNotice(payload: unknown): { content: readonly Record<string, unknown>[] } | undefined {
@@ -27,9 +27,14 @@ export function registerReceiptReadGuard(pi: SenpiExtensionAPI): void {
 }
 
 function readResult(payload: unknown): ReadResult | undefined {
-  if (!isRecord(payload) || payload["type"] !== "tool_result" || payload["toolName"] !== "read" || payload["isError"] === true) return undefined
+  if (!isRecord(payload) || payload["type"] !== "tool_result" || !isReadTool(payload["toolName"]) || payload["isError"] === true) return undefined
   const content = payload["content"]
   return Array.isArray(content) ? { content: content.filter(isRecord) } : undefined
+}
+
+// Any tool named read, alone or behind a namespace (`Read`, `mcp_read`, `fs:read`), as the memory guard matches names.
+function isReadTool(name: unknown): boolean {
+  return typeof name === "string" && /(?:^|[_:/.])read$/i.test(name)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

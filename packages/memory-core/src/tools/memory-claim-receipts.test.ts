@@ -45,7 +45,7 @@ async function header(repo: GitMemoryRepo, path: string): Promise<string | undef
   return raw === undefined ? undefined : String(JSON.parse(raw))
 }
 
-const isUserHeader = (value: string | undefined): boolean => value?.startsWith("user said ") === true
+const isUserHeader = (value: string | undefined): boolean => value?.startsWith("user replied ") === true
 const CLEANUP = { command: "create", file_path: "cleanup.md", description: "Cleanup", file_text: "Remove plugins X and Y." } as const
 
 describe("memory claim receipts", () => {

@@ -1,4 +1,8 @@
+import { readFile } from "../fs/resilient"
+import { join } from "node:path"
+
 import type { GitCommitAuthor, GitMemoryRepo, MemoryCommit } from "../git"
+import { PROVENANCE_STRIPPED_TRAILER, strippedLegacyUserHeader } from "../tools/claim-frontmatter"
 import type { FactsApplyRecovery } from "./mutation-plan"
 import { FactsMutationTransaction, FactsOwnershipLostError } from "./recovery-mutation"
 import { captureOwnedFactsState, sameFactsOwnedState } from "./recovery-ownership"
@@ -30,7 +34,7 @@ export async function applyFactsRecovery(
     await transaction.applyPostState()
     const result = await repo.commitPrepared(
       recovery.paths.map((entry) => entry.path),
-      commitMessage(recovery.batchId, recordCount),
+      commitMessage(recovery.batchId, recordCount, await strippedHeaderPaths(repo, recovery)),
       author,
     )
     return { outcome: "committed", sha: result.sha, affectedPaths: recovery.paths.map((entry) => entry.path) }
@@ -44,12 +48,25 @@ export async function applyFactsRecovery(
   }
 }
 
-function commitMessage(batchId: string, count: number): string {
+function commitMessage(batchId: string, count: number, stripped: readonly string[]): string {
   return [
     `chore(facts): extract ${count} ${count === 1 ? "fact" : "facts"}`,
     "",
     "Generated-By: facts-extractor",
     "Omo-Writer: facts-extractor",
     `Omo-Facts-Batch: ${batchId}`,
+    ...stripped.map((path) => `${PROVENANCE_STRIPPED_TRAILER}: ${path}`),
   ].join("\n")
+}
+
+// The paths whose legacy user header this batch dropped, compared between the pre-state blob and the written file.
+async function strippedHeaderPaths(repo: GitMemoryRepo, recovery: FactsApplyRecovery): Promise<string[]> {
+  const before = await repo.readBlobs(recovery.paths.flatMap((entry) => (entry.pre.index === null ? [] : [entry.pre.index.oid])))
+  const stripped: string[] = []
+  for (const entry of recovery.paths) {
+    const prior = entry.pre.index === null ? undefined : before.get(entry.pre.index.oid)
+    const written = await readFile(join(repo.dir, entry.path), "utf8")
+    if (strippedLegacyUserHeader(prior, written)) stripped.push(entry.path)
+  }
+  return stripped
 }

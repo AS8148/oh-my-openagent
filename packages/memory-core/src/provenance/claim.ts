@@ -91,7 +91,7 @@ function capQuote(text: string): string {
 
 export function renderClaimReceipt(receipt: ClaimReceipt): string {
   switch (receipt.source) {
-    case "user": return `user said "${singleLine(receipt.userQuote)}" approving proposal ${receipt.approves}`
+    case "user": return `user replied "${singleLine(receipt.userQuote)}" to proposal ${receipt.approves}; a record, not the user's approval`
     case "agent": return receipt.downgraded === true
       ? "agent suggestion, not a user decision (claimed as the user's, but no matching user words)"
       : "agent suggestion, not a user decision"

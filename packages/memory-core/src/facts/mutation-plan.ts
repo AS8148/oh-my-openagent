@@ -100,7 +100,7 @@ async function renderFactsNote(
   const prefix = parsed.body.length === 0 || parsed.body.endsWith("\n") ? "" : "\n"
   const bullets = records.map((record) => `- [${record.date}] ${factDisplayText(record)}`).join("\n")
   const body = `${parsed.body}${prefix}${bullets}\n`
-  // Appended facts were not approved by the user, so a user header is lowered to mixed, as the commit hook requires.
+  // Same header rule as every writer and the commit hook: a legacy user header is dropped, a user record becomes mixed.
   const frontmatter = existing === undefined ? parsed.frontmatter : stampReceipt(parsed, parsed.frontmatter, body, undefined)
   return renderMemoryFile(frontmatter, body)
 }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, setDefaultTimeout } from "bun:test"
 import { join } from "node:path"
 
 import type { ClaimReceipt } from "../provenance"
-import { MIXED_PROVENANCE, stampReceipt, verifiedUserReceipt } from "../tools/claim-frontmatter"
+import { MIXED_PROVENANCE, readHeader, stampReceipt } from "../tools/claim-frontmatter"
 import { parseMemoryFile, renderMemoryFile } from "./frontmatter"
 import { commit, createRepo, removeTempDirs, run, writeFiles } from "./hooks.test-support"
 
@@ -68,10 +68,10 @@ async function trustedFiles(dir: string): Promise<Map<string, string>> {
   const trusted = new Map<string, string>()
   for (const file of files) {
     const content = (await run(["git", "show", `HEAD:./${file}`], dir)).stdout
-    // No note carries authority (decision C); this tracks the display header's own consistency, which hand
-    // commits must never raise.
+    // No note carries authority (decision C); this tracks user-sourced headers (a record or a legacy "user said"),
+    // which a hand commit must never add or raise.
     try {
-      if (verifiedUserReceipt(parseMemoryFile(content))) trusted.set(file, content)
+      if (readHeader(parseMemoryFile(content).frontmatter)?.startsWith("user ") === true) trusted.set(file, content)
     } catch { /* no frontmatter: no header */ }
   }
   return trusted

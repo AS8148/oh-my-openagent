@@ -13,6 +13,7 @@ import { readFile } from "../fs/resilient"
 import { join } from "node:path"
 
 import { parseMemoryFile, renderMemoryFile } from "../memfs"
+import { stampReceipt } from "../tools/claim-frontmatter"
 import {
   parsePeopleCard,
   resolveSlugCollision,
@@ -184,8 +185,10 @@ async function renderExplicitObservations(
     const refreshed = record.receipt === undefined ? found.content : content
     explicit.entries[at] = { ...found, content: refreshed, date: record.date, n: (found.n ?? 1) + 1 }
   }
-  const body = serializePeopleCard({ entries: card.entries, observations: groups }, limits)
-  return renderMemoryFile(parsed.frontmatter, `${body}\n`)
+  const body = `${serializePeopleCard({ entries: card.entries, observations: groups }, limits)}\n`
+  // Same header rule as every writer and the commit hook: a legacy user header is dropped, a user record becomes mixed.
+  const frontmatter = existing === undefined ? parsed.frontmatter : stampReceipt(parsed, parsed.frontmatter, body, undefined)
+  return renderMemoryFile(frontmatter, body)
 }
 
 function resolvePersonSlug(
