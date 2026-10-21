@@ -13,6 +13,9 @@ export const DagToolParams = Type.Object({
       Type.Literal("retry"),
       Type.Literal("send"),
       Type.Literal("amend"),
+      Type.Literal("resume"),
+      Type.Literal("cancel_node"),
+      Type.Literal("guide"),
     ],
     {
       description: [
@@ -54,6 +57,9 @@ export const DagToolParams = Type.Object({
   node_ids: Type.Optional(Type.Array(Type.String(), { description: "Node ids to retry. retry only, mutually exclusive with node_id; omit both to retry every failed or cancelled node plus the dependents they skipped." })),
   message: Type.Optional(Type.String({ description: "Message delivered to the node's child. Required for send, ignored otherwise." })),
   prompt: Type.Optional(Type.String({ description: "Replacement prompt for a retried node. retry only, and only with exactly one node id." })),
+  guidance_id: Type.Optional(Type.String()),
+  text: Type.Optional(Type.String()),
+  remove: Type.Optional(Type.Boolean()),
 })
 
 export type DagToolInput = Static<typeof DagToolParams>
