@@ -116,8 +116,8 @@ export function createWorkpoolAdmission(ports: PoolManagerPorts): WorkpoolAdmiss
           let context: WorkpoolLaunch
           try {
             if (!current()) return
-            const admission = await options.admit?.(pool.parent_session_id)
-            if (admission?.kind === "rejected") throw new WorkpoolError("admission_refused", admission.message)
+            const residency = await options.admit?.(pool.parent_session_id)
+            if (residency?.kind === "rejected") throw new WorkpoolError("admission_refused", residency.message)
             if (!current()) return
             input.authorize()
             if (!acquired.lease.isOwner()) throw new WorkpoolError("admission_refused", "Residency admission lease was displaced.")

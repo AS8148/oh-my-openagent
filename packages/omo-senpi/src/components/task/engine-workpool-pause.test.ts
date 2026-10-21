@@ -104,7 +104,10 @@ test("a workpool child created across Stop is held before its first provider cal
       items: [{ status: "assigned", delivery: { phase: "acknowledged" } }],
     })
     if (participant?.taskId === undefined) throw new Error("pool worker task identity is missing")
-    expect(manager.get(participant.taskId)?.pending_steering).toEqual([])
+    // An empty steering queue is stored as an absent field (createTaskRecord, clearPersistedQueue).
+    const worker = manager.get(participant.taskId)
+    expect(worker).toBeDefined()
+    expect(worker?.pending_steering).toBeUndefined()
   } finally {
     bind.resolve()
     await pausing?.catch(() => undefined)

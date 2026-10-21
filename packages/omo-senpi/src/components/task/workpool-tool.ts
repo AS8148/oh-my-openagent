@@ -36,7 +36,7 @@ export function registerWorkpoolTool(
   })
   pi.on("session_start", () => {
     const sessionId = engine.runtime.sessionId()
-    if (sessionId !== undefined) workpools.attach({ sessionId, rootSessionId: sessionId, depth: 0, cwd: pi.cwd ?? process.cwd() })
+    if (sessionId !== undefined) workpools.attach({ sessionId })
   })
   pi.on("session_shutdown", () => workpools.dispose())
 }
