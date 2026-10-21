@@ -4,7 +4,8 @@ import { join } from "node:path"
 
 import { CLAIM_LEASE_MS, createBatchId } from "./otlp-spool-dir"
 import { startCollectorStub, type CollectorStub } from "./otlp-spool-server"
-import { capture, createSpoolRoot, makeTransport, spoolNames } from "./otlp-test-support"
+import { createSpoolRoot, makeTransport, spoolNames } from "./otlp-test-support"
+import { spoolProducer } from "./otlp-spool-producer.test-support"
 
 const CHILD = join(import.meta.dir, "otlp-spool-child.ts")
 const cleanups: (() => void)[] = []
@@ -73,16 +74,16 @@ describe("spool claims across real processes", () => {
     const pid = await deadPid()
     const sealed = ids(40)
     const active = ids(20)
-    const owner = makeTransport(dir, { pid, bootId: "d".repeat(32), flushAt: 1_000 })
+    const owner = spoolProducer(dir, { pid, bootId: "d".repeat(32) })
     for (const id of sealed) {
-      capture(owner, "feature_used", { event_id: id })
-      owner.providers.logWriter.seal(createBatchId(Date.now()))
+      owner.capture("feature_used", { event_id: id })
+      owner.seal(createBatchId(Date.now()))
     }
     const idle = new Date(Date.now() - 600_000)
     active.forEach((id, index) => {
-      const writer = makeTransport(dir, { pid, bootId: index.toString(16).padStart(32, "a"), flushAt: 1_000 })
-      capture(writer, "feature_used", { event_id: id })
-      writer.providers.logWriter.close()
+      const writer = spoolProducer(dir, { pid, bootId: index.toString(16).padStart(32, "a") })
+      writer.capture("feature_used", { event_id: id })
+      writer.close()
     })
     for (const name of spoolNames(dir).filter((n) => n.startsWith("active-"))) utimesSync(join(dir, name), idle, idle)
     const server = stub("ok")

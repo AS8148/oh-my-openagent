@@ -17,6 +17,7 @@ import {
   recordingFetch,
   spoolNames,
 } from "./otlp-test-support"
+import { spoolProducer } from "./otlp-spool-producer.test-support"
 
 const roots: (() => void)[] = []
 afterEach(() => {
@@ -54,9 +55,9 @@ function manualScheduler() {
 }
 
 function sealedBatch(dir: string, records: number, createdMs: number): string {
-  const writer = makeTransport(dir, { pid: 4_000, bootId: "0".repeat(32), flushAt: 1_000 })
-  for (let seq = 0; seq < records; seq += 1) capture(writer, "feature_used", { seq, feature: "x".repeat(64) })
-  const name = writer.providers.logWriter.seal(createBatchId(createdMs))
+  const writer = spoolProducer(dir, { pid: 4_000, bootId: "0".repeat(32) })
+  for (let seq = 0; seq < records; seq += 1) writer.capture("feature_used", { seq, feature: "x".repeat(64) })
+  const name = writer.seal(createBatchId(createdMs))
   if (name === null) throw new Error("nothing to seal")
   return name
 }
@@ -132,9 +133,10 @@ describe("producer versus replayer", () => {
     const sentWhileAWritesE1 = calls.length
     const aActiveStillThere = spoolNames(dir).some((n) => n.startsWith("active-logs-4101-"))
     await a.flush()
-    capture(a, "feature_used", { event_id: e2 })
-    capture(a, "feature_used", { event_id: e3 })
-    a.providers.logWriter.seal(createBatchId(Date.now()))
+    const aBeforeDying = spoolProducer(dir, { pid: 4_101, bootId: "c".repeat(32) })
+    aBeforeDying.capture("feature_used", { event_id: e2 })
+    aBeforeDying.capture("feature_used", { event_id: e3 })
+    aBeforeDying.seal(createBatchId(Date.now()))
     aAlive = false
     b.sweep()
     await b.flush()
@@ -149,11 +151,11 @@ describe("producer versus replayer", () => {
   test("#given two live transports starting together over the same dead-owner active file and sealed batch #then each record is sent exactly once", async () => {
     // given
     const dir = root()
-    const dead = makeTransport(dir, { pid: 4_201, bootId: "d".repeat(32), flushAt: 1_000 })
+    const dead = spoolProducer(dir, { pid: 4_201, bootId: "d".repeat(32) })
     const [sealedId, activeId] = ids(2)
-    capture(dead, "feature_used", { event_id: sealedId })
-    dead.providers.logWriter.seal(createBatchId(Date.now()))
-    capture(dead, "feature_used", { event_id: activeId })
+    dead.capture("feature_used", { event_id: sealedId })
+    dead.seal(createBatchId(Date.now()))
+    dead.capture("feature_used", { event_id: activeId })
     const { calls, fetch } = recordingFetch()
     const later = (): number => Date.now() + 600_000
     const isPidAlive = (pid: number): boolean => pid !== 4_201
@@ -175,11 +177,11 @@ describe("restart before the lease grace", () => {
     // given
     const dir = root()
     const t0 = Date.now()
-    const producer = makeTransport(dir, { pid: 4_301, bootId: "e".repeat(32), flushAt: 1_000 })
+    const producer = spoolProducer(dir, { pid: 4_301, bootId: "e".repeat(32) })
     const events = ids(3)
-    for (const id of events) capture(producer, "feature_used", { event_id: id })
+    for (const id of events) producer.capture("feature_used", { event_id: id })
     const batchId = createBatchId(t0)
-    producer.providers.logWriter.seal(batchId)
+    producer.seal(batchId)
     const bCtx: SpoolContext = {
       dir,
       bootId: "f".repeat(32),
