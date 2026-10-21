@@ -15,12 +15,15 @@ export type SpoolEntry =
     readonly claimer: string
     readonly leaseExpiresMs: number
   }
+  | { readonly kind: "lock"; readonly name: string; readonly target: string }
   | { readonly kind: "other"; readonly name: string }
 
 const ACTIVE = /^active-(logs|traces)-([0-9]+)-([0-9a-f]{32})\.otlp$/
 const BATCH = /^batch-(logs|traces)-([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12})\.otlp$/
 const SENDING =
   /^batch-(logs|traces)-([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12})\.sending-([0-9a-f]{32})-([0-9]+)$/
+
+const LOCK_SUFFIX = ".lock"
 
 function signalOf(value: string | undefined): Signal {
   return value === "traces" ? "traces" : "logs"
@@ -44,6 +47,11 @@ export function parseSpoolName(name: string): SpoolEntry {
       leaseExpiresMs: Number(sending[4]),
     }
   }
+  if (name.endsWith(LOCK_SUFFIX)) {
+    const target = name.slice(0, -LOCK_SUFFIX.length)
+    const kind = parseSpoolName(target).kind
+    if (kind !== "other" && kind !== "lock") return { kind: "lock", name, target }
+  }
   return { kind: "other", name }
 }
 
@@ -55,3 +63,6 @@ export const activeName = (signal: Signal, pid: number, bootId: string): string 
 export const batchName = (signal: Signal, batchId: string): string => `batch-${signal}-${batchId}.otlp`
 export const sendingName = (signal: Signal, batchId: string, bootId: string, leaseExpiresMs: number): string =>
   `batch-${signal}-${batchId}.sending-${bootId}-${leaseExpiresMs}`
+
+/** The exclusive move lock of one spool file (see `otlp-spool-lock.ts`). */
+export const lockName = (target: string): string => `${target}${LOCK_SUFFIX}`
