@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { realpathSync } from "node:fs"
-import { mkdtemp, readFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { GitMemoryRepo } from "../git"
+import { parseMemoryFile, renderMemoryFile } from "../memfs"
+import { MIXED_PROVENANCE, readHeader, stampReceipt } from "../tools/claim-frontmatter"
 import { buildDefaultSeedFiles } from "../seeds"
 import { factDisplayText } from "./display"
 import { applyFactsBatch, FactsExtractionValidationError, parseFactsExtractionRecord } from "./extraction"
@@ -64,6 +66,21 @@ describe("facts claim receipts", () => {
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain("I prefer Bun for everything")
     expect(lines[0]).not.toContain("forged")
+  }, 30_000)
+
+  test("#given a facts note carrying a user receipt header #when the extractor appends facts #then the header is lowered to mixed (appended facts were never approved)", async () => {
+    const memory = await repo()
+    const body = "- [2026-10-01] Approved fact.\n"
+    const user = { source: "user", userQuote: "yes", approves: "0123456789abcdef" } as const
+    await mkdir(join(memory.dir, "notes/facts"), { recursive: true })
+    await writeFile(join(memory.dir, "notes/facts/2026-10.md"), renderMemoryFile(stampReceipt(undefined, { description: "Explicit facts for 2026-10" }, body, user), body))
+    await memory.commitWrite(["notes/facts/2026-10.md"], "seed\n\nOmo-Writer: memory-tool", AUTHOR)
+
+    await applyFactsBatch(memory, { batchId: "4b0f6f0e-6a55-4a43-9a8c-2f0d5f7d3c14", records: [{ scope: "project", text: "Unapproved fact.", date: "2026-10-18" }] }, AUTHOR)
+
+    const note = parseMemoryFile(await readFile(join(memory.dir, "notes/facts/2026-10.md"), "utf8"))
+    expect(note.body).toContain("Unapproved fact.")
+    expect(readHeader(note.frontmatter)).toBe(MIXED_PROVENANCE)
   }, 30_000)
 
   test("#given a fact citing a real source in parentheses #when rendered #then the citation is kept", () => {

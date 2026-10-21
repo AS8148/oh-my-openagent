@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto"
 
 import { parseMemoryFile, renderMemoryFile, type MemoryFrontmatter } from "../memfs/frontmatter"
-import { duplicateFrontmatterKeys, lookAlikeFrontmatterKeys, normalizedFrontmatterKey } from "../memfs/frontmatter-entries"
-import { RECEIPT_ATTESTATION_PREFIX, renderClaimReceipt, type ClaimReceipt } from "../provenance"
+import { lookAlikeFrontmatterKeys, normalizedFrontmatterKey } from "../memfs/frontmatter-entries"
+import { renderClaimReceipt, type ClaimReceipt } from "../provenance"
 
 export const PROVENANCE_FRONTMATTER_KEY = "provenance"
 export const MIXED_PROVENANCE = "mixed: parts of this note are not verified as the user's own words"
@@ -10,7 +10,6 @@ export const UNVERIFIED_USER_PROVENANCE = "unverified: this note changed after t
 
 const USER_PREFIX = "user said "
 const BODY_BINDING = / \(body sha256:([0-9a-f]{16})\)$/
-const APPROVED_PROPOSAL = / approving proposal ([0-9a-f]{16}) \(body sha256:[0-9a-f]{16}\)$/
 
 export interface StampedNote {
   readonly frontmatter: MemoryFrontmatter
@@ -41,7 +40,10 @@ export function stampReceipt(
 export function restampContent(previous: string | undefined, next: string, claim: ClaimReceipt | undefined): string {
   const parsed = parseMemoryFile(next)
   const stamped = stampReceipt(previous === undefined ? undefined : parseMemoryFile(previous), parsed.frontmatter, parsed.body, claim)
-  const unchanged = JSON.stringify(stamped.extra ?? {}) === JSON.stringify(parsed.frontmatter.extra ?? {})
+  // The parser drops keys it does not accept (a Unicode look-alike such as `\u0440rovenance`), so a raw look-alike line
+  // can survive an unchanged parse; re-render whenever the raw text carries one, so the memory tool never writes it.
+  const rawLookAlike = lookAlikeFrontmatterKeys(next, PROVENANCE_FRONTMATTER_KEY).length > 0
+  const unchanged = !rawLookAlike && JSON.stringify(stamped.extra ?? {}) === JSON.stringify(parsed.frontmatter.extra ?? {})
   return unchanged ? next : renderMemoryFile(stamped, parsed.body)
 }
 
@@ -54,24 +56,6 @@ export function bodyDigest(body: string): string {
 export function verifiedUserReceipt(note: StampedNote): boolean {
   const header = readHeader(note.frontmatter)
   return header !== undefined && isBoundUserHeader(header, note.body)
-}
-
-// The attestation line the read tool attaches for a note whose user receipt verifies, or undefined. It is issued only
-// for the memory tool's exact header: one `provenance` key, no key that merely reads as it (`Provenance`,
-// `"provenance"`), and a digest that matches the body. MEMORY_AUTHORITY_RULE tells the model this line is the only
-// user approval it may trust, so header text alone, however it is spelled, never counts.
-export function receiptAttestation(content: string): string | undefined {
-  if (lookAlikeFrontmatterKeys(content, PROVENANCE_FRONTMATTER_KEY).length > 0) return undefined
-  if (duplicateFrontmatterKeys(content).includes(PROVENANCE_FRONTMATTER_KEY)) return undefined
-  let note: StampedNote
-  try {
-    note = parseMemoryFile(content)
-  } catch {
-    return undefined
-  }
-  if (!verifiedUserReceipt(note)) return undefined
-  const proposal = APPROVED_PROPOSAL.exec(readHeader(note.frontmatter) ?? "")?.[1]
-  return proposal === undefined ? undefined : `${RECEIPT_ATTESTATION_PREFIX} proposal ${proposal}, body sha256 ok]`
 }
 
 export function isUserHeader(header: string | undefined): boolean {

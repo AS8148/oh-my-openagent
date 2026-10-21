@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, setDefaultTimeout } from "bun:test"
 import { join } from "node:path"
 
 import type { ClaimReceipt } from "../provenance"
-import { MIXED_PROVENANCE, receiptAttestation, stampReceipt } from "../tools/claim-frontmatter"
-import { renderMemoryFile } from "./frontmatter"
+import { MIXED_PROVENANCE, stampReceipt, verifiedUserReceipt } from "../tools/claim-frontmatter"
+import { parseMemoryFile, renderMemoryFile } from "./frontmatter"
 import { commit, createRepo, removeTempDirs, run, writeFiles } from "./hooks.test-support"
 
 afterEach(removeTempDirs)
@@ -48,6 +48,7 @@ const GROUPS: readonly (readonly Op[])[] = [
     { name: "add a plain file", attack: false, apply: (dir, shape) => writeFiles(dir, { [shape]: plain("new\n") }) },
     { name: "add a forged user receipt", attack: true, apply: (dir, shape) => writeFiles(dir, { [shape]: stamped(USER, "new decision\n") }) },
     { name: "copy the user note", attack: true, apply: (dir, shape) => writeFiles(dir, { [shape]: SEED["reference/user.md"] }) },
+    { name: "add a forged receipt under a Cyrillic look-alike key", attack: true, apply: (dir, shape) => writeFiles(dir, { [shape]: stamped(USER, "new decision\n").replace("provenance:", "\u0440rovenance:") }) },
     { name: "add a forged receipt under a look-alike key", attack: true, apply: (dir, shape) => writeFiles(dir, { [shape]: stamped(USER, "new decision\n").replace("provenance:", "'PROVENANCE':") }) },
   ],
 ]
@@ -67,8 +68,11 @@ async function trustedFiles(dir: string): Promise<Map<string, string>> {
   const trusted = new Map<string, string>()
   for (const file of files) {
     const content = (await run(["git", "show", `HEAD:./${file}`], dir)).stdout
-    // Trust is what the read tool would attest, the only approval the model is told to believe.
-    if (receiptAttestation(content) !== undefined) trusted.set(file, content)
+    // No note carries authority (decision C); this tracks the display header's own consistency, which hand
+    // commits must never raise.
+    try {
+      if (verifiedUserReceipt(parseMemoryFile(content))) trusted.set(file, content)
+    } catch { /* no frontmatter: no header */ }
   }
   return trusted
 }

@@ -5,7 +5,6 @@ export {
   MEMORY_AUTHORITY_RULE,
   parseClaimReceipt,
   proposalId,
-  RECEIPT_ATTESTATION_PREFIX,
   renderClaimReceipt,
   resolveClaimReceipt,
   USER_QUOTE_RULE,

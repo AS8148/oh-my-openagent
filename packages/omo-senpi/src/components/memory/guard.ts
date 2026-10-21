@@ -43,7 +43,7 @@ export function registerMemoryGuard(
 ): void {
   const resolveCwd = options.resolveCwd ?? (() => process.cwd())
   const warnedBashSessions = new Set<string>()
-  registerReceiptReadGuard(pi, resolveCwd)
+  registerReceiptReadGuard(pi)
 
   pi.on("tool_call", (payload, eventContext): ToolCallEventResult | undefined => {
     const context = options.getContext(eventContext)

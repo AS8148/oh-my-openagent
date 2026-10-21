@@ -4,6 +4,7 @@ import { join } from "node:path"
 
 import type { GitIndexIdentity, GitMemoryRepo, GitPathState, GitWorktreeFileIdentity } from "../git"
 import { parseMemoryFile, renderMemoryFile } from "../memfs"
+import { stampReceipt } from "../tools/claim-frontmatter"
 import {
   factsRoutingPaths,
   planFactsRouting,
@@ -98,5 +99,8 @@ async function renderFactsNote(
     : parseMemoryFile(existing)
   const prefix = parsed.body.length === 0 || parsed.body.endsWith("\n") ? "" : "\n"
   const bullets = records.map((record) => `- [${record.date}] ${factDisplayText(record)}`).join("\n")
-  return renderMemoryFile(parsed.frontmatter, `${parsed.body}${prefix}${bullets}\n`)
+  const body = `${parsed.body}${prefix}${bullets}\n`
+  // Appended facts were not approved by the user, so a user header is lowered to mixed, as the commit hook requires.
+  const frontmatter = existing === undefined ? parsed.frontmatter : stampReceipt(parsed, parsed.frontmatter, body, undefined)
+  return renderMemoryFile(frontmatter, body)
 }

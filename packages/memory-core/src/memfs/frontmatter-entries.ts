@@ -1,4 +1,5 @@
 import { FRONTMATTER_RE } from "./frontmatter-scalar"
+import { lookAlikeSkeleton } from "./lookalike-text"
 
 export interface FrontmatterEntry {
   readonly key: string
@@ -31,10 +32,11 @@ export function duplicateFrontmatterKeys(content: string): string[] {
   return [...duplicates]
 }
 
-// How a reader might take a key: case-folded, with surrounding quotes removed. A key that reads as
-// `canonical` but is not spelled exactly so (`Provenance`, `"provenance"`) is a look-alike.
+// How a reader might take a key: its look-alike skeleton (lookalike-text.ts), with surrounding quotes removed. A key
+// that reads as `canonical` but is not spelled exactly so (`Provenance`, `"provenance"`, `\u0440rovenance`,
+// `provenance\u200b`) is a look-alike.
 export function normalizedFrontmatterKey(key: string): string {
-  return key.replace(/^["']+|["']+$/g, "").trim().toLowerCase()
+  return lookAlikeSkeleton(key).replace(/^["']+|["']+$/g, "").trim()
 }
 
 export function lookAlikeFrontmatterKeys(content: string, canonical: string): string[] {
