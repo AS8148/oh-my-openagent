@@ -3,6 +3,7 @@
 import type { TaskRecord, TaskStatus } from "../state"
 import type { SendOutcome } from "../steering"
 import { dagNodeSteeredEvent, dagNodeTransitionedEvent } from "./events"
+import { guidePausedDag } from "./paused-controls"
 import type { DagRunRecordV1 } from "./manager"
 import {
   controlErrorMessage,
@@ -17,8 +18,9 @@ import type { DagNode, DagNodeError, DagNodeErrorCode, DagNodeId, DagRunId } fro
 
 export type DagNodeSendResult = {
   readonly nodeId: DagNodeId
-  readonly taskId: string
-  readonly delivery: "steer" | "revive" | "queued" | "uncertain"
+  readonly taskId?: string
+  readonly delivery: "steer" | "revive" | "queued" | "uncertain" | "guidance"
+  readonly guidanceId?: string
   readonly effectId?: string
   readonly queuePosition?: number
   /** Present only for a revive: resolves once the revived child's new outcome has been folded. */
@@ -41,6 +43,10 @@ export async function sendToDagNode(
   const node = record.nodes.find((entry) => entry.id === nodeId)
   if (node === undefined) {
     throw new DagNodeControlError({ code: "node_not_found", message: `unknown dag node "${nodeId}"`, runId, nodeIds: [nodeId] })
+  }
+  if (record.status === "paused" && record.pause?.reason === "user_stop") {
+    const guidance = guidePausedDag(options, runId, message, nodeId)
+    return { nodeId, delivery: "guidance", guidanceId: guidance.id, ...(node.taskId === undefined ? {} : { taskId: node.taskId }) }
   }
   // #7412 defect 2: a completed or cancelled run is settled evidence. Reviving a child here
   // would journal running nodes under a terminal run - a checkpoint no recovery path can ever

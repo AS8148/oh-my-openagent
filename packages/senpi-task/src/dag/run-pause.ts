@@ -8,12 +8,12 @@ export function applyRunPause(record: DagRunRecordV1, event: DagRunEvent): DagRu
     if (event.pauseSeq === undefined) throw new Error("user_stop requires its pause sequence")
     return {
       ...record, status: "paused", pause: { reason: "user_stop", pauseSeq: event.pauseSeq }, updatedAt: event.at,
-      nodes: record.nodes.map(node => node.state === "running" || node.state === "scheduled"
+      nodes: record.nodes.map(node => node.state === "running"
         ? { ...node, state: "paused" } : node),
     }
   }
   if (event.type !== "dag.run.resumed") return undefined
-  const { pause: _pause, completedAt: _completedAt, ...resumed } = record
+  const { pause: _pause, completedAt: _completedAt, retryOnResume: _retryOnResume, ...resumed } = record
   return {
     ...resumed, status: "running", generation: event.generation, updatedAt: event.at,
     nodes: record.nodes.map(node => node.state === "paused"

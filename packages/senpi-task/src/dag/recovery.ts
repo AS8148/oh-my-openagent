@@ -3,6 +3,8 @@ import * as fs from "node:fs"
 import { join } from "node:path"
 import type { ResumeCredential } from "../pause/admission-barrier"
 import type { DagScheduler } from "./scheduler"
+import { installRecoveredDag } from "./recovery-install"
+import type { PausedChildRecoveryPort } from "./paused-child-recovery"
 
 import { defaultSignaller } from "../lifecycle/context"
 import type { ManagerStartSpec, TaskManager } from "../manager/types"
@@ -36,7 +38,7 @@ const LIVE_RUN_STATUSES = new Set(["pending", "running"])
 // attempt. Retries/amendments also consume this budget; recovery never advances it past three.
 const MAX_RECOVERY_READMISSIONS = 3
 
-type RecoverableRecord = DagRunRecordV1 & {
+export type RecoverableRecord = DagRunRecordV1 & {
   readonly leaseHolderPid?: number
   readonly previousLeaseHolderPid?: number
 }
@@ -55,6 +57,7 @@ export type DagRecoveryOutcome = {
 }
 
 export type DagRecoveryOptions = {
+  readonly pausedChildren?: PausedChildRecoveryPort
   readonly store: DagFileStore
   readonly taskManager: TaskManager
   readonly hostPid?: number
@@ -88,7 +91,8 @@ export type InstalledDagRun = {
   readonly settled: Promise<DagRecoveryOutcome>
 }
 
-type RecoveryContext = Required<Pick<DagRecoveryOptions, "store" | "taskManager">> & {
+export type RecoveryContext = Required<Pick<DagRecoveryOptions, "store" | "taskManager">> & {
+  readonly pausedChildren?: PausedChildRecoveryPort
   readonly resumeCredential?: ResumeCredential
   readonly hostPid: number
   readonly isProcessAlive: (pid: number) => boolean
@@ -101,7 +105,7 @@ type RecoveryContext = Required<Pick<DagRecoveryOptions, "store" | "taskManager"
   readonly ancestry?: { readonly depth: number }
 }
 
-type RecoveryPendingTerminalResult = {
+export type RecoveryPendingTerminalResult = {
   readonly record: TaskRecord
 }
 
@@ -119,6 +123,7 @@ export function createDagRecovery(options: DagRecoveryOptions): DagRecovery {
     ...(options.isRunHeldInProcess === undefined ? {} : { isRunHeldInProcess: options.isRunHeldInProcess }),
     now: options.now ?? Date.now,
     ...(options.subscriberRing === undefined ? {} : { subscriberRing: options.subscriberRing }),
+    ...(options.pausedChildren === undefined ? {} : { pausedChildren: options.pausedChildren }),
     ...(options.nodeSpawnPolicy === undefined ? {} : { nodeSpawnPolicy: options.nodeSpawnPolicy }),
     ...(options.stopAdmission === undefined ? {} : { stopAdmission: options.stopAdmission }),
     ...(options.reattach === undefined ? {} : { reattach: options.reattach }),
@@ -244,34 +249,11 @@ async function resumeClaimedRun(context: RecoveryContext, claimed: RecoverableRe
 }
 
 async function installResumedRun(context: RecoveryContext, claimed: RecoverableRecord): Promise<InstalledDagRun> {
-  const pendingErrors = new Map<DagNodeId, DagNodeError>()
-  const pendingTerminalResults = new Map<DagNodeId, RecoveryPendingTerminalResult>()
-  const journal = recoveryJournal(context, claimed, pendingErrors, pendingTerminalResults)
-  const reusedOutputs = new Map<DagNodeId, string>()
-  const reattachedTasks = new Map<DagNodeId, string>()
-  try {
-    await reconcileNodes(context, journal, reusedOutputs, pendingErrors, pendingTerminalResults, reattachedTasks)
-    const generation = journal.snapshot().generation + 1
-    journal.append(dagRunResumedEvent({ generation }))
-    const scheduler = createDagScheduler({
-      store: context.store,
-      taskManager: context.taskManager,
-      initialRecord: journal.snapshot(),
-      ...(context.subscriberRing === undefined ? {} : { subscriberRing: context.subscriberRing }),
-      ...(context.nodeSpawnPolicy === undefined ? {} : { nodeSpawnPolicy: context.nodeSpawnPolicy }),
-      ...(reattachedTasks.size === 0 ? {} : { preAttachedTasks: reattachedTasks }),
-      ...(context.ancestry === undefined ? {} : { ancestry: context.ancestry }),
-      ...(context.resumeCredential === undefined ? {} : { resumeCredential: context.resumeCredential }),
-      now: context.now,
-    })
-    const settled = scheduler.run()
-      .then(record => ({ runId: claimed.runId, kind: "resumed" as const, record, reusedOutputs }))
-      .finally(() => releaseLease(context, claimed.runId))
-    return { kind: "installed", runId: claimed.runId, scheduler, settled }
-  } catch (error) {
-    releaseLease(context, claimed.runId)
-    throw error
-  }
+  return installRecoveredDag(context, claimed, {
+    journal: (record, errors, results) => recoveryJournal(context, record, errors, results),
+    reconcile: (journal, outputs, errors, results, tasks) => reconcileNodes(context, journal, outputs, errors, results, tasks),
+    release: () => releaseLease(context, claimed.runId),
+  })
 }
 
 async function reconcileNodes(

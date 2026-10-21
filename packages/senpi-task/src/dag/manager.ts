@@ -2,7 +2,10 @@
 import { randomUUID } from "node:crypto"
 import * as fs from "node:fs"
 import { join } from "node:path"
-import { applyRunPause } from "./run-pause"
+import type { Guidance } from "../pause/guidance"
+import { applyDagRunMutation } from "./run-mutation"
+import { liveLeaseHolder, pausedAmendmentUnsafe } from "./amend-safety"
+export { applyDagRunMutation } from "./run-mutation"
 import { countDagNodes as countNodes } from "./counts"
 
 import { defaultSignaller } from "../lifecycle/context"
@@ -111,6 +114,10 @@ export type DagPersistedDefinition = {
 export type { AmendRecord } from "./types"
 
 export type DagRunRecordV1 = DagJournalCheckpoint & {
+  readonly guidance?: readonly Guidance[]
+  readonly retryOnResume?: readonly DagNodeId[]
+  readonly cancelRequestedNodes?: readonly DagNodeId[]
+  readonly pausedChildAcks?: Readonly<Record<string, number>>
   readonly pause?: { readonly reason: "user_stop"; readonly pauseSeq: number }
   readonly runId: DagRunId
   readonly runKey: string
@@ -344,15 +351,6 @@ type StartContext = {
 
 type AmendContext = Omit<StartContext, "newRunId">
 
-type DagDefinitionAmendedMutationEvent = Extract<DagRunEvent, { readonly type: "dag.definition.amended" }> & {
-  readonly definition: DagPersistedDefinition
-  readonly nodes: readonly DagNode[]
-  readonly edges: readonly DagEdge[]
-  readonly waves: readonly DagWave[]
-  readonly criticalPath: readonly DagNodeId[]
-  readonly bottlenecks: readonly DagBottleneck[]
-  readonly diagnostics: readonly DagDiagnostic[]
-}
 
 function startRun(params: DagStartParams, context: StartContext): DagStartResult {
   const at = new Date(context.now()).toISOString()
@@ -468,7 +466,7 @@ function amendRun(params: DagAmendParams, context: AmendContext): DagRunRecordV1
   if (oldRecord.parentSessionId !== params.parentSessionId) {
     throw new DagManagerError({ code: "run_not_owned", message: `dag run "${selectedRunId}" belongs to another session`, runId: selectedRunId })
   }
-  if (oldRecord.status === "paused" && liveLeaseHolder(oldRecord)) {
+  if (oldRecord.status === "paused" && oldRecord.pause?.reason !== "user_stop" && liveLeaseHolder(oldRecord)) {
     throw new DagManagerError({ code: "invalid_amendment", message: `dag run "${selectedRunId}" is paused by another live lease`, runId: selectedRunId })
   }
 
@@ -492,8 +490,7 @@ function amendRun(params: DagAmendParams, context: AmendContext): DagRunRecordV1
     params.definition.nodes.map(nodeFingerprintFromInput),
   )
   const unsafeIds = [...diff.changedIds, ...diff.removedIds].filter((id) => {
-    const state = oldRecord.nodes.find((node) => node.id === id)?.state
-    return state === "scheduled" || state === "running"
+    return pausedAmendmentUnsafe(oldRecord, id)
   })
   if (unsafeIds.length > 0) {
     throw new DagManagerError({
@@ -581,63 +578,6 @@ function amendRun(params: DagAmendParams, context: AmendContext): DagRunRecordV1
   return amended
 }
 
-export function applyDagRunMutation(record: DagRunRecordV1, event: DagRunEvent): DagRunRecordV1 {
-  const paused = applyRunPause(record, event)
-  if (paused !== undefined) return paused
-  if (event.type === "dag.run.created") return { ...record, updatedAt: event.at }
-  if (event.type === "dag.node.retried") {
-    return {
-      ...record,
-      nodes: record.nodes.map((node) => {
-        if (node.id !== event.nodeId) return node
-        const { error: _error, resultArtifact: _resultArtifact, runStats: _runStats, completedAt: _completedAt, startedAt: _startedAt, output: _output, outputBytes: _outputBytes, ...kept } = node as DagNode & {
-          readonly resultArtifact?: unknown
-        }
-        return { ...kept, state: "pending", execAttempt: event.execAttempt }
-      }),
-      updatedAt: event.at,
-    }
-  }
-  if (event.type !== "dag.definition.amended") return record
-  const mutation = event as DagDefinitionAmendedMutationEvent
-  // This reducer runs as the journal's applyEvent, and the journal writes the WAL BEFORE applying it
-  // (journal.ts appendPayload). Throwing from here would leave a durable event whose every replay
-  // throws again, wedging the run permanently. So a precondition that no longer holds returns the
-  // record UNCHANGED: replay stays idempotent, and amendRun below turns the unadvanced fingerprint
-  // into the caller's typed refusal. amendRun re-checks all of these before appending, so reaching
-  // one here means the run changed underneath a live amendment.
-  if (record.definitionFingerprint !== event.previousFingerprint) return record
-  const mutationNodeIds = new Set(mutation.nodes.map((node) => node.id))
-  const removedNodeIds = record.nodes.filter((node) => !mutationNodeIds.has(node.id)).map((node) => node.id)
-  const unsafeIds = [...event.changedNodeIds, ...removedNodeIds].filter((id) => {
-    const state = record.nodes.find((node) => node.id === id)?.state
-    return state === "scheduled" || state === "running"
-  })
-  if (unsafeIds.length > 0) return record
-  if (record.status === "running") return record
-  if (record.status === "paused" && liveLeaseHolder(record)) return record
-  return {
-    ...record,
-    name: mutation.definition.name,
-    definition: mutation.definition,
-    definitionFingerprint: event.fingerprint,
-    nodes: mutation.nodes,
-    edges: mutation.edges,
-    waves: mutation.waves,
-    criticalPath: mutation.criticalPath,
-    bottlenecks: mutation.bottlenecks,
-    diagnostics: mutation.diagnostics,
-    amendHistory: [...(record.amendHistory ?? []), {
-      at: event.at,
-      previousFingerprint: event.previousFingerprint,
-      fingerprint: event.fingerprint,
-      changedNodeIds: event.changedNodeIds,
-      addedNodeIds: event.addedNodeIds,
-      invalidatedNodeIds: event.invalidatedNodeIds,
-    }],
-    updatedAt: event.at,
-  }
-}
 
 function applyRunEvent(record: DagRunRecordV1, event: DagRunEvent): DagRunRecordV1 {
   return applyDagRunMutation(record, event)
@@ -677,11 +617,6 @@ function transitiveDependents(edges: readonly DagEdge[], seeds: readonly DagNode
   return [...visited]
 }
 
-function liveLeaseHolder(record: DagRunRecordV1): boolean {
-  const pid = record.leaseHolderPid ?? record.previousLeaseHolderPid
-  if (pid === undefined) return false
-  return defaultSignaller.isAlive(pid)
-}
 
 function materializeAmendedDefinition(
   context: AmendContext,
