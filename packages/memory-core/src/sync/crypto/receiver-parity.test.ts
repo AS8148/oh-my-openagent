@@ -303,19 +303,30 @@ describe("the receiver checks one new entry in constant work (#10655)", () => {
   }, 60000)
 
   test("the state a snapshot import continues from keeps the receiver, so its first append does not re-fold the history", async () => {
-    let state = await verified([...mainUntil("post_join_rotation"), record("post_join_rotation")])
+    const base = [...mainUntil("post_join_rotation"), record("post_join_rotation")]
+    let state = await verified(base)
+    const rotations = []
     for (let i = 0; i < 50; i++) {
-      const { outcome } = await run([await rotation(state, "A")], state)
+      const entry = await rotation(state, "A")
+      const { outcome } = await run([entry], state)
       if (!outcome.ok) throw new Error(`rotation ${i} refused: ${outcome.reason}`)
+      rotations.push(entry)
       state = outcome.state
     }
     const continued = atVerifiedHead(state, headOf(state))
     if (continued === null) throw new Error("atVerifiedHead refused the verified head")
     const next = await rotation(continued, "B")
+    let carried = false
     await handedPerAppend(async (handed) => {
-      expect((await run([next], continued)).outcome.ok).toBe(true)
+      carried = (await run([next], continued)).outcome.ok
       expect(handed()).toBeLessThanOrEqual(1)
     })
+    // The carried receiver must give the verdict a receiver folded over the whole history gives.
+    const refolded = await verified([...base, ...rotations])
+    const fromRefold = atVerifiedHead(refolded, headOf(refolded))
+    if (fromRefold === null) throw new Error("atVerifiedHead refused the refolded head")
+    expect(carried).toBe(true)
+    expect((await run([next], fromRefold)).outcome.ok).toBe(carried)
   })
 
   test("a replayed or lower-seq keyring entry is still refused, with the whole-list fold's reason", async () => {
