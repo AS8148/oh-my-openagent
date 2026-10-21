@@ -13,10 +13,10 @@ const CONTEXT_WINDOW = 80
 // (helpers such as sh(), q(), run(), template tags, `command:` fields) is read as a command line.
 const TEXT_CONTEXT = new RegExp(
   [
-    String.raw`\b(?:print|log|info|warn|warning|error|debug|display|echo|write|writeFile|writeFileSync|appendFile|appendFileSync|assert|expect|includes|replace|replaceAll|startsWith|endsWith|find|index|count|search|match|split|join|send|reply|post|report|notify|format)\s*\(\s*(?:[^()]*?,\s*)?[A-Za-z]{0,2}$`,
-    String.raw`\b(?:assert|if|elif|while|not|and|or|in)\s+[A-Za-z]{0,2}$`,
+    String.raw`\b(?:print|log|info|warn|warning|error|debug|display|echo|write|write_text|write_bytes|writeFile|writeFileSync|appendFile|appendFileSync|assert|expect|toEqual|toStrictEqual|toBe|toContain|toMatch|includes|replace|replaceAll|startsWith|endsWith|find|index|count|search|match|split|join|send|reply|post|report|notify|format)\s*\(\s*(?:[^()]*?,\s*)?[A-Za-z]{0,2}$`,
+    String.raw`\b(?:assert|if|elif|while|not|and|or)\s+[A-Za-z]{0,2}$`,
     String.raw`(?:==|!=|===|!==)\s*[A-Za-z]{0,2}$`,
-    String.raw`\b(?:label|title|name|text|message|msg|description|desc|summary|note|body|entry|header|pattern|needle|old|new|expected)\s*[:=]\s*[A-Za-z]{0,2}$`,
+    String.raw`\b(?:label|title|name|text|message|msg|description|desc|summary|note|body|entry|header|pattern|needle|old|new|oldText|newText|old_string|new_string|expected)\s*[:=]\s*[A-Za-z]{0,2}$`,
   ].join("|"),
 )
 
@@ -26,7 +26,7 @@ const shellQuote = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'
 const checkKinds = (line: string): CellCheckKind[] => invokedKinds(line).filter((kind): kind is CellCheckKind => kind !== "lookup")
 
 // A list such as ["gh", "pr", "checks", n] is one argv (subprocess.run, Bun.spawn): non-literal elements stand in as X.
-function listArgv(list: string): string {
+function listWords(list: string): string[] {
   const words: string[] = []
   for (const element of list.slice(1, -1).split(",")) {
     const trimmed = element.trim()
@@ -35,7 +35,15 @@ function listArgv(list: string): string {
     const isLiteral = literal !== undefined && trimmed.endsWith(literal) && LITERAL_PREFIX.test(trimmed.slice(0, -literal.length))
     words.push(isLiteral ? unquote(literal) : "X")
   }
-  return words.map(shellQuote).join(" ")
+  return words
+}
+
+// A list whose elements contain spaces is a list of whole command lines (`for c in ["bun test x", "tsgo"]: sh(c)`), so
+// each element is also read on its own; a plain argv list never has spaces inside its words.
+function listKinds(list: string): CellCheckKind[] {
+  const words = listWords(list)
+  const lines = words.some((word) => /\s/.test(word)) ? words : []
+  return [...checkKinds(words.map(shellQuote).join(" ")), ...lines.flatMap(checkKinds)]
 }
 
 /**
@@ -54,7 +62,7 @@ export function cellInvokedKinds(code: string): { kinds: CellCheckKind[]; offset
   const inLists: Array<readonly [number, number]> = []
   for (const match of code.matchAll(LIST_OF_STRINGS)) {
     inLists.push([match.index, match.index + match[0].length])
-    if (!isText(code, match.index)) found(match.index, checkKinds(listArgv(match[0])))
+    if (!isText(code, match.index)) found(match.index, listKinds(match[0]))
   }
   for (const match of code.matchAll(STRING_LITERAL)) {
     if (inLists.some(([start, end]) => match.index >= start && match.index < end)) continue

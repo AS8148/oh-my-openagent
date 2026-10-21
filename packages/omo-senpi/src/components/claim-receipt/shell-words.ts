@@ -1,5 +1,6 @@
-const HEREDOC = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
-const SEPARATORS = new Set(["\n", ";", "|", "&", "(", ")"])
+const HEREDOC = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
+const QUOTED = /(?<!<<-?\s*)(?:'[^']*'|"(?:\\.|[^"\\])*")/g
+const SEPARATORS = new Set(["\n", ";", "|", "&", "(", ")", "`"])
 
 // A heredoc body is file content, not commands: keep the redirect line, drop every line up to the terminator.
 function stripHeredocBodies(input: string): string {
@@ -11,14 +12,14 @@ function stripHeredocBodies(input: string): string {
       continue
     }
     kept.push(line)
-    terminator = HEREDOC.exec(line)?.[2] ?? null
+    terminator = HEREDOC.exec(line.replace(QUOTED, ""))?.[2] ?? null
   }
   return kept.join("\n")
 }
 
 /**
- * Splits a shell command line into argv segments at `&&`, `||`, `;`, `|`, `&`, newlines and the parentheses of
- * subshells and `$(...)` substitutions, honouring single and double quotes so a quoted `&&` or a quoted check name
+ * Splits a shell command line into argv segments at `&&`, `||`, `;`, `|`, `&`, newlines, the parentheses of
+ * subshells and `$(...)` substitutions, and backticks, honouring single and double quotes so a quoted `&&` or a quoted check name
  * stays inside its argument. Heredoc bodies are dropped.
  */
 export function shellSegments(input: string): string[][] {

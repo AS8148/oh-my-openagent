@@ -180,6 +180,8 @@ describe("claim-receipt evidence timeline", () => {
       expect(checks(evalRun("e7", { code: "await tool.bash({ command: 'bun test x' })", output: " 3 pass\n 0 fail" }))).toEqual([["test", "passed", 1]])
       expect(checks(evalRun("e8", { code: "print(await q(`gh pr checks 213 --repo o/r 2>&1 | head`))", output: "lint\tpass\t1m\te2e\tpass\t2m" }))).toEqual([["test", "passed", 1]])
       expect(checks(evalRun("e9", { code: "const p = Bun.spawn(['gh', 'pr', 'checks', String(n)], { stdout: 'pipe' })", output: "lint\tpass\t1m" }))).toEqual([["test", "passed", 1]])
+      expect(checks(evalRun("e11", { code: 'for c in ["bun test packages/x", "tsgo --noEmit"]:\n    sh(c)', output: " 3 pass\n 0 fail" })).map(([kind]) => kind)).toEqual(["test", "typecheck"])
+      expect(checks(evalRun("e12", { code: 'tool.edit({ edits: [{ newText: "bun test packages/x" }] })\nPath(p).write_text("bun test x")\nexpect(argv).toEqual(["bun", "test"])', output: " 3 pass\n 0 fail" }))).toEqual([])
       expect(checks(evalRun("e10", { code: "write(f'{R}/run.sh', 'bun test x')\nopen(f, 'w').write('tsc --noEmit')\nassert 'bun test' in s", output: " 3 pass\n 0 fail" }))).toEqual([])
       expect(checks(evalRun("e3", { code: "await sh(`cd ${WT} && bun test x`)", output: " 3 pass\n 0 fail" }))).toEqual([["test", "passed", 1]])
       const python = 'r = subprocess.run(f"""cd {W0} &&\n CI=1 bun test packages/x 2>&1 | tail -3""", shell=True)'

@@ -8,6 +8,12 @@ const SLOT_WRAPPERS = /(?:^|\/)(?:heavy-slot|early-static-slot|launch-detached)\
 const SHELLS = new Set(["bash", "sh", "zsh"])
 const SHELL_KEYWORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "}"])
 const PASSTHROUGH = new Set(["env", "time", "nohup", "command", "exec", "sudo"])
+// Wrapper options that take a value (`env -u NAME`, `sudo -u user`, `time -o file`), per env(1), sudo(8) and time(1).
+const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
+  env: new Set(["-u", "-C", "-S", "-P"]),
+  sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T"]),
+  time: new Set(["-f", "-o"]),
+}
 const PYTHON_RUNNERS = new Set(["uv", "poetry", "pdm", "pipx", "hatch", "rye"])
 const PYTHONS = /^python(?:3(?:\.\d+)?)?$/
 const TASK_RUNNERS = new Set(["make", "just", "task"])
@@ -21,9 +27,9 @@ const CI_API_PATH = /check-runs|check-suites|\/status(?:es)?\b/
 
 const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1)
 
-function skipFlags(argv: readonly string[], from: number): readonly string[] {
+function skipFlags(argv: readonly string[], from: number, valueFlags?: ReadonlySet<string>): readonly string[] {
   let index = from
-  while (index < argv.length && (argv[index] as string).startsWith("-")) index += 1
+  while (index < argv.length && (argv[index] as string).startsWith("-")) index += valueFlags?.has(argv[index] as string) ? 2 : 1
   return argv.slice(index)
 }
 
@@ -43,7 +49,7 @@ function sshRemoteCommand(argv: readonly string[]): string | undefined {
     const flag = argv[index] as string
     index += flag.length === 2 && SSH_VALUE_FLAGS.has(flag.slice(1)) ? 2 : 1
   }
-  const remote = argv.slice(index + 1)
+  const remote = argv.slice(argv[index + 1] === "--" ? index + 2 : index + 1)
   return remote.length === 0 ? undefined : remote.join(" ")
 }
 
@@ -108,7 +114,7 @@ function toolKinds(exe: string, rest: readonly string[]): InvokedKind[] {
 }
 
 function wrappedKinds(exe: string, rest: readonly string[], depth: number): InvokedKind[] | undefined {
-  if (PASSTHROUGH.has(exe)) return argvKinds(skipFlags(rest, 1), depth)
+  if (PASSTHROUGH.has(exe)) return argvKinds(skipFlags(rest, 1, WRAPPER_VALUE_FLAGS[exe]), depth)
   if (PYTHON_RUNNERS.has(exe) && rest[1] === "run") return argvKinds(skipFlags(rest, 2), depth)
   if (PYTHONS.test(exe)) {
     const module = rest.indexOf("-m")

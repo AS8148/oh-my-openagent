@@ -74,6 +74,15 @@ describe("claim-receipt invocations", () => {
       expect(invokedKinds("if bun run typecheck; then echo ok; fi")).toEqual(["typecheck"])
     })
 
+    it("#then value-taking wrapper flags, ssh --, backticks and here-strings do not hide the check", () => {
+      expect(invokedKinds("env -u FOO bun test x")).toEqual(["test"])
+      expect(invokedKinds("sudo -u bob bun test x")).toEqual(["test"])
+      expect(invokedKinds("ssh host -- bun test x")).toEqual(["test"])
+      expect(invokedKinds("x=`bun test x`")).toEqual(["test"])
+      expect(invokedKinds("read a <<< foo\nbun test x")).toEqual(["test"])
+      expect(invokedKinds('echo "<<EOF"\nbun test x')).toEqual(["test"])
+    })
+
     it("#then CI status readouts count as test runs", () => {
       expect(invokedKinds("gh run view 123 --log-failed")).toEqual(["test"])
       expect(invokedKinds("gh run watch 123")).toEqual(["test"])
