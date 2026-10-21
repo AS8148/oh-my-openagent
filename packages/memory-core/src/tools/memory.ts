@@ -7,7 +7,7 @@ import { describeDescriptionViolation } from "../memfs/frontmatter-validation"
 import { validateMemoryPath, validateRepositoryPath } from "../memfs/paths"
 import { MemoryPatchHunkError, MemoryPatchParseError, applyMemoryPatch } from "./patch-apply"
 import type { ClaimReceipt } from "../provenance"
-import { stampReceipt } from "./claim-frontmatter"
+import { isLegacyUserHeader, readHeader, stampReceipt } from "./claim-frontmatter"
 import { commitMemoryWrite, type MemoryWriteLock } from "./commit-write"
 import { describeRepairs, repairLeakedArguments } from "./leaked-arguments"
 import { MemoryToolError } from "./tool-errors"
@@ -169,9 +169,10 @@ async function move(root: string, params: MemoryToolParams): Promise<AppliedComm
   const oldPath = validateMemoryPath(root, oldSource, { fieldName: "old_path" })
   const newPath = validateMemoryPath(root, newSource, { fieldName: "new_path" })
   if (existsSync(newPath)) throw toolError(`rename: destination already exists at ${newSource}`)
-  await loadEditable(oldPath, oldSource)
+  const loaded = await loadEditable(oldPath, oldSource)
   await mkdir(dirname(newPath), { recursive: true })
   await rename(oldPath, newPath)
+  if (isLegacyUserHeader(readHeader(loaded.frontmatter))) await writeFile(newPath, renderMemoryFile(stampReceipt(loaded, loaded.frontmatter, loaded.body, undefined), loaded.body), "utf8")
   return { affectedPaths: [relativePath(root, oldPath), relativePath(root, newPath)] }
 }
 

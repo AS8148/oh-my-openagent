@@ -5,6 +5,7 @@ import { NoEffectiveChangesError, MemorySecretError, type GitCommitAuthor, type 
 import { SOUL_EDIT_RESULT_LINE, touchesSoulPath } from "../soul"
 import { claimReceiptTrailers, type ClaimReceipt } from "../provenance"
 import { restampContent } from "./claim-frontmatter"
+import { provenanceStrippedTrailers } from "./provenance-stripped"
 import type { MemoryToolCommit, MemoryToolProvenance } from "./memory"
 import { parseMemoryFile, renderMemoryFile } from "../memfs/frontmatter"
 import { describeDescriptionViolation } from "../memfs/frontmatter-validation"
@@ -68,7 +69,7 @@ export async function runMemoryApplyPatch(
       const paths = await applyOperations(repo.dir, parseMemoryPatch(params.input), params.provenance?.claim)
       let result
       try {
-        result = await repo.commitWrite(paths, memoryCommitMessage(reason, params.provenance), params.author)
+        result = await repo.commitWrite(paths, memoryCommitMessage(reason, params.provenance, await provenanceStrippedTrailers(repo, paths)), params.author)
       } catch (error) {
         if (error instanceof NoEffectiveChangesError) {
           throw new MemoryApplyPatchError(
@@ -255,8 +256,8 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-function memoryCommitMessage(reason: string, provenance: MemoryToolProvenance | undefined): string {
-  if (provenance === undefined) return reason
+function memoryCommitMessage(reason: string, provenance: MemoryToolProvenance | undefined, stripped: readonly string[]): string {
+  if (provenance === undefined) return stripped.length === 0 ? reason : [reason, "", ...stripped].join("\n")
   return [
     reason,
     "",
@@ -264,6 +265,7 @@ function memoryCommitMessage(reason: string, provenance: MemoryToolProvenance | 
     `Omo-Session: ${provenance.sessionId}`,
     `Omo-Turn: ${provenance.userTurns}`,
     ...(provenance.claim === undefined ? [] : claimReceiptTrailers(provenance.claim)),
+    ...stripped,
   ].join("\n")
 }
 

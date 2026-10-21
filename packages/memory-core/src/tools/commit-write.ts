@@ -7,6 +7,7 @@ import { SOUL_EDIT_RESULT_LINE, touchesSoulPath } from "../soul"
 import type { LockDomain } from "../locks"
 import { claimReceiptTrailers } from "../provenance"
 import type { MemoryToolProvenance } from "./memory"
+import { provenanceStrippedTrailers } from "./provenance-stripped"
 import { undoBehindKeptLock } from "./rollback-behind-lock"
 import { MemoryToolError } from "./tool-errors"
 
@@ -40,7 +41,7 @@ export async function commitMemoryWrite(options: CommitMemoryWriteOptions): Prom
     if (paths.length === 0) throw new MemoryToolError(noChangesMessage ?? "made no changes")
     let result
     try {
-      result = await repo.commitWrite(paths, memoryCommitMessage(reason, provenance), author)
+      result = await repo.commitWrite(paths, memoryCommitMessage(reason, provenance, await provenanceStrippedTrailers(repo, paths)), author)
     } catch (error) {
       if (error instanceof NoEffectiveChangesError) {
         throw new MemoryToolError(noChangesMessage ?? "made no effective changes", { cause: error })
@@ -71,8 +72,8 @@ async function hasConfiguredRemote(repo: GitMemoryRepo): Promise<boolean> {
   return /^\s*\[remote\s+"[^"]+"\]/m.test(gitConfig)
 }
 
-function memoryCommitMessage(reason: string, provenance: MemoryToolProvenance | undefined): string {
-  if (provenance === undefined) return reason
+function memoryCommitMessage(reason: string, provenance: MemoryToolProvenance | undefined, stripped: readonly string[]): string {
+  if (provenance === undefined) return stripped.length === 0 ? reason : [reason, "", ...stripped].join("\n")
   return [
     reason,
     "",
@@ -80,5 +81,6 @@ function memoryCommitMessage(reason: string, provenance: MemoryToolProvenance | 
     `Omo-Session: ${provenance.sessionId}`,
     `Omo-Turn: ${provenance.userTurns}`,
     ...(provenance.claim === undefined ? [] : claimReceiptTrailers(provenance.claim)),
+    ...stripped,
   ].join("\n")
 }
