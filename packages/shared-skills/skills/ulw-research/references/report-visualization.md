@@ -95,7 +95,7 @@ When the deliverable reproduces a visual source (recreate a clip in 3D, rebuild 
 2. **Extract real frames from the source.** For a video, download only the sections you need, then cut one frame per moment. Run the download as a background job; a long download outlives a single tool call.
    ```bash
    mkdir -p "$SESSION_DIR/compare"
-   uvx yt-dlp -f 'bv*[height<=720]/b[height<=720]' --download-sections '*<start>-<end>' -o "$SESSION_DIR/compare/source-<start>.%(ext)s" '<url>'
+   uvx yt-dlp -f 'bv*[height<=720]/b[height<=720]' --download-sections '*<start>-<end>' --force-keyframes-at-cuts --remux-video mp4 -o "$SESSION_DIR/compare/source-<start>.%(ext)s" '<url>'
    ffmpeg -y -v error -ss <seconds into the section> -i "$SESSION_DIR/compare/source-<start>.mp4" -frames:v 1 "$SESSION_DIR/compare/ref-<n>.png"
    ```
    For an image, use the original file. For a page or interface, capture it through the browser skill at the viewport the output targets. Never substitute a thumbnail, a generated image, or a description for the real frame.
