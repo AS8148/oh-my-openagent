@@ -98,6 +98,10 @@ export async function finalizeClaimedFactsRun(input: FinalizeClaimedFactsRunInpu
     await fail("parent_dirty", applied.detail ?? "memory repository contains foreign state", "parent_dirty")
     return { status: "parent_dirty", runId }
   }
+  if (applied.outcome === "unchanged") {
+    await terminal.succeed(runDir, runId, "no_facts", batch)
+    return { status: "no_facts", runId }
+  }
   await terminal.succeed(runDir, runId, "committed", batch, applied.sha)
   return { status: "committed", runId, sha: applied.sha }
 }

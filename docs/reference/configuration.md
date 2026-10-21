@@ -833,7 +833,7 @@ Standing agreements with your person, kept in `system/agreements.md` with how ma
 | ---------------------------------- | ------- | -------------------------------------------------------------- |
 | `agreements.enabled`               | `true`  | Count repeated corrections and announce flagged agreements      |
 | `agreements.needs_human_threshold` | `3`     | Breaks at which an agreement is flagged as needing you (min 1)  |
-| `agreements.max_items`             | `64`    | Ledger size; overlapping agent-written items merge near it (8-256) |
+| `agreements.max_items`             | `64`    | Ledger size; at the cap the oldest never-reaffirmed agent item is evicted (8-256) |
 
 #### Soul
 

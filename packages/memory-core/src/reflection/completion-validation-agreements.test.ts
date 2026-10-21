@@ -49,6 +49,23 @@ describe("reflection completion: the agreement ledger is off limits (security co
     expect(result.status === "failed" ? result.detail : "").toContain(AGREEMENTS_PATH)
   })
 
+  it("#given a reflection that git-mv's the ledger elsewhere (default rename detection) #when validated #then it fails naming the ledger", async () => {
+    // given
+    const worktree = await fixture()
+    await mkdir(join(worktree.dir, "reference"), { recursive: true })
+    const moved = await worktree.exec.run(["mv", AGREEMENTS_PATH, "reference/old-agreements.md"], { cwd: worktree.dir, timeoutMs: 30_000 })
+    expect(moved.code).toBe(0)
+    await new GitMemoryRepo({ dir: worktree.dir, agentId: AUTHOR.agentId })
+      .commitPrepared([AGREEMENTS_PATH, "reference/old-agreements.md"], "move the ledger", AUTHOR)
+
+    // when
+    const result = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
+
+    // then
+    expect(result.status).toBe("failed")
+    expect(result.status === "failed" ? result.detail : "").toContain(AGREEMENTS_PATH)
+  })
+
   it("#given a reflection that edits another system block #when validated #then it stays valid", async () => {
     // given
     const worktree = await fixture()

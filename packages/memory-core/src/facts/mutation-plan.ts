@@ -3,6 +3,7 @@ import { readFile } from "../fs/resilient"
 import { join } from "node:path"
 
 import { renderAgreementsTarget } from "./agreements-target"
+import type { AgreementEvent } from "../agreements/mutate"
 import { AGREEMENTS_PATH, DEFAULT_AGREEMENTS_POLICY, type AgreementExtractionRecord, type AgreementsPolicy } from "../agreements/types"
 import type { GitIndexIdentity, GitMemoryRepo, GitPathState, GitWorktreeFileIdentity } from "../git"
 import { parseMemoryFile, renderMemoryFile } from "../memfs"
@@ -43,12 +44,15 @@ export async function planFactsMutation(
   people: FactsPeopleRouting | undefined,
   onAliasTie?: (tie: FactsAliasTie) => void,
   agreements: AgreementsPolicy = DEFAULT_AGREEMENTS_POLICY,
+  onAgreementEvent?: (event: AgreementEvent) => void,
 ): Promise<FactsApplyRecovery> {
   const headBeforeApply = await repo.head()
   if (headBeforeApply === null) throw new Error("facts repository has no HEAD")
   const routing = await planFactsRouting(repo.dir, batch.records, people, onAliasTie)
   const agreementRecords = batch.agreements ?? []
-  const paths = [...factsRoutingPaths(routing), ...(agreementRecords.length === 0 ? [] : [AGREEMENTS_PATH])].sort()
+  const ledger = agreementRecords.length === 0 ? undefined : await renderAgreementsTarget(repo.dir, agreementRecords, agreements)
+  for (const event of ledger?.events ?? []) onAgreementEvent?.(event)
+  const paths = [...factsRoutingPaths(routing), ...(ledger?.content === undefined ? [] : [AGREEMENTS_PATH])].sort()
   const pre = await repo.pathState.captureAll(paths)
   if ((await repo.status()).trim().length > 0) throw new FactsPlanParentDirtyError("facts repository changed during planning")
   const content = new Map<string, string>()
@@ -59,9 +63,7 @@ export async function planFactsMutation(
     const rendered = await renderPersonTargets(repo.dir, routing, people)
     for (const [path, value] of rendered) content.set(path, value)
   }
-  if (agreementRecords.length > 0) {
-    content.set(AGREEMENTS_PATH, await renderAgreementsTarget(repo.dir, agreementRecords, agreements))
-  }
+  if (ledger?.content !== undefined) content.set(AGREEMENTS_PATH, ledger.content)
   const planned: FactsRecoveryPath[] = []
   for (const path of paths) {
     const before = pre.get(path)

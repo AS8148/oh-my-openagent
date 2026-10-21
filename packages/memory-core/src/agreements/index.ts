@@ -24,7 +24,7 @@ export {
   addHumanAgreement,
   applyAgreementRecords,
   dropAgreement,
-  mergeOverlappingAgentItems,
+  type AgreementEvent,
   type AgreementsMutation,
 } from "./mutate"
 export { describeAgreementsToolViolation } from "./guard"

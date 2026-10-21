@@ -85,6 +85,25 @@ describe("memory tools cannot change agreements the person wrote (security contr
     expect(await repo.head()).toBe(head)
   })
 
+  it("#given a counted but unflagged agent agreement #when the memory tool deletes it (to re-add it later at zero) #then the delete is refused and HEAD is unchanged", async () => {
+    // given
+    const { repo, lock } = await fixture()
+    const counted = "- [global] Run bun test before claiming done <!-- id: 7b1d000000; by: agent; n: 2; status: active -->"
+    await runMemoryTool({ repo, lock, params: {
+      command: "insert", reason: "seed counted", file_path: AGREEMENTS_PATH, insert_line: 2, insert_text: counted, author: AUTHOR,
+    } })
+    const head = await repo.head()
+
+    // when
+    const remove = runMemoryTool({ repo, lock, params: {
+      command: "str_replace", reason: "tidy", file_path: AGREEMENTS_PATH, old_string: `${counted}\n`, new_string: "", author: AUTHOR,
+    } })
+
+    // then
+    await expect(remove).rejects.toThrow(/restart that count/)
+    expect(await repo.head()).toBe(head)
+  })
+
   it("#given a ledger holding only a flagged agent agreement #when apply_patch deletes the whole file #then the delete is refused and HEAD is unchanged", async () => {
     // given
     const root = realpathSync.native(await mkdtemp(join(tmpdir(), "omo-agreements-wipe-")))

@@ -4,8 +4,13 @@ import type { AgreementExtractionRecord, AgreementItem, AgreementScope, Agreemen
 export interface AgreementsMutation {
   readonly items: readonly AgreementItem[]
   readonly newlyFlagged: readonly string[]
-  readonly refusedOverCap: readonly string[]
+  readonly events: readonly AgreementEvent[]
 }
+
+export type AgreementEvent =
+  | { readonly kind: "evicted"; readonly date: string; readonly item: AgreementItem; readonly forText: string }
+  | { readonly kind: "refused"; readonly date: string; readonly text: string }
+  | { readonly kind: "stale-reaffirm"; readonly date: string; readonly id: string }
 
 export function applyAgreementRecords(
   existing: readonly AgreementItem[],
@@ -14,7 +19,7 @@ export function applyAgreementRecords(
 ): AgreementsMutation {
   let items = [...existing]
   const flagged = new Set<string>()
-  const refused: string[] = []
+  const events: AgreementEvent[] = []
   const bump = (at: number, date: string, text: string | undefined): void => {
     const found = items[at]
     if (found === undefined) return
@@ -26,7 +31,9 @@ export function applyAgreementRecords(
   }
   for (const record of records) {
     if (record.action === "reaffirm") {
-      bump(items.findIndex((item) => item.id === record.id), record.date, record.text)
+      const at = items.findIndex((item) => item.id === record.id)
+      if (at < 0) events.push({ kind: "stale-reaffirm", date: record.date, id: record.id })
+      else bump(at, record.date, record.text)
       continue
     }
     const at = findAgreement(items, record.text)
@@ -39,16 +46,26 @@ export function applyAgreementRecords(
       id: agreementId(record.text), scope: record.applies, by: "agent", text: record.text,
       n: 1, since: record.date, last: record.date, status,
     }
+    if (items.length >= policy.maxItems) {
+      const victim = evictionCandidate(items)
+      if (victim === undefined) {
+        events.push({ kind: "refused", date: record.date, text: record.text })
+        continue
+      }
+      items = items.filter((item) => item.id !== victim.id)
+      events.push({ kind: "evicted", date: record.date, item: victim, forText: record.text })
+    }
     if (status === "needs-human") flagged.add(created.id)
     items.push(created)
-    if (items.length <= policy.maxItems) continue
-    items = mergeOverlappingAgentItems(items)
-    if (items.length <= policy.maxItems) continue
-    items = items.filter((item) => item.id !== created.id)
-    flagged.delete(created.id)
-    refused.push(record.text)
   }
-  return { items: sortAgreements(items), newlyFlagged: [...flagged], refusedOverCap: refused }
+  return { items: sortAgreements(items), newlyFlagged: [...flagged], events }
+}
+
+/** At the cap only an agent item that was never reaffirmed and is not flagged may go: the oldest one. */
+function evictionCandidate(items: readonly AgreementItem[]): AgreementItem | undefined {
+  return items
+    .filter((item) => item.by === "agent" && item.status === "active" && item.n <= 1)
+    .sort((a, b) => (a.last ?? a.since ?? "").localeCompare(b.last ?? b.since ?? "") || a.id.localeCompare(b.id))[0]
 }
 
 export function addHumanAgreement(
@@ -76,52 +93,8 @@ export function dropAgreement(existing: readonly AgreementItem[], id: string): r
   return existing.filter((item) => item.id !== id)
 }
 
-export function mergeOverlappingAgentItems(items: readonly AgreementItem[]): AgreementItem[] {
-  const ordered = sortAgreements(items)
-  const merged: AgreementItem[] = []
-  for (const item of ordered) {
-    const host = item.by === "agent"
-      ? merged.findIndex((kept) => kept.by === "agent" && kept.scope === item.scope && overlaps(kept.text, item.text))
-      : -1
-    const kept = host >= 0 ? merged[host] : undefined
-    if (kept === undefined) {
-      merged.push(item)
-      continue
-    }
-    merged[host] = {
-      ...kept,
-      text: item.text.length > kept.text.length ? item.text : kept.text,
-      n: kept.n + item.n,
-      ...(laterDate(kept.last, item.last) === undefined ? {} : { last: laterDate(kept.last, item.last) }),
-      status: kept.status === "needs-human" || item.status === "needs-human" ? "needs-human" : "active",
-    }
-  }
-  return merged
-}
-
 function findAgreement(items: readonly AgreementItem[], text: string): number {
   const id = agreementId(text)
   const normalized = normalizeAgreementText(text)
   return items.findIndex((item) => item.id === id || normalizeAgreementText(item.text) === normalized)
-}
-
-function overlaps(a: string, b: string): boolean {
-  const left = normalizeAgreementText(a)
-  const right = normalizeAgreementText(b)
-  if (left.includes(right) || right.includes(left)) return true
-  const leftTokens = tokens(left)
-  const rightTokens = tokens(right)
-  const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length
-  const union = new Set([...leftTokens, ...rightTokens]).size
-  return union > 0 && shared / union >= 0.5
-}
-
-function tokens(normalized: string): Set<string> {
-  return new Set(normalized.split(/[^\p{L}\p{N}]+/u).filter((token) => token.length >= 2))
-}
-
-function laterDate(a: string | undefined, b: string | undefined): string | undefined {
-  if (a === undefined) return b
-  if (b === undefined) return a
-  return a >= b ? a : b
 }

@@ -15,6 +15,7 @@ import {
   planFactsMutation,
   validateFactsRecovery,
   withLock,
+  type AgreementEvent,
   type AgreementExtractionRecord,
   type AgreementsPolicy,
   type FactsApplyRecovery,
@@ -35,6 +36,7 @@ const WRITER_ATTEMPTS = 3
 export type Applied =
   | { readonly outcome: "committed"; readonly sha: string; readonly affectedPaths: readonly string[] }
   | { readonly outcome: "parent_dirty"; readonly detail?: string }
+  | { readonly outcome: "unchanged" }
 
 /** The cross-process `memory-write` lock every facts apply takes (2 s wait per attempt). */
 export async function withFactsWriterLock<T>(locksDir: string, operation: () => Promise<T>, attempt: number, runId = `facts-${attempt}`): Promise<T> {
@@ -184,11 +186,12 @@ async function applyClaimed(options: ClaimedApplyOptions): Promise<Applied> {
       recovery = await planFactsMutation(options.repo, batch, options.people, (tie) => options.logger?.warn(
         "facts person alias tie resolved by slug order",
         { alias: tie.alias, slugs: tie.slugs.join(","), chosen: tie.chosen },
-      ), options.agreementsPolicy)
+      ), options.agreementsPolicy, (event) => logAgreementEvent(options.logger, options.ledger.batchId, event))
     } catch (error) {
       if (error instanceof FactsPlanParentDirtyError) return { outcome: "parent_dirty" }
       throw error
     }
+    if (recovery.paths.length === 0) return { outcome: "unchanged" }
     await updateRunLedger(`${options.runDir}/ledger.json`, {
       headBeforeApply: recovery.headBeforeApply,
       applyRecovery: recovery,
@@ -201,6 +204,22 @@ async function applyClaimed(options: ClaimedApplyOptions): Promise<Applied> {
   return result.outcome === "parent_dirty"
     ? result
     : { outcome: "committed", sha: result.sha, affectedPaths: result.affectedPaths }
+}
+
+function logAgreementEvent(logger: ComponentLogger | undefined, batchId: string, event: AgreementEvent): void {
+  switch (event.kind) {
+    case "evicted":
+      logger?.warn("agreement ledger full: evicted the oldest unreaffirmed agreement", {
+        batchId, id: event.item.id, text: event.item.text, since: event.item.since, forText: event.forText,
+      })
+      return
+    case "refused":
+      logger?.warn("agreement ledger full: refused a new agreement (nothing evictable)", { batchId, text: event.text })
+      return
+    case "stale-reaffirm":
+      logger?.warn("agreement reaffirm ignored: the agreement is no longer in the ledger", { batchId, id: event.id })
+      return
+  }
 }
 
 // A batch answered from its receipt (a retried client batchId) reports the paths that commit wrote.

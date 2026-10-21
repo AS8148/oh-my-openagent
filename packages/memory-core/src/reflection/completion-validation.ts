@@ -77,7 +77,9 @@ export async function validateCompletion(
         return { status: "failed", detail: `Changed path escapes the memory repository: ${path}` }
       }
     }
-    if (changedPaths.includes(AGREEMENTS_PATH)) {
+    // Rename detection is off here on purpose: `git mv system/agreements.md elsewhere` must read as a deletion.
+    const ledger = await git(exec, worktree.dir, ["diff", "--no-renames", "--name-only", "-z", `${recordedBase}..${tipSha}`, "--", AGREEMENTS_PATH])
+    if (ledger.stdout.split("\0").some(Boolean)) {
       return { status: "failed", detail: `Reflection may not modify ${AGREEMENTS_PATH}; agreements change only through the facts lane and /agreements` }
     }
     const frontmatterFailure = await findFrontmatterFailure(exec, worktree.dir, recordedBase, tipSha, changedPaths)

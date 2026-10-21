@@ -20,7 +20,9 @@ export function describeAgreementsToolViolation(
   if (after === undefined) {
     if (humanBefore.length > 0) return "system/agreements.md holds agreements your person wrote; only they can remove them (/agreements drop)"
     const flagged = itemsBefore.find((item) => item.status === "needs-human")
-    return flagged === undefined ? undefined : `agreement ${flagged.id} is flagged as needing your person; only they can drop it (/agreements drop)`
+    if (flagged !== undefined) return `agreement ${flagged.id} is flagged as needing your person; only they can drop it (/agreements drop)`
+    const counted = itemsBefore.find((item) => item.n > 0)
+    return counted === undefined ? undefined : countedRemoval(counted)
   }
   let parsed
   try {
@@ -50,6 +52,7 @@ function describeCountTampering(before: readonly AgreementItem[], after: readonl
     const kept = byId.get(item.id)
     if (kept === undefined) {
       if (item.status === "needs-human") return `agreement ${item.id} is flagged as needing your person; only they can drop it (/agreements drop)`
+      if (item.n > 0) return countedRemoval(item)
       continue
     }
     if (kept.n < item.n) return `agreement ${item.id} was broken ${item.n} times; automation cannot lower that count (/agreements ack)`
@@ -58,4 +61,9 @@ function describeCountTampering(before: readonly AgreementItem[], after: readonl
     }
   }
   return undefined
+}
+
+// Removing a counted item and re-adding it later would restart its count at zero.
+function countedRemoval(item: AgreementItem): string {
+  return `agreement ${item.id} was broken ${item.n} times; automation cannot remove it and restart that count (/agreements drop)`
 }

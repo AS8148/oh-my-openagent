@@ -59,7 +59,7 @@ describe("applyAgreementRecords: counting and the needs-human threshold", () => 
 })
 
 describe("applyAgreementRecords: human-written items are immutable to automation", () => {
-  test("#given a human item #when automation reaffirms it with new wording and a cap merge runs #then its text and scope are untouched, it is counted, and it is never merged or evicted", () => {
+  test("#given a human item #when automation reaffirms it with new wording and the cap evicts #then its text and scope are untouched, it is counted, and it is never evicted", () => {
     // given
     const human = item("Never filter the message monitor", { by: "human", n: 2 })
     const overlapping = item("Never filter the message monitor output stream", { n: 1, since: "2026-10-02" })
@@ -84,19 +84,59 @@ describe("applyAgreementRecords: human-written items are immutable to automation
 })
 
 describe("applyAgreementRecords: the cap", () => {
-  test("#given a full ledger of unrelated items #when a new unrelated agreement arrives #then it is refused and the ledger keeps its size", () => {
+  test("#given a full ledger with two similar but distinct agent rules #when a new agreement arrives #then both rules survive verbatim and only the oldest unreaffirmed item is evicted, as a recorded event", () => {
     // given
-    const full = [item("Use bun, never npm"), item("Answer in Korean in the chat room")]
+    const main = item("Never push to main", { since: "2026-10-03", last: "2026-10-03" })
+    const dev = item("Never push to dev", { since: "2026-10-04", last: "2026-10-04" })
+    const oldest = item("Use bun, never npm", { since: "2026-10-01", last: "2026-10-01" })
+    const reaffirmed = item("Answer in Korean in the chat room", { n: 2, since: "2026-09-01", last: "2026-09-01" })
+
+    // when
+    const result = applyAgreementRecords(
+      [main, dev, oldest, reaffirmed],
+      [{ action: "new", applies: "project", text: "Keep run roots out of tmp", date: "2026-10-21" }],
+      { needsHumanThreshold: 3, maxItems: 4 },
+    )
+
+    // then
+    expect(result.items.map((entry) => entry.text).sort()).toEqual(
+      ["Answer in Korean in the chat room", "Keep run roots out of tmp", "Never push to dev", "Never push to main"],
+    )
+    expect(result.events).toEqual([{ kind: "evicted", date: "2026-10-21", item: oldest, forText: "Keep run roots out of tmp" }])
+  })
+
+  test("#given a full ledger with nothing evictable (human, reaffirmed, flagged) #when a new agreement arrives #then it is refused as a recorded event and the ledger is unchanged", () => {
+    // given
+    const full = [
+      item("Use bun, never npm", { by: "human", n: 0 }),
+      item("Answer in Korean in the chat room", { n: 2 }),
+      item("Never push to main", { n: 1, status: "needs-human" }),
+    ]
 
     // when
     const result = applyAgreementRecords(
       full,
       [{ action: "new", applies: "project", text: "Keep run roots out of tmp", date: "2026-10-21" }],
-      { needsHumanThreshold: 3, maxItems: 2 },
+      { needsHumanThreshold: 1, maxItems: 3 },
     )
 
     // then
-    expect(result.items).toHaveLength(2)
-    expect(result.refusedOverCap).toEqual(["Keep run roots out of tmp"])
+    expect([...result.items].sort((a, b) => a.id.localeCompare(b.id))).toEqual([...full].sort((a, b) => a.id.localeCompare(b.id)))
+    expect(result.events).toEqual([{ kind: "refused", date: "2026-10-21", text: "Keep run roots out of tmp" }])
+    expect(result.newlyFlagged).toEqual([])
+  })
+})
+
+describe("applyAgreementRecords: a reaffirm whose agreement was dropped meanwhile", () => {
+  test("#given a reaffirm naming an id no longer in the ledger #when applied #then nothing changes and the stale reaffirm is reported as an event", () => {
+    // given
+    const kept = item("Use bun, never npm")
+
+    // when
+    const result = applyAgreementRecords([kept], [{ action: "reaffirm", id: "0000000000", date: "2026-10-21" }], POLICY)
+
+    // then
+    expect(result.items).toEqual([kept])
+    expect(result.events).toEqual([{ kind: "stale-reaffirm", date: "2026-10-21", id: "0000000000" }])
   })
 })
