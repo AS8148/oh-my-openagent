@@ -19,7 +19,7 @@ import type { DagNode, DagNodeError, DagNodeErrorCode, DagNodeId, DagRunId } fro
 export type DagNodeSendResult = {
   readonly nodeId: DagNodeId
   readonly taskId?: string
-  readonly delivery: "steer" | "revive" | "queued" | "uncertain" | "guidance"
+  readonly delivery: "steer" | "revive" | "queued" | "uncertain" | "guidance" | "held"
   readonly guidanceId?: string
   readonly effectId?: string
   readonly queuePosition?: number
@@ -108,6 +108,9 @@ function foldSendOutcome(
       // The steering engine persisted the message on the child's record; the node itself did not
       // change state, and dag.node.steered has no vocabulary for an undelivered message.
       return { nodeId, taskId, delivery: "queued", queuePosition: outcome.queue_position }
+    case "held":
+      // The node's run is stopped: the child holds the message and the run's Resume delivers it.
+      return { nodeId, taskId, delivery: "held" }
     case "steered":
       controlJournal(options, record).append(dagNodeSteeredEvent({ nodeId, taskId, delivery: "steer" }))
       return { nodeId, taskId, delivery: "steer" }

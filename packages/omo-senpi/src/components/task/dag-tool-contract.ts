@@ -57,7 +57,7 @@ export type DagToolError = {
 }
 
 /** How the engine delivered a send: steered into a live turn, revived a resident child, or queued. */
-export type DagToolSendDelivery = "steer" | "revive" | "queued" | "uncertain" | "guidance"
+export type DagToolSendDelivery = "steer" | "revive" | "queued" | "uncertain" | "guidance" | "held"
 
 export type DagToolSendOutcome = {
   readonly nodeId: string

@@ -5,6 +5,7 @@ import type { TaskConcurrency } from "./concurrency"
 import { ResumeCapacity, type ResumeAllocation } from "./resume-capacity"
 import { PendingPauses } from "./pending-pauses"
 import type { AdmissionBarrier, ResumeCredential } from "../pause/admission-barrier"
+import { buildRevived } from "../steering/engine-policy"
 
 export type ResumeTaskRequest = RunPauseOwner & {
   readonly resumeCredential?: ResumeCredential
@@ -148,6 +149,30 @@ export function createTaskRunPause(ports: {
     return port.holdInput(handle, input, { parentSessionId: owner.parentSessionId })
   }
 
+  // An idle resident child has no turn to abort: its next run is opened paused under the run's
+  // owner (a fresh epoch, as a revive would), so the run's Resume starts that turn.
+  async function joinIdlePause(taskId: string, owner: RunPauseOwner): Promise<EngineInheritReceipt> {
+    const port = childPort()
+    const { record, handle } = live(taskId)
+    if (record.status !== "completed" && record.status !== "error" && record.status !== "interrupted") {
+      throw new Error(`cannot join an idle pause from ${record.status}`)
+    }
+    const ack = await port.pauseForRun(handle, owner)
+    if ("refused" in ack) return ack
+    const timestamp = new Date(ports.now()).toISOString()
+    let opened = false
+    ports.store.mutate(taskId, fresh => {
+      if (fresh.status !== record.status || fresh.notification.run_epoch !== record.notification.run_epoch) return fresh
+      opened = true
+      return buildRevived(fresh, timestamp)
+    })
+    if (!opened || !ports.store.transition(taskId, { type: "pause", timestamp }).applied) {
+      throw new Error(`idle child ${taskId} changed while joining the pause`)
+    }
+    owners.set(taskId, owner)
+    return ack
+  }
+
   function forget(taskId: string): void {
     owners.delete(taskId)
     intents.clear(taskId)
@@ -158,5 +183,5 @@ export function createTaskRunPause(ports: {
     resumed.delete(taskId)
   }
 
-  return { pauseTask, resumePausedTask, holdTaskInput, park, forget, settlement: (taskId: string, epoch: number) => intents.settlement(taskId, epoch) }
+  return { pauseTask, resumePausedTask, holdTaskInput, joinIdlePause, park, forget, settlement: (taskId: string, epoch: number) => intents.settlement(taskId, epoch) }
 }

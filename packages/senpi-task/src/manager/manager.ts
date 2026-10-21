@@ -57,6 +57,8 @@ import { reattachManagedTask } from "./manager-reattach"
 import { TASK_AWAITING_INPUT_EVENT } from "./host-turn-resumed"
 import { PendingStops } from "./pending-stops"
 import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest, type HeldTaskInput } from "./run-pause"
+import { createHeldSend } from "./held-send"
+import { admitRespawn } from "./respawn-admission"
 import type { RunPauseOwner } from "../pause/ports"
 import { AdmissionBarrier, type ResumeCredential } from "../pause/admission-barrier"
 import { createStartAdmissions } from "./start-admission"
@@ -114,7 +116,7 @@ type TaskManagerImplOptions = TaskManagerOptions & {
 
 type ReattachingTaskManager = TaskManager & TaskPauseMethods & {
   readonly workpools: WorkpoolEngine
-  respawn(record: TaskRecord, resumeSessionPath?: string): Promise<RespawnResult>
+  respawn(record: TaskRecord, resumeSessionPath?: string, credential?: ResumeCredential): Promise<RespawnResult>
   redispatchTask(idOrName: string, callerSessionId?: string): Promise<RedispatchOutcome>
   reattach(
     record: TaskRecord,
@@ -202,10 +204,12 @@ class TaskManagerImpl implements TaskManager {
   readonly #startAdmissions: ReturnType<typeof createStartAdmissions>
   readonly #heldAdmissions: HeldAdmissions
   readonly #residency = new ResidencySignal()
+  readonly #barrier: AdmissionBarrier
 
   constructor(inputOptions: TaskManagerImplOptions) {
     const options = { ...inputOptions, admissionBarrier: inputOptions.admissionBarrier ?? new AdmissionBarrier() }
     this.#options = options
+    this.#barrier = options.admissionBarrier
     this.#startAdmissions = createStartAdmissions(options.admissionBarrier, options.onHeldAdmission, options.now ?? Date.now)
     try {
       const listed = options.store.list()
@@ -245,6 +249,14 @@ class TaskManagerImpl implements TaskManager {
       endSend: (taskId) => this.endSend(taskId),
       isEvicting: (taskId) => this.isEvicting(taskId),
       isLaunching: (taskId) => this.#launching.has(taskId),
+      sendWhileRunHeld: createHeldSend(options.admissionBarrier, {
+        liveHandle: taskId => this.#live.get(taskId)?.handle,
+        pauseTask: (taskId, owner) => this.#runPause.pauseTask(taskId, owner),
+        joinIdlePause: (taskId, owner) => this.#runPause.joinIdlePause(taskId, owner),
+        holdTaskInput: (taskId, input) => this.#runPause.holdTaskInput(taskId, input),
+        noteParticipant: (record, owner, childSeq) => this.#options.onPausedChild?.(record, owner, childSeq),
+        load: taskId => this.#tryLoad(taskId) ?? undefined,
+      }),
       // A rung that runtime fallback is closing is never steered, interrupted through, or revived: its
       // handle is being torn down, and the fallback path retires it once the close ends.
       liveHandle: (taskId) => {
@@ -912,14 +924,15 @@ class TaskManagerImpl implements TaskManager {
     return record.notify_on_terminal
   }
 
-  respawn(record: TaskRecord, resumeSessionPath?: string): Promise<RespawnResult> {
-    return respawnWithWorkpool({
+  respawn(record: TaskRecord, resumeSessionPath?: string, credential?: ResumeCredential): Promise<RespawnResult> {
+    return admitRespawn(this.#barrier, record, credential, checkLaunch => respawnWithWorkpool({
       record,
       sessionPath: resumeSessionPath,
       stateDir: this.#options.store.stateDir,
       runners: this.#options.runners,
       rpcRunner: this.#rpcRespawnRunner,
       beforeLaunch: () => {
+        checkLaunch()
         // Respawn bypasses start's status transition; persist the same durable launch boundary
         // without changing the status or epoch that lifecycle reattachment owns. It is also the last
         // point before the child runs: a stop, a kill or another owner that landed while the revival
@@ -938,7 +951,7 @@ class TaskManagerImpl implements TaskManager {
       ...(this.#options.resolveInheritedExtensions === undefined
         ? {}
         : { inheritedExtensions: this.#options.resolveInheritedExtensions }),
-    }, this.workpools, () => this.get(record.task_id)?.notification.run_epoch ?? -1)
+    }, this.workpools, () => this.get(record.task_id)?.notification.run_epoch ?? -1))
   }
 
   async reattach(record: TaskRecord, handle: ManagedChildHandle, awaitingInput?: { readonly reason: AwaitingInputReason }): Promise<ReattachResult> {

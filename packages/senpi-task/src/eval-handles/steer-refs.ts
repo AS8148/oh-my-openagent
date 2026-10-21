@@ -59,6 +59,8 @@ export async function sendRef(deps: SteerDeps, ref: HandleRef, message: string, 
     case "steered":
     case "queued":
       return runAt(ref.run_epoch).delivered(ref, undefined)
+    case "held":
+      return runAt(ref.run_epoch).delivered(ref, "held until the run resumes")
     case "stale":
       throw runAt(ref.run_epoch).stale(ref)
     case "scope_denied":
