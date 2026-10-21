@@ -6,13 +6,12 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { readTurnTraceparent, type TelemetryTransportFactory } from "@oh-my-opencode/telemetry-core"
 import {
   createOtlpTelemetryTransport,
-  inspectOtlpRequest,
-  type InspectedLogRecord,
-  type InspectedSpan,
   type OtlpTelemetryTransport,
   type OtlpWireProjection,
+  type SpanAllowlist,
   type WireAttributes,
 } from "@oh-my-opencode/telemetry-core/otlp"
+import { inspectOtlpRequest, type InspectedLogRecord, type InspectedSpan } from "@oh-my-opencode/telemetry-core/otlp-inspect"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { CONSENT_CACHE_MS, createOmoNativeTelemetryComponent } from "./omo-native-component"
@@ -28,6 +27,24 @@ import {
 // The transport requires a schema artifact's projection; this mirrors telemetry-core's test stand-in
 // (every primitive that passes the key rule becomes `omo.<name>`), which is not exported to other packages.
 const NON_WIRE_KEYS = new Set(["$os", "$os_version", "$process_person_profile", "$session_id", "ci", "event_id", "install_hash", "package_version", "platform", "product_name", "schema_version", "surface"])
+// Every attribute omo-native-turn-span sets on `omo.turn`; the transport drops anything not listed.
+const TURN_SPANS: SpanAllowlist = {
+  "omo.turn": [
+    "gen_ai.operation.name",
+    "gen_ai.provider.name",
+    "gen_ai.request.model",
+    "gen_ai.response.model",
+    "omo.model_id",
+    "omo.provider",
+    "omo.session.role",
+    "omo.turn.end_reason",
+    "omo.turn.index",
+    "session.id",
+  ],
+}
+// Sessions per test (a parent and its child at most); each takes its own transport from this pool.
+const TRANSPORT_POOL = 4
+
 const testProjection: OtlpWireProjection = (_event, properties) => {
   const attributes: WireAttributes = {}
   for (const [key, value] of Object.entries(properties)) {
@@ -52,13 +69,14 @@ type Collector = {
 // A real OTLP transport per factory call, sending to a recording endpoint. Its shutdown is deferred
 // to `drain` so the test reads every record the session wrote, including the shutdown-time ones,
 // unless `liveShutdown` lets the session's own shutdown really shut the transport down.
-function otlpCollector(options: { readonly liveShutdown?: boolean } = {}): Collector {
+async function otlpCollector(options: { readonly liveShutdown?: boolean } = {}): Promise<Collector> {
   const root = mkdtempSync(join(tmpdir(), "omo-senpi-turn-span-"))
   cleanups.push(() => rmSync(root, { recursive: true, force: true }))
   const bodies: { url: string; body: Uint8Array }[] = []
   const transports: OtlpTelemetryTransport[] = []
-  const factory: TelemetryTransportFactory = () => {
-    const transport = createOtlpTelemetryTransport({
+  const pool: OtlpTelemetryTransport[] = []
+  for (let slot = 0; slot < TRANSPORT_POOL; slot += 1) {
+    const transport = await createOtlpTelemetryTransport({
       productEnvPrefix: "OMO_TEST",
       ingestKey: "test-ingest-key",
       spoolDir: join(root, "telemetry-spool"),
@@ -66,6 +84,7 @@ function otlpCollector(options: { readonly liveShutdown?: boolean } = {}): Colle
       resource: { "service.name": "omo-senpi", "service.version": "1.0.0" },
       scope: { name: "omo-senpi", version: "1.0.0" },
       project: testProjection,
+      spans: TURN_SPANS,
       env: {},
       endpoint: "https://collector.test",
       autoStart: false,
@@ -77,6 +96,11 @@ function otlpCollector(options: { readonly liveShutdown?: boolean } = {}): Colle
       },
     })
     if (transport === null) throw new Error("collector transport unexpectedly disabled")
+    pool.push(transport)
+  }
+  const factory: TelemetryTransportFactory = () => {
+    const transport = pool.shift()
+    if (transport === undefined) throw new Error(`a test opened more than ${TRANSPORT_POOL} collector sessions`)
     transports.push(transport)
     return {
       capture: transport.capture,
@@ -216,7 +240,7 @@ describe("omo.turn span per assistant turn", () => {
   test("#given a three-turn session on the collector sink #then three ok spans carry the D-P attributes, each turn_completed carries its own span's exact pair, and events outside a turn carry none", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
-      const collector = otlpCollector()
+      const collector = await otlpCollector()
       const { pi, ctx } = await openSession(agentDir, collector.factory, "main-1")
 
       // when
@@ -262,7 +286,7 @@ describe("omo.turn span per assistant turn", () => {
   test("#given a parent turn that delegates to a process child through the per-child env #then two turns, two spans, two exact pair matches and four trace-only pairs, and the child row carries the CHILD span id", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
-      const collector = otlpCollector()
+      const collector = await otlpCollector()
       const parent = await openSession(agentDir, collector.factory, "parent-raw")
       await parent.pi.dispatch("turn_start", turnStart(0), parent.ctx)
       const delegating = readTurnTraceparent("parent-raw")
@@ -301,7 +325,7 @@ describe("omo.turn span per assistant turn", () => {
   test("#given a shared-host child whose session context carries the delegating traceparent #then its turn span is a child of the delegating span", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
-      const collector = otlpCollector()
+      const collector = await otlpCollector()
       const delegating = "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
       const child = await openSession(agentDir, collector.factory, "child-host", {
         sessionContext: { role: "child", task_id: "st_1", state_dir: "/s", traceparent: delegating },
@@ -322,7 +346,7 @@ describe("omo.turn span per assistant turn", () => {
   test("#given two sessions of one shared extension with interleaved turns #then their spans never share an id and each turn row carries its own session's span", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
-      const collector = otlpCollector()
+      const collector = await otlpCollector()
       const component = processComponent(agentDir, collector.factory)
       const a = await openSession(agentDir, collector.factory, "sibling-a", { component })
       const b = await openSession(agentDir, collector.factory, "sibling-b", { component })
@@ -349,7 +373,7 @@ describe("omo.turn span per assistant turn", () => {
   test("#given a turn that fails and a turn abandoned without a turn_end #then both spans end with status error and the failed turn's row still carries its pair", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
-      const collector = otlpCollector()
+      const collector = await otlpCollector()
       const { pi, ctx } = await openSession(agentDir, collector.factory, "failing")
 
       // when
@@ -370,7 +394,7 @@ describe("omo.turn span per assistant turn", () => {
   test("#given a turn still open when the session shuts down and consent still holds #then its span is exported as error with end reason shutdown", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
-      const collector = otlpCollector({ liveShutdown: true })
+      const collector = await otlpCollector({ liveShutdown: true })
       const { pi, ctx } = await openSession(agentDir, collector.factory, "quit-mid-turn")
       await pi.dispatch("turn_start", turnStart(0), ctx)
       await pi.dispatch("turn_end", turnEnd(0), ctx)
@@ -391,7 +415,7 @@ describe("omo.turn span per assistant turn", () => {
   test("#given a turn still open when the session shuts down after consent was withdrawn #then that span is dropped, never exported", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
-      const collector = otlpCollector()
+      const collector = await otlpCollector()
       const consent = consentSwitch()
       const { pi, ctx } = await openSession(agentDir, collector.factory, "withdrawn-mid-turn", { consent })
       await pi.dispatch("turn_start", turnStart(0), ctx)
@@ -425,7 +449,7 @@ describe("omo.turn span per assistant turn", () => {
     test(`#given consent withdrawn mid-turn inside the consent cache window #when the turn ends by ${ending.name} #then no span is exported and no traceparent is left`, async () => {
       await withTempAgentDir(async (agentDir) => {
         // given
-        const collector = otlpCollector()
+        const collector = await otlpCollector()
         const consent = consentSwitch()
         const session = await openSession(agentDir, collector.factory, "withdrawn-ending", { consent })
         await session.pi.dispatch("turn_start", turnStart(0), session.ctx)
@@ -445,7 +469,7 @@ describe("omo.turn span per assistant turn", () => {
     test(`#given consent kept #when the turn ends by ${ending.name} #then its span is exported exactly once`, async () => {
       await withTempAgentDir(async (agentDir) => {
         // given
-        const collector = otlpCollector()
+        const collector = await otlpCollector()
         const session = await openSession(agentDir, collector.factory, "kept-ending")
         await session.pi.dispatch("turn_start", turnStart(0), session.ctx)
 
@@ -462,7 +486,7 @@ describe("omo.turn span per assistant turn", () => {
   test("#given a published turn traceparent #when the turn ends, or the next turn starts after an opt-out #then no traceparent is left for a later child launch", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given
-      const collector = otlpCollector()
+      const collector = await otlpCollector()
       const consent = consentSwitch()
       const { pi, ctx } = await openSession(agentDir, collector.factory, "stale-trace", { consent })
       await pi.dispatch("turn_start", turnStart(0), ctx)

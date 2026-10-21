@@ -40,8 +40,8 @@ const RESOURCE_OR_RELAY_KEYS = new Set([
 /**
  * The key rule every record on the wire obeys, whichever API produced it: Resource-level and
  * relay-only keys stay off the record and `$` keys never travel on the OTLP wire. The WAL
- * processors apply it to every LogRecord and Span they encode, so attributes given to
- * `providers.logger` or `providers.tracer` directly pass the same rule as `capture()`.
+ * processors apply it to every LogRecord and Span they encode, so spans started through
+ * `transport.tracer` pass the same rule as `capture()` events.
  */
 export function isWireAttributeKey(key: string): boolean {
   return !RESOURCE_OR_RELAY_KEYS.has(key) && !key.startsWith("$")

@@ -1,8 +1,8 @@
 import { lstatSync, readdirSync, realpathSync, rmdirSync, type Stats, unlinkSync } from "node:fs"
 import { isAbsolute, join, relative } from "node:path"
 
-import { isSpoolFileName, QUARANTINE_DIR } from "./otlp-spool-dir"
-import type { TelemetrySpoolEntryKind } from "./types"
+import { isSpoolFileName, QUARANTINE_DIR } from "./otlp-spool-names"
+import type { TelemetryDiagnosticInput, TelemetrySpoolEntryKind } from "./types"
 
 /**
  * `refused`: the directory failed verification and nothing was deleted. `incomplete`: the sweep ran
@@ -182,4 +182,12 @@ export function purgeSpool(
   removeIfEmpty(quarantine)
   removeIfEmpty(dir)
   return sweep.failed > 0 ? "incomplete" : "purged"
+}
+
+/** Each entry the purge leaves behind becomes one diagnostic, by kind or errno code, never by path. */
+export function purgeReport(diagnostics: ((input: TelemetryDiagnosticInput) => void) | undefined, source: string): PurgeReport {
+  return {
+    onSkipped: (entryKind: TelemetrySpoolEntryKind) => diagnostics?.({ event: "telemetry_spool_purge_skipped", source, entryKind }),
+    onFailed: (errorCode: string) => diagnostics?.({ event: "telemetry_spool_purge_failed", source, errorCode }),
+  }
 }

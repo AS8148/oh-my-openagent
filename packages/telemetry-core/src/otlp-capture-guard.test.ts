@@ -53,7 +53,7 @@ describe("capture never throws into the caller", () => {
     expect(attributeMap(records[4]?.attributes ?? [])["omo.k"]).toBe(2 ** 62)
   })
 
-  test("#given a log or span attribute outside int64 sent through the providers directly #then emit and end return", async () => {
+  test("#given a log or span attribute outside int64 #then capture and span end return", async () => {
     // given
     const dir = root()
     const { calls, fetch } = recordingFetch()
@@ -61,8 +61,8 @@ describe("capture never throws into the caller", () => {
 
     // when
     const run = (): void => {
-      transport.providers.logger.emit({ eventName: "omo.feature_used", attributes: { n: 1e30 } })
-      transport.providers.tracer.startSpan("omo.turn", { attributes: { n: -1e30, nan: Number.NaN } }).end()
+      capture(transport, "feature_used", { n: 1e30 })
+      transport.tracer.startSpan("omo.turn", { attributes: { n: -1e30, nan: Number.NaN } }).end()
     }
 
     // then

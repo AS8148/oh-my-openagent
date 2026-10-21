@@ -3,6 +3,7 @@ import { rename } from "node:fs/promises"
 import { join } from "node:path"
 
 import { countSpoolRecords, type Signal } from "./otlp-spool-file"
+import { tryLock, tryLockSync, unlock } from "./otlp-spool-lock"
 
 /** Why records were lost before acceptance; `write_failed` = the record never reached the spool. */
 export type DropReason = "evicted" | "expired" | "rejected" | "corrupt" | "write_failed"
@@ -23,57 +24,15 @@ export type SpoolContext = {
   readonly onDrop: (reason: DropReason, records: number) => void
 }
 
-export type SpoolEntry =
-  | { readonly kind: "active"; readonly name: string; readonly signal: Signal; readonly pid: number; readonly bootId: string }
-  | { readonly kind: "batch"; readonly name: string; readonly signal: Signal; readonly batchId: string }
-  | {
-    readonly kind: "sending"
-    readonly name: string
-    readonly signal: Signal
-    readonly batchId: string
-    readonly claimer: string
-    readonly leaseExpiresMs: number
-  }
-  | { readonly kind: "other"; readonly name: string }
-
-const ACTIVE = /^active-(logs|traces)-([0-9]+)-([0-9a-f]{32})\.otlp$/
-const BATCH = /^batch-(logs|traces)-([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12})\.otlp$/
-const SENDING =
-  /^batch-(logs|traces)-([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12})\.sending-([0-9a-f]{32})-([0-9]+)$/
-
-function signalOf(value: string | undefined): Signal {
-  return value === "traces" ? "traces" : "logs"
-}
-
-export function parseSpoolName(name: string): SpoolEntry {
-  const active = ACTIVE.exec(name)
-  if (active !== null) {
-    return { kind: "active", name, signal: signalOf(active[1]), pid: Number(active[2]), bootId: active[3] ?? "" }
-  }
-  const batch = BATCH.exec(name)
-  if (batch !== null) return { kind: "batch", name, signal: signalOf(batch[1]), batchId: batch[2] ?? "" }
-  const sending = SENDING.exec(name)
-  if (sending !== null) {
-    return {
-      kind: "sending",
-      name,
-      signal: signalOf(sending[1]),
-      batchId: sending[2] ?? "",
-      claimer: sending[3] ?? "",
-      leaseExpiresMs: Number(sending[4]),
-    }
-  }
-  return { kind: "other", name }
-}
-
-/** True only for names the spool itself creates (the builders below); the opt-out purge deletes nothing else. */
-export const isSpoolFileName = (name: string): boolean => parseSpoolName(name).kind !== "other"
-
-export const activeName = (signal: Signal, pid: number, bootId: string): string =>
-  `active-${signal}-${pid}-${bootId}.otlp`
-export const batchName = (signal: Signal, batchId: string): string => `batch-${signal}-${batchId}.otlp`
-const sendingName = (signal: Signal, batchId: string, bootId: string, leaseExpiresMs: number): string =>
-  `batch-${signal}-${batchId}.sending-${bootId}-${leaseExpiresMs}`
+export {
+  QUARANTINE_DIR,
+  activeName,
+  batchName,
+  isSpoolFileName,
+  parseSpoolName,
+  type SpoolEntry,
+} from "./otlp-spool-names"
+import { activeName, batchName, parseSpoolName, QUARANTINE_DIR, sendingName, type SpoolEntry } from "./otlp-spool-names"
 
 const HEX = Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0"))
 
@@ -138,7 +97,7 @@ function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT"
 }
 
-/** POSIX rename is atomic: exactly one competitor wins, every other one gets ENOENT. */
+/** A rename of a file only this process moves, or to a name every competitor would choose. */
 function tryRename(dir: string, from: string, to: string): boolean {
   try {
     renameSync(join(dir, from), join(dir, to))
@@ -146,6 +105,16 @@ function tryRename(dir: string, from: string, to: string): boolean {
   } catch (error) {
     if (isMissing(error)) return false
     throw error
+  }
+}
+
+/** A competing move to a name of this process's own: the file's lock picks the one mover (see otlp-spool-lock). */
+function lockedRename(dir: string, from: string, to: string): boolean {
+  if (!tryLockSync(dir, from)) return false
+  try {
+    return tryRename(dir, from, to)
+  } finally {
+    unlock(dir, from)
   }
 }
 
@@ -165,14 +134,19 @@ export function listSpool(dir: string): SpoolEntry[] {
 export async function claimBatch(
   ctx: SpoolContext,
   entry: { readonly signal: Signal; readonly batchId: string },
+  move: (from: string, to: string) => Promise<void> = rename,
 ): Promise<string | null> {
-  const claimed = sendingName(entry.signal, entry.batchId, ctx.bootId, ctx.nowMs() + CLAIM_LEASE_MS)
+  const source = batchName(entry.signal, entry.batchId)
+  if (!(await tryLock(ctx.dir, source))) return null
   try {
-    await rename(join(ctx.dir, batchName(entry.signal, entry.batchId)), join(ctx.dir, claimed))
+    const claimed = sendingName(entry.signal, entry.batchId, ctx.bootId, ctx.nowMs() + CLAIM_LEASE_MS)
+    await move(join(ctx.dir, source), join(ctx.dir, claimed))
     return claimed
   } catch (error) {
     if (isMissing(error)) return null
     throw error
+  } finally {
+    unlock(ctx.dir, source)
   }
 }
 
@@ -180,7 +154,7 @@ export function renewClaim(ctx: SpoolContext, claimed: string): string | null {
   const entry = parseSpoolName(claimed)
   if (entry.kind !== "sending") return null
   const renewed = sendingName(entry.signal, entry.batchId, ctx.bootId, ctx.nowMs() + CLAIM_LEASE_MS)
-  return tryRename(ctx.dir, claimed, renewed) ? renewed : null
+  return lockedRename(ctx.dir, claimed, renewed) ? renewed : null
 }
 
 /** Only the claim's owner releases it, so the owner-only link move is enough (no competitor). */
@@ -211,7 +185,7 @@ function lacksHardLinks(error: unknown): boolean {
  * content, and the pair costs well under a millisecond where a rename can take 50-130 ms (measured
  * in a Linux container VM). A crash between the two leaves the old name as a second link, which the
  * sweep deletes instead of recovering it again. Filesystems without hard links fall back to rename.
- * Competing movers (claims, lease reclaims) keep using rename, whose atomicity picks one winner.
+ * Competing movers (claims, renewals, lease reclaims, dead-owner seals) rename under the file's lock.
  */
 function tryLinkMove(dir: string, from: string, to: string): boolean {
   try {
@@ -235,7 +209,6 @@ export function dropFile(ctx: SpoolContext, name: string, reason: DropReason): v
   if (deleteFile(ctx.dir, name)) ctx.onDrop(reason, records)
 }
 
-export const QUARANTINE_DIR = "quarantine"
 
 /**
  * Corrupt files are kept for inspection but are bounded like everything else: they count toward the
@@ -289,14 +262,23 @@ export function sweepSpool(ctx: SpoolContext): void {
   for (const entry of listSpool(ctx.dir)) {
     if (entry.kind === "sending" && entry.leaseExpiresMs <= now) {
       if ((fileStat(ctx.dir, entry.name)?.links ?? 1) > 1) deleteFile(ctx.dir, entry.name)
-      else tryRename(ctx.dir, entry.name, batchName(entry.signal, entry.batchId))
+      else lockedRename(ctx.dir, entry.name, batchName(entry.signal, entry.batchId))
     } else if (entry.kind === "active" && isDeadOwner(ctx, entry)) {
       const stat = fileStat(ctx.dir, entry.name)
       if (stat !== null && stat.links > 1) {
         deleteFile(ctx.dir, entry.name)
       } else if (stat !== null && now - stat.mtimeMs >= DEAD_OWNER_IDLE_MS) {
-        tryRename(ctx.dir, entry.name, batchName(entry.signal, createBatchId(stat.birthMs)))
+        lockedRename(ctx.dir, entry.name, batchName(entry.signal, createBatchId(stat.birthMs)))
       }
+    } else if (entry.kind === "active" && entry.pid !== ctx.pid) {
+      // A live pid may be a later process that reused it: an active file nobody appended to for the age
+      // limit is abandoned whoever holds the pid now.
+      const stat = fileStat(ctx.dir, entry.name)
+      if (stat !== null && now - stat.mtimeMs > ctx.maxAgeMs) dropFile(ctx, entry.name, "expired")
+    } else if (entry.kind === "lock") {
+      // A lock is held for one rename; one older than a lease belongs to a mover that crashed.
+      const stat = fileStat(ctx.dir, entry.name)
+      if (stat !== null && now - stat.mtimeMs >= CLAIM_LEASE_MS) deleteFile(ctx.dir, entry.name)
     }
   }
   for (const entry of listSpool(ctx.dir)) {

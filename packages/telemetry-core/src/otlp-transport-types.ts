@@ -1,8 +1,9 @@
-import type { TelemetryProviders } from "./otel-providers"
+import type { Tracer } from "@opentelemetry/api"
 import type { InstrumentationScope, OtelClock } from "./otel-time"
 import type { OtlpWireProjection } from "./otlp-config"
 import type { ResourceAttributes } from "./otlp-encode"
 import type { OtlpFetch } from "./otlp-http"
+import type { SpanAllowlist } from "./otlp-wal"
 import type { TelemetryDiagnosticInput, TelemetryEnv, TelemetryTransport, TurnTracing } from "./types"
 
 export type CreateOtlpTelemetryTransportInput = {
@@ -20,6 +21,8 @@ export type CreateOtlpTelemetryTransportInput = {
    * wire key and dropping everything else. There is no default, so a caller cannot ship unlisted properties.
    */
   readonly project: OtlpWireProjection
+  /** Required: the schema artifact's span allowlist, span name -> the attribute keys it may carry. */
+  readonly spans: SpanAllowlist
   readonly consent?: () => boolean
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
   readonly source?: string
@@ -46,7 +49,9 @@ export type CreateOtlpTelemetryTransportInput = {
 
 export type OtlpTelemetryTransport = TelemetryTransport & {
   readonly sampling: { readonly rawTurnRate: 1 }
-  readonly providers: TelemetryProviders
+  /** The only direct API: spans, filtered by `spans`. Log records reach the wire only through `capture`. */
+  readonly tracer: Tracer
+  /** Turn spans for the session adapter, through `tracer` and filtered by `spans`. */
   readonly traces: TurnTracing
   readonly endpoint: string
   readonly ready: Promise<void>
