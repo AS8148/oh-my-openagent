@@ -9,7 +9,6 @@ import { join } from "node:path"
 import {
   engineCaTrustReady,
   ExtraCaCertificatesError,
-  gateFetchOnEngineCaTrust,
   installEngineCaTrust,
   loadSystemStoreOffThread,
   MAX_EXTRA_CA_BYTES,
@@ -150,42 +149,7 @@ describe("the OS store never blocks startup (#10760)", () => {
     expect(env.NODE_USE_SYSTEM_CA).toBe("1")
   })
 
-  test("#given the fetch gate #then the first fetch waits for the store and goes out with it installed", async () => {
-    const { installs, tls } = fakeTls()
-    let answer: (certificates: string[]) => void = () => {}
-    installEngineCaTrust({}, tls as never, { loadSystem: () => new Promise<string[]>((resolve) => (answer = resolve)) })
-    const seen: number[] = []
-    const target = { fetch: (async () => (seen.push(installs.length), new Response("ok"))) as unknown as typeof fetch }
-    gateFetchOnEngineCaTrust(target)
-    const first = target.fetch("https://example.invalid/")
-    answer(["S"])
-    await first
-    await target.fetch("https://example.invalid/")
-    expect(seen).toEqual([2, 2])
-  })
-
   // Regression guard for #10219's users: a company proxy whose CA lives only in the OS store.
-  test("#given a store that never answers #then a certificate failure names the slow store and the escape hatch", async () => {
-    const { tls } = fakeTls()
-    installEngineCaTrust({}, tls as never, { loadSystem: () => new Promise<string[]>(() => {}) })
-    const refused = Object.assign(new Error("unable to get local issuer certificate"), { code: "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" })
-    const target = { fetch: (async () => { throw refused }) as unknown as typeof fetch }
-    gateFetchOnEngineCaTrust(target, 30)
-    const error = await target.fetch("https://proxy.example/").then(() => undefined, (cause: unknown) => cause as Error)
-    expect(error?.message).toContain("system certificate store was still not answering")
-    expect(error?.message).toContain("NODE_EXTRA_CA_CERTS")
-    expect((error as Error & { cause?: unknown }).cause).toBe(refused)
-  })
-
-  test("#given a store that answered #then a certificate failure is passed through unchanged", async () => {
-    const { tls } = fakeTls()
-    installEngineCaTrust({}, tls as never, { loadSystem: async () => ["S"] })
-    const refused = Object.assign(new Error("self signed certificate"), { code: "SELF_SIGNED_CERT_IN_CHAIN" })
-    const target = { fetch: (async () => { throw refused }) as unknown as typeof fetch }
-    gateFetchOnEngineCaTrust(target, 1_000)
-    expect(await target.fetch("https://x.example/").then(() => undefined, (cause: unknown) => cause)).toBe(refused)
-  })
-
   test("#given the OS-store worker never returns #then the process still exits promptly", () => {
     const dir = mkdtempSync(join(tmpdir(), "omo-ca-exit-"))
     try {
@@ -251,6 +215,7 @@ describe("compiled binary", () => {
   let dir = ""
   let server: Server
   let port = 0
+  let caFile = ""
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "omo-ca-trust-"))
@@ -261,6 +226,15 @@ describe("compiled binary", () => {
 import { request } from "node:https"
 import { spawnSync } from "node:child_process"
 const [mode, port] = process.argv.slice(2)
+if (mode === "late") {
+  // The store answers 300 ms after start with the only CA that signs the test server: the
+  // "company CA lives only in the OS store" case. compile-entry awaits the store before any engine code.
+  const ca = require("node:fs").readFileSync(process.argv[5], "utf8")
+  installEngineCaTrust(process.env, undefined, { loadSystem: () => new Promise((resolve) => setTimeout(() => resolve([ca]), 300)) })
+  await engineCaTrustReady()
+  await new Promise<void>((done) => request("https://localhost:" + port + "/", (r) => { r.resume(); console.log("ok " + r.statusCode); done() }).on("error", (e: NodeJS.ErrnoException) => { console.log("error " + e.code); done() }).end())
+  process.exit(0)
+}
 if (mode === "install") {
   try { installEngineCaTrust() } catch (error) { console.log("refused " + (error as Error).name); process.exit(3) }
 }
@@ -292,21 +266,30 @@ request("https://localhost:" + port + "/", (r) => { r.resume(); console.log("ok 
     server = createServer({ key: fixture("leaf.key"), cert: fixture("leaf.pem") }, (_req, res) => res.end("ok"))
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
     port = (server.address() as AddressInfo).port
+    caFile = join(dir, "store-only-ca.pem")
+    writeFileSync(caFile, fixture("ca.pem"))
   })
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
     rmSync(dir, { recursive: true, force: true })
   })
 
-  const probe = (mode: string, env: NodeJS.ProcessEnv) =>
+  const probe = (mode: string, env: NodeJS.ProcessEnv, extra: readonly string[] = []) =>
     new Promise<string>((resolve) => {
-      const child = spawn(join(dir, "probe"), [mode, String(port)], {
+      const child = spawn(join(dir, "probe"), [mode, String(port), ...extra], {
         env: { ...withoutCaVariables(process.env), ...env },
       })
       let out = ""
       child.stdout.on("data", (chunk) => (out += chunk))
       child.on("close", () => resolve(out.trim()))
     })
+
+  // #10760: a CA that lives only in the OS store and answers late is trusted by the first node:https
+  // request, because startup waits for the store at the one choke point. (Bun's fetch and WebSocket
+  // never read the runtime trust set; see compiled-ca-trust.ts engineCaTrustReady.)
+  test("#given the store-only CA arrives late #then a node:https request made right after start trusts it", async () => {
+    expect(await probe("late", {}, ["https", caFile])).toBe("ok 200")
+  }, 30_000)
 
   test("#given the private CA only in OMO_EXTRA_CA_CERTIFICATES #then a plain compiled binary rejects it", async () => {
     expect(await probe("none", { OMO_EXTRA_CA_CERTIFICATES: fixture("ca.pem") })).toBe("error UNABLE_TO_VERIFY_LEAF_SIGNATURE")

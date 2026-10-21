@@ -36,7 +36,7 @@ import { runLoroSmoke } from "./loro-smoke"
 import { spawnSync } from "node:child_process"
 import { compiledRollbackMigration } from "./compiled-rollback"
 import { refuseRetiredCommand } from "./bin/lib/retired-command.js"
-import { ExtraCaCertificatesError, gateFetchOnEngineCaTrust, installEngineCaTrust } from "./compiled-ca-trust"
+import { engineCaTrustReady, ExtraCaCertificatesError, installEngineCaTrust } from "./compiled-ca-trust"
 
 // The engine is imported via a RELATIVE string LITERAL, inlined at both import
 // sites, and both properties are load-bearing:
@@ -275,10 +275,13 @@ async function main(): Promise<void> {
     // `--version` / `--help` never touch the OS store; every other start reads it off the main thread
     // and only the first outbound request waits for it, bounded (#10760).
     const argv = process.argv.slice(2)
-    installEngineCaTrust(process.env, undefined, {
-      skipSystem: argv.length === 1 && (argv[0] === "--version" || argv[0] === "--help"),
-    })
-    gateFetchOnEngineCaTrust()
+    const skipSystem = argv.length === 1 && (argv[0] === "--version" || argv[0] === "--help")
+    installEngineCaTrust(process.env, undefined, { skipSystem })
+    // The one choke point: no engine code runs before the store answers or the bound expires, so
+    // every client that reads the runtime trust set starts with it. The wait is async (nothing is
+    // blocked); it costs the store's own read time (tens of ms), and at most the bound on a machine
+    // whose store never answers.
+    if (!skipSystem) await engineCaTrustReady()
   } catch (error) {
     if (!(error instanceof ExtraCaCertificatesError)) throw error
     if (await answerUnderRefusedTrust(process.argv.slice(2))) {

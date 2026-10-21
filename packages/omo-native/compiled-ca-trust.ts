@@ -133,8 +133,12 @@ export function installEngineCaTrust(
 let slowStoreWarned = false
 
 /**
- * Waits for the OS store at most `budgetMs`, so the first outbound request trusts it on every machine
- * whose store answers, and a machine whose store never answers is held up once, not forever.
+ * Waits for the OS store at most `budgetMs`. `compile-entry` awaits this before any engine code runs,
+ * so every client that reads the runtime trust set (node:https / node:tls) starts with the store on
+ * every machine whose store answers, and a machine whose store never answers is held up once, by the
+ * bound, not forever. Bun's `fetch` and `WebSocket` never read `setDefaultCACertificates` (they take
+ * only what `NODE_EXTRA_CA_CERTS` / `NODE_USE_SYSTEM_CA` say at process start), so neither this wait
+ * nor #10219's install changes what they trust.
  */
 export async function engineCaTrustReady(
   budgetMs = SYSTEM_STORE_BUDGET_MS,
@@ -152,44 +156,10 @@ export async function engineCaTrustReady(
   if (outcome === "timed-out" && !slowStoreWarned) {
     slowStoreWarned = true
     warn(
-      `the system certificate store did not answer within ${budgetMs / 1000} s; continuing with the bundled certificates and any NODE_EXTRA_CA_CERTS / ${ENGINE_EXTRA_CA_ENV}. Its certificates are added when it answers.`,
+      `the system certificate store did not answer within ${budgetMs / 1000} s; starting with the bundled certificates and any NODE_EXTRA_CA_CERTS / ${ENGINE_EXTRA_CA_ENV}, and adding the store's certificates when it answers. If your network needs a certificate from the system store (a company proxy, for example), set NODE_EXTRA_CA_CERTS to a PEM file with it.`,
     )
   }
   return outcome
-}
-
-const CERT_ERROR = /CERT|UNABLE_TO_(?:GET_ISSUER|VERIFY)|SELF_SIGNED|certificate/i
-
-/** Error text for a request refused while the OS store was still unread: names the store and the escape hatch. */
-export function slowStoreCertificateError(cause: unknown): Error {
-  return new Error(
-    `TLS certificate check failed while the system certificate store was still not answering, so only the bundled certificates and any NODE_EXTRA_CA_CERTS / ${ENGINE_EXTRA_CA_ENV} were trusted. If your network needs a certificate from the system store (a company proxy, for example), set NODE_EXTRA_CA_CERTS to a PEM file with it and start omo again.`,
-    { cause },
-  )
-}
-
-/**
- * The first `fetch` waits (bounded) for the OS store; every later one goes straight through. A
- * certificate error while the store is still unread is reported as that, never as a bare
- * certificate error: a company proxy whose CA lives only in the OS store (why #10219 added it)
- * needs to know the store did not answer and how to supply the CA instead.
- */
-export function gateFetchOnEngineCaTrust(target: { fetch: typeof fetch } = globalThis, budgetMs = SYSTEM_STORE_BUDGET_MS): void {
-  const original = target.fetch
-  let ready: Promise<SystemStoreOutcome> | undefined
-  const gated = (async (...args: Parameters<typeof fetch>) => {
-    ready ??= engineCaTrustReady(budgetMs)
-    await ready
-    try {
-      return await original(...args)
-    } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code
-      const text = `${typeof code === "string" ? code : ""} ${error instanceof Error ? error.message : String(error)}`
-      if (!systemSettled && CERT_ERROR.test(text)) throw slowStoreCertificateError(error)
-      throw error
-    }
-  }) as typeof fetch
-  target.fetch = Object.assign(gated, original)
 }
 
 // A Worker blocked inside the OS call cannot hold the process open (`unref`), and its result is
