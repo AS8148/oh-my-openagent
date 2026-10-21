@@ -23,6 +23,11 @@ import { createOnboardingMemoryTools, type TuiOnboardingScan } from "./tui-memor
 export interface OnboardingComponentDependencies {
   claimOnboarding(stateDir: string, claimOwnerSeams?: ClaimOwnerSeams): boolean | Promise<boolean>
   isOnboardingComplete(stateDir: string): boolean
+  /**
+   * Read-only: whether `claimOnboarding` would take the claim now (a dead owner's claim is taken over).
+   * A preview asks this instead of claiming; omitted, it is `!isOnboardingComplete` (the plain claim's rule).
+   */
+  isOnboardingClaimable?(stateDir: string, claimOwnerSeams?: ClaimOwnerSeams): boolean | Promise<boolean>
   releaseOnboarding(stateDir: string): void
   /** Records a finished onboarding; omitted, a finished TUI turn records nothing (test fakes). */
   completeOnboarding?(stateDir: string): void
@@ -60,6 +65,7 @@ const defaultDependencies: OnboardingComponentDependencies = {
   claimOnboarding: claimWithOwner,
   completeOnboarding,
   isOnboardingComplete,
+  isOnboardingClaimable: claimableWithOwner,
   releaseOnboarding,
   resetOnboarding,
 }
@@ -76,6 +82,19 @@ async function claimWithOwner(stateDir: string, seams?: ClaimOwnerSeams): Promis
     return claimOnboarding(stateDir)
   }
   return runtime.claimOnboardingOwned(stateDir, seams)
+}
+
+// The same decision as `claimWithOwner`, read without writing: no claim, or one whose owner is gone.
+export async function claimableWithOwner(stateDir: string, seams?: ClaimOwnerSeams): Promise<boolean> {
+  if (isOnboardingCompletionRecorded(stateDir)) return false
+  let runtime
+  try {
+    runtime = await loadOnboardingScanRuntime()
+  } catch {
+    return !isOnboardingComplete(stateDir)
+  }
+  const state = await runtime.readOnboardingState(stateDir, seams)
+  return state.completedAt === null && !state.inProgress
 }
 
 export function isSessionStartEvent(v: unknown): v is SessionStartEvent {
@@ -225,7 +244,9 @@ export function createOnboardingComponent(
         const preview = event.preview === true
         const forced = force()
         if (preview) {
-          if (pending !== undefined || claiming || (!forced && dependencies.isOnboardingComplete(stateDir))) return
+          if (pending !== undefined || claiming) return
+          if (!forced && !(await (dependencies.isOnboardingClaimable?.(stateDir, dependencies.claimOwnerSeams)
+            ?? !dependencies.isOnboardingComplete(stateDir)))) return
         } else if (!(await claim(ctx, forced))) return
         if (ctx.sessionManager.getBranch().some((entry) =>
           entry.type === "custom_message" && entry.customType === "omo-onboarding:context")) return

@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createOnboardingHarness } from "./test-harness"
 import { claimOnboarding, isOnboardingComplete, releaseOnboarding } from "./state"
-import { createOnboardingComponent } from "./component"
+import { claimOnboardingOwned } from "./claim-owner"
+import { claimableWithOwner, createOnboardingComponent } from "./component"
 
 const dirs: string[] = []
 afterEach(() => {
@@ -55,3 +56,35 @@ for (const forced of [false, true]) {
     expect(await h.prompt()).toEqual([undefined])
   })
 }
+
+test("#given a claim whose owner died #when previewed #then it adds what the real turn adds after taking the claim over", async () => {
+  // given
+  const dir = mkdtempSync(join(tmpdir(), "onboard-preview-stale-"))
+  dirs.push(dir)
+  const deadOwner = { pid: 2_147_483_000, processStart: null }
+  writeFileSync(join(dir, "onboarding-completed"), JSON.stringify({ claimedAt: new Date().toISOString(), version: 2, owner: deadOwner }))
+  const claimOwnerSeams = { getPidLiveness: () => "dead" as const }
+  let claims = 0
+  const component = createOnboardingComponent({
+    claimOnboarding: (stateDir, seams) => { claims += 1; return claimOnboardingOwned(stateDir, seams) },
+    isOnboardingComplete: () => isOnboardingComplete(dir),
+    isOnboardingClaimable: claimableWithOwner,
+    releaseOnboarding: () => releaseOnboarding(dir),
+    claimOwnerSeams,
+    stateDir: dir,
+    scan: async () => ({ scanId: "stale", digests: [], projectRoots: new Set<string>(), context: "Scan rows: 1 sign-in.", inventory: "1 sign-in" }),
+    sessionHistory: async () => undefined,
+  })
+  const h = createOnboardingHarness(dir, "stale", "tui", component)
+  await h.start()
+  const marker = readFileSync(join(dir, "onboarding-completed"), "utf8")
+  // when
+  const preview = await h.prompt({ preview: true })
+  // then
+  expect(readFileSync(join(dir, "onboarding-completed"), "utf8")).toBe(marker)
+  expect(claims).toBe(0)
+  const real = await h.prompt()
+  expect(claims).toBe(1)
+  expect(JSON.stringify(real)).toContain("1 sign-in")
+  expect(preview).toEqual(real)
+})

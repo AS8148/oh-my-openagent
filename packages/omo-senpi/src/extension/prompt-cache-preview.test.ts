@@ -3,7 +3,7 @@ import type { ExtensionContext } from "@code-yeongyu/senpi"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DefaultResourceLoader, ModelRegistry, ModelRuntime, SessionManager, SettingsManager, createAgentSession } from "../senpi-test-runtime"
+import { DefaultResourceLoader, ModelRegistry, ModelRuntime, SessionManager, SettingsManager, createAgentSession, getMcpService } from "../senpi-test-runtime"
 import omoExtension from "./index"
 
 test("#given a real OmO session #when the engine builds its prewarm prefix #then it is ready rather than skipped by unsafe handlers", async () => {
@@ -19,8 +19,7 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
   mkdirSync(sweepStamps)
   for (const stamp of ["lsp-proxy-sweep.stamp", "lsp-daemon-sweep.stamp"]) writeFileSync(join(sweepStamps, stamp), "")
   const cwd = process.cwd()
-  // No deferred MCP dispose: the quit below closes the MCP service now, not 15 s later inside the removed HOME.
-  const overrides = { HOME: root, OMO_CODING_AGENT_DIR: agentDir, SENPI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_DIR: agentDir, OMO_SENPI_DISABLE_POSTHOG: "1", SENPI_MCP_DEFERRED_DISPOSE_TIMEOUT_MS: "0" }
+  const overrides = { HOME: root, OMO_CODING_AGENT_DIR: agentDir, SENPI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_DIR: agentDir, OMO_SENPI_DISABLE_POSTHOG: "1" }
   const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]))
   Object.assign(process.env, overrides)
   process.chdir(root)
@@ -45,6 +44,7 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
     }],
   })
   let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined
+  let mcp: ReturnType<typeof getMcpService> | undefined
   try {
     await loader.reload()
     expect(loader.getExtensions().errors).toEqual([])
@@ -56,9 +56,21 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
     }))
     await session.bindExtensions({ mode: "print" })
     if (context?.getPromptCachePrefixRequest === undefined) throw new Error("session_start did not expose the engine prefix builder")
+    // Binding the session, not the preview, starts the extension's MCP servers (ast-grep connects in the
+    // background past session_start and logs into this HOME). Settle that before the preview so anything
+    // the preview started would show, and so no connect is still writing when the HOME is removed.
+    const service = getMcpService()
+    mcp = service
+    expect(await service.whenAttachSettled(20_000)).toBe("settled")
+    const servers = () => service.getServerSnapshots().map(({ name, lifecycleState, generation, pid }) => ({ name, lifecycleState, generation, pid }))
+    const serversBefore = servers()
+    const connectionsBefore = service.getSnapshot().connectionCount
     // when
     const result = await context.getPromptCachePrefixRequest({ signal: AbortSignal.timeout(10_000) })
     // then
+    expect(servers()).toEqual(serversBefore)
+    expect(service.getSnapshot().connectionCount).toBe(connectionsBefore)
+    expect(await service.whenAttachSettled(0)).toBe("settled")
     console.info("OMO_PREWARM_PREFIX", JSON.stringify(result.status === "ready" ? { status: result.status } : result))
     expect(result.status).toBe("ready")
     if (result.status === "ready") {
@@ -68,6 +80,9 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
   } finally {
     await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" })
     await session?.dispose()
+    // The quit disposes the MCP service and awaits every connection's close; with no connect pending
+    // (settled above), nothing the session started writes into the HOME after this point.
+    if (mcp !== undefined) expect(mcp.getSnapshot().disposed).toBe(true)
     process.chdir(cwd)
     for (const [key, value] of previous) {
       if (value === undefined) delete process.env[key]
