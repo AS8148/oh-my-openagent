@@ -1,4 +1,5 @@
-import type { ResolvedModelRecord, TaskRecord } from "../state"
+import { isFallbackHandoff } from "../lifecycle/fallback-handoff"
+import type { EffectiveModelRecord, ResolvedModelRecord, TaskRecord } from "../state"
 import type { ManagerStartSpec, ResolvedChildPlan } from "./types"
 
 export type ParentRungPlan = {
@@ -32,16 +33,27 @@ export function isParentModelRung(record: Pick<TaskRecord, "parent_model">, mode
 }
 
 /**
- * The parent-model note as of the child's CURRENT route: shown only while the child's effective model is the
- * parent's (or before any model observation), so a revert or an operator switch never leaves it stale.
+ * The parent-model note as of the child's CURRENT route. It reads as ran once the child is observed on the
+ * parent's model (or before any model observation). While the parent's model is SELECTED but no child has
+ * reported it yet (#10797) it carries a phase instead: `switching` while the handoff is in flight,
+ * `not_started` once the task ended without it. A revert or an operator switch drops it.
  */
-export function activeParentModelFallback(
-  record: Pick<TaskRecord, "parent_model" | "parent_model_fallback" | "effective_model">,
-): TaskRecord["parent_model_fallback"] {
+export function activeParentModelFallback(record: TaskRecord): TaskRecord["parent_model_fallback"] {
   const fallback = record.parent_model_fallback
-  if (fallback === undefined || record.effective_model === undefined) return fallback
-  return isParentModelRung(record, record.effective_model) ? fallback : undefined
+  const observed = record.effective_model
+  if (fallback === undefined || observed === undefined || isParentModelRung(record, observed)) return fallback
+  const selected = record.resolved_model
+  if (selected === undefined || !isParentModelRung(record, selected) || movedAway(observed)) return undefined
+  const live = record.status === "running" || record.status === "pending" || isFallbackHandoff(record)
+  return { ...fallback, phase: live ? "switching" : "not_started" }
 }
+
+/** An observation that came after the hop (a revert, an operator or client switch) supersedes the note. */
+function movedAway(observed: EffectiveModelRecord): boolean {
+  return observed.switched_by_operator === true || CHANGES_AFTER_THE_HOP.has(observed.source)
+}
+
+const CHANGES_AFTER_THE_HOP: ReadonlySet<EffectiveModelRecord["source"]> = new Set(["set", "cycle", "restore", "fallback-revert"])
 
 function parseParentModel(value: string, source: ResolvedModelRecord["source"]): ResolvedModelRecord | undefined {
   const slash = value.indexOf("/")
