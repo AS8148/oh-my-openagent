@@ -5,19 +5,21 @@ import { describe, expect, it } from "bun:test"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import type { ComponentContext } from "../../extension/types"
 import { answer, editResult, type FixtureEntry, passingTest, userInput } from "./entries.test-support"
-import { CLAIM_RECEIPT_NUDGE_FLAG, createClaimReceiptComponent } from "./index"
+import { CLAIM_RECEIPT_NUDGE_FLAG, type ClaimReceiptComponentOptions, createClaimReceiptComponent } from "./index"
+import { createClaimReceiptRuntimeLoader } from "./runtime-loader"
 import { NUDGE_MESSAGE_TYPE, VERDICT_ENTRY_TYPE } from "./verdict"
 
 type Draft = { readonly type: string; readonly customType: string; readonly data?: unknown; readonly content?: unknown; readonly display?: boolean }
 
-function setup(env: Record<string, string> = {}, nudge = true) {
+function setup(env: Record<string, string> = {}, nudge = true, options: ClaimReceiptComponentOptions = {}) {
   const pi = new FakeExtensionAPI()
   if (nudge) pi.setFlag(CLAIM_RECEIPT_NUDGE_FLAG, true)
+  const warnings: string[] = []
   const ctx: ComponentContext = {
-    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    logger: { debug() {}, info() {}, warn: (message: string) => warnings.push(message), error() {} },
     config: { getFlag: (name) => pi.getFlag(name) },
   } as ComponentContext
-  createClaimReceiptComponent(env).register(pi, ctx)
+  createClaimReceiptComponent(env, options).register(pi, ctx)
   let branch: FixtureEntry[] = []
   const eventCtx = { sessionManager: { getSessionId: () => "s1", getBranch: () => branch } }
   const finish = async (entries: FixtureEntry[], agentEnd: Record<string, unknown> = {}) => {
@@ -28,7 +30,7 @@ function setup(env: Record<string, string> = {}, nudge = true) {
   }
   const input = (source: string) => pi.dispatch("input", { type: "input", text: "go", source }, eventCtx)
   const toolCall = (payload: Record<string, unknown>) => pi.dispatch("tool_call", payload, eventCtx)
-  return { pi, finish, input, toolCall }
+  return { pi, finish, input, toolCall, warnings }
 }
 
 const unsupported = (): FixtureEntry[] => [userInput("fix"), ...editResult("e1", "src/a.ts"), answer("All tests pass.")]
@@ -71,6 +73,24 @@ describe("claim-receipt component", () => {
       expect(supported?.entries?.map((draft) => draft.customType)).toEqual(["other", VERDICT_ENTRY_TYPE])
       expect(supported?.entries?.[1]?.data).toMatchObject({ flagged: false, nudged: false })
       expect(await finish([userInput("hi"), answer("Here is the summary you asked for.")])).toBeUndefined()
+    })
+  })
+
+  describe("#given the verdict sidecar fails to load once", () => {
+    it("#then that answer settles with no verdict and a warning, and the next answer loads it again", async () => {
+      let imports = 0
+      const loadRuntime = createClaimReceiptRuntimeLoader(async () => {
+        imports += 1
+        if (imports === 1) throw new Error("Cannot find module '#omo-claim-receipt-runtime'")
+        return import("./runtime")
+      })
+      const { finish, input, warnings } = setup({}, true, { loadRuntime })
+      await input("interactive")
+      expect(await finish(unsupported())).toBeUndefined()
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain("extensions/omo-claim-receipt.js")
+      expect((await finish(unsupported()))?.entries?.map((draft) => draft.customType)).toEqual(["other", VERDICT_ENTRY_TYPE, NUDGE_MESSAGE_TYPE])
+      expect(imports).toBe(2)
     })
   })
 

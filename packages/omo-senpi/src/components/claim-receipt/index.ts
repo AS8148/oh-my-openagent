@@ -1,8 +1,7 @@
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
-import { classifyClaims } from "./classify"
-import { buildTimeline, contentText } from "./evidence"
-import { type ClaimVerdict, isFlagged, matchClaims } from "./match"
+import type { ClaimVerdict } from "./match"
+import { type ClaimReceiptRuntimeLoader, claimReceiptRuntimeLoadFailure, loadClaimReceiptRuntime } from "./runtime-loader"
 import { GATE_FLAGS_TAG, gateFlagsBlock, NUDGE_MESSAGE_TYPE, nudgeText, VERDICT_ENTRY_TYPE, type VerdictRecord } from "./verdict"
 
 export const CLAIM_RECEIPT_NUDGE_FLAG = "omo-senpi-claim-receipt-nudge"
@@ -39,7 +38,15 @@ function lastAssistantIndex(branch: readonly unknown[]): number {
   return -1
 }
 
-export function createClaimReceiptComponent(env: Readonly<Record<string, string | undefined>> = process.env): OmoSenpiComponent {
+export interface ClaimReceiptComponentOptions {
+  readonly loadRuntime?: ClaimReceiptRuntimeLoader
+}
+
+export function createClaimReceiptComponent(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  options: ClaimReceiptComponentOptions = {},
+): OmoSenpiComponent {
+  const loadRuntime = options.loadRuntime ?? loadClaimReceiptRuntime
   return {
     name: "claim-receipt",
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
@@ -77,7 +84,7 @@ export function createClaimReceiptComponent(env: Readonly<Record<string, string 
         stateOf(eventCtx).agentEnd = payload
       })
 
-      pi.on("agent_before_settle", (payload: unknown, eventCtx: unknown) => {
+      pi.on("agent_before_settle", async (payload: unknown, eventCtx: unknown) => {
         if (!isRecord(payload) || payload["outcome"] !== "completed") return undefined
         if (MEMORY_CHILD_SENTINELS.some((name) => env[name] === "1")) return undefined
         const state = stateOf(eventCtx)
@@ -91,11 +98,16 @@ export function createClaimReceiptComponent(env: Readonly<Record<string, string 
         if (!isRecord(answerEntry) || !isRecord(answerEntry["message"])) return undefined
         const content = answerEntry["message"]["content"]
         if (Array.isArray(content) && content.some((part) => isRecord(part) && part["type"] === "toolCall")) return undefined
-        const claims = classifyClaims(contentText(content))
-        if (claims.length === 0) return undefined
-
-        const verdicts = matchClaims(buildTimeline(branch), claims, answerAt)
-        const flagged = verdicts.filter(isFlagged)
+        let runtime: Awaited<ReturnType<ClaimReceiptRuntimeLoader>>
+        try {
+          runtime = await loadRuntime()
+        } catch (error) {
+          ctx.logger.warn(claimReceiptRuntimeLoadFailure(error))
+          return undefined
+        }
+        const evaluated = runtime.evaluateAnswer(branch, answerAt, content)
+        if (evaluated === undefined) return undefined
+        const { verdicts, flagged } = evaluated
         const nudged = flagged.length > 0 && state.nudgedEpoch !== state.epoch && surfaced()
         if (nudged) state.nudgedEpoch = state.epoch
         state.flagged = [...state.flagged, ...flagged].slice(-MAX_GATE_FLAGS)
