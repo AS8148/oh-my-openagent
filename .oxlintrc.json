@@ -7,7 +7,7 @@
     "unicorn"
   ],
   "jsPlugins": [
-    "./script/oxlint/no-enum.ts"
+    "./script/oxlint/biome-ports.ts"
   ],
   "categories": {},
   "rules": {
@@ -48,7 +48,7 @@
     "eslint/no-func-assign": "error",
     "eslint/no-global-assign": "error",
     "eslint/no-import-assign": "error",
-    "eslint/no-inner-declarations": "off",
+    "eslint/no-inner-declarations": "error",
     "eslint/no-irregular-whitespace": "error",
     "eslint/no-label-var": "error",
     "eslint/no-labels": [
@@ -65,7 +65,7 @@
     "eslint/no-obj-calls": "error",
     "eslint/no-proto": "error",
     "eslint/no-prototype-builtins": "error",
-    "eslint/no-redeclare": "off",
+    "eslint/no-redeclare": "error",
     "eslint/no-regex-spaces": "error",
     "eslint/no-script-url": "error",
     "eslint/no-self-assign": "error",
@@ -269,7 +269,9 @@
     ],
     "omo/no-enum": "error",
     "typescript/consistent-type-exports": "error",
-    "typescript/no-invalid-void-type": "error"
+    "typescript/no-invalid-void-type": "error",
+    "omo/no-implicit-any-let": "error",
+    "omo/no-string-case-mismatch": "error"
   },
   "ignorePatterns": [
     "**/node_modules/**",
