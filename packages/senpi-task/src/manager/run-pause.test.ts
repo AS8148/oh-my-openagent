@@ -7,6 +7,33 @@ import { baseSpec, categoryPlanner, cleanupProjects, FakeRunner, makeManager, se
 afterEach(cleanupProjects)
 
 describe("manager run pause capacity and turn ownership", () => {
+  test("#given a refused parent pause #when the child completes during the request #then ordinary completion is not trapped behind a pause intent", async () => {
+    const cwd = tempProject()
+    const store = createTaskRecordStore({ project_dir: cwd })
+    const runner = new FakeRunner()
+    const refusal = Promise.withResolvers<{ readonly refused: "wrong_parent" }>()
+    const manager = createTaskManager({
+      cwd, store, config: settings(), planner: categoryPlanner(),
+      runners: { "in-process": runner, process: runner },
+      childPausePort: {
+        pauseForRun: () => refusal.promise,
+        resumeTurn: async () => ({ otherHoldLive: true }),
+        holdInput: async () => ({ kind: "held", entryId: "guide", duplicate: false }),
+      },
+    })
+    const started = await manager.start(baseSpec())
+    if (started.kind !== "started") throw new Error("expected started")
+    const terminal = manager.waitFor(started.task_id)
+    const pausing = manager.pauseTask(started.task_id, {
+      parentSessionId: "wrong-parent", parentPauseSeq: 1, runRef: { kind: "task", id: started.task_id },
+    })
+    runner.handles.get(started.task_id)?.settle({ status: "completed", finalResponse: "finished normally" })
+    refusal.resolve({ refused: "wrong_parent" })
+    expect(await pausing).toEqual({ refused: "wrong_parent" })
+    expect(manager.get(started.task_id)?.status).not.toBe("paused")
+    expect(await terminal).toMatchObject({ status: "completed", final_response: "finished normally" })
+  })
+
   test("#given a paused child #when cancelled through the manager #then it becomes terminal and releases every lease", async () => {
     const { manager, store } = makeManager()
     const started = await manager.start(baseSpec())
@@ -34,7 +61,7 @@ describe("manager run pause capacity and turn ownership", () => {
         resumes += 1
         return { turnId: "new-turn", outcome: Promise.resolve({ status: "completed", finalResponse: "new result" }) }
       },
-      holdInput: async () => ({ entryId: "held", duplicate: false }),
+      holdInput: async () => ({ kind: "held", entryId: "held", duplicate: false }),
     }
     const manager = createTaskManager({
       store, cwd, config: settings(), planner: categoryPlanner(),
@@ -43,9 +70,10 @@ describe("manager run pause capacity and turn ownership", () => {
     const result = await manager.start(baseSpec())
     if (result.kind !== "started") throw new Error("expected started")
     const before = manager.get(result.task_id)
-    const owner = { parentSessionId: "parent-1", parentPauseSeq: 1, runRef: { kind: "task" as const, taskId: result.task_id } }
+    const owner = { parentSessionId: "parent-1", parentPauseSeq: 1, runRef: { kind: "task" as const, id: result.task_id } }
     expect(typeof manager.pauseTask).toBe("function")
     const ack = await manager.pauseTask(result.task_id, owner)
+    if ("refused" in ack) throw new Error("expected the task parent to own this child")
     expect(ack.childSeq).toBe(9)
     expect(manager.get(result.task_id)?.status).toBe("paused")
     expect(manager.concurrency?.leaseState(result.task_id, 0)).toBe("parked")
@@ -67,7 +95,7 @@ describe("manager run pause capacity and turn ownership", () => {
         return { childSeq: 8 }
       },
       resumeTurn: async () => ({ otherHoldLive: true, childSeq: 9 }),
-      holdInput: async () => ({ entryId: "held", duplicate: false }),
+      holdInput: async () => ({ kind: "held", entryId: "held", duplicate: false }),
     }
     const manager = createTaskManager({
       store, cwd, config: settings(), planner: categoryPlanner(),
@@ -75,7 +103,7 @@ describe("manager run pause capacity and turn ownership", () => {
     })
     const result = await manager.start(baseSpec())
     if (result.kind !== "started") throw new Error("expected started")
-    const owner = { parentSessionId: "parent-1", parentPauseSeq: 1, runRef: { kind: "task" as const, taskId: result.task_id } }
+    const owner = { parentSessionId: "parent-1", parentPauseSeq: 1, runRef: { kind: "task" as const, id: result.task_id } }
     await manager.pauseTask(result.task_id, owner)
     expect(await manager.resumePausedTask(result.task_id, { ...owner, resumeId: "resume-1", childSeqCutoff: 8 }))
       .toEqual({ otherHoldLive: true, childSeq: 9 })

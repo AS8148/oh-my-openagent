@@ -10,7 +10,7 @@ afterEach(cleanupProjects)
 function participant(key: string, sequence: number, phase: "pre_grant" | "parked"): PauseParticipant {
   return {
     key, kind: phase === "parked" ? "task" : "held_admission",
-    taskId: key, runEpoch: 0, runRef: { kind: "task", taskId: key },
+    taskId: key, runEpoch: 0, runRef: { kind: "task", id: key },
     admission: { model: "test/model", laneKey: "test/model", sequence, phase },
     state: "pending", at: new Date(0).toISOString(),
   }
@@ -41,7 +41,7 @@ describe("durable parent pause participant ledger", () => {
     const barrier = new AdmissionBarrier()
     const restored = new PauseRegistry(dir, barrier)
     restored.restore("root", { pauseSeq: 1 })
-    expect(barrier.enter("root", { key: "late", runRef: { kind: "task", taskId: "late" } }).kind).toBe("held")
+    expect(barrier.enter("root", { key: "late", runRef: { kind: "task", id: "late" } }).kind).toBe("held")
     expect(restored.orderedAdmissions("root").map(entry => entry.key))
       .toEqual(["parked-first", "parked-later", "queued-oldest"])
   })

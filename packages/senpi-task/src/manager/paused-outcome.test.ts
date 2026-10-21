@@ -23,6 +23,7 @@ describe("pause intent outcome routing", () => {
     let parked = 0
     let released = 0
     let terminals = 0
+    const pauseAcknowledged = Promise.resolve()
     const ports = {
       store, now: () => 0,
       liveHandle: () => fake.handle,
@@ -34,7 +35,7 @@ describe("pause intent outcome routing", () => {
       settleWaiters: () => { terminals += 1; routed.resolve() },
       tryRuntimeFallback: async () => { fallback += 1; return false },
       settleIsolation: async () => { isolation += 1 },
-      pauseSettlement: () => Promise.resolve(),
+      pauseSettlement: () => pauseAcknowledged,
     }
     const tracker = createOutcomeTracker(ports)
     tracker.trackOutcome(draft.task_id, fake.handle, "test/model", draft.notification.run_epoch)

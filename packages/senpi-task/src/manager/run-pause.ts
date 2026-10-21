@@ -1,4 +1,4 @@
-import type { ChildPausePort, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
+import type { ChildPausePort, EngineInheritReceipt, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
 import type { TaskRecordStore } from "../store"
 import type { ManagedChildHandle } from "./child-handle"
 import { TaskConcurrency, type ParkedLease } from "./concurrency"
@@ -10,10 +10,10 @@ export type ResumeTaskRequest = RunPauseOwner & {
 }
 export type ResumeTaskResult =
   | { readonly turnId: string }
-  | { readonly otherHoldLive: true; readonly childSeq: number }
+  | { readonly otherHoldLive: true; readonly childSeq?: number }
 
 export type TaskPauseMethods = {
-  pauseTask(taskId: string, owner: RunPauseOwner): Promise<{ readonly childSeq: number }>
+  pauseTask(taskId: string, owner: RunPauseOwner): Promise<EngineInheritReceipt>
   resumePausedTask(taskId: string, request: ResumeTaskRequest): Promise<ResumeTaskResult>
 }
 
@@ -47,7 +47,7 @@ export function createTaskRunPause(ports: {
     return { record, handle }
   }
 
-  async function pauseTask(taskId: string, owner: RunPauseOwner): Promise<{ readonly childSeq: number }> {
+  async function pauseTask(taskId: string, owner: RunPauseOwner): Promise<EngineInheritReceipt> {
     const port = childPort()
     const { record, handle } = live(taskId)
     const epoch = record.notification.run_epoch
@@ -56,6 +56,10 @@ export function createTaskRunPause(ports: {
     resumed.delete(taskId)
     // Registration above MUST precede the child call: its abort can settle immediately.
     const ack = await port.pauseForRun(handle, owner)
+    if ("refused" in ack) {
+      intents.clear(taskId)
+      return ack
+    }
     intents.acknowledge(taskId, epoch)
     if (settled !== undefined) await settled
     return ack

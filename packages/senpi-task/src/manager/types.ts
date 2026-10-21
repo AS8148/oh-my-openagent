@@ -32,7 +32,7 @@ import type { InheritedExtensions } from "../runners/rpc/parent-extensions"
 import type { WorkpoolEngine } from "../workpool/engine"
 import type { ChildExtensionEvent } from "../runners/child-extension-events"
 import type { ExitConfirmationSchedule } from "./provisional-exit"
-import type { ChildPausePort } from "../pause/ports"
+import type { ChildCreationPort, ChildPausePort } from "../pause/ports"
 import type { AdmissionBarrier, ResumeCredential } from "../pause/admission-barrier"
 import type { HeldStart, StartAdmission } from "./start-admission"
 
@@ -269,6 +269,7 @@ export type TrustedRespawnLaunch = {
 export type TrustedRespawnLaunchResolver = (record: TaskRecord) => Promise<TrustedRespawnLaunch | undefined>
 
 export type TaskManagerOptions = {
+  readonly childCreationPort?: ChildCreationPort
   readonly admissionBarrier?: AdmissionBarrier
   readonly onHeldAdmission?: (result: HeldStart, spec: ManagerStartSpec) => void
   readonly childPausePort?: ChildPausePort

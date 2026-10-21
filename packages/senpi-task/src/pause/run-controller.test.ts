@@ -8,7 +8,7 @@ afterEach(cleanupProjects)
 
 const participant: PauseParticipant = {
   key: "a", kind: "task", taskId: "a", runEpoch: 0,
-  runRef: { kind: "task", taskId: "a" }, state: "pending", at: new Date(0).toISOString(),
+  runRef: { kind: "task", id: "a" }, state: "pending", at: new Date(0).toISOString(),
   admission: { model: "test/model", laneKey: "test/model", sequence: 1, phase: "parked" },
 }
 
@@ -55,7 +55,7 @@ describe("whole-run pause custody", () => {
     h.events.length = 0
     expect(await h.controller.resume("root", 1, "resume-1")).toEqual({ kind: "installed" })
     expect(h.events).toEqual(["guidance", "resume", "install", "ack"])
-    expect(h.barrier.enter("root", { key: "b", runRef: { kind: "task", taskId: "b" } }).kind).toBe("held")
+    expect(h.barrier.enter("root", { key: "b", runRef: { kind: "task", id: "b" } }).kind).toBe("held")
     expect(h.controller.released("root", 1, "resume-1")).toBe(true)
     expect(h.barrier.state("root")).toEqual({ kind: "open" })
   })

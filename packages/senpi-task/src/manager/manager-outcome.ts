@@ -258,7 +258,12 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
         const stopped = ports.stopSettlement?.(taskId)
         if (stopped !== undefined) return await settleStopped(taskId, handle, model, epoch, stopped)
         const paused = ports.pauseSettlement?.(taskId, epoch)
-        if (paused !== undefined) return await settlePaused(ports, taskId, handle, epoch, paused)
+        if (paused !== undefined) {
+          if (await settlePaused(ports, taskId, handle, epoch, paused)) return
+          if (turns.get(taskId) !== tracking) return
+          const stoppedNow = ports.stopSettlement?.(taskId)
+          if (stoppedNow !== undefined) return await settleStopped(taskId, handle, model, epoch, stoppedNow)
+        }
         const owned = ownedRecord(ports, taskId, handle, epoch)
         if (owned === null) return
         const timestamp = nowIso(ports.now)
@@ -272,7 +277,9 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
             const settling = stopped !== undefined
               ? settleStopped(taskId, handle, model, epoch, stopped)
               : paused !== undefined
-                ? settlePaused(ports, taskId, handle, epoch, paused)
+                ? settlePaused(ports, taskId, handle, epoch, paused).then(handled => {
+                  if (!handled && turns.get(taskId) === tracking) return settleErrorOutcome({ ...input, timestamp: nowIso(ports.now) })
+                })
                 : settleErrorOutcome({ ...input, timestamp: nowIso(ports.now) })
             void settling.catch((error: unknown) => {
               log("senpi-task manager error outcome tracking failed", { taskId, error: String(error) })

@@ -35,6 +35,9 @@ export class PendingPauses {
   }
 
   clear(taskId: string): void {
+    const intent = this.#pending.get(taskId)
     this.#pending.delete(taskId)
+    intent?.acknowledged.resolve()
+    intent?.settled.resolve()
   }
 }

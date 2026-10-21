@@ -42,7 +42,7 @@ export function createStartAdmissions(barrier: AdmissionBarrier, held?: (result:
   ): Promise<T | HeldStart> {
     let taskId: string = createTaskId(now())
     const rootSessionId = spec.root_session_id ?? spec.parent_session_id
-    const participant = { key: taskId, runRef: runRef ?? { kind: "task" as const, taskId } }
+    const participant = { key: taskId, runRef: runRef ?? { kind: "task" as const, id: taskId } }
     const entered = barrier.enter(rootSessionId, participant, credential)
     const result = (pauseSeq: number): HeldStart => ({ kind: "held", pauseSeq, task_id: taskId, root_session_id: rootSessionId })
     if (entered.kind === "held") {
@@ -56,7 +56,7 @@ export function createStartAdmissions(barrier: AdmissionBarrier, held?: (result:
       get runRef() { return participant.runRef },
       bind: id => {
         taskId = id
-        if (participant.runRef.kind === "task") participant.runRef = { kind: "task", taskId: id }
+        if (participant.runRef.kind === "task") participant.runRef = { kind: "task", id }
         entered.ticket.update({ key: id, runRef: participant.runRef })
       },
       transfer: () => { transferred = true },

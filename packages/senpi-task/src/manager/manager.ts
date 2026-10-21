@@ -59,7 +59,8 @@ import { PendingStops } from "./pending-stops"
 import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest } from "./run-pause"
 import type { RunPauseOwner } from "../pause/ports"
 import { AdmissionBarrier } from "../pause/admission-barrier"
-import { isAdmissionHeld, createStartAdmissions, type HeldStart } from "./start-admission"
+import { createStartAdmissions } from "./start-admission"
+import { launchTask, type LaunchContext, type LaunchOutcome } from "./launch-task"
 import { respawnWithWorkpool } from "./workpool-respawn"
 import { NameRegistry } from "./names"
 import { newestSessionPath } from "../lifecycle/session-path"
@@ -95,13 +96,6 @@ type LiveTask = {
   readonly runner?: ManagedRunner
 }
 
-type LaunchContext = {
-  readonly record: TaskRecord
-  readonly managedSpec: ManagedStartSpec
-  readonly runner: ManagedRunner
-  readonly model: string
-}
-
 type TaskWaiter = {
   readonly resolve: (record: TaskRecord) => void
   readonly reject: (reason: unknown) => void
@@ -115,15 +109,6 @@ type RpcRespawnRunner = {
 type TaskManagerImplOptions = TaskManagerOptions & {
   readonly rpcRespawnRunner?: RpcRespawnRunner
 }
-
-type LaunchOutcome =
-  | { readonly ok: true; readonly held?: HeldStart; readonly run_epoch?: number; readonly resolved_model?: ResolvedModelRecord; readonly effective_model?: EffectiveModelRecord; readonly queue_position?: number }
-  | {
-    readonly ok: false
-    readonly error: string
-    readonly failure_kind?: Extract<StartResult, { kind: "start_failed" }>["failure_kind"]
-    readonly failure_reason?: Extract<StartResult, { kind: "start_failed" }>["failure_reason"]
-  }
 
 type ReattachingTaskManager = TaskManager & TaskPauseMethods & {
   readonly workpools: WorkpoolEngine
@@ -349,7 +334,7 @@ class TaskManagerImpl implements TaskManager {
   }
 
   async startOwned(spec: ManagerStartSpec, owner: DagTaskOwner): Promise<OwnedStartResult> {
-    return this.#startAdmissions.run(spec, { kind: "dag", runId: owner.runId },
+    return this.#startAdmissions.run(spec, { kind: "dag", id: owner.runId },
       admitted => this.#startOwnedAdmitted(admitted, owner), spec.resumeCredential)
   }
 
@@ -1064,98 +1049,29 @@ class TaskManagerImpl implements TaskManager {
   }
 
   async #launch(initial: LaunchContext): Promise<LaunchOutcome> {
-    try {
-      initial.managedSpec.admission?.assertOpen()
-      return await this.#launchAdmitted(initial)
-    } catch (error) {
-      if (!isAdmissionHeld(error)) throw error
-      const held = initial.managedSpec.admission?.hold() ?? error.result
-      this.#concurrency.releaseTask(initial.record.task_id)
-      return { ok: true, held }
-    } finally {
-      initial.managedSpec.admission?.leave()
-    }
-  }
-
-  async #launchAdmitted(initial: LaunchContext): Promise<LaunchOutcome> {
-    if (this.#shutdownStarted) {
-      // Still pending: the shutdown suspension parks it with the other pending records.
-      this.#releaseSlot(initial.record.task_id, initial.model, initial.record.notification.run_epoch)
-      return { ok: false, error: "the session is shutting down" }
-    }
-    const startResult = this.#options.store.transition(initial.record.task_id, { type: "start", timestamp: nowIso(this.#now) })
-    if (!startResult.applied) {
-      this.#releaseSlot(initial.record.task_id, initial.model, initial.record.notification.run_epoch)
-      if (startResult.record.status === "cancelled") this.#steering.dropPending(initial.record.task_id, "cancelled")
-      this.#settleWaiters(initial.record.task_id)
-      return { ok: false, error: "task was cancelled before launch" }
-    }
-
-    let context = initial
-    let handle: ManagedChildHandle
-    for (;;) {
-      const { record, managedSpec, runner, model } = context
-      try {
-        managedSpec.admission?.assertOpen()
-        handle = await runner.start(managedSpec)
-        break
-      } catch (error) { // no-excuse-ok: catch - runner boundary converts every thrown value into a public classification.
-        if (isAdmissionHeld(error)) throw error
-        // A child that cannot serve this model can still serve the next entry of its chain, and
-        // nothing has run yet, so advancing costs no duplicated work. Every other failure kind would
-        // reproduce identically on the next entry, so only an admission refusal walks the chain.
-        const advanced = this.#advanceStartFallback(context, error)
-        if (advanced !== undefined) {
-          if (advanced.kind === "queued") {
-            return { ok: true, run_epoch: advanced.runEpoch, resolved_model: advanced.resolvedModel, queue_position: advanced.queuePosition }
-          }
-          if (advanced.kind === "stale") {
-            this.#releaseSlot(record.task_id, model, record.notification.run_epoch)
-            this.#settleWaiters(record.task_id)
-            return { ok: false, error: "task stopped during launch" }
-          }
-          context = advanced.context
-          continue
-        }
-        this.#releaseSlot(record.task_id, model, record.notification.run_epoch)
-        const failure = this.#recordStartFailure(record, error)
-        this.#settleWaiters(record.task_id)
-        return {
-          ok: false,
-          error: failure.errorMessage,
-          ...(failure.failureKind === undefined ? {} : { failure_kind: failure.failureKind }),
-          ...(failure.failureReason === undefined ? {} : { failure_reason: failure.failureReason }),
-        }
-      }
-    }
-
-    const { record, managedSpec, runner, model } = context
-    const current = this.#tryLoad(record.task_id)
-    const cancelled = current?.status === "cancelled"
-    if (!this.#ownsLaunch(context, current)) {
-      await this.#discardStaleLaunch(context, handle)
-      return { ok: false, error: cancelled ? "task was cancelled during launch" : "task stopped during launch" }
-    }
-
-    const unsubscribe = this.#subscribeChildFacts(handle, record.task_id)
-    this.#live.set(record.task_id, {
-      handle,
-      model,
-      unsubscribe,
-      managedSpec,
-      runner,
+    return launchTask(initial, {
+      store: this.#options.store, now: this.#now, creation: this.#options.childCreationPort,
+      isShuttingDown: () => this.#shutdownStarted,
+      release: context => this.#releaseSlot(context.record.task_id, context.model, context.record.notification.run_epoch),
+      settleWaiters: taskId => this.#settleWaiters(taskId),
+      dropPending: taskId => this.#steering.dropPending(taskId, "cancelled"),
+      advance: (context, error) => this.#advanceStartFallback(context, error),
+      failure: (record, error) => this.#recordStartFailure(record, error),
+      load: taskId => this.#tryLoad(taskId),
+      owns: (context, record) => this.#ownsLaunch(context, record),
+      discard: (context, handle) => this.#discardStaleLaunch(context, handle),
+      forget: taskId => this.forget(taskId, { path: "end", reason: "target_gone" }),
+      park: context => this.#runPause.park(context.record.task_id, context.record.notification.run_epoch),
+      track: (context, handle, turn) => this.#outcome.trackOutcome(
+        context.record.task_id, handle, context.model, context.record.notification.run_epoch, turn),
+      install: ({ record, managedSpec, runner, model }, handle) => {
+        const unsubscribe = this.#subscribeChildFacts(handle, record.task_id)
+        this.#live.set(record.task_id, { handle, model, unsubscribe, managedSpec, runner })
+        this.#attachChildSubscribers(record.task_id, handle)
+        this.#recordSpawnFacts(record.task_id, handle)
+        void this.#isolation.stamp(record.task_id, handle)
+      },
     })
-    this.#attachChildSubscribers(record.task_id, handle)
-    this.#recordSpawnFacts(record.task_id, handle)
-    void this.#isolation.stamp(record.task_id, handle)
-    this.#outcome.trackOutcome(record.task_id, handle, model, record.notification.run_epoch)
-    const recorded = this.#tryLoad(record.task_id)
-    return {
-      ok: true,
-      run_epoch: record.notification.run_epoch,
-      ...(record.resolved_model === undefined ? {} : { resolved_model: record.resolved_model }),
-      ...(recorded?.effective_model === undefined ? {} : { effective_model: recorded.effective_model }),
-    }
   }
 
   #recordStartFailure(record: TaskRecord, error: unknown): ReturnType<typeof describeStartFailure> {

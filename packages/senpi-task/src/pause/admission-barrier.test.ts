@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { AdmissionBarrier } from "./admission-barrier"
 
-const participant = { key: "task:a", runRef: { kind: "task" as const, taskId: "a" } }
+const participant = { key: "task:a", runRef: { kind: "task" as const, id: "a" } }
 
 describe("root session admission barrier", () => {
   test("#given an authorized Resume #when the same Stop is replayed #then its credential is not revoked", () => {
