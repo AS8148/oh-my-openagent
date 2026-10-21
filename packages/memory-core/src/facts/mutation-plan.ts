@@ -2,6 +2,8 @@ import { createHash } from "node:crypto"
 import { readFile } from "../fs/resilient"
 import { join } from "node:path"
 
+import { renderAgreementsTarget } from "./agreements-target"
+import { AGREEMENTS_PATH, DEFAULT_AGREEMENTS_POLICY, type AgreementExtractionRecord, type AgreementsPolicy } from "../agreements/types"
 import type { GitIndexIdentity, GitMemoryRepo, GitPathState, GitWorktreeFileIdentity } from "../git"
 import { parseMemoryFile, renderMemoryFile } from "../memfs"
 import {
@@ -40,11 +42,13 @@ export async function planFactsMutation(
   batch: FactsBatch,
   people: FactsPeopleRouting | undefined,
   onAliasTie?: (tie: FactsAliasTie) => void,
+  agreements: AgreementsPolicy = DEFAULT_AGREEMENTS_POLICY,
 ): Promise<FactsApplyRecovery> {
   const headBeforeApply = await repo.head()
   if (headBeforeApply === null) throw new Error("facts repository has no HEAD")
   const routing = await planFactsRouting(repo.dir, batch.records, people, onAliasTie)
-  const paths = factsRoutingPaths(routing)
+  const agreementRecords = batch.agreements ?? []
+  const paths = [...factsRoutingPaths(routing), ...(agreementRecords.length === 0 ? [] : [AGREEMENTS_PATH])].sort()
   const pre = await repo.pathState.captureAll(paths)
   if ((await repo.status()).trim().length > 0) throw new FactsPlanParentDirtyError("facts repository changed during planning")
   const content = new Map<string, string>()
@@ -54,6 +58,9 @@ export async function planFactsMutation(
   if (people?.enabled === true) {
     const rendered = await renderPersonTargets(repo.dir, routing, people)
     for (const [path, value] of rendered) content.set(path, value)
+  }
+  if (agreementRecords.length > 0) {
+    content.set(AGREEMENTS_PATH, await renderAgreementsTarget(repo.dir, agreementRecords, agreements))
   }
   const planned: FactsRecoveryPath[] = []
   for (const path of paths) {
@@ -76,14 +83,18 @@ export async function planFactsMutation(
     version: 1,
     batchId: batch.batchId,
     headBeforeApply,
-    recordsHash: factsRecordsHash(batch.records),
+    recordsHash: factsRecordsHash(batch.records, batch.agreements),
     people: people === undefined ? null : { ...people },
     paths: planned,
   }
 }
 
-export function factsRecordsHash(records: readonly FactsExtractionRecord[]): string {
-  return createHash("sha256").update(JSON.stringify(records)).digest("hex")
+export function factsRecordsHash(
+  records: readonly FactsExtractionRecord[],
+  agreements: readonly AgreementExtractionRecord[] = [],
+): string {
+  const hashed = agreements.length === 0 ? records : { records, agreements }
+  return createHash("sha256").update(JSON.stringify(hashed)).digest("hex")
 }
 
 async function renderFactsNote(

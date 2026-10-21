@@ -15,6 +15,8 @@ import {
   planFactsMutation,
   validateFactsRecovery,
   withLock,
+  type AgreementExtractionRecord,
+  type AgreementsPolicy,
   type FactsApplyRecovery,
   type FactsExtractionRecord,
   type FactsPeopleRouting,
@@ -135,14 +137,19 @@ export function resolveFactsPeopleRouting(config: OmoConfig, identity: string): 
   }
 }
 
-export async function applyFactsWithRetries(options: {
+type ClaimedApplyOptions = {
   readonly runDir: string
   readonly ledger: FactsRunLedger
   readonly repo: GitMemoryRepo
   readonly records: ReturnType<typeof parseFactsExtractionJsonl>
+  readonly agreements?: readonly AgreementExtractionRecord[]
+  readonly agreementsPolicy?: AgreementsPolicy
   readonly people: FactsPeopleRouting
   readonly identity: MemoryIdentity
   readonly logger?: ComponentLogger
+}
+
+export async function applyFactsWithRetries(options: ClaimedApplyOptions & {
   readonly withWriterLock: <T>(operation: () => Promise<T>, attempt: number) => Promise<T>
   readonly retryDelay?: (attempt: number, delayMs: number) => Promise<void>
   readonly random?: () => number
@@ -163,18 +170,11 @@ export async function applyFactsWithRetries(options: {
   return undefined
 }
 
-async function applyClaimed(options: {
-  readonly runDir: string
-  readonly ledger: FactsRunLedger
-  readonly repo: GitMemoryRepo
-  readonly records: ReturnType<typeof parseFactsExtractionJsonl>
-  readonly people: FactsPeopleRouting
-  readonly identity: MemoryIdentity
-  readonly logger?: ComponentLogger
-}): Promise<Applied> {
+async function applyClaimed(options: ClaimedApplyOptions): Promise<Applied> {
   const receipt = await findFactsBatchReceipt(options.repo, options.ledger.batchId)
   if (receipt !== undefined) return { outcome: "committed", sha: receipt.sha, affectedPaths: await receiptPaths(options.repo, receipt.sha, options.ledger.batchId) }
-  const batch = { batchId: options.ledger.batchId, records: options.records }
+  const agreements = options.agreements ?? []
+  const batch = { batchId: options.ledger.batchId, records: options.records, ...(agreements.length === 0 ? {} : { agreements }) }
   let recovery: FactsApplyRecovery
   if (options.ledger.applyRecovery !== undefined) {
     recovery = options.ledger.applyRecovery
@@ -184,7 +184,7 @@ async function applyClaimed(options: {
       recovery = await planFactsMutation(options.repo, batch, options.people, (tie) => options.logger?.warn(
         "facts person alias tie resolved by slug order",
         { alias: tie.alias, slugs: tie.slugs.join(","), chosen: tie.chosen },
-      ))
+      ), options.agreementsPolicy)
     } catch (error) {
       if (error instanceof FactsPlanParentDirtyError) return { outcome: "parent_dirty" }
       throw error
@@ -194,7 +194,7 @@ async function applyClaimed(options: {
       applyRecovery: recovery,
     })
   }
-  const result = await applyFactsRecovery(options.repo, recovery, options.records.length, {
+  const result = await applyFactsRecovery(options.repo, recovery, options.records.length + agreements.length, {
     agentId: options.identity.id,
     authorName: "Facts Extractor",
   })
