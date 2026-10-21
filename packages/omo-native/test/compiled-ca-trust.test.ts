@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, onTestFinished, test } from "bun:test"
 import { spawn, spawnSync } from "node:child_process"
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { createServer, type Server } from "node:https"
 import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
@@ -11,8 +11,8 @@ import {
   ExtraCaCertificatesError,
   installEngineCaTrust,
   loadSystemStoreOffThread,
+  selfSpawnTrustEnv,
   SYSTEM_STORE_STATE_ENV,
-  SYSTEM_STORE_UNANSWERED,
   MAX_EXTRA_CA_BYTES,
   parseExtraCaCertificates,
 } from "../compiled-ca-trust"
@@ -176,6 +176,7 @@ console.log("done")
 // #10771 review: a child that re-runs the entry inherits the parent's RESOLVED store state, so it
 // never reads the OS store again and the slow-store warning prints once per user command.
 describe("children inherit the resolved store state (#10771)", () => {
+  const CHILD = { parentPid: process.pid, pid: 424_242 }
   const counting = () => {
     const installs: string[][] = []
     let reads = 0
@@ -194,68 +195,123 @@ describe("children inherit the resolved store state (#10771)", () => {
       },
     }
   }
-
-  test("#given the parent's store answered #then a child installs the handed-off set without asking the OS", async () => {
-    const ca = readFileSync(join(fixtures, "ca.pem"), "utf8")
+  const caPem = () => readFileSync(join(fixtures, "ca.pem"), "utf8")
+  const tempDir = (prefix: string) => {
+    const dir = mkdtempSync(join(tmpdir(), prefix))
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }))
+    return dir
+  }
+  async function loadedParent(handoffDir: string) {
     const parent = counting()
     const env: NodeJS.ProcessEnv = {}
-    const handoffDir = mkdtempSync(join(tmpdir(), "omo-ca-handoff-"))
-    onTestFinished(() => rmSync(handoffDir, { recursive: true, force: true }))
-    installEngineCaTrust(env, parent.tls as never, { loadSystem: parent.loadSystem([ca]), handoffDir })
+    installEngineCaTrust(env, parent.tls as never, { loadSystem: parent.loadSystem([caPem()]), handoffDir })
     expect(await engineCaTrustReady(1_000)).toBe("loaded")
-    expect(env[SYSTEM_STORE_STATE_ENV]).toStartWith("file:")
+    return env
+  }
+
+  test("#given the parent's store answered #then a self-spawn installs the cached set without asking the OS", async () => {
+    const handoffDir = tempDir("omo-ca-handoff-")
+    const parentEnv = await loadedParent(handoffDir)
+    // Never in the parent's own environment: a tool shell it starts inherits nothing.
+    expect(parentEnv[SYSTEM_STORE_STATE_ENV]).toBeUndefined()
+    const childEnv = selfSpawnTrustEnv({}) as NodeJS.ProcessEnv
+    expect(childEnv[SYSTEM_STORE_STATE_ENV]).toBe(`${process.pid}:loaded`)
 
     const child = counting()
-    const childEnv = { ...env }
-    installEngineCaTrust(childEnv, child.tls as never, { loadSystem: child.loadSystem("never") })
+    installEngineCaTrust(childEnv, child.tls as never, { ...CHILD, loadSystem: child.loadSystem("never"), handoffDir })
     expect(await engineCaTrustReady(50, () => {})).toBe("loaded")
     expect(child.reads()).toBe(0)
-    expect(child.installs.at(-1)?.map((pem) => pem.trim())).toEqual(["B", ca.trim()])
+    expect(child.installs.at(-1)?.map((pem) => pem.trim())).toEqual(["B", caPem().trim()])
   })
 
-  test("#given the parent's store missed the bound #then a child neither waits nor warns", async () => {
+  test.each([
+    ["a hostile path (the file is a symlink elsewhere)", (dir: string) => {
+      const elsewhere = join(tempDir("omo-ca-elsewhere-"), "evil.pem")
+      writeFileSync(elsewhere, caPem(), { mode: 0o600 })
+      rmSync(join(dir, "system-ca.pem"))
+      symlinkSync(elsewhere, join(dir, "system-ca.pem"))
+      return {}
+    }],
+    ["a file another user owns", () => ({ ownerUid: (process.getuid?.() ?? 0) + 1 })],
+    ["a group-readable file", (dir: string) => {
+      chmodSync(join(dir, "system-ca.pem"), 0o640)
+      return {}
+    }],
+    ["a file holding a non-CA certificate", (dir: string) => {
+      writeFileSync(join(dir, "system-ca.pem"), readFileSync(join(fixtures, "leaf.pem"), "utf8"), { mode: 0o600 })
+      return {}
+    }],
+  ] as const)("#given %s #then the child ignores the hint and reads the OS store itself", async (_name, tamper) => {
+    if (process.platform === "win32") return
+    const handoffDir = tempDir("omo-ca-handoff-")
+    await loadedParent(handoffDir)
+    const childEnv = selfSpawnTrustEnv({}) as NodeJS.ProcessEnv
+    const extra = tamper(handoffDir)
+    const child = counting()
+    installEngineCaTrust(childEnv, child.tls as never, { ...CHILD, ...extra, loadSystem: child.loadSystem(["S"]), handoffDir })
+    expect(await engineCaTrustReady(1_000)).toBe("loaded")
+    expect(child.reads()).toBe(1)
+    expect(child.installs.at(-1)).toEqual(["B", "S"])
+  })
+
+  test("#given a hint from a process that is not this one's parent #then it is ignored", async () => {
+    const child = counting()
+    installEngineCaTrust({ [SYSTEM_STORE_STATE_ENV]: "1:unanswered" }, child.tls as never, { ...CHILD, loadSystem: child.loadSystem(["S"]) })
+    expect(await engineCaTrustReady(1_000)).toBe("loaded")
+    expect(child.reads()).toBe(1)
+  })
+
+  test.each(["unanswered", "failed"] as const)("#given the parent's store %s #then a self-spawn neither reads nor warns", async (outcome) => {
     const parent = counting()
-    const env: NodeJS.ProcessEnv = {}
-    installEngineCaTrust(env, parent.tls as never, { loadSystem: parent.loadSystem("never") })
-    expect(await engineCaTrustReady(30, () => {})).toBe("timed-out")
-    expect(env[SYSTEM_STORE_STATE_ENV]).toBe(SYSTEM_STORE_UNANSWERED)
+    const parentEnv: NodeJS.ProcessEnv = {}
+    installEngineCaTrust(parentEnv, parent.tls as never, {
+      loadSystem: outcome === "failed" ? () => Promise.reject(new Error("store refused")) : parent.loadSystem("never"),
+      warn: () => {},
+    })
+    expect(await engineCaTrustReady(30, () => {})).toBe(outcome === "failed" ? "failed" : "timed-out")
+    expect(parentEnv[SYSTEM_STORE_STATE_ENV]).toBeUndefined()
 
     const child = counting()
     const warnings: string[] = []
-    installEngineCaTrust({ ...env }, child.tls as never, { loadSystem: child.loadSystem("never") })
-    const started = performance.now()
+    installEngineCaTrust(selfSpawnTrustEnv({}) as NodeJS.ProcessEnv, child.tls as never, { ...CHILD, loadSystem: child.loadSystem("never"), warn: (m) => warnings.push(m) })
     expect(await engineCaTrustReady(1_000, (message) => warnings.push(message))).toBe("skipped")
-    expect(performance.now() - started).toBeLessThan(100)
     expect({ reads: child.reads(), warnings }).toEqual({ reads: 0, warnings: [] })
   })
 
-  // The lead's RED: a blocking store and a command that self-spawns twice -> one bound, one warning.
-  test("#given a blocking store and a command that re-runs itself twice #then the total wait is one bound and one warning", () => {
-    const dir = mkdtempSync(join(tmpdir(), "omo-ca-spawn-"))
-    try {
-      const script = join(dir, "entry.ts")
-      writeFileSync(script, `import { spawnSync } from "node:child_process"
-import { engineCaTrustReady, installEngineCaTrust } from ${JSON.stringify(join(import.meta.dir, "..", "compiled-ca-trust.ts"))}
+  // The lead's RED: a blocking store, a command that self-spawns twice, and a tool shell it starts.
+  test("#given a blocking store #then two self-spawns skip it, one warning prints, and a tool shell does not inherit it", () => {
+    const dir = tempDir("omo-ca-spawn-")
+    const script = join(dir, "entry.ts")
+    writeFileSync(script, `import { spawnSync } from "node:child_process"
+import { engineCaTrustReady, installEngineCaTrust, selfSpawnTrustEnv } from ${JSON.stringify(join(import.meta.dir, "..", "compiled-ca-trust.ts"))}
 const role = process.argv[2]
 installEngineCaTrust(process.env, undefined, { loadSystem: () => { process.stdout.write("READ " + role + "\\n"); return new Promise(() => {}) } })
 process.stdout.write("OUTCOME " + role + " " + (await engineCaTrustReady(400)) + "\\n")
-if (role === "parent") for (const n of [1, 2]) process.stdout.write(spawnSync(process.execPath, [import.meta.path, "child" + n], { env: process.env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).stdout)
+const run = (name, env) => process.stdout.write(spawnSync(process.execPath, [import.meta.path, name], { env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).stdout)
+if (role === "parent") {
+  run("child1", selfSpawnTrustEnv(process.env))
+  run("child2", selfSpawnTrustEnv(process.env))
+  run("toolshell", process.env)
+}
 process.exit(0)
 `)
-      const run = spawnSync(process.execPath, [script, "parent"], { env: withoutCaVariables(process.env), encoding: "utf8", timeout: 20_000 })
-      const lines = run.stdout.trim().split("\n")
-      const warnings = run.stderr.split("\n").filter((line) => line.includes("did not answer within"))
-      // Only the parent reads the store and waits out the bound ("timed-out"); each child resolves
-      // at once from the inherited state ("skipped"), so the command pays one bound and warns once.
-      expect({ status: run.status, lines, warnings: warnings.length }).toEqual({
-        status: 0,
-        lines: ["READ parent", "OUTCOME parent timed-out", "OUTCOME child1 skipped", "OUTCOME child2 skipped"],
-        warnings: 1,
-      })
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  }, 30_000)
+    const run = spawnSync(process.execPath, [script, "parent"], { env: withoutCaVariables(process.env), encoding: "utf8", timeout: 30_000 })
+    const warnings = run.stderr.split("\n").filter((line) => line.includes("did not answer within"))
+    expect({ status: run.status, lines: run.stdout.trim().split("\n"), warnings: warnings.length }).toEqual({
+      status: 0,
+      lines: [
+        "READ parent",
+        "OUTCOME parent timed-out",
+        "OUTCOME child1 skipped",
+        "OUTCOME child2 skipped",
+        // A process started with the parent's plain environment knows nothing and reads the store itself.
+        "READ toolshell",
+        "OUTCOME toolshell timed-out",
+      ],
+      // The parent's, and the tool shell's own: the self-spawns add none.
+      warnings: 2,
+    })
+  }, 40_000)
 })
 
 describe("the fast path's local-only argv never reads the OS store (#10771)", () => {

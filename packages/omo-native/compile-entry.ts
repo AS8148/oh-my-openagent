@@ -37,7 +37,7 @@ import { spawnSync } from "node:child_process"
 import { compiledRollbackMigration } from "./compiled-rollback"
 import { refuseRetiredCommand } from "./bin/lib/retired-command.js"
 import { answeredFromLocalData } from "./compile-entry-fast-path"
-import { engineCaTrustReady, ExtraCaCertificatesError, installEngineCaTrust } from "./compiled-ca-trust"
+import { engineCaTrustReady, ExtraCaCertificatesError, installEngineCaTrust, selfSpawnTrustEnv } from "./compiled-ca-trust"
 
 // The engine is imported via a RELATIVE string LITERAL, inlined at both import
 // sites, and both properties are load-bearing:
@@ -156,7 +156,7 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
   // node path here would re-enter omo itself and leave a phantom session behind.
   const engine = {
     run(engineArgs: string[], options: { env: Record<string, string | undefined> }) {
-      const result = spawnSync(process.execPath, engineArgs, { encoding: "utf8", env: options.env, windowsHide: true })
+      const result = spawnSync(process.execPath, engineArgs, { encoding: "utf8", env: selfSpawnTrustEnv(options.env), windowsHide: true })
       return { exitCode: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
     },
   }
@@ -335,7 +335,7 @@ async function main(): Promise<void> {
   }
   if (answerCompiledFastPath(process.argv.slice(2), manifest)) return
   if (launch.handOff) {
-    await handOffToProvisionedRuntime(expected)
+    await handOffToProvisionedRuntime(expected, { env: selfSpawnTrustEnv(process.env) })
     return
   }
   const execDir = launch.execDir

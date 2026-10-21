@@ -1,5 +1,5 @@
 import { X509Certificate } from "node:crypto"
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import * as nodeTls from "node:tls"
 
@@ -74,23 +74,63 @@ export interface EngineTrustOptions {
   readonly warn?: (message: string) => void
   /** Where the answered store is handed to children: the agent dir's `cache` (compile-entry passes it). */
   readonly handoffDir?: string
+  /** This process's parent and own pid (tests set them; production uses `process`). */
+  readonly parentPid?: number
+  readonly pid?: number
+  /** The uid the handed-off file must belong to (tests set it; production uses `process.getuid()`). */
+  readonly ownerUid?: number
 }
 
 /** How long startup waits for the OS store before going on with what is installed. */
 export const SYSTEM_STORE_BUDGET_MS = 1_500
 
 /**
- * The parent's RESOLVED store state, handed to every child that re-runs this entry (`thread`,
- * `daemon`, `host status --all`, the provisioned handoff), so a child never reads the OS store again
- * and the slow-store warning prints once per user command (#10771 review):
- * - `unanswered`: the store missed the bound; the child starts like its parent, bundled + extras.
- * - `file:<path>`: the store answered; its certificates are in that owner-only PEM file (the agent
- *   dir's `cache/system-ca.pem`, replaced atomically on every parent start), which the child installs
- *   instead of asking the OS.
+ * The parent's RESOLVED store state, handed to the children that re-run this entry (`thread`,
+ * `daemon`, `host status --all` through `engine.run`, and the provisioned handoff), so they never read
+ * the OS store again and the slow-store warning prints once per user command (#10771 review). It is
+ * never written into this process's own environment: only those spawns get it, through
+ * `selfSpawnTrustEnv`, so a tool shell or any other long-lived descendant never inherits it. The
+ * value is `<parent pid>:<state>`, and a child honors it only when that pid is its parent (or itself,
+ * after the handoff's in-place exec). Only the OUTCOME crosses; never a path or certificates. States:
+ * - `loaded`: the store answered; the child reads `<agent dir>/cache/system-ca.pem` (a fixed path, never
+ *   from the environment) only if it is a regular file owned by this user, private, and every block is
+ *   a CA; otherwise it reads the OS store itself.
  * - `empty`: the store answered with no certificates.
+ * - `unanswered` / `failed`: the store missed the bound or failed; the child starts like its parent,
+ *   bundled + extras, with no second warning.
  */
 export const SYSTEM_STORE_STATE_ENV = "OMO_SYSTEM_CA_STORE"
 export const SYSTEM_STORE_UNANSWERED = "unanswered"
+type HandedState = "loaded" | "empty" | "unanswered" | "failed"
+const HANDED_STATES: readonly string[] = ["loaded", "empty", "unanswered", "failed"]
+
+export function encodeSystemStoreState(state: HandedState, pid = process.pid): string {
+  return `${pid}:${state}`
+}
+
+/** The state this process's parent handed it, or undefined when it came from anyone else. */
+export function decodeSystemStoreState(
+  value: string | undefined,
+  parentPid = process.ppid,
+  ownPid = process.pid,
+): HandedState | undefined {
+  if (value === undefined) return undefined
+  const separator = value.indexOf(":")
+  const state = value.slice(separator + 1)
+  const issuer = value.slice(0, separator)
+  if (separator <= 0 || (issuer !== String(parentPid) && issuer !== String(ownPid)) || !HANDED_STATES.includes(state)) {
+    return undefined
+  }
+  return state as HandedState
+}
+
+let resolvedState: HandedState | undefined
+
+/** `env` plus this process's resolved store outcome, for a self-spawn only (`engine.run`, the handoff). */
+export function selfSpawnTrustEnv<T extends Record<string, string | undefined>>(env: T): T {
+  const { [SYSTEM_STORE_STATE_ENV]: _inherited, ...rest } = env
+  return (resolvedState === undefined ? rest : { ...rest, [SYSTEM_STORE_STATE_ENV]: encodeSystemStoreState(resolvedState) }) as T
+}
 
 let systemStore: Promise<SystemStoreOutcome> = Promise.resolve("skipped")
 let systemSettled = false
@@ -127,15 +167,21 @@ export function installEngineCaTrust(
   const ambient = tls.getCACertificates("extra")
   const base = [...new Set([...bundled, ...ambient, ...extra])]
   tls.setDefaultCACertificates(base)
-  const inherited = env[SYSTEM_STORE_STATE_ENV]
-  const inheritedFile = inherited?.startsWith("file:") === true ? inherited.slice("file:".length) : undefined
-  const fromParent = inheritedFile === undefined ? undefined : readInheritedStore(inheritedFile)
+  const inherited = decodeSystemStoreState(env[SYSTEM_STORE_STATE_ENV], options.parentPid ?? process.ppid, options.pid ?? process.pid)
+  delete env[SYSTEM_STORE_STATE_ENV]
+  resolvedState = undefined
+  const fromParent =
+    inherited === "loaded" && options.handoffDir !== undefined
+      ? readInheritedStore(join(options.handoffDir, "system-ca.pem"), options.ownerUid ?? process.getuid?.())
+      : undefined
   if (fromParent !== undefined) {
     tls.setDefaultCACertificates([...new Set([...base, ...fromParent])])
     env.NODE_USE_SYSTEM_CA = "1"
+    resolvedState = "loaded"
     systemStore = Promise.resolve("loaded")
     systemSettled = true
-  } else if (options.skipSystem === true || inherited === SYSTEM_STORE_UNANSWERED || inherited === "empty") {
+  } else if (options.skipSystem === true || inherited === "empty" || inherited === "unanswered" || inherited === "failed") {
+    if (inherited !== undefined && inherited !== "loaded") resolvedState = inherited
     systemStore = Promise.resolve("skipped")
     systemSettled = true
   } else {
@@ -144,46 +190,54 @@ export function installEngineCaTrust(
       (system) => {
         tls.setDefaultCACertificates([...new Set([...base, ...system])])
         env.NODE_USE_SYSTEM_CA = "1"
-        const handoff = system.length === 0 ? "empty" : writeStoreHandoff(system, options.handoffDir)
-        if (handoff === undefined) delete env[SYSTEM_STORE_STATE_ENV]
-        else env[SYSTEM_STORE_STATE_ENV] = handoff === "empty" ? "empty" : `file:${handoff}`
+        const state: HandedState | undefined =
+          system.length === 0 ? "empty" : writeStoreHandoff(system, options.handoffDir) ? "loaded" : undefined
+        resolvedState = state
         systemSettled = true
         return "loaded" as const
       },
       (error: unknown) => {
         systemSettled = true
+        resolvedState = "failed"
         warn(`could not read the system certificate store (${error instanceof Error ? error.message : String(error)}); using the bundled certificates`)
         return "failed" as const
       },
     )
   }
-  trustEnv = env
   return { installed: true, bundled: bundled.length, system: 0, ambient: ambient.length, extra: extra.length }
 }
 
-let trustEnv: NodeJS.ProcessEnv = process.env
 
-/** The store's PEM set for this process's children, owner-only and replaced atomically; undefined when it can't be written. */
-function writeStoreHandoff(system: readonly string[], dir: string | undefined): string | undefined {
-  if (dir === undefined) return undefined
+/** The store's PEM set for this process's children, owner-only and replaced atomically; false when it can't be written. */
+function writeStoreHandoff(system: readonly string[], dir: string | undefined): boolean {
+  if (dir === undefined) return false
   const path = join(dir, "system-ca.pem")
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
+    if (process.platform !== "win32") chmodSync(dir, 0o700)
     const staging = `${path}.${process.pid}.tmp`
     writeFileSync(staging, system.join("\n"), { mode: 0o600 })
     renameSync(staging, path)
-    return path
+    return true
   } catch {
-    return undefined
+    return false
   }
 }
 
-/** A parent's handed-off store, or undefined (unreadable or empty), in which case the child reads the OS itself. */
-function readInheritedStore(path: string): readonly string[] | undefined {
+/**
+ * A parent's handed-off store, or undefined, in which case the child reads the OS itself: the file
+ * must be this user's and private (POSIX), and every block must parse as a certificate.
+ */
+function readInheritedStore(path: string, ownerUid: number | undefined): readonly string[] | undefined {
   try {
-    const pem = readFileSync(path, "utf8")
-    const certificates = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----\n?/g)
-    return certificates === null ? undefined : certificates.map((certificate) => certificate.trimEnd() + "\n")
+    const stat = lstatSync(path)
+    if (!stat.isFile()) return undefined
+    if (process.platform !== "win32" && (stat.uid !== ownerUid || (stat.mode & 0o077) !== 0)) return undefined
+    const blocks = readFileSync(path, "utf8").match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g)
+    if (blocks === null) return undefined
+    const certificates = blocks.map((block) => new X509Certificate(block))
+    if (!certificates.every((certificate) => certificate.ca)) return undefined
+    return certificates.map((certificate) => certificate.toString())
   } catch {
     return undefined
   }
@@ -212,7 +266,7 @@ export async function engineCaTrustReady(
     }),
   ])
   clearTimeout(timer)
-  if (outcome === "timed-out" && !systemSettled) trustEnv[SYSTEM_STORE_STATE_ENV] = SYSTEM_STORE_UNANSWERED
+  if (outcome === "timed-out" && !systemSettled) resolvedState = "unanswered"
   if (outcome === "timed-out" && !slowStoreWarned) {
     slowStoreWarned = true
     warn(
