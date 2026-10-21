@@ -1,5 +1,5 @@
 import { X509Certificate } from "node:crypto"
-import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import * as nodeTls from "node:tls"
 
@@ -93,8 +93,9 @@ export const SYSTEM_STORE_BUDGET_MS = 1_500
  * value is `<parent pid>:<state>`, and a child honors it only when that pid is its parent (or itself,
  * after the handoff's in-place exec). Only the OUTCOME crosses; never a path or certificates. States:
  * - `loaded`: the store answered; the child reads `<agent dir>/cache/system-ca.pem` (a fixed path, never
- *   from the environment) only if it is a regular file owned by this user, private, and every block is
- *   a CA; otherwise it reads the OS store itself.
+ *   from the environment) only if it is a regular file, every block is a CA, and on POSIX it is owned
+ *   by this user and private (Windows has no comparable uid/mode bits, so there only the CA check
+ *   applies); otherwise it reads the OS store itself.
  * - `empty`: the store answered with no certificates.
  * - `unanswered` / `failed`: the store missed the bound or failed; the child starts like its parent,
  *   bundled + extras, with no second warning.
@@ -118,6 +119,8 @@ export function decodeSystemStoreState(
   const separator = value.indexOf(":")
   const state = value.slice(separator + 1)
   const issuer = value.slice(0, separator)
+  // The own-pid branch exists only for the provisioned handoff's in-place exec (the same pid runs the
+  // new image); a spawned child, including Windows' handoff, always matches its parent pid.
   if (separator <= 0 || (issuer !== String(parentPid) && issuer !== String(ownPid)) || !HANDED_STATES.includes(state)) {
     return undefined
   }
@@ -216,6 +219,8 @@ function writeStoreHandoff(system: readonly string[], dir: string | undefined): 
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     if (process.platform !== "win32") chmodSync(dir, 0o700)
     const staging = `${path}.${process.pid}.tmp`
+    // `mode` applies only on create: a leftover staging file from a reused pid would keep its mode.
+    rmSync(staging, { force: true })
     writeFileSync(staging, system.join("\n"), { mode: 0o600 })
     renameSync(staging, path)
     return true
