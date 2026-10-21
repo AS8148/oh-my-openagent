@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { readFileSync } from "../fs/resilient"
 
 export interface StagedEntry {
   readonly status: string
@@ -14,7 +15,7 @@ export interface StagedEntry {
 const ZERO = /^0+$/
 
 export function git(cwd: string, args: readonly string[]): string | undefined {
-  const result = spawnSync("git", ["--literal-pathspecs", ...args], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+  const result = spawnSync("git", ["--literal-pathspecs", ...args], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true })
   return result.status === 0 ? result.stdout : undefined
 }
 

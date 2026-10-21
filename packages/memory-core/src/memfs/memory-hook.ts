@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs"
-
+import { readFileSync } from "../fs/resilient"
 import { PROVENANCE_FRONTMATTER_KEY, stampReceipt } from "../tools/claim-frontmatter"
 import { parseMemoryFile } from "./frontmatter"
 import { contentFrontmatterEntries, duplicateFrontmatterKeys, lookAlikeFrontmatterKeys } from "./frontmatter-entries"
