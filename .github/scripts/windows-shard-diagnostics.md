@@ -1,17 +1,47 @@
 # Windows root-shard diagnostics (#10814)
 
-Both Windows root shards collect the same measurements. The serial quarantine
-stays serial; the rpc-host and remainder invocations keep their existing
-partition, isolation, crash-wrapper policy and timeout budgets.
+The profile is off by default. `WINDOWS_SHARD_PROFILE` is `1` only for a
+`workflow_dispatch` run of `ci.yml` with `shard_profile=true`, or for a pull
+request carrying the `ci:windows-profile` label (labels do not trigger CI: add
+it, then push or re-run). Every other push, PR, merge-queue and reusable run
+keeps the unprofiled launch path (no sampler, preload wrapper or timing flags),
+so the runs the acceptance streak counts are not perturbed by the measurement.
+
+Sampling is one long-lived process per invocation: a single `pwsh` loop
+(`ci-test-processes.ps1`) prints one compressed JSON process table every two
+seconds and exits by itself once the collector is gone. There is no cold
+PowerShell start per sample. Each sample records the sampler's PID, and the
+profile keeps the sampler's own last-seen row, so its cumulative CPU time is
+part of the evidence.
+
+When enabled, both Windows root shards collect the same measurements. The
+serial quarantine stays serial; the rpc-host and remainder invocations keep
+their existing partition, isolation, crash-wrapper policy and timeout budgets.
+Telemetry never decides the test outcome:
+
+- The wrapper first runs `ci-test-telemetry.mjs --preflight`; if the collector
+  cannot load, the tests run unprofiled and a `profile preflight` error lands in
+  the boundary snapshot.
+- If profile setup fails (unreadable bunfig, unexpected `preload` shape or
+  arguments), the collector records a `setup` capture error and runs the
+  original test arguments unchanged. Such a profile has `fallback: true` and
+  does not count as a comparison leg.
+- The non-required `Report Windows shard profile` step (`continue-on-error`)
+  judges the profiles and exits non-zero on a missing, fallback, sample-less or
+  erroring profile, so a telemetry failure is visible without failing a
+  required test step.
+
+`comparison_sha` must be a full 40-character lowercase SHA; anything else fails
+the `ci-mode` job before tests start.
 
 After this workflow is available on a dispatchable ref, run both legs against
 the **same full commit SHA containing these diagnostics**:
 
 ```sh
 gh workflow run ci.yml --repo code-yeongyu/oh-my-openagent --ref <diagnostic-branch> \
-  -f comparison_sha=<full-diagnostic-sha> -f windows_workers=4
+  -f comparison_sha=<full-diagnostic-sha> -f windows_workers=4 -f shard_profile=true
 gh workflow run ci.yml --repo code-yeongyu/oh-my-openagent --ref <diagnostic-branch> \
-  -f comparison_sha=<full-diagnostic-sha> -f windows_workers=2
+  -f comparison_sha=<full-diagnostic-sha> -f windows_workers=2 -f shard_profile=true
 ```
 
 The test jobs check out `comparison_sha`, not a moving branch. Other CI jobs
