@@ -11,6 +11,9 @@
     "./fs": {
       "import": "./src/fs/resilient.ts"
     },
+    "./recall-store": {
+      "import": "./src/recall/bm25-persist.ts"
+    },
     "./sync-engine": {
       "import": "./src/sync/engine/index.ts"
     },
