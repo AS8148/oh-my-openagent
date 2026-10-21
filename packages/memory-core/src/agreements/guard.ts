@@ -18,7 +18,9 @@ export function describeAgreementsToolViolation(
   const itemsBefore = readAgreementsBody(before)
   const humanBefore = itemsBefore.filter((item) => item.by === "human")
   if (after === undefined) {
-    return humanBefore.length === 0 ? undefined : "system/agreements.md holds agreements your person wrote; only they can remove them (/agreements drop)"
+    if (humanBefore.length > 0) return "system/agreements.md holds agreements your person wrote; only they can remove them (/agreements drop)"
+    const flagged = itemsBefore.find((item) => item.status === "needs-human")
+    return flagged === undefined ? undefined : `agreement ${flagged.id} is flagged as needing your person; only they can drop it (/agreements drop)`
   }
   let parsed
   try {

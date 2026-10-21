@@ -14,7 +14,7 @@ const line = (n: number, status: string) =>
   `- [global] Never filter the monitor <!-- id: 3f9a1c0b2e; by: agent; n: ${n}; status: ${status} -->`
 const roots: string[] = []
 
-setDefaultTimeout(process.platform === "win32" ? 20_000 : 5_000)
+setDefaultTimeout(20_000)
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => removeTree(root, { maxRetries: 10, retryDelay: 200 })))

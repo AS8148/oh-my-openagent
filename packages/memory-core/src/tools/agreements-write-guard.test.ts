@@ -85,6 +85,29 @@ describe("memory tools cannot change agreements the person wrote (security contr
     expect(await repo.head()).toBe(head)
   })
 
+  it("#given a ledger holding only a flagged agent agreement #when apply_patch deletes the whole file #then the delete is refused and HEAD is unchanged", async () => {
+    // given
+    const root = realpathSync.native(await mkdtemp(join(tmpdir(), "omo-agreements-wipe-")))
+    roots.push(root)
+    const repo = new GitMemoryRepo({ dir: join(root, "repo"), agentId: AUTHOR.agentId })
+    await repo.init({ authorName: AUTHOR.authorName })
+    await mkdir(join(repo.dir, "system"), { recursive: true })
+    const flagged = "- [global] Run bun test before claiming done <!-- id: 7b1d000000; by: agent; n: 3; status: needs-human -->"
+    await writeFile(join(repo.dir, AGREEMENTS_PATH), renderMemoryFile({ description: "Agreements" }, `${flagged}\n`))
+    await repo.commitWrite([AGREEMENTS_PATH], "seed flagged", AUTHOR)
+    const lock: MemoryToolLock = async (_domain, operation) => operation()
+    const head = await repo.head()
+
+    // when
+    const wipe = runMemoryApplyPatch({ repo, lock, params: {
+      reason: "wipe", author: AUTHOR, input: `*** Begin Patch\n*** Delete File: ${AGREEMENTS_PATH}\n*** End Patch`,
+    } })
+
+    // then
+    await expect(wipe).rejects.toThrow(/only they can drop it/)
+    expect(await repo.head()).toBe(head)
+  })
+
   it("#given a human agreement at HEAD #when the memory tool appends a bare agent line #then the write commits", async () => {
     // given
     const { repo, lock, head } = await fixture()
