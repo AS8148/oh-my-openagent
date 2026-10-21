@@ -71,6 +71,7 @@ class OtlpSender {
       isPidAlive: input.isPidAlive ?? isPidAlive,
       capBytes: input.capBytes ?? SPOOL_CAP_BYTES,
       maxAgeMs: input.maxAgeMs ?? SPOOL_MAX_AGE_MS,
+      onLockLeft: (error) => this.#report("telemetry_spool_write_failed", error),
       onDrop: (reason, records) => {
         this.#droppedSince200 += records
         this.#unreported[reason] += records
