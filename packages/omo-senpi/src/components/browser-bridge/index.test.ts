@@ -107,7 +107,7 @@ describe("browser bridge", () => {
     ["auto", false],
     ["ask", false],
     [undefined, false],
-  ])("#given the permission preset %s #when the skill asks to confirm an irreversible action #then approved is %s", async (preset, approved) => {
+  ])("#given the permission preset %p #when the skill asks to confirm an irreversible action #then approved is %p", async (preset, approved) => {
     const { pi, tool } = setup()
     ;(pi as unknown as { getPermissionPreset: () => string | undefined }).getPermissionPreset = () => preset
 

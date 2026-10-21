@@ -419,33 +419,42 @@ describe("confirmation before irreversible actions", () => {
     expect(session.calls.map((call) => call[0])).toContain("click")
   })
 
-  test.each([
-    ["a pay button", "Pay now"],
-    ["a submit button", "Submit order"],
-    ["a send button", "Confirm transfer"],
-    ["a merge button", "Merge pull request"],
-  ])("#given Full access #when the model clicks %s #then nothing asks and the click happens (Q 2026-10-14, #2465)", async (_name, text) => {
-    const host = fakeHost({ fullAccess: true })
-    const { session, guardedSession } = await connected(host, { descriptors: [{ tag: "button", text }] })
+  const irreversibleKinds: ReadonlyArray<[string, SessionScript, (session: Awaited<ReturnType<typeof connected>>["guardedSession"]) => Promise<unknown>, string]> = [
+    ["a pay button click", { descriptors: [{ tag: "button", text: "Pay now" }] }, (s) => s.click("#act"), "click"],
+    ["a submit button click", { descriptors: [{ tag: "button", text: "Submit order" }] }, (s) => s.click("#act"), "click"],
+    ["a transfer button click", { descriptors: [{ tag: "button", text: "Confirm transfer" }] }, (s) => s.click("#act"), "click"],
+    ["a merge button click", { descriptors: [{ tag: "button", text: "Merge pull request" }] }, (s) => s.click("#act"), "click"],
+    ["Enter in a message box", { descriptors: [{ tag: "div", text: "", editable: true }] }, (s) => s.press("Enter"), "press"],
+    [
+      "Enter in a form that sends",
+      { descriptors: [{ tag: "input", text: "", form: { action: "https://mail.example/send", method: "post", submitLabels: ["Send message"] } }] },
+      (s) => s.press("Enter"),
+      "press",
+    ],
+    ["a script that clicks", {}, (s) => s.evaluate("document.querySelector('button.buy').click()"), "evaluate"],
+  ]
 
-    await guardedSession.click("#act")
+  test.each(irreversibleKinds)("#given Full access #when %s #then nothing asks and the action happens (Q 2026-10-14, #2465)", async (_name, script, act, action) => {
+    const host = fakeHost({ fullAccess: true })
+    const { session, guardedSession } = await connected(host, script)
+
+    await act(guardedSession)
 
     expect(asked(host)).toEqual([])
-    expect(session.calls.map((call) => call[0])).toContain("click")
+    expect(session.calls.map((call) => call[0])).toContain(action)
     const confirm = host.log.find((entry) => entry.tool === "omo_browser_bridge" && entry.args.op === "confirm")
-    expect(confirm?.args.data).toMatchObject({ action: "click" })
-    expect(String((confirm?.args.data as Json).description)).toContain(text)
+    expect(confirm?.args.data).toMatchObject({ action })
   })
 
-  test("#given any mode but Full access #when the model clicks a pay button #then the question is still asked", async () => {
+  test.each(irreversibleKinds)("#given any mode but Full access #when %s #then the question is still asked and a no stops it", async (_name, script, act, action) => {
     const host = fakeHost({ fullAccess: false, answers: ["Don't allow"] })
-    const { session, guardedSession } = await connected(host, { descriptors: [{ tag: "button", text: "Pay now" }] })
+    const { session, guardedSession } = await connected(host, script)
 
-    const error = await guardedSession.click("#pay").then(() => undefined, (cause: unknown) => cause)
+    const error = await act(guardedSession).then(() => undefined, (cause: unknown) => cause)
 
     expect(asked(host)).toHaveLength(1)
     expect(error).toBeInstanceOf(BrowserActionDeclinedError)
-    expect(session.calls.map((call) => call[0])).not.toContain("click")
+    expect(session.calls.map((call) => call[0])).not.toContain(action)
   })
 
   test("#given the user says no #when the model clicks a payment control #then the click never happens and the refusal is typed", async () => {

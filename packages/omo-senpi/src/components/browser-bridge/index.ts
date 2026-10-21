@@ -52,7 +52,7 @@ export function createBrowserBridgeComponent(): OmoSenpiComponent {
         name: BROWSER_BRIDGE_TOOL_NAME,
         label: "Browser bridge",
         description:
-          "Internal channel for the browser skill: publish browser state to the app and read whether the user stopped browser use. Not for direct use.",
+          "Internal channel for the browser skill: publish browser state to the app, read whether the user stopped browser use, and ask whether Full access approves an irreversible browser action. Not for direct use.",
         parameters: PARAMETERS,
         exposure: "eval",
         permissionParser: () => [],

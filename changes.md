@@ -1,6 +1,6 @@
 ## 2026-10-20 - Full access no longer asks before irreversible browser actions (#2465)
 
-`packages/shared-skills/skills/browser/scripts/browser-engine-guard.mjs`: `confirmWithUser` asks `omo_browser_bridge` (`op: "confirm"`) first and returns without a question when the bridge reports Full access. In every other mode the Allow / Don't allow question is unchanged. A guest on Full access was still asked before pay/submit/send-style clicks (Q, 2026-10-14: Full access means no prompts). Tests in `packages/shared-skills/browser-skill-engine.test.ts` cover pay, submit, transfer and merge clicks under Full access with no question, plus the question still asked otherwise.
+`packages/shared-skills/skills/browser/scripts/browser-engine-guard.mjs`: `confirmWithUser` asks `omo_browser_bridge` (`op: "confirm"`) first and returns without a question when the bridge reports Full access. In every other mode the Allow / Don't allow question is unchanged. A guest on Full access was still asked before pay/submit/send-style clicks (Q, 2026-10-14: Full access means no prompts). It covers every action the guard confirms: clicks on pay/submit/transfer/merge-style controls, Enter in a message box, Enter in a form that sends, and a script that clicks or sends. Tests in `packages/shared-skills/browser-skill-engine.test.ts` run each kind under Full access (no question, the action happens) and in every other mode (still asked; a no stops it).
 
 ## 2026-10-23 - The engine publishes its OTel telemetry schema artifact, decoupled from the PostHog schema
 
