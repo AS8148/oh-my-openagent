@@ -3,7 +3,6 @@
  * Ed25519: canonical on-curve A/R, no negative zero or order-dividing-8 points;
  * public KEYS additionally require [L]A=identity (1024-entry byte-keyed LRU).
  * S<L; native WebCrypto computes the equation ONLY after strict prechecks.
- * The exported reference oracle computes the cofactorless equation in-helper.
  * Consumers MUST pass the full native/reference corpus on their runtime.
  * X25519: exactly 32 bytes, top bit clear, u<p, exclude all five low-order u;
  * the derived secret must be exactly 32 bytes and not all zero before any KDF.
@@ -52,9 +51,6 @@ const sqrtPower = (z: bigint): bigint => {
 };
 type Point = Readonly<{ x: bigint; y: bigint; z: bigint; t: bigint }>;
 const IDENTITY: Point = { x: 0n, y: 1n, z: 1n, t: 0n };
-const BASE_X = 15112221349535400772501151409588531511454012693041857206046113283949847762202n;
-const BASE_Y = 46316835694926478169428394003475163141307993866256225615783033603165251855960n;
-const BASE: Point = { x: BASE_X, y: BASE_Y, z: 1n, t: mod(BASE_X * BASE_Y) };
 
 // Complete extended twisted-Edwards addition for a=-1; XY=ZT and z is nonzero.
 const add = (p: Point, q: Point): Point => {
@@ -169,25 +165,6 @@ export const strictEd25519Verify = async (key: Uint8Array, sig: Uint8Array, msg:
   const nativeKey = await cached.native;
   const valid = await crypto.subtle.verify("Ed25519", nativeKey, signature, message);
   return valid ? { ok: true } : { ok: false, refusal: "signature" };
-};
-
-/** Slow, independent equation oracle for corpus parity; not the shipped hot path. */
-export const strictEd25519VerifyReference = async (key: Uint8Array, sig: Uint8Array, msg: Uint8Array): Promise<StrictEd25519Verdict> => {
-  if (key.length !== 32 || sig.length !== 64) return { ok: false, refusal: "malformed" };
-  // Snapshot the public inputs before the first await; callers may reuse their buffers.
-  const aBytes = Uint8Array.from(key);
-  const signature = Uint8Array.from(sig);
-  const a = decodePublicKeyUncached(aBytes);
-  const r = decodePoint(signature.subarray(0, 32));
-  const s = littleEndian(signature.subarray(32));
-  if (a === undefined || r === undefined || s >= L) return { ok: false, refusal: "malformed" };
-  const hashInput = new Uint8Array(64 + msg.length);
-  hashInput.set(signature.subarray(0, 32));
-  hashInput.set(aBytes, 32);
-  hashInput.set(msg, 64);
-  const h = littleEndian(new Uint8Array(await crypto.subtle.digest("SHA-512", hashInput))) % L;
-  return equal(multiply(BASE, s), add(r, multiply(a, h)))
-    ? { ok: true } : { ok: false, refusal: "signature" };
 };
 
 // Montgomery u-coordinates of the order-8 points (little-endian encodings in the corpus).

@@ -3,12 +3,13 @@ import { createHash, generateKeyPairSync } from "node:crypto"
 import { keyringFor } from "../testing/sync-v1.test-support.ts"
 import pin from "./PIN.json"
 import corpus from "./strict-ed25519-corpus.json"
-import { checkSharedSecret, strictEd25519Key, strictEd25519Precheck, strictEd25519Verify, strictEd25519VerifyReference, strictX25519Key } from "./strict-ed25519.ts"
+import { strictEd25519VerifyReference } from "../testing/strict-ed25519-oracle.test-support.ts"
+import { checkSharedSecret, strictEd25519Key, strictEd25519Precheck, strictEd25519Verify, strictX25519Key } from "./strict-ed25519.ts"
 
 // Vendored copy of the shared strict-ed25519 helper and corpus (#10742), taken byte-identical from
 // the relay-proto package that owns them. Any rule change happens there; this copy must keep the
 // source's sha256 and runs the corpus on Bun, the runtime the sync client ships on.
-const SOURCE_SHA256 = { "strict-ed25519.ts": pin.module, "strict-ed25519-corpus.json": pin.corpus } as const
+const SOURCE_SHA256 = { "strict-ed25519.ts": pin.module, "strict-ed25519-corpus.json": pin.corpus, "../testing/strict-ed25519-oracle.test-support.ts": pin.oracle } as const
 
 const bytes = (hex: string): Uint8Array<ArrayBuffer> => new Uint8Array(Buffer.from(hex, "hex"))
 const sha256 = async (name: string): Promise<string> =>
