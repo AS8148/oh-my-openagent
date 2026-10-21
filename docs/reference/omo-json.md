@@ -139,10 +139,10 @@ The one supported way to turn a skill off. A name listed here is absent from the
 
 ### `exclude_models` (Native harness)
 
-Keeps a model out of every chain OmO Native picks from. A matching model is treated as if its provider had no login: a category's builtin rungs, its `model` / `models` / `fallback_models`, an agent's chain, an agent that borrows a category, memory children, the main session's `model_profile` walk (a literal pin included), and an explicit `model` on a task call. A task call that pins an excluded model fails with `model_unavailable` and names the entry that matched. A category or agent whose every rung is excluded becomes unavailable, exactly like one with no connected provider.
+Keeps a model out of every chain OmO Native picks from. A matching model is treated as if its provider had no login: a category's builtin rungs, its `model` / `models` / `fallback_models`, an agent's chain, an agent that borrows a category, memory children (reflection, dream and facts, including the session model they would otherwise inherit), the main session's `model_profile` walk (a literal pin included), an explicit `model` on a task call, a task child respawned or resumed on its recorded model, and the `-fast` sibling a fast parent would upgrade a child to (the child keeps its planned model instead). A task call that pins an excluded model fails with `model_unavailable` and names the entry that matched. A category or agent whose every rung is excluded becomes unavailable, exactly like one with no connected provider.
 
 - `provider/model` matches that provider's copy only: `"opencode/claude-fable-5-1"`.
-- A bare model id matches it from any provider: `"claude-fable-5-1"`.
+- A bare model id matches it from any provider, including a gateway that nests the vendor in its id (`openrouter/anthropic/claude-fable-5-1`): `"claude-fable-5-1"`. A `vendor/model` entry such as `"anthropic/claude-fable-5-1"` also matches that nested id.
 - `*` matches any run of characters, and matching ignores case: `"claude-fable-*"` keeps every Fable build out.
 
 Like `disabled_skills`, layers are unioned: a project file cannot let back in a model the user file keeps out. Senpi's own mid-session retry chains for the main session (`retry.fallbackChains` in the engine settings) are not covered.

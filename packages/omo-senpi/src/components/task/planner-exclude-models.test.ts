@@ -28,6 +28,25 @@ describe("task model pins with exclude_models", () => {
     expect(result.kind === "error" ? result.error.message : "").toContain("claude-fable-*")
   })
 
+  test("#given a fast parent and an excluded -fast sibling #when planned #then the child keeps the planned model", () => {
+    // given
+    const models = [
+      { provider: "chatgpt-subscription", id: "gpt-5.6-luna" },
+      { provider: "chatgpt-subscription", id: "gpt-5.6-luna-fast", upstreamModelId: "gpt-5.6-luna", serviceTier: "priority" as const },
+    ]
+    const fastRegistry: TaskModelRegistry = {
+      getAvailable: () => models,
+      find: (provider, modelId) => models.find((model) => model.provider === provider && model.id === modelId),
+    }
+    const planner = createTaskChildPlanner({ exclude_models: ["*-fast"] }, BUILTIN_AGENTS, () => fastRegistry, () => "priority")
+
+    // when
+    const result = planner({ prompt: "go", parent_session_id: "parent-1", depth: 0, model: "chatgpt-subscription/gpt-5.6-luna" })
+
+    // then
+    expect(result.kind === "resolved" ? result.plan.model : result.kind).toBe("chatgpt-subscription/gpt-5.6-luna")
+  })
+
   test("#given a pin outside the list #when planned #then it still resolves", () => {
     // given
     const planner = createTaskChildPlanner({ exclude_models: ["claude-fable-*"] }, BUILTIN_AGENTS, () => REGISTRY)

@@ -15,6 +15,7 @@ import {
   type RpcRunnerSpec,
 } from "@oh-my-opencode/senpi-task"
 
+import { createRpcModelAdmission } from "@oh-my-opencode/senpi-task/rpc-model-admission"
 import { log } from "@oh-my-opencode/utils"
 
 import { loadSenpiBarrel } from "../../../../senpi-task/src/lazy/senpi-barrel"
@@ -51,6 +52,9 @@ export interface RunnerBuildContext {
   // WHERE this session's `process` children open (its own task host) and the task store the index
   // records. The engine always passes it; the host runner cannot be built without it.
   readonly hostRouting?: TaskHostRouting
+  // omo.json exclude_models: an in-process child respawned or resumed on an excluded model fails
+  // model_unavailable instead of running it.
+  readonly excludeModels?: readonly string[]
 }
 
 export interface TaskRunnerFactories {
@@ -77,6 +81,7 @@ function buildInProcessRunner(build: RunnerBuildContext): ManagedRunner {
   const context = createParentRegistrySessionContext(
     () => build.runtime.modelRegistry(),
     () => build.runtime.projectTrusted(),
+    () => build.excludeModels,
   )
   return createInProcessManagedRunner(inProcess, context)
 }
@@ -182,8 +187,10 @@ export function buildRespawnRunner(
  */
 export function buildProcessChildRunner(build: RunnerBuildContext): RpcHostRunner | RpcProcessRunner {
   const inheritedExtensions = parseExtensionEntries(process.argv)
+  const modelAdmission = build.excludeModels === undefined ? {} : { modelAdmission: createRpcModelAdmission({ excludeModels: build.excludeModels }) }
   const perChild = new RpcProcessRunner({
     inheritedExtensions,
+    ...modelAdmission,
     ...(build.onHostWarning === undefined ? {} : { onWarning: build.onHostWarning }),
   })
   const platform = build.platform ?? process.platform
@@ -192,6 +199,7 @@ export function buildProcessChildRunner(build: RunnerBuildContext): RpcHostRunne
   if (routing === undefined) throw new Error("omo-senpi task host runner built without the session's shard routing")
   const env = build.env ?? process.env
   return new RpcHostRunner({
+    ...modelAdmission,
     policy: build.settings.host_engine_policy,
     agentDir: build.agentDir ?? resolveAgentHome({ env }),
     env,

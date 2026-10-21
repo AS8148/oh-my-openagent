@@ -1,4 +1,4 @@
-import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
+import { isExcludedModel, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 
 import { inheritParentFastMode, type ResolveParentServiceTier } from "./fast-mode-inheritance"
 import { NO_REGISTRY_MESSAGE, resolveExplicitPin, type ResolveDefaultRoute } from "./planner-explicit-pin"
@@ -86,10 +86,9 @@ export function createTaskChildPlanner(
   return (spec): PlanResolution => {
     const resolution = planChild(spec)
     if (resolution.kind !== "resolved") return resolution
-    return {
-      kind: "resolved",
-      plan: inheritParentFastMode(resolution.plan, resolveRegistry(), resolveParentServiceTier()),
-    }
+    const fast = inheritParentFastMode(resolution.plan, resolveRegistry(), resolveParentServiceTier())
+    // The -fast sibling is a different model: exclude_models can keep it out while the planned one runs.
+    return { kind: "resolved", plan: isExcludedModel(fast.model, omoConfig.exclude_models) ? resolution.plan : fast }
   }
 }
 

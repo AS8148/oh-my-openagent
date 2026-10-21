@@ -1,4 +1,4 @@
-import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
+import { isExcludedModel, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import {
   builtinCategoryChainCandidates,
   resolveCategory,
@@ -66,6 +66,11 @@ export function resolveReflectionModel(
   // exclude_models reaches every rung below: the category chain, a pin, the builtin rungs appended
   // after it and the beyond-category ladder all read this one filtered view.
   const registry = liveRegistry === undefined ? undefined : withoutExcludedModels(liveRegistry, config.exclude_models)
+  const session = options.sessionModel
+  if (session !== undefined && isExcludedModel(`${session.provider}/${session.id}`, config.exclude_models)) {
+    const { sessionModel: _excluded, ...rest } = options
+    return resolveReflectionModel(category, config, liveRegistry, rest)
+  }
   if (!registry) {
     return resolveBeyondCategory(category, undefined, options)
       ?? { kind: "category_unavailable", category, cause: "no_registry" }

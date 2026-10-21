@@ -32,6 +32,18 @@ describe("excludedModelPattern", () => {
     expect(isExcludedModel("anthropic/claude-opus-5-5", patterns)).toBe(false)
   })
 
+  test("#given a gateway id that nests a provider #when matching #then a bare entry and a provider-scoped entry both match its tail", () => {
+    // given
+    const nested = "openrouter/anthropic/claude-fable-5-1"
+
+    // when / then
+    expect(isExcludedModel(nested, ["claude-fable-*"])).toBe(true)
+    expect(isExcludedModel(nested, ["anthropic/claude-fable-5-1"])).toBe(true)
+    expect(isExcludedModel(nested, ["openrouter/anthropic/claude-fable-5-1"])).toBe(true)
+    expect(isExcludedModel(nested, ["openrouter/claude-fable-5-1"])).toBe(false)
+    expect(isExcludedModel(nested, ["anthropic"])).toBe(false)
+  })
+
   test("#given regex metacharacters and blank entries #when matching #then they are literal and inert", () => {
     // given
     const patterns = ["  ", "gpt-6.1-sol"]
