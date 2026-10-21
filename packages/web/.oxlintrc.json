@@ -1,0 +1,23 @@
+{
+  "$schema": "../../node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript"
+  ],
+  "categories": {
+    "correctness": "off"
+  },
+  "rules": {
+    "eslint/no-unused-vars": "error",
+    "eslint/prefer-const": "error",
+    "typescript/consistent-type-imports": "error",
+    "eslint/no-console": "warn",
+    "typescript/no-explicit-any": "error",
+    "eslint/no-var": "error"
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/.open-next/**",
+    "**/dist/**"
+  ]
+}
