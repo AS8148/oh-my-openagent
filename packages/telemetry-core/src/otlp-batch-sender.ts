@@ -116,6 +116,10 @@ export class BatchSender {
       let claimed: string | null
       try {
         claimed = await claiming
+      } catch (error) {
+        // The batch keeps its name (or its lease runs out) and a later pass retries it; the pump never rejects.
+        this.#input.report("telemetry_otlp_send_failed", error)
+        claimed = null
       } finally {
         this.#claiming = undefined
       }
@@ -131,8 +135,13 @@ export class BatchSender {
     const renew = setInterval(() => {
       if (ctx.nowMs() > deadlineMs) return
       const current = this.#inFlight
-      const renewed = current === undefined ? null : renewClaim(ctx, current)
-      if (renewed !== null) this.#inFlight = renewed
+      // A timer has no caller to reject to: an error here would be an uncaught exception in the host.
+      try {
+        const renewed = current === undefined ? null : renewClaim(ctx, current)
+        if (renewed !== null) this.#inFlight = renewed
+      } catch (error) {
+        this.#input.report("telemetry_spool_write_failed", error)
+      }
     }, this.#input.leaseRenewIntervalMs)
     renew.unref?.()
     try {
