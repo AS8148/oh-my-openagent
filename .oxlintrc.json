@@ -6,7 +6,9 @@
     "typescript",
     "unicorn"
   ],
-  "jsPlugins": [],
+  "jsPlugins": [
+    "./script/oxlint/no-enum.ts"
+  ],
   "categories": {},
   "rules": {
     "eslint/array-callback-return": "error",
@@ -264,7 +266,8 @@
       {
         "disallowTypeAnnotations": false
       }
-    ]
+    ],
+    "omo/no-enum": "error"
   },
   "ignorePatterns": [
     "**/node_modules/**",
