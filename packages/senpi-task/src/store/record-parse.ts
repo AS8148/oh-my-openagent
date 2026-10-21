@@ -256,6 +256,7 @@ function readTaskStatus(record: Record<string, unknown>): TaskRecord["status"] {
   switch (status) {
     case "pending":
     case "running":
+    case "paused":
     case "completed":
     case "error":
     case "cancelled":

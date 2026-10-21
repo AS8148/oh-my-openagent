@@ -182,7 +182,7 @@ async function watchRevivedTask(
     failRevivedNode(options, nodeId, "task_error", controlErrorMessage(error), now)
     return
   }
-  if (task.status === "pending" || task.status === "running") {
+  if (task.status === "pending" || task.status === "running" || task.status === "paused") {
     failRevivedNode(options, nodeId, "task_error", `revived task ${taskId} settled nonterminal`, now)
     return
   }
@@ -215,7 +215,7 @@ function failRevivedNode(
 }
 
 function revivedTaskFailure(
-  status: Exclude<TaskStatus, "completed" | "pending" | "running">,
+  status: Exclude<TaskStatus, "completed" | "pending" | "running" | "paused">,
   message?: string,
 ): { readonly code: DagNodeErrorCode; readonly message: string } {
   switch (status) {

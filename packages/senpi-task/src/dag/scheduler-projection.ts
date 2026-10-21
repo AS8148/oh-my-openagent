@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import { relative } from "node:path"
 import { applyDagRunMutation } from "./manager"
+import { applyRunPause } from "./run-pause"
 import { persistDagNodeResult, readDagNodeResult, type DagNodeResultArtifact } from "./results"
 import type { DagFileStore } from "./store"
 import type { TaskRecord } from "../state"
@@ -20,6 +21,8 @@ export function applyDagSchedulerEvent(
     readonly now: () => number
   },
 ): DagRunRecordV1 {
+  const paused = applyRunPause(record, event)
+  if (paused !== undefined) return paused
   switch (event.type) {
     case "dag.run.started":
       return {

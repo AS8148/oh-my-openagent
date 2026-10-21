@@ -56,6 +56,10 @@ import { withTaskRecordLockAsync } from "../store/record-lock"
 import { reattachManagedTask } from "./manager-reattach"
 import { TASK_AWAITING_INPUT_EVENT } from "./host-turn-resumed"
 import { PendingStops } from "./pending-stops"
+import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest } from "./run-pause"
+import type { RunPauseOwner } from "../pause/ports"
+import { AdmissionBarrier } from "../pause/admission-barrier"
+import { isAdmissionHeld, createStartAdmissions, type HeldStart } from "./start-admission"
 import { respawnWithWorkpool } from "./workpool-respawn"
 import { NameRegistry } from "./names"
 import { newestSessionPath } from "../lifecycle/session-path"
@@ -113,7 +117,7 @@ type TaskManagerImplOptions = TaskManagerOptions & {
 }
 
 type LaunchOutcome =
-  | { readonly ok: true; readonly run_epoch?: number; readonly resolved_model?: ResolvedModelRecord; readonly effective_model?: EffectiveModelRecord; readonly queue_position?: number }
+  | { readonly ok: true; readonly held?: HeldStart; readonly run_epoch?: number; readonly resolved_model?: ResolvedModelRecord; readonly effective_model?: EffectiveModelRecord; readonly queue_position?: number }
   | {
     readonly ok: false
     readonly error: string
@@ -121,7 +125,7 @@ type LaunchOutcome =
     readonly failure_reason?: Extract<StartResult, { kind: "start_failed" }>["failure_reason"]
   }
 
-type ReattachingTaskManager = TaskManager & {
+type ReattachingTaskManager = TaskManager & TaskPauseMethods & {
   readonly workpools: WorkpoolEngine
   respawn(record: TaskRecord, resumeSessionPath?: string): Promise<RespawnResult>
   redispatchTask(idOrName: string, callerSessionId?: string): Promise<RedispatchOutcome>
@@ -207,10 +211,13 @@ class TaskManagerImpl implements TaskManager {
   readonly #steering: SteeringEngine
   readonly #isolation: IsolationWiring
   readonly #outcome: OutcomeTracker
+  readonly #runPause: ReturnType<typeof createTaskRunPause>
+  readonly #startAdmissions: ReturnType<typeof createStartAdmissions>
   readonly #residency = new ResidencySignal()
 
   constructor(options: TaskManagerImplOptions) {
     this.#options = options
+    this.#startAdmissions = createStartAdmissions(options.admissionBarrier ?? new AdmissionBarrier(), options.onHeldAdmission, options.now ?? Date.now)
     try {
       const listed = options.store.list()
       if (listed.diagnostics.length > 0) {
@@ -274,6 +281,11 @@ class TaskManagerImpl implements TaskManager {
       hostPid: this.#hostPid,
       config: options.config,
     })
+    this.#runPause = createTaskRunPause({
+      store: options.store, concurrency: this.#concurrency, child: options.childPausePort, now: this.#now,
+      liveHandle: taskId => this.#live.get(taskId)?.handle,
+      track: (taskId, handle, model, epoch, turn) => this.#outcome.trackOutcome(taskId, handle, model, epoch, turn),
+    })
     this.#outcome = createOutcomeTracker({
       scheduleExitConfirmation: options.scheduleExitConfirmation,
       store: options.store,
@@ -287,6 +299,8 @@ class TaskManagerImpl implements TaskManager {
       settleWaiters: (taskId, terminal) => this.#settleWaiters(taskId, terminal),
       tryRuntimeFallback: (input) => this.#tryRuntimeFallback(input),
       stopSettlement: (taskId) => this.#stopsPending.settlement(taskId),
+      pauseSettlement: (taskId, epoch) => this.#runPause.settlement(taskId, epoch),
+      parkSlot: (taskId, epoch) => this.#runPause.park(taskId, epoch),
     })
     this.workpools = createWorkpoolEngine(options.store.stateDir, createWorkpoolAdmission({
       options, concurrency: this.#concurrency, hostPid: this.#hostPid,
@@ -311,27 +325,49 @@ class TaskManagerImpl implements TaskManager {
   }
 
   async start(spec: ManagerStartSpec): Promise<StartResult> {
+    return this.#startAdmissions.run(spec, undefined, admitted => this.#startAdmitted(admitted), spec.resumeCredential)
+  }
+
+  async #startAdmitted(spec: ManagerStartSpec): Promise<StartResult> {
+    spec.admission?.assertOpen()
     const refused = memberKernelToolRefusal(spec)
     if (refused !== undefined) return refused
     const resolution = await planWithWarmBarrel(this.#options.planner, spec)
+    spec.admission?.assertOpen()
     if (resolution.kind === "error") return { kind: "plan_unresolved", error: resolution.error }
 
     return withResidentStart(this.#options, spec.parent_session_id,
-      release => this.#startResolved(spec, resolution.plan, undefined, release))
+      release => this.#startResolved(spec, resolution.plan, undefined, release), spec.admission)
+  }
+
+  pauseTask(taskId: string, owner: RunPauseOwner) {
+    return this.#runPause.pauseTask(taskId, owner)
+  }
+
+  resumePausedTask(taskId: string, request: ResumeTaskRequest) {
+    return this.#runPause.resumePausedTask(taskId, request)
   }
 
   async startOwned(spec: ManagerStartSpec, owner: DagTaskOwner): Promise<OwnedStartResult> {
+    return this.#startAdmissions.run(spec, { kind: "dag", runId: owner.runId },
+      admitted => this.#startOwnedAdmitted(admitted, owner), spec.resumeCredential)
+  }
+
+  async #startOwnedAdmitted(spec: ManagerStartSpec, owner: DagTaskOwner): Promise<OwnedStartResult> {
+    spec.admission?.assertOpen()
     const refused = memberKernelToolRefusal(spec)
     if (refused !== undefined) return refused
     const lockPath = ownerLockPath(this.#options.store.stateDir, owner)
     const resolution = await planWithWarmBarrel(this.#options.planner, spec)
+    spec.admission?.assertOpen()
     if (resolution.kind === "error") return { kind: "plan_unresolved", error: resolution.error }
 
     return withTaskRecordLockAsync(lockPath, async () => {
+      spec.admission?.assertOpen()
       const raced = this.#ownedResult(owner)
       if (raced !== undefined) return raced
       const result = await withResidentStart(this.#options, spec.parent_session_id,
-        release => this.#startResolved(spec, resolution.plan, owner, release))
+        release => this.#startResolved(spec, resolution.plan, owner, release), spec.admission)
       return result.kind === "started" ? { ...result, reused: false } : result
     })
   }
@@ -378,6 +414,7 @@ class TaskManagerImpl implements TaskManager {
     owner?: DagTaskOwner,
     releaseResidency?: () => void,
   ): Promise<StartResult> {
+    spec.admission?.assertOpen()
     const normalizeSpecName = (value: string | undefined): string | undefined => {
       const trimmed = value?.trim()
       return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
@@ -404,6 +441,7 @@ class TaskManagerImpl implements TaskManager {
     })
 
     const requestedName = normalizeSpecName(spec.name)
+    spec.admission?.assertOpen()
     const requestedRegistration = requestedName === undefined
       ? undefined
       : this.#names.register(spec.parent_session_id, requestedName)
@@ -411,6 +449,7 @@ class TaskManagerImpl implements TaskManager {
     let claimed: TaskRecord
     try {
       const draft = createTaskRecord({
+        ...(spec.admission === undefined ? {} : { task_id: spec.admission.taskId }),
         ...buildRecordInput({
           spec,
           plan,
@@ -420,7 +459,8 @@ class TaskManagerImpl implements TaskManager {
         }),
         ...(owner === undefined ? {} : { owner }),
       }, this.#now())
-      const claimDraft: TaskRecord = { ...draft, name: requestedRegistration?.name ?? draft.task_id, host_pid: this.#hostPid }
+      const taskId = spec.admission?.taskId ?? draft.task_id
+      const claimDraft: TaskRecord = { ...draft, task_id: taskId, name: requestedRegistration?.name ?? taskId, host_pid: this.#hostPid }
       claimed = claimTaskRecord(this.#options.store, claimDraft, {
         nameFollowsId: requestedRegistration === undefined,
         ...(requestedRegistration === undefined
@@ -445,6 +485,7 @@ class TaskManagerImpl implements TaskManager {
     }
 
     const registration = requestedRegistration ?? this.#names.register(spec.parent_session_id, undefined, claimed.task_id)
+    spec.admission?.bind(claimed.task_id)
     const admission = admitSpill(plan, this.#concurrency, claimed.task_id, claimed.notification.run_epoch)
     const effectivePlan = admission.plan
     const lease = admission.lease
@@ -478,6 +519,7 @@ class TaskManagerImpl implements TaskManager {
         cwd: isolation === undefined ? this.#options.cwd : isolation.handle.mergedDir,
         stateDir: this.#options.store.stateDir,
       })
+      managedSpec = { ...managedSpec, ...(spec.admission === undefined ? {} : { admission: spec.admission }) }
       // Persist the mode-neutral rebuild spec for BOTH execution modes: v1 carries only safe
       // launch facts (effective prompt, instructions, tool names, cwd) - never executable tools,
       // extensions, or member env.
@@ -498,6 +540,7 @@ class TaskManagerImpl implements TaskManager {
     releaseResidency?.()
     const runner = this.#options.runners[executionMode]
     const context: LaunchContext = { record: finalRecord, managedSpec, runner, model: effectivePlan.model }
+    spec.admission?.transfer()
     const startParts = {
       run_epoch: finalRecord.notification.run_epoch,
       ...(isolation === undefined ? {} : { isolation: { backend: isolation.spec.backend, merged_dir: isolation.spec.merged_dir } }),
@@ -522,6 +565,7 @@ class TaskManagerImpl implements TaskManager {
         }
       }
       const launched = reported.value
+      if (launched.ok && launched.held !== undefined) return launched.held
       if (!launched.ok) {
         return {
           kind: "start_failed",
@@ -603,6 +647,7 @@ class TaskManagerImpl implements TaskManager {
       // whose live handle this manager already let go of, or never had (still launching). Only a live
       // handle whose abort was skipped keeps its slot until its settled outcome releases it.
       if (options?.abort !== "skip" || !this.#live.has(outcome.task_id)) this.#concurrency.releaseTask(outcome.task_id)
+      this.#settleWaiters(outcome.task_id)
     }
     return outcome
   }
@@ -654,6 +699,7 @@ class TaskManagerImpl implements TaskManager {
     const releaseLease = (): void => this.#concurrency.releaseLease(taskId, nextEpoch)
     // The abandoned run's settling outcome must never terminalize the task the fresh child continues.
     this.#outcome.release(taskId)
+    this.#runPause.forget(taskId)
     try {
       await this.#abandonForRedispatch(taskId)
     } catch (error) {
@@ -800,6 +846,7 @@ class TaskManagerImpl implements TaskManager {
     // never reaches its own release: free its lane now or every suspension leaks a slot (#8973).
     this.#releaseSlotForTask(taskId)
     this.#outcome.release(taskId)
+    this.#runPause.forget(taskId)
     this.#live.get(taskId)?.unsubscribe()
     this.#live.delete(taskId)
     const subscribers = this.#childSubscribers.get(taskId)
@@ -1017,6 +1064,20 @@ class TaskManagerImpl implements TaskManager {
   }
 
   async #launch(initial: LaunchContext): Promise<LaunchOutcome> {
+    try {
+      initial.managedSpec.admission?.assertOpen()
+      return await this.#launchAdmitted(initial)
+    } catch (error) {
+      if (!isAdmissionHeld(error)) throw error
+      const held = initial.managedSpec.admission?.hold() ?? error.result
+      this.#concurrency.releaseTask(initial.record.task_id)
+      return { ok: true, held }
+    } finally {
+      initial.managedSpec.admission?.leave()
+    }
+  }
+
+  async #launchAdmitted(initial: LaunchContext): Promise<LaunchOutcome> {
     if (this.#shutdownStarted) {
       // Still pending: the shutdown suspension parks it with the other pending records.
       this.#releaseSlot(initial.record.task_id, initial.model, initial.record.notification.run_epoch)
@@ -1035,9 +1096,11 @@ class TaskManagerImpl implements TaskManager {
     for (;;) {
       const { record, managedSpec, runner, model } = context
       try {
+        managedSpec.admission?.assertOpen()
         handle = await runner.start(managedSpec)
         break
       } catch (error) { // no-excuse-ok: catch - runner boundary converts every thrown value into a public classification.
+        if (isAdmissionHeld(error)) throw error
         // A child that cannot serve this model can still serve the next entry of its chain, and
         // nothing has run yet, so advancing costs no duplicated work. Every other failure kind would
         // reproduce identically on the next entry, so only an admission refusal walks the chain.

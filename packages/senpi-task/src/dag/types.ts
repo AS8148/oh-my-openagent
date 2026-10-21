@@ -46,6 +46,7 @@ export const DAG_NODE_STATES = [
   "blocked",
   "scheduled",
   "running",
+  "paused",
   "completed",
   "failed",
   "cancelled",
@@ -219,6 +220,7 @@ export type DagBottleneck = {
 }
 
 export type DagNodeCounts = {
+  readonly paused?: number
   readonly total: number
   readonly pending: number
   readonly blocked: number
@@ -231,6 +233,7 @@ export type DagNodeCounts = {
 }
 
 export type DagRunSnapshot = {
+  readonly pause?: { readonly reason: "user_stop"; readonly pauseSeq: number }
   readonly schemaVersion: 1
   readonly runId: DagRunId
   readonly runKey: string

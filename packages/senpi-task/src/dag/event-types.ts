@@ -57,7 +57,7 @@ export type DagRunEventPayload =
       readonly edgeCount: number
     }
   | { readonly type: "dag.run.started"; readonly generation: number }
-  | { readonly type: "dag.run.paused"; readonly reason?: string }
+  | { readonly type: "dag.run.paused"; readonly reason?: string; readonly pauseSeq?: number }
   | { readonly type: "dag.run.resumed"; readonly generation: number }
   | { readonly type: "dag.run.completed"; readonly counts: DagNodeCounts }
   | {

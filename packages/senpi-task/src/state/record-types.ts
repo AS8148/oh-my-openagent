@@ -71,6 +71,7 @@ export type PendingSteeringEntry = {
 }
 
 export type TaskRecordInput = {
+  readonly task_id?: string
   readonly name?: string
   readonly task_summary?: string
   readonly description?: string

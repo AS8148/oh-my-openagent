@@ -32,12 +32,16 @@ import type { InheritedExtensions } from "../runners/rpc/parent-extensions"
 import type { WorkpoolEngine } from "../workpool/engine"
 import type { ChildExtensionEvent } from "../runners/child-extension-events"
 import type { ExitConfirmationSchedule } from "./provisional-exit"
+import type { ChildPausePort } from "../pause/ports"
+import type { AdmissionBarrier, ResumeCredential } from "../pause/admission-barrier"
+import type { HeldStart, StartAdmission } from "./start-admission"
 
 export type { ExecutionMode, ExecutionModeGate } from "./execution-mode"
 
 // The unified spec both runner adapters accept. A superset: the rpc adapter uses the subset it
 // needs (task_id, cwd, state_dir, prompt); the in-process adapter also consumes model/tools/agent.
 export type ManagedStartSpec = {
+  readonly admission?: StartAdmission
   readonly taskId: string
   readonly cwd: string
   readonly stateDir: string
@@ -78,6 +82,8 @@ export type ManagedRunner = {
 }
 
 export type ManagerStartSpec = {
+  readonly admission?: StartAdmission
+  readonly resumeCredential?: ResumeCredential
   readonly isolated?: boolean
   readonly apply?: boolean
   readonly merge?: "patch" | "branch"
@@ -145,6 +151,7 @@ export type PlanResolution =
 export type ChildPlanner = (spec: ManagerStartSpec) => PlanResolution
 
 export type StartResult =
+  | HeldStart
   | {
       readonly kind: "started"
       readonly task_id: string
@@ -262,6 +269,9 @@ export type TrustedRespawnLaunch = {
 export type TrustedRespawnLaunchResolver = (record: TaskRecord) => Promise<TrustedRespawnLaunch | undefined>
 
 export type TaskManagerOptions = {
+  readonly admissionBarrier?: AdmissionBarrier
+  readonly onHeldAdmission?: (result: HeldStart, spec: ManagerStartSpec) => void
+  readonly childPausePort?: ChildPausePort
   readonly onChildExtensionEvent?: (event: ChildExtensionEvent, owner: TaskRecord) => void
   readonly concurrency?: TaskConcurrency
   // Injected by row 17. Absent, `isolated` children are refused rather than silently run against the

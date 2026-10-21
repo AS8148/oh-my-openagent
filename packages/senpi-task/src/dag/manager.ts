@@ -2,6 +2,8 @@
 import { randomUUID } from "node:crypto"
 import * as fs from "node:fs"
 import { join } from "node:path"
+import { applyRunPause } from "./run-pause"
+import { countDagNodes as countNodes } from "./counts"
 
 import { defaultSignaller } from "../lifecycle/context"
 import { dagDefinitionAmendedEvent, dagRunCreatedEvent, type DagRunEventType } from "./events"
@@ -109,6 +111,7 @@ export type DagPersistedDefinition = {
 export type { AmendRecord } from "./types"
 
 export type DagRunRecordV1 = DagJournalCheckpoint & {
+  readonly pause?: { readonly reason: "user_stop"; readonly pauseSeq: number }
   readonly runId: DagRunId
   readonly runKey: string
   readonly name: string
@@ -579,6 +582,8 @@ function amendRun(params: DagAmendParams, context: AmendContext): DagRunRecordV1
 }
 
 export function applyDagRunMutation(record: DagRunRecordV1, event: DagRunEvent): DagRunRecordV1 {
+  const paused = applyRunPause(record, event)
+  if (paused !== undefined) return paused
   if (event.type === "dag.run.created") return { ...record, updatedAt: event.at }
   if (event.type === "dag.node.retried") {
     return {
@@ -725,7 +730,7 @@ function materializeAmendedDefinition(
 
 // States whose node still owns a child that could be doing work right now. The activity clock is
 // projected for exactly these, so a settled node never reports a stale "last seen" time.
-const LIVE_CHILD_NODE_STATES: ReadonlySet<DagNodeState> = new Set(["scheduled", "running"])
+const LIVE_CHILD_NODE_STATES: ReadonlySet<DagNodeState> = new Set(["scheduled", "running", "paused"])
 
 function withNodeActivity(nodes: readonly DagNode[], stateDir: string): readonly DagNode[] {
   return nodes.map((node) => {
@@ -737,6 +742,7 @@ function withNodeActivity(nodes: readonly DagNode[], stateDir: string): readonly
 
 function projectSnapshot(record: DagRunRecordV1, stateDir: string): DagRunSnapshot {
   return {
+    ...(record.pause === undefined ? {} : { pause: record.pause }),
     schemaVersion: 1,
     runId: record.runId,
     runKey: record.runKey,
@@ -760,22 +766,6 @@ function projectSnapshot(record: DagRunRecordV1, stateDir: string): DagRunSnapsh
     ...(record.amendHistory === undefined ? {} : { amendHistory: record.amendHistory }),
     ...(record.leaseHolderPid === undefined ? {} : { leaseHolderPid: record.leaseHolderPid }),
   }
-}
-
-function countNodes(nodes: readonly DagNode[]): DagNodeCounts {
-  const counts = {
-    total: nodes.length,
-    pending: 0,
-    blocked: 0,
-    scheduled: 0,
-    running: 0,
-    completed: 0,
-    failed: 0,
-    cancelled: 0,
-    skipped: 0,
-  }
-  for (const node of nodes) counts[node.state] += 1
-  return counts
 }
 
 function resolveLimit(requested: number | undefined, fallback: number, max: number): number {

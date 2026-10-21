@@ -8,6 +8,8 @@ import type { ForgetOptions } from "./types"
 import { terminalFailureMessage } from "./credential-failure"
 import { nowIso } from "./manager-helpers"
 import { createProvisionalExitTracker, type ExitConfirmationSchedule } from "./provisional-exit"
+import { settlePaused } from "./settle-paused"
+import type { ResumedChildTurn } from "../pause/ports"
 
 export type ManagedOutcome = Awaited<ReturnType<ManagedChildHandle["waitForOutcome"]>>
 
@@ -40,6 +42,8 @@ export type OutcomeTrackerPorts = {
   // A cancel is waiting to stop this task: the run ends as cancelled, never as the failure the stop
   // causes. Settles once that cancel finished, whether or not its own record write landed.
   readonly stopSettlement?: (taskId: string) => Promise<void> | undefined
+  readonly pauseSettlement?: (taskId: string, epoch: number) => Promise<void> | undefined
+  readonly parkSlot?: (taskId: string, epoch: number) => void
   // Merges (or retains) an isolated child's clone. Awaited BEFORE the terminal record is written, so
   // every result builder - the foreground waiter, the completion notification, task_output - reads
   // one record that already carries merge_result. A late merge would publish "done" before the
@@ -48,7 +52,7 @@ export type OutcomeTrackerPorts = {
 }
 
 export type OutcomeTracker = {
-  readonly trackOutcome: (taskId: string, handle: ManagedChildHandle, model: string, epoch: number) => void
+  readonly trackOutcome: (taskId: string, handle: ManagedChildHandle, model: string, epoch: number, turn?: ResumedChildTurn) => void
   // The manager no longer owns this task's handle: stop watching it for parks.
   readonly release: (taskId: string) => void
 }
@@ -115,6 +119,7 @@ function errnoField(error: unknown, key: "code" | "syscall" | "path"): string | 
 
 export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker {
   const provisional = createProvisionalExitTracker(ports)
+  const turns = new Map<string, object>()
   // A terminal outcome is never lost to a persistence fault (#8050). When the store cannot write the
   // terminal record (Windows EPERM on the rename after the store's own retries), the run is still
   // settled: the residency is released through forget() and every waiter receives a synthesized
@@ -212,6 +217,7 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
   }
 
   function release(taskId: string): void {
+    turns.delete(taskId)
     provisional.release(taskId)
     parkWatches.get(taskId)?.()
     parkWatches.delete(taskId)
@@ -240,14 +246,19 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
     persistTerminal(taskId, owned, timestamp, { type: "cancel", timestamp, ...(runStats === undefined ? {} : { run_stats: runStats }) })
   }
 
-  function trackOutcome(taskId: string, handle: ManagedChildHandle, model: string, epoch: number): void {
+  function trackOutcome(taskId: string, handle: ManagedChildHandle, model: string, epoch: number, turn?: ResumedChildTurn): void {
     watchParks(taskId, handle, epoch)
     watchReplaced(taskId, handle, epoch)
-    handle
-      .waitForOutcome()
+    const tracking = {}
+    turns.set(taskId, tracking)
+    const outcomePromise = turn?.outcome ?? handle.waitForOutcome()
+    outcomePromise
       .then(async (outcome) => {
+        if (turns.get(taskId) !== tracking) return
         const stopped = ports.stopSettlement?.(taskId)
         if (stopped !== undefined) return await settleStopped(taskId, handle, model, epoch, stopped)
+        const paused = ports.pauseSettlement?.(taskId, epoch)
+        if (paused !== undefined) return await settlePaused(ports, taskId, handle, epoch, paused)
         const owned = ownedRecord(ports, taskId, handle, epoch)
         if (owned === null) return
         const timestamp = nowIso(ports.now)
@@ -255,10 +266,14 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
         if (outcome.status === "error") {
           const input = { taskId, handle, model, epoch, outcome, runStats, timestamp }
           const commit = (): void => {
+            if (turns.get(taskId) !== tracking) return
             const stopped = ports.stopSettlement?.(taskId)
-            const settling = stopped === undefined
-              ? settleErrorOutcome({ ...input, timestamp: nowIso(ports.now) })
-              : settleStopped(taskId, handle, model, epoch, stopped)
+            const paused = ports.pauseSettlement?.(taskId, epoch)
+            const settling = stopped !== undefined
+              ? settleStopped(taskId, handle, model, epoch, stopped)
+              : paused !== undefined
+                ? settlePaused(ports, taskId, handle, epoch, paused)
+                : settleErrorOutcome({ ...input, timestamp: nowIso(ports.now) })
             void settling.catch((error: unknown) => {
               log("senpi-task manager error outcome tracking failed", { taskId, error: String(error) })
             })
