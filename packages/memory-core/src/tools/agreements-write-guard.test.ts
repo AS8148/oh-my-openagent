@@ -66,6 +66,25 @@ describe("memory tools cannot change agreements the person wrote (security contr
     expect(await repo.head()).toBe(head)
   })
 
+  it("#given a flagged agent agreement at HEAD #when the memory tool lowers its count, clears its flag, or deletes it #then each write is refused and HEAD is unchanged", async () => {
+    // given
+    const { repo, lock } = await fixture()
+    const flagged = "- [global] Run bun test before claiming done <!-- id: 7b1d000000; by: agent; n: 3; status: needs-human -->"
+    await runMemoryTool({ repo, lock, params: {
+      command: "insert", reason: "seed flagged", file_path: AGREEMENTS_PATH, insert_line: 2, insert_text: flagged, author: AUTHOR,
+    } })
+    const head = await repo.head()
+    const edit = (new_string: string) => runMemoryTool({ repo, lock, params: {
+      command: "str_replace", reason: "tamper", file_path: AGREEMENTS_PATH, old_string: flagged, new_string, author: AUTHOR,
+    } })
+
+    // when / then
+    await expect(edit(flagged.replace("n: 3", "n: 1"))).rejects.toThrow(/cannot lower that count/)
+    await expect(edit(flagged.replace("needs-human", "active"))).rejects.toThrow(/only they can clear it/)
+    await expect(edit("- [global] Prefer short commit subjects")).rejects.toThrow(/only they can drop it/)
+    expect(await repo.head()).toBe(head)
+  })
+
   it("#given a human agreement at HEAD #when the memory tool appends a bare agent line #then the write commits", async () => {
     // given
     const { repo, lock, head } = await fixture()

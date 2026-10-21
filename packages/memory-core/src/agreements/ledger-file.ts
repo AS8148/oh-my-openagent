@@ -25,8 +25,10 @@ export function agreementItemsOf(content: string | undefined): readonly Agreemen
 }
 
 export function renderAgreementsFile(existing: string | undefined, items: readonly AgreementItem[]): string {
-  const frontmatter = existing === undefined ? { description: AGREEMENTS_DESCRIPTION } : parseMemoryFile(existing).frontmatter
-  const body = serializeAgreementsLedger(items)
+  const parsed = existing === undefined ? undefined : parseMemoryFile(existing)
+  const frontmatter = parsed === undefined ? { description: AGREEMENTS_DESCRIPTION } : parsed.frontmatter
+  const unparsed = parsed === undefined ? [] : parseAgreementsLedger(parsed.body).unparsed
+  const body = serializeAgreementsLedger(items, unparsed)
   return renderMemoryFile(frontmatter, body.length === 0 ? "" : `${body}\n`)
 }
 

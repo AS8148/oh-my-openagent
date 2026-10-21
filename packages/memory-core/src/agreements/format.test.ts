@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { agreementId, parseAgreementsLedger, serializeAgreementsLedger } from "./format"
+import { agreementItemsOf, renderAgreementsFile } from "./ledger-file"
 
 describe("agreement ids and the ledger line format (storage contract)", () => {
   test("#given the same lesson with NFKC, case, whitespace and trailing punctuation variants #when ids are minted #then they are one id", () => {
@@ -48,5 +49,17 @@ describe("agreement ids and the ledger line format (storage contract)", () => {
       text: "Ask before force-pushing", n: 0, status: "active",
     }])
     expect(parsed.diagnostics).toHaveLength(1)
+  })
+
+  test("#given a ledger with a line the parser cannot read #when the file is rendered after a mutation #then that line is kept verbatim", () => {
+    // given
+    const existing = "---\ndescription: Agreements\n---\n\n- [global] Ask before force-pushing\nhand-written note the person typed\n"
+
+    // when
+    const rendered = renderAgreementsFile(existing, agreementItemsOf(existing).map((item) => ({ ...item, n: 1 })))
+
+    // then
+    expect(rendered).toContain("\nhand-written note the person typed\n")
+    expect(agreementItemsOf(rendered)[0]?.n).toBe(1)
   })
 })

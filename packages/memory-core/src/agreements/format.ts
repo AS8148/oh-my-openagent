@@ -6,6 +6,7 @@ import type { AgreementAuthor, AgreementItem, AgreementScope, AgreementStatus } 
 export interface AgreementsLedgerParse {
   readonly items: readonly AgreementItem[]
   readonly diagnostics: readonly string[]
+  readonly unparsed: readonly string[]
 }
 
 const LINE_RE = /^-\s+\[(global|project)\]\s+(.+?)\s*(?:<!--\s*(.*?)\s*-->)?\s*$/
@@ -23,6 +24,7 @@ export function agreementId(text: string): string {
 export function parseAgreementsLedger(body: string): AgreementsLedgerParse {
   const items: AgreementItem[] = []
   const diagnostics: string[] = []
+  const unparsed: string[] = []
   const seen = new Set<string>()
   for (const [index, raw] of body.split(/\r?\n/).entries()) {
     const line = raw.trim()
@@ -32,25 +34,28 @@ export function parseAgreementsLedger(body: string): AgreementsLedgerParse {
     const text = match?.[2]?.trim()
     if (scope !== "global" && scope !== "project" || text === undefined || text.length === 0) {
       diagnostics.push(`line ${index + 1}: expected "- [global|project] <agreement>"`)
+      unparsed.push(line)
       continue
     }
     const parsed = parseMeta(match?.[3] ?? "", text, scope)
     if (typeof parsed === "string") {
       diagnostics.push(`line ${index + 1}: ${parsed}`)
+      unparsed.push(line)
       continue
     }
     if (seen.has(parsed.id)) {
       diagnostics.push(`line ${index + 1}: duplicate agreement id ${parsed.id}`)
+      unparsed.push(line)
       continue
     }
     seen.add(parsed.id)
     items.push(parsed)
   }
-  return { items, diagnostics }
+  return { items, diagnostics, unparsed }
 }
 
-export function serializeAgreementsLedger(items: readonly AgreementItem[]): string {
-  return sortAgreements(items).map(serializeItem).join("\n")
+export function serializeAgreementsLedger(items: readonly AgreementItem[], unparsed: readonly string[] = []): string {
+  return [...sortAgreements(items).map(serializeItem), ...unparsed].join("\n")
 }
 
 export function sortAgreements(items: readonly AgreementItem[]): AgreementItem[] {
