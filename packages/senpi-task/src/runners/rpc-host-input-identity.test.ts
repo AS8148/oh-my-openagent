@@ -1,8 +1,7 @@
 import { afterEach, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { HOST_CHILD_MODEL, startHostWorld, type ParentSession } from "./rpc-host/__fixtures__/host-world"
-import type { FakeHost } from "./rpc-host/__fixtures__/fake-host"
+import { HOST_CHILD_MODEL, startHostWorld } from "./rpc-host/__fixtures__/host-world"
 import { runTaskSend } from "../tools/control/send"
 import { cleanupSteering, makeHarness } from "../steering/__fixtures__/steering-fakes"
 import { adaptRpcHandle } from "../manager/child-handle"
@@ -14,63 +13,40 @@ afterEach(cleanupSteering)
 
 const INPUT_TYPES = ["prompt", "steer", "follow_up"]
 
-// task_send can return before the host records the input: a send accepted while the first launch is
-// still being admitted, or while the launch's drain runs, is queued and delivered by that drain
-// (#10042, #9861). The test therefore waits for the host to record every input (#10318).
 for (const launch of ["admitted", "held"] as const) {
   test(`#given a daemon task whose launch is ${launch} #when it receives two messages #then every parsed input carries the durable increasing identity`, async () => {
     const world = await startHostWorld({ transcripts: true })
     const parent = world.connect("parent")
+    const release = launch === "held" ? world.host.holdReply("prompt") : () => undefined
+    const prompted = world.host.waitForCommand("prompt")
+    const steered = world.host.waitForCommand("steer", 2)
+    let launched: string | undefined
     try {
-      const taskId = launch === "admitted"
-        ? await sendAfterAdmission(parent)
-        : await sendDuringHeldLaunch(world.host, parent)
-      await bounded(inputsRecorded(world.host, 3))
+      const started = await parent.manager.start({
+        prompt: "host child parent #0", parent_session_id: "parent", depth: 1,
+        execution_mode: "process", model: HOST_CHILD_MODEL,
+      })
+      if (started.kind !== "started") throw new Error(`launch failed: ${started.kind}`)
+      await bounded(prompted)
+      if (launch === "held") expect(started.starting).toBe(true)
+      const taskId = started.task_id
+      launched = taskId
+      const first = await runTaskSend(parent.manager, { to: taskId, message: "first" }, "parent")
+      const second = await runTaskSend(parent.manager, { to: taskId, message: "second" }, "parent")
+      if (launch === "held") expect([first.details.kind, second.details.kind]).toEqual(["queued", "queued"])
+      release()
+      await bounded(steered)
       const inputs = world.host.commands.filter(command => INPUT_TYPES.includes(command.type))
       expect(inputs.map(command => command.payload.clientMessageId)).toEqual([
         `${taskId}:0:1`, `${taskId}:0:2`, `${taskId}:0:3`,
       ])
       expect(parent.store.load(taskId)?.host_session?.effect_seq).toBe(3)
     } finally {
+      release()
+      if (launched !== undefined) await bounded(parent.manager.whenLaunched?.(launched) ?? Promise.resolve())
       await world.cleanup()
     }
   })
-}
-
-async function sendAfterAdmission(parent: ParentSession): Promise<string> {
-  await parent.startChildren(1)
-  const record = parent.records()[0]
-  if (record === undefined) throw new Error("task did not start")
-  await sendTwo(parent, record.task_id)
-  return record.task_id
-}
-
-/** Holds the first prompt's reply, so both sends are queued behind the launch, then lets it finish. */
-async function sendDuringHeldLaunch(host: FakeHost, parent: ParentSession): Promise<string> {
-  const release = host.holdReply("prompt")
-  const prompted = host.waitForCommand("prompt")
-  const started = await parent.manager.start({
-    prompt: "host child parent #0", parent_session_id: "parent", depth: 1, execution_mode: "process", model: HOST_CHILD_MODEL,
-  })
-  if (started.kind !== "started" || started.starting !== true) throw new Error(`launch was not held: ${started.kind}`)
-  await bounded(prompted)
-  expect(await sendTwo(parent, started.task_id)).toEqual(["queued", "queued"])
-  release()
-  await bounded(parent.manager.whenLaunched?.(started.task_id) ?? Promise.resolve())
-  return started.task_id
-}
-
-async function sendTwo(parent: ParentSession, taskId: string): Promise<readonly string[]> {
-  const first = await runTaskSend(parent.manager, { to: taskId, message: "first" }, "parent")
-  const second = await runTaskSend(parent.manager, { to: taskId, message: "second" }, "parent")
-  return [first.details.kind, second.details.kind]
-}
-
-/** Resolves once the host has recorded `count` inputs; each check and its subscription share one tick. */
-async function inputsRecorded(host: FakeHost, count: number): Promise<void> {
-  while (host.commands.filter(command => INPUT_TYPES.includes(command.type)).length < count) {
-    await Promise.race(INPUT_TYPES.map(type => host.waitForCommand(type)))
-  }
 }
 
 for (const conflict of [false, true]) {
