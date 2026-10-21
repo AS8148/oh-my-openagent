@@ -184,6 +184,7 @@ describe("dag domain types", () => {
       "blocked",
       "scheduled",
       "running",
+      "paused",
       "completed",
       "failed",
       "cancelled",
@@ -200,6 +201,7 @@ describe("dag domain types", () => {
       "task_cancelled",
       "resume_task_missing",
       "resume_task_orphaned",
+      "lost_while_paused",
       "journal_corrupt",
     ])
     expect(DAG_NODE_TRANSITION_REASONS).toEqual([

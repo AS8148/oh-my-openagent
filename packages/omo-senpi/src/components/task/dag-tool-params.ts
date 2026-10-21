@@ -23,6 +23,7 @@ export const DagToolParams = Type.Object({
         "retry gives failed, cancelled, or skipped nodes a FRESH attempt on the same run (completed nodes keep their results and are never re-run); it requires the run to have settled.",
         "send delivers a message to ONE node's child: a running child is steered in place, a finished resident child is revived with its context intact; a child that cannot be continued is refused with node_not_continuable, and retry is then the remedy.",
         "amend submits an edited definition for the SAME run: unchanged completed nodes are cache-reused, and only changed or added nodes plus their transitive dependents re-run.",
+        "On a run the user stopped: guide adds, edits, or removes guidance its nodes receive when the user resumes it; cancel_node cancels one node and its child while the run stays paused; resume is refused, because only the user's Resume restarts a stopped run.",
       ].join(" "),
     },
   ),
