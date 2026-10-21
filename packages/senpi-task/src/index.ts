@@ -144,6 +144,7 @@ export {
   resolveCategory,
 } from "./category"
 export { withoutExcludedModels } from "./model-exclusion"
+export { resolveTaskAgents } from "./agents/task-agents"
 export type {
   BuiltinCategoryDefinition,
   CategoryModelSelection,

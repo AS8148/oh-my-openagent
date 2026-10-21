@@ -1,19 +1,14 @@
 import type { ToolDefinition } from "@code-yeongyu/senpi"
-import type { OmoConfig, OmoTaskSettings } from "@oh-my-opencode/omo-config-core"
+import type { OmoTaskSettings } from "@oh-my-opencode/omo-config-core"
 import {
-  BUILTIN_AGENTS,
-  CURATED_READONLY_AGENT_NAMES,
   InProcessRunner,
-  ULW_REVIEWER_AGENT_NAMES,
   RpcHostRunner,
   RpcProcessRunner,
   createInProcessManagedRunner,
   createParentRegistrySessionContext,
   createRpcManagedRunner,
-  mapOmoConfigAgents,
   parseExtensionEntries,
   selectPackageExtensionPaths,
-  type AgentDefinition,
   type KernelToolBindingRegistry,
   type ManagedRunner,
   type RpcChildHandle,
@@ -68,21 +63,7 @@ export const DEFAULT_RUNNER_FACTORIES: TaskRunnerFactories = {
   process: buildProcessRunner,
 }
 
-export function resolveTaskAgents(config: OmoConfig): Readonly<Record<string, AgentDefinition>> {
-  const merged: Record<string, AgentDefinition> = { ...BUILTIN_AGENTS }
-  for (const [name, definition] of Object.entries(mapOmoConfigAgents(config))) {
-    merged[name] = { ...merged[name], ...definition }
-  }
-  for (const name of CURATED_READONLY_AGENT_NAMES) {
-    const definition = merged[name]
-    if (definition !== undefined) merged[name] = { ...definition, executionMode: "in-process" }
-  }
-  for (const name of ULW_REVIEWER_AGENT_NAMES) {
-    const definition = merged[name]
-    if (definition !== undefined) merged[name] = { ...definition, executionMode: "in-process" }
-  }
-  return merged
-}
+export { resolveTaskAgents } from "@oh-my-opencode/senpi-task"
 
 function buildInProcessRunner(build: RunnerBuildContext): ManagedRunner {
   const inProcess = new InProcessRunner({
