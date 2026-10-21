@@ -1,36 +1,35 @@
 import { NativePauseUnavailableError, type NativeRunPause } from "../../pause/native-child-pause"
 import type { RunnerOutcome } from "../in-process/child-handle"
-import { createTaskParentControl, TaskParentControlError } from "../task-parent-control"
-import type { RpcProtocolClient } from "./protocol-client"
+import { TaskParentControlError, type createTaskParentControl } from "../task-parent-control"
 
-const TASK_PARENT_WIDTH = 80
+type TaskParentControl = ReturnType<typeof createTaskParentControl>
 
 /**
- * The RPC child's run hold over its own connection, declared `task_parent` once. A Resume turn the
- * engine starts is CLAIMED before the command goes out, so its agent_start re-arms this handle's turn
- * tracking without announcing a self-resumed run (which would reopen and complete the record twice).
+ * An RPC child's run hold over its task_parent connection; `control` answers for the CURRENT
+ * connection (a daemon child's port moves on reattach). A Resume turn the engine starts is CLAIMED
+ * before the command goes out, so its agent_start re-arms this handle's turn tracking without
+ * announcing a self-resumed run (which would reopen and complete the record twice).
  */
 export function createRpcRunPause(input: {
   readonly taskId: string
-  readonly client: Pick<RpcProtocolClient, "sendTaskParent">
+  control(): TaskParentControl
   claimNextTurn(): () => void
   currentOutcome(): Promise<RunnerOutcome>
 }): NativeRunPause {
-  const control = createTaskParentControl({ width: TASK_PARENT_WIDTH, send: command => input.client.sendTaskParent(command) })
-  const unsupported = async <T>(run: () => Promise<T>): Promise<T> => {
+  const unsupported = async <T>(run: (control: TaskParentControl) => Promise<T>): Promise<T> => {
     try {
-      return await run()
+      return await run(input.control())
     } catch (error) {
       if (error instanceof TaskParentControlError && error.code === "unsupported") throw new NativePauseUnavailableError(input.taskId)
       throw error
     }
   }
   return {
-    pauseForRun: owner => unsupported(() => control.pauseForRun(owner)),
+    pauseForRun: owner => unsupported(control => control.pauseForRun(owner)),
     async resumeForRun(request) {
       const releaseClaim = input.claimNextTurn()
       try {
-        const receipt = await unsupported(() => control.resumeForRun(request))
+        const receipt = await unsupported(control => control.resumeForRun(request))
         if (!receipt.released) {
           releaseClaim()
           return receipt
@@ -46,6 +45,6 @@ export function createRpcRunPause(input: {
         throw error
       }
     },
-    holdInput: (parentSessionId, held) => unsupported(() => control.holdInput(parentSessionId, held)),
+    holdInput: (parentSessionId, held) => unsupported(control => control.holdInput(parentSessionId, held)),
   }
 }

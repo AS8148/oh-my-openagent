@@ -30,6 +30,8 @@ import {
   toOpenFailure,
   type HostControlRecord,
 } from "./session-wire"
+import { createHostTaskParentWire } from "./task-parent-wire"
+import type { TaskParentWire } from "../task-parent-control"
 
 
 // send() settles with no value: the runner does not consume the host's input disposition.
@@ -60,6 +62,8 @@ export class HostSessionClient {
   private readonly closedListeners = new Set<(event: HostSessionClosed) => void>()
   private readonly replacedListeners = new Set<(event: HostSessionReplaced) => void>()
   private client: HostRpcClient | undefined
+  // One wire per engine connection: a reattach's new connection declares task_parent again.
+  private readonly taskParentWires = new WeakMap<HostRpcClient, TaskParentWire>()
   private routingId: string | undefined
   private identity: SenpiHostProtocolInfo | undefined
   private reattached = false
@@ -155,6 +159,15 @@ export class HostSessionClient {
       default:
         return unreachable(command)
     }
+  }
+
+  taskParentWire(): TaskParentWire {
+    const client = this.connected("task_parent")
+    const known = this.taskParentWires.get(client)
+    if (known !== undefined) return known
+    const wire = createHostTaskParentWire(client)
+    this.taskParentWires.set(client, wire)
+    return wire
   }
 
   getState(): Promise<RpcSessionState> {
