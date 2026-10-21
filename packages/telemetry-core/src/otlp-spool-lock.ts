@@ -1,5 +1,6 @@
-import { closeSync, openSync, unlinkSync } from "node:fs"
-import { open } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
+import { closeSync, lstatSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs"
+import { open, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { lockName } from "./otlp-spool-names"
@@ -9,41 +10,159 @@ import { lockName } from "./otlp-spool-names"
  * lease renewal, a lease reclaim, a dead owner's seal). A rename to DIFFERENT destinations does not
  * pick one winner on Windows: two racing renames of one source can both report success. Creating
  * `<source>.lock` with O_EXCL (CREATE_NEW on Windows) is atomic everywhere, so exactly one competitor
- * moves the file and every other one skips it. A crash while holding a lock leaves it behind; the
- * sweep deletes locks older than the claim lease.
+ * moves the file and every other one skips it.
+ *
+ * Each lock holds its owner's token (`<pid> <boot id> <nonce>`). A mover moves only while the lock still
+ * holds its own token, and deletes only its own lock: a lock the sweep judged abandoned, or the opt-out
+ * purge deleted, may by then be another mover's, and that one must not be moved past or unlocked.
  */
+export type LockOwner = { readonly pid: number; readonly bootId: string }
 
-function isBusy(error: unknown): boolean {
-  if (!(error instanceof Error) || !("code" in error)) return false
-  // A lock another competitor is deleting stays "delete pending" on Windows, and opening it fails EPERM.
-  return error.code === "EEXIST" || error.code === "ENOENT" || (error.code === "EPERM" && process.platform === "win32")
+const newToken = (owner: LockOwner): string => `${owner.pid} ${owner.bootId} ${randomUUID()}`
+
+function code(error: unknown): unknown {
+  return error instanceof Error && "code" in error ? error.code : undefined
 }
 
-export function tryLockSync(dir: string, source: string): boolean {
+function isBusy(error: unknown): boolean {
+  // A lock another competitor is deleting stays "delete pending" on Windows, and opening it fails EPERM.
+  const c = code(error)
+  return c === "EEXIST" || c === "ENOENT" || (c === "EPERM" && process.platform === "win32")
+}
+
+function removeQuietly(path: string): void {
   try {
-    closeSync(openSync(join(dir, lockName(source)), "wx"))
-    return true
+    unlinkSync(path)
   } catch (error) {
-    if (isBusy(error)) return false
+    if (code(error) !== "ENOENT") throw error
+  }
+}
+
+/** The lock's token, or null when another mover holds it. A lock this call created but could not fill is removed. */
+export function tryLockSync(dir: string, source: string, owner: LockOwner): string | null {
+  const path = join(dir, lockName(source))
+  let fd: number
+  try {
+    fd = openSync(path, "wx")
+  } catch (error) {
+    if (isBusy(error)) return null
     throw error
   }
+  const token = newToken(owner)
+  try {
+    writeSync(fd, token)
+  } catch (error) {
+    closeSync(fd)
+    removeQuietly(path)
+    throw error
+  }
+  closeSync(fd)
+  return token
 }
 
 /** Off the event loop, like the claim rename it guards: a stalled synchronous call would hold every timer. */
-export async function tryLock(dir: string, source: string): Promise<boolean> {
+export async function tryLock(dir: string, source: string, owner: LockOwner): Promise<string | null> {
+  const path = join(dir, lockName(source))
+  let handle: Awaited<ReturnType<typeof open>>
   try {
-    await (await open(join(dir, lockName(source)), "wx")).close()
-    return true
+    handle = await open(path, "wx")
   } catch (error) {
-    if (isBusy(error)) return false
+    if (isBusy(error)) return null
+    throw error
+  }
+  const token = newToken(owner)
+  try {
+    await handle.writeFile(token)
+  } catch (error) {
+    await handle.close()
+    removeQuietly(path)
+    throw error
+  }
+  await handle.close()
+  return token
+}
+
+export function holdsLockSync(dir: string, source: string, token: string): boolean {
+  try {
+    return readFileSync(join(dir, lockName(source)), "utf8") === token
+  } catch (error) {
+    if (code(error) === "ENOENT") return false
     throw error
   }
 }
 
-export function unlock(dir: string, source: string): void {
+export async function holdsLock(dir: string, source: string, token: string): Promise<boolean> {
   try {
+    return (await readFile(join(dir, lockName(source)), "utf8")) === token
+  } catch (error) {
+    if (code(error) === "ENOENT") return false
+    throw error
+  }
+}
+
+/**
+ * Deletes the lock only while it still holds `token`. Never throws: it runs in the `finally` of a move
+ * that may already have happened, and an error here would replace that result. A lock it cannot delete
+ * goes to `onLeft`; the sweep deletes it once it is abandoned (`isAbandonedLock`).
+ */
+export function unlock(dir: string, source: string, token: string, onLeft?: (error: unknown) => void): void {
+  try {
+    if (!holdsLockSync(dir, source, token)) return
     unlinkSync(join(dir, lockName(source)))
   } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error
+    if (code(error) === "ENOENT") return
+    onLeft?.(error)
+  }
+}
+
+/**
+ * A lock is held for one rename. Past the claim lease it is abandoned when its owner's pid is gone (or
+ * the token is unreadable: a crash between creating and filling it); a live pid may be a suspended
+ * holder, so its lock stays until the spool's age limit, past which it is abandoned whoever holds the pid.
+ */
+export function isAbandonedLock(
+  dir: string,
+  name: string,
+  ageMs: number,
+  limits: { readonly leaseMs: number; readonly maxAgeMs: number; readonly isPidAlive: (pid: number) => boolean },
+): boolean {
+  if (ageMs < limits.leaseMs) return false
+  if (ageMs > limits.maxAgeMs) return true
+  let text: string
+  try {
+    text = readFileSync(join(dir, name), "utf8")
+  } catch (error) {
+    if (code(error) === "ENOENT") return false
+    throw error
+  }
+  const pid = Number(text.split(" ")[0])
+  return !Number.isInteger(pid) || pid <= 0 || !limits.isPidAlive(pid)
+}
+
+/**
+ * A move that failed may still have left its destination (Windows renames by copy, then unlink).
+ * Puts the spool back to exactly one copy under the source name, then throws the move's error. If the
+ * rollback fails too, both errors are thrown; the leftover destination is a claim of this process, which
+ * the sweep returns once its lease ends.
+ */
+export function throwAfterRollBack(dir: string, from: string, to: string, error: unknown): never {
+  try {
+    if (exists(join(dir, to))) {
+      if (exists(join(dir, from))) unlinkSync(join(dir, to))
+      else renameSync(join(dir, to), join(dir, from))
+    }
+  } catch (rollbackError) {
+    throw new AggregateError([error, rollbackError], "spool move failed and its rollback failed")
+  }
+  throw error
+}
+
+function exists(path: string): boolean {
+  try {
+    lstatSync(path)
+    return true
+  } catch (error) {
+    if (code(error) === "ENOENT") return false
+    throw error
   }
 }

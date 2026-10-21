@@ -3,7 +3,7 @@ import { rename } from "node:fs/promises"
 import { join } from "node:path"
 
 import { countSpoolRecords, type Signal } from "./otlp-spool-file"
-import { tryLock, tryLockSync, unlock } from "./otlp-spool-lock"
+import { holdsLock, holdsLockSync, isAbandonedLock, throwAfterRollBack, tryLock, tryLockSync, unlock } from "./otlp-spool-lock"
 
 /** Why records were lost before acceptance; `write_failed` = the record never reached the spool. */
 export type DropReason = "evicted" | "expired" | "rejected" | "corrupt" | "write_failed"
@@ -22,6 +22,8 @@ export type SpoolContext = {
   readonly capBytes: number
   readonly maxAgeMs: number
   readonly onDrop: (reason: DropReason, records: number) => void
+  /** A move succeeded but its lock could not be deleted (the sweep removes it after the claim lease). */
+  readonly onLockLeft?: (error: unknown) => void
 }
 
 export {
@@ -109,12 +111,18 @@ function tryRename(dir: string, from: string, to: string): boolean {
 }
 
 /** A competing move to a name of this process's own: the file's lock picks the one mover (see otlp-spool-lock). */
-function lockedRename(dir: string, from: string, to: string): boolean {
-  if (!tryLockSync(dir, from)) return false
+function lockedRename(ctx: SpoolContext, from: string, to: string): boolean {
+  const token = tryLockSync(ctx.dir, from, ctx)
+  if (token === null) return false
   try {
-    return tryRename(dir, from, to)
+    if (!holdsLockSync(ctx.dir, from, token)) return false
+    try {
+      return tryRename(ctx.dir, from, to)
+    } catch (error) {
+      throwAfterRollBack(ctx.dir, from, to, error)
+    }
   } finally {
-    unlock(dir, from)
+    unlock(ctx.dir, from, token, ctx.onLockLeft)
   }
 }
 
@@ -137,16 +145,20 @@ export async function claimBatch(
   move: (from: string, to: string) => Promise<void> = rename,
 ): Promise<string | null> {
   const source = batchName(entry.signal, entry.batchId)
-  if (!(await tryLock(ctx.dir, source))) return null
+  const token = await tryLock(ctx.dir, source, ctx)
+  if (token === null) return null
   try {
+    if (!(await holdsLock(ctx.dir, source, token))) return null
     const claimed = sendingName(entry.signal, entry.batchId, ctx.bootId, ctx.nowMs() + CLAIM_LEASE_MS)
-    await move(join(ctx.dir, source), join(ctx.dir, claimed))
+    try {
+      await move(join(ctx.dir, source), join(ctx.dir, claimed))
+    } catch (error) {
+      if (isMissing(error)) return null
+      throwAfterRollBack(ctx.dir, source, claimed, error)
+    }
     return claimed
-  } catch (error) {
-    if (isMissing(error)) return null
-    throw error
   } finally {
-    unlock(ctx.dir, source)
+    unlock(ctx.dir, source, token, ctx.onLockLeft)
   }
 }
 
@@ -154,7 +166,7 @@ export function renewClaim(ctx: SpoolContext, claimed: string): string | null {
   const entry = parseSpoolName(claimed)
   if (entry.kind !== "sending") return null
   const renewed = sendingName(entry.signal, entry.batchId, ctx.bootId, ctx.nowMs() + CLAIM_LEASE_MS)
-  return lockedRename(ctx.dir, claimed, renewed) ? renewed : null
+  return lockedRename(ctx, claimed, renewed) ? renewed : null
 }
 
 /** Only the claim's owner releases it, so the owner-only link move is enough (no competitor). */
@@ -262,13 +274,13 @@ export function sweepSpool(ctx: SpoolContext): void {
   for (const entry of listSpool(ctx.dir)) {
     if (entry.kind === "sending" && entry.leaseExpiresMs <= now) {
       if ((fileStat(ctx.dir, entry.name)?.links ?? 1) > 1) deleteFile(ctx.dir, entry.name)
-      else lockedRename(ctx.dir, entry.name, batchName(entry.signal, entry.batchId))
+      else lockedRename(ctx, entry.name, batchName(entry.signal, entry.batchId))
     } else if (entry.kind === "active" && isDeadOwner(ctx, entry)) {
       const stat = fileStat(ctx.dir, entry.name)
       if (stat !== null && stat.links > 1) {
         deleteFile(ctx.dir, entry.name)
       } else if (stat !== null && now - stat.mtimeMs >= DEAD_OWNER_IDLE_MS) {
-        lockedRename(ctx.dir, entry.name, batchName(entry.signal, createBatchId(stat.birthMs)))
+        lockedRename(ctx, entry.name, batchName(entry.signal, createBatchId(stat.birthMs)))
       }
     } else if (entry.kind === "active" && entry.pid !== ctx.pid) {
       // A live pid may be a later process that reused it: an active file nobody appended to for the age
@@ -276,9 +288,9 @@ export function sweepSpool(ctx: SpoolContext): void {
       const stat = fileStat(ctx.dir, entry.name)
       if (stat !== null && now - stat.mtimeMs > ctx.maxAgeMs) dropFile(ctx, entry.name, "expired")
     } else if (entry.kind === "lock") {
-      // A lock is held for one rename; one older than a lease belongs to a mover that crashed.
       const stat = fileStat(ctx.dir, entry.name)
-      if (stat !== null && now - stat.mtimeMs >= CLAIM_LEASE_MS) deleteFile(ctx.dir, entry.name)
+      const limits = { leaseMs: CLAIM_LEASE_MS, maxAgeMs: ctx.maxAgeMs, isPidAlive: ctx.isPidAlive }
+      if (stat !== null && isAbandonedLock(ctx.dir, entry.name, now - stat.mtimeMs, limits)) deleteFile(ctx.dir, entry.name)
     }
   }
   for (const entry of listSpool(ctx.dir)) {
