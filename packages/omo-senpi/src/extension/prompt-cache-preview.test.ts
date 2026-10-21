@@ -13,8 +13,14 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
   mkdirSync(agentDir)
   mkdirSync(join(root, ".omo"))
   writeFileSync(join(root, ".omo", "omo.json"), JSON.stringify({ memory: { enabled: false } }))
+  // Fresh stamps throttle the session-start process sweeps, which would otherwise list this machine's
+  // real processes and write their stamps into the temp HOME after the test removed it.
+  const sweepStamps = join(root, ".omo", "lsp-daemon")
+  mkdirSync(sweepStamps)
+  for (const stamp of ["lsp-proxy-sweep.stamp", "lsp-daemon-sweep.stamp"]) writeFileSync(join(sweepStamps, stamp), "")
   const cwd = process.cwd()
-  const overrides = { HOME: root, OMO_CODING_AGENT_DIR: agentDir, SENPI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_DIR: agentDir, OMO_SENPI_DISABLE_POSTHOG: "1" }
+  // No deferred MCP dispose: the quit below closes the MCP service now, not 15 s later inside the removed HOME.
+  const overrides = { HOME: root, OMO_CODING_AGENT_DIR: agentDir, SENPI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_DIR: agentDir, OMO_SENPI_DISABLE_POSTHOG: "1", SENPI_MCP_DEFERRED_DISPOSE_TIMEOUT_MS: "0" }
   const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]))
   Object.assign(process.env, overrides)
   process.chdir(root)
