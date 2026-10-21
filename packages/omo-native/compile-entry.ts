@@ -136,6 +136,8 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
     process.exitCode = await runLoroSmoke()
     return true
   }
+  // The account verbs return early, so the #10697 plaintext file is deleted here too, not only on a normal launch.
+  if (["login", "logout", "whoami", "sync"].includes(args[0] ?? "")) removeLegacyServiceCredentials()
   if (["login", "logout", "whoami"].includes(args[0] ?? "")) {
     await runServiceAuthCommand(args)
     return true
