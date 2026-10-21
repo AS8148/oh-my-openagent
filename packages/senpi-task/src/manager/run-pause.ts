@@ -6,6 +6,8 @@ import { ResumeCapacity, type ResumeAllocation } from "./resume-capacity"
 import { PendingPauses } from "./pending-pauses"
 import type { AdmissionBarrier, ResumeCredential } from "../pause/admission-barrier"
 import { buildRevived } from "../steering/engine-policy"
+import type { TaskRecord } from "../state"
+import { savedRunOwner } from "./paused-restore"
 
 export type ResumeTaskRequest = RunPauseOwner & {
   readonly resumeCredential?: ResumeCredential
@@ -37,6 +39,8 @@ export function createTaskRunPause(ports: {
   readonly barrier?: AdmissionBarrier
   readonly now: () => number
   liveHandle(taskId: string): ManagedChildHandle | undefined
+  // Rebuild a paused child whose host is gone; it starts no turn (see paused-restore.ts).
+  restore?(record: TaskRecord): Promise<ManagedChildHandle>
   track(taskId: string, handle: ManagedChildHandle, model: string, epoch: number, turn: ResumedChildTurn): void
 }) {
   const intents = new PendingPauses()
@@ -55,6 +59,29 @@ export function createTaskRunPause(ports: {
     return ports.child
   }
 
+  // The owner is saved on the record so a restarted host re-holds the child under exactly this run.
+  function remember(taskId: string, owner: RunPauseOwner): void {
+    owners.set(taskId, owner)
+    ports.store.mutate(taskId, fresh => ({ ...fresh, run_pause: {
+      parent_session_id: owner.parentSessionId, parent_pause_seq: owner.parentPauseSeq, run_ref: owner.runRef,
+    } }))
+  }
+
+  function load(taskId: string): TaskRecord {
+    const record = ports.store.load(taskId)
+    if (record === null || record === undefined) throw new Error(`paused child ${taskId} has no record`)
+    return record
+  }
+
+  async function rehold(record: TaskRecord, owner: RunPauseOwner): Promise<{ readonly handle: ManagedChildHandle; readonly childSeq: number }> {
+    if (ports.restore === undefined) throw new Error(`paused child ${record.task_id} has no live handle and no restore port`)
+    const handle = await ports.restore(record)
+    const ack = await childPort().pauseForRun(handle, owner)
+    if ("refused" in ack) throw new Error(`restored child ${record.task_id} is held by another parent`)
+    owners.set(record.task_id, owner)
+    return { handle, childSeq: ack.childSeq }
+  }
+
   function live(taskId: string) {
     const record = ports.store.load(taskId)
     const handle = ports.liveHandle(taskId)
@@ -64,9 +91,19 @@ export function createTaskRunPause(ports: {
 
   async function pauseTask(taskId: string, owner: RunPauseOwner): Promise<EngineInheritReceipt> {
     const port = childPort()
-    const { record, handle } = live(taskId)
+    const record = load(taskId)
+    const handle = ports.liveHandle(taskId)
     const epoch = record.notification.run_epoch
     if (record.status !== "running" && record.status !== "paused") throw new Error(`cannot pause ${record.status} task`)
+    if (handle === undefined) {
+      // Its host is gone, so nothing runs: record the pause and the run's sequence; the restore that
+      // precedes Resume re-holds the child and reads the cutoff from the child's own answer.
+      if (record.status === "running" && !ports.store.transition(taskId, { type: "pause", timestamp: new Date(ports.now()).toISOString() }).applied) {
+        throw new Error(`child ${taskId} changed while pausing`)
+      }
+      remember(taskId, owner)
+      return { childSeq: 0 }
+    }
     const settled = record.status === "paused" ? undefined : intents.begin(taskId, epoch)
     const resuming = attempts.get(taskId)
     resumed.delete(taskId)
@@ -82,7 +119,7 @@ export function createTaskRunPause(ports: {
       intents.clear(taskId)
       return ack
     }
-    owners.set(taskId, owner)
+    remember(taskId, owner)
     if (attempts.get(taskId) === resuming) {
       attempts.delete(taskId)
       resuming?.cancel.abort()
@@ -97,7 +134,8 @@ export function createTaskRunPause(ports: {
     const previous = resumed.get(taskId)
     if (previous?.resumeId === request.resumeId) return previous.result
     const port = childPort()
-    const { record, handle } = live(taskId)
+    const record = load(taskId)
+    let handle = ports.liveHandle(taskId)
     if (record.status !== "paused") throw new Error(`cannot resume ${record.status} task`)
     const entered = ports.barrier?.enter(record.root_session_id ?? record.parent_session_id,
       { key: taskId, runRef: request.runRef }, request.resumeCredential)
@@ -117,10 +155,17 @@ export function createTaskRunPause(ports: {
       }
     }
     try {
+      let childSeqCutoff = request.childSeqCutoff
+      if (handle === undefined) {
+        const owner = savedRunOwner(record) ?? { parentSessionId: request.parentSessionId, parentPauseSeq: request.parentPauseSeq, runRef: request.runRef }
+        const restored = await rehold(record, owner)
+        handle = restored.handle
+        childSeqCutoff = restored.childSeq
+      }
       const acquired = await capacity.acquire(record, attempt.cancel.signal, request.allocation)
       assertCurrent()
       if (!acquired) throw new RunPauseAdmissionHeld()
-      const result = await port.resumeTurn(handle, request)
+      const result = await port.resumeTurn(handle, { ...request, childSeqCutoff })
       assertCurrent()
       if ("otherHoldLive" in result) {
         park(taskId, record.notification.run_epoch)
@@ -129,6 +174,8 @@ export function createTaskRunPause(ports: {
       intents.clear(taskId)
       const unpaused = ports.store.transition(taskId, { type: "unpause", timestamp: new Date(ports.now()).toISOString() })
       if (!unpaused.applied) throw new Error("paused child changed while resuming")
+      owners.delete(taskId)
+      ports.store.mutate(taskId, ({ run_pause: _resumed, ...fresh }) => fresh)
       // The returned promise belongs to turnId even when already settled; never waitForOutcome here.
       ports.track(taskId, handle, record.model, record.notification.run_epoch, result)
       const receipt = { turnId: result.turnId }
@@ -142,10 +189,11 @@ export function createTaskRunPause(ports: {
   // Guidance names the parent that paused this child; the child engine refuses any other parent.
   async function holdTaskInput(taskId: string, input: HeldTaskInput): Promise<EngineHoldInputResult> {
     const port = childPort()
-    const { record, handle } = live(taskId)
+    const record = load(taskId)
     if (record.status !== "paused") throw new Error(`cannot hold input for ${record.status} task`)
-    const owner = owners.get(taskId)
-    if (owner === undefined) throw new Error(`paused child ${taskId} has no run owner in this process`)
+    const owner = owners.get(taskId) ?? savedRunOwner(record)
+    if (owner === undefined) throw new Error(`paused child ${taskId} has no recorded run owner`)
+    const handle = ports.liveHandle(taskId) ?? (await rehold(record, owner)).handle
     return port.holdInput(handle, input, { parentSessionId: owner.parentSessionId })
   }
 
@@ -169,7 +217,7 @@ export function createTaskRunPause(ports: {
     if (!opened || !ports.store.transition(taskId, { type: "pause", timestamp }).applied) {
       throw new Error(`idle child ${taskId} changed while joining the pause`)
     }
-    owners.set(taskId, owner)
+    remember(taskId, owner)
     return ack
   }
 

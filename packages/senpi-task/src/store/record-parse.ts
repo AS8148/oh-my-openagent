@@ -28,6 +28,7 @@ import {
 import { parseRunStats } from "./run-stats-parse"
 import { parseOptionalProvisionalExit } from "./provisional-exit-parse"
 import { parseUncertainInputs } from "./input-effects-parse"
+import { parseOptionalRunPause } from "./run-pause-parse"
 import {
   isRecord,
   readNumber,
@@ -95,6 +96,7 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const suspensionReason = readOptionalSuspensionReason(value)
   const revivalDeferredReason = readOptionalString(value, "revival_deferred_reason")
   const recoveryDeadlineAt = readOptionalNumber(value, "recovery_deadline_at")
+  const runPause = parseOptionalRunPause(value)
   const failureKind = readOptionalTaskStartFailureKind(value)
   // An unknown cause (a newer build's) is dropped: the record still parses and the interrupt stays silent.
   const interruptCause = value.interrupt_cause === "session_replaced" ? "session_replaced" : undefined
@@ -175,6 +177,7 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
     ...(suspensionReason === undefined ? {} : { suspension_reason: suspensionReason }),
     ...(revivalDeferredReason === undefined ? {} : { revival_deferred_reason: revivalDeferredReason }),
     ...(recoveryDeadlineAt === undefined ? {} : { recovery_deadline_at: recoveryDeadlineAt }),
+    ...(runPause === undefined ? {} : { run_pause: runPause }),
     ...(runnerKind === undefined ? {} : { runner_kind: runnerKind }),
     ...(hostSession === undefined ? {} : { host_session: hostSession }),
     ...(fallbackHandoffEpoch === undefined ? {} : { fallback_handoff_epoch: fallbackHandoffEpoch }),

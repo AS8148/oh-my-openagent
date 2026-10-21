@@ -59,6 +59,7 @@ import { PendingStops } from "./pending-stops"
 import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest, type HeldTaskInput } from "./run-pause"
 import { createHeldSend } from "./held-send"
 import { admitRespawn } from "./respawn-admission"
+import { restorePausedChild } from "./paused-restore"
 import type { RunPauseOwner } from "../pause/ports"
 import { AdmissionBarrier, type ResumeCredential } from "../pause/admission-barrier"
 import { createStartAdmissions } from "./start-admission"
@@ -116,7 +117,7 @@ type TaskManagerImplOptions = TaskManagerOptions & {
 
 type ReattachingTaskManager = TaskManager & TaskPauseMethods & {
   readonly workpools: WorkpoolEngine
-  respawn(record: TaskRecord, resumeSessionPath?: string, credential?: ResumeCredential): Promise<RespawnResult>
+  respawn(record: TaskRecord, resumeSessionPath?: string, credential?: ResumeCredential, options?: { readonly paused?: boolean }): Promise<RespawnResult>
   redispatchTask(idOrName: string, callerSessionId?: string): Promise<RedispatchOutcome>
   reattach(
     record: TaskRecord,
@@ -296,6 +297,12 @@ class TaskManagerImpl implements TaskManager {
       store: options.store, concurrency: this.#concurrency, child: options.childPausePort, now: this.#now,
       ...(options.admissionBarrier === undefined ? {} : { barrier: options.admissionBarrier }),
       liveHandle: taskId => this.#live.get(taskId)?.handle,
+      restore: record => restorePausedChild({
+        store: options.store, hostPid: this.#hostPid,
+        respawn: (paused, sessionPath) => this.respawn(paused, sessionPath, undefined, { paused: true }),
+        reattach: (paused, handle) => this.reattach(paused, handle),
+        liveHandle: taskId => this.#live.get(taskId)?.handle,
+      }, record),
       track: (taskId, handle, model, epoch, turn) => this.#outcome.trackOutcome(taskId, handle, model, epoch, turn),
     })
     this.#outcome = createOutcomeTracker({
@@ -924,9 +931,10 @@ class TaskManagerImpl implements TaskManager {
     return record.notify_on_terminal
   }
 
-  respawn(record: TaskRecord, resumeSessionPath?: string, credential?: ResumeCredential): Promise<RespawnResult> {
+  respawn(record: TaskRecord, resumeSessionPath?: string, credential?: ResumeCredential, options?: { readonly paused?: boolean }): Promise<RespawnResult> {
     return admitRespawn(this.#barrier, record, credential, checkLaunch => respawnWithWorkpool({
       record,
+      ...(options?.paused === true ? { paused: true } : {}),
       sessionPath: resumeSessionPath,
       stateDir: this.#options.store.stateDir,
       runners: this.#options.runners,
@@ -951,7 +959,7 @@ class TaskManagerImpl implements TaskManager {
       ...(this.#options.resolveInheritedExtensions === undefined
         ? {}
         : { inheritedExtensions: this.#options.resolveInheritedExtensions }),
-    }, this.workpools, () => this.get(record.task_id)?.notification.run_epoch ?? -1))
+    }, this.workpools, () => this.get(record.task_id)?.notification.run_epoch ?? -1), options?.paused === true)
   }
 
   async reattach(record: TaskRecord, handle: ManagedChildHandle, awaitingInput?: { readonly reason: AwaitingInputReason }): Promise<ReattachResult> {
