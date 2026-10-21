@@ -21,6 +21,7 @@ export function createRunStatsTracker(startedAt: number, now: () => number = Dat
   let generationMs = 0
   let collapsedWindows = 0
   let windowStart = startedAt
+  let turnsReportingCost = 0
   let costUsd = 0
   let sawCost = false
   let inputTokens = 0
@@ -98,6 +99,7 @@ export function createRunStatsTracker(startedAt: number, now: () => number = Dat
       if (reported && usage.cost !== undefined) {
         costUsd += usage.cost
         sawCost = true
+        turnsReportingCost += 1
       }
       const requestCacheReadTokens = usage.cacheRead ?? 0
       const requestCacheWriteTokens = usage.cacheWrite ?? 0
@@ -138,7 +140,7 @@ export function createRunStatsTracker(startedAt: number, now: () => number = Dat
         // execution time. Reconstructed durations (reconciled records) are the consumer's job.
         duration_status: "monotonic",
         token_status: tokenCoverage(turns, turnsReportingUsage),
-        cost_status: costStatus(sawCost, costReported, turnsReportingUsage < turns),
+        cost_status: costStatus(sawCost, costReported, turnsReportingCost < turns),
         ...positiveFiniteTotal("output_tokens", outputTokens),
         ...positiveFiniteTotal("input_tokens", inputTokens),
         ...positiveFiniteTotal("cache_read_tokens", cacheReadTokens),
@@ -208,13 +210,15 @@ type UsageFacts = {
   readonly cacheWrite?: number
 }
 
+// A turn on a model with no known price carries `costUnknown` (senpi#3844): its zero cost is not a
+// reported $0, so the turn counts as one whose cost was not reported.
 function readUsage(message: Record<string, unknown>): UsageFacts {
   const usage = message.usage
   if (!isRecord(usage)) return {}
   return {
     ...optionalNumber("output", firstFiniteNonNegativeNumber(usage.output, usage.output_tokens)),
     ...optionalNumber("total", firstFiniteNonNegativeNumber(usage.totalTokens, usage.total_tokens)),
-    ...optionalNumber("cost", readCost(usage.cost)),
+    ...optionalNumber("cost", usage.costUnknown === true ? undefined : readCost(usage.cost)),
     ...optionalNumber("input", firstFiniteNonNegativeNumber(usage.input, usage.input_tokens)),
     ...optionalNumber("cacheRead", firstFiniteNonNegativeNumber(usage.cacheRead, usage.cache_read_input_tokens)),
     ...optionalNumber(
