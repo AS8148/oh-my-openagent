@@ -36,6 +36,7 @@ import { runLoroSmoke } from "./loro-smoke"
 import { spawnSync } from "node:child_process"
 import { compiledRollbackMigration } from "./compiled-rollback"
 import { refuseRetiredCommand } from "./bin/lib/retired-command.js"
+import { answeredFromLocalData } from "./compile-entry-fast-path"
 import { engineCaTrustReady, ExtraCaCertificatesError, installEngineCaTrust } from "./compiled-ca-trust"
 
 // The engine is imported via a RELATIVE string LITERAL, inlined at both import
@@ -100,7 +101,7 @@ export function answerCompiledFastPath(
   args: string[],
   manifest: Pick<EmbeddedManifest, "omoAiVersion" | "enginePin" | "buildInfo" | "engineBuild">,
 ): boolean {
-  if ((args[0] === "--version" || args[0] === "-v") && args.length === 1) {
+  if (answeredFromLocalData(args)) {
     console.log(versionLine({
       version: manifest.omoAiVersion,
       omoBuild: manifest.buildInfo,
@@ -231,7 +232,7 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
     })
     return true
   }
-  if ((command === "--version" || command === "-v") && args.length === 1) { console.log(versionLine(packageJson, enginePin ?? "unknown")); return true }
+  if (answeredFromLocalData(args)) { console.log(versionLine(packageJson, enginePin ?? "unknown")); return true }
   if (isSelfUpdate(args)) { answerUpdateHint(args, packageJson.omoBuild); return true }
   return false
 }
@@ -272,11 +273,11 @@ async function main(): Promise<void> {
   // exact argv `--version` or `--help` is answered, from static local data, before anything else runs
   // (#10236): the engine's own help loads extensions, which can install packages over the network.
   try {
-    // `--version` / `--help` never touch the OS store; every other start reads it off the main thread
-    // and only the first outbound request waits for it, bounded (#10760).
+    // `--version` / `-v` / `--help` never touch the OS store; every other start reads it off the main
+    // thread and waits for it below, once and bounded (#10760).
     const argv = process.argv.slice(2)
-    const skipSystem = argv.length === 1 && (argv[0] === "--version" || argv[0] === "--help")
-    installEngineCaTrust(process.env, undefined, { skipSystem })
+    const skipSystem = answeredFromLocalData(argv)
+    installEngineCaTrust(process.env, undefined, { skipSystem, handoffDir: join(canonicalAgentDir(), "cache") })
     // The one choke point: no engine code runs before the store answers or the bound expires, so
     // every client that reads the runtime trust set starts with it. The wait is async (nothing is
     // blocked); it costs the store's own read time (tens of ms), and at most the bound on a machine

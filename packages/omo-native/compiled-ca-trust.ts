@@ -1,4 +1,6 @@
 import { X509Certificate } from "node:crypto"
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import * as nodeTls from "node:tls"
 
 /**
@@ -7,8 +9,8 @@ import * as nodeTls from "node:tls"
  * A `bun build --compile` binary trusts only Bun's bundled CA list, and `--use-system-ca` passed to
  * it is inert (it reaches `process.argv` as a plain string). So the engine installs bundled + OS
  * store + extras itself, at the top of every start: `host ensure`, the host daemon it spawns, and
- * the provisioned handoff all run this entry again. The OS store is read off the main thread and
- * awaited (bounded) only by the first outbound request (#10760).
+ * the provisioned handoff all run this entry again. The OS store is read off the main thread, and
+ * `compile-entry` awaits it once, bounded, before any engine code runs (#10760).
  *
  * Extras come from `OMO_EXTRA_CA_CERTIFICATES`, PEM text (never a path) that the desktop validated
  * and its server set for the engine (sisyphuslabs/omo-desktop-app#2760). It is re-validated here
@@ -61,19 +63,34 @@ export interface EngineTrustReport {
   readonly extra: number
 }
 
-/** How the OS store reached the trust set: read, still pending when a request had to go, or not read at all. */
+/** How the OS store reached the trust set: read, still unanswered at the bound, failed, or not read at all. */
 export type SystemStoreOutcome = "loaded" | "timed-out" | "failed" | "skipped"
 
 export interface EngineTrustOptions {
   /** Reads the OS store off the main thread. Default: a Worker calling `getCACertificates("system")`. */
   readonly loadSystem?: () => Promise<readonly string[]>
-  /** `--version` / `--help`: never touch the OS store (#10760). */
+  /** `--version` / `-v` / `--help`: never touch the OS store (#10760). */
   readonly skipSystem?: boolean
   readonly warn?: (message: string) => void
+  /** Where the answered store is handed to children: the agent dir's `cache` (compile-entry passes it). */
+  readonly handoffDir?: string
 }
 
-/** How long the first outbound request waits for the OS store before going with what is installed. */
+/** How long startup waits for the OS store before going on with what is installed. */
 export const SYSTEM_STORE_BUDGET_MS = 1_500
+
+/**
+ * The parent's RESOLVED store state, handed to every child that re-runs this entry (`thread`,
+ * `daemon`, `host status --all`, the provisioned handoff), so a child never reads the OS store again
+ * and the slow-store warning prints once per user command (#10771 review):
+ * - `unanswered`: the store missed the bound; the child starts like its parent, bundled + extras.
+ * - `file:<path>`: the store answered; its certificates are in that owner-only PEM file (the agent
+ *   dir's `cache/system-ca.pem`, replaced atomically on every parent start), which the child installs
+ *   instead of asking the OS.
+ * - `empty`: the store answered with no certificates.
+ */
+export const SYSTEM_STORE_STATE_ENV = "OMO_SYSTEM_CA_STORE"
+export const SYSTEM_STORE_UNANSWERED = "unanswered"
 
 let systemStore: Promise<SystemStoreOutcome> = Promise.resolve("skipped")
 let systemSettled = false
@@ -100,6 +117,8 @@ export function installEngineCaTrust(
   const extra = raw === undefined || raw === "" ? [] : parseExtraCaCertificates(raw)
   systemSettled = false
   if (typeof tls.getCACertificates !== "function" || typeof tls.setDefaultCACertificates !== "function") {
+    // A runtime without the trust APIs still lets `BUN_BE_BUN` children read the store themselves.
+    env.NODE_USE_SYSTEM_CA = "1"
     systemStore = Promise.resolve("skipped")
     systemSettled = true
     return { installed: false, bundled: 0, system: 0, ambient: 0, extra: 0 }
@@ -108,7 +127,15 @@ export function installEngineCaTrust(
   const ambient = tls.getCACertificates("extra")
   const base = [...new Set([...bundled, ...ambient, ...extra])]
   tls.setDefaultCACertificates(base)
-  if (options.skipSystem === true) {
+  const inherited = env[SYSTEM_STORE_STATE_ENV]
+  const inheritedFile = inherited?.startsWith("file:") === true ? inherited.slice("file:".length) : undefined
+  const fromParent = inheritedFile === undefined ? undefined : readInheritedStore(inheritedFile)
+  if (fromParent !== undefined) {
+    tls.setDefaultCACertificates([...new Set([...base, ...fromParent])])
+    env.NODE_USE_SYSTEM_CA = "1"
+    systemStore = Promise.resolve("loaded")
+    systemSettled = true
+  } else if (options.skipSystem === true || inherited === SYSTEM_STORE_UNANSWERED || inherited === "empty") {
     systemStore = Promise.resolve("skipped")
     systemSettled = true
   } else {
@@ -117,6 +144,9 @@ export function installEngineCaTrust(
       (system) => {
         tls.setDefaultCACertificates([...new Set([...base, ...system])])
         env.NODE_USE_SYSTEM_CA = "1"
+        const handoff = system.length === 0 ? "empty" : writeStoreHandoff(system, options.handoffDir)
+        if (handoff === undefined) delete env[SYSTEM_STORE_STATE_ENV]
+        else env[SYSTEM_STORE_STATE_ENV] = handoff === "empty" ? "empty" : `file:${handoff}`
         systemSettled = true
         return "loaded" as const
       },
@@ -127,7 +157,36 @@ export function installEngineCaTrust(
       },
     )
   }
+  trustEnv = env
   return { installed: true, bundled: bundled.length, system: 0, ambient: ambient.length, extra: extra.length }
+}
+
+let trustEnv: NodeJS.ProcessEnv = process.env
+
+/** The store's PEM set for this process's children, owner-only and replaced atomically; undefined when it can't be written. */
+function writeStoreHandoff(system: readonly string[], dir: string | undefined): string | undefined {
+  if (dir === undefined) return undefined
+  const path = join(dir, "system-ca.pem")
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const staging = `${path}.${process.pid}.tmp`
+    writeFileSync(staging, system.join("\n"), { mode: 0o600 })
+    renameSync(staging, path)
+    return path
+  } catch {
+    return undefined
+  }
+}
+
+/** A parent's handed-off store, or undefined (unreadable or empty), in which case the child reads the OS itself. */
+function readInheritedStore(path: string): readonly string[] | undefined {
+  try {
+    const pem = readFileSync(path, "utf8")
+    const certificates = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----\n?/g)
+    return certificates === null ? undefined : certificates.map((certificate) => certificate.trimEnd() + "\n")
+  } catch {
+    return undefined
+  }
 }
 
 let slowStoreWarned = false
@@ -153,6 +212,7 @@ export async function engineCaTrustReady(
     }),
   ])
   clearTimeout(timer)
+  if (outcome === "timed-out" && !systemSettled) trustEnv[SYSTEM_STORE_STATE_ENV] = SYSTEM_STORE_UNANSWERED
   if (outcome === "timed-out" && !slowStoreWarned) {
     slowStoreWarned = true
     warn(
@@ -175,6 +235,9 @@ export function loadSystemStoreOffThread(source = SYSTEM_STORE_WORKER_SOURCE): P
       resolve(event.data)
       void worker.terminate()
     }
-    worker.onerror = (event: ErrorEvent) => reject(new Error(event.message))
+    worker.onerror = (event: ErrorEvent) => {
+      reject(new Error(event.message))
+      void worker.terminate()
+    }
   })
 }

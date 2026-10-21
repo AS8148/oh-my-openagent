@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, onTestFinished, test } from "bun:test"
 import { spawn, spawnSync } from "node:child_process"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, type Server } from "node:https"
@@ -11,6 +11,8 @@ import {
   ExtraCaCertificatesError,
   installEngineCaTrust,
   loadSystemStoreOffThread,
+  SYSTEM_STORE_STATE_ENV,
+  SYSTEM_STORE_UNANSWERED,
   MAX_EXTRA_CA_BYTES,
   parseExtraCaCertificates,
 } from "../compiled-ca-trust"
@@ -80,9 +82,10 @@ describe("installEngineCaTrust", () => {
     expect(installed).toEqual(["B", "A", "S"])
   })
 
-  test("#given a runtime without the trust APIs #then leaves it alone", () => {
+  test("#given a runtime without the trust APIs #then leaves it alone and still sets NODE_USE_SYSTEM_CA", () => {
     const env: NodeJS.ProcessEnv = {}
     expect(installEngineCaTrust(env, {} as never).installed).toBe(false)
+    expect(env.NODE_USE_SYSTEM_CA).toBe("1")
   })
 })
 
@@ -170,6 +173,106 @@ console.log("done")
 
 // The bug is specific to `bun build --compile`: a compiled binary ignores --use-system-ca, so this
 // compiles a real probe and connects to a local TLS server whose leaf chains to a private CA.
+// #10771 review: a child that re-runs the entry inherits the parent's RESOLVED store state, so it
+// never reads the OS store again and the slow-store warning prints once per user command.
+describe("children inherit the resolved store state (#10771)", () => {
+  const counting = () => {
+    const installs: string[][] = []
+    let reads = 0
+    return {
+      installs,
+      reads: () => reads,
+      tls: {
+        getCACertificates: (kind: string) => (kind === "bundled" ? ["B"] : []),
+        setDefaultCACertificates: (certificates: string[]) => {
+          installs.push(certificates)
+        },
+      },
+      loadSystem: (system: readonly string[] | "never") => () => {
+        reads += 1
+        return system === "never" ? new Promise<readonly string[]>(() => {}) : Promise.resolve(system)
+      },
+    }
+  }
+
+  test("#given the parent's store answered #then a child installs the handed-off set without asking the OS", async () => {
+    const ca = readFileSync(join(fixtures, "ca.pem"), "utf8")
+    const parent = counting()
+    const env: NodeJS.ProcessEnv = {}
+    const handoffDir = mkdtempSync(join(tmpdir(), "omo-ca-handoff-"))
+    onTestFinished(() => rmSync(handoffDir, { recursive: true, force: true }))
+    installEngineCaTrust(env, parent.tls as never, { loadSystem: parent.loadSystem([ca]), handoffDir })
+    expect(await engineCaTrustReady(1_000)).toBe("loaded")
+    expect(env[SYSTEM_STORE_STATE_ENV]).toStartWith("file:")
+
+    const child = counting()
+    const childEnv = { ...env }
+    installEngineCaTrust(childEnv, child.tls as never, { loadSystem: child.loadSystem("never") })
+    expect(await engineCaTrustReady(50, () => {})).toBe("loaded")
+    expect(child.reads()).toBe(0)
+    expect(child.installs.at(-1)?.map((pem) => pem.trim())).toEqual(["B", ca.trim()])
+  })
+
+  test("#given the parent's store missed the bound #then a child neither waits nor warns", async () => {
+    const parent = counting()
+    const env: NodeJS.ProcessEnv = {}
+    installEngineCaTrust(env, parent.tls as never, { loadSystem: parent.loadSystem("never") })
+    expect(await engineCaTrustReady(30, () => {})).toBe("timed-out")
+    expect(env[SYSTEM_STORE_STATE_ENV]).toBe(SYSTEM_STORE_UNANSWERED)
+
+    const child = counting()
+    const warnings: string[] = []
+    installEngineCaTrust({ ...env }, child.tls as never, { loadSystem: child.loadSystem("never") })
+    const started = performance.now()
+    expect(await engineCaTrustReady(1_000, (message) => warnings.push(message))).toBe("skipped")
+    expect(performance.now() - started).toBeLessThan(100)
+    expect({ reads: child.reads(), warnings }).toEqual({ reads: 0, warnings: [] })
+  })
+
+  // The lead's RED: a blocking store and a command that self-spawns twice -> one bound, one warning.
+  test("#given a blocking store and a command that re-runs itself twice #then the total wait is one bound and one warning", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-ca-spawn-"))
+    try {
+      const script = join(dir, "entry.ts")
+      writeFileSync(script, `import { spawnSync } from "node:child_process"
+import { engineCaTrustReady, installEngineCaTrust } from ${JSON.stringify(join(import.meta.dir, "..", "compiled-ca-trust.ts"))}
+const role = process.argv[2]
+installEngineCaTrust(process.env, undefined, { loadSystem: () => { process.stdout.write("READ " + role + "\\n"); return new Promise(() => {}) } })
+process.stdout.write("OUTCOME " + role + " " + (await engineCaTrustReady(400)) + "\\n")
+if (role === "parent") for (const n of [1, 2]) process.stdout.write(spawnSync(process.execPath, [import.meta.path, "child" + n], { env: process.env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).stdout)
+process.exit(0)
+`)
+      const run = spawnSync(process.execPath, [script, "parent"], { env: withoutCaVariables(process.env), encoding: "utf8", timeout: 20_000 })
+      const lines = run.stdout.trim().split("\n")
+      const warnings = run.stderr.split("\n").filter((line) => line.includes("did not answer within"))
+      // Only the parent reads the store and waits out the bound ("timed-out"); each child resolves
+      // at once from the inherited state ("skipped"), so the command pays one bound and warns once.
+      expect({ status: run.status, lines, warnings: warnings.length }).toEqual({
+        status: 0,
+        lines: ["READ parent", "OUTCOME parent timed-out", "OUTCOME child1 skipped", "OUTCOME child2 skipped"],
+        warnings: 1,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
+})
+
+describe("the fast path's local-only argv never reads the OS store (#10771)", () => {
+  test.each([
+    [["--version"], true],
+    [["-v"], true],
+    [["--help"], false],
+    [["-h"], false],
+    [["update"], false],
+    [["--version", "doctor"], false],
+    [["doctor"], false],
+  ] as const)("%p -> %p", async (args, expected) => {
+    const { answeredFromLocalData } = await import("../compile-entry-fast-path")
+    expect(answeredFromLocalData(args)).toBe(expected)
+  })
+})
+
 describe("engine entry", () => {
   const entry = join(import.meta.dir, "..", "compile-entry.ts")
   const runEntry = (args: readonly string[], home?: string) =>
