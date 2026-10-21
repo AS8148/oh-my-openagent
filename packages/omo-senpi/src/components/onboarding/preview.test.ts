@@ -19,10 +19,13 @@ for (const forced of [false, true]) {
     dirs.push(dir)
     let claims = 0
     let releases = 0
+    let historyReads = 0
     const component = createOnboardingComponent({
       claimOnboarding: () => { claims += 1; return claimOnboarding(dir) },
       isOnboardingComplete: () => isOnboardingComplete(dir),
       releaseOnboarding: () => { releases += 1; releaseOnboarding(dir) },
+      scan: async () => ({ scanId: "preview", digests: [], projectRoots: new Set<string>(), context: "Scan rows: 2 sign-ins.", inventory: "2 sign-ins" }),
+      sessionHistory: async () => { historyReads += 1; return undefined },
     })
     const h = createOnboardingHarness(dir, "preview", "tui", component)
     if (forced) claimOnboarding(dir)
@@ -42,9 +45,12 @@ for (const forced of [false, true]) {
     expect(h.widgets).toEqual(widgets)
     expect(h.pi.messages).toEqual([])
     expect(h.branch).toEqual([])
+    expect(historyReads).toBe(0)
     const real = await h.prompt()
     expect(real.filter(Boolean)).toHaveLength(1)
+    expect(JSON.stringify(real)).toContain("2 sign-ins")
     expect(preview).toEqual(real)
+    expect(historyReads).toBe(1)
     expect(isOnboardingComplete(dir)).toBe(true)
     expect(await h.prompt()).toEqual([undefined])
   })
