@@ -96,12 +96,13 @@ async function respawnInProcess(input: {
 }): Promise<RespawnResult> {
   const rebuilt = buildRespawnManagedSpec(input.record, input.stateDir)
   if (!rebuilt.ok) return failure("unrecoverable", rebuilt.code, rebuilt.reason)
-  const resume = input.runners["in-process"].resume
-  if (resume === undefined) return failure("unrecoverable", "respawn_failed", "in-process runner cannot resume sessions")
+  const runner = input.runners["in-process"]
+  if (runner.resume === undefined) return failure("unrecoverable", "respawn_failed", "in-process runner cannot resume sessions")
   let handle: ManagedChildHandle | undefined
   try {
     input.beforeLaunch()
-    handle = await resume(rebuilt.spec, input.sessionPath)
+    // Called on the runner: a runner whose resume reads its own state must keep its receiver.
+    handle = await runner.resume(rebuilt.spec, input.sessionPath)
     await continueInterruptedTurn(input.record, input.sessionPath, handle)
     return { ok: true, handle }
   } catch (error) {
