@@ -53,6 +53,15 @@ Since 5.1.35 the anonymous `distinct_id` was read from the install-id file under
 
 `docs/reference/senpi-telemetry.md` regenerates the schema block and adds the disclosure row.
 
+## 2026-10-21 - Launch-gated Fable 5.5 recognition (#10798)
+
+Recognize the provisional `claude-fable-5-5` ID in supplemental model capabilities
+and the telemetry vocabulary, with family and refusal detection covered by the
+existing Fable predicates. `FABLE_55_LAUNCH` holds the provisional ID and all
+unverified capability and context values; limits remain unknown until the live
+listing is available, and runtime metadata takes precedence. Recognition alone
+does not change any routing defaults.
+
 ## 2026-10-21 - Memory counts how often a standing agreement had to be repeated (#10780)
 
 A person's standing instructions to the agent now live as one counted ledger, `system/agreements.md`: one line per agreement with a stable id (sha256 of the normalized text), a scope (`global` / `project`), who wrote it (`human` / `agent`), how many times it was broken, and a status. The facts extractor gets a second tool, `record_agreement`: when the person corrects something an existing agreement already covers, it reaffirms that id and the count goes up in the same facts commit; a reaffirm naming an id the extractor was not shown is refused. At `memory.agreements.needs_human_threshold` (default 3) an item turns NEEDS-HUMAN, and each newly flagged item is announced once: one `<memory_notice>` line to the agent and one `omo-memory:agreement-flagged` row to the person. At `max_items` (default 64) a new agreement evicts the oldest agent-written item that was never reaffirmed nor flagged, and the facts commit names it in an `Omo-Agreement-Evicted: <id>` trailer; when nothing is evictable the new agreement is refused and logged. Similar agreements are never merged, so two distinct rules always stay two lines.
