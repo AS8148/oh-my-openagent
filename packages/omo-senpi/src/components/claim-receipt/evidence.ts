@@ -1,7 +1,8 @@
 import { extractMutatedFilePaths, MUTATION_TOOL_NAMES } from "../post-mutation/post-mutation"
-import { commandKinds, firstCommandOffset, isRelevantPath, judgeOutput, judgeStructured } from "./signatures"
+import { cellInvokedKinds, invokedKinds } from "./invocations"
+import { isRelevantPath, judgeOutput, judgeStructured } from "./signatures"
 
-export type CheckKind = "test" | "typecheck" | "lint" | "build" | "run" | "lsp"
+export type CheckKind = "test" | "typecheck" | "lint" | "build" | "run" | "lsp" | "lookup"
 export type CheckOutcome = "passed" | "failed" | "unknown"
 
 export interface CheckEvidence {
@@ -25,7 +26,12 @@ export interface Timeline {
 }
 
 type Rec = Record<string, unknown>
-type CommandKind = Exclude<CheckKind, "lsp">
+type CommandKind = Exclude<CheckKind, "lsp" | "lookup">
+const LOOKUP_TOOLS: ReadonlySet<string> = new Set(["read", "grep", "glob", "find", "ls", "lsp_goto_definition", "lsp_find_references", "lsp_symbols", "ast_grep"])
+const splitKinds = (line: string) => {
+  const all = invokedKinds(line)
+  return { kinds: all.filter((kind): kind is CommandKind => kind !== "lookup"), lookup: all.includes("lookup") }
+}
 interface PendingCheck {
   readonly kinds: readonly CommandKind[]
   readonly command: string
@@ -89,11 +95,17 @@ class TimelineBuilder {
       return
     }
     if (toolName === "lsp_diagnostics") return this.lsp(text, isError, index, entryId)
+    if (LOOKUP_TOOLS.has(toolName)) return this.lookup(isError, text, index, entryId)
     if (toolName === "bash" || toolName === "powershell") {
       const command = asString(args["command"])
-      const kinds = commandKinds(command)
+      const { kinds, lookup } = splitKinds(command)
       if (kinds.length > 0) this.addCheck(index, entryId, { kinds, command }, judgeStructured(isError, text))
+      if (lookup && kinds.length === 0) this.lookup(isError, text, index, entryId)
     }
+  }
+
+  lookup(isError: boolean, text: string, at: number, entryId: string): void {
+    if (!isError && text.trim() !== "") this.checks.push({ at, entryId, kind: "lookup", outcome: "passed" })
   }
 
   lsp(text: string, isError: boolean, at: number, entryId: string): void {
@@ -123,11 +135,17 @@ class TimelineBuilder {
       return
     }
     if (name === "lsp_diagnostics") return this.lsp(preview, call["ok"] === false, at, entryId)
+    if (LOOKUP_TOOLS.has(name)) return this.lookup(call["ok"] === false, preview, at, entryId)
     if (name !== "bash" && name !== "monitor") return
     const command = asString(args["command"])
-    const kinds = commandKinds(command)
-    if (kinds.length === 0) return
-    const backgroundId = name === "monitor" || args["run_in_background"] === true ? BACKGROUND_ID.exec(preview)?.[1] : undefined
+    const { kinds, lookup } = splitKinds(command)
+    if (kinds.length === 0) {
+      if (lookup && name === "bash") this.lookup(call["ok"] === false, preview, at, entryId)
+      return
+    }
+    const background = name === "monitor" || args["run_in_background"] === true
+    if (background && call["ok"] === false) return
+    const backgroundId = background ? BACKGROUND_ID.exec(preview)?.[1] : undefined
     if (backgroundId !== undefined) {
       this.#background.set(backgroundId, { kinds, command })
       if (name === "monitor") this.#background.set(`desc:${asString(args["description"])}`, { kinds, command })
@@ -137,10 +155,10 @@ class TimelineBuilder {
   }
 
   cell(callId: string, code: string, output: string, status: unknown, index: number, entryId: string): void {
-    const kinds = commandKinds(code)
+    const { kinds, offset } = cellInvokedKinds(code)
     if (kinds.length === 0) return
     const pending = { kinds, command: code }
-    const at = index + (firstCommandOffset(code) + 1) / (code.length + 2)
+    const at = index + (offset + 1) / (code.length + 2)
     // Cell code mixes mutation probes, log greps, scratch writes and composed reports with real runs, so a cell
     // can support a claim but never contradicts one: its failures are not attributed and its writes are not
     // edits. Only structured sources (host calls, tool results, terminal exit codes) produce a failed check, and
@@ -180,7 +198,7 @@ class TimelineBuilder {
       return
     }
     if (customType === "senpi-monitor:notification") {
-      if (/\bkilled\b/.test(content)) return
+      if (/\bkilled\b|\btimed[_ ]out\b/.test(content)) return
       const ids = asArray(isRecord(details) ? details["monitors"] : undefined).map((monitor) => (isRecord(monitor) ? asString(monitor["id"]) : ""))
       const description = MONITOR_DESCRIPTION.exec(content)?.[1]
       const pending = ids.map((id) => this.#background.get(id)).find((value) => value !== undefined) ?? (description === undefined ? undefined : this.#background.get(`desc:${description}`))

@@ -40,7 +40,7 @@ const CLAIM_RULES: readonly ClaimRule[] = [
   { id: "build.ko", kind: "build", pattern: /빌드[^.\n\0]{0,12}(?:성공|통과|됩니다|됐|돼요)/ },
   { id: "run.works", kind: "run", pattern: /\b(?:works|is working|runs) (?:as expected|correctly|end to end|fine)\b|(?:정상(?:적으로)?|잘)\s*(?:동작|작동)/i },
   { id: "exists.already", kind: "exists", pattern: /\balready\s+(?:exists?|implemented|in place|supported|wired up|present)\b/i },
-  { id: "exists.ko", kind: "exists", pattern: /이미\s*(?:있|존재|구현|되어|돼|지원|반영|들어)/ },
+  { id: "exists.ko", kind: "exists", pattern: /이미\s*(?:있|존재|구현(?:되어|돼|됐|되었|했|해)|되어|돼|지원(?:되|돼|해|합)|반영(?:되|돼|됐|했)|들어)/ },
   { id: "done.leading", kind: "done", pattern: /^(?:done|completed|finished|fixed|implemented|verified|confirmed|all set)\b/i },
   { id: "done.ko-leading", kind: "done", pattern: /^(?:완료|끝|구현 완료|수정 완료|확인 완료)/ },
   { id: "done.ko", kind: "done", pattern: /완료(?:했|됐|되었|입니다|됨)|끝났(?:어요|습니다|다)/ },

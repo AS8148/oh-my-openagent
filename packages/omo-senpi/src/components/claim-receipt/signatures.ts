@@ -1,25 +1,4 @@
-import type { CheckKind, CheckOutcome } from "./evidence"
-
-const COMMAND_KINDS: ReadonlyArray<readonly [Exclude<CheckKind, "lsp">, RegExp]> = [
-  ["test", /\b(?:bun (?:run )?test|vitest|jest|pytest|cargo test|go test|deno test|playwright test|(?:npm|pnpm|yarn) (?:run )?test|test:[\w:-]+|gh pr checks|vp test|vp run\b[^\n`'"]*?\stest)\b/],
-  ["typecheck", /\b(?:tsc|tsgo|typecheck|type-check|mypy|pyright|cargo check|vp check)\b/],
-  ["lint", /\b(?:biome|eslint|oxlint|ruff|clippy|lint|vp check)\b/],
-  ["build", /\b(?:bun build|cargo build|go build|vite build|next build|(?:bun|npm|pnpm|yarn) run build(?::[\w:-]+)?|build:[\w:-]+)\b/],
-  ["run", /\bscripts\/qa\/|\b(?:qa|e2e)-?(?:driver|run)\b/],
-]
-
-export function commandKinds(command: string): Array<Exclude<CheckKind, "lsp">> {
-  return COMMAND_KINDS.filter(([, pattern]) => pattern.test(command)).map(([kind]) => kind)
-}
-
-export function firstCommandOffset(code: string): number {
-  let first = -1
-  for (const [, pattern] of COMMAND_KINDS) {
-    const match = pattern.exec(code)
-    if (match !== null && (first === -1 || match.index < first)) first = match.index
-  }
-  return first
-}
+import type { CheckOutcome } from "./evidence"
 
 const FAIL_SIGNATURES: readonly RegExp[] = [
   /(?<![0-9])[1-9]\d*\s+fail(?:ed|ures?)?\b/i,

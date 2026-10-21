@@ -110,6 +110,7 @@ describe("claim-receipt classifier", () => {
       expect(classifyClaims("Gate v2 passed at 11:56.")).toEqual([])
       expect(classifyClaims("That alert is one I've already handled.")).toEqual([])
       expect(classifyClaims("A machine that already has memory gets the label.")).toEqual([])
+      expect(classifyClaims("\uC774\uBBF8 \uAD6C\uD604\uB41C \uD568\uC218\uB97C \uC7AC\uC0AC\uC6A9\uD588\uC2B5\uB2C8\uB2E4.")).toEqual([])
     })
   })
 

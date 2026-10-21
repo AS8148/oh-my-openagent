@@ -91,6 +91,16 @@ describe("claim-receipt evidence timeline", () => {
       expect(checks(other)).toEqual([])
     })
 
+    it("#then a monitor that failed to start or timed out is not a failed check", () => {
+      const refused = evalRun("c9", { code: "await tool.monitor(spec)" }, [{ name: "monitor", ok: false, args: { command: "bun test" }, resultPreview: "" }])
+      const timedOut = [
+        ...start("bun test", "bash_7"),
+        customMessage("senpi-monitor:notification", "<system-reminder>Monitor event(suites): watcher timed_out (exit code 1)</system-reminder>", { monitors: [{ id: "bash_7" }] }),
+      ]
+      expect(checks(refused)).toEqual([])
+      expect(checks(timedOut)).toEqual([])
+    })
+
     it("#then a monitor event for that id decides it, including one bundled inside a wake", () => {
       const content = "<system-reminder>Monitor event(run tests): TEST_EXIT=0\nwatcher completed (exit code 0)</system-reminder>"
       const direct = [...start("bun test", "bash_3"), customMessage("senpi-monitor:notification", content, { monitors: [{ id: "bash_3" }] })]
@@ -102,6 +112,48 @@ describe("claim-receipt evidence timeline", () => {
       ]
       expect(checks(direct)).toEqual([["test", "passed", 2]])
       expect(checks(wake)).toEqual([["test", "passed", 2]])
+    })
+  })
+
+  describe("#given a command that only mentions a check", () => {
+    const bash = (id: string, command: string, text: string, isError = false) => [
+      toolCall(id, "bash", { command }),
+      toolResult(id, "bash", { text, isError }),
+    ]
+
+    it("#then echo, grep, rg and git messages are not check runs (a grep is at most a lookup)", () => {
+      expect(checks(bash("m1", "echo bun test", "bun test"))).toEqual([])
+      expect(checks(bash("m2", "grep -rn vitest packages/", "a.ts: FAIL vitest"))).toEqual([["lookup", "passed", 1]])
+      expect(checks(bash("m3", 'rg -n "bun test" docs/', "docs/x.md: FAIL: 2 fail"))).toEqual([["lookup", "passed", 1]])
+      expect(checks(bash("m4", 'git commit -m "fix lint and tsc"', "[main 1] fix lint"))).toEqual([])
+      const host = evalRun("m5", { code: "await tool.bash({ command: 'echo bun test' })" }, [hostBash("echo bun test && grep vitest x", " 1 fail")])
+      expect(checks(host)).toEqual([["lookup", "passed", 1]])
+    })
+
+    it("#then real invocations behind cd, env, timeout, bash -c and heavy-slot still count, one kind per segment", () => {
+      expect(checks(bash("r1", "cd pkg && CI=1 timeout -k 10 300 bun test src", " 3 pass\n 0 fail"))).toEqual([["test", "passed", 1]])
+      expect(checks(bash("r2", "bash -c 'bunx tsgo --noEmit -p x'", "", true))).toEqual([["typecheck", "failed", 1]])
+      expect(checks(bash("r3", "HEAVY_BUDGET=600 ~/.omo/omocat/heavy-slot.sh lab -- bun run test:senpi", " 9 pass\n 0 fail"))).toEqual([["test", "passed", 1]])
+      expect(checks(bash("r4", "npx vitest run && pnpm run lint", "Found 0 errors"))).toEqual([["test", "passed", 1], ["lint", "passed", 1]])
+    })
+
+    it("#then an eval cell counts only shell strings that invoke a check, not prose or greps about one", () => {
+      expect(checks(evalRun("e1", { code: 'print("run bun test later")', output: " 3 pass\n 0 fail" }))).toEqual([])
+      expect(checks(evalRun("e2", { code: "await sh(`grep -c vitest log.txt`)", output: " 3 pass\n 0 fail" }))).toEqual([])
+      expect(checks(evalRun("e3", { code: "await sh(`cd ${WT} && bun test x`)", output: " 3 pass\n 0 fail" }))).toEqual([["test", "passed", 1]])
+      const python = 'r = subprocess.run(f"""cd {W0} &&\n CI=1 bun test packages/x 2>&1 | tail -3""", shell=True)'
+      expect(checks(evalRun("e4", { code: python, output: " 3 pass\n 0 fail" }))).toEqual([["test", "passed", 1]])
+    })
+  })
+
+  describe("#given a lookup that shows something exists", () => {
+    it("#then read, grep and symbol lookups are recorded as passed lookups", () => {
+      const read = [toolCall("k1", "read", { path: "src/a.ts" }), toolResult("k1", "read", { text: "export const x = 1" })]
+      const grep = [toolCall("k2", "bash", { command: "rg -n flag src/config.ts" }), toolResult("k2", "bash", { text: "12: flag" })]
+      const missing = [toolCall("k3", "read", { path: "src/b.ts" }), toolResult("k3", "read", { text: "ENOENT", isError: true })]
+      expect(checks(read)).toEqual([["lookup", "passed", 1]])
+      expect(checks(grep)).toEqual([["lookup", "passed", 1]])
+      expect(checks(missing)).toEqual([])
     })
   })
 

@@ -3,7 +3,7 @@
 import { describe, expect, it } from "bun:test"
 
 import { classifyClaims } from "./classify"
-import { answer, editResult, evalRun, failingTest, type FixtureEntry, passingTest, userInput } from "./entries.test-support"
+import { answer, editResult, evalRun, failingTest, type FixtureEntry, passingTest, toolCall, toolResult, userInput } from "./entries.test-support"
 import { buildTimeline } from "./evidence"
 import { matchClaims } from "./match"
 
@@ -54,9 +54,19 @@ describe("claim-receipt matcher", () => {
       expect(verdictFor([...passingTest("t1"), ...editResult("e1", "notes/RESULT.md")], "All tests pass.")).toMatchObject({ status: "supported" })
     })
 
-    it("#then an unknown latest check is not flagged", () => {
+    it("#then a later unknown check does not hide an earlier visible failure", () => {
       const unknown = evalRun("t2", { code: "await sh(`bun test`)", output: "running" })
-      expect(verdictFor([...failingTest("t1"), ...unknown], "All tests pass.")).toMatchObject({ status: "unknown" })
+      expect(verdictFor([...failingTest("t1"), ...unknown], "All tests pass.")).toMatchObject({ status: "unsupported", reason: "last-check-failed" })
+    })
+
+    it("#then a quoted result after a later unreadable run is not contradicted by the earlier failure", () => {
+      const unknown = evalRun("t2", { code: "await sh(`bun test`)", output: "running" })
+      expect(verdictFor([...failingTest("t1"), ...unknown], "The rerun shows 343 pass, 0 fail.")).toMatchObject({ status: "unknown" })
+    })
+
+    it("#then an unknown check after a pass stays unknown", () => {
+      const unknown = evalRun("t2", { code: "await sh(`bun test`)", output: "running" })
+      expect(verdictFor([...passingTest("t1"), ...unknown], "All tests pass.")).toMatchObject({ status: "unknown" })
     })
   })
 
@@ -78,6 +88,18 @@ describe("claim-receipt matcher", () => {
         status: "unsupported",
         reason: "last-check-failed",
       })
+    })
+
+    it("#then an exists claim is supported by a lookup and never failed by an unrelated check", () => {
+      const read = [toolCall("k1", "read", { path: "src/config.ts" }), toolResult("k1", "read", { text: "flag" })]
+      expect(verdictFor(read, "That flag already exists in config.ts.")).toMatchObject({ status: "supported", receipt: { kind: "lookup" } })
+      expect(verdictFor([...failingTest("t1")], "That flag already exists in config.ts.")).toMatchObject({ status: "unknown" })
+      expect(verdictFor([], "That flag already exists in config.ts.")).toMatchObject({ status: "unsupported", reason: "no-check" })
+    })
+
+    it("#then a works-correctly claim with no code edit in the session is not flagged", () => {
+      expect(verdictFor([], "The parser works correctly.")).toMatchObject({ status: "unknown" })
+      expect(verdictFor([...editResult("e1", "src/a.ts")], "The parser works correctly.")).toMatchObject({ status: "unsupported", reason: "no-check" })
     })
 
     it("#then an admitted claim is recorded as admitted, never unsupported", () => {
