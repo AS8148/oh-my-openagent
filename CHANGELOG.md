@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Closing a session no longer delays pending facts extraction for 15 minutes.** Cancelled extraction releases its queue claim, so the next session's first eligible settled turn can retry the saved input immediately. A crashed process still leaves its claim protected until the existing expiry ([#10813](https://github.com/code-yeongyu/oh-my-openagent/issues/10813)).
+**Closing a session no longer delays pending facts extraction for 15 minutes.** Cancelled extraction releases its queue claim, so the next session's first eligible settled turn can retry the saved input immediately. A crashed process still leaves its claim protected until the existing expiry ([#10817](https://github.com/code-yeongyu/oh-my-openagent/pull/10817), fixes [#10813](https://github.com/code-yeongyu/oh-my-openagent/issues/10813)).
 
 **The launcher deletes a legacy `~/.omo/credentials.json` left by an intermediate sign-in build.** The file held the device's private keys and account refresh material in plaintext, sometimes world-readable; upgrading removes it. Only the exact legacy shape is removed. ([#10697](https://github.com/code-yeongyu/oh-my-openagent/issues/10697), [#10698](https://github.com/code-yeongyu/oh-my-openagent/pull/10698))
 
