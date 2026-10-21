@@ -84,6 +84,8 @@ async function pausedThenRestarted(options: { readonly transcript: boolean; read
   const after = createTaskManager({
     cwd, store, config: settings({ default_concurrency: 5 }), planner: categoryPlanner(), admissionBarrier: barrier,
     runners: { "in-process": runner, process: runner }, childPausePort, hostPid: 424_242,
+    // The first host ran in this test process; the restarted host must see it as gone.
+    isProcessAlive: () => false,
   })
   return { store, taskId, owner, epoch, sessionPath, calls, runner, turn, barrier, manager: after }
 }

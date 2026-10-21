@@ -291,6 +291,8 @@ export type TaskManagerOptions = {
   // Pid recorded as host_pid on every claimed record so sibling processes sharing the project store
   // can tell a live owner from a dead one. Defaults to process.pid; injectable for tests.
   readonly hostPid?: number
+  // Whether a recorded owner host still runs; defaults to the lifecycle's signal-0 probe.
+  readonly isProcessAlive?: (pid: number) => boolean
   // The parent engine's RUNTIME-ONLY kernel-tool capability map (item 6). Shared with the runner so
   // a same-host parked child revives onto the same live parent closures; absent = no kernel tools.
   readonly kernelToolBindings?: KernelToolBindingRegistry

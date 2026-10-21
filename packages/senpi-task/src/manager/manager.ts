@@ -60,6 +60,7 @@ import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest, type
 import { createHeldSend } from "./held-send"
 import { admitRespawn } from "./respawn-admission"
 import { restorePausedChild } from "./paused-restore"
+import { defaultSignaller } from "../lifecycle/context"
 import type { RunPauseOwner } from "../pause/ports"
 import { AdmissionBarrier, type ResumeCredential } from "../pause/admission-barrier"
 import { createStartAdmissions } from "./start-admission"
@@ -298,7 +299,7 @@ class TaskManagerImpl implements TaskManager {
       ...(options.admissionBarrier === undefined ? {} : { barrier: options.admissionBarrier }),
       liveHandle: taskId => this.#live.get(taskId)?.handle,
       restore: record => restorePausedChild({
-        store: options.store, hostPid: this.#hostPid,
+        store: options.store, hostPid: this.#hostPid, isProcessAlive: options.isProcessAlive ?? defaultSignaller.isAlive,
         respawn: (paused, sessionPath) => this.respawn(paused, sessionPath, undefined, { paused: true }),
         reattach: (paused, handle) => this.reattach(paused, handle),
         liveHandle: taskId => this.#live.get(taskId)?.handle,

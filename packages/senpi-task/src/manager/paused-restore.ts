@@ -12,9 +12,17 @@ export class PausedChildLostError extends Error {
   }
 }
 
+export class PausedChildOwnedElsewhereError extends Error {
+  readonly code = "paused_child_owned_elsewhere"
+  constructor(readonly taskId: string, readonly ownerPid: number) {
+    super(`paused child ${taskId} is still held by live host ${ownerPid}; it is never run on two hosts`)
+  }
+}
+
 export type PausedRestorePorts = {
   readonly store: TaskRecordStore
   readonly hostPid: number
+  isProcessAlive(pid: number): boolean
   respawn(record: TaskRecord, sessionPath: string): Promise<RespawnResult>
   reattach(record: TaskRecord, handle: ManagedChildHandle): Promise<ReattachResult>
   liveHandle(taskId: string): ManagedChildHandle | undefined
@@ -33,11 +41,15 @@ export function savedRunOwner(record: TaskRecord): RunPauseOwner | undefined {
  */
 export async function restorePausedChild(ports: PausedRestorePorts, record: TaskRecord): Promise<ManagedChildHandle> {
   const taskId = record.task_id
+  const owner = record.host_pid
+  if (owner !== undefined && owner !== ports.hostPid && ports.isProcessAlive(owner)) throw new PausedChildOwnedElsewhereError(taskId, owner)
   const sessionPath = newestSessionPath(ports, taskId)
   if (sessionPath === undefined) throw new PausedChildLostError(taskId, "its session transcript is gone")
   let claimed = false
+  // The claim is a compare-and-set on the owner proven dead above: a host that took it since keeps it.
   ports.store.mutate(taskId, fresh => {
-    if (fresh.status !== "paused" || fresh.killed === true || fresh.notification.run_epoch !== record.notification.run_epoch) return fresh
+    if (fresh.status !== "paused" || fresh.killed === true || fresh.host_pid !== owner
+      || fresh.notification.run_epoch !== record.notification.run_epoch) return fresh
     claimed = true
     return { ...fresh, host_pid: ports.hostPid, residency_state: "resident" }
   })
