@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { isolationDetails, isolationLine } from "../isolation/details"
 import { messageability } from "../state"
 import type { TaskRecord } from "../state"
+import { activeParentModelFallback } from "../manager/parent-model-rung"
 import { describeParentModelFallback } from "../parent-model-fallback-text"
 import { formatTargetWithModel } from "../status-line"
 import { formatRunDuration } from "../tools/run-stats-format"
@@ -47,7 +48,7 @@ export function buildCompletionDetails(record: TaskRecord, options: BuildDetails
     ...(record.resolved_model === undefined ? {} : { resolved_model: record.resolved_model }),
     ...(record.effective_model === undefined ? {} : { effective_model: record.effective_model }),
     ...(record.parent_model === undefined ? {} : { parent_model: record.parent_model }),
-    ...(record.parent_model_fallback === undefined ? {} : { parent_model_fallback: record.parent_model_fallback }),
+    ...(activeParentModelFallback(record) === undefined ? {} : { parent_model_fallback: activeParentModelFallback(record) }),
     duration_ms: durationMs(record),
     ...(runStats === undefined ? {} : { run_stats: runStats }),
     final_response: finalResponse.text,

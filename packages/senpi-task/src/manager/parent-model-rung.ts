@@ -26,8 +26,21 @@ export function withParentModelRung(plan: ResolvedChildPlan, spec: ManagerStartS
 
 export function isParentModelRung(record: Pick<TaskRecord, "parent_model">, model: string | Pick<ResolvedModelRecord, "provider" | "model_id">): boolean {
   if (record.parent_model === undefined) return false
-  const base = typeof model === "string" ? baseSelector(model) : `${model.provider}/${model.model_id}`
-  return base === record.parent_model
+  if (typeof model !== "string") return `${model.provider}/${model.model_id}` === record.parent_model
+  // A model id may itself contain ":" (a Bedrock "...-v2:0"), so the selector matches as-is or without a thinking suffix.
+  return model === record.parent_model || baseSelector(model) === record.parent_model
+}
+
+/**
+ * The parent-model note as of the child's CURRENT route: shown only while the child's effective model is the
+ * parent's (or before any model observation), so a revert or an operator switch never leaves it stale.
+ */
+export function activeParentModelFallback(
+  record: Pick<TaskRecord, "parent_model" | "parent_model_fallback" | "effective_model">,
+): TaskRecord["parent_model_fallback"] {
+  const fallback = record.parent_model_fallback
+  if (fallback === undefined || record.effective_model === undefined) return fallback
+  return isParentModelRung(record, record.effective_model) ? fallback : undefined
 }
 
 function parseParentModel(value: string, source: ResolvedModelRecord["source"]): ResolvedModelRecord | undefined {

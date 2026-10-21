@@ -76,6 +76,13 @@ export type RuntimeFallbackCandidates = {
   readonly remaining: readonly ResolvedModelRecord[]
   readonly skipped: readonly ResolvedModelRecord[]
   readonly limit?: UsageLimitScope
+  // Not a remedy for THIS failure, but kept at the end of the chain for a later spent or signed-out rung.
+  readonly retained?: readonly ResolvedModelRecord[]
+}
+
+/** The chain a hop onto `remaining[0]` leaves on the record: the rest of the walk, then the rungs kept for later. */
+export function chainAfterHop(candidates: RuntimeFallbackCandidates): readonly ResolvedModelRecord[] {
+  return [...candidates.remaining.slice(1), ...(candidates.retained ?? [])]
 }
 
 /**
@@ -85,7 +92,8 @@ export type RuntimeFallbackCandidates = {
  */
 export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: string): RuntimeFallbackCandidates {
   const unusable = usageLimitScope(failureMessage) !== undefined || isCredentialFailure(failureMessage, modelIdOf(record))
-  const fallbacks = (record.fallback_models ?? []).filter((model) => unusable || !isParentModelRung(record, model))
+  const all = record.fallback_models ?? []
+  const fallbacks = all.filter((model) => unusable || !isParentModelRung(record, model))
   const provider = providerOf(record)
   if (provider !== undefined && isCredentialFailure(failureMessage, modelIdOf(record))) {
     return {
@@ -94,7 +102,10 @@ export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: st
     }
   }
   const limit = usageLimitScope(failureMessage)
-  if (limit === undefined) return { remaining: fallbacks, skipped: [] }
+  if (limit === undefined) {
+    const retained = all.filter((model) => isParentModelRung(record, model))
+    return { remaining: fallbacks, skipped: [], ...(retained.length === 0 ? {} : { retained }) }
+  }
   if (limit === "model" || provider === undefined) return { remaining: fallbacks, skipped: [], limit }
   const spentParent = fallbacks.filter((model) => model.provider === provider && isParentModelRung(record, model))
   return {

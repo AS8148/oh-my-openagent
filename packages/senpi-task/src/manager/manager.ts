@@ -21,7 +21,7 @@ import type { CancelOptions, CancelOutcome, DestructionPort, InterruptOutcome, R
 import { discardManagedHandle, releaseOnDispose, releaseSupersededHandle, type ManagedChildHandle, type ManagedChildListener } from "./child-handle"
 import { TaskConcurrency } from "./concurrency"
 import { failOwnedRun, launchRunOf, ownsRun } from "./launch-fence"
-import { runtimeFallbackCandidates } from "./credential-failure"
+import { chainAfterHop, runtimeFallbackCandidates } from "./credential-failure"
 import { createWorkpoolAdmission } from "./workpool-admission"
 import { withResidentStart } from "./resident-start"
 import { createWorkpoolEngine, type WorkpoolEngine } from "../workpool/engine"
@@ -1396,7 +1396,11 @@ class TaskManagerImpl implements TaskManager {
         return fresh
       }
       handoff.closed = childIdentityOf(fresh)
-      const next = handOffToNextRung(fresh, { model: nextModel, remaining: candidates.remaining.slice(1), timestamp: input.timestamp })
+      const next = handOffToNextRung(fresh, {
+        model: nextModel,
+        remaining: chainAfterHop(candidates),
+        timestamp: input.timestamp,
+      })
       handoff.record = isParentModelRung(fresh, nextModel)
         ? {
             ...next,

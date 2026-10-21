@@ -1,3 +1,4 @@
+import { activeParentModelFallback } from "../../manager/parent-model-rung"
 import { isolationDetails } from "../../isolation/details"
 import { isTerminalRecord } from "../../manager/manager-helpers"
 import type { AwaitingInputReason, TaskRecord } from "../../state"
@@ -45,7 +46,7 @@ export function buildTaskSnapshot(record: TaskRecord, stateDir: string, now: num
     ...(record.resolved_model !== undefined ? { resolved_model: record.resolved_model } : {}),
     ...(record.effective_model !== undefined ? { effective_model: record.effective_model } : {}),
     ...(record.parent_model !== undefined ? { parent_model: record.parent_model } : {}),
-    ...(record.parent_model_fallback !== undefined ? { parent_model_fallback: record.parent_model_fallback } : {}),
+    ...(activeParentModelFallback(record) === undefined ? {} : { parent_model_fallback: activeParentModelFallback(record) }),
     parent_session_id: record.parent_session_id,
     root_session_id: record.root_session_id,
     age_ms: ageMs(record, now),
