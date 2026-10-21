@@ -267,7 +267,9 @@
         "disallowTypeAnnotations": false
       }
     ],
-    "omo/no-enum": "error"
+    "omo/no-enum": "error",
+    "typescript/consistent-type-exports": "error",
+    "typescript/no-invalid-void-type": "error"
   },
   "ignorePatterns": [
     "**/node_modules/**",
