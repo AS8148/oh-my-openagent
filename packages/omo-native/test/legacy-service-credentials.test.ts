@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { removeLegacyServiceCredentials } from "../bin/lib/legacy-service-credentials.js"
@@ -67,5 +68,48 @@ describe("removeLegacyServiceCredentials", () => {
     const { home, path } = homeWith(JSON.stringify(["signingPrivateKey", "sealingPrivateKey"]))
     expect(removeLegacyServiceCredentials(home)).toBe(false)
     expect(existsSync(path)).toBe(true)
+  })
+
+  test("#given a directory at the credentials path #when it runs #then it is kept", () => {
+    const { home, path } = homeWith()
+    mkdirSync(path)
+    writeFileSync(join(path, "inner.json"), LEGACY)
+    expect(removeLegacyServiceCredentials(home)).toBe(false)
+    expect(existsSync(join(path, "inner.json"))).toBe(true)
+  })
+
+  test("#given a legacy-shaped file over 64 KiB #when it runs #then it is kept", () => {
+    const padded = JSON.stringify({ ...JSON.parse(LEGACY), padding: "x".repeat(64 * 1024) })
+    const { home, path } = homeWith(padded)
+    expect(removeLegacyServiceCredentials(home)).toBe(false)
+    expect(existsSync(path)).toBe(true)
+  })
+
+  test("#given `.omo` is a file rather than a directory #when it runs #then it is a no-op", () => {
+    const home = mkdtempSync(join(tmpdir(), "omo-legacy-creds-"))
+    homes.push(home)
+    writeFileSync(join(home, ".omo"), "not a directory")
+    expect(removeLegacyServiceCredentials(home)).toBe(false)
+    expect(existsSync(join(home, ".omo"))).toBe(true)
+  })
+
+  test.skipIf(process.platform === "win32")("#given a FIFO at the credentials path #when it runs #then it is kept", () => {
+    const { home, path } = homeWith()
+    const made = spawnSync("mkfifo", [path])
+    expect(made.status).toBe(0)
+    expect(removeLegacyServiceCredentials(home)).toBe(false)
+    expect(existsSync(path)).toBe(true)
+  })
+
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("#given a read-only `.omo` holding a legacy file #when unlink is refused #then it reports false and keeps the file", () => {
+    const { home, path } = homeWith(LEGACY)
+    const dir = join(home, ".omo")
+    chmodSync(dir, 0o500)
+    try {
+      expect(removeLegacyServiceCredentials(home)).toBe(false)
+      expect(existsSync(path)).toBe(true)
+    } finally {
+      chmodSync(dir, 0o700)
+    }
   })
 })
