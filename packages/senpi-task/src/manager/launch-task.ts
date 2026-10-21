@@ -1,4 +1,4 @@
-import type { ChildCreationPort, GuardedChild, ResumedChildTurn } from "../pause/ports"
+import type { ChildCreationPort, GuardedChild, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
 import type { EffectiveModelRecord, ResolvedModelRecord, TaskRecord } from "../state"
 import type { TaskRecordStore } from "../store"
 import type { ManagedChildHandle } from "./child-handle"
@@ -43,6 +43,7 @@ export type LaunchPorts = {
   install(context: LaunchContext, handle: ManagedChildHandle): void
   track(context: LaunchContext, handle: ManagedChildHandle, turn?: ResumedChildTurn): void
   park(context: LaunchContext): void
+  paused(context: LaunchContext, owner: RunPauseOwner, childSeq: number): void
 }
 
 export async function launchTask(initial: LaunchContext, ports: LaunchPorts): Promise<LaunchOutcome> {
@@ -78,6 +79,7 @@ async function launchAdmitted(initial: LaunchContext, ports: LaunchPorts): Promi
     const { record, managedSpec, runner } = context
     try {
       managedSpec.admission?.assertOpen()
+      managedSpec.admission?.creating()
       guarded = ports.creation === undefined || managedSpec.admission === undefined
         ? undefined : await ports.creation.startPaused(managedSpec, runner, managedSpec.admission)
       handle = guarded?.child ?? await runner.start(managedSpec)
@@ -111,6 +113,7 @@ async function launchAdmitted(initial: LaunchContext, ports: LaunchPorts): Promi
       if ("kind" in activation) {
         ports.store.transition(record.task_id, { type: "pause", timestamp: new Date(ports.now()).toISOString() })
         ports.park(context)
+        ports.paused(context, activation.owner, activation.childSeq)
         if (managedSpec.admission === undefined) throw new Error("guarded child has no admission owner")
         return { ok: true, held: managedSpec.admission.hold() }
       }

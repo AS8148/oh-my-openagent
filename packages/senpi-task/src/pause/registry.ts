@@ -33,6 +33,7 @@ export type PauseRegistryRecord = {
   readonly resume?: {
     readonly resumeId: string
     readonly childSeqCutoffs: Readonly<Record<string, number>>
+    readonly installed?: true
   }
 }
 
@@ -119,6 +120,13 @@ export class PauseRegistry {
     return true
   }
 
+  add(parentSessionId: string, pauseSeq: number, participant: PauseParticipant): boolean {
+    const record = this.require(parentSessionId)
+    if (record.pauseSeq !== pauseSeq || record.phase === "resumed") return false
+    this.#write({ ...record, participants: { ...record.participants, [participant.key]: participant } })
+    return true
+  }
+
   phase(parentSessionId: string, pauseSeq: number, phase: PauseRegistryRecord["phase"]): boolean {
     const record = this.require(parentSessionId)
     if (record.pauseSeq !== pauseSeq) return false
@@ -137,6 +145,13 @@ export class PauseRegistry {
     }
     this.#write({ ...record, phase: "resuming", resume })
     return resume
+  }
+
+  markInstalled(parentSessionId: string, pauseSeq: number, resumeId: string): boolean {
+    const record = this.require(parentSessionId)
+    if (record.pauseSeq !== pauseSeq || record.resume?.resumeId !== resumeId) return false
+    this.#write({ ...record, resume: { ...record.resume, installed: true } })
+    return true
   }
 
   authorizeResume(parentSessionId: string, pauseSeq: number, resumeId: string) {

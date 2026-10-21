@@ -35,7 +35,7 @@ export function createWorkpoolStore(stateDir: string) {
     }
     return names.filter(name => /^wp_[0-9a-f]{32}\.json$/.test(name)).sort().map(name => load(name.slice(0, -5)))
   }
-  function owned(caller: WorkpoolCaller, poolId: string): WorkpoolRecord {
+  function owned(caller: Pick<WorkpoolCaller, "sessionId">, poolId: string): WorkpoolRecord {
     const record = load(poolId)
     if (record.parent_session_id !== caller.sessionId) throw new WorkpoolError("scope_denied", "Only the owning parent session may access this pool.")
     return record

@@ -17,6 +17,7 @@ export type AdmissionParticipant = {
 
 export type AdmissionCheck = { readonly kind: "allowed" } | { readonly kind: "held"; readonly pauseSeq: number }
 export type AdmissionTicket = {
+  creating(taskId?: string): void
   update(participant: AdmissionParticipant): void
   check(): AdmissionCheck
   commit(): { readonly kind: "launch" } | { readonly kind: "start_paused"; readonly owner: RunPauseOwner }
@@ -28,6 +29,8 @@ type RootBarrier = {
   highWater: number
   credential?: ResumeCredential
   readonly tickets: Map<object, AdmissionParticipant>
+  readonly creations: Map<object, string>
+  readonly creationWaiters: Set<() => void>
 }
 
 export class AdmissionBarrier {
@@ -36,7 +39,7 @@ export class AdmissionBarrier {
   #root(id: string): RootBarrier {
     let root = this.#roots.get(id)
     if (root === undefined) {
-      root = { state: { kind: "open" }, highWater: 0, tickets: new Map() }
+      root = { state: { kind: "open" }, highWater: 0, tickets: new Map(), creations: new Map(), creationWaiters: new Set() }
       this.#roots.set(id, root)
     }
     return root
@@ -65,7 +68,13 @@ export class AdmissionBarrier {
     const check = (): AdmissionCheck => enteredSeq === root.highWater && permitted()
       ? { kind: "allowed" } : { kind: "held", pauseSeq: root.highWater }
     return { kind: "entered", ticket: {
-      update: participant => { if (root.tickets.has(key)) root.tickets.set(key, participant) },
+      creating: taskId => { if (root.tickets.has(key)) root.creations.set(key, taskId ?? participant.key) },
+      update: next => {
+        if (root.tickets.has(key)) {
+          participant = next
+          root.tickets.set(key, next)
+        }
+      },
       check,
       commit: () => {
         const admission = check()
@@ -74,8 +83,23 @@ export class AdmissionBarrier {
           owner: { parentSessionId: id, parentPauseSeq: admission.pauseSeq, runRef: participant.runRef },
         }
       },
-      leave: () => root.tickets.delete(key),
+      leave: () => {
+        root.tickets.delete(key)
+        if (root.creations.delete(key) && root.creations.size === 0) {
+          for (const resolve of root.creationWaiters) resolve()
+          root.creationWaiters.clear()
+        }
+      },
     } }
+  }
+
+  creationsSettled(id: string): Promise<void> {
+    const root = this.#root(id)
+    return root.creations.size === 0 ? Promise.resolve() : new Promise(resolve => { root.creationWaiters.add(resolve) })
+  }
+
+  isCreating(id: string, taskId: string): boolean {
+    return [...this.#root(id).creations.values()].includes(taskId)
   }
 
   close(id: string, pauseSeq: number): readonly AdmissionParticipant[] {

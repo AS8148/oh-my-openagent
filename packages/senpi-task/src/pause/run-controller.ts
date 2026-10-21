@@ -10,16 +10,17 @@ export type ResumeParticipantRequest = RunPauseOwner & {
 export type RunPauseEffects = {
   snapshot(parentSessionId: string, admissions: readonly AdmissionParticipant[]): readonly PauseParticipant[]
   quiesce(parentSessionId: string, pauseSeq: number): void | Promise<void>
+  settleCreations?(parentSessionId: string, pauseSeq: number): Promise<void>
   addFences(parentSessionId: string, pauseSeq: number, runs: readonly RunRef[]): Promise<void>
   pause(participant: PauseParticipant, owner: RunPauseOwner): Promise<
-    { readonly kind: "held"; readonly childSeq: number } | { readonly kind: "settled" }>
+    { readonly kind: "held"; readonly childSeq: number } | { readonly kind: "settled" } | { readonly kind: "pending" }>
   dispatchGuidance(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<void>
   resume(participant: PauseParticipant, request: ResumeParticipantRequest, credential: ResumeCredential): Promise<
     { readonly kind: "resumed"; readonly turnId?: string } | { readonly kind: "held_by_user"; readonly childSeq: number }
     | { readonly kind: "settled" }>
   install(parentSessionId: string, pauseSeq: number, credential: ResumeCredential): Promise<void>
   acknowledgeInstalled(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<void>
-  cancel(participant: PauseParticipant): Promise<void>
+  cancel(participant: PauseParticipant, parentSessionId: string): Promise<void>
 }
 
 type ResumeTransaction = { readonly pauseSeq: number; readonly resumeId: string; readonly credential: ResumeCredential }
@@ -42,18 +43,13 @@ export class RunPauseController {
     await this.effects.addFences(parentSessionId, pauseSeq, runs)
     await quiesced
     if (this.registry.require(parentSessionId).pauseSeq !== pauseSeq) return
-    for (const participant of Object.values(this.registry.require(parentSessionId).participants)) {
-      if (participant.state === "held") continue
-      if (participant.kind === "held_admission") {
-        this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "held", ackSeq: pauseSeq })
-        continue
-      }
-      const result = await this.effects.pause(participant, { parentSessionId, parentPauseSeq: pauseSeq, runRef: participant.runRef })
-      if (this.registry.require(parentSessionId).pauseSeq !== pauseSeq) return
-      if (result.kind === "settled") this.registry.drop(parentSessionId, pauseSeq, participant.key)
-      else this.registry.update(parentSessionId, pauseSeq, participant.key, {
-        state: "held", ackSeq: pauseSeq, observedChildSeq: result.childSeq,
-      })
+    if (!await this.#propagate(parentSessionId, pauseSeq)) return
+    await this.effects.settleCreations?.(parentSessionId, pauseSeq)
+    if (this.registry.require(parentSessionId).pauseSeq !== pauseSeq) return
+    if (!await this.#propagate(parentSessionId, pauseSeq)) return
+    if (Object.values(this.registry.require(parentSessionId).participants).some(participant =>
+      participant.state !== "held" && participant.state !== "restorable" && participant.state !== "lost")) {
+      throw new Error("run pause has an unacknowledged participant")
     }
     this.registry.phase(parentSessionId, pauseSeq, "applied")
   }
@@ -106,10 +102,30 @@ export class RunPauseController {
     const selected = Object.values(this.registry.require(parentSessionId).participants)
       .filter(entry => JSON.stringify(entry.runRef) === JSON.stringify(runRef))
     for (const participant of selected) {
-      await this.effects.cancel(participant)
+      await this.effects.cancel(participant, parentSessionId)
       const current = this.registry.require(parentSessionId)
       this.registry.drop(parentSessionId, current.pauseSeq, participant.key)
     }
+  }
+
+  async #propagate(parentSessionId: string, pauseSeq: number): Promise<boolean> {
+    for (const key of Object.keys(this.registry.require(parentSessionId).participants)) {
+      const record = this.registry.require(parentSessionId)
+      if (record.pauseSeq !== pauseSeq) return false
+      const participant = record.participants[key]
+      if (participant === undefined || participant.state === "held" || participant.state === "restorable" || participant.state === "lost") continue
+      if (participant.kind === "held_admission") {
+        this.registry.update(parentSessionId, pauseSeq, key, { state: "held", ackSeq: pauseSeq })
+        continue
+      }
+      const result = await this.effects.pause(participant, { parentSessionId, parentPauseSeq: pauseSeq, runRef: participant.runRef })
+      if (this.registry.require(parentSessionId).pauseSeq !== pauseSeq) return false
+      if (result.kind === "settled") this.registry.drop(parentSessionId, pauseSeq, key)
+      else if (result.kind === "held") this.registry.update(parentSessionId, pauseSeq, key, {
+        state: "held", ackSeq: pauseSeq, observedChildSeq: result.childSeq,
+      })
+    }
+    return true
   }
 
   #current(parentSessionId: string, transaction: ResumeTransaction): boolean {

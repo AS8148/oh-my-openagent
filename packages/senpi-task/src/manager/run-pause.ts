@@ -1,12 +1,21 @@
 import type { ChildPausePort, EngineInheritReceipt, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
 import type { TaskRecordStore } from "../store"
 import type { ManagedChildHandle } from "./child-handle"
-import { TaskConcurrency, type ParkedLease } from "./concurrency"
+import type { TaskConcurrency } from "./concurrency"
+import { ResumeCapacity, type ResumeAllocation } from "./resume-capacity"
 import { PendingPauses } from "./pending-pauses"
+import type { AdmissionBarrier, ResumeCredential } from "../pause/admission-barrier"
 
 export type ResumeTaskRequest = RunPauseOwner & {
+  readonly resumeCredential?: ResumeCredential
+  readonly allocation?: ResumeAllocation
   readonly resumeId: string
   readonly childSeqCutoff: number
+}
+
+export class RunPauseAdmissionHeld extends Error {
+  readonly code = "run_admission_held"
+  constructor() { super("the run Resume was superseded by a hold") }
 }
 export type ResumeTaskResult =
   | { readonly turnId: string }
@@ -21,17 +30,18 @@ export function createTaskRunPause(ports: {
   readonly store: TaskRecordStore
   readonly concurrency: TaskConcurrency
   readonly child?: ChildPausePort
+  readonly barrier?: AdmissionBarrier
   readonly now: () => number
   liveHandle(taskId: string): ManagedChildHandle | undefined
   track(taskId: string, handle: ManagedChildHandle, model: string, epoch: number, turn: ResumedChildTurn): void
 }) {
   const intents = new PendingPauses()
-  const parked = new Map<string, ParkedLease>()
+  const capacity = new ResumeCapacity(ports.concurrency)
   const resumed = new Map<string, { readonly resumeId: string; readonly result: ResumeTaskResult }>()
+  const attempts = new Map<string, { readonly resumeId: string; readonly cancel: AbortController }>()
 
   function park(taskId: string, epoch: number): void {
-    const lease = ports.concurrency.park(taskId, epoch)
-    if (lease !== undefined) parked.set(taskId, lease)
+    capacity.park(taskId, epoch)
     intents.settle(taskId, epoch)
   }
 
@@ -53,6 +63,7 @@ export function createTaskRunPause(ports: {
     const epoch = record.notification.run_epoch
     if (record.status !== "running" && record.status !== "paused") throw new Error(`cannot pause ${record.status} task`)
     const settled = record.status === "paused" ? undefined : intents.begin(taskId, epoch)
+    const resuming = attempts.get(taskId)
     resumed.delete(taskId)
     // Registration above MUST precede the child call: its abort can settle immediately.
     const ack = await port.pauseForRun(handle, owner)
@@ -60,26 +71,14 @@ export function createTaskRunPause(ports: {
       intents.clear(taskId)
       return ack
     }
+    if (attempts.get(taskId) === resuming) {
+      attempts.delete(taskId)
+      resuming?.cancel.abort()
+      if (record.status === "paused") park(taskId, epoch)
+    }
     intents.acknowledge(taskId, epoch)
     if (settled !== undefined) await settled
     return ack
-  }
-
-  async function acquire(taskId: string): Promise<void> {
-    const { record } = live(taskId)
-    const epoch = record.notification.run_epoch
-    const token = parked.get(taskId)
-    if (token !== undefined) {
-      await ports.concurrency.unpark(token)
-      parked.delete(taskId)
-      return
-    }
-    if (ports.concurrency.leaseState(taskId, epoch) === "held") return
-    // Restart has no original token: acquire a new lease, never unpark a reconstructed object.
-    const granted = Promise.withResolvers<void>()
-    ports.concurrency.enqueue(record.model, taskId, epoch, () => granted.resolve())
-    ports.concurrency.drain()
-    await granted.promise
   }
 
   async function resumePausedTask(taskId: string, request: ResumeTaskRequest): Promise<ResumeTaskResult> {
@@ -88,25 +87,52 @@ export function createTaskRunPause(ports: {
     const port = childPort()
     const { record, handle } = live(taskId)
     if (record.status !== "paused") throw new Error(`cannot resume ${record.status} task`)
-    await acquire(taskId)
-    const result = await port.resumeTurn(handle, request)
-    if ("otherHoldLive" in result) {
-      park(taskId, record.notification.run_epoch)
-      return result
+    const entered = ports.barrier?.enter(record.root_session_id ?? record.parent_session_id,
+      { key: taskId, runRef: request.runRef }, request.resumeCredential)
+    if (entered?.kind === "held") throw new RunPauseAdmissionHeld()
+    const attempt = { resumeId: request.resumeId, cancel: new AbortController() }
+    attempts.set(taskId, attempt)
+    const assertCurrent = (): void => {
+      if (attempts.get(taskId) !== attempt) throw new RunPauseAdmissionHeld()
+      if (entered?.ticket.check().kind === "held") {
+        park(taskId, record.notification.run_epoch)
+        throw new RunPauseAdmissionHeld()
+      }
+      const current = ports.store.load(taskId)
+      if (current?.status !== "paused" || current.notification.run_epoch !== record.notification.run_epoch || ports.liveHandle(taskId) !== handle) {
+        park(taskId, record.notification.run_epoch)
+        throw new Error("paused task changed while resuming")
+      }
     }
-    intents.clear(taskId)
-    const unpaused = ports.store.transition(taskId, { type: "unpause", timestamp: new Date(ports.now()).toISOString() })
-    if (!unpaused.applied) throw new Error("paused child changed while resuming")
-    // The returned promise belongs to turnId even when already settled; never waitForOutcome here.
-    ports.track(taskId, handle, record.model, record.notification.run_epoch, result)
-    const receipt = { turnId: result.turnId }
-    resumed.set(taskId, { resumeId: request.resumeId, result: receipt })
-    return receipt
+    try {
+      const acquired = await capacity.acquire(record, attempt.cancel.signal, request.allocation)
+      assertCurrent()
+      if (!acquired) throw new RunPauseAdmissionHeld()
+      const result = await port.resumeTurn(handle, request)
+      assertCurrent()
+      if ("otherHoldLive" in result) {
+        park(taskId, record.notification.run_epoch)
+        return result
+      }
+      intents.clear(taskId)
+      const unpaused = ports.store.transition(taskId, { type: "unpause", timestamp: new Date(ports.now()).toISOString() })
+      if (!unpaused.applied) throw new Error("paused child changed while resuming")
+      // The returned promise belongs to turnId even when already settled; never waitForOutcome here.
+      ports.track(taskId, handle, record.model, record.notification.run_epoch, result)
+      const receipt = { turnId: result.turnId }
+      resumed.set(taskId, { resumeId: request.resumeId, result: receipt })
+      return receipt
+    } finally {
+      entered?.ticket.leave()
+    }
   }
 
   function forget(taskId: string): void {
     intents.clear(taskId)
-    parked.delete(taskId)
+    const attempt = attempts.get(taskId)
+    attempts.delete(taskId)
+    attempt?.cancel.abort()
+    capacity.forget(taskId)
     resumed.delete(taskId)
   }
 

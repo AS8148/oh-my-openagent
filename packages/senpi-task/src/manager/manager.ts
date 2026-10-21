@@ -58,8 +58,10 @@ import { TASK_AWAITING_INPUT_EVENT } from "./host-turn-resumed"
 import { PendingStops } from "./pending-stops"
 import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest } from "./run-pause"
 import type { RunPauseOwner } from "../pause/ports"
-import { AdmissionBarrier } from "../pause/admission-barrier"
+import { AdmissionBarrier, type ResumeCredential } from "../pause/admission-barrier"
 import { createStartAdmissions } from "./start-admission"
+import { HeldAdmissions, type HeldAdmissionResult } from "./held-admissions"
+import type { PauseParticipant } from "../pause/registry"
 import { launchTask, type LaunchContext, type LaunchOutcome } from "./launch-task"
 import { respawnWithWorkpool } from "./workpool-respawn"
 import { NameRegistry } from "./names"
@@ -198,11 +200,13 @@ class TaskManagerImpl implements TaskManager {
   readonly #outcome: OutcomeTracker
   readonly #runPause: ReturnType<typeof createTaskRunPause>
   readonly #startAdmissions: ReturnType<typeof createStartAdmissions>
+  readonly #heldAdmissions: HeldAdmissions
   readonly #residency = new ResidencySignal()
 
-  constructor(options: TaskManagerImplOptions) {
+  constructor(inputOptions: TaskManagerImplOptions) {
+    const options = { ...inputOptions, admissionBarrier: inputOptions.admissionBarrier ?? new AdmissionBarrier() }
     this.#options = options
-    this.#startAdmissions = createStartAdmissions(options.admissionBarrier ?? new AdmissionBarrier(), options.onHeldAdmission, options.now ?? Date.now)
+    this.#startAdmissions = createStartAdmissions(options.admissionBarrier, options.onHeldAdmission, options.now ?? Date.now)
     try {
       const listed = options.store.list()
       if (listed.diagnostics.length > 0) {
@@ -224,6 +228,16 @@ class TaskManagerImpl implements TaskManager {
       ...(options.config.provider_concurrency !== undefined && { provider_concurrency: options.config.provider_concurrency }),
       ...(options.config.model_concurrency !== undefined && { model_concurrency: options.config.model_concurrency }),
       ...(options.config.global_concurrency !== undefined && { global_concurrency: options.config.global_concurrency }),
+    })
+    this.#heldAdmissions = new HeldAdmissions({
+      store: options.store, barrier: options.admissionBarrier, concurrency: this.#concurrency,
+      hostPid: this.#hostPid, runners: options.runners,
+      launch: context => {
+        if (context.record.notify_on_terminal) this.#background.add(context.record.task_id)
+        void this.#trackLaunch(context.record.task_id, context).catch((error: unknown) => {
+          log("senpi-task queued launch failed", { taskId: context.record.task_id, error: String(error) })
+        })
+      },
     })
     const port: SteeringPort = {
       store: options.store,
@@ -268,6 +282,7 @@ class TaskManagerImpl implements TaskManager {
     })
     this.#runPause = createTaskRunPause({
       store: options.store, concurrency: this.#concurrency, child: options.childPausePort, now: this.#now,
+      ...(options.admissionBarrier === undefined ? {} : { barrier: options.admissionBarrier }),
       liveHandle: taskId => this.#live.get(taskId)?.handle,
       track: (taskId, handle, model, epoch, turn) => this.#outcome.trackOutcome(taskId, handle, model, epoch, turn),
     })
@@ -582,13 +597,7 @@ class TaskManagerImpl implements TaskManager {
       }
     }
 
-    const position = this.#concurrency.enqueue(plan.model, finalRecord.task_id, finalRecord.notification.run_epoch, () => {
-      // A lane-queued first launch is still a first launch while its host admits it (#10042): a send in
-      // that window queues behind the launch instead of reviving a session that does not exist yet.
-      void this.#trackLaunch(finalRecord.task_id, context).catch((error: unknown) => {
-        log("senpi-task queued launch failed", { taskId: finalRecord.task_id, error: String(error) })
-      })
-    })
+    const position = this.#heldAdmissions.enqueue(context)
     return {
       kind: "started",
       task_id: finalRecord.task_id,
@@ -800,6 +809,12 @@ class TaskManagerImpl implements TaskManager {
 
   get concurrency(): TaskConcurrency { return this.#concurrency }
 
+  withdrawAdmissions(taskIds: readonly string[]): void { this.#heldAdmissions.withdraw(taskIds) }
+
+  async resumeHeldTask(participant: PauseParticipant, credential: ResumeCredential): Promise<HeldAdmissionResult> {
+    return this.#heldAdmissions.resume(participant, credential)
+  }
+
   findTaskByChildSession(sessionId: string): TaskRecord | undefined {
     return this.#options.store.list().records.find((record) => record.child_session_id === sessionId
       && record.status === "running" && this.#live.has(record.task_id))
@@ -832,6 +847,7 @@ class TaskManagerImpl implements TaskManager {
     this.#releaseSlotForTask(taskId)
     this.#outcome.release(taskId)
     this.#runPause.forget(taskId)
+    this.#heldAdmissions.forget(taskId)
     this.#live.get(taskId)?.unsubscribe()
     this.#live.delete(taskId)
     const subscribers = this.#childSubscribers.get(taskId)
@@ -947,6 +963,8 @@ class TaskManagerImpl implements TaskManager {
       },
       ...(awaitingInput === undefined ? {} : { awaitingInput }),
     })
+    const paused = result.ok ? this.get(record.task_id) : undefined
+    if (paused?.status === "paused") this.#runPause.park(paused.task_id, paused.notification.run_epoch)
     // The flag is user-visible state: a live progress row leaves "starting" for
     // "resumed, waiting for input" the moment the stamp lands, not on the next poll.
     if (awaitingInput !== undefined && result.ok) {
@@ -1041,6 +1059,7 @@ class TaskManagerImpl implements TaskManager {
 
   #trackLaunch(taskId: string, context: LaunchContext): Promise<LaunchOutcome> {
     const launching = this.#launch(context)
+    this.#heldAdmissions.track(context, launching)
     this.#launching.set(taskId, launching)
     void launching.finally(() => {
       if (this.#launching.get(taskId) === launching) this.#launching.delete(taskId)
@@ -1062,6 +1081,10 @@ class TaskManagerImpl implements TaskManager {
       discard: (context, handle) => this.#discardStaleLaunch(context, handle),
       forget: taskId => this.forget(taskId, { path: "end", reason: "target_gone" }),
       park: context => this.#runPause.park(context.record.task_id, context.record.notification.run_epoch),
+      paused: (context, owner, childSeq) => {
+        const record = this.#options.store.load(context.record.task_id)
+        if (record !== null) this.#options.onPausedChild?.(record, owner, childSeq)
+      },
       track: (context, handle, turn) => this.#outcome.trackOutcome(
         context.record.task_id, handle, context.model, context.record.notification.run_epoch, turn),
       install: ({ record, managedSpec, runner, model }, handle) => {
