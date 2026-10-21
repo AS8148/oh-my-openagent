@@ -3,7 +3,7 @@ import { hasAccentOutline, hasEdgeStripe, hasInsetShadowStripe, hasRadius, isPse
 import { type Finding, lineLocator, type RuleId } from "./findings"
 import { hasGradientEdgeBand } from "./gradient"
 import { classGroups, cssTemplates, inlineStyles, styleBlocks } from "./markup"
-import { type Compound, compoundCovers, isExemptSelector, parseCompound, selectorParts } from "./selector"
+import { type Compound, compoundCovers, isExemptSelector, isExemptTag, parseCompound, selectorParts } from "./selector"
 import { checkClassSet } from "./tailwind"
 
 export type SourceFile = { readonly path: string; readonly text: string }
@@ -91,9 +91,11 @@ export function lintFiles(files: readonly SourceFile[]): Finding[] {
 		}
 		if (STYLESHEET.test(file.path)) continue
 		for (const group of classGroups(file.text, SCRIPT.test(file.path))) {
+			if (isExemptTag(group.tag)) continue
 			for (const id of checkClassSet(group.tokens)) report(group.offset, id)
 		}
 		for (const style of inlineStyles(file.text)) {
+			if (isExemptTag(style.tag)) continue
 			const rounded = style.tagRounded || roundedCorners(style.declarations).size > 0
 			for (const hit of declarationHits(style.declarations, rounded, style.offset)) report(style.offset, hit.id)
 		}

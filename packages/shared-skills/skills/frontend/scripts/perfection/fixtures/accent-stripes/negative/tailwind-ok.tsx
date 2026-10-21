@@ -7,5 +7,8 @@ export const Ok = () => (
     <blockquote className="border-l-2 border-zinc-300 pl-4">Neutral quote rule</blockquote>
     <button className="rounded-md border border-indigo-500 px-3">Outline button</button>
     <div className="rounded-lg bg-blue-50 p-4 text-blue-900">Tonal surface</div>
+    <input className="border-b-2 border-indigo-500" />
+    <select className="rounded-md border-2 border-indigo-500" />
+    <table><tbody><tr><td className="border-l-4 border-indigo-500">Sorted</td></tr></tbody></table>
   </div>
 )
