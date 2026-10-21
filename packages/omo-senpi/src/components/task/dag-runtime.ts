@@ -529,7 +529,11 @@ export function createDagRuntime(deps: DagRuntimeDeps): DagRuntime {
       const record = store.readCheckpoint<DagRunRecordV1>(runId)
       if (record !== null) await controller(runId, record.parentSessionId).scheduler.cancel(runId, "run_cancelled")
     },
-    ...(deps.pausedGuidance === undefined ? {} : { deliverGuidance: deps.pausedGuidance }),
+    deliverGuidance: deps.pausedGuidance ?? (async (taskId, input) => {
+      const held = await deps.engine.manager.holdTaskInput(taskId, input)
+      if (held.kind === "input_id_conflict") throw new Error(`guidance ${input.inputId} conflicts with held revision ${held.heldRevision}`)
+      return held.kind === "held" ? { entryId: held.entryId } : {}
+    }),
   }))
   const runtime: DagRuntime = {
     cancelNode: createPausedNodeCancel(runId => ({ ...schedulerOptions, initialRecord: coreManager.record(runId, deps.engine.runtime.sessionId() ?? "") }), deps.pausedNodeHoldPort),

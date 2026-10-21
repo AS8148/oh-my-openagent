@@ -1,4 +1,4 @@
-import type { EngineResumeReceipt, RunPauseOwner } from "../pause/ports"
+import type { EngineHoldInputResult, EngineResumeReceipt, RunPauseOwner } from "../pause/ports"
 
 export type TaskParentCommand =
   | { readonly type: "set_client_info"; readonly width: number; readonly capabilities: readonly ["task_parent"] }
@@ -7,6 +7,12 @@ export type TaskParentCommand =
     readonly type: "resume_for_run"; readonly parentSessionId: string; readonly parentPauseSeq: number
     readonly resumeId: string; readonly childSeqCutoff: number
   }
+  | {
+    readonly type: "hold_input"; readonly inputId: string; readonly revision: number; readonly text: string
+    readonly parentSessionId: string; readonly origin: "human"
+  }
+
+export type HeldGuidanceInput = { readonly inputId: string; readonly revision: number; readonly text: string }
 
 export type TaskParentWire = {
   readonly width: number
@@ -15,7 +21,7 @@ export type TaskParentWire = {
 }
 
 export class TaskParentControlError extends Error {
-  constructor(readonly code: "task_parent_required" | "request_rejected" | "protocol_error") {
+  constructor(readonly code: "task_parent_required" | "wrong_parent" | "unsupported" | "request_rejected" | "protocol_error") {
     super(code)
   }
 }
@@ -72,11 +78,33 @@ export function createTaskParentControl(wire: TaskParentWire) {
         ...(data.turnId === undefined ? {} : { turnId: data.turnId }),
       }
     },
+    // Relays a person's run guidance into the child this parent paused; never an interactive escalation.
+    async holdInput(parentSessionId: string, input: HeldGuidanceInput): Promise<EngineHoldInputResult> {
+      await identify()
+      const response = await wire.send({
+        type: "hold_input", inputId: input.inputId, revision: input.revision, text: input.text,
+        parentSessionId, origin: "human",
+      })
+      if (!response.success) {
+        const conflict = /^input_id_conflict:.* at revision (\d+)$/.exec(response.error)
+        if (conflict?.[1] !== undefined) return { kind: "input_id_conflict", heldRevision: Number(conflict[1]) }
+        if (response.error.startsWith("wrong_parent:")) throw new TaskParentControlError("wrong_parent")
+        throw rejection(response.error)
+      }
+      const data = response.data
+      if (!isRecord(data)) throw new TaskParentControlError("protocol_error")
+      if (data.alreadyDelivered === true) return { kind: "already_delivered", revision: input.revision }
+      if (typeof data.entryId !== "string" || typeof data.duplicate !== "boolean") throw new TaskParentControlError("protocol_error")
+      return { kind: "held", entryId: data.entryId, duplicate: data.duplicate }
+    },
   }
 }
 
 function rejection(message: string): TaskParentControlError {
-  return new TaskParentControlError(message.startsWith("task_parent_required:") ? "task_parent_required" : "request_rejected")
+  if (message.startsWith("task_parent_required:")) return new TaskParentControlError("task_parent_required")
+  // A child engine that predates the run hold (senpi#3811) does not know the command at all.
+  if (message.startsWith("Unknown command:")) return new TaskParentControlError("unsupported")
+  return new TaskParentControlError("request_rejected")
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

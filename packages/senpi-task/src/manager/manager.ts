@@ -56,7 +56,7 @@ import { withTaskRecordLockAsync } from "../store/record-lock"
 import { reattachManagedTask } from "./manager-reattach"
 import { TASK_AWAITING_INPUT_EVENT } from "./host-turn-resumed"
 import { PendingStops } from "./pending-stops"
-import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest } from "./run-pause"
+import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest, type HeldTaskInput } from "./run-pause"
 import type { RunPauseOwner } from "../pause/ports"
 import { AdmissionBarrier, type ResumeCredential } from "../pause/admission-barrier"
 import { createStartAdmissions } from "./start-admission"
@@ -346,6 +346,10 @@ class TaskManagerImpl implements TaskManager {
 
   resumePausedTask(taskId: string, request: ResumeTaskRequest) {
     return this.#runPause.resumePausedTask(taskId, request)
+  }
+
+  holdTaskInput(taskId: string, input: HeldTaskInput) {
+    return this.#runPause.holdTaskInput(taskId, input)
   }
 
   async startOwned(spec: ManagerStartSpec, owner: DagTaskOwner): Promise<OwnedStartResult> {

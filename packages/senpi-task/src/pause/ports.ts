@@ -51,7 +51,7 @@ export type ChildPausePort = {
     readonly inputId: string
     readonly revision: number
     readonly text: string
-  }): Promise<EngineHoldInputResult>
+  }, owner: { readonly parentSessionId: string }): Promise<EngineHoldInputResult>
 }
 
 export type GuardedChild = {

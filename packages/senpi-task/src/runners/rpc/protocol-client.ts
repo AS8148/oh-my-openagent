@@ -8,6 +8,7 @@ import { createChildExtensionEvents } from "../child-extension-events"
 import { RpcCommandError, RpcRequestTimeout } from "./errors"
 import { tailStderr } from "./exit-mapping"
 import { buildAutoUiResponse } from "./ui-auto-answer"
+import type { TaskParentCommand } from "../task-parent-control"
 
 const STDERR_BUFFER_CAP = 16_384
 
@@ -71,6 +72,16 @@ export class RpcProtocolClient {
   }
 
   send(command: RpcCommand, options: { readonly deadlineMs?: number } = {}): Promise<RpcResponse> {
+    return this.request(command, options)
+  }
+
+  // The task-parent run hold commands (senpi#3811) are omo's contract with the child engine, typed
+  // apart from the pinned engine's RpcCommand; an older child answers them with an error response.
+  sendTaskParent(command: TaskParentCommand): Promise<RpcResponse> {
+    return this.request(command, {})
+  }
+
+  private request(command: { readonly type: string; readonly id?: string }, options: { readonly deadlineMs?: number }): Promise<RpcResponse> {
     const stdin = this.child.stdin
     if (this.isExited || stdin === null || stdin === undefined || stdin.writableEnded || stdin.destroyed) {
       return Promise.reject(new Error(`RPC process is not running. Stderr: ${this.stderrTail}`))

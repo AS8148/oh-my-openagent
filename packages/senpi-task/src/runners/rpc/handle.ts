@@ -22,6 +22,7 @@ import { createTurnSettlement, sessionIsIdle, type TurnSettlementScheduler } fro
 import { createTurnWakeSources } from "./turn-wake-sources"
 import { createInputEffects } from "../input-effects"
 import { createInputDelivery } from "../input-delivery"
+import { createRpcRunPause } from "./native-run-pause"
 
 export type CreateRpcChildHandleOptions = {
   readonly inputStore?: import("../../store").TaskRecordStore
@@ -93,6 +94,7 @@ export function createRpcChildHandle(options: CreateRpcChildHandleOptions): Trac
   })
 
   const resumedListeners = new Set<() => void>()
+  let claimedTurn: object | undefined
   // A child can run its whole first turn (a tool call and an in-session fallback hop included) before
   // `start` returns and the manager subscribes; those events are kept for the first observers (#9582).
   const listeners = createHandleListeners({
@@ -103,7 +105,8 @@ export function createRpcChildHandle(options: CreateRpcChildHandleOptions): Trac
     // is a new turn: the next outcome is that run's, never the settled one again (omo#9069).
     if (event.type === "agent_start" && turnOutcome !== undefined && outcome === undefined) {
       beginTurn()
-      for (const listener of resumedListeners) listener()
+      if (claimedTurn !== undefined) claimedTurn = undefined
+      else for (const listener of resumedListeners) listener()
     }
     if (event.type === "message_end") {
       const terminal = extractTerminalAssistantMessage(event.message)
@@ -201,9 +204,25 @@ export function createRpcChildHandle(options: CreateRpcChildHandleOptions): Trac
     },
   })
 
+  const waitForOutcome = (): Promise<RunnerOutcome> =>
+    turnOutcome !== undefined
+      ? Promise.resolve(turnOutcome)
+      : outcome === undefined
+        ? new Promise<RunnerOutcome>((resolve) => outcomeWaiters.push(resolve))
+        : Promise.resolve(exitTurnOutcome(outcome, finalText))
+  const runPause = createRpcRunPause({
+    taskId, client, currentOutcome: waitForOutcome,
+    claimNextTurn: () => {
+      const claim = {}
+      claimedTurn = claim
+      return () => { if (claimedTurn === claim) claimedTurn = undefined }
+    },
+  })
+
   return {
     reconcileInputs: inputEffects.reconcile,
     task_id: taskId,
+    runPause,
     get sessionId() {
       return sessionId
     },
@@ -236,12 +255,7 @@ export function createRpcChildHandle(options: CreateRpcChildHandleOptions): Trac
     waitForIdle: () =>
       reachedIdle || outcome ? Promise.resolve() : new Promise<void>((resolve) => idleWaiters.push(resolve)),
     hasExited: () => outcome !== undefined || client.exited,
-    waitForOutcome: () =>
-      turnOutcome !== undefined
-        ? Promise.resolve(turnOutcome)
-        : outcome === undefined
-          ? new Promise<RunnerOutcome>((resolve) => outcomeWaiters.push(resolve))
-          : Promise.resolve(exitTurnOutcome(outcome, finalText)),
+    waitForOutcome,
     lastAssistantText: () => finalText,
     terminalAssistantMessage: () => terminalAssistantMessage,
     wasAbortedByUser: () => abortedByUser,

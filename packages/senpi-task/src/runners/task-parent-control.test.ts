@@ -4,6 +4,53 @@ import { createTaskParentControl, type TaskParentCommand, type TaskParentWire } 
 const owner = { parentSessionId: "parent", parentPauseSeq: 2, runRef: { kind: "dag" as const, id: "run" } }
 
 describe("native task-parent RPC contract", () => {
+  test("#given parent-relayed human guidance #when dispatching #then declare only task_parent and name the inherited hold owner", async () => {
+    const calls: unknown[] = []
+    const control = createTaskParentControl({
+      width: 80,
+      send: async command => {
+        calls.push(command)
+        return command.type === "set_client_info"
+          ? { success: true }
+          : { success: true, data: { entryId: "held-1", duplicate: false } }
+      },
+    })
+    expect(await control.holdInput("parent", { inputId: "guide-1", revision: 2, text: "Use staging" }))
+      .toEqual({ kind: "held", entryId: "held-1", duplicate: false })
+    expect(calls).toEqual([
+      { type: "set_client_info", width: 80, capabilities: ["task_parent"] },
+      {
+        type: "hold_input", inputId: "guide-1", revision: 2, text: "Use staging",
+        parentSessionId: "parent", origin: "human",
+      },
+    ])
+  })
+
+  test("#given another parent owns custody #when dispatching guidance #then preserve wrong_parent without interactive escalation", async () => {
+    const calls: unknown[] = []
+    const control = createTaskParentControl({
+      width: 80,
+      send: async command => {
+        calls.push(command)
+        return command.type === "set_client_info" ? { success: true }
+          : { success: false, error: "wrong_parent: this child is not paused for that parent session's run" }
+      },
+    })
+    await expect(control.holdInput("other-parent", { inputId: "guide-1", revision: 1, text: "Use staging" }))
+      .rejects.toMatchObject({ code: "wrong_parent" })
+    expect(calls).toHaveLength(2)
+  })
+
+  test("#given engine-held guidance was already delivered #when retrying dispatch #then acknowledge without sending another input", async () => {
+    const control = createTaskParentControl({
+      width: 80,
+      send: async command => command.type === "set_client_info" ? { success: true }
+        : { success: true, data: { alreadyDelivered: true } },
+    })
+    expect(await control.holdInput("parent", { inputId: "guide-1", revision: 2, text: "Use staging" }))
+      .toEqual({ kind: "already_delivered", revision: 2 })
+  })
+
   test("#given two controls sharing a connection #when pausing and resuming #then declare task_parent once and use native field names", async () => {
     const calls: TaskParentCommand[] = []
     const wire: TaskParentWire = {

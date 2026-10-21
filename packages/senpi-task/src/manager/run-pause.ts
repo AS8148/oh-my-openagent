@@ -1,4 +1,4 @@
-import type { ChildPausePort, EngineInheritReceipt, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
+import type { ChildPausePort, EngineHoldInputResult, EngineInheritReceipt, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
 import type { TaskRecordStore } from "../store"
 import type { ManagedChildHandle } from "./child-handle"
 import type { TaskConcurrency } from "./concurrency"
@@ -24,7 +24,10 @@ export type ResumeTaskResult =
 export type TaskPauseMethods = {
   pauseTask(taskId: string, owner: RunPauseOwner): Promise<EngineInheritReceipt>
   resumePausedTask(taskId: string, request: ResumeTaskRequest): Promise<ResumeTaskResult>
+  holdTaskInput(taskId: string, input: HeldTaskInput): Promise<EngineHoldInputResult>
 }
+
+export type HeldTaskInput = { readonly inputId: string; readonly revision: number; readonly text: string }
 
 export function createTaskRunPause(ports: {
   readonly store: TaskRecordStore
@@ -39,6 +42,7 @@ export function createTaskRunPause(ports: {
   const capacity = new ResumeCapacity(ports.concurrency)
   const resumed = new Map<string, { readonly resumeId: string; readonly result: ResumeTaskResult }>()
   const attempts = new Map<string, { readonly resumeId: string; readonly cancel: AbortController }>()
+  const owners = new Map<string, RunPauseOwner>()
 
   function park(taskId: string, epoch: number): void {
     capacity.park(taskId, epoch)
@@ -66,11 +70,18 @@ export function createTaskRunPause(ports: {
     const resuming = attempts.get(taskId)
     resumed.delete(taskId)
     // Registration above MUST precede the child call: its abort can settle immediately.
-    const ack = await port.pauseForRun(handle, owner)
+    let ack: EngineInheritReceipt
+    try {
+      ack = await port.pauseForRun(handle, owner)
+    } catch (error) {
+      if (settled !== undefined) intents.clear(taskId)
+      throw error
+    }
     if ("refused" in ack) {
       intents.clear(taskId)
       return ack
     }
+    owners.set(taskId, owner)
     if (attempts.get(taskId) === resuming) {
       attempts.delete(taskId)
       resuming?.cancel.abort()
@@ -127,7 +138,18 @@ export function createTaskRunPause(ports: {
     }
   }
 
+  // Guidance names the parent that paused this child; the child engine refuses any other parent.
+  async function holdTaskInput(taskId: string, input: HeldTaskInput): Promise<EngineHoldInputResult> {
+    const port = childPort()
+    const { record, handle } = live(taskId)
+    if (record.status !== "paused") throw new Error(`cannot hold input for ${record.status} task`)
+    const owner = owners.get(taskId)
+    if (owner === undefined) throw new Error(`paused child ${taskId} has no run owner in this process`)
+    return port.holdInput(handle, input, { parentSessionId: owner.parentSessionId })
+  }
+
   function forget(taskId: string): void {
+    owners.delete(taskId)
     intents.clear(taskId)
     const attempt = attempts.get(taskId)
     attempts.delete(taskId)
@@ -136,5 +158,5 @@ export function createTaskRunPause(ports: {
     resumed.delete(taskId)
   }
 
-  return { pauseTask, resumePausedTask, park, forget, settlement: (taskId: string, epoch: number) => intents.settlement(taskId, epoch) }
+  return { pauseTask, resumePausedTask, holdTaskInput, park, forget, settlement: (taskId: string, epoch: number) => intents.settlement(taskId, epoch) }
 }

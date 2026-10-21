@@ -55,14 +55,16 @@ import { sharedTaskTerminalObservers, type TaskTerminalObservers } from "./termi
 import { admitAdapter } from "./engine-admission"
 import { AdmissionBarrier } from "../../../../senpi-task/src/pause/admission-barrier"
 import type { ChildPausePort, ChildCreationPort } from "../../../../senpi-task/src/pause/ports"
+import type { TaskPauseMethods } from "../../../../senpi-task/src/manager/run-pause"
 import { createEngineRunPause } from "./engine-run-pause"
+import { nativeChildPausePort } from "../../../../senpi-task/src/pause/native-child-pause"
 
 export { admitAdapter } from "./engine-admission"
 
 export interface TaskEngine {
   readonly runPause?: ReturnType<typeof createEngineRunPause>
   readonly admissionBarrier: AdmissionBarrier
-  readonly manager: TaskManager
+  readonly manager: TaskManager & TaskPauseMethods
   // The session's package-aware inherited extension list, shared with every child-launch producer.
   readonly resolveInheritedExtensions: () => Promise<readonly string[]>
   readonly lifecycle: TaskLifecycle
@@ -246,7 +248,7 @@ export function composeTaskEngine(deps: ComposeTaskEngineDeps): TaskEngine {
   const manager = createTaskManager({
     onPausedChild: (record, owner, childSeq) => runPause.notePausedChild(record, owner, childSeq),
     admissionBarrier,
-    ...(deps.childPausePort === undefined ? {} : { childPausePort: deps.childPausePort }),
+    childPausePort: deps.childPausePort ?? nativeChildPausePort,
     ...(deps.childCreationPort === undefined ? {} : { childCreationPort: deps.childCreationPort }),
     // An in-process child's task tool shares this manager; its owner connection is still ours.
     onChildExtensionEvent: (event, owner) => deps.pi.events?.emit(TASK_CHILD_EXTENSION_EVENT, {
