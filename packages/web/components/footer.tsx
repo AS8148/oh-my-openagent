@@ -62,7 +62,7 @@ const GROUPS: readonly FooterGroup[] = [
 const LINK_CLASS =
   "text-text-lo hover:text-text-hi focus-visible:outline-accent-32 inline-flex min-h-11 items-center text-sm transition-colors duration-[var(--dur-micro)] ease-standard focus-visible:outline-2 focus-visible:outline-offset-2"
 
-/** DESIGN.md §5 Footer: top hairline, py-12, 2 → 4 columns, mono meta copyright. */
+/** DESIGN.md §5 Footer: top hairline, py-12, 2 → 5 columns, mono meta copyright. */
 export async function Footer({ locale }: { readonly locale?: string } = {}): Promise<JSX.Element> {
   const t = locale
     ? await getTranslations({ locale, namespace: "footer" })
