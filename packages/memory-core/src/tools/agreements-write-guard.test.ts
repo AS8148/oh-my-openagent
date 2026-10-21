@@ -96,7 +96,7 @@ describe("memory tools cannot change agreements the person wrote (security contr
 
     // when
     const remove = runMemoryTool({ repo, lock, params: {
-      command: "str_replace", reason: "tidy", file_path: AGREEMENTS_PATH, old_string: `${counted}\n`, new_string: "", author: AUTHOR,
+      command: "str_replace", reason: "tidy", file_path: AGREEMENTS_PATH, old_string: counted, new_string: "- [global] Prefer short commit subjects", author: AUTHOR,
     } })
 
     // then
