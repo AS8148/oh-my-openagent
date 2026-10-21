@@ -8,19 +8,22 @@ const QUOTES = /^(?:"""|'''|[`'"])|(?:"""|'''|[`'"])$/g
 const LITERAL_PREFIX = /^(?:f|r|rf|fr|b)?$/i
 const INTERPOLATION = /\$\{[^}]*\}|\{[A-Za-z_][\w.]*\}/g
 const CONTEXT_WINDOW = 80
-// Places where a literal is text rather than a command: printed or logged, written into a file, asserted on,
-// searched for, used to patch source, or stored under a label-like name. Every other literal handed to code
-// (helpers such as sh(), q(), run(), template tags, `command:` fields) is read as a command line.
-const TEXT_CONTEXT = new RegExp(
+// Positions that carry a command line, the only places a literal counts as one: the first argument of a runner call
+// (sh/run/exec/spawn/system/Popen/check_output, shell-named helpers such as s, sh2, shr, rd, q, ssh*, *_run), a runner
+// template tag ($`...`, sh`...`), a command-like field or variable (command:, cmd =, script:, job =, s = f"""...),
+// a [name, command] pair nested in a list, and the list of a for loop (`for c in ["bun test x", ...]`). Everything else is text, so an unknown position fails toward "not a command".
+const RUNNER = String.raw`(?:sh\w*|run\w*|exec\w*|spawn\w*|\w+_(?:run|sh|exec|cmd)|system|popen|Popen|check_output|check_call|call|shell|bash|zsh|ssh\w*|rsh|rd|q|s|\$)`
+const COMMAND_CONTEXT = new RegExp(
   [
-    String.raw`\b(?:print|log|info|warn|warning|error|debug|display|echo|write|write_text|write_bytes|writeFile|writeFileSync|appendFile|appendFileSync|assert|expect|toEqual|toStrictEqual|toBe|toContain|toMatch|includes|replace|replaceAll|startsWith|endsWith|find|index|count|search|match|split|join|send|reply|post|report|notify|format)\s*\(\s*(?:[^()]*?,\s*)?[A-Za-z]{0,2}$`,
-    String.raw`\b(?:assert|if|elif|while|not|and|or)\s+[A-Za-z]{0,2}$`,
-    String.raw`(?:==|!=|===|!==)\s*[A-Za-z]{0,2}$`,
-    String.raw`\b(?:label|title|name|text|message|msg|description|desc|summary|note|body|entry|header|pattern|needle|old|new|oldText|newText|old_string|new_string|expected)\s*[:=]\s*[A-Za-z]{0,2}$`,
+    String.raw`(?:^|[^\w$])${RUNNER}\s*\(\s*(?:\[\s*)?[A-Za-z]{0,2}$`,
+    String.raw`(?:^|[^\w])(?:\$|sh|run|exec)\s*$`,
+    String.raw`\b(?:command|commands|cmd|cmds|script|scripts|shell|job|jobs|steps?|s)\w*\s*[:=]\s*(?:\[\s*)?[A-Za-z]{0,2}$`,
+    String.raw`(?:\[|\],)\s*$`,
+    String.raw`\bfor\s*\(?\s*(?:const|let|var)?\s*\w+\s+(?:in|of)\s*$`,
   ].join("|"),
 )
 
-const isText = (code: string, at: number): boolean => TEXT_CONTEXT.test(code.slice(Math.max(0, at - CONTEXT_WINDOW), at))
+const isCommand = (code: string, at: number): boolean => COMMAND_CONTEXT.test(code.slice(Math.max(0, at - CONTEXT_WINDOW), at))
 const unquote = (literal: string): string => literal.replace(QUOTES, "").replace(INTERPOLATION, "X")
 const shellQuote = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`
 const checkKinds = (line: string): CellCheckKind[] => invokedKinds(line).filter((kind): kind is CellCheckKind => kind !== "lookup")
@@ -48,8 +51,8 @@ function listKinds(list: string): CellCheckKind[] {
 
 /**
  * Check kinds run by shell strings inside eval cell code, with the offset of the first such string. Only string
- * literals in command positions are parsed as command lines, so prints, file contents, asserts and labels about a
- * check never count; lookups are dropped because cells grep and cat for many reasons besides proving existence.
+ * literals in command positions (see COMMAND_CONTEXT) are parsed as command lines, so prints, file contents, asserts,
+ * labels and any unknown position never count; lookups are dropped because cells grep and cat for many reasons besides proving existence.
  */
 export function cellInvokedKinds(code: string): { kinds: CellCheckKind[]; offset: number } {
   const kinds: CellCheckKind[] = []
@@ -62,11 +65,11 @@ export function cellInvokedKinds(code: string): { kinds: CellCheckKind[]; offset
   const inLists: Array<readonly [number, number]> = []
   for (const match of code.matchAll(LIST_OF_STRINGS)) {
     inLists.push([match.index, match.index + match[0].length])
-    if (!isText(code, match.index)) found(match.index, listKinds(match[0]))
+    if (isCommand(code, match.index)) found(match.index, listKinds(match[0]))
   }
   for (const match of code.matchAll(STRING_LITERAL)) {
     if (inLists.some(([start, end]) => match.index >= start && match.index < end)) continue
-    if (!isText(code, match.index)) found(match.index, checkKinds(unquote(match[0])))
+    if (isCommand(code, match.index)) found(match.index, checkKinds(unquote(match[0])))
   }
   return { kinds, offset }
 }
