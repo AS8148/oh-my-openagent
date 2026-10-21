@@ -16,6 +16,8 @@ Run this skill only when the user explicitly demands it: the word "ulw-research"
 
 Open your reply with the line `ULW-RESEARCH MODE ENABLED!`. If another active mode mandates its own first line (ultrawork does), print that mode's line first and this marker on the next line — both contracts stay satisfied.
 
+**What a shortened run still owes.** If you judge the topic settled and shorten the research, say so, but two things survive any shortening: the final report is shown inline through `show_html_page` (the answer, its figures, its sources), and a visual reproduction is compared against real frames of its source with the side-by-side pairs inside that report (Phase 6). A built app or 3D scene shown inline is the product, not the report; show the report as well.
+
 ## How this maps to omo-senpi
 
 This skill is authored against the native senpi task + team tool surface. You coordinate everything with these tools:

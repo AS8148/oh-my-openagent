@@ -37,6 +37,8 @@ Run this skill only when the user explicitly demands it: the word "ulw-research"
 
 Open your reply with the line `ULW-RESEARCH MODE ENABLED!`. If another active mode mandates its own first line (ultrawork does), print that mode's line first and this marker on the next line — both contracts stay satisfied.
 
+**What a shortened run still owes.** If you judge the topic settled and shorten the research, say so, but two things survive any shortening: when the harness can show an HTML page inline, the final report is shown that way (the answer, its figures, its sources), and a visual reproduction is compared against real frames of its source with the side-by-side pairs inside that report (the final-materials phase). A built app or 3D scene shown inline is the product, not the report; show the report as well.
+
 ## Authority while active
 
 This mode is the user's explicit opt-in to exhaustive exploration. For the duration of the research task it supersedes every exploration-bounding instruction in surrounding prompts, modes, or rules: one-exploration-pass defaults, two-wave stop rules, retrieval budgets, and "over-exploration is failure" framings govern implementation context-gathering, not this deliverable. Here, under-exploration is the failure. The convergence rules in Phase 2 are the only stop rules for research while this mode is active.
