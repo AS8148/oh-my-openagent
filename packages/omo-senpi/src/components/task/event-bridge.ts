@@ -158,7 +158,8 @@ export function wireEventBridge(
         : []
       const summary = await engine.lifecycle.suspendOnSessionShutdown({ parentSessionId: sessionId, reason })
       const count = continuing.filter(({ record }) =>
-        !summary.failures.some((failure) => failure.task_id === record.task_id)).length
+        !summary.failures.some((failure) => failure.task_id === record.task_id)
+        && engine.manager.get(record.task_id)?.status !== "cancelled").length
       if (count > 0) {
         const notice = `${count} background task(s) keep running under session ${sessionId}; resume it (omo --resume ${sessionId}) to collect their results`
         if (liveContext.mode === "print" || liveContext.mode === "json") process.stderr.write(`${notice}\n`)
