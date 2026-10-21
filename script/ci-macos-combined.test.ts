@@ -8,6 +8,7 @@ const stepSchema = z.object({
   if: z.string().optional(),
   "working-directory": z.string().optional(),
   "continue-on-error": z.boolean().optional(),
+  "timeout-minutes": z.number().optional(),
   env: z.record(z.string(), z.string()).optional(),
 })
 const { jobs } = z.object({
@@ -46,7 +47,7 @@ describe("combined macOS CI execution contract (#9974)", () => {
     expect(combined.needs).toEqual(["ci-mode"])
     expect(combined["runs-on"]).toBe("macos-latest")
     expect(combined.if).toBe("needs.ci-mode.outputs.run_heavy == 'true' && needs.ci-mode.outputs.full_matrix == 'true'")
-    expect(combined["timeout-minutes"]).toBe(60)
+    expect(combined["timeout-minutes"]).toBe(90)
     const install = combined.steps.find((step) => step.id === "install")
     expect(install?.run).toBe("bun install --frozen-lockfile\nbun run script/remove-stale-self-package-tests.ts\n")
     expect(combined.steps.filter((step) => step.run?.includes("bun install"))).toHaveLength(1)
@@ -60,8 +61,15 @@ describe("combined macOS CI execution contract (#9974)", () => {
       const step = combined.steps.find((step) => step.id === id)
       expect(step?.if).toBe("${{ !cancelled() && steps.install.outcome == 'success' }}")
       expect(step?.["continue-on-error"]).toBeUndefined()
+      // A hung part must hit its own step timeout (failing only its own context) before the job budget
+      // cancels the later parts: every part is bounded, and the part budgets fit inside the job budget.
+      expect(step?.["timeout-minutes"]).toBeGreaterThan(0)
       expect(combined.outputs?.[output]).toBe(`\${{ steps.${id}.outcome }}`)
     }
+    const partBudget = combined.steps
+      .filter((step) => parts.some(([, id]) => id === step.id))
+      .reduce((sum, step) => sum + (step["timeout-minutes"] ?? 0), 0)
+    expect(partBudget).toBeLessThan(Number(combined["timeout-minutes"]))
   })
 
   test("#given all former macOS suites #when the combined job runs #then it executes every suite and shared prerequisite", () => {

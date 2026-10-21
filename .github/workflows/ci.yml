@@ -166,7 +166,8 @@ jobs:
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 30 }}
     strategy:
       fail-fast: false
-      # merge_group uses these same six required contexts, without PR labels.
+      # merge_group uses these same four matrix contexts (the macOS ones come from
+      # the macos-combined status jobs), without PR labels.
       # Queue commits always run heavy validation on every OS leg, including
       # docs/web-only groups; the fast path remains a pull-request optimization.
       matrix:
@@ -350,7 +351,9 @@ jobs:
     needs: [ci-mode]
     if: needs.ci-mode.outputs.run_heavy == 'true' && needs.ci-mode.outputs.full_matrix == 'true'
     runs-on: macos-latest
-    timeout-minutes: 60
+    # Each part has its own step timeout so one hung part fails only its own
+    # context; the job budget covers install plus the sum of the part budgets.
+    timeout-minutes: 90
     outputs:
       lsp: ${{ steps.lsp-daemon-tests.outcome }}
       shard1: ${{ steps.root-tests-posix-1.outcome }}
@@ -377,19 +380,23 @@ jobs:
       - name: Run vendored lsp-daemon tests
         id: lsp-daemon-tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 5
         working-directory: packages/lsp-daemon
         run: npm test
       - name: Run root test shard 1
         id: root-tests-posix-1
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 20
         run: bun test --timeout 20000 packages/omo-opencode packages/memory-core
       - name: Run root test shard 2
         id: root-tests-posix-2
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 20
         run: bash .github/scripts/ci-root-shard-2.sh
       - name: Run Codex platform smoke
         id: codex-platform-tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 10
         run: |
           bash .github/scripts/ci-codex-platform-build.sh
           bash .github/scripts/ci-codex-platform-node.sh
@@ -397,6 +404,7 @@ jobs:
       - name: Run Senpi compatibility tests
         id: senpi-tests-posix
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 20
         run: bash .github/scripts/ci-senpi-posix.sh
 
       - name: Write job summary
