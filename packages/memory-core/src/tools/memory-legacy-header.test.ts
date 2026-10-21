@@ -38,6 +38,12 @@ async function headerAt(repo: GitMemoryRepo, path: string): Promise<string | und
   return readHeader(parseMemoryFile(await readFile(join(repo.dir, path), "utf8")).frontmatter)
 }
 
+// Every Omo-Provenance-Stripped line of the latest commit (the parsed trailer map keeps only one value per key).
+async function strippedLines(repo: GitMemoryRepo): Promise<string[]> {
+  const body = (await repo.log({ limit: 1 }))[0]?.body ?? ""
+  return body.split("\n").filter((line) => line.startsWith(`${PROVENANCE_STRIPPED_TRAILER}: `)).map((line) => line.slice(PROVENANCE_STRIPPED_TRAILER.length + 2))
+}
+
 async function lastTrailer(repo: GitMemoryRepo): Promise<string | undefined> {
   return (await repo.log({ limit: 1 }))[0]?.trailers[PROVENANCE_STRIPPED_TRAILER]
 }
@@ -69,6 +75,34 @@ describe("memory tool: a legacy user header is dropped on edit and the drop is r
     await run(repo, { command: "rename", old_path: "legacy.md", new_path: "moved.md" })
     expect(await headerAt(repo, "moved.md")).toBeUndefined()
     expect(await lastTrailer(repo)).toBe("legacy.md")
+  }, 30_000)
+
+  it("#given a legacy note #when a patch moves it onto an existing file (both patch paths) #then the moved header is dropped and recorded under the source path", async () => {
+    for (const via of ["memory_apply_patch", "memory apply_patch"] as const) {
+      const repo = await seeded()
+      await writeFile(join(repo.dir, "plain.md"), "---\ndescription: Plain\n---\n\nold plain body\n")
+      await repo.commitWrite(["plain.md"], "plain\n\nOmo-Writer: memory-tool", AUTHOR)
+      const input = "*** Begin Patch\n*** Update File: legacy.md\n*** Move to: plain.md\n@@\n-Theme: light.\n+Theme: dark.\n*** End Patch"
+      if (via === "memory_apply_patch") await runMemoryApplyPatch({ repo, lock, params: { reason: "patch", author: AUTHOR, provenance: PROVENANCE, input } })
+      else await run(repo, { command: "apply_patch", input })
+      expect({ via, header: await headerAt(repo, "plain.md") }).toEqual({ via, header: undefined })
+      expect({ via, recorded: await strippedLines(repo) }).toEqual({ via, recorded: ["legacy.md"] })
+    }
+  }, 60_000)
+
+  it("#given a legacy note #when a patch moves another legacy note onto it #then both drops are recorded, source and overwritten destination", async () => {
+    const repo = await seeded()
+    await writeFile(join(repo.dir, "other.md"), `---\ndescription: Other\nprovenance: ${LEGACY}\n---\n\nTheme: blue.\n`)
+    await repo.commitWrite(["other.md"], "other\n\nOmo-Writer: memory-tool", AUTHOR)
+    await runMemoryApplyPatch({ repo, lock, params: { reason: "patch", author: AUTHOR, provenance: PROVENANCE, input: "*** Begin Patch\n*** Update File: other.md\n*** Move to: legacy.md\n@@\n-Theme: blue.\n+Theme: green.\n*** End Patch" } })
+    expect(await headerAt(repo, "legacy.md")).toBeUndefined()
+    expect((await strippedLines(repo)).sort()).toEqual(["legacy.md", "other.md"])
+  }, 30_000)
+
+  it("#given a legacy note #when a patch deletes it beside an unrelated add #then nothing is recorded (a delete is not an edit)", async () => {
+    const repo = await seeded()
+    await runMemoryApplyPatch({ repo, lock, params: { reason: "patch", author: AUTHOR, provenance: PROVENANCE, input: "*** Begin Patch\n*** Delete File: legacy.md\n*** Add File: brand-new.md\n+---\n+description: New\n+---\n+\n+new body\n*** End Patch" } })
+    expect(await strippedLines(repo)).toEqual([])
   }, 30_000)
 
   it("#given a legacy note #when it is deleted #then nothing is recorded (a delete is not an edit)", async () => {

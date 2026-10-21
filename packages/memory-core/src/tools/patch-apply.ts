@@ -4,7 +4,7 @@ import { dirname, relative } from "node:path"
 import { parseMemoryFile, renderMemoryFile } from "../memfs/frontmatter"
 import { MemoryPathError, validateMemoryPath } from "../memfs/paths"
 import type { ClaimReceipt } from "../provenance"
-import { restampContent } from "./claim-frontmatter"
+import { hasLegacyUserHeader, restampContent } from "./claim-frontmatter"
 import {
   applyMemoryPatchHunk,
   MemoryPatchHunkError,
@@ -15,14 +15,22 @@ import {
 
 export { MemoryPatchHunkError, MemoryPatchParseError }
 
-export async function applyMemoryPatch(root: string, input: string, claim?: ClaimReceipt): Promise<string[]> {
+export interface AppliedPatch {
+  readonly affectedPaths: string[]
+  readonly strippedPaths: string[]
+}
+
+export async function applyMemoryPatch(root: string, input: string, claim?: ClaimReceipt): Promise<AppliedPatch> {
   return applyOperations(root, parseMemoryPatch(input), claim)
 }
 
-async function applyOperations(root: string, operations: readonly PatchOperation[], claim: ClaimReceipt | undefined): Promise<string[]> {
+async function applyOperations(root: string, operations: readonly PatchOperation[], claim: ClaimReceipt | undefined): Promise<AppliedPatch> {
   const pendingWrites = new Map<string, string>()
   const pendingDeletes = new Set<string>()
   const affectedPaths = new Set<string>()
+  // Per file (lead ruling on #10498): the paths whose legacy user header this patch dropped, decided from that file's own
+  // content before and after, never from the batch shape.
+  const strippedPaths: string[] = []
 
   const resolvePath = (input: string, fieldName: string): { absolute: string; relative: string } => {
     try {
@@ -82,7 +90,10 @@ async function applyOperations(root: string, operations: readonly PatchOperation
     if (parseForTool(next).frontmatter.read_only === "true") {
       throw new Error(`memory apply_patch: ${target.relative} cannot be written with read_only=true`)
     }
-    pendingWrites.set(target.absolute, restampContent(current, next, claim))
+    const written = restampContent(current, next, claim)
+    if (hasLegacyUserHeader(current) && !hasLegacyUserHeader(written)) strippedPaths.push(source.relative)
+    if (source.absolute !== target.absolute && hasLegacyUserHeader(pendingWrites.get(target.absolute) ?? (await exists(target.absolute) ? await loadCurrent(target) : undefined))) strippedPaths.push(target.relative)
+    pendingWrites.set(target.absolute, written)
     pendingDeletes.delete(target.absolute)
     affectedPaths.add(target.relative)
     if (source.absolute !== target.absolute) {
@@ -99,7 +110,7 @@ async function applyOperations(root: string, operations: readonly PatchOperation
   for (const path of pendingDeletes) {
     if (!pendingWrites.has(path) && await exists(path)) await unlink(path)
   }
-  return [...affectedPaths]
+  return { affectedPaths: [...affectedPaths], strippedPaths }
 }
 
 function parseForTool(content: string): ReturnType<typeof parseMemoryFile> {

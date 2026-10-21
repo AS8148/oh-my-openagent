@@ -4,8 +4,8 @@ import { dirname, join, relative } from "node:path"
 import { NoEffectiveChangesError, MemorySecretError, type GitCommitAuthor, type GitMemoryRepo } from "../git"
 import { SOUL_EDIT_RESULT_LINE, touchesSoulPath } from "../soul"
 import { claimReceiptTrailers, type ClaimReceipt } from "../provenance"
-import { restampContent } from "./claim-frontmatter"
-import { provenanceStrippedTrailers } from "./provenance-stripped"
+import { hasLegacyUserHeader, provenanceStrippedTrailers, restampContent } from "./claim-frontmatter"
+import type { AppliedPatch } from "./patch-apply"
 import type { MemoryToolCommit, MemoryToolProvenance } from "./memory"
 import { parseMemoryFile, renderMemoryFile } from "../memfs/frontmatter"
 import { describeDescriptionViolation } from "../memfs/frontmatter-validation"
@@ -66,10 +66,11 @@ export async function runMemoryApplyPatch(
 
     return await lock("memory-write", async () => {
       await repo.cleanCheck()
-      const paths = await applyOperations(repo.dir, parseMemoryPatch(params.input), params.provenance?.claim)
+      const applied = await applyOperations(repo.dir, parseMemoryPatch(params.input), params.provenance?.claim)
+      const paths = applied.affectedPaths
       let result
       try {
-        result = await repo.commitWrite(paths, memoryCommitMessage(reason, params.provenance, await provenanceStrippedTrailers(repo, paths)), params.author)
+        result = await repo.commitWrite(paths, memoryCommitMessage(reason, params.provenance, provenanceStrippedTrailers(applied.strippedPaths)), params.author)
       } catch (error) {
         if (error instanceof NoEffectiveChangesError) {
           throw new MemoryApplyPatchError(
@@ -109,10 +110,13 @@ export async function runMemoryApplyPatch(
   }
 }
 
-async function applyOperations(root: string, operations: readonly PatchOperation[], claim: ClaimReceipt | undefined): Promise<string[]> {
+async function applyOperations(root: string, operations: readonly PatchOperation[], claim: ClaimReceipt | undefined): Promise<AppliedPatch> {
   const pendingWrites = new Map<string, string>()
   const pendingDeletes = new Set<string>()
   const affectedPaths = new Set<string>()
+  // Per file (lead ruling on #10498): the paths whose legacy user header this patch dropped, decided from that file's own
+  // content before and after, never from the batch shape.
+  const strippedPaths: string[] = []
 
   const resolvePath = (input: string, fieldName: string): { absolute: string; relative: string } => {
     try {
@@ -179,7 +183,10 @@ async function applyOperations(root: string, operations: readonly PatchOperation
     }
     assertDescriptionAcceptable(patched.frontmatter.description, target.relative)
 
-    pendingWrites.set(target.absolute, restampContent(current, renderMemoryFile(patched.frontmatter, patched.body), claim))
+    const written = restampContent(current, renderMemoryFile(patched.frontmatter, patched.body), claim)
+    if (hasLegacyUserHeader(current) && !hasLegacyUserHeader(written)) strippedPaths.push(source.relative)
+    if (source.absolute !== target.absolute && hasLegacyUserHeader(pendingWrites.get(target.absolute) ?? (await exists(target.absolute) ? await loadCurrent(target) : undefined))) strippedPaths.push(target.relative)
+    pendingWrites.set(target.absolute, written)
     pendingDeletes.delete(target.absolute)
     affectedPaths.add(target.relative)
     if (source.absolute !== target.absolute) {
@@ -196,7 +203,7 @@ async function applyOperations(root: string, operations: readonly PatchOperation
   for (const path of pendingDeletes) {
     if (!pendingWrites.has(path) && await exists(path)) await unlink(path)
   }
-  return [...affectedPaths]
+  return { affectedPaths: [...affectedPaths], strippedPaths }
 }
 
 function parseForTool(content: string): ReturnType<typeof parseMemoryFile> {

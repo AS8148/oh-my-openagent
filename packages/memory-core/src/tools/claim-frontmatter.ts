@@ -54,6 +54,15 @@ export function strippedLegacyUserHeader(before: string | undefined, after: stri
   return isLegacyUserHeader(headerOf(before)) && !isLegacyUserHeader(headerOf(after))
 }
 
+// One trailer line per path, in first-seen order, for the paths a writer reported dropping a legacy header from.
+export function provenanceStrippedTrailers(paths: readonly string[]): string[] {
+  return [...new Set(paths)].map((path) => `${PROVENANCE_STRIPPED_TRAILER}: ${path}`)
+}
+
+export function hasLegacyUserHeader(content: string | undefined): boolean {
+  return isLegacyUserHeader(headerOf(content))
+}
+
 function headerOf(content: string | undefined): string | undefined {
   if (content === undefined) return undefined
   try {

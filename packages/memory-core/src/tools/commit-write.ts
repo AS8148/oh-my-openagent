@@ -7,19 +7,25 @@ import { SOUL_EDIT_RESULT_LINE, touchesSoulPath } from "../soul"
 import type { LockDomain } from "../locks"
 import { claimReceiptTrailers } from "../provenance"
 import type { MemoryToolProvenance } from "./memory"
-import { provenanceStrippedTrailers } from "./provenance-stripped"
+import { provenanceStrippedTrailers } from "./claim-frontmatter"
 import { undoBehindKeptLock } from "./rollback-behind-lock"
 import { MemoryToolError } from "./tool-errors"
 
 export interface CommitMemoryWriteOptions {
   readonly repo: GitMemoryRepo
   readonly lock: MemoryWriteLock
-  readonly apply: () => Promise<readonly string[]>
+  readonly apply: () => Promise<AppliedWrite>
   readonly reason: string
   readonly author: GitCommitAuthor
   readonly provenance?: MemoryToolProvenance
   readonly successLabel: string
   readonly noChangesMessage?: string
+}
+
+// The paths a write touched, and the ones whose legacy user header it dropped (reported by the writer itself).
+export interface AppliedWrite {
+  readonly affectedPaths: readonly string[]
+  readonly strippedPaths?: readonly string[]
 }
 
 export interface MemoryWriteLock {
@@ -37,11 +43,12 @@ export async function commitMemoryWrite(options: CommitMemoryWriteOptions): Prom
   const { repo, lock, reason, author, provenance, successLabel, noChangesMessage } = options
   return lock("memory-write", async () => {
     await repo.cleanCheck()
-    const paths = await options.apply()
+    const applied = await options.apply()
+    const paths = applied.affectedPaths
     if (paths.length === 0) throw new MemoryToolError(noChangesMessage ?? "made no changes")
     let result
     try {
-      result = await repo.commitWrite(paths, memoryCommitMessage(reason, provenance, await provenanceStrippedTrailers(repo, paths)), author)
+      result = await repo.commitWrite(paths, memoryCommitMessage(reason, provenance, provenanceStrippedTrailers(applied.strippedPaths ?? [])), author)
     } catch (error) {
       if (error instanceof NoEffectiveChangesError) {
         throw new MemoryToolError(noChangesMessage ?? "made no effective changes", { cause: error })
