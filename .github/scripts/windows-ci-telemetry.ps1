@@ -128,9 +128,19 @@ $testProcess = $null
 $testProcessRecord = $null
 $testLaunchErrorType = $null
 try {
+  # Root-shard diagnostics are opt-in; compatibility callers retain their existing path.
+  $launchArguments = $TestArguments
+  if ($env:WINDOWS_SHARD_PROFILE -eq "1") {
+    $launchArguments = @(
+      ".github/scripts/ci-test-telemetry.mjs",
+      $ArtifactDirectory,
+      $Invocation,
+      $env:WINDOWS_TEST_WORKERS
+    ) + $TestArguments
+  }
   $testProcess = Start-Process `
     -FilePath "bun" `
-    -ArgumentList $TestArguments `
+    -ArgumentList $launchArguments `
     -NoNewWindow `
     -PassThru
   try {

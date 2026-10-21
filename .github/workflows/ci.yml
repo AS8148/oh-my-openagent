@@ -9,13 +9,24 @@ on:
   merge_group:
     types: [checks_requested]
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      windows_workers:
+        description: "Windows file workers (compare 4 and 2 on the same SHA)"
+        type: choice
+        options: ["4", "2"]
+        default: "4"
+      comparison_sha:
+        description: "Exact diagnostic commit SHA (use the same SHA for both worker counts)"
+        type: string
+        required: true
 
 concurrency:
   # Queue refs are unique per group, so unrelated groups never cancel each other. One group per ref: a push to
   # master/dev is never cancelled, so the running dev run always finishes (the baseline PR failures are judged
   # against), and GitHub keeps only the newest pending push run, so at most two dev runs exist at a time. PR runs
   # still cancel their superseded run on the same ref.
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-workers-{0}', inputs.windows_workers) || '' }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 permissions:
@@ -161,6 +172,10 @@ jobs:
 
   test:
     needs: [ci-mode]
+    env:
+      WINDOWS_SHARD_PROFILE: "1"
+      WINDOWS_TEST_WORKERS: ${{ inputs.windows_workers || '4' }}
+      CI_TEST_SHA: ${{ inputs.comparison_sha || github.sha }}
     # Preserve required matrix check names during the Ubuntu image migration.
     runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-26.04' || matrix.os }}
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 30 }}
@@ -185,6 +200,8 @@ jobs:
             shard: "2/2"
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.comparison_sha || github.sha }}
 
       - uses: actions/setup-node@v7
         if: needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
@@ -317,8 +334,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
-          name: windows-root-test-telemetry-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard == '1/2' && 'shard-1' || 'shard-2' }}
-          path: ${{ runner.temp }}/windows-root-test-telemetry/*.json
+          name: windows-root-test-telemetry-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard == '1/2' && 'shard-1' || 'shard-2' }}-workers-${{ inputs.windows_workers || '4' }}
+          path: ${{ runner.temp }}/windows-root-test-telemetry/
           if-no-files-found: warn
           overwrite: false
 
