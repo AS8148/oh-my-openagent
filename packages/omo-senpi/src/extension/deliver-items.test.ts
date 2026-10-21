@@ -1,37 +1,44 @@
 import { describe, expect, test } from "bun:test"
 import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
-import { deliverItems, type NativeItemMessage } from "./deliver-items"
+import { deliverItems } from "./deliver-items"
 
-describe("native per-item run admission", () => {
-  test("#given a formed coordinator batch #when the engine fences its run #then each original content becomes an independent notice", async () => {
-    const messages: NativeItemMessage[] = []
+describe("native itemized run admission", () => {
+  test("#given a formed coordinator batch #when the engine fences one run #then one send carries every item and each gets its own receipt", async () => {
+    const sends: { readonly content: string; readonly items: readonly { readonly itemId: string; readonly runRef?: unknown }[] }[] = []
     let held = 0
-    let modelDeliveries = 0
+    let delivered = 0
     const finished = Promise.withResolvers<void>()
-    const coordinator = new IdleInjectionCoordinator((_message, options) => deliverItems(
-      message => {
-        messages.push(message)
-        const disposition = message.details.runRef?.id === "fenced" ? "notice_persisted" as const : "model_consumed" as const
-        return { itemId: message.details.itemId, disposition, entryId: `entry:${message.details.itemId}` }
-      }, options,
-    ))
+    const settle = () => { if (held + delivered === 3) finished.resolve() }
+    const coordinator = new IdleInjectionCoordinator((message, options) => deliverItems((native, delivery) => {
+      sends.push({ content: native.content, items: delivery.items })
+      return delivery.items.map(item => ({
+        itemId: item.itemId, entryId: `entry:${item.itemId}`,
+        disposition: (item.runRef as { id?: string } | undefined)?.id === "fenced" ? "notice_persisted" as const : "message_persisted" as const,
+      }))
+    }, { ...options, message }))
     for (const content of ["first", "second"]) coordinator.enqueue({
       key: "same-key", source: "task-completion", content, runRef: { kind: "task", id: "fenced" },
-      onHeld: () => { held += 1; if (held + modelDeliveries === 3) finished.resolve() },
-      onFlushed: () => { modelDeliveries += 1; if (held + modelDeliveries === 3) finished.resolve() },
+      onHeld: () => { held += 1; settle() }, onFlushed: () => { delivered += 1; settle() },
     })
-    coordinator.enqueue({
-      key: "unrelated", source: "ulw-continuation", content: "unrelated work",
-      onFlushed: () => { modelDeliveries += 1; if (held + modelDeliveries === 3) finished.resolve() },
-    })
+    coordinator.enqueue({ key: "unrelated", source: "ulw-continuation", content: "unrelated work",
+      onFlushed: () => { delivered += 1; settle() } })
     coordinator.flushOnIdle()
     await finished.promise
-    expect(messages.map(message => message.content)).toEqual(["first", "second", "unrelated work"])
-    expect(messages.map(message => message.details.runRef)).toEqual([
-      { kind: "task", id: "fenced" }, { kind: "task", id: "fenced" }, undefined,
-    ])
-    expect(new Set(messages.map(message => message.details.itemId)).size).toBe(3)
+    expect(sends).toHaveLength(1)
+    expect(sends[0]?.content).toBe("first\n\nsecond\n\nunrelated work")
+    expect(sends[0]?.items.map(item => item.runRef)).toEqual([{ kind: "task", id: "fenced" }, { kind: "task", id: "fenced" }, undefined])
+    expect(new Set(sends[0]?.items.map(item => item.itemId)).size).toBe(3)
     expect(held).toBe(2)
-    expect(modelDeliveries).toBe(1)
+    expect(delivered).toBe(1)
+  })
+
+  test("#given an engine that predates items #when a batch is sent #then it answers nothing and every item is delivered", async () => {
+    let delivered = 0
+    const coordinator = new IdleInjectionCoordinator((message, options) => deliverItems(() => undefined, { ...options, message }))
+    for (const key of ["a", "b"]) coordinator.enqueue({ key, source: "task-completion", content: key, onFlushed: () => { delivered += 1 } })
+    coordinator.flushOnIdle()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(delivered).toBe(2)
   })
 })

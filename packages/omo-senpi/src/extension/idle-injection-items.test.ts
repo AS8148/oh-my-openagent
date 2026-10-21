@@ -7,7 +7,7 @@ describe("coordinator custody preserves individual run items", () => {
     let held = 0
     const received: string[] = []
     const coordinator = new IdleInjectionCoordinator((message, options) => {
-      expect(message.content).toBe("")
+      expect(message.content).toBe("first\n\nsecond")
       for (const item of options.items) received.push(item.content)
       return options.items.map(item => ({
         itemId: item.itemId, disposition: "notice_persisted" as const, entryId: `notice:${item.itemId}`,
@@ -25,19 +25,17 @@ describe("coordinator custody preserves individual run items", () => {
     expect(held).toBe(2)
   })
 
-  test("#given different run references #when flushed #then no admission batch mixes refs", () => {
-    const refs: unknown[] = []
+  test("#given different run references #when flushed #then one delivery carries each item with its own ref", () => {
+    const deliveries: unknown[][] = []
     const coordinator = new IdleInjectionCoordinator((_message, options) => {
-      const distinct = new Set(options.items.map(item => JSON.stringify(item.runRef)))
-      expect(distinct.size).toBe(1)
-      refs.push(options.items[0]?.runRef)
+      deliveries.push(options.items.map(item => item.runRef))
     })
     for (const taskId of ["one", "two"]) coordinator.enqueue({
       key: taskId, source: "task-completion", content: taskId,
       runRef: { kind: "task", id: taskId },
     })
     coordinator.flushOnIdle()
-    expect(refs).toEqual([{ kind: "task", id: "one" }, { kind: "task", id: "two" }])
+    expect(deliveries).toEqual([[{ kind: "task", id: "one" }, { kind: "task", id: "two" }]])
   })
 
   test("#given a formed batch #when Stop lands inside admission #then per-item custody is still possible", async () => {
@@ -50,7 +48,7 @@ describe("coordinator custody preserves individual run items", () => {
       await admit.promise
       return options.items.map(item => ({
         itemId: item.itemId,
-        disposition: held ? "notice_persisted" as const : "model_consumed" as const,
+        disposition: held ? "notice_persisted" as const : "message_persisted" as const,
         entryId: `entry:${item.itemId}`,
       }))
     })

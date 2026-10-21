@@ -123,7 +123,7 @@ export function composeOmoSenpiExtension(
     // senpi-task's completion retry): retirement cancels the armed handle instead of leaving a live
     // 200ms timer behind after a `quit` shutdown.
     const idleCoordinator = new IdleInjectionCoordinator(
-      (_message, options) => deliverItems((message, delivery) => pi.sendMessage(message, delivery), options),
+      (message, options) => deliverItems((native, delivery) => pi.sendMessage(native, delivery), { ...options, message }),
       {
         scheduleFlush: (flush) => {
           const timer = setTimeout(flush, IDLE_FLUSH_BATCH_WINDOW_MS)

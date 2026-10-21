@@ -38,7 +38,7 @@ describe("IdleInjectionCoordinator", () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({
       message: {
-        customType: "omo-senpi:wake", content: "", display: false,
+        customType: "omo-senpi:wake", content: "task st_1 completed", display: false,
         details: [{ customType: "senpi-task:completion", details: { taskId: "st_1" } }],
       },
       options: { deliverAs: "steer", items: [{ producer: "task-completion", content: "task st_1 completed" }] },

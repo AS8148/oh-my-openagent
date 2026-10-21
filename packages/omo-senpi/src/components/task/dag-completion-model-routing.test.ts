@@ -16,8 +16,7 @@ import {
 import type { DagNodeId, DagRunId } from "@oh-my-opencode/senpi-task/dag"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
-import { coalesceAdmittedWake } from "../../../test-support/admitted-wake"
-import { deliverItems, type NativeItemMessage } from "../../extension/deliver-items"
+import { deliverItems } from "../../extension/deliver-items"
 import { IdleInjectionCoordinator, type IdleInjectionMessage } from "../../extension/idle-injection-coordinator"
 import { createDagWake } from "./dag-wake"
 import { wireDagVerificationContext } from "./dag-verification-context"
@@ -52,19 +51,13 @@ function harness(receiverModel: unknown, includeUlw = false) {
   runtime.captureFrom({ model: receiverModel, isIdle: () => false })
   let scheduled: (() => void) | undefined
   const delivered: IdleInjectionMessage[] = []
-  const nativeDelivered: NativeItemMessage[] = []
-  const coordinator = new IdleInjectionCoordinator((_message, options) => {
-    const admitted: NativeItemMessage[] = []
-    const result = deliverItems(message => { admitted.push(message); nativeDelivered.push(message) }, options)
-    delivered.push(coalesceAdmittedWake(admitted))
-    return result
-  }, {
+  const coordinator = new IdleInjectionCoordinator((message, options) => deliverItems(native => { delivered.push(native) }, { ...options, message }), {
     scheduleFlush: (flush) => { scheduled = flush },
   })
   const notifier = createParentNotifier(pi, coordinator, () => true, undefined, () => runtime.parentModel())
   const wake = createDagWake({ coordinator, parentState: () => runtime.parentState(), getReceiverModel: () => runtime.parentModel() })
   wireDagVerificationContext(pi, runtime)
-  return { pi, runtime, notifier, wake, delivered, nativeDelivered, flush: () => { scheduled?.(); scheduled = undefined } }
+  return { pi, runtime, notifier, wake, delivered, flush: () => { scheduled?.(); scheduled = undefined } }
 }
 
 function completeRun(target: ReturnType<typeof harness>, type = "dag.run.completed"): void {
@@ -78,7 +71,7 @@ describe("DAG receiving-model routing", () => {
     target.notifier.enqueue(buildCompletionMessage([node]))
     completeRun(target)
     target.flush()
-    let payload: unknown = { messages: target.nativeDelivered.map(message => ({ ...message, role: "custom" })) }
+    let payload: unknown = { messages: target.delivered.map(message => ({ ...message, role: "custom" })) }
     for (const entry of target.pi.handlers.filter(entry => entry.event === "context")) {
       const result = await entry.handler(payload, { model: { id: ASTRA } })
       if (result !== undefined) payload = result
@@ -87,14 +80,17 @@ describe("DAG receiving-model routing", () => {
       buildCompletionMessage([{ ...node, final_response: SENPI_ASTRA_ULTRAWORK_DIRECTIVE }], ASTRA_DAG_VERIFICATION_DIRECTIVE).content,
       `DAG "release" completed: 1 completed, 0 failed, 0 cancelled, 0 skipped (1 total)\n\n${ASTRA_DAG_RUN_VERIFICATION_DIRECTIVE}`,
     ]
-    expect(target.nativeDelivered).toHaveLength(2)
-    expect(payload).toEqual({ messages: target.nativeDelivered.map((message, index) => ({
-      ...message, role: "custom", content: contents[index],
-      details: { ...message.details, items: message.details.items.map(item => ({
-        ...item, contentRange: [0, contents[index]?.length],
-      })) },
-    })) })
-    expect(target.nativeDelivered[0]?.content).toEndWith(DAG_VERIFICATION_DIRECTIVE)
+    // One wake carries both segments; each keeps its own range through the receiver's rewrite.
+    const [nodeText, runText] = contents.map(content => content ?? "")
+    const ranges = [[0, nodeText.length], [nodeText.length + 2, nodeText.length + 2 + runText.length]]
+    const sent = target.delivered[0]
+    expect(target.delivered).toHaveLength(1)
+    expect(payload).toEqual({ messages: [{
+      ...sent, role: "custom", content: `${nodeText}\n\n${runText}`,
+      details: sent?.details.map((detail, index) => ({ ...detail, contentRange: ranges[index] })),
+    }] })
+    const nodeRange = sent?.details[0]?.contentRange
+    expect(sent?.content.slice(0, nodeRange?.[1])).toEndWith(DAG_VERIFICATION_DIRECTIVE)
   })
 
   for (const [receiver, child, astra] of [

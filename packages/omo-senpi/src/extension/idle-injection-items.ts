@@ -14,30 +14,18 @@ export type AdmissionItem = {
 
 export type ItemReceipt = {
   readonly itemId: string
-  readonly disposition: "notice_persisted" | "model_consumed"
+  readonly disposition: "notice_persisted" | "message_persisted"
   readonly entryId: string
 }
 
 export type QueuedInjection = IdleInjection & { readonly itemId: string }
 
+// One flush is ONE delivery (one model turn at most): every item rides it with its own identity and
+// run reference, and the engine decides custody per item at admission (design 4.5).
 export function admissionBatches(injections: readonly QueuedInjection[]) {
-  const groups = new Map<string, QueuedInjection[]>()
-  for (const injection of injections) {
-    const ref = JSON.stringify(injection.runRef)
-    const group = groups.get(ref) ?? []
-    group.push(injection)
-    groups.set(ref, group)
-  }
-  return [...groups.values()].map(group => ({
+  return [injections].filter(group => group.length > 0).map(group => ({
     injections: group,
-    message: {
-      customType: "omo-senpi:wake",
-      content: "",
-      display: false,
-      details: group.flatMap(item => item.customType === undefined ? [] : [{
-        customType: item.customType, details: item.details,
-      }]),
-    } satisfies IdleInjectionMessage,
+    message: batchMessage(group),
     items: group.map(({ itemId, source, content, runRef, customType, details, display, contextScoped }): AdmissionItem => ({
       itemId, producer: source, content,
       ...(runRef === undefined ? {} : { runRef }),
@@ -47,6 +35,22 @@ export function admissionBatches(injections: readonly QueuedInjection[]) {
       ...(contextScoped === undefined ? {} : { contextScoped }),
     })),
   }))
+}
+
+// The batch's one message still carries every item's text: a delivery that sends the message (not the
+// itemized items) must deliver the whole wake, with each context-scoped segment's range intact.
+function batchMessage(group: readonly QueuedInjection[]): IdleInjectionMessage {
+  let offset = 0
+  const details = group.flatMap(item => {
+    const start = offset
+    const end = start + item.content.length
+    offset = end + 2
+    return item.customType === undefined ? [] : [{
+      customType: item.customType, details: item.details,
+      ...(item.contextScoped === true ? { contentRange: [start, end] as const } : {}),
+    }]
+  })
+  return { customType: "omo-senpi:wake", content: group.map(item => item.content).join("\n\n"), display: false, details }
 }
 
 export function settleItemReceipts(injections: readonly QueuedInjection[], result: unknown): void {
@@ -70,5 +74,5 @@ export function settleItemReceipts(injections: readonly QueuedInjection[], resul
 function isReceipt(value: unknown): value is ItemReceipt {
   return typeof value === "object" && value !== null && "itemId" in value && typeof value.itemId === "string"
     && "entryId" in value && typeof value.entryId === "string" && "disposition" in value
-    && (value.disposition === "notice_persisted" || value.disposition === "model_consumed")
+    && (value.disposition === "notice_persisted" || value.disposition === "message_persisted")
 }

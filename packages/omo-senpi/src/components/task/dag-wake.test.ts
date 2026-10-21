@@ -30,6 +30,7 @@ const counts: DagWakeNodeCounts = {
 interface DeliveredCall {
   readonly message: IdleInjectionMessage
   readonly options: { readonly deliverAs: "steer" | "followUp" }
+  readonly runRefs: readonly unknown[]
 }
 
 function fakeTimers() {
@@ -79,6 +80,7 @@ function createHarness(initialParentState: ParentState = { kind: "streaming" }) 
       delivered.push({
         message: { ...message, details, content: options.items.map(item => item.content).join("\n\n") },
         options: { deliverAs: options.deliverAs },
+        runRefs: options.items.map(item => item.runRef),
       })
     },
     { scheduleFlush: timers.schedule },
@@ -132,7 +134,7 @@ describe("dag wake", () => {
     }])
   })
 
-  it("#given two terminal runs in one window #when the fake timer flushes #then each run has its own admission", () => {
+  it("#given two terminal runs in one window #when the fake timer flushes #then one admission carries each run with its own reference", () => {
     // given
     const harness = createHarness()
 
@@ -148,13 +150,12 @@ describe("dag wake", () => {
     harness.timers.runAll()
 
     // then
-    expect(harness.delivered).toHaveLength(2)
-    expect(harness.delivered[0]?.message.content).toBe(
+    expect(harness.delivered).toHaveLength(1)
+    expect(harness.delivered[0]?.message.content).toBe([
       `DAG "release" completed: 3 completed, 1 failed, 0 cancelled, 0 skipped (4 total)\n\n${DAG_VERIFICATION_DIRECTIVE}`,
-    )
-    expect(harness.delivered[1]?.message.content).toBe(
       `DAG "docs" cancelled: 3 completed, 1 failed, 0 cancelled, 0 skipped (4 total)\n\n${DAG_VERIFICATION_DIRECTIVE}`,
-    )
+    ].join("\n\n"))
+    expect(harness.delivered[0]?.runRefs).toEqual([{ kind: "dag", id: "dag_1" }, { kind: "dag", id: "dag_2" }])
     expect(harness.delivered[0]?.options).toEqual({ deliverAs: "steer" })
   })
 
@@ -213,14 +214,13 @@ describe("dag wake", () => {
     harness.timers.runAll()
 
     // then
-    expect(harness.delivered).toHaveLength(2)
+    expect(harness.delivered).toHaveLength(1)
     expect(harness.delivered[0]?.message.content).toBe(
-      "task st_1 completed",
-    )
-    expect(harness.delivered[1]?.message.content).toBe(
-      "DAG \"release-pipeline\" completed: 3 completed, 1 failed, 0 cancelled, 0 skipped (4 total)"
+      "task st_1 completed\n\n"
+      + "DAG \"release-pipeline\" completed: 3 completed, 1 failed, 0 cancelled, 0 skipped (4 total)"
       + `\n\n${DAG_VERIFICATION_DIRECTIVE}`,
     )
+    expect(harness.delivered[0]?.runRefs).toEqual([undefined, { kind: "dag", id: "dag_1" }])
   })
 
   it("#given a run paused by session shutdown and an idle parent #when the pause event arrives #then one steer tells the main session the dag was paused", async () => {

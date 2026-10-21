@@ -28,14 +28,16 @@ function fakePi(): SenpiExtensionAPI & { readonly sent: SentMessage[]; readonly 
   }
 }
 
-type Delivered = { content: string; deliverAs: "steer" | "followUp" }
+type Delivered = { content: string; deliverAs: "steer" | "followUp"; runRefs: readonly unknown[] }
 
 // A manually-driven flush scheduler stands in for the production batch-window timer so the tests
 // control exactly when the deferred flush runs (everything enqueued before it batches together).
 function coordinatorWithManualFlush(delivered: Delivered[]): { coordinator: IdleInjectionCoordinator; runFlush: () => void } {
   let pending: (() => void) | undefined
   const coordinator = new IdleInjectionCoordinator(
-    (_message, options) => { delivered.push({ content: options.items.map(item => item.content).join("\n\n"), deliverAs: options.deliverAs }) },
+    (_message, options) => { delivered.push({
+      content: options.items.map(item => item.content).join("\n\n"), deliverAs: options.deliverAs, runRefs: options.items.map(item => item.runRef),
+    }) },
     { scheduleFlush: (flush) => { pending = flush } },
   )
   return {
@@ -155,7 +157,7 @@ describe("createParentNotifier batched injection delivery", () => {
     expect(pi.userSent).toHaveLength(0)
   })
 
-  test("#given completions from different runs #when the batch window closes #then each reference gets its own admission", () => {
+  test("#given completions from different runs #when the batch window closes #then one admission carries each completion with its own reference", () => {
     // given
     const delivered: Delivered[] = []
     const { coordinator, runFlush } = coordinatorWithManualFlush(delivered)
@@ -167,11 +169,11 @@ describe("createParentNotifier batched injection delivery", () => {
     notifier.enqueue(completionMessage("st_2"))
     runFlush()
 
-    // then the engine receives two independently tagged admissions
-    expect(delivered).toHaveLength(2)
+    // then one admission carries both, each item tagged with its own run
+    expect(delivered).toHaveLength(1)
     expect(delivered[0]?.deliverAs).toBe("steer")
-    expect(delivered[0]?.content).toContain("st_1 completed")
-    expect(delivered[1]?.content).toContain("st_2 completed")
+    expect(delivered[0]?.content).toMatch(/st_1 completed[\s\S]*st_2 completed/)
+    expect(delivered[0]?.runRefs).toEqual([{ kind: "task", id: "st_1" }, { kind: "task", id: "st_2" }])
   })
 
   test("#given repeated completion enqueues #when admitted #then both contents reach engine custody", () => {
@@ -194,7 +196,9 @@ describe("createParentNotifier batched injection delivery", () => {
     // given: no manual scheduler - the idle path flushes itself on the next microtask
   const delivered: Delivered[] = []
   const coordinator = new IdleInjectionCoordinator(
-    (_message, options) => { delivered.push({ content: options.items.map(item => item.content).join("\n\n"), deliverAs: options.deliverAs }) },
+    (_message, options) => { delivered.push({
+      content: options.items.map(item => item.content).join("\n\n"), deliverAs: options.deliverAs, runRefs: options.items.map(item => item.runRef),
+    }) },
     )
     const notifier = createParentNotifier(fakePi(), coordinator, () => false)
 
@@ -205,10 +209,9 @@ describe("createParentNotifier batched injection delivery", () => {
     await Promise.resolve()
 
     // then delivery is immediate (no exit race in print mode) and still batched into ONE steer
-    expect(delivered).toHaveLength(2)
+    expect(delivered).toHaveLength(1)
     expect(delivered[0]?.deliverAs).toBe("steer")
-    expect(delivered[0]?.content).toContain("st_1 completed")
-    expect(delivered[1]?.content).toContain("st_2 completed")
+    expect(delivered[0]?.content).toMatch(/st_1 completed[\s\S]*st_2 completed/)
   })
 
   test("#given no coordinator is wired #when a completion enqueues #then it falls back to a direct steer on the renderer channel", () => {
