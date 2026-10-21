@@ -3,7 +3,7 @@
 // supplies one DeviceAccountSource; everything after it is the same code for the TUI, the CLI and
 // the desktop. Private keys stay in the credential store and reach only the keyring built from them.
 
-import { type Credentials, createCredentialStore, type CredentialStore, createSession, serviceOrigin, SignInError } from "@oh-my-opencode/omo-opencode/service-auth"
+import { type Credentials, createCredentialStore, type CredentialStore, createSession, quietNotice, serviceOrigin, SignInError } from "@oh-my-opencode/omo-opencode/service-auth"
 
 import type { DeviceKeyMaterial, DeviceKeyring } from "@oh-my-opencode/memory-core/keyring"
 
@@ -50,7 +50,7 @@ export function createCliAccountSource(options: {
     try {
       // A host runs under a TUI: the CLI's keyring-fallback notice must not write over it, and the fallback is
       // the same libsecret path the CLI uses (#10658 review).
-      store = options.store ?? createCredentialStore(api, undefined, undefined, undefined, () => {})
+      store = options.store ?? createCredentialStore(api, undefined, undefined, undefined, quietNotice)
       credentials = await store.read()
     } catch (error) {
       // A host with no usable OS credential store (plain Node, a locked or absent keyring) cannot be

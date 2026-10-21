@@ -21,8 +21,15 @@ export class SecretServiceUnavailableError extends SignInError {}
 // a locked libsecret keyring). Callers must surface this as its own outcome, never as a prompt.
 const LOCKED = /-25308|errSecInteractionNotAllowed|interaction is not allowed|locked collection/i
 const UNLOCKED_REUSE_MS = 30_000
-// The fallback notice is once per PROCESS: a command (or a host) may build several stores (#10658 review).
+// The stderr fallback notice is once per PROCESS: a command (or a host) may build several stores. The flag lives
+// in the printing notice so a quiet store (a host under a TUI) can never use up the person's one notice.
 let fallbackNoticed = false
+const stderrNoticeOncePerProcess = (message: string): void => {
+  if (fallbackNoticed) return
+  fallbackNoticed = true
+  process.stderr.write(`${message}\n`)
+}
+export const quietNotice = (_message: string): void => {}
 const isLocked = (error: unknown): boolean =>
   error instanceof Error && (LOCKED.test(error.message) || LOCKED.test(String((error as { code?: unknown }).code ?? "")))
 
@@ -35,7 +42,7 @@ export function createCredentialStore(
   secrets: SecretApi | null = typeof Bun === "undefined" ? null : Bun.secrets,
   platform: NodeJS.Platform = process.platform,
   lockProbe: SecretServiceLockProbe = probeSecretServiceLock,
-  notice: (message: string) => void = (message) => { process.stderr.write(`${message}\n`) },
+  notice: (message: string) => void = stderrNoticeOncePerProcess,
 ): CredentialStore {
   if (!secrets) throw new SignInError("OmO sign-in needs Bun 1.4 or newer with OS credential storage. No file fallback is available.")
   const platformName = platform === "darwin" ? "macOS Keychain"
@@ -51,15 +58,17 @@ export function createCredentialStore(
   // probe cannot answer (no gdbus binary, no Secret Service name on the bus, a bus that did not reply) the store
   // falls back to asking libsecret directly, exactly as before the probe existed: login must never depend on gdbus.
   // An unlocked answer is reused for a short while: one CLI command probes once, while a long-lived host (the
-  // senpi memory session) still notices a keyring that auto-locked later.
+  // senpi memory session) still notices a keyring that auto-locked later. Trade-off: a keyring that auto-locks
+  // inside that window can still reach libsecret, which may then show its unlock prompt once.
   let unlockedUntil = 0
+  let noticed = false
   const assertUsable = async () => {
     if (platform !== "linux" || Date.now() < unlockedUntil) return
     const lock = await lockProbe()
     if (lock === "locked") throw new KeychainLockedError(`${platformName} is locked. Unlock it, then try again. Credentials are never saved to a file.`)
     if (lock === "unlocked") { unlockedUntil = Date.now() + UNLOCKED_REUSE_MS; return }
-    if (!fallbackNoticed) {
-      fallbackNoticed = true
+    if (!noticed) {
+      noticed = true
       notice("omo: could not check whether the keyring is locked (gdbus or the Secret Service did not answer); using libsecret directly.")
     }
   }
