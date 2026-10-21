@@ -70,7 +70,7 @@ type DagWakeStatus = (typeof TERMINAL_EVENT_STATUSES)[keyof typeof TERMINAL_EVEN
 const PAUSED_EVENT_TYPE = "dag.run.paused"
 
 export function createDagWake(deps: DagWakeDeps): DagWake {
-  const buffered = new Map<string, Map<string, IdleInjection>>()
+  const buffered = new Map<string, IdleInjection[]>()
 
   function deliver(injection: IdleInjection, parentState: ParentState): void {
     deps.coordinator.enqueue(injection)
@@ -79,8 +79,8 @@ export function createDagWake(deps: DagWakeDeps): DagWake {
   }
 
   function buffer(parentSessionId: string, injection: IdleInjection): void {
-    const entries = buffered.get(parentSessionId) ?? new Map<string, IdleInjection>()
-    entries.set(injection.key, injection)
+    const entries = buffered.get(parentSessionId) ?? []
+    entries.push(injection)
     buffered.set(parentSessionId, entries)
   }
 
@@ -100,13 +100,13 @@ export function createDagWake(deps: DagWakeDeps): DagWake {
     onSessionStart(parentSessionId) {
       if (parentSessionId === undefined) return
       const entries = buffered.get(parentSessionId)
-      if (entries === undefined || entries.size === 0) return
+      if (entries === undefined || entries.length === 0) return
       buffered.delete(parentSessionId)
       for (const injection of entries.values()) deps.coordinator.enqueue(injection)
       deps.coordinator.flushSoon()
     },
     bufferedCount(parentSessionId) {
-      return buffered.get(parentSessionId)?.size ?? 0
+      return buffered.get(parentSessionId)?.length ?? 0
     },
   }
 }
@@ -128,6 +128,7 @@ function buildRunInjection(
   return {
     key: `dag-run:${run.runId}`,
     source: "dag-run",
+    runRef: { kind: "dag", id: run.runId },
     customType: DAG_WAKE_MESSAGE_TYPE,
     // Buffering and the coordinator retain this object; select for the receiver when it is flushed.
     contextScoped: true,
@@ -153,8 +154,10 @@ function buildPausedInjection(run: DagWakeRun, reason: string | undefined): Idle
   return {
     key: `dag-run:${run.runId}`,
     source: "dag-run",
+    runRef: { kind: "dag", id: run.runId },
     customType: DAG_WAKE_MESSAGE_TYPE,
-    content: `DAG "${run.name}" paused${cause}: it will resume when the session restarts.`,
+    content: reason === "user_stop" ? `DAG "${run.name}" paused by your Stop. Resume the run to continue.`
+      : `DAG "${run.name}" paused${cause}: it will resume when the session restarts.`,
     display: false,
     details: {
       runId: run.runId,

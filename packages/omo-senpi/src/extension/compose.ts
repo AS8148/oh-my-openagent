@@ -4,6 +4,7 @@ import { createDagSdkRootProvisioning } from "./dag-sdk-root-provisioning"
 import { isOmoSenpiDisabledByEnv } from "./disable-env"
 import { AGENT_TOOLKIT_SDK_ROOT_ENV, createSdkRootProvisioning } from "./sdk-root-provisioning"
 import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
+import { deliverItems } from "./deliver-items"
 import { createFirstPaintScheduler, createStartupDeferral, type StartupWorkScheduler } from "./startup-deferral"
 import { installToolCaptureRegistry } from "./tool-capture-registry"
 import type { ComponentContext, ComponentLogger, OmoSenpiComponent, SenpiExtensionAPI } from "./types"
@@ -122,8 +123,7 @@ export function composeOmoSenpiExtension(
     // senpi-task's completion retry): retirement cancels the armed handle instead of leaving a live
     // 200ms timer behind after a `quit` shutdown.
     const idleCoordinator = new IdleInjectionCoordinator(
-      (message, options) =>
-        pi.sendMessage(message, { triggerTurn: true, deliverAs: options.deliverAs }),
+      (_message, options) => deliverItems((message, delivery) => pi.sendMessage(message, delivery), options),
       {
         scheduleFlush: (flush) => {
           const timer = setTimeout(flush, IDLE_FLUSH_BATCH_WINDOW_MS)

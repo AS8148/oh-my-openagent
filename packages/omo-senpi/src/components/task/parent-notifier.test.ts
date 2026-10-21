@@ -35,7 +35,7 @@ type Delivered = { content: string; deliverAs: "steer" | "followUp" }
 function coordinatorWithManualFlush(delivered: Delivered[]): { coordinator: IdleInjectionCoordinator; runFlush: () => void } {
   let pending: (() => void) | undefined
   const coordinator = new IdleInjectionCoordinator(
-    (message, options) => delivered.push({ content: message.content, deliverAs: options.deliverAs }),
+    (_message, options) => { delivered.push({ content: options.items.map(item => item.content).join("\n\n"), deliverAs: options.deliverAs }) },
     { scheduleFlush: (flush) => { pending = flush } },
   )
   return {
@@ -87,6 +87,7 @@ describe("createParentNotifier batched injection delivery", () => {
       {
         key: "task-completion:st_1",
         source: "task-completion",
+        runRef: { kind: "task", id: "st_1" },
         customType: "senpi-task.completion",
         content: "st_1 completed",
         display: false,
@@ -154,7 +155,7 @@ describe("createParentNotifier batched injection delivery", () => {
     expect(pi.userSent).toHaveLength(0)
   })
 
-  test("#given two near-simultaneous completions #when the batch window closes #then BOTH arrive in ONE steer injection", () => {
+  test("#given completions from different runs #when the batch window closes #then each reference gets its own admission", () => {
     // given
     const delivered: Delivered[] = []
     const { coordinator, runFlush } = coordinatorWithManualFlush(delivered)
@@ -166,14 +167,14 @@ describe("createParentNotifier batched injection delivery", () => {
     notifier.enqueue(completionMessage("st_2"))
     runFlush()
 
-    // then the parent receives exactly ONE steer carrying both notifications
-    expect(delivered).toHaveLength(1)
+    // then the engine receives two independently tagged admissions
+    expect(delivered).toHaveLength(2)
     expect(delivered[0]?.deliverAs).toBe("steer")
     expect(delivered[0]?.content).toContain("st_1 completed")
-    expect(delivered[0]?.content).toContain("st_2 completed")
+    expect(delivered[1]?.content).toContain("st_2 completed")
   })
 
-  test("#given a re-enqueue of the same completion #when the batch window closes #then the key dedupes to one entry", () => {
+  test("#given repeated completion enqueues #when admitted #then both contents reach engine custody", () => {
     // given
     const delivered: Delivered[] = []
     const { coordinator, runFlush } = coordinatorWithManualFlush(delivered)
@@ -184,16 +185,16 @@ describe("createParentNotifier batched injection delivery", () => {
     notifier.enqueue(completionMessage("st_1"))
     runFlush()
 
-    // then it never double-injects
+    // then the coordinator preserves both items for the engine's custody decision
     expect(delivered).toHaveLength(1)
-    expect(delivered[0]?.content.match(/st_1 completed/g)).toHaveLength(1)
+    expect(delivered[0]?.content.match(/st_1 completed/g)).toHaveLength(2)
   })
 
   test("#given an IDLE parent #when two completions land in the same tick #then one microtask steer carries both", async () => {
     // given: no manual scheduler - the idle path flushes itself on the next microtask
   const delivered: Delivered[] = []
   const coordinator = new IdleInjectionCoordinator(
-    (message, options) => delivered.push({ content: message.content, deliverAs: options.deliverAs }),
+    (_message, options) => { delivered.push({ content: options.items.map(item => item.content).join("\n\n"), deliverAs: options.deliverAs }) },
     )
     const notifier = createParentNotifier(fakePi(), coordinator, () => false)
 
@@ -204,10 +205,10 @@ describe("createParentNotifier batched injection delivery", () => {
     await Promise.resolve()
 
     // then delivery is immediate (no exit race in print mode) and still batched into ONE steer
-    expect(delivered).toHaveLength(1)
+    expect(delivered).toHaveLength(2)
     expect(delivered[0]?.deliverAs).toBe("steer")
     expect(delivered[0]?.content).toContain("st_1 completed")
-    expect(delivered[0]?.content).toContain("st_2 completed")
+    expect(delivered[1]?.content).toContain("st_2 completed")
   })
 
   test("#given no coordinator is wired #when a completion enqueues #then it falls back to a direct steer on the renderer channel", () => {

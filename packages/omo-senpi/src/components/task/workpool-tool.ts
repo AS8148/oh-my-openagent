@@ -19,12 +19,13 @@ export function registerWorkpoolTool(
   workpools.bindAggregate({
     enqueue: (message, receipts) => {
       if (coordinator === undefined) {
-        pi.sendMessage({ customType: "senpi-task.workpool-aggregate", content: JSON.stringify(message.results), display: false, details: message }, { triggerTurn: true, deliverAs: "steer" })
+        pi.sendMessage({ customType: "senpi-task.workpool-aggregate", content: JSON.stringify(message.results), display: false, details: { ...message, runRef: { kind: "workpool", id: message.pool_id } } }, { triggerTurn: true, deliverAs: "steer" })
         receipts.ack()
         return
       }
       const accepted = coordinator.enqueue({
         key: `workpool:${message.pool_id}:${message.generation}`, source: "workpool-aggregate",
+        runRef: { kind: "workpool", id: message.pool_id },
         customType: "senpi-task.workpool-aggregate", content: JSON.stringify(message.results), display: false, details: message,
         onFlushed: () => receipts.ack(),
         onDeliveryFailed: error => receipts.fail(error),

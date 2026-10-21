@@ -1,9 +1,14 @@
+import { randomUUID } from "node:crypto"
+import type { RunRef } from "../../../senpi-task/src/pause/ports"
+import { admissionBatches, settleItemReceipts, type AdmissionItem, type ItemReceipt, type QueuedInjection } from "./idle-injection-items"
+
 export type IdleInjectionSource = "task-completion" | "workpool-aggregate" | "team-message" | "team-liveness" | "boulder-continuation" | "ulw-continuation" | "dag-run" | "kibitzer"
 
 export interface IdleInjection {
-  // Dedupe/order key. Task completions key on their task id; the ulw continuation keys on its source
-  // so repeated continuation enqueues on one idle edge collapse to a single injection.
+  // Cancellation/order key; every enqueue retains its independent custody identity.
   readonly key: string
+  readonly itemId?: string
+  readonly runRef?: RunRef
   readonly source: IdleInjectionSource
   readonly customType?: string
   readonly content: string
@@ -14,6 +19,7 @@ export interface IdleInjection {
   /** Preserve this segment's boundary for model-specific context transforms. */
   readonly contextScoped?: boolean
   readonly onFlushed?: () => void
+  readonly onHeld?: (receipt: ItemReceipt) => void
   readonly onDeliveryFailed?: (error: unknown) => void
 }
 
@@ -26,7 +32,7 @@ export interface IdleInjectionMessage extends Record<string, unknown> {
 
 export type IdleInjectionDelivery = (
   message: IdleInjectionMessage,
-  options: { deliverAs: "steer" | "followUp" },
+  options: { deliverAs: "steer" | "followUp"; readonly items: readonly AdmissionItem[] },
 ) => unknown
 
 // Defers a single flush to the next idle tick. Injectable so unit tests drive it deterministically;
@@ -86,7 +92,7 @@ const SOURCE_RANK: Readonly<Record<IdleInjectionSource, number>> = {
  */
 export class IdleInjectionCoordinator {
   readonly #deliver: IdleInjectionDelivery
-  readonly #pending = new Map<string, IdleInjection>()
+  readonly #pending = new Map<string, QueuedInjection>()
   readonly #scheduleFlush: FlushScheduler
   #flushScheduled = false
   #soonScheduled = false
@@ -106,7 +112,8 @@ export class IdleInjectionCoordinator {
    */
   enqueue(injection: IdleInjection): boolean {
     if (this.#retired) return false
-    this.#pending.set(injection.key, injection)
+    const itemId = injection.itemId ?? randomUUID()
+    this.#pending.set(itemId, { ...injection, itemId, get content() { return injection.content } })
     return true
   }
 
@@ -140,7 +147,13 @@ export class IdleInjectionCoordinator {
   }
 
   remove(key: string): boolean {
-    return this.#pending.delete(key)
+    let removed = false
+    for (const [id, injection] of this.#pending) {
+      if (injection.key !== key) continue
+      this.#pending.delete(id)
+      removed = true
+    }
+    return removed
   }
 
   /**
@@ -178,41 +191,19 @@ export class IdleInjectionCoordinator {
     )
     const collapsed = ordered.length
     this.#pending.clear()
-    let delivery: unknown
-    try {
-      const contents = ordered.map((injection) => injection.content)
-      let offset = 0
-      const details = ordered.flatMap((injection, index) => {
-        const start = offset
-        const end = start + (contents[index]?.length ?? 0)
-        offset = end + 2
-        return injection.customType === undefined ? [] : [{
-          customType: injection.customType, details: injection.details,
-          ...(injection.contextScoped === true ? { contentRange: [start, end] as const } : {}),
-        }]
-      })
-      delivery = this.#deliver(
-        {
-          customType: "omo-senpi:wake",
-          content: contents.join("\n\n"),
-          display: false,
-          details,
-        },
-        { deliverAs },
-      )
-    } catch (error) {
-      for (const injection of ordered) injection.onDeliveryFailed?.(error)
-      throw error
-    }
-    if (!isPromiseLike(delivery)) {
-      for (const injection of ordered) injection.onFlushed?.()
-    } else {
-      void delivery.then(
-        () => {
-          for (const injection of ordered) injection.onFlushed?.()
-        },
+    for (const batch of admissionBatches(ordered)) {
+      let delivery: unknown
+      try {
+        delivery = this.#deliver(batch.message, { deliverAs, items: batch.items })
+      } catch (error) {
+        for (const injection of batch.injections) injection.onDeliveryFailed?.(error)
+        throw error
+      }
+      if (!isPromiseLike(delivery)) settleItemReceipts(batch.injections, delivery)
+      else void delivery.then(
+        result => settleItemReceipts(batch.injections, result),
         (error: unknown) => {
-          for (const injection of ordered) injection.onDeliveryFailed?.(error)
+          for (const injection of batch.injections) injection.onDeliveryFailed?.(error)
         },
       )
     }
