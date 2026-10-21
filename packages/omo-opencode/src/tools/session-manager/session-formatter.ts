@@ -2,7 +2,7 @@ import type { SessionInfo, SessionMessage, SearchResult } from "./types"
 import { forEachSessionMessagePage, getSessionInfo } from "./storage"
 import { describeSessionError, formatSkippedSessions, type SkippedSession } from "./session-error"
 
-export async function formatSessionList(sessionIDs: string[]): Promise<string> {
+export async function formatSessionList(sessionIDs: string[], signal?: AbortSignal): Promise<string> {
   if (sessionIDs.length === 0) {
     return "No sessions found."
   }
@@ -10,7 +10,9 @@ export async function formatSessionList(sessionIDs: string[]): Promise<string> {
   const skipped: SkippedSession[] = []
   const reads = await Promise.all(
     sessionIDs.map((id) =>
-      getSessionInfo(id).catch((error: unknown) => {
+      getSessionInfo(id, signal).catch((error: unknown) => {
+        // A cancelled call is not an unreadable session: let the abort end the whole list.
+        signal?.throwIfAborted()
         skipped.push({ id, reason: describeSessionError(error) })
         return null
       }),
@@ -133,7 +135,8 @@ export function formatSearchResults(results: SearchResult[]): string {
 export async function filterSessionsByDate(
   sessionIDs: string[],
   fromDate?: string,
-  toDate?: string
+  toDate?: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
   if (!fromDate && !toDate) return sessionIDs
 
@@ -142,7 +145,8 @@ export async function filterSessionsByDate(
 
   const results: string[] = []
   for (const id of sessionIDs) {
-    const info = await getSessionInfo(id)
+    signal?.throwIfAborted()
+    const info = await getSessionInfo(id, signal)
     if (!info || !info.last_message) continue
 
     if (from && info.last_message < from) continue

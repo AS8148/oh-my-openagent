@@ -120,14 +120,14 @@ export function createSessionManagerTools(
         let sessionIDs = sessions.map((s) => s.id)
 
         if (args.from_date || args.to_date) {
-          sessionIDs = await resolvedDeps.filterSessionsByDate(sessionIDs, args.from_date, args.to_date)
+          sessionIDs = await resolvedDeps.filterSessionsByDate(sessionIDs, args.from_date, args.to_date, _context.abort)
         }
 
         if (args.limit && args.limit > 0) {
           sessionIDs = sessionIDs.slice(0, args.limit)
         }
 
-        return await resolvedDeps.formatSessionList(sessionIDs)
+        return await resolvedDeps.formatSessionList(sessionIDs, _context.abort)
       } catch (e) {
         return `Error: ${describeSessionError(e)}`
       }

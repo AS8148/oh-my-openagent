@@ -227,5 +227,5 @@ export async function getSessionInfo(sessionID: string, signal?: AbortSignal): P
     }
   }
 
-  return getFileSessionInfo(sessionID)
+  return getFileSessionInfo(sessionID, signal)
 }

@@ -82,7 +82,7 @@ type FileMessageMeta = Omit<SessionMessage, "parts">
 
 // Message metadata only, sorted oldest-first. Parts (where the bulk of a session lives) are read
 // separately, only for the messages a caller actually returns or scans.
-async function getFileSessionMessageMetas(sessionID: string): Promise<FileMessageMeta[]> {
+async function getFileSessionMessageMetas(sessionID: string, signal?: AbortSignal): Promise<FileMessageMeta[]> {
   const messageDir = getMessageDir(sessionID)
   if (!messageDir || !existsSync(messageDir)) return []
 
@@ -91,6 +91,7 @@ async function getFileSessionMessageMetas(sessionID: string): Promise<FileMessag
     const files = await readdir(messageDir)
     for (const file of files) {
       if (!file.endsWith(".json")) continue
+      signal?.throwIfAborted()
       try {
         const content = await readFile(join(messageDir, file), "utf-8")
         const meta = JSON.parse(content)
@@ -106,6 +107,8 @@ async function getFileSessionMessageMetas(sessionID: string): Promise<FileMessag
       }
     }
   } catch (error) {
+    // ignoreFileStorageError swallows every Error, which would turn a cancellation into an empty session.
+    signal?.throwIfAborted()
     ignoreFileStorageError(error)
     return []
   }
@@ -132,7 +135,7 @@ export async function getFileSessionMessages(
   window?: { limit: number; fromEnd: boolean },
   signal?: AbortSignal,
 ): Promise<SessionMessage[]> {
-  const metas = await getFileSessionMessageMetas(sessionID)
+  const metas = await getFileSessionMessageMetas(sessionID, signal)
   if (!window) return withParts(metas, signal)
   return withParts(window.fromEnd ? metas.slice(-window.limit) : metas.slice(0, window.limit), signal)
 }
@@ -143,7 +146,7 @@ export async function forEachFileSessionMessagePage(
   visit: (messages: SessionMessage[]) => boolean | void,
   options: { pageSize: number; signal?: AbortSignal },
 ): Promise<void> {
-  const metas = await getFileSessionMessageMetas(sessionID)
+  const metas = await getFileSessionMessageMetas(sessionID, options.signal)
   for (let end = metas.length; end > 0; end -= options.pageSize) {
     options.signal?.throwIfAborted()
     const page = await withParts(metas.slice(Math.max(0, end - options.pageSize), end), options.signal)
@@ -221,8 +224,8 @@ export async function getFileSessionTranscript(sessionID: string): Promise<numbe
   }
 }
 
-export async function getFileSessionInfo(sessionID: string): Promise<SessionInfo | null> {
-  const messages = await getFileSessionMessageMetas(sessionID)
+export async function getFileSessionInfo(sessionID: string, signal?: AbortSignal): Promise<SessionInfo | null> {
+  const messages = await getFileSessionMessageMetas(sessionID, signal)
   if (messages.length === 0) return null
 
   const agentsUsed = new Set<string>()

@@ -285,6 +285,36 @@ describe("session-manager paging (#10738)", () => {
     expect(server.fetchedMessages).toBeLessThanOrEqual(201)
   })
 
+  test.each([
+    ["listing", {}],
+    ["filtering by date", { from_date: "1970-01-01T00:00:00Z" }],
+  ] as const)("#given session_list %s a long session #when the caller aborts mid-count #then it reports the cancellation and reads nothing more", async (_mode: string, args: { from_date?: string }) => {
+    //#given
+    const server = createFakeServer({ ses_big: SESSION_SIZE })
+    const gate = blockRequest(server, 3)
+    const caller = new AbortController()
+    const { session_list } = createSessionManagerTools({ directory: TEST_DIR, client: server.client } as unknown as PluginInput, {
+      getMainSessions: async () => [{ id: "ses_big", projectID: "p", directory: TEST_DIR, time: { created: 1, updated: 1 } }],
+    })
+    const output = session_list.execute(args, createContext(caller.signal))
+    const blocked = await Promise.race([
+      gate.blocked,
+      output.then(() => {
+        throw new Error("session_list settled before its count reached the third request")
+      }),
+    ])
+
+    //#when
+    caller.abort(new Error("cancelled by caller"))
+    const result = String(await output)
+
+    //#then
+    expect(result).toContain("cancelled by caller")
+    expect(result).not.toContain("Skipped")
+    expect(blocked.signal?.aborted).toBe(true)
+    expect(server.requests.length).toBe(3)
+  })
+
   test("#given a long session #when session_read asks for the first 150 messages #then the window spans the page boundary exactly", async () => {
     //#given
     const server = createFakeServer({ ses_big: SESSION_SIZE })
