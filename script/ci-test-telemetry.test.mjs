@@ -2,10 +2,12 @@ import { expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { judgeProfiles } from "../.github/scripts/ci-test-telemetry-report.mjs"
 import { descendants, instrumentArguments } from "../.github/scripts/ci-test-telemetry.mjs"
 
-const collector = new URL("../.github/scripts/ci-test-telemetry.mjs", import.meta.url).pathname
+// fileURLToPath, not URL.pathname: the pathname is "/D:/..." on Windows, which Bun cannot resolve.
+const collector = fileURLToPath(new URL("../.github/scripts/ci-test-telemetry.mjs", import.meta.url))
 
 async function runCollector(root, args) {
   const child = Bun.spawn([process.execPath, collector, ...args], {
@@ -100,9 +102,10 @@ test("process inventory includes nested children, not unrelated processes", () =
   expect(descendants(rows, 10)).toEqual(rows.slice(0, 3))
 })
 
-for (const [name, bunfig, setupMarker] of [
-  ["missing bunfig", null, "absent"],
-  ["string-valued preload", '[test]\npreload = "./setup.mjs"\n', "loaded"],
+// A missing file is an ENOENT (name "Error"); a wrong preload shape is the collector's own TypeError.
+for (const [name, bunfig, setupMarker, errorType] of [
+  ["missing bunfig", null, "absent", "Error"],
+  ["string-valued preload", '[test]\npreload = "./setup.mjs"\n', "loaded", "TypeError"],
 ]) {
   test(`setup failure (${name}) runs the original tests unchanged and records a capture error`, async () => {
     const root = mkdtempSync(join(tmpdir(), "ci-profile-fallback-"))
@@ -117,11 +120,11 @@ for (const [name, bunfig, setupMarker] of [
       ]) {
         const { code, output, stderr } = await runCollector(root, [join(root, "artifacts"), invocation, "2", "test", "--parallel", file])
         expect(code, output).toBe(expectedExit)
-        expect(stderr).toContain("[ci-profile] setup capture failed: TypeError")
+        expect(stderr).toContain(`[ci-profile] setup capture failed: ${errorType};`)
         const profile = JSON.parse(readFileSync(join(root, "artifacts", `${invocation}-profile.json`), "utf8"))
         expect(profile).toMatchObject({
           fallback: true, exitCode: expectedExit, sampleCount: 0, sha: "diagnostic-sha",
-          errors: [{ stage: "setup", type: "TypeError" }],
+          errors: [{ stage: "setup", type: errorType }],
         })
       }
       expect(readFileSync(summary, "utf8")).toContain("tests ran unprofiled")
@@ -135,7 +138,6 @@ for (const [name, bunfig, setupMarker] of [
 for (const workers of ["4", "2"]) {
   test(`real collector records native file/preload/resource data with ${workers} workers and preserves failures`, async () => {
     const root = mkdtempSync(join(tmpdir(), "ci-profile-"))
-    const collector = new URL("../.github/scripts/ci-test-telemetry.mjs", import.meta.url).pathname
     const summary = join(root, "summary.md")
     try {
       writeFileSync(join(root, "bunfig.toml"), '[test]\npreload = ["./setup.mjs"]\n')
