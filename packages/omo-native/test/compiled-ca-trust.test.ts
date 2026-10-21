@@ -11,6 +11,7 @@ import {
   ExtraCaCertificatesError,
   gateFetchOnEngineCaTrust,
   installEngineCaTrust,
+  loadSystemStoreOffThread,
   MAX_EXTRA_CA_BYTES,
   parseExtraCaCertificates,
 } from "../compiled-ca-trust"
@@ -162,6 +163,45 @@ describe("the OS store never blocks startup (#10760)", () => {
     await target.fetch("https://example.invalid/")
     expect(seen).toEqual([2, 2])
   })
+
+  // Regression guard for #10219's users: a company proxy whose CA lives only in the OS store.
+  test("#given a store that never answers #then a certificate failure names the slow store and the escape hatch", async () => {
+    const { tls } = fakeTls()
+    installEngineCaTrust({}, tls as never, { loadSystem: () => new Promise<string[]>(() => {}) })
+    const refused = Object.assign(new Error("unable to get local issuer certificate"), { code: "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" })
+    const target = { fetch: (async () => { throw refused }) as unknown as typeof fetch }
+    gateFetchOnEngineCaTrust(target, 30)
+    const error = await target.fetch("https://proxy.example/").then(() => undefined, (cause: unknown) => cause as Error)
+    expect(error?.message).toContain("system certificate store was still not answering")
+    expect(error?.message).toContain("NODE_EXTRA_CA_CERTS")
+    expect((error as Error & { cause?: unknown }).cause).toBe(refused)
+  })
+
+  test("#given a store that answered #then a certificate failure is passed through unchanged", async () => {
+    const { tls } = fakeTls()
+    installEngineCaTrust({}, tls as never, { loadSystem: async () => ["S"] })
+    const refused = Object.assign(new Error("self signed certificate"), { code: "SELF_SIGNED_CERT_IN_CHAIN" })
+    const target = { fetch: (async () => { throw refused }) as unknown as typeof fetch }
+    gateFetchOnEngineCaTrust(target, 1_000)
+    expect(await target.fetch("https://x.example/").then(() => undefined, (cause: unknown) => cause)).toBe(refused)
+  })
+
+  test("#given the OS-store worker never returns #then the process still exits promptly", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-ca-exit-"))
+    try {
+      const script = join(dir, "exit.ts")
+      writeFileSync(script, `import { loadSystemStoreOffThread } from ${JSON.stringify(join(import.meta.dir, "..", "compiled-ca-trust.ts"))}
+void loadSystemStoreOffThread("for (;;) {}")
+console.log("done")
+`)
+      const started = performance.now()
+      const run = spawnSync(process.execPath, [script], { encoding: "utf8", timeout: 10_000 })
+      expect({ status: run.status, out: run.stdout.trim() }).toEqual({ status: 0, out: "done" })
+      expect(performance.now() - started).toBeLessThan(5_000)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 15_000)
 })
 
 // The bug is specific to `bun build --compile`: a compiled binary ignores --use-system-ca, so this

@@ -158,23 +158,46 @@ export async function engineCaTrustReady(
   return outcome
 }
 
-/** The first `fetch` waits (bounded) for the OS store; every later one goes straight through. */
-export function gateFetchOnEngineCaTrust(target: { fetch: typeof fetch } = globalThis): void {
+const CERT_ERROR = /CERT|UNABLE_TO_(?:GET_ISSUER|VERIFY)|SELF_SIGNED|certificate/i
+
+/** Error text for a request refused while the OS store was still unread: names the store and the escape hatch. */
+export function slowStoreCertificateError(cause: unknown): Error {
+  return new Error(
+    `TLS certificate check failed while the system certificate store was still not answering, so only the bundled certificates and any NODE_EXTRA_CA_CERTS / ${ENGINE_EXTRA_CA_ENV} were trusted. If your network needs a certificate from the system store (a company proxy, for example), set NODE_EXTRA_CA_CERTS to a PEM file with it and start omo again.`,
+    { cause },
+  )
+}
+
+/**
+ * The first `fetch` waits (bounded) for the OS store; every later one goes straight through. A
+ * certificate error while the store is still unread is reported as that, never as a bare
+ * certificate error: a company proxy whose CA lives only in the OS store (why #10219 added it)
+ * needs to know the store did not answer and how to supply the CA instead.
+ */
+export function gateFetchOnEngineCaTrust(target: { fetch: typeof fetch } = globalThis, budgetMs = SYSTEM_STORE_BUDGET_MS): void {
   const original = target.fetch
-  let ready: Promise<unknown> | undefined
+  let ready: Promise<SystemStoreOutcome> | undefined
   const gated = (async (...args: Parameters<typeof fetch>) => {
-    ready ??= engineCaTrustReady()
+    ready ??= engineCaTrustReady(budgetMs)
     await ready
-    return await original(...args)
+    try {
+      return await original(...args)
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code
+      const text = `${typeof code === "string" ? code : ""} ${error instanceof Error ? error.message : String(error)}`
+      if (!systemSettled && CERT_ERROR.test(text)) throw slowStoreCertificateError(error)
+      throw error
+    }
   }) as typeof fetch
   target.fetch = Object.assign(gated, original)
 }
 
 // A Worker blocked inside the OS call cannot hold the process open (`unref`), and its result is
 // plain PEM text, so nothing native crosses threads.
-function loadSystemStoreOffThread(): Promise<readonly string[]> {
+export const SYSTEM_STORE_WORKER_SOURCE = 'postMessage(require("node:tls").getCACertificates("system"))'
+
+export function loadSystemStoreOffThread(source = SYSTEM_STORE_WORKER_SOURCE): Promise<readonly string[]> {
   return new Promise((resolve, reject) => {
-    const source = 'postMessage(require("node:tls").getCACertificates("system"))'
     const url = URL.createObjectURL(new Blob([source], { type: "application/javascript" }))
     const worker = new Worker(url)
     worker.unref()
