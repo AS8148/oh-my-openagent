@@ -447,6 +447,19 @@ describe("OmO Native session telemetry", () => {
     })
   })
 
+  it("#given linked accounts in auth.json #when session_started emits #then connected_account_count carries the kind counts and no account detail (#10919)", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      writeInventory(agentDir)
+      writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ "chatgpt-subscription": { accounts: [{ name: "me@example.com" }, { name: "two" }] } }))
+      const recorder = createRecorder()
+      const pi = register(agentDir, recorder)
+      await pi.dispatch("session_start", { type: "session_start", reason: "startup" }, sessionCtx("accounts"))
+      const properties = recorder.messages.find(({ event }) => event === "session_started")?.properties
+      expect(properties).toMatchObject({ connected_account_count: "chatgpt-subscription:2" })
+      expect(JSON.stringify(properties)).not.toContain("example.com")
+    })
+  })
+
   it("#given an empty providers dictionary #when session_start fires #then inventory is valid and empty without a diagnostic", async () => {
     await withTempAgentDir(async (agentDir) => {
       // given

@@ -41,12 +41,12 @@ describe("readConnectedAccounts (#10919: linked accounts per provider, counts on
     expect(connected).not.toContain("acme")
   })
 
-  it("#given no auth.json #then empty without a diagnostic; a malformed one reports one fixed diagnostic", () => {
-    const diagnostics: unknown[] = []
-    expect(readConnectedAccounts(agentDir(), (d) => diagnostics.push(d))).toBe("")
-    expect(diagnostics).toEqual([])
-    expect(readConnectedAccounts(agentDir(`{"anthropic": ${SECRET}}`), (d) => diagnostics.push(d))).toBe("")
-    expect(diagnostics).toHaveLength(1)
-    expect(String(Reflect.get(Object(Reflect.get(Object(diagnostics[0]), "error")), "message"))).not.toContain("sk")
+  it("#given no auth.json or a malformed one #then empty (the provider inventory already reports the malformed file once)", () => {
+    expect(readConnectedAccounts(agentDir())).toBe("")
+    expect(readConnectedAccounts(agentDir(`{"anthropic": ${SECRET}}`))).toBe("")
+  })
+
+  it("#given an emptied account list #then that provider is not counted; a single credential without a list still counts 1 (#10922 review)", () => {
+    expect(readConnectedAccounts(agentDir({ openai: { accounts: [] }, anthropic: { type: "api", key: SECRET }, xai: null }))).toBe("anthropic:1,xai:1")
   })
 })
