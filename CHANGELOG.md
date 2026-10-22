@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Messages between sessions start with the sender's workspace and project ([#10853](https://github.com/code-yeongyu/oh-my-openagent/pull/10853)).** The sender's environment, git owner or configured paths decide it, never the message text; older stored messages say provenance was not recorded (#10794).
+
 **omo.json can say which workspace a session belongs to ([#10852](https://github.com/code-yeongyu/oh-my-openagent/pull/10852)).** `provenance.workspaces` lists workspaces by name with optional `git_owners` and `paths`; messages between sessions use it to show where the sender works (#10794).
 
 **OmO records when an answer says "tests pass" or "done" with nothing in the session behind it.** When a turn's final answer says tests pass, a build or typecheck is clean, a feature already exists, or the work is done, OmO checks the session for a check that passed after the last code edit, and records in the session whether the claim is backed. It starts in shadow mode: nothing is shown to you or the agent and no turn is blocked or continued, because on a week of our own sessions most flags were still false positives. Setting the `omo-senpi-claim-receipt-nudge` flag turns on a short note under a flagged answer (once per message you send) and passes the flagged claims to a gate reviewer spawned afterwards. ([#10785](https://github.com/code-yeongyu/oh-my-openagent/pull/10785))
