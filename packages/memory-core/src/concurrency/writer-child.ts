@@ -1,7 +1,6 @@
-import { existsSync } from "node:fs"
 import { join } from "node:path"
 
-import { appendFile } from "../fs/resilient"
+import { appendFile, existsSync } from "../fs/resilient"
 import { provenDeadTakeoverFor } from "../locks/proven-dead-takeovers"
 import { traceTakeover } from "./takeover-trace.test-support"
 
