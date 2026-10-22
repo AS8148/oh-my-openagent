@@ -289,7 +289,7 @@ export function sweepSpool(ctx: SpoolContext): void {
       if (stat !== null && now - stat.mtimeMs > ctx.maxAgeMs) dropFile(ctx, entry.name, "expired")
     } else if (entry.kind === "lock") {
       const stat = fileStat(ctx.dir, entry.name)
-      const limits = { leaseMs: CLAIM_LEASE_MS, maxAgeMs: ctx.maxAgeMs, isPidAlive: ctx.isPidAlive }
+      const limits = { leaseMs: CLAIM_LEASE_MS, maxAgeMs: ctx.maxAgeMs, isPidAlive: ctx.isPidAlive, self: ctx }
       if (stat !== null && isAbandonedLock(ctx.dir, entry.name, now - stat.mtimeMs, limits)) deleteFile(ctx.dir, entry.name)
     }
   }
