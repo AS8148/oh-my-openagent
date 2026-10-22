@@ -102,6 +102,9 @@ export function createEngineRunPause(ports: {
       const record = participant.taskId === undefined ? undefined : ports.manager.get(participant.taskId)
       if (record === undefined || record.notification.run_epoch !== participant.runEpoch ||
         (record.status !== "running" && record.status !== "paused")) return { kind: "settled" }
+      // Unpausing clears the run owner, so a running child at this epoch was already resumed by a
+      // transaction the host died inside; resuming it again would fail and wedge the Resume.
+      if (record.status === "running" && record.run_pause === undefined) return { kind: "resumed" }
       if (request.childSeqCutoff === undefined) throw new Error("child resume has no frozen cutoff")
       const resumed = await ports.manager.resumePausedTask(record.task_id, {
         ...request, childSeqCutoff: request.childSeqCutoff, resumeCredential: credential,
