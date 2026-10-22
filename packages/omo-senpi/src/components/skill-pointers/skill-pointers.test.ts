@@ -233,8 +233,19 @@ describe("omo-senpi skill-pointers component", () => {
         ["meth ship the docs refresh", ["<omo-mass-ulw-pointer>"]],
         ["meth research the market", ["<omo-mass-ulw-pointer>", "<omo-ulw-research-pointer>"]],
         // A relayed order or lane report whose tag the strict relay filter does not cover.
-        ["[LEAD via duty -> lane-a, omo#1 FIX_FIRST] asking about it must not start a run; mass ulw research the fix", ["<omo-mass-ulw-pointer>", "<omo-ulw-research-pointer>"]],
+        ["[LEAD via coordinator -> lane-a, omo#1 FIX_FIRST] asking about it must not start a run; mass ulw research the fix", []],
         ["[lane-a w46:p6P] ran mass ulw on the docs refresh", ["<omo-mass-ulw-pointer>"]],
+        // Statements and questions that name the skill without invoking it (#10822 delta review).
+        ["Fix the bug in the mass-ulw skill pointer.", ["<omo-mass-ulw-pointer>"]],
+        ["Update the docs for mass-ulw and ulw-research.", ["<omo-mass-ulw-pointer>", "<omo-ulw-research-pointer>"]],
+        ["I used mass ulw yesterday and it was slow.", ["<omo-mass-ulw-pointer>"]],
+        ["The mass-ulw block says it decides lane dispatch for ulw research lanes.", ["<omo-mass-ulw-pointer>", "<omo-ulw-research-pointer>"]],
+        ["what is mass ulw research at https://example.com?", ["<omo-mass-ulw-pointer>", "<omo-ulw-research-pointer>"]],
+        ["can you explain what mass ulw does", ["<omo-mass-ulw-pointer>"]],
+        ["is mass ulw better than ulw-loop for this, or should I use team mode", ["<omo-mass-ulw-pointer>"]],
+        ["the failing test is 'mass ulw research the market > binds both'", []],
+        ["[lane-r3 -> coordinator + ledger-lane] the other recorded name is 'omo-senpi skill-pointers > mass ulw research binds'; mass ulw is next", []],
+        ["Our mass ulw runs keep stalling; look at the queue first. Then report.", ["<omo-mass-ulw-pointer>"]],
       ] as const) {
         // given
         const pi = new FakeExtensionAPI()
@@ -250,16 +261,36 @@ describe("omo-senpi skill-pointers component", () => {
       }
     })
 
-    it("#when a question precedes the request in the same prompt #then the request still binds", async () => {
+    it("#when the request is explicit (keyword opens or closes the prompt, or a request verb takes the skill) #then it binds", async () => {
+      for (const text of [
+        "mass ulw fix the flaky suite. Why does this keep failing?",
+        "Why does this keep failing? Fix the flaky suite, mass ulw.",
+        "[Image #1] mass ulw recreate this",
+        "The suite is flaky. Run mass-ulw on it and report back",
+        "please use mass-ulw to split the docs refresh into lanes",
+      ]) {
+        // given
+        const pi = new FakeExtensionAPI()
+        await registerSkillPointers(pi)
+
+        // when
+        await dispatchInput(pi, text)
+
+        // then
+        expect({ text, first: String(pi.messages[0]?.message["content"]).slice(0, 19) }).toEqual({ text, first: "<omo-mass-ulw-mode>" })
+      }
+    })
+
+    it("#when a request verb takes ulw-research as its object #then research binds", async () => {
       // given
       const pi = new FakeExtensionAPI()
       await registerSkillPointers(pi)
 
       // when
-      await dispatchInput(pi, "Why does this keep failing? mass ulw fix the flaky suite")
+      await dispatchInput(pi, "use ulw-research to compare the gateway options")
 
       // then
-      expect(String(pi.messages[0]?.message["content"])).toStartWith("<omo-mass-ulw-mode>")
+      expect(String(pi.messages[0]?.message["content"])).toStartWith("<omo-ulw-research-mode>")
     })
 
     it("#when a prompt carries an injected mode block #then the block's own mention does not re-arm", async () => {

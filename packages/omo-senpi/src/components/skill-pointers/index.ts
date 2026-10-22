@@ -24,11 +24,11 @@ interface SkillPointerTarget {
   readonly instruction: string
   readonly extra?: (sessionScope: string | null) => string
   readonly companions?: readonly SkillCompanion[]
-  // A binding target enters its mode instead of asking the model whether the user meant it: the quote,
-  // relay, negation, identifier, child-session and extension filters already decided that, and the
-  // conditional pointer let the model skip mass-ulw entirely (#10810). It binds only on a request
-  // match (see `isRequest`); a question about the skill, or the plain-word alias `meth`, keeps the
-  // conditional pointer, because forcing a workflow run onto a question is the wrong answer to it.
+  // A binding target enters its mode instead of asking the model whether the user meant it: the
+  // conditional pointer let the model skip mass-ulw entirely (#10810). Binding is POSITIVE: only an
+  // explicit request form matches (`explicitRequestPattern`). Every other mention (a statement or a
+  // question about the skill, a relayed report, the plain-word alias `meth`) keeps the conditional
+  // pointer, because forcing a workflow run onto it is the wrong answer.
   readonly bindingPattern?: RegExp
 }
 
@@ -79,8 +79,31 @@ const ULTIMATE_BROWSING_COMPANION: SkillCompanion = {
 // also stands in for the `ulw` half: "mulw research" names the same composite as
 // "mass ulw research" and loads both skills.
 const MASS_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw|meth)`
-// `meth` is an ordinary English word, so it may point at the skill but never binds the mode.
-const MASS_REQUEST_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw)`
+// Explicit request forms, the only inputs that bind:
+//   1. the keyword opens the prompt ("mass ulw fix the suite"), after anything the host or the user puts
+//      ahead of the typed request: masked regions, image/paste placeholders, an expanded skill block, a
+//      slash command ("/skill:browser then ulw research ...");
+//   2. the keyword closes the prompt ("<task>. mass ulw research", the way the ulw keywords are typed);
+//   3. an imperative verb opens a sentence and takes the skill as its object ("run mass-ulw on ...",
+//      "use ulw-research to ...").
+// Keywords are the spaced or fused spellings; the hyphenated skill name counts only after a request
+// verb, since prose uses it as a noun ("fix the mass-ulw skill"). `meth` is an ordinary English word
+// and never binds. A slash command for the skill itself loads it through the command and is deduped.
+const MASS_KEYWORD = String.raw`(?:mass\s*ulw|ulw\s*mass|mulw)`
+const MASS_NAME = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw)`
+const PROMPT_LEAD = String.raw`^[\s\0]*(?:(?:\[(?:Image|Pasted text)\b[^\]\n]*\]|<skill\s[^>]*>[\s\S]*?<\/skill>|\/[\w:-]+(?:\s+(?:then|and)\b)?)[\s\0]*)*`
+const REQUEST_VERB = String.raw`(?:^|[.!?\n])[\s\0]*(?:please\s+|let'?s\s+|now\s+)?(?:run|use|start|launch|invoke|do|kick\s+off|spin\s+up)\s+(?:a\s+|the\s+)?`
+const explicitRequestPattern = (keyword: string, name: string): RegExp => {
+  const ends = `${NOT_INTO_IDENTIFIER}${NOT_BEFORE_PATH}`
+  return new RegExp(
+    [
+      String.raw`${PROMPT_LEAD}${keyword}\b${ends}`,
+      String.raw`${NOT_AFTER_IDENTIFIER}\b${keyword}[\s\0]*[.!]?[\s\0]*$`,
+      String.raw`${REQUEST_VERB}${name}\b${ends}`,
+    ].join("|"),
+    "i",
+  )
+}
 // A skill name is a request only as a word of its own: not a segment of a longer identifier
 // (`mass-ulw-refactor`, `senpi-ulw-loop`) and not part of a path or file name (`.omo/ulw-plan/`).
 const skillNamePattern = (body: string): RegExp => new RegExp(String.raw`${NOT_AFTER_IDENTIFIER}\b${body}\b${NOT_INTO_IDENTIFIER}${NOT_BEFORE_PATH}`, "i")
@@ -91,7 +114,8 @@ const TARGETS: readonly SkillPointerTarget[] = [
     pattern: skillNamePattern(MASS_ALIAS),
     expandedBlockPattern: /<skill\s+name="mass-ulw"/i,
     instruction: "dispatch each phase's dependency-ordered lanes as one run of the workflow tool composed in an eval cell, start a new run per phase rather than one graph for the whole job, and when a ulw-loop or ulw-execute contract is active let it own the goal",
-    bindingPattern: skillNamePattern(MASS_REQUEST_ALIAS),
+    // The trailing composite "... mass ulw research" invokes both skills.
+    bindingPattern: explicitRequestPattern(String.raw`${MASS_KEYWORD}(?:\s+research)?`, MASS_NAME),
   },
   {
     skillName: "ulw-plan",
@@ -115,7 +139,7 @@ const TARGETS: readonly SkillPointerTarget[] = [
     expandedBlockPattern: /<skill\s+name="ulw-research"/i,
     instruction: "orchestrate team-first maximum-saturation research",
     companions: [BROWSER_COMPANION, ULTIMATE_BROWSING_COMPANION],
-    bindingPattern: skillNamePattern(String.raw`(?:ulw|${MASS_REQUEST_ALIAS})[\s-]*research`),
+    bindingPattern: explicitRequestPattern(String.raw`(?:ulw|${MASS_KEYWORD})\s*research`, String.raw`(?:ulw|${MASS_NAME})[\s-]*research`),
   },
 ]
 
@@ -175,9 +199,7 @@ function handleInput(
   const alreadyLoaded = (skillName: string, expandedBlockPattern: RegExp): boolean =>
     skillName === commandSkillName || expandedBlockPattern.test(payload.text)
   const invoked = TARGETS.filter((target) => target.pattern.test(visible))
-  const relayed = LEADING_TAG.test(payload.text)
-  const binds = (target: SkillPointerTarget): boolean =>
-    !relayed && target.bindingPattern !== undefined && isRequest(visible, target.bindingPattern)
+  const binds = (target: SkillPointerTarget): boolean => target.bindingPattern?.test(visible) === true
   const massMode = invoked.some((target) => target.customType === MASS_ULW_CUSTOM_TYPE && binds(target))
   const pointers: SkillPointerMessage[] = invoked
     .filter((target) => !alreadyLoaded(target.skillName, target.expandedBlockPattern))
@@ -230,8 +252,9 @@ function skillPointer(target: SkillPointerTarget, sessionScope: string | null): 
   return `<omo-${target.skillName}-pointer>This message mentions ${target.skillName}. If the user of this session is asking to run ${target.skillName}, read the ${target.skillName} skill at ${skillsRoot}${target.skillName}/SKILL.md with the read tool and follow it: ${target.instruction}. If ${target.skillName} is only being discussed, quoted, or relayed from another session, ignore this pointer.${extra}</omo-${target.skillName}-pointer>`
 }
 
-// Only text the session's own user typed reaches this point (see handleInput), so the block states the
-// mode as settled and names the first reads and the dispatch shape that satisfy it.
+// Reached only for an invocation (see `bindingPattern`) in text that survived the quote, relay, negation,
+// identifier, child-session and extension filters, so the block states the mode as settled and names the
+// first reads and the dispatch shape that satisfy it.
 function skillMode(target: SkillPointerTarget, massMode: boolean, sessionScope: string | null): string {
   const skillsRoot = getBuiltinSkillsRoot()
   const extra = target.extra?.(sessionScope) ?? ""
@@ -249,22 +272,6 @@ function skillMode(target: SkillPointerTarget, massMode: boolean, sessionScope: 
   return `<${tag}>The user of this session invoked ${target.skillName} in their own words, so this turn runs in ${target.skillName} mode. This is binding: quoted, relayed, negated and delegated mentions never produce this block. Before any other tool call this turn, read ${reads} in full with the read tool, then follow the skill: ${target.instruction}.${dispatch}${extra}</${tag}>`
 }
 
-// Lane reports and relayed orders open with a bracketed tag ("[LEAD via duty -> lane, ...]", "[lane w46:p6P]").
-// The quote filter only masks the strict relay shapes, so a looser tag still reaches the keyword test; such
-// text may keep a conditional pointer but never binds a mode on another session's behalf.
-const LEADING_TAG = /^\s*\[[^\]\n]{2,120}\]/
-
-// A match is a request unless the sentence it sits in is a question: the first sentence terminator
-// after it is `?`. "How is this possible? Recreate it in 3D. mass ulw research" requests the mode;
-// "how does mass ulw differ from ulw-loop?" asks about it.
-function isRequest(visible: string, pattern: RegExp): boolean {
-  for (const match of visible.matchAll(new RegExp(pattern.source, "gi"))) {
-    const rest = visible.slice((match.index ?? 0) + match[0].length)
-    const terminator = /[.!?\n]/.exec(rest)
-    if (terminator?.[0] !== "?") return true
-  }
-  return false
-}
 
 function companionPointer(parent: SkillPointerTarget, companion: SkillCompanion, binding: boolean): string {
   const skillsRoot = getBuiltinSkillsRoot()
