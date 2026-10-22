@@ -16,9 +16,18 @@ export interface HandleSessionIdentity {
   readonly followReplace: (event: HostSessionReplaced) => HostSessionReplaced
 }
 
-export function createHandleSessionIdentity(initial: HostSessionIdentity): HandleSessionIdentity {
+/**
+ * `initialDurableId` is the id the open's own state read returned. When that read failed, the first
+ * heartbeat learns it instead, and `onDurableIdLearned` hears it so the record can be stamped then
+ * (#10873). Only a new or changed id is reported, so a steady heartbeat reports nothing.
+ */
+export function createHandleSessionIdentity(
+  initial: HostSessionIdentity,
+  initialDurableId?: string,
+  onDurableIdLearned?: (id: string) => void,
+): HandleSessionIdentity {
   let session = initial
-  let durableId: string | undefined
+  let durableId: string | undefined = initialDurableId
   return {
     current: () => session,
     durableId: () => durableId,
@@ -26,7 +35,9 @@ export function createHandleSessionIdentity(initial: HostSessionIdentity): Handl
       session = next
     },
     observeDurableId: (id) => {
+      if (typeof id !== "string" || id.length === 0 || id === durableId) return
       durableId = id
+      onDurableIdLearned?.(id)
     },
     followReplace: (event) => {
       session = { ...session, sessionPath: event.sessionFile }

@@ -109,6 +109,8 @@ export type HostSessionChildHandle = RpcChildHandle & {
   onParked(listener: (event: HostSessionParked) => void): () => void
   /** The host swapped the session under the live routing handle: the child follows the new transcript. */
   onReplaced(listener: (event: HostSessionReplaced) => void): () => void
+  /** A durable session id learned after spawn, because the open's own state read did not return one. */
+  onDurableSessionId(listener: (id: string) => void): () => void
   /** A reattach left a turn that was in flight at the loss running on the new port. */
   onTurnResumed(listener: () => void): () => void
   onSelfResumed(listener: () => void): () => void

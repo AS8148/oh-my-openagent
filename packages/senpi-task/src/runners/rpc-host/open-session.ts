@@ -1,3 +1,5 @@
+import { log } from "@oh-my-opencode/utils"
+
 import { asSenpiThinkingLevel } from "../../senpi/thinking-level"
 import { splitModelDecorators } from "../../senpi/explicit-pin"
 import type { HostSessionLiveness } from "./handle-port"
@@ -114,7 +116,12 @@ export async function openTaskHostSession(input: {
     return { ...opened, reportedModel: reportedEffectiveModel(effective, serviceTier), ...withDurableId(durableSessionId) }
   }
   if (freshOpen && input.client.getState !== undefined) {
-    const state = await input.client.getState().catch(() => undefined)
+    // Not fatal without a pin: the child still starts, and its first heartbeat learns the durable id,
+    // which the manager then stamps on the record (#10873). The failure is reported, never hidden.
+    const state = await input.client.getState().catch((error: unknown) => {
+      log("senpi-task host session open state read failed", { taskId: input.spec.task_id, error: String(error) })
+      return undefined
+    })
     const effective = state?.model
     const reported = effective === undefined ? {} : { reportedModel: reportedEffectiveModel(effective, state?.serviceTier) }
     return { ...opened, ...reported, ...withDurableId(state?.sessionId) }
@@ -122,8 +129,8 @@ export async function openTaskHostSession(input: {
   return opened
 }
 
-function withDurableId(sessionId: string | undefined): { readonly durableSessionId?: string } {
-  return sessionId === undefined || sessionId.length === 0 ? {} : { durableSessionId: sessionId }
+function withDurableId(sessionId: unknown): { readonly durableSessionId?: string } {
+  return typeof sessionId === "string" && sessionId.length > 0 ? { durableSessionId: sessionId } : {}
 }
 
 function sessionFailureReason(error: unknown): TaskStartFailureReason | undefined {

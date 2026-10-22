@@ -207,8 +207,20 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
   const replaceWatches = new Map<string, () => void>()
 
   function watchReplaced(taskId: string, handle: ManagedChildHandle, epoch: number): void {
-    const stop = handle.onReplaced?.((event) => replaceOwned(taskId, handle, epoch, event))
-    if (stop !== undefined) replaceWatches.set(taskId, stop)
+    const stopReplaced = handle.onReplaced?.((event) => replaceOwned(taskId, handle, epoch, event))
+    const stopDurable = handle.onDurableSessionId?.((id) => stampDurableId(taskId, handle, epoch, id))
+    replaceWatches.set(taskId, () => {
+      stopReplaced?.()
+      stopDurable?.()
+    })
+  }
+
+  // The open's own state read did not return the durable id, so the record took none at spawn; the
+  // first heartbeat that learns it stamps it now (#10873).
+  function stampDurableId(taskId: string, handle: ManagedChildHandle, epoch: number, id: string): void {
+    if (ownedRecord(ports, taskId, handle, epoch) === null) return
+    ports.store.mutate(taskId, (fresh) =>
+      fresh.child_session_id === id ? fresh : { ...fresh, child_session_id: id, updated_at: nowIso(ports.now) })
   }
 
   function release(taskId: string): void {
