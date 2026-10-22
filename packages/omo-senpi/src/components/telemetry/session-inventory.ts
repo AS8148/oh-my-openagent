@@ -14,12 +14,27 @@ export type OmoNativeInventory = {
   readonly defaultModel?: string
   readonly defaultProvider?: string
   readonly modelCount: number
+  /** Distinct providers usable this session: signed in (auth.json) or configured (models.json). */
   readonly providerCount: number
+  readonly signedInProviderCount: number
+  readonly configuredProviderCount: number
+  /** Sorted provider kinds; any id outside KNOWN_PROVIDERS is folded into one `custom`. */
   readonly providers: string
 }
 
+/** Subscription ids the engine renamed; installs that predate the rename still carry the old key. */
+const RETIRED_PROVIDER_IDS: Readonly<Record<string, string>> = Object.freeze({
+  "claude-sdk-oauth": "anthropic-subscription",
+  "openai-codex": "chatgpt-subscription",
+})
+
+const EMPTY: OmoNativeInventory = Object.freeze({
+  providerCount: 0, signedInProviderCount: 0, configuredProviderCount: 0, modelCount: 0, providers: "",
+})
+
 /**
- * Read `models.json` + `settings.json` from the agent home. Provider ids ship only when they are in
+ * Read `models.json` + `settings.json` (+ the top-level KEYS of `auth.json`, never a value) from the agent
+ * home. A provider counts when the user signed into it or configured it (#10887). Provider ids ship only when they are in
  * the known vocabulary, the default pair is masked, and no model name a user configured privately
  * leaves the machine. A missing or malformed inventory reports one diagnostic and yields zeroes -
  * inventory is a nice-to-have, never a reason to fail session telemetry.
@@ -44,16 +59,20 @@ export function readOmoNativeInventory(
       modelCount += modelsValue?.length ?? 0
     }
 
-    const providerIds = Object.keys(providers)
+    const configured = Object.keys(providers).map(canonicalProvider)
+    const signedIn = readSignedInProviders(agentDir, diagnostics)
+    const usable = [...new Set([...configured, ...signedIn])]
     const defaultProvider = stringProperty(settings, "defaultProvider")
     const defaultModel = stringProperty(settings, "defaultModel")
     const masked = defaultProvider !== undefined && defaultModel !== undefined
       ? maskProviderAndModel(defaultProvider, defaultModel)
       : undefined
     return {
-      providerCount: providerIds.length,
+      providerCount: usable.length,
+      signedInProviderCount: new Set(signedIn).size,
+      configuredProviderCount: new Set(configured).size,
       modelCount,
-      providers: providerIds.filter((id) => isKnownProvider(id)).sort().join(","),
+      providers: providerKinds(usable),
       ...(masked === undefined ? {} : {
         defaultProvider: masked.provider,
         defaultModel: masked.model_id,
@@ -61,8 +80,32 @@ export function readOmoNativeInventory(
     }
   } catch (error) {
     diagnostics?.({ event: "omo_native_inventory_read_failed", error, source: "omo-native-session" })
-    return { providerCount: 0, modelCount: 0, providers: "" }
+    return EMPTY
   }
+}
+
+/** auth.json provider keys; a missing file is no sign-in, a malformed one reports a diagnostic and counts none. */
+function readSignedInProviders(
+  agentDir: string,
+  diagnostics: ((input: OmoNativeInventoryDiagnostic) => void) | undefined,
+): string[] {
+  try {
+    return Object.keys(readObject(join(agentDir, "auth.json"))).map(canonicalProvider)
+  } catch (error) {
+    if (Reflect.get(Object(error), "code") !== "ENOENT") {
+      diagnostics?.({ event: "omo_native_inventory_read_failed", error, source: "omo-native-session" })
+    }
+    return []
+  }
+}
+
+function canonicalProvider(id: string): string {
+  return RETIRED_PROVIDER_IDS[id] ?? id
+}
+
+function providerKinds(ids: readonly string[]): string {
+  const known = ids.filter((id) => isKnownProvider(id)).sort()
+  return (known.length === ids.length ? known : [...known, "custom"]).join(",")
 }
 
 function readObject(path: string): Record<string, unknown> {

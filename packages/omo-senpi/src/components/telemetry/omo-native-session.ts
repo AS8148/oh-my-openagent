@@ -111,6 +111,8 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           cpu_count: osProvider.cpus().length,
           memory_bucket: memoryBucket(osProvider.totalmem()),
           provider_count: inventory.providerCount,
+          signed_in_provider_count: inventory.signedInProviderCount,
+          configured_provider_count: inventory.configuredProviderCount,
           model_count: inventory.modelCount,
           providers: inventory.providers,
           reason,

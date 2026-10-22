@@ -72,6 +72,8 @@ export const OMO_NATIVE_EVENT_SCHEMAS = Object.freeze({
     memory_bucket: enumProperty(["lt_8_gb", "8_15_gb", "16_31_gb", "32_63_gb", "64_plus_gb"] as const),
     model_count: NUMBER_PROPERTY,
     provider_count: NUMBER_PROPERTY,
+    configured_provider_count: NUMBER_PROPERTY,
+    signed_in_provider_count: NUMBER_PROPERTY,
     providers: STRING_PROPERTY,
     reason: enumProperty(["startup", "reload", "new", "resume", "fork"] as const),
     // Device-reported IANA zone. A timezone signal, never a country signal: countries share zones,

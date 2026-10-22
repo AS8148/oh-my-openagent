@@ -325,7 +325,9 @@ describe("OmO Native session telemetry", () => {
         memory_bucket: "64_plus_gb",
         model_count: 3,
         provider_count: 2,
-        providers: "anthropic",
+        signed_in_provider_count: 0,
+        configured_provider_count: 2,
+        providers: "anthropic,custom",
         reason: "fork",
       })
       expect(Object.keys(captured?.properties ?? {}).sort()).toEqual([
