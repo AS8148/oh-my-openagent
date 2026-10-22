@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { sep } from "node:path"
+import { tmpdir, userInfo } from "node:os"
+import { dirname, sep } from "node:path"
 
 import {
   createEventTelemetryClient,
@@ -247,9 +247,15 @@ export function automatedRunReason(env: TelemetryEnv): "ci" | "test_runner" | "e
 }
 
 function isInsideTempDir(path: string): boolean {
-  const roots = new Set([tmpdir(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"].map(realOrSelf))
+  const accountHome = realOrSelf(userInfo().homedir)
+  const contains = (root: string, target: string) => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep)
+  // A misconfigured temp dir (TMPDIR=/, or one that holds the account's real home) is not a temp root: it would
+  // silently turn off a real user's telemetry.
+  const roots = [tmpdir(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
+    .map(realOrSelf)
+    .filter((root) => dirname(root) !== root && !contains(root, accountHome))
   const target = realOrSelf(path)
-  return [...roots].some((root) => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep))
+  return roots.some((root) => contains(root, target))
 }
 
 function realOrSelf(path: string): string {

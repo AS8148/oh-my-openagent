@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { createHash } from "node:crypto"
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { tmpdir, userInfo } from "node:os"
 import { join } from "node:path"
 
 import { automatedRunReason, isOmoNativeTelemetryEnabled } from "./omo-native-session"
@@ -14,6 +14,7 @@ afterEach(() => {
 
 const ID_A = "a".repeat(64)
 const ID_B = "b".repeat(64)
+const homedirOf = () => userInfo().homedir
 const sha = (id: string) => createHash("sha256").update(id).digest("hex")
 
 function home(): string {
@@ -87,6 +88,21 @@ describe("telemetry is off by default for automated runs that cannot hold a stab
     const h = home()
     expect(automatedRunReason({ HOME: h, USERPROFILE: h })).toBe("ephemeral_home")
     expect(automatedRunReason(realHome)).toBeUndefined()
+  })
+
+  it("#given a misconfigured temp dir (TMPDIR=/ or one containing the real account home) #then a real user's home is NOT treated as temporary", () => {
+    const saved = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP }
+    try {
+      process.env.TMPDIR = "/"
+      process.env.TEMP = "/"
+      process.env.TMP = "/"
+      expect(automatedRunReason({ HOME: homedirOf(), USERPROFILE: homedirOf() })).toBeUndefined()
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+    }
   })
 
   it("#given an automated run #then the enablement gate is off, unless OMO_TELEMETRY_ALLOW_AUTOMATION opts back in", () => {
