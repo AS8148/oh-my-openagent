@@ -331,11 +331,11 @@ When an agent or category `model` string matches a catalog key, resolution (`mod
 
 ### Model profiles (Native harness)
 
-A model profile is a named, ordered model chain you pick by lane (Daily / Geeky × Normal / Heavy) instead of by model id. Two keys drive it (`schema/model-profile.ts`, `schema/config.ts`):
+A model profile is a named, ordered model chain you pick by lane (Daily / Obsessive × Normal / Heavy) instead of by model id. Two keys drive it (`schema/model-profile.ts`, `schema/config.ts`):
 
 | Key | Type | Notes |
 |-----|------|-------|
-| `model_profiles` | record<string, `{ display_name?: string; family?: "daily" \| "geeky"; tier?: "normal" \| "heavy"; models?: model entries }`> | Named chains. `models` entries are the same shape as a category chain: a bare string (`provider/model`, a bare model id, either with an optional `:level` reasoning suffix) or `{ model, reasoning?, ... }`. Fields are optional; the object is strict. `family` / `tier` are metadata only. |
+| `model_profiles` | record<string, `{ display_name?: string; caution?: string; family?: "daily" \| "geeky"; tier?: "normal" \| "heavy"; models?: model entries }`> | Named chains. `models` entries are the same shape as a category chain: a bare string (`provider/model`, a bare model id, either with an optional `:level` reasoning suffix) or `{ model, reasoning?, ... }`. Fields are optional; the object is strict. `family` / `tier` are metadata only. |
 | `model_profile` | string | Which chain drives the main session model. Either a lane id (`daily-normal`) or a literal `provider/model` (`anthropic/claude-opus-5-5`). A value containing `/` is a pin, so the pin and the profile share one key. |
 
 This is not the `profiles` key. `profiles.<name>` is a config-layer overlay activated by `OMO_PROFILE` (see [Profile activation](#profile-activation)): it changes which configuration is loaded. `model_profiles` and `model_profile` are ordinary base keys inside that configuration: they change which model the main session starts on. A `profiles.<name>` layer may set `model_profile` like any other key, which is the one way the two meet.
@@ -346,8 +346,8 @@ Four builtin lanes ship (`packages/omo-senpi/src/components/model-profile/builti
 |----|--------------|-------|
 | `daily-normal` | Daily · Normal | `claude-opus-5-5` (medium) -> `kimi-k3` (max) -> `glm-5.3` (max) |
 | `daily-heavy` | Daily · Heavy | `claude-fable-5-1` (xhigh) |
-| `geeky-normal` | Geeky · Normal | `gpt-6.1-sol-fast` (medium, ChatGPT subscription/API), then `gpt-6.1-sol` (medium, ChatGPT subscription/API), then `gpt-5.6-sol` (medium, ChatGPT subscription/API/Copilot/OpenCode) |
-| `geeky-heavy` | Geeky · Heavy | `gpt-6-astra` (high) |
+| `geeky-normal` | Obsessive · Normal | `gpt-6-astra` (medium, ChatGPT subscription/API/Copilot/OpenCode), then `gpt-6.1-sol-fast` (medium, ChatGPT subscription/API), then `gpt-6.1-sol` (medium, ChatGPT subscription/API), then `gpt-5.6-sol` (medium, ChatGPT subscription/API/Copilot/OpenCode) |
+| `geeky-heavy` | Obsessive · Heavy | `gpt-6-astra` (high) |
 
 GPT profiles use the same provider coverage as the corresponding task lanes:
 ChatGPT subscription takes priority over the `openai` API/proxy lane. A user
@@ -357,7 +357,7 @@ next user-listed candidate, while a bare model id may match any provider.
 
 What happens at session start (`packages/omo-senpi/src/components/model-profile/index.ts`, `resolve.ts`) in OmO Desktop and headless sessions. The interactive TUI does not apply `model_profile` yet; it keeps the model it started with.
 
-- `model_profile` unset: Daily · Normal is applied on a fresh session. When none of its rungs resolves on the connected providers, the first of Daily · Heavy, Geeky · Normal and Geeky · Heavy that does is applied instead (a ChatGPT-only setup starts on Geeky · Normal); when none resolves, the notice names Daily · Normal and the current model stays. The apply is not written back to config. Builtin rungs are served only by their ranked providers, so a gateway aggregator's copy of a model (for example OpenGateway's `anthropic/claude-opus-5-5`) is never picked. A saved `model_profile: "recommended"` (retired) starts this same default with one log line and is never reported as unknown, unless your own `model_profiles` defines `recommended`.
+- `model_profile` unset: Daily · Normal is applied on a fresh session. When none of its rungs resolves on the connected providers, the first of Daily · Heavy, Obsessive · Normal and Obsessive · Heavy that does is applied instead (a ChatGPT-only setup starts on Obsessive · Normal); when none resolves, the notice names Daily · Normal and the current model stays. The apply is not written back to config. Builtin rungs are served only by their ranked providers, so a gateway aggregator's copy of a model (for example OpenGateway's `anthropic/claude-opus-5-5`) is never picked. A saved `model_profile: "recommended"` (retired) starts this same default with one log line and is never reported as unknown, unless your own `model_profiles` defines `recommended`.
 - A literal `provider/model`: that exact model is looked up in the live registry and applied.
 - A profile id: the builtin table is overlaid with `model_profiles`, and the first rung the live registry can serve is applied. The notice names the lane, the pick, and the thinking level, for example `OmO Native: model profile "daily-normal" (Daily · Normal) selected anthropic-subscription/claude-opus-5-5 medium; mid-session fallback follows senpi's retry chains`.
 - A rung counts for a profile only when its first turn could use it, which is resolved at session start: the provider's stored credential (per account when the provider holds several and the engine may rotate them - a pinned account is the only one that counts; with `providers.<id>.credentials.rotation: false` in `models.json` or a runtime API key only the default credential counts) and then the model's own request configuration. A saved login that can no longer be refreshed is skipped with the whole provider; a model whose configured headers do not resolve is skipped alone, and its siblings stay eligible. The notice names each skipped provider or model and the recovery for the current surface (`re-authenticate <provider> in Provider authentication settings` on the desktop, `/login <provider>` in an interactive session for a headless run); the raw error is never shown, `details.authFailed` carries `{ provider, model, reason }` with `reason` one of `refresh`, `credentials`, `request`. Each attempted account costs one credential resolution, sequentially (a rejected refresh waits for the provider's exchange timeout). A literal `provider/model` is applied without this check.
