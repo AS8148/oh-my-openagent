@@ -302,6 +302,9 @@ describe("post-commit mirror push", () => {
   async function createMirror(): Promise<string> {
     const dir = await tempDir("memory-mirror-")
     await run(["git", "init", "--bare", "--quiet", "--initial-branch=main"], dir)
+    // A push into the mirror would otherwise start receive-pack's detached `gc --auto`, which outlives the test (#10945).
+    await run(["git", "config", "receive.autogc", "false"], dir)
+    await run(["git", "config", "gc.auto", "0"], dir)
     return dir
   }
 

@@ -60,6 +60,11 @@ export async function createRepo(options: Parameters<typeof installHooks>[1] = {
   await run(["git", "config", "user.email", "agent@omo.local"], dir)
   await run(["git", "config", "user.name", "OmO Agent"], dir)
   await run(["git", "config", "commit.gpgsign", "false"], dir)
+  // A commit otherwise starts `git maintenance run --auto --detach`: a process this support never spawned, so
+  // removeTempDirs cannot reap it, and it can still write into the repo while teardown removes it (#10945). The
+  // production memory repos turn auto-maintenance off for the same reason (#10177).
+  await run(["git", "config", "maintenance.auto", "false"], dir)
+  await run(["git", "config", "gc.auto", "0"], dir)
   installHooks(dir, options)
   return dir
 }
