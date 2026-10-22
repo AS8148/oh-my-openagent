@@ -26,9 +26,9 @@ test("cutover-target-deploy runs the same retain step before its web deploy", as
 
 test("web-deploy skips pushes to master: production deploys from dev only", async () => {
   const parsed = Bun.YAML.parse(await workflow("web-deploy.yml"))
-  const condition = parsed.jobs.deploy.if
-  expect(condition).toContain("github.repository == 'code-yeongyu/oh-my-openagent'")
-  expect(condition).toContain("github.ref != 'refs/heads/master'")
+  expect(parsed.jobs.deploy.if).toBe(
+    "github.repository == 'code-yeongyu/oh-my-openagent' && github.ref != 'refs/heads/master'",
+  )
   expect(parsed.jobs.deploy.environment.name).toBe("omo-production")
   expect(parsed.on.push.branches).toContain("dev")
 })
