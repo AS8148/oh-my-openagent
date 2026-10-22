@@ -91,6 +91,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
     env: options.env,
     corpusCache,
     projectCorpora: projectScope.recallCorpora,
+    projectSource: projectScope.sourceFor,
     drainQueued: (sessionId, context) => deliveryRef.current?.drainForPrompt(sessionId, context) ?? [],
     ...(options.logger === undefined ? {} : { logger: options.logger }),
   })

@@ -28,7 +28,7 @@ import { componentContext, memorySettings } from "./memory.test-support"
 import { createProjectMemoryScope } from "./project-memory-nudge"
 import { loadRecallStoreRuntime } from "./recall-store-runtime-loader"
 import { createMemoryRecallWiring, createSharedRecallCorpusCache } from "./recall-wiring"
-import { eventContext, userEntry } from "./recall-wiring.test-support"
+import { assistantEntry, eventContext, userEntry } from "./recall-wiring.test-support"
 import { rmSyncEfaultTolerant } from "./teardown.test-support"
 
 const roots: string[] = []
@@ -98,6 +98,7 @@ function world(options: { recall?: boolean; large?: boolean } = {}) {
     env: {},
     corpusCache: cache,
     projectCorpora: scope.recallCorpora,
+    projectSource: scope.sourceFor,
   })
   const touch = (path: string) =>
     pi.dispatch("tool_result", { type: "tool_result", toolName: "read", input: { path }, content: [] }, {
@@ -191,6 +192,20 @@ describe("project memory in Kibitzer recall (#10044)", () => {
 
     // then
     expect(collected?.candidates.map((candidate) => candidate.path)).toContain(w.childPath)
+  }, 30_000)
+
+  test("#given the transcript already names a child note's file path #when candidates are collected #then that note is not offered again", async () => {
+    // given - the model reads a project note at the file path the nudge shows, never at its `@project/` key.
+    const w = world()
+    await w.touch(join(w.child, "src", "invoice.ts"))
+    const source = join(w.childIdentity.paths.repo, "reference", "invoices.md")
+    const read = eventContext([assistantEntry("a1", `Reading ${source} first.`), userEntry("u1", "how do we reconcile invoices")], SESSION)
+
+    // when
+    const collected = await w.recall.collectCandidates(read)
+
+    // then
+    expect(collected?.candidates.map((candidate) => candidate.path) ?? []).not.toContain(w.childPath)
   }, 30_000)
 
   test("#given a project outside the session's working tree was touched #when candidates are collected #then its note never appears", async () => {

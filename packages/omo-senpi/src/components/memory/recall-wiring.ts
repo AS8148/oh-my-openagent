@@ -32,6 +32,7 @@ import type { MemoryIdentityContext } from "./context"
 import { resolveMemorySettings } from "./identity-runtime"
 import { loadRecallStoreRuntime } from "./recall-store-runtime-loader"
 import { withProjectDocuments } from "./project-memory-nudge"
+import { createProjectSourceMentions } from "./project-recall-mentions"
 import { projectDocumentsOf, selectWithProjectSeats, type ProjectRecallCorpus } from "./project-recall-seats"
 import { createRecallDrain, type PendingNudgesPort } from "./recall-drain"
 import { createTranscriptMentionIndex } from "./recall-transcript-mentions"
@@ -77,6 +78,8 @@ export interface MemoryRecallWiringOptions {
   readonly corpusCache?: RecallCorpusCache
   /** Each child project this session touched, its notes under `@project/` paths (#10044); ranked apart from the bound memory. */
   readonly projectCorpora?: (sessionId: string) => Promise<readonly ProjectRecallCorpus[]>
+  /** The readable file behind a qualified project note path; a note the transcript names there is not recalled again. */
+  readonly projectSource?: (sessionId: string, path: string) => string | undefined
   readonly ledgerFor?: (context: MemoryIdentityContext) => RecallLedger
   readonly pendingFor?: (context: MemoryIdentityContext) => PendingNudgesPort
   readonly drainQueued?: (sessionId: string, context: MemoryIdentityContext) => RecallNudge[]
@@ -128,6 +131,7 @@ const CHILD_SENTINELS = ["SENPI_MEMORY_REFLECTION", "SENPI_MEMORY_FACTS"] as con
 export function createMemoryRecallWiring(options: MemoryRecallWiringOptions): MemoryRecallWiring {
   const corpusCache = options.corpusCache ?? new RecallCorpusCache()
   const transcriptMentions = createTranscriptMentionIndex()
+  const projectSourceMentions = options.projectSource === undefined ? undefined : createProjectSourceMentions(options.projectSource)
   const createRepo = options.createRepo ?? defaultCreateRepo
   const ledgerFor = options.ledgerFor ?? ((context) => new RecallLedger(context.identityPaths.recallLedger))
   const pendingFor = options.pendingFor ?? ((context) => new PendingNudges(context.identityPaths.recallPending))
@@ -172,7 +176,8 @@ export function createMemoryRecallWiring(options: MemoryRecallWiringOptions): Me
     const repo = createRepo(context)
     const own = await corpusCache.load(repo)
     const projects = await options.projectCorpora?.(session.id) ?? []
-    const allDocuments = withProjectDocuments(own.documents, projects.length === 0 ? [] : projectDocumentsOf(projects))
+    const projectDocuments = projects.length === 0 ? [] : projectDocumentsOf(projects)
+    const allDocuments = withProjectDocuments(own.documents, projectDocuments)
     if (allDocuments.length === 0) return undefined
 
     // Raw entries include tool calls/results that the judge's text-only window omits. The index
@@ -183,6 +188,7 @@ export function createMemoryRecallWiring(options: MemoryRecallWiringOptions): Me
       entries: session.entries,
       documents: allDocuments,
     })
+    for (const path of projectSourceMentions?.excludedPaths(session.id, session.entries, projectDocuments) ?? []) excludePaths.add(path)
 
     const ledger = ledgerFor(context)
     const surfaced = await ledger.surfacedPaths(session.id)
