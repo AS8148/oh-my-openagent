@@ -91,10 +91,12 @@ export function createGitSyncRepo(options: GitSyncRepoOptions): SyncRepo {
         // reclaimed when its owner is proven dead, otherwise surfaced as StrandedGitLockError.
         const moved = await withStrandedGitLockRecovery(root, () => moveHead(commit, parent))
         if (!moved) continue
-        if (paths.length > 0) await withStrandedGitLockRecovery(root, () => run(["reset", "-q", "HEAD", "--", ...paths]))
         return commit
       }
       throw new SyncCommitError(`HEAD kept moving; the sync commit was not recorded after ${CAS_ATTEMPTS} attempts`)
+    },
+    async syncIndex(paths) {
+      if (paths.length > 0) await withStrandedGitLockRecovery(root, () => run(["reset", "-q", "HEAD", "--", ...paths]))
     },
     async hasSyncCommit(range) {
       if ((await head()) === null) return false
