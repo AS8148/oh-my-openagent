@@ -110,7 +110,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
-      const tool = createFactsRecordTool({ extractionPath: path })
+      const tool = createFactsRecordTool({ exchanges: [], extractionPath: path })
 
       // when
       const result = await tool.execute("placeholder", { scope: "project", person: { name: "", aliases: [] }, text: "The office uses rhwp for HWP files.", date: "2026-10-22" })
@@ -129,7 +129,7 @@ describe("facts record tool", () => {
     try {
       const path = join(root, "extraction.jsonl")
       await Bun.write(path, "")
-      const tool = createFactsRecordTool({ extractionPath: path })
+      const tool = createFactsRecordTool({ exchanges: [], extractionPath: path })
       await tool.execute("kept", { scope: "project", text: "The project uses Bun.", date: "2026-10-22" })
       const rejected = { scope: "project" as const, person: { name: "Mina", aliases: [] }, text: "Mina reviews releases.", date: "2026-10-22" }
 
