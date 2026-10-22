@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { ExtensionContext } from "@code-yeongyu/senpi"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DefaultResourceLoader, ModelRegistry, ModelRuntime, SessionManager, SettingsManager, createAgentSession, getMcpService } from "../senpi-test-runtime"
@@ -23,7 +23,10 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
   const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]))
   Object.assign(process.env, overrides)
   process.chdir(root)
-  const settingsManager = SettingsManager.inMemory({ defaultProjectTrust: "always" })
+  // The OmO extension is loaded whole; of the engine builtins only those this test needs: the MCP host the
+  // extension's servers attach to and the prewarm builtin. The goal builtin's session_start takes a goal-file
+  // lock (mkdir under this HOME) that a loaded run can finish after the HOME is removed (#9766 leak).
+  const settingsManager = SettingsManager.inMemory({ defaultProjectTrust: "always", enabledBuiltinExtensions: ["cache-keepalive", "mcp"] })
   const modelRuntime = ModelRuntime.createSync({ modelsPath: null })
   const registry = new ModelRegistry(modelRuntime)
   registry.registerProvider("prefix-fixture", {
@@ -88,6 +91,9 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+    // No builtin left a store under this HOME that could still be written after it is removed.
+    const homeEntries = readdirSync(root, { recursive: true }).map(String)
     rmSync(root, { recursive: true, force: true })
+    expect(homeEntries.filter((entry) => entry.includes("goal"))).toEqual([])
   }
 }, 30_000)
