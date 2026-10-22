@@ -85,15 +85,15 @@ const MASS_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw|meth)`
 //   (b) the prompt's first word is a verb from a fixed list and the keyword follows it directly, then
 //       the prompt ends or continues with a connector: "run mass ulw on the flaky suite",
 //       "use ulw-research to compare ...". The Korean form puts the keyword first and the verb right
-//       after it: "mass ulw 돌려", "ulw research 실행해", "mass ulw로 써줘".
+//       after it, ending the sentence: "mass ulw 돌려줘", "ulw research 실행해", "mass ulw로 써줘".
 // Everything else, keyword-first sentences, statements and questions included, keeps the conditional
 // pointer. Only image/paste placeholders may precede the request: a masked quote or relay never does.
 const BIND_LEAD = String.raw`^\s*(?:\[(?:Image|Pasted text)\b[^\]\n]*\]\s*)*`
 const BIND_VERB = String.raw`(?:run|start|use|do|execute)`
 const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,.!:;\n]|(?:to|on|for|with|and|now|here)\b))(?![^\n.!]*\?)`
-// The Korean verb must end in a request ending, then the prompt ends or a break follows, with no `?` in the
-// sentence: "mass ulw 돌려봤는데" (I ran it) and "돌려도 돼?" (may I run it?) are not requests.
-const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려|실행해|써)(?:봐줘|봐|줘|주세요|라)?(?=[\s.!,]|$)(?![^\n.!]*\?)`
+// The Korean form takes exactly one request ending, closing the sentence: a question ("돌려도 돼?") or a
+// past-tense or declarative ending ("돌렸어", "했는데", "하니") is not a request.
+const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려줘|실행해줘|써줘|해줘|돌려|실행해)(?=\s*(?:[.!\n]|$))`
 const bindingForms = (command: string, keyword: string): RegExp =>
   new RegExp(
     [

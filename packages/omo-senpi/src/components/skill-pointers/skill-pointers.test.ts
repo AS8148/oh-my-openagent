@@ -229,11 +229,14 @@ describe("omo-senpi skill-pointers component", () => {
         ["execute mass ulw research for this video", BOTH],
         ["use ulw-research to compare the gateway options", ["omo-ulw-research-mode"]],
         ["[Image #1] run mass ulw on this", MASS],
-        ["mass ulw 돌려", MASS],
+        // Korean: the keyword, then exactly one request ending closing the sentence.
+        ["mass ulw 돌려줘", MASS],
         ["mass ulw로 실행해줘", MASS],
-        ["ulw research 써줘", ["omo-ulw-research-mode"]],
-        ["mass ulw 돌려봐", MASS],
-        ["ulw research 실행해주세요.", ["omo-ulw-research-mode"]],
+        ["mass ulw 써줘.", MASS],
+        ["mass ulw 해줘", MASS],
+        ["mass ulw 돌려", MASS],
+        ["ulw research 실행해", ["omo-ulw-research-mode"]],
+        ["mass ulw research 돌려줘\n결과는 표로 정리", BOTH],
       ] as const) {
         expect({ text, modes: await modesOf(text) }).toEqual({ text, modes: [...modes] })
       }
@@ -266,6 +269,16 @@ describe("omo-senpi skill-pointers component", () => {
         ["mass ulw 돌려봤는데 안 되네", ["mass-ulw"]],
         ["mass ulw 써서 만든 결과가 이상해", ["mass-ulw"]],
         ["mass ulw 실행해줘?", ["mass-ulw"]],
+        ["mass ulw 돌렸어", ["mass-ulw"]],
+        ["mass ulw 했어", ["mass-ulw"]],
+        ["mass ulw 하나", ["mass-ulw"]],
+        ["mass ulw 하니", ["mass-ulw"]],
+        ["mass ulw 했는데 결과가 없어", ["mass-ulw"]],
+        ["mass ulw 돌려봐", ["mass-ulw"]],
+        ["mass ulw 실행해주세요", ["mass-ulw"]],
+        ["mass ulw 돌려줘서 고마워", ["mass-ulw"]],
+        // A bracketed prose arrow is not a relay header: the text keeps its pointer.
+        ["[step 1 -> step 2] run mass ulw on this migration", ["mass-ulw"]],
         // A verb that does not open the prompt, and 'in ...' forms.
         ["The suite is flaky. Run mass-ulw on it and report back", ["mass-ulw"]],
         ["please use mass-ulw to split the docs refresh", ["mass-ulw"]],
