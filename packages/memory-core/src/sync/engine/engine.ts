@@ -51,6 +51,8 @@ export class SyncEngine {
   private cancelPoll: (() => void) | null = null
   private cancelDebounce: (() => void) | null = null
   private failing: Failing | null = null
+  /** The failure a UI shows: set once a failure crosses its visibility threshold, cleared only by a successful cycle. */
+  private shown: Failing | null = null
 
   constructor(private readonly deps: EngineDeps) {
     this.journal = new SyncJournal(deps.repo.gitDir)
@@ -60,10 +62,10 @@ export class SyncEngine {
     return this.journal.state()
   }
 
-  /** What a UI shows: a failing cycle until one succeeds (an offline one once it persists), paused at a refused entry, else the last successful sync. */
+  /** What a UI shows: a shown failure until a cycle succeeds, paused at a refused entry, else the last successful sync. */
   async status(): Promise<EngineStatus> {
     // Failing outranks paused on purpose: while no cycle completes nothing moves at all, and a paused refusal shows again after the first good cycle.
-    if (this.failing !== null && isFailureShown(this.failing.failure.kind, this.failing.attempts)) return { kind: "failing", ...this.failing }
+    if (this.shown !== null) return { kind: "failing", ...this.shown }
     const s = await this.journal.state()
     if (s.paused !== null) return { kind: "paused", seq: s.paused.seq, code: s.paused.code }
     if (s.lastSyncedAt === null) return { kind: "never_synced" }
@@ -110,8 +112,9 @@ export class SyncEngine {
     const waiters = this.waiters.splice(0)
     void run.then(
       (report) => {
-        const shownBefore = this.shownFailureKind()
+        const shownBefore = this.shownKey()
         this.failing = null
+        this.shown = null
         this.announceIfChanged(shownBefore)
         for (const w of waiters) w.resolve(report)
         if (this.running === run) this.running = null
@@ -121,12 +124,16 @@ export class SyncEngine {
         }
       },
       (error: unknown) => {
-        const shownBefore = this.shownFailureKind()
+        const shownBefore = this.shownKey()
         const failure = describeSyncFailure(error)
         const previous = this.failing
-        this.failing = previous?.failure.kind === failure.kind
+        const failing = previous?.failure.kind === failure.kind
           ? { failure, since: previous.since, attempts: previous.attempts + 1 }
           : { failure, since: this.deps.clock.now(), attempts: 1 }
+        this.failing = failing
+        // A failure below its threshold (an offline blip) never replaces or clears what is shown: only a
+        // successful cycle clears a shown failure.
+        if (isFailureShown(failing.failure.kind, failing.attempts)) this.shown = failing
         this.announceIfChanged(shownBefore)
         for (const w of waiters) w.reject(error)
         if (this.running === run) this.running = null
@@ -140,18 +147,18 @@ export class SyncEngine {
     return run
   }
 
-  private shownFailureKind(): string | null {
-    const failing = this.failing
-    return failing !== null && isFailureShown(failing.failure.kind, failing.attempts) ? failing.failure.kind : null
+  /** The shown failure's kind and action: a new stranded lock path changes the action, so it is a change too. */
+  private shownKey(): string | null {
+    return this.shown === null ? null : `${this.shown.failure.kind}\n${this.shown.failure.action}`
   }
 
-  /** Tells the owner when the failure a UI shows appeared, changed kind or cleared; a repeat of the same one is silent. */
+  /** Tells the owner when the shown failure appears, changes or clears; a repeat of the same one is silent. */
   private announceIfChanged(shownBefore: string | null): void {
-    if (this.shownFailureKind() === shownBefore) return
+    if (this.shownKey() === shownBefore) return
     try {
       this.deps.onStatusChange?.()
     } catch (error) {
-      this.deps.log?.(`sync status listener failed: ${String(error)}`)
+      this.deps.log?.(`sync status listener failed: ${error instanceof Error ? error.message : "a non-Error value was thrown"}`)
     }
   }
 

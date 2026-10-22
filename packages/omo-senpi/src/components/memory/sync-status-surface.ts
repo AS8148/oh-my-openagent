@@ -31,8 +31,9 @@ export function createSyncStatusNotifier(read: SyncStatusReader): SyncStatusNoti
         if (previous !== undefined) ui?.notify(SYNC_RECOVERED_NOTICE, "info")
         return
       }
-      if (previous === failure.kind) return
-      announced.set(repo, failure.kind)
+      const key = `${failure.kind}\n${failure.action}`
+      if (previous === key) return
+      announced.set(repo, key)
       ui?.notify(`Memory sync is blocked. ${failure.reason} ${failure.action}`, "warning")
     },
   }

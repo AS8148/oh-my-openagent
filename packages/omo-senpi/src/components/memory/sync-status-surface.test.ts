@@ -35,3 +35,24 @@ test("#given sync transitions #when the notifier hears them #then the person get
     { message: SYNC_RECOVERED_NOTICE, level: "info" },
   ])
 })
+
+test("#given a stranded lock that moves to another path #when the notifier hears it #then the person gets a new notice naming the new path (omo #10637 review L1)", async () => {
+  const lockAt = (path: string): EngineStatus => ({
+    kind: "failing",
+    since: 0,
+    attempts: 1,
+    failure: { kind: "stranded_lock", paths: [path], reason: "A git lock blocks sync.", action: `Run /memory unlock ${path}.` },
+  })
+  let status: EngineStatus = lockAt("/m/.git/index.lock")
+  const notices: string[] = []
+  const notifier = createSyncStatusNotifier(async () => status)
+  const ui = { notify: (message: string) => notices.push(message) }
+  await notifier.changed("/repo", ui)
+  status = lockAt("/m/.git/HEAD.lock")
+  await notifier.changed("/repo", ui)
+  await notifier.changed("/repo", ui)
+  expect(notices).toEqual([
+    "Memory sync is blocked. A git lock blocks sync. Run /memory unlock /m/.git/index.lock.",
+    "Memory sync is blocked. A git lock blocks sync. Run /memory unlock /m/.git/HEAD.lock.",
+  ])
+})
