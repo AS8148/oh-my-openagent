@@ -221,6 +221,8 @@ describe("omo-senpi skill-pointers component", () => {
         ["/mass-ulw split the docs refresh into lanes", MASS],
         ["/mulw fix the flaky suite", MASS],
         ["/ulw-research compare the gateway options", ["omo-ulw-research-mode"]],
+        ["/mulw research the gateway options", BOTH],
+        ["run mass ulw on index.ts. Then report", MASS],
         ["run mass ulw on the flaky suite", MASS],
         ["Run mass-ulw", MASS],
         ["start mass ulw: fix the flaky suite", MASS],
@@ -263,6 +265,8 @@ describe("omo-senpi skill-pointers component", () => {
         ["Do mass ulw tests pass on dev?", ["mass-ulw"]],
         ["Use ulw research results from yesterday to write the summary", ["ulw-research"]],
         ["run mass ulw on dev?", ["mass-ulw"]],
+        ["run mass ulw on index.ts?", ["mass-ulw"]],
+        ["run mass ulw on v1.2 of the planner?", ["mass-ulw"]],
         // Korean questions and past-tense statements (#10822 round-5 review).
         ["mass ulw 돌려도 돼?", ["mass-ulw"]],
         ["mass ulw를 돌려볼까?", ["mass-ulw"]],

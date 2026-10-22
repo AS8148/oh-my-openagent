@@ -90,7 +90,8 @@ const MASS_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw|meth)`
 // pointer. Only image/paste placeholders may precede the request: a masked quote or relay never does.
 const BIND_LEAD = String.raw`^\s*(?:\[(?:Image|Pasted text)\b[^\]\n]*\]\s*)*`
 const BIND_VERB = String.raw`(?:run|start|use|do|execute)`
-const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,.!:;\n]|(?:to|on|for|with|and|now|here)\b))(?![^\n.!]*\?)`
+// A `.` ends the sentence only before whitespace or the end, so "run mass ulw on index.ts?" is still a question.
+const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,.!:;\n]|(?:to|on|for|with|and|now|here)\b))(?!(?:[^\n.!?]|\.(?!\s|$))*\?)`
 // The Korean form takes exactly one request ending, closing the sentence: a question ("돌려도 돼?") or a
 // past-tense or declarative ending ("돌렸어", "했는데", "하니") is not a request.
 const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려줘|실행해줘|써줘|해줘|돌려|실행해)(?=\s*(?:[.!\n]|$))`
@@ -139,7 +140,7 @@ const TARGETS: readonly SkillPointerTarget[] = [
     expandedBlockPattern: /<skill\s+name="ulw-research"/i,
     instruction: "orchestrate team-first maximum-saturation research",
     companions: [BROWSER_COMPANION, ULTIMATE_BROWSING_COMPANION],
-    bindingPattern: bindingForms("ulw-research", String.raw`(?:ulw|${MASS_KEYWORD})[\s-]*research`),
+    bindingPattern: bindingForms(String.raw`(?:ulw-research|(?:mass-ulw|mulw)\s+research)`, String.raw`(?:ulw|${MASS_KEYWORD})[\s-]*research`),
   },
 ]
 
@@ -154,7 +155,7 @@ type SenpiInputEventResult = { action: "continue" } | { action: "transform"; tex
 
 export function matchedSkillPointerNames(text: string): string[] {
   const visible = stripQuotedRegions(text)
-  return TARGETS.filter((target) => target.pattern.test(visible)).map((target) => target.skillName)
+  return TARGETS.filter((target) => target.pattern.test(visible) || target.bindingPattern?.test(visible) === true).map((target) => target.skillName)
 }
 
 export function createSkillPointersComponent(): OmoSenpiComponent {
@@ -272,7 +273,6 @@ function skillMode(target: SkillPointerTarget, massMode: boolean, sessionScope: 
         : ""
   return `<${tag}>The user of this session invoked ${target.skillName} in their own words, so this turn runs in ${target.skillName} mode. This is binding: the block is produced only for the skill's slash command or a prompt that opens with a request to run it. Before any other tool call this turn, read ${reads} in full with the read tool, then follow the skill: ${target.instruction}.${dispatch}${extra}</${tag}>`
 }
-
 
 function companionPointer(parent: SkillPointerTarget, companion: SkillCompanion, binding: boolean): string {
   const skillsRoot = getBuiltinSkillsRoot()
