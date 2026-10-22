@@ -6,6 +6,7 @@ import {
   type LaunchRungRejection,
   selectLaunchRungs,
 } from "./fable-55-launch"
+import { LATEST_MODEL_BY_FAMILY } from "./latest-models"
 import type { ModelCapabilitiesSnapshotEntry } from "./model-capabilities/types"
 
 // Names every launch value still at its placeholder (undefined), including any field added later.
@@ -99,4 +100,12 @@ describe("Fable 5.5 launch values", () => {
     expect(rejected).toEqual([])
   })
 
+})
+
+describe("Fable 5.5 launch order (#10800 review)", () => {
+  test("#given Fable 5.5 is not released #then the latest-model table does not name it yet: moving the table to 5.5 is the POST-launch cleanup step", () => {
+    // launchDefaultModelId() returns the table entry until FABLE_55_RELEASED flips; a table already at 5.5 would make the
+    // pre-launch default the gated 5.5 id, which every resolver skips. Flip the release first, then move the table.
+    expect(FABLE_55_RELEASED || LATEST_MODEL_BY_FAMILY.claudeFable !== FABLE_55_LAUNCH.id).toBe(true)
+  })
 })

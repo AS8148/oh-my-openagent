@@ -71,7 +71,11 @@ function recordLaunchRungRejection(rejection: LaunchRungRejection): void {
   )
 }
 
-/** The model that stands in for Fable 5.5 until it is released (its launch-day predecessor). */
+/**
+ * The model that stands in for Fable 5.5 until it is released (its launch-day predecessor): the table entry, which stays
+ * on 5.1 until after launch. Moving `LATEST_MODEL_BY_FAMILY.claudeFable` to 5.5 is the POST-launch cleanup step, after
+ * FABLE_55_RELEASED flips; fable-55-launch.test.ts fails if the table names 5.5 while the release is still gated.
+ */
 export const FABLE_55_PREDECESSOR = LATEST_MODEL_BY_FAMILY.claudeFable
 
 // Data-layer gate: every builtin chain, profile and default builds its 5.5 entries through these, so
