@@ -22,6 +22,7 @@ export interface FakeBunBehavior {
 	readonly lintExitCode?: number;
 	readonly formatWrites?: boolean;
 	readonly hangHelpUntil?: string;
+	readonly wrapperForks?: boolean;
 }
 
 export interface FakeBunCall {
@@ -50,7 +51,8 @@ export function createFakeBun(behavior: FakeBunBehavior): FakeBun {
 		if (process.platform === "win32") {
 			writeFileSync(path, `@"${process.execPath}" "${scriptPath}" %*\r\n`);
 		} else {
-			writeFileSync(path, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`);
+			const launch = `"${process.execPath}" "${scriptPath}" "$@"`;
+			writeFileSync(path, next.wrapperForks ? `#!/bin/sh\n${launch}\n` : `#!/bin/sh\nexec ${launch}\n`);
 			chmodSync(path, 0o755);
 		}
 	};

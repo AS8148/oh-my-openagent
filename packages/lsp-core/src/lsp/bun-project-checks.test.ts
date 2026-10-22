@@ -95,6 +95,15 @@ describe("bunHasCommand", () => {
 		expect(await bunHasCommand(bun.path, "lint")).toBe(true);
 	}, 30_000);
 
+	it("#given a bun wrapper that starts bun as a child #when the probe times out #then the probe settles near its deadline", async () => {
+		const release = join(createProject({}), "release");
+		const bun = createFakeBun({ commands: ["check", "lint"], hangHelpUntil: release, wrapperForks: true });
+		const started = performance.now();
+		expect(await bunHasCommand(bun.path, "lint", 500)).toBe(false);
+		expect(performance.now() - started).toBeLessThan(5_000);
+		writeFileSync(release, "");
+	}, 30_000);
+
 	it("#given the bun binary is replaced in place #when probed again #then the new binary is probed", async () => {
 		const bun = createFakeBun({ commands: ["check"] });
 		expect(await bunHasCommand(bun.path, "lint")).toBe(false);

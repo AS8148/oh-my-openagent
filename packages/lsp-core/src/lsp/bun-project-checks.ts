@@ -192,11 +192,13 @@ export function runBunCommand(bunPath: string, args: readonly string[], cwd: str
 			stdio: ["ignore", "pipe", "pipe"],
 			shell: prepared.shell,
 			windowsHide: true,
+			detached: process.platform !== "win32",
 		});
 		const stdout: Buffer[] = [];
 		const stderr: Buffer[] = [];
-		// On Windows a .cmd shim of bun runs through cmd.exe; killing only cmd.exe leaves bun holding the
-		// pipes, the child never closes, and an aborted probe outlives its timeout. Kill the whole tree.
+		// A wrapper (a .cmd shim through cmd.exe on Windows, a non-exec sh script elsewhere) leaves bun holding
+		// the pipes when only the direct child dies, so an aborted probe would outlive its timeout. Kill the
+		// whole tree: taskkill /T on Windows, the process group (hence `detached`) elsewhere.
 		const onAbort = () => killProcessTree(child, "SIGKILL");
 		signal?.addEventListener("abort", onAbort, { once: true });
 		child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
