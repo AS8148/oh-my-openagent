@@ -22,6 +22,14 @@ export type ContractHostOptions = {
   readonly keyRoot?: string
   /** Writes a line that is not JSON before every response, as a host's stray output would. */
   readonly strayLine?: boolean
+  /** Delays the get_protocol_info answer, to measure the client's total deadline. */
+  readonly protocolDelayMs?: number
+  /** Commands the host reads but never answers. */
+  readonly silent?: readonly string[]
+  /** An older host that refuses get_protocol_info itself. */
+  readonly refuseProtocolInfo?: boolean
+  /** Refuses any client proof with auth_failed (frame 4). */
+  readonly rejectProof?: boolean
 }
 export type ContractHost = {
   readonly socket: string
@@ -63,10 +71,13 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
     let authenticated = process.platform === "win32" || options.auth !== true
     let attached = false
     let expectedProof = ""
+    let released = false
     const respond = (frame: Frame, data: unknown = {}, error?: string, errorData?: Frame) => client.write(`${options.strayLine ? "not json\n" : ""}${JSON.stringify({
       id: frame.id, type: "response", command: frame.type, success: error === undefined,
       ...(error === undefined ? { data } : { error, errorCode: error, ...(errorData === undefined ? {} : { errorData }) }),
     })}\n`)
+    // Wire frames 4 and 5: an auth refusal is answered, then the host closes the connection.
+    const refuseAndClose = (frame: Frame, error: "auth_required" | "auth_failed") => { respond(frame, undefined, error); client.end() }
     client.setEncoding("utf8")
     client.on("data", (chunk: string) => {
       buffer += chunk
@@ -74,31 +85,36 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         const frame = JSON.parse(buffer.slice(0, newline)) as Frame
         buffer = buffer.slice(newline + 1)
         frames.push({ connection, frame })
+        if (options.silent?.includes(String(frame.type))) continue
+        if (frame.type === "get_protocol_info" && options.refuseProtocolInfo) { respond(frame, undefined, "unknown_command"); continue }
         if (frame.type === "get_protocol_info") {
           const capabilities = options.legacy ? [] : ["attach_session", "release_attachment", "release_caller_aware"]
           if (options.auth && process.platform !== "win32") {
             const clientNonce = (frame.auth as { client_nonce?: string } | undefined)?.client_nonce
             if (typeof clientNonce !== "string" || !/^[0-9a-f]{64}$/.test(clientNonce)) {
-              respond(frame, undefined, "auth_required")
+              refuseAndClose(frame, "auth_required")
               continue
             }
             const serverNonce = randomBytes(32).toString("hex")
             const proof = (label: string, first: string, second: string) =>
               createHmac("sha256", key).update([label, launchId, first, second].join("\n"), "utf8").digest("hex")
             expectedProof = proof("senpi-rpc-client", serverNonce, clientNonce)
-            respond(frame, { capabilities: [...capabilities, "socket_auth"], auth: {
+            const answer = { capabilities: [...capabilities, "socket_auth"], auth: {
               launch_id: launchId, server_nonce: serverNonce,
               server_proof: options.badProof ? "0".repeat(64) : proof("senpi-rpc-server", clientNonce, serverNonce),
-            } })
+            } }
+            if (options.protocolDelayMs === undefined) respond(frame, answer)
+            else setTimeout(() => respond(frame, answer), options.protocolDelayMs)
           } else respond(frame, { capabilities })
           continue
         }
         if (frame.type === "authenticate") {
-          authenticated = frame.client_proof === expectedProof && expectedProof !== ""
-          respond(frame, {}, authenticated ? undefined : "auth_failed")
+          authenticated = !options.rejectProof && frame.client_proof === expectedProof && expectedProof !== ""
+          if (authenticated) respond(frame, {})
+          else refuseAndClose(frame, "auth_failed")
           continue
         }
-        if (!authenticated) { respond(frame, undefined, "auth_required"); continue }
+        if (!authenticated) { refuseAndClose(frame, "auth_required"); continue }
         if (frame.type === "attach_session") {
           if (options.attachRefusal === "host_draining") respond(frame, undefined, "session_busy_lifecycle", { reason: "host_draining" })
           else if (options.attachRefusal === "session_not_attached") respond(frame, undefined, "session_not_attached", { reason: "no_connection" })
@@ -109,7 +125,8 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         }
         if (frame.type === "release_attachment") {
           if (options.afterMutation === "connection_lost") { client.destroy(); continue }
-          if (attached) respond(frame, { deferred: false })
+          if (released) respond(frame, undefined, "unknown_session")
+          else if (attached) respond(frame, { deferred: false })
           else respond(frame, undefined, "session_not_attached", { reason: "not_attached" })
           attached = false
           continue
@@ -146,6 +163,8 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         }
         mutations.push(frame)
         if (options.afterMutation === "detached") attached = false
+        // A released session leaves the host, so a later release_attachment names a session it no longer knows.
+        if (frame.type === "release_session") released = true
         respond(frame, frame.type === "set_model" ? { provider: frame.provider, id: frame.modelId }
           : frame.type === "release_session" ? { released: true, session_path: join(root, "session.jsonl"), attachments: 0, dropped: { deliveries: [], user_messages: [] } }
           : frame.type === "interrupt" ? { interrupted: true } : {})

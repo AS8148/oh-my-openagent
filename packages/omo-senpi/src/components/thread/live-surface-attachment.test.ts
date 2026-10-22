@@ -99,6 +99,35 @@ describe("thread RPC attachment refusals and release outcomes (wire contract v1.
       })
     })
   })
+
+  test("#given an older host that refuses get_protocol_info #when a mutation runs #then it is sent unfenced, as before", async () => {
+    await withContractHost({ legacy: true, refuseProtocolInfo: true }, async (host) => {
+      await Reflect.apply(surface(host).setSessionName, undefined, ["rpc-1", "renamed", "dur-selected"])
+      expect(host.mutations.map((frame) => frame.type)).toEqual(["set_session_name"])
+      expect(host.frames.some(({ frame }) => frame.type === "attach_session" || frame.type === "authenticate")).toBe(false)
+    })
+  })
+
+  test.skipIf(process.platform === "win32")("#given no key record for an enforcing host #when a read is refused auth_required #then the error names the endpoint and the key-root remedy", async () => {
+    await withContractHost({ auth: true, prepareRecord: (path) => { rmSync(path) } }, async (host) => {
+      await capturingLogs(async () => {
+        const refusal = await surface(host).getMessages("rpc-1").then(() => undefined, (error: unknown) => error)
+        expect((refusal as Error).message).toStartWith("auth_required:")
+        expect((refusal as Error).message).toContain(host.socket)
+        expect((refusal as Error).message).toContain("SENPI_RPC_KEY_ROOT")
+      })
+    })
+  })
+
+  test("#given a release_session that succeeded #when release_attachment answers unknown_session #then the hold counts as released and nothing is logged", async () => {
+    await withContractHost({ auth: true }, async (host) => {
+      await capturingLogs(async (lines) => {
+        expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: true })
+        expect(host.frames.some(({ frame }) => frame.type === "release_attachment")).toBe(true)
+        expect(lines.log.filter((line) => line.includes("release_attachment"))).toEqual([])
+      })
+    })
+  })
 })
 
 describe("thread RPC connection-local fenced mutations", () => {
