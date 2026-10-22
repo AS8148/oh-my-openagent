@@ -95,7 +95,9 @@ export function createMemoryPromptHandler(
     const context = options.resolveContext(session.id)
     if (context === undefined) return undefined
 
-    const repo = createRepo(context)
+    // One HEAD read per prompt: the nudge count, the soul notice and the pin all ask for it, and each read is
+    // a git process (about 10 ms). HEAD cannot move in a way this turn must see between those reads.
+    const repo = withHeadReadOnce(createRepo(context))
     // A preview (senpi's prompt-cache prewarm) keeps only the systemPrompt: compose at the revision the
     // real turn will use, and record no pin, consume no watermark, announce no repin. The notice inputs
     // only feed the message a preview discards, so their reads (a git log each) are skipped too.
@@ -227,4 +229,16 @@ function countCompactedMessages(branch: readonly unknown[]): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+/** `repo` with `head()` answered by one shared read; every other member is the repository's own. */
+function withHeadReadOnce(repo: GitMemoryRepo): GitMemoryRepo {
+  let head: Promise<string | null> | undefined
+  return new Proxy(repo, {
+    get(target, property, receiver) {
+      if (property === "head") return () => (head ??= target.head())
+      const value = Reflect.get(target, property, receiver)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
 }
