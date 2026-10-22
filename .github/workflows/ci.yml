@@ -336,8 +336,8 @@ jobs:
           $unfinished = Join-Path $diagnostics "trace2-unfinished"
           New-Item -ItemType Directory -Force -Path $unfinished | Out-Null
           Get-ChildItem (Join-Path $env:RUNNER_TEMP "git-trace2") -File -ErrorAction SilentlyContinue |
-            Where-Object { -not (Select-String -Path $_.FullName -Pattern '\|\s*atexit\s*\|' -Quiet) } |
-            Copy-Item -Destination $unfinished
+            Where-Object { -not (Select-String -Path $_.FullName -Pattern '\|\s*atexit\s*\|' -Quiet -ErrorAction Continue) } |
+            Copy-Item -Destination $unfinished -ErrorAction Continue
           # The upload can be refused (artifact quota), so the evidence is also printed here.
           foreach ($record in Get-ChildItem $diagnostics -Filter 'git-timeout-*.json' -File) {
             "::group::git timeout record $($record.Name)"

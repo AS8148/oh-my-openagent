@@ -8,13 +8,16 @@ import { join } from "node:path"
 // the stalled git's thread wait states on Windows) before git is signalled. Unset, nothing runs.
 export const GIT_TIMEOUT_DIAGNOSTICS_ENV = "OMO_GIT_TIMEOUT_DIAGNOSTICS_DIR"
 
+// The snapshot is synchronous and blocks this process for at most this long before git is signalled.
+// That cost exists only in diagnostics mode and only on an actual timeout, where the evidence matters more.
 const SNAPSHOT_TIMEOUT_MS = 15_000
 
 function processSnapshot(pid: number): string {
   const command = process.platform === "win32"
     ? spawnSync("powershell", ["-NoProfile", "-Command", [
       "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CreationDate,CommandLine | Format-Table -AutoSize -Wrap | Out-String -Width 400",
-      `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).Threads | Group-Object ThreadState,WaitReason -NoElement | Format-Table -AutoSize | Out-String`,
+      // Thread states for the git and every child it started, in case the stalled work runs in a child.
+      `@(${pid}) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid}" | ForEach-Object { $_.ProcessId }) | ForEach-Object { "threads of $_"; (Get-Process -Id $_ -ErrorAction SilentlyContinue).Threads | Group-Object ThreadState,WaitReason -NoElement | Format-Table -AutoSize | Out-String }`,
     ].join("; ")], { encoding: "utf8", timeout: SNAPSHOT_TIMEOUT_MS, windowsHide: true })
     : spawnSync("ps", ["-axo", "pid,ppid,stat,wchan,etime,command"], { encoding: "utf8", timeout: SNAPSHOT_TIMEOUT_MS })
   if (command.error) return `process snapshot failed: ${command.error.message}`
