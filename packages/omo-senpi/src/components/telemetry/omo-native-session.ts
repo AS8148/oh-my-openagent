@@ -28,7 +28,7 @@ import {
   getOmoNativeStateDir,
   hashSessionId,
 } from "./product-identity"
-import { readAccountInventory } from "./account-inventory"
+import { readConnectedAccounts } from "./account-inventory"
 import { readOmoNativeInventory, type OmoNativeInventoryDiagnostic } from "./session-inventory"
 import { resolveSessionModelRegistry } from "./session-model-registry"
 
@@ -102,7 +102,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
         }
 
         const inventory = readOmoNativeInventory(resolveAgentHome({ env }), options.diagnostics)
-        const accounts = readAccountInventory(resolveAgentHome({ env }), (options.now ?? new Date()).getTime(), options.diagnostics)
+        const connectedAccounts = readConnectedAccounts(resolveAgentHome({ env }), options.diagnostics)
         const reason = sessionReason(payload)
         const timezone = readTimeZone(options.timeZone)
         client.captureEvent("session_started", {
@@ -115,8 +115,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           provider_count: inventory.providerCount,
           signed_in_provider_count: inventory.signedInProviderCount,
           configured_provider_count: inventory.configuredProviderCount,
-          connected_account_count: accounts.connected,
-          concurrently_active_account_count: accounts.active,
+          connected_account_count: connectedAccounts,
           model_count: inventory.modelCount,
           providers: inventory.providers,
           reason,

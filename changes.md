@@ -1,10 +1,6 @@
-## 2026-10-22 - Telemetry counts how many accounts you hold per provider, and how many are in use (#10919)
+## 2026-10-22 - Telemetry counts how many accounts you have linked per provider (#10919)
 
-`session_started` gains two `kind:count` lists over the shipped provider kinds (any other provider is summed into `custom`; each count is capped at `10_plus`):
-- `connected_account_count`: how many accounts the engine holds per provider, the length of each provider's account list in `auth.json` (one for a single-credential provider). Nothing inside the list is read.
-- `concurrently_active_account_count`: how many of those accounts the engine's credential pool (`credential-pool-state.json`) shows as in use: distinct slots with an unexpired lease now, or a success in the last 5 hours (the subscription rate-limit window).
-
-`account-inventory.ts` (`packages/omo-senpi/src/components/telemetry`) reads both files, keeps only lengths and slot counts, and reports an unreadable file as the existing `omo_native_inventory_read_failed` diagnostic with a fixed message, never the parser's text. `docs/reference/senpi-telemetry.md` regenerates the schema block and adds the disclosure row.
+`session_started` gains `connected_account_count`: per provider kind, how many accounts the engine holds in `auth.json` (the length of each provider's account list, or one for a single-credential provider), whether or not they are used. It is a `kind:count` list over the shipped provider kinds; any other provider is summed into `custom`, and each count is capped at `10_plus`. Nothing inside the account list is read. `account-inventory.ts` (`packages/omo-senpi/src/components/telemetry`) reports an unreadable `auth.json` as the existing `omo_native_inventory_read_failed` diagnostic with a fixed message, never the parser's text. `docs/reference/senpi-telemetry.md` regenerates the schema block and adds the disclosure row.
 
 ## 2026-10-22 - Telemetry counts the providers you signed into, not only the ones you configured (#10887)
 

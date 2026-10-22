@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Anonymous usage stats now count how many accounts you hold per provider, and how many are in use.** `session_started` reports, per provider kind, how many accounts are signed in and how many of them the credential pool shows in use (a request in flight or a success in the last 5 hours), as capped counts only, never an account name, email or token ([#10919](https://github.com/code-yeongyu/oh-my-openagent/issues/10919)).
+**Anonymous usage stats now count how many accounts you have linked per provider.** `session_started` reports, per provider kind, how many accounts are linked (used or not), as capped counts only, never an account name, email or token ([#10919](https://github.com/code-yeongyu/oh-my-openagent/issues/10919)).
 
 **Anonymous usage stats now count the providers you signed into, not only the ones you configured.** `session_started` counted only the providers in `models.json`, so a user who just signed into a subscription or added an API key showed zero providers. It now counts both, reports `signed_in_provider_count` and `configured_provider_count` separately, and still sends only the names of providers OmO ships (anything else is `custom`), never an account, key or credential ([#10889](https://github.com/code-yeongyu/oh-my-openagent/pull/10889)).
 

@@ -28,7 +28,6 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `session_started` | `provider_count` | `number` | - |
 | `session_started` | `configured_provider_count` | `number` | - |
 | `session_started` | `connected_account_count` | `string` | - |
-| `session_started` | `concurrently_active_account_count` | `string` | - |
 | `session_started` | `signed_in_provider_count` | `number` | - |
 | `session_started` | `providers` | `string` | - |
 | `session_started` | `reason` | `string` | `startup`, `reload`, `new`, `resume`, `fork` |
@@ -420,7 +419,7 @@ How provider and model are masked differs, because they carry different privacy 
 | `provider` | Exported only when it is one of the providers OmO itself ships. Every other value, including a self-hosted or proxy gateway name, is exported as `custom`. |
 | `model_id` | Exported when it exactly matches OmO's published model vocabulary (`claude-opus-5`, `gpt-5.6-sol`, and the other public product names listed in the tables above), **regardless of which provider routed it**. Any other value is exported as `custom`. |
 | `providers`, `provider_count`, `signed_in_provider_count`, `configured_provider_count` (`session_started`) | The providers usable this session: the providers you signed into (read from the top-level provider names in `auth.json` only, never a credential, account id or key) united with the providers configured in `models.json`. `providers` lists only the kinds OmO ships, sorted; every other provider is folded into one `custom`. The counts are plain numbers. |
-| `connected_account_count`, `concurrently_active_account_count` (`session_started`) | How many accounts you hold per provider kind, and how many of them are in use: `connected` is the number of accounts the engine keeps for that provider in `auth.json` (the length of its account list; nothing inside it is read), `concurrently active` is how many of those accounts the engine's credential pool shows with a request in flight or a success in the last 5 hours. Both are `kind:count` lists over the provider kinds OmO ships (any other provider is summed into `custom`), each count capped at `10_plus`. No account name, email, token or id is sent. |
+| `connected_account_count` (`session_started`) | How many accounts you have linked per provider kind, whether or not they are used: the number of accounts the engine keeps for that provider in `auth.json` (the length of its account list; nothing inside it is read). A `kind:count` list over the provider kinds OmO ships (any other provider is summed into `custom`), each count capped at `10_plus`. No account name, email, token or id is sent. |
 
 The practical consequence: routing a publicly known model through an unknown gateway reports `custom/claude-opus-5` rather than `custom/custom`. The gateway name — the user-authored half — is still withheld, while the model id is a public product name shared by every user running that model. A model name you chose yourself is never exported.
 
