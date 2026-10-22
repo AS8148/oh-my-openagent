@@ -60,7 +60,8 @@ describe("one anonymous install id per user, independent of the agent home (#109
     writeId(join(h, ".omo", "omo-senpi", "omo-native", "install-id"), ID_B)
     expect(attribution({ HOME: h, USERPROFILE: h }).install_hash).toBe(sha(ID_B))
     expect(readFileSync(canonicalFile(h), "utf8").trim()).toBe(ID_B)
-    expect(statSync(canonicalFile(h)).mode & 0o777).toBe(0o600)
+    // Windows has no POSIX permission bits (stat reports 0o666): the 0600 mode is asserted only where it exists.
+    if (process.platform !== "win32") expect(statSync(canonicalFile(h)).mode & 0o777).toBe(0o600)
   })
 
   it("#given a flat-layout legacy id and the FIRST post-upgrade run under an orchestrator's agent-dir override #then the user's real legacy id is adopted, not a fresh one", () => {
@@ -95,6 +96,8 @@ describe("telemetry is off by default for automated runs that cannot hold a stab
     expect(automatedRunReason({ ...realHome, VITEST: "true" })).toBe("test_runner")
     expect(automatedRunReason({ ...realHome, JEST_WORKER_ID: "1" })).toBe("test_runner")
     const h = home()
+    // Diagnostic for the Windows CI run (#10935): the temp-dir comparison's inputs, as the OS reports them.
+    if (process.platform === "win32") console.log("[#10935 diag]", JSON.stringify({ tmpdir: tmpdir(), tmpdirReal: realpathSync(tmpdir()), tmpdirNative: realpathSync.native(tmpdir()), home: h, homeReal: realpathSync(h), homeNative: realpathSync.native(h), accountHome: userInfo().homedir }))
     expect(automatedRunReason({ HOME: h, USERPROFILE: h })).toBe("ephemeral_home")
     expect(automatedRunReason(realHome)).toBeUndefined()
   })
