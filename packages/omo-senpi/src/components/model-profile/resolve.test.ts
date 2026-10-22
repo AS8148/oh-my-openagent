@@ -168,7 +168,7 @@ describe("builtin chain routing", () => {
     const result = resolveModelProfile({
       active: "daily-normal",
       availableModels: ["my-claude-proxy/claude-opus-5-5"],
-      customProviders: ["my-claude-proxy"],
+      customProviders: [{ provider: "my-claude-proxy", modelIds: ["claude-opus-5-5"] }],
     })
 
     expect(result).toMatchObject({
@@ -183,7 +183,7 @@ describe("builtin chain routing", () => {
     const result = resolveModelProfile({
       active: "daily-normal",
       availableModels: ["my-claude-proxy/claude-opus-5-5", OPUS_SUBSCRIPTION],
-      customProviders: ["my-claude-proxy"],
+      customProviders: [{ provider: "my-claude-proxy", modelIds: ["claude-opus-5-5"] }],
     })
 
     expect(result).toMatchObject({ kind: "resolved", provider: "anthropic-subscription", modelId: "claude-opus-5-5" })
@@ -193,7 +193,10 @@ describe("builtin chain routing", () => {
     const result = resolveModelProfile({
       active: "daily-normal",
       availableModels: ["proxy-b/claude-opus-5-5", "proxy-a/claude-opus-5-5"],
-      customProviders: ["proxy-a", "proxy-b"],
+      customProviders: [
+        { provider: "proxy-a", modelIds: ["claude-opus-5-5"] },
+        { provider: "proxy-b", modelIds: ["claude-opus-5-5"] },
+      ],
     })
 
     expect(result).toMatchObject({ kind: "resolved", provider: "proxy-a", modelId: "claude-opus-5-5" })
@@ -203,7 +206,7 @@ describe("builtin chain routing", () => {
     const result = resolveModelProfile({
       active: "daily-normal",
       availableModels: ["opengateway/anthropic/claude-opus-5-5", "openrouter/claude-opus-5-5"],
-      customProviders: ["opengateway"],
+      customProviders: [{ provider: "opengateway", modelIds: ["claude-opus-5-5"] }],
     })
 
     expect(result.kind).toBe("unavailable")
