@@ -1,4 +1,5 @@
 import { DEFAULT_WRITE_FILE_SYSTEM, type OmoConfigEdit, type OmoConfigWriteFileSystem } from "../writer"
+import { chmodSync, copyFileSync, mkdirSync, renameSync } from "node:fs"
 
 export type MigrationEnvironment = {
   readonly HOME?: string
@@ -153,6 +154,16 @@ export const DEFAULT_MIGRATION_PROCESS: MigrationProcess = {
 
 export const DEFAULT_MIGRATION_FILE_SYSTEM: MigrationFileSystem = {
   ...DEFAULT_WRITE_FILE_SYSTEM,
+  mkdirSync: (path, options) => mkdirSync(path, { ...options, mode: 0o700 }),
+  // Renames preserve source modes, so secure a legacy copy before it enters the backup tree.
+  renameSync: (source, destination) => {
+    chmodSync(source, 0o600)
+    renameSync(source, destination)
+  },
+  copyFileSync: (source, destination) => {
+    chmodSync(source, 0o600)
+    copyFileSync(source, destination)
+  },
   removeIfContentsMatchSync: (path: string, expected: string): boolean => {
     if (!DEFAULT_WRITE_FILE_SYSTEM.existsSync(path)) return false
     if (DEFAULT_WRITE_FILE_SYSTEM.readFileSync(path, "utf-8") !== expected) return false

@@ -5,7 +5,7 @@ export const BrowserAutomationProviderSchema = z.enum([
   "dev-browser",
   "playwright-cli",
 ], {
-  error: (issue) => `Browser provider ${JSON.stringify(issue.input)} is no longer supported; use the built-in browser path: Bun.WebView / playwright-core scripts`,
+  error: "Unsupported browser provider; use the built-in browser path: Bun.WebView / playwright-core scripts",
 })
 
 export const BrowserAutomationConfigSchema = z.object({

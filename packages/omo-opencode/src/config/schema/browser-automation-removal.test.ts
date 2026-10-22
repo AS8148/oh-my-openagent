@@ -18,7 +18,7 @@ describe("browser provider removal", () => {
     if (result.success) throw new Error("Removed provider was accepted")
     expect(result.error.issues).toMatchObject([{
       code: "invalid_value",
-      message: `Browser provider ${JSON.stringify(input)} is no longer supported; ${replacement}`,
+      message: `Unsupported browser provider; ${replacement}`,
     }])
   })
 
@@ -32,7 +32,7 @@ describe("browser provider removal", () => {
     if (result.success) throw new Error("Removed provider was accepted")
     expect(result.error.issues).toMatchObject([{
       path: ["browser_automation_engine", "provider"],
-      message: `Browser provider ${JSON.stringify(removedProvider)} is no longer supported; ${replacement}`,
+      message: `Unsupported browser provider; ${replacement}`,
     }])
   })
 

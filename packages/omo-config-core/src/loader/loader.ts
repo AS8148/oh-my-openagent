@@ -82,10 +82,9 @@ function readConfigSource(
   let content: string
   try {
     content = fileSystem.readFileSync(path, "utf-8")
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+  } catch {
     return {
-      diagnostics: [{ kind: "read", message: `Failed to read ${path}: ${message}`, path }],
+      diagnostics: [{ kind: "read", message: `Failed to read ${path}`, path }],
       source: { exists: true, loaded: false, path, scope },
     }
   }

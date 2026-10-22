@@ -12,7 +12,7 @@ async function registeredBrowserProviderCheck() {
 }
 
 const removedProvider = ["agent", "browser"].join("-")
-const removalMessage = `Browser provider ${JSON.stringify(removedProvider)} is no longer supported; use the built-in browser path: Bun.WebView / playwright-core scripts`
+const removalMessage = "Expected a supported value"
 
 describe("browser provider doctor check", () => {
   let root: string

@@ -62,7 +62,7 @@ export const DEFAULT_WRITE_FILE_SYSTEM: OmoConfigWriteFileSystem = {
   renameSync,
   unlinkSync,
   writeFileExclusiveSync: (path: string, content: string): void => {
-    writeFileSync(path, content, { encoding: "utf-8", flag: "wx" })
+    writeFileSync(path, content, { encoding: "utf-8", flag: "wx", mode: 0o600 })
   },
   writeFileSync,
 }
@@ -75,7 +75,6 @@ export class OmoConfigWriteError extends Error {
     readonly operation: "backup" | "parse" | "read" | "write",
     cause: unknown,
   ) {
-    const detail = cause instanceof Error ? cause.message : String(cause)
-    super(`Failed to ${operation} omo config at ${path}: ${detail}`, { cause })
+    super(`Failed to ${operation} omo config at ${path}`, { cause })
   }
 }
