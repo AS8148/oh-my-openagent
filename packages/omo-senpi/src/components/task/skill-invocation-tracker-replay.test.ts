@@ -191,6 +191,29 @@ describe("createSkillInvocationTracker - replay on session_start (omo#10378 2b)"
     expect(tracker.stateFor("sess-live").hasUserRequested("ulw-plan")).toBe(true)
   })
 
+  test("#given a reload handoff holding a typed request #when the rebuilt tracker replays an unsourced transcript #then the handed-off request is kept", async () => {
+    // given
+    const live = new FakeExtensionAPI()
+    createSkillInvocationTracker(live)
+    const liveCtx = { sessionManager: { getSessionId: () => "sess-handoff" } }
+    await live.dispatch("input", { type: "input", text: "please ulw-plan this", source: "interactive" }, liveCtx)
+    await live.dispatch("session_shutdown", { type: "session_shutdown", reason: "reload" }, liveCtx)
+    const rebuilt = new FakeExtensionAPI()
+    const tracker = createSkillInvocationTracker(rebuilt)
+
+    // when
+    await rebuilt.dispatch(
+      "session_start",
+      { type: "session_start", reason: "reload" },
+      resumedCtx("sess-handoff", [user("please ulw-plan this"), toolCall("w9", "write", { path: PLAN }), toolResult("w9", "write")]),
+    )
+
+    // then
+    const state = tracker.stateFor("sess-handoff")
+    expect(state.hasUserRequested("ulw-plan")).toBe(true)
+    expect(state.planArtifactReferences().map((ref) => ref.count)).toEqual([1])
+  })
+
   test("#given session_start fires twice for one session #when replayed #then touch counts do not double", async () => {
     // given
     const pi = new FakeExtensionAPI()

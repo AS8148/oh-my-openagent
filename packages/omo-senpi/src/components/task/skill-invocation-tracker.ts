@@ -1,6 +1,13 @@
 import type { SkillInvocationState } from "@oh-my-opencode/senpi-task"
 
 import type { SenpiExtensionAPI } from "../../extension/types"
+import {
+  depositSessionHandoff,
+  discardSessionHandoff,
+  type PlanTouch,
+  shutdownKeepsSession,
+  takeSessionHandoff,
+} from "./skill-invocation-handoff"
 
 // Session-scoped state feeding the senpi-task invocation gate for plan-gated agents (plan-consultant/plan-reviewer).
 // Three observation channels, deliberately separated because they carry different trust levels:
@@ -88,7 +95,8 @@ const PLAN_ARTIFACT_PATH_TOOLS: ReadonlySet<string> = new Set(["read", "write", 
 export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvocationTracker {
   const invokedBySession = new Map<string, Set<string>>()
   const requestedBySession = new Map<string, Set<string>>()
-  const planTouchesBySession = new Map<string, Map<string, { count: number; lastTouchedAt: number }>>()
+  const planTouchesBySession = new Map<string, Map<string, PlanTouch>>()
+  const adoptedSessions = new Set<string>()
   let planTouchSequence = 0
 
   const record = (target: Map<string, Set<string>>, sessionId: string | undefined, skill: string | undefined): void => {
@@ -99,6 +107,32 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
       return
     }
     target.set(sessionId, new Set([skill]))
+  }
+
+  // Adopt the session's handoff once per session per generation, before this generation records
+  // anything for it, so the rebuilt tracker starts from what the retired one observed.
+  const adoptHandoff = (sessionId: string | undefined): void => {
+    if (sessionId === undefined || adoptedSessions.has(sessionId)) return
+    adoptedSessions.add(sessionId)
+    const handoff = takeSessionHandoff(sessionId)
+    if (handoff === undefined) return
+    for (const skill of handoff.invoked) record(invokedBySession, sessionId, skill)
+    for (const skill of handoff.requested) record(requestedBySession, sessionId, skill)
+    if (handoff.planTouches.length > 0) {
+      const touches = planTouchesBySession.get(sessionId) ?? new Map<string, PlanTouch>()
+      for (const [path, touch] of handoff.planTouches) if (!touches.has(path)) touches.set(path, { ...touch })
+      planTouchesBySession.set(sessionId, touches)
+    }
+    planTouchSequence = Math.max(planTouchSequence, handoff.planTouchSequence)
+  }
+
+  const depositHandoff = (sessionId: string): void => {
+    depositSessionHandoff(sessionId, {
+      invoked: [...(invokedBySession.get(sessionId) ?? [])],
+      requested: [...(requestedBySession.get(sessionId) ?? [])],
+      planTouches: [...(planTouchesBySession.get(sessionId) ?? [])].map(([path, touch]) => [path, { ...touch }] as const),
+      planTouchSequence,
+    })
   }
 
   const observeToolResult = (event: ToolResultEvent, sessionId: string | undefined): void => {
@@ -149,9 +183,27 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
     planTouchesBySession.delete(sessionId)
   }
 
+  const snapshot = (sessionId: string): Snapshot => ({
+    invoked: [...(invokedBySession.get(sessionId) ?? [])],
+    requested: [...(requestedBySession.get(sessionId) ?? [])],
+    planTouches: [...(planTouchesBySession.get(sessionId) ?? [])].map(([path, touch]) => [path, { ...touch }] as const),
+  })
+
+  const restore = (sessionId: string, kept: Snapshot): void => {
+    for (const skill of kept.invoked) record(invokedBySession, sessionId, skill)
+    for (const skill of kept.requested) record(requestedBySession, sessionId, skill)
+    if (kept.planTouches.length === 0) return
+    const touches = planTouchesBySession.get(sessionId) ?? new Map<string, PlanTouch>()
+    for (const [path, touch] of kept.planTouches) if (!touches.has(path)) touches.set(path, touch)
+    planTouchesBySession.set(sessionId, touches)
+  }
+
   pi.on("tool_result", (payload, eventCtx) => {
     const event = asToolResultEvent(payload)
-    if (event !== undefined) observeToolResult(event, extractSessionId(eventCtx))
+    if (event === undefined) return
+    const sessionId = extractSessionId(eventCtx)
+    adoptHandoff(sessionId)
+    observeToolResult(event, sessionId)
   })
 
   pi.on("input", (payload, eventCtx) => {
@@ -160,7 +212,9 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
     // Extension-injected text is code the model can drive; it must never arm a gate that exists to
     // prove a HUMAN asked. An absent source means a plain host that only delivers user input.
     if (event.source === AGENT_MANUFACTURABLE_INPUT_SOURCE) return
-    observeUserInput(event.text, extractSessionId(eventCtx))
+    const sessionId = extractSessionId(eventCtx)
+    adoptHandoff(sessionId)
+    observeUserInput(event.text, sessionId)
   })
 
   // A restarted or restored session has no live events for its past turns, so its own transcript is
@@ -173,6 +227,12 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
     // A host that cannot read the branch has nothing to replay; keep the live state rather than wipe it.
     const persisted = persistedMessages(eventCtx)
     if (persisted === undefined) return
+    // Same-process transitions hand state over (adoptHandoff); on an engine that records no input
+    // source, that handoff can hold a typed request the transcript cannot prove. Keep it: snapshot the
+    // live state, rebuild from the transcript, then union the snapshot back (touch counts from the
+    // transcript win, since every live touch is also persisted).
+    adoptHandoff(sessionId)
+    const kept = snapshot(sessionId)
     forget(sessionId)
     const calls = new Map<string, { readonly name: string; readonly args: unknown }>()
     for (const { message, inputSource } of persisted) {
@@ -195,26 +255,34 @@ export function createSkillInvocationTracker(pi: SenpiExtensionAPI): SkillInvoca
         if (event !== undefined) observeToolResult(event, sessionId)
       }
     }
+    restore(sessionId, kept)
   })
 
-  pi.on("session_shutdown", (_payload, eventCtx) => {
+  pi.on("session_shutdown", (payload, eventCtx) => {
     const sessionId = extractSessionId(eventCtx)
-    if (sessionId !== undefined) forget(sessionId)
+    if (sessionId === undefined) return
+    if (shutdownKeepsSession(payload)) depositHandoff(sessionId)
+    else discardSessionHandoff(sessionId)
+    forget(sessionId)
+    adoptedSessions.delete(sessionId)
   })
 
   return {
-    stateFor: (sessionId) => ({
-      hasInvoked: (skill) => invokedBySession.get(sessionId)?.has(skill) ?? false,
-      hasUserRequested: (skill) => requestedBySession.get(sessionId)?.has(skill) ?? false,
-      hasPlanArtifact: () => (planTouchesBySession.get(sessionId)?.size ?? 0) > 0,
-      planArtifactReferences: () => {
-        const touches = planTouchesBySession.get(sessionId)
-        if (touches === undefined) return []
-        return [...touches.entries()]
-          .map(([path, touch]) => ({ path, count: touch.count, lastTouchedAt: touch.lastTouchedAt }))
-          .sort((a, b) => b.count - a.count || b.lastTouchedAt - a.lastTouchedAt)
-      },
-    }),
+    stateFor: (sessionId) => {
+      adoptHandoff(sessionId)
+      return {
+        hasInvoked: (skill) => invokedBySession.get(sessionId)?.has(skill) ?? false,
+        hasUserRequested: (skill) => requestedBySession.get(sessionId)?.has(skill) ?? false,
+        hasPlanArtifact: () => (planTouchesBySession.get(sessionId)?.size ?? 0) > 0,
+        planArtifactReferences: () => {
+          const touches = planTouchesBySession.get(sessionId)
+          if (touches === undefined) return []
+          return [...touches.entries()]
+            .map(([path, touch]) => ({ path, count: touch.count, lastTouchedAt: touch.lastTouchedAt }))
+            .sort((a, b) => b.count - a.count || b.lastTouchedAt - a.lastTouchedAt)
+        },
+      }
+    },
   }
 }
 
@@ -228,6 +296,12 @@ function extractSessionId(eventCtx: unknown): string | undefined {
   if (typeof getSessionId !== "function") return undefined
   const id: unknown = getSessionId.call(eventCtx["sessionManager"])
   return typeof id === "string" && id.length > 0 ? id : undefined
+}
+
+type Snapshot = {
+  readonly invoked: readonly string[]
+  readonly requested: readonly string[]
+  readonly planTouches: readonly (readonly [string, PlanTouch])[]
 }
 
 type PersistedMessage = { readonly message: Record<string, unknown>; readonly inputSource: unknown }
