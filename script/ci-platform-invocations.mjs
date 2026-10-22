@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs"
 // (`scheduler-frontier.ts` for `scheduler.test.ts`) stay covered while an
 // unrelated `schedulers.ts` does not.
 const platformCondition = /runner\.os == 'Windows'|runner\.os == 'macOS'|matrix\.suite == 'platform'/
-const pathToken = /(?<![\w/.-])(?:\.\/)?((?:packages|script|\.github|bin|crates)\/[A-Za-z0-9_.@/-]*[A-Za-z0-9_-]|bunfig[\w.-]*\.toml)/g
+const pathToken = /(?<=(?:^|[^\w/.$-])(?:\$\{?\w+\}?\/|\}\}\/)?)(?:\.\/)?((?:packages|script|\.github|bin|crates)\/[A-Za-z0-9_.@/-]*[A-Za-z0-9_-]|bunfig[\w.-]*\.toml)/g
 const jobHeader = /^ {2}[A-Za-z0-9_-]+:\s*$/
 const literalPlatformRunner = /^ {4}runs-on:\s*["']?(?:macos|windows)[\w.-]*["']?\s*$/
 const ciScript = /^\.github\/scripts\/[\w.-]+\.sh$/

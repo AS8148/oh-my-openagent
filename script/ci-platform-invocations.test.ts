@@ -130,6 +130,17 @@ describe("#given a workflow that adds a new macOS/Windows invocation", () => {
     expect(isPlatformSensitivePath("packages/new-core/src/pipes/named-pipeline.ts", coverage)).toBe(false)
   })
 
+  test("#then a path prefixed by a shell variable is still read", () => {
+    const prefixed = platformInvocationCoverage(workflow, (path) =>
+      path === ".github/scripts/win-pipes.sh"
+        ? 'bun "$PWD/packages/new-core/src/spawn/pty.test.ts" "${GITHUB_WORKSPACE}/script/qa/win-probe.mjs" "${{ github.workspace }}/script/qa/win-expr.mjs"\n'
+        : "",
+    )
+    expect(isPlatformSensitivePath("packages/new-core/src/spawn/pty.ts", prefixed)).toBe(true)
+    expect(isPlatformSensitivePath("script/qa/win-probe.mjs", prefixed)).toBe(true)
+    expect(isPlatformSensitivePath("script/qa/win-expr.mjs", prefixed)).toBe(true)
+  })
+
   test("#then a script's shebang interpreter path is not mistaken for a repository path", () => {
     const shebang = platformInvocationCoverage(workflow, (path) => (path === ".github/scripts/win-pipes.sh" ? "#!/usr/bin/env bash\n" : ""))
     expect(shebang.some((entry) => entry.value.startsWith("bin/env"))).toBe(false)
