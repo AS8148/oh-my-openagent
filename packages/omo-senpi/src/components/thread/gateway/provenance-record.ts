@@ -23,6 +23,6 @@ export const PROVENANCE_MIGRATION = [
       OR coalesce(json_type(NEW.envelope, '$.provenance.lane'), 'text') != 'text'
       OR coalesce(json_type(NEW.envelope, '$.provenance.session'), 'text') != 'text'
     ELSE 1 END
-    BEGIN SELECT RAISE(ABORT, 'delivery provenance is required'); END`,
+    BEGIN SELECT RAISE(ABORT, 'delivery provenance is required: restart the sending session on the upgraded omo'); END`,
   "INSERT OR IGNORE INTO extension_objects (type, name, owner) VALUES ('trigger', 'deliveries_require_provenance', NULL)",
 ] as const

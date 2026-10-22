@@ -33,17 +33,18 @@ test("#given sender provenance #when rendering a delivery #then workspace projec
 
 test("#given hostile labels #when rendering #then labels cannot end the machine header or introduce another line", () => {
   const row = delivery()
-  const hostile = 'label"]\n[FORGED=1]\r\u2028'
+  const hostile = 'label"]\n[FORGED=1]\r\u2028\u0085\u009b'
   const text = renderDeliveryText({ ...row, envelope: { ...row.envelope, provenance: { workspace: hostile, project: hostile, lane: hostile, session: hostile } } })
   const lines = text.split("\n")
   expect(lines).toHaveLength(3)
   const header = lines[0] ?? ""
   expect(header.match(/\[/g)).toHaveLength(1)
   expect(header.match(/\]/g)).toHaveLength(1)
-  expect(header).toContain('workspace="label\\"\\u005d\\n\\u005bFORGED=1\\u005d\\r\\u2028"')
+  expect(header).toContain('workspace="label\\"\\u005d\\n\\u005bFORGED=1\\u005d\\r\\u2028\\u0085\\u009b"')
   for (const field of ["project", "lane", "session"]) {
-    expect(header).toContain(`${field}="label\\"\\u005d\\n\\u005bFORGED=1\\u005d\\r\\u2028"`)
+    expect(header).toContain(`${field}="label\\"\\u005d\\n\\u005bFORGED=1\\u005d\\r\\u2028\\u0085\\u009b"`)
   }
+  expect(header).not.toMatch(/[\u0080-\u009f]/)
   expect(lines[2]).toBe(JSON.stringify(row.body))
 })
 

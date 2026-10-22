@@ -17,6 +17,8 @@ export type ProvenanceRuntime = {
    * loader carries the schema library, which the standalone thread SDK build must not inline.
    */
   readonly loadWorkspaces?: (cwd: string, env: Readonly<Record<string, string | undefined>>) => ProvenanceWorkspaces
+  /** Where a degraded classification is reported (git or the config table failed); the send itself goes on. */
+  readonly onWarning?: (message: string) => void
   /** A runtime IO seam, not an agent/tool argument. */
   readonly gitRemote?: (cwd: string) => Promise<string | undefined>
 }
@@ -45,31 +47,35 @@ function insideRepository(cwd: string, env: Readonly<Record<string, string | und
 
 // The sender's own environment drives git (URL rewrites, GIT_CONFIG_*), so the origin is read the way the sender sees it.
 // "No repository" and "no origin" are decided from structure and git's exit code (2: no such remote), never from its
-// message text, which a translated git prints in the sender's language; any other git failure (a broken config, a
-// timeout) is surfaced instead of silently classifying the sender as unclassified.
-function originRemote(cwd: string, env: Readonly<Record<string, string | undefined>>): Promise<string | undefined> {
+// message text, which a translated git prints in the sender's language. Provenance is metadata on the message, so any
+// other git failure (a refused ownership check, a broken config, the timeout) is reported and the sender is
+// classified without git: it never fails the send.
+function originRemote(cwd: string, env: Readonly<Record<string, string | undefined>>, warn: (message: string) => void): Promise<string | undefined> {
   if (!insideRepository(cwd, env)) return Promise.resolve(undefined)
-  return new Promise((done, fail) => {
+  return new Promise((done) => {
     execFile("git", ["remote", "get-url", "origin"], { cwd, env, encoding: "utf8", windowsHide: true, timeout: 1_000 }, (error, stdout, stderr) => {
       if (error === null) return done(stdout.trim())
       const missingGit = "code" in error && error.code === "ENOENT"
       const noOrigin = error.code === 2
-      if (missingGit || noOrigin) return done(undefined)
-      fail(new Error(`reading the sender's git origin failed: ${stderr.trim() || error.message}`))
+      if (missingGit) warn("git is not installed for the sender, so git does not classify this send")
+      else if (!noOrigin) warn(`reading the sender's git origin failed, so git does not classify this send: ${stderr.trim() || error.message}`)
+      done(undefined)
     })
   })
 }
 
 /** Parse only the path of a network remote: credentials and host identities never become labels. */
-function repository(remote: string | undefined): { readonly owner?: string; readonly project: string } | undefined {
+function repository(remote: string | undefined): { readonly owners: readonly string[]; readonly project: string } | undefined {
   if (remote === undefined) return undefined
   const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(remote) ? URL.parse(remote) : null
   const scp = url !== null || /^[a-z]:[\\/]/i.test(remote) ? undefined : /^(?:[^/@:]+@)?[^/:]+:(.+)$/.exec(remote)?.[1]
   const path = url?.pathname ?? scp ?? remote
   const parts = path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean)
   const project = parts?.at(-1)?.replace(/\.git$/, "")
-  const owner = (url !== null && url.protocol !== "file:") || scp !== undefined ? parts.at(-2) : undefined
-  return project ? { owner, project } : undefined
+  // Every parent segment of a network remote is a candidate owner: a GitLab subgroup path `group/sub/project` matches
+  // a `git_owners` entry of either `group` or `sub`.
+  const owners = (url !== null && url.protocol !== "file:") || scp !== undefined ? parts.slice(0, -1) : []
+  return project ? { owners, project } : undefined
 }
 
 function contains(cwd: string, prefix: string, home: string): boolean {
@@ -77,6 +83,15 @@ function contains(cwd: string, prefix: string, home: string): boolean {
   if (!isAbsolute(expanded)) return false
   const child = relative(resolve(expanded), resolve(cwd))
   return child === "" || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${sep}`))
+}
+
+function loadTable(runtime: ProvenanceRuntime, env: Readonly<Record<string, string | undefined>>, warn: (message: string) => void): ProvenanceWorkspaces {
+  try {
+    return runtime.loadWorkspaces?.(runtime.cwd, env) ?? []
+  } catch (error) {
+    warn(`reading provenance.workspaces failed, so the table does not classify this send: ${error instanceof Error ? error.message : String(error)}`)
+    return []
+  }
 }
 
 /** Called in the sender runtime; the receiver renders only the provenance saved in the envelope. */
@@ -87,12 +102,13 @@ export async function resolveProvenance(runtime: ProvenanceRuntime): Promise<Pro
   const lane = env.OMO_PROVENANCE_LANE?.trim()
   const extra = lane ? { lane } : {}
   if (explicitWorkspace && explicitProject) return { workspace: explicitWorkspace, project: explicitProject, ...extra }
-  const repo = repository(await (runtime.gitRemote ?? ((cwd: string) => originRemote(cwd, env)))(runtime.cwd))
+  const warn = runtime.onWarning ?? (() => {})
+  const repo = repository(await (runtime.gitRemote ?? ((cwd: string) => originRemote(cwd, env, warn)))(runtime.cwd))
   const project = explicitProject || repo?.project || basename(resolve(runtime.cwd)) || "root"
   if (explicitWorkspace) return { workspace: explicitWorkspace, project, ...extra }
-  const table = runtime.workspaces ?? runtime.loadWorkspaces?.(runtime.cwd, env) ?? []
-  const owner = repo?.owner?.toLowerCase()
-  const byOwner = owner === undefined ? undefined : table.find((row) => row.git_owners?.some((candidate) => candidate.toLowerCase() === owner))
+  const table = runtime.workspaces ?? loadTable(runtime, env, warn)
+  const owners = new Set(repo?.owners.map((owner) => owner.toLowerCase()) ?? [])
+  const byOwner = owners.size === 0 ? undefined : table.find((row) => row.git_owners?.some((candidate) => owners.has(candidate.toLowerCase())))
   const home = env.HOME ?? env.USERPROFILE ?? homedir()
   const workspace = byOwner ?? table.find((row) => row.paths?.some((prefix) => contains(runtime.cwd, prefix, home)))
   return { workspace: workspace?.name ?? "unclassified", project, ...extra }

@@ -9,7 +9,7 @@ function headerValue(value: string): string {
 
 /** A JSON string whose brackets are escaped too, so a quoted value can never close the `[...]` header. */
 function quotedHeaderValue(value: string): string {
-  return JSON.stringify(value).replace(/\[/g, "\\u005b").replace(/\]/g, "\\u005d").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")
+  return JSON.stringify(value).replace(/\[/g, "\\u005b").replace(/\]/g, "\\u005d").replace(/[\u0080-\u009f\u2028\u2029]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)
 }
 
 export function deliveryProvenanceLine(provenance: Provenance | undefined): string {

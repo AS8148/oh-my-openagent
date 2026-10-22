@@ -89,6 +89,8 @@ export type ThreadToolSurfaceOptions = {
   readonly env?: Readonly<Record<string, string | undefined>>
   /** Reads the sender's `provenance.workspaces` table; absent, only the sender's environment and git classify it. */
   readonly loadProvenanceWorkspaces?: ProvenanceRuntime["loadWorkspaces"]
+  /** Receives a degraded-classification diagnostic; the send goes on either way. */
+  readonly onProvenanceWarning?: ProvenanceRuntime["onWarning"]
   readonly host: ThreadHost
   readonly callerSessionId: () => string
   readonly callerWorkspaceRoot: () => string

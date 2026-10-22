@@ -146,12 +146,52 @@ test("#given a repository above the sender's git ceiling #when resolving below t
     .toEqual({ workspace: "unclassified", project: "below" })
 })
 
-test("#given a broken sender git configuration #when resolving its origin #then unexpected git errors are surfaced instead of silently unclassifying", async () => {
+// Contract: provenance is metadata on the message. Every git failure class degrades the classification and is logged;
+// none of them may reject the send.
+function gitFailureCase(script: string | undefined): { readonly cwd: string; readonly env: Record<string, string | undefined> } {
+  root = mkdtempSync(join(tmpdir(), "omo-provenance-git-failure-"))
+  const cwd = join(root, "repo")
+  const bin = join(root, "bin")
+  mkdirSync(join(cwd, ".git"), { recursive: true })
+  mkdirSync(bin)
+  if (script !== undefined) writeFileSync(join(bin, "git"), `#!/bin/sh\n${script}\n`, { mode: 0o755 })
+  return { cwd, env: { HOME: root, PATH: bin, GIT_DIR: undefined, GIT_CEILING_DIRECTORIES: root } }
+}
+
+test.each([
+  ["git is not installed", undefined, "not installed"],
+  ["git refuses the repository (exit 128)", "echo 'fatal: detected dubious ownership' >&2; exit 128", "dubious ownership"],
+  ["git outlives the timeout", "exec /bin/sleep 5", "git origin failed"],
+])("#given %s #when resolving #then the send is classified without git and the failure is logged", async (_name, script, diagnostic) => {
+  const { cwd, env } = gitFailureCase(script)
+  const warnings: string[] = []
+  const result = await settled(resolveProvenance({ cwd, env, workspaces: [], onWarning: (message) => warnings.push(message) }))
+  expect(result.error).toBeUndefined()
+  expect(result.value).toEqual({ workspace: "unclassified", project: "repo" })
+  expect(warnings).toHaveLength(1)
+  expect(warnings[0]).toContain(diagnostic)
+})
+
+test("#given a broken sender git configuration #when resolving #then the send goes on unclassified and git's error is logged", async () => {
   const cwd = (root = mkdtempSync(join(tmpdir(), "omo-provenance-git-error-")))
   const config = join(cwd, "gitconfig")
   const env = { ...process.env, HOME: cwd, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1", GIT_MASTER: "1" }
   execFileSync("git", ["init", "-q", cwd], { env, windowsHide: true })
   writeFileSync(config, "[invalid\n")
-  const failure = await settled(resolveProvenance({ cwd, env, workspaces: runtime.workspaces }))
-  expect(failure.error?.message).toContain("bad config line")
+  const warnings: string[] = []
+  const result = await settled(resolveProvenance({ cwd, env, workspaces: [], onWarning: (message) => warnings.push(message) }))
+  expect(result.value).toEqual({ workspace: "unclassified", project: basename(cwd) })
+  expect(warnings.join("\n")).toContain("bad config line")
+})
+
+test("#given a provenance.workspaces table that cannot be read #when resolving #then the send goes on unclassified and the failure is logged", async () => {
+  const warnings: string[] = []
+  const result = await settled(resolveProvenance({ cwd, env: {}, gitRemote: runtime.gitRemote, loadWorkspaces: () => { throw new Error("omo.json is unreadable") }, onWarning: (message) => warnings.push(message) }))
+  expect(result.value).toEqual({ workspace: "unclassified", project: "remote-project" })
+  expect(warnings.join("\n")).toContain("omo.json is unreadable")
+})
+
+test("#given a remote nested under subgroups #when resolving #then any parent group can name the workspace", async () => {
+  expect(await resolveProvenance({ cwd, env: {}, gitRemote: async () => "https://example.invalid/group/sub/remote-project.git", workspaces: [{ name: "Group workspace", git_owners: ["group"] }] }))
+    .toEqual({ workspace: "Group workspace", project: "remote-project" })
 })
