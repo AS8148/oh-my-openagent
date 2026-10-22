@@ -34,6 +34,7 @@ import { registerEngineRuntimeModules } from "./engine-runtime-modules"
 import { applyCachedClaudeCode } from "../omo-senpi/src/components/claude-code/index"
 import { buildSenpiArgs, shouldPrintCompiledBanner } from "./compile-args"
 import { runLoroSmoke } from "./loro-smoke"
+import { runSyncCommand } from "./sync-cli"
 import { spawnSync } from "node:child_process"
 import { compiledRollbackMigration } from "./compiled-rollback"
 import { refuseRetiredCommand } from "./bin/lib/retired-command.js"
@@ -135,8 +136,14 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
     process.exitCode = await runLoroSmoke()
     return true
   }
+  // The account verbs return early, so the #10697 plaintext file is deleted here too, not only on a normal launch.
+  if (["login", "logout", "whoami", "sync"].includes(args[0] ?? "")) removeLegacyServiceCredentials()
   if (["login", "logout", "whoami"].includes(args[0] ?? "")) {
     await runServiceAuthCommand(args)
+    return true
+  }
+  if (args[0] === "sync") {
+    await runSyncCommand(args)
     return true
   }
   const packageJson = readJson(join(execDir, "package.json")) as { version: string; omoBuild?: unknown }
