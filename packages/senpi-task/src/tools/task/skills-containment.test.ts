@@ -23,6 +23,47 @@ function fixture() {
   return { root, cwd, homeDir, outside }
 }
 
+test("task discovery excludes nested references and README files beside and below SKILL.md", () => {
+  // given
+  const f = fixture()
+  const skills = join(f.cwd, ".agents", "skills")
+  const inner = join(skills, "grp", "inner")
+  for (const [relative, name] of [
+    ["grp/inner/SKILL.md", "inner"],
+    ["grp/inner/references/deploy.md", "deploy"],
+    ["grp/inner/README.md", "readme-beside"],
+    ["grp/inner/docs/README.md", "readme-below"],
+    ["grp/README.md", "readme-group"],
+    ["top.md", "top"],
+  ]) {
+    const path = join(skills, relative!)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, `---\nname: ${name}\ndescription: fixture\n---\n${name}\n`)
+  }
+  const loader = createFsSkillLoader({ homeDir: f.homeDir, loadSkillsFromDir })
+  // when
+  const result = loader(["inner", "deploy", "readme-beside", "readme-below", "readme-group", "top"], f.cwd)
+  // then
+  expect(loadSkillsFromDir({ dir: skills, source: "project" }).skills.map((s) => s.name).sort()).toEqual(["inner", "top"])
+  expect(result.resolved).toEqual(["inner", "top"])
+  expect(result.missing).toEqual(["deploy", "readme-beside", "readme-below", "readme-group"])
+  expect(result.skills?.[0]?.location).toBe(join(inner, "SKILL.md"))
+})
+
+test("task discovery stops at SKILL.md even in the selected root", () => {
+  // given
+  const f = fixture()
+  const skills = join(f.cwd, ".agents", "skills")
+  mkdirSync(join(skills, "nested"), { recursive: true })
+  writeFileSync(join(skills, "SKILL.md"), "---\nname: root-skill\ndescription: fixture\n---\nROOT\n")
+  writeFileSync(join(skills, "nested", "SKILL.md"), "---\nname: nested\ndescription: fixture\n---\nNESTED\n")
+  // when
+  const result = createFsSkillLoader({ homeDir: f.homeDir, loadSkillsFromDir })(["root-skill", "nested"], f.cwd)
+  // then
+  expect(result.resolved).toEqual(["root-skill"])
+  expect(result.missing).toEqual(["nested"])
+})
+
 test.each(["folder", "file", "root"])("task direct read blocks an escaping project %s with reason", (layout) => {
   // given
   const f = fixture()

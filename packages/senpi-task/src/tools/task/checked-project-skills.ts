@@ -15,16 +15,24 @@ export type CheckedProjectSkills = {
 export function readProjectSkills(dir: string, provenance: SkillProvenance): CheckedProjectSkills {
   const skills = new Map<string, LoadedSkill>()
   const blocked: SkillLinkBlockedError[] = []
-  function walk(path: string, ancestry: ReadonlySet<string>): void {
+  function walk(path: string, ancestry: ReadonlySet<string>, root = false, markdown = false): void {
     try {
       const canonical = checkSkillPath(path, provenance, true)
       if (statSync(canonical).isDirectory()) {
         if (ancestry.has(canonical)) return
         const next = new Set([...ancestry, canonical])
-        for (const entry of readdirSync(path, { withFileTypes: true })) {
-          if (!entry.name.startsWith(".")) walk(join(path, entry.name), next)
+        const entries = readdirSync(path, { withFileTypes: true })
+        if (entries.some((entry) => entry.name === "SKILL.md" && !entry.isDirectory())) {
+          walk(join(path, "SKILL.md"), next)
+          return
         }
-      } else if (path.toLowerCase().endsWith(".md")) {
+        for (const entry of entries) {
+          if (entry.name.startsWith(".") || entry.name === "node_modules") continue
+          if (entry.isDirectory() || entry.isSymbolicLink() || (root && entry.name.endsWith(".md"))) {
+            walk(join(path, entry.name), next, false, root)
+          }
+        }
+      } else if (basename(path) === "SKILL.md" || (markdown && path.endsWith(".md"))) {
         const raw = readSkillFileChecked(path, provenance)
         const { data, body } = parseFrontmatter<{ name?: string }>(raw)
         const name = data.name ?? (basename(path) === "SKILL.md" ? basename(dirname(path)) : basename(path, ".md"))
@@ -35,6 +43,6 @@ export function readProjectSkills(dir: string, provenance: SkillProvenance): Che
       else if (!(error instanceof Error)) throw error
     }
   }
-  if (existsSync(dir)) walk(dir, new Set())
+  if (existsSync(dir)) walk(dir, new Set(), true)
   return { skills, blocked }
 }

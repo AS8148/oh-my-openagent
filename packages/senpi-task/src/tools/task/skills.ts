@@ -90,6 +90,7 @@ function blockedSkillName(path: string): string {
 }
 
 function directSkill(name: string, dir: string, provenance: SkillProvenance): LoadedSkill | undefined {
+  if (provenance.kind === "project-auto" && existsSync(join(dir, "SKILL.md"))) return undefined
   const candidates = [join(dir, name, "SKILL.md"), join(dir, `${name}.md`)]
   const path = candidates.find(existsSync)
   return path === undefined ? undefined : readSkillFile(name, path, provenance)
