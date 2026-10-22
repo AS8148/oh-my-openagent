@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
+import { existsSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, isAbsolute, relative, resolve, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import type { OmoProvenanceSettings } from "@oh-my-opencode/omo-config-core"
 import { loadSenpiOmoConfig } from "../../config-resolution"
@@ -14,15 +15,26 @@ export type ProvenanceRuntime = {
   readonly gitRemote?: (cwd: string) => Promise<string | undefined>
 }
 
+/** Structural, locale-independent: a repository is an explicit GIT_DIR or a `.git` entry (directory or worktree file) above the cwd. */
+function insideRepository(cwd: string, env: Readonly<Record<string, string | undefined>>): boolean {
+  if (env.GIT_DIR) return true
+  for (let dir = resolve(cwd); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, ".git"))) return true
+    if (dirname(dir) === dir) return false
+  }
+}
+
 // The sender's own environment drives git (URL rewrites, GIT_CONFIG_*), so the origin is read the way the sender sees it.
-// Only "this is not a repository with an origin" means no repository; any other git failure (a broken config, a timeout)
-// is surfaced instead of silently classifying the sender as unclassified.
+// "No repository" and "no origin" are decided from structure and git's exit code (2: no such remote), never from its
+// message text, which a translated git prints in the sender's language; any other git failure (a broken config, a
+// timeout) is surfaced instead of silently classifying the sender as unclassified.
 function originRemote(cwd: string, env: Readonly<Record<string, string | undefined>>): Promise<string | undefined> {
+  if (!insideRepository(cwd, env)) return Promise.resolve(undefined)
   return new Promise((done, fail) => {
     execFile("git", ["remote", "get-url", "origin"], { cwd, env, encoding: "utf8", windowsHide: true, timeout: 1_000 }, (error, stdout, stderr) => {
       if (error === null) return done(stdout.trim())
       const missingGit = "code" in error && error.code === "ENOENT"
-      const noOrigin = error.code === 2 || /not a git repository/i.test(stderr)
+      const noOrigin = error.code === 2
       if (missingGit || noOrigin) return done(undefined)
       fail(new Error(`reading the sender's git origin failed: ${stderr.trim() || error.message}`))
     })

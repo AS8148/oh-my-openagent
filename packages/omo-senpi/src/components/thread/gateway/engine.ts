@@ -89,7 +89,8 @@ type SenderFacts = {
 }
 
 function senderFacts(sender: GatewaySender, resolved: Provenance): SenderFacts {
-  const provenance = { ...resolved, ...(sender.kind === "session" && sender.name ? { session: sender.name } : {}) }
+  const sessionLabel = sender.kind === "session" ? sender.name?.trim() : undefined
+  const provenance = { ...resolved, ...(sessionLabel ? { session: sessionLabel } : {}) }
   if (sender.kind === "session") {
     return {
       provenance,
