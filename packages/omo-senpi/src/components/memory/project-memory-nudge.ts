@@ -6,12 +6,11 @@ import {
   redactSecretLikeMaterial,
   type ProjectIdentity,
   type ProjectIdentityResolver,
+  type ProjectScopeFs,
   type RecallDocument,
 } from "@oh-my-opencode/memory-core"
 
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
-
-import { realpathSync } from "@oh-my-opencode/memory-core/fs"
 
 import type { ComponentLogger, SenpiExtensionAPI } from "../../extension/types"
 import type { MemoryIdentityContext } from "./context"
@@ -32,11 +31,13 @@ export interface ProjectMemorySwitches {
 
 export interface ProjectMemoryNudgeOptions {
   readonly resolveContext: (sessionId: string) => MemoryIdentityContext | undefined
+  /** Read once per session: the tool-result path never reloads configuration. */
   readonly switches: () => ProjectMemorySwitches
   readonly fallbackCwd: () => string
   readonly corpusCache: RecallCorpusCache
   readonly env?: Record<string, string | undefined>
   readonly logger?: Pick<ComponentLogger, "warn">
+  readonly fs?: ProjectScopeFs
 }
 
 interface SessionScope {
@@ -57,9 +58,22 @@ export interface ProjectMemoryScope {
 
 export function createProjectMemoryScope(options: ProjectMemoryNudgeOptions): ProjectMemoryScope {
   const sessions = new Map<string, SessionScope>()
+  const switchesBySession = new Map<string, ProjectMemorySwitches>()
 
-  function scopeFor(sessionId: string, eventCtx: unknown, context: MemoryIdentityContext): SessionScope {
-    const cwd = isRecord(eventCtx) && typeof eventCtx.cwd === "string" && eventCtx.cwd.length > 0 ? eventCtx.cwd : options.fallbackCwd()
+  function switchesFor(sessionId: string): ProjectMemorySwitches {
+    let switches = switchesBySession.get(sessionId)
+    if (switches === undefined) {
+      switches = options.switches()
+      switchesBySession.set(sessionId, switches)
+    }
+    return switches
+  }
+
+  function sessionCwd(eventCtx: unknown): string {
+    return isRecord(eventCtx) && typeof eventCtx.cwd === "string" && eventCtx.cwd.length > 0 ? eventCtx.cwd : options.fallbackCwd()
+  }
+
+  function scopeFor(sessionId: string, cwd: string, context: MemoryIdentityContext): SessionScope {
     const bound = context.projectScope
     const key = [cwd, context.identity, bound?.memoryRoot ?? "", bound?.autoIdentity ?? "path"].join("\0")
     const existing = sessions.get(sessionId)
@@ -71,6 +85,7 @@ export function createProjectMemoryScope(options: ProjectMemoryNudgeOptions): Pr
         boundId: context.identity,
         ...(bound === undefined ? {} : { memoryRoot: bound.memoryRoot, autoIdentity: bound.autoIdentity }),
         ...(options.env === undefined ? {} : { env: options.env }),
+        ...(options.fs === undefined ? {} : { fs: options.fs }),
       }),
       nudged: new Set(),
       touched: [],
@@ -92,7 +107,7 @@ export function createProjectMemoryScope(options: ProjectMemoryNudgeOptions): Pr
   // Rank the original cached arrays: persistence seeds and observes terms on these exact documents.
   async function recallCorpora(sessionId: string): Promise<readonly ProjectRecallCorpus[]> {
     const scope = sessions.get(sessionId)
-    if (scope === undefined || !options.switches().recall) return []
+    if (scope === undefined || !switchesFor(sessionId).recall) return []
     const projects = scope.touched.slice(0, PROJECT_MEMORY_RECALL_MAX_PROJECTS)
     const list = await Promise.all(projects.map(async (project) => {
       const corpus = await corpusOf(project)
@@ -111,28 +126,31 @@ export function createProjectMemoryScope(options: ProjectMemoryNudgeOptions): Pr
     return project === undefined ? undefined : join(project.identity.paths.repo, parsed.path)
   }
 
-  function register(pi: SenpiExtensionAPI): void {
-  pi.on("tool_result", async (payload: unknown, eventCtx: unknown) => {
+  // Every await below is asynchronous filesystem or git work: the tool-result path never blocks.
+  async function onToolResult(payload: unknown, eventCtx: unknown) {
     const touchedPath = touchedPathOf(payload)
     if (touchedPath === undefined) return undefined
     const sessionId = sessionIdFrom(eventCtx)
     if (sessionId === undefined) return undefined
     const context = options.resolveContext(sessionId)
     if (context === undefined) return undefined
-    const switches = options.switches()
+    const switches = switchesFor(sessionId)
     if (!switches.nudge && !switches.recall) {
       revokeProjectMemoryReads(context)
       return undefined
     }
 
-    const scope = scopeFor(sessionId, eventCtx, context)
-    const project = scope.resolver.forPath(touchedPath)
+    const cwd = sessionCwd(eventCtx)
+    const scope = scopeFor(sessionId, cwd, context)
+    const project = await scope.resolver.forPath(touchedPath)
     if (project === undefined || project.identity.id === context.identity) return undefined
-    grantProjectMemoryRead(context, project.identity.paths.repo)
+    const live = () => sessions.get(sessionId) === scope
+    await grantProjectMemoryRead(context, project.identity.paths.repo, { realPath: scope.resolver.realPath, stillLive: live })
+    if (!live()) return undefined
     const index = scope.touched.findIndex((entry) => entry.identity.id === project.identity.id)
     if (index >= 0) scope.touched.splice(index, 1)
     scope.touched.unshift(project)
-    const within = projectRelativePath(project.projectDir, resolve(isRecord(eventCtx) && typeof eventCtx.cwd === "string" ? eventCtx.cwd : options.fallbackCwd(), touchedPath))
+    const within = await projectRelativePath(scope.resolver, project.projectDir, resolve(cwd, touchedPath))
     if (within !== undefined) scope.touchedPaths.set(project.identity.id, within)
 
     if (!switches.nudge || scope.nudged.has(project.identity.id)) return undefined
@@ -151,21 +169,25 @@ export function createProjectMemoryScope(options: ProjectMemoryNudgeOptions): Pr
     if (notes.length === 0) return undefined
     const content = isRecord(payload) && Array.isArray(payload.content) ? payload.content : []
     return { content: [...content, { type: "text", text: formatProjectMemoryNudge(project, notes), audience: "model" }] }
-  })
+  }
 
-  pi.on("session_compact", (payload: unknown, eventCtx: unknown) => {
-    if (isRecord(payload) && payload.accepted === false) return
-    const sessionId = sessionIdFrom(eventCtx)
-    if (sessionId !== undefined) sessions.get(sessionId)?.nudged.clear()
-  })
+  function register(pi: SenpiExtensionAPI): void {
+    pi.on("tool_result", onToolResult)
 
-  pi.on("session_shutdown", (_payload: unknown, eventCtx: unknown) => {
-    const sessionId = sessionIdFrom(eventCtx)
-    if (sessionId === undefined) return
-    sessions.delete(sessionId)
-    const context = options.resolveContext(sessionId)
-    if (context !== undefined) revokeProjectMemoryReads(context)
-  })
+    pi.on("session_compact", (payload: unknown, eventCtx: unknown) => {
+      if (isRecord(payload) && payload.accepted === false) return
+      const sessionId = sessionIdFrom(eventCtx)
+      if (sessionId !== undefined) sessions.get(sessionId)?.nudged.clear()
+    })
+
+    pi.on("session_shutdown", (_payload: unknown, eventCtx: unknown) => {
+      const sessionId = sessionIdFrom(eventCtx)
+      if (sessionId === undefined) return
+      sessions.delete(sessionId)
+      switchesBySession.delete(sessionId)
+      const context = options.resolveContext(sessionId)
+      if (context !== undefined) revokeProjectMemoryReads(context)
+    })
   }
 
   return {
@@ -191,15 +213,11 @@ export function formatProjectMemoryNudge(project: ProjectIdentity, notes: readon
 
 // The touched file named from its project's root, so a note about that file can match it. A path
 // mapped onto a main checkout (git mode) does not sit under it lexically and keeps no relative form.
-function projectRelativePath(projectDir: string, filePath: string): string | undefined {
-  let real: string
-  try {
-    real = join(realpathSync.native(dirname(filePath)), filePath.slice(dirname(filePath).length + 1))
-  } catch {
-    // A file whose directory vanished after the tool ran has no position to rank by.
-    return undefined
-  }
-  const rel = relative(projectDir, real)
+async function projectRelativePath(resolver: ProjectIdentityResolver, projectDir: string, filePath: string): Promise<string | undefined> {
+  const realDir = await resolver.realPath(dirname(filePath))
+  // A file whose directory vanished after the tool ran has no position to rank by.
+  if (realDir === undefined) return undefined
+  const rel = relative(projectDir, join(realDir, filePath.slice(dirname(filePath).length + 1)))
   if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return undefined
   return rel
 }

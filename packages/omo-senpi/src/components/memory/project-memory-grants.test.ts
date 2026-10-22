@@ -37,7 +37,7 @@ describe("project memory read grants (#10044)", () => {
   test("#given a project identity the resolver returned #when its note is read #then the hard policy allows it", async () => {
     // given
     const { setup, foreignRepo, decide } = projectGrantFixture()
-    grantProjectMemoryRead(setup.own, foreignRepo)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
 
     // when / then
     expect(await decide("read", setup.foreignFile)).toEqual({ allow: true })
@@ -46,7 +46,7 @@ describe("project memory read grants (#10044)", () => {
   test("#given a granted project identity #when its notes are written, enumerated, or its git metadata read #then each stays denied", async () => {
     // given
     const { setup, foreignRepo, gitConfig, decide } = projectGrantFixture()
-    grantProjectMemoryRead(setup.own, foreignRepo)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
 
     // when / then
     expect((await decide("write", setup.foreignFile)).allow).toBe(false)
@@ -67,7 +67,7 @@ describe("project memory read grants (#10044)", () => {
     // given
     const first = projectGrantFixture()
     const second = policyFixture(roots)
-    grantProjectMemoryRead(first.setup.own, first.foreignRepo)
+    await grantProjectMemoryRead(first.setup.own, first.foreignRepo)
     registerMemoryFilesystemPolicy(second.pi, second.own)
 
     // when
@@ -84,7 +84,7 @@ describe("project memory read grants (#10044)", () => {
   test("#given a granted project identity #when the soft guard sees a read and a write tool call #then only the read passes", async () => {
     // given
     const { setup, foreignRepo } = projectGrantFixture()
-    grantProjectMemoryRead(setup.own, foreignRepo)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
     const pi = new FakeExtensionAPI()
     registerMemoryGuard(pi, componentContext(), { getContext: () => setup.own, resolveCwd: () => setup.workspace })
     const call = (toolName: string, input: Record<string, unknown>) =>
@@ -99,12 +99,12 @@ describe("project memory read grants (#10044)", () => {
     expect(write).toContainEqual(expect.objectContaining({ block: true }))
   })
 
-  test("#given a granted project repo #when a read names its git metadata in another case or its system tree #then the grant does not cover it", () => {
+  test("#given a granted project repo #when a read names its git metadata in another case or its system tree #then the grant does not cover it", async () => {
     // given
     const { setup, foreignRepo } = projectGrantFixture()
     mkdirSync(join(foreignRepo, "system"), { recursive: true })
     writeFileSync(join(foreignRepo, "system", "persona.md"), "persona")
-    grantProjectMemoryRead(setup.own, foreignRepo)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
 
     // when / then
     expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, ".GIT", "config"))).toBe(false)
@@ -112,14 +112,14 @@ describe("project memory read grants (#10044)", () => {
     expect(isGrantedProjectMemoryRead(setup.own, foreignRepo)).toBe(false)
   })
 
-  test("#given a symlink committed inside a granted repo #when it points at another identity's memory #then a read through it is not granted", () => {
+  test("#given a symlink committed inside a granted repo #when it points at another identity's memory #then a read through it is not granted", async () => {
     // given
     const { setup, foreignRepo } = projectGrantFixture()
     const elsewhere = join(setup.memoryRoot, "agents", "third", "repo")
     mkdirSync(elsewhere, { recursive: true })
     writeFileSync(join(elsewhere, "secret.md"), "secret")
     symlinkSync(elsewhere, join(foreignRepo, "escape"))
-    grantProjectMemoryRead(setup.own, foreignRepo)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
 
     // when / then
     expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, "escape", "secret.md"))).toBe(false)
@@ -128,7 +128,7 @@ describe("project memory read grants (#10044)", () => {
   test("#given a granted project repo #when the grants are revoked #then its notes are denied again", async () => {
     // given
     const { setup, foreignRepo, decide } = projectGrantFixture()
-    grantProjectMemoryRead(setup.own, foreignRepo)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
 
     // when
     revokeProjectMemoryReads(setup.own)

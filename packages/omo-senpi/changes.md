@@ -4,7 +4,9 @@ Port project-scoped memory onto the current session binder and persisted recall 
 
 Kibitzer recall and its read-only memory tool rank the own corpus and up to three recently touched projects separately. Projects receive up to half the seats, rounded up, in touch order; unused seats go to the other side. The shared `RecallCorpusCache` loads every project repository through the existing lazy term-store runtime. Ranking uses the original store-backed arrays; only candidate paths, transcript filtering and read presentation use `@project/<identity>/<path>`. A project store save failure logs through the same warning path as the own corpus and never fails recall. Readable project sources survive pending-nudge persistence.
 
-`memory.project_scope.nudge` and `.recall` default on and can be set separately on the root memory block or its harness/profile layers, not per agent. The existing auto-identity feature, sync-runner acquisition, generated adapter bundles and bundle budgets are not duplicated or changed.
+The tool-result path never blocks on the filesystem: the switches are read once per session, the session-tree scan and every real-path, link and git-layout probe go through `fs/promises` into a per-session memo, and a further touch in an already-resolved directory reads neither configuration nor the filesystem.
+
+`memory.project_scope.nudge` and `.recall` default on and can be set separately on the root memory block or its harness/profile layers, not per agent; a change takes effect in the next session. The existing auto-identity feature, sync-runner acquisition, generated adapter bundles and bundle budgets are not duplicated or changed.
 
 ## 2026-10-19 - The feedback core is a lazy sidecar, so omo.js stays inside its byte budget (#10546)
 

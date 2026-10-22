@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, writeFileSync, realpathSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, realpathSync } from "node:fs"
+import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
-import { MEMORY_ROOT_ENV_VAR, buildIdentityPaths, resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
+import { MEMORY_ROOT_ENV_VAR, buildIdentityPaths, resolveMemoryIdentity, type ProjectScopeFs } from "@oh-my-opencode/memory-core"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createMemoryIdentityContext, type MemoryIdentityContext } from "./context"
@@ -42,9 +43,10 @@ interface World {
   readonly other: string
   readonly childRepo: string
   readonly switches: { current: ProjectMemorySwitches }
+  readonly switchReads: () => number
 }
 
-function world(childNotes: Record<string, string> = { "reference/deploy.md": "how the child deploys" }): World {
+function world(childNotes: Record<string, string> = { "reference/deploy.md": "how the child deploys" }, fs?: ProjectScopeFs): World {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "project-memory-nudge-")))
   roots.push(root)
   const workspace = join(root, "workspace")
@@ -63,14 +65,37 @@ function world(childNotes: Record<string, string> = { "reference/deploy.md": "ho
   })
   const pi = new FakeExtensionAPI()
   const switches = { current: { nudge: true, recall: true } }
+  let switchReads = 0
   createProjectMemoryScope({
     resolveContext: () => own,
-    switches: () => switches.current,
+    switches: () => {
+      switchReads += 1
+      return switches.current
+    },
     fallbackCwd: () => workspace,
     corpusCache: createSharedRecallCorpusCache(undefined),
     env,
+    ...(fs === undefined ? {} : { fs }),
   }).register(pi)
-  return { pi, own, workspace, child, other, childRepo, switches }
+  return { pi, own, workspace, child, other, childRepo, switches, switchReads: () => switchReads }
+}
+
+function countingFs(): { readonly fs: ProjectScopeFs; readonly calls: () => number } {
+  let calls = 0
+  const counted = <A extends unknown[], R>(call: (...args: A) => Promise<R>) => (...args: A): Promise<R> => {
+    calls += 1
+    return call(...args)
+  }
+  return {
+    fs: {
+      realpath: counted((path: string) => realpath(path)),
+      lstat: counted((path: string) => lstat(path)),
+      stat: counted((path: string) => stat(path)),
+      readFile: counted((path: string, encoding: "utf8") => readFile(path, encoding)),
+      readdir: counted((path: string) => readdir(path)),
+    },
+    calls: () => calls,
+  }
 }
 
 const ctx = (w: World) => ({ cwd: w.workspace, sessionManager: { getSessionId: () => "session-1" } })
@@ -182,6 +207,39 @@ describe("project memory nudge (#10044)", () => {
 
     // then
     expect(isGrantedProjectMemoryRead(w.own, join(w.childRepo, "reference", "deploy.md"))).toBe(false)
+  })
+
+  test("#given a session that touched a child project #when it touches files in the same directory again #then neither configuration nor the filesystem is read again", async () => {
+    // given
+    const counter = countingFs()
+    const w = world(undefined, counter.fs)
+    await readResult(w, join(w.child, "src", "a.ts"))
+    const fsCallsAfterFirst = counter.calls()
+
+    // when
+    await readResult(w, join(w.child, "src", "b.ts"), "edit")
+    await readResult(w, join(w.child, "src", "c.ts"), "write")
+
+    // then
+    expect(fsCallsAfterFirst).toBeGreaterThan(0)
+    expect(counter.calls()).toBe(fsCallsAfterFirst)
+    expect(w.switchReads()).toBe(1)
+    expect(isGrantedProjectMemoryRead(w.own, join(w.childRepo, "reference", "deploy.md"))).toBe(true)
+  })
+
+  test("#given the tool-result path modules #when their sources are read #then none calls a synchronous filesystem API", () => {
+    // given - architecture contract (#10044 review): the per-tool tool_result handler never blocks the event loop on fs.
+    const sources = [
+      join(import.meta.dir, "project-memory-nudge.ts"),
+      join(import.meta.dir, "../../../../memory-core/src/identity/project-scope.ts"),
+      join(import.meta.dir, "../../../../memory-core/src/identity/project-scope-fs.ts"),
+    ]
+
+    // when
+    const syncCalls = sources.flatMap((source) => readFileSync(source, "utf8").match(/\b\w+Sync\b/g) ?? [])
+
+    // then
+    expect(syncCalls).toEqual([])
   })
 
   test("#given a failed read #when it targets a child file #then nothing is added", async () => {

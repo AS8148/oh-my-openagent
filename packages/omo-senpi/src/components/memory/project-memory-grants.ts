@@ -1,4 +1,4 @@
-import { realpathSync } from "@oh-my-opencode/memory-core/fs"
+import { realpath, realpathSync } from "@oh-my-opencode/memory-core/fs"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import type { MemoryIdentityContext } from "./context"
@@ -14,9 +14,16 @@ const grants = new WeakMap<MemoryIdentityContext, Set<string>>()
 // never note content, and on a case-insensitive volume it is the real git metadata.
 const EXCLUDED_TOP_LEVEL = [".git", "system"]
 
-export function grantProjectMemoryRead(context: MemoryIdentityContext, projectRepo: string): void {
-  const root = canonical(projectRepo)
-  if (root === undefined) return
+export interface ProjectMemoryGrantOptions {
+  /** Canonicalizes the repo; the tool-result path passes its session's memoized lookup. */
+  readonly realPath?: (path: string) => Promise<string | undefined>
+  /** Checked after canonicalizing: a session that shut down meanwhile is never granted. */
+  readonly stillLive?: () => boolean
+}
+
+export async function grantProjectMemoryRead(context: MemoryIdentityContext, projectRepo: string, options: ProjectMemoryGrantOptions = {}): Promise<void> {
+  const root = await (options.realPath ?? canonicalAsync)(projectRepo)
+  if (root === undefined || options.stillLive?.() === false) return
   let roots = grants.get(context)
   if (roots === undefined) {
     roots = new Set()
@@ -42,6 +49,14 @@ export function isGrantedProjectMemoryRead(context: MemoryIdentityContext, targe
     return true
   }
   return false
+}
+
+async function canonicalAsync(path: string): Promise<string | undefined> {
+  try {
+    return await realpath(path)
+  } catch {
+    return undefined
+  }
 }
 
 function canonical(path: string): string | undefined {
