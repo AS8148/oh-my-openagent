@@ -186,7 +186,7 @@ describe("event-bridge session_shutdown", () => {
   })
 
   // buildChildContext puts the child's own task id and state_dir = <task store>/children/<task id> into
-  // its session context; only a state_dir inside THIS engine's store vouches for the id (ids are per-store).
+  // its session context; only exactly that folder of THIS engine's store vouches for the id (ids are per-store).
   for (const [label, stateDir, expected] of [
     ["inside this engine's store", "/stores/proj/senpi-task/children/st_0000c0de", { ownTaskId: "st_0000c0de" }],
     ["inside another store", "/stores/other/senpi-task/children/st_0000c0de", {}],

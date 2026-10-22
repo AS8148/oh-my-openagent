@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**A task's session matches its own task only inside its own task store ([#10903](https://github.com/code-yeongyu/oh-my-openagent/pull/10903)).** When a task's session shuts down, it looks up its own task by the task id in its session context. Task ids are unique only within one task store, so that id is now trusted only when the context's state directory points inside this engine's store; otherwise the session falls back to matching by its session id. ([#10881](https://github.com/code-yeongyu/oh-my-openagent/issues/10881))
+**Stopping a task no longer risks matching a task with the same id from another task store ([#10903](https://github.com/code-yeongyu/oh-my-openagent/pull/10903)).** When a task's session shuts down, it finds its own task by the task id in its session context. Task ids are unique only within one task store, so that id is now trusted only when the session's state folder is exactly this store's folder for that task; otherwise the session falls back to matching by its session id. ([#10881](https://github.com/code-yeongyu/oh-my-openagent/issues/10881))
 
 **Cancelling a task now also stops the tasks it started ([#10824](https://github.com/code-yeongyu/oh-my-openagent/pull/10824)).** Before, the cancelled task's session suspended its running children as if it could be resumed later, so they kept running tools on the task host with nobody able to collect them. A cancelled, lost or killed task now cancels its children when its session shuts down, and the same rule applies one level down. A live task's quit or reload still keeps its children so they can be collected on resume.
 
