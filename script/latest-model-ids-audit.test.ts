@@ -39,7 +39,8 @@ function latestModelLiteralPattern(ids: readonly string[]): RegExp {
 const LATEST_MODEL_LITERAL = latestModelLiteralPattern(Object.values(LATEST_MODEL_BY_FAMILY))
 
 async function trackedSourceFiles(): Promise<string[]> {
-  const proc = Bun.spawn(["git", "ls-files", "-z", "--", "packages/*/src/**/*.ts"], {
+  // :(glob) makes `**/` match zero directories too; the plain pathspec skipped every file directly under src/.
+  const proc = Bun.spawn(["git", "ls-files", "-z", "--", ":(glob)packages/*/src/**/*.ts"], {
     cwd: REPOSITORY_ROOT,
     stdout: "pipe",
   })
@@ -68,6 +69,8 @@ describe("latest model id audit", () => {
   test("#given shipped source #when scanning for a latest family id #then only model-identity files spell one", async () => {
     const files = await trackedSourceFiles()
     expect(files.length).toBeGreaterThan(100)
+    // Architecture contract: files directly under a package's src/ are scanned too (a fallback-chain table lives there).
+    expect(files).toContain("packages/model-core/src/category-model-requirements.ts")
 
     const offenders: string[] = []
     for (const file of files) {

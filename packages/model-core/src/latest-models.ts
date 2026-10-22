@@ -3,7 +3,9 @@
  * target meaning "the newest model of this family" reads it from here, so a bump is one edit;
  * `script/latest-model-ids-audit.test.ts` rejects a literal copy elsewhere. Deliberate older rungs
  * (`claude-opus-4-6`, `gpt-5.6-sol`) stay literal. No imports: consumers outside the barrel use the
- * `@oh-my-opencode/model-core/latest-models` subpath.
+ * `@oh-my-opencode/model-core/latest-models` subpath. Not covered: the Codex plugin's data files
+ * (`omo-codex/plugin` agent TOMLs, `migrate-codex-config/catalog.mjs`, `model-catalog.json`) still
+ * spell `gptAstra`'s id, so a Codex default bump also edits those.
  */
 export const LATEST_MODEL_BY_FAMILY = {
   claudeOpus: "claude-opus-5-5",

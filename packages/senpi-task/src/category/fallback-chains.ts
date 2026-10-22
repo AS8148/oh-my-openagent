@@ -2,7 +2,6 @@ import type { DelegateFallbackEntry } from "@oh-my-opencode/delegate-core"
 import { LATEST_MODEL_BY_FAMILY } from "@oh-my-opencode/model-core/latest-models"
 
 // Source of truth mirrored from packages/model-core/src/category-model-requirements.ts.
-// senpi-task cannot import model-core here without adding a package dependency outside this task's scope.
 // senpi-only differences (model-core/omo-opencode carry neither; the OpenCode and Codex editions have
 // no such providers):
 //   - kimi rungs carry BOTH provider ids ("kimi-coding" senpi registry id and the "kimi-for-coding"
