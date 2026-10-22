@@ -1,6 +1,6 @@
 import type { AgentToolResult, ToolDefinition } from "@code-yeongyu/senpi"
 import { appendFile } from "@oh-my-opencode/memory-core/fs"
-import { parseFactsExtractionRecord } from "@oh-my-opencode/memory-core"
+import { FactsExtractionValidationError, parseFactsExtractionRecord } from "@oh-my-opencode/memory-core"
 import { Type, type Static } from "typebox"
 
 export const FACTS_RECORD_TOOL_NAME = "record_fact"
@@ -10,7 +10,7 @@ const FactsRecordParams = Type.Object({
   person: Type.Optional(Type.Object({
     name: Type.String(),
     aliases: Type.Array(Type.String()),
-  }, { additionalProperties: false })),
+  }, { additionalProperties: false, description: "Only for scope person. Omit this field for scope project." })),
   text: Type.String(),
   date: Type.String(),
 }, { additionalProperties: false })
@@ -43,6 +43,10 @@ export function createFactsRecordTool(input: FactsRecordToolInput): FactsRecordT
   let count = 0
   let bytes = 0
   let calls = 0
+  let ended = false
+  // A model that resends a call the validator already refused will resend it until the deadline
+  // (#10918). The second identical refusal ends the run instead; the facts recorded so far commit.
+  const refused = new Set<string>()
   const reject = (reason: string): FactsRecordToolResult => {
     input.onFailure?.(reason)
     return errorResult(reason)
@@ -53,6 +57,7 @@ export function createFactsRecordTool(input: FactsRecordToolInput): FactsRecordT
     deactivate: () => { active = false },
     execute: async (_toolCallId, params) => {
       if (!active || input.state?.cancelled === true) return errorResult("the facts run is no longer active")
+      if (ended) return { ...errorResult("the facts run has ended; stop calling record_fact"), terminate: true }
       if (input.maxCalls !== undefined && calls >= input.maxCalls) {
         return reject(`the facts tool-call limit (${input.maxCalls}) has been reached`)
       }
@@ -78,7 +83,15 @@ export function createFactsRecordTool(input: FactsRecordToolInput): FactsRecordT
           details: undefined,
         }
       } catch (error) {
-        return reject(error instanceof Error ? error.message : String(error))
+        const reason = error instanceof Error ? error.message : String(error)
+        if (!(error instanceof FactsExtractionValidationError)) return reject(reason)
+        const call = JSON.stringify(params)
+        if (!refused.has(call)) {
+          refused.add(call)
+          return reject(`${reason}. Fix this call or skip this fact; the same call will not be accepted`)
+        }
+        ended = true
+        return { ...reject(`${reason}. This exact call was already refused, so the facts run ends here; facts recorded so far are kept`), terminate: true }
       }
     },
   }

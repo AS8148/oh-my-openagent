@@ -115,8 +115,11 @@ export function parseFactsExtractionRecord(value: unknown, index: number): Facts
   if (text === undefined) throw invalid(index, "text must be non-empty")
   if (date === undefined) throw invalid(index, "date must be YYYY-MM-DD")
   if (value.scope === "project") {
-    if ("person" in value) throw invalid(index, "project record must not carry person")
-    assertKeys(value, ["scope", "text", "date"], index)
+    // Models that fill every optional property (GPT through OpenAI-compatible proxies, #10918)
+    // send an empty person on project facts. That carries no person, so it is dropped; a project
+    // record naming a real person is still a contradiction and is refused.
+    if ("person" in value && !isPlaceholderPerson(value.person)) throw invalid(index, "project record must not carry person")
+    assertKeys(value, ["scope", "person", "text", "date"], index)
     return { scope: "project", text, date }
   }
   if (value.scope !== "person") throw invalid(index, "scope must be person or project")
@@ -129,6 +132,22 @@ export function parseFactsExtractionRecord(value: unknown, index: number): Facts
   const aliases = value.person.aliases.map(nonEmpty)
   if (aliases.some((alias) => alias === undefined)) throw invalid(index, "person aliases must be non-empty strings")
   return { scope: "person", person: { name, aliases: aliases as string[] }, text, date }
+}
+
+const PLACEHOLDER_NAMES = new Set(["n/a", "na", "none", "null", "undefined", "unknown", "-"])
+
+function isPlaceholderName(value: unknown): boolean {
+  if (value === undefined || value === null) return true
+  return typeof value === "string" && (value.trim().length === 0 || PLACEHOLDER_NAMES.has(value.trim().toLowerCase()))
+}
+
+function isPlaceholderPerson(value: unknown): boolean {
+  if (!isRecord(value)) return isPlaceholderName(value)
+  if (Object.keys(value).some((key) => key !== "name" && key !== "aliases")) return false
+  const aliases = value.aliases
+  const emptyAliases = aliases === undefined || aliases === null
+    || (Array.isArray(aliases) && aliases.every((alias) => typeof alias === "string" && alias.trim().length === 0))
+  return isPlaceholderName(value.name) && emptyAliases
 }
 
 function assertKeys(value: Record<string, unknown>, allowed: readonly string[], index: number): void {
