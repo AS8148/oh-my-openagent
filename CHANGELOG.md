@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Messages between sessions start with the sender's workspace and project ([#10853](https://github.com/code-yeongyu/oh-my-openagent/pull/10853)).** The sender's environment, git owner or configured paths decide it, never the message text; older stored messages say provenance was not recorded (#10794).
+
 **omo.json can say which workspace a session belongs to ([#10852](https://github.com/code-yeongyu/oh-my-openagent/pull/10852)).** `provenance.workspaces` lists workspaces by name with optional `git_owners` and `paths`; messages between sessions use it to show where the sender works (#10794).
 
 **The launcher deletes a legacy `~/.omo/credentials.json` left by an intermediate sign-in build.** The file held the device's private keys and account refresh material in plaintext, sometimes world-readable; upgrading removes it. Only the exact legacy shape is removed. ([#10697](https://github.com/code-yeongyu/oh-my-openagent/issues/10697), [#10698](https://github.com/code-yeongyu/oh-my-openagent/pull/10698))
