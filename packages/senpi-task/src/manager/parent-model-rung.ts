@@ -33,20 +33,21 @@ export function isParentModelRung(record: Pick<TaskRecord, "parent_model">, mode
 }
 
 /**
- * The parent-model note as of the child's CURRENT route. It reads as ran once the child is observed on the
- * parent's model (or before any model observation). While the parent's model is SELECTED but no child has
- * reported it yet (#10797) it carries a phase instead: `switching` while the handoff is in flight,
- * `unconfirmed` once the task ended without it. An ended record cannot tell a child that never spawned from
- * one that spawned without reporting its model and died before its first message, so the phase never claims
- * which of the two happened. A revert or an operator switch drops it.
+ * The parent-model note as of the child's CURRENT route. It reads as ran ONLY once a child is observed on the
+ * parent's model. While the parent's model is SELECTED but no child has reported it (#10797), whether an older
+ * route was observed or none ever was, it carries a phase instead: `switching` while the task is live,
+ * `unconfirmed` once it ended. An ended record cannot tell a child that never spawned from one that spawned
+ * without reporting its model and died before its first message, so the phase never claims which of the two
+ * happened. A revert or an operator switch drops it.
  */
 export function activeParentModelFallback(record: TaskRecord): TaskRecord["parent_model_fallback"] {
   const fallback = record.parent_model_fallback
   const observed = record.effective_model
-  if (fallback === undefined || observed === undefined || isParentModelRung(record, observed)) return fallback
-  const selected = record.resolved_model
-  if (selected === undefined || !isParentModelRung(record, selected) || movedAway(observed)) return undefined
+  if (fallback === undefined || (observed !== undefined && isParentModelRung(record, observed))) return fallback
   const live = record.status === "running" || record.status === "pending" || isFallbackHandoff(record)
+  const selected = record.resolved_model
+  const parentSelected = selected !== undefined && isParentModelRung(record, selected)
+  if (!parentSelected || (observed !== undefined && movedAway(observed))) return undefined
   return { ...fallback, phase: live ? "switching" : "unconfirmed" }
 }
 

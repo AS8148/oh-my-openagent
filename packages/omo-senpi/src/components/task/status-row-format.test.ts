@@ -354,6 +354,9 @@ describe("formatTaskRow", () => {
         resets: "3:20am",
         at: "2026-10-21T01:00:00.000Z",
       },
+      // #10807: "moved" means a child was OBSERVED on the parent's model; an unobserved record reads as switching/unconfirmed.
+      resolved_model: { provider: "chatgpt-subscription", model_id: "gpt-6.1-sol", display: "chatgpt-subscription/gpt-6.1-sol", source: "category" },
+      effective_model: { provider: "chatgpt-subscription", model_id: "gpt-6.1-sol", display: "chatgpt-subscription/gpt-6.1-sol", source: "fallback" },
     })
     const stayed = record({ task_id: "st_category_model", status: "running", category: "unspecified-high" })
     // #10797: selected but not yet observed on the parent's model, so the row must not claim it runs there.
