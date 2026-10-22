@@ -18,6 +18,7 @@ import {
   memoryWriterLockPath,
   readAgreementsWorktree,
   renderAgreementsFile,
+  strippedLegacyUserHeader,
   sortAgreements,
   withLock,
   type AgreementItem,
@@ -96,8 +97,11 @@ async function write(
           return { affectedPaths: [] }
         }
         await mkdir(join(repo.dir, "system"), { recursive: true })
-        await writeFile(join(repo.dir, AGREEMENTS_PATH), renderAgreementsFile(existing, next), "utf8")
-        return { affectedPaths: [AGREEMENTS_PATH] }
+        const rendered = renderAgreementsFile(existing, next)
+        await writeFile(join(repo.dir, AGREEMENTS_PATH), rendered, "utf8")
+        return strippedLegacyUserHeader(existing, rendered)
+          ? { affectedPaths: [AGREEMENTS_PATH], strippedPaths: [AGREEMENTS_PATH] }
+          : { affectedPaths: [AGREEMENTS_PATH] }
       },
     })
     deps.bustPromptCache()
