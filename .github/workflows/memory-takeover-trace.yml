@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/memory-takeover-trace.yml
       - packages/memory-core/src/concurrency/takeover-trace.test-support.ts
+      - packages/memory-core/src/concurrency/sigkill-takeover.test.ts
       - script/takeover-trace-summary.ts
   workflow_dispatch:
     inputs:
@@ -48,13 +49,12 @@ jobs:
         shell: bash
         env:
           ITERATIONS: ${{ inputs.iterations || 20 }}
-          OMO_TAKEOVER_TRACE_BUDGET_MS: "120000"
         run: |
           trace_dir="$RUNNER_TEMP/takeover-trace"
           mkdir -p "$trace_dir"
           failed=0
           for i in $(seq 1 "$ITERATIONS"); do
-            if OMO_TAKEOVER_TRACE="$trace_dir/run-$i.jsonl" bun test packages/memory-core/src/concurrency/sigkill-takeover.test.ts -t "twenty clean commits" > "$trace_dir/run-$i.log" 2>&1; then
+            if OMO_TAKEOVER_TRACE="$trace_dir/run-$i.jsonl" bun test packages/memory-core/src/concurrency/sigkill-takeover.test.ts -t "lands every remaining commit cleanly" > "$trace_dir/run-$i.log" 2>&1; then
               echo "run $i: pass"
             else
               echo "run $i: FAIL"

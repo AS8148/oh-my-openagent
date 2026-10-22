@@ -23,6 +23,14 @@ const crashCommitChildPath = fileURLToPath(new URL("./crash-commit-child.ts", im
 // as well as twenty, and the extra fifteen only made each case's 30 s budget a function of host
 // load (omo #10199 r5 HIGH 2). Volume stress lives in loop-crash-consistency.mjs.
 const PEER_COMMITS = 5
+// Same reasoning for the SIGKILL takeover case (#10959): three commits per writer still prove the takeover (the holder
+// dies on its second acquire, the survivor finishes the holder's remaining tasks and its own), and six linear commits
+// replace twenty. On a loaded Windows shard the twenty took the whole 30 s budget before the holder even reached the kill.
+const WRITER_COMMITS = 3
+// Each phase waits for its own event and fails naming that phase. The bounds are circuit breakers for a real hang, never
+// the expected duration; the test-level timeout only sits above their sum.
+const PHASE_BOUND_MS = { ready: 60_000, killReady: 60_000, holderExit: 30_000, recovery: 120_000 } as const
+const TAKEOVER_BREAKER_MS = 300_000
 
 const kit = createConcurrencyKit()
 afterEach(kit.cleanup)
@@ -37,7 +45,7 @@ function spawnWriter(
     fixtureValue.identity.paths.repo,
     fixtureValue.identity.paths.locks,
     writerId,
-    "10",
+    String(WRITER_COMMITS),
     fixtureValue.contentionPath,
   ])
 }
@@ -61,11 +69,16 @@ function traceExit(name: string, harness: ChildHarness): void {
   void harness.exit.then((exit) => traceTakeover("test", `${name}-exit`, { ...exit, pid: harness.child.pid ?? null, context: harness.failureContext().slice(0, 400) }))
 }
 
-// Only the measurement workflow (#10959) raises the budget, and only while tracing, so a slow pass is measured instead
-// of cut off; every other run keeps the 30 s budget.
-function takeoverBudgetMs(): number {
-  const raised = Number(process.env.OMO_TAKEOVER_TRACE_BUDGET_MS)
-  return takeoverTraceEnabled() && Number.isFinite(raised) && raised > 30_000 ? raised : 30_000
+async function phase<T>(name: string, boundMs: number, event: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const breaker = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`takeover phase "${name}" did not happen within ${String(boundMs)} ms`)), boundMs)
+  })
+  try {
+    return await Promise.race([event, breaker])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function withTimelineOnFailure(body: () => Promise<void>): Promise<void> {
@@ -79,7 +92,7 @@ async function withTimelineOnFailure(body: () => Promise<void>): Promise<void> {
 }
 
 describe("one memory identity across real Bun processes (omo #10177 crash consistency)", () => {
-  test("#given a writer SIGKILLed while holding the shared lock #when its peer continues #then liveness takeover completes twenty clean commits", async () => {
+  test("#given a writer SIGKILLed while holding the shared lock #when its peer continues #then liveness takeover lands every remaining commit cleanly", async () => {
     await withTimelineOnFailure(async () => {
     // #given
     const shared = await kit.fixture()
@@ -89,17 +102,17 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
     traceTakeover("test", "spawned", { holder: holder.child.pid ?? null, survivor: survivor.child.pid ?? null })
     traceExit("holder", holder)
     traceExit("survivor", survivor)
-    await Promise.all([holder.waitForLine("ready"), survivor.waitForLine("ready")])
+    await phase("both writers ready", PHASE_BOUND_MS.ready, Promise.all([holder.waitForLine("ready"), survivor.waitForLine("ready")]))
     const killReady = holder.waitForLine("kill-ready")
 
     // #when
     holder.send("go")
     survivor.send("go")
     traceTakeover("test", "go-sent")
-    await killReady
+    await phase("holder holds the lock (kill-ready)", PHASE_BOUND_MS.killReady, killReady)
     traceTakeover("test", "kill-sent")
     holder.child.kill("SIGKILL")
-    expect(await holder.exit).toEqual({ code: null, signal: "SIGKILL" })
+    expect(await phase("holder exit after SIGKILL", PHASE_BOUND_MS.holderExit, holder.exit)).toEqual({ code: null, signal: "SIGKILL" })
     // The exit event only proves this parent reaped its child. Recovery starts once the lock
     // protocol's own oracle proves the recorded owner dead, so the survivor never spends its
     // acquire budget on an owner the OS has not yet let go of; a proof that never arrives fails here.
@@ -107,15 +120,15 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
     await assertRepoIntegrity(shared.identity.paths.repo)
     traceTakeover("test", "integrity-ok")
     survivor.send("begin-recovery")
-    await survivor.waitForPrefix("done:")
+    await phase("survivor takes over and commits (done)", PHASE_BOUND_MS.recovery, survivor.waitForPrefix("done:"))
     traceTakeover("test", "survivor-done")
     await kit.expectSuccessful(survivor)
 
     // #then
-    await assertLinearCommits(shared.identity, 20)
+    await assertLinearCommits(shared.identity, 2 * WRITER_COMMITS)
     traceTakeover("test", "passed")
     })
-  }, takeoverBudgetMs())
+  }, TAKEOVER_BREAKER_MS)
 
   // Windows: a writer that dies mid-commit takes its git commit down with it and leaves the change
   // staged, which blocks every later write (product bug #10393, not introduced here).
