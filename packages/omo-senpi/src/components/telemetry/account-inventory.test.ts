@@ -4,6 +4,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
+import { apiKeyEnvProviders } from "@earendil-works/pi-ai"
+
 import { connectedAccountCounts, readConnectedAccounts } from "./account-inventory"
 
 const dirs: string[] = []
@@ -43,6 +45,11 @@ describe("readConnectedAccounts (#10919: linked accounts per provider, as the en
     expect(readConnectedAccounts(agentDir({ "anthropic-subscription": SENTINEL }), NO_ENV)).toBe("")
   })
 
+  it("#given a Claude credential with an EMPTY account list (written when an env-only user pins) #then the engine lists the flat credential: 1, plus env slots", () => {
+    expect(readConnectedAccounts(agentDir({ "anthropic-subscription": { ...SENTINEL, accounts: [] } }), NO_ENV)).toBe("anthropic-subscription:1")
+    expect(readConnectedAccounts(agentDir({ "anthropic-subscription": { ...SENTINEL, accounts: [] } }), { CLAUDE_CODE_OAUTH_TOKEN: SECRET })).toBe("anthropic-subscription:2")
+  })
+
   it("#given Claude env-var accounts #then each discovered env slot is counted beside the stored ones", () => {
     const env = { CLAUDE_CODE_OAUTH_TOKEN: SECRET, CLAUDE_CODE_OAUTH_TOKEN_3: SECRET }
     expect(readConnectedAccounts(agentDir({ "anthropic-subscription": { ...SENTINEL, accounts: [login("a")] } }), env)).toBe("anthropic-subscription:3")
@@ -74,38 +81,58 @@ type EngineAccounts = {
   getCredentialAccounts(storage: unknown, provider: string, env: Readonly<Record<string, string | undefined>>, repository: unknown): Promise<readonly unknown[]>
 }
 type EngineStore = { CredentialSlotRepository: new (path: string) => unknown }
-type EngineAuth = { AuthStorage: { inMemory(data?: Record<string, unknown>): unknown } }
+type EngineAuth = { AuthStorage: { inMemory(data?: Record<string, unknown>): { getAll(): Record<string, unknown> } } }
 
 const senpiDist = dirname(fileURLToPath(import.meta.resolve("@code-yeongyu/senpi")))
 const engineImport = async <T,>(...path: string[]): Promise<T> => (await import(pathToFileURL(join(senpiDist, ...path)).href)) as T
 
-describe("parity with the engine's own account listing (senpi getCredentialAccounts)", () => {
-  const FIXTURES: readonly (readonly [string, Record<string, unknown>, Readonly<Record<string, string | undefined>>])[] = [
-    ["3 Claude logins", { "anthropic-subscription": { ...SENTINEL, accounts: [login("a"), login("b"), login("c")] } }, NO_ENV],
-    ["managed sentinel", { "anthropic-subscription": SENTINEL }, NO_ENV],
-    ["Claude env slots beside a login", { "anthropic-subscription": { ...SENTINEL, accounts: [login("a")] } }, { CLAUDE_CODE_OAUTH_TOKEN: SECRET, CLAUDE_CODE_OAUTH_TOKEN_5: SECRET }],
-    ["Claude env slots only", {}, { CLAUDE_CODE_OAUTH_TOKEN: SECRET, CLAUDE_CODE_OAUTH_TOKEN_2: SECRET }],
-    ["non-Claude empty list", { openai: { type: "api_key", key: SECRET, accounts: [] } }, { OPENAI_API_KEY: SECRET }],
-    ["non-Claude flat key", { openai: { type: "api_key", key: SECRET } }, NO_ENV],
-    ["non-Claude pool", { "chatgpt-subscription": { type: "oauth", access: SECRET, refresh: SECRET, expires: 1, accounts: [login("a"), login("b")] } }, NO_ENV],
-    ["env-only API keys", {}, { OPENAI_API_KEY: SECRET, OPENAI_API_KEY_2: SECRET, ANTHROPIC_API_KEY: SECRET }],
+describe("parity with the engine's own account listing (senpi getCredentialAccounts), generative", () => {
+  const PROVIDERS = ["anthropic-subscription", "claude-sdk-oauth", "chatgpt-subscription", "openai-codex", "openai", "anthropic", "openrouter", "acme-gateway"] as const
+  const SHAPES: readonly (readonly [string, unknown])[] = [
+    ["absent", undefined],
+    ["null", null],
+    ["flat api key", { type: "api_key", key: SECRET }],
+    ["flat oauth", { type: "oauth", access: SECRET, refresh: SECRET, expires: 1 }],
+    ["managed sentinel, no accounts key", SENTINEL],
+    ["empty accounts", { ...SENTINEL, accounts: [] }],
+    ["1 account", { ...SENTINEL, accounts: [login("a")] }],
+    ["3 accounts", { ...SENTINEL, accounts: [login("a"), login("b"), login("c")] }],
+    ["api key + 2 accounts", { type: "api_key", key: SECRET, accounts: [login("a"), login("b")] }],
+    ["non-array accounts (string)", { ...SENTINEL, accounts: "x" }],
+    ["non-array accounts (object)", { type: "api_key", key: SECRET, accounts: {} }],
   ]
-
-  for (const [label, auth, env] of FIXTURES) {
-    it(`#given ${label} #then our count per provider equals the engine's listing length`, async () => {
-      const { getCredentialAccounts } = await engineImport<EngineAccounts>("core", "credential-accounts.js")
-      const { CredentialSlotRepository } = await engineImport<EngineStore>("core", "credential-pool", "state-store.js")
-      const { AuthStorage } = await engineImport<EngineAuth>("core", "auth-storage.js")
-      const storage = AuthStorage.inMemory(structuredClone(auth))
-      const repository = new CredentialSlotRepository(join(tempDir(), "credential-pool-state.json"))
-      const ours = connectedAccountCounts(structuredClone(auth), env)
-      for (const [provider, count] of ours) {
-        expect([provider, (await getCredentialAccounts(storage, provider, env, repository)).length]).toEqual([provider, count])
-      }
-      for (const provider of new Set([...Object.keys(auth), "anthropic-subscription", "openai", "anthropic"])) {
-        const engine = (await getCredentialAccounts(storage, provider, env, repository)).length
-        expect([provider, ours.get(provider) ?? 0]).toEqual([provider, engine])
-      }
-    })
+  const envFor = (provider: string, mode: "off" | "primary" | "primary+3"): Record<string, string> => {
+    if (mode === "off") return {}
+    const primary = provider === "anthropic-subscription" || provider === "claude-sdk-oauth" ? "CLAUDE_CODE_OAUTH_TOKEN" : "OPENAI_API_KEY"
+    return mode === "primary" ? { [primary]: SECRET } : { [primary]: SECRET, [`${primary}_3`]: SECRET }
   }
+  const CASES = PROVIDERS.flatMap((provider) =>
+    SHAPES.flatMap(([shape, credential]) =>
+      (["off", "primary", "primary+3"] as const).map((mode) => [provider, shape, credential, mode] as const)))
+
+  it(`#given every provider x credential shape x env slot combination (${CASES.length}) #then our count equals the engine listing for every provider`, async () => {
+    const { getCredentialAccounts } = await engineImport<EngineAccounts>("core", "credential-accounts.js")
+    const { CredentialSlotRepository } = await engineImport<EngineStore>("core", "credential-pool", "state-store.js")
+    const { AuthStorage } = await engineImport<EngineAuth>("core", "auth-storage.js")
+    const repository = new CredentialSlotRepository(join(tempDir(), "credential-pool-state.json"))
+    const mismatches: string[] = []
+    for (const [provider, shape, credential, mode] of CASES) {
+      const auth: Record<string, unknown> = credential === undefined ? {} : { [provider]: structuredClone(credential) }
+      const env = envFor(provider, mode)
+      const storage = AuthStorage.inMemory(structuredClone(auth))
+      // The engine rewrites auth.json with its load migrations (legacy keys, Anthropic OAuth -> subscription) once, before
+      // telemetry can run, so the file telemetry reads is the engine's loaded document.
+      const ours = connectedAccountCounts(structuredClone(storage.getAll()), env)
+      for (const listed of new Set([provider, ...apiKeyEnvProviders(), "anthropic-subscription"])) {
+        const canonical = listed === "claude-sdk-oauth" ? "anthropic-subscription" : listed === "openai-codex" ? "chatgpt-subscription" : listed
+        if (canonical !== listed && provider !== listed) continue
+        const engine = (await getCredentialAccounts(storage, listed, env, repository)).length
+        const mine = ours.get(canonical) ?? 0
+        if (canonical === listed || provider === listed) {
+          if (mine !== engine) mismatches.push(`${provider} / ${shape} / env ${mode} / listed ${listed}: ours ${mine}, engine ${engine}`)
+        }
+      }
+    }
+    expect(mismatches).toEqual([])
+  })
 })
