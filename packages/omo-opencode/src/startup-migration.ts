@@ -2,8 +2,7 @@ import { posix } from "node:path"
 
 import {
   runMigrations,
-  MigrationTransactionError,
-  MigrationValidationError,
+  migrationDiagnosticError,
   type MigrationBoundary,
   type MigrationClock,
   type MigrationEnvironment,
@@ -114,14 +113,8 @@ export function runOpenCodeStartupMigration(
       ...(batch.status === "locked" ? { error: "Configuration migration is already running" } : {}),
     }
   } catch (error) {
-    const code = error instanceof Error ? Reflect.get(error, "code") : undefined
-    const fileError = typeof code === "string" && ["EACCES", "EPERM", "ENOSPC", "EROFS", "EXDEV", "ENOENT", "EIO", "ENOTDIR"].includes(code)
-      ? ` (${code})`
-      : ""
     return {
-      error: error instanceof MigrationTransactionError || error instanceof MigrationValidationError
-        ? error.message
-        : `Configuration migration failed${fileError}; check the source and target config files`,
+      error: migrationDiagnosticError(error),
       journalResumed: false,
       migratedFrom: [],
       reloadRequired: false,

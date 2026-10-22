@@ -24,6 +24,10 @@ export function categoryShadowedAgentNames(config: OmoConfig, agentNames: Iterab
 export function categoryShadowMessage(config: OmoConfig, name: string): string {
   const category = config.categories?.[name]
   const chain = category?.models ?? (category?.model === undefined ? undefined : [category.model])
+  if (chain?.some((entry) => typeof entry !== "string" && Object.keys(entry).some((key) => key !== "model"))) {
+    const models = chain.map((entry) => displayConfigIdentifier(typeof entry === "string" ? entry : entry.model)).join(", ")
+    return `categories."${name}" is not read for subagent_type "${name}" spawns (models: ${models}). Move the complete categories."${name}" configuration to agents."${name}", including every model entry and its tuning/options; inspect omo.json for the full values. If you also use task(category: "${name}"), keep the category configuration too`
+  }
   const value = chain === undefined ? "[...]" : JSON.stringify(chain.map((entry) =>
     typeof entry === "string" ? displayConfigIdentifier(entry) : { model: displayConfigIdentifier(entry.model) },
   ))

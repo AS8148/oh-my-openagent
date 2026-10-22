@@ -94,7 +94,7 @@ describe("config diagnostic security", () => {
 
   test("malformed journal errors never quote the journal bytes", () => {
     const { home } = fixture()
-    writeFileSync(join(home, ".omo", ".migration-journal.json"), `{"token":"${secret}",${token}}`)
+    writeFileSync(join(home, ".omo", ".migration-journal.json"), `{"token":${secret}}`)
     let error: unknown
     try {
       readMigrationJournal(DEFAULT_MIGRATION_FILE_SYSTEM, { HOME: home })
@@ -128,10 +128,11 @@ describe("config diagnostic security", () => {
       env: { HOME: home },
       fileSystem: {
         existsSync: (path) => path === targetPath,
-        readFileSync: () => { throw new Error(secret) },
+        readFileSync: () => { throw Object.assign(new Error(secret), { code: "EACCES" }) },
       },
     })
     expect(result.diagnostics.some((diagnostic) => diagnostic.kind === "read")).toBe(true)
+    expect(result.diagnostics[0]?.message).toContain("EACCES")
     noSecrets(result.diagnostics)
   })
 

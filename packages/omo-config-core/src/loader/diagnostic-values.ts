@@ -1,12 +1,23 @@
 import type * as z from "zod"
 
+export function configFileErrorCode(error: unknown): string {
+  const code = error instanceof Error ? Reflect.get(error, "code") : undefined
+  return typeof code === "string" && ["EACCES", "EPERM", "ENOSPC", "EROFS", "EXDEV", "ENOENT", "EIO", "ENOTDIR", "EISDIR"].includes(code)
+    ? ` (${code})`
+    : ""
+}
+
 /** Schema messages may embed received input, including credentials in custom refinements. */
 export function configIssueSummary(issue: z.core.$ZodIssue): string {
-  return issue.code === "invalid_type"
-    ? `Expected ${issue.expected}`
-    : issue.code === "invalid_value"
-      ? "Expected a supported value"
-      : "Invalid value"
+  switch (issue.code) {
+    case "invalid_type": return `Expected ${issue.expected}`
+    case "invalid_value": return "Expected a supported value"
+    case "too_big": return "Value exceeds the maximum"
+    case "too_small": return "Value is below the minimum"
+    case "invalid_format": return "Invalid format"
+    case "unrecognized_keys": return "Unrecognized keys"
+    default: return "Invalid value"
+  }
 }
 
 /** Keep identifiers useful to doctor without echoing credentials embedded in URL identifiers. */

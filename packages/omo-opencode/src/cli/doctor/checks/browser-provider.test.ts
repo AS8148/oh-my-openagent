@@ -12,7 +12,7 @@ async function registeredBrowserProviderCheck() {
 }
 
 const removedProvider = ["agent", "browser"].join("-")
-const removalMessage = "Expected a supported value"
+const removalMessage = "Unsupported browser provider"
 
 describe("browser provider doctor check", () => {
   let root: string

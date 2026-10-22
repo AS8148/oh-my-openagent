@@ -14,6 +14,7 @@ import { invalidValueDiagnostics, validateConfigLayer, validationDiagnostic } fr
 import { mergeOmoConfigRecords } from "./merge"
 import { resolveOmoConfigPaths } from "./paths"
 import { pruneInvalidConfigPaths } from "./prune-invalid-leaves"
+import { configFileErrorCode } from "./diagnostic-values"
 import { resolveOmoConfigView, resolveOmoProfileName } from "./resolution"
 import {
   DEFAULT_READ_FILE_SYSTEM,
@@ -82,9 +83,9 @@ function readConfigSource(
   let content: string
   try {
     content = fileSystem.readFileSync(path, "utf-8")
-  } catch {
+  } catch (error) {
     return {
-      diagnostics: [{ kind: "read", message: `Failed to read ${path}`, path }],
+      diagnostics: [{ kind: "read", message: `Failed to read ${path}${configFileErrorCode(error)}`, path }],
       source: { exists: true, loaded: false, path, scope },
     }
   }

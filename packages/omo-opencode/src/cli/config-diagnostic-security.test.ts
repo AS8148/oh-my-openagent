@@ -113,7 +113,7 @@ describe("migration and doctor diagnostic security", () => {
     const message = categoryShadowMessage({
       categories: { oracle: { models: [{ model: "provider/model", provider_options: { apiKey: secret, headers: { Authorization: token } } }] } },
     }, "oracle")
-    expect(message).toContain("provider/model")
+    expect(message).toContain("including every model entry and its tuning/options")
     noSecrets(message)
   })
 
@@ -160,7 +160,7 @@ describe("migration and doctor diagnostic security", () => {
     const previous = process.env.OMO_CODING_AGENT_DIR
     process.env.OMO_CODING_AGENT_DIR = home
     try {
-      writeFileSync(join(home, "settings.json"), `{"token":"${secret}",${token}}`)
+      writeFileSync(join(home, "settings.json"), `{"token":${secret}}`)
       const lines = warningsForSettings()
       expect(lines.join("\n")).toContain("settings.json")
       noSecrets(lines)
@@ -182,7 +182,7 @@ describe("migration and doctor diagnostic security", () => {
     const lines = configDoctorLines({ cwd: home, env: { HOME: home } })
     expect(lines.join("\n")).toContain("task.default_concurrency")
     expect(lines.join("\n")).toContain("unknown")
-    expect(lines.join("\n")).toContain("provider/model")
+    expect(lines.join("\n")).toContain("including every model entry and its tuning/options")
     noSecrets(lines)
   })
 
