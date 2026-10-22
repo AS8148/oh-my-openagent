@@ -109,7 +109,9 @@ export class SyncEngine {
     const waiters = this.waiters.splice(0)
     void run.then(
       (report) => {
+        const shownBefore = this.shownFailureKind()
         this.failing = null
+        this.announceIfChanged(shownBefore)
         for (const w of waiters) w(report)
         if (this.running === run) this.running = null
         if (this.rerun && this.eventHead > this.appliedMirror) {
@@ -118,15 +120,32 @@ export class SyncEngine {
         }
       },
       (error: unknown) => {
+        const shownBefore = this.shownFailureKind()
         const failure = describeSyncFailure(error)
         const previous = this.failing
         this.failing = previous?.failure.kind === failure.kind
           ? { failure, since: previous.since, attempts: previous.attempts + 1 }
           : { failure, since: this.deps.clock.now(), attempts: 1 }
+        this.announceIfChanged(shownBefore)
         if (this.running === run) this.running = null
       },
     )
     return run
+  }
+
+  private shownFailureKind(): string | null {
+    const failing = this.failing
+    return failing !== null && isFailureShown(failing.failure.kind, failing.attempts) ? failing.failure.kind : null
+  }
+
+  /** Tells the owner when the failure a UI shows appeared, changed kind or cleared; a repeat of the same one is silent. */
+  private announceIfChanged(shownBefore: string | null): void {
+    if (this.shownFailureKind() === shownBefore) return
+    try {
+      this.deps.onStatusChange?.()
+    } catch (error) {
+      this.deps.log?.(`sync status listener failed: ${String(error)}`)
+    }
   }
 
   private request(): void {

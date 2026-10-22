@@ -145,6 +145,32 @@ test.each([
   expect(await b.engine.status()).toMatchObject({ kind: "synced", at: b.clock.now() })
 }, GIT_TEST_TIMEOUT)
 
+test("the owner hears when the shown failure appears, changes kind or clears, and never for a repeat or a hidden blip (omo #10637)", async () => {
+  const server = new FakeSyncServer()
+  let changes = 0
+  const b = await makeDevice(server, "b", undefined, { onStatusChange: () => (changes += 1) })
+  devices.push(b)
+  const failWith = (makeError: () => Error) => spyOn(b.store, "load").mockImplementation(async () => {
+    throw makeError()
+  })
+  const offline = failWith(() => new SyncNetworkError(new TypeError("fetch failed")))
+  for (let attempt = 1; attempt < OFFLINE_SHOWN_AFTER_ATTEMPTS; attempt += 1) await failedCycle(b)
+  expect(changes).toBe(0)
+  await failedCycle(b)
+  expect(changes).toBe(1)
+  await failedCycle(b)
+  expect(changes).toBe(1)
+  offline.mockRestore()
+  const locked = failWith(() => new StrandedGitLockError([{ path: "/memory/.git/index.lock", reason: "owner-not-proven-dead" }]))
+  await failedCycle(b)
+  expect(changes).toBe(2)
+  locked.mockRestore()
+  await b.engine.runCycle()
+  expect(changes).toBe(3)
+  await b.engine.runCycle()
+  expect(changes).toBe(3)
+}, GIT_TEST_TIMEOUT)
+
 test("the status reports the last successful sync time and how many memories a catch-up updated", async () => {
   const { a, b } = await pair()
   expect(await b.engine.status()).toEqual({ kind: "never_synced" })
