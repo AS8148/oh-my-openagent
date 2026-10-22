@@ -2,6 +2,7 @@
 // ships as the `#omo-device-account-runtime` sidecar and loads on the first sync resolve, so a session
 // start does not carry the service-auth code.
 
+import { SyncSidecarUnavailableError } from "../sync-runner"
 import type { DeviceAccountSource } from "./account-source"
 import type * as AccountRuntime from "./account-runtime"
 
@@ -19,7 +20,7 @@ export function lazyCliAccountSource(
   return async () => {
     pending ??= importRuntime().then((runtime) => runtime.createCliAccountSource(options)).catch((error: unknown) => {
       pending = undefined
-      throw error
+      throw new SyncSidecarUnavailableError("device account", error)
     })
     return (await pending)()
   }

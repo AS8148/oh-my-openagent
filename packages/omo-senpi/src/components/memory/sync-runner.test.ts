@@ -8,6 +8,8 @@ import { join } from "node:path"
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import type { DeviceSync, EngineStatus, SyncSession } from "@oh-my-opencode/memory-core/sync-engine"
 
+import { lazyCliAccountSource } from "./device-session/account-runtime-loader"
+import { createDeviceSessionResolver } from "./device-session/resolver"
 import { SYNC_CLOSE_WAIT_EXCEEDED, SYNC_IDLE_NO_DEVICE_SESSION, SYNC_UNAVAILABLE, createSyncRunner, watchHeadLog } from "./sync-runner"
 
 const dirs: string[] = []
@@ -143,6 +145,35 @@ test("a missing sync sidecar leaves the runner idle with a typed sync-unavailabl
   const status = await runner.status(paths.repo)
   expect(status?.kind).toBe(SYNC_UNAVAILABLE)
   expect(status !== null && "reason" in status ? status.reason : "").toContain("#omo-memory-sync-runtime")
+  expect(warned.map((w) => w.code)).toEqual([SYNC_UNAVAILABLE])
+  expect(errors).toEqual([])
+  await runner.release(paths.repo)
+})
+
+test("an unloadable device account sidecar reports sync-unavailable with its reason, like the engine sidecar", async () => {
+  const paths = await identity()
+  const warned: { message: string; code: unknown }[] = []
+  const errors: string[] = []
+  const missing = Object.assign(new Error("Cannot find module '#omo-device-account-runtime'"), { code: "ERR_MODULE_NOT_FOUND" })
+  const runner = createSyncRunner({
+    logger: {
+      info: () => undefined,
+      warn: (message: string, meta?: Record<string, unknown>) => warned.push({ message, code: meta?.code }),
+      error: (message: string) => errors.push(message),
+    },
+    resolveSession: createDeviceSessionResolver({
+      source: lazyCliAccountSource({ env: {} }, async () => {
+        throw missing
+      }),
+      pinDir: join(paths.runtime, "pins"),
+      loadRuntime: () => Promise.reject(new Error("the engine sidecar is not reached when the account cannot load")),
+    }),
+    watchHead: () => () => undefined,
+  })
+  await runner.acquire("agent", paths, { enabled: true })
+  const status = await runner.status(paths.repo)
+  expect(status?.kind).toBe(SYNC_UNAVAILABLE)
+  expect(status !== null && "reason" in status ? status.reason : "").toContain("#omo-device-account-runtime")
   expect(warned.map((w) => w.code)).toEqual([SYNC_UNAVAILABLE])
   expect(errors).toEqual([])
   await runner.release(paths.repo)

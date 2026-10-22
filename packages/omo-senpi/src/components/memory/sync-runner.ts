@@ -29,6 +29,14 @@ export interface SyncUnavailableStatus {
   readonly reason: string
 }
 
+/** Thrown by a session resolver whose own packaged sidecar would not load; reported like the engine sidecar. */
+export class SyncSidecarUnavailableError extends Error {
+  constructor(readonly sidecar: string, cause: unknown) {
+    super(`the ${sidecar} sidecar could not be loaded: ${String(cause)}`, { cause })
+    this.name = "SyncSidecarUnavailableError"
+  }
+}
+
 export type SyncRuntime = Pick<typeof import("#omo-memory-sync-runtime"), "openDeviceSync">
 
 /**
@@ -143,7 +151,14 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
   }
 
   const start = async (identity: string, paths: MemoryIdentityPaths, space: SyncSpaceInputs): Promise<Running | SyncUnavailableStatus | null> => {
-    const resolved = await resolveSession({ identity, paths, space })
+    let resolved: SyncSessionResolution
+    try {
+      resolved = await resolveSession({ identity, paths, space })
+    } catch (error) {
+      if (!(error instanceof SyncSidecarUnavailableError)) throw error
+      logger.warn(`memory sync unavailable: the ${error.sidecar} sidecar could not be loaded`, { identity, code: SYNC_UNAVAILABLE, reason: error.message })
+      return { kind: SYNC_UNAVAILABLE, reason: error.message }
+    }
     if (resolved === null) {
       logger.info(SYNC_IDLE_NO_DEVICE_SESSION, { identity })
       return null
