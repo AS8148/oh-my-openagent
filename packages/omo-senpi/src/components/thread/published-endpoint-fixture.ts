@@ -2,6 +2,7 @@ import { once } from "node:events"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createConnection, createServer, type Socket } from "node:net"
 import { join } from "node:path"
+import { fakeHostTransport } from "../../../../senpi-task/src/runners/rpc-host/__fixtures__/fake-host-transport"
 import { controlSocketSecretPath } from "./endpoint-registry"
 import { createLiveThreadSurface } from "./live-surface"
 import { createControlEndpointRegistrant, type SenpiWakeEvent } from "./gateway/registration"
@@ -54,7 +55,11 @@ export async function publishedWorld() {
     const frames: string[] = []
     const listing = { answer: true, durableId, delayMs: 0 }
     const sockets = new Set<Socket>()
-    const server = createServer((socket) => {
+    // A host-published owner listens on the transport its logical path names (a hashed pipe behind a raw
+    // secret on win32); a terminal keeps its own secret on the logical path.
+    const transport = terminal ? undefined : fakeHostTransport(socketPath)
+    const admit = (socket: Socket, accept: () => void) => (transport === undefined ? accept() : transport.authenticate(socket, accept))
+    const server = createServer((socket) => admit(socket, () => {
       sockets.add(socket)
       socket.once("close", () => sockets.delete(socket))
       let buffer = ""
@@ -82,9 +87,9 @@ export async function publishedWorld() {
           })()
         }
       })
-    })
+    }))
     const listening = once(server, "listening", { signal: AbortSignal.timeout(5000) })
-    server.listen(socketPath)
+    server.listen(transport?.listenAddress ?? socketPath)
     await listening
     calls.push(socketPath)
     let closed = false

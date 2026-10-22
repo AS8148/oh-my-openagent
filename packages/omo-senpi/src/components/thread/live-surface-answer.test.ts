@@ -3,6 +3,7 @@ import { once } from "node:events"
 import { mkdtempSync, rmSync } from "node:fs"
 import { createServer, type Socket } from "node:net"
 import { join } from "node:path"
+import { fakeHostTransport } from "../../../../senpi-task/src/runners/rpc-host/__fixtures__/fake-host-transport"
 
 import type { GatewayEndpointKind, GatewayEndpointRef } from "./gateway/adapter"
 import { createGatewayRelay } from "./gateway/relay"
@@ -30,7 +31,11 @@ afterEach(async () => {
 async function answeringEndpoint(socketPath: string, kind: GatewayEndpointKind, pending: Set<string>) {
   const frames: Frame[] = []
   const sockets = new Set<Socket>()
-  const server = createServer((socket) => {
+  // An rpc_host listens on the transport its logical path names (a hashed pipe behind a raw secret on win32);
+  // a terminal keeps its own secret on the logical path.
+  const transport = kind === "rpc_host" ? fakeHostTransport(socketPath) : undefined
+  const admit = (socket: Socket, accept: () => void) => (transport === undefined ? accept() : transport.authenticate(socket, accept))
+  const server = createServer((socket) => admit(socket, () => {
     sockets.add(socket)
     socket.once("close", () => sockets.delete(socket))
     let authenticated = kind === "rpc_host"
@@ -58,9 +63,9 @@ async function answeringEndpoint(socketPath: string, kind: GatewayEndpointKind, 
       pending.delete(request)
       return reply({ success: true })
     })
-  })
+  }))
   const listening = once(server, "listening")
-  server.listen(socketPath)
+  server.listen(transport?.listenAddress ?? socketPath)
   await listening
   cleanups.push(async () => {
     for (const socket of sockets) socket.destroy()
