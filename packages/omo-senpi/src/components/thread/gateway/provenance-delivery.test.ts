@@ -16,7 +16,7 @@ function fixture() {
   const receiver = h.session("receiver")
   const unused = async (): Promise<never> => { throw new Error("unused host operation") }
   const host: ThreadHost = {
-    socket: "fixture", listSessions: async () => [{ sessionId: receiver.id, cwd: receiver.cwd, name: "receiver" }],
+    socket: "fixture", listSessions: async () => [{ sessionId: receiver.id, durableSessionId: receiver.id, cwd: receiver.cwd, name: "receiver" }],
     gateway: { wake: async (_endpoint, ids) => toSessionControlDrainResult(await receiver.drain.drain({ reason: "command", delivery_ids: ids })) },
     openSession: unused, getMessages: unused, getState: unused, prompt: unused,
     interrupt: unused, setSessionName: unused, setModel: unused, getAvailableModels: unused,

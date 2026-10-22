@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
 import { resolveProvenance, type ProvenanceRuntime } from "./provenance-resolver"
 
@@ -103,6 +103,26 @@ test("#given a sender git URL rewrite #when resolving its origin #then the sende
   writeFileSync(config, '[url "https://example.invalid/example-owner/"]\n\tinsteadOf = sender-alias:\n')
   expect(await resolveProvenance({ cwd, env, workspaces: runtime.workspaces }))
     .toEqual({ workspace: "Owner workspace", project: "remote-project" })
+})
+
+// Contract: "no repository" is decided structurally (no .git above the cwd, or git's exit code 2 for a missing remote), never from
+// git's message text, which a translated git prints in the sender's own language.
+test("#given a cwd outside any repository and a git that answers in another language #when resolving #then delivery stays possible as unclassified", async () => {
+  root = mkdtempSync(join(tmpdir(), "omo-provenance-no-repo-"))
+  const bin = join(root, "bin")
+  const outside = join(root, "outside")
+  mkdirSync(bin)
+  mkdirSync(outside)
+  writeFileSync(join(bin, "git"), "#!/bin/sh\necho \"fatal: ce n'est pas un depot git\" >&2\nexit 128\n", { mode: 0o755 })
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, HOME: root, LANG: "fr_FR.UTF-8", LC_ALL: "fr_FR.UTF-8", GIT_DIR: undefined, GIT_WORK_TREE: undefined }
+  expect(await resolveProvenance({ cwd: outside, env, workspaces: [] })).toEqual({ workspace: "unclassified", project: "outside" })
+})
+
+test("#given a sender repository without an origin #when resolving #then git's exit code, not its message, marks it unclassified", async () => {
+  const cwd = (root = mkdtempSync(join(tmpdir(), "omo-provenance-no-origin-")))
+  const env = { ...process.env, HOME: cwd, GIT_CONFIG_GLOBAL: join(cwd, "no-config"), GIT_CONFIG_NOSYSTEM: "1", GIT_MASTER: "1", LANG: "fr_FR.UTF-8", LC_ALL: "fr_FR.UTF-8" }
+  execFileSync("git", ["init", "-q", cwd], { env, windowsHide: true })
+  expect(await resolveProvenance({ cwd, env, workspaces: [] })).toEqual({ workspace: "unclassified", project: basename(cwd) })
 })
 
 test("#given a broken sender git configuration #when resolving its origin #then unexpected git errors are surfaced instead of silently unclassifying", async () => {

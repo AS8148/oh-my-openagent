@@ -27,7 +27,11 @@ test("#given current storage #when the historical v4 worker reads and attempts a
   const before = await old.list()
   expect(before.map((row) => row.body)).toEqual(["before"])
   expect(before[0]).not.toHaveProperty("actor_user_id")
-  await expect(h.engineFor(old).deliver({ sender: sender("old-actor"), target: "target", text: "from v4" })).rejects.toThrow("delivery provenance is required")
+  // Capture the refusal explicitly: under Bun 1.4.3, awaiting a worker-backed promise through `expect(...).rejects`
+  // stops the worker's replies from reaching this thread, so the store's close never settles.
+  const refusal = await h.engineFor(old).deliver({ sender: sender("old-actor"), target: "target", text: "from v4" }).then(() => undefined, (error: unknown) => error)
+  expect(refusal).toBeInstanceOf(Error)
+  expect(String(refusal)).toContain("delivery provenance is required")
   await old.dispose()
 
   const db = new Database(gatewayDatabasePath(h.agentDir))
