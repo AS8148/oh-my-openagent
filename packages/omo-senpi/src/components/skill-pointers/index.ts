@@ -24,10 +24,12 @@ interface SkillPointerTarget {
   readonly instruction: string
   readonly extra?: (sessionScope: string | null) => string
   readonly companions?: readonly SkillCompanion[]
-  // A binding target enters its mode on a match instead of asking the model whether the user meant it:
-  // the quote, relay, negation, identifier, child-session and extension filters above already decided
-  // that, and the conditional pointer let the model skip mass-ulw entirely (#10810).
-  readonly binding?: true
+  // A binding target enters its mode instead of asking the model whether the user meant it: the quote,
+  // relay, negation, identifier, child-session and extension filters already decided that, and the
+  // conditional pointer let the model skip mass-ulw entirely (#10810). It binds only on a request
+  // match (see `isRequest`); a question about the skill, or the plain-word alias `meth`, keeps the
+  // conditional pointer, because forcing a workflow run onto a question is the wrong answer to it.
+  readonly bindingPattern?: RegExp
 }
 
 // A companion is a skill the parent workflow runs on. It has no keyword of its own: it rides on
@@ -77,6 +79,8 @@ const ULTIMATE_BROWSING_COMPANION: SkillCompanion = {
 // also stands in for the `ulw` half: "mulw research" names the same composite as
 // "mass ulw research" and loads both skills.
 const MASS_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw|meth)`
+// `meth` is an ordinary English word, so it may point at the skill but never binds the mode.
+const MASS_REQUEST_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw)`
 // A skill name is a request only as a word of its own: not a segment of a longer identifier
 // (`mass-ulw-refactor`, `senpi-ulw-loop`) and not part of a path or file name (`.omo/ulw-plan/`).
 const skillNamePattern = (body: string): RegExp => new RegExp(String.raw`${NOT_AFTER_IDENTIFIER}\b${body}\b${NOT_INTO_IDENTIFIER}${NOT_BEFORE_PATH}`, "i")
@@ -87,7 +91,7 @@ const TARGETS: readonly SkillPointerTarget[] = [
     pattern: skillNamePattern(MASS_ALIAS),
     expandedBlockPattern: /<skill\s+name="mass-ulw"/i,
     instruction: "dispatch each phase's dependency-ordered lanes as one run of the workflow tool composed in an eval cell, start a new run per phase rather than one graph for the whole job, and when a ulw-loop or ulw-execute contract is active let it own the goal",
-    binding: true,
+    bindingPattern: skillNamePattern(MASS_REQUEST_ALIAS),
   },
   {
     skillName: "ulw-plan",
@@ -111,7 +115,7 @@ const TARGETS: readonly SkillPointerTarget[] = [
     expandedBlockPattern: /<skill\s+name="ulw-research"/i,
     instruction: "orchestrate team-first maximum-saturation research",
     companions: [BROWSER_COMPANION, ULTIMATE_BROWSING_COMPANION],
-    binding: true,
+    bindingPattern: skillNamePattern(String.raw`(?:ulw|${MASS_REQUEST_ALIAS})[\s-]*research`),
   },
 ]
 
@@ -171,18 +175,21 @@ function handleInput(
   const alreadyLoaded = (skillName: string, expandedBlockPattern: RegExp): boolean =>
     skillName === commandSkillName || expandedBlockPattern.test(payload.text)
   const invoked = TARGETS.filter((target) => target.pattern.test(visible))
-  const massMode = invoked.some((target) => target.customType === MASS_ULW_CUSTOM_TYPE)
+  const relayed = LEADING_TAG.test(payload.text)
+  const binds = (target: SkillPointerTarget): boolean =>
+    !relayed && target.bindingPattern !== undefined && isRequest(visible, target.bindingPattern)
+  const massMode = invoked.some((target) => target.customType === MASS_ULW_CUSTOM_TYPE && binds(target))
   const pointers: SkillPointerMessage[] = invoked
     .filter((target) => !alreadyLoaded(target.skillName, target.expandedBlockPattern))
     .map((target) => ({
       customType: target.customType,
-      content: target.binding === true ? skillMode(target, massMode) : skillPointer(target, sessionScope),
+      content: binds(target) ? skillMode(target, massMode, sessionScope) : skillPointer(target, sessionScope),
     }))
   for (const parent of invoked) {
     for (const companion of parent.companions ?? []) {
       if (alreadyLoaded(companion.skillName, companion.expandedBlockPattern)) continue
       if (pointers.some((pointer) => pointer.customType === companion.customType)) continue
-      pointers.push({ customType: companion.customType, content: companionPointer(parent, companion) })
+      pointers.push({ customType: companion.customType, content: companionPointer(parent, companion, binds(parent)) })
     }
   }
 
@@ -225,8 +232,9 @@ function skillPointer(target: SkillPointerTarget, sessionScope: string | null): 
 
 // Only text the session's own user typed reaches this point (see handleInput), so the block states the
 // mode as settled and names the first reads and the dispatch shape that satisfy it.
-function skillMode(target: SkillPointerTarget, massMode: boolean): string {
+function skillMode(target: SkillPointerTarget, massMode: boolean, sessionScope: string | null): string {
   const skillsRoot = getBuiltinSkillsRoot()
+  const extra = target.extra?.(sessionScope) ?? ""
   const tag = `omo-${target.skillName}-mode`
   const reads =
     target.customType === MASS_ULW_CUSTOM_TYPE
@@ -238,12 +246,29 @@ function skillMode(target: SkillPointerTarget, massMode: boolean): string {
       : massMode
         ? " mass-ulw mode is active in the same message, so run the research waves as its workflow runs."
         : ""
-  return `<${tag}>The user of this session invoked ${target.skillName} in their own words, so this turn runs in ${target.skillName} mode. This is binding: quoted, relayed, negated and delegated mentions never produce this block. Before any other tool call this turn, read ${reads} in full with the read tool, then follow the skill: ${target.instruction}.${dispatch}</${tag}>`
+  return `<${tag}>The user of this session invoked ${target.skillName} in their own words, so this turn runs in ${target.skillName} mode. This is binding: quoted, relayed, negated and delegated mentions never produce this block. Before any other tool call this turn, read ${reads} in full with the read tool, then follow the skill: ${target.instruction}.${dispatch}${extra}</${tag}>`
 }
 
-function companionPointer(parent: SkillPointerTarget, companion: SkillCompanion): string {
+// Lane reports and relayed orders open with a bracketed tag ("[LEAD via duty -> lane, ...]", "[lane w46:p6P]").
+// The quote filter only masks the strict relay shapes, so a looser tag still reaches the keyword test; such
+// text may keep a conditional pointer but never binds a mode on another session's behalf.
+const LEADING_TAG = /^\s*\[[^\]\n]{2,120}\]/
+
+// A match is a request unless the sentence it sits in is a question: the first sentence terminator
+// after it is `?`. "How is this possible? Recreate it in 3D. mass ulw research" requests the mode;
+// "how does mass ulw differ from ulw-loop?" asks about it.
+function isRequest(visible: string, pattern: RegExp): boolean {
+  for (const match of visible.matchAll(new RegExp(pattern.source, "gi"))) {
+    const rest = visible.slice((match.index ?? 0) + match[0].length)
+    const terminator = /[.!?\n]/.exec(rest)
+    if (terminator?.[0] !== "?") return true
+  }
+  return false
+}
+
+function companionPointer(parent: SkillPointerTarget, companion: SkillCompanion, binding: boolean): string {
   const skillsRoot = getBuiltinSkillsRoot()
-  if (parent.binding === true) {
+  if (binding) {
     return `<omo-${companion.skillName}-pointer>${parent.skillName} ${companion.role}. Read the ${companion.skillName} skill at ${skillsRoot}${companion.skillName}/SKILL.md with the read tool in the same turn as the ${parent.skillName} skill and ${companion.instruction}.</omo-${companion.skillName}-pointer>`
   }
   return `<omo-${companion.skillName}-pointer>${parent.skillName} ${companion.role}. If the user of this session is asking to run ${parent.skillName}, read the ${companion.skillName} skill at ${skillsRoot}${companion.skillName}/SKILL.md with the read tool in the same turn as the ${parent.skillName} skill and ${companion.instruction}. If ${parent.skillName} is only being discussed, quoted, or relayed from another session, ignore this pointer.</omo-${companion.skillName}-pointer>`

@@ -227,6 +227,41 @@ describe("omo-senpi skill-pointers component", () => {
       expect(research).toEndWith("</omo-ulw-research-mode>")
     })
 
+    it("#when the skill is only asked about or named by the plain-word alias #then it keeps the conditional pointer", async () => {
+      for (const [text, tags] of [
+        ["how does mass ulw differ from ulw-loop?", ["<omo-mass-ulw-pointer>"]],
+        ["meth ship the docs refresh", ["<omo-mass-ulw-pointer>"]],
+        ["meth research the market", ["<omo-mass-ulw-pointer>", "<omo-ulw-research-pointer>"]],
+        // A relayed order or lane report whose tag the strict relay filter does not cover.
+        ["[LEAD via duty -> lane-a, omo#1 FIX_FIRST] asking about it must not start a run; mass ulw research the fix", ["<omo-mass-ulw-pointer>", "<omo-ulw-research-pointer>"]],
+        ["[lane-a w46:p6P] ran mass ulw on the docs refresh", ["<omo-mass-ulw-pointer>"]],
+      ] as const) {
+        // given
+        const pi = new FakeExtensionAPI()
+        await registerSkillPointers(pi)
+
+        // when
+        await dispatchInput(pi, text)
+
+        // then
+        const contents = pi.messages.map((call) => String(call.message["content"]))
+        expect({ text, modes: contents.filter((content) => /^<omo-[a-z-]+-mode>/.test(content)) }).toEqual({ text, modes: [] })
+        for (const tag of tags) expect(contents.some((content) => content.startsWith(tag))).toBe(true)
+      }
+    })
+
+    it("#when a question precedes the request in the same prompt #then the request still binds", async () => {
+      // given
+      const pi = new FakeExtensionAPI()
+      await registerSkillPointers(pi)
+
+      // when
+      await dispatchInput(pi, "Why does this keep failing? mass ulw fix the flaky suite")
+
+      // then
+      expect(String(pi.messages[0]?.message["content"])).toStartWith("<omo-mass-ulw-mode>")
+    })
+
     it("#when a prompt carries an injected mode block #then the block's own mention does not re-arm", async () => {
       // given
       const pi = new FakeExtensionAPI()
