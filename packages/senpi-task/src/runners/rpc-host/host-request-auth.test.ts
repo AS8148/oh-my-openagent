@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test"
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { configureSharedSubunitLogger } from "@oh-my-opencode/utils"
 import { startFakeHost } from "./__fixtures__/fake-host"
 import { askHost } from "./host-request"
@@ -96,21 +97,18 @@ describe.skipIf(process.platform === "win32")("POSIX raw task host challenge-res
   ]
   test.each(layouts)("#given no agent-dir override on %s #when askHost runs without options #then it reads the key record where the thread client resolves the agent dir", async (_name, agentDirOf) => {
     const home = mkdtempSync(join(tmpdir(), "rpc-home-"))
-    const saved = Object.fromEntries(["HOME", "OMO_CODING_AGENT_DIR", "SENPI_CODING_AGENT_DIR", "PI_CODING_AGENT_DIR", "SENPI_RPC_KEY_ROOT"].map((name) => [name, process.env[name]]))
     try {
-      for (const name of Object.keys(saved)) delete process.env[name]
-      process.env.HOME = home
       const keyRoot = agentDirOf(home)
       mkdirSync(keyRoot, { recursive: true, mode: 0o700 })
-      await withContractHost({ auth: true, keyRoot }, async (host) => {
-        expect(await askHost(host.socket, { type: "warm", id: "warm-default", cwd: host.root, kind: "worker" }, 2000)).toMatchObject({ success: true, data: { warmed: true } })
-        expect(host.frames.map(({ frame }) => frame.type)).toEqual(["get_protocol_info", "authenticate", "warm"])
-      })
+      const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(OMO|SENPI|PI)_CODING_AGENT_DIR$|^SENPI_RPC_KEY_ROOT$/.test(name)))
+      const child = Bun.spawn([process.execPath, fileURLToPath(new URL("./__fixtures__/ask-host-default-root.ts", import.meta.url)), keyRoot], { env: { ...env, HOME: home }, stdout: "pipe", stderr: "pipe" })
+      const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited])
+      expect(exitCode).toBe(0)
+      expect(JSON.parse(stdout.trim().split("\n").pop()!)).toEqual({ success: true, frames: ["get_protocol_info", "authenticate", "warm"] })
     } finally {
-      for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
       rmSync(home, { recursive: true, force: true })
     }
-  })
+  }, 20_000)
 })
 
 test.skipIf(process.platform !== "win32")("#given a Windows task host #when warm is sent #then the raw pipe secret transport remains unchanged", async () => {
