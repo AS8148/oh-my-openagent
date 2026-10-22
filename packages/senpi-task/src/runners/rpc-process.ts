@@ -222,8 +222,11 @@ async function engineAcceptsFallbackChain(client: RpcProtocolClient): Promise<bo
 }
 
 const ANSI_ESCAPE = /\u001B\[[0-?]*[ -/]*[@-~]/g
-// senpi's `model_unresolved` startup diagnostic, which it prints before exiting 1 (core/model-resolver).
-const SENPI_UNRESOLVED_MODEL = /Model "[^"\n]+" not found\. Use --list-models to see available models\./
+// senpi's two `model_unresolved` startup diagnostics, printed before it exits 1 (core/model-resolver):
+// an unknown model, and an unknown provider in a `provider/model` pin. Both mean the child can't serve
+// the requested model, so both fail typed and let the start fallback chain move on.
+const SENPI_UNRESOLVED_MODEL =
+  /Model "[^"\n]+" not found\. Use --list-models to see available models\.|Unknown provider "[^"\n]+"\. Use --list-models to see available providers\/models\./
 
 function childUnresolvedModelError(stderrTail: string): string | undefined {
   return SENPI_UNRESOLVED_MODEL.exec(stderrTail.replace(ANSI_ESCAPE, ""))?.[0]

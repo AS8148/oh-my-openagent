@@ -65,4 +65,30 @@ describe("RpcProcessRunner child model resolution (#10863)", () => {
     // then
     expect(failure).toMatchObject({ failure: { kind: "child-prompt-failed", rejected_while: "exited" } })
   })
+
+  test("#given a pin whose provider the child does not know #when the child exits with its unknown-provider diagnostic #then the start fails typed model_unavailable", async () => {
+    // given: senpi's second model_unresolved form (model-resolver: Unknown provider "X")
+    const unknownProvider = 'Error: Unknown provider "ghostprov". Use --list-models to see available providers/models.'
+    const runner = new RpcProcessRunner({
+      modelAdmission: async () => undefined,
+      buildSpawn: (input) => ({
+        command: process.execPath,
+        args: ["-e", `process.stderr.write(${JSON.stringify(`${unknownProvider}\n`)}); process.exit(1)`],
+        cwd: input.cwd,
+        env: process.env,
+      }),
+    })
+
+    // when
+    const failure = await runner.start(spec("ghostprov/model")).catch((error: unknown) => error)
+
+    // then
+    expect(failure).toMatchObject({
+      failure: {
+        kind: "model_unavailable",
+        message: expect.stringContaining('Unknown provider "ghostprov"'),
+        rejected_while: "exited",
+      },
+    })
+  })
 })
