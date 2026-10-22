@@ -43,6 +43,8 @@ test("next.config builds with the commit as its build id and without Next's depl
     const { default: config } = await import("../next.config.ts")
     expect(config.deploymentId).toBeUndefined()
     expect(await config.generateBuildId()).toBe(treeA)
+    // The inlined id is what puts data-omo-build on <html>; live-asset-inventory relies on that marker.
+    expect(config.env.OMO_WEB_BUILD_ID).toBe(treeA)
   } finally {
     if (previous === undefined) delete process.env.GITHUB_SHA
     else process.env.GITHUB_SHA = previous
