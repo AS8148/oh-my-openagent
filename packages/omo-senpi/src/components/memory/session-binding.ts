@@ -138,7 +138,7 @@ export function createSessionBinder(deps: SessionBinderDeps): SessionBinder {
     memoryModuleSupervisor.acquire()
     if (!oneShot) {
       state.syncRepo = identity.paths.repo
-      void syncRunner.acquire(identity.id, identity.paths, sessionConfig.sync)
+      void syncRunner.acquire(identity.id, identity.paths, sessionConfig.sync, { profile: sessionConfig.agent, projectDir: sessionCwd })
     }
     // Disposable bookkeeping: a session closed without a conversation leaves no file (senpi#3263).
     pi.appendEntry(MEMORY_BINDING_CUSTOM_TYPE, binding, { startupBookkeeping: true })
