@@ -190,6 +190,75 @@ test("a 429 on a resend honours a Retry-After longer than the backoff", async ()
   expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
 })
 
+test("each attempt gets a fresh 256-bit base64url Idempotency-Key that stays fixed across its resends", async () => {
+  const service = idempotentService()
+  const store = memorySecrets().store(service.api)
+  await store.write(expired)
+  const { time, open } = await setup()
+  loseFirstAnswer()
+  await expect(open(service.api, store).accessToken()).rejects.toThrow()
+  await time.sleep(5_000)
+  expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
+  const restored = await store.read()
+  if (restored === null) throw new Error("restored record missing")
+  await store.write({ ...restored, accessTokenExpiresAt: "2000-01-01T00:00:00Z" })
+  expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
+  const keys = service.seen.map(entry => entry.key ?? "")
+  expect(keys).toHaveLength(3)
+  for (const key of keys) expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/)
+  expect(keys[1]).toBe(keys[0])
+  expect(keys[2]).not.toBe(keys[0])
+})
+
+test("a pending attempt journaled with an older UUID key keeps resending that key", async () => {
+  const legacyKey = "0f8e3b52-6d1c-4a8e-9b7f-2c4d5e6f7a8b"
+  const service = idempotentService()
+  const store = memorySecrets().store(service.api)
+  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: legacyKey, attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+  const { open } = await setup()
+  expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
+  expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: legacyKey }])
+})
+
+for (const phase of ["first send", "resend"]) {
+  test(`invalid_request on the ${phase} proves the token unconsumed and restores the settled record`, async () => {
+    const service = idempotentService((_, index) => index === 1 ? refusal("invalid_request", undefined, 400) : undefined)
+    const store = memorySecrets().store(service.api)
+    await store.write(phase === "first send" ? expired
+      : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+    const { open } = await setup()
+    await expect(open(service.api, store).accessToken()).rejects.toMatchObject({ code: "invalid_request", status: 400 })
+    expect(await store.read()).toEqual(expired)
+    expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
+    expect(service.seen).toHaveLength(2)
+    expect(service.seen[1]?.key).not.toBe(service.seen[0]?.key)
+  })
+
+  for (const [code, status] of [["forbidden", 403], ["not_found", 404], ["entitlement_required", 402], ["brand_new_code", 400]] as const) {
+    test(`an enveloped ${code} on the ${phase} is a definite answer that ends the session`, async () => {
+      const service = idempotentService((_, index) => index === 1 ? refusal(code, undefined, status) : undefined)
+      const store = memorySecrets().store(service.api)
+      await store.write(phase === "first send" ? expired
+        : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+      const { open } = await setup()
+      await expect(open(service.api, store).accessToken()).rejects.toThrow("Sign in again")
+      expect(await store.read()).toBeNull()
+      expect(service.seen).toHaveLength(1)
+    })
+  }
+}
+
+test("a nextAttemptAt beyond the five-minute cap after a backward clock jump is treated as due", async () => {
+  const service = idempotentService()
+  const store = memorySecrets().store(service.api)
+  const { time, open } = await setup()
+  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: {
+    idempotencyKey: "journaled-key", attempts: 3, nextAttemptAt: new Date(time.now() + 300_001).toISOString(),
+  } })
+  expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
+  expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: "journaled-key" }])
+})
+
 test("two concurrent invocations on an uncertain record send one request under the session lock", async () => {
   const service = idempotentService()
   const secrets = memorySecrets()

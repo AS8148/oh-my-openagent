@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -16,8 +15,12 @@ class SessionEnded extends SignInError {
 // The service revokes the device row before answering reauth_required on refresh (token reuse);
 // account_deleted removes the account. unauthorized and invalid_grant leave the device's slot held.
 const DEVICE_REVOKING_REFUSALS = new Set(["account_deleted", "reauth_required", "device_revoked"])
-const ENDING_REFUSALS = new Set(["unauthorized", "invalid_grant", ...DEVICE_REVOKING_REFUSALS])
-const retryDelay = (attempts: number) => Math.min(300_000, 5_000 * 2 ** (attempts - 1))
+// A refusal the service gives before it reads the token proves the token was not consumed.
+const UNCONSUMED_REFUSALS = new Set(["invalid_request"])
+const MAX_RETRY_DELAY = 300_000
+const retryDelay = (attempts: number) => Math.min(MAX_RETRY_DELAY, 5_000 * 2 ** (attempts - 1))
+// The service contract requires a CSPRNG key of at least 128 bits; 256 bits encode to 43 base64url chars.
+const newIdempotencyKey = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")
 
 export function createSession(options: {
   readonly api: string
@@ -46,7 +49,9 @@ export function createSession(options: {
     const { refreshState, refreshAttempt, ...settled } = current
     const pending = refreshState === "uncertain"
     if (!pending && Date.parse(current.accessTokenExpiresAt) > now() + 30_000) return current.accessToken
-    if (refreshAttempt !== undefined && Date.parse(refreshAttempt.nextAttemptAt) > now()) throw uncertain()
+    // A wait longer than the backoff cap can only come from a backward clock jump; treat it as due.
+    const wait = refreshAttempt === undefined ? 0 : Date.parse(refreshAttempt.nextAttemptAt) - now()
+    if (wait > 0 && wait <= MAX_RETRY_DELAY) throw uncertain()
     // Journal the attempt and its Idempotency-Key before sending. An unknown outcome is only ever
     // resent as this same token with this same key, so a service that committed the rotation
     // (sisyphuslabs/omo-service#628) answers the stored successor instead of a reuse revoke.
@@ -56,7 +61,7 @@ export function createSession(options: {
     const attempts = (refreshAttempt?.attempts ?? 0) + 1
     const backoff = retryDelay(attempts)
     const attempt = {
-      idempotencyKey: refreshAttempt?.idempotencyKey ?? randomUUID(), attempts,
+      idempotencyKey: refreshAttempt?.idempotencyKey ?? newIdempotencyKey(), attempts,
       nextAttemptAt: new Date(now() + backoff).toISOString(),
     }
     const journal: Credentials = { ...settled, refreshState: "uncertain", refreshAttempt: attempt }
@@ -69,7 +74,13 @@ export function createSession(options: {
       await store.write({ ...settled, ...tokens })
       return tokens.accessToken
     } catch (error) {
-      if (error instanceof ApiRefusal && error.status < 500 && ENDING_REFUSALS.has(error.code)) {
+      // Any enveloped answer below 500 other than 429 is definite: it never leaves the record uncertain.
+      const definite = error instanceof ApiRefusal && error.status < 500 && error.status !== 429
+      if (definite && UNCONSUMED_REFUSALS.has(error.code)) {
+        await store.write(settled)
+        throw error
+      }
+      if (definite) {
         await store.clear()
         throw new SessionEnded(error.code === "reauth_required"
           ? "This session was ended because its refresh token was reused. Sign in again with omo login."
@@ -81,6 +92,8 @@ export function createSession(options: {
         throw error
       }
       if (error instanceof ApiRefusal && error.status === 429) {
+        // retryDelay caps Retry-After at 60 s. A wait past the service's 60 s replay grace ends in a
+        // reuse revoke by design (#628 threat 9): a late replay must not be distinguishable from theft.
         const delay = Math.max(backoff, error.retryDelay(now(), 0))
         if (delay > backoff) {
           await store.write({ ...journal, refreshAttempt: { ...attempt, nextAttemptAt: new Date(now() + delay).toISOString() } })
