@@ -82,7 +82,8 @@ export function createEngineRunPause(ports: {
         (record.status !== "running" && record.status !== "paused")) return { kind: "settled" }
       if (ports.barrier.isCreating(owner.parentSessionId, record.task_id)) return { kind: "pending" }
       const ack = await ports.manager.pauseTask(record.task_id, owner)
-      if ("refused" in ack) throw new Error("engine refused run pause ownership")
+      // Another parent owns this child's custody: it is not part of this run's pause.
+      if ("refused" in ack) return { kind: "settled" }
       const allocation = admission(record)
       if (allocation !== undefined) registry.update(owner.parentSessionId, owner.parentPauseSeq, participant.key, { admission: allocation })
       return { kind: "held", childSeq: ack.childSeq }

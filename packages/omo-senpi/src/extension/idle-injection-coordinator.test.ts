@@ -96,21 +96,21 @@ describe("IdleInjectionCoordinator", () => {
     ])
   })
 
-  it("#given repeated continuation enqueues #when flushed #then every accepted wake reaches custody", () => {
+  it("#given repeated continuation enqueues #when flushed #then they collapse to one keyed injection", () => {
     // given
     const { coordinator, calls } = createCoordinator()
     coordinator.enqueue({ key: "ulw", source: "ulw-continuation", content: "continue A" })
     coordinator.enqueue({ key: "ulw", source: "ulw-continuation", content: "continue B" })
 
     // then
-    expect(coordinator.pendingCount()).toBe(2)
+    expect(coordinator.pendingCount()).toBe(1)
 
     // when
     coordinator.flushOnIdle()
 
-    // then both contents survive until engine admission
+    // then the latest continuation content wins, delivered once
     expect(calls).toHaveLength(1)
-    expect(calls[0]?.content).toBe("continue A\n\ncontinue B")
+    expect(calls[0]?.content).toBe("continue B")
   })
 
   it("#given a queued injection #when removed by key #then the flush no-ops and removal reports true only once", () => {

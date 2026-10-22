@@ -2,7 +2,12 @@ import type { RunRef } from "../../../senpi-task/src/pause/ports"
 import type { IdleInjectionMessage } from "./idle-injection-coordinator"
 import type { AdmissionItem, ItemReceipt } from "./idle-injection-items"
 
-export type NativeAdmissionItem = { readonly itemId: string; readonly producer: string; readonly runRef?: RunRef }
+export type NativeAdmissionItem = {
+  readonly itemId: string
+  readonly producer: string
+  readonly contentRange: readonly [number, number]
+  readonly runRef?: RunRef
+}
 
 type NativeSender = (
   message: IdleInjectionMessage,
@@ -23,7 +28,8 @@ export async function deliverItems(
   const result = await send(options.message, {
     triggerTurn: true, deliverAs: options.deliverAs,
     items: options.items.map(item => ({
-      itemId: item.itemId, producer: item.producer, ...(item.runRef === undefined ? {} : { runRef: item.runRef }),
+      itemId: item.itemId, producer: item.producer, contentRange: item.contentRange,
+      ...(item.runRef === undefined ? {} : { runRef: item.runRef }),
     })),
   })
   return Array.isArray(result) ? result : undefined

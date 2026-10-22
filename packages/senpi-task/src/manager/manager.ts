@@ -61,7 +61,8 @@ import { createHeldSend } from "./held-send"
 import { admitRespawn } from "./respawn-admission"
 import { restorePausedChild } from "./paused-restore"
 import { defaultSignaller } from "../lifecycle/context"
-import type { RunPauseOwner } from "../pause/ports"
+import type { ChildCreationPort, RunPauseOwner } from "../pause/ports"
+import { createStagedChildCreation } from "./staged-creation"
 import { AdmissionBarrier, type ResumeCredential } from "../pause/admission-barrier"
 import { createStartAdmissions } from "./start-admission"
 import { HeldAdmissions, type HeldAdmissionResult } from "./held-admissions"
@@ -203,6 +204,7 @@ class TaskManagerImpl implements TaskManager {
   readonly #isolation: IsolationWiring
   readonly #outcome: OutcomeTracker
   readonly #runPause: ReturnType<typeof createTaskRunPause>
+  readonly #creation: ChildCreationPort | undefined
   readonly #startAdmissions: ReturnType<typeof createStartAdmissions>
   readonly #heldAdmissions: HeldAdmissions
   readonly #residency = new ResidencySignal()
@@ -294,6 +296,8 @@ class TaskManagerImpl implements TaskManager {
       hostPid: this.#hostPid,
       config: options.config,
     })
+    this.#creation = options.childCreationPort
+      ?? (options.childPausePort === undefined ? undefined : createStagedChildCreation(options.childPausePort))
     this.#runPause = createTaskRunPause({
       store: options.store, concurrency: this.#concurrency, child: options.childPausePort, now: this.#now,
       ...(options.admissionBarrier === undefined ? {} : { barrier: options.admissionBarrier }),
@@ -1095,7 +1099,7 @@ class TaskManagerImpl implements TaskManager {
 
   async #launch(initial: LaunchContext): Promise<LaunchOutcome> {
     return launchTask(initial, {
-      store: this.#options.store, now: this.#now, creation: this.#options.childCreationPort,
+      store: this.#options.store, now: this.#now, creation: this.#creation,
       isShuttingDown: () => this.#shutdownStarted,
       release: context => this.#releaseSlot(context.record.task_id, context.model, context.record.notification.run_epoch),
       settleWaiters: taskId => this.#settleWaiters(taskId),

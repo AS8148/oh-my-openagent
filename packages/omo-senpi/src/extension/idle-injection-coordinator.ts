@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { RunRef } from "../../../senpi-task/src/pause/ports"
-import { admissionBatches, settleItemReceipts, type AdmissionItem, type ItemReceipt, type QueuedInjection } from "./idle-injection-items"
+import { admissionBatches, failItems, settleItemReceipts, withSuperseded, type AdmissionItem, type ItemReceipt, type QueuedInjection } from "./idle-injection-items"
 
 export type IdleInjectionSource = "task-completion" | "workpool-aggregate" | "team-message" | "team-liveness" | "boulder-continuation" | "ulw-continuation" | "dag-run" | "kibitzer"
 
@@ -113,7 +113,9 @@ export class IdleInjectionCoordinator {
   enqueue(injection: IdleInjection): boolean {
     if (this.#retired) return false
     const itemId = injection.itemId ?? randomUUID()
-    this.#pending.set(itemId, { ...injection, itemId, get content() { return injection.content } })
+    const prior = this.#pending.get(injection.key)
+    const superseded = prior === undefined ? [] : withSuperseded(prior)
+    this.#pending.set(injection.key, { ...injection, itemId, superseded, get content() { return injection.content } })
     return true
   }
 
@@ -147,13 +149,7 @@ export class IdleInjectionCoordinator {
   }
 
   remove(key: string): boolean {
-    let removed = false
-    for (const [id, injection] of this.#pending) {
-      if (injection.key !== key) continue
-      this.#pending.delete(id)
-      removed = true
-    }
-    return removed
+    return this.#pending.delete(key)
   }
 
   /**
@@ -175,7 +171,7 @@ export class IdleInjectionCoordinator {
     cancelScheduledFlush?.()
     const dropped = [...this.#pending.values()]
     this.#pending.clear()
-    for (const injection of dropped) injection.onDeliveryFailed?.(new IdleInjectionRetiredError())
+    failItems(dropped, new IdleInjectionRetiredError())
   }
 
   // Flush the whole queue as one idle-edge steer. Returns how many queued items were collapsed (0 = no-op).
@@ -196,15 +192,13 @@ export class IdleInjectionCoordinator {
       try {
         delivery = this.#deliver(batch.message, { deliverAs, items: batch.items })
       } catch (error) {
-        for (const injection of batch.injections) injection.onDeliveryFailed?.(error)
+        failItems(batch.injections, error)
         throw error
       }
       if (!isPromiseLike(delivery)) settleItemReceipts(batch.injections, delivery)
       else void delivery.then(
         result => settleItemReceipts(batch.injections, result),
-        (error: unknown) => {
-          for (const injection of batch.injections) injection.onDeliveryFailed?.(error)
-        },
+        (error: unknown) => failItems(batch.injections, error),
       )
     }
     return collapsed

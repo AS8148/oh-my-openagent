@@ -3,7 +3,7 @@ import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
 import { deliverItems } from "./deliver-items"
 
 describe("native itemized run admission", () => {
-  test("#given a formed coordinator batch #when the engine fences one run #then one send carries every item and each gets its own receipt", async () => {
+  test("#given a formed coordinator batch #when the engine fences one run #then one send carries one item per key and every enqueue gets its receipt", async () => {
     const sends: { readonly content: string; readonly items: readonly { readonly itemId: string; readonly runRef?: unknown }[] }[] = []
     let held = 0
     let delivered = 0
@@ -24,9 +24,9 @@ describe("native itemized run admission", () => {
     coordinator.flushOnIdle()
     await finished.promise
     expect(sends).toHaveLength(1)
-    expect(sends[0]?.content).toBe("first\n\nsecond\n\nunrelated work")
-    expect(sends[0]?.items.map(item => item.runRef)).toEqual([{ kind: "task", id: "fenced" }, { kind: "task", id: "fenced" }, undefined])
-    expect(new Set(sends[0]?.items.map(item => item.itemId)).size).toBe(3)
+    expect(sends[0]?.content).toBe("second\n\nunrelated work")
+    expect(sends[0]?.items.map(item => item.runRef)).toEqual([{ kind: "task", id: "fenced" }, undefined])
+    expect(new Set(sends[0]?.items.map(item => item.itemId)).size).toBe(2)
     expect(held).toBe(2)
     expect(delivered).toBe(1)
   })

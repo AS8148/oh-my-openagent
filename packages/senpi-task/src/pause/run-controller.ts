@@ -47,9 +47,11 @@ export class RunPauseController {
     await this.effects.settleCreations?.(parentSessionId, pauseSeq)
     if (this.registry.require(parentSessionId).pauseSeq !== pauseSeq) return
     if (!await this.#propagate(parentSessionId, pauseSeq)) return
-    if (Object.values(this.registry.require(parentSessionId).participants).some(participant =>
-      participant.state !== "held" && participant.state !== "restorable" && participant.state !== "lost")) {
-      throw new Error("run pause has an unacknowledged participant")
+    // A participant that never acknowledged is out of the run's custody; it must never hold the
+    // Stop open, or neither Resume nor a person's message could reopen admission.
+    for (const participant of Object.values(this.registry.require(parentSessionId).participants)) {
+      if (participant.state === "held" || participant.state === "restorable" || participant.state === "lost") continue
+      this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason: "never acknowledged the pause" })
     }
     this.registry.phase(parentSessionId, pauseSeq, "applied")
   }
@@ -64,7 +66,11 @@ export class RunPauseController {
     this.#resuming.set(parentSessionId, transaction)
     for (const participant of this.registry.orderedAdmissions(parentSessionId)) {
       if (!this.#current(parentSessionId, transaction)) return { kind: "superseded" }
-      if (participant.state === "resumed") continue
+      if (participant.state === "resumed" || participant.state === "lost") continue
+      if (participant.state === "pending") {
+        this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason: "never acknowledged the pause" })
+        continue
+      }
       const cutoff = requested.childSeqCutoffs[participant.key]
       if (participant.kind !== "held_admission" && cutoff === undefined) throw new Error(`missing pause acknowledgement for ${participant.key}`)
       this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "resuming" })
@@ -118,9 +124,15 @@ export class RunPauseController {
         this.registry.update(parentSessionId, pauseSeq, key, { state: "held", ackSeq: pauseSeq })
         continue
       }
-      const result = await this.effects.pause(participant, { parentSessionId, parentPauseSeq: pauseSeq, runRef: participant.runRef })
+      let result: Awaited<ReturnType<RunPauseEffects["pause"]>> | { readonly kind: "lost"; readonly reason: string }
+      try {
+        result = await this.effects.pause(participant, { parentSessionId, parentPauseSeq: pauseSeq, runRef: participant.runRef })
+      } catch (error) {
+        result = { kind: "lost", reason: error instanceof Error ? error.message : String(error) }
+      }
       if (this.registry.require(parentSessionId).pauseSeq !== pauseSeq) return false
-      if (result.kind === "settled") this.registry.drop(parentSessionId, pauseSeq, key)
+      if (result.kind === "lost") this.registry.update(parentSessionId, pauseSeq, key, { state: "lost", lostReason: result.reason })
+      else if (result.kind === "settled") this.registry.drop(parentSessionId, pauseSeq, key)
       else if (result.kind === "held") this.registry.update(parentSessionId, pauseSeq, key, {
         state: "held", ackSeq: pauseSeq, observedChildSeq: result.childSeq,
       })

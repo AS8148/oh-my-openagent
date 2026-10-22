@@ -176,7 +176,7 @@ describe("createParentNotifier batched injection delivery", () => {
     expect(delivered[0]?.runRefs).toEqual([{ kind: "task", id: "st_1" }, { kind: "task", id: "st_2" }])
   })
 
-  test("#given repeated completion enqueues #when admitted #then both contents reach engine custody", () => {
+  test("#given a re-enqueue of the same completion #when the batch window closes #then the key dedupes to one entry", () => {
     // given
     const delivered: Delivered[] = []
     const { coordinator, runFlush } = coordinatorWithManualFlush(delivered)
@@ -187,9 +187,9 @@ describe("createParentNotifier batched injection delivery", () => {
     notifier.enqueue(completionMessage("st_1"))
     runFlush()
 
-    // then the coordinator preserves both items for the engine's custody decision
+    // then it never double-injects
     expect(delivered).toHaveLength(1)
-    expect(delivered[0]?.content.match(/st_1 completed/g)).toHaveLength(2)
+    expect(delivered[0]?.content.match(/st_1 completed/g)).toHaveLength(1)
   })
 
   test("#given an IDLE parent #when two completions land in the same tick #then one microtask steer carries both", async () => {

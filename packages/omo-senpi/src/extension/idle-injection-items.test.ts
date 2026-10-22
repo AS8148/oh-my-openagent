@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
 
 describe("coordinator custody preserves individual run items", () => {
-  test("#given repeated keys #when final admission is held #then every content has its own notice receipt", () => {
+  test("#given repeated keys #when final admission is held #then the latest content is held once and every enqueue gets the notice receipt", () => {
     let delivered = 0
     let held = 0
     const received: string[] = []
     const coordinator = new IdleInjectionCoordinator((message, options) => {
-      expect(message.content).toBe("first\n\nsecond")
+      expect(message.content).toBe("second")
       for (const item of options.items) received.push(item.content)
       return options.items.map(item => ({
         itemId: item.itemId, disposition: "notice_persisted" as const, entryId: "held-batch", noticeId: `notice:${item.itemId}`,
@@ -18,9 +18,9 @@ describe("coordinator custody preserves individual run items", () => {
       onFlushed: () => { delivered += 1 },
       onHeld: () => { held += 1 },
     })
-    expect(coordinator.pendingCount()).toBe(2)
-    expect(coordinator.flushOnIdle()).toBe(2)
-    expect(received).toEqual(["first", "second"])
+    expect(coordinator.pendingCount()).toBe(1)
+    expect(coordinator.flushOnIdle()).toBe(1)
+    expect(received).toEqual(["second"])
     expect(delivered).toBe(0)
     expect(held).toBe(2)
   })

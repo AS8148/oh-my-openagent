@@ -5,6 +5,8 @@ export type AdmissionItem = {
   readonly itemId: string
   readonly producer: string
   readonly content: string
+  // This item's text inside the batch message, so the engine can hold or deliver it on its own.
+  readonly contentRange: readonly [number, number]
   readonly runRef?: RunRef
   readonly customType?: string
   readonly details?: unknown
@@ -19,55 +21,62 @@ export type ItemReceipt = {
   readonly noticeId?: string
 }
 
-export type QueuedInjection = IdleInjection & { readonly itemId: string }
+// One entry per key: a later enqueue under the same key replaces the content, and the enqueues it
+// replaced are settled with whatever receipt the surviving item gets.
+export type QueuedInjection = IdleInjection & {
+  readonly itemId: string
+  readonly superseded: readonly IdleInjection[]
+}
 
-// One flush is ONE delivery (one model turn at most): every item rides it with its own identity and
-// run reference, and the engine decides custody per item at admission (design 4.5).
+export function withSuperseded(injection: QueuedInjection): readonly IdleInjection[] {
+  return [injection, ...injection.superseded]
+}
+
+// One flush is ONE delivery (one model turn at most): every item rides it with its own identity, run
+// reference and text range, and the engine decides custody per item at admission (design 4.5).
 export function admissionBatches(injections: readonly QueuedInjection[]) {
-  return [injections].filter(group => group.length > 0).map(group => ({
-    injections: group,
-    message: batchMessage(group),
-    items: group.map(({ itemId, source, content, runRef, customType, details, display, contextScoped }): AdmissionItem => ({
-      itemId, producer: source, content,
+  if (injections.length === 0) return []
+  const contents = injections.map(injection => injection.content)
+  const ranges: (readonly [number, number])[] = []
+  let offset = 0
+  for (const content of contents) {
+    ranges.push([offset, offset + content.length])
+    offset += content.length + 2
+  }
+  const details = injections.flatMap((item, index) => item.customType === undefined ? [] : [{
+    customType: item.customType, details: item.details,
+    ...(item.contextScoped === true ? { contentRange: ranges[index] ?? [0, 0] } : {}),
+  }])
+  const message: IdleInjectionMessage = { customType: "omo-senpi:wake", content: contents.join("\n\n"), display: false, details }
+  return [{
+    injections,
+    message,
+    items: injections.map(({ itemId, source, runRef, customType, details, display, contextScoped }, index): AdmissionItem => ({
+      itemId, producer: source, content: contents[index] ?? "", contentRange: ranges[index] ?? [0, 0],
       ...(runRef === undefined ? {} : { runRef }),
       ...(customType === undefined ? {} : { customType }),
       ...(details === undefined ? {} : { details }),
       ...(display === undefined ? {} : { display }),
       ...(contextScoped === undefined ? {} : { contextScoped }),
     })),
-  }))
+  }]
 }
 
-// The batch's one message still carries every item's text: a delivery that sends the message (not the
-// itemized items) must deliver the whole wake, with each context-scoped segment's range intact.
-function batchMessage(group: readonly QueuedInjection[]): IdleInjectionMessage {
-  let offset = 0
-  const details = group.flatMap(item => {
-    const start = offset
-    const end = start + item.content.length
-    offset = end + 2
-    return item.customType === undefined ? [] : [{
-      customType: item.customType, details: item.details,
-      ...(item.contextScoped === true ? { contentRange: [start, end] as const } : {}),
-    }]
-  })
-  return { customType: "omo-senpi:wake", content: group.map(item => item.content).join("\n\n"), display: false, details }
+export function failItems(injections: readonly QueuedInjection[], error: unknown): void {
+  for (const injection of injections) for (const entry of withSuperseded(injection)) entry.onDeliveryFailed?.(error)
 }
 
 export function settleItemReceipts(injections: readonly QueuedInjection[], result: unknown): void {
-  // A host with no custody receipts retains its synchronous successful-send contract.
-  if (result === undefined || !Array.isArray(result)) {
-    for (const injection of injections) injection.onFlushed?.()
-    return
-  }
   for (const injection of injections) {
-    const receipt: unknown = result.find(value => isReceipt(value) && value.itemId === injection.itemId)
-    if (!isReceipt(receipt)) {
-      injection.onDeliveryFailed?.(new Error(`missing custody receipt for ${injection.itemId}`))
-    } else if (receipt.disposition === "notice_persisted") {
-      injection.onHeld?.(receipt)
-    } else {
-      injection.onFlushed?.()
+    // A host with no custody receipts retains its synchronous successful-send contract.
+    const receipt: unknown = result === undefined || !Array.isArray(result)
+      ? undefined : result.find(value => isReceipt(value) && value.itemId === injection.itemId)
+    for (const entry of withSuperseded(injection)) {
+      if (result === undefined || !Array.isArray(result)) entry.onFlushed?.()
+      else if (!isReceipt(receipt)) entry.onDeliveryFailed?.(new Error(`missing custody receipt for ${injection.itemId}`))
+      // A held notice is engine custody: a producer that does not track holds treats it as delivered.
+      else if (receipt.disposition === "notice_persisted" && entry.onHeld !== undefined) entry.onHeld(receipt)
+      else entry.onFlushed?.()
     }
   }
 }

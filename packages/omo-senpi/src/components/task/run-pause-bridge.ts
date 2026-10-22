@@ -36,10 +36,10 @@ export class EngineRunPauseBridge {
     const live = readEngineRunHold(state)
     const pauseSeq = record.pauseSeq
     if (record.phase === "resumed" && !live.stopped) return
-    await this.#pause(parentSessionId, pauseSeq)
     // Only an authoritative engine ledger at this epoch proves that the user's Stop
     // was released. An absent/old context must not turn a restart into Resume.
-    if (!live.stopped && live.pauseSeq === pauseSeq) await this.#resume(parentSessionId, pauseSeq)
+    if (!live.stopped && live.pauseSeq === pauseSeq) return this.#resume(parentSessionId, pauseSeq)
+    await this.#pause(parentSessionId, pauseSeq)
   }
 
   changed(parentSessionId: string, event: RunHoldChange): Promise<void> {
@@ -77,7 +77,9 @@ export class EngineRunPauseBridge {
     const registry = this.controller.registry
     const before = registry.load(parentSessionId)
     if (before === undefined || before.pauseSeq !== pauseSeq || before.phase === "resumed") return
-    await this.#pause(parentSessionId, pauseSeq)
+    // A failed propagation was already reported to whoever awaited the Stop. Resume still runs:
+    // participants that never acknowledged are lost, and admission must reopen.
+    await this.#pause(parentSessionId, pauseSeq).catch(() => undefined)
     const record = registry.require(parentSessionId)
     if (record.pauseSeq !== pauseSeq) return
     const resumeId = record.resume?.resumeId ?? `parent-resume:${pauseSeq}`

@@ -21,6 +21,8 @@ export type PauseParticipant = {
   readonly ackSeq?: number
   readonly observedChildSeq?: number
   readonly resumeTurnId?: string
+  // Why a participant left the run's custody without acknowledging the pause.
+  readonly lostReason?: string
   readonly at: string
 }
 

@@ -242,17 +242,19 @@ describe("DAG receiving-model routing", () => {
     target.notifier.enqueue(buildCompletionMessage([details()]))
     target.notifier.enqueue(buildCompletionMessage([plain]))
     target.flush()
+    // One idle flush is one itemized delivery: both completions ride one wake, each in its own segment.
+    expect(target.delivered).toHaveLength(1)
     const message = { ...target.delivered[0], role: "custom" }
-    const plainMessage = { ...target.delivered[1], role: "custom" }
+    const plainText = buildCompletionMessage([plain]).content
     // when
-    const results = await target.pi.dispatch("context", { messages: [message, plainMessage] }, { model: { id: ASTRA } })
-    // then: the emitted plain result is byte-preserved and the DAG's policy artifact is selected.
+    const results = await target.pi.dispatch("context", { messages: [message] }, { model: { id: ASTRA } })
+    // then: the plain segment is byte-preserved and only the DAG segment selects the Astra policy.
     const expected = buildCompletionMessage([details()], ASTRA_DAG_VERIFICATION_DIRECTIVE).content
-    expect(target.delivered).toHaveLength(2)
-    expect(results).toEqual([{ messages: [{ ...message, content: expected, details: [
-      { ...message.details?.[0], contentRange: [0, buildCompletionMessage([details()], ASTRA_DAG_VERIFICATION_DIRECTIVE).content.length] },
-    ] }, plainMessage] }])
-    expect(plainMessage.content).toBe(buildCompletionMessage([plain]).content)
+    expect(message.content?.endsWith(`\n\n${plainText}`)).toBe(true)
+    expect(results).toEqual([{ messages: [{ ...message, content: `${expected}\n\n${plainText}`, details: [
+      { ...message.details?.[0], contentRange: [0, expected.length] },
+      message.details?.[1],
+    ] }] }])
   })
 
   test("#given a historic untagged wake #when context switches model #then unknown segment provenance preserves its original text", async () => {

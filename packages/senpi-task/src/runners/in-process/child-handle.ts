@@ -349,9 +349,16 @@ function createTrackedChildHandle(
 }
 
 export function createChildHandle(input: CreateChildHandleInput): ChildHandle {
+  const staged = createStagedChildHandle(input)
+  staged.begin()
+  return staged.handle
+}
+
+// A created child whose first prompt has not been sent: the launch decides, after creation, whether
+// to begin that turn or hold the prompt for the run's Resume.
+export function createStagedChildHandle(input: CreateChildHandleInput): { readonly handle: ChildHandle; begin(): void } {
   const tracked = createTrackedChildHandle(input.taskId, input.session, input.completion)
-  tracked.beginTurn(input.promptText)
-  return tracked.handle
+  return { handle: tracked.handle, begin: () => tracked.beginTurn(input.promptText) }
 }
 
 // A restored child is rebuilt from its persisted transcript: the original prompt is NEVER

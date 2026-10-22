@@ -21,7 +21,7 @@ describe("design 30/34: coordinator items carry durable per-item engine receipts
     const held: { readonly itemId: string; readonly entryId: string; readonly noticeId?: string }[] = []
     let flushed = 0
     for (const [itemId, content] of [["item-1", "first"], ["item-2", "second"]] as const) coordinator.enqueue({
-      key: "goal", itemId, source: "ulw-continuation", content, runRef: { kind: "dag", id: "run-1" },
+      key: `goal:${itemId}`, itemId, source: "ulw-continuation", content, runRef: { kind: "dag", id: "run-1" },
       onHeld: receipt => { held.push({ itemId: receipt.itemId, entryId: receipt.entryId, noticeId: receipt.noticeId }) },
       onFlushed: () => { flushed += 1 },
     })
@@ -29,8 +29,8 @@ describe("design 30/34: coordinator items carry durable per-item engine receipts
     await Promise.resolve()
     await Promise.resolve()
     expect(sent.map(call => call.options)).toEqual([{ triggerTurn: true, deliverAs: "steer", items: [
-      { itemId: "item-1", producer: "ulw-continuation", runRef: { kind: "dag", id: "run-1" } },
-      { itemId: "item-2", producer: "ulw-continuation", runRef: { kind: "dag", id: "run-1" } },
+      { itemId: "item-1", producer: "ulw-continuation", contentRange: [0, 5], runRef: { kind: "dag", id: "run-1" } },
+      { itemId: "item-2", producer: "ulw-continuation", contentRange: [7, 13], runRef: { kind: "dag", id: "run-1" } },
     ] }])
     expect(held.map(receipt => [receipt.itemId, receipt.noticeId])).toEqual([["item-1", "notice:item-1"], ["item-2", "notice:item-2"]])
     expect(new Set(held.map(receipt => receipt.entryId))).toEqual(new Set(["held-batch"]))

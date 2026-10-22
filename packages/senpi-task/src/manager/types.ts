@@ -21,7 +21,7 @@ import type { TaskConcurrency } from "./concurrency"
 import type { InheritedExtensions } from "../runners/rpc/parent-extensions"
 import type { ChildExtensionEvent } from "../runners/child-extension-events"
 import type { ExitConfirmationSchedule } from "./provisional-exit"
-import type { ChildCreationPort, ChildPausePort, RunPauseOwner } from "../pause/ports"
+import type { ChildCreationPort, ChildPausePort, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
 import type { AdmissionBarrier, ResumeCredential } from "../pause/admission-barrier"
 import type { HeldStart, StartAdmission } from "./start-admission"
 
@@ -63,8 +63,18 @@ export type ManagedStartSpec = {
   readonly memberEnv?: Readonly<Record<string, string>>
 }
 
+// A created child whose first prompt is not sent yet; `begin` sends it and returns that turn.
+export type StagedManagedChild = {
+  readonly child: ManagedChildHandle
+  readonly firstPrompt: string
+  begin(): ResumedChildTurn
+}
+
 export type ManagedRunner = {
   start(spec: ManagedStartSpec): Promise<ManagedChildHandle>
+  // Runners that can create a child without its first prompt, so a Stop that lands during creation
+  // holds that prompt instead of letting the first turn start.
+  startStaged?(spec: ManagedStartSpec): Promise<StagedManagedChild>
   // Rebuild a persisted child from its session transcript without replaying its prompt. Optional
   // until the mode adapters grow their resume paths (todo 10); start-only fakes keep compiling.
   resume?(spec: ManagedStartSpec, sessionPath: string): Promise<ManagedChildHandle>
