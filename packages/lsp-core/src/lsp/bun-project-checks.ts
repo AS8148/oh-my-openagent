@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createSpawnCommand } from "./process.js";
+import { createSpawnCommand, killProcessTree } from "./process.js";
 import { resolveServerBinary } from "./server-installation.js";
 
 export type BunProjectCommand = "check" | "lint" | "format";
@@ -195,7 +195,9 @@ export function runBunCommand(bunPath: string, args: readonly string[], cwd: str
 		});
 		const stdout: Buffer[] = [];
 		const stderr: Buffer[] = [];
-		const onAbort = () => child.kill("SIGKILL");
+		// On Windows a .cmd shim of bun runs through cmd.exe; killing only cmd.exe leaves bun holding the
+		// pipes, the child never closes, and an aborted probe outlives its timeout. Kill the whole tree.
+		const onAbort = () => killProcessTree(child, "SIGKILL");
 		signal?.addEventListener("abort", onAbort, { once: true });
 		child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
 		child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
