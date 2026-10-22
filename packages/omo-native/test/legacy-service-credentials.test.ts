@@ -30,22 +30,29 @@ const LEGACY = JSON.stringify({
   signingPrivateKey: "synthetic-signing-private",
 })
 
-describe("a first account command after upgrading", () => {
+// The #10697 plaintext file holds a refresh token and both private keys: it must be gone after ANY first command
+// after upgrading, including the hidden verbs a host or the desktop may call without ever doing a normal launch
+// (#10658 delta review MEDIUM). Only side-effect-free invocations are spawned; login/logout would reach the real keychain.
+const FIRST_COMMANDS: readonly (readonly string[])[] = [["sync", "--help"], ["account", "--help"], ["--version"]]
+
+describe("a first command after upgrading", () => {
   const isolatedEnv = (home: string) => ({ PATH: process.env.PATH, HOME: home, USERPROFILE: home, OMO_RUNTIME: "bun" })
 
-  test("#given the legacy file #when `omo sync` runs through bin/omo.js #then the file is removed", () => {
-    const { home, path } = homeWith(LEGACY)
-    spawnSync(process.execPath, [join(import.meta.dir, "..", "bin", "omo.js"), "sync", "--help"], { env: isolatedEnv(home), encoding: "utf8", windowsHide: true })
-    expect(existsSync(path)).toBe(false)
-  })
+  for (const args of FIRST_COMMANDS) {
+    test(`#given the legacy file #when \`omo ${args.join(" ")}\` runs through bin/omo.js #then the file is removed`, () => {
+      const { home, path } = homeWith(LEGACY)
+      spawnSync(process.execPath, [join(import.meta.dir, "..", "bin", "omo.js"), ...args], { env: isolatedEnv(home), encoding: "utf8", windowsHide: true })
+      expect(existsSync(path)).toBe(false)
+    })
 
-  test("#given the legacy file #when `omo sync` runs through the compiled entry #then the file is removed", () => {
-    const { home, path } = homeWith(LEGACY)
-    const entry = join(import.meta.dir, "..", "compile-entry.ts")
-    const script = `const { runCompiledLauncher } = await import(${JSON.stringify(entry)}); await runCompiledLauncher(["sync", "--help"], ${JSON.stringify(home)})`
-    spawnSync(process.execPath, ["-e", script], { env: isolatedEnv(home), encoding: "utf8", windowsHide: true })
-    expect(existsSync(path)).toBe(false)
-  })
+    test(`#given the legacy file #when \`omo ${args.join(" ")}\` runs through the compiled entry #then the file is removed`, () => {
+      const { home, path } = homeWith(LEGACY)
+      const entry = join(import.meta.dir, "..", "compile-entry.ts")
+      const script = `const { runCompiledLauncher } = await import(${JSON.stringify(entry)}); await runCompiledLauncher(${JSON.stringify(args)}, ${JSON.stringify(home)})`
+      spawnSync(process.execPath, ["-e", script], { env: isolatedEnv(home), encoding: "utf8", windowsHide: true })
+      expect(existsSync(path)).toBe(false)
+    })
+  }
 })
 
 describe("removeLegacyServiceCredentials", () => {
