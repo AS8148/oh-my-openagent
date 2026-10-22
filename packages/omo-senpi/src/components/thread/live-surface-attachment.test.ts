@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { withContractHost, type ContractHost } from "../../../../senpi-task/src/runners/rpc-host/testing/contract-host"
 import { createLiveThreadSurface, type LiveThreadSurface } from "./live-surface"
 import { createLazyLiveThreadSurface } from "./lazy-live-surface"
@@ -21,6 +21,55 @@ const operations: readonly [string, (client: LiveThreadSurface, host: ContractHo
   ["release_session", (client, host) => client.gateway.releaseSession!(endpoint(host), { reason: "takeover" })],
   ["extension_ui_response", (client, host) => client.gateway.respondUi!(endpoint(host), { ui_request_id: "question", fields: { value: "yes" } })],
 ]
+
+function releaseLogLines(stderr: { readonly mock: { readonly calls: readonly (readonly unknown[])[] } }): string[] {
+  return stderr.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("release_attachment"))
+}
+
+describe("thread RPC attachment refusals and release outcomes (wire contract v1.1)", () => {
+  test.each(operations)("#given a draining host #when %s attaches #then a transient host_draining error surfaces and nothing is mutated, aborted or closed", async (_command, run) => {
+    await withContractHost({ auth: true, attachRefusal: "host_draining" }, async (host) => {
+      const refusal = await run(surface(host), host).then(() => undefined, (error: unknown) => error)
+      expect(refusal).toBeInstanceOf(Error)
+      expect((refusal as Error).message).toStartWith("host_draining:")
+      expect(host.mutations).toEqual([])
+      expect(host.frames.map(({ frame }) => frame.type))
+        .toEqual(["get_protocol_info", ...(process.platform === "win32" ? [] : ["authenticate"]), "attach_session"])
+    })
+  })
+
+  test("#given a caller the host holds no connection for #when attach is refused session_not_attached #then a typed session_not_attached error surfaces", async () => {
+    await withContractHost({ auth: true, attachRefusal: "session_not_attached" }, async (host) => {
+      const refusal = await Reflect.apply(surface(host).setSessionName, undefined, ["rpc-1", "renamed", "dur-selected"])
+        .then(() => undefined, (error: unknown) => error)
+      expect((refusal as Error).message).toStartWith("session_not_attached:")
+      expect(host.mutations).toEqual([])
+    })
+  })
+
+  test("#given a host that already dropped the hold #when the mutation succeeded and release answers session_not_attached #then the mutation result is returned as released", async () => {
+    await withContractHost({ auth: true, afterMutation: "detached" }, async (host) => {
+      const stderr = spyOn(process.stderr, "write")
+      try {
+        expect(await Reflect.apply(surface(host).setModel, undefined, ["rpc-1", "p", "m", "dur-selected"])).toEqual({ provider: "p", id: "m" })
+        expect(host.mutations.map((frame) => frame.type)).toEqual(["set_model"])
+        expect(host.frames.some(({ frame }) => frame.type === "release_attachment")).toBe(true)
+        expect(releaseLogLines(stderr)).toEqual([])
+      } finally { stderr.mockRestore() }
+    })
+  })
+
+  test("#given a connection lost before release answers #when the mutation succeeded #then the mutation result is returned and the release failure is logged once", async () => {
+    await withContractHost({ auth: true, afterMutation: "connection_lost" }, async (host) => {
+      const stderr = spyOn(process.stderr, "write")
+      try {
+        expect(await Reflect.apply(surface(host).setModel, undefined, ["rpc-1", "p", "m", "dur-selected"])).toEqual({ provider: "p", id: "m" })
+        expect(host.mutations.map((frame) => frame.type)).toEqual(["set_model"])
+        expect(releaseLogLines(stderr)).toHaveLength(1)
+      } finally { stderr.mockRestore() }
+    })
+  })
+})
 
 describe("thread RPC connection-local fenced mutations", () => {
   test.skipIf(process.platform === "win32").each(["environment", "option"] as const)("#given a separate client profile #when the key root comes from %s #then authentication leaves the target preset untouched", async (source) => {

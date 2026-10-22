@@ -14,6 +14,10 @@ export type ContractHostOptions = {
   readonly otherAttachments?: number
   readonly badProof?: boolean
   readonly prepareRecord?: (path: string, root: string) => void
+  /** attach_session refusals: a draining host (v1 session_busy_lifecycle + host_draining) or a caller with no connection (v1.1). */
+  readonly attachRefusal?: "host_draining" | "session_not_attached"
+  /** After a mutation succeeds: the host drops the attachment itself, or the connection is lost before release answers. */
+  readonly afterMutation?: "detached" | "connection_lost"
 }
 export type ContractHost = {
   readonly socket: string
@@ -24,7 +28,7 @@ export type ContractHost = {
   readonly permissionPreset: () => string
 }
 
-/** Enforces the public v1 wire contract, including connection-local attachment ownership. */
+/** Enforces the public v1.1 wire contract, including connection-local attachment ownership. */
 export async function withContractHost(options: ContractHostOptions, exercise: (host: ContractHost) => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "rpc-client-"))
   const socket = join(root, "rpc.sock")
@@ -54,9 +58,9 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
     let authenticated = process.platform === "win32" || options.auth !== true
     let attached = false
     let expectedProof = ""
-    const respond = (frame: Frame, data: unknown = {}, error?: string) => client.write(`${JSON.stringify({
+    const respond = (frame: Frame, data: unknown = {}, error?: string, errorData?: Frame) => client.write(`${JSON.stringify({
       id: frame.id, type: "response", command: frame.type, success: error === undefined,
-      ...(error === undefined ? { data } : { error, errorCode: error }),
+      ...(error === undefined ? { data } : { error, errorCode: error, ...(errorData === undefined ? {} : { errorData }) }),
     })}\n`)
     client.setEncoding("utf8")
     client.on("data", (chunk: string) => {
@@ -91,12 +95,20 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         }
         if (!authenticated) { respond(frame, undefined, "auth_required"); continue }
         if (frame.type === "attach_session") {
-          if (frame.sessionId !== "rpc-1" || frame.durableSessionId !== durableId) {
+          if (options.attachRefusal === "host_draining") respond(frame, undefined, "session_busy_lifecycle", { reason: "host_draining" })
+          else if (options.attachRefusal === "session_not_attached") respond(frame, undefined, "session_not_attached", {})
+          else if (frame.sessionId !== "rpc-1" || frame.durableSessionId !== durableId) {
             respond(frame, undefined, "session_identity_mismatch")
           } else { attached = true; respond(frame, { sessionId: "rpc-1", attached: true }) }
           continue
         }
-        if (frame.type === "release_attachment") { attached = false; respond(frame, { deferred: false }); continue }
+        if (frame.type === "release_attachment") {
+          if (options.afterMutation === "connection_lost") { client.destroy(); continue }
+          if (attached) respond(frame, { deferred: false })
+          else respond(frame, undefined, "session_not_attached", {})
+          attached = false
+          continue
+        }
         if (frame.type === "list_sessions") { respond(frame, { sessions: [session()] }); continue }
         if (frame.type === "get_messages") { respond(frame, { messages: [] }); continue }
         if (frame.type === "get_state") { respond(frame, { isStreaming: false }); continue }
@@ -108,12 +120,19 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
           respond(frame, { sessionId: "rpc-1", state: session() })
           continue
         }
-        if (!options.legacy && !attached) { respond(frame, undefined, "session_not_attached"); continue }
+        if (!options.legacy && !attached) {
+          respond(frame, undefined, "session_not_attached", {
+            reason: "this connection is not attached to that session",
+            action: "attach first with attach_session { sessionId, durableSessionId } or open_session { sessionPath }",
+          })
+          continue
+        }
         if (frame.type === "release_session" && options.otherAttachments && frame.force !== true) {
           respond(frame, undefined, "attached")
           continue
         }
         mutations.push(frame)
+        if (options.afterMutation === "detached") attached = false
         respond(frame, frame.type === "set_model" ? { provider: frame.provider, id: frame.modelId }
           : frame.type === "release_session" ? { released: true, session_path: join(root, "session.jsonl"), attachments: 0, dropped: { deliveries: [], user_messages: [] } }
           : frame.type === "interrupt" ? { interrupted: true } : {})
