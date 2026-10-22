@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { FABLE_55_LAUNCH, FABLE_55_RELEASED } from "./fable-55-launch"
+import {
+  FABLE_55_EFFORTS,
+  FABLE_55_LAUNCH,
+  FABLE_55_RELEASED,
+  type LaunchRungRejection,
+  selectLaunchRungs,
+} from "./fable-55-launch"
 import type { ModelCapabilitiesSnapshotEntry } from "./model-capabilities/types"
 
 // Names every launch value still at its placeholder (undefined), including any field added later.
@@ -54,4 +60,43 @@ describe("Fable 5.5 launch values", () => {
     ])
     expect(unfilledLaunchValues({ ...filled, family: undefined })).toEqual(["family"])
   })
+
+  test("a release measures the 5.5 efforts instead of carrying them over from 5.1", () => {
+    // given / when / then
+    expect(FABLE_55_RELEASED ? FABLE_55_EFFORTS.measured : true).toBe(true)
+  })
+
+  test("a released 5.5 rung with an unaccepted effort is dropped and recorded, never thrown", () => {
+    // given
+    const rungs = [
+      { model: "anthropic/claude-fable-5.5", variant: "max" },
+      { model: "claude-fable-5-5", variant: "high" },
+      { model: "claude-fable-5-5" },
+      { model: "claude-fable-5-1", variant: "low" },
+    ]
+    const rejected: LaunchRungRejection[] = []
+    // when (on the pre-fix code this release path threw while the chain tables were built)
+    const selected = selectLaunchRungs(rungs, { released: true, accepted: ["xhigh", "max"] }, (r) => rejected.push(r))
+    // then
+    expect(selected.map((r) => r.model)).toEqual(["anthropic/claude-fable-5.5", "claude-fable-5-1"])
+    expect(rejected).toEqual([
+      { model: "claude-fable-5-5", variant: "high" },
+      { model: "claude-fable-5-5", variant: undefined },
+    ])
+  })
+
+  test("an unreleased gate drops every 5.5 rung without recording a rejection", () => {
+    // given
+    const rejected: LaunchRungRejection[] = []
+    // when
+    const selected = selectLaunchRungs(
+      [{ model: "claude-fable-5-5", variant: "max" }, { model: "claude-fable-5-1", variant: "max" }],
+      { released: false, accepted: ["max"] },
+      (r) => rejected.push(r),
+    )
+    // then
+    expect(selected.map((r) => r.model)).toEqual(["claude-fable-5-1"])
+    expect(rejected).toEqual([])
+  })
+
 })
