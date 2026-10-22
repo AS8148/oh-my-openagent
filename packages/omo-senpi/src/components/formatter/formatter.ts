@@ -42,14 +42,14 @@ export interface FormatterStepOptions {
   readonly readMarker?: (cwd: string, marker: string) => string
   readonly daemonFormat?: (filePath: string) => Promise<{ readonly content?: readonly { readonly type: string; readonly text?: string }[]; readonly details?: unknown; readonly isError?: boolean }>
   readonly resolveBinary?: (command: string, cwd: string) => string | null
-  readonly bunFormatAvailable?: (cwd: string) => Promise<boolean>
+  readonly resolveBunFormat?: (cwd: string) => Promise<string | undefined>
   readonly logger?: { warn(message: string, details?: unknown): void }
 }
 
 export function createFormatterStep(options: FormatterStepOptions = {}) {
   const missingNotices = new Set<string>()
   const daemonFormat = options.daemonFormat ?? (filePath => callPackagedDaemonTool("format", { filePath }))
-  const bunFormatAvailable = options.bunFormatAvailable ?? (async cwd => (await resolveBunProjectCommand("format", cwd)) !== undefined)
+  const resolveBunFormat = options.resolveBunFormat ?? (cwd => resolveBunProjectCommand("format", cwd))
   return async function formatMutation(event: PostMutationEvent, cwd: string, sessionId = "anonymous") {
     if (event.toolName === undefined || !MUTATION_TOOL_NAMES.has(event.toolName) || event.input === undefined) return { content: undefined, error: undefined }
     const config = { ...formatOnMutationDefaults, ...(options.config ?? {}) }
@@ -63,9 +63,10 @@ export function createFormatterStep(options: FormatterStepOptions = {}) {
       const markerNames = options.markers?.(cwd) ?? []
       const detected = detectFormatter(markerNames, filePath, options.readMarker?.(cwd, "pyproject.toml") ?? "")
       if (!detected) continue
-      const marker = detected.tool === "prettier" && (await bunFormatAvailable(cwd)) ? bunFormatter : detected
       const language = languageForPath(filePath)
       if (resolveFormatMode(config, language) === "off") continue
+      const probedBun = detected.tool === "prettier" ? await resolveBunFormat(cwd) : undefined
+      const marker = probedBun === undefined ? detected : { ...bunFormatter, command: probedBun }
       const result = await runSingleFlight(filePath, () => formatOne(filePath, marker, cwd, config.timeoutMs, daemonFormat, options.resolveBinary))
       if (result.status === "formatted") additions.push({
         type: "text",

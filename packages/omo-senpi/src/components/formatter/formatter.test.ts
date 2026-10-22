@@ -79,7 +79,8 @@ describe("bun format in place of prettier", () => {
 
   // A fake bun that formats like `bun format --write <file>`: it rewrites the file only when --write is passed,
   // so a formatter entry without an in-place flag leaves the file unchanged and the test fails.
-  function arrange(markers: readonly string[], bunHasFormat: boolean) {
+  // The plain name "bun" resolves to a decoy that does not exist, so only the exact probed path can format.
+  function arrange(markers: readonly string[], bunHasFormat: boolean, languages: Record<string, boolean> = {}) {
     const cwd = mkdtempSync(join(tmpdir(), "omo-formatter-bun-"))
     created.push(cwd)
     const filePath = join(cwd, "a.ts")
@@ -99,11 +100,11 @@ describe("bun format in place of prettier", () => {
     }
     let probes = 0
     const step = createFormatterStep({
-      config: { mode: "best-effort", timeoutMs: 10_000 },
+      config: { mode: "best-effort", timeoutMs: 10_000, languages },
       markers: () => markers,
       daemonFormat: async () => ({ details: { status: "unavailable" } }),
-      resolveBinary: (command) => (command === "bun" ? bin : null),
-      bunFormatAvailable: async () => (probes++, bunHasFormat),
+      resolveBinary: (command) => (command === bin ? bin : command === "bun" ? join(cwd, "decoy-bun") : null),
+      resolveBunFormat: async () => (probes++, bunHasFormat ? bin : undefined),
     })
     const calls = () => {
       try { return readFileSync(join(cwd, "calls.log"), "utf8").trim().split("\n").filter(Boolean) } catch { return [] }
@@ -127,6 +128,15 @@ describe("bun format in place of prettier", () => {
 
     await step({ toolName: "write", input: { filePath } }, cwd)
 
+    expect(calls()).toEqual([])
+  })
+
+  it("#given a prettier project with TypeScript formatting off #when a .ts file is written #then bun is never probed", async () => {
+    const { cwd, filePath, step, calls, probes } = arrange([".prettierrc"], true, { typescript: false })
+
+    await step({ toolName: "write", input: { filePath } }, cwd)
+
+    expect(probes()).toBe(0)
     expect(calls()).toEqual([])
   })
 
