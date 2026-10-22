@@ -6,6 +6,7 @@ import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { createCompletionTracker, type AgentEndFacts } from "./gateway/completion"
 import { SESSION_CONTROL_DELIVERY_TYPE } from "./gateway/constants"
 import { gatewayDatabasePath } from "./gateway/paths"
+import { loadProvenanceWorkspaces } from "./gateway/provenance-config"
 import { resolveProvenance } from "./gateway/provenance-resolver"
 import { registerInitialSkills } from "./initial-skills"
 import { controlSessionOf, createControlEndpointRegistrant, hostInstanceOf, sessionControlOf, type ControlEndpointRegistrantOptions, type SessionControlActionsPort } from "./gateway/registration"
@@ -196,7 +197,8 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
       // into the store once, when this session starts and the mailbox still exists on disk.
       const legacyMailbox = join(stateDirectory, "mailbox")
       const callerWorkspaceRoot = options.callerWorkspaceRoot ?? (() => pi.cwd ?? process.cwd())
-      const store = options.store ?? createGatewayStore({ agentDir: agentDir(), senderProvenance: () => resolveProvenance({ cwd: callerWorkspaceRoot(), env: options.env }), legacyMailboxDirectories: [legacyMailbox], ...(runtimeInstance === undefined ? {} : { runtimeInstance }) })
+      const onProvenanceWarning = (message: string) => ctx.logger.warn(`thread gateway: ${message}`)
+      const store = options.store ?? createGatewayStore({ agentDir: agentDir(), senderProvenance: () => resolveProvenance({ cwd: callerWorkspaceRoot(), env: options.env, loadWorkspaces: loadProvenanceWorkspaces, onWarning: onProvenanceWarning }), legacyMailboxDirectories: [legacyMailbox], ...(runtimeInstance === undefined ? {} : { runtimeInstance }) })
       // Every store open retries an unreadable legacy mailbox, and an idle store reopens its worker on
       // the next call, so the same failure would repeat each time: it is reported once per session.
       const reportedInvalidMailboxes = new Set<string>()
@@ -220,6 +222,8 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
         stateDirectory,
         store,
         env: options.env,
+        loadProvenanceWorkspaces,
+        onProvenanceWarning,
         diskSessions: options.diskSessions,
         sessionsDirectory: options.sessionsDirectory ?? (() => join(agentDir(), "sessions")),
         ensureHost: options.ensureHost,

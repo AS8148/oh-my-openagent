@@ -4,6 +4,7 @@ import { afterEach, expect, test } from "bun:test"
 import { gatewayDatabasePath } from "./paths"
 import { GATEWAY_MIGRATIONS } from "./schema"
 import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
+import { settled } from "./testing/settled"
 
 let harness: GatewayHarness | undefined
 afterEach(async () => { await harness?.dispose(); harness = undefined })
@@ -27,11 +28,9 @@ test("#given current storage #when the historical v4 worker reads and attempts a
   const before = await old.list()
   expect(before.map((row) => row.body)).toEqual(["before"])
   expect(before[0]).not.toHaveProperty("actor_user_id")
-  // Capture the refusal explicitly: under Bun 1.4.3, awaiting a worker-backed promise through `expect(...).rejects`
-  // stops the worker's replies from reaching this thread, so the store's close never settles.
-  const refusal = await h.engineFor(old).deliver({ sender: sender("old-actor"), target: "target", text: "from v4" }).then(() => undefined, (error: unknown) => error)
-  expect(refusal).toBeInstanceOf(Error)
-  expect(String(refusal)).toContain("delivery provenance is required")
+  // Settled plainly: `expect(p).rejects` after an earlier worker reply never wakes (oven-sh/bun#43819, oven-sh/bun#37189).
+  const refusal = await settled(h.engineFor(old).deliver({ sender: sender("old-actor"), target: "target", text: "from v4" }))
+  expect(refusal.error?.message).toContain("delivery provenance is required")
   await old.dispose()
 
   const db = new Database(gatewayDatabasePath(h.agentDir))

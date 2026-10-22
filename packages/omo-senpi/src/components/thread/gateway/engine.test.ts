@@ -349,8 +349,8 @@ describe("cli_sender_principal", () => {
     })
     const text = b.runtime.textOf(id) ?? ""
     expect(text.split("\n")[0]).toStartWith("From unclassified / ")
-    expect(text.split("\n")[1]).toContain("source=external")
-    expect(text.split("\n")[3]).toBe(JSON.stringify("from the shell"))
+    expect(text.split("\n")[0]).toContain("source=external")
+    expect(text.split("\n")[2]).toBe(JSON.stringify("from the shell"))
     expect(b.runtime.senderOf(id)).toEqual({ sender: { kind: "command_line", user: "tester" }, display_text: "From unclassified / fixture\nfrom the shell" })
   })
 
@@ -363,8 +363,8 @@ describe("cli_sender_principal", () => {
     const id = okId(result)
     await h.quiesce()
     expect(b.runtime.senderOf(id)).toEqual({ sender: { kind: "agent", session_id: "A", name: "planner" }, display_text: 'From unclassified / fixture / session "planner"\nreview the diff' })
-    expect((b.runtime.textOf(id) ?? "").split("\n")[0]).toEndWith('/ session "planner"')
-    expect((b.runtime.textOf(id) ?? "").split("\n")[1]).toContain("source=peer_agent")
+    expect((b.runtime.textOf(id) ?? "").split("\n")[0]).toContain('/ session "planner" [OMO_GATEWAY v=1 ')
+    expect((b.runtime.textOf(id) ?? "").split("\n")[0]).toContain("source=peer_agent")
 
     const unnamed = await named.deliver({ sender: { kind: "session", durable_id: "A" }, target: "B", text: "and the tests" })
     await h.quiesce()
