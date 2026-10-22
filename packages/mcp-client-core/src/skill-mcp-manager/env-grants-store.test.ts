@@ -6,7 +6,8 @@ import * as timers from "node:timers/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { unsafeTestValue } from "../../../../test-support/unsafe-test-value"
-import { addGrant, declarationDigest, list, observe, read, resolveGrantsStorePath, revoke, type GrantObservation } from "./env-grants-store"
+import lockfile from "proper-lockfile"
+import { addGrant, declarationDigest, GrantsLockLostError, list, observe, read, resolveGrantsStorePath, revoke, type GrantObservation } from "./env-grants-store"
 import { createFileGrantStore } from "./env-grant-store"
 
 let root: string
@@ -116,6 +117,58 @@ for (const code of ["EPERM", "EACCES", "EBUSY"]) {
     expect(fs.readdirSync(root)).toEqual(["mcp-env-grants.json"])
   })
 }
+
+function loseLockOnDemand(): { lose: () => void } {
+  const realLock = lockfile.lock
+  const handle = { lose: () => {} }
+  const lock = spyOn(lockfile, "lock").mockImplementation(async (file, options) => {
+    const release = await realLock(file, options)
+    handle.lose = () => {
+      void release()
+      options?.onCompromised?.(Object.assign(new Error("synthetic lost lock"), { code: "ECOMPROMISED" }))
+    }
+    return release
+  })
+  restorers.push(() => lock.mockRestore())
+  return handle
+}
+
+test("a grant is not saved after its lock was lost", async () => {
+  // given
+  const path = resolveGrantsStorePath(root)
+  await addGrant(path, identity, label, ["KEPT"])
+  const before = fs.readFileSync(path, "utf8")
+  const realLock = lockfile.lock
+  const lock = spyOn(lockfile, "lock").mockImplementation(async (file, options) => {
+    const release = await realLock(file, options)
+    await release()
+    options?.onCompromised?.(Object.assign(new Error("synthetic lost lock"), { code: "ECOMPROMISED" }))
+    return async () => {}
+  })
+  restorers.push(() => lock.mockRestore())
+  // when / then
+  await expect(addGrant(path, declarationDigest({ command: "synthetic-other" }), label, ["NEW"])).rejects.toBeInstanceOf(GrantsLockLostError)
+  expect(fs.readFileSync(path, "utf8")).toBe(before)
+  expect(fs.readdirSync(root)).toEqual(["mcp-env-grants.json"])
+})
+
+// The lock is checked before EVERY replace attempt: a loss during a Windows backoff refuses the next attempt.
+test("refuses the next Windows replace attempt once the lock is lost during a backoff", async () => {
+  // given
+  const path = resolveGrantsStorePath(root)
+  await addGrant(path, identity, label, ["OLD"])
+  const before = fs.readFileSync(path, "utf8")
+  Object.defineProperty(process, "platform", { value: "win32" })
+  const lock = loseLockOnDemand()
+  const rename = spyOn(fsPromises, "rename").mockRejectedValueOnce(Object.assign(new Error("synthetic open handle"), { code: "EPERM" }))
+  const delay = spyOn(timers, "setTimeout").mockImplementation((async () => { lock.lose() }) as unknown as typeof timers.setTimeout)
+  restorers.push(() => rename.mockRestore(), () => delay.mockRestore())
+  // when / then
+  await expect(addGrant(path, identity, label, ["NEW"])).rejects.toBeInstanceOf(GrantsLockLostError)
+  expect(rename).toHaveBeenCalledTimes(1)
+  expect(fs.readFileSync(path, "utf8")).toBe(before)
+  expect(fs.readdirSync(root)).toEqual(["mcp-env-grants.json"])
+})
 
 test("bounds Windows replace retries, preserves the old store and releases the lock", async () => {
   // given
