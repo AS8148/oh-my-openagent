@@ -10,11 +10,13 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-function agentDir(files: { readonly models?: unknown; readonly auth?: string | unknown; readonly settings?: unknown }): string {
+function agentDir(files: { readonly models?: unknown; readonly auth?: string | unknown; readonly settings?: unknown; readonly authOnly?: boolean }): string {
   const dir = mkdtempSync(join(tmpdir(), "omo-inventory-"))
   dirs.push(dir)
-  writeFileSync(join(dir, "models.json"), JSON.stringify(files.models ?? { providers: {} }))
-  writeFileSync(join(dir, "settings.json"), JSON.stringify(files.settings ?? {}))
+  if (files.authOnly !== true) {
+    writeFileSync(join(dir, "models.json"), JSON.stringify(files.models ?? { providers: {} }))
+    writeFileSync(join(dir, "settings.json"), JSON.stringify(files.settings ?? {}))
+  }
   if (files.auth !== undefined) {
     writeFileSync(join(dir, "auth.json"), typeof files.auth === "string" ? files.auth : JSON.stringify(files.auth))
   }
@@ -73,5 +75,22 @@ describe("readOmoNativeInventory: providers the user can use (#10887)", () => {
     const inventory = readOmoNativeInventory(agentDir({ models: { providers: { openai: {} } }, auth: "{not json" }), (d) => diagnostics.push(d))
     expect(inventory).toMatchObject({ providerCount: 1, signedInProviderCount: 0, configuredProviderCount: 1, providers: "openai" })
     expect(diagnostics).toHaveLength(1)
+  })
+
+  it("#given only auth.json (no models.json, no settings.json) #then the signed-in providers still count", () => {
+    const inventory = readOmoNativeInventory(agentDir({ authOnly: true, auth: { anthropic: { key: SECRET }, openai: { key: SECRET } } }))
+    expect(inventory).toMatchObject({ providerCount: 2, signedInProviderCount: 2, configuredProviderCount: 0, providers: "anthropic,openai" })
+  })
+
+  it("#given a malformed models.json and a valid auth.json #then the signed-in providers still count", () => {
+    const inventory = readOmoNativeInventory(agentDir({ models: "{not json", auth: { anthropic: {} } }))
+    expect(inventory).toMatchObject({ providerCount: 1, signedInProviderCount: 1, configuredProviderCount: 0, modelCount: 0, providers: "anthropic" })
+  })
+
+  it("#given a malformed auth.json that starts like a key #then the diagnostic carries no part of the file", () => {
+    const diagnostics: unknown[] = []
+    readOmoNativeInventory(agentDir({ auth: `{"anthropic": ${SECRET}}` }), (d) => diagnostics.push(d))
+    expect(diagnostics).toHaveLength(1)
+    expect(String(Reflect.get(Object(Reflect.get(Object(diagnostics[0]), "error")), "message"))).not.toContain("sk")
   })
 })

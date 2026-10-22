@@ -36,13 +36,15 @@ const EMPTY: OmoNativeInventory = Object.freeze({
  * Read `models.json` + `settings.json` (+ the top-level KEYS of `auth.json`, never a value) from the agent
  * home. A provider counts when the user signed into it or configured it (#10887). Provider ids ship only when they are in
  * the known vocabulary, the default pair is masked, and no model name a user configured privately
- * leaves the machine. A missing or malformed inventory reports one diagnostic and yields zeroes -
+ * leaves the machine. A missing or malformed models/settings inventory reports one diagnostic and yields zero
+ * configured providers (the signed-in ones still count); a malformed auth.json reports one diagnostic -
  * inventory is a nice-to-have, never a reason to fail session telemetry.
  */
 export function readOmoNativeInventory(
   agentDir: string,
   diagnostics?: (input: OmoNativeInventoryDiagnostic) => void,
 ): OmoNativeInventory {
+  const signedIn = readSignedInProviders(agentDir, diagnostics)
   try {
     const models = readObject(join(agentDir, "models.json"))
     const settings = readObject(join(agentDir, "settings.json"))
@@ -60,7 +62,6 @@ export function readOmoNativeInventory(
     }
 
     const configured = Object.keys(providers).map(canonicalProvider)
-    const signedIn = readSignedInProviders(agentDir, diagnostics)
     const usable = [...new Set([...configured, ...signedIn])]
     const defaultProvider = stringProperty(settings, "defaultProvider")
     const defaultModel = stringProperty(settings, "defaultModel")
@@ -80,7 +81,13 @@ export function readOmoNativeInventory(
     }
   } catch (error) {
     diagnostics?.({ event: "omo_native_inventory_read_failed", error, source: "omo-native-session" })
-    return EMPTY
+    // The configured inventory is unreadable; the providers the user signed into still count.
+    return signedIn.length === 0 ? EMPTY : {
+      ...EMPTY,
+      providerCount: new Set(signedIn).size,
+      signedInProviderCount: new Set(signedIn).size,
+      providers: providerKinds([...new Set(signedIn)]),
+    }
   }
 }
 
@@ -93,7 +100,8 @@ function readSignedInProviders(
     return Object.keys(readObject(join(agentDir, "auth.json"))).map(canonicalProvider)
   } catch (error) {
     if (Reflect.get(Object(error), "code") !== "ENOENT") {
-      diagnostics?.({ event: "omo_native_inventory_read_failed", error, source: "omo-native-session" })
+      // A fixed error: a JSON parse message can quote the start of a credential.
+      diagnostics?.({ event: "omo_native_inventory_read_failed", error: new Error("auth.json is unreadable or not a JSON object"), source: "omo-native-session" })
     }
     return []
   }
