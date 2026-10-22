@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
@@ -134,7 +135,9 @@ export function getOmoNativeAttribution(input: OmoNativeAttributionInput = {}): 
   const envInstallId = env["OMO_NATIVE_INSTALL_ID"]?.trim() ?? ""
   const installId = INSTALL_ID_PATTERN.test(envInstallId)
     ? envInstallId
-    : readOrCreateInstallId(join(input.stateDir ?? getOmoNativeStateDir(env), INSTALL_ID_FILE_NAME))
+    : input.stateDir !== undefined
+      ? readOrCreateInstallId(join(input.stateDir, INSTALL_ID_FILE_NAME))
+      : resolveUserInstallId(env)
   const now = input.now ?? new Date()
   return {
     surface,
@@ -197,6 +200,38 @@ function readOrCreateSalt(path: string): Buffer {
       return salt
     }
   }
+}
+
+/**
+ * One anonymous id per user, whatever agent home a process resolves (#10934). The id lives at the path OmO Desktop
+ * uses, `<user home>/.omo/agent/omo-senpi/omo-native/install-id`, so an agent-dir override (an orchestrator's
+ * isolated agent dir per run) or a pre-unification flat `~/.omo` layout no longer mints a new person. An id an older
+ * release wrote under the resolved agent home is adopted once into that path, so an existing install keeps its id.
+ */
+export function getOmoNativeInstallIdPath(env: TelemetryEnv = process.env): string {
+  return join(userHome(env), ".omo", "agent", "omo-senpi", "omo-native", INSTALL_ID_FILE_NAME)
+}
+
+function resolveUserInstallId(env: TelemetryEnv): string {
+  const canonical = getOmoNativeInstallIdPath(env)
+  const legacy = join(resolveAgentHome({ env, homeDir: userHome(env) }), "omo-senpi", "omo-native", INSTALL_ID_FILE_NAME)
+  if (legacy === canonical) return readOrCreateInstallId(canonical)
+  const shared = readInstallId(canonical)
+  if (shared !== undefined) return shared
+  const adopted = readInstallId(legacy)
+  if (adopted === undefined) return readOrCreateInstallId(canonical)
+  try {
+    mkdirSync(dirname(canonical), { recursive: true })
+    writeFileSync(canonical, `${adopted}\n`, { flag: "wx", mode: 0o600 })
+  } catch {
+    // A concurrent writer (the Desktop, or another CLI process) may have created it first; its id wins below.
+  }
+  return readInstallId(canonical) ?? adopted
+}
+
+function userHome(env: TelemetryEnv): string {
+  const fromEnv = (process.platform === "win32" ? env["USERPROFILE"] : env["HOME"])?.trim()
+  return fromEnv ? fromEnv : homedir()
 }
 
 function readOrCreateInstallId(path: string): string {
