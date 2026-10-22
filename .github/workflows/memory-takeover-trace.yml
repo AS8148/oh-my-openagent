@@ -8,6 +8,8 @@ on:
       - .github/workflows/memory-takeover-trace.yml
       - packages/memory-core/src/concurrency/takeover-trace.test-support.ts
       - packages/memory-core/src/concurrency/sigkill-takeover.test.ts
+      - packages/memory-core/src/concurrency/writer-child.ts
+      - packages/memory-core/src/concurrency/two-process-kit.test-support.ts
       - script/takeover-trace-summary.ts
   workflow_dispatch:
     inputs:
@@ -65,14 +67,23 @@ jobs:
           echo "trace_dir=$trace_dir" >> "$GITHUB_OUTPUT"
 
       - name: Write job summary
-        if: always()
+        if: always() && steps.runs.outputs.trace_dir != ''
         shell: bash
         run: bun script/takeover-trace-summary.ts "${{ steps.runs.outputs.trace_dir }}" "${{ matrix.os }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload timelines
-        if: always()
+        if: always() && steps.runs.outputs.trace_dir != ''
         uses: actions/upload-artifact@v4
         with:
           name: takeover-trace-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.runs.outputs.trace_dir }}
           retention-days: 1
+
+      - name: Fail when any run failed
+        if: steps.runs.outputs.failed != '0'
+        shell: bash
+        env:
+          FAILED: ${{ steps.runs.outputs.failed }}
+        run: |
+          echo "::error::$FAILED takeover run(s) failed; see the job summary and the uploaded timelines"
+          exit 1

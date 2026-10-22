@@ -29,8 +29,8 @@ const PEER_COMMITS = 5
 const WRITER_COMMITS = 3
 // Each phase waits for its own event and fails naming that phase. The bounds are circuit breakers for a real hang, never
 // the expected duration; the test-level timeout only sits above their sum.
-const PHASE_BOUND_MS = { ready: 60_000, killReady: 60_000, holderExit: 30_000, recovery: 120_000 } as const
-const TAKEOVER_BREAKER_MS = 300_000
+const PHASE_BOUND_MS = { fixture: 30_000, ready: 60_000, killReady: 60_000, holderExit: 30_000, integrity: 30_000, recovery: 120_000, survivorExit: 30_000, history: 30_000 } as const
+const TAKEOVER_BREAKER_MS = Object.values(PHASE_BOUND_MS).reduce((sum, bound) => sum + bound, DEATH_PROOF_BOUND_MS) + 60_000
 
 const kit = createConcurrencyKit()
 afterEach(kit.cleanup)
@@ -95,7 +95,7 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
   test("#given a writer SIGKILLed while holding the shared lock #when its peer continues #then liveness takeover lands every remaining commit cleanly", async () => {
     await withTimelineOnFailure(async () => {
     // #given
-    const shared = await kit.fixture()
+    const shared = await phase("fixture repository", PHASE_BOUND_MS.fixture, kit.fixture())
     traceTakeover("test", "fixture-ready")
     const holder = spawnWriter(shared, "kill-holder", "holder")
     const survivor = spawnWriter(shared, "recovery", "survivor")
@@ -117,15 +117,15 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
     // protocol's own oracle proves the recorded owner dead, so the survivor never spends its
     // acquire budget on an owner the OS has not yet let go of; a proof that never arrives fails here.
     await expectTakeoverOwnerProvenDead(shared.identity, holder.child.pid)
-    await assertRepoIntegrity(shared.identity.paths.repo)
+    await phase("repository integrity after the kill", PHASE_BOUND_MS.integrity, assertRepoIntegrity(shared.identity.paths.repo))
     traceTakeover("test", "integrity-ok")
     survivor.send("begin-recovery")
     await phase("survivor takes over and commits (done)", PHASE_BOUND_MS.recovery, survivor.waitForPrefix("done:"))
     traceTakeover("test", "survivor-done")
-    await kit.expectSuccessful(survivor)
+    await phase("survivor exits cleanly", PHASE_BOUND_MS.survivorExit, kit.expectSuccessful(survivor))
 
     // #then
-    await assertLinearCommits(shared.identity, 2 * WRITER_COMMITS)
+    await phase("linear history check", PHASE_BOUND_MS.history, assertLinearCommits(shared.identity, 2 * WRITER_COMMITS))
     traceTakeover("test", "passed")
     })
   }, TAKEOVER_BREAKER_MS)
