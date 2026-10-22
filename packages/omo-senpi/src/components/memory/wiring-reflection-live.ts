@@ -116,6 +116,7 @@ export function createMemoryReflectionLiveWiring(
         resolveContext,
         activeRun: (identity) => activeRuns.current(identity),
         ...(applyFacts === undefined ? {} : { applyFacts }),
+        ...(options.syncStatus === undefined ? {} : { syncStatus: options.syncStatus }),
       })
     },
     attach(sessionId): void {
@@ -186,6 +187,7 @@ export function createMemoryReflectionLiveWiring(
       const ui = readUi(lastEventCtx.current)
       await syncNotifier?.changed(repo, ui)
       track(footerLive.refresh(sessionId, ui))
+      await rpcBridge.current?.sync()
     },
   }
 }
