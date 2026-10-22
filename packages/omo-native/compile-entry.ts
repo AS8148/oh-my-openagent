@@ -133,8 +133,6 @@ export function compiledBannerLines(manifest: Pick<EmbeddedManifest, "omoAiVersi
 type CompiledLauncherSeams = { readonly threadSdk?: (options: Record<string, unknown>) => Promise<{ sdk?: unknown; error?: string }> }
 
 export async function runCompiledLauncher(args: string[], execDir: string, enginePin = "unknown", compiledPackageRoot?: string, migration: CompiledLauncherOptions = {}, seams: CompiledLauncherSeams = {}): Promise<boolean> {
-  // The #10697 plaintext file goes before ANY command runs: several verbs return early below.
-  removeLegacyServiceCredentials()
   if (args[0] === "loro-smoke") {
     process.exitCode = await runLoroSmoke()
     return true
@@ -280,6 +278,8 @@ async function answerUnderRefusedTrust(args: string[]): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+  // The #10697 plaintext file goes before ANY command, including the answers below that return early.
+  removeLegacyServiceCredentials()
   // Before anything opens TLS, and on every start: `host ensure`, the host daemon and the
   // provisioned handoff all re-enter here (#10215). A bad value refuses to start (exit 78). Only the
   // exact argv `--version` or `--help` is answered, from static local data, before anything else runs
