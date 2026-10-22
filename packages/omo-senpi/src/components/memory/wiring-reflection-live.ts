@@ -14,6 +14,7 @@ import { isStaleExtensionContextError } from "./stale-extension-context"
 import { MEMORY_STATUS_KEY, refreshMemoryStatus } from "./status"
 import { createActiveReflectionRuns } from "./status-active-runs"
 import { createMemoryFooterStatusLive } from "./status-live-wiring"
+import { createSyncStatusNotifier } from "./sync-status-surface"
 import {
   consumePendingReflectionCompletions,
   emitReflectionHealthAlert,
@@ -44,6 +45,7 @@ export interface MemoryReflectionLiveWiring {
   /** Resolves once every status refresh started by bind or settle has finished (each one runs git in the identity dir). */
   settled(): Promise<void>
   clearStatus(eventCtx: unknown): void
+  onSyncStatusChanged(repo: string): Promise<void>
 }
 
 // A pi captured at bind is retired by session replacement or runtime reload. Under --multi-session
@@ -89,7 +91,9 @@ export function createMemoryReflectionLiveWiring(
     resolveContext: (sessionId) => options.sessions.get(sessionId)?.context,
     isActive: (identity) => activeRuns.isActive(identity),
     ...(options.footerTimers === undefined ? {} : { timers: options.footerTimers }),
+    ...(options.syncStatus === undefined ? {} : { syncStatus: options.syncStatus }),
   })
+  const syncNotifier = options.syncStatus === undefined ? undefined : createSyncStatusNotifier(options.syncStatus)
 
   async function onReflectionLaunched(identity: string, run: ReservedRun): Promise<void> {
     activeRuns.start(identity, run.runId, launchDetails(options, identity, run))
@@ -175,6 +179,14 @@ export function createMemoryReflectionLiveWiring(
       footerLive.stop()
       readUi(eventCtx)?.setStatus(MEMORY_STATUS_KEY, undefined)
     },
+    async onSyncStatusChanged(repo): Promise<void> {
+      const sessionId = activeSession.current
+      const context = sessionId === undefined ? undefined : options.sessions.get(sessionId)?.context
+      if (context === undefined || context.identityPaths.repo !== repo) return
+      const ui = readUi(lastEventCtx.current)
+      await syncNotifier?.changed(repo, ui)
+      track(footerLive.refresh(sessionId, ui))
+    },
   }
 }
 
@@ -203,6 +215,7 @@ function refreshInitialStatus(
     alreadyNotified: false,
     requestPressureDream,
     sessionId,
+    ...(options.syncStatus === undefined ? {} : { syncStatus: options.syncStatus }),
   })
 }
 
