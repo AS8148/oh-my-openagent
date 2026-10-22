@@ -27,6 +27,9 @@ function git(cwd: string, ...args: string[]): void {
 function commitNotes(repo: string, notes: Record<string, string>): void {
   mkdirSync(repo, { recursive: true })
   git(repo, "init", "-q")
+  // A synchronous commit can still launch detached maintenance that races root teardown.
+  git(repo, "config", "maintenance.auto", "false")
+  git(repo, "config", "gc.auto", "0")
   for (const [path, description] of Object.entries(notes)) {
     mkdirSync(dirname(join(repo, path)), { recursive: true })
     writeFileSync(join(repo, path), `---\ndescription: ${description}\n---\nbody of ${path}\n`)
@@ -108,6 +111,21 @@ async function readResult(w: World, path: string, toolName = "read"): Promise<st
 }
 
 describe("project memory nudge (#10044)", () => {
+  test("#given a fixture repo #when a commit finishes #then no automatic git maintenance child can outlive teardown", () => {
+    const w = world()
+    const trace = join(dirname(w.workspace), "git-trace.jsonl")
+
+    const result = Bun.spawnSync(
+      ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-q", "-m", "trace maintenance"],
+      { cwd: w.childRepo, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_TRACE2_EVENT: trace } },
+    )
+
+    expect(result.exitCode).toBe(0)
+    const events = readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { event: string; argv?: string[] })
+    expect(events.some((event) => event.event === "exit")).toBe(true)
+    expect(events.filter((event) => event.event === "child_start" && event.argv?.some((arg) => arg === "maintenance" || arg === "gc"))).toEqual([])
+  })
+
   test("#given a child project with memory #when the session first reads a file there #then one nudge lists its notes with a call to consult them", async () => {
     // given
     const w = world()
