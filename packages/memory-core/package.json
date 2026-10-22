@@ -11,6 +11,9 @@
     "./fs": {
       "import": "./src/fs/resilient.ts"
     },
+    "./recall-store": {
+      "import": "./src/recall/bm25-persist.ts"
+    },
     "./sync-engine": {
       "import": "./src/sync/engine/index.ts"
     },
@@ -25,6 +28,9 @@
     },
     "./keyring": {
       "import": "./src/sync/keyring-port.ts"
+    },
+    "./memory-hook": {
+      "import": "./src/memfs/memory-hook.ts"
     }
   },
   "scripts": {
