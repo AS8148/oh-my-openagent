@@ -21,14 +21,30 @@ export type ProvenanceRuntime = {
   readonly onWarning?: (message: string) => void
   /** A runtime IO seam, not an agent/tool argument. */
   readonly gitRemote?: (cwd: string) => Promise<string | undefined>
+  /** Runtime IO seams for the git probe, so every failure class is exercised the same way on every platform. */
+  readonly execGit?: ExecGit
+  readonly readGitFile?: (path: string) => string
 }
 
+/** One git run: its stdout, or how it failed (an exit code, ENOENT for a missing binary, or killed by the timeout). */
+export type GitRun =
+  | { readonly ok: true; readonly stdout: string }
+  | { readonly ok: false; readonly code: number | string | null; readonly killed: boolean; readonly stderr: string; readonly message: string }
+export type ExecGit = (args: readonly string[], options: { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>>; readonly timeoutMs: number }) => Promise<GitRun>
+
+const execGitFile: ExecGit = (args, options) => new Promise((done) => {
+  execFile("git", [...args], { cwd: options.cwd, env: options.env, encoding: "utf8", windowsHide: true, timeout: options.timeoutMs }, (error, stdout, stderr) => {
+    if (error === null) return done({ ok: true, stdout })
+    done({ ok: false, code: error.code ?? null, killed: error.killed === true, stderr, message: error.message })
+  })
+})
+
 /** A `.git` directory, or a worktree `.git` file whose `gitdir:` target still exists (a pruned worktree leaves a dangling one). */
-function liveGitEntry(dir: string): boolean {
+function liveGitEntry(dir: string, readGitFile: (path: string) => string): boolean {
   const entry = join(dir, ".git")
   if (!existsSync(entry)) return false
   if (statSync(entry).isDirectory()) return true
-  const target = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(entry, "utf8"))?.[1]
+  const target = /^gitdir:\s*(.+?)\s*$/m.exec(readGitFile(entry))?.[1]
   return target !== undefined && existsSync(resolve(dir, target))
 }
 
@@ -36,12 +52,17 @@ function liveGitEntry(dir: string): boolean {
  * Structural, locale-independent: a repository is an explicit GIT_DIR or a live `.git` entry above the cwd. The walk
  * stops below the sender's GIT_CEILING_DIRECTORIES, as git's own discovery does.
  */
-function insideRepository(cwd: string, env: Readonly<Record<string, string | undefined>>): boolean {
+function insideRepository(cwd: string, env: Readonly<Record<string, string | undefined>>, warn: (message: string) => void, readGitFile: (path: string) => string): boolean {
   if (env.GIT_DIR) return true
   const ceilings = new Set((env.GIT_CEILING_DIRECTORIES ?? "").split(delimiter).filter((path) => isAbsolute(path)).map((path) => resolve(path)))
-  for (let dir = resolve(cwd); ; dir = dirname(dir)) {
-    if (liveGitEntry(dir)) return true
-    if (dirname(dir) === dir || ceilings.has(dirname(dir))) return false
+  try {
+    for (let dir = resolve(cwd); ; dir = dirname(dir)) {
+      if (liveGitEntry(dir, readGitFile)) return true
+      if (dirname(dir) === dir || ceilings.has(dirname(dir))) return false
+    }
+  } catch (error) {
+    warn(`finding the sender's repository failed, so git does not classify this send: ${error instanceof Error ? error.message : String(error)}`)
+    return false
   }
 }
 
@@ -50,18 +71,14 @@ function insideRepository(cwd: string, env: Readonly<Record<string, string | und
 // message text, which a translated git prints in the sender's language. Provenance is metadata on the message, so any
 // other git failure (a refused ownership check, a broken config, the timeout) is reported and the sender is
 // classified without git: it never fails the send.
-function originRemote(cwd: string, env: Readonly<Record<string, string | undefined>>, warn: (message: string) => void): Promise<string | undefined> {
-  if (!insideRepository(cwd, env)) return Promise.resolve(undefined)
-  return new Promise((done) => {
-    execFile("git", ["remote", "get-url", "origin"], { cwd, env, encoding: "utf8", windowsHide: true, timeout: 1_000 }, (error, stdout, stderr) => {
-      if (error === null) return done(stdout.trim())
-      const missingGit = "code" in error && error.code === "ENOENT"
-      const noOrigin = error.code === 2
-      if (missingGit) warn("git is not installed for the sender, so git does not classify this send")
-      else if (!noOrigin) warn(`reading the sender's git origin failed, so git does not classify this send: ${stderr.trim() || error.message}`)
-      done(undefined)
-    })
-  })
+async function originRemote(cwd: string, env: Readonly<Record<string, string | undefined>>, warn: (message: string) => void, runtime: ProvenanceRuntime): Promise<string | undefined> {
+  if (!insideRepository(cwd, env, warn, runtime.readGitFile ?? ((path) => readFileSync(path, "utf8")))) return undefined
+  const run = await (runtime.execGit ?? execGitFile)(["remote", "get-url", "origin"], { cwd, env, timeoutMs: 1_000 })
+  if (run.ok) return run.stdout.trim()
+  if (run.code === "ENOENT") warn("git is not installed for the sender, so git does not classify this send")
+  else if (run.killed) warn("reading the sender's git origin failed, so git does not classify this send: git did not answer within 1000 ms")
+  else if (run.code !== 2) warn(`reading the sender's git origin failed, so git does not classify this send: ${run.stderr.trim() || run.message}`)
+  return undefined
 }
 
 /** Parse only the path of a network remote: credentials and host identities never become labels. */
@@ -73,7 +90,8 @@ function repository(remote: string | undefined): { readonly owners: readonly str
   const parts = path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean)
   const project = parts?.at(-1)?.replace(/\.git$/, "")
   // Every parent segment of a network remote is a candidate owner: a GitLab subgroup path `group/sub/project` matches
-  // a `git_owners` entry of either `group` or `sub`.
+  // a `git_owners` entry of either `group` or `sub`. The first matching row in table order wins, so list the more
+  // specific workspace first.
   const owners = (url !== null && url.protocol !== "file:") || scp !== undefined ? parts.slice(0, -1) : []
   return project ? { owners, project } : undefined
 }
@@ -103,7 +121,7 @@ export async function resolveProvenance(runtime: ProvenanceRuntime): Promise<Pro
   const extra = lane ? { lane } : {}
   if (explicitWorkspace && explicitProject) return { workspace: explicitWorkspace, project: explicitProject, ...extra }
   const warn = runtime.onWarning ?? (() => {})
-  const repo = repository(await (runtime.gitRemote ?? ((cwd: string) => originRemote(cwd, env, warn)))(runtime.cwd))
+  const repo = repository(await (runtime.gitRemote ?? ((cwd: string) => originRemote(cwd, env, warn, runtime)))(runtime.cwd))
   const project = explicitProject || repo?.project || basename(resolve(runtime.cwd)) || "root"
   if (explicitWorkspace) return { workspace: explicitWorkspace, project, ...extra }
   const table = runtime.workspaces ?? loadTable(runtime, env, warn)
