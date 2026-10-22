@@ -92,8 +92,10 @@ const BIND_LEAD = String.raw`^\s*(?:\[(?:Image|Pasted text)\b[^\]\n]*\]\s*)*`
 const BIND_VERB = String.raw`(?:run|start|use|do|execute)`
 // A `?` anywhere after the keyword makes the prompt a question, so it never binds ("use mass ulw. Is that the
 // right choice?"); a URL's own `?` is masked before this test. A masked span (a pasted URL) may follow directly.
-const NO_QUESTION = String.raw`(?![\s\S]*\?)`
-const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,.!:;\n\0]|(?:to|on|for|with|and|now|here)\b))${NO_QUESTION}`
+// The full-width question mark (U+FF1F) that Korean and Japanese IMEs type counts too.
+const NO_QUESTION = String.raw`(?![\s\S]*[?\uFF1F])`
+// A `.` after the keyword must end the sentence: "run mass ulw.ts again" names a file, not the skill.
+const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,!:;\n\0]|\.(?:\s|$)|(?:to|on|for|with|and|now|here)\b))${NO_QUESTION}`
 // The Korean form takes exactly one request ending, closing the sentence: a question ("돌려도 돼?") or a
 // past-tense or declarative ending ("돌렸어", "했는데", "하니") is not a request.
 const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려줘|실행해줘|써줘|해줘|돌려|실행해)(?=\s*(?:[.!\n]|$))${NO_QUESTION}`
