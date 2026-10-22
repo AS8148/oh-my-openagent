@@ -1,7 +1,8 @@
 import { afterEach, expect, spyOn, test } from "bun:test"
 
 import { StrandedGitLockError } from "../../git/repo-lock-sweep"
-import { SyncAuthError, SyncHttpError } from "./adapters/http-transport"
+import { SyncAuthError, SyncHttpError, SyncNetworkError } from "./adapters/http-transport"
+import { OFFLINE_SHOWN_AFTER_ATTEMPTS } from "./failure"
 import { type Device, GIT_TEST_TIMEOUT, makeDevice } from "./engine-harness.test-support"
 import { FakeSyncServer } from "./fake-server.test-support"
 
@@ -108,6 +109,36 @@ test.each([
     since: b.clock.now(),
     attempts: 1,
     failure: { kind: "auth_expired", reason: expect.any(String), action: "Sign in to OmO again." },
+  })
+  load.mockRestore()
+  await b.engine.runCycle()
+  expect(await b.engine.status()).toMatchObject({ kind: "synced", at: b.clock.now() })
+}, GIT_TEST_TIMEOUT)
+
+test.each([
+  ["an unreachable sync service", () => new SyncNetworkError(new TypeError("fetch failed"))],
+  ["a sync service answering 503", () => new SyncHttpError("unavailable", 503, true)],
+])("%s stays quiet while it is a blip, then reports failing as offline with the connection action, and clears on recovery (omo #10637)", async (_name, makeError) => {
+  const { b } = await pair()
+  await b.engine.runCycle()
+  const lastGood = await b.engine.status()
+  expect(lastGood).toMatchObject({ kind: "synced" })
+  await b.restart()
+  const load = spyOn(b.store, "load").mockImplementation(async () => {
+    throw makeError()
+  })
+  const firstFailureAt = b.clock.now()
+  for (let attempt = 1; attempt < OFFLINE_SHOWN_AFTER_ATTEMPTS; attempt += 1) {
+    await failedCycle(b)
+    expect(await b.engine.status()).toEqual(lastGood)
+    b.clock.advance(10_000)
+  }
+  await failedCycle(b)
+  expect(await b.engine.status()).toEqual({
+    kind: "failing",
+    since: firstFailureAt,
+    attempts: OFFLINE_SHOWN_AFTER_ATTEMPTS,
+    failure: { kind: "offline", reason: expect.any(String), action: expect.any(String) },
   })
   load.mockRestore()
   await b.engine.runCycle()

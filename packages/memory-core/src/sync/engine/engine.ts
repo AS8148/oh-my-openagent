@@ -6,7 +6,7 @@
 
 import { advance, applyVerified, capture } from "./apply"
 import type { EngineDeps } from "./engine-deps"
-import { describeSyncFailure, type SyncFailure } from "./failure"
+import { describeSyncFailure, isFailureShown, type SyncFailure } from "./failure"
 import { type EngineState, SyncJournal } from "./journal"
 import { push, staleBackoffMs } from "./push"
 import type { RefusalCode } from "./ports"
@@ -60,9 +60,9 @@ export class SyncEngine {
     return this.journal.state()
   }
 
-  /** What a UI shows: a failing cycle until one succeeds, paused at a refused entry, else the last successful sync. */
+  /** What a UI shows: a failing cycle until one succeeds (an offline one once it persists), paused at a refused entry, else the last successful sync. */
   async status(): Promise<EngineStatus> {
-    if (this.failing !== null) return { kind: "failing", ...this.failing }
+    if (this.failing !== null && isFailureShown(this.failing.failure.kind, this.failing.attempts)) return { kind: "failing", ...this.failing }
     const s = await this.journal.state()
     if (s.paused !== null) return { kind: "paused", seq: s.paused.seq, code: s.paused.code }
     if (s.lastSyncedAt === null) return { kind: "never_synced" }

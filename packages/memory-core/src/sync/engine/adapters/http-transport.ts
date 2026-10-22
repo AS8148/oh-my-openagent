@@ -31,6 +31,14 @@ export class SyncAuthError extends Error {
   }
 }
 
+/** The sync service could not be reached at all: no network, DNS, a refused or reset connection. */
+export class SyncNetworkError extends Error {
+  override readonly name = "SyncNetworkError"
+  constructor(cause: unknown) {
+    super("the sync service could not be reached", { cause })
+  }
+}
+
 export interface HttpTransportOptions {
   readonly baseUrl: string
   /** The device's bearer token, read per request so a refresh takes effect. */
@@ -66,7 +74,9 @@ export function createHttpTransport(options: HttpTransportOptions): Transport {
   const request = async (method: string, path: string, body?: string | Uint8Array, json = true): Promise<Response> => {
     const headers: Record<string, string> = { authorization: `Bearer ${await bearer(options)}` }
     if (body !== undefined && json) headers["content-type"] = "application/json"
-    const response = await doFetch(`${options.baseUrl}${path}`, { method, headers, ...(body === undefined ? {} : { body }) })
+    const response = await doFetch(`${options.baseUrl}${path}`, { method, headers, ...(body === undefined ? {} : { body }) }).catch((error: unknown) => {
+      throw new SyncNetworkError(error)
+    })
     if (response.ok) return response
     const code = await response.json().then(
       (b: unknown) => (b as { error?: { code?: string } }).error?.code ?? "unknown",

@@ -3,11 +3,12 @@
 // latest failure until a cycle succeeds; the raw error text stays in the log, never in the status.
 
 import { StrandedGitLockError } from "../../git/repo-lock-sweep"
-import { SyncAuthError, SyncHttpError } from "./adapters/http-transport"
+import { SyncAuthError, SyncHttpError, SyncNetworkError } from "./adapters/http-transport"
 
 export type SyncFailure =
   | { readonly kind: "stranded_lock"; readonly paths: readonly string[]; readonly reason: string; readonly action: string }
   | { readonly kind: "auth_expired"; readonly reason: string; readonly action: string }
+  | { readonly kind: "offline"; readonly reason: string; readonly action: string }
   | { readonly kind: "unknown"; readonly reason: string; readonly action: string }
 
 export type SyncFailureKind = SyncFailure["kind"]
@@ -16,6 +17,22 @@ const AUTH_EXPIRED: SyncFailure = {
   kind: "auth_expired",
   reason: "This device's OmO sign-in has expired or was refused, so memory sync cannot reach your account.",
   action: "Sign in to OmO again.",
+}
+
+const OFFLINE: SyncFailure = {
+  kind: "offline",
+  reason: "Memory sync cannot reach the OmO sync service.",
+  action: "Check your internet connection. Sync resumes on its own once the service is reachable.",
+}
+
+/**
+ * A network blip retries on the next cycle without alarming anyone: an offline failure is shown
+ * only once this many cycles in a row have failed with it. Every other kind is shown at once.
+ */
+export const OFFLINE_SHOWN_AFTER_ATTEMPTS = 3
+
+export function isFailureShown(kind: SyncFailureKind, attempts: number): boolean {
+  return kind !== "offline" || attempts >= OFFLINE_SHOWN_AFTER_ATTEMPTS
 }
 
 const UNKNOWN: SyncFailure = {
@@ -36,5 +53,6 @@ export function describeSyncFailure(error: unknown): SyncFailure {
     }
   }
   if (error instanceof SyncAuthError || (error instanceof SyncHttpError && error.status === 401)) return AUTH_EXPIRED
+  if (error instanceof SyncNetworkError || (error instanceof SyncHttpError && error.transient)) return OFFLINE
   return UNKNOWN
 }

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
 
-import { b64urlOfHex, createHttpTransport, hexOfB64url, SyncAuthError, SyncHttpError } from "./http-transport"
+import { b64urlOfHex, createHttpTransport, hexOfB64url, SyncAuthError, SyncHttpError, SyncNetworkError } from "./http-transport"
 import { startWireServer, type WireServer } from "./wire-server.test-support"
 
 const servers: WireServer[] = []
@@ -62,6 +62,14 @@ test("a token that cannot be refreshed fails the request as SyncAuthError, and a
   const refusal = await unknownDevice.pull(0, 500).then(() => null, (error: unknown) => error)
   expect(refusal).toBeInstanceOf(SyncHttpError)
   expect(refusal).toMatchObject({ code: "unauthorized", status: 401, transient: false })
+})
+
+test("a sync service that cannot be reached fails the request as SyncNetworkError, keeping the fetch error (omo #10637)", async () => {
+  const refused = new TypeError("fetch failed")
+  const unreachable = createHttpTransport({ baseUrl: "http://sync.invalid", token: () => "tok", fetch: (() => Promise.reject(refused)) as unknown as typeof fetch })
+  const failure = await unreachable.pull(0, 500).then(() => null, (error: unknown) => error)
+  expect(failure).toBeInstanceOf(SyncNetworkError)
+  expect((failure as SyncNetworkError).cause).toBe(refused)
 })
 
 test("a stale base answers stale_base with the server's head", async () => {
