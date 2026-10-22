@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**A memory git command that hangs past its timeout can now leave evidence behind.** With `OMO_GIT_TIMEOUT_DIAGNOSTICS_DIR` set, a timed-out git records the running process table (and on Windows the stuck git's thread wait states) in that directory before it is stopped; unset, nothing changes. Windows CI uses it to diagnose a rare stalled `git add`. ([#10821](https://github.com/code-yeongyu/oh-my-openagent/issues/10821))
+**A memory git command that hangs past its timeout can now leave evidence behind.** With `OMO_GIT_TIMEOUT_DIAGNOSTICS_DIR` set, a timed-out git records the running process table (and on Windows the stuck git's thread wait states) in that directory before it is stopped; unset, nothing changes. Windows CI uses it to diagnose a rare stalled `git add`. ([#10821](https://github.com/code-yeongyu/oh-my-openagent/issues/10821), [#10914](https://github.com/code-yeongyu/oh-my-openagent/pull/10914))
 
 ## [5.1.41] - 2026-10-22
 
