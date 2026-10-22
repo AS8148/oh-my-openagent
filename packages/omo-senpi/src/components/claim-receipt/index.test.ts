@@ -97,17 +97,19 @@ describe("claim-receipt component", () => {
   describe("#given the verdict sidecar keeps failing to load", () => {
     it("#then each failure streak warns once, and a failure after a successful load warns again", async () => {
       let imports = 0
-      const loadRuntime = createClaimReceiptRuntimeLoader(async () => {
+      const loadRuntime = async () => {
         imports += 1
         if (imports === 3) return import("./runtime")
         throw new Error("Cannot find module '#omo-claim-receipt-runtime'")
-      })
+      }
       const { finish, warnings } = setup({}, true, { loadRuntime })
       await finish(unsupported())
       await finish(unsupported())
       expect(warnings).toHaveLength(1)
       expect((await finish(unsupported()))?.entries?.map((draft) => draft.customType)).toContain(VERDICT_ENTRY_TYPE)
-      expect(imports).toBe(3)
+      await finish(unsupported())
+      expect(warnings).toHaveLength(2)
+      expect(imports).toBe(4)
     })
   })
 
