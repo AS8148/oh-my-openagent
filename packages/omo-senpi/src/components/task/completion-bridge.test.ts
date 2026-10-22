@@ -216,8 +216,7 @@ describe("completion bridge live background promotion", () => {
       category: "quick",
       run_in_background: true,
     })
-    if (started.kind !== "started") throw new Error("expected started task")
-    expect(started.starting).toBe(true)
+    if (started.kind !== "starting") throw new Error(`expected a starting task, got ${started.kind}`)
 
     // when
     release.resolve()

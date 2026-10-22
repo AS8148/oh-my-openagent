@@ -7,7 +7,7 @@ import type { DagNodeId, DagNodeErrorCode } from "./types"
 export function attachStarted(
   context: SchedulerContext,
   nodeId: DagNodeId,
-  result: Extract<OwnedStartResult, { readonly kind: "started" }>,
+  result: Extract<OwnedStartResult, { readonly kind: "started" | "starting" }>,
 ): void {
   const node = nodeById(context.journal.snapshot(), nodeId)
   const attempt = node.attempt + 1

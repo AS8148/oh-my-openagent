@@ -6,10 +6,29 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { RunnerError } from "../runners/in-process"
 import { RpcProcessRunner } from "../runners/rpc-process"
 import { releaseSpawnedChild } from "../runners/rpc/__fixtures__/release-child"
+import { discardUnstartedRpcHandle } from "../runners/rpc/start-cleanup"
 import { spawnFakeChild } from "../runners/rpc/__fixtures__/spawn-fake"
 import { terminateRpcChild } from "../runners/rpc/terminate"
 import { createRpcManagedRunner } from "./runner"
+import type { ManagedChildHandle } from "./child-handle"
 import { FakeRunner, cleanupProjects, makeManager } from "./__fixtures__/manager-fakes"
+
+// Refuses every first prompt the way the rpc runners do: the child's teardown is started detached and
+// stays pending until the test releases it.
+class RefusingRunner extends FakeRunner {
+  readonly teardownReleased = Promise.withResolvers<void>()
+  readonly order: string[] = []
+
+  override async start(): Promise<ManagedChildHandle> {
+    void discardUnstartedRpcHandle({
+      terminate: () => this.teardownReleased.promise,
+      dispose: async () => {
+        this.order.push("child torn down")
+      },
+    }, () => undefined)
+    throw new RunnerError({ kind: "child-prompt-failed", message: "prompt refused" })
+  }
+}
 
 // The same shape start-failure-security.test.ts uses: a cause carrying a credential, so any test that
 // persists free text fails loudly instead of leaking quietly.
@@ -185,6 +204,26 @@ describe("TaskManager start failure diagnostics", () => {
     await teardownDone
     const child = spawned.at(-1)
     expect(child?.exitCode ?? child?.signalCode ?? null).not.toBeNull()
+  })
+
+  test("#given a refused start whose child is still being torn down #when the session shuts down #then shutdown waits for that teardown, so no child is left behind", async () => {
+    // given
+    const runner = new RefusingRunner()
+    const { manager } = makeManager({ inProcess: runner })
+    const result = await manager.start({ prompt: "p", parent_session_id: "parent-1", depth: 1, category: "quick" })
+    expect(result.kind).toBe("start_failed")
+
+    // when: one event-loop turn lets any shutdown that is not waiting on the teardown finish first
+    const settling = (manager.settleLaunchesForShutdown?.(60_000) ?? Promise.resolve()).then(() => {
+      runner.order.push("shutdown settled")
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    runner.order.push("teardown released")
+    runner.teardownReleased.resolve()
+    await settling
+
+    // then
+    expect(runner.order).toEqual(["teardown released", "child torn down", "shutdown settled"])
   })
 
   test("#given a start failure that never reached a process exit #when it is recorded #then the failure kind alone is persisted", async () => {

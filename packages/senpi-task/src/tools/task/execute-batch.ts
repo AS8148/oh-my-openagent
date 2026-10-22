@@ -48,7 +48,7 @@ async function startAll(input: ExecuteBatchInput): Promise<readonly BatchStart[]
       const start = await input.startItem(item)
       const skills = input.skillSummaryFor?.(item)
       starts.push(
-        start.kind === "started"
+        start.kind === "started" || start.kind === "starting"
           ? { kind: "started", item, result: start, ...(skills === undefined ? {} : { skills }) }
           : { kind: "failed", item, detail: failedStartDetail(item, start, skills), ...(skills === undefined ? {} : { skills }) },
       )
@@ -65,8 +65,9 @@ function backgroundText(starts: readonly BatchStart[], status: "running" | "erro
     if (start.kind === "failed") {
       return `${index + 1}. ${start.detail.name ?? "task"} (error): ${start.detail.error_message ?? "start failed"}`
     }
-    const queue = start.result.queue_position === undefined ? "" : ` queue:${start.result.queue_position}`
-    return `${index + 1}. ${start.result.name} ${start.result.task_id} (${start.result.status})${queue}${continuationFooter(start.result.task_id)}`
+    const queue = start.result.kind !== "started" || start.result.queue_position === undefined ? "" : ` queue:${start.result.queue_position}`
+    const status = start.result.kind === "starting" ? "starting" : start.result.status
+    return `${index + 1}. ${start.result.name} ${start.result.task_id} (${status})${queue}${continuationFooter(start.result.task_id)}`
   })
   return [`Batch ${status}.`, ...lines].join("\n")
 }

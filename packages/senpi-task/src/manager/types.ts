@@ -157,11 +157,21 @@ export type StartResult =
       // absent for a queued start that has not launched yet (#9722).
       readonly effective_model?: EffectiveModelRecord
       readonly queue_position?: number
-      // The task host has not admitted the child yet; its start outcome arrives on the record (#10042).
-      // run_epoch and resolved_model are then the plan's: a start-time fallback may still move both.
-      readonly starting?: true
       readonly name_warning?: string
       // Where an isolated child is working. The merge outcome is NOT here: it does not exist yet.
+      readonly isolation?: IsolationStartedDetails
+    }
+  | {
+      // The child has not accepted its first prompt within the start window (#10042), so it is not started
+      // yet. Acceptance appends `task_started` to the record; a refusal fails the record (#10402).
+      // run_epoch and resolved_model are the plan's: a start-time fallback may still move both.
+      readonly kind: "starting"
+      readonly task_id: string
+      readonly run_epoch?: number
+      readonly status: "running"
+      readonly name: string
+      readonly resolved_model?: ResolvedModelRecord
+      readonly name_warning?: string
       readonly isolation?: IsolationStartedDetails
     }
   | {

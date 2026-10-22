@@ -73,19 +73,68 @@ describe("task start against a busy host (#10042)", () => {
       const started = await bounded(h.manager.start(baseSpec({ run_in_background: runInBackground })))
 
       // then
-      if (started.kind !== "started") throw new Error(`expected started, got ${started.kind}`)
-      expect(started.starting).toBe(true)
+      if (started.kind !== "starting") throw new Error(`expected starting, got ${started.kind}`)
       expect(h.store.load(started.task_id)?.status).toBe("running")
       held.release.resolve(undefined)
     })
   }
+
+  test("#given a child whose acceptance arrives after the start window #when the task starts #then it is reported starting, and started only once acceptance lands", async () => {
+    // given
+    const held = new BusyHostRunner()
+    const h = makeManager({ inProcess: held })
+    const accepted = Promise.withResolvers<void>()
+    const append = h.store.appendEvent.bind(h.store)
+    spyOn(h.store, "appendEvent").mockImplementation((id, event) => {
+      const result = append(id, event)
+      if (event.type === "task_started") accepted.resolve()
+      return result
+    })
+
+    // when
+    const result = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
+
+    // then: the window elapsed before acceptance, which is not a start
+    expect(result.kind).toBe("starting")
+    if (result.kind !== "starting") return
+    expect(readEvents(h.store, result.task_id)).not.toContain("task_started")
+
+    // and: acceptance is what reports it started
+    held.release.resolve(undefined)
+    await bounded(accepted.promise)
+    expect(h.manager.getResidentHandle(result.task_id)).toBeDefined()
+  })
+
+  test("#given a child whose acceptance arrives after the start window #when the host refuses it #then it fails and is never reported started", async () => {
+    // given
+    const held = new BusyHostRunner()
+    const h = makeManager({ inProcess: held })
+    const result = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
+    expect(result.kind).toBe("starting")
+    if (result.kind !== "starting") return
+    const failed = Promise.withResolvers<void>()
+    const append = h.store.appendEvent.bind(h.store)
+    spyOn(h.store, "appendEvent").mockImplementation((id, event) => {
+      const appended = append(id, event)
+      if (id === result.task_id && event.type === "task_start_failed") failed.resolve()
+      return appended
+    })
+
+    // when
+    held.release.resolve(hostBusy())
+    await bounded(failed.promise)
+
+    // then
+    expect(h.store.load(result.task_id)?.status).toBe("error")
+    expect(readEvents(h.store, result.task_id)).not.toContain("task_started")
+  })
 
   test("#given a start still waiting on the host #when the host refuses it #then the record fails with the host's reason and waiters settle", async () => {
     // given
     const held = new BusyHostRunner()
     const h = makeManager({ inProcess: held, config: oneLane() })
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
+    if (started.kind !== "starting") throw new Error("fixture did not start")
     const failed = Promise.withResolvers<void>()
     const append = h.store.appendEvent.bind(h.store)
     spyOn(h.store, "appendEvent").mockImplementation((id, event) => {
@@ -114,7 +163,7 @@ describe("task start against a busy host (#10042)", () => {
     const held = new BusyHostRunner()
     const h = makeManager({ inProcess: held })
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
+    if (started.kind !== "starting") throw new Error("fixture did not start")
     const waited = h.manager.waitFor(started.task_id)
 
     // when
@@ -136,7 +185,7 @@ describe("task start against a busy host (#10042)", () => {
     const held = new BusyHostRunner()
     const h = makeManager({ inProcess: held, config: oneLane() })
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: false })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
+    if (started.kind !== "starting") throw new Error("fixture did not start")
 
     // when
     const cancelled = await h.manager.cancelTask(started.task_id, "parent turn aborted")
@@ -157,8 +206,7 @@ describe("task start against a busy host (#10042)", () => {
     const held = new BusyHostRunner()
     const h = makeManager({ inProcess: held })
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
-    expect(started.starting).toBe(true)
+    if (started.kind !== "starting") throw new Error("fixture did not start")
     const whenLaunched = h.manager.whenLaunched?.bind(h.manager)
     if (whenLaunched === undefined) throw new Error("the manager exposes no whenLaunched")
     let launched = false
@@ -178,8 +226,7 @@ describe("task start against a busy host (#10042)", () => {
     const held = new BusyHostRunner()
     const h = makeManager({ inProcess: held })
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
-    expect(started.starting).toBe(true)
+    if (started.kind !== "starting") throw new Error("fixture did not start")
     const delivered = Promise.withResolvers<void>()
     const append = h.store.appendEvent.bind(h.store)
     spyOn(h.store, "appendEvent").mockImplementation((id, event) => {
@@ -241,8 +288,7 @@ describe("task start against a busy host (#10042)", () => {
     const held = new BusyHostRunner()
     const h = makeManager({ inProcess: held })
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
-    expect(started.starting).toBe(true)
+    if (started.kind !== "starting") throw new Error("fixture did not start")
 
     // when
     const settling = h.manager.settleLaunchesForShutdown?.(60_000)
@@ -258,7 +304,7 @@ describe("task start against a busy host (#10042)", () => {
     const held = new BusyHostRunner()
     const h = makeManager({ inProcess: held })
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
+    if (started.kind !== "starting") throw new Error("fixture did not start")
 
     // when
     await bounded(h.manager.settleLaunchesForShutdown?.(0) ?? Promise.resolve())
@@ -283,7 +329,7 @@ describe("task start against a busy host (#10042)", () => {
     const held = new BusyHostRunner()
     const h = makeManager({ inProcess: held })
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
+    if (started.kind !== "starting") throw new Error("fixture did not start")
     await bounded(h.manager.settleLaunchesForShutdown?.(0) ?? Promise.resolve())
     held.release.resolve(undefined)
     await bounded(h.manager.whenLaunched?.(started.task_id) ?? Promise.resolve())
@@ -344,7 +390,6 @@ describe("task start against a busy host (#10042)", () => {
     const h = makeManager()
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
     if (started.kind !== "started") throw new Error("fixture did not start")
-    expect(started.starting).toBeUndefined()
     expect(started.status).toBe("running")
   })
 })

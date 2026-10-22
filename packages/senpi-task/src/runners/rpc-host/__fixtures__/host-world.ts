@@ -256,7 +256,7 @@ function connectParent(input: ConnectParentInput): ParentSession {
           model: HOST_CHILD_MODEL,
         })
         // A slow host returns `starting` (#10042); these scenarios need the child admitted first.
-        if (result.kind === "started" && result.starting === true) await manager.whenLaunched?.(result.task_id)
+        if (result.kind === "starting") await manager.whenLaunched?.(result.task_id)
         started.push(result)
       }
       return started

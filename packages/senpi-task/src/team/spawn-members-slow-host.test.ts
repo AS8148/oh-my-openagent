@@ -12,7 +12,7 @@ function slowHostManager(outcome: "admitted" | "refused"): TeamRuntimeManagerPor
   let launched = false
   return {
     start: async (spec: ManagerStartSpec): Promise<StartResult> =>
-      ({ kind: "started", task_id: "st_00000001", status: "running", starting: true, name: spec.name ?? "member" }),
+      ({ kind: "starting", task_id: "st_00000001", status: "running", name: spec.name ?? "member" }),
     whenLaunched: async () => { launched = true },
     cancelTask: async () => { throw new Error("cancelTask not configured") },
     get: () => (launched

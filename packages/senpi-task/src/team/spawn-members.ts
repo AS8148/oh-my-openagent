@@ -103,7 +103,7 @@ async function spawnOneMember(input: SpawnMembersInput, member: TeamMember): Pro
     ? undefined
     : assembleMemberExtensions(launch.entryPath, await resolveInheritedExtensionList(launch.inheritedExtensions))
   const result = await input.manager.start(buildMemberStartSpec(input, member, extensions))
-  if (result.kind !== "started") {
+  if (result.kind !== "started" && result.kind !== "starting") {
     throw new SenpiTeamRuntimeError(
       `member '${member.name}' failed to start: ${describeStartResult(result)}`,
       "member_start_rejected",
@@ -112,9 +112,9 @@ async function spawnOneMember(input: SpawnMembersInput, member: TeamMember): Pro
   }
 
   // A member must be live to be addressable: wait out a start the task host is still admitting (#10042).
-  if (result.starting === true) await input.manager.whenLaunched?.(result.task_id)
+  if (result.kind === "starting") await input.manager.whenLaunched?.(result.task_id)
   const record = input.manager.get(result.task_id)
-  if (result.starting === true && record !== undefined && record.status !== "running" && record.status !== "pending") {
+  if (result.kind === "starting" && record !== undefined && record.status !== "running" && record.status !== "pending") {
     throw new SenpiTeamRuntimeError(
       `member '${member.name}' failed to start: ${record.error_message ?? record.status}`,
       "member_start_rejected",
@@ -190,7 +190,7 @@ function describePlanError(error: PlanResolutionError): string {
   return error.message + agentSuffix + categorySuffix
 }
 
-function describeStartResult(result: Exclude<StartResult, { kind: "started" }>): string {
+function describeStartResult(result: Exclude<StartResult, { kind: "started" | "starting" }>): string {
   switch (result.kind) {
     case "depth_denied":
       return result.reason

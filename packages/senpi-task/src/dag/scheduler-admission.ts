@@ -57,7 +57,7 @@ export async function admitFrontier(context: SchedulerContext): Promise<boolean>
       }
       const { result } = settled.value
       if (context.cancellationStarted) {
-        if (result.kind === "started") attachStarted(context, nodeId, result)
+        if (result.kind === "started" || result.kind === "starting") attachStarted(context, nodeId, result)
       } else if (result.kind === "residency_denied") {
         const parked = parkResidencyDenied(context, nodeId, result)
         if (parked === "queued") nextDenied.push(nodeId)
@@ -136,7 +136,7 @@ function attachOrFail(
     })
     return
   }
-  if (result.kind !== "started") {
+  if (result.kind !== "started" && result.kind !== "starting") {
     const failure = startFailure(result)
     failNode(context, nodeId, failure.code, failure.message)
     if (result.kind === "start_failed") {
@@ -149,7 +149,7 @@ function attachOrFail(
   attachStarted(context, nodeId, result)
 }
 
-function startFailure(result: Exclude<OwnedStartResult, { readonly kind: "started" | "residency_denied" }>): {
+function startFailure(result: Exclude<OwnedStartResult, { readonly kind: "started" | "starting" | "residency_denied" }>): {
   readonly code: DagNodeErrorCode
   readonly message: string
 } {

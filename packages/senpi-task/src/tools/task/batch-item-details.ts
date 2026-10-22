@@ -1,7 +1,7 @@
 import type { PlanResolutionError, StartResult } from "../../manager"
 import type { ResolvedSpawnItem, TaskSkillSummary, TaskToolItemDetail } from "./types"
 
-export type StartedResult = Extract<StartResult, { kind: "started" }>
+export type StartedResult = Extract<StartResult, { kind: "started" | "starting" }>
 export type FailedStartResult = Exclude<StartResult, StartedResult>
 
 export function itemError(
@@ -51,7 +51,7 @@ export function startedDetail(item: ResolvedSpawnItem, start: StartedResult, ski
     ...(item.model === undefined ? {} : { model: item.model }),
     ...(start.resolved_model === undefined ? {} : { resolved_model: start.resolved_model }),
     status: start.status,
-    ...(start.queue_position !== undefined && { queue_position: start.queue_position }),
+    ...(start.kind === "started" && start.queue_position !== undefined && { queue_position: start.queue_position }),
     ...(skills === undefined ? {} : { skills }),
   }
 }

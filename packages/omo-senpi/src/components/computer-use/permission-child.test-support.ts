@@ -49,7 +49,7 @@ export async function permissionOwner(sessionContext?: Readonly<Record<string, s
                       root_session_id: owner.ancestry?.rootSessionId ?? owner.runtime.sessionId(),
                       depth: (owner.ancestry?.depth ?? 0) + 2, execution_mode: "process", model: "test/model", run_in_background: true,
                     })
-                    if (nested.kind !== "started") throw new Error(JSON.stringify(nested))
+                    if (nested.kind !== "started" && nested.kind !== "starting") throw new Error(JSON.stringify(nested))
                     await owner.manager.waitFor(nested.task_id)
                   } else await session.executeTool("computer", capture)
                   finalText = "done"
@@ -97,7 +97,7 @@ export async function permissionOwner(sessionContext?: Readonly<Record<string, s
         depth: (ancestry?.depth ?? 0) + 1,
         execution_mode: mode, model: "test/model", run_in_background: true,
       })
-      if (started.kind !== "started") throw new Error(JSON.stringify(started))
+      if (started.kind !== "started" && started.kind !== "starting") throw new Error(JSON.stringify(started))
       const settled = await taskEngine.manager.waitFor(started.task_id)
       if (settled.status !== "completed") throw new Error(JSON.stringify(settled))
     },

@@ -296,7 +296,7 @@ async function reconcileNodes(
         continue
       }
       task = attachStartedOrFail(journal, observed.id, result, context.now, pendingErrors)
-      if (task === undefined && result.kind === "started") {
+      if (task === undefined && (result.kind === "started" || result.kind === "starting")) {
         startedHere.add(result.task_id)
         task = context.taskManager.get(result.task_id)
       }
@@ -392,7 +392,7 @@ function attachStartedOrFail(
   now: () => number,
   pendingErrors: Map<DagNodeId, DagNodeError>,
 ): TaskRecord | undefined {
-  if (result.kind === "started") {
+  if (result.kind === "started" || result.kind === "starting") {
     attachTask(journal, nodeId, result.task_id)
     return undefined
   }
@@ -566,7 +566,7 @@ function persistedNode(record: DagRunRecordV1, nodeId: DagNodeId): DagPersistedN
   return node
 }
 
-function startFailure(result: Exclude<OwnedStartResult, { readonly kind: "started" | "residency_denied" }>): {
+function startFailure(result: Exclude<OwnedStartResult, { readonly kind: "started" | "starting" | "residency_denied" }>): {
   readonly code: DagNodeErrorCode
   readonly message: string
 } {

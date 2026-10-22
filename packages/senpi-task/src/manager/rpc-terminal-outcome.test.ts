@@ -58,7 +58,7 @@ describe("RPC terminal outcomes", () => {
       execution_mode: "process",
       model: "fixture/model",
     })
-    if (result.kind !== "start_failed" && result.kind !== "started") throw new Error(`unexpected ${result.kind}`)
+    if (result.kind !== "start_failed" && result.kind !== "starting") throw new Error(`unexpected ${result.kind}`)
     // A start slower than the report window returns `starting`; the failure then lands on the record (#10042).
     const record = await manager.waitFor(result.task_id)
     process.off("unhandledRejection", onRejection)
@@ -83,7 +83,7 @@ describe("RPC terminal outcomes", () => {
       model: "fixture/model",
       run_in_background: true,
     })
-    if (started.kind !== "started") throw new Error("expected started")
+    if (started.kind !== "started" && started.kind !== "starting") throw new Error(`expected a start, got ${started.kind}`)
     // A start slower than the report window returns before the child is resident, so read the child
     // only after its run is terminal (#10042).
     const terminal = await manager.waitFor(started.task_id)

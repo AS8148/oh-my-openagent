@@ -26,14 +26,14 @@ type ReusedOwnedStart = {
   readonly resolved_model?: ResolvedModelRecord
 }
 
-type FreshOwnedStart = Extract<StartResult, { readonly kind: "started" }> & {
+type FreshOwnedStart = Extract<StartResult, { readonly kind: "started" | "starting" }> & {
   readonly reused: false
 }
 
 export type OwnedStartResult =
   | FreshOwnedStart
   | ReusedOwnedStart
-  | Exclude<StartResult, { readonly kind: "started" }>
+  | Exclude<StartResult, { readonly kind: "started" | "starting" }>
   | {
       readonly kind: "owner_conflict"
       readonly task_id: string

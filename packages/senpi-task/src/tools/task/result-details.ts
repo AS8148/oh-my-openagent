@@ -49,7 +49,7 @@ export function recordDetails(
 }
 
 export function startedDetails(
-  started: Extract<StartResult, { kind: "started" }>,
+  started: Extract<StartResult, { kind: "started" | "starting" }>,
   params: SingleSpawnParams,
   executionMode: ExecutionMode,
   skills?: TaskSkillSummary,
@@ -66,16 +66,15 @@ export function startedDetails(
     execution_mode: executionMode,
     model: params.model,
     resolved_model: started.resolved_model,
-    effective_model: started.effective_model,
+    ...(started.kind === "started" && { effective_model: started.effective_model, queue_position: started.queue_position }),
     run_in_background: params.run_in_background === true,
-    queue_position: started.queue_position,
     ...(started.isolation === undefined ? {} : { isolation: started.isolation }),
     ...(skills === undefined ? {} : { skills }),
   }
 }
 
 export function partialDetails(
-  started: Extract<StartResult, { kind: "started" }>,
+  started: Extract<StartResult, { kind: "started" | "starting" }>,
   params: SingleSpawnParams,
   executionMode: ExecutionMode,
   progress: ToolProgressDetails,

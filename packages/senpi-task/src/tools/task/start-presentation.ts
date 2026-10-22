@@ -1,6 +1,6 @@
 import type { StartResult } from "../../manager"
 
-type StartedResult = Extract<StartResult, { kind: "started" }>
+type StartedResult = Extract<StartResult, { kind: "started" | "starting" }>
 
 export type StartLabels = {
   readonly taskSummary?: string
@@ -8,14 +8,17 @@ export type StartLabels = {
 }
 
 export function backgroundStartText(started: StartedResult, labels: StartLabels): string {
-  const queue = started.queue_position !== undefined
+  const starting = started.kind === "starting"
+  const queue = started.kind === "started" && started.queue_position !== undefined
     ? ` queued at position ${started.queue_position}`
-    : started.starting === true ? ", the task host is still admitting it; a failed start arrives as its notification" : ""
+    : starting ? ", the task host is still admitting it; a failed start arrives as its notification" : ""
+  const verb = starting ? "Starting" : "Started"
+  const status = starting ? "starting" : started.status
   const label = labels.taskSummary ?? labels.description ?? started.name
   const base =
     label === started.task_id
-      ? `Started task ${started.task_id} (${started.status})${queue}. Completion is automatically delivered. End your turn if no independent work remains; otherwise keep working. Use task_send only to steer it.`
-      : `Started task ${label} (${started.task_id}, ${started.status})${queue}. Completion is automatically delivered. End your turn if no independent work remains; otherwise keep working. Use task_send only to steer it.`
+      ? `${verb} task ${started.task_id} (${status})${queue}. Completion is automatically delivered. End your turn if no independent work remains; otherwise keep working. Use task_send only to steer it.`
+      : `${verb} task ${label} (${started.task_id}, ${status})${queue}. Completion is automatically delivered. End your turn if no independent work remains; otherwise keep working. Use task_send only to steer it.`
   return base
 }
 

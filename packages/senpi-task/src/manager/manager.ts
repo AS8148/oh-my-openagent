@@ -9,6 +9,7 @@ import { endFallbackHandoff, forgetClosedChild, handOffToNextRung, isFallbackHan
 import { registerLifecycleReattachPorts, type ReattachResult, type RespawnResult } from "../lifecycle/port"
 import { RunnerError } from "../runners/in-process/runner-error"
 import { RpcProcessRunner } from "../runners/rpc-process"
+import { settleStartTeardowns } from "../runners/rpc/start-cleanup"
 import type { RpcChildHandle, RpcRunnerSpec } from "../runners/types"
 import { createTaskRecord, isSpawnSpecV1, nextRunEpoch, parseTaskId, syncTaskIdFloor } from "../state"
 import { TaskIdSpaceExhaustedError } from "../state/id"
@@ -332,7 +333,7 @@ class TaskManagerImpl implements TaskManager {
       if (raced !== undefined) return raced
       const result = await withResidentStart(this.#options, spec.parent_session_id,
         release => this.#startResolved(spec, resolution.plan, owner, release))
-      return result.kind === "started" ? { ...result, reused: false } : result
+      return result.kind === "started" || result.kind === "starting" ? { ...result, reused: false } : result
     })
   }
 
@@ -509,14 +510,20 @@ class TaskManagerImpl implements TaskManager {
       const launching = this.#trackLaunch(finalRecord.task_id, context)
       const reported = await settledWithin(launching, START_REPORT_WINDOW_MS)
       if (!reported.settled) {
-        launching.catch((error: unknown) => {
+        // Not accepted yet, so not started: acceptance is reported on the record when it lands (#10402).
+        launching.then((outcome) => {
+          if (!outcome.ok || outcome.queue_position !== undefined) return
+          this.#options.store.appendEvent(finalRecord.task_id, {
+            type: "task_started",
+            payload: { run_epoch: outcome.run_epoch ?? finalRecord.notification.run_epoch },
+          })
+        }).catch((error: unknown) => {
           log("senpi-task start still admitting failed", { taskId: finalRecord.task_id, error: String(error) })
         })
         return {
-          kind: "started",
+          kind: "starting",
           task_id: finalRecord.task_id,
           status: "running",
-          starting: true,
           name: registration.name,
           ...startParts,
         }
@@ -934,12 +941,14 @@ class TaskManagerImpl implements TaskManager {
   async settleLaunchesForShutdown(boundMs: number): Promise<void> {
     this.#shutdownStarted = true
     const inFlight = [...this.#launching.values()].map((launch) => launch.then(() => undefined, () => undefined))
-    if (inFlight.length > 0 && boundMs > 0) {
+    if (boundMs > 0) {
       let timer: ReturnType<typeof setTimeout> | undefined
       const bound = new Promise<void>((resolveBound) => {
         timer = setTimeout(resolveBound, boundMs)
       })
-      await Promise.race([Promise.all(inFlight), bound])
+      // A refused start tears its child down detached; a launch refused within the bound starts one too.
+      const settled = Promise.all(inFlight).then(() => settleStartTeardowns())
+      await Promise.race([settled, bound])
       clearTimeout(timer)
     }
     for (const taskId of this.#launching.keys()) this.#parkUnadmittedLaunch(taskId)
