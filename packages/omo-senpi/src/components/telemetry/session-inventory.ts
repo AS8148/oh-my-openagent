@@ -80,7 +80,9 @@ export function readOmoNativeInventory(
       }),
     }
   } catch (error) {
-    diagnostics?.({ event: "omo_native_inventory_read_failed", error, source: "omo-native-session" })
+    // A parse error's message can quote the start of an apiKey in models.json: report a fixed one instead.
+    const reported = error instanceof SyntaxError ? new Error("models.json or settings.json is not valid JSON") : error
+    diagnostics?.({ event: "omo_native_inventory_read_failed", error: reported, source: "omo-native-session" })
     // The configured inventory is unreadable; the providers the user signed into still count.
     return signedIn.length === 0 ? EMPTY : {
       ...EMPTY,

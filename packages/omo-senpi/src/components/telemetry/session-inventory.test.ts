@@ -10,11 +10,11 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-function agentDir(files: { readonly models?: unknown; readonly auth?: string | unknown; readonly settings?: unknown; readonly authOnly?: boolean }): string {
+function agentDir(files: { readonly models?: unknown; readonly auth?: string | unknown; readonly settings?: unknown; readonly authOnly?: boolean; readonly modelsRaw?: string }): string {
   const dir = mkdtempSync(join(tmpdir(), "omo-inventory-"))
   dirs.push(dir)
   if (files.authOnly !== true) {
-    writeFileSync(join(dir, "models.json"), JSON.stringify(files.models ?? { providers: {} }))
+    writeFileSync(join(dir, "models.json"), files.modelsRaw ?? JSON.stringify(files.models ?? { providers: {} }))
     writeFileSync(join(dir, "settings.json"), JSON.stringify(files.settings ?? {}))
   }
   if (files.auth !== undefined) {
@@ -83,8 +83,17 @@ describe("readOmoNativeInventory: providers the user can use (#10887)", () => {
   })
 
   it("#given a malformed models.json and a valid auth.json #then the signed-in providers still count", () => {
-    const inventory = readOmoNativeInventory(agentDir({ models: "{not json", auth: { anthropic: {} } }))
+    const diagnostics: unknown[] = []
+    const inventory = readOmoNativeInventory(agentDir({ modelsRaw: "{not json", auth: { anthropic: {} } }), (d) => diagnostics.push(d))
     expect(inventory).toMatchObject({ providerCount: 1, signedInProviderCount: 1, configuredProviderCount: 0, modelCount: 0, providers: "anthropic" })
+    expect(diagnostics).toHaveLength(1)
+  })
+
+  it("#given a models.json parse error next to an apiKey #then the diagnostic carries no part of the file", () => {
+    const diagnostics: unknown[] = []
+    readOmoNativeInventory(agentDir({ modelsRaw: `{"providers": {"openai": {"apiKey": ${SECRET}}}}` }), (d) => diagnostics.push(d))
+    expect(diagnostics).toHaveLength(1)
+    expect(String(Reflect.get(Object(Reflect.get(Object(diagnostics[0]), "error")), "message"))).not.toContain("sk")
   })
 
   it("#given a malformed auth.json that starts like a key #then the diagnostic carries no part of the file", () => {
