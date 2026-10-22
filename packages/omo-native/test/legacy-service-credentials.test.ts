@@ -54,6 +54,17 @@ describe("a first command after upgrading", () => {
   }
 })
 
+describe("a first command the release entry answers before any launch", () => {
+  // A refused extra-CA value makes main() answer and return before the launcher (#10215). The legacy cleanup must
+  // already have run (#10658 round 2): it is main()'s first step, shared by every command and every early return.
+  test("#given the legacy file and a refused extra-CA value #when the compiled entry's main answers --version #then the file is removed", () => {
+    const { home, path } = homeWith(LEGACY)
+    const env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, OMO_RUNTIME: "bun", OMO_EXTRA_CA_CERTIFICATES: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n" }
+    spawnSync(process.execPath, [join(import.meta.dir, "..", "compile-entry.ts"), "--version"], { env, encoding: "utf8", windowsHide: true })
+    expect(existsSync(path)).toBe(false)
+  })
+})
+
 describe("removeLegacyServiceCredentials", () => {
   test("#given the legacy credentials shape #when it runs #then the file is removed", () => {
     const { home, path } = homeWith(LEGACY)
