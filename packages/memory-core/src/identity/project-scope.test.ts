@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it, spyOn } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, realpathSync } from "node:fs"
 import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises"
 import { execFileSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import * as resilientFs from "../fs/resilient"
 import { MEMORY_ROOT_ENV_VAR } from "./layout"
 import { createProjectIdentityResolver, type ProjectScopeFs } from "./project-scope"
 import { resolveAutoIdentity, resolveMemoryIdentity } from "./resolve"
@@ -123,6 +124,25 @@ describe("createProjectIdentityResolver", () => {
     expect(second?.identity.id).toBe(first?.identity.id ?? "missing")
     expect(linkedSecond?.projectDir).toBe(linkedFirst?.projectDir ?? "missing")
     expect(linkedFirst?.projectDir).toBe(sibling)
+  })
+
+  it("#given git mode #when files are touched #then no synchronous filesystem call runs", async () => {
+    // given - every sync entry point the identity code can fall back to is watched.
+    const { workspace, child, sibling, env } = fixture(({ child, sibling }) => [child, sibling])
+    symlinkSync(sibling, join(workspace, "linked"))
+    const spies = (["existsSync", "statSync", "lstatSync", "readFileSync", "readdirSync", "realpathSync"] as const).map((name) => spyOn(resilientFs, name))
+    const resolver = createProjectIdentityResolver({ sessionCwd: workspace, env, autoIdentity: "git" })
+
+    try {
+      // when
+      await resolver.forPath(join(child, "src", "a.ts"))
+      await resolver.forPath(join(workspace, "linked", "a.ts"))
+
+      // then
+      expect(spies.map((spy) => spy.mock.calls.length)).toEqual(spies.map(() => 0))
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
   })
 
   it("#given a relative path #when it is touched #then it resolves against the session's working tree", async () => {
