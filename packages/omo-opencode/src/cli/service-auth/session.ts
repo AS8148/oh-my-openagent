@@ -19,7 +19,8 @@ const DEVICE_REVOKING_REFUSALS = new Set(["account_deleted", "reauth_required", 
 const UNCONSUMED_REFUSALS = new Set(["invalid_request"])
 const MAX_RETRY_DELAY = 300_000
 const retryDelay = (attempts: number) => Math.min(MAX_RETRY_DELAY, 5_000 * 2 ** (attempts - 1))
-// The service contract requires a CSPRNG key of at least 128 bits; 256 bits encode to 43 base64url chars.
+// The service contract (1.21.0) requires a CSPRNG key of at least 256 bits as 43..128 base64url chars.
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{43,128}$/
 const newIdempotencyKey = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url")
 
 export function createSession(options: {
@@ -61,7 +62,9 @@ export function createSession(options: {
     const attempts = (refreshAttempt?.attempts ?? 0) + 1
     const backoff = retryDelay(attempts)
     const attempt = {
-      idempotencyKey: refreshAttempt?.idempotencyKey ?? newIdempotencyKey(), attempts,
+      idempotencyKey: refreshAttempt !== undefined && IDEMPOTENCY_KEY.test(refreshAttempt.idempotencyKey)
+        ? refreshAttempt.idempotencyKey : newIdempotencyKey(),
+      attempts,
       nextAttemptAt: new Date(now() + backoff).toISOString(),
     }
     const journal: Credentials = { ...settled, refreshState: "uncertain", refreshAttempt: attempt }

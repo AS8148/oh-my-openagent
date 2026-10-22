@@ -6,6 +6,8 @@ import { clock, fakeApi, grant, memorySecrets, privateKeys, refusal, temporaryHo
 const expired: Credentials = { ...grant, ...privateKeys, accessTokenExpiresAt: "2000-01-01T00:00:00Z" }
 const successor = { accessToken: "successor-access", accessTokenExpiresAt: "2099-01-01T00:00:00.000Z", refreshToken: "successor-refresh" }
 
+const JOURNALED_KEY = "j".repeat(43)
+
 type Seen = { readonly refreshToken: string; readonly key: string | null }
 
 // Models sisyphuslabs/omo-service#628: a replay of the same token under the same
@@ -18,6 +20,7 @@ function idempotentService(reply?: (seen: Seen, index: number) => Response | und
     const { refreshToken } = await request.json() as { refreshToken: string }
     const entry = { refreshToken, key: request.headers.get("idempotency-key") }
     seen.push(entry)
+    if (!/^[A-Za-z0-9_-]{43,128}$/.test(entry.key ?? "")) return refusal("invalid_request", undefined, 400)
     const scripted = reply?.(entry, seen.length)
     if (scripted) return scripted
     if (entry.key !== null && committed.get(entry.key) === refreshToken) return Response.json(successor)
@@ -135,7 +138,7 @@ for (const mode of ["503", "500-terminal-code", "no-envelope", "lost-again"]) {
 test("backoff doubles per failed retry and is capped at five minutes", async () => {
   const service = idempotentService(() => refusal("unavailable", undefined, 503))
   const store = memorySecrets().store(service.api)
-  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "fixed-key", attempts: 0, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: JOURNALED_KEY, attempts: 0, nextAttemptAt: "2000-01-01T00:00:00Z" } })
   const { time, open } = await setup()
   const delays: number[] = []
   for (let round = 0; round < 8; round++) {
@@ -145,7 +148,7 @@ test("backoff doubles per failed retry and is capped at five minutes", async () 
     await time.sleep(delay)
   }
   expect(delays).toEqual([5_000, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000])
-  expect(new Set(service.seen.map(entry => entry.key))).toEqual(new Set(["fixed-key"]))
+  expect(new Set(service.seen.map(entry => entry.key))).toEqual(new Set([JOURNALED_KEY]))
 })
 
 for (const seeded of ["fresh", "resend"]) {
@@ -153,7 +156,7 @@ for (const seeded of ["fresh", "resend"]) {
     const service = idempotentService()
     const base = memorySecrets().store(service.api)
     await base.write(seeded === "fresh" ? expired
-      : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+      : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: JOURNALED_KEY, attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
     const killed = { ...base, write: async (value: Credentials) => {
       if (service.seen.length > 0) throw new Error("process killed")
       await base.write(value)
@@ -177,11 +180,11 @@ test("a 429 on a resend honours a Retry-After longer than the backoff", async ()
     ? Response.json({ error: { code: "rate_limited", message: "slow down", retryable: true, requestId: "test" } }, { status: 429, headers: { "retry-after": "30" } })
     : undefined)
   const store = memorySecrets().store(service.api)
-  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: JOURNALED_KEY, attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
   const { time, open } = await setup()
   await expect(open(service.api, store).accessToken()).rejects.toMatchObject({ retryable: true })
   const held = await store.read()
-  expect(held).toMatchObject({ refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 2 } })
+  expect(held).toMatchObject({ refreshState: "uncertain", refreshAttempt: { idempotencyKey: JOURNALED_KEY, attempts: 2 } })
   expect(Date.parse(held?.refreshAttempt?.nextAttemptAt ?? "")).toBe(time.now() + 30_000)
   await time.sleep(29_999)
   await expect(open(service.api, store).accessToken()).rejects.toThrow()
@@ -210,14 +213,18 @@ test("each attempt gets a fresh 256-bit base64url Idempotency-Key that stays fix
   expect(keys[2]).not.toBe(keys[0])
 })
 
-test("a pending attempt journaled with an older UUID key keeps resending that key", async () => {
-  const legacyKey = "0f8e3b52-6d1c-4a8e-9b7f-2c4d5e6f7a8b"
+test("a pending attempt journaled with an out-of-contract draft key is re-keyed before its resend of the same token", async () => {
+  const draftKey = "0f8e3b52-6d1c-4a8e-9b7f-2c4d5e6f7a8b"
   const service = idempotentService()
-  const store = memorySecrets().store(service.api)
-  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: legacyKey, attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+  const base = memorySecrets().store(service.api)
+  await base.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: draftKey, attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+  const journals: Credentials[] = []
+  const store = { ...base, write: async (value: Credentials) => { journals.push(value); await base.write(value) } }
   const { open } = await setup()
   expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
-  expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: legacyKey }])
+  const rekeyed = journals[0]?.refreshAttempt?.idempotencyKey
+  expect(rekeyed).toMatch(/^[A-Za-z0-9_-]{43}$/)
+  expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: rekeyed ?? "" }])
 })
 
 for (const phase of ["first send", "resend"]) {
@@ -225,7 +232,7 @@ for (const phase of ["first send", "resend"]) {
     const service = idempotentService((_, index) => index === 1 ? refusal("invalid_request", undefined, 400) : undefined)
     const store = memorySecrets().store(service.api)
     await store.write(phase === "first send" ? expired
-      : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+      : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: JOURNALED_KEY, attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
     const { open } = await setup()
     await expect(open(service.api, store).accessToken()).rejects.toMatchObject({ code: "invalid_request", status: 400 })
     expect(await store.read()).toEqual(expired)
@@ -239,7 +246,7 @@ for (const phase of ["first send", "resend"]) {
       const service = idempotentService((_, index) => index === 1 ? refusal(code, undefined, status) : undefined)
       const store = memorySecrets().store(service.api)
       await store.write(phase === "first send" ? expired
-        : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+        : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: JOURNALED_KEY, attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
       const { open } = await setup()
       await expect(open(service.api, store).accessToken()).rejects.toThrow("Sign in again")
       expect(await store.read()).toBeNull()
@@ -253,21 +260,21 @@ test("a nextAttemptAt beyond the five-minute cap after a backward clock jump is 
   const store = memorySecrets().store(service.api)
   const { time, open } = await setup()
   await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: {
-    idempotencyKey: "journaled-key", attempts: 3, nextAttemptAt: new Date(time.now() + 300_001).toISOString(),
+    idempotencyKey: JOURNALED_KEY, attempts: 3, nextAttemptAt: new Date(time.now() + 300_001).toISOString(),
   } })
   expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
-  expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: "journaled-key" }])
+  expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: JOURNALED_KEY }])
 })
 
 test("two concurrent invocations on an uncertain record send one request under the session lock", async () => {
   const service = idempotentService()
   const secrets = memorySecrets()
   const store = secrets.store(service.api)
-  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: JOURNALED_KEY, attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
   const { open } = await setup()
   const results = await Promise.all([open(service.api, store).accessToken(), open(service.api, store).accessToken()])
   expect(results).toEqual([successor.accessToken, successor.accessToken])
-  expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: "journaled-key" }])
+  expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: JOURNALED_KEY }])
 })
 
 test("a keyless uncertain record from an older CLI gets one persisted key before its first resend", async () => {
