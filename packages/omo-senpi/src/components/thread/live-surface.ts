@@ -15,6 +15,7 @@ import type { ThreadTranscriptEntry, ThreadHost, ThreadHostSession } from "./too
 import type { ThreadHostView, ThreadHostViewRequest, ThreadSessionPort } from "./tools/ports"
 import { acceptedControls, LEGACY_TUI_COMMANDS, tuiCommandsFrom } from "./endpoint-controls"
 import { answerUiRequest } from "./ui-answer"
+import { attachSelectedSession, releaseAttachment } from "./attachment-fence"
 
 type RpcFrame = { readonly success?: boolean; readonly data?: unknown; readonly error?: unknown; readonly errorData?: unknown }
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value) }
@@ -86,7 +87,7 @@ async function requestFrame(socketPath: string, command: Record<string, unknown>
       && (command.type !== "release_session" || capabilities.has("release_caller_aware"))
     if (attach) {
       if (options.durableSessionId === undefined) throw new Error("session_identity_mismatch:missing selected durable session id")
-      dataRecord(await request({ type: "attach_session", sessionId: command.sessionId, durableSessionId: options.durableSessionId }), "attach_session")
+      await attachSelectedSession(request, socketPath, command.sessionId, options.durableSessionId)
     }
     const result = await request(command)
     if (command.type === "open_session" && result.success === true && options.openedName?.trim()) {
@@ -94,7 +95,7 @@ async function requestFrame(socketPath: string, command: Record<string, unknown>
       dataRecord(await request({ type: "set_session_name", sessionId: opened.sessionId, name: options.openedName }), "set_session_name")
     }
     if (attach && capabilities.has("release_attachment")) {
-      dataRecord(await request({ type: "release_attachment", sessionId: command.sessionId }), "release_attachment")
+      await releaseAttachment(request, command.sessionId, (line) => { process.stderr.write(`${line}\n`) })
     }
     return result
   })
