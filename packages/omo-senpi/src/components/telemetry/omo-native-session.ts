@@ -1,6 +1,5 @@
-import { realpathSync } from "node:fs"
 import * as os from "node:os"
-import { dirname, sep } from "node:path"
+import { posix, win32 } from "node:path"
 
 import {
   createEventTelemetryClient,
@@ -16,6 +15,7 @@ import {
 } from "@oh-my-opencode/telemetry-core/injected"
 import { createLazyPostHogTransportFactory } from "./lazy-posthog"
 import { isOmoTelemetryEnabled, type OmoConfig } from "@oh-my-opencode/omo-config-core"
+import { isPathInside, type PathContainmentOptions } from "@oh-my-opencode/utils/path-containment"
 
 import { deferUntilAfterFirstPaint } from "../../extension/startup-deferral"
 import type { OmoSenpiComponent } from "../../extension/types"
@@ -251,34 +251,55 @@ const ALLOW_AUTOMATION_VALUES = ["1", "true", "yes"]
  * from nothing each time), so each one would count as a new person (#10934). Telemetry is off for them by default;
  * `OMO_TELEMETRY_ALLOW_AUTOMATION=1` opts a deliberate run back in.
  */
-export function automatedRunReason(env: TelemetryEnv): "ci" | "test_runner" | "ephemeral_home" | undefined {
+export function automatedRunReason(
+  env: TelemetryEnv,
+  deps: TempDirDeps = {},
+): "ci" | "test_runner" | "ephemeral_home" | undefined {
   if (ALLOW_AUTOMATION_VALUES.includes(env["OMO_TELEMETRY_ALLOW_AUTOMATION"]?.trim().toLowerCase() ?? "")) return undefined
   const ci = env["CI"]?.trim().toLowerCase() ?? ""
   if (ci !== "" && ci !== "0" && ci !== "false") return "ci"
   if (env["NODE_ENV"]?.trim() === "test" || env["VITEST"] || env["JEST_WORKER_ID"]) return "test_runner"
-  const home = (process.platform === "win32" ? env["USERPROFILE"] : env["HOME"])?.trim()
-  if (home && isInsideTempDir(home)) return "ephemeral_home"
+  const platform = deps.platform ?? process.platform
+  const home = (platform === "win32" ? env["USERPROFILE"] : env["HOME"])?.trim()
+  if (home && isInsideTempDir(home, deps)) return "ephemeral_home"
   return undefined
 }
 
-function isInsideTempDir(path: string): boolean {
-  const accountHome = realOrSelf(os.userInfo().homedir)
-  const contains = (root: string, target: string) => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep)
-  // A misconfigured temp dir (TMPDIR=/, or one that holds the account's real home) is not a temp root: it would
-  // silently turn off a real user's telemetry.
-  const roots = [os.tmpdir(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
-    .map(realOrSelf)
-    .filter((root) => dirname(root) !== root && !contains(root, accountHome))
-  const target = realOrSelf(path)
-  return roots.some((root) => contains(root, target))
+/** What the temp-home check reads from the OS; injected only by tests that simulate another platform. */
+export type TempDirDeps = PathContainmentOptions & {
+  readonly tmpdir?: () => string
+  readonly homedir?: () => string
 }
 
-function realOrSelf(path: string): string {
-  try {
-    return realpathSync(path)
-  } catch {
-    return path
+const POSIX_TEMP_ROOTS = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
+
+/**
+ * Whether `path` lies inside an OS temp dir, decided by the shared path-containment helper (#10935): native realpath on
+ * both sides (8.3 short names expanded, '..' resolved by the kernel, never lexically), case-insensitive on Windows.
+ * A path that cannot be resolved is not inside.
+ */
+function isInsideTempDir(path: string, deps: TempDirDeps): boolean {
+  const options: PathContainmentOptions = { ...(deps.platform === undefined ? {} : { platform: deps.platform }), ...(deps.realpath === undefined ? {} : { realpath: deps.realpath }) }
+  const inside = (child: string, parent: string): boolean => {
+    try {
+      return isPathInside(child, parent, options)
+    } catch {
+      return false
+    }
   }
+  const windows = (deps.platform ?? process.platform) === "win32"
+  const accountHome = (deps.homedir ?? (() => os.userInfo().homedir))()
+  const candidates = [(deps.tmpdir ?? os.tmpdir)(), ...(windows ? [] : POSIX_TEMP_ROOTS)]
+  // A misconfigured temp dir (TMPDIR=/, or one that holds the account's real home) is not a temp root: it would
+  // silently turn off a real user's telemetry.
+  const roots = candidates.filter((root) => !isFilesystemRoot(root, windows) && !inside(accountHome, root))
+  return roots.some((root) => inside(path, root))
+}
+
+function isFilesystemRoot(path: string, windows: boolean): boolean {
+  const paths = windows ? win32 : posix
+  const normalized = paths.normalize(path)
+  return paths.dirname(normalized) === normalized
 }
 
 function configEnabled(
