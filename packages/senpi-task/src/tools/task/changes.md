@@ -1,3 +1,9 @@
+## 2026-10-22 - Report task skill read failures (#10693)
+
+Task discovery reports I/O failures with their original error and returns a
+rejection reason for the requested unreadable skill. Only real escapes are
+classified as blocked links.
+
 ## 2026-10-22 - Match the repository boundary for nested packages (#10693)
 
 Task skill loading uses the detected worktree root, matching OpenCode discovery.

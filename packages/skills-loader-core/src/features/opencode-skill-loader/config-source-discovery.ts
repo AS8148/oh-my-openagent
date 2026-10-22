@@ -9,7 +9,7 @@ import { loadSkillsFromDir } from "./skill-directory-loader"
 import { inferSkillNameFromFileName, loadSkillFromPath } from "./loaded-skill-from-path"
 import type { LoadedSkill } from "./types"
 import { detectWorktreePath } from "../../shared/project-discovery-dirs"
-import { skillProvenance, checkSkillPath, reportSkillBlocked, SkillLinkBlockedError, type SkillProvenance, type SkillDiagnosticSink } from "./skill-provenance"
+import { skillProvenance, checkSkillPath, reportSkillLoadError, type SkillProvenance, type SkillDiagnosticSink } from "./skill-provenance"
 
 const sourceOrigins = new WeakMap<object, SkillProvenance>()
 export function setSkillSourceProvenance(config: SkillsConfig, provenance: SkillProvenance): void {
@@ -74,14 +74,14 @@ async function loadSourcePath(options: {
   const provenance = skillProvenance(absolutePath, "config", { ...options.provenance, selectedRoot: absolutePath })
   if (provenance.kind === "project-auto") {
     try { checkSkillPath(absolutePath, provenance, true) } catch (error) {
-      if (error instanceof SkillLinkBlockedError) {
-        reportSkillBlocked(error, options.onDiagnostic)
-        return []
-      }
-      throw error
+      reportSkillLoadError(error, absolutePath, options.onDiagnostic)
+      return []
     }
   }
-  const stat = await fs.stat(absolutePath).catch(() => null)
+  const stat = await fs.stat(absolutePath).catch((error) => {
+    reportSkillLoadError(error, absolutePath, options.onDiagnostic)
+    return null
+  })
   if (!stat) return []
   const realSourcePath = absolutePath
 

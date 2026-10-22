@@ -4,7 +4,7 @@ import type { DiscoveredProjectDirectory } from "../../shared/project-discovery-
 import type { LoadedSkill, SkillScope } from "./types"
 import { inferSkillNameFromFileName, loadSkillFromPath } from "./loaded-skill-from-path"
 import {
-  checkSkillPath, reportSkillBlocked, SkillLinkBlockedError, skillProvenance,
+  checkSkillPath, reportSkillLoadError, skillProvenance,
   type SkillProvenance, type SkillDiagnosticSink,
 } from "./skill-provenance"
 
@@ -46,8 +46,10 @@ export async function loadSkillsFromDir(options: {
           let found = false
           for (const skillPath of candidates) {
             try { await fs.lstat(skillPath) } catch (error) {
-              if (error instanceof Error) continue
-              throw error
+              if (error instanceof Error && "code" in error && error.code === "ENOENT") continue
+              reportSkillLoadError(error, skillPath, options.onDiagnostic)
+              found = true
+              break
             }
             found = true
             const skill = await loadSkillFromPath({
@@ -74,13 +76,11 @@ export async function loadSkillsFromDir(options: {
           if (skill && !skillMap.has(skill.name)) skillMap.set(skill.name, skill)
         }
       } catch (error) {
-        if (error instanceof SkillLinkBlockedError) reportSkillBlocked(error, options.onDiagnostic)
-        else if (!(error instanceof Error)) throw error
+        reportSkillLoadError(error, path, options.onDiagnostic)
       }
     }
   } catch (error) {
-    if (error instanceof SkillLinkBlockedError) reportSkillBlocked(error, options.onDiagnostic)
-    else if (!(error instanceof Error)) throw error
+    reportSkillLoadError(error, discovered, options.onDiagnostic)
   }
   return [...skillMap.values()]
 }

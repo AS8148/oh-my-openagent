@@ -13,7 +13,7 @@ export type SkillProvenance = {
 }
 export type SkillDiagnostic = {
   readonly type: "warning"
-  readonly category: "skill-link-blocked"
+  readonly category: "skill-link-blocked" | "skill-load-error"
   readonly path: string
   readonly message: string
 }
@@ -145,18 +145,25 @@ export function reportSkillBlocked(error: SkillLinkBlockedError, sink?: SkillDia
   for (const observer of observers) if (observer !== sink) observer(error.diagnostic)
 }
 
+export function reportSkillLoadError(error: unknown, path: string, sink?: SkillDiagnosticSink): void {
+  if (error instanceof SkillLinkBlockedError) {
+    reportSkillBlocked(error, sink)
+    return
+  }
+  if (!(error instanceof Error)) throw error
+  const diagnostic: SkillDiagnostic = {
+    type: "warning", category: "skill-load-error", path,
+    message: `Failed to load skill ${shortPath(path)}: ${error.message}`,
+  }
+  sink?.(diagnostic)
+  for (const observer of observers) if (observer !== sink) observer(diagnostic)
+}
+
 export function checkSkillPath(path: string, provenance: SkillProvenance, directory = false): string {
-  let canonical: string
-  try { canonical = realpathSync.native(path) } catch (error) {
-    if (provenance.kind !== "project-auto") throw error
-    throw new SkillLinkBlockedError(path, "(unresolved)")
-  }
+  const canonical = realpathSync.native(path)
   if (provenance.kind !== "project-auto") return canonical
-  let project: string | undefined
-  try { project = realpathSync.native(provenance.projectRoot ?? skillProjectRoot(path)) } catch (error) {
-    if (!(error instanceof Error)) throw error
-  }
-  if (project && pathIsInside(canonical, project)) return canonical
+  const project = realpathSync.native(provenance.projectRoot ?? skillProjectRoot(path))
+  if (pathIsInside(canonical, project)) return canonical
   const allowed = userAllowedPaths(provenance)
   if (allowed.roots.some((root) => pathIsInside(canonical, root)) ||
     allowed.files.includes(canonical) || (directory && allowed.files.some((file) => pathIsInside(file, canonical)))) return canonical

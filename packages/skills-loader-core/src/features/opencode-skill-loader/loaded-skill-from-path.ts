@@ -8,7 +8,7 @@ import { parseAllowedTools } from "./allowed-tools-parser"
 import { loadMcpJsonFromDir, parseSkillMcpConfigFromFrontmatter } from "./skill-mcp-config"
 import type { SkillScope, SkillMetadata, LoadedSkill, LazyContentLoader } from "./types"
 import { readSkillFileChecked } from "./checked-skill-read"
-import { reportSkillBlocked, SkillLinkBlockedError, skillProvenance, type SkillProvenance, type SkillDiagnosticSink } from "./skill-provenance"
+import { reportSkillLoadError, skillProvenance, type SkillProvenance, type SkillDiagnosticSink } from "./skill-provenance"
 
 export async function loadSkillFromPath(options: {
   skillPath: string
@@ -74,7 +74,7 @@ export async function loadSkillFromPath(options: {
       lazyContent: eagerLoader,
     }
   } catch (error) {
-    if (error instanceof SkillLinkBlockedError) reportSkillBlocked(error, options.onDiagnostic)
+    reportSkillLoadError(error, options.skillPath, options.onDiagnostic)
     if (error instanceof Error) {
       return null
     }

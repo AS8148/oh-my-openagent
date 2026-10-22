@@ -1,7 +1,6 @@
 import type { LoadedSkill, SkillMetadata } from "../types"
 import type { SkillDefinition } from "../../../types"
 import type { CommandDefinition } from "@oh-my-opencode/claude-code-compat-core/claude-code-command-loader/types"
-import { existsSync } from "fs"
 import { dirname, isAbsolute, resolve } from "path"
 import { homedir } from "os"
 import { isWithinProject, parseFrontmatter } from "@oh-my-opencode/utils"
@@ -10,7 +9,7 @@ import { log } from "../../../shared"
 import { resolveSkillPathReferences } from "../../../shared/skill-path-resolver"
 import { parseAllowedTools } from "../allowed-tools-parser"
 import { readSkillFileChecked } from "../checked-skill-read"
-import { skillProvenance, SkillLinkBlockedError, reportSkillBlocked, type SkillProvenance } from "../skill-provenance"
+import { skillProvenance, reportSkillLoadError, type SkillProvenance } from "../skill-provenance"
 
 function resolveFilePath(from: string, configDir?: string): string {
   let filePath = from
@@ -33,12 +32,11 @@ function resolveFilePath(from: string, configDir?: string): string {
 
 function loadSkillFromFile(filePath: string, provenance: SkillProvenance): { template: string; metadata: SkillMetadata } | null {
   try {
-    if (!existsSync(filePath)) return null
     const content = readSkillFileChecked(filePath, provenance)
     const { data, body } = parseFrontmatter<SkillMetadata>(content)
     return { template: body, metadata: data }
   } catch (error) {
-    if (error instanceof SkillLinkBlockedError) reportSkillBlocked(error)
+    reportSkillLoadError(error, filePath)
     if (error instanceof Error) return null
     return null
   }

@@ -1,6 +1,6 @@
 import type { LoadedSkill } from "../../features/opencode-skill-loader"
 import { extractSkillTemplate } from "../../features/opencode-skill-loader/skill-content"
-import { readSkillFileChecked, skillProvenance, SkillLinkBlockedError, reportSkillBlocked } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader"
+import { readSkillFileChecked, skillProvenance, reportSkillLoadError } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader"
 import { parseFrontmatter } from "@oh-my-opencode/utils"
 import { resolveSkillPathReferences } from "@oh-my-opencode/skills-loader-core/shared/skill-path-resolver"
 import { dirname } from "node:path"
@@ -18,7 +18,7 @@ export async function extractSkillBody(skill: LoadedSkill): Promise<string> {
       const body = parseFrontmatter(readSkillFileChecked(skill.path, skillProvenance(skill.path, skill.scope, skill.provenance))).body.trim()
       return resolveSkillPathReferences(body, skill.resolvedPath ?? dirname(skill.path))
     } catch (error) {
-      if (error instanceof SkillLinkBlockedError) reportSkillBlocked(error)
+      reportSkillLoadError(error, skill.path)
       throw error
     }
   }

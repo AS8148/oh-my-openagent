@@ -10,7 +10,7 @@ import type { LoadedSkill, SkillLoader, SkillResolution } from "./types"
 import { readProjectSkills, type CheckedProjectSkills } from "./checked-project-skills"
 import { readSkillFileChecked } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/checked-skill-read"
 import {
-  checkSkillPath, skillProvenance, SkillLinkBlockedError,
+  checkSkillPath, skillProvenance, reportSkillLoadError,
   type SkillProvenance,
 } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/skill-provenance"
 
@@ -117,6 +117,8 @@ function discoveredSkill(
     // would name the wrong file, so an unrelated miss stays "missing" (#10693 review L1).
     const blocked = skill ? undefined : discovery.blocked.find((error) => blockedSkillName(error.diagnostic.path) === name)
     if (blocked) throw blocked
+    const failed = skill ? undefined : discovery.errors.find((entry) => blockedSkillName(entry.path) === name)
+    if (failed) throw failed.error
     return skill === undefined ? undefined : readSkillFile(name, skill.location ?? "", provenance)
   }
   let discovery = cache.get(dir)
@@ -150,8 +152,8 @@ function readSkill(
       const skill = directSkill(name, dir, provenance) ?? discoveredSkill(name, dir, discover, cache, provenance, projectCache)
       if (skill !== undefined) return skill
     } catch (error) {
-      if (error instanceof SkillLinkBlockedError) rejected.push({ name, reason: error.message })
-      else if (!(error instanceof Error)) throw error
+      reportSkillLoadError(error, dir)
+      if (error instanceof Error) rejected.push({ name, reason: error.message })
     }
   }
   return undefined

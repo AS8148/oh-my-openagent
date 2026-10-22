@@ -3,11 +3,10 @@ import type { LoadedSkill } from "../../features/opencode-skill-loader"
 import { isDisabledSkillAlias } from "../../features/opencode-skill-loader/skill-discovery"
 import { dirname, join } from "node:path"
 import { existsSync } from "node:fs"
-import { log } from "../../shared/logger"
 import { parseFrontmatter } from "@oh-my-opencode/utils"
 import {
   readSkillFileChecked, skillProvenance, readMcpJsonFromDirChecked, parseSkillMcpConfigFromFrontmatter,
-  SkillLinkBlockedError,
+  SkillLinkBlockedError, reportSkillLoadError,
 } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader"
 import { detectWorktreePath } from "@oh-my-opencode/skills-loader-core/shared/project-discovery-dirs"
 
@@ -54,9 +53,9 @@ function readHostSkillFile(native: NativeSkillEntry, provenance: Parameters<type
 }
 
 // One native row that cannot be loaded skips only itself; it never drops the rows after it (#10693 review L2).
-function skipUnloadableNative(nativeName: string, error: unknown): void {
+function skipUnloadableNative(path: string, error: unknown): void {
   if (!(error instanceof Error)) throw error
-  log("[skill] native skill skipped", { name: nativeName, error: error.name })
+  reportSkillLoadError(error, path)
 }
 
 function nativeSkillToLoadedSkill(native: NativeSkillEntry, directory = process.cwd()): LoadedSkill {
@@ -103,7 +102,7 @@ export function mergeNativeSkills(
   nativeSkills: NativeSkillEntry[],
   disabledSkills?: ReadonlySet<string>,
   directory?: string,
-  onRejected?: (name: string, error: SkillLinkBlockedError) => void,
+  onRejected?: (name: string, error: Error) => void,
 ): void {
   const knownNames = new Set(skills.map((skill) => normalizeSkillName(skill.name)))
   const disabledSkillAliases = normalizeDisabledSkills(disabledSkills)
@@ -113,11 +112,8 @@ export function mergeNativeSkills(
     if (disabledSkillAliases && isDisabledSkillAlias(nativeSkillToAliasCheckSkill(native), disabledSkillAliases)) continue
     let loadedSkill: LoadedSkill
     try { loadedSkill = nativeSkillToLoadedSkill(native, directory) } catch (error) {
-      if (error instanceof SkillLinkBlockedError) {
-        onRejected?.(nativeName, error)
-        continue
-      }
-      skipUnloadableNative(nativeName, error)
+      skipUnloadableNative(native.location, error)
+      if (error instanceof Error) onRejected?.(nativeName, error)
       continue
     }
     skills.push(loadedSkill)
@@ -130,7 +126,7 @@ export function mergeNativeSkillInfos(
   nativeSkills: NativeSkillEntry[],
   disabledSkills?: ReadonlySet<string>,
   directory?: string,
-  onRejected?: (name: string, error: SkillLinkBlockedError) => void,
+  onRejected?: (name: string, error: Error) => void,
 ): void {
   const knownNames = new Set(skillInfos.map((skill) => normalizeSkillName(skill.name)))
   const disabledSkillAliases = normalizeDisabledSkills(disabledSkills)
@@ -139,11 +135,8 @@ export function mergeNativeSkillInfos(
     if (knownNames.has(nativeName)) continue
     if (disabledSkillAliases && isDisabledSkillAlias(nativeSkillToAliasCheckSkill(native), disabledSkillAliases)) continue
     try { nativeSkillToLoadedSkill(native, directory) } catch (error) {
-      if (error instanceof SkillLinkBlockedError) {
-        onRejected?.(nativeName, error)
-        continue
-      }
-      skipUnloadableNative(nativeName, error)
+      skipUnloadableNative(native.location, error)
+      if (error instanceof Error) onRejected?.(nativeName, error)
       continue
     }
     skillInfos.push({

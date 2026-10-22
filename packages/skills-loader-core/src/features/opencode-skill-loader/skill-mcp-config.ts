@@ -3,7 +3,7 @@ import { lstatSync } from "node:fs"
 import * as yaml from "js-yaml"
 import type { SkillMcpConfig } from "../../types"
 import { readSkillFileChecked } from "./checked-skill-read"
-import { reportSkillBlocked, SkillLinkBlockedError, type SkillProvenance, type SkillDiagnosticSink } from "./skill-provenance"
+import { reportSkillLoadError, type SkillProvenance, type SkillDiagnosticSink } from "./skill-provenance"
 
 export function parseSkillMcpConfigFromFrontmatter(content: string): SkillMcpConfig | undefined {
   const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
@@ -51,7 +51,7 @@ export function readMcpJsonFromDirChecked(skillDir: string, provenance: SkillPro
       }
     }
   } catch (error) {
-    if (error instanceof SkillLinkBlockedError) reportSkillBlocked(error, onDiagnostic)
+    reportSkillLoadError(error, mcpJsonPath, onDiagnostic)
     if (!(error instanceof Error)) {
       throw error
     }

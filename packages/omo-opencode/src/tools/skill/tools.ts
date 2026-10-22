@@ -28,10 +28,9 @@ import { reportSkillBlocked, SkillLinkBlockedError } from "@oh-my-opencode/skill
 
 export function createSkillTool(options: SkillLoadOptions): ToolDefinition {
   let cachedDescription: string | null = null
-  const rejectedSkills = new Map<string, SkillLinkBlockedError>()
-  const onRejected = (name: string, error: SkillLinkBlockedError) => {
+  const rejectedSkills = new Map<string, Error>()
+  const onRejected = (name: string, error: Error) => {
     rejectedSkills.set(name, error)
-    reportSkillBlocked(error)
   }
 
   const getBaseSkills = async (context?: ToolContext): Promise<LoadedSkill[]> => {

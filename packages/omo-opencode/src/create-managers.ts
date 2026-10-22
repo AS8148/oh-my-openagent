@@ -72,7 +72,7 @@ export function createManagers(args: {
 }): Managers {
   const { ctx, pluginConfig, tmuxConfig, modelCacheState, backgroundNotificationHookEnabled, runtimeSkillSourceUrl } = args
   const deps = { ...defaultCreateManagersDeps, ...args.deps }
-  const unsubscribeSkillDiagnostics = subscribeSkillDiagnostics((diagnostic) => showSkillSecurityNotice(ctx, diagnostic.message))
+  const unsubscribeSkillDiagnostics = subscribeSkillDiagnostics((diagnostic) => showSkillSecurityNotice(ctx, diagnostic.message, diagnostic.category))
 
   // Only mark the server as in-process when the SDK actually exposes a
   // serverUrl. `tmuxConfig.enabled` alone is not proof of a running server —

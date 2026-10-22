@@ -3,18 +3,20 @@ import { basename, dirname, join } from "node:path"
 import { parseFrontmatter } from "@oh-my-opencode/utils"
 import { readSkillFileChecked } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/checked-skill-read"
 import {
-  checkSkillPath, SkillLinkBlockedError, type SkillProvenance,
+  checkSkillPath, SkillLinkBlockedError, reportSkillLoadError, type SkillProvenance,
 } from "@oh-my-opencode/skills-loader-core/opencode-skill-loader/skill-provenance"
 import type { LoadedSkill } from "./types"
 
 export type CheckedProjectSkills = {
   readonly skills: ReadonlyMap<string, LoadedSkill>
   readonly blocked: readonly SkillLinkBlockedError[]
+  readonly errors: readonly { path: string; error: Error }[]
 }
 
 export function readProjectSkills(dir: string, provenance: SkillProvenance): CheckedProjectSkills {
   const skills = new Map<string, LoadedSkill>()
   const blocked: SkillLinkBlockedError[] = []
+  const errors: { path: string; error: Error }[] = []
   function walk(path: string, ancestry: ReadonlySet<string>, root = false, markdown = false): void {
     try {
       const canonical = checkSkillPath(path, provenance, true)
@@ -40,9 +42,12 @@ export function readProjectSkills(dir: string, provenance: SkillProvenance): Che
       }
     } catch (error) {
       if (error instanceof SkillLinkBlockedError) blocked.push(error)
-      else if (!(error instanceof Error)) throw error
+      else {
+        reportSkillLoadError(error, path)
+        if (error instanceof Error) errors.push({ path, error })
+      }
     }
   }
   if (existsSync(dir)) walk(dir, new Set(), true)
-  return { skills, blocked }
+  return { skills, blocked, errors }
 }

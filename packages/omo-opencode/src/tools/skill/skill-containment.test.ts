@@ -76,7 +76,7 @@ test("native fallback cannot restore a missing project descendant's cached bytes
     nativeSkills: { all: () => [entry], get: () => entry, dirs: () => [] },
   })
   // when / then
-  await expect(tool.execute({ name: "missing" }, undefined)).rejects.toThrow("outside the project")
+  await expect(tool.execute({ name: "missing" }, undefined)).rejects.toThrow("ENOENT")
 })
 
 test("native builtin row keeps its supplied descriptorless content", async () => {

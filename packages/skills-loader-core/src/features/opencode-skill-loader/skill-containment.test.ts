@@ -30,6 +30,67 @@ function skill(path: string) {
 }
 
 describe("legacy skill containment at discovery and reread", () => {
+  test("mode-000 skill fails closed with its real EACCES error, not a security block", async () => {
+    // given
+    const f = fixture()
+    const path = join(f.skillsDir, "unreadable", "SKILL.md")
+    skill(path)
+    fs.chmodSync(path, 0)
+    const diagnostics: { category: string; path: string; message: string }[] = []
+    try {
+      // when
+      const loaded = await loadSkillsFromDir({
+        skillsDir: f.skillsDir, scope: "project",
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      })
+      // then
+      expect(loaded).toEqual([])
+      expect(diagnostics).toHaveLength(1)
+      expect(diagnostics[0]?.category).toBe("skill-load-error")
+      expect(diagnostics[0]?.path).toBe(path)
+      expect(diagnostics[0]?.message).toContain("EACCES")
+      expect(diagnostics[0]?.message).toContain(path)
+    } finally {
+      fs.chmodSync(path, 0o600)
+    }
+  })
+
+  test("missing configured source fails closed with its real ENOENT error", async () => {
+    // given
+    const f = fixture()
+    const path = join(f.project, "missing-source")
+    const diagnostics: { category: string; path: string; message: string }[] = []
+    // when
+    const loaded = await discoverConfigSourceSkills({
+      config: { sources: [path] }, configDir: f.project,
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+    // then
+    expect(loaded).toEqual([])
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]?.category).toBe("skill-load-error")
+    expect(diagnostics[0]?.path).toBe(path)
+    expect(diagnostics[0]?.message).toContain("ENOENT")
+    expect(diagnostics[0]?.message).toContain(path)
+  })
+
+  test("directory used as a skill fails closed with EISDIR rather than a security block", async () => {
+    // given
+    const f = fixture()
+    const path = join(f.skillsDir, "directory", "SKILL.md")
+    mkdirSync(path, { recursive: true })
+    const diagnostics: { category: string; message: string }[] = []
+    // when
+    const loaded = await loadSkillFromPath({
+      skillPath: path, resolvedPath: dirname(path), defaultName: "directory", scope: "project",
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    })
+    // then
+    expect(loaded).toBeNull()
+    expect(diagnostics[0]?.category).toBe("skill-load-error")
+    expect(diagnostics[0]?.message).toContain("EISDIR")
+  })
+
   // The core package's minimal Bun declarations omit test.each (#10693).
   for (const layout of ["folder", "file", "nested", "root"]) {
     test(`blocks escaping project ${layout} with a reason`, async () => {
