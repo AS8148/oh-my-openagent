@@ -4,7 +4,7 @@ import { ModelRegistry, ModelRuntime } from "@code-yeongyu/senpi"
 
 import { RunnerError } from "../runners/in-process/runner-error"
 import { createRpcModelAdmission } from "../runners/rpc/model-admission"
-import { withoutExcludedFallbacks } from "../model-exclusion"
+import { withoutExcludedFallbacks } from "./exclude-fallbacks"
 import type { ChildSpec } from "../runners/in-process"
 import { createParentRegistrySessionContext, resolveResumeContext } from "./parent-registry-context"
 import { createInProcessManagedRunner } from "./runner"
