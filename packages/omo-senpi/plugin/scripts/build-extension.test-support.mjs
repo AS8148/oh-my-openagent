@@ -18,6 +18,7 @@ export function outputPathsIn(root) {
     memoryDoctorOutputPath: join(root, "omo-memory-doctor.js"),
     memoryMemfsOutputPath: join(root, "omo-memory-memfs.js"),
     memoryPalaceOutputPath: join(root, "omo-memory-palace.js"),
+    deviceAccountOutputPath: join(root, "omo-device-account.js"),
     memoryCommandsOutputPath: join(root, "omo-memory-commands.js"),
     sessionHistoryOutputPath: join(root, "omo-session-history.js"),
     recallStoreOutputPath: join(root, "omo-recall-store.js"),

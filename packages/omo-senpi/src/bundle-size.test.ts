@@ -135,8 +135,10 @@ const builtExtensionPath = join(packageRoot, "plugin", "extensions", "omo.js")
 // startup does not need, and lowers this ceiling to 1,424,569 again.
 // Reset to 1,450,000 by #10860: eleven memory slash commands (/memory, /remember, /init, /recompile,
 // /memory-repository, /sleeptime, /reflect, /dream, /search, /facts, /agreements) keep synchronous registration
-// but load their handlers from the lazy #omo-memory-commands-runtime sidecar on first use. On the batch #2 head
-// the entry bundle measures 1,444,821 -> 1,411,558 bytes (-33,263) with build-extension.mjs (bun 1.4.3).
+// but load their handlers from the lazy #omo-memory-commands-runtime sidecar on first use, and memory sync's
+// device account (service-auth store and refresh) loads from #omo-device-account-runtime on the first sync
+// resolve. On the batch #2 head (e320d31ab1) build-extension.mjs (bun 1.4.3) measures 1,485,607 -> 1,439,434
+// bytes (-46,173): -33,386 from the commands sidecar, -12,787 from the device account sidecar.
 const BUDGET_BYTES = 1_450_000
 
 describe("omo-senpi bundle size budget", () => {

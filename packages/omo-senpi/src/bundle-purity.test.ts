@@ -17,6 +17,7 @@ const builtClaimReceiptExtensionPath = join(packageRoot, "plugin", "extensions",
 const builtMemoryMemfsExtensionPath = join(packageRoot, "plugin", "extensions", "omo-memory-memfs.js")
 const builtMemoryPalaceExtensionPath = join(packageRoot, "plugin", "extensions", "omo-memory-palace.js")
 const builtMemoryCommandsExtensionPath = join(packageRoot, "plugin", "extensions", "omo-memory-commands.js")
+const builtDeviceAccountExtensionPath = join(packageRoot, "plugin", "extensions", "omo-device-account.js")
 const builtSessionHistoryExtensionPath = join(packageRoot, "plugin", "extensions", "omo-session-history.js")
 const builtRecallStoreExtensionPath = join(packageRoot, "plugin", "extensions", "omo-recall-store.js")
 const builtTelemetryPosthogExtensionPath = join(packageRoot, "plugin", "extensions", "omo-telemetry-posthog.js")
@@ -65,7 +66,7 @@ describe("omo-senpi bundle purity", () => {
 
   it("#given built extension artifacts #when static imports are inspected #then only senpi peers and node builtins remain external", () => {
     const allowed = new Set<string>(SENPI_LOADER_ALIASES)
-    for (const path of [builtExtensionPath, builtTaskExtensionPath, builtComputerUseExtensionPath, builtMemoryDoctorExtensionPath, builtMemoryMemfsExtensionPath, builtMemoryPalaceExtensionPath, builtMemoryCommandsExtensionPath, builtSessionHistoryExtensionPath, builtRecallStoreExtensionPath, builtTelemetryPosthogExtensionPath, builtThreadClientExtensionPath, builtFeedbackExtensionPath, builtClaimReceiptExtensionPath]) {
+    for (const path of [builtExtensionPath, builtTaskExtensionPath, builtComputerUseExtensionPath, builtMemoryDoctorExtensionPath, builtMemoryMemfsExtensionPath, builtMemoryPalaceExtensionPath, builtMemoryCommandsExtensionPath, builtDeviceAccountExtensionPath, builtSessionHistoryExtensionPath, builtRecallStoreExtensionPath, builtTelemetryPosthogExtensionPath, builtThreadClientExtensionPath, builtFeedbackExtensionPath, builtClaimReceiptExtensionPath]) {
       expect(existsSync(path), `missing built extension at ${path}`).toBe(true)
       const imports = collectStaticImportSpecifiers(readFileSync(path, "utf8"))
       const forbidden = imports.filter((specifier) => !specifier.startsWith("node:") && !allowed.has(specifier))

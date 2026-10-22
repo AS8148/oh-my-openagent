@@ -337,6 +337,18 @@ describe("checkExtensionCurrent", () => {
     expect(await readFile(memoryCommandsOutputPath, "utf8")).not.toContain("#omo-memory-commands-runtime")
   })
 
+  test("#given the split extension build #when device account inputs are inspected #then the service-auth sign-in code loads only from the lazy entry", async () => {
+    const { mainInputs, deviceAccountInputs } = await sharedOutputs()
+    for (const suffix of [
+      "packages/omo-senpi/src/components/memory/device-session/account-source.ts",
+      "packages/omo-opencode/src/cli/service-auth/keystore.ts",
+      "packages/omo-opencode/src/cli/service-auth/session.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(deviceAccountInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+  })
+
   test("#given the split extension build #when onboarding inputs are inspected #then the session-history scan loads only from its lazy entry", async () => {
     const { mainInputs, sessionHistoryInputs, sessionHistoryOutputPath } = await sharedOutputs()
     for (const suffix of [
@@ -453,6 +465,7 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-memory-memfs-runtime")')
     expect(main).toContain('import("#omo-memory-palace-runtime")')
     expect(main).toContain('import("#omo-memory-commands-runtime")')
+    expect(main).toContain('import("#omo-device-account-runtime")')
     expect(main).toContain('import("#omo-session-history-runtime")')
     expect(main).toContain('import("#omo-recall-store-runtime")')
     expect(main).toContain('import("#omo-telemetry-posthog-runtime")')
@@ -470,6 +483,7 @@ describe("checkExtensionCurrent", () => {
       "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
       "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
       "#omo-memory-commands-runtime": "./extensions/omo-memory-commands.js",
+      "#omo-device-account-runtime": "./extensions/omo-device-account.js",
       "#omo-session-history-runtime": "./extensions/omo-session-history.js",
       "#omo-recall-store-runtime": "./extensions/omo-recall-store.js",
       "#omo-telemetry-posthog-runtime": "./extensions/omo-telemetry-posthog.js",
