@@ -90,15 +90,18 @@ const MASS_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw|meth)`
 // pointer. Only image/paste placeholders may precede the request: a masked quote or relay never does.
 const BIND_LEAD = String.raw`^\s*(?:\[(?:Image|Pasted text)\b[^\]\n]*\]\s*)*`
 const BIND_VERB = String.raw`(?:run|start|use|do|execute)`
-// A `.` ends the sentence only before whitespace or the end, so "run mass ulw on index.ts?" is still a question.
-const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,.!:;\n]|(?:to|on|for|with|and|now|here)\b))(?!(?:[^\n.!?]|\.(?!\s|$))*\?)`
+// A `?` anywhere after the keyword makes the prompt a question, so it never binds ("use mass ulw. Is that the
+// right choice?"); a URL's own `?` is masked before this test. A masked span (a pasted URL) may follow directly.
+const NO_QUESTION = String.raw`(?![\s\S]*\?)`
+const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,.!:;\n\0]|(?:to|on|for|with|and|now|here)\b))${NO_QUESTION}`
 // The Korean form takes exactly one request ending, closing the sentence: a question ("돌려도 돼?") or a
 // past-tense or declarative ending ("돌렸어", "했는데", "하니") is not a request.
-const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려줘|실행해줘|써줘|해줘|돌려|실행해)(?=\s*(?:[.!\n]|$))`
+const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려줘|실행해줘|써줘|해줘|돌려|실행해)(?=\s*(?:[.!\n]|$))${NO_QUESTION}`
 const bindingForms = (command: string, keyword: string): RegExp =>
   new RegExp(
     [
-      String.raw`${BIND_LEAD}\/${command}(?=\s|$)`,
+      // skill-commands (registered first, #9042) rewrites a bare "/mass-ulw" to "/skill:mass-ulw", so both spellings count.
+      String.raw`${BIND_LEAD}\/(?:skill:)?${command}(?=\s|$)${NO_QUESTION}`,
       String.raw`${BIND_LEAD}${BIND_VERB}\s+${keyword}${BIND_FOLLOW}`,
       String.raw`${BIND_LEAD}${keyword}${KOREAN_VERB}`,
     ].join("|"),
@@ -199,12 +202,17 @@ function handleInput(
   const visible = stripQuotedRegions(payload.text)
   const alreadyLoaded = (skillName: string, expandedBlockPattern: RegExp): boolean =>
     skillName === commandSkillName || expandedBlockPattern.test(payload.text)
-  const binds = (target: SkillPointerTarget): boolean => target.bindingPattern?.test(visible) === true
+  // A binding target its own slash command loaded is bound too (form (a) matches the rewritten /skill: text). The
+  // command loads the skill body, but the mode block
+  // (first reads, workflow-only dispatch) is not in it, so a bound target is never deduped; nor do its companions or
+  // the composite research block fall back to conditional pointers.
+  const binds = (target: SkillPointerTarget): boolean =>
+    target.bindingPattern?.test(visible) === true
   // A slash command ("/mass-ulw") is not a bare name, so it is invoked through its binding form.
   const invoked = TARGETS.filter((target) => target.pattern.test(visible) || binds(target))
   const massMode = invoked.some((target) => target.customType === MASS_ULW_CUSTOM_TYPE && binds(target))
   const pointers: SkillPointerMessage[] = invoked
-    .filter((target) => !alreadyLoaded(target.skillName, target.expandedBlockPattern))
+    .filter((target) => binds(target) || !alreadyLoaded(target.skillName, target.expandedBlockPattern))
     .map((target) => ({
       customType: target.customType,
       content: binds(target) ? skillMode(target, massMode, sessionScope) : skillPointer(target, sessionScope),

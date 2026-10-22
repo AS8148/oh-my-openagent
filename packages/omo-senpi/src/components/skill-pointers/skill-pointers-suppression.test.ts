@@ -151,13 +151,13 @@ describe("omo-senpi skill-pointers suppression", () => {
       expectNoInjection(pi, result)
     })
 
-    it("#when the prompt is a raw /skill: command for the only matched skill #then nothing is injected", async () => {
+    it("#when the prompt is a raw /skill: command for the only matched non-binding skill #then nothing is injected", async () => {
       // given
       const pi = new FakeExtensionAPI()
       await registerSkillPointers(pi)
 
       // when
-      const result = await dispatchInput(pi, "/skill:mass-ulw run the graph")
+      const result = await dispatchInput(pi, "/skill:ulw-plan draft the migration")
 
       // then
       expectNoInjection(pi, result)

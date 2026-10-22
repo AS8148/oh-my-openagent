@@ -28,7 +28,7 @@ describe("omo-senpi skill-pointers companion", () => {
       expect(companion).toContain('load_skills: ["ultimate-browsing"]')
     })
 
-    it("#when the prompt is a raw /skill:ulw-research command #then only the companion is injected", async () => {
+    it("#when the prompt is a raw /skill:ulw-research command #then the research mode block binds with its companions (#10822)", async () => {
       // given
       const pi = new FakeExtensionAPI()
       await registerSkillPointers(pi)
@@ -37,7 +37,7 @@ describe("omo-senpi skill-pointers companion", () => {
       const result = await dispatchInput(pi, "/skill:ulw-research the gateway options")
 
       // then
-      expectPointerInjections(pi, result, [BROWSER, COMPANION])
+      expectPointerInjections(pi, result, [{ ...RESEARCH, mode: true }, BROWSER, COMPANION])
     })
 
     it("#when the prompt carries an expanded ulw-research block #then only the companion is injected", async () => {
