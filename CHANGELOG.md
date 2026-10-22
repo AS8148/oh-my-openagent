@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Project memory reads work on Windows when a path uses a short user-directory name.** Read grants now compare native canonical paths on both sides, accounting for Windows case and separator differences without granting sibling memory repositories. Missing or unreadable paths remain denied. ([#10982](https://github.com/code-yeongyu/oh-my-openagent/pull/10982))
+
 **Each model family's current default is named once.** Every builtin default, fallback rung, category gate, Claude Code alias and migration target that means "the newest Opus / Sonnet / Haiku / Fable / GPT / GLM / Kimi / Gemini" now reads its id from one table, so the next model bump is one edit. Resolved models stay the same, with one exception: the Claude Code `sonnet` alias now means the current Sonnet (`claude-sonnet-5-5`) instead of `claude-sonnet-4-6`. ([#10483](https://github.com/code-yeongyu/oh-my-openagent/pull/10483), [#10141](https://github.com/code-yeongyu/oh-my-openagent/issues/10141))
 
 **A builtin model profile can run on your own provider.** When the only provider serving a profile's model is one you declared in `models.json` (for example an API-key proxy serving `claude-opus-5-5`), Daily · Normal and the other builtin lanes now pick it instead of reporting that no model is available. Only the models you declared for that provider count, the lane's own providers still come first, and gateways you never declared still never serve a builtin lane. Reported by 채완. ([#10493](https://github.com/code-yeongyu/oh-my-openagent/pull/10493), [#10485](https://github.com/code-yeongyu/oh-my-openagent/issues/10485))
