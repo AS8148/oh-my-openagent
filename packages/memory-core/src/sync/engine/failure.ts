@@ -46,7 +46,7 @@ export function describeSyncFailure(error: unknown): SyncFailure {
     return {
       kind: "stranded_lock",
       paths: error.paths,
-      reason: "A git lock file left in the memory repository blocks sync, and it could not be proven safe to remove.",
+      reason: "A git lock file left in the memory repository blocks sync, and OmO did not remove it on its own.",
       action: error.paths.length === 1
         ? `If no other session is working on this memory, run /memory unlock ${error.paths[0]}, or restart OmO.`
         : `If no other session is working on this memory, run /memory unlock for each: ${error.paths.join(", ")}; or restart OmO.`,

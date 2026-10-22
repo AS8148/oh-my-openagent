@@ -62,6 +62,7 @@ export class SyncEngine {
 
   /** What a UI shows: a failing cycle until one succeeds (an offline one once it persists), paused at a refused entry, else the last successful sync. */
   async status(): Promise<EngineStatus> {
+    // Failing outranks paused on purpose: while no cycle completes nothing moves at all, and a paused refusal shows again after the first good cycle.
     if (this.failing !== null && isFailureShown(this.failing.failure.kind, this.failing.attempts)) return { kind: "failing", ...this.failing }
     const s = await this.journal.state()
     if (s.paused !== null) return { kind: "paused", seq: s.paused.seq, code: s.paused.code }
