@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createNodeGitExec, type GitExec } from "../../../git/exec"
+import { StrandedGitLockError } from "../../../git/repo-lock-sweep"
 import { createGitSyncRepo } from "./git-sync-repo"
 
 const dirs: string[] = []
@@ -81,4 +82,17 @@ test("an agent commit landing while the sync commits is kept: HEAD moves by comp
   expect(await git(root, "log", "--format=%s", "-3")).toBe("sync: 1 memories updated\nagent: write\ninit")
   expect((await git(root, "ls-tree", "--name-only", "HEAD")).split("\n").sort()).toEqual(["agent.md", "base.md", "synced.md"])
   expect(await porcelain(root)).toBe("")
+})
+
+test.each(["index.lock", "HEAD.lock"])("a stranded .git/%s whose owner cannot be proven dead stops the sync commit as StrandedGitLockError naming it (omo #10637)", async (name) => {
+  const root = await repo()
+  const sync = createGitSyncRepo({ root })
+  const head = await git(root, "rev-parse", "HEAD")
+  await writeFile(join(root, "synced.md"), "from sync\n")
+  const lock = join(root, ".git", name)
+  await writeFile(lock, "")
+  const failure = await sync.commit(["synced.md"], "sync: 1 memories updated\n\nSync-Seq: 1-1").then(() => null, (error: unknown) => error)
+  expect(failure).toBeInstanceOf(StrandedGitLockError)
+  expect((failure as StrandedGitLockError).paths).toContain(lock)
+  if (name === "HEAD.lock") expect(await git(root, "rev-parse", "HEAD")).toBe(head)
 })
