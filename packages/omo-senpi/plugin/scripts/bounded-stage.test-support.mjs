@@ -20,6 +20,9 @@ export function runBoundedStage(stage, command, args, options, capMs) {
       } else {
         child.kill("SIGKILL")
       }
+      // A process outside the killed tree may still hold the pipes; without them `close` can still fire.
+      child.stdout?.destroy()
+      child.stderr?.destroy()
     }, capMs)
     child.once("error", (error) => {
       clearTimeout(cap)

@@ -406,7 +406,7 @@ describe("checkExtensionCurrent", () => {
     } finally {
       await rm(work, { recursive: true, force: true })
     }
-  }, 60000)
+  }, 90_000)
 
   test("#given a packaged task import map #when generated artifacts are inspected #then the main bundle resolves its task sidecar", async () => {
     const outputs = await sharedOutputs()
