@@ -133,12 +133,12 @@ export function compiledBannerLines(manifest: Pick<EmbeddedManifest, "omoAiVersi
 type CompiledLauncherSeams = { readonly threadSdk?: (options: Record<string, unknown>) => Promise<{ sdk?: unknown; error?: string }> }
 
 export async function runCompiledLauncher(args: string[], execDir: string, enginePin = "unknown", compiledPackageRoot?: string, migration: CompiledLauncherOptions = {}, seams: CompiledLauncherSeams = {}): Promise<boolean> {
+  // The #10697 plaintext file goes before ANY command runs: several verbs return early below.
+  removeLegacyServiceCredentials()
   if (args[0] === "loro-smoke") {
     process.exitCode = await runLoroSmoke()
     return true
   }
-  // The account verbs return early, so the #10697 plaintext file is deleted here too, not only on a normal launch.
-  if (["login", "logout", "whoami", "sync"].includes(args[0] ?? "")) removeLegacyServiceCredentials()
   if (["login", "logout", "whoami"].includes(args[0] ?? "")) {
     await runServiceAuthCommand(args)
     return true
@@ -153,7 +153,6 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
   }
   const packageJson = readJson(join(execDir, "package.json")) as { version: string; omoBuild?: unknown }
   migrateLegacyBunGlobalManifest(execDir)
-  removeLegacyServiceCredentials()
   adoptLegacyFlatState()
   const command = args[0]
   // The toolkit CLI is no longer shipped in the Native payload: the loop runs in-process behind the

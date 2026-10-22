@@ -21,9 +21,8 @@ try {
   ensureBunBinShim({ scriptPath })
   const reexeced = await maybeReexecUnderBun({ scriptPath })
   if (!reexeced) {
-    const accountVerb = ["login", "logout", "whoami", "sync"].includes(process.argv[2])
-    // These verbs return before runLauncher, which is where the #10697 plaintext file is otherwise deleted.
-    if (accountVerb) removeLegacyServiceCredentials()
+    // The #10697 plaintext file goes before ANY command runs: several verbs return before runLauncher.
+    removeLegacyServiceCredentials()
     if (["login", "logout", "whoami"].includes(process.argv[2])) {
       const { runServiceAuthCommand } = await import("./lib/service-auth.generated.js")
       await runServiceAuthCommand(process.argv.slice(2))
