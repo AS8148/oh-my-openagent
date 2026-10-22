@@ -34,8 +34,9 @@ async function endpoint(socketPath: string, answer: Answer): Promise<{ readonly 
       if (newline < 0) return
       const frame = JSON.parse(buffer.slice(0, newline)) as Frame
       buffer = buffer.slice(newline + 1)
+      if (frame.type === "get_protocol_info") { socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, data: {} })}\n`); return }
       frames.push(frame)
-      socket.end(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, ...answer(frame) })}\n`)
+      socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, ...answer(frame) })}\n`)
     })
   })
   const listening = once(server, "listening", { signal: AbortSignal.timeout(2000) })

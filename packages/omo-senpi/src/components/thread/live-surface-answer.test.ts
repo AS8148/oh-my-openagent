@@ -47,8 +47,9 @@ async function answeringEndpoint(socketPath: string, kind: GatewayEndpointKind, 
       if (newline < 0) return
       const frame = JSON.parse(buffer.subarray(0, newline).toString("utf8")) as Frame
       buffer = buffer.subarray(newline + 1)
+      if (frame.type === "get_protocol_info") { socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, data: {} })}\n`); return }
       frames.push(frame)
-      const reply = (body: Frame) => socket.end(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, ...body })}\n`)
+      const reply = (body: Frame) => socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, ...body })}\n`)
       if (frame.type !== "extension_ui_response") return reply({ success: true, data: {} })
       const request = typeof frame.uiRequestId === "string" ? frame.uiRequestId : frame.id
       const shaped = typeof frame.answers === "object" && frame.answers !== null && !Array.isArray(frame.answers)
@@ -83,7 +84,7 @@ async function questionRelayedFrom(kind: GatewayEndpointKind, pending: readonly 
     registry: async () => [],
     readSecret: () => SECRET,
   })
-  const ref: GatewayEndpointRef = { kind, socket, routing_id: kind === "rpc_host" ? "rpc-1" : null }
+  const ref: GatewayEndpointRef = { kind, socket, routing_id: kind === "rpc_host" ? "rpc-1" : null, durable_session_id: "B" }
   const store = h.store()
   const relay = createGatewayRelay({ store, engine: h.engineFor(store), endpoints: surface.gateway, locate: async () => ref, now: () => h.clock.now })
   const bound = await relay.bind({ principal: "session:A", binding: { platform: "custom", account_id: "qa", chat_id: "c1", thread_id: "t1", session_durable_id: "B" } })
