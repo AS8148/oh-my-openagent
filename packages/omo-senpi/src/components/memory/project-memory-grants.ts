@@ -1,5 +1,6 @@
 import { realpath, realpathSync } from "@oh-my-opencode/memory-core/fs"
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { isPathInside, type PathContainmentOptions } from "@oh-my-opencode/utils/path-containment"
+import * as path from "node:path"
 
 import type { MemoryIdentityContext } from "./context"
 
@@ -36,17 +37,24 @@ export function revokeProjectMemoryReads(context: MemoryIdentityContext): void {
   grants.delete(context)
 }
 
-export function isGrantedProjectMemoryRead(context: MemoryIdentityContext, target: string): boolean {
+export function isGrantedProjectMemoryRead(context: MemoryIdentityContext, target: string, options: PathContainmentOptions = {}): boolean {
   const roots = grants.get(context)
   if (roots === undefined || roots.size === 0) return false
-  const resolved = canonicalTarget(target)
-  if (resolved === undefined) return false
+  const windows = (options.platform ?? process.platform) === "win32"
+  const paths = windows ? path.win32 : path.posix
+  const canonicalPath = options.realpath ?? realpathSync.native
   for (const root of roots) {
-    const rel = relative(root, resolved)
-    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) continue
-    const first = rel.split(sep)[0] ?? ""
-    if (EXCLUDED_TOP_LEVEL.includes(first.toLowerCase())) continue
-    return true
+    try {
+      if (!isPathInside(target, root, { ...options, realpath: canonicalPath })) continue
+      const rel = paths.relative(canonicalPath(root), canonicalPath(target))
+      if (rel === "" || rel.startsWith("..") || paths.isAbsolute(rel)) continue
+      const first = rel.split(paths.sep)[0] ?? ""
+      if (EXCLUDED_TOP_LEVEL.includes(first.toLowerCase())) continue
+      return true
+    } catch {
+      // An absent or unreadable path is not a read grant; never trust a lexical fallback.
+      continue
+    }
   }
   return false
 }
@@ -56,27 +64,5 @@ async function canonicalAsync(path: string): Promise<string | undefined> {
     return await realpath(path)
   } catch {
     return undefined
-  }
-}
-
-function canonical(path: string): string | undefined {
-  try {
-    return realpathSync(path)
-  } catch {
-    return undefined
-  }
-}
-
-// A file that does not exist yet has no real path: canonicalize its nearest existing ancestor.
-function canonicalTarget(target: string): string | undefined {
-  let current = resolve(target)
-  const suffix: string[] = []
-  for (;;) {
-    const real = canonical(current)
-    if (real !== undefined) return suffix.length === 0 ? real : join(real, ...suffix.reverse())
-    const parent = dirname(current)
-    if (parent === current) return undefined
-    suffix.push(current.slice(parent.length).replace(/^[\\/]+/, ""))
-    current = parent
   }
 }

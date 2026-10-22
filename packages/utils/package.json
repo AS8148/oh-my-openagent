@@ -13,6 +13,10 @@
       "types": "./src/atomic-write.ts",
       "import": "./src/atomic-write.ts"
     },
+    "./path-containment": {
+      "types": "./src/path-containment.ts",
+      "import": "./src/path-containment.ts"
+    },
     "./runtime": {
       "types": "./runtime.d.ts",
       "import": "./src/runtime/index.ts"
