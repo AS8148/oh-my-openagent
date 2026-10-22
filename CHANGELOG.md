@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Each prompt reads your memory's git HEAD once instead of up to three times.** The memory nudge, the soul notice and the session pin now share one read, which saves up to two git processes on every prompt. ([#10707](https://github.com/code-yeongyu/oh-my-openagent/issues/10707), [#10855](https://github.com/code-yeongyu/oh-my-openagent/pull/10855))
+
 **Outside full access, computer use asks before it acts on your screen as a whole.** Clicks, typing, key presses, scrolling, drags, pointer moves and holds aimed at the desktop or a display land on your real pointer and frontmost app, so they now need the same "Allow foreground computer control?" approval as foreground input; without it they fail with `ControlRequired` and nothing is sent. Input to one window in the background still needs no approval, and full access keeps working without a prompt, headless runs included. The macOS background check no longer moves your pointer back after you moved it, and a stopped session stays stopped when the desktop engine restarts. ([#10788](https://github.com/code-yeongyu/oh-my-openagent/issues/10788), [#10790](https://github.com/code-yeongyu/oh-my-openagent/pull/10790))
 
 **The launcher deletes a legacy `~/.omo/credentials.json` left by an intermediate sign-in build.** The file held the device's private keys and account refresh material in plaintext, sometimes world-readable; upgrading removes it. Only the exact legacy shape is removed. ([#10697](https://github.com/code-yeongyu/oh-my-openagent/issues/10697), [#10698](https://github.com/code-yeongyu/oh-my-openagent/pull/10698))
