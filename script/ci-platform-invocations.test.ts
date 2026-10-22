@@ -122,9 +122,17 @@ describe("#given a workflow that adds a new macOS/Windows invocation", () => {
     expect(isPlatformSensitivePath("script/qa/new-parity.mjs", coverage)).toBe(true)
   })
 
-  test("#then a named test covers its own source but not a sibling that only shares the name prefix", () => {
+  test("#then a named test covers its own source and the sibling helpers that share its stem", () => {
     expect(isPlatformSensitivePath("packages/new-core/src/pipes/named-pipe.windows.ts", coverage)).toBe(true)
-    expect(isPlatformSensitivePath("packages/new-core/src/pipes/named-pipe-pool.ts", coverage)).toBe(false)
+    expect(isPlatformSensitivePath("packages/new-core/src/pipes/named-pipe-pool.ts", coverage)).toBe(true)
+    expect(isPlatformSensitivePath("packages/new-core/src/pipes/other.ts", coverage)).toBe(false)
+    expect(isPlatformSensitivePath("packages/new-core/src/pipes/named-pipe_util.ts", coverage)).toBe(true)
+    expect(isPlatformSensitivePath("packages/new-core/src/pipes/named-pipeline.ts", coverage)).toBe(false)
+  })
+
+  test("#then a script's shebang interpreter path is not mistaken for a repository path", () => {
+    const shebang = platformInvocationCoverage(workflow, (path) => (path === ".github/scripts/win-pipes.sh" ? "#!/usr/bin/env bash\n" : ""))
+    expect(shebang.some((entry) => entry.value.startsWith("bin/env"))).toBe(false)
   })
 
   test("#then a job with a literal macOS/Windows runner and the CI script it runs are both read", () => {

@@ -5,9 +5,14 @@ import { readFileSync } from "node:fs"
 // selects that runner (or the macOS/Windows-only Codex platform suite), or when
 // its job runs only on macOS/Windows (an OS matrix with no ubuntu leg, or a
 // literal macOS/Windows `runs-on`). A `.github/scripts/*.sh` script such a step
-// runs is read too, so commands moved into a script stay covered.
+// runs is read one level deep, so commands moved into a script stay covered;
+// `.ps1` scripts, nested script calls, and paths outside the roots in
+// `pathToken` are not followed. A named test covers its stem followed by `.`,
+// `-`, `_` or the end of the name, so the sibling helpers it imports
+// (`scheduler-frontier.ts` for `scheduler.test.ts`) stay covered while an
+// unrelated `schedulers.ts` does not.
 const platformCondition = /runner\.os == 'Windows'|runner\.os == 'macOS'|matrix\.suite == 'platform'/
-const pathToken = /(?:\.\/)?((?:packages|script|\.github|bin|crates)\/[A-Za-z0-9_.@/-]*[A-Za-z0-9_-]|bunfig[\w.-]*\.toml)/g
+const pathToken = /(?<![\w/.-])(?:\.\/)?((?:packages|script|\.github|bin|crates)\/[A-Za-z0-9_.@/-]*[A-Za-z0-9_-]|bunfig[\w.-]*\.toml)/g
 const jobHeader = /^ {2}[A-Za-z0-9_-]+:\s*$/
 const literalPlatformRunner = /^ {4}runs-on:\s*["']?(?:macos|windows)[\w.-]*["']?\s*$/
 const ciScript = /^\.github\/scripts\/[\w.-]+\.sh$/
@@ -53,7 +58,7 @@ export function platformOnlyStepTexts(workflowText) {
 function coverageOf(token) {
   const basename = token.slice(token.lastIndexOf("/") + 1)
   const test = testFile.exec(basename)
-  if (test?.[1] !== undefined) return { kind: "prefix", value: `${token.slice(0, token.length - basename.length)}${test[1]}.` }
+  if (test?.[1] !== undefined) return { kind: "stem", value: token.slice(0, token.length - basename.length) + test[1] }
   if (basename.includes(".")) return { kind: "exact", value: token }
   if (suitePartition.test(token)) return null
   return { kind: "prefix", value: `${token}/` }
@@ -73,10 +78,26 @@ export function platformInvocationCoverage(workflowText, readScript = () => "") 
 }
 
 export function coveredByInvocation(path, coverage) {
-  return coverage.some((entry) => (entry.kind === "exact" ? path === entry.value : path.startsWith(entry.value)))
+  return coverage.some((entry) => {
+    switch (entry.kind) {
+      case "exact":
+        return path === entry.value
+      case "prefix":
+        return path.startsWith(entry.value)
+      case "stem":
+        return path.startsWith(entry.value) && /^(?:[._-]|$)/.test(path.slice(entry.value.length))
+    }
+    throw new Error(`unknown coverage kind ${entry.kind}`)
+  })
 }
 
 export function readCiInvocationCoverage() {
-  const readRepoFile = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
+  const readRepoFile = (path) => {
+    try {
+      return readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
+    } catch (error) {
+      throw new Error(`ci.yml names ${path} in a macOS/Windows-only step, but it cannot be read`, { cause: error })
+    }
+  }
   return platformInvocationCoverage(readRepoFile(".github/workflows/ci.yml"), readRepoFile)
 }
