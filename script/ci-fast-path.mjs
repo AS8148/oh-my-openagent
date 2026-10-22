@@ -19,8 +19,11 @@ const platformSensitiveExactPaths = new Set([
   "Cargo.lock",
   "rust-toolchain.toml",
   "postinstall.mjs",
+  "script/build-binaries.ts",
   "script/build-omo-binary.ts",
   "script/build-omo-native.ts",
+  "packages/omo-codex/plugin/test/node-install-surface.test.mjs",
+  "packages/omo-codex/plugin/test/install-time-build-runtime.test.mjs",
   "script/qa/omo-native-parity-smoke.mjs",
   "script/ci-fast-path.mjs",
   "script/ci-leg-tests-guard.mjs",
@@ -32,7 +35,10 @@ const platformSensitiveExactPaths = new Set([
 ])
 const platformSensitivePrefixes = [
   "crates/",
+  "bin/",
   ".github/scripts/",
+  "packages/git-bash-mcp/",
+  "packages/omo-codex/src/install/",
   "packages/omo-native/",
   "packages/omo-codex/scripts/install-",
   "script/qa/desktop/macos/",

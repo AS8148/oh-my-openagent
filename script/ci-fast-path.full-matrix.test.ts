@@ -276,6 +276,13 @@ describe("full-matrix classification", () => {
       ["a macOS desktop QA script", "script/qa/desktop/macos/run.sh"],
       ["a Codex local installer script", "packages/omo-codex/scripts/install-local.mjs"],
       ["a platform-suffixed test", "packages/omo-opencode/src/cli/cli-installer.platform.test.ts"],
+      ["the launcher platform detection", "bin/platform.js"],
+      ["the launcher entry", "bin/oh-my-opencode.js"],
+      ["the platform launcher package generator", "script/build-binaries.ts"],
+      ["the Windows Git Bash runtime", "packages/git-bash-mcp/src/index.ts"],
+      ["the Codex installer source", "packages/omo-codex/src/install/codex-agent-config.ts"],
+      ["a Codex platform smoke test", "packages/omo-codex/plugin/test/node-install-surface.test.mjs"],
+      ["the other Codex platform smoke test", "packages/omo-codex/plugin/test/install-time-build-runtime.test.mjs"],
       ["basename contains darwin", "packages/utils/src/open-darwin.ts"],
       ["basename contains macos", "script/macos-signing-workflow.test.ts"],
     ])("#then %s forces the full matrix", (_name, changedPath) => {
