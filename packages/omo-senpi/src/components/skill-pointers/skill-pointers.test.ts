@@ -267,10 +267,11 @@ describe("omo-senpi skill-pointers component", () => {
         ["what is mass ulw research at https://example.com?", ["mass-ulw", "ulw-research"]],
         ["how does mass ulw differ from ulw-loop?", ["mass-ulw"]],
         ["meth ship the docs refresh", ["mass-ulw"]],
-        // Quotes and relays: a quoted test name, a relay header, the coordinator-binding relay (#10822).
+        // Quotes and relays: a quoted test name, relay headers, and the two relays that bound a coordinator session (#10822).
         ["the failing test is 'run mass ulw research > binds both'", []],
         ["[LEAD via coordinator -> lane-a, omo#1 FIX_FIRST] run mass ulw research on the fix", []],
         ["[lane-a w46:p6P] ran mass ulw on the docs refresh", ["mass-ulw"]],
+        ["[mass-ulw-hard-trigger lane-a] omo#1 SIMPLIFY ack, implementing now. One consequence for the lead: the motivating prompt itself ('<url> How is this possible? Recreate it in 3D. mass ulw research', keyword LAST) will NOT bind under (a)/(b); it gets the pointer only ...", []],
         ["[lane-r3 -> coordinator + ledger-lane] (1) the one-time copy STARTED. (2) no parser bug: the recorded names are exact, and the other is 'omo-senpi ultrawork packaged reload > ...'; mass ulw research is next.\n[lane-r3 -> coordinator + ledger-lane] the rerun is filed.", []],
       ] as const) {
         // given
