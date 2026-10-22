@@ -28,7 +28,7 @@ import {
   getOmoNativeStateDir,
   hashSessionId,
 } from "./product-identity"
-import { readConnectedAccounts } from "./account-inventory"
+import { loadEngineTables, readConnectedAccounts } from "./account-inventory"
 import { readOmoNativeInventory, type OmoNativeInventoryDiagnostic } from "./session-inventory"
 import { resolveSessionModelRegistry } from "./session-model-registry"
 
@@ -59,6 +59,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
   return {
     name: "omo-native-session",
     register(pi, ctx) {
+      void loadEngineTables()
       // Reading the inventory, loading omo config twice and building the PostHog client is ~14 ms of
       // analytics on the session_start dispatch path, and nothing in the session observes it. It
       // runs one tick past the first paint instead, still inside this session.
