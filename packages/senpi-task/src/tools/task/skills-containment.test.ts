@@ -99,6 +99,24 @@ test("task discovered read cannot use a project symlink's frontmatter name to es
   expect(JSON.stringify(result)).not.toContain("outside the project")
 })
 
+test("task nested package links resolve within the repository boundary", () => {
+  // given
+  const f = fixture()
+  const cwd = join(f.cwd, "packages", "foo")
+  const skills = join(cwd, ".agents", "skills")
+  const shared = join(f.cwd, "shared", "mono")
+  mkdirSync(skills, { recursive: true })
+  mkdirSync(shared, { recursive: true })
+  writeFileSync(join(shared, "SKILL.md"), "---\nname: mono\ndescription: fixture\n---\nSHARED\n")
+  symlinkSync(shared, join(skills, "mono"))
+  symlinkSync(f.outside, join(skills, "escape"))
+  // when
+  const result = createFsSkillLoader({ homeDir: f.homeDir, loadSkillsFromDir })(["mono", "escape"], cwd)
+  // then
+  expect(result.resolved).toEqual(["mono"])
+  expect(result.rejected?.map((entry) => entry.name)).toEqual(["escape"])
+})
+
 test("task reports a nonexistent skill missing instead of another skill's blocked link", () => {
   // given: one escaping link next to the requested name that does not exist (#10693 review L1)
   const f = fixture()

@@ -3,6 +3,7 @@ import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 
 import type { loadSkillsFromDir as discoverSkillsFromDir } from "@code-yeongyu/senpi"
+import { detectWorktreePath } from "@oh-my-opencode/skills-loader-core/shared/project-discovery-dirs"
 
 import { senpiBarrel } from "../../lazy/senpi-barrel"
 import type { LoadedSkill, SkillLoader, SkillResolution } from "./types"
@@ -135,13 +136,14 @@ function readSkill(
   userDirs: readonly string[],
   rejected: { name: string; reason: string }[],
   projectCache: Map<string, CheckedProjectSkills>,
+  projectRoot: string | undefined,
 ): LoadedSkill | undefined {
   if (!/^[a-z0-9-]+$/.test(name)) return undefined
   for (const dir of dirs) {
     const provenance = skillProvenance(dir, userDirs.includes(dir) ? "user" : "project", {
       kind: userDirs.includes(dir) ? "user" : "project-auto",
       selectedRoot: dir, userRoots: userDirs,
-      projectRoot: skillProvenance(dir, "project").projectRoot,
+      projectRoot: projectRoot ?? skillProvenance(dir, "project").projectRoot,
     })
     try {
       if (existsSync(dir)) checkSkillPath(dir, provenance, true)
@@ -172,8 +174,9 @@ export function createFsSkillLoader(options: FsSkillLoaderOptions = {}): SkillLo
     const missing: string[] = []
     const rejected: { name: string; reason: string }[] = []
     const userDirs = uniqueDirs([join(agentDir, "skills"), join(home, ".agents", "skills"), ...extraDirs])
+    const projectRoot = detectWorktreePath(cwd)
     for (const name of names) {
-      const skill = readSkill(name, dirs, discover, discoveryCache, userDirs, rejected, projectCache)
+      const skill = readSkill(name, dirs, discover, discoveryCache, userDirs, rejected, projectCache, projectRoot)
       if (skill === undefined && !rejected.some((entry) => entry.name === name)) missing.push(name)
       else if (skill !== undefined) skills.push(skill)
     }
