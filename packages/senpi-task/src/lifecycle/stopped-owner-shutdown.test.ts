@@ -21,14 +21,17 @@ const CHILD_PATH = "/tmp/stopped-owner-child.jsonl"
 // The session shutting down belongs to a task of its own (the record whose child_session_id is that
 // session). Its hosted child is mid-turn on the host, the way a grandchild is when the root cancels
 // its parent task: the cancel closes the parent's session, whose session_shutdown runs this.
-async function world(ownerStatus: TaskStatus, ownerKilled = false, cancelRequested = false) {
+// ownerSessionRecorded=false is the live hosted shape: the host reports the durable session id only
+// later, so the owner record has no child_session_id and the session knows itself by its task id.
+async function world(ownerStatus: TaskStatus, ownerKilled = false, cancelRequested = false, ownerSessionRecorded = true) {
   const host = await harness.fakeHost()
   const handle = await openHostSessionHandle({ client: harness.hostClient(host), sessionPath: CHILD_PATH })
   await handle.startInitialPrompt("keep working")
   const store = tempStore()
   seedRecord(store, {
     task_id: "st_000000b0", parent_session_id: "root-1", status: ownerStatus, killed: ownerKilled,
-    execution_mode: "process", runner_kind: "host-session", child_session_id: PARENT_SESSION, host_pid: process.pid,
+    execution_mode: "process", runner_kind: "host-session", host_pid: process.pid,
+    ...(ownerSessionRecorded ? { child_session_id: PARENT_SESSION } : {}),
   })
   if (cancelRequested) store.mutate("st_000000b0", (owner) => ({ ...owner, cancel_requested: { requested_at: new Date().toISOString() } }))
   seedRecord(store, {
@@ -47,16 +50,20 @@ async function world(ownerStatus: TaskStatus, ownerKilled = false, cancelRequest
 }
 
 describe("session shutdown of a deliberately stopped task's session", () => {
-  for (const [label, status, killed, requested] of [
-    ["cancelled", "cancelled", false, false], ["lost", "lost", false, false], ["killed", "error", true, false],
+  for (const [label, status, killed, requested, recorded] of [
+    ["cancelled", "cancelled", false, false, true], ["lost", "lost", false, false, true], ["killed", "error", true, false, true],
     // The unreachable-child stop and the revival's pending cancel close the session while the owner
     // still reads running with only cancel_requested set.
-    ["still running with a cancel requested", "running", false, true],
+    ["still running with a cancel requested", "running", false, true, true],
+    // The live hosted path (#10818): the owner record never got child_session_id.
+    ["cancelled and hosted, known only by its task id", "cancelled", false, false, false],
   ] as const) {
     test(`#given the session's own task is ${label} #when it shuts down #then its hosted child is stopped, not detached`, async () => {
-      const { host, store, registry, lifecycle, order } = await world(status, killed, requested)
+      const { host, store, registry, lifecycle, order } = await world(status, killed, requested, recorded)
 
-      const summary = await lifecycle.suspendOnSessionShutdown({ parentSessionId: PARENT_SESSION, reason: "quit" })
+      const summary = await lifecycle.suspendOnSessionShutdown({
+        parentSessionId: PARENT_SESSION, reason: "quit", ...(recorded ? {} : { ownTaskId: "st_000000b0" }),
+      })
 
       const sent = host.commands.map((command) => command.type)
       expect(sent).toContain("abort")

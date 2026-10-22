@@ -21,7 +21,7 @@ export async function suspendOnSessionShutdown(
   context: LifecycleContext,
   input: SuspendInput,
 ): Promise<SuspendSummary> {
-  const stoppedOwner = stoppedOwnerTask(context, input.parentSessionId)
+  const stoppedOwner = stoppedOwnerTask(context, input.parentSessionId, input.ownTaskId)
   if (stoppedOwner !== undefined) return stopOwnedChildren(context, input, stoppedOwner)
   if (context.config.resume_children === false) return disposeAllOnShutdown(context, input)
 

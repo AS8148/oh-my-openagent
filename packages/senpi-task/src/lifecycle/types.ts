@@ -56,6 +56,9 @@ export type CleanupResult = {
 export type SuspendInput = {
   readonly parentSessionId: string
   readonly reason: string
+  // The shutting-down session's own task id, from its host session context. A hosted child's record
+  // never carries child_session_id, so this is how that session finds its own task (#10818).
+  readonly ownTaskId?: string
 }
 
 export type SuspendFailure = {

@@ -10,9 +10,11 @@ import type { SuspendFailure, SuspendInput, SuspendSummary } from "./types"
 // killed it can never be resumed, so nothing could ever collect a child its session suspended (#10818).
 // A cancel that is still landing counts too: the unreachable-child stop and the revival's pending
 // cancel both end the session BEFORE the record turns cancelled, with only cancel_requested set.
-export function stoppedOwnerTask(context: LifecycleContext, sessionId: string): TaskRecord | undefined {
+// A hosted child's record has no child_session_id (the host reports the durable id only later), so the
+// session's own task id from its host session context identifies it too.
+export function stoppedOwnerTask(context: LifecycleContext, sessionId: string, ownTaskId?: string): TaskRecord | undefined {
   return context.store.list().records.find((record) =>
-    record.child_session_id === sessionId
+    (record.child_session_id === sessionId || (ownTaskId !== undefined && record.task_id === ownTaskId))
     && (record.killed === true || record.status === "cancelled" || record.status === "lost"
       || record.cancel_requested !== undefined))
 }
