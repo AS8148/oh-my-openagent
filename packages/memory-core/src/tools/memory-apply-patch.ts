@@ -185,7 +185,11 @@ async function applyOperations(root: string, operations: readonly PatchOperation
 
     const written = restampContent(current, renderMemoryFile(patched.frontmatter, patched.body), claim)
     if (hasLegacyUserHeader(current) && !hasLegacyUserHeader(written)) strippedPaths.push(source.relative)
-    if (source.absolute !== target.absolute && hasLegacyUserHeader(pendingWrites.get(target.absolute) ?? (await exists(target.absolute) ? await loadCurrent(target) : undefined))) strippedPaths.push(target.relative)
+    // The destination's content before this move overwrites it: what this patch already wrote there, nothing when an earlier
+    // op freed the path (that op handled its own note), else the file on disk read leniently (only its header is looked at).
+    const overwritten = pendingWrites.get(target.absolute)
+      ?? (pendingDeletes.has(target.absolute) || !(await exists(target.absolute)) ? undefined : await readFile(target.absolute, "utf8"))
+    if (source.absolute !== target.absolute && hasLegacyUserHeader(overwritten)) strippedPaths.push(target.relative)
     pendingWrites.set(target.absolute, written)
     pendingDeletes.delete(target.absolute)
     affectedPaths.add(target.relative)

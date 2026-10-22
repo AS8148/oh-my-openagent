@@ -105,6 +105,34 @@ describe("memory tool: a legacy user header is dropped on edit and the drop is r
     expect(await strippedLines(repo)).toEqual([])
   }, 30_000)
 
+  it("#given a path freed earlier in the same patch (delete, or moved away in a rotate) #when another note moves onto it (both patch paths) #then the patch applies and only the legacy source is recorded", async () => {
+    const shapes = {
+      "delete then move": "*** Begin Patch\n*** Delete File: legacy.md\n*** Update File: plain.md\n*** Move to: legacy.md\n@@\n-old plain body\n+new plain body\n*** End Patch",
+      rotate: "*** Begin Patch\n*** Update File: legacy.md\n*** Move to: parked.md\n@@\n-Theme: light.\n+Theme: dark.\n*** Update File: plain.md\n*** Move to: legacy.md\n@@\n-old plain body\n+new plain body\n*** End Patch",
+    } as const
+    const expected = { "delete then move": [], rotate: ["legacy.md"] } as const
+    for (const [shape, input] of Object.entries(shapes) as [keyof typeof shapes, string][]) {
+      for (const via of ["memory_apply_patch", "memory apply_patch"] as const) {
+        const repo = await seeded()
+        await writeFile(join(repo.dir, "plain.md"), "---\ndescription: Plain\n---\n\nold plain body\n")
+        await repo.commitWrite(["plain.md"], "plain\n\nOmo-Writer: memory-tool", AUTHOR)
+        if (via === "memory_apply_patch") await runMemoryApplyPatch({ repo, lock, params: { reason: "patch", author: AUTHOR, provenance: PROVENANCE, input } })
+        else await run(repo, { command: "apply_patch", input })
+        expect({ shape, via, body: parseMemoryFile(await readFile(join(repo.dir, "legacy.md"), "utf8")).body.trim() }).toEqual({ shape, via, body: "new plain body" })
+        expect({ shape, via, recorded: await strippedLines(repo) }).toEqual({ shape, via, recorded: [...expected[shape]] })
+      }
+    }
+  }, 120_000)
+
+  it("#given a destination that is not valid UTF-8 #when a patch moves a legacy note onto it #then the move overwrites it as before and records the source", async () => {
+    const repo = await seeded()
+    await writeFile(join(repo.dir, "binary.md"), Buffer.from([0x2d, 0x2d, 0x2d, 0x0a, 0xff, 0xfe, 0x0a]))
+    await repo.commitWrite(["binary.md"], "binary\n\nOmo-Writer: memory-tool", AUTHOR)
+    await runMemoryApplyPatch({ repo, lock, params: { reason: "patch", author: AUTHOR, provenance: PROVENANCE, input: "*** Begin Patch\n*** Update File: legacy.md\n*** Move to: binary.md\n@@\n-Theme: light.\n+Theme: dark.\n*** End Patch" } })
+    expect(parseMemoryFile(await readFile(join(repo.dir, "binary.md"), "utf8")).body.trim()).toBe("Theme: dark.")
+    expect(await strippedLines(repo)).toEqual(["legacy.md"])
+  }, 30_000)
+
   it("#given a legacy note #when it is deleted #then nothing is recorded (a delete is not an edit)", async () => {
     const repo = await seeded()
     await run(repo, { command: "delete", file_path: "legacy.md" })
