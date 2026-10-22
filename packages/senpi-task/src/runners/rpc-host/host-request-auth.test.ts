@@ -1,5 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { chmodSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { configureSharedSubunitLogger } from "@oh-my-opencode/utils"
 import { startFakeHost } from "./__fixtures__/fake-host"
 import { askHost } from "./host-request"
 import { withContractHost, type ContractHost, type ContractHostOptions } from "./testing/contract-host"
@@ -63,16 +66,50 @@ describe.skipIf(process.platform === "win32")("POSIX raw task host challenge-res
     })
   })
 
-  test("#given a missing record #when an enforcing host challenges #then grace logs the remedy and surfaces auth_required", async () => {
+  test("#given a missing record #when an enforcing host challenges twice #then grace logs the remedy once to the omo log, never stderr, and surfaces auth_required", async () => {
     await withContractHost({ auth: true, prepareRecord: (path) => rmSync(path) }, async (host) => {
+      const lines: string[] = []
+      configureSharedSubunitLogger((message) => { lines.push(message) })
       const warning = spyOn(console, "error").mockImplementation(() => undefined)
+      const stderr = spyOn(process.stderr, "write")
       try {
-        const reply = await warm(host)
-        expect(reply).toMatchObject({ success: false, error: "auth_required" })
-        expect(warning.mock.calls.flat().join(" ")).toContain("SENPI_RPC_KEY_ROOT")
-        expect(host.frames.map(({ frame }) => frame.type)).toEqual(["get_protocol_info", "warm"])
-      } finally { warning.mockRestore() }
+        expect(await warm(host)).toMatchObject({ success: false, error: "auth_required" })
+        expect(await warm(host)).toMatchObject({ success: false, error: "auth_required" })
+        expect(lines.filter((line) => line.includes("SENPI_RPC_KEY_ROOT"))).toHaveLength(1)
+        expect(warning).not.toHaveBeenCalled()
+        expect(stderr.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("senpi rpc"))).toEqual([])
+        expect(host.frames.map(({ frame }) => frame.type)).toEqual(["get_protocol_info", "warm", "get_protocol_info", "warm"])
+      } finally { warning.mockRestore(); stderr.mockRestore(); configureSharedSubunitLogger(undefined) }
     })
+  })
+
+  test("#given a host that writes a non-JSON line before its answers #when warm runs #then the stray line is skipped and the reply arrives", async () => {
+    await withContractHost({ auth: true, strayLine: true }, async (host) => {
+      expect(await warm(host)).toMatchObject({ success: true, data: { warmed: true } })
+      expect(host.frames.map(({ frame }) => frame.type)).toEqual(["get_protocol_info", "authenticate", "warm"])
+    })
+  })
+
+  const layouts: readonly [string, (home: string) => string][] = [
+    ["a standalone engine (~/.senpi/agent)", (home) => join(home, ".senpi", "agent")],
+    ["the flat omo layout (~/.omo)", (home) => { mkdirSync(join(home, ".omo"), { mode: 0o700 }); writeFileSync(join(home, ".omo", "settings.json"), "{}"); return join(home, ".omo") }],
+  ]
+  test.each(layouts)("#given no agent-dir override on %s #when askHost runs without options #then it reads the key record where the thread client resolves the agent dir", async (_name, agentDirOf) => {
+    const home = mkdtempSync(join(tmpdir(), "rpc-home-"))
+    const saved = Object.fromEntries(["HOME", "OMO_CODING_AGENT_DIR", "SENPI_CODING_AGENT_DIR", "PI_CODING_AGENT_DIR", "SENPI_RPC_KEY_ROOT"].map((name) => [name, process.env[name]]))
+    try {
+      for (const name of Object.keys(saved)) delete process.env[name]
+      process.env.HOME = home
+      const keyRoot = agentDirOf(home)
+      mkdirSync(keyRoot, { recursive: true, mode: 0o700 })
+      await withContractHost({ auth: true, keyRoot }, async (host) => {
+        expect(await askHost(host.socket, { type: "warm", id: "warm-default", cwd: host.root, kind: "worker" }, 2000)).toMatchObject({ success: true, data: { warmed: true } })
+        expect(host.frames.map(({ frame }) => frame.type)).toEqual(["get_protocol_info", "authenticate", "warm"])
+      })
+    } finally {
+      for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })
 

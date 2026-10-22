@@ -18,6 +18,10 @@ export type ContractHostOptions = {
   readonly attachRefusal?: "host_draining" | "session_not_attached"
   /** After a mutation succeeds: the host drops the attachment itself, or the connection is lost before release answers. */
   readonly afterMutation?: "detached" | "connection_lost"
+  /** Agent dir the key record is written under (`<keyRoot>/rpc/keys/<launch_id>`); the host's temp root by default. */
+  readonly keyRoot?: string
+  /** Writes a line that is not JSON before every response, as a host's stray output would. */
+  readonly strayLine?: boolean
 }
 export type ContractHost = {
   readonly socket: string
@@ -35,9 +39,10 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
   const transport = fakeHostTransport(socket)
   const launchId = randomUUID()
   const key = randomBytes(32)
-  const recordPath = join(root, "rpc", "keys", launchId)
-  mkdirSync(join(root, "rpc", "keys"), { recursive: true, mode: 0o700 })
-  chmodSync(join(root, "rpc"), 0o700)
+  const keyRoot = options.keyRoot ?? root
+  const recordPath = join(keyRoot, "rpc", "keys", launchId)
+  mkdirSync(join(keyRoot, "rpc", "keys"), { recursive: true, mode: 0o700 })
+  for (const directory of [keyRoot, join(keyRoot, "rpc")]) chmodSync(directory, 0o700)
   writeFileSync(recordPath, JSON.stringify({
     version: 1, launch_id: launchId, key: key.toString("hex"), pid: process.pid,
     process_start: null, endpoint: socket, created_at: new Date().toISOString(),
@@ -58,7 +63,7 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
     let authenticated = process.platform === "win32" || options.auth !== true
     let attached = false
     let expectedProof = ""
-    const respond = (frame: Frame, data: unknown = {}, error?: string, errorData?: Frame) => client.write(`${JSON.stringify({
+    const respond = (frame: Frame, data: unknown = {}, error?: string, errorData?: Frame) => client.write(`${options.strayLine ? "not json\n" : ""}${JSON.stringify({
       id: frame.id, type: "response", command: frame.type, success: error === undefined,
       ...(error === undefined ? { data } : { error, errorCode: error, ...(errorData === undefined ? {} : { errorData }) }),
     })}\n`)
@@ -96,7 +101,7 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         if (!authenticated) { respond(frame, undefined, "auth_required"); continue }
         if (frame.type === "attach_session") {
           if (options.attachRefusal === "host_draining") respond(frame, undefined, "session_busy_lifecycle", { reason: "host_draining" })
-          else if (options.attachRefusal === "session_not_attached") respond(frame, undefined, "session_not_attached", {})
+          else if (options.attachRefusal === "session_not_attached") respond(frame, undefined, "session_not_attached", { reason: "no_connection" })
           else if (frame.sessionId !== "rpc-1" || frame.durableSessionId !== durableId) {
             respond(frame, undefined, "session_identity_mismatch")
           } else { attached = true; respond(frame, { sessionId: "rpc-1", attached: true }) }
@@ -105,8 +110,15 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         if (frame.type === "release_attachment") {
           if (options.afterMutation === "connection_lost") { client.destroy(); continue }
           if (attached) respond(frame, { deferred: false })
-          else respond(frame, undefined, "session_not_attached", {})
+          else respond(frame, undefined, "session_not_attached", { reason: "not_attached" })
           attached = false
+          continue
+        }
+        if (frame.type === "reclaim_session") {
+          if (options.attachRefusal === "host_draining") respond(frame, undefined, "session_busy_lifecycle", { reason: "host_draining" })
+          else if (options.attachRefusal === "session_not_attached") respond(frame, undefined, "session_not_attached", { reason: "no_connection" })
+          else if (frame.durableSessionId !== durableId) respond(frame, undefined, "session_identity_mismatch")
+          else { attached = true; respond(frame, { reclaimed: true, sessionId: "rpc-1" }) }
           continue
         }
         if (frame.type === "list_sessions") { respond(frame, { sessions: [session()] }); continue }
@@ -120,7 +132,8 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
           respond(frame, { sessionId: "rpc-1", state: session() })
           continue
         }
-        if (!options.legacy && !attached) {
+        // Only session-scoped commands are gated, as the host's attachment gate reads `sessionId`.
+        if (!options.legacy && !attached && frame.sessionId !== undefined) {
           respond(frame, undefined, "session_not_attached", {
             reason: "this connection is not attached to that session",
             action: "attach first with attach_session { sessionId, durableSessionId } or open_session { sessionPath }",

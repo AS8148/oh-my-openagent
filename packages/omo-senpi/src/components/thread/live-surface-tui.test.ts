@@ -64,7 +64,6 @@ async function tuiEndpoint(socketPath: string, session: { id: string; path: stri
       if (newline < 0) return
       const frame = JSON.parse(text.slice(0, newline)) as Frame
       pending = Buffer.from(text.slice(newline + 1), "utf8")
-      if (frame.type === "get_protocol_info") { socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, data: {} })}\n`); return }
       frames.push(frame)
       const reply = (body: Record<string, unknown>) => socket.end(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, ...body })}\n`)
       switch (frame.type) {

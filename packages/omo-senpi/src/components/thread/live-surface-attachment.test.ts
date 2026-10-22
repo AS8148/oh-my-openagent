@@ -1,4 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import { rmSync } from "node:fs"
+import { configureSharedSubunitLogger } from "@oh-my-opencode/utils"
 import { withContractHost, type ContractHost } from "../../../../senpi-task/src/runners/rpc-host/testing/contract-host"
 import { createLiveThreadSurface, type LiveThreadSurface } from "./live-surface"
 import { createLazyLiveThreadSurface } from "./lazy-live-surface"
@@ -22,8 +24,14 @@ const operations: readonly [string, (client: LiveThreadSurface, host: ContractHo
   ["extension_ui_response", (client, host) => client.gateway.respondUi!(endpoint(host), { ui_request_id: "question", fields: { value: "yes" } })],
 ]
 
-function releaseLogLines(stderr: { readonly mock: { readonly calls: readonly (readonly unknown[])[] } }): string[] {
-  return stderr.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("release_attachment"))
+/** Runs `exercise` while collecting the omo log lines and our lines written to stderr. */
+async function capturingLogs(exercise: (lines: { readonly log: string[]; readonly stderr: () => string[] }) => Promise<void>): Promise<void> {
+  const log: string[] = []
+  configureSharedSubunitLogger((message) => { log.push(message) })
+  const stderr = spyOn(process.stderr, "write")
+  try {
+    await exercise({ log, stderr: () => stderr.mock.calls.map((call) => String(call[0])).filter((line) => /thread rpc|senpi rpc/.test(line)) })
+  } finally { stderr.mockRestore(); configureSharedSubunitLogger(undefined) }
 }
 
 describe("thread RPC attachment refusals and release outcomes (wire contract v1.1)", () => {
@@ -49,24 +57,46 @@ describe("thread RPC attachment refusals and release outcomes (wire contract v1.
 
   test("#given a host that already dropped the hold #when the mutation succeeded and release answers session_not_attached #then the mutation result is returned as released", async () => {
     await withContractHost({ auth: true, afterMutation: "detached" }, async (host) => {
-      const stderr = spyOn(process.stderr, "write")
-      try {
+      await capturingLogs(async (lines) => {
         expect(await Reflect.apply(surface(host).setModel, undefined, ["rpc-1", "p", "m", "dur-selected"])).toEqual({ provider: "p", id: "m" })
         expect(host.mutations.map((frame) => frame.type)).toEqual(["set_model"])
         expect(host.frames.some(({ frame }) => frame.type === "release_attachment")).toBe(true)
-        expect(releaseLogLines(stderr)).toEqual([])
-      } finally { stderr.mockRestore() }
+        expect(lines.log.filter((line) => line.includes("release_attachment"))).toEqual([])
+        expect(lines.stderr()).toEqual([])
+      })
     })
   })
 
-  test("#given a connection lost before release answers #when the mutation succeeded #then the mutation result is returned and the release failure is logged once", async () => {
+  test("#given a connection lost before release answers #when the mutation succeeded #then the mutation result is returned and the release failure is logged once to the omo log, not stderr", async () => {
     await withContractHost({ auth: true, afterMutation: "connection_lost" }, async (host) => {
-      const stderr = spyOn(process.stderr, "write")
-      try {
+      await capturingLogs(async (lines) => {
         expect(await Reflect.apply(surface(host).setModel, undefined, ["rpc-1", "p", "m", "dur-selected"])).toEqual({ provider: "p", id: "m" })
         expect(host.mutations.map((frame) => frame.type)).toEqual(["set_model"])
-        expect(releaseLogLines(stderr)).toHaveLength(1)
-      } finally { stderr.mockRestore() }
+        expect(lines.log.filter((line) => line.includes("release_attachment"))).toHaveLength(1)
+        expect(lines.stderr()).toEqual([])
+      })
+    })
+  })
+
+  test("#given an rpc_host endpoint with no routing id #when wake is sent to an attach-capable host #then no attachment is attempted and the session-less wake goes through", async () => {
+    await withContractHost({ auth: true }, async (host) => {
+      const reply = await surface(host).gateway.wake({ ...endpoint(host), routing_id: null }, ["delivery"])
+      expect(reply).toEqual({ admitted: [] })
+      expect(host.mutations.map((frame) => frame.type)).toEqual(["wake"])
+      expect(host.mutations[0]).not.toHaveProperty("sessionId")
+      expect(host.frames.some(({ frame }) => frame.type === "attach_session" || frame.type === "release_attachment")).toBe(false)
+    })
+  })
+
+  test.skipIf(process.platform === "win32")("#given no key record for an enforcing host #when a mutation is refused auth_required #then the typed error carries the key-root remedy", async () => {
+    await withContractHost({ auth: true, prepareRecord: (path) => { rmSync(path) } }, async (host) => {
+      await capturingLogs(async () => {
+        const refusal = await Reflect.apply(surface(host).setSessionName, undefined, ["rpc-1", "renamed", "dur-selected"])
+          .then(() => undefined, (error: unknown) => error)
+        expect((refusal as Error).message).toStartWith("auth_required:")
+        expect((refusal as Error).message).toContain("SENPI_RPC_KEY_ROOT")
+        expect(host.mutations).toEqual([])
+      })
     })
   })
 })
