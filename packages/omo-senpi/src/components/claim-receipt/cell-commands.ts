@@ -33,7 +33,7 @@ const unquote = (literal: string): string => literal.replace(QUOTES, "").replace
 const shellQuote = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`
 const checkKinds = (line: string): CellCheckKind[] => invokedKinds(line).filter((kind): kind is CellCheckKind => kind !== "lookup")
 
-// A list such as ["gh", "pr", "checks", n] is one argv (subprocess.run, Bun.spawn): non-literal elements stand in as X.
+// A list such as ["gh", "pr", "checks", n] is one argv (subprocess.run, a Bun spawn call): non-literal elements stand in as X.
 function listWords(list: string): string[] {
   const words: string[] = []
   for (const element of list.slice(1, -1).split(",")) {
