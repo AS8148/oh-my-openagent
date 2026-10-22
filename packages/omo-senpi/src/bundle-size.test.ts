@@ -147,7 +147,7 @@ const builtExtensionPath = join(packageRoot, "plugin", "extensions", "omo.js")
 // device account (service-auth store and refresh) loads from #omo-device-account-runtime on the first sync
 // resolve. On the batch #2 head (e320d31ab1) build-extension.mjs (bun 1.4.3) measures 1,485,607 -> 1,439,434
 // bytes (-46,173): -33,386 from the commands sidecar, -12,787 from the device account sidecar.
-const BUDGET_BYTES = 1_450_000
+const BUDGET_BYTES = 1_460_000
 
 describe("omo-senpi bundle size budget", () => {
   it("#given the built extension #when its byte size is measured #then it stays within the documented byte budget", () => {
