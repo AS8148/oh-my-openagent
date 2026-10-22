@@ -338,7 +338,17 @@ jobs:
           Get-ChildItem (Join-Path $env:RUNNER_TEMP "git-trace2") -File -ErrorAction SilentlyContinue |
             Where-Object { -not (Select-String -Path $_.FullName -Pattern '\|\s*atexit\s*\|' -Quiet) } |
             Copy-Item -Destination $unfinished
-          Get-ChildItem $diagnostics -Recurse -File | Select-Object -ExpandProperty FullName
+          # The upload can be refused (artifact quota), so the evidence is also printed here.
+          foreach ($record in Get-ChildItem $diagnostics -Filter 'git-timeout-*.json' -File) {
+            "::group::git timeout record $($record.Name)"
+            Get-Content $record.FullName -TotalCount 200
+            "::endgroup::"
+          }
+          foreach ($trace in Get-ChildItem $unfinished -File) {
+            "::group::unfinished git trace2 $($trace.Name)"
+            Get-Content $trace.FullName -Tail 60
+            "::endgroup::"
+          }
 
       - name: Upload timed-out git evidence
         if: always() && runner.os == 'Windows' && matrix.shard == '1/2' && needs.ci-mode.outputs.run_heavy == 'true' && (matrix.os == 'ubuntu-latest' || needs.ci-mode.outputs.full_matrix == 'true')
