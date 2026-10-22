@@ -3,12 +3,20 @@
 // latest failure until a cycle succeeds; the raw error text stays in the log, never in the status.
 
 import { StrandedGitLockError } from "../../git/repo-lock-sweep"
+import { SyncAuthError, SyncHttpError } from "./adapters/http-transport"
 
 export type SyncFailure =
   | { readonly kind: "stranded_lock"; readonly paths: readonly string[]; readonly reason: string; readonly action: string }
+  | { readonly kind: "auth_expired"; readonly reason: string; readonly action: string }
   | { readonly kind: "unknown"; readonly reason: string; readonly action: string }
 
 export type SyncFailureKind = SyncFailure["kind"]
+
+const AUTH_EXPIRED: SyncFailure = {
+  kind: "auth_expired",
+  reason: "This device's OmO sign-in has expired or was refused, so memory sync cannot reach your account.",
+  action: "Sign in to OmO again.",
+}
 
 const UNKNOWN: SyncFailure = {
   kind: "unknown",
@@ -27,5 +35,6 @@ export function describeSyncFailure(error: unknown): SyncFailure {
         : `If no other session is working on this memory, run /memory unlock for each: ${error.paths.join(", ")}; or restart OmO.`,
     }
   }
+  if (error instanceof SyncAuthError || (error instanceof SyncHttpError && error.status === 401)) return AUTH_EXPIRED
   return UNKNOWN
 }

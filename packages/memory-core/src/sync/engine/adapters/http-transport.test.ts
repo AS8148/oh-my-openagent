@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
 
-import { b64urlOfHex, createHttpTransport, hexOfB64url } from "./http-transport"
+import { b64urlOfHex, createHttpTransport, hexOfB64url, SyncAuthError, SyncHttpError } from "./http-transport"
 import { startWireServer, type WireServer } from "./wire-server.test-support"
 
 const servers: WireServer[] = []
@@ -49,6 +49,19 @@ test("reserve, upload and append land a batch the other device pulls and downloa
   expect(entry).toMatchObject({ seq: 1, kind: "batch", digest: sha256Hex(bytes), author: "device:dev-a", batchId: pushedIds.at(-1) })
   expect(entry.batchId).toMatch(/^[A-Za-z0-9_-]{22}$/)
   expect(await b.download(entry.objectId)).toEqual(bytes)
+})
+
+test("a token that cannot be refreshed fails the request as SyncAuthError, and a token the server refuses as a 401 (omo #10637)", async () => {
+  const { server } = await pair()
+  const refused = new Error("refresh refused")
+  const unrefreshable = createHttpTransport({ baseUrl: server.url, token: () => Promise.reject(refused) })
+  const failure = await unrefreshable.pull(0, 500).then(() => null, (error: unknown) => error)
+  expect(failure).toBeInstanceOf(SyncAuthError)
+  expect((failure as SyncAuthError).cause).toBe(refused)
+  const unknownDevice = createHttpTransport({ baseUrl: server.url, token: () => "not-a-device-token" })
+  const refusal = await unknownDevice.pull(0, 500).then(() => null, (error: unknown) => error)
+  expect(refusal).toBeInstanceOf(SyncHttpError)
+  expect(refusal).toMatchObject({ code: "unauthorized", status: 401, transient: false })
 })
 
 test("a stale base answers stale_base with the server's head", async () => {

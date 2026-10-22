@@ -23,6 +23,14 @@ export class SyncHttpError extends Error {
   }
 }
 
+/** The device's bearer token could not be read or refreshed: its sign-in has expired or was refused. */
+export class SyncAuthError extends Error {
+  override readonly name = "SyncAuthError"
+  constructor(cause: unknown) {
+    super("the device's sign-in token could not be read or refreshed", { cause })
+  }
+}
+
 export interface HttpTransportOptions {
   readonly baseUrl: string
   /** The device's bearer token, read per request so a refresh takes effect. */
@@ -45,10 +53,18 @@ interface WireState {
   readonly snapshot: { readonly covers_seq: number; readonly chunk_object_ids: readonly string[] } | null
 }
 
+async function bearer(options: HttpTransportOptions): Promise<string> {
+  try {
+    return await options.token()
+  } catch (error) {
+    throw new SyncAuthError(error)
+  }
+}
+
 export function createHttpTransport(options: HttpTransportOptions): Transport {
   const doFetch = options.fetch ?? fetch
   const request = async (method: string, path: string, body?: string | Uint8Array, json = true): Promise<Response> => {
-    const headers: Record<string, string> = { authorization: `Bearer ${await options.token()}` }
+    const headers: Record<string, string> = { authorization: `Bearer ${await bearer(options)}` }
     if (body !== undefined && json) headers["content-type"] = "application/json"
     const response = await doFetch(`${options.baseUrl}${path}`, { method, headers, ...(body === undefined ? {} : { body }) })
     if (response.ok) return response
@@ -119,7 +135,7 @@ async function streamLoop(options: HttpTransportOptions, doFetch: typeof fetch, 
     let up = false
     try {
       const response = await doFetch(`${options.baseUrl}/v1/me/events`, {
-        headers: { authorization: `Bearer ${await options.token()}`, accept: "text/event-stream" },
+        headers: { authorization: `Bearer ${await bearer(options)}`, accept: "text/event-stream" },
         signal,
       })
       if (!response.ok || response.body === null) throw new SyncHttpError("stream", response.status, true)

@@ -1,6 +1,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test"
 
 import { StrandedGitLockError } from "../../git/repo-lock-sweep"
+import { SyncAuthError, SyncHttpError } from "./adapters/http-transport"
 import { type Device, GIT_TEST_TIMEOUT, makeDevice } from "./engine-harness.test-support"
 import { FakeSyncServer } from "./fake-server.test-support"
 
@@ -88,6 +89,26 @@ test("an unexpected cycle error reports failing with a generic reason, never the
   const status = await b.engine.status()
   expect(status).toMatchObject({ kind: "failing", attempts: 1, failure: { kind: "unknown" } })
   expect(JSON.stringify(status)).not.toContain("secret-value")
+  load.mockRestore()
+  await b.engine.runCycle()
+  expect(await b.engine.status()).toMatchObject({ kind: "synced", at: b.clock.now() })
+}, GIT_TEST_TIMEOUT)
+
+test.each([
+  ["a sign-in token that cannot be refreshed", () => new SyncAuthError(new Error("refresh refused"))],
+  ["a request the server refuses as unauthorized (401)", () => new SyncHttpError("unauthorized", 401, false)],
+])("%s reports failing as an expired sign-in with the sign-in action until a cycle succeeds (omo #10637)", async (_name, makeError) => {
+  const { b } = await pair()
+  const load = spyOn(b.store, "load").mockImplementation(async () => {
+    throw makeError()
+  })
+  await failedCycle(b)
+  expect(await b.engine.status()).toEqual({
+    kind: "failing",
+    since: b.clock.now(),
+    attempts: 1,
+    failure: { kind: "auth_expired", reason: expect.any(String), action: "Sign in to OmO again." },
+  })
   load.mockRestore()
   await b.engine.runCycle()
   expect(await b.engine.status()).toMatchObject({ kind: "synced", at: b.clock.now() })
