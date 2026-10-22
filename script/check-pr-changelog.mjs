@@ -45,7 +45,7 @@ function hasReleaseTransition(before, after) {
 // changelogs: every changed CHANGELOG.md as { path, before, after }; fragments: files this PR added, as { path, content }.
 export function checkPrChangelog({ changedFiles, policy, previousPolicy = policy, changelogs = [], fragments = [], labels = [], prNumber }) {
   const userFacingFiles = changedFiles.filter((path) => isUserFacingPath(path, policy) || isUserFacingPath(path, previousPolicy))
-  // Unreleased is compiled from fragments at release, so no label or fragment excuses a direct edit.
+  // PRs never edit Unreleased; their entries live in fragments (the release-time compile is #9961), so no label or fragment excuses a direct edit.
   const editedUnreleased = changelogs
     .filter(({ before, after }) => unreleasedBody(before) !== unreleasedBody(after) && !hasReleaseTransition(before, after))
     .map(({ path }) => path)
@@ -54,7 +54,8 @@ export function checkPrChangelog({ changedFiles, policy, previousPolicy = policy
   }
   if (labels.includes(noChangelogLabel)) return { pass: true, reason: "no-changelog label present", userFacingFiles }
   if (userFacingFiles.length === 0) return { pass: true, reason: "no user-facing changes", userFacingFiles }
-  const added = fragments.filter(({ path, content }) => fragmentPath.test(path) && hasContentLine(content)).map(({ path }) => path)
+  const ownFragment = (path) => prNumber === undefined || path === `changes/unreleased/${prNumber}.md`
+  const added = fragments.filter(({ path, content }) => fragmentPath.test(path) && ownFragment(path) && hasContentLine(content)).map(({ path }) => path)
   if (added.length > 0) return { pass: true, reason: `added changelog fragment ${added.join(", ")}`, userFacingFiles }
   if (changelogs.some(({ before, after }) => hasReleaseTransition(before, after))) return { pass: true, reason: "moved Unreleased content into a new release section", userFacingFiles }
   return { pass: false, reason: "user-facing changes without an added changes/unreleased/<PR number>.md fragment", userFacingFiles }
@@ -104,7 +105,7 @@ export function main(argv) {
   console.log(`changelog-gate: ${result.pass ? "PASS" : "FAIL"} - ${result.reason}`)
   for (const path of result.userFacingFiles) console.log(`  user-facing: ${path}`)
   const fragment = `changes/unreleased/${prNumber ?? "<PR number>"}.md`
-  if (result.editedUnreleased) console.log(`Revert the Unreleased edit in ${result.editedUnreleased.join(", ")} and put this PR's entry in ${fragment} instead; the release compiles fragments into the changelog.`)
+  if (result.editedUnreleased) console.log(`Revert the Unreleased edit in ${result.editedUnreleased.join(", ")} and put this PR's entry in ${fragment} instead; fragments are compiled into the changelog at release (#9961).`)
   else if (!result.pass) console.log(`Add ${fragment} with this PR's entry (a ### section heading such as Fixed or Changed, then the note), or ask a maintainer to apply no-changelog.`)
   return result.pass ? 0 : 1
 }

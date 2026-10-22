@@ -53,6 +53,12 @@ describe("changelog fragments replace direct Unreleased edits", () => {
   ])("refuses a fragment that %s", (_name, path, text) => {
     expect(gate({ [path]: text }).status).toBe(1)
   }, 20_000)
+  test("refuses a fragment named for another PR when the PR number is known", () => {
+    const result = gate({ "changes/unreleased/2.md": "### Fixed\n\n- Runtime value fix (#7).\n" }, ["--pr", "7"])
+    expect(result.stdout).toContain("changelog-gate: FAIL")
+    expect(result.stdout).toContain("changes/unreleased/7.md")
+    expect(result.status).toBe(1)
+  }, 20_000)
   test("does not count an edit to another PR's existing fragment", () => {
     expect(gate({ "changes/unreleased/1.md": "### Fixed\n\n- Earlier fix, reworded (#1).\n" }).status).toBe(1)
   }, 20_000)
