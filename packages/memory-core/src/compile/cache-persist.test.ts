@@ -31,6 +31,7 @@ async function createRepo(): Promise<{ dir: string; repo: GitMemoryRepo }> {
     seedFiles: [
       { relativePath: "system/persona.md", content: "---\ndescription: Persona\n---\nsteady\n" },
       { relativePath: "system/human.md", content: "---\ndescription: Human\n---\nprefers short answers\n" },
+      { relativePath: "system/agreements.md", content: "---\ndescription: Agreements\n---\n- [global] Reply in English.\n" },
       ...Array.from({ length: 30 }, (_, note) => ({
         relativePath: `reference/topic-${note % 3}/note-${note}.md`,
         content: `---\ndescription: note ${note}\n---\nbody ${note}\n`,
@@ -198,6 +199,37 @@ describe("MemoryBlockCache persisted blocks", () => {
       expect(relaunch.work.lsTree, failing).toBeGreaterThan(0)
       expect(recompiled, failing).toBe(full)
     }
+  })
+
+  it("#given the agreements read times out during the compile #when the block is compiled #then nothing is stored and a fresh process compiles the full block", async () => {
+    // given
+    const { dir, repo } = await createRepo()
+    const revision = await repo.head()
+    const full = await new MemoryBlockCache().compile(repo, TEMPLATE, OPTIONS, revision)
+    const flaky = new Proxy(repo, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver)
+        if (typeof value !== "function") return value
+        if (property === "show") {
+          return (...args: unknown[]) =>
+            args[1] === "system/agreements.md"
+              ? Promise.reject(new GitTimeoutError(["show"], 1))
+              : value.apply(target, args)
+        }
+        return value.bind(target)
+      },
+    })
+    const degraded = persistedCache()
+
+    // when
+    const fallback = await degraded.compile(flaky, TEMPLATE, OPTIONS, revision)
+    await settle(degraded)
+    const recompiled = await persistedCache().compile(repo, TEMPLATE, OPTIONS, revision)
+
+    // then
+    expect(fallback).not.toBe(full)
+    expect(await storeFiles(dir)).toEqual([])
+    expect(recompiled).toBe(full)
   })
 
   it("#given a damaged stored block #when a new process compiles #then it compiles the correct bytes and rewrites the entry for the next process", async () => {
