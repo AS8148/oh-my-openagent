@@ -1,6 +1,4 @@
-import { join } from "node:path"
-
-import { readJsoncFile } from "@oh-my-opencode/utils"
+import { readModelsJson } from "./models-json"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -28,7 +26,7 @@ function declaredModelIds(entry: unknown): readonly string[] {
  */
 export function customModelProviders(agentDir: string | undefined): readonly DeclaredModelProvider[] {
   if (agentDir === undefined) return []
-  const parsed = readJsoncFile<unknown>(join(agentDir, "models.json"))
+  const parsed = readModelsJson(agentDir)
   const providers = isRecord(parsed) ? parsed["providers"] : undefined
   if (!isRecord(providers)) return []
   return Object.entries(providers).flatMap(([provider, entry]) => {
