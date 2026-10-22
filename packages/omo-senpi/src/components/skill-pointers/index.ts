@@ -25,8 +25,8 @@ interface SkillPointerTarget {
   readonly extra?: (sessionScope: string | null) => string
   readonly companions?: readonly SkillCompanion[]
   // A binding target enters its mode instead of asking the model whether the user meant it: the
-  // conditional pointer let the model skip mass-ulw entirely (#10810). Binding is POSITIVE: only an
-  // explicit request form matches (`explicitRequestPattern`). Every other mention (a statement or a
+  // conditional pointer let the model skip mass-ulw entirely (#10810). Binding is POSITIVE: only a
+  // fixed request form matches (`bindingForms`). Every other mention (a statement or a
   // question about the skill, a relayed report, the plain-word alias `meth`) keeps the conditional
   // pointer, because forcing a workflow run onto it is the wrong answer.
   readonly bindingPattern?: RegExp
@@ -79,31 +79,29 @@ const ULTIMATE_BROWSING_COMPANION: SkillCompanion = {
 // also stands in for the `ulw` half: "mulw research" names the same composite as
 // "mass ulw research" and loads both skills.
 const MASS_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw|meth)`
-// Explicit request forms, the only inputs that bind:
-//   1. the keyword opens the prompt ("mass ulw fix the suite"), after anything the host or the user puts
-//      ahead of the typed request: masked regions, image/paste placeholders, an expanded skill block, a
-//      slash command ("/skill:browser then ulw research ...");
-//   2. the keyword closes the prompt ("<task>. mass ulw research", the way the ulw keywords are typed);
-//   3. an imperative verb opens a sentence and takes the skill as its object ("run mass-ulw on ...",
-//      "use ulw-research to ...").
-// Keywords are the spaced or fused spellings; the hyphenated skill name counts only after a request
-// verb, since prose uses it as a noun ("fix the mass-ulw skill"). `meth` is an ordinary English word
-// and never binds. A slash command for the skill itself loads it through the command and is deduped.
-const MASS_KEYWORD = String.raw`(?:mass\s*ulw|ulw\s*mass|mulw)`
-const MASS_NAME = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw)`
-const PROMPT_LEAD = String.raw`^[\s\0]*(?:(?:\[(?:Image|Pasted text)\b[^\]\n]*\]|<skill\s[^>]*>[\s\S]*?<\/skill>|\/[\w:-]+(?:\s+(?:then|and)\b)?)[\s\0]*)*`
-const REQUEST_VERB = String.raw`(?:^|[.!?\n])[\s\0]*(?:please\s+|let'?s\s+|now\s+)?(?:run|use|start|launch|invoke|do|kick\s+off|spin\s+up)\s+(?:a\s+|the\s+)?`
-const explicitRequestPattern = (keyword: string, name: string): RegExp => {
-  const ends = `${NOT_INTO_IDENTIFIER}${NOT_BEFORE_PATH}`
-  return new RegExp(
+// Binding forms, and the only ones: a missed bind costs the user a retyped prompt, while a false bind
+// forces a workflow run onto a session that only read the name (a relayed lane report did, #10822).
+//   (a) the skill's slash command opens the prompt: "/mass-ulw ...", "/mulw ...", "/ulw-research ...";
+//   (b) the prompt's first word is a verb from a fixed list and the keyword follows it directly, then
+//       the prompt ends or continues with a connector: "run mass ulw on the flaky suite",
+//       "use ulw-research to compare ...". The Korean form puts the keyword first and the verb right
+//       after it: "mass ulw 돌려", "ulw research 실행해", "mass ulw로 써줘".
+// Everything else, keyword-first sentences, statements and questions included, keeps the conditional
+// pointer. Only image/paste placeholders may precede the request: a masked quote or relay never does.
+const BIND_LEAD = String.raw`^\s*(?:\[(?:Image|Pasted text)\b[^\]\n]*\]\s*)*`
+const BIND_VERB = String.raw`(?:run|start|use|do|execute)`
+const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,.!:;\n]|(?:to|on|for|with|and|now|here)\b))(?![^\n.!]*\?)`
+const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려|실행해|써)`
+const bindingForms = (command: string, keyword: string): RegExp =>
+  new RegExp(
     [
-      String.raw`${PROMPT_LEAD}${keyword}\b${ends}`,
-      String.raw`${NOT_AFTER_IDENTIFIER}\b${keyword}[\s\0]*[.!]?[\s\0]*$`,
-      String.raw`${REQUEST_VERB}${name}\b${ends}`,
+      String.raw`${BIND_LEAD}\/${command}(?=\s|$)`,
+      String.raw`${BIND_LEAD}${BIND_VERB}\s+${keyword}${BIND_FOLLOW}`,
+      String.raw`${BIND_LEAD}${keyword}${KOREAN_VERB}`,
     ].join("|"),
     "i",
   )
-}
+const MASS_KEYWORD = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw)`
 // A skill name is a request only as a word of its own: not a segment of a longer identifier
 // (`mass-ulw-refactor`, `senpi-ulw-loop`) and not part of a path or file name (`.omo/ulw-plan/`).
 const skillNamePattern = (body: string): RegExp => new RegExp(String.raw`${NOT_AFTER_IDENTIFIER}\b${body}\b${NOT_INTO_IDENTIFIER}${NOT_BEFORE_PATH}`, "i")
@@ -115,7 +113,7 @@ const TARGETS: readonly SkillPointerTarget[] = [
     expandedBlockPattern: /<skill\s+name="mass-ulw"/i,
     instruction: "dispatch each phase's dependency-ordered lanes as one run of the workflow tool composed in an eval cell, start a new run per phase rather than one graph for the whole job, and when a ulw-loop or ulw-execute contract is active let it own the goal",
     // The trailing composite "... mass ulw research" invokes both skills.
-    bindingPattern: explicitRequestPattern(String.raw`${MASS_KEYWORD}(?:\s+research)?`, MASS_NAME),
+    bindingPattern: bindingForms(String.raw`(?:mass-ulw|mulw)`, String.raw`${MASS_KEYWORD}(?:[\s-]*research)?`),
   },
   {
     skillName: "ulw-plan",
@@ -139,7 +137,7 @@ const TARGETS: readonly SkillPointerTarget[] = [
     expandedBlockPattern: /<skill\s+name="ulw-research"/i,
     instruction: "orchestrate team-first maximum-saturation research",
     companions: [BROWSER_COMPANION, ULTIMATE_BROWSING_COMPANION],
-    bindingPattern: explicitRequestPattern(String.raw`(?:ulw|${MASS_KEYWORD})\s*research`, String.raw`(?:ulw|${MASS_NAME})[\s-]*research`),
+    bindingPattern: bindingForms("ulw-research", String.raw`(?:ulw|${MASS_KEYWORD})[\s-]*research`),
   },
 ]
 
@@ -198,8 +196,9 @@ function handleInput(
   const visible = stripQuotedRegions(payload.text)
   const alreadyLoaded = (skillName: string, expandedBlockPattern: RegExp): boolean =>
     skillName === commandSkillName || expandedBlockPattern.test(payload.text)
-  const invoked = TARGETS.filter((target) => target.pattern.test(visible))
   const binds = (target: SkillPointerTarget): boolean => target.bindingPattern?.test(visible) === true
+  // A slash command ("/mass-ulw") is not a bare name, so it is invoked through its binding form.
+  const invoked = TARGETS.filter((target) => target.pattern.test(visible) || binds(target))
   const massMode = invoked.some((target) => target.customType === MASS_ULW_CUSTOM_TYPE && binds(target))
   const pointers: SkillPointerMessage[] = invoked
     .filter((target) => !alreadyLoaded(target.skillName, target.expandedBlockPattern))
@@ -252,7 +251,7 @@ function skillPointer(target: SkillPointerTarget, sessionScope: string | null): 
   return `<omo-${target.skillName}-pointer>This message mentions ${target.skillName}. If the user of this session is asking to run ${target.skillName}, read the ${target.skillName} skill at ${skillsRoot}${target.skillName}/SKILL.md with the read tool and follow it: ${target.instruction}. If ${target.skillName} is only being discussed, quoted, or relayed from another session, ignore this pointer.${extra}</omo-${target.skillName}-pointer>`
 }
 
-// Reached only for an invocation (see `bindingPattern`) in text that survived the quote, relay, negation,
+// Reached only for a binding form (see `bindingForms`) in text that survived the quote, relay, negation,
 // identifier, child-session and extension filters, so the block states the mode as settled and names the
 // first reads and the dispatch shape that satisfy it.
 function skillMode(target: SkillPointerTarget, massMode: boolean, sessionScope: string | null): string {
@@ -269,7 +268,7 @@ function skillMode(target: SkillPointerTarget, massMode: boolean, sessionScope: 
       : massMode
         ? " mass-ulw mode is active in the same message, so run the research waves as its workflow runs."
         : ""
-  return `<${tag}>The user of this session invoked ${target.skillName} in their own words, so this turn runs in ${target.skillName} mode. This is binding: quoted, relayed, negated and delegated mentions never produce this block. Before any other tool call this turn, read ${reads} in full with the read tool, then follow the skill: ${target.instruction}.${dispatch}${extra}</${tag}>`
+  return `<${tag}>The user of this session invoked ${target.skillName} in their own words, so this turn runs in ${target.skillName} mode. This is binding: the block is produced only for the skill's slash command or a prompt that opens with a request to run it. Before any other tool call this turn, read ${reads} in full with the read tool, then follow the skill: ${target.instruction}.${dispatch}${extra}</${tag}>`
 }
 
 

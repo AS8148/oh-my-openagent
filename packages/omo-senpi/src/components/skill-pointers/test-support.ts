@@ -51,7 +51,8 @@ export async function dispatchInput(
   return result as InputDispatchResult
 }
 
-// mass-ulw and ulw-research inject binding `<omo-*-mode>` blocks (#10810); every other skill keeps its pointer.
+// mass-ulw and ulw-research inject a binding `<omo-*-mode>` block for a binding form and a pointer otherwise
+// (#10810, #10822); the binding tables assert which one. Every other skill always gets its pointer.
 const MODE_SKILLS: ReadonlySet<string> = new Set(["mass-ulw", "ulw-research"])
 
 export function expectPointerInjections(pi: FakeExtensionAPI, result: unknown, expected: readonly ExpectedPointer[]): void {
@@ -65,7 +66,7 @@ export function expectPointerInjections(pi: FakeExtensionAPI, result: unknown, e
     if (typeof content !== "string") {
       throw new Error("expected a string skill-pointer message")
     }
-    expect(content).toContain(`<omo-${entry.skillName}-${MODE_SKILLS.has(entry.skillName) ? "mode" : "pointer"}>`)
+    expect(content).toMatch(new RegExp(`^<omo-${entry.skillName}-${MODE_SKILLS.has(entry.skillName) ? "(?:mode|pointer)" : "pointer"}>`))
     expect(content).toContain(`${entry.skillName}/SKILL.md`)
   }
 }

@@ -78,14 +78,14 @@ describe("omo-senpi skill-pointers companion", () => {
       await registerSkillPointers(pi)
 
       // when
-      const result = await dispatchInput(pi, "ulw research the gateway options", "interactive", "followUp")
+      const result = await dispatchInput(pi, "use ulw research to compare the gateway options", "interactive", "followUp")
 
       // then
       expect(pi.messages).toHaveLength(0)
       if (result.action !== "transform") {
         throw new Error("expected the queued prompt to be transformed")
       }
-      expect(result.text.startsWith("ulw research the gateway options\n")).toBe(true)
+      expect(result.text.startsWith("use ulw research to compare the gateway options\n")).toBe(true)
       expect(result.text.indexOf("<omo-ulw-research-mode>")).toBeLessThan(result.text.indexOf("<omo-browser-pointer>"))
       expect(result.text.indexOf("<omo-browser-pointer>")).toBeLessThan(result.text.indexOf("<omo-ultimate-browsing-pointer>"))
       expect(result.text).toContain("browser/SKILL.md")
