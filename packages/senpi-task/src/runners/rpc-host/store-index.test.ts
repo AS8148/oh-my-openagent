@@ -65,6 +65,31 @@ describe("registerStoreIndex", () => {
     expect({ ino: after.ino, mtimeMs: after.mtimeMs }).toEqual({ ino: before.ino, mtimeMs: before.mtimeMs })
   })
 
+  test("#given a new store #when it is admitted #then the index write yields to the event loop instead of running its fsyncs on it", async () => {
+    // given - admission runs on the session's event loop; a durable write done there with fsyncSync holds every
+    // timer, socket and prompt for as long as the disk takes (95 s on a VM disk flushing other containers, #10846).
+    // A write whose syscalls run on the libuv pool lets a macrotask queued beside it run before it settles.
+    const path = indexPath()
+    let admissionSettled = false
+    let loopRanFirst: boolean | undefined
+    const loopTurn = new Promise<void>((resolveTurn) =>
+      setImmediate(() => {
+        loopRanFirst = !admissionSettled
+        resolveTurn()
+      }),
+    )
+
+    // when
+    await registerStoreIndex({ indexPath: path, storeDir: "/p1/.omo/senpi-task", now: Date.now }).then(() => {
+      admissionSettled = true
+    })
+    await loopTurn
+
+    // then
+    expect(loopRanFirst).toBe(true)
+    expect(Object.keys(readTaskStoreIndex(path).stores)).toEqual([resolve("/p1/.omo/senpi-task")])
+  })
+
   test("#given a write whose read-back does not contain the store #when registering #then it is unavailable", async () => {
     // given - the write lands nowhere: every read returns the empty index
     const path = indexPath()
