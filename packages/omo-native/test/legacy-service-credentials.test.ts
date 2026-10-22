@@ -30,6 +30,24 @@ const LEGACY = JSON.stringify({
   signingPrivateKey: "synthetic-signing-private",
 })
 
+describe("a first account command after upgrading", () => {
+  const isolatedEnv = (home: string) => ({ PATH: process.env.PATH, HOME: home, USERPROFILE: home, OMO_RUNTIME: "bun" })
+
+  test("#given the legacy file #when `omo sync` runs through bin/omo.js #then the file is removed", () => {
+    const { home, path } = homeWith(LEGACY)
+    spawnSync(process.execPath, [join(import.meta.dir, "..", "bin", "omo.js"), "sync", "--help"], { env: isolatedEnv(home), encoding: "utf8", windowsHide: true })
+    expect(existsSync(path)).toBe(false)
+  })
+
+  test("#given the legacy file #when `omo sync` runs through the compiled entry #then the file is removed", () => {
+    const { home, path } = homeWith(LEGACY)
+    const entry = join(import.meta.dir, "..", "compile-entry.ts")
+    const script = `const { runCompiledLauncher } = await import(${JSON.stringify(entry)}); await runCompiledLauncher(["sync", "--help"], ${JSON.stringify(home)})`
+    spawnSync(process.execPath, ["-e", script], { env: isolatedEnv(home), encoding: "utf8", windowsHide: true })
+    expect(existsSync(path)).toBe(false)
+  })
+})
+
 describe("removeLegacyServiceCredentials", () => {
   test("#given the legacy credentials shape #when it runs #then the file is removed", () => {
     const { home, path } = homeWith(LEGACY)
