@@ -52,9 +52,15 @@ export function createSession(options: {
     // (sisyphuslabs/omo-service#628) answers the stored successor instead of a reuse revoke.
     // A service without #628 refuses a committed token with reauth_required, which clears the store
     // exactly as the stale grace would have; a keyless journal from an older CLI is adopted the same way.
-    const attempt = refreshAttempt ?? { idempotencyKey: randomUUID(), attempts: 0, nextAttemptAt: new Date(now()).toISOString() }
+    // The next backoff is persisted before every send, so a run killed mid-request cannot resend early.
+    const attempts = (refreshAttempt?.attempts ?? 0) + 1
+    const backoff = retryDelay(attempts)
+    const attempt = {
+      idempotencyKey: refreshAttempt?.idempotencyKey ?? randomUUID(), attempts,
+      nextAttemptAt: new Date(now() + backoff).toISOString(),
+    }
     const journal: Credentials = { ...settled, refreshState: "uncertain", refreshAttempt: attempt }
-    if (refreshAttempt === undefined) await store.write(journal)
+    await store.write(journal)
     try {
       const tokens = parseReply(tokenSchema, await request("/v1/session/refresh", {
         ...jsonRequest({ refreshToken: current.refreshToken }),
@@ -74,10 +80,12 @@ export function createSession(options: {
         await store.write(current)
         throw error
       }
-      const attempts = attempt.attempts + 1
-      await store.write({ ...journal, refreshAttempt: {
-        ...attempt, attempts, nextAttemptAt: new Date(now() + retryDelay(attempts)).toISOString(),
-      } })
+      if (error instanceof ApiRefusal && error.status === 429) {
+        const delay = Math.max(backoff, error.retryDelay(now(), 0))
+        if (delay > backoff) {
+          await store.write({ ...journal, refreshAttempt: { ...attempt, nextAttemptAt: new Date(now() + delay).toISOString() } })
+        }
+      }
       throw uncertain()
     }
   }
@@ -92,7 +100,7 @@ export function createSession(options: {
           const current = await store.read()
           if (current !== null) {
             if (current.refreshState === "uncertain") return false
-            const access = Date.parse(current.accessTokenExpiresAt) <= Date.now()
+            const access = Date.parse(current.accessTokenExpiresAt) <= now()
               ? await refreshedAccess(current) : current.accessToken
             await request(`/v1/devices/${encodeURIComponent(current.device.id)}`, {
               method: "DELETE", headers: { authorization: `Bearer ${access}` },

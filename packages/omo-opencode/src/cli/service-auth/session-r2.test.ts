@@ -2,7 +2,7 @@ import { expect, onTestFinished, spyOn, test } from "bun:test"
 import { inspect } from "node:util"
 import { createSession } from "./session"
 import { SignInError } from "./protocol"
-import { fakeApi, grant, memorySecrets, privateKeys, refusal, temporaryHome } from "./test-support"
+import { clock, fakeApi, grant, memorySecrets, privateKeys, refusal, temporaryHome } from "./test-support"
 
 const expired = { ...grant, ...privateKeys, accessTokenExpiresAt: "2000-01-01T00:00:00Z" }
 const notSentCodes = [
@@ -82,10 +82,12 @@ test("failed not-sent restoration retains the durable fence and the next run res
   const fetcher = spyOn(globalThis, "fetch").mockRejectedValueOnce(Object.assign(new Error("offline"), { code: "ECONNREFUSED" }))
   onTestFinished(() => fetcher.mockRestore())
   const home = await temporaryHome()
-  await expect(createSession({ api, store, home }).accessToken()).rejects.toThrow()
+  const time = clock()
+  await expect(createSession({ api, store, home, now: time.now }).accessToken()).rejects.toThrow()
   const journal = await base.read()
   expect(journal).toMatchObject({ ...expired, refreshState: "uncertain" })
-  expect(await createSession({ api, store: base, home }).accessToken()).toBe(grant.accessToken)
+  await time.sleep(5_000)
+  expect(await createSession({ api, store: base, home, now: time.now }).accessToken()).toBe(grant.accessToken)
   expect(fetcher).toHaveBeenCalledTimes(2)
   expect(keys).toEqual([journal?.refreshAttempt?.idempotencyKey ?? ""])
   expect(writes).toBe(2)

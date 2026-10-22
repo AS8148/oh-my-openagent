@@ -148,6 +148,48 @@ test("backoff doubles per failed retry and is capped at five minutes", async () 
   expect(new Set(service.seen.map(entry => entry.key))).toEqual(new Set(["fixed-key"]))
 })
 
+for (const seeded of ["fresh", "resend"]) {
+  test(`a run killed after its ${seeded} send leaves a persisted backoff that the next run honours`, async () => {
+    const service = idempotentService()
+    const base = memorySecrets().store(service.api)
+    await base.write(seeded === "fresh" ? expired
+      : { ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+    const killed = { ...base, write: async (value: Credentials) => {
+      if (service.seen.length > 0) throw new Error("process killed")
+      await base.write(value)
+    } }
+    loseFirstAnswer()
+    const { time, open } = await setup()
+    await expect(open(service.api, killed).accessToken()).rejects.toThrow()
+    expect(service.seen).toHaveLength(1)
+    const delay = Date.parse((await base.read())?.refreshAttempt?.nextAttemptAt ?? "") - time.now()
+    expect(delay).toBe(seeded === "fresh" ? 5_000 : 10_000)
+    await expect(open(service.api, base).accessToken()).rejects.toMatchObject({ retryable: true })
+    expect(service.seen).toHaveLength(1)
+    await time.sleep(delay)
+    expect(await open(service.api, base).accessToken()).toBe(successor.accessToken)
+    expect(service.seen).toHaveLength(2)
+  })
+}
+
+test("a 429 on a resend honours a Retry-After longer than the backoff", async () => {
+  const service = idempotentService((_, index) => index === 1
+    ? Response.json({ error: { code: "rate_limited", message: "slow down", retryable: true, requestId: "test" } }, { status: 429, headers: { "retry-after": "30" } })
+    : undefined)
+  const store = memorySecrets().store(service.api)
+  await store.write({ ...expired, refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 1, nextAttemptAt: "2000-01-01T00:00:00Z" } })
+  const { time, open } = await setup()
+  await expect(open(service.api, store).accessToken()).rejects.toMatchObject({ retryable: true })
+  const held = await store.read()
+  expect(held).toMatchObject({ refreshState: "uncertain", refreshAttempt: { idempotencyKey: "journaled-key", attempts: 2 } })
+  expect(Date.parse(held?.refreshAttempt?.nextAttemptAt ?? "")).toBe(time.now() + 30_000)
+  await time.sleep(29_999)
+  await expect(open(service.api, store).accessToken()).rejects.toThrow()
+  expect(service.seen).toHaveLength(1)
+  await time.sleep(1)
+  expect(await open(service.api, store).accessToken()).toBe(successor.accessToken)
+})
+
 test("two concurrent invocations on an uncertain record send one request under the session lock", async () => {
   const service = idempotentService()
   const secrets = memorySecrets()
@@ -180,6 +222,6 @@ test("the first send of a fresh refresh carries the journaled Idempotency-Key", 
   const recording = { ...store, write: async (value: Credentials) => { writes.push(value); await store.write(value) } }
   const { time, home } = await setup()
   expect(await createSession({ api: service.api, store: recording, home, now: time.now }).accessToken()).toBe(successor.accessToken)
-  expect(writes[0]).toMatchObject({ refreshState: "uncertain", refreshAttempt: { attempts: 0 } })
+  expect(writes[0]).toMatchObject({ refreshState: "uncertain", refreshAttempt: { attempts: 1 } })
   expect(service.seen).toEqual([{ refreshToken: grant.refreshToken, key: writes[0]?.refreshAttempt?.idempotencyKey ?? "" }])
 })
