@@ -94,6 +94,56 @@ describe("claim-receipt component", () => {
     })
   })
 
+  describe("#given the verdict sidecar keeps failing to load", () => {
+    it("#then each failure streak warns once, and a failure after a successful load warns again", async () => {
+      let imports = 0
+      const loadRuntime = createClaimReceiptRuntimeLoader(async () => {
+        imports += 1
+        if (imports === 3) return import("./runtime")
+        throw new Error("Cannot find module '#omo-claim-receipt-runtime'")
+      })
+      const { finish, warnings } = setup({}, true, { loadRuntime })
+      await finish(unsupported())
+      await finish(unsupported())
+      expect(warnings).toHaveLength(1)
+      expect((await finish(unsupported()))?.entries?.map((draft) => draft.customType)).toContain(VERDICT_ENTRY_TYPE)
+      expect(imports).toBe(3)
+    })
+  })
+
+  describe("#given a user message arrives while the verdict sidecar is still loading", () => {
+    it("#then the earlier answer keeps its own epoch, shows no nudge and adds no gate flags, and the new message can still be nudged", async () => {
+      let markCalled = (): void => {}
+      const called = new Promise<void>((resolve) => {
+        markCalled = resolve
+      })
+      let release = (): void => {}
+      const gateOpen = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const loadRuntime = createClaimReceiptRuntimeLoader(async () => {
+        markCalled()
+        await gateOpen
+        return import("./runtime")
+      })
+      const { finish, input, toolCall } = setup({}, true, { loadRuntime })
+      await input("interactive")
+      const pending = finish(unsupported())
+      await called
+      await input("interactive")
+      release()
+      const stale = await pending
+      expect(stale?.entries?.map((draft) => draft.customType)).toEqual(["other", VERDICT_ENTRY_TYPE])
+      expect(stale?.entries?.[1]?.data).toMatchObject({ epoch: 1, flagged: true, nudged: false })
+      const gate = { toolName: "task", input: { subagent_type: "omo-native-gate-reviewer", prompt: "Review it." } }
+      await toolCall(gate)
+      expect(gate.input.prompt).toBe("Review it.")
+      const current = await finish(unsupported())
+      expect(current?.entries?.map((draft) => draft.customType)).toEqual(["other", VERDICT_ENTRY_TYPE, NUDGE_MESSAGE_TYPE])
+      expect(current?.entries?.[1]?.data).toMatchObject({ epoch: 2, nudged: true })
+    })
+  })
+
   describe("#given a run that did not finish cleanly", () => {
     it("#then stays out of aborted, retried and non-completed runs and memory worker children", async () => {
       const { finish } = setup()

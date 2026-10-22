@@ -58,6 +58,7 @@ export function createClaimReceiptComponent(
         description: "Show the unsupported-claim nudge and pass flagged claims to gate reviewers. Off by default: verdicts are only recorded.",
       })
       const surfaced = (): boolean => ctx.config.getFlag(CLAIM_RECEIPT_NUDGE_FLAG) === true
+      let loadFailureReported = false
       const sessions = new Map<string, SessionState>()
       const keyOf = (eventCtx: unknown): string => {
         const id = callManager(eventCtx, "getSessionId")
@@ -98,21 +99,27 @@ export function createClaimReceiptComponent(
         if (!isRecord(answerEntry) || !isRecord(answerEntry["message"])) return undefined
         const content = answerEntry["message"]["content"]
         if (Array.isArray(content) && content.some((part) => isRecord(part) && part["type"] === "toolCall")) return undefined
+        // The first sidecar import is a real await: a user message can arrive during it. This answer belongs to the
+        // epoch it ended in, so a newer message must neither inherit its flags nor lose its own nudge.
+        const epoch = state.epoch
         let runtime: Awaited<ReturnType<ClaimReceiptRuntimeLoader>>
         try {
           runtime = await loadRuntime()
+          loadFailureReported = false
         } catch (error) {
-          ctx.logger.warn(claimReceiptRuntimeLoadFailure(error))
+          if (!loadFailureReported) ctx.logger.warn(claimReceiptRuntimeLoadFailure(error))
+          loadFailureReported = true
           return undefined
         }
         const evaluated = runtime.evaluateAnswer(branch, answerAt, content)
         if (evaluated === undefined) return undefined
         const { verdicts, flagged } = evaluated
-        const nudged = flagged.length > 0 && state.nudgedEpoch !== state.epoch && surfaced()
-        if (nudged) state.nudgedEpoch = state.epoch
-        state.flagged = [...state.flagged, ...flagged].slice(-MAX_GATE_FLAGS)
+        const current = state.epoch === epoch
+        const nudged = current && flagged.length > 0 && state.nudgedEpoch !== epoch && surfaced()
+        if (nudged) state.nudgedEpoch = epoch
+        if (current) state.flagged = [...state.flagged, ...flagged].slice(-MAX_GATE_FLAGS)
         const answerEntryId = typeof answerEntry["id"] === "string" ? answerEntry["id"] : ""
-        const record: VerdictRecord = { version: 1, answerEntryId, epoch: state.epoch, flagged: flagged.length > 0, nudged, verdicts }
+        const record: VerdictRecord = { version: 1, answerEntryId, epoch, flagged: flagged.length > 0, nudged, verdicts }
         const drafts: Rec[] = [{ type: "custom", customType: VERDICT_ENTRY_TYPE, data: record }]
         if (nudged) drafts.push({ type: "custom_message", customType: NUDGE_MESSAGE_TYPE, content: nudgeText(flagged), display: true, details: { answerEntryId, flagged } })
         if (flagged.length > 0) ctx.logger.info("omo-senpi claim-receipt flagged unsupported claims", { count: flagged.length, nudged })
