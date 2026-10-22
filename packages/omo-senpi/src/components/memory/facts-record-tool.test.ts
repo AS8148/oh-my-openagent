@@ -117,7 +117,7 @@ describe("facts record tool", () => {
 
       // then
       expect(result.isError).toBeUndefined()
-      expect(await readFile(path, "utf8")).toBe('{"scope":"project","text":"The office uses rhwp for HWP files.","date":"2026-10-22"}\n')
+      expect(await readFile(path, "utf8")).toBe('{"scope":"project","text":"The office uses rhwp for HWP files.","date":"2026-10-22","receipt":{"source":"inferred"}}\n')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -148,7 +148,7 @@ describe("facts record tool", () => {
       expect(results[1]?.isError).toBe(true)
       expect(results[1]?.terminate).toBe(true)
       expect((await tool.execute("late", { scope: "project", text: "late", date: "2026-10-22" })).terminate).toBe(true)
-      expect(await readFile(path, "utf8")).toBe('{"scope":"project","text":"The project uses Bun.","date":"2026-10-22"}\n')
+      expect(await readFile(path, "utf8")).toBe('{"scope":"project","text":"The project uses Bun.","date":"2026-10-22","receipt":{"source":"inferred"}}\n')
     } finally {
       await rm(root, { recursive: true, force: true })
     }
