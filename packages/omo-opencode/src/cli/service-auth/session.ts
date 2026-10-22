@@ -54,10 +54,13 @@ export function createSession(options: {
     const wait = refreshAttempt === undefined ? 0 : Date.parse(refreshAttempt.nextAttemptAt) - now()
     if (wait > 0 && wait <= MAX_RETRY_DELAY) throw uncertain()
     // Journal the attempt and its Idempotency-Key before sending. An unknown outcome is only ever
-    // resent as this same token with this same key, so a service that committed the rotation
-    // (sisyphuslabs/omo-service#628) answers the stored successor instead of a reuse revoke.
+    // resent as this same token, under the journaled key whenever that key meets the 43..128 base64url
+    // contract, so a service that committed the rotation (sisyphuslabs/omo-service#628) answers the
+    // stored successor instead of a reuse revoke. A journaled key outside the contract (keyless, or an
+    // earlier draft's UUID) gets a fresh key: the 1.21.0 service refuses such a key with invalid_request
+    // before rotating, so no rotation can have been committed under it.
     // A service without #628 refuses a committed token with reauth_required, which clears the store
-    // exactly as the stale grace would have; a keyless journal from an older CLI is adopted the same way.
+    // exactly as the stale grace would have.
     // The next backoff is persisted before every send, so a run killed mid-request cannot resend early.
     const attempts = (refreshAttempt?.attempts ?? 0) + 1
     const backoff = retryDelay(attempts)
