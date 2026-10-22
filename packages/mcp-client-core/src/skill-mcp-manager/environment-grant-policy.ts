@@ -5,6 +5,8 @@ import { createFileGrantStore, type EnvGrantSnapshot, type GrantStore } from "./
 import type { SkillMcpClientInfo } from "./types"
 import { log } from "../logger"
 
+const MAX_PENDING_GRANTS = 128
+
 type PendingGrant = {
   readonly digest: string
   readonly names: readonly string[]
@@ -84,8 +86,22 @@ export class EnvironmentGrantPolicy {
       const digest = policyHash({ identity, provenance: info.provenance, names, explicit, withheld: policy.withheld })
       const live = this.live.get(identity) ?? { names, version: 0, controller: new AbortController() }
       this.live.set(identity, live)
-      if (policy.withheld.length === 0) this.noticeMessages.delete(identity)
+      if (policy.withheld.length === 0) {
+        for (const [id, pending] of this.pending) if (pending.digest === identity) this.dropPending(id)
+        this.notices.delete(identity)
+        this.noticeMessages.delete(identity)
+      }
       if (policy.withheld.length > 0 && this.notices.get(identity) !== digest) {
+        for (const [id, pending] of this.pending) {
+          if (pending.digest === identity || (
+            pending.info.sessionID === info.sessionID && pending.info.skillName === info.skillName &&
+            pending.info.serverName === info.serverName
+          )) this.dropPending(id)
+        }
+        while (this.pending.size >= MAX_PENDING_GRANTS) {
+          const oldest = this.pending.keys().next().value
+          if (oldest !== undefined) this.dropPending(oldest)
+        }
         this.notices.set(identity, digest)
         const id = randomBytes(6).toString("hex")
         this.pending.set(id, { digest: identity, names: policy.withheld, info, raw })
@@ -102,6 +118,14 @@ export class EnvironmentGrantPolicy {
   }
 
   version(identity: string): number { return this.live.get(identity)?.version ?? 0 }
+
+  private dropPending(id: string): void {
+    const pending = this.pending.get(id)
+    if (!pending) return
+    this.pending.delete(id)
+    this.notices.delete(pending.digest)
+    this.noticeMessages.delete(pending.digest)
+  }
 
   invalidateIdentity(identity: string): void {
     const live = this.live.get(identity)
@@ -124,17 +148,18 @@ export class EnvironmentGrantPolicy {
     const current = pending.info.revalidateDeclaration ? await pending.info.revalidateDeclaration() : {
       config: pending.raw, sourcePath: pending.info.sourcePath, sourceKind: pending.info.sourceKind,
     }
+    if (this.pending.get(id) !== pending) throw new Error("Unknown or expired MCP environment grant handle.")
     const declarationKey = `${pending.info.sessionID}:${pending.info.skillName}:${pending.info.serverName}`
     if (!current || declarationDigest({ ...pending.info, sourcePath: current.sourcePath, sourceKind: current.sourceKind }, current.config) !== pending.digest ||
       this.declarations.get(declarationKey) !== pending.digest) {
-      this.pending.delete(id)
+      this.dropPending(id)
       throw new Error("The MCP declaration changed. Start the server again to obtain a new grant command.")
     }
     await this.store.add(pending.digest, {
       label: { project: pending.info.provenance?.projectRoot ?? pending.info.directory ?? "", skill: pending.info.skillName, server: pending.info.serverName },
       names,
     })
-    this.pending.delete(id)
+    this.dropPending(id)
     await this.refresh()
     return `Saved permanent MCP environment grant for ${pending.info.serverName}: ${names.join(", ")}.`
   }
@@ -142,6 +167,9 @@ export class EnvironmentGrantPolicy {
   close(): void {
     this.unwatch?.()
     this.unwatch = undefined
+    this.pending.clear()
+    this.notices.clear()
+    this.noticeMessages.clear()
     for (const identity of this.live.keys()) this.invalidateIdentity(identity)
   }
 }
