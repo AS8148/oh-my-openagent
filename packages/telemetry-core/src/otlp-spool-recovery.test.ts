@@ -17,22 +17,41 @@ import {
 } from "./otlp-test-support"
 
 const DAY_MS = 24 * 60 * 60 * 1000
-// A short shutdown cap keeps the shutdown tests fast; the flush deadline leaves the cleanup reserve (cap / 10 here).
+// A short shutdown cap keeps the shutdown tests fast. The flush deadline is derived from #shutdown in
+// otlp-sender-core.ts: cap - min(SHUTDOWN_CLEANUP_RESERVE_MS, cap / 10) = 400 - min(200, 40) = 360.
 const CAP_MS = 400
 const FLUSH_DEADLINE_MS = 360
 // The outer breaker: far above any cap, so only a shutdown that never returns reaches it.
 const BREAKER_MS = 10_000
 
-/** Records the delay of every timer armed while installed; shutdown's deadlines are plain timers. */
-function recordTimerDelays(): { readonly delays: number[]; readonly restore: () => void } {
+/**
+ * Records the delay of every timer armed while installed; shutdown's deadlines are plain timers. The
+ * restore is also queued on the file's cleanup list, so a test that throws before its own finally
+ * never leaves the patched setTimeout in place for later tests.
+ */
+function recordTimerDelays(): {
+  readonly delays: number[]
+  readonly fired: number[]
+  readonly restore: () => void
+} {
   const original = globalThis.setTimeout
   const delays: number[] = []
+  const fired: number[] = []
   const recording = (handler: Parameters<typeof setTimeout>[0], ms?: number, ...args: unknown[]) => {
-    delays.push(Number(ms ?? 0))
-    return original(handler, ms, ...args)
+    const delayMs = Number(ms ?? 0)
+    delays.push(delayMs)
+    if (typeof handler !== "function") return original(handler, ms, ...args)
+    return original((...handlerArgs: unknown[]) => {
+      fired.push(delayMs)
+      return handler(...handlerArgs)
+    }, ms, ...args)
   }
   globalThis.setTimeout = recording as unknown as typeof setTimeout
-  return { delays, restore: () => void (globalThis.setTimeout = original) }
+  const restore = (): void => {
+    globalThis.setTimeout = original
+  }
+  roots.push(restore)
+  return { delays, fired, restore }
 }
 
 /** "settled" when the work settles first, else a named breaker message (never a pass by timing). */
@@ -212,7 +231,7 @@ describe("spool recovery", () => {
     expect(transport.droppedEvents()).toBe(0)
   }, 60_000)
 
-  test("#given a fetch that never settles #when the transport shuts down #then the shutdown cap ends it and the batch stays on disk", async () => {
+  test("#given a fetch that never settles #when the transport shuts down #then a shutdown deadline ends it within the cap, never a longer wait, and the batch stays on disk", async () => {
     // given
     const dir = root()
     const timers = recordTimerDelays()
@@ -221,11 +240,21 @@ describe("spool recovery", () => {
 
     try {
       // when
-      const outcome = await settleOrBreak(transport.shutdown(), "shutdown returning once its cap fires")
+      let firedWhenShutdownReturned: number[] = []
+      const outcome = await settleOrBreak(
+        transport.shutdown().then(() => {
+          firedWhenShutdownReturned = [...timers.fired]
+        }),
+        "shutdown returning once its cap fires",
+      )
 
       // then
       expect(outcome).toBe("settled")
-      expect(timers.delays).toContain(CAP_MS)
+      // A shutdown deadline (the flush deadline, or the cap behind it) had fired when shutdown returned,
+      // so a deadline ended it, not the fetch...
+      expect(firedWhenShutdownReturned.some((ms) => ms === FLUSH_DEADLINE_MS || ms === CAP_MS)).toBe(true)
+      // ...and no deadline longer than the cap had: shutdown returns within the cap measured from the call.
+      expect(firedWhenShutdownReturned.filter((ms) => ms > CAP_MS)).toEqual([])
       expect(spoolNames(dir).length).toBe(1)
       expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
     } finally {
