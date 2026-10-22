@@ -6,6 +6,11 @@ import { removeWorldDirs, sessionCtx, world } from "./host-prewarm.test-support"
 
 afterEach(removeWorldDirs)
 
+// Skipped on win32 like the sibling host-prewarm suites: the first-turn host resolves its shard through the POSIX
+// socket layout (sun_path limit, owner-checked /tmp alternate root), which a win32 filesystem cannot host. What
+// prewarm does on win32 (nothing is ensured) is pinned everywhere by host-prewarm.test.ts.
+const posixPreviewTest = test.skipIf(process.platform === "win32")
+
 function files(dir: string): unknown {
   return readdirSync(dir, { withFileTypes: true }).map((entry) => {
     const path = join(dir, entry.name)
@@ -13,7 +18,7 @@ function files(dir: string): unknown {
   })
 }
 
-test("#given a first-turn task host #when its prompt is previewed #then no launcher, warm, registry, socket, lock or pid state changes", async () => {
+posixPreviewTest("#given a first-turn task host #when its prompt is previewed #then no launcher, warm, registry, socket, lock or pid state changes", async () => {
   // given: the world's injected ensureDaemon is the process-launch boundary.
   const w = world({ prewarm: "first-turn", ensure: "reject", platform: "darwin" })
   await w.sessionStart("preview")
