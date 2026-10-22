@@ -73,6 +73,8 @@ export const OMO_NATIVE_EVENT_SCHEMAS = Object.freeze({
     model_count: NUMBER_PROPERTY,
     provider_count: NUMBER_PROPERTY,
     configured_provider_count: NUMBER_PROPERTY,
+    connected_account_count: STRING_PROPERTY,
+    concurrently_active_account_count: STRING_PROPERTY,
     signed_in_provider_count: NUMBER_PROPERTY,
     providers: STRING_PROPERTY,
     reason: enumProperty(["startup", "reload", "new", "resume", "fork"] as const),
