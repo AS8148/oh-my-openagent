@@ -166,7 +166,8 @@ describe("full-matrix classification", () => {
       ["an unusual extension at the root", "pipeline.weird"],
       ["a script named like a doc", "script/agents.ts"],
       ["a doc-like name with an unknown extension", "packages/utils/README.rst"],
-      ["an unlisted .github file", ".github/actions/setup/action.yml"],
+      ["an unlisted .github file", ".github/CODEOWNERS"],
+      ["an in-process senpi-task runner", "packages/senpi-task/src/runners/in-process.ts"],
       ["a Codex plugin source file", "packages/omo-codex/plugin/src/index.ts"],
       ["an omo-opencode hook", "packages/omo-opencode/src/hooks/session-start.ts"],
     ])("#then %s runs heavy validation on ubuntu only", (_name, changedPath) => {
@@ -283,6 +284,10 @@ describe("full-matrix classification", () => {
       ["the Codex installer source", "packages/omo-codex/src/install/codex-agent-config.ts"],
       ["a Codex platform smoke test", "packages/omo-codex/plugin/test/node-install-surface.test.mjs"],
       ["the other Codex platform smoke test", "packages/omo-codex/plugin/test/install-time-build-runtime.test.mjs"],
+      ["a composite action the legs could use", ".github/actions/setup/action.yml"],
+      ["the senpi-task RPC host the Windows shard isolates", "packages/senpi-task/src/runners/rpc-host/host.ts"],
+      ["the senpi-task RPC child process", "packages/senpi-task/src/runners/rpc-process.ts"],
+      ["the senpi-task record lock", "packages/senpi-task/src/store/record-lock.ts"],
       ["basename contains darwin", "packages/utils/src/open-darwin.ts"],
       ["basename contains macos", "script/macos-signing-workflow.test.ts"],
     ])("#then %s forces the full matrix", (_name, changedPath) => {
