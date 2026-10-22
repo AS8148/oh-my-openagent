@@ -6,12 +6,14 @@
 
 import { advance, applyVerified, capture } from "./apply"
 import type { EngineDeps } from "./engine-deps"
+import { describeSyncFailure, type SyncFailure } from "./failure"
 import { type EngineState, SyncJournal } from "./journal"
 import { push, staleBackoffMs } from "./push"
 import type { RefusalCode } from "./ports"
 import { receive } from "./receive"
 
 export { CrashInjected, type EngineFault, INBOUND_POINTS, OUTBOUND_POINTS } from "./engine-deps"
+export type { SyncFailure, SyncFailureKind } from "./failure"
 
 export const POLL_MS = 10_000
 export const LOCAL_DEBOUNCE_MS = 2_000
@@ -21,6 +23,13 @@ export type EngineStatus =
   | { readonly kind: "never_synced" }
   | { readonly kind: "synced"; readonly at: number; readonly updatedWhileOffline: number }
   | { readonly kind: "paused"; readonly seq: number; readonly code: RefusalCode }
+  | { readonly kind: "failing"; readonly failure: SyncFailure; readonly since: number; readonly attempts: number }
+
+interface Failing {
+  readonly failure: SyncFailure
+  readonly since: number
+  readonly attempts: number
+}
 
 export interface CycleReport {
   readonly applied: number
@@ -41,6 +50,7 @@ export class SyncEngine {
   private unsubscribe: (() => void) | null = null
   private cancelPoll: (() => void) | null = null
   private cancelDebounce: (() => void) | null = null
+  private failing: Failing | null = null
 
   constructor(private readonly deps: EngineDeps) {
     this.journal = new SyncJournal(deps.repo.gitDir)
@@ -50,8 +60,9 @@ export class SyncEngine {
     return this.journal.state()
   }
 
-  /** What a UI shows: paused at a refused entry, else the last successful sync. */
+  /** What a UI shows: a failing cycle until one succeeds, paused at a refused entry, else the last successful sync. */
   async status(): Promise<EngineStatus> {
+    if (this.failing !== null) return { kind: "failing", ...this.failing }
     const s = await this.journal.state()
     if (s.paused !== null) return { kind: "paused", seq: s.paused.seq, code: s.paused.code }
     if (s.lastSyncedAt === null) return { kind: "never_synced" }
@@ -98,6 +109,7 @@ export class SyncEngine {
     const waiters = this.waiters.splice(0)
     void run.then(
       (report) => {
+        this.failing = null
         for (const w of waiters) w(report)
         if (this.running === run) this.running = null
         if (this.rerun && this.eventHead > this.appliedMirror) {
@@ -105,7 +117,12 @@ export class SyncEngine {
           this.request()
         }
       },
-      () => {
+      (error: unknown) => {
+        const failure = describeSyncFailure(error)
+        const previous = this.failing
+        this.failing = previous?.failure.kind === failure.kind
+          ? { failure, since: previous.since, attempts: previous.attempts + 1 }
+          : { failure, since: this.deps.clock.now(), attempts: 1 }
         if (this.running === run) this.running = null
       },
     )
