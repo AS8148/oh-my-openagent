@@ -157,14 +157,16 @@ export function wireEventBridge(
           ))
         : []
       const summary = await engine.lifecycle.suspendOnSessionShutdown({ parentSessionId: sessionId, reason })
+      const notify = (notice: string, level: "info" | "warning"): void => {
+        if (liveContext.mode === "print" || liveContext.mode === "json") process.stderr.write(`${notice}\n`)
+        else liveContext.ui?.notify(notice, level)
+      }
       const count = continuing.filter(({ record }) =>
         !summary.failures.some((failure) => failure.task_id === record.task_id)
         && engine.manager.get(record.task_id)?.status !== "cancelled").length
-      if (count > 0) {
-        const notice = `${count} background task(s) keep running under session ${sessionId}; resume it (omo --resume ${sessionId}) to collect their results`
-        if (liveContext.mode === "print" || liveContext.mode === "json") process.stderr.write(`${notice}\n`)
-        else liveContext.ui?.notify(notice, "info")
-      }
+      if (count > 0) notify(`${count} background task(s) keep running under session ${sessionId}; resume it (omo --resume ${sessionId}) to collect their results`, "info")
+      const unstopped = summary.failures.filter((failure) => engine.manager.get(failure.task_id)?.status === "cancelled").length
+      if (unstopped > 0) notify(`${unstopped} cancelled child task(s) under session ${sessionId} could not be stopped and may still be running on the task host`, "warning")
     }
   })
 
