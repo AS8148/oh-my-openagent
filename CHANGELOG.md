@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.43] - 2026-10-22
+
 **Anonymous usage stats now count how many accounts you have linked per provider.** `session_started` reports, per provider kind, how many accounts the engine lists for it (the same list the app's account list shows: signed-in accounts and environment-variable slots), used or not, as capped counts only, never an account name, email, token or value ([#10919](https://github.com/code-yeongyu/oh-my-openagent/issues/10919)).
 
 **The desktop app and `omo login` can share one device on a machine.** A new hidden `omo account` command (`show`, `adopt`, `token`, `export`, `forget`) lets the desktop use the same OS-keychain sign-in the CLI writes, so a machine counts as one device for memory sync and only one process ever refreshes its tokens. Secrets pass only on stdin and stdout, a refused renewal (exit 5) names the service's refusal code so the desktop can say why the sign-in ended, and a locked OS keychain is reported as its own outcome (exit 7) instead of a generic failure. On Linux, where a locked Secret Service collection reads as empty, the default collection's lock state is read over D-Bus before any secret call (libsecret would otherwise ask the keyring to show an unlock prompt), a locked collection is reported (exit 7) instead of read, and when that check cannot answer (no `gdbus` on a minimal install, no Secret Service on the bus, a slow bus) the CLI prints one notice and uses libsecret directly as before, so login never depends on `gdbus` ([#10658](https://github.com/code-yeongyu/oh-my-openagent/pull/10658)).
