@@ -6,6 +6,7 @@ import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { createCompletionTracker, type AgentEndFacts } from "./gateway/completion"
 import { SESSION_CONTROL_DELIVERY_TYPE } from "./gateway/constants"
 import { gatewayDatabasePath } from "./gateway/paths"
+import { resolveProvenance } from "./gateway/provenance-resolver"
 import { registerInitialSkills } from "./initial-skills"
 import { controlSessionOf, createControlEndpointRegistrant, hostInstanceOf, sessionControlOf, type ControlEndpointRegistrantOptions, type SessionControlActionsPort } from "./gateway/registration"
 import { createGatewayStore, type GatewayStore } from "./gateway/store"
@@ -194,7 +195,8 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
       // The pre-gateway `thread_send` mailbox of this workspace: its undelivered items are imported
       // into the store once, when this session starts and the mailbox still exists on disk.
       const legacyMailbox = join(stateDirectory, "mailbox")
-      const store = options.store ?? createGatewayStore({ agentDir: agentDir(), legacyMailboxDirectories: [legacyMailbox], ...(runtimeInstance === undefined ? {} : { runtimeInstance }) })
+      const callerWorkspaceRoot = options.callerWorkspaceRoot ?? (() => pi.cwd ?? process.cwd())
+      const store = options.store ?? createGatewayStore({ agentDir: agentDir(), senderProvenance: () => resolveProvenance({ cwd: callerWorkspaceRoot(), env: options.env }), legacyMailboxDirectories: [legacyMailbox], ...(runtimeInstance === undefined ? {} : { runtimeInstance }) })
       // Every store open retries an unreadable legacy mailbox, and an idle store reopens its worker on
       // the next call, so the same failure would repeat each time: it is reported once per session.
       const reportedInvalidMailboxes = new Set<string>()
@@ -217,11 +219,12 @@ export function createThreadComponent(options: ThreadComponentOptions = {}): Omo
         host,
         stateDirectory,
         store,
+        env: options.env,
         diskSessions: options.diskSessions,
         sessionsDirectory: options.sessionsDirectory ?? (() => join(agentDir(), "sessions")),
         ensureHost: options.ensureHost,
         callerSessionId: options.callerSessionId ?? (() => UNKNOWN_CALLER),
-        callerWorkspaceRoot: options.callerWorkspaceRoot ?? (() => pi.cwd ?? process.cwd()),
+        callerWorkspaceRoot,
         callerTurnId: () => (run.turn === 0 ? undefined : `turn-${run.turn}`),
         callerName: () => pi.getSessionName?.(),
         callerCause: () => run.cause,
