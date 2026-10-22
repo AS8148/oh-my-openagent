@@ -26,6 +26,8 @@ The curated plan agents were renamed to `plan-consultant` and `plan-reviewer`; `
 | `session_started` | `memory_bucket` | `string` | `lt_8_gb`, `8_15_gb`, `16_31_gb`, `32_63_gb`, `64_plus_gb` |
 | `session_started` | `model_count` | `number` | - |
 | `session_started` | `provider_count` | `number` | - |
+| `session_started` | `configured_provider_count` | `number` | - |
+| `session_started` | `signed_in_provider_count` | `number` | - |
 | `session_started` | `providers` | `string` | - |
 | `session_started` | `reason` | `string` | `startup`, `reload`, `new`, `resume`, `fork` |
 | `session_started` | `timezone` | `string` | - |
@@ -415,6 +417,7 @@ How provider and model are masked differs, because they carry different privacy 
 |---|---|
 | `provider` | Exported only when it is one of the providers OmO itself ships. Every other value, including a self-hosted or proxy gateway name, is exported as `custom`. |
 | `model_id` | Exported when it exactly matches OmO's published model vocabulary (`claude-opus-5`, `gpt-5.6-sol`, and the other public product names listed in the tables above), **regardless of which provider routed it**. Any other value is exported as `custom`. |
+| `providers`, `provider_count`, `signed_in_provider_count`, `configured_provider_count` (`session_started`) | The providers usable this session: the providers you signed into (read from the top-level provider names in `auth.json` only, never a credential, account id or key) united with the providers configured in `models.json`. `providers` lists only the kinds OmO ships, sorted; every other provider is folded into one `custom`. The counts are plain numbers. |
 
 The practical consequence: routing a publicly known model through an unknown gateway reports `custom/claude-opus-5` rather than `custom/custom`. The gateway name — the user-authored half — is still withheld, while the model id is a public product name shared by every user running that model. A model name you chose yourself is never exported.
 

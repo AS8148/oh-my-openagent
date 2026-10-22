@@ -1,3 +1,15 @@
+## 2026-10-22 - Telemetry counts the providers you signed into, not only the ones you configured (#10887)
+
+`session_started` already sent `provider_count` and `providers`, but they came from `models.json` alone: the custom providers and endpoints a user configured. Providers a user signed into, such as subscriptions or API keys stored in `auth.json`, were missing. In the last 14 days the most common `provider_count` was 0 (about 7,000 installs), and the most common `providers` was empty (about 13,100 installs).
+
+`readOmoNativeInventory` (`packages/omo-senpi/src/components/telemetry/session-inventory.ts`) now also reads the top-level provider names in `auth.json`. It never reads a credential value, account id or key. The retired subscription names `claude-sdk-oauth` and `openai-codex` count as `anthropic-subscription` and `chatgpt-subscription`.
+- `provider_count` is the number of distinct providers the user signed into or configured.
+- Two new numbers on `session_started` split it: `signed_in_provider_count` and `configured_provider_count`.
+- `providers` lists the shipped provider kinds, sorted. Any other provider now appears as one `custom` entry instead of being dropped, so the list agrees with the count.
+- A missing `auth.json` means no sign-in. A malformed one counts no sign-ins and reports the existing `omo_native_inventory_read_failed` diagnostic with a fixed message, never the parser's text, which can quote a credential. The configured providers still count. An unreadable `models.json` no longer hides the signed-in providers.
+
+`docs/reference/senpi-telemetry.md` regenerates the schema block and adds the disclosure row.
+
 ## 2026-10-21 - Memory counts how often a standing agreement had to be repeated (#10780)
 
 A person's standing instructions to the agent now live as one counted ledger, `system/agreements.md`: one line per agreement with a stable id (sha256 of the normalized text), a scope (`global` / `project`), who wrote it (`human` / `agent`), how many times it was broken, and a status. The facts extractor gets a second tool, `record_agreement`: when the person corrects something an existing agreement already covers, it reaffirms that id and the count goes up in the same facts commit; a reaffirm naming an id the extractor was not shown is refused. At `memory.agreements.needs_human_threshold` (default 3) an item turns NEEDS-HUMAN, and each newly flagged item is announced once: one `<memory_notice>` line to the agent and one `omo-memory:agreement-flagged` row to the person. At `max_items` (default 64) a new agreement evicts the oldest agent-written item that was never reaffirmed nor flagged, and the facts commit names it in an `Omo-Agreement-Evicted: <id>` trailer; when nothing is evictable the new agreement is refused and logged. Similar agreements are never merged, so two distinct rules always stay two lines.
