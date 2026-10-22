@@ -81,6 +81,8 @@ const computerUseOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? plugin
 const memoryDoctorEntryPath = join(packageRoot, "src", "components", "memory", "commands", "doctor-runtime.ts")
 const memoryMemfsEntryPath = join(packageRoot, "src", "components", "memory", "commands", "memfs-runtime.ts")
 const memoryPalaceEntryPath = join(packageRoot, "src", "components", "memory", "palace", "runtime.ts")
+const deviceAccountEntryPath = join(packageRoot, "src", "components", "memory", "device-session", "account-runtime.ts")
+const memoryCommandsEntryPath = join(packageRoot, "src", "components", "memory", "commands", "runtime.ts")
 const sessionHistoryEntryPath = join(packageRoot, "src", "components", "onboarding", "session-history", "runtime.ts")
 const recallStoreEntryPath = join(packageRoot, "src", "components", "memory", "recall-store-runtime.ts")
 const telemetryPosthogEntryPath = join(packageRoot, "src", "components", "telemetry", "posthog-runtime.ts")
@@ -108,6 +110,8 @@ const claimReceiptEntryPath = join(packageRoot, "src", "components", "claim-rece
 const memoryDoctorOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-doctor.js")
 const memoryMemfsOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-memfs.js")
 const memoryPalaceOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-palace.js")
+const deviceAccountOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-device-account.js")
+const memoryCommandsOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-commands.js")
 const sessionHistoryOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-session-history.js")
 const recallStoreOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-recall-store.js")
 const telemetryPosthogOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-posthog.js")
@@ -128,6 +132,8 @@ const externalSpecifiers = [
   "#omo-memory-doctor-runtime",
   "#omo-memory-memfs-runtime",
   "#omo-memory-palace-runtime",
+  "#omo-device-account-runtime",
+  "#omo-memory-commands-runtime",
   "#omo-session-history-runtime",
   "#omo-recall-store-runtime",
   "#omo-telemetry-posthog-runtime",
@@ -170,6 +176,8 @@ export const extensionBuildPaths = {
   memoryDoctorOutputPath,
   memoryMemfsOutputPath,
   memoryPalaceOutputPath,
+  deviceAccountOutputPath,
+  memoryCommandsOutputPath,
   sessionHistoryOutputPath,
   recallStoreOutputPath,
   telemetryPosthogOutputPath,
@@ -200,6 +208,8 @@ export function resolveOutputs(options) {
     memoryDoctorOutput: sibling(options.memoryDoctorOutputPath, memoryDoctorOutputPath, "omo-memory-doctor.js"),
     memoryMemfsOutput: sibling(options.memoryMemfsOutputPath, memoryMemfsOutputPath, "omo-memory-memfs.js"),
     memoryPalaceOutput: sibling(options.memoryPalaceOutputPath, memoryPalaceOutputPath, "omo-memory-palace.js"),
+    deviceAccountOutput: sibling(options.deviceAccountOutputPath, deviceAccountOutputPath, "omo-device-account.js"),
+    memoryCommandsOutput: sibling(options.memoryCommandsOutputPath, memoryCommandsOutputPath, "omo-memory-commands.js"),
     sessionHistoryOutput: sibling(options.sessionHistoryOutputPath, sessionHistoryOutputPath, "omo-session-history.js"),
     recallStoreOutput: sibling(options.recallStoreOutputPath, recallStoreOutputPath, "omo-recall-store.js"),
     telemetryPosthogOutput: sibling(options.telemetryPosthogOutputPath, telemetryPosthogOutputPath, "omo-telemetry-posthog.js"),
@@ -237,6 +247,8 @@ export async function buildExtension(options = {}) {
     memoryDoctorOutput,
     memoryMemfsOutput,
     memoryPalaceOutput,
+    deviceAccountOutput,
+    memoryCommandsOutput,
     sessionHistoryOutput,
     recallStoreOutput,
     telemetryPosthogOutput,
@@ -259,6 +271,8 @@ export async function buildExtension(options = {}) {
   const memoryDoctorInputs = await buildEntry(memoryDoctorEntryPath, memoryDoctorOutput, buildDefines)
   const memoryMemfsInputs = await buildEntry(memoryMemfsEntryPath, memoryMemfsOutput, buildDefines)
   const memoryPalaceInputs = await buildEntry(memoryPalaceEntryPath, memoryPalaceOutput, buildDefines)
+  const deviceAccountInputs = await buildEntry(deviceAccountEntryPath, deviceAccountOutput, buildDefines)
+  const memoryCommandsInputs = await buildEntry(memoryCommandsEntryPath, memoryCommandsOutput, buildDefines)
   const sessionHistoryInputs = await buildEntry(sessionHistoryEntryPath, sessionHistoryOutput, buildDefines)
   const recallStoreInputs = await buildEntry(recallStoreEntryPath, recallStoreOutput, buildDefines)
   const telemetryPosthogInputs = await buildEntry(telemetryPosthogEntryPath, telemetryPosthogOutput, buildDefines)
@@ -290,6 +304,8 @@ export async function buildExtension(options = {}) {
     memoryDoctorInputs,
     memoryMemfsInputs,
     memoryPalaceInputs,
+    deviceAccountInputs,
+    memoryCommandsInputs,
     sessionHistoryInputs,
     recallStoreInputs,
     telemetryPosthogInputs,

@@ -9,6 +9,7 @@ import { isUiRequestKind, UI_REQUEST_KINDS } from "./gateway/answer-shape"
 import { type BindInput, OUTBOUND_EVENTS, type OutboundEvent } from "./gateway/bindings"
 import type { GatewayRelay, RelayResult } from "./gateway/relay"
 import { createGatewayStore, type GatewayStore } from "./gateway/store"
+import { resolveProvenance } from "./gateway/provenance-resolver"
 import type { ReportOpResult } from "./gateway/store-relay-ops"
 import type { StoreExtensionApi } from "./gateway/store-extensions"
 export type { StoreExtensionApi, StoreExtensionRegistration, StoreExtensionTransaction, StoreExtensionOperation, StoreExtensionResult, StoreExtensionRefusal, StoreExtensionRefusalCode } from "./gateway/store-extensions"
@@ -102,9 +103,9 @@ export function createThreadSdk(options: ThreadSdkOptions): ThreadSdk {
     env,
     ...(engineStatusAll === undefined ? {} : { statusAll: async () => parseHostStatusAll(await engineStatusAll()) }),
   })
-  const store = options.store ?? createGatewayStore({ agentDir: options.agentDir, resolveTarget: (address, request) => resolveForExtension(address, request), ...(options.workerModuleUrl === undefined ? {} : { workerModuleUrl: options.workerModuleUrl }) })
+  const store = options.store ?? createGatewayStore({ agentDir: options.agentDir, senderProvenance: () => resolveProvenance({ cwd: options.cwd, env }), resolveTarget: (address, request) => resolveForExtension(address, request), ...(options.workerModuleUrl === undefined ? {} : { workerModuleUrl: options.workerModuleUrl }) })
   const now = options.now ?? store.now
-  const surface: ThreadToolSurfaceOptions = { host, store, stateDirectory: options.agentDir, sessionsDirectory: () => join(options.agentDir, "sessions"), callerSessionId: () => UNKNOWN_CALLER, callerWorkspaceRoot: () => options.cwd, now }
+  const surface: ThreadToolSurfaceOptions = { host, store, env, stateDirectory: options.agentDir, sessionsDirectory: () => join(options.agentDir, "sessions"), callerSessionId: () => UNKNOWN_CALLER, callerWorkspaceRoot: () => options.cwd, now }
   const view = () => hostView(surface)
   const { engine, relay, endpoints, locate } = createGatewayServices(surface, () => hostView(surface, { offline: true }))
   // An extension call resolves its target while the store worker runs that call's transaction, so it
