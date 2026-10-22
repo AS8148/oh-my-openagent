@@ -1,3 +1,7 @@
+## 2026-10-22 - Telemetry counts how many accounts you have linked per provider (#10919)
+
+`session_started` gains `connected_account_count`: per provider kind, how many accounts the engine holds in `auth.json`, whether or not they are used: the length of each provider's account list; a provider entry with no account list (the single-credential form) counts as one, and an empty list counts as zero, so that provider is not listed. It is a `kind:count` list over the shipped provider kinds; any other provider is summed into `custom`, and each count is capped at `10_plus`. Nothing inside the account list is read. An unreadable `auth.json` counts nothing here; the provider inventory already reports it once, as the existing `omo_native_inventory_read_failed` diagnostic with a fixed message. `docs/reference/senpi-telemetry.md` regenerates the schema block and adds the disclosure row.
+
 ## 2026-10-22 - Telemetry counts the providers you signed into, not only the ones you configured (#10887)
 
 `session_started` already sent `provider_count` and `providers`, but they came from `models.json` alone: the custom providers and endpoints a user configured. Providers a user signed into, such as subscriptions or API keys stored in `auth.json`, were missing. In the last 14 days the most common `provider_count` was 0 (about 7,000 installs), and the most common `providers` was empty (about 13,100 installs).

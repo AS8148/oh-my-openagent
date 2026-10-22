@@ -23,7 +23,7 @@ export type OmoNativeInventory = {
 }
 
 /** Subscription ids the engine renamed; installs that predate the rename still carry the old key. */
-const RETIRED_PROVIDER_IDS: Readonly<Record<string, string>> = Object.freeze({
+export const RETIRED_PROVIDER_IDS: Readonly<Record<string, string>> = Object.freeze({
   "claude-sdk-oauth": "anthropic-subscription",
   "openai-codex": "chatgpt-subscription",
 })
