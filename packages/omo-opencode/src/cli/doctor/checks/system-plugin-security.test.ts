@@ -11,7 +11,8 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 for (const name of ["oh-my-openagent", "oh-my-opencode"]) {
   test(`System check ${name} spec hides URL credentials in default, verbose and JSON`, async () => {
     // runner.test.ts replaces the base system module; exercise a fresh real producer.
-    const { checkSystem, gatherSystemInfo } = await import("./system?credential-url-security")
+    const systemModulePath = "./system?credential-url-security"
+    const { checkSystem, gatherSystemInfo }: typeof import("./system") = await import(systemModulePath)
     const secret = "sk-test-SYSTEM-DO-NOT-PRINT"
     const token = "eyJhbGci.SYSTEM-DO-NOT-PRINT.signature"
     const home = mkdtempSync(join(tmpdir(), "system-plugin-security-"))
@@ -24,7 +25,7 @@ for (const name of ["oh-my-openagent", "oh-my-opencode"]) {
         plugin: [`${name}@https://user:${secret}@example.test/plugin.tgz?token=${token}`],
       }))
       const deps = {
-        findOpenCodeBinary: async () => ({ binary: "opencode", path: "/fixture/opencode" }),
+        findOpenCodeBinary: async () => ({ binary: "opencode" as const, path: "/fixture/opencode" }),
         getOpenCodeVersion: async () => "1.4.0",
         compareVersions: () => true,
         getPluginInfo,
