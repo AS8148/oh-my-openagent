@@ -74,6 +74,8 @@ export type HostSessionHandleOptions = {
   readonly inputStore?: import("../../store").TaskRecordStore
   readonly client: HostSessionPort
   readonly session: HostSessionIdentity
+  /** The durable session id the open already read; absent, the first heartbeat learns it. */
+  readonly durableSessionId?: string
   readonly taskId: string
   readonly heartbeatIntervalMs: number
   readonly now: () => number

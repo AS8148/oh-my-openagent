@@ -42,6 +42,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   // routing handle on a possibly new host generation. The session PATH is the child's identity.
   let client: HostSessionPort = options.client
   const identity = createHandleSessionIdentity(options.session)
+  if (options.durableSessionId !== undefined) identity.observeDurableId(options.durableSessionId)
   let openDisposition: HostSessionOpenDisposition = options.openDisposition
   const listeners = createHandleListeners({
     onListenerError: (error) => log("senpi-task early event replay listener failed", { taskId, error: String(error) }),

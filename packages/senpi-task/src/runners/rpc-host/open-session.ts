@@ -66,10 +66,12 @@ export async function openTaskHostSession(input: {
   if (model !== undefined && freshOpen) {
     let effective: HostSessionLiveness["model"]
     let serviceTier: string | undefined
+    let durableSessionId: string | undefined
     try {
       const state = await input.client.getState?.()
       effective = state?.model
       serviceTier = state?.serviceTier
+      durableSessionId = state?.sessionId
     } catch (error) {
       await input.client.close?.().catch(() => undefined)
       throw new RunnerError({
@@ -109,14 +111,19 @@ export async function openTaskHostSession(input: {
         message: `the host opened the child on ${effective.provider}/${effective.id} instead of the requested ${model.provider}/${model.modelId}; refusing the substitution`,
       })
     }
-    return { ...opened, reportedModel: reportedEffectiveModel(effective, serviceTier) }
+    return { ...opened, reportedModel: reportedEffectiveModel(effective, serviceTier), ...withDurableId(durableSessionId) }
   }
   if (freshOpen && input.client.getState !== undefined) {
     const state = await input.client.getState().catch(() => undefined)
     const effective = state?.model
-    return effective === undefined ? opened : { ...opened, reportedModel: reportedEffectiveModel(effective, state?.serviceTier) }
+    const reported = effective === undefined ? {} : { reportedModel: reportedEffectiveModel(effective, state?.serviceTier) }
+    return { ...opened, ...reported, ...withDurableId(state?.sessionId) }
   }
   return opened
+}
+
+function withDurableId(sessionId: string | undefined): { readonly durableSessionId?: string } {
+  return sessionId === undefined || sessionId.length === 0 ? {} : { durableSessionId: sessionId }
 }
 
 function sessionFailureReason(error: unknown): TaskStartFailureReason | undefined {
