@@ -15,7 +15,6 @@ const REPOSITORY_ROOT = fileURLToPath(new URL("..", import.meta.url))
 const MODEL_IDENTITY_FILES = new Map<string, string>([
   ["packages/model-core/src/latest-models.ts", "the table itself"],
   ["packages/model-core/src/model-capability-heuristics.ts", "per-model capability family names"],
-  ["packages/model-core/src/fable-55-launch.ts", "the launch block names Fable 5.5 and its 5.1 predecessor by identity"],
   ["packages/model-core/src/provider-model-id-transform.ts", "per-model provider spellings"],
   ["packages/omo-senpi/src/components/telemetry/model-vocabulary.ts", "every known id, old and new"],
   ["packages/omo-codex/src/install/managed-agent-model-defaults.ts", "models LazyCodex once bundled"],

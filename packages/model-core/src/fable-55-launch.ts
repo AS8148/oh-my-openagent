@@ -1,3 +1,4 @@
+import { LATEST_MODEL_BY_FAMILY } from "./latest-models"
 import type { ModelCapabilitiesSnapshotEntry } from "./model-capabilities/types"
 
 // LAUNCH-GATED: the ID is provisional. Fill only from the live launch listing, never from 5.1.
@@ -71,7 +72,7 @@ function recordLaunchRungRejection(rejection: LaunchRungRejection): void {
 }
 
 /** The model that stands in for Fable 5.5 until it is released (its launch-day predecessor). */
-export const FABLE_55_PREDECESSOR = "claude-fable-5-1"
+export const FABLE_55_PREDECESSOR = LATEST_MODEL_BY_FAMILY.claudeFable
 
 // Data-layer gate: every builtin chain, profile and default builds its 5.5 entries through these, so
 // while FABLE_55_RELEASED is false no resolver (model-core, delegate-core, getFirstFallbackModel,
