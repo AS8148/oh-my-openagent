@@ -171,6 +171,64 @@ test("the owner hears when the shown failure appears, changes kind or clears, an
   expect(changes).toBe(3)
 }, GIT_TEST_TIMEOUT)
 
+test("only a successful cycle clears a shown failure: an offline blip right after it keeps it shown and says nothing (omo #10637 review H1)", async () => {
+  const server = new FakeSyncServer()
+  let changes = 0
+  const b = await makeDevice(server, "b", undefined, { onStatusChange: () => (changes += 1) })
+  devices.push(b)
+  const lockPath = "/memory/.git/index.lock"
+  const failWith = (makeError: () => Error) => spyOn(b.store, "load").mockImplementation(async () => {
+    throw makeError()
+  })
+  const locked = failWith(() => new StrandedGitLockError([{ path: lockPath, reason: "owner-not-proven-dead" }]))
+  await failedCycle(b)
+  expect(changes).toBe(1)
+  locked.mockRestore()
+  const offline = failWith(() => new SyncNetworkError(new TypeError("fetch failed")))
+  await failedCycle(b)
+  expect(changes).toBe(1)
+  expect(await b.engine.status()).toMatchObject({ kind: "failing", failure: { kind: "stranded_lock", paths: [lockPath] } })
+  offline.mockRestore()
+  await b.engine.runCycle()
+  expect(changes).toBe(2)
+  expect(await b.engine.status()).toMatchObject({ kind: "synced" })
+}, GIT_TEST_TIMEOUT)
+
+test("a stranded lock moving to another path is a change the owner hears about, because the action names the path (omo #10637 review L1)", async () => {
+  const server = new FakeSyncServer()
+  let changes = 0
+  const b = await makeDevice(server, "b", undefined, { onStatusChange: () => (changes += 1) })
+  devices.push(b)
+  for (const path of ["/memory/.git/index.lock", "/memory/.git/HEAD.lock"]) {
+    const locked = spyOn(b.store, "load").mockImplementation(async () => {
+      throw new StrandedGitLockError([{ path, reason: "owner-not-proven-dead" }])
+    })
+    await failedCycle(b)
+    locked.mockRestore()
+  }
+  expect(changes).toBe(2)
+  expect(await b.engine.status()).toMatchObject({ failure: { paths: ["/memory/.git/HEAD.lock"] } })
+}, GIT_TEST_TIMEOUT)
+
+test("a listener that throws is logged and never stalls sync: the cycle settles, nextCycle() resolves and the next cycle runs (omo #10637 review M1)", async () => {
+  const server = new FakeSyncServer()
+  const b = await makeDevice(server, "b", undefined, { onStatusChange: () => {
+    throw new Error("listener boom")
+  } })
+  devices.push(b)
+  const locked = spyOn(b.store, "load").mockImplementation(async () => {
+    throw new StrandedGitLockError([{ path: "/memory/.git/index.lock", reason: "owner-not-proven-dead" }])
+  })
+  expect(await failedCycle(b)).toBeInstanceOf(StrandedGitLockError)
+  locked.mockRestore()
+  const waiter = b.engine.nextCycle()
+  const report = await b.engine.runCycle()
+  expect(await waiter).toBe(report)
+  expect(await b.engine.status()).toMatchObject({ kind: "synced" })
+  await b.engine.runCycle()
+  expect(b.engine.cyclesRun).toBe(2)
+}, GIT_TEST_TIMEOUT)
+
 test("the status reports the last successful sync time and how many memories a catch-up updated", async () => {
   const { a, b } = await pair()
   expect(await b.engine.status()).toEqual({ kind: "never_synced" })
