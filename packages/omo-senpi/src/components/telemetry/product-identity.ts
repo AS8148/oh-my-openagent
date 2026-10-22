@@ -214,7 +214,9 @@ export function getOmoNativeInstallIdPath(env: TelemetryEnv = process.env): stri
 
 function resolveUserInstallId(env: TelemetryEnv): string {
   const canonical = getOmoNativeInstallIdPath(env)
-  const legacy = join(resolveAgentHome({ env, homeDir: userHome(env) }), "omo-senpi", "omo-native", INSTALL_ID_FILE_NAME)
+  // The legacy id is the one the user's own install wrote, so an orchestrator's agent-dir override is ignored here:
+  // otherwise its first post-upgrade run would mint the permanent id instead of adopting the real one.
+  const legacy = join(resolveAgentHome({ env: withoutAgentDirOverrides(env), homeDir: userHome(env) }), "omo-senpi", "omo-native", INSTALL_ID_FILE_NAME)
   if (legacy === canonical) return readOrCreateInstallId(canonical)
   const shared = readInstallId(canonical)
   if (shared !== undefined) return shared
@@ -227,6 +229,11 @@ function resolveUserInstallId(env: TelemetryEnv): string {
     // A concurrent writer (the Desktop, or another CLI process) may have created it first; its id wins below.
   }
   return readInstallId(canonical) ?? adopted
+}
+
+function withoutAgentDirOverrides(env: TelemetryEnv): TelemetryEnv {
+  const { OMO_CODING_AGENT_DIR: _omo, SENPI_CODING_AGENT_DIR: _senpi, PI_CODING_AGENT_DIR: _pi, ...rest } = env
+  return rest
 }
 
 function userHome(env: TelemetryEnv): string {

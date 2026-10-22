@@ -62,6 +62,14 @@ describe("one anonymous install id per user, independent of the agent home (#109
     expect(statSync(canonicalFile(h)).mode & 0o777).toBe(0o600)
   })
 
+  it("#given a flat-layout legacy id and the FIRST post-upgrade run under an orchestrator's agent-dir override #then the user's real legacy id is adopted, not a fresh one", () => {
+    const h = home()
+    flatLayout(h)
+    writeId(join(h, ".omo", "omo-senpi", "omo-native", "install-id"), ID_B)
+    expect(attribution({ HOME: h, USERPROFILE: h, OMO_CODING_AGENT_DIR: join(h, "runs", "fresh", "agent") }).install_hash).toBe(sha(ID_B))
+    expect(attribution({ HOME: h, USERPROFILE: h }).install_hash).toBe(sha(ID_B))
+  })
+
   it("#given no id anywhere #then one is created at the canonical path and every agent home reads it", () => {
     const h = home()
     const first = attribution({ HOME: h, USERPROFILE: h, OMO_CODING_AGENT_DIR: join(h, "x") }).install_hash
