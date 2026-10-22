@@ -10,7 +10,7 @@ import type { DeviceSync, EngineStatus, SyncSession } from "@oh-my-opencode/memo
 
 import { lazyCliAccountSource } from "./device-session/account-runtime-loader"
 import { createDeviceSessionResolver } from "./device-session/resolver"
-import { SYNC_CLOSE_WAIT_EXCEEDED, SYNC_IDLE_NO_DEVICE_SESSION, SYNC_UNAVAILABLE, createSyncRunner, watchHeadLog } from "./sync-runner"
+import { SYNC_CLOSE_WAIT_EXCEEDED, SYNC_CONFIG_INVALID, SYNC_IDLE_NO_DEVICE_SESSION, SYNC_UNAVAILABLE, createSyncRunner, watchHeadLog } from "./sync-runner"
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -179,15 +179,15 @@ test("an unloadable device account sidecar reports sync-unavailable with its rea
   await runner.release(paths.repo)
 })
 
-test("an invalid service URL in a loaded device account sidecar stays a generic start failure, not sync-unavailable", async () => {
+test("an invalid OMO_SERVICE_API_URL is reported as a configuration error naming the variable, not as an unavailable sidecar", async () => {
   const paths = await identity()
   const warned: unknown[] = []
-  const errors: { message: string; error: unknown }[] = []
+  const errors: { message: string; code: unknown; variable: unknown }[] = []
   const runner = createSyncRunner({
     logger: {
       info: () => undefined,
       warn: (_message: string, meta?: Record<string, unknown>) => warned.push(meta?.code),
-      error: (message: string, meta?: Record<string, unknown>) => errors.push({ message, error: meta?.error }),
+      error: (message: string, meta?: Record<string, unknown>) => errors.push({ message, code: meta?.code, variable: meta?.variable }),
     },
     resolveSession: createDeviceSessionResolver({
       source: lazyCliAccountSource({ env: { OMO_SERVICE_API_URL: "not a url" } }),
@@ -197,11 +197,15 @@ test("an invalid service URL in a loaded device account sidecar stays a generic 
     watchHead: () => () => undefined,
   })
   await runner.acquire("agent", paths, { enabled: true })
-  expect(await runner.status(paths.repo)).toBeNull()
+  const status = await runner.status(paths.repo)
+  expect(status?.kind).toBe(SYNC_CONFIG_INVALID)
+  expect(status !== null && "variable" in status ? status.variable : undefined).toBe("OMO_SERVICE_API_URL")
   expect(warned).toEqual([])
-  expect(errors.map((entry) => entry.message)).toEqual(["memory sync failed to start"])
-  expect(String(errors[0]?.error)).toContain("SignInError")
-  expect(String(errors[0]?.error)).not.toContain("sidecar could not be loaded")
+  expect(errors).toHaveLength(1)
+  expect(errors[0]?.code).toBe(SYNC_CONFIG_INVALID)
+  expect(errors[0]?.variable).toBe("OMO_SERVICE_API_URL")
+  expect(errors[0]?.message).toContain("OMO_SERVICE_API_URL")
+  expect(errors[0]?.message).not.toContain("sidecar")
   await runner.release(paths.repo)
 })
 
