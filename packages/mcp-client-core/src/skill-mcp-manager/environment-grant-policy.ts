@@ -167,9 +167,6 @@ export class EnvironmentGrantPolicy {
   close(): void {
     this.unwatch?.()
     this.unwatch = undefined
-    this.pending.clear()
-    this.notices.clear()
-    this.noticeMessages.clear()
     for (const identity of this.live.keys()) this.invalidateIdentity(identity)
   }
 }
