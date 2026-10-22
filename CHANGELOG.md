@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- An uncertain account session refresh now recovers instead of staying stuck: the CLI resends the same refresh token with the same Idempotency-Key, backing off from 5 s up to 5 min, until the service gives a definite answer. Before, a lost refresh answer left `omo account token` failing until sign-in. ([#10898](https://github.com/code-yeongyu/oh-my-openagent/pull/10898))
+
 ## [5.1.41] - 2026-10-22
 
 
