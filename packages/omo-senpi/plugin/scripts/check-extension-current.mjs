@@ -22,6 +22,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryDoctorOutput,
     memoryMemfsOutput,
     memoryPalaceOutput,
+    memoryCommandsOutput,
     sessionHistoryOutput,
     recallStoreOutput,
     telemetryPosthogOutput,
@@ -53,6 +54,7 @@ export async function checkExtensionCurrent(options = {}) {
   const currentMemoryDoctor = await readBuiltEntry(memoryDoctorOutput)
   const currentMemoryMemfs = await readBuiltEntry(memoryMemfsOutput)
   const currentMemoryPalace = await readBuiltEntry(memoryPalaceOutput)
+  const currentMemoryCommands = await readBuiltEntry(memoryCommandsOutput)
   const currentSessionHistory = await readBuiltEntry(sessionHistoryOutput)
   const currentRecallStore = await readBuiltEntry(recallStoreOutput)
   const currentTelemetryPosthog = await readBuiltEntry(telemetryPosthogOutput)
@@ -72,6 +74,7 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentMemoryDoctor === undefined) return { ok: false, reason: "missing-output", output: memoryDoctorOutput }
   if (currentMemoryMemfs === undefined) return { ok: false, reason: "missing-output", output: memoryMemfsOutput }
   if (currentMemoryPalace === undefined) return { ok: false, reason: "missing-output", output: memoryPalaceOutput }
+  if (currentMemoryCommands === undefined) return { ok: false, reason: "missing-output", output: memoryCommandsOutput }
   if (currentSessionHistory === undefined) return { ok: false, reason: "missing-output", output: sessionHistoryOutput }
   if (currentRecallStore === undefined) return { ok: false, reason: "missing-output", output: recallStoreOutput }
   if (currentTelemetryPosthog === undefined) return { ok: false, reason: "missing-output", output: telemetryPosthogOutput }
@@ -99,6 +102,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryDoctorOutputPath: join(tempRoot, "omo-memory-doctor.js"),
     memoryMemfsOutputPath: join(tempRoot, "omo-memory-memfs.js"),
     memoryPalaceOutputPath: join(tempRoot, "omo-memory-palace.js"),
+    memoryCommandsOutputPath: join(tempRoot, "omo-memory-commands.js"),
     sessionHistoryOutputPath: join(tempRoot, "omo-session-history.js"),
     recallStoreOutputPath: join(tempRoot, "omo-recall-store.js"),
     telemetryPosthogOutputPath: join(tempRoot, "omo-telemetry-posthog.js"),
@@ -125,6 +129,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentMemoryDoctor, expected.memoryDoctorOutputPath, memoryDoctorOutput],
       [currentMemoryMemfs, expected.memoryMemfsOutputPath, memoryMemfsOutput],
       [currentMemoryPalace, expected.memoryPalaceOutputPath, memoryPalaceOutput],
+      [currentMemoryCommands, expected.memoryCommandsOutputPath, memoryCommandsOutput],
       [currentSessionHistory, expected.sessionHistoryOutputPath, sessionHistoryOutput],
       [currentRecallStore, expected.recallStoreOutputPath, recallStoreOutput],
       [currentTelemetryPosthog, expected.telemetryPosthogOutputPath, telemetryPosthogOutput],

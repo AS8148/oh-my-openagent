@@ -302,6 +302,41 @@ describe("checkExtensionCurrent", () => {
     expect(await readFile(memoryPalaceOutputPath, "utf8")).not.toContain("#omo-memory-palace-runtime")
   })
 
+  test("#given the split extension build #when memory command inputs are inspected #then the slash-command handlers load only from the lazy entry", async () => {
+    const { mainInputs, memoryCommandsInputs } = await sharedOutputs()
+    for (const suffix of [
+      "packages/omo-senpi/src/components/memory/commands/runtime.ts",
+      "packages/omo-senpi/src/components/memory/commands/sleeptime.ts",
+      "packages/omo-senpi/src/components/memory/commands/dream.ts",
+      "packages/omo-senpi/src/components/memory/commands/dream-staging.ts",
+      "packages/omo-senpi/src/components/memory/commands/agreements.ts",
+      "packages/omo-senpi/src/components/memory/commands/memory.ts",
+      "packages/omo-senpi/src/components/memory/commands/memory-unlock.ts",
+      "packages/omo-senpi/src/components/memory/commands/search.ts",
+      "packages/omo-senpi/src/components/memory/commands/facts.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+      expect(memoryCommandsInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+    for (const suffix of [
+      "packages/omo-senpi/src/components/memory/commands/metadata.ts",
+      "packages/omo-senpi/src/components/memory/commands/runtime-loader.ts",
+    ]) {
+      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
+    }
+  })
+
+  test("#given the split extension build #when the memory commands sidecar is inspected #then it carries no runtime loader of its own", async () => {
+    const { memoryCommandsInputs, memoryCommandsOutputPath } = await sharedOutputs()
+    for (const suffix of [
+      "packages/omo-senpi/src/components/memory/commands/runtime-loader.ts",
+      "packages/omo-senpi/src/components/memory/commands/register.ts",
+    ]) {
+      expect(memoryCommandsInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
+    }
+    expect(await readFile(memoryCommandsOutputPath, "utf8")).not.toContain("#omo-memory-commands-runtime")
+  })
+
   test("#given the split extension build #when onboarding inputs are inspected #then the session-history scan loads only from its lazy entry", async () => {
     const { mainInputs, sessionHistoryInputs, sessionHistoryOutputPath } = await sharedOutputs()
     for (const suffix of [
@@ -417,6 +452,7 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-task-runtime")')
     expect(main).toContain('import("#omo-memory-memfs-runtime")')
     expect(main).toContain('import("#omo-memory-palace-runtime")')
+    expect(main).toContain('import("#omo-memory-commands-runtime")')
     expect(main).toContain('import("#omo-session-history-runtime")')
     expect(main).toContain('import("#omo-recall-store-runtime")')
     expect(main).toContain('import("#omo-telemetry-posthog-runtime")')
@@ -433,6 +469,7 @@ describe("checkExtensionCurrent", () => {
       "#omo-memory-doctor-runtime": "./extensions/omo-memory-doctor.js",
       "#omo-memory-memfs-runtime": "./extensions/omo-memory-memfs.js",
       "#omo-memory-palace-runtime": "./extensions/omo-memory-palace.js",
+      "#omo-memory-commands-runtime": "./extensions/omo-memory-commands.js",
       "#omo-session-history-runtime": "./extensions/omo-session-history.js",
       "#omo-recall-store-runtime": "./extensions/omo-recall-store.js",
       "#omo-telemetry-posthog-runtime": "./extensions/omo-telemetry-posthog.js",
