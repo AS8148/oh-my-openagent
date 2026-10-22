@@ -95,19 +95,24 @@ export function createEngineRunPause(ports: {
       participant.taskId === undefined ? undefined : ports.manager.observeTaskHold(participant.taskId, parentSessionId),
     async resume(participant, request, credential) {
       if (participant.key.startsWith("run:")) return { kind: "resumed" }
-      if (participant.state === "lost" && participant.taskId !== undefined) {
-        const resumed = await ports.manager.resumeLostTask(participant.taskId, { ...request, resumeCredential: credential })
-        if ("notHeld" in resumed) return { kind: "settled" }
-        if ("otherHoldLive" in resumed) return { kind: "held_by_user", childSeq: resumed.childSeq ?? request.childSeqCutoff ?? 0 }
-        return { kind: "resumed", turnId: resumed.turnId }
-      }
+      // A queued admission has no engine to hold it: it is always re-admitted, lost or not.
       if (participant.kind === "held_admission") {
+        if (credential === undefined) throw new Error("a queued admission resumes only inside a resume transaction")
         if (ports.resumeAdmission !== undefined) return ports.resumeAdmission(participant, request, credential)
         if (participant.runRef.kind === "task" && ports.manager.resumeHeldTask !== undefined) {
           return ports.manager.resumeHeldTask(participant, credential)
         }
         throw new Error("held admission resumption port is not configured")
       }
+      if (participant.state === "lost" && participant.taskId !== undefined) {
+        const resumed = await ports.manager.resumeLostTask(participant.taskId, {
+          ...request, ...(credential === undefined ? {} : { resumeCredential: credential }),
+        })
+        if ("notHeld" in resumed) return { kind: "settled" }
+        if ("otherHoldLive" in resumed) return { kind: "held_by_user", childSeq: resumed.childSeq ?? request.childSeqCutoff ?? 0 }
+        return { kind: "resumed", turnId: resumed.turnId }
+      }
+      if (credential === undefined) throw new Error("a paused child resumes only inside a resume transaction")
       const record = participant.taskId === undefined ? undefined : ports.manager.get(participant.taskId)
       if (record === undefined || record.notification.run_epoch !== participant.runEpoch ||
         (record.status !== "running" && record.status !== "paused")) return { kind: "settled" }

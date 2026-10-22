@@ -16,7 +16,9 @@ export type RunPauseEffects = {
   pause(participant: PauseParticipant, owner: RunPauseOwner): Promise<
     { readonly kind: "held"; readonly childSeq: number } | { readonly kind: "settled" } | { readonly kind: "pending" }>
   dispatchGuidance(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<void>
-  resume(participant: PauseParticipant, request: ResumeParticipantRequest, credential: ResumeCredential): Promise<
+  // `credential` is undefined only when a later Resume retries a lost participant after a restart,
+  // when admission is already open and no resume transaction is live.
+  resume(participant: PauseParticipant, request: ResumeParticipantRequest, credential: ResumeCredential | undefined): Promise<
     { readonly kind: "resumed"; readonly turnId?: string } | { readonly kind: "held_by_user"; readonly childSeq: number }
     | { readonly kind: "settled" }>
   install(parentSessionId: string, pauseSeq: number, credential: ResumeCredential): Promise<void>
@@ -28,8 +30,12 @@ export type RunPauseEffects = {
 
 type ResumeTransaction = { readonly pauseSeq: number; readonly resumeId: string; readonly credential: ResumeCredential }
 
+export type ResumeFailure = { readonly key: string; readonly reason: string }
+export type RunResumeResult = { readonly kind: "installed" | "superseded"; readonly failures?: readonly ResumeFailure[] }
+
 export class RunPauseController {
   readonly #resuming = new Map<string, ResumeTransaction>()
+  readonly #released = new Map<string, ResumeTransaction>()
 
   constructor(readonly registry: PauseRegistry, readonly effects: RunPauseEffects) {}
 
@@ -72,7 +78,7 @@ export class RunPauseController {
     }
   }
 
-  async resume(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<{ readonly kind: "installed" | "superseded" }> {
+  async resume(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<RunResumeResult> {
     const requested = this.registry.requestResume(parentSessionId, pauseSeq, resumeId)
     await this.effects.dispatchGuidance(parentSessionId, pauseSeq, resumeId)
     const afterGuidance = this.registry.require(parentSessionId)
@@ -80,44 +86,90 @@ export class RunPauseController {
     const credential = this.registry.authorizeResume(parentSessionId, pauseSeq, resumeId)
     const transaction = { pauseSeq, resumeId, credential }
     this.#resuming.set(parentSessionId, transaction)
+    const failures: ResumeFailure[] = []
     for (const participant of this.registry.orderedAdmissions(parentSessionId)) {
       if (!this.#current(parentSessionId, transaction)) return { kind: "superseded" }
       if (participant.state === "resumed") continue
-      let cutoff = requested.childSeqCutoffs[participant.key]
-      if (participant.state === "lost" || participant.state === "pending") {
-        // A child outside the run's custody may still be held by its engine; release it rather
-        // than strand it paused. One the engine does not hold is left as it is.
-        const observed = await this.#observe(parentSessionId, participant)
-        if (!this.#current(parentSessionId, transaction)) return { kind: "superseded" }
-        if (observed?.held !== true) {
-          const lostReason = participant.lostReason ?? "never acknowledged the pause"
-          log("[senpi-task] run resume skips a lost participant", { parentSessionId, pauseSeq, key: participant.key, lostReason })
-          if (participant.state === "pending") this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason })
-          continue
-        }
-        cutoff = observed.childSeq
-      }
-      if (participant.kind !== "held_admission" && cutoff === undefined) throw new Error(`missing pause acknowledgement for ${participant.key}`)
-      this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "resuming" })
-      const result = await this.effects.resume(participant, {
-        parentSessionId, parentPauseSeq: pauseSeq, resumeId, runRef: participant.runRef,
-        ...(cutoff === undefined ? {} : { childSeqCutoff: cutoff }),
-      }, credential)
-      if (!this.#current(parentSessionId, transaction)) return { kind: "superseded" }
-      if (result.kind === "settled") this.registry.drop(parentSessionId, pauseSeq, participant.key)
-      else if (result.kind === "held_by_user") this.registry.update(parentSessionId, pauseSeq, participant.key, {
-        state: "held_by_user", observedChildSeq: result.childSeq,
-      })
-      else this.registry.update(parentSessionId, pauseSeq, participant.key, {
-        state: "resumed", ...(result.turnId === undefined ? {} : { resumeTurnId: result.turnId }),
-      })
+      const outcome = await this.#resumeOne(parentSessionId, pauseSeq, resumeId, participant,
+        requested.childSeqCutoffs[participant.key], credential, () => this.#current(parentSessionId, transaction))
+      if (outcome === "superseded") return { kind: "superseded" }
+      if (outcome !== undefined) failures.push(outcome)
     }
     await this.effects.install(parentSessionId, pauseSeq, credential)
     if (!this.#current(parentSessionId, transaction)) return { kind: "superseded" }
     await this.effects.acknowledgeInstalled(parentSessionId, pauseSeq, resumeId)
     const record = this.registry.require(parentSessionId)
-    return record.pauseSeq === pauseSeq && record.resume?.resumeId === resumeId
-      ? { kind: "installed" } : { kind: "superseded" }
+    if (record.pauseSeq !== pauseSeq || record.resume?.resumeId !== resumeId) return { kind: "superseded" }
+    return failures.length === 0 ? { kind: "installed" } : { kind: "installed", failures }
+  }
+
+  // A later Resume at the same Stop (a repeated resumed change, or the reconcile after a restart):
+  // admission is already open, so only the participants still outside the run's custody are retried.
+  async retryLost(parentSessionId: string, pauseSeq: number): Promise<readonly ResumeFailure[]> {
+    const record = this.registry.load(parentSessionId)
+    if (record === undefined || record.pauseSeq !== pauseSeq || record.phase !== "resumed") return []
+    if (this.registry.barrier.state(parentSessionId).kind !== "open") return []
+    const released = this.#released.get(parentSessionId)
+    const credential = released?.pauseSeq === pauseSeq ? released.credential : undefined
+    const resumeId = record.resume?.resumeId ?? `parent-resume:${pauseSeq}`
+    const failures: ResumeFailure[] = []
+    const current = () => {
+      const latest = this.registry.load(parentSessionId)
+      return latest?.pauseSeq === pauseSeq && latest.phase === "resumed" && this.registry.barrier.state(parentSessionId).kind === "open"
+    }
+    for (const participant of this.registry.orderedAdmissions(parentSessionId)) {
+      if (participant.state !== "lost") continue
+      const outcome = await this.#resumeOne(parentSessionId, pauseSeq, resumeId, participant, undefined, credential, current)
+      if (outcome === "superseded") break
+      if (outcome !== undefined) failures.push(outcome)
+    }
+    return failures
+  }
+
+  // Resumes one participant. A participant outside the run's custody (lost, or never acknowledged)
+  // is resumed only if its engine still holds it, and a failure to resume it never fails the run's
+  // Resume: it is logged, kept as its lostReason, returned, and retried by a later Resume.
+  async #resumeOne(
+    parentSessionId: string, pauseSeq: number, resumeId: string, participant: PauseParticipant,
+    frozenCutoff: number | undefined, credential: ResumeCredential | undefined, current: () => boolean,
+  ): Promise<ResumeFailure | "superseded" | undefined> {
+    const outsideCustody = participant.state === "lost" || participant.state === "pending"
+    let cutoff = frozenCutoff
+    if (outsideCustody && participant.kind !== "held_admission") {
+      const observed = await this.#observe(parentSessionId, participant)
+      if (!current()) return "superseded"
+      if (observed?.held !== true) {
+        const lostReason = participant.lostReason ?? "never acknowledged the pause"
+        log("[senpi-task] run resume skips a lost participant", { parentSessionId, pauseSeq, key: participant.key, lostReason })
+        if (participant.state === "pending") this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason })
+        return undefined
+      }
+      cutoff = observed.childSeq
+    }
+    if (participant.kind !== "held_admission" && cutoff === undefined) throw new Error(`missing pause acknowledgement for ${participant.key}`)
+    this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "resuming" })
+    let result: Awaited<ReturnType<RunPauseEffects["resume"]>>
+    try {
+      result = await this.effects.resume(participant, {
+        parentSessionId, parentPauseSeq: pauseSeq, resumeId, runRef: participant.runRef,
+        ...(cutoff === undefined ? {} : { childSeqCutoff: cutoff }),
+      }, credential)
+    } catch (error) {
+      if (!outsideCustody) throw error
+      const reason = `resume failed: ${error instanceof Error ? error.message : String(error)}`
+      log("[senpi-task] run resume failed for a lost participant", { parentSessionId, pauseSeq, key: participant.key, reason })
+      this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason: reason })
+      return current() ? { key: participant.key, reason } : "superseded"
+    }
+    if (!current()) return "superseded"
+    if (result.kind === "settled") this.registry.drop(parentSessionId, pauseSeq, participant.key)
+    else if (result.kind === "held_by_user") this.registry.update(parentSessionId, pauseSeq, participant.key, {
+      state: "held_by_user", observedChildSeq: result.childSeq,
+    })
+    else this.registry.update(parentSessionId, pauseSeq, participant.key, {
+      state: "resumed", lostReason: undefined, ...(result.turnId === undefined ? {} : { resumeTurnId: result.turnId }),
+    })
+    return undefined
   }
 
   released(parentSessionId: string, pauseSeq: number, resumeId: string): boolean {
@@ -126,6 +178,7 @@ export class RunPauseController {
     if (!this.registry.barrier.release(parentSessionId, transaction.credential)) return false
     this.registry.phase(parentSessionId, pauseSeq, "resumed")
     this.#resuming.delete(parentSessionId)
+    this.#released.set(parentSessionId, transaction)
     return true
   }
 

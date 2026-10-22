@@ -25,13 +25,17 @@ export type ResumeTaskResult =
   | { readonly otherHoldLive: true; readonly childSeq?: number }
 
 export type LostResumeResult = ResumeTaskResult | { readonly notHeld: true }
+// `childSeqCutoff` is the hold the run already observed; without it the engine is asked.
+export type LostResumeRequest = RunPauseOwner & {
+  readonly resumeId: string; readonly resumeCredential?: ResumeCredential; readonly childSeqCutoff?: number
+}
 
 export type TaskPauseMethods = {
   pauseTask(taskId: string, owner: RunPauseOwner): Promise<EngineInheritReceipt>
   resumePausedTask(taskId: string, request: ResumeTaskRequest): Promise<ResumeTaskResult>
   holdTaskInput(taskId: string, input: HeldTaskInput): Promise<EngineHoldInputResult>
   observeTaskHold(taskId: string, parentSessionId: string): Promise<ObservedHold | undefined>
-  resumeLostTask(taskId: string, request: RunPauseOwner & { readonly resumeId: string; readonly resumeCredential?: ResumeCredential }): Promise<LostResumeResult>
+  resumeLostTask(taskId: string, request: LostResumeRequest): Promise<LostResumeResult>
 }
 
 export type HeldTaskInput = { readonly inputId: string; readonly revision: number; readonly text: string }
@@ -204,18 +208,19 @@ export function createTaskRunPause(ports: {
 
   // A child the run recorded as lost may still be held by its engine (the pause failed after the
   // hold landed, or the child recovered). Release it with the cutoff the engine reports now.
-  async function resumeLostTask(
-    taskId: string,
-    request: RunPauseOwner & { readonly resumeId: string; readonly resumeCredential?: ResumeCredential },
-  ): Promise<LostResumeResult> {
+  async function resumeLostTask(taskId: string, request: LostResumeRequest): Promise<LostResumeResult> {
     const record = load(taskId)
     if (record.status !== "running" && record.status !== "paused") return { notHeld: true }
-    const observed = await observeTaskHold(taskId, request.parentSessionId)
-    if (observed?.held !== true) return { notHeld: true }
-    if (record.status === "paused") return resumePausedTask(taskId, { ...request, childSeqCutoff: observed.childSeq })
+    let cutoff = request.childSeqCutoff
+    if (cutoff === undefined) {
+      const observed = await observeTaskHold(taskId, request.parentSessionId)
+      if (observed?.held !== true) return { notHeld: true }
+      cutoff = observed.childSeq
+    }
+    if (record.status === "paused") return resumePausedTask(taskId, { ...request, childSeqCutoff: cutoff })
     const handle = ports.liveHandle(taskId)
     if (handle === undefined) return { notHeld: true }
-    const result = await childPort().resumeTurn(handle, { ...request, childSeqCutoff: observed.childSeq })
+    const result = await childPort().resumeTurn(handle, { ...request, childSeqCutoff: cutoff })
     if ("otherHoldLive" in result) return result
     ports.track(taskId, handle, record.model, record.notification.run_epoch, result)
     return { turnId: result.turnId }

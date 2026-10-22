@@ -56,7 +56,7 @@ import { withTaskRecordLockAsync } from "../store/record-lock"
 import { reattachManagedTask } from "./manager-reattach"
 import { TASK_AWAITING_INPUT_EVENT } from "./host-turn-resumed"
 import { PendingStops } from "./pending-stops"
-import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest, type HeldTaskInput } from "./run-pause"
+import { createTaskRunPause, type TaskPauseMethods, type ResumeTaskRequest, type HeldTaskInput, type LostResumeRequest } from "./run-pause"
 import { createHeldSend } from "./held-send"
 import { admitRespawn } from "./respawn-admission"
 import { restorePausedChild } from "./paused-restore"
@@ -376,7 +376,7 @@ class TaskManagerImpl implements TaskManager {
     return this.#runPause.observeTaskHold(taskId, parentSessionId)
   }
 
-  resumeLostTask(taskId: string, request: RunPauseOwner & { readonly resumeId: string; readonly resumeCredential?: ResumeCredential }) {
+  resumeLostTask(taskId: string, request: LostResumeRequest) {
     return this.#runPause.resumeLostTask(taskId, request)
   }
 

@@ -56,11 +56,12 @@ export function createInProcessRunPause(session: RunHoldSession, watchEngineTurn
       return holdInput.call(session, { inputId: input.inputId, revision: input.revision, text: input.text })
     },
     async observeHold(parentSessionId) {
+      // Without the engine's sequence there is no cutoff to resume with, so the hold is unknown.
       const view = session.pauseView
-      if (view === undefined) return undefined
+      if (view?.pauseSeq === undefined) return undefined
       return {
         held: view.records.some(record => record.kind === "inherited_hold" && record.parentSessionId === parentSessionId),
-        childSeq: view.pauseSeq ?? 0,
+        childSeq: view.pauseSeq,
       }
     },
   }
