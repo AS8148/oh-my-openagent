@@ -30,7 +30,8 @@ function isSinglePathSegment(value: string): boolean {
 // The real path of `path`, resolved through its nearest existing ancestor, so the same store spelled
 // through a symlink (darwin's /tmp -> /private/tmp) compares equal even before the child's folder exists.
 // Only a step that does not exist at all is rebuilt by name: a step that exists but cannot be resolved
-// (a dangling symlink, an unreadable folder) answers undefined, so its target is never taken on trust.
+// (a dangling symlink, an unreadable folder, a file used as a folder) answers undefined, so its target
+// is never taken on trust. It never throws: the caller runs inside the session_shutdown loop.
 function canonical(path: string): string | undefined {
   const missing: string[] = []
   let current = resolve(path)
@@ -38,11 +39,19 @@ function canonical(path: string): string | undefined {
     try {
       return join(realpathSync(current), ...missing.reverse())
     } catch {
-      if (lstatSync(current, { throwIfNoEntry: false }) !== undefined) return undefined
+      if (!isMissing(current)) return undefined
       const parent = dirname(current)
       if (parent === current) return undefined
       missing.push(basename(current))
       current = parent
     }
+  }
+}
+
+function isMissing(path: string): boolean {
+  try {
+    return lstatSync(path, { throwIfNoEntry: false }) === undefined
+  } catch {
+    return false
   }
 }

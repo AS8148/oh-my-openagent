@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -79,6 +79,14 @@ describe("ownHostedTaskId", () => {
     mkdirSync(store, { recursive: true })
     symlinkSync(elsewhere, join(store, "children"))
     expect(ownHostedTaskId(piWith({ task_id: TASK_ID, state_dir: join(store, "children", TASK_ID) }), store)).toBeUndefined()
+    expect(ownHostedTaskId(piWith({ task_id: "st_notyet", state_dir: join(store, "children", "st_notyet") }), store)).toBeUndefined()
+  })
+
+  test("#given a state_dir whose path runs through a regular file (ENOTDIR) #then it answers undefined instead of throwing", () => {
+    const { store } = realStore()
+    writeFileSync(join(store, "children", "st_file"), "")
+    expect(ownHostedTaskId(piWith({ task_id: "x", state_dir: join(store, "children", "st_file", "x") }), store)).toBeUndefined()
+    expect(ownHostedTaskId(piWith({ task_id: TASK_ID, state_dir: join(store, "children", TASK_ID) }), join(store, "children", "st_file", "x"))).toBeUndefined()
   })
 
   test("#given a real state_dir inside another store #then it answers undefined", () => {
