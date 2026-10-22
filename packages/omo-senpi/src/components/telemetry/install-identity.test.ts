@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it, spyOn } from "bun:test"
+import * as os from "node:os"
 import { createHash } from "node:crypto"
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir, userInfo } from "node:os"
@@ -110,6 +111,19 @@ describe("telemetry is off by default for automated runs that cannot hold a stab
         if (value === undefined) delete process.env[name]
         else process.env[name] = value
       }
+    }
+  })
+
+  it("#given the automation check throws (os.userInfo with no passwd entry) #then the consent gate never throws and telemetry is OFF for that run", () => {
+    const spy = spyOn(os, "userInfo").mockImplementation(() => {
+      throw new Error("ENOENT: no such file or directory, uv_os_get_passwd")
+    })
+    try {
+      const gate = () => isOmoNativeTelemetryEnabled({ isConfigEnabled: () => true }, {}, { HOME: "/Users/someone", USERPROFILE: "/Users/someone" })
+      expect(gate).not.toThrow()
+      expect(gate()).toBe(false)
+    } finally {
+      spy.mockRestore()
     }
   })
 

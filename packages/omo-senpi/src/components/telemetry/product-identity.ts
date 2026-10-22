@@ -10,7 +10,7 @@ import {
   type TelemetryOsProvider,
   type TelemetryProductConfig,
 } from "@oh-my-opencode/telemetry-core/injected"
-import { resolveAgentHome } from "../agent-home/resolve-agent-home"
+import { AGENT_DIR_ENV_NAMES, resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { ALL_KNOWN_MODEL_IDS, KNOWN_MODELS, KNOWN_PROVIDERS, type KnownProvider } from "./model-vocabulary"
 
 export const OMO_NATIVE_POSTHOG_API_KEY = "phc_r6UYQzNZcGYSzKw4PxCiVrZepGqV3dw9qcvcKtRNUWAn"
@@ -232,8 +232,8 @@ function resolveUserInstallId(env: TelemetryEnv): string {
 }
 
 function withoutAgentDirOverrides(env: TelemetryEnv): TelemetryEnv {
-  const { OMO_CODING_AGENT_DIR: _omo, SENPI_CODING_AGENT_DIR: _senpi, PI_CODING_AGENT_DIR: _pi, ...rest } = env
-  return rest
+  const names: readonly string[] = AGENT_DIR_ENV_NAMES
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !names.includes(name)))
 }
 
 function userHome(env: TelemetryEnv): string {

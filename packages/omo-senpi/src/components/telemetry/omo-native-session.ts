@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs"
-import { tmpdir, userInfo } from "node:os"
+import * as os from "node:os"
 import { dirname, sep } from "node:path"
 
 import {
@@ -223,10 +223,19 @@ export function isOmoNativeTelemetryEnabled(
   env: TelemetryEnv,
 ): boolean {
   return (
-    automatedRunReason(env) === undefined &&
+    notAutomated(env) &&
     isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }) &&
     configEnabled(options, eventCtx, env)
   )
+}
+
+/** The automation check sits on the consent path, which must never throw: if it cannot decide, telemetry is off. */
+function notAutomated(env: TelemetryEnv): boolean {
+  try {
+    return automatedRunReason(env) === undefined
+  } catch {
+    return false
+  }
 }
 
 const ALLOW_AUTOMATION_VALUES = ["1", "true", "yes"]
@@ -247,11 +256,11 @@ export function automatedRunReason(env: TelemetryEnv): "ci" | "test_runner" | "e
 }
 
 function isInsideTempDir(path: string): boolean {
-  const accountHome = realOrSelf(userInfo().homedir)
+  const accountHome = realOrSelf(os.userInfo().homedir)
   const contains = (root: string, target: string) => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep)
   // A misconfigured temp dir (TMPDIR=/, or one that holds the account's real home) is not a temp root: it would
   // silently turn off a real user's telemetry.
-  const roots = [tmpdir(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
+  const roots = [os.tmpdir(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
     .map(realOrSelf)
     .filter((root) => dirname(root) !== root && !contains(root, accountHome))
   const target = realOrSelf(path)
