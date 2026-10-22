@@ -14,6 +14,7 @@ import {
   createConcurrencyKit,
   type ChildHarness,
 } from "./two-process-kit.test-support"
+import { takeoverTimeline, takeoverTraceEnabled, traceTakeover } from "./takeover-trace.test-support"
 
 const writerChildPath = fileURLToPath(new URL("./writer-child.ts", import.meta.url))
 const crashCommitChildPath = fileURLToPath(new URL("./crash-commit-child.ts", import.meta.url))
@@ -44,22 +45,59 @@ function spawnWriter(
 async function expectTakeoverOwnerProvenDead(identity: Awaited<ReturnType<typeof kit.fixture>>["identity"], pid: number | undefined): Promise<void> {
   const record = parseLockRecord(await readFile(memoryWriterLockPath(identity.paths.locks), "utf8"))
   if (record === null || record.pid !== pid) throw new Error(`unexpected lock owner: ${JSON.stringify(record)}`)
-  expect(await probeUntil(() => isLockOwnerProvenDead(record), DEATH_PROOF_BOUND_MS)).toBe(true)
+  const proofStart = performance.now()
+  let probes = 0
+  const proven = await probeUntil(async () => {
+    probes += 1
+    return isLockOwnerProvenDead(record)
+  }, DEATH_PROOF_BOUND_MS)
+  traceTakeover("test", "death-proof", { proven, probes, ms: Math.round(performance.now() - proofStart) })
+  expect(proven).toBe(true)
+}
+
+// Each child's exit is traced the moment it happens, so a writer that ends early (#10959: before kill-ready, with an
+// empty stderr) shows when, with which code, and what it last printed.
+function traceExit(name: string, harness: ChildHarness): void {
+  void harness.exit.then((exit) => traceTakeover("test", `${name}-exit`, { ...exit, pid: harness.child.pid ?? null, context: harness.failureContext().slice(0, 400) }))
+}
+
+// Only the measurement workflow (#10959) raises the budget, and only while tracing, so a slow pass is measured instead
+// of cut off; every other run keeps the 30 s budget.
+function takeoverBudgetMs(): number {
+  const raised = Number(process.env.OMO_TAKEOVER_TRACE_BUDGET_MS)
+  return takeoverTraceEnabled() && Number.isFinite(raised) && raised > 30_000 ? raised : 30_000
+}
+
+async function withTimelineOnFailure(body: () => Promise<void>): Promise<void> {
+  try {
+    await body()
+  } catch (error) {
+    if (takeoverTraceEnabled()) console.error(`takeover timeline (#10959):\n${takeoverTimeline() ?? ""}`)
+    traceTakeover("test", "failed", { error: String(error).slice(0, 400) })
+    throw error
+  }
 }
 
 describe("one memory identity across real Bun processes (omo #10177 crash consistency)", () => {
   test("#given a writer SIGKILLed while holding the shared lock #when its peer continues #then liveness takeover completes twenty clean commits", async () => {
+    await withTimelineOnFailure(async () => {
     // #given
     const shared = await kit.fixture()
+    traceTakeover("test", "fixture-ready")
     const holder = spawnWriter(shared, "kill-holder", "holder")
     const survivor = spawnWriter(shared, "recovery", "survivor")
+    traceTakeover("test", "spawned", { holder: holder.child.pid ?? null, survivor: survivor.child.pid ?? null })
+    traceExit("holder", holder)
+    traceExit("survivor", survivor)
     await Promise.all([holder.waitForLine("ready"), survivor.waitForLine("ready")])
     const killReady = holder.waitForLine("kill-ready")
 
     // #when
     holder.send("go")
     survivor.send("go")
+    traceTakeover("test", "go-sent")
     await killReady
+    traceTakeover("test", "kill-sent")
     holder.child.kill("SIGKILL")
     expect(await holder.exit).toEqual({ code: null, signal: "SIGKILL" })
     // The exit event only proves this parent reaped its child. Recovery starts once the lock
@@ -67,13 +105,17 @@ describe("one memory identity across real Bun processes (omo #10177 crash consis
     // acquire budget on an owner the OS has not yet let go of; a proof that never arrives fails here.
     await expectTakeoverOwnerProvenDead(shared.identity, holder.child.pid)
     await assertRepoIntegrity(shared.identity.paths.repo)
+    traceTakeover("test", "integrity-ok")
     survivor.send("begin-recovery")
     await survivor.waitForPrefix("done:")
+    traceTakeover("test", "survivor-done")
     await kit.expectSuccessful(survivor)
 
     // #then
     await assertLinearCommits(shared.identity, 20)
-  }, 30_000)
+    traceTakeover("test", "passed")
+    })
+  }, takeoverBudgetMs())
 
   // Windows: a writer that dies mid-commit takes its git commit down with it and leaves the change
   // staged, which blocks every later write (product bug #10393, not introduced here).
