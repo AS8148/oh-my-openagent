@@ -97,6 +97,9 @@ type LaunchContext = {
   readonly managedSpec: ManagedStartSpec
   readonly runner: ManagedRunner
   readonly model: string
+  // Reports the child's acceptance of a start already returned as `starting` (#10402). It is carried onto
+  // every fallback rung, so whichever launch is accepted - direct or queued - reports it, at most once.
+  readonly onAccepted?: (runEpoch: number) => void
 }
 
 type TaskWaiter = {
@@ -498,7 +501,13 @@ class TaskManagerImpl implements TaskManager {
     }
     releaseResidency?.()
     const runner = this.#options.runners[executionMode]
-    const context: LaunchContext = { record: finalRecord, managedSpec, runner, model: effectivePlan.model }
+    let awaitingAcceptance = false
+    const onAccepted = (runEpoch: number): void => {
+      if (!awaitingAcceptance) return
+      awaitingAcceptance = false
+      this.#options.store.appendEvent(finalRecord.task_id, { type: "task_started", payload: { run_epoch: runEpoch } })
+    }
+    const context: LaunchContext = { record: finalRecord, managedSpec, runner, model: effectivePlan.model, onAccepted }
     const startParts = {
       run_epoch: finalRecord.notification.run_epoch,
       ...(isolation === undefined ? {} : { isolation: { backend: isolation.spec.backend, merged_dir: isolation.spec.merged_dir } }),
@@ -511,12 +520,11 @@ class TaskManagerImpl implements TaskManager {
       const reported = await settledWithin(launching, START_REPORT_WINDOW_MS)
       if (!reported.settled) {
         // Not accepted yet, so not started: acceptance is reported on the record when it lands (#10402).
+        // A launch that fell back into a lane queue is reported by that queued launch instead.
+        awaitingAcceptance = true
         launching.then((outcome) => {
           if (!outcome.ok || outcome.queue_position !== undefined) return
-          this.#options.store.appendEvent(finalRecord.task_id, {
-            type: "task_started",
-            payload: { run_epoch: outcome.run_epoch ?? finalRecord.notification.run_epoch },
-          })
+          onAccepted(outcome.run_epoch ?? finalRecord.notification.run_epoch)
         }).catch((error: unknown) => {
           log("senpi-task start still admitting failed", { taskId: finalRecord.task_id, error: String(error) })
         })
@@ -1187,6 +1195,7 @@ class TaskManagerImpl implements TaskManager {
       }),
       runner: context.runner,
       model: nextModel.display,
+      ...(context.onAccepted === undefined ? {} : { onAccepted: context.onAccepted }),
     }
     if (this.#concurrency.tryAcquire(nextModel.display, record.task_id, nextEpoch)) {
       return { kind: "retry", context: nextContext }
@@ -1657,6 +1666,7 @@ class TaskManagerImpl implements TaskManager {
       context.model,
       context.record.notification.run_epoch,
     )
+    context.onAccepted?.(context.record.notification.run_epoch)
   }
 
   // A revived child is running again and SHOULD occupy a slot; re-acquire it and re-arm outcome

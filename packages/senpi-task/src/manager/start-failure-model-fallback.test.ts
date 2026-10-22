@@ -7,6 +7,8 @@ import type { ResolvedModelRecord } from "../state"
 import type { ManagedChildHandle } from "./child-handle"
 import type { ChildPlanner, ManagedStartSpec } from "./types"
 import { FakeRunner, cleanupProjects, flush, makeManager, settings } from "./__fixtures__/manager-fakes"
+import { bounded } from "../lifecycle/__fixtures__/live-parent-clock"
+import { readEvents } from "../lifecycle/__fixtures__/lifecycle-fakes"
 
 const PACKAGE_MODEL: ResolvedModelRecord = {
   provider: "glm-zcode",
@@ -53,6 +55,39 @@ class AdmissionRefusingRunner extends FakeRunner {
       })
     }
     return super.start(spec)
+  }
+}
+
+// Refuses the first chain model: at once for the first task (it falls back and holds the fallback lane),
+// and for every later task only once `refuse` is called, after the start window has elapsed.
+class LateRefusingRunner extends FakeRunner {
+  readonly #refusal = Promise.withResolvers<void>()
+  #refusals = 0
+  readonly #admitted = new Map<string, PromiseWithResolvers<void>>()
+
+  refuse(): void {
+    this.#refusal.resolve()
+  }
+
+  admitted(taskId: string): Promise<void> {
+    const pending = this.#admitted.get(taskId) ?? Promise.withResolvers<void>()
+    this.#admitted.set(taskId, pending)
+    return pending.promise
+  }
+
+  override start(spec: ManagedStartSpec): Promise<ManagedChildHandle> {
+    if (spec.model !== PACKAGE_MODEL.display) {
+      return super.start(spec).then((handle) => {
+        void this.admitted(spec.taskId)
+        this.#admitted.get(spec.taskId)?.resolve()
+        return handle
+      })
+    }
+    this.startedSpecs.push(spec)
+    this.#refusals += 1
+    return (this.#refusals === 1 ? Promise.resolve() : this.#refusal.promise).then(() => {
+      throw new RunnerError({ kind: "model_unavailable", reason: "model_not_in_child_profile", message: `refused ${spec.model}` })
+    })
   }
 }
 
@@ -221,5 +256,33 @@ describe("a start-time fallback whose model lane is full (omo#9069)", () => {
     // then
     expect(runner.handles.has(result.task_id)).toBe(true)
     expect(store.load(result.task_id)?.start_queued).toBeUndefined()
+  })
+
+  test("#given a starting task refused after the start window #when it falls back into a full lane and is later accepted #then task_started is recorded exactly once (#10402)", async () => {
+    // given - the fallback model's only slot is held, and the first model answers after the window
+    const runner = new LateRefusingRunner()
+    const { manager, store } = makeManager({
+      planner: chainPlanner([BUILTIN_MODEL]),
+      inProcess: runner,
+      config: settings({ default_concurrency: 1, max_depth: 1 }),
+    })
+    const holder = await manager.start({ prompt: "hold", parent_session_id: "parent-1", depth: 1, model: BUILTIN_MODEL.display })
+    if (holder.kind !== "started") throw new Error("expected the holder to start")
+    const result = await bounded(manager.start({ prompt: "work", parent_session_id: "parent-1", depth: 1, category: "unspecified-high" }))
+    if (result.kind !== "starting") throw new Error(`expected starting, got ${JSON.stringify(result)}`)
+
+    // when - the refusal walks the chain into the full lane, then the lane frees
+    runner.refuse()
+    await bounded(manager.whenLaunched?.(result.task_id) ?? Promise.resolve())
+    expect(readEvents(store, result.task_id)).toContain("task_start_queued")
+    const admitted = runner.admitted(result.task_id)
+    runner.handles.get(holder.task_id)?.settle({ status: "completed", finalResponse: "done" })
+    await bounded(admitted)
+    const accepted = runner.handles.get(result.task_id)
+    if (accepted === undefined) throw new Error("the queued fallback never launched")
+    await bounded(accepted.waitForSubscription())
+
+    // then
+    expect(readEvents(store, result.task_id).filter((type) => type === "task_started")).toHaveLength(1)
   })
 })
