@@ -102,7 +102,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
         }
 
         const inventory = readOmoNativeInventory(resolveAgentHome({ env }), options.diagnostics)
-        const connectedAccounts = readConnectedAccounts(resolveAgentHome({ env }))
+        const connectedAccounts = readConnectedAccounts(resolveAgentHome({ env }), env)
         const reason = sessionReason(payload)
         const timezone = readTimeZone(options.timeZone)
         client.captureEvent("session_started", {
