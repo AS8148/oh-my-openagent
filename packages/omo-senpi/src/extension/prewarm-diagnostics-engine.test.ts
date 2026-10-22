@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
@@ -14,7 +14,11 @@ test("#given a real session with a late unsafe component #when draft prewarm ski
   const overrides = { HOME: root, OMO_CODING_AGENT_DIR: agentDir, SENPI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_DIR: agentDir, OMO_SENPI_DISABLE_POSTHOG: "1" }
   const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]))
   Object.assign(process.env, overrides)
-  const settingsManager = SettingsManager.inMemory({ defaultProjectTrust: "always", promptCache: { keepAlive: { enabled: true } } })
+  // Only the prewarm builtin. The goal builtin's session_start takes a goal-file lock (mkdir under this
+  // HOME) that a loaded run can finish after the teardown removed the HOME, recreating it (#9766 leak).
+  const settingsManager = SettingsManager.inMemory({
+    defaultProjectTrust: "always", enabledBuiltinExtensions: ["cache-keepalive"], promptCache: { keepAlive: { enabled: true } },
+  })
   const registry = new ModelRegistry(ModelRuntime.createSync({ modelsPath: null }))
   registry.registerProvider("diagnostic-fixture", {
     api: "openai-responses", baseUrl: "https://api.openai.com/v1", apiKey: "fixture-key",
@@ -82,6 +86,9 @@ test("#given a real session with a late unsafe component #when draft prewarm ski
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+    // No builtin left a store under this HOME that could still be written after it is removed.
+    const homeEntries = readdirSync(root, { recursive: true }).map(String)
     rmSync(root, { recursive: true, force: true })
+    expect(homeEntries.filter((entry) => entry.includes("goal"))).toEqual([])
   }
 }, 30_000)
