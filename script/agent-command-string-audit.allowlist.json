@@ -102,7 +102,17 @@
     "script/install-codex-dev.ts: omo get-local-version",
     "script/qa/codex-marketplace-e2e.sh: =omo",
     "script/verify-omo-ai-payload.mjs: omo doctor",
-    "script/qa/omo-native-parity-smoke.mjs: omo doctor"
+    "script/qa/omo-native-parity-smoke.mjs: omo doctor",
+    "README.de.md: /bin/omo",
+    "README.de.md: omo doctor",
+    "README.es.md: /bin/omo",
+    "README.es.md: omo doctor",
+    "README.fr.md: /bin/omo",
+    "README.fr.md: omo doctor",
+    "README.it.md: /bin/omo",
+    "README.it.md: omo doctor",
+    "README.pt-br.md: /bin/omo",
+    "README.pt-br.md: omo doctor"
   ],
   "literal-label": [
     "packages/omo-opencode/src/cli/account-keys/keystore.ts: =omo"
