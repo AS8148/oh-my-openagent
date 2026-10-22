@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseBunCheckOutput, parseBunLintJson } from "./bun-command-output.js";
@@ -85,6 +86,14 @@ describe("bunHasCommand", () => {
 			["format", "--write", "probe.ts"],
 		]);
 	});
+
+	it("#given a probe that times out #when probed again #then the timeout is not cached as absent and the retry answers", async () => {
+		const release = join(createProject({}), "release");
+		const bun = createFakeBun({ commands: ["check", "lint"], hangHelpUntil: release });
+		expect(await bunHasCommand(bun.path, "lint", 500)).toBe(false);
+		writeFileSync(release, "");
+		expect(await bunHasCommand(bun.path, "lint")).toBe(true);
+	}, 30_000);
 
 	it("#given the bun binary is replaced in place #when probed again #then the new binary is probed", async () => {
 		const bun = createFakeBun({ commands: ["check"] });

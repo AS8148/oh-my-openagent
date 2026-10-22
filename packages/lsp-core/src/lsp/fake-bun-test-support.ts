@@ -21,6 +21,7 @@ export interface FakeBunBehavior {
 	readonly lintStdout?: string;
 	readonly lintExitCode?: number;
 	readonly formatWrites?: boolean;
+	readonly hangHelpUntil?: string;
 }
 
 export interface FakeBunCall {
@@ -71,8 +72,9 @@ function writeFakeBunScript(scriptPath: string, logPath: string, behavior: FakeB
 	writeFileSync(
 		scriptPath,
 		[
-			'import { appendFileSync, readdirSync, writeFileSync } from "node:fs";',
+			'import { appendFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";',
 			`const behavior = ${JSON.stringify(behavior)};`,
+			'if (behavior.hangHelpUntil && process.argv.includes("--help") && !existsSync(behavior.hangHelpUntil)) await new Promise((r) => setTimeout(r, 60_000));',
 			"const args = process.argv.slice(2);",
 			`appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, cwd: process.cwd(), cwdEntries: readdirSync(process.cwd()) }) + "\\n");`,
 			"const [command] = args;",

@@ -127,31 +127,41 @@ function binaryIdentity(bunPath: string): string {
 
 // Feature detection by exit code, in an empty directory: next to a same-named project script an
 // older Bun runs that script for `--help` and exits 0. Asynchronous, so a probe never blocks the
-// event loop; cached per binary and command, and re-probed when the binary file changes.
-export function bunHasCommand(bunPath: string, command: BunProjectCommand): Promise<boolean> {
+// event loop; cached per binary and command, and re-probed when the binary file changes. Only a
+// definite answer is kept: a probe that timed out or could not spawn is retried on the next call.
+export function bunHasCommand(
+	bunPath: string,
+	command: BunProjectCommand,
+	timeoutMs: number = PROBE_TIMEOUT_MS,
+): Promise<boolean> {
 	const key = `${bunPath}\0${binaryIdentity(bunPath)}\0${command}`;
 	const cached = probeCache.get(key);
 	if (cached !== undefined) return cached;
-	const probe = probeOnce(bunPath, command);
+	const probe = probeOnce(bunPath, command, timeoutMs).then((answer) => {
+		if (answer === undefined) probeCache.delete(key);
+		return answer === true;
+	});
 	probeCache.set(key, probe);
 	return probe;
 }
 
 // `format` must also prove it rewrites a file in place: a bun whose `format --write` printed to stdout
 // instead, or ignored the flag, would leave every file unchanged and silently stop formatting.
-async function probeOnce(bunPath: string, command: BunProjectCommand): Promise<boolean> {
+async function probeOnce(bunPath: string, command: BunProjectCommand, timeoutMs: number): Promise<boolean | undefined> {
 	const emptyDir = mkdtempSync(join(tmpdir(), "omo-bun-probe-"));
-	const timeout = AbortSignal.timeout(PROBE_TIMEOUT_MS);
+	const timeout = AbortSignal.timeout(timeoutMs);
 	try {
 		const help = await runBunCommand(bunPath, [command, "--help"], emptyDir, timeout);
+		if (help.exitCode === null) return undefined;
 		if (help.exitCode !== 0) return false;
 		if (command !== "format") return true;
 		const probeFile = join(emptyDir, "probe.ts");
 		writeFileSync(probeFile, UNFORMATTED_PROBE);
 		const write = await runBunCommand(bunPath, ["format", "--write", "probe.ts"], emptyDir, timeout);
+		if (write.exitCode === null) return undefined;
 		return write.exitCode === 0 && readFileSync(probeFile, "utf8") !== UNFORMATTED_PROBE;
 	} catch {
-		return false;
+		return undefined;
 	} finally {
 		rmSync(emptyDir, { recursive: true, force: true });
 	}
