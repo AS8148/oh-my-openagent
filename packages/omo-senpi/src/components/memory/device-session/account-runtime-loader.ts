@@ -18,10 +18,15 @@ export function lazyCliAccountSource(
 ): DeviceAccountSource {
   let pending: Promise<DeviceAccountSource> | undefined
   return async () => {
-    pending ??= importRuntime().then((runtime) => runtime.createCliAccountSource(options)).catch((error: unknown) => {
-      pending = undefined
-      throw new SyncSidecarUnavailableError("device account", error)
-    })
+    pending ??= importRuntime()
+      .catch((error: unknown) => {
+        throw new SyncSidecarUnavailableError("device account", error)
+      })
+      .then((runtime) => runtime.createCliAccountSource(options))
+      .catch((error: unknown) => {
+        pending = undefined
+        throw error
+      })
     return (await pending)()
   }
 }

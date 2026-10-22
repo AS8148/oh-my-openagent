@@ -179,6 +179,32 @@ test("an unloadable device account sidecar reports sync-unavailable with its rea
   await runner.release(paths.repo)
 })
 
+test("an invalid service URL in a loaded device account sidecar stays a generic start failure, not sync-unavailable", async () => {
+  const paths = await identity()
+  const warned: unknown[] = []
+  const errors: { message: string; error: unknown }[] = []
+  const runner = createSyncRunner({
+    logger: {
+      info: () => undefined,
+      warn: (_message: string, meta?: Record<string, unknown>) => warned.push(meta?.code),
+      error: (message: string, meta?: Record<string, unknown>) => errors.push({ message, error: meta?.error }),
+    },
+    resolveSession: createDeviceSessionResolver({
+      source: lazyCliAccountSource({ env: { OMO_SERVICE_API_URL: "not a url" } }),
+      pinDir: join(paths.runtime, "pins"),
+      loadRuntime: () => Promise.reject(new Error("the engine sidecar is not reached when the account cannot be built")),
+    }),
+    watchHead: () => () => undefined,
+  })
+  await runner.acquire("agent", paths, { enabled: true })
+  expect(await runner.status(paths.repo)).toBeNull()
+  expect(warned).toEqual([])
+  expect(errors.map((entry) => entry.message)).toEqual(["memory sync failed to start"])
+  expect(String(errors[0]?.error)).toContain("SignInError")
+  expect(String(errors[0]?.error)).not.toContain("sidecar could not be loaded")
+  await runner.release(paths.repo)
+})
+
 test("a release followed at once by an acquire of the same repo waits for the close and keeps sync running", async () => {
   const paths = await identity()
   let leased = false
