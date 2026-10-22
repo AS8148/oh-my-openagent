@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { log } from "@oh-my-opencode/utils"
+import { log } from "@oh-my-opencode/utils/logger"
 
 export type RpcObject = Readonly<Record<string, unknown>>
 export type RpcRequest = (command: RpcObject, timeoutMs?: number) => Promise<RpcObject>

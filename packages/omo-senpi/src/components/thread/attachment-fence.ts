@@ -1,4 +1,4 @@
-import { log } from "@oh-my-opencode/utils"
+import { log } from "@oh-my-opencode/utils/logger"
 import { authRequiredError, type RpcObject, type RpcRequest } from "@oh-my-opencode/senpi-task/rpc-socket-client"
 
 const MUTATIONS: ReadonlySet<string> = new Set(["prompt", "interrupt", "set_session_name", "set_model", "set_thinking_level", "wake", "release_session", "extension_ui_response"])

@@ -66,17 +66,21 @@ export async function publishedWorld() {
           buffer = buffer.slice(32)
           authenticated = true
         }
-        if (!buffer.includes("\n")) return
-        const frame = JSON.parse(buffer.slice(0, buffer.indexOf("\n")))
-        frames.push(frame.type)
-        if (frame.type === "list_sessions" && !listing.answer) return
-        void (async () => {
-          if (frame.type === "list_sessions" && listing.delayMs > 0) await new Promise((done) => setTimeout(done, listing.delayMs))
-          const data = frame.type === "list_sessions"
-            ? { sessions: [{ sessionId: `route-${name}`, durableSessionId: listing.durableId, sessionPath, cwd, name, status: "open" }] }
-            : await drain?.({ type: "session_control_wake", reason: "command", reasons: ["command"], delivery_ids: frame.delivery_ids })
-          socket.end(JSON.stringify({ id: frame.id, success: true, data: data ?? {} }) + "\n")
-        })()
+        // The client negotiates protocol (and auth) before its command on the same connection: every line is a frame.
+        for (let newline = buffer.indexOf("\n"); newline >= 0; newline = buffer.indexOf("\n")) {
+          const frame = JSON.parse(buffer.slice(0, newline))
+          buffer = buffer.slice(newline + 1)
+          frames.push(frame.type)
+          if (frame.type === "get_protocol_info") { socket.write(JSON.stringify({ id: frame.id, success: true, data: {} }) + "\n"); continue }
+          if (frame.type === "list_sessions" && !listing.answer) continue
+          void (async () => {
+            if (frame.type === "list_sessions" && listing.delayMs > 0) await new Promise((done) => setTimeout(done, listing.delayMs))
+            const data = frame.type === "list_sessions"
+              ? { sessions: [{ sessionId: `route-${name}`, durableSessionId: listing.durableId, sessionPath, cwd, name, status: "open" }] }
+              : await drain?.({ type: "session_control_wake", reason: "command", reasons: ["command"], delivery_ids: frame.delivery_ids })
+            if (!socket.destroyed) socket.write(JSON.stringify({ id: frame.id, success: true, data: data ?? {} }) + "\n")
+          })()
+        }
       })
     })
     const listening = once(server, "listening", { signal: AbortSignal.timeout(5000) })

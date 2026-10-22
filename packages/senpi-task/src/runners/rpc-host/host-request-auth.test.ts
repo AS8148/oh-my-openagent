@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { configureSharedSubunitLogger } from "@oh-my-opencode/utils"
+import { configureSharedSubunitLogger } from "@oh-my-opencode/utils/logger"
 import { startFakeHost } from "./__fixtures__/fake-host"
 import { askHost } from "./host-request"
 import { RpcIdentityError } from "./socket-auth"
