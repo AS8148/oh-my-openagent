@@ -52,9 +52,28 @@ export interface RegisterStoreIndexInput {
   readonly fs?: DurableJsonFsAsync
 }
 
+// Admissions of one index from this process run one after another. While a slow durable write holds the
+// index lock, a second same-process admission (the pre-warm and an auto spawn's gate) waits for it here,
+// as it did when that write froze the loop, instead of spinning on the lock and spending the holder budget
+// meant for other processes' stalled writers (#10868).
+const inProcessAdmissions = new Map<string, Promise<void>>()
+
 // Admission runs on the session's event loop (the pre-warm, an auto spawn's gate), so its durable write
 // goes through the async file contract: a stalled fsync holds this admission, never the process (#10846).
 export async function registerStoreIndex(input: RegisterStoreIndexInput): Promise<void> {
+  const key = resolve(input.indexPath)
+  const previous = inProcessAdmissions.get(key) ?? Promise.resolve()
+  const admission = previous.then(() => admitToStoreIndex(input))
+  const settled = admission.then(() => undefined, () => undefined)
+  inProcessAdmissions.set(key, settled)
+  try {
+    await admission
+  } finally {
+    if (inProcessAdmissions.get(key) === settled) inProcessAdmissions.delete(key)
+  }
+}
+
+async function admitToStoreIndex(input: RegisterStoreIndexInput): Promise<void> {
   const fs = input.fs ?? DURABLE_JSON_FS_ASYNC
   const storeDir = resolve(input.storeDir)
   try {
