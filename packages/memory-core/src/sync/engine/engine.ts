@@ -46,7 +46,7 @@ export class SyncEngine {
   private rerun = false
   private eventHead = 0
   private appliedMirror = 0
-  private waiters: ((report: CycleReport) => void)[] = []
+  private waiters: { readonly resolve: (report: CycleReport) => void; readonly reject: (error: unknown) => void }[] = []
   private unsubscribe: (() => void) | null = null
   private cancelPoll: (() => void) | null = null
   private cancelDebounce: (() => void) | null = null
@@ -97,10 +97,10 @@ export class SyncEngine {
     })
   }
 
-  /** The running cycle's report, or the next cycle's when none is running. */
+  /** The running cycle's outcome, or the next cycle's when none is running: its report, or its failure. */
   nextCycle(): Promise<CycleReport> {
     if (this.running !== null) return this.running
-    return new Promise((resolve) => this.waiters.push(resolve))
+    return new Promise((resolve, reject) => this.waiters.push({ resolve, reject }))
   }
 
   runCycle(): Promise<CycleReport> {
@@ -113,7 +113,7 @@ export class SyncEngine {
         const shownBefore = this.shownFailureKind()
         this.failing = null
         this.announceIfChanged(shownBefore)
-        for (const w of waiters) w(report)
+        for (const w of waiters) w.resolve(report)
         if (this.running === run) this.running = null
         if (this.rerun && this.eventHead > this.appliedMirror) {
           this.rerun = false
@@ -128,7 +128,13 @@ export class SyncEngine {
           ? { failure, since: previous.since, attempts: previous.attempts + 1 }
           : { failure, since: this.deps.clock.now(), attempts: 1 }
         this.announceIfChanged(shownBefore)
+        for (const w of waiters) w.reject(error)
         if (this.running === run) this.running = null
+        // A request that arrived during the failed cycle still deserves its cycle: nothing it asked for was done.
+        if (this.rerun) {
+          this.rerun = false
+          this.request()
+        }
       },
     )
     return run
