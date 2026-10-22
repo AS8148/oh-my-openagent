@@ -67,15 +67,21 @@ describe("omo's own hop onto the parent's model (#10750 review round 2, #10797)"
     expect(activeParentModelFallback(record)).toMatchObject({ reason: "usage_limit", phase: "switching" })
   })
 
-  test("#given the handoff onto the parent's model never started a child #when the task has ended #then the note says it could not start", () => {
+  // #10807 review M1: an ended record without an observation on the parent's model cannot tell "never spawned" from
+  // "spawned, reported no model, died before its first message" (both clear the handoff marker), so the phase may only
+  // say the run is unconfirmed, never that the child could not start.
+  test.each([
+    ["the handoff never started a child", (record: TaskRecord): TaskRecord => record],
+    ["a child spawned without reporting its model and died before its first message", (record: TaskRecord): TaskRecord => ({ ...record, pid: 4242 })],
+  ])("#given %s #when the task has ended #then the note says the run on the parent's model is unconfirmed", (_label, settle) => {
     // given
     const { fallback_handoff_epoch: _ended, ...stranded } = handedOff()
 
     // when
-    const ended: TaskRecord = { ...stranded, status: "error" }
+    const ended: TaskRecord = { ...settle(stranded), status: "error" }
 
     // then
-    expect(activeParentModelFallback(ended)).toMatchObject({ reason: "usage_limit", phase: "not_started" })
+    expect(activeParentModelFallback(ended)).toMatchObject({ reason: "usage_limit", phase: "unconfirmed" })
   })
 
   test("#given the child reports the parent's model #when the note is read #then it reads as ran", () => {

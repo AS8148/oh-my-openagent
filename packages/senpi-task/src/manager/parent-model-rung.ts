@@ -36,7 +36,9 @@ export function isParentModelRung(record: Pick<TaskRecord, "parent_model">, mode
  * The parent-model note as of the child's CURRENT route. It reads as ran once the child is observed on the
  * parent's model (or before any model observation). While the parent's model is SELECTED but no child has
  * reported it yet (#10797) it carries a phase instead: `switching` while the handoff is in flight,
- * `not_started` once the task ended without it. A revert or an operator switch drops it.
+ * `unconfirmed` once the task ended without it. An ended record cannot tell a child that never spawned from
+ * one that spawned without reporting its model and died before its first message, so the phase never claims
+ * which of the two happened. A revert or an operator switch drops it.
  */
 export function activeParentModelFallback(record: TaskRecord): TaskRecord["parent_model_fallback"] {
   const fallback = record.parent_model_fallback
@@ -45,7 +47,7 @@ export function activeParentModelFallback(record: TaskRecord): TaskRecord["paren
   const selected = record.resolved_model
   if (selected === undefined || !isParentModelRung(record, selected) || movedAway(observed)) return undefined
   const live = record.status === "running" || record.status === "pending" || isFallbackHandoff(record)
-  return { ...fallback, phase: live ? "switching" : "not_started" }
+  return { ...fallback, phase: live ? "switching" : "unconfirmed" }
 }
 
 /** An observation that came after the hop (a revert, an operator or client switch) supersedes the note. */

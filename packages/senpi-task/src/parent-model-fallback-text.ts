@@ -11,12 +11,12 @@ const REASON_PHRASES: Readonly<Record<ParentModelFallbackReason, string>> = {
 
 const PHASE_TOKENS: Readonly<Record<ParentModelFallbackPhase, string>> = {
   switching: "switching",
-  not_started: "not started",
+  unconfirmed: "unconfirmed",
 }
 
 const PHASE_LEADS: Readonly<Record<ParentModelFallbackPhase, string>> = {
   switching: "switching to",
-  not_started: "could not start",
+  unconfirmed: "was never confirmed running on",
 }
 
 function resetsSuffix(fallback: ParentModelFallback): string {
