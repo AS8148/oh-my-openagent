@@ -143,6 +143,9 @@ export {
   resolveAvailableCategoryNames,
   resolveCategory,
 } from "./category"
+export { withoutExcludedFallbacks, withoutExcludedSelectors } from "./manager/exclude-fallbacks"
+export { withoutExcludedModels } from "./model-exclusion"
+export { resolveTaskAgents } from "./agents/task-agents"
 export type {
   BuiltinCategoryDefinition,
   CategoryModelSelection,

@@ -108,6 +108,7 @@ No default profiles ship. A profile exists only when you write one under `profil
   "git_master": { "commit_footer": false }, // opt-in commit footer (Native harness); no Co-authored-by trailer is ever emitted
   "telemetry": { "enabled": true }, // telemetry (Native harness), enabled by default
   "disabled_skills": [], // skill names hidden on every harness, unioned across layers
+  "exclude_models": [], // models no category, agent, profile or task pin may run, unioned across layers (Native harness)
   "[opencode]": {},     // OpenCode plugin config, freeform (see configuration.md)
   "[native]": {},       // OmO Native-only overrides, typed base keys
   "[codex]": {},        // Codex-only overrides, typed base keys
@@ -121,7 +122,7 @@ Source: `packages/omo-config-core/src/schema/config.ts`.
 
 ### Harness blocks
 
-`[opencode]` is a freeform record: it carries the full OpenCode plugin configuration documented in [`docs/reference/configuration.md`](./configuration.md) (background tasks, tmux, hooks, skills, and every other plugin key), and the strict schema does not validate its contents. `[native]` and `[codex]` are typed blocks accepting the shared base keys (`categories`, `agents`, `git_master`, `task`, `teams`, `models`, `model_profiles`, `model_profile`, `memory`, `telemetry`, `disabled_skills`), so a harness-specific override stays schema-checked.
+`[opencode]` is a freeform record: it carries the full OpenCode plugin configuration documented in [`docs/reference/configuration.md`](./configuration.md) (background tasks, tmux, hooks, skills, and every other plugin key), and the strict schema does not validate its contents. `[native]` and `[codex]` are typed blocks accepting the shared base keys (`categories`, `agents`, `git_master`, `task`, `teams`, `models`, `model_profiles`, `model_profile`, `memory`, `telemetry`, `disabled_skills`, `exclude_models`), so a harness-specific override stays schema-checked.
 
 `[senpi]` is the legacy spelling of `[native]`, kept working for one release line. It is canonicalized to `[native]` when the config is read, so a config that cannot be rewritten still applies every value it sets, and the startup migration rewrites the key in the file once, naming it in a notice. When a file carries both blocks, `[native]` wins and the ignored `[senpi]` block is reported as a deprecation diagnostic.
 
@@ -135,6 +136,25 @@ The one supported way to turn a skill off. A name listed here is absent from the
   "disabled_skills": ["frontend", "visual-qa"]
 }
 ```
+
+### `exclude_models` (Native harness)
+
+Keeps a model out of every chain OmO Native picks from. A matching model is treated as if its provider had no login: a category's builtin rungs, its `model` / `models` / `fallback_models`, an agent's chain, an agent that borrows a category, memory children (reflection, dream and facts, including the session model they would otherwise inherit), the main session's `model_profile` walk (a literal pin included), an explicit `model` on a task call, a task child respawned or resumed on its recorded model (its recorded fallback chain is filtered the same way, so a model excluded after the child was planned never runs), and the `-fast` sibling a fast parent would upgrade a child to (the child keeps its planned model instead). A task call that pins an excluded model fails with `model_unavailable` and names the entry that matched. A category or agent whose every rung is excluded becomes unavailable, exactly like one with no connected provider.
+
+- `provider/model` matches that provider's copy only: `"opencode/claude-fable-5-1"`.
+- A bare model id matches it from any provider, including a gateway that nests the vendor in its id (`openrouter/anthropic/claude-fable-5-1`): `"claude-fable-5-1"`. A `vendor/model` entry such as `"anthropic/claude-fable-5-1"` also matches that nested id.
+- `*` matches any run of characters, and matching ignores case: `"claude-fable-*"` keeps every Fable build out.
+
+Like `disabled_skills`, layers are unioned: a project file cannot let back in a model the user file keeps out. Senpi's own mid-session retry chains for the main session (`retry.fallbackChains` in the engine settings) are not covered.
+
+```jsonc
+// ~/.omo/omo.jsonc
+{
+  "exclude_models": ["claude-fable-*"]
+}
+```
+
+To see the effect, run `omo doctor --models`. It prints, for every category and task agent, the model a spawn runs first, the runtime retry chain in order, and each declared rung with its source (`built-in`, `omo.json`, or `category:<name>` for an agent that borrows a category) and its state (`runs first`, `fallback N`, `excluded by exclude_models "..."`, `no login`, `not reached`), then the main session's `model_profile` lane. Add `--json` for tooling. The answer comes from the same resolvers spawns use, so it cannot drift from what runs. Logins are read offline and credentials are not probed.
 
 Security invariant: the OpenCode plugin honors `mcp_env_allowlist` and `browser_automation_engine.playwright_mcp_args` only from the user layer, including the user layer's own active profile block. Project layers cannot extend them.
 
