@@ -39,16 +39,40 @@ type Observed = {
   connectionsAfter: number
   settledAfterPreview: Settle
 }
-type Teardown = { errors: unknown[]; mcpDisposed: boolean | undefined; homeEntries: string[]; homeRemoved: boolean }
+const TEARDOWN_STEP_MS = 15_000
+
+/** Resolves or rejects with `step`, or rejects once `ms` passes so a hung teardown step cannot hold the test. */
+async function bounded<T>(step: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} did not settle within ${ms} ms`)), ms)
+  })
+  try {
+    return await Promise.race([step, deadline])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+type Teardown = { errors: unknown[]; mcpDisposed: boolean | undefined; homeEntries: string[]; homeRemoved: boolean; ownsProcess: boolean }
 
 /**
  * Builds a real OmO session in a temp HOME and asks the engine for its prewarm prefix. Teardown always runs and
  * restores cwd + env and removes the HOME before anything is asserted, so a failure here (an attach that does
  * not settle, a throw in the preview) can never leave this process's env pointing at the removed HOME.
  */
-async function runPrefixScenario(options: { attachSettleMs: number; extraMcpServers?: Record<string, unknown> }) {
+type Session = Awaited<ReturnType<typeof createAgentSession>>["session"]
+async function runPrefixScenario(options: {
+  attachSettleMs: number
+  extraMcpServers?: Record<string, unknown>
+  teardownStepMs?: number
+  disposeSession?: (session: Session) => Promise<void>
+}) {
+  // A run bun abandoned at its timeout has already been cleaned up by afterEach and may resume while a later
+  // test runs; it must then leave the process alone, so it only restores state it still owns.
+  const owner = baseline
   const root = mkdtempSync(join(tmpdir(), "omo-prefix-"))
-  baseline?.roots.push(root)
+  owner?.roots.push(root)
   const agentDir = join(root, "agent")
   mkdirSync(agentDir)
   // The bundled remote MCPs (context7, grep_app) would race a network connect at startup in a fresh HOME;
@@ -90,7 +114,7 @@ async function runPrefixScenario(options: { attachSettleMs: number; extraMcpServ
       pi.on("session_start", (_event, ctx) => { context = ctx })
     }],
   })
-  let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined
+  let session: Session | undefined
   let mcp: ReturnType<typeof getMcpService> | undefined
   let observed: Observed | undefined
   let failure: unknown
@@ -131,18 +155,37 @@ async function runPrefixScenario(options: { attachSettleMs: number; extraMcpServ
   } catch (caught) {
     failure = caught
   }
-  // Teardown: shut the session down, then restore cwd + env and remove the HOME. Errors are collected, never
-  // thrown, so nothing below can be skipped; every assertion happens after this point.
+  // Teardown: bounded shutdown + dispose (errors collected, never thrown), then - in its own finally, so a hung or
+  // throwing step cannot skip it - restore cwd + env and remove the HOME. Every assertion happens after this point.
   const errors: unknown[] = []
-  try { await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }) } catch (caught) { errors.push(caught) }
-  try { await session?.dispose() } catch (caught) { errors.push(caught) }
-  const mcpDisposed = mcp?.getSnapshot().disposed
-  process.chdir(cwd)
-  restoreEnv(previous)
+  const stepMs = options.teardownStepMs ?? TEARDOWN_STEP_MS
+  const disposeSession = options.disposeSession ?? (async (live: Session): Promise<void> => { await live.dispose() })
+  let mcpDisposed: boolean | undefined
   let homeEntries: string[] = []
-  try { homeEntries = readdirSync(root, { recursive: true }).map(String) } catch (caught) { errors.push(caught) }
-  rmSync(root, { recursive: true, force: true })
-  const teardown: Teardown = { errors, mcpDisposed, homeEntries, homeRemoved: !existsSync(root) }
+  const ownsProcess = (): boolean => owner !== undefined && baseline === owner
+  try {
+    // dispose does not wait for a connect still in flight; when that connect later fails it logs into this HOME
+    // (logs/mcp/<server>.log), after the HOME is gone. Let every attach connect finish first, bounded.
+    try {
+      const settled = await mcp?.whenAttachSettled(stepMs)
+      if (settled !== undefined && settled !== "settled") errors.push(new Error(`MCP attach still pending at teardown (${String(settled)})`))
+    } catch (caught) { errors.push(caught) }
+    try {
+      await bounded(Promise.resolve(session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" })), stepMs, "session_shutdown")
+    } catch (caught) { errors.push(caught) }
+    try {
+      if (session !== undefined) await bounded(disposeSession(session), stepMs, "session.dispose()")
+    } catch (caught) { errors.push(caught) }
+    mcpDisposed = mcp?.getSnapshot().disposed
+  } finally {
+    if (ownsProcess()) {
+      process.chdir(cwd)
+      restoreEnv(previous)
+      try { homeEntries = readdirSync(root, { recursive: true }).map(String) } catch (caught) { errors.push(caught) }
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+  const teardown: Teardown = { errors, mcpDisposed, homeEntries, homeRemoved: !existsSync(root), ownsProcess: ownsProcess() }
   return { observed, failure, teardown, envAfter: snapshotEnv(), cwdAfter: process.cwd(), envBefore: previous, cwdBefore: cwd }
 }
 
@@ -160,18 +203,36 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
   expect(run.observed?.settledAfterPreview).toBe("settled")
   // The quit disposes the MCP service and awaits every connection's close, so nothing it started writes later.
   expect(run.teardown.mcpDisposed).toBe(true)
-  expect(run.teardown.homeEntries.filter((entry) => entry.split("/").includes("goal"))).toEqual([])
+  expect(run.teardown.homeEntries.filter((entry) => /(^|[\\/])goals?([\\/.-]|$)/.test(entry))).toEqual([])
   expect(run.teardown.homeRemoved).toBe(true)
 }, 90_000)
 
 test("#given an MCP attach that never settles #when the prefix scenario fails #then the process env, cwd and temp HOME are restored before it reports", async () => {
   // given: an eager stdio server that is spawned but never answers initialize, so the attach cannot settle
-  // within the bound (its own connect timeout is far longer)
-  const neverReady = { command: process.execPath, args: ["-e", "setInterval(() => {}, 1 << 30)"], lifecycle: "eager", connectTimeoutMs: 120_000 }
+  // within the 1 s bound (its connect times out at 3 s, before teardown disposes the session)
+  const neverReady = { command: process.execPath, args: ["-e", "setInterval(() => {}, 1 << 30)"], lifecycle: "eager", connectTimeoutMs: 3_000 }
   // when
   const run = await runPrefixScenario({ attachSettleMs: 1_000, extraMcpServers: { "never-ready": neverReady } })
   // then
   expect(String(run.failure)).toContain("MCP attach did not settle within 1000 ms")
+  expect(run.envAfter).toEqual(run.envBefore)
+  expect(run.cwdAfter).toBe(run.cwdBefore)
+  expect(run.teardown.errors).toEqual([])
+  expect(run.teardown.mcpDisposed).toBe(true)
+  expect(run.teardown.homeRemoved).toBe(true)
+}, 90_000)
+
+test("#given a session dispose that never settles #when the scenario tears down #then the bound reports it and env, cwd and the HOME are still restored", async () => {
+  // given: dispose does its real work, then never settles
+  const hangingDispose = async (live: Session): Promise<void> => {
+    await live.dispose()
+    await new Promise<void>(() => {})
+  }
+  // when
+  const run = await runPrefixScenario({ attachSettleMs: 30_000, teardownStepMs: 1_000, disposeSession: hangingDispose })
+  // then
+  expect(run.failure).toBeUndefined()
+  expect(run.teardown.errors.map(String)).toEqual(["Error: session.dispose() did not settle within 1000 ms"])
   expect(run.envAfter).toEqual(run.envBefore)
   expect(run.cwdAfter).toBe(run.cwdBefore)
   expect(run.teardown.homeRemoved).toBe(true)
