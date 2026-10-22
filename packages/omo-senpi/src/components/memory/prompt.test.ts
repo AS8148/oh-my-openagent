@@ -445,6 +445,30 @@ describe("createMemoryPromptHandler", () => {
     expect(result?.systemPrompt).toContain(`<!-- senpi-memory:${IDENTITY}:begin -->`)
   }, 30_000)
 
+  test("#given the nudge and soul notices both read HEAD #when one prompt runs #then git is asked for HEAD once", async () => {
+    // given
+    const { repo, context } = await fixture()
+    const pi = new FakeExtensionAPI()
+    pi.on("before_agent_start", createMemoryPromptHandler({
+      resolveContext: () => context,
+      createRepo: () => repo,
+      resolveNudgeTurns: async (noticeRepo) => {
+        await noticeRepo.head()
+        return undefined
+      },
+      resolveSoulNotice: async (noticeRepo) => {
+        await noticeRepo.head()
+        return undefined
+      },
+    }))
+
+    // when
+    await dispatchEvent(pi, beforeAgentStart("BASE PROMPT"), eventContext("session-1", liveBranch(1)))
+
+    // then
+    expect(repo.headCalls).toBe(1)
+  }, 30_000)
+
   test("#given an unchanged HEAD #when the handler runs twice #then HEAD is re-checked each run while the block compiles once", async () => {
     // given
     const { repo, context } = await fixture()
