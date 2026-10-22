@@ -1,5 +1,4 @@
 import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { spawnSync } from "node:child_process"
 import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, parse } from "node:path"
@@ -15,6 +14,7 @@ import {
   resolveBunExecutable,
   toPortableBuildPath,
 } from "./build-extension.mjs"
+import { runBoundedStage, systemTar } from "./bounded-stage.test-support.mjs"
 import { createBuildFixture } from "./build-extension.test-support.mjs"
 import { runtimePersonaSources } from "./persona-artifacts.mjs"
 
@@ -383,12 +383,12 @@ describe("checkExtensionCurrent", () => {
       await cp(join(pluginRoot, "package.json"), join(pkg, "package.json"))
       await cp(memorySyncOutputPath, join(pkg, "extensions", "omo-memory-sync.js"))
       for (const asset of MEMORY_SYNC_ASSET_NAMES) await cp(join(dirname(memorySyncOutputPath), asset), join(pkg, "extensions", asset))
-      const packed = spawnSync("npm", ["pack", "--silent", "--pack-destination", work], { cwd: pkg, encoding: "utf8", shell: process.platform === "win32" })
+      const packed = await runBoundedStage("npm pack", "npm", ["pack", "--silent", "--pack-destination", work], { cwd: pkg, shell: process.platform === "win32" }, 25_000)
       expect(packed.status, packed.stderr).toBe(0)
       const tarball = join(work, packed.stdout.trim().split("\n").at(-1))
       const installed = join(work, "installed")
       await mkdir(installed)
-      const untar = spawnSync("tar", ["-xzf", tarball, "-C", installed], { encoding: "utf8" })
+      const untar = await runBoundedStage("tar", systemTar(), ["-xzf", tarball, "-C", installed], {}, 10_000)
       expect(untar.status, untar.stderr).toBe(0)
       const root = join(installed, "package")
       const listed = await readdir(join(root, "extensions"))
@@ -400,7 +400,7 @@ describe("checkExtensionCurrent", () => {
         "await sidecar.checkSyncRuntime()",
         'console.log("sync-sidecar-ok")',
       ].join("\n"))
-      const run = spawnSync("node", [probe], { cwd: parse(process.cwd()).root, encoding: "utf8", shell: process.platform === "win32" })
+      const run = await runBoundedStage("node probe", "node", [probe], { cwd: parse(process.cwd()).root }, 20_000)
       expect(run.stdout, run.stderr).toContain("sync-sidecar-ok")
       expect(run.status, run.stderr).toBe(0)
     } finally {
