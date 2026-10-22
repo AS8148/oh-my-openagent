@@ -4,9 +4,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
+import * as engineTables from "@earendil-works/pi-ai"
 import { apiKeyEnvProviders } from "@earendil-works/pi-ai"
 
-import { connectedAccountCounts, readConnectedAccounts } from "./account-inventory"
+import { connectedAccountCounts, loadEngineTables, readConnectedAccounts as readWithTables } from "./account-inventory"
+
+const readConnectedAccounts = (dir: string, env: Readonly<Record<string, string | undefined>>) => readWithTables(dir, env, engineTables)
 
 const dirs: string[] = []
 afterEach(() => {
@@ -71,6 +74,15 @@ describe("readConnectedAccounts (#10919: linked accounts per provider, as the en
     expect(connected).not.toContain("acme")
   })
 
+  it("#given pi-ai cannot be loaded by the host #then only this count is empty and nothing throws", async () => {
+    await loadEngineTables(() => Promise.reject(new Error("Cannot find package '@earendil-works/pi-ai'")))
+    expect(readWithTables(agentDir({ "anthropic-subscription": { ...SENTINEL, accounts: [login("a")] } }), NO_ENV)).toBe("")
+    await loadEngineTables(() => Promise.resolve({ normalizeProviderId: "not a function" }))
+    expect(readWithTables(agentDir({ "anthropic-subscription": { ...SENTINEL, accounts: [login("a")] } }), NO_ENV)).toBe("")
+    await loadEngineTables()
+    expect(readWithTables(agentDir({ "anthropic-subscription": { ...SENTINEL, accounts: [login("a")] } }), NO_ENV)).toBe("anthropic-subscription:1")
+  })
+
   it("#given no auth.json or a malformed one #then only env slots count (the provider inventory already reports the malformed file once)", () => {
     expect(readConnectedAccounts(agentDir(), NO_ENV)).toBe("")
     expect(readConnectedAccounts(agentDir(`{"anthropic": ${SECRET}}`), NO_ENV)).toBe("")
@@ -122,7 +134,7 @@ describe("parity with the engine's own account listing (senpi getCredentialAccou
       const storage = AuthStorage.inMemory(structuredClone(auth))
       // The engine rewrites auth.json with its load migrations (legacy keys, Anthropic OAuth -> subscription) once, before
       // telemetry can run, so the file telemetry reads is the engine's loaded document.
-      const ours = connectedAccountCounts(structuredClone(storage.getAll()), env)
+      const ours = connectedAccountCounts(structuredClone(storage.getAll()), env, engineTables)
       for (const listed of new Set([provider, ...apiKeyEnvProviders(), "anthropic-subscription"])) {
         const canonical = listed === "claude-sdk-oauth" ? "anthropic-subscription" : listed === "openai-codex" ? "chatgpt-subscription" : listed
         if (canonical !== listed && provider !== listed) continue

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { loadEngineTables } from "./account-inventory"
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
@@ -453,6 +454,7 @@ describe("OmO Native session telemetry", () => {
       writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ "chatgpt-subscription": { accounts: [{ name: "me@example.com" }, { name: "two" }] } }))
       const recorder = createRecorder()
       const pi = register(agentDir, recorder)
+      await loadEngineTables()
       await pi.dispatch("session_start", { type: "session_start", reason: "startup" }, sessionCtx("accounts"))
       const properties = recorder.messages.find(({ event }) => event === "session_started")?.properties
       expect(properties).toMatchObject({ connected_account_count: "chatgpt-subscription:2" })
