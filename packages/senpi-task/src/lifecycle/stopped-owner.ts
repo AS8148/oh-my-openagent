@@ -31,12 +31,12 @@ export async function stopOwnedChildren(
   const reason = `parent task ${owner.task_id} was ${owner.killed === true ? "killed" : owner.status === "running" ? "cancelled" : owner.status}`
   for (const record of context.store.list().records) {
     if (record.parent_session_id !== input.parentSessionId || record.host_pid !== context.hostPid) continue
-    const handle = context.registry.get(record.task_id)
-    if (handle === undefined && record.status !== "pending") continue
+    if (context.registry.get(record.task_id) === undefined && record.status !== "pending") continue
     try {
       if (record.status === "pending") context.dequeuePending(record.task_id)
-      if (record.status === "pending" || record.status === "running") cancelChild(context, record, reason)
-      handle?.markStopping?.()
+      if (record.status === "pending" || record.status === "running") cancelChild(context, record.task_id, reason)
+      // Read after the cancel: a launch that admitted the pending child meanwhile has registered it by now.
+      context.registry.get(record.task_id)?.markStopping?.()
       await destroyResidentTask(context, record.task_id, "cancel")
       disposed += 1
     } catch (error) {
@@ -44,7 +44,7 @@ export async function stopOwnedChildren(
     }
   }
   const summary: SuspendSummary = {
-    suspended_in_process: 0, suspended_rpc: 0, suspended_pending: 0, disposed, failures,
+    suspended_in_process: 0, suspended_rpc: 0, suspended_pending: 0, disposed, failures, stopped_owner: owner.task_id,
   }
   log("senpi-task session shutdown stopped the children of a stopped task", {
     parentSessionId: input.parentSessionId, owner: owner.task_id, ...summary,
@@ -52,19 +52,24 @@ export async function stopOwnedChildren(
   return summary
 }
 
-function cancelChild(context: LifecycleContext, record: TaskRecord, reason: string): void {
-  const undelivered = record.pending_steering?.length ?? 0
-  const result = context.store.transition(record.task_id, {
-    type: "cancel", timestamp: nowIso(context), error_message: withDroppedSteeringNotice(reason, undelivered) ?? reason,
+// Every fact comes from the fresh record, never the shutdown's list() snapshot: the child may have
+// started, settled or received a queued message since.
+function cancelChild(context: LifecycleContext, taskId: string, reason: string): void {
+  const before = context.store.load(taskId)
+  if (before === null) return
+  const result = context.store.transition(taskId, {
+    type: "cancel", timestamp: nowIso(context),
+    error_message: withDroppedSteeringNotice(reason, before.pending_steering?.length ?? 0) ?? reason,
   })
   // A child that settled on its own in the meantime keeps its own outcome: no cancelled event for it.
   if (!result.applied) return
-  if (undelivered > 0) {
-    context.store.mutate(record.task_id, (fresh) => {
-      const { pending_steering: _dropped, ...rest } = fresh
-      return rest
-    })
-    context.store.appendEvent(record.task_id, { type: "steer_dropped", payload: { count: undelivered, reason: "cancelled" } })
-  }
-  context.store.appendEvent(record.task_id, { type: "cancelled", payload: { previous_status: record.status, reason } })
+  let dropped = 0
+  context.store.mutate(taskId, (fresh) => {
+    dropped = fresh.pending_steering?.length ?? 0
+    if (dropped === 0) return fresh
+    const { pending_steering: _dropped, ...rest } = fresh
+    return rest
+  })
+  if (dropped > 0) context.store.appendEvent(taskId, { type: "steer_dropped", payload: { count: dropped, reason: "cancelled" } })
+  context.store.appendEvent(taskId, { type: "cancelled", payload: { previous_status: before.status, reason } })
 }

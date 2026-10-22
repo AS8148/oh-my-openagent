@@ -161,12 +161,20 @@ export function wireEventBridge(
         if (liveContext.mode === "print" || liveContext.mode === "json") process.stderr.write(`${notice}\n`)
         else liveContext.ui?.notify(notice, level)
       }
-      const count = continuing.filter(({ record }) =>
-        !summary.failures.some((failure) => failure.task_id === record.task_id)
-        && engine.manager.get(record.task_id)?.status !== "cancelled").length
-      if (count > 0) notify(`${count} background task(s) keep running under session ${sessionId}; resume it (omo --resume ${sessionId}) to collect their results`, "info")
-      const unstopped = summary.failures.filter((failure) => engine.manager.get(failure.task_id)?.status === "cancelled").length
-      if (unstopped > 0) notify(`${unstopped} cancelled child task(s) under session ${sessionId} could not be stopped and may still be running on the task host`, "warning")
+      // A stopped owner's session can never be resumed, so nothing kept running there to collect.
+      if (summary.stopped_owner === undefined) {
+        const count = continuing.filter(({ record }) =>
+          !summary.failures.some((failure) => failure.task_id === record.task_id)
+          && engine.manager.get(record.task_id)?.status !== "cancelled").length
+        if (count > 0) notify(`${count} background task(s) keep running under session ${sessionId}; resume it (omo --resume ${sessionId}) to collect their results`, "info")
+        continue
+      }
+      // Only a child that ever started can still be running; a pending one that failed to tear down never ran.
+      const unstopped = summary.failures.filter((failure) => {
+        const record = engine.manager.get(failure.task_id)
+        return record?.started_at !== undefined && (record.status === "running" || record.status === "cancelled")
+      }).length
+      if (unstopped > 0) notify(`${unstopped} child task(s) of stopped task ${summary.stopped_owner} could not be stopped and may still be running on the task host`, "warning")
     }
   })
 

@@ -69,6 +69,8 @@ export type SuspendSummary = {
   readonly suspended_pending: number
   readonly disposed: number
   readonly failures: readonly SuspendFailure[]
+  // Set when the session's own task was stopped: its children were stopped too and nothing detached.
+  readonly stopped_owner?: string
 }
 
 export type TaskLifecycle = {
