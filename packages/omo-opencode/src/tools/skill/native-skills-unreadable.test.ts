@@ -26,6 +26,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("an unread
   roots.push(root)
   const project = join(root, "project")
   mkdirSync(project)
+  mkdirSync(join(project, ".git"))
   const host = join(root, "host")
   const locked = skillFile(host, "locked")
   const entries = ["locked", "second", "third"].map((name) => ({
