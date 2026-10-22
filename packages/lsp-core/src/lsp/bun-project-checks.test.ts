@@ -28,6 +28,11 @@ describe("findBunProjectRoot", () => {
 		const root = createProject({ "package.json": '{"packageManager":"npm@11.0.0"}', "package-lock.json": "{}", "src/a.ts": "" });
 		expect(findBunProjectRoot(join(root, "src"))).toBeUndefined();
 	});
+
+	it("#given a bunfig.toml in the home directory and no repository #when looked up below home #then it is not a Bun project", () => {
+		const home = createProject({ "bunfig.toml": "", "work/src/a.ts": "" }, { git: false });
+		expect(findBunProjectRoot(join(home, "work", "src"), home)).toBeUndefined();
+	});
 });
 
 describe("projectShadowsBunCommand", () => {
@@ -43,39 +48,65 @@ describe("projectShadowsBunCommand", () => {
 		expect(projectShadowsBunCommand("lint", root)).toBe(true);
 		expect(projectShadowsBunCommand("check", root)).toBe(false);
 	});
+
+	it("#given a plain lint/ or format/ folder #when checked #then it does not shadow, but one with an index file does", () => {
+		const plain = createProject({ "bun.lock": "", "lint/rules.md": "", "format/notes.txt": "" });
+		expect(projectShadowsBunCommand("lint", plain)).toBe(false);
+		expect(projectShadowsBunCommand("format", plain)).toBe(false);
+		const runnable = createProject({ "bun.lock": "", "lint/index.ts": "" });
+		expect(projectShadowsBunCommand("lint", runnable)).toBe(true);
+	});
 });
 
 describe("bunHasCommand", () => {
-	it("#given a bun without lint #when probed #then only the commands whose --help exits 0 are available", () => {
+	it("#given a bun without lint #when probed #then only the commands whose --help exits 0 are available", async () => {
 		const bun = createFakeBun({ commands: ["check"] });
-		expect(bunHasCommand(bun.path, "check")).toBe(true);
-		expect(bunHasCommand(bun.path, "lint")).toBe(false);
-		expect(bunHasCommand(bun.path, "format")).toBe(false);
+		expect(await bunHasCommand(bun.path, "check")).toBe(true);
+		expect(await bunHasCommand(bun.path, "lint")).toBe(false);
+		expect(await bunHasCommand(bun.path, "format")).toBe(false);
 	});
 
-	it("#given repeated probes #when probed #then each command runs --help once, in an empty directory", () => {
+	it("#given concurrent and repeated probes #when probed #then each command runs --help once, in an empty directory", async () => {
 		const bun = createFakeBun({ commands: ["check", "lint"] });
-		bunHasCommand(bun.path, "lint");
-		bunHasCommand(bun.path, "lint");
+		await Promise.all([bunHasCommand(bun.path, "lint"), bunHasCommand(bun.path, "lint")]);
+		await bunHasCommand(bun.path, "lint");
 		const calls = bun.calls();
 		expect(calls.map((call) => call.args)).toEqual([["lint", "--help"]]);
 		expect(calls[0]?.cwdEntries).toEqual([]);
 	});
+
+	it("#given a bun whose format answers --help #when its format --write leaves the file unchanged #then format counts as unavailable", async () => {
+		const silent = createFakeBun({ commands: ["check", "format"], formatWrites: false });
+		const writing = createFakeBun({ commands: ["check", "format"], formatWrites: true });
+		expect(await bunHasCommand(silent.path, "format")).toBe(false);
+		expect(await bunHasCommand(writing.path, "format")).toBe(true);
+		expect(writing.calls().map((call) => call.args)).toEqual([
+			["format", "--help"],
+			["format", "--write", "probe.ts"],
+		]);
+	});
+
+	it("#given the bun binary is replaced in place #when probed again #then the new binary is probed", async () => {
+		const bun = createFakeBun({ commands: ["check"] });
+		expect(await bunHasCommand(bun.path, "lint")).toBe(false);
+		bun.upgrade({ commands: ["check", "lint"] });
+		expect(await bunHasCommand(bun.path, "lint")).toBe(true);
+	});
 });
 
 describe("resolveBunProjectCommand", () => {
-	it("#given a non-Bun project #when resolved #then bun is never looked up", () => {
+	it("#given a non-Bun project #when resolved #then bun is never looked up", async () => {
 		const root = createProject({ "package.json": "{}", "src/a.ts": "" });
 		let lookups = 0;
-		expect(resolveBunProjectCommand("check", root, { resolveBun: () => (lookups++, "/unused/bun") })).toBeUndefined();
+		expect(await resolveBunProjectCommand("check", root, { resolveBun: () => (lookups++, "/unused/bun") })).toBeUndefined();
 		expect(lookups).toBe(0);
 	});
 
-	it("#given a Bun project and a bun with check #when resolved #then that bun is returned", () => {
+	it("#given a Bun project and a bun with check #when resolved #then that bun is returned", async () => {
 		const root = createProject({ "bun.lock": "" });
 		const bun = createFakeBun({ commands: ["check"] });
-		expect(resolveBunProjectCommand("check", root, { resolveBun: () => bun.path })).toBe(bun.path);
-		expect(resolveBunProjectCommand("lint", root, { resolveBun: () => bun.path })).toBeUndefined();
+		expect(await resolveBunProjectCommand("check", root, { resolveBun: () => bun.path })).toBe(bun.path);
+		expect(await resolveBunProjectCommand("lint", root, { resolveBun: () => bun.path })).toBeUndefined();
 	});
 });
 

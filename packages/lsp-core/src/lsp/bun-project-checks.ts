@@ -1,6 +1,6 @@
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createSpawnCommand } from "./process.js";
 import { resolveServerBinary } from "./server-installation.js";
@@ -9,6 +9,7 @@ export type BunProjectCommand = "check" | "lint" | "format";
 
 export interface BunProjectChecksOptions {
 	readonly resolveBun?: (cwd: string) => string | null;
+	readonly homeDir?: string;
 }
 
 export interface BunCommandRun {
@@ -18,18 +19,24 @@ export interface BunCommandRun {
 }
 
 const BUN_LOCKFILES = ["bun.lock", "bun.lockb", "bunfig.toml"];
-const RUNNABLE_EXTENSIONS = ["", ".tsx", ".ts", ".jsx", ".cts", ".cjs", ".js", ".mjs", ".mts"];
+const RUNNABLE_EXTENSIONS = [".tsx", ".ts", ".jsx", ".cts", ".cjs", ".js", ".mjs", ".mts"];
+const BIN_SUFFIXES = process.platform === "win32" ? [".exe", ".bunx", ".cmd", ""] : [""];
 const PROBE_TIMEOUT_MS = 10_000;
+const UNFORMATTED_PROBE = "const a=1\n";
 
-const probeCache = new Map<string, boolean>();
+const probeCache = new Map<string, Promise<boolean>>();
 
 export function __resetBunCommandProbeCacheForTests(): void {
 	probeCache.clear();
 }
 
-export function findBunProjectRoot(start: string): string | undefined {
+// The walk stops at the repository boundary, and never reads the home directory or anything above
+// it, so a stray file there does not turn every directory outside a repository into a Bun project.
+export function findBunProjectRoot(start: string, home: string = homedir()): string | undefined {
+	const stopAt = resolve(home);
 	let dir = resolve(start);
 	for (;;) {
+		if (dir === stopAt) return undefined;
 		if (BUN_LOCKFILES.some((name) => existsSync(join(dir, name)))) return dir;
 		if (packageManagerIsBun(join(dir, "package.json"))) return dir;
 		if (existsSync(join(dir, ".git"))) return undefined;
@@ -57,8 +64,25 @@ function readJsonObject(path: string): Record<string, unknown> | undefined {
 	}
 }
 
+function isFile(path: string): boolean {
+	try {
+		return statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
+
+function isDirectory(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
 // Bun still runs a project's own script (nearest package.json) named check/lint/format, and for
-// lint/format also a file or installed executable of that name, instead of its built-in command.
+// lint/format also what `bun <name>` would run as a file: `name` or `name.<ext>`, a `name/` directory
+// with a package.json or an index file, or an executable a package installed in node_modules/.bin.
 export function projectShadowsBunCommand(command: BunProjectCommand, cwd: string): boolean {
 	const packageJsonDir = nearestPackageJsonDir(cwd);
 	if (packageJsonDir !== undefined) {
@@ -68,10 +92,14 @@ export function projectShadowsBunCommand(command: BunProjectCommand, cwd: string
 		}
 	}
 	if (command === "check") return false;
-	if (RUNNABLE_EXTENSIONS.some((extension) => existsSync(join(cwd, `${command}${extension}`)))) return true;
+	const base = join(cwd, command);
+	if (isFile(base) || RUNNABLE_EXTENSIONS.some((extension) => isFile(`${base}${extension}`))) return true;
+	if (isDirectory(base) && (isFile(join(base, "package.json")) || RUNNABLE_EXTENSIONS.some((extension) => isFile(join(base, `index${extension}`))))) {
+		return true;
+	}
 	let dir = resolve(cwd);
 	for (;;) {
-		if (existsSync(join(dir, "node_modules", ".bin", command))) return true;
+		if (BIN_SUFFIXES.some((suffix) => existsSync(join(dir, "node_modules", ".bin", `${command}${suffix}`)))) return true;
 		const parent = dirname(dir);
 		if (parent === dir) return false;
 		dir = parent;
@@ -88,41 +116,57 @@ function nearestPackageJsonDir(start: string): string | undefined {
 	}
 }
 
+function binaryIdentity(bunPath: string): string {
+	try {
+		const stats = statSync(bunPath);
+		return `${stats.mtimeMs}:${stats.size}`;
+	} catch {
+		return "missing";
+	}
+}
+
 // Feature detection by exit code, in an empty directory: next to a same-named project script an
-// older Bun runs that script for `--help` and exits 0.
-export function bunHasCommand(bunPath: string, command: BunProjectCommand): boolean {
-	const key = `${bunPath}\0${command}`;
+// older Bun runs that script for `--help` and exits 0. Asynchronous, so a probe never blocks the
+// event loop; cached per binary and command, and re-probed when the binary file changes.
+export function bunHasCommand(bunPath: string, command: BunProjectCommand): Promise<boolean> {
+	const key = `${bunPath}\0${binaryIdentity(bunPath)}\0${command}`;
 	const cached = probeCache.get(key);
 	if (cached !== undefined) return cached;
+	const probe = probeOnce(bunPath, command);
+	probeCache.set(key, probe);
+	return probe;
+}
+
+// `format` must also prove it rewrites a file in place: a bun whose `format --write` printed to stdout
+// instead, or ignored the flag, would leave every file unchanged and silently stop formatting.
+async function probeOnce(bunPath: string, command: BunProjectCommand): Promise<boolean> {
 	const emptyDir = mkdtempSync(join(tmpdir(), "omo-bun-probe-"));
-	let available = false;
+	const timeout = AbortSignal.timeout(PROBE_TIMEOUT_MS);
 	try {
-		const prepared = createSpawnCommand([bunPath, command, "--help"]);
-		const result = spawnSync(prepared.command, prepared.args, {
-			cwd: emptyDir,
-			stdio: "ignore",
-			shell: prepared.shell,
-			windowsHide: true,
-			timeout: PROBE_TIMEOUT_MS,
-		});
-		available = result.error === undefined && result.status === 0;
+		const help = await runBunCommand(bunPath, [command, "--help"], emptyDir, timeout);
+		if (help.exitCode !== 0) return false;
+		if (command !== "format") return true;
+		const probeFile = join(emptyDir, "probe.ts");
+		writeFileSync(probeFile, UNFORMATTED_PROBE);
+		const write = await runBunCommand(bunPath, ["format", "--write", "probe.ts"], emptyDir, timeout);
+		return write.exitCode === 0 && readFileSync(probeFile, "utf8") !== UNFORMATTED_PROBE;
+	} catch {
+		return false;
 	} finally {
 		rmSync(emptyDir, { recursive: true, force: true });
 	}
-	probeCache.set(key, available);
-	return available;
 }
 
-export function resolveBunProjectCommand(
+export async function resolveBunProjectCommand(
 	command: BunProjectCommand,
 	cwd: string,
 	options: BunProjectChecksOptions = {},
-): string | undefined {
-	if (findBunProjectRoot(cwd) === undefined) return undefined;
+): Promise<string | undefined> {
+	if (findBunProjectRoot(cwd, options.homeDir) === undefined) return undefined;
 	if (projectShadowsBunCommand(command, cwd)) return undefined;
 	const bunPath = (options.resolveBun ?? defaultResolveBun)(cwd);
 	if (!bunPath) return undefined;
-	return bunHasCommand(bunPath, command) ? bunPath : undefined;
+	return (await bunHasCommand(bunPath, command)) ? bunPath : undefined;
 }
 
 function defaultResolveBun(cwd: string): string | null {

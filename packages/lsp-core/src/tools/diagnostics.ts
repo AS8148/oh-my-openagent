@@ -58,13 +58,13 @@ export async function executeLspDiagnostics(
 				return text(bun.output, details);
 			}
 
-				const output = await aggregateDiagnosticsForDirectory(
-					absPath,
-					extension,
-					severity,
-					undefined,
-					signal === undefined ? {} : { signal },
-				);
+			const output = await aggregateDiagnosticsForDirectory(
+				absPath,
+				extension,
+				severity,
+				undefined,
+				signal === undefined ? {} : { signal },
+			);
 			const details: LspDiagnosticsDetails = {
 				filePath,
 				severity,

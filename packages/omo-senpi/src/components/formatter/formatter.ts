@@ -23,13 +23,13 @@ export function resolveFormatMode(config: { mode?: FormatMode; languages?: Recor
   return config.mode ?? "best-effort"
 }
 
-export function detectFormatter(markers: readonly string[], filePath: string, configText = "", bunFormatAvailable: () => boolean = () => false): Formatter | undefined {
+export const bunFormatter: Formatter = { tool: "bun format", command: "bun", args: ["format", "--write"] }
+
+export function detectFormatter(markers: readonly string[], filePath: string, configText = ""): Formatter | undefined {
   const name = basename(filePath)
   const ext = extname(filePath)
   if (markers.includes("biome.json") || markers.includes("biome.jsonc")) return { tool: "biome", command: "biome", args: ["format", "--write"] }
-  if (markers.some((m) => m === ".prettierrc" || m.startsWith(".prettierrc") || m === "prettier.config.js" || m.startsWith("prettier.config."))) {
-    return bunFormatAvailable() ? { tool: "bun format", command: "bun", args: ["format"] } : { tool: "prettier", command: "prettier", args: ["--write"] }
-  }
+  if (markers.some((m) => m === ".prettierrc" || m.startsWith(".prettierrc") || m === "prettier.config.js" || m.startsWith("prettier.config."))) return { tool: "prettier", command: "prettier", args: ["--write"] }
   if (markers.includes("rustfmt.toml") || markers.includes("Cargo.toml")) return ext === ".rs" ? { tool: "rustfmt", command: "rustfmt", args: [] } : undefined
   if (markers.includes("go.mod")) return ext === ".go" ? { tool: "gofmt", command: "gofmt", args: ["-w"] } : undefined
   if ((markers.includes("ruff.toml") || (markers.includes("pyproject.toml") && /^\s*\[tool\.ruff\]/m.test(configText))) && ext === ".py") return { tool: "ruff", command: "ruff", args: ["format"] }
@@ -42,14 +42,14 @@ export interface FormatterStepOptions {
   readonly readMarker?: (cwd: string, marker: string) => string
   readonly daemonFormat?: (filePath: string) => Promise<{ readonly content?: readonly { readonly type: string; readonly text?: string }[]; readonly details?: unknown; readonly isError?: boolean }>
   readonly resolveBinary?: (command: string, cwd: string) => string | null
-  readonly bunFormatAvailable?: (cwd: string) => boolean
+  readonly bunFormatAvailable?: (cwd: string) => Promise<boolean>
   readonly logger?: { warn(message: string, details?: unknown): void }
 }
 
 export function createFormatterStep(options: FormatterStepOptions = {}) {
   const missingNotices = new Set<string>()
   const daemonFormat = options.daemonFormat ?? (filePath => callPackagedDaemonTool("format", { filePath }))
-  const bunFormatAvailable = options.bunFormatAvailable ?? (cwd => resolveBunProjectCommand("format", cwd) !== undefined)
+  const bunFormatAvailable = options.bunFormatAvailable ?? (async cwd => (await resolveBunProjectCommand("format", cwd)) !== undefined)
   return async function formatMutation(event: PostMutationEvent, cwd: string, sessionId = "anonymous") {
     if (event.toolName === undefined || !MUTATION_TOOL_NAMES.has(event.toolName) || event.input === undefined) return { content: undefined, error: undefined }
     const config = { ...formatOnMutationDefaults, ...(options.config ?? {}) }
@@ -61,8 +61,9 @@ export function createFormatterStep(options: FormatterStepOptions = {}) {
       if (!existsSync(filePath) || isGitIgnored(filePath, cwd)) continue
       if (readFileSync(filePath).byteLength > config.maxFileBytes) continue
       const markerNames = options.markers?.(cwd) ?? []
-      const marker = detectFormatter(markerNames, filePath, options.readMarker?.(cwd, "pyproject.toml") ?? "", () => bunFormatAvailable(cwd))
-      if (!marker) continue
+      const detected = detectFormatter(markerNames, filePath, options.readMarker?.(cwd, "pyproject.toml") ?? "")
+      if (!detected) continue
+      const marker = detected.tool === "prettier" && (await bunFormatAvailable(cwd)) ? bunFormatter : detected
       const language = languageForPath(filePath)
       if (resolveFormatMode(config, language) === "off") continue
       const result = await runSingleFlight(filePath, () => formatOne(filePath, marker, cwd, config.timeoutMs, daemonFormat, options.resolveBinary))

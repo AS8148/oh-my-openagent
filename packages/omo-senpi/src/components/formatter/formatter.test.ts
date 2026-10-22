@@ -1,9 +1,9 @@
-import { describe, expect, it } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { afterEach, describe, expect, it } from "bun:test"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { createFormatterStep, detectFormatter, formatOnMutationDefaults, resolveFormatMode } from "./formatter"
+import { bunFormatter, createFormatterStep, detectFormatter, formatOnMutationDefaults, resolveFormatMode } from "./formatter"
 
 describe("format-on-mutation policy", () => {
   it("uses marker precedence and never enables prettier beside biome", () => {
@@ -13,19 +13,6 @@ describe("format-on-mutation policy", () => {
     expect(detectFormatter(["go.mod"], "src/a.go")?.tool).toBe("gofmt")
     expect(detectFormatter(["pyproject.toml"], "src/a.py", "[tool.ruff]\nline-length=88")?.tool).toBe("ruff")
     expect(detectFormatter(["pyproject.toml"], "src/a.py", "[tool.black]\nline-length=88")).toBeUndefined()
-  })
-
-  it("#given a prettier project #when the installed bun has format #then bun format replaces the prettier binary", () => {
-    expect(detectFormatter([".prettierrc"], "src/a.ts", "", () => true)).toEqual({ tool: "bun format", command: "bun", args: ["format"] })
-    expect(detectFormatter([".prettierrc"], "src/a.ts", "", () => false)?.tool).toBe("prettier")
-  })
-
-  it("#given no prettier opt-in #when bun has format #then bun format is never probed or chosen", () => {
-    let probes = 0
-    const probe = () => (probes++, true)
-    expect(detectFormatter(["biome.json", ".prettierrc"], "src/a.ts", "", probe)?.tool).toBe("biome")
-    expect(detectFormatter(["package.json", "bun.lock"], "src/a.ts", "", probe)).toBeUndefined()
-    expect(probes).toBe(0)
   })
 
   it("has the required defaults and language overrides", () => {
@@ -81,5 +68,76 @@ describe("formatter CLI fallback when the binary cannot be spawned", () => {
     const result = await step("required")({ toolName: "write", input: { filePath } }, cwd)
 
     expect(result.error).toContain("Formatter prettier is unavailable")
+  })
+})
+
+describe("bun format in place of prettier", () => {
+  const created: string[] = []
+  afterEach(() => {
+    for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  // A fake bun that formats like `bun format --write <file>`: it rewrites the file only when --write is passed,
+  // so a formatter entry without an in-place flag leaves the file unchanged and the test fails.
+  function arrange(markers: readonly string[], bunHasFormat: boolean) {
+    const cwd = mkdtempSync(join(tmpdir(), "omo-formatter-bun-"))
+    created.push(cwd)
+    const filePath = join(cwd, "a.ts")
+    writeFileSync(filePath, "const a=1\n")
+    const script = join(cwd, "fake-bun.mjs")
+    writeFileSync(script, [
+      'import { appendFileSync, writeFileSync } from "node:fs";',
+      `appendFileSync(${JSON.stringify(join(cwd, "calls.log"))}, process.argv.slice(2).join(" ") + "\\n");`,
+      'const args = process.argv.slice(2);',
+      'if (args[0] === "format" && args.includes("--write")) writeFileSync(args[args.length - 1], "const a = 1;\\n");',
+    ].join("\n"))
+    const bin = process.platform === "win32" ? join(cwd, "bun.cmd") : join(cwd, "bun")
+    if (process.platform === "win32") writeFileSync(bin, `@"${process.execPath}" "${script}" %*\r\n`)
+    else {
+      writeFileSync(bin, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`)
+      chmodSync(bin, 0o755)
+    }
+    let probes = 0
+    const step = createFormatterStep({
+      config: { mode: "best-effort", timeoutMs: 10_000 },
+      markers: () => markers,
+      daemonFormat: async () => ({ details: { status: "unavailable" } }),
+      resolveBinary: (command) => (command === "bun" ? bin : null),
+      bunFormatAvailable: async () => (probes++, bunHasFormat),
+    })
+    const calls = () => {
+      try { return readFileSync(join(cwd, "calls.log"), "utf8").trim().split("\n").filter(Boolean) } catch { return [] }
+    }
+    return { cwd, filePath, step, calls, probes: () => probes }
+  }
+
+  it("#given a prettier project and a bun with format #when a file is written #then bun format rewrites it in place and says so", async () => {
+    const { cwd, filePath, step, calls } = arrange([".prettierrc"], true)
+
+    const result = await step({ toolName: "write", input: { filePath } }, cwd)
+
+    expect(readFileSync(filePath, "utf8")).toBe("const a = 1;\n")
+    expect(calls()).toEqual([`format --write ${filePath}`])
+    expect(result.content?.[0]?.text).toContain("auto-formatted a.ts with bun format")
+    expect(bunFormatter.args).toContain("--write")
+  })
+
+  it("#given a prettier project and a bun without format #when a file is written #then bun is never run", async () => {
+    const { cwd, filePath, step, calls } = arrange([".prettierrc"], false)
+
+    await step({ toolName: "write", input: { filePath } }, cwd)
+
+    expect(calls()).toEqual([])
+  })
+
+  it("#given biome or no formatter config #when a file is written #then bun format is never probed", async () => {
+    for (const markers of [["biome.json", ".prettierrc"], ["package.json", "bun.lock"]]) {
+      const { cwd, filePath, step, calls, probes } = arrange(markers, true)
+
+      await step({ toolName: "write", input: { filePath } }, cwd)
+
+      expect(probes()).toBe(0)
+      expect(calls()).toEqual([])
+    }
   })
 })

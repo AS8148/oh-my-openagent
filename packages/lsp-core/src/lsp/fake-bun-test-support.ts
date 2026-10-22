@@ -20,6 +20,7 @@ export interface FakeBunBehavior {
 	readonly checkExitCode?: number;
 	readonly lintStdout?: string;
 	readonly lintExitCode?: number;
+	readonly formatWrites?: boolean;
 }
 
 export interface FakeBunCall {
@@ -31,38 +32,31 @@ export interface FakeBunCall {
 export interface FakeBun {
 	readonly path: string;
 	calls(): FakeBunCall[];
+	upgrade(behavior: FakeBunBehavior): void;
 }
 
 export function createFakeBun(behavior: FakeBunBehavior): FakeBun {
 	const dir = createTempDir("omo-fake-bun-");
 	const logPath = join(dir, "calls.jsonl");
-	const scriptPath = join(dir, "fake-bun.mjs");
-	writeFileSync(
-		scriptPath,
-		[
-			'import { appendFileSync, readdirSync } from "node:fs";',
-			`const behavior = ${JSON.stringify(behavior)};`,
-			"const args = process.argv.slice(2);",
-			`appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, cwd: process.cwd(), cwdEntries: readdirSync(process.cwd()) }) + "\\n");`,
-			"const [command] = args;",
-			"if (!behavior.commands.includes(command)) process.exit(1);",
-			'if (args.includes("--help")) process.exit(0);',
-			'if (command === "check") { process.stdout.write(behavior.checkStdout ?? ""); process.exit(behavior.checkExitCode ?? 0); }',
-			'if (command === "lint") { process.stdout.write(behavior.lintStdout ?? "[]"); process.exit(behavior.lintExitCode ?? 0); }',
-			"process.exit(0);",
-		].join("\n"),
-	);
 	const binDir = join(dir, "bin");
 	mkdirSync(binDir);
 	const path = process.platform === "win32" ? join(binDir, "bun.cmd") : join(binDir, "bun");
-	if (process.platform === "win32") {
-		writeFileSync(path, `@"${process.execPath}" "${scriptPath}" %*\r\n`);
-	} else {
-		writeFileSync(path, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`);
-		chmodSync(path, 0o755);
-	}
+	let version = 0;
+	const install = (next: FakeBunBehavior) => {
+		version += 1;
+		const scriptPath = join(dir, `fake-bun-${version}.mjs`);
+		writeFakeBunScript(scriptPath, logPath, next);
+		if (process.platform === "win32") {
+			writeFileSync(path, `@"${process.execPath}" "${scriptPath}" %*\r\n`);
+		} else {
+			writeFileSync(path, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`);
+			chmodSync(path, 0o755);
+		}
+	};
+	install(behavior);
 	return {
 		path,
+		upgrade: install,
 		calls: () =>
 			existsSync(logPath)
 				? readFileSync(logPath, "utf8")
@@ -73,9 +67,28 @@ export function createFakeBun(behavior: FakeBunBehavior): FakeBun {
 	};
 }
 
-export function createProject(files: Record<string, string>): string {
+function writeFakeBunScript(scriptPath: string, logPath: string, behavior: FakeBunBehavior): void {
+	writeFileSync(
+		scriptPath,
+		[
+			'import { appendFileSync, readdirSync, writeFileSync } from "node:fs";',
+			`const behavior = ${JSON.stringify(behavior)};`,
+			"const args = process.argv.slice(2);",
+			`appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, cwd: process.cwd(), cwdEntries: readdirSync(process.cwd()) }) + "\\n");`,
+			"const [command] = args;",
+			"if (!behavior.commands.includes(command)) process.exit(1);",
+			'if (args.includes("--help")) process.exit(0);',
+			'if (command === "check") { process.stdout.write(behavior.checkStdout ?? ""); process.exit(behavior.checkExitCode ?? 0); }',
+			'if (command === "lint") { process.stdout.write(behavior.lintStdout ?? "[]"); process.exit(behavior.lintExitCode ?? 0); }',
+			'if (command === "format" && behavior.formatWrites && args.includes("--write")) writeFileSync(args[args.length - 1], "const a = 1;\\n");',
+			"process.exit(0);",
+		].join("\n"),
+	);
+}
+
+export function createProject(files: Record<string, string>, options: { readonly git?: boolean } = {}): string {
 	const root = createTempDir("omo-bun-project-");
-	mkdirSync(join(root, ".git"));
+	if (options.git !== false) mkdirSync(join(root, ".git"));
 	for (const [relativePath, content] of Object.entries(files)) {
 		const target = join(root, relativePath);
 		mkdirSync(join(target, ".."), { recursive: true });

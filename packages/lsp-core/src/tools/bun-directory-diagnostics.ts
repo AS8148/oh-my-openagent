@@ -20,7 +20,7 @@ export async function runBunDirectoryDiagnostics(
 	options: BunProjectChecksOptions = {},
 ): Promise<BunDirectoryDiagnostics | undefined> {
 	if (!TYPESCRIPT_EXTENSIONS.has(extension)) return undefined;
-	const checkBun = resolveBunProjectCommand("check", absDir, options);
+	const checkBun = await resolveBunProjectCommand("check", absDir, options);
 	if (checkBun === undefined) return undefined;
 
 	let typecheck: FileDiagnostic[];
@@ -34,10 +34,10 @@ export async function runBunDirectoryDiagnostics(
 		return undefined;
 	}
 
-	const header = [`Directory: ${absDir}`, "Typecheck: bun check"];
+	const header = [`Directory: ${absDir}`, "Typecheck: bun check (files in this directory and everything they import)"];
 	const projectCommands = ["bun check"];
 	const collected = [...typecheck];
-	const lintBun = resolveBunProjectCommand("lint", absDir, options);
+	const lintBun = await resolveBunProjectCommand("lint", absDir, options);
 	if (lintBun !== undefined) {
 		const lint = await runBunLint(lintBun, absDir, signal);
 		header.push(lint.status);
