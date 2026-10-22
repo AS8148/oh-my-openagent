@@ -1,6 +1,8 @@
 import { readFile } from "../fs/resilient"
 import { join } from "node:path"
 
+import { agreementItemsOf, readAgreementsAt, readAgreementsWorktree } from "../agreements/ledger-file"
+import { AGREEMENTS_PATH } from "../agreements/types"
 import type { GitCommitAuthor, GitMemoryRepo, MemoryCommit } from "../git"
 import { PROVENANCE_STRIPPED_TRAILER, strippedLegacyUserHeader } from "../tools/claim-frontmatter"
 import type { FactsApplyRecovery } from "./mutation-plan"
@@ -34,7 +36,7 @@ export async function applyFactsRecovery(
     await transaction.applyPostState()
     const result = await repo.commitPrepared(
       recovery.paths.map((entry) => entry.path),
-      commitMessage(recovery.batchId, recordCount, await strippedHeaderPaths(repo, recovery)),
+      commitMessage(recovery.batchId, recordCount, await strippedHeaderPaths(repo, recovery), await evictedAgreementIds(repo, recovery)),
       author,
     )
     return { outcome: "committed", sha: result.sha, affectedPaths: recovery.paths.map((entry) => entry.path) }
@@ -48,7 +50,15 @@ export async function applyFactsRecovery(
   }
 }
 
-function commitMessage(batchId: string, count: number, stripped: readonly string[]): string {
+// The facts lane removes an agreement only by evicting it at the cap; each removal is named in the commit.
+async function evictedAgreementIds(repo: GitMemoryRepo, recovery: FactsApplyRecovery): Promise<readonly string[]> {
+  if (!recovery.paths.some((entry) => entry.path === AGREEMENTS_PATH)) return []
+  const after = new Set(agreementItemsOf(await readAgreementsWorktree(repo.dir)).map((item) => item.id))
+  const before = agreementItemsOf(await readAgreementsAt(repo, recovery.headBeforeApply))
+  return before.filter((item) => !after.has(item.id)).map((item) => item.id)
+}
+
+function commitMessage(batchId: string, count: number, stripped: readonly string[], evicted: readonly string[]): string {
   return [
     `chore(facts): extract ${count} ${count === 1 ? "fact" : "facts"}`,
     "",
@@ -56,6 +66,7 @@ function commitMessage(batchId: string, count: number, stripped: readonly string
     "Omo-Writer: facts-extractor",
     `Omo-Facts-Batch: ${batchId}`,
     ...stripped.map((path) => `${PROVENANCE_STRIPPED_TRAILER}: ${path}`),
+    ...evicted.map((id) => `Omo-Agreement-Evicted: ${id}`),
   ].join("\n")
 }
 

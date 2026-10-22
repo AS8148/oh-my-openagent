@@ -11,6 +11,7 @@ import { parseMemoryFile, renderMemoryFile } from "../memfs/frontmatter"
 import { describeDescriptionViolation } from "../memfs/frontmatter-validation"
 import { MemoryPathError, validateMemoryPath } from "../memfs/paths"
 import type { LockDomain } from "../locks"
+import { refuseAgreementsViolation } from "./agreements-write-guard"
 import {
   applyMemoryPatchHunk,
   MemoryPatchHunkError,
@@ -68,6 +69,8 @@ export async function runMemoryApplyPatch(
       await repo.cleanCheck()
       const applied = await applyOperations(repo.dir, parseMemoryPatch(params.input), params.provenance?.claim)
       const paths = applied.affectedPaths
+      const violation = await refuseAgreementsViolation(repo, paths)
+      if (violation !== undefined) throw new MemoryApplyPatchError(violation)
       let result
       try {
         result = await repo.commitWrite(paths, memoryCommitMessage(reason, params.provenance, provenanceStrippedTrailers(applied.strippedPaths)), params.author)
