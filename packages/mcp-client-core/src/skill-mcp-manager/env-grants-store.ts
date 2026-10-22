@@ -1,4 +1,5 @@
-// Vendored from code-yeongyu/senpi@1cbe1594e353126ab8016bb0183ab82ffc5715d5.
+// Vendored from code-yeongyu/senpi@c7ac4b1a86 (formatting), with the Windows
+// rename-retry hunk from 1cbe1594e353126ab8016bb0183ab82ffc5715d5.
 // Source of truth: packages/coding-agent/src/core/extensions/builtin/mcp/env-grants-store.ts.
 // Replace this copy with the engine export after the senpi release.
 /**

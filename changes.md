@@ -1,3 +1,17 @@
+## 2026-10-22 - Address skill containment review findings (#10693)
+
+Task discovery preserves SKILL.md stopping rules and repository-wide link
+boundaries. I/O failures remain unloaded and report their real errno; only actual
+escapes use the security notice. Global OpenCode skill sources retain user
+authority, and pending MCP grants are bounded and invalidate superseded handles.
+The vendored grants-store header identifies both formatting and Windows retry
+source commits. The PR's existing Unreleased paragraph records these behaviors.
+
+Allowed-path walks remain uncached: a session cache could keep a removed or
+retargeted user link authorized, while a safe per-operation cache would require
+threading an explicit lifetime through discovery and declaration revalidation.
+The optional optimization is deferred rather than changing the trust lifetime.
+
 ## 2026-10-20 - Contain legacy and task skill links and scope skill MCP environments (#10693)
 
 Legacy discovery keeps the spelled project path and its provenance through config sources, directory traversal, native fallback and invocation. Project reads use a canonical containment check and a checked descriptor, including MCP sidecars; user skill roots and sibling skill aliases remain supported. Task skill loading uses the same boundary and reports rejected links in its result.
