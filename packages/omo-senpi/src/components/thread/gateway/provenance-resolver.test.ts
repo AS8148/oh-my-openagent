@@ -125,6 +125,25 @@ test("#given a sender repository without an origin #when resolving #then git's e
   expect(await resolveProvenance({ cwd, env, workspaces: [] })).toEqual({ workspace: "unclassified", project: basename(cwd) })
 })
 
+test("#given a cwd left behind by a pruned worktree #when resolving #then its dangling .git file means no repository, not a refused send", async () => {
+  root = mkdtempSync(join(tmpdir(), "omo-provenance-pruned-"))
+  const leftover = join(root, "leftover")
+  mkdirSync(leftover)
+  writeFileSync(join(leftover, ".git"), `gitdir: ${join(root, "gone", "worktrees", "leftover")}\n`)
+  const env = { ...process.env, HOME: root, GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_CEILING_DIRECTORIES: root }
+  expect(await resolveProvenance({ cwd: leftover, env, workspaces: [] })).toEqual({ workspace: "unclassified", project: "leftover" })
+})
+
+test("#given a repository above the sender's git ceiling #when resolving below that ceiling #then git's discovery boundary is honored", async () => {
+  root = mkdtempSync(join(tmpdir(), "omo-provenance-ceiling-"))
+  const env = { ...process.env, HOME: root, GIT_CONFIG_GLOBAL: join(root, "no-config"), GIT_CONFIG_NOSYSTEM: "1", GIT_MASTER: "1" }
+  execFileSync("git", ["init", "-q", root], { env, windowsHide: true })
+  const below = join(root, "ceiling", "below")
+  mkdirSync(below, { recursive: true })
+  expect(await resolveProvenance({ cwd: below, env: { ...env, GIT_CEILING_DIRECTORIES: join(root, "ceiling") }, workspaces: [] }))
+    .toEqual({ workspace: "unclassified", project: "below" })
+})
+
 test("#given a broken sender git configuration #when resolving its origin #then unexpected git errors are surfaced instead of silently unclassifying", async () => {
   const cwd = (root = mkdtempSync(join(tmpdir(), "omo-provenance-git-error-")))
   const config = join(cwd, "gitconfig")

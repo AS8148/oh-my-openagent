@@ -27,8 +27,8 @@ test("#given current storage #when the historical v4 worker reads and attempts a
   const before = await old.list()
   expect(before.map((row) => row.body)).toEqual(["before"])
   expect(before[0]).not.toHaveProperty("actor_user_id")
-  // Capture the refusal explicitly: under Bun 1.4.3, awaiting a worker-backed promise through `expect(...).rejects`
-  // stops the worker's replies from reaching this thread, so the store's close never settles.
+  // Capture the refusal explicitly: `await expect(p).rejects` reached from a worker reply's continuation deadlocks in
+  // Bun >= 1.3.14 (https://github.com/oven-sh/bun/issues/37189), so the store's close would never settle.
   const refusal = await h.engineFor(old).deliver({ sender: sender("old-actor"), target: "target", text: "from v4" }).then(() => undefined, (error: unknown) => error)
   expect(refusal).toBeInstanceOf(Error)
   expect(String(refusal)).toContain("delivery provenance is required")

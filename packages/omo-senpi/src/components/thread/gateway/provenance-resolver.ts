@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import type { OmoProvenanceSettings } from "@oh-my-opencode/omo-config-core"
 import { loadSenpiOmoConfig } from "../../config-resolution"
@@ -15,12 +15,25 @@ export type ProvenanceRuntime = {
   readonly gitRemote?: (cwd: string) => Promise<string | undefined>
 }
 
-/** Structural, locale-independent: a repository is an explicit GIT_DIR or a `.git` entry (directory or worktree file) above the cwd. */
+/** A `.git` directory, or a worktree `.git` file whose `gitdir:` target still exists (a pruned worktree leaves a dangling one). */
+function liveGitEntry(dir: string): boolean {
+  const entry = join(dir, ".git")
+  if (!existsSync(entry)) return false
+  if (statSync(entry).isDirectory()) return true
+  const target = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(entry, "utf8"))?.[1]
+  return target !== undefined && existsSync(resolve(dir, target))
+}
+
+/**
+ * Structural, locale-independent: a repository is an explicit GIT_DIR or a live `.git` entry above the cwd. The walk
+ * stops below the sender's GIT_CEILING_DIRECTORIES, as git's own discovery does.
+ */
 function insideRepository(cwd: string, env: Readonly<Record<string, string | undefined>>): boolean {
   if (env.GIT_DIR) return true
+  const ceilings = new Set((env.GIT_CEILING_DIRECTORIES ?? "").split(delimiter).filter((path) => isAbsolute(path)).map((path) => resolve(path)))
   for (let dir = resolve(cwd); ; dir = dirname(dir)) {
-    if (existsSync(join(dir, ".git"))) return true
-    if (dirname(dir) === dir) return false
+    if (liveGitEntry(dir)) return true
+    if (dirname(dir) === dir || ceilings.has(dirname(dir))) return false
   }
 }
 
