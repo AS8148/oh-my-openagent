@@ -64,6 +64,23 @@ describe("ownHostedTaskId", () => {
     expect(ownHostedTaskId(piWith({ task_id: "st_notyet", state_dir: join(alias, "children", "st_notyet") }), store)).toBe("st_notyet")
   })
 
+  test("#given <store>/children/<task id> is a dangling symlink pointing outside the store #then it answers undefined", () => {
+    const { root, store } = realStore()
+    const childDir = join(store, "children", "st_dangling")
+    symlinkSync(join(root, "outside", "gone"), childDir)
+    expect(ownHostedTaskId(piWith({ task_id: "st_dangling", state_dir: childDir }), store)).toBeUndefined()
+  })
+
+  test("#given the store's children folder is itself a symlink elsewhere #then a child under it answers undefined (fails closed to the session-id match)", () => {
+    const { root } = realStore()
+    const store = join(root, "linked", "senpi-task")
+    const elsewhere = join(root, "elsewhere-children")
+    mkdirSync(join(elsewhere, TASK_ID), { recursive: true })
+    mkdirSync(store, { recursive: true })
+    symlinkSync(elsewhere, join(store, "children"))
+    expect(ownHostedTaskId(piWith({ task_id: TASK_ID, state_dir: join(store, "children", TASK_ID) }), store)).toBeUndefined()
+  })
+
   test("#given a real state_dir inside another store #then it answers undefined", () => {
     const mine = realStore()
     const other = realStore()
