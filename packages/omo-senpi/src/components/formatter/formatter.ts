@@ -3,13 +3,14 @@ import { basename, extname, relative, resolve } from "node:path"
 import { spawn } from "node:child_process"
 import { execFileSync } from "node:child_process"
 import { createSpawnCommand, resolveServerBinary } from "@oh-my-opencode/lsp-core"
+import { resolveBunProjectCommand } from "@oh-my-opencode/lsp-core/lsp/bun-project-checks"
 import { callPackagedDaemonTool } from "../lsp/daemon-tool-client"
 import { extractMutatedFilePaths, MUTATION_TOOL_NAMES, runSingleFlight, type PostMutationEvent } from "../post-mutation/post-mutation"
 
 // Mutation formatting is intentionally opt-in through project markers and fail-open by default.
 export const formatOnMutationDefaults = { mode: "best-effort", maxFileBytes: 1_048_576, timeoutMs: 3_000 } as const
 export type FormatMode = "off" | "best-effort" | "required"
-export type FormatterTool = "biome" | "prettier" | "rustfmt" | "gofmt" | "ruff"
+export type FormatterTool = "biome" | "prettier" | "bun format" | "rustfmt" | "gofmt" | "ruff"
 export type Formatter = { readonly tool: FormatterTool; readonly command: string; readonly args: readonly string[] }
 
 // Sentinel for "the child never started": a non-numeric variant so no real exit code —
@@ -22,11 +23,13 @@ export function resolveFormatMode(config: { mode?: FormatMode; languages?: Recor
   return config.mode ?? "best-effort"
 }
 
-export function detectFormatter(markers: readonly string[], filePath: string, configText = ""): Formatter | undefined {
+export function detectFormatter(markers: readonly string[], filePath: string, configText = "", bunFormatAvailable: () => boolean = () => false): Formatter | undefined {
   const name = basename(filePath)
   const ext = extname(filePath)
   if (markers.includes("biome.json") || markers.includes("biome.jsonc")) return { tool: "biome", command: "biome", args: ["format", "--write"] }
-  if (markers.some((m) => m === ".prettierrc" || m.startsWith(".prettierrc") || m === "prettier.config.js" || m.startsWith("prettier.config."))) return { tool: "prettier", command: "prettier", args: ["--write"] }
+  if (markers.some((m) => m === ".prettierrc" || m.startsWith(".prettierrc") || m === "prettier.config.js" || m.startsWith("prettier.config."))) {
+    return bunFormatAvailable() ? { tool: "bun format", command: "bun", args: ["format"] } : { tool: "prettier", command: "prettier", args: ["--write"] }
+  }
   if (markers.includes("rustfmt.toml") || markers.includes("Cargo.toml")) return ext === ".rs" ? { tool: "rustfmt", command: "rustfmt", args: [] } : undefined
   if (markers.includes("go.mod")) return ext === ".go" ? { tool: "gofmt", command: "gofmt", args: ["-w"] } : undefined
   if ((markers.includes("ruff.toml") || (markers.includes("pyproject.toml") && /^\s*\[tool\.ruff\]/m.test(configText))) && ext === ".py") return { tool: "ruff", command: "ruff", args: ["format"] }
@@ -39,12 +42,14 @@ export interface FormatterStepOptions {
   readonly readMarker?: (cwd: string, marker: string) => string
   readonly daemonFormat?: (filePath: string) => Promise<{ readonly content?: readonly { readonly type: string; readonly text?: string }[]; readonly details?: unknown; readonly isError?: boolean }>
   readonly resolveBinary?: (command: string, cwd: string) => string | null
+  readonly bunFormatAvailable?: (cwd: string) => boolean
   readonly logger?: { warn(message: string, details?: unknown): void }
 }
 
 export function createFormatterStep(options: FormatterStepOptions = {}) {
   const missingNotices = new Set<string>()
   const daemonFormat = options.daemonFormat ?? (filePath => callPackagedDaemonTool("format", { filePath }))
+  const bunFormatAvailable = options.bunFormatAvailable ?? (cwd => resolveBunProjectCommand("format", cwd) !== undefined)
   return async function formatMutation(event: PostMutationEvent, cwd: string, sessionId = "anonymous") {
     if (event.toolName === undefined || !MUTATION_TOOL_NAMES.has(event.toolName) || event.input === undefined) return { content: undefined, error: undefined }
     const config = { ...formatOnMutationDefaults, ...(options.config ?? {}) }
@@ -56,7 +61,7 @@ export function createFormatterStep(options: FormatterStepOptions = {}) {
       if (!existsSync(filePath) || isGitIgnored(filePath, cwd)) continue
       if (readFileSync(filePath).byteLength > config.maxFileBytes) continue
       const markerNames = options.markers?.(cwd) ?? []
-      const marker = detectFormatter(markerNames, filePath, options.readMarker?.(cwd, "pyproject.toml") ?? "")
+      const marker = detectFormatter(markerNames, filePath, options.readMarker?.(cwd, "pyproject.toml") ?? "", () => bunFormatAvailable(cwd))
       if (!marker) continue
       const language = languageForPath(filePath)
       if (resolveFormatMode(config, language) === "off") continue

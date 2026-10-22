@@ -15,6 +15,19 @@ describe("format-on-mutation policy", () => {
     expect(detectFormatter(["pyproject.toml"], "src/a.py", "[tool.black]\nline-length=88")).toBeUndefined()
   })
 
+  it("#given a prettier project #when the installed bun has format #then bun format replaces the prettier binary", () => {
+    expect(detectFormatter([".prettierrc"], "src/a.ts", "", () => true)).toEqual({ tool: "bun format", command: "bun", args: ["format"] })
+    expect(detectFormatter([".prettierrc"], "src/a.ts", "", () => false)?.tool).toBe("prettier")
+  })
+
+  it("#given no prettier opt-in #when bun has format #then bun format is never probed or chosen", () => {
+    let probes = 0
+    const probe = () => (probes++, true)
+    expect(detectFormatter(["biome.json", ".prettierrc"], "src/a.ts", "", probe)?.tool).toBe("biome")
+    expect(detectFormatter(["package.json", "bun.lock"], "src/a.ts", "", probe)).toBeUndefined()
+    expect(probes).toBe(0)
+  })
+
   it("has the required defaults and language overrides", () => {
     expect(formatOnMutationDefaults).toEqual({ mode: "best-effort", maxFileBytes: 1048576, timeoutMs: 3000 })
     expect(resolveFormatMode({ mode: "required", languages: { typescript: false } }, "typescript")).toBe("off")
