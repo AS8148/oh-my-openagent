@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:5ef093f525a4d5d96d7eaa88bd528560a3a28095f0572a27ee4a503cebccadcb:434fb69f41833b4170ecd753e31a61db44e6a4dfb4e9b58b5b21f0790ae60f83
+// omo-codex-install:7eba588c72258a49ce7e9b13546cea88045cc5051656bf0d60938db462e5fa03:93a4f9b578527bf158d1a51a3d108d0aa4ffafff88822104b620eb73749dd279
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -284,6 +284,8 @@ function toDiagnosticRecord(input, now) {
     timestamp: now.toISOString(),
     event: input.event,
     source: input.source,
+    ...input.entryKind === undefined ? {} : { entry_kind: input.entryKind },
+    ...input.errorCode === undefined ? {} : { error_code: input.errorCode },
     ...input.count === undefined ? {} : { count: input.count },
     ...serializeError(input.error, input.errorKind)
   };
@@ -20005,11 +20007,21 @@ var OmoFormatOnMutationSchema = OmoFormatOnMutationLayerSchema.extend({
 // packages/omo-config-core/src/schema/gateway.ts
 var OmoGatewaySectionSchema = record(string2(), unknown()).describe("Chat-surface gateway settings, owned and validated by a separately installed gateway package. omo accepts the key and never reads it.");
 
+// packages/omo-config-core/src/schema/provenance.ts
+var OmoProvenanceSettingsSchema = object({
+  workspaces: array(object({
+    name: string2().trim().min(1).regex(/\S/),
+    git_owners: array(string2().trim().min(1).regex(/\S/)).optional(),
+    paths: array(string2().trim().min(1).regex(/\S/)).optional()
+  }).strict()).optional()
+}).strict();
+
 // packages/omo-config-core/src/schema/config.ts
 var OmoOpenCodeHarnessConfigSchema = record(string2(), unknown());
 var OmoDisabledSkillsSchema = array(string2());
 var OmoExcludedModelsSchema = array(string2());
 var OmoTypedHarnessConfigSchema = object({
+  provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
   gateway: OmoGatewaySectionSchema.optional(),
   categories: OmoCategoriesConfigSchema.optional(),
@@ -20028,6 +20040,7 @@ var OmoTypedHarnessConfigSchema = object({
   exclude_models: OmoExcludedModelsSchema.optional()
 }).strict();
 var OmoConfigProfileSchema = object({
+  provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
@@ -20049,6 +20062,7 @@ var OmoConfigProfileSchema = object({
   "[codex]": OmoTypedHarnessConfigSchema.optional()
 }).strict();
 var OmoConfigSchema = object({
+  provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationSchema.optional(),
   gateway: OmoGatewaySectionSchema.optional(),
   $schema: string2().optional(),
@@ -20075,6 +20089,7 @@ var OmoConfigSchema = object({
   legacy_migrations: record(string2(), unknown()).optional()
 }).strict();
 var OmoConfigLayerSchema = object({
+  provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
   gateway: OmoGatewaySectionSchema.optional(),
   $schema: string2().optional(),
