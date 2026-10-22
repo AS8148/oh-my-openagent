@@ -8,7 +8,7 @@ import { createGatewayHarness, type GatewayHarness } from "./testing/harness"
 let harness: GatewayHarness | undefined
 afterEach(async () => { await harness?.dispose(); harness = undefined })
 
-test("#given populated v5 storage #when the historical v4 worker reads and writes #then version extension data and existing actors survive", async () => {
+test("#given current storage #when the historical v4 worker reads and attempts an insert #then reads survive but unattributed new deliveries are refused", async () => {
   const h = (harness = createGatewayHarness())
   h.phantom("target")
   const current = h.store()
@@ -27,14 +27,14 @@ test("#given populated v5 storage #when the historical v4 worker reads and write
   const before = await old.list()
   expect(before.map((row) => row.body)).toEqual(["before"])
   expect(before[0]).not.toHaveProperty("actor_user_id")
-  expect((await h.engineFor(old).deliver({ sender: sender("old-actor"), target: "target", text: "from v4" })).kind).toBe("ok")
+  await expect(h.engineFor(old).deliver({ sender: sender("old-actor"), target: "target", text: "from v4" })).rejects.toThrow("delivery provenance is required")
   await old.dispose()
 
   const db = new Database(gatewayDatabasePath(h.agentDir))
   try {
     expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: GATEWAY_MIGRATIONS.length })
     expect(db.query("SELECT body, actor_user_id FROM deliveries ORDER BY seq").all()).toEqual([
-      { body: "before", actor_user_id: "current-actor" }, { body: "from v4", actor_user_id: null },
+      { body: "before", actor_user_id: "current-actor" },
     ])
     expect(db.query("SELECT name, version FROM extension_schema").all()).toEqual([{ name: "alpha", version: 1 }])
     expect(db.query("SELECT owner FROM extension_objects WHERE name='alpha_items'").get()).toEqual({ owner: "alpha" })

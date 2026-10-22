@@ -85,6 +85,7 @@ export type ThreadHost = {
 }
 
 export type ThreadToolSurfaceOptions = {
+  readonly env?: Readonly<Record<string, string | undefined>>
   readonly host: ThreadHost
   readonly callerSessionId: () => string
   readonly callerWorkspaceRoot: () => string
