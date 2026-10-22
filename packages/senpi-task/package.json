@@ -41,6 +41,10 @@
       "types": "./src/runners/rpc/spawn.ts",
       "import": "./src/runners/rpc/spawn.ts"
     },
+    "./agent-home": {
+      "types": "./src/agent-home.ts",
+      "import": "./src/agent-home.ts"
+    },
     "./rpc-socket-client": {
       "types": "./src/runners/rpc-host/socket-client.ts",
       "import": "./src/runners/rpc-host/socket-client.ts"

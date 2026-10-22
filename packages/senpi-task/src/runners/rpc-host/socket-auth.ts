@@ -1,11 +1,20 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { log } from "@oh-my-opencode/utils"
 
 export type RpcObject = Readonly<Record<string, unknown>>
 export type RpcRequest = (command: RpcObject, timeoutMs?: number) => Promise<RpcObject>
 const HEX_32 = /^[0-9a-f]{64}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const KEY_ROOT_REMEDY = "set SENPI_RPC_KEY_ROOT to the host's agent dir"
+// One grace line per key root per process: every endpoint and call under one agent dir shares the cause.
+const graceLogged = new Set<string>()
+
+/** An enforcing host's `auth_required` refusal, with the same remedy the missing-record line names. */
+export function authRequiredError(location: string): Error {
+  return new Error(`auth_required:${location}: the host requires authentication and no usable key record was found; ${KEY_ROOT_REMEDY}`)
+}
 
 export class RpcIdentityError extends Error {
   constructor(readonly code: "unsafe_key_record" | "host_identity_unproven" | "auth_failed", location: string) {
@@ -64,7 +73,10 @@ export async function authenticateRpcHost(
   const root = typeof keyRoot === "function" ? keyRoot() : keyRoot
   const key = readKey(root, auth.launch_id)
   if (key === undefined) {
-    console.error(`senpi rpc client: no key record for launch ${auth.launch_id} under ${root}; continuing unauthenticated (refused from the next release; set SENPI_RPC_KEY_ROOT to the host's agent dir)`)
+    if (!graceLogged.has(root)) {
+      graceLogged.add(root)
+      log(`senpi rpc client: no key record for launch ${auth.launch_id} under ${root}; continuing unauthenticated (refused from the next release; ${KEY_ROOT_REMEDY})`)
+    }
     return reply
   }
   const proof = (label: string, first: string, second: string) =>

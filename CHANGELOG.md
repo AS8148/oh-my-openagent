@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Thread tools check that an RPC host is the one they selected before changing a session ([#10712](https://github.com/code-yeongyu/oh-my-openagent/pull/10712)).** The client proves the host's key with a challenge-response and attaches the selected session by its durable id on the same connection, so a host that reused a routing id cannot receive another session's mutation. A draining host answers with a retryable `host_draining` error instead of failing the call, and a change that took effect is never reported as failed.
+
 **A DAG node whose child dies on infrastructure is retried instead of taking its whole branch down.** When a mass-ulw node's child stops answering its heartbeats or loses its host session, the node is now retried automatically, at most twice, with a backoff. Its dependents are skipped only if the retries fail too. Before, one starved wave failed and every later node was skipped (an overloaded machine skipped 54 of 61 nodes). Task failures and cancelled nodes behave as before, and the TUI and the desktop app share this behaviour ([#10605](https://github.com/code-yeongyu/oh-my-openagent/issues/10605), [#10616](https://github.com/code-yeongyu/oh-my-openagent/pull/10616)).
 
 ## [5.1.40] - 2026-10-20

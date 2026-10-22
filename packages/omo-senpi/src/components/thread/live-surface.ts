@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { createConnection, type Socket } from "node:net"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { authenticateRpcHost, resolveRpcSocketTransport, withRpcSocket } from "@oh-my-opencode/senpi-task/rpc-socket-client"
+import { authenticateRpcHost, authRequiredError, resolveRpcSocketTransport, withRpcSocket } from "@oh-my-opencode/senpi-task/rpc-socket-client"
 import { resolveThreadSocket } from "./live-surface-paths"
 import type { SenpiExtensionAPI } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
@@ -10,20 +10,22 @@ import { resolveSenpiLaunch, withoutForeignPackageDirEnv } from "../memory/worke
 import { readDiskSession, type AddressBookHost, type DiskSession } from "./address-book"
 import { INITIAL_SKILLS_CONTEXT_KEY } from "./initial-skills"
 import { controlSocketSecretPath, endpointKindOf, isTuiControlSocket, listRegistryEndpoints, type EndpointKind, type RegistryEndpoint } from "./endpoint-registry"
-import type { EndpointLiveness, ExternalAdmissionKind, GatewayEndpointPort, GatewayEndpointRef, GatewayWakeReply, ReleaseSessionReply } from "./gateway/adapter"
+import type { EndpointLiveness, GatewayEndpointPort, GatewayEndpointRef } from "./gateway/adapter"
+import { releaseReply, wakeReply } from "./gateway-replies"
 import type { ThreadTranscriptEntry, ThreadHost, ThreadHostSession } from "./tools"
 import type { ThreadHostView, ThreadHostViewRequest, ThreadSessionPort } from "./tools/ports"
 import { acceptedControls, LEGACY_TUI_COMMANDS, tuiCommandsFrom } from "./endpoint-controls"
 import { answerUiRequest } from "./ui-answer"
-import { attachSelectedSession, releaseAttachment } from "./attachment-fence"
+import { fencedCommand } from "./attachment-fence"
 
-type RpcFrame = { readonly success?: boolean; readonly data?: unknown; readonly error?: unknown; readonly errorData?: unknown }
+type RpcFrame = { readonly success?: boolean; readonly data?: unknown; readonly error?: unknown; readonly errorCode?: unknown; readonly errorData?: unknown }
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value) }
 function dataRecord(frame: RpcFrame, command: unknown): Record<string, unknown> {
   if (frame.success === false && command === "set_thinking_level" && typeof frame.error === "string" && /^Thinking level .+ is not supported by the active model\.$/.test(frame.error)) {
     throw new Error(`thinking_level_unsupported:${frame.error}`)
   }
   if (frame.success === false && frame.error === "unsupported") throw new Error(`unsupported:${String(command)}`)
+  if (frame.success === false && (frame.errorCode ?? frame.error) === "auth_required") throw authRequiredError(String(command))
   if (frame.success && frame.data === undefined && (command === "set_session_name" || command === "set_thinking_level")) return {}
   if (!frame.success || !record(frame.data)) throw new Error(`thread RPC request failed: ${JSON.stringify(frame.error ?? frame)}`)
   return frame.data
@@ -61,7 +63,6 @@ type RequestOptions = {
   readonly openedName?: string
   readonly rpcHost?: boolean
 }
-const MUTATIONS = new Set(["prompt", "interrupt", "set_session_name", "set_model", "set_thinking_level", "wake", "release_session", "extension_ui_response"])
 
 /**
  * One request, one correlated response. The multi-session host writes other lines on the same
@@ -83,21 +84,14 @@ async function requestFrame(socketPath: string, command: Record<string, unknown>
     if (command.type === "get_protocol_info") return info
     const protocol = dataRecord(info, "get_protocol_info")
     const capabilities = new Set(Array.isArray(protocol.capabilities) ? protocol.capabilities : [])
-    const attach = MUTATIONS.has(String(command.type)) && capabilities.has("attach_session")
-      && (command.type !== "release_session" || capabilities.has("release_caller_aware"))
-    if (attach) {
-      if (options.durableSessionId === undefined) throw new Error("session_identity_mismatch:missing selected durable session id")
-      await attachSelectedSession(request, socketPath, command.sessionId, options.durableSessionId)
-    }
-    const result = await request(command)
-    if (command.type === "open_session" && result.success === true && options.openedName?.trim()) {
-      const opened = dataRecord(result, "open_session")
-      dataRecord(await request({ type: "set_session_name", sessionId: opened.sessionId, name: options.openedName }), "set_session_name")
-    }
-    if (attach && capabilities.has("release_attachment")) {
-      await releaseAttachment(request, command.sessionId, (line) => { process.stderr.write(`${line}\n`) })
-    }
-    return result
+    return await fencedCommand(request, socketPath, command, capabilities, options.durableSessionId, async () => {
+      const result = await request(command)
+      if (command.type === "open_session" && result.success === true && options.openedName?.trim()) {
+        const opened = dataRecord(result, "open_session")
+        dataRecord(await request({ type: "set_session_name", sessionId: opened.sessionId, name: options.openedName }), "set_session_name")
+      }
+      return result
+    })
   })
 }
 
@@ -196,30 +190,6 @@ export type LiveThreadSurface = ThreadHost & Required<Pick<ThreadHost, "endpoint
 function isConnectRefusal(error: unknown): boolean {
   const code = record(error) ? error.code : undefined
   return code === "ENOENT" || code === "ECONNREFUSED"
-}
-
-/** senpi's `release_session` frame as the adapter's union: the success payload, or the refusal code with its `errorData`. */
-function releaseReply(frame: RpcFrame): ReleaseSessionReply {
-  if (frame.success === true && record(frame.data) && frame.data.released === true && typeof frame.data.session_path === "string") {
-    return { success: true, data: frame.data as Extract<ReleaseSessionReply, { success: true }>["data"] }
-  }
-  const error = typeof frame.error === "string" ? frame.error : "release_failed"
-  return record(frame.errorData)
-    ? { success: false, error, errorData: frame.errorData as NonNullable<Extract<ReleaseSessionReply, { success: false }>["errorData"]> }
-    : { success: false, error }
-}
-
-const EXTERNAL_ADMISSION_KINDS: ReadonlySet<string> = new Set<ExternalAdmissionKind>(["started", "queued", "steered", "turn_conflict", "held_draft", "already_admitted"])
-
-function wakeReply(data: { readonly admitted?: unknown }): GatewayWakeReply {
-  if (!Array.isArray(data.admitted)) return { admitted: [] }
-  return {
-    admitted: data.admitted.flatMap((entry: unknown) =>
-      record(entry) && typeof entry.delivery_id === "string" && typeof entry.kind === "string" && EXTERNAL_ADMISSION_KINDS.has(entry.kind)
-        ? [{ delivery_id: entry.delivery_id, kind: entry.kind as ExternalAdmissionKind }]
-        : [],
-    ),
-  }
 }
 
 /**

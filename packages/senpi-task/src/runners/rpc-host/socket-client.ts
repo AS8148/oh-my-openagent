@@ -5,7 +5,7 @@ import { win32 } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { RpcObject, RpcRequest } from "./socket-auth"
 
-export { authenticateRpcHost, RpcIdentityError } from "./socket-auth"
+export { authenticateRpcHost, authRequiredError, RpcIdentityError } from "./socket-auth"
 export type { RpcObject, RpcRequest } from "./socket-auth"
 
 const WINDOWS_PIPE_PREFIX = "\\\\.\\pipe\\senpi-rpc-"
@@ -64,7 +64,8 @@ export async function withRpcSocket<T>(
       buffer = buffer.slice(newline + 1)
       if (line.trim() === "") continue
       let frame: unknown
-      try { frame = JSON.parse(line) } catch (error) { fail(error instanceof Error ? error : new Error(String(error))); return }
+      // A line that is not JSON (stray host output) is never the reply; it is skipped like a broadcast.
+      try { frame = JSON.parse(line) } catch { continue }
       if (typeof frame !== "object" || frame === null || !("id" in frame) || frame.id !== pending?.id) continue
       const waiter = pending
       pending = undefined

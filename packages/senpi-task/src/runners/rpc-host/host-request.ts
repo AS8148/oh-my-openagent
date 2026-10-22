@@ -1,5 +1,4 @@
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { resolveAgentHome } from "../../agent-home"
 import { authenticateRpcHost, resolveRpcSocketTransport, RpcIdentityError, withRpcSocket } from "./socket-client"
 
 export type HostReply = Readonly<Record<string, unknown>>
@@ -14,8 +13,7 @@ export type HostReply = Readonly<Record<string, unknown>>
 export async function askHost(socket: string, request: HostReply, timeoutMs: number, options: { readonly keyRoot?: string; readonly agentDir?: string } = {}): Promise<HostReply | undefined> {
   const transport = await resolveRpcSocketTransport(socket)
   if (transport === undefined) return undefined
-  const agentDir = options.agentDir ?? [process.env.OMO_CODING_AGENT_DIR, process.env.SENPI_CODING_AGENT_DIR, process.env.PI_CODING_AGENT_DIR]
-    .map((value) => value?.trim()).find(Boolean) ?? join(process.env.HOME ?? homedir(), ".omo", "agent")
+  const agentDir = options.agentDir ?? resolveAgentHome({ env: process.env })
   const keyRoot = options.keyRoot ?? (process.env.SENPI_RPC_KEY_ROOT?.trim() || agentDir)
   try {
     return await withRpcSocket(transport.address, { timeoutMs, secret: transport.secret }, async (send) => {
