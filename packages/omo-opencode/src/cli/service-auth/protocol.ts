@@ -26,6 +26,10 @@ export const grantSchema = tokenSchema.extend({
 export const credentialSchema = grantSchema.extend({
   signingPrivateKey: nonempty, sealingPrivateKey: nonempty,
   refreshState: z.literal("uncertain").optional(),
+  // The journaled attempt for the stored refresh token: every resend reuses this Idempotency-Key.
+  refreshAttempt: z.object({
+    idempotencyKey: nonempty, attempts: z.number().int().nonnegative(), nextAttemptAt: timestamp,
+  }).optional(),
 })
 export type Credentials = z.infer<typeof credentialSchema>
 export const deviceCodeSchema = z.object({
@@ -60,7 +64,7 @@ export class ApiRefusal extends SignInError {
     // Server messages and unknown codes can contain credentials; never echo either.
     super("The service refused this request. Sign in again or check your account.", status === 429 || status >= 500)
     this.code = [
-      "unauthorized", "account_deleted", "reauth_required", "invalid_grant", "entitlement_required",
+      "unauthorized", "account_deleted", "reauth_required", "invalid_grant", "device_revoked", "entitlement_required",
       "authorization_pending", "slow_down", "access_denied", "expired_token", "rate_limited",
       "internal", "unavailable", "forbidden", "invalid_request", "not_found",
     ].includes(code) ? code : "unknown"

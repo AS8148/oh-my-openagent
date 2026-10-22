@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -14,15 +15,19 @@ class SessionEnded extends SignInError {
 
 // The service revokes the device row before answering reauth_required on refresh (token reuse);
 // account_deleted removes the account. unauthorized and invalid_grant leave the device's slot held.
-const DEVICE_REVOKING_REFUSALS = new Set(["account_deleted", "reauth_required"])
+const DEVICE_REVOKING_REFUSALS = new Set(["account_deleted", "reauth_required", "device_revoked"])
+const ENDING_REFUSALS = new Set(["unauthorized", "invalid_grant", ...DEVICE_REVOKING_REFUSALS])
+const retryDelay = (attempts: number) => Math.min(300_000, 5_000 * 2 ** (attempts - 1))
 
 export function createSession(options: {
   readonly api: string
   readonly store: CredentialStore
   readonly home?: string
   readonly signal?: AbortSignal
+  readonly now?: () => number
 }) {
   const api = serviceOrigin(options.api)
+  const now = options.now ?? Date.now
   const { store, signal } = options
   const directory = join(options.home ?? homedir(), ".omo", "session-locks")
   const lockPath = join(directory, `${credentialId(api)}.lock`)
@@ -36,28 +41,43 @@ export function createSession(options: {
   }
   const request = (path: string, init: RequestInit) => requestApi(api, path, init, signal)
   const uncertain = () => new SignInError(
-    "The refresh outcome is unknown. Saved credentials and keys were retained, but this refresh token will not be sent again. Retry sign-in with omo login.", true)
+    "The refresh outcome is unknown. Saved credentials and keys were retained, and the same refresh will be retried automatically.", true)
   async function refreshedAccess(current: Credentials): Promise<string> {
-    if (current.refreshState === "uncertain") throw uncertain()
-    if (Date.parse(current.accessTokenExpiresAt) > Date.now() + 30_000) return current.accessToken
-    // Journal before sending: a lost response or process crash must never replay a single-use token.
-    await store.write({ ...current, refreshState: "uncertain" })
+    const { refreshState, refreshAttempt, ...settled } = current
+    const pending = refreshState === "uncertain"
+    if (!pending && Date.parse(current.accessTokenExpiresAt) > now() + 30_000) return current.accessToken
+    if (refreshAttempt !== undefined && Date.parse(refreshAttempt.nextAttemptAt) > now()) throw uncertain()
+    // Journal the attempt and its Idempotency-Key before sending. An unknown outcome is only ever
+    // resent as this same token with this same key, so a service that committed the rotation
+    // (sisyphuslabs/omo-service#628) answers the stored successor instead of a reuse revoke.
+    // A service without #628 refuses a committed token with reauth_required, which clears the store
+    // exactly as the stale grace would have; a keyless journal from an older CLI is adopted the same way.
+    const attempt = refreshAttempt ?? { idempotencyKey: randomUUID(), attempts: 0, nextAttemptAt: new Date(now()).toISOString() }
+    const journal: Credentials = { ...settled, refreshState: "uncertain", refreshAttempt: attempt }
+    if (refreshAttempt === undefined) await store.write(journal)
     try {
-      const tokens = parseReply(tokenSchema, await request("/v1/session/refresh", jsonRequest({ refreshToken: current.refreshToken })))
-      await store.write({ ...current, ...tokens })
+      const tokens = parseReply(tokenSchema, await request("/v1/session/refresh", {
+        ...jsonRequest({ refreshToken: current.refreshToken }),
+        headers: { "content-type": "application/json", "idempotency-key": attempt.idempotencyKey },
+      }))
+      await store.write({ ...settled, ...tokens })
       return tokens.accessToken
     } catch (error) {
-      if (error instanceof ApiRefusal && error.status < 500 && ["unauthorized", "account_deleted", "reauth_required", "invalid_grant"].includes(error.code)) {
+      if (error instanceof ApiRefusal && error.status < 500 && ENDING_REFUSALS.has(error.code)) {
         await store.clear()
         throw new SessionEnded(error.code === "reauth_required"
           ? "This session was ended because its refresh token was reused. Sign in again with omo login."
           : "Sign in again with omo login.", DEVICE_REVOKING_REFUSALS.has(error.code))
       }
-      if ((error instanceof RequestFailure && error.notSent) ||
-        (error instanceof ApiRefusal && error.status === 429 && error.code === "rate_limited")) {
+      if (!pending && ((error instanceof RequestFailure && error.notSent) ||
+        (error instanceof ApiRefusal && error.status === 429 && error.code === "rate_limited"))) {
         await store.write(current)
         throw error
       }
+      const attempts = attempt.attempts + 1
+      await store.write({ ...journal, refreshAttempt: {
+        ...attempt, attempts, nextAttemptAt: new Date(now() + retryDelay(attempts)).toISOString(),
+      } })
       throw uncertain()
     }
   }
