@@ -4,6 +4,9 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
 const homes: string[] = []
+const packageRoot = resolve(import.meta.dir, "..")
+const packageJson: { bin: { omo: string } } = await Bun.file(join(packageRoot, "package.json")).json()
+const omoEntry = join(packageRoot, packageJson.bin.omo)
 afterAll(() => {
   for (const home of homes) rmSync(home, { recursive: true, force: true })
 })
@@ -19,7 +22,7 @@ test("omo account adopt on Linux with no gdbus succeeds and prints the fallback 
   }
   const child = Bun.spawn([
     process.execPath, "--preload", join(import.meta.dir, "account-linux-no-gdbus.fixture.ts"),
-    resolve(import.meta.dir, "../bin/omo.js"), "account", "adopt",
+    omoEntry, "account", "adopt",
   ], {
     cwd: home,
     env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, OMO_RUNTIME: "bun", OMO_SERVICE_API_URL: "http://127.0.0.1:1" },
