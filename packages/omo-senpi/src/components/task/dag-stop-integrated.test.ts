@@ -41,7 +41,9 @@ test("design 18: Stop on A-done, B-running, C-queued keeps A, holds B's child wi
   const coordinator = new IdleInjectionCoordinator((message, options) => deliverItems((_native, delivery) => delivery.items.map((item, index) => {
     const disposition = item.runRef !== undefined && fenced.has(`${item.runRef.kind}:${item.runRef.id}`) ? "notice_persisted" as const : "message_persisted" as const
     admitted.push({ content: options.items[index]?.content ?? "", disposition })
-    return { itemId: item.itemId, entryId: `entry:${item.itemId}`, disposition }
+    return disposition === "notice_persisted"
+      ? { itemId: item.itemId, entryId: "held-batch", noticeId: `notice:${item.itemId}`, disposition }
+      : { itemId: item.itemId, entryId: `entry:${item.itemId}`, disposition }
   }), { ...options, message }))
   let pauseState: EnginePauseState = { pauseSeq: 6, holds: [] }
   const engine = composeTaskEngine({

@@ -16,6 +16,7 @@ export type ItemReceipt = {
   readonly itemId: string
   readonly disposition: "notice_persisted" | "message_persisted"
   readonly entryId: string
+  readonly noticeId?: string
 }
 
 export type QueuedInjection = IdleInjection & { readonly itemId: string }

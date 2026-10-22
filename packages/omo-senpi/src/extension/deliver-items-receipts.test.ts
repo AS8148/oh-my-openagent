@@ -14,15 +14,15 @@ function coordinatorOver(answer: (items: readonly { readonly itemId: string }[])
 }
 
 describe("design 30/34: coordinator items carry durable per-item engine receipts", () => {
-  test("#given a paused run #when two items of one producer are flushed #then one send names each item and each is held under its own entry", async () => {
+  test("#given a paused run #when two items of one producer are flushed #then one send names each item and each is held under its own notice in one shared entry", async () => {
     const { coordinator, sent } = coordinatorOver(items => items.map(item => ({
-      itemId: item.itemId, entryId: `notice:${item.itemId}`, disposition: "notice_persisted",
+      itemId: item.itemId, entryId: "held-batch", noticeId: `notice:${item.itemId}`, disposition: "notice_persisted",
     })))
-    const held: { readonly itemId: string; readonly entryId: string }[] = []
+    const held: { readonly itemId: string; readonly entryId: string; readonly noticeId?: string }[] = []
     let flushed = 0
     for (const [itemId, content] of [["item-1", "first"], ["item-2", "second"]] as const) coordinator.enqueue({
       key: "goal", itemId, source: "ulw-continuation", content, runRef: { kind: "dag", id: "run-1" },
-      onHeld: receipt => { held.push({ itemId: receipt.itemId, entryId: receipt.entryId }) },
+      onHeld: receipt => { held.push({ itemId: receipt.itemId, entryId: receipt.entryId, noticeId: receipt.noticeId }) },
       onFlushed: () => { flushed += 1 },
     })
     coordinator.flushOnIdle()
@@ -32,7 +32,8 @@ describe("design 30/34: coordinator items carry durable per-item engine receipts
       { itemId: "item-1", producer: "ulw-continuation", runRef: { kind: "dag", id: "run-1" } },
       { itemId: "item-2", producer: "ulw-continuation", runRef: { kind: "dag", id: "run-1" } },
     ] }])
-    expect(held).toEqual([{ itemId: "item-1", entryId: "notice:item-1" }, { itemId: "item-2", entryId: "notice:item-2" }])
+    expect(held.map(receipt => [receipt.itemId, receipt.noticeId])).toEqual([["item-1", "notice:item-1"], ["item-2", "notice:item-2"]])
+    expect(new Set(held.map(receipt => receipt.entryId))).toEqual(new Set(["held-batch"]))
     expect(flushed).toBe(0)
   })
 

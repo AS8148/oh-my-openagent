@@ -10,7 +10,7 @@ describe("coordinator custody preserves individual run items", () => {
       expect(message.content).toBe("first\n\nsecond")
       for (const item of options.items) received.push(item.content)
       return options.items.map(item => ({
-        itemId: item.itemId, disposition: "notice_persisted" as const, entryId: `notice:${item.itemId}`,
+        itemId: item.itemId, disposition: "notice_persisted" as const, entryId: "held-batch", noticeId: `notice:${item.itemId}`,
       }))
     })
     for (const content of ["first", "second"]) coordinator.enqueue({
@@ -49,7 +49,7 @@ describe("coordinator custody preserves individual run items", () => {
       return options.items.map(item => ({
         itemId: item.itemId,
         disposition: held ? "notice_persisted" as const : "message_persisted" as const,
-        entryId: `entry:${item.itemId}`,
+        ...(held ? { entryId: "held-batch", noticeId: `notice:${item.itemId}` } : { entryId: `entry:${item.itemId}` }),
       }))
     })
     const done = Promise.withResolvers<void>()

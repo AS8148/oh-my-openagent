@@ -19,10 +19,9 @@ test("design 25: a run-tagged completion held as a notice while paused is engine
   const failures: string[] = []
   const coordinator = new IdleInjectionCoordinator((message, options) => deliverItems((_native, delivery) => {
     sends.push({ runRefs: delivery.items.map(item => item.runRef) })
-    return delivery.items.map(item => ({
-      itemId: item.itemId, entryId: `entry:${item.itemId}`,
-      disposition: item.runRef !== undefined && stoppedRuns.has(item.runRef.id) ? "notice_persisted" as const : "message_persisted" as const,
-    }))
+    return delivery.items.map(item => item.runRef !== undefined && stoppedRuns.has(item.runRef.id)
+      ? { itemId: item.itemId, entryId: "held-batch", noticeId: `notice:${item.itemId}`, disposition: "notice_persisted" as const }
+      : { itemId: item.itemId, entryId: `entry:${item.itemId}`, disposition: "message_persisted" as const })
   }, { ...options, message }))
   const notifier = createParentNotifier(new FakeExtensionAPI(), coordinator, () => false, taskIds => { failures.push(...taskIds) })
 

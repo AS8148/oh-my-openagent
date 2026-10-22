@@ -11,10 +11,9 @@ describe("native itemized run admission", () => {
     const settle = () => { if (held + delivered === 3) finished.resolve() }
     const coordinator = new IdleInjectionCoordinator((message, options) => deliverItems((native, delivery) => {
       sends.push({ content: native.content, items: delivery.items })
-      return delivery.items.map(item => ({
-        itemId: item.itemId, entryId: `entry:${item.itemId}`,
-        disposition: (item.runRef as { id?: string } | undefined)?.id === "fenced" ? "notice_persisted" as const : "message_persisted" as const,
-      }))
+      return delivery.items.map(item => (item.runRef as { id?: string } | undefined)?.id === "fenced"
+        ? { itemId: item.itemId, entryId: "held-batch", noticeId: `notice:${item.itemId}`, disposition: "notice_persisted" as const }
+        : { itemId: item.itemId, entryId: `entry:${item.itemId}`, disposition: "message_persisted" as const })
     }, { ...options, message }))
     for (const content of ["first", "second"]) coordinator.enqueue({
       key: "same-key", source: "task-completion", content, runRef: { kind: "task", id: "fenced" },
