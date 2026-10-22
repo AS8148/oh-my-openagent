@@ -64,5 +64,7 @@ export function renderDeliveryText(row: DeliveryRow): string {
     `hop=${envelope.hop}`,
     ...(row.binding_id === null ? [] : [`binding=${headerValue(row.binding_id)}@${row.binding_revision ?? 0}`]),
   ].join(" ")
-  return `${deliveryProvenanceLine(envelope.provenance)}\n[${header}]\n${GATEWAY_PROVENANCE_SENTENCE}\n${JSON.stringify(row.body)}`
+  // One header line, workspace and project first: readers split the text as header, sentence, body. Every label is
+  // quoted with its brackets escaped, so the line still ends at the header's own `]`.
+  return `${deliveryProvenanceLine(envelope.provenance)} [${header}]\n${GATEWAY_PROVENANCE_SENTENCE}\n${JSON.stringify(row.body)}`
 }

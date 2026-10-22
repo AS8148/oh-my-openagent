@@ -4,7 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
+import { loadProvenanceWorkspaces } from "./provenance-config"
 import { resolveProvenance, type ProvenanceRuntime } from "./provenance-resolver"
+import { settled } from "./testing/settled"
 
 const cwd = join(tmpdir(), "example-project")
 const runtime: ProvenanceRuntime = {
@@ -79,7 +81,7 @@ test("#given a configured native profile #when the runtime loads its own config 
   writeFileSync(join(root, ".omo", "omo.json"), JSON.stringify({
     profiles: { review: { "[native]": { provenance: { workspaces: [{ name: "Configured workspace", git_owners: ["example-owner"] }] } } } },
   }))
-  expect(await resolveProvenance({ cwd: project, env: { HOME: root, OMO_PROFILE: "review" }, gitRemote: runtime.gitRemote }))
+  expect(await resolveProvenance({ cwd: project, env: { HOME: root, OMO_PROFILE: "review" }, gitRemote: runtime.gitRemote, loadWorkspaces: loadProvenanceWorkspaces }))
     .toEqual({ workspace: "Configured workspace", project: "remote-project" })
 })
 
@@ -150,5 +152,6 @@ test("#given a broken sender git configuration #when resolving its origin #then 
   const env = { ...process.env, HOME: cwd, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1", GIT_MASTER: "1" }
   execFileSync("git", ["init", "-q", cwd], { env, windowsHide: true })
   writeFileSync(config, "[invalid\n")
-  await expect(resolveProvenance({ cwd, env, workspaces: runtime.workspaces })).rejects.toThrow("bad config line")
+  const failure = await settled(resolveProvenance({ cwd, env, workspaces: runtime.workspaces }))
+  expect(failure.error?.message).toContain("bad config line")
 })

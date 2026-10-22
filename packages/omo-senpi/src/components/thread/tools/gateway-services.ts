@@ -50,7 +50,7 @@ export function createGatewayServices(options: ThreadToolSurfaceOptions, view: (
   const now = options.now ?? store.now
   const endpoints = options.host.gateway ?? UNREACHABLE
   const entries = async () => toGatewayAddressEntries(addressBook(options, await view()))
-  const engine = createGatewayEngine({ store, endpoints, resolve, now, senderProvenance: () => resolveProvenance({ cwd: options.callerWorkspaceRoot(), env: options.env }) })
+  const engine = createGatewayEngine({ store, endpoints, resolve, now, senderProvenance: () => resolveProvenance({ cwd: options.callerWorkspaceRoot(), env: options.env, ...(options.loadProvenanceWorkspaces === undefined ? {} : { loadWorkspaces: options.loadProvenanceWorkspaces }) }) })
   const locate = async (durableId: string): Promise<GatewayEndpointRef | null> => {
     const entry = (await entries()).find((candidate) => candidate.thread_id === durableId)
     return entry === undefined || entry.liveness !== "routable" ? null : entry.endpoint

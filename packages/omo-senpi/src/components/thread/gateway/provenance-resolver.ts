@@ -4,13 +4,19 @@ import { homedir } from "node:os"
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import type { OmoProvenanceSettings } from "@oh-my-opencode/omo-config-core"
-import { loadSenpiOmoConfig } from "../../config-resolution"
 import type { Provenance } from "./types"
+
+export type ProvenanceWorkspaces = NonNullable<OmoProvenanceSettings["workspaces"]>
 
 export type ProvenanceRuntime = {
   readonly cwd: string
   readonly env?: Readonly<Record<string, string | undefined>>
-  readonly workspaces?: OmoProvenanceSettings["workspaces"]
+  readonly workspaces?: ProvenanceWorkspaces
+  /**
+   * Reads the sender's `provenance.workspaces` table when none is given. Injected rather than imported: the config
+   * loader carries the schema library, which the standalone thread SDK build must not inline.
+   */
+  readonly loadWorkspaces?: (cwd: string, env: Readonly<Record<string, string | undefined>>) => ProvenanceWorkspaces
   /** A runtime IO seam, not an agent/tool argument. */
   readonly gitRemote?: (cwd: string) => Promise<string | undefined>
 }
@@ -84,7 +90,7 @@ export async function resolveProvenance(runtime: ProvenanceRuntime): Promise<Pro
   const repo = repository(await (runtime.gitRemote ?? ((cwd: string) => originRemote(cwd, env)))(runtime.cwd))
   const project = explicitProject || repo?.project || basename(resolve(runtime.cwd)) || "root"
   if (explicitWorkspace) return { workspace: explicitWorkspace, project, ...extra }
-  const table = runtime.workspaces ?? loadSenpiOmoConfig({ cwd: runtime.cwd, env }).config.provenance?.workspaces ?? []
+  const table = runtime.workspaces ?? runtime.loadWorkspaces?.(runtime.cwd, env) ?? []
   const owner = repo?.owner?.toLowerCase()
   const byOwner = owner === undefined ? undefined : table.find((row) => row.git_owners?.some((candidate) => candidate.toLowerCase() === owner))
   const home = env.HOME ?? env.USERPROFILE ?? homedir()

@@ -11,7 +11,9 @@ export function isProvenance(value: unknown): value is Provenance {
 
 /** Insert-only: existing JSON remains readable and receivers can update historical delivery state. */
 export const PROVENANCE_MIGRATION = [
-  `CREATE TRIGGER deliveries_require_provenance BEFORE INSERT ON deliveries
+  // Idempotent: a store rewound to an older version replays this step, and the v5 step's rebuild of extension_objects
+  // already copies a surviving trigger from sqlite_schema.
+  `CREATE TRIGGER IF NOT EXISTS deliveries_require_provenance BEFORE INSERT ON deliveries
     WHEN CASE WHEN json_valid(NEW.envelope) THEN
       coalesce(json_type(NEW.envelope, '$.provenance'), '') != 'object'
       OR coalesce(json_type(NEW.envelope, '$.provenance.workspace'), '') != 'text'
@@ -22,5 +24,5 @@ export const PROVENANCE_MIGRATION = [
       OR coalesce(json_type(NEW.envelope, '$.provenance.session'), 'text') != 'text'
     ELSE 1 END
     BEGIN SELECT RAISE(ABORT, 'delivery provenance is required'); END`,
-  "INSERT INTO extension_objects (type, name, owner) VALUES ('trigger', 'deliveries_require_provenance', NULL)",
+  "INSERT OR IGNORE INTO extension_objects (type, name, owner) VALUES ('trigger', 'deliveries_require_provenance', NULL)",
 ] as const
