@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { rmSync } from "node:fs"
-import { configureSharedSubunitLogger } from "@oh-my-opencode/utils"
+import { configureSharedSubunitLogger } from "@oh-my-opencode/utils/logger"
 import { withContractHost, type ContractHost } from "../../../../senpi-task/src/runners/rpc-host/testing/contract-host"
 import { createLiveThreadSurface, type LiveThreadSurface } from "./live-surface"
 import { createLazyLiveThreadSurface } from "./lazy-live-surface"
