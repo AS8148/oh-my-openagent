@@ -52,9 +52,7 @@ export function tryLockSync(dir: string, source: string, owner: LockOwner): stri
   try {
     writeSync(fd, token)
   } catch (error) {
-    closeSync(fd)
-    removeQuietly(path)
-    throw error
+    cleanUpThenThrow(error, () => closeSync(fd), path)
   }
   closeSync(fd)
   return token
@@ -74,9 +72,13 @@ export async function tryLock(dir: string, source: string, owner: LockOwner): Pr
   try {
     await handle.writeFile(token)
   } catch (error) {
-    await handle.close()
-    removeQuietly(path)
-    throw error
+    let closeError: unknown
+    await handle.close().catch((thrown: unknown) => {
+      closeError = thrown
+    })
+    cleanUpThenThrow(error, () => {
+      if (closeError !== undefined) throw closeError
+    }, path)
   }
   await handle.close()
   return token
@@ -124,7 +126,12 @@ export function isAbandonedLock(
   dir: string,
   name: string,
   ageMs: number,
-  limits: { readonly leaseMs: number; readonly maxAgeMs: number; readonly isPidAlive: (pid: number) => boolean },
+  limits: {
+    readonly leaseMs: number
+    readonly maxAgeMs: number
+    readonly isPidAlive: (pid: number) => boolean
+    readonly self: LockOwner
+  },
 ): boolean {
   if (ageMs < limits.leaseMs) return false
   if (ageMs > limits.maxAgeMs) return true
@@ -135,25 +142,45 @@ export function isAbandonedLock(
     if (code(error) === "ENOENT") return false
     throw error
   }
-  const pid = Number(text.split(" ")[0])
-  return !Number.isInteger(pid) || pid <= 0 || !limits.isPidAlive(pid)
+  const [pidText, bootId] = text.split(" ")
+  const pid = Number(pidText)
+  if (!Number.isInteger(pid) || pid <= 0) return true
+  // Our own pid answers "alive" by definition: only the boot id tells this process from a crashed earlier one.
+  if (pid === limits.self.pid) return bootId !== limits.self.bootId
+  return !limits.isPidAlive(pid)
 }
 
 /**
  * A move that failed may still have left its destination (Windows renames by copy, then unlink).
  * Puts the spool back to exactly one copy under the source name, then throws the move's error. If the
- * rollback fails too, both errors are thrown; the leftover destination is a claim of this process, which
- * the sweep returns once its lease ends.
+ * rollback fails too, both errors are thrown. A leftover claim (a claim or a renewal) returns to the
+ * spool when its lease ends; a leftover sealed batch (a reclaim or a seal) is simply that batch.
  */
 export function throwAfterRollBack(dir: string, from: string, to: string, error: unknown): never {
   try {
-    if (exists(join(dir, to))) {
-      if (exists(join(dir, from))) unlinkSync(join(dir, to))
-      else renameSync(join(dir, to), join(dir, from))
-    }
+    // No exists(to) pre-check: a competitor may take `to` (a sealed batch name, for a reclaim or a seal) at
+    // any moment, so ENOENT here means the spool already holds one copy and the rollback is done.
+    if (exists(join(dir, from))) unlinkSync(join(dir, to))
+    else renameSync(join(dir, to), join(dir, from))
   } catch (rollbackError) {
-    throw new AggregateError([error, rollbackError], "spool move failed and its rollback failed")
+    if (code(rollbackError) !== "ENOENT") {
+      throw new AggregateError([error, rollbackError], "spool move failed and its rollback failed")
+    }
   }
+  throw error
+}
+
+/** Rethrows the lock-fill error; a cleanup that also fails is thrown with it, never in its place. */
+function cleanUpThenThrow(error: unknown, close: () => void, path: string): never {
+  const cleanupErrors: unknown[] = []
+  for (const step of [close, () => removeQuietly(path)]) {
+    try {
+      step()
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError)
+    }
+  }
+  if (cleanupErrors.length > 0) throw new AggregateError([error, ...cleanupErrors], "spool lock fill failed and its cleanup failed")
   throw error
 }
 
