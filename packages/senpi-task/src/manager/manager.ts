@@ -372,6 +372,14 @@ class TaskManagerImpl implements TaskManager {
     return this.#runPause.resumePausedTask(taskId, request)
   }
 
+  observeTaskHold(taskId: string, parentSessionId: string) {
+    return this.#runPause.observeTaskHold(taskId, parentSessionId)
+  }
+
+  resumeLostTask(taskId: string, request: RunPauseOwner & { readonly resumeId: string; readonly resumeCredential?: ResumeCredential }) {
+    return this.#runPause.resumeLostTask(taskId, request)
+  }
+
   holdTaskInput(taskId: string, input: HeldTaskInput) {
     return this.#runPause.holdTaskInput(taskId, input)
   }

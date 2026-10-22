@@ -1,4 +1,4 @@
-import type { ChildPausePort, EngineHoldInputResult, EngineInheritReceipt, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
+import type { ChildPausePort, EngineHoldInputResult, EngineInheritReceipt, ObservedHold, ResumedChildTurn, RunPauseOwner } from "../pause/ports"
 import type { TaskRecordStore } from "../store"
 import type { ManagedChildHandle } from "./child-handle"
 import type { TaskConcurrency } from "./concurrency"
@@ -24,10 +24,14 @@ export type ResumeTaskResult =
   | { readonly turnId: string }
   | { readonly otherHoldLive: true; readonly childSeq?: number }
 
+export type LostResumeResult = ResumeTaskResult | { readonly notHeld: true }
+
 export type TaskPauseMethods = {
   pauseTask(taskId: string, owner: RunPauseOwner): Promise<EngineInheritReceipt>
   resumePausedTask(taskId: string, request: ResumeTaskRequest): Promise<ResumeTaskResult>
   holdTaskInput(taskId: string, input: HeldTaskInput): Promise<EngineHoldInputResult>
+  observeTaskHold(taskId: string, parentSessionId: string): Promise<ObservedHold | undefined>
+  resumeLostTask(taskId: string, request: RunPauseOwner & { readonly resumeId: string; readonly resumeCredential?: ResumeCredential }): Promise<LostResumeResult>
 }
 
 export type HeldTaskInput = { readonly inputId: string; readonly revision: number; readonly text: string }
@@ -112,8 +116,14 @@ export function createTaskRunPause(ports: {
     try {
       ack = await port.pauseForRun(handle, owner)
     } catch (error) {
-      if (settled !== undefined) intents.clear(taskId)
-      throw error
+      // The request may have failed after the child's engine took the hold (an RPC timeout):
+      // the engine's own hold view, not the failed call, decides whether this child is held.
+      const observed = await port.observeHold?.(handle, owner.parentSessionId).catch(() => undefined)
+      if (observed?.held !== true) {
+        if (settled !== undefined) intents.clear(taskId)
+        throw error
+      }
+      ack = { childSeq: observed.childSeq }
     }
     if ("refused" in ack) {
       intents.clear(taskId)
@@ -186,6 +196,31 @@ export function createTaskRunPause(ports: {
     }
   }
 
+  async function observeTaskHold(taskId: string, parentSessionId: string): Promise<ObservedHold | undefined> {
+    const handle = ports.liveHandle(taskId)
+    if (handle === undefined) return undefined
+    return childPort().observeHold?.(handle, parentSessionId)
+  }
+
+  // A child the run recorded as lost may still be held by its engine (the pause failed after the
+  // hold landed, or the child recovered). Release it with the cutoff the engine reports now.
+  async function resumeLostTask(
+    taskId: string,
+    request: RunPauseOwner & { readonly resumeId: string; readonly resumeCredential?: ResumeCredential },
+  ): Promise<LostResumeResult> {
+    const record = load(taskId)
+    if (record.status !== "running" && record.status !== "paused") return { notHeld: true }
+    const observed = await observeTaskHold(taskId, request.parentSessionId)
+    if (observed?.held !== true) return { notHeld: true }
+    if (record.status === "paused") return resumePausedTask(taskId, { ...request, childSeqCutoff: observed.childSeq })
+    const handle = ports.liveHandle(taskId)
+    if (handle === undefined) return { notHeld: true }
+    const result = await childPort().resumeTurn(handle, { ...request, childSeqCutoff: observed.childSeq })
+    if ("otherHoldLive" in result) return result
+    ports.track(taskId, handle, record.model, record.notification.run_epoch, result)
+    return { turnId: result.turnId }
+  }
+
   // Guidance names the parent that paused this child; the child engine refuses any other parent.
   async function holdTaskInput(taskId: string, input: HeldTaskInput): Promise<EngineHoldInputResult> {
     const port = childPort()
@@ -231,5 +266,5 @@ export function createTaskRunPause(ports: {
     resumed.delete(taskId)
   }
 
-  return { pauseTask, resumePausedTask, holdTaskInput, joinIdlePause, park, forget, settlement: (taskId: string, epoch: number) => intents.settlement(taskId, epoch) }
+  return { pauseTask, resumePausedTask, holdTaskInput, observeTaskHold, resumeLostTask, joinIdlePause, park, forget, settlement: (taskId: string, epoch: number) => intents.settlement(taskId, epoch) }
 }

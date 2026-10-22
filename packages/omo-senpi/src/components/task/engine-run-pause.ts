@@ -91,8 +91,16 @@ export function createEngineRunPause(ports: {
     async dispatchGuidance(parentSessionId, pauseSeq, resumeId) {
       for (const source of sources) await source.dispatchGuidance?.(parentSessionId, pauseSeq, resumeId)
     },
+    observeHold: async (participant, parentSessionId) =>
+      participant.taskId === undefined ? undefined : ports.manager.observeTaskHold(participant.taskId, parentSessionId),
     async resume(participant, request, credential) {
       if (participant.key.startsWith("run:")) return { kind: "resumed" }
+      if (participant.state === "lost" && participant.taskId !== undefined) {
+        const resumed = await ports.manager.resumeLostTask(participant.taskId, { ...request, resumeCredential: credential })
+        if ("notHeld" in resumed) return { kind: "settled" }
+        if ("otherHoldLive" in resumed) return { kind: "held_by_user", childSeq: resumed.childSeq ?? request.childSeqCutoff ?? 0 }
+        return { kind: "resumed", turnId: resumed.turnId }
+      }
       if (participant.kind === "held_admission") {
         if (ports.resumeAdmission !== undefined) return ports.resumeAdmission(participant, request, credential)
         if (participant.runRef.kind === "task" && ports.manager.resumeHeldTask !== undefined) {

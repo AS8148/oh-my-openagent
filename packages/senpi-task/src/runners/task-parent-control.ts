@@ -1,4 +1,4 @@
-import type { EngineHoldInputResult, EngineResumeReceipt, RunPauseOwner } from "../pause/ports"
+import type { EngineHoldInputResult, EngineResumeReceipt, ObservedHold, RunPauseOwner } from "../pause/ports"
 
 export type TaskParentCommand =
   | { readonly type: "set_client_info"; readonly width: number; readonly capabilities: readonly ["task_parent"] }
@@ -11,6 +11,7 @@ export type TaskParentCommand =
     readonly type: "hold_input"; readonly inputId: string; readonly revision: number; readonly text: string
     readonly parentSessionId: string; readonly origin: "human"
   }
+  | { readonly type: "get_state" }
 
 export type HeldGuidanceInput = { readonly inputId: string; readonly revision: number; readonly text: string }
 
@@ -96,6 +97,17 @@ export function createTaskParentControl(wire: TaskParentWire) {
       if (data.alreadyDelivered === true) return { kind: "already_delivered", revision: input.revision }
       if (typeof data.entryId !== "string" || typeof data.duplicate !== "boolean") throw new TaskParentControlError("protocol_error")
       return { kind: "held", entryId: data.entryId, duplicate: data.duplicate }
+    },
+    // The child's live hold records (`get_state.pause`); undefined when its engine reports none.
+    async observeHold(parentSessionId: string): Promise<ObservedHold | undefined> {
+      const response = await wire.send({ type: "get_state" })
+      if (!response.success || !isRecord(response.data)) return undefined
+      const pause = response.data["pause"]
+      if (!isRecord(pause) || typeof pause["pauseSeq"] !== "number" || !Array.isArray(pause["records"])) return undefined
+      return {
+        held: pause["records"].some(record => isRecord(record) && record["kind"] === "inherited_hold" && record["parentSessionId"] === parentSessionId),
+        childSeq: pause["pauseSeq"],
+      }
     },
   }
 }

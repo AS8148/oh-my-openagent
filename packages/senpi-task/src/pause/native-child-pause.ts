@@ -1,5 +1,5 @@
 import type { ManagedChildHandle, RunnerOutcome } from "../manager/child-handle"
-import type { ChildPausePort, EngineHoldInputResult, EngineInheritReceipt, RunPauseOwner } from "./ports"
+import type { ChildPausePort, EngineHoldInputResult, EngineInheritReceipt, ObservedHold, RunPauseOwner } from "./ports"
 
 export type NativeResumeResult =
   | { readonly released: false; readonly reason: "stale" | "not_held" | "wrong_parent" }
@@ -21,6 +21,7 @@ export type NativeRunPause = {
   holdInput(parentSessionId: string, input: {
     readonly inputId: string; readonly revision: number; readonly text: string
   }): Promise<EngineHoldInputResult>
+  observeHold?(parentSessionId: string): Promise<ObservedHold | undefined>
 }
 
 export class NativePauseUnavailableError extends Error {
@@ -55,4 +56,5 @@ export const nativeChildPausePort: ChildPausePort = {
     return { turnId: result.turnId, outcome: result.outcome }
   },
   holdInput: async (child, input, owner) => native(child).holdInput(owner.parentSessionId, input),
+  observeHold: async (child, parentSessionId) => child.runPause?.observeHold?.(parentSessionId),
 }

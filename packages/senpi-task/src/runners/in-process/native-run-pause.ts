@@ -14,7 +14,10 @@ export type RunHoldSession = {
   }): Promise<({ readonly released: true; readonly otherHoldLive: boolean }
     | { readonly released: false; readonly reason: "stale" | "wrong_parent" | "not_held" }) & { turnId?: string }>
   holdInput?(input: { inputId: string; revision: number; text: string }): EngineHoldInputResult
-  readonly pauseView?: { readonly records: readonly { readonly kind: string; readonly parentSessionId?: string }[] }
+  readonly pauseView?: {
+    readonly pauseSeq?: number
+    readonly records: readonly { readonly kind: string; readonly parentSessionId?: string }[]
+  }
 }
 
 /** A turn the engine itself starts on Resume; armed before the call so its agent_start is never missed. */
@@ -51,6 +54,14 @@ export function createInProcessRunPause(session: RunHoldSession, watchEngineTurn
         record.kind === "inherited_hold" && record.parentSessionId === parentSessionId) === true
       if (!owned) throw new TaskParentControlError("wrong_parent")
       return holdInput.call(session, { inputId: input.inputId, revision: input.revision, text: input.text })
+    },
+    async observeHold(parentSessionId) {
+      const view = session.pauseView
+      if (view === undefined) return undefined
+      return {
+        held: view.records.some(record => record.kind === "inherited_hold" && record.parentSessionId === parentSessionId),
+        childSeq: view.pauseSeq ?? 0,
+      }
     },
   }
 }

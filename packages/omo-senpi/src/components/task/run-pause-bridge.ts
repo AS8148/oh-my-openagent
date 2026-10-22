@@ -77,9 +77,11 @@ export class EngineRunPauseBridge {
     const registry = this.controller.registry
     const before = registry.load(parentSessionId)
     if (before === undefined || before.pauseSeq !== pauseSeq || before.phase === "resumed") return
-    // A failed propagation was already reported to whoever awaited the Stop. Resume still runs:
-    // participants that never acknowledged are lost, and admission must reopen.
-    await this.#pause(parentSessionId, pauseSeq).catch(() => undefined)
+    // Resume still runs after a failed propagation, so admission reopens; the failure is logged and
+    // kept as the reason each unacknowledged participant left the run's custody.
+    await this.#pause(parentSessionId, pauseSeq).catch((error: unknown) => {
+      this.controller.recordPropagationFailure(parentSessionId, pauseSeq, error)
+    })
     const record = registry.require(parentSessionId)
     if (record.pauseSeq !== pauseSeq) return
     const resumeId = record.resume?.resumeId ?? `parent-resume:${pauseSeq}`

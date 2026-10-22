@@ -1,5 +1,6 @@
+import { log } from "@oh-my-opencode/utils"
 import type { AdmissionParticipant, ResumeCredential } from "./admission-barrier"
-import type { RunPauseOwner, RunRef } from "./ports"
+import type { ObservedHold, RunPauseOwner, RunRef } from "./ports"
 import { PauseRegistry, type PauseParticipant } from "./registry"
 
 export type ResumeParticipantRequest = RunPauseOwner & {
@@ -21,6 +22,8 @@ export type RunPauseEffects = {
   install(parentSessionId: string, pauseSeq: number, credential: ResumeCredential): Promise<void>
   acknowledgeInstalled(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<void>
   cancel(participant: PauseParticipant, parentSessionId: string): Promise<void>
+  // The child's engine view of this parent's hold; undefined when it reports none.
+  observeHold?(participant: PauseParticipant, parentSessionId: string): Promise<ObservedHold | undefined>
 }
 
 type ResumeTransaction = { readonly pauseSeq: number; readonly resumeId: string; readonly credential: ResumeCredential }
@@ -51,9 +54,22 @@ export class RunPauseController {
     // Stop open, or neither Resume nor a person's message could reopen admission.
     for (const participant of Object.values(this.registry.require(parentSessionId).participants)) {
       if (participant.state === "held" || participant.state === "restorable" || participant.state === "lost") continue
-      this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason: "never acknowledged the pause" })
+      await this.#holdOrLose(parentSessionId, pauseSeq, participant, "never acknowledged the pause")
     }
     this.registry.phase(parentSessionId, pauseSeq, "applied")
+  }
+
+  // A Stop whose propagation failed may still be resumed past; the failure is kept as the reason
+  // every participant that never acknowledged left the run's custody.
+  recordPropagationFailure(parentSessionId: string, pauseSeq: number, error: unknown): void {
+    const reason = `the Stop's propagation failed: ${error instanceof Error ? error.message : String(error)}`
+    log("[senpi-task] run pause propagation failed", { parentSessionId, pauseSeq, reason })
+    const record = this.registry.load(parentSessionId)
+    if (record === undefined || record.pauseSeq !== pauseSeq) return
+    for (const participant of Object.values(record.participants)) {
+      if (participant.state !== "pending") continue
+      this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason: reason })
+    }
   }
 
   async resume(parentSessionId: string, pauseSeq: number, resumeId: string): Promise<{ readonly kind: "installed" | "superseded" }> {
@@ -66,12 +82,21 @@ export class RunPauseController {
     this.#resuming.set(parentSessionId, transaction)
     for (const participant of this.registry.orderedAdmissions(parentSessionId)) {
       if (!this.#current(parentSessionId, transaction)) return { kind: "superseded" }
-      if (participant.state === "resumed" || participant.state === "lost") continue
-      if (participant.state === "pending") {
-        this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason: "never acknowledged the pause" })
-        continue
+      if (participant.state === "resumed") continue
+      let cutoff = requested.childSeqCutoffs[participant.key]
+      if (participant.state === "lost" || participant.state === "pending") {
+        // A child outside the run's custody may still be held by its engine; release it rather
+        // than strand it paused. One the engine does not hold is left as it is.
+        const observed = await this.#observe(parentSessionId, participant)
+        if (!this.#current(parentSessionId, transaction)) return { kind: "superseded" }
+        if (observed?.held !== true) {
+          const lostReason = participant.lostReason ?? "never acknowledged the pause"
+          log("[senpi-task] run resume skips a lost participant", { parentSessionId, pauseSeq, key: participant.key, lostReason })
+          if (participant.state === "pending") this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason })
+          continue
+        }
+        cutoff = observed.childSeq
       }
-      const cutoff = requested.childSeqCutoffs[participant.key]
       if (participant.kind !== "held_admission" && cutoff === undefined) throw new Error(`missing pause acknowledgement for ${participant.key}`)
       this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "resuming" })
       const result = await this.effects.resume(participant, {
@@ -131,13 +156,32 @@ export class RunPauseController {
         result = { kind: "lost", reason: error instanceof Error ? error.message : String(error) }
       }
       if (this.registry.require(parentSessionId).pauseSeq !== pauseSeq) return false
-      if (result.kind === "lost") this.registry.update(parentSessionId, pauseSeq, key, { state: "lost", lostReason: result.reason })
+      if (result.kind === "lost") await this.#holdOrLose(parentSessionId, pauseSeq, participant, result.reason)
       else if (result.kind === "settled") this.registry.drop(parentSessionId, pauseSeq, key)
       else if (result.kind === "held") this.registry.update(parentSessionId, pauseSeq, key, {
         state: "held", ackSeq: pauseSeq, observedChildSeq: result.childSeq,
       })
     }
     return true
+  }
+
+  #observe(parentSessionId: string, participant: PauseParticipant): Promise<ObservedHold | undefined> {
+    return this.effects.observeHold?.(participant, parentSessionId).catch((error: unknown) => {
+      log("[senpi-task] run hold observation failed", { parentSessionId, key: participant.key, error: error instanceof Error ? error.message : String(error) })
+      return undefined
+    }) ?? Promise.resolve(undefined)
+  }
+
+  // Only a child its engine does not hold is lost: a failed pause request can land after the hold.
+  async #holdOrLose(parentSessionId: string, pauseSeq: number, participant: PauseParticipant, reason: string): Promise<void> {
+    const observed = await this.#observe(parentSessionId, participant)
+    if (this.registry.require(parentSessionId).pauseSeq !== pauseSeq) return
+    if (observed?.held === true) {
+      this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "held", ackSeq: pauseSeq, observedChildSeq: observed.childSeq })
+      return
+    }
+    log("[senpi-task] run pause lost a participant", { parentSessionId, pauseSeq, key: participant.key, reason })
+    this.registry.update(parentSessionId, pauseSeq, participant.key, { state: "lost", lostReason: reason })
   }
 
   #current(parentSessionId: string, transaction: ResumeTransaction): boolean {

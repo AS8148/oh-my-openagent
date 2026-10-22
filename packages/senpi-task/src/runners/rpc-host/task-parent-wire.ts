@@ -11,6 +11,7 @@ export type HostRunHoldClient = {
   pauseForRun?(owner: { parentSessionId: string; parentPauseSeq: number; runRef: RunRef }): Promise<unknown>
   resumeForRun?(request: { parentSessionId: string; parentPauseSeq: number; resumeId: string; childSeqCutoff: number }): Promise<unknown>
   holdInput?(input: { inputId: string; revision: number; text: string; parentSessionId?: string; origin?: "human" }): Promise<unknown>
+  getState?(): Promise<unknown>
 }
 
 const WIDTH = 80
@@ -52,6 +53,10 @@ export function createHostTaskParentWire(client: HostRunHoldClient): TaskParentW
             inputId: command.inputId, revision: command.revision, text: command.text,
             parentSessionId: command.parentSessionId, origin: command.origin,
           }))
+        }
+        case "get_state": {
+          const state = client.getState
+          return state === undefined ? unsupported() : answer(() => state.call(client))
         }
       }
     },

@@ -46,8 +46,13 @@ export type ResumedChildTurn = {
   readonly outcome: Promise<RunnerOutcome>
 }
 
+// What a child's engine reports about this parent's run hold right now.
+export type ObservedHold = { readonly held: boolean; readonly childSeq: number }
+
 export type ChildPausePort = {
   pauseForRun(child: ManagedChildHandle, owner: RunPauseOwner): Promise<EngineInheritReceipt>
+  // Undefined when the child's engine reports no pause view.
+  observeHold?(child: ManagedChildHandle, parentSessionId: string): Promise<ObservedHold | undefined>
   resumeTurn(child: ManagedChildHandle, request: RunPauseOwner & {
     readonly resumeId: string
     readonly childSeqCutoff: number

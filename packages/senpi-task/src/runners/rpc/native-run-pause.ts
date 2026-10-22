@@ -46,5 +46,6 @@ export function createRpcRunPause(input: {
       }
     },
     holdInput: (parentSessionId, held) => unsupported(control => control.holdInput(parentSessionId, held)),
+    observeHold: parentSessionId => unsupported(control => control.observeHold(parentSessionId)),
   }
 }
