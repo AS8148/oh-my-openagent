@@ -1,16 +1,62 @@
-import { expect, test } from "bun:test"
+import { afterEach, beforeEach, expect, test } from "bun:test"
 import type { ExtensionContext } from "@code-yeongyu/senpi"
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DefaultResourceLoader, ModelRegistry, ModelRuntime, SessionManager, SettingsManager, createAgentSession, getMcpService } from "../senpi-test-runtime"
 import omoExtension from "./index"
 
-test("#given a real OmO session #when the engine builds its prewarm prefix #then it is ready rather than skipped by unsafe handlers", async () => {
-  // given
+const ENV_KEYS = ["HOME", "OMO_CODING_AGENT_DIR", "SENPI_CODING_AGENT_DIR", "PI_CODING_AGENT_DIR", "OMO_SENPI_DISABLE_POSTHOG"] as const
+type EnvSnapshot = ReadonlyMap<(typeof ENV_KEYS)[number], string | undefined>
+const snapshotEnv = (): EnvSnapshot => new Map(ENV_KEYS.map((key) => [key, process.env[key]]))
+function restoreEnv(snapshot: EnvSnapshot): void {
+  for (const [key, value] of snapshot) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+}
+
+// Safety net for a run bun abandons at its own timeout, where the scenario's teardown never runs: the next
+// test must still see this process's env, cwd and no leftover temp HOME.
+let baseline: { env: EnvSnapshot; cwd: string; roots: string[] } | undefined
+beforeEach(() => { baseline = { env: snapshotEnv(), cwd: process.cwd(), roots: [] } })
+afterEach(() => {
+  if (baseline === undefined) return
+  restoreEnv(baseline.env)
+  process.chdir(baseline.cwd)
+  for (const root of baseline.roots) rmSync(root, { recursive: true, force: true })
+  baseline = undefined
+})
+
+type Settle = Awaited<ReturnType<ReturnType<typeof getMcpService>["whenAttachSettled"]>>
+type Observed = {
+  status: string
+  systemPrompt: unknown
+  messages: unknown
+  serversBefore: unknown
+  serversAfter: unknown
+  connectionsBefore: number
+  connectionsAfter: number
+  settledAfterPreview: Settle
+}
+type Teardown = { errors: unknown[]; mcpDisposed: boolean | undefined; homeEntries: string[]; homeRemoved: boolean }
+
+/**
+ * Builds a real OmO session in a temp HOME and asks the engine for its prewarm prefix. Teardown always runs and
+ * restores cwd + env and removes the HOME before anything is asserted, so a failure here (an attach that does
+ * not settle, a throw in the preview) can never leave this process's env pointing at the removed HOME.
+ */
+async function runPrefixScenario(options: { attachSettleMs: number; extraMcpServers?: Record<string, unknown> }) {
   const root = mkdtempSync(join(tmpdir(), "omo-prefix-"))
+  baseline?.roots.push(root)
   const agentDir = join(root, "agent")
   mkdirSync(agentDir)
+  // The bundled remote MCPs (context7, grep_app) would race a network connect at startup in a fresh HOME;
+  // a loaded or offline host turns that into an attach that does not settle. The documented switch is a
+  // trusted user mcp.json entry with enabled:false.
+  writeFileSync(join(agentDir, "mcp.json"), JSON.stringify({
+    mcpServers: { context7: { enabled: false }, grep_app: { enabled: false }, ...options.extraMcpServers },
+  }))
   mkdirSync(join(root, ".omo"))
   writeFileSync(join(root, ".omo", "omo.json"), JSON.stringify({ memory: { enabled: false } }))
   // Fresh stamps throttle the session-start process sweeps, which would otherwise list this machine's
@@ -19,16 +65,14 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
   mkdirSync(sweepStamps)
   for (const stamp of ["lsp-proxy-sweep.stamp", "lsp-daemon-sweep.stamp"]) writeFileSync(join(sweepStamps, stamp), "")
   const cwd = process.cwd()
-  const overrides = { HOME: root, OMO_CODING_AGENT_DIR: agentDir, SENPI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_DIR: agentDir, OMO_SENPI_DISABLE_POSTHOG: "1" }
-  const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]))
-  Object.assign(process.env, overrides)
+  const previous = snapshotEnv()
+  Object.assign(process.env, { HOME: root, OMO_CODING_AGENT_DIR: agentDir, SENPI_CODING_AGENT_DIR: agentDir, PI_CODING_AGENT_DIR: agentDir, OMO_SENPI_DISABLE_POSTHOG: "1" })
   process.chdir(root)
   // The OmO extension is loaded whole; of the engine builtins only those this test needs: the MCP host the
   // extension's servers attach to and the prewarm builtin. The goal builtin's session_start takes a goal-file
   // lock (mkdir under this HOME) that a loaded run can finish after the HOME is removed (#9766 leak).
   const settingsManager = SettingsManager.inMemory({ defaultProjectTrust: "always", enabledBuiltinExtensions: ["cache-keepalive", "mcp"] })
-  const modelRuntime = ModelRuntime.createSync({ modelsPath: null })
-  const registry = new ModelRegistry(modelRuntime)
+  const registry = new ModelRegistry(ModelRuntime.createSync({ modelsPath: null }))
   registry.registerProvider("prefix-fixture", {
     api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", apiKey: "fixture-key",
     models: [{
@@ -48,9 +92,12 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
   })
   let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined
   let mcp: ReturnType<typeof getMcpService> | undefined
+  let observed: Observed | undefined
+  let failure: unknown
   try {
     await loader.reload()
-    expect(loader.getExtensions().errors).toEqual([])
+    const loadErrors = loader.getExtensions().errors
+    if (loadErrors.length > 0) throw new Error(`extension load errors: ${JSON.stringify(loadErrors)}`)
     ;({ session } = await createAgentSession({
       cwd: root, agentDir, settingsManager, modelRegistry: registry,
       model: registry.find("prefix-fixture", "prefix-fixture"), thinkingLevel: "off",
@@ -59,41 +106,73 @@ test("#given a real OmO session #when the engine builds its prewarm prefix #then
     }))
     await session.bindExtensions({ mode: "print" })
     if (context?.getPromptCachePrefixRequest === undefined) throw new Error("session_start did not expose the engine prefix builder")
-    // Binding the session, not the preview, starts the extension's MCP servers (ast-grep connects in the
-    // background past session_start and logs into this HOME). Settle that before the preview so anything
-    // the preview started would show, and so no connect is still writing when the HOME is removed.
+    // Binding the session, not the preview, starts the MCP connects (ast-grep spawns past session_start and
+    // logs into this HOME). Await their settled signal, bounded, before the preview so anything the preview
+    // started would show, and so no connect is still writing when the HOME is removed.
     const service = getMcpService()
     mcp = service
-    expect(await service.whenAttachSettled(20_000)).toBe("settled")
+    const settled = await service.whenAttachSettled(options.attachSettleMs)
+    if (settled !== "settled") throw new Error(`MCP attach did not settle within ${options.attachSettleMs} ms (${String(settled)})`)
     const servers = () => service.getServerSnapshots().map(({ name, lifecycleState, generation, pid }) => ({ name, lifecycleState, generation, pid }))
     const serversBefore = servers()
     const connectionsBefore = service.getSnapshot().connectionCount
     // when
     const result = await context.getPromptCachePrefixRequest({ signal: AbortSignal.timeout(10_000) })
-    // then
-    expect(servers()).toEqual(serversBefore)
-    expect(service.getSnapshot().connectionCount).toBe(connectionsBefore)
-    expect(await service.whenAttachSettled(0)).toBe("settled")
     console.info("OMO_PREWARM_PREFIX", JSON.stringify(result.status === "ready" ? { status: result.status } : result))
-    expect(result.status).toBe("ready")
-    if (result.status === "ready") {
-      expect(result.request.context.systemPrompt).toBeTruthy()
-      expect(result.request.context.messages).toEqual([])
+    observed = {
+      status: result.status,
+      systemPrompt: result.status === "ready" ? result.request.context.systemPrompt : undefined,
+      messages: result.status === "ready" ? result.request.context.messages : undefined,
+      serversBefore, serversAfter: servers(), connectionsBefore,
+      connectionsAfter: service.getSnapshot().connectionCount,
+      // Anything the preview started would still be pending here; await that signal, bounded.
+      settledAfterPreview: await service.whenAttachSettled(10_000),
     }
-  } finally {
-    await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" })
-    await session?.dispose()
-    // The quit disposes the MCP service and awaits every connection's close; with no connect pending
-    // (settled above), nothing the session started writes into the HOME after this point.
-    if (mcp !== undefined) expect(mcp.getSnapshot().disposed).toBe(true)
-    process.chdir(cwd)
-    for (const [key, value] of previous) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-    // No builtin left a store under this HOME that could still be written after it is removed.
-    const homeEntries = readdirSync(root, { recursive: true }).map(String)
-    rmSync(root, { recursive: true, force: true })
-    expect(homeEntries.filter((entry) => entry.includes("goal"))).toEqual([])
+  } catch (caught) {
+    failure = caught
   }
-}, 30_000)
+  // Teardown: shut the session down, then restore cwd + env and remove the HOME. Errors are collected, never
+  // thrown, so nothing below can be skipped; every assertion happens after this point.
+  const errors: unknown[] = []
+  try { await session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }) } catch (caught) { errors.push(caught) }
+  try { await session?.dispose() } catch (caught) { errors.push(caught) }
+  const mcpDisposed = mcp?.getSnapshot().disposed
+  process.chdir(cwd)
+  restoreEnv(previous)
+  let homeEntries: string[] = []
+  try { homeEntries = readdirSync(root, { recursive: true }).map(String) } catch (caught) { errors.push(caught) }
+  rmSync(root, { recursive: true, force: true })
+  const teardown: Teardown = { errors, mcpDisposed, homeEntries, homeRemoved: !existsSync(root) }
+  return { observed, failure, teardown, envAfter: snapshotEnv(), cwdAfter: process.cwd(), envBefore: previous, cwdBefore: cwd }
+}
+
+test("#given a real OmO session #when the engine builds its prewarm prefix #then it is ready rather than skipped by unsafe handlers", async () => {
+  // given / when
+  const run = await runPrefixScenario({ attachSettleMs: 30_000 })
+  // then: teardown already restored the process, so these assertions cannot leak state into later tests
+  if (run.failure !== undefined) throw run.failure
+  expect(run.teardown.errors).toEqual([])
+  expect(run.observed?.status).toBe("ready")
+  expect(run.observed?.systemPrompt).toBeTruthy()
+  expect(run.observed?.messages).toEqual([])
+  expect(run.observed?.serversAfter).toEqual(run.observed?.serversBefore)
+  expect(run.observed?.connectionsAfter).toBe(run.observed?.connectionsBefore ?? -1)
+  expect(run.observed?.settledAfterPreview).toBe("settled")
+  // The quit disposes the MCP service and awaits every connection's close, so nothing it started writes later.
+  expect(run.teardown.mcpDisposed).toBe(true)
+  expect(run.teardown.homeEntries.filter((entry) => entry.split("/").includes("goal"))).toEqual([])
+  expect(run.teardown.homeRemoved).toBe(true)
+}, 90_000)
+
+test("#given an MCP attach that never settles #when the prefix scenario fails #then the process env, cwd and temp HOME are restored before it reports", async () => {
+  // given: an eager stdio server that is spawned but never answers initialize, so the attach cannot settle
+  // within the bound (its own connect timeout is far longer)
+  const neverReady = { command: process.execPath, args: ["-e", "setInterval(() => {}, 1 << 30)"], lifecycle: "eager", connectTimeoutMs: 120_000 }
+  // when
+  const run = await runPrefixScenario({ attachSettleMs: 1_000, extraMcpServers: { "never-ready": neverReady } })
+  // then
+  expect(String(run.failure)).toContain("MCP attach did not settle within 1000 ms")
+  expect(run.envAfter).toEqual(run.envBefore)
+  expect(run.cwdAfter).toBe(run.cwdBefore)
+  expect(run.teardown.homeRemoved).toBe(true)
+}, 90_000)
