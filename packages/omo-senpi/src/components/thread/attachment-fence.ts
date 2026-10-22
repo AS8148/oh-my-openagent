@@ -35,11 +35,14 @@ async function attachSelectedSession(request: RpcRequest, socketPath: string, se
  * other refusal or a lost connection leaves at most a connection-local hold the host drops when
  * this one-shot connection closes; it is logged once and the mutation's result stands.
  */
-async function releaseAttachment(request: RpcRequest, sessionId: unknown): Promise<void> {
+async function releaseAttachment(request: RpcRequest, command: RpcObject): Promise<void> {
+  const sessionId = command.sessionId
   let failure: string
   try {
     const frame = await request({ type: "release_attachment", sessionId })
-    if (frame.success === true || errorCodeOf(frame) === "session_not_attached") return
+    const code = errorCodeOf(frame)
+    // A session the mutation released has left the host, taking its hold with it.
+    if (frame.success === true || code === "session_not_attached" || (command.type === "release_session" && code === "unknown_session")) return
     failure = JSON.stringify(frame.error ?? frame)
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error)
@@ -66,6 +69,6 @@ export async function fencedCommand(
   if (durableSessionId === undefined) throw new Error("session_identity_mismatch:missing selected durable session id")
   await attachSelectedSession(request, socketPath, command.sessionId, durableSessionId)
   const result = await send()
-  if (capabilities.has("release_attachment")) await releaseAttachment(request, command.sessionId)
+  if (capabilities.has("release_attachment")) await releaseAttachment(request, command)
   return result
 }

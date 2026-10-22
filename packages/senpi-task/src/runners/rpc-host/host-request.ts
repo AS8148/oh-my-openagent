@@ -1,5 +1,5 @@
 import { resolveAgentHome } from "../../agent-home"
-import { authenticateRpcHost, resolveRpcSocketTransport, RpcIdentityError, withRpcSocket } from "./socket-client"
+import { authenticateRpcHost, authRequiredError, resolveRpcSocketTransport, RpcIdentityError, withRpcSocket } from "./socket-client"
 
 export type HostReply = Readonly<Record<string, unknown>>
 
@@ -21,7 +21,9 @@ export async function askHost(socket: string, request: HostReply, timeoutMs: num
         const info = await authenticateRpcHost(send, socket, keyRoot, request.type === "get_protocol_info" ? request : undefined)
         if (request.type === "get_protocol_info") return info
       }
-      return await send(request)
+      const reply = await send(request)
+      if (reply.success === false && (reply.errorCode ?? reply.error) === "auth_required") throw authRequiredError(socket)
+      return reply
     })
   } catch (error) {
     if (error instanceof RpcIdentityError) throw error

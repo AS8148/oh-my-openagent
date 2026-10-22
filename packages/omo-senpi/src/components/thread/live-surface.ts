@@ -25,7 +25,6 @@ function dataRecord(frame: RpcFrame, command: unknown): Record<string, unknown> 
     throw new Error(`thinking_level_unsupported:${frame.error}`)
   }
   if (frame.success === false && frame.error === "unsupported") throw new Error(`unsupported:${String(command)}`)
-  if (frame.success === false && (frame.errorCode ?? frame.error) === "auth_required") throw authRequiredError(String(command))
   if (frame.success && frame.data === undefined && (command === "set_session_name" || command === "set_thinking_level")) return {}
   if (!frame.success || !record(frame.data)) throw new Error(`thread RPC request failed: ${JSON.stringify(frame.error ?? frame)}`)
   return frame.data
@@ -82,7 +81,8 @@ async function requestFrame(socketPath: string, command: Record<string, unknown>
       ? await authenticateRpcHost(request, socketPath, options.keyRoot!, protocolRequest)
       : await request(protocolRequest ?? { type: "get_protocol_info", observe: true })
     if (command.type === "get_protocol_info") return info
-    const protocol = dataRecord(info, "get_protocol_info")
+    // An older host that refuses get_protocol_info advertises nothing: it gets today's unfenced request, as askHost does.
+    const protocol = info.success === true && record(info.data) ? info.data : {}
     const capabilities = new Set(Array.isArray(protocol.capabilities) ? protocol.capabilities : [])
     return await fencedCommand(request, socketPath, command, capabilities, options.durableSessionId, async () => {
       const result = await request(command)
@@ -244,11 +244,13 @@ export function createLiveThreadSurface(_pi: SenpiExtensionAPI | undefined, opti
       secret = transport.secret
       if (transport.address !== socket) dial = () => connect(transport.address)
     }
-    return await requestFrame(socket, { type, ...data }, dial, {
+    const frame = await requestFrame(socket, { type, ...data }, dial, {
       timeoutMs: timeoutMs ?? (tui ? TUI_REQUEST_TIMEOUT_MS : undefined), secret, durableSessionId, openedName,
       rpcHost: !tui,
       keyRoot: () => options.keyRoot ?? (env.SENPI_RPC_KEY_ROOT?.trim() || resolveAgentHome({ env })),
     })
+    if (frame.success === false && (frame.errorCode ?? frame.error) === "auth_required") throw authRequiredError(socket)
+    return frame
   }
   const callOn = async <T>(socket: string, type: string, data: Record<string, unknown> = {}, timeoutMs?: number, durableSessionId?: string): Promise<T> =>
     dataRecord(await callFrame(socket, type, data, timeoutMs, durableSessionId), type) as T

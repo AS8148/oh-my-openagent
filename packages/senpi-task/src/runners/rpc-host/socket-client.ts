@@ -51,9 +51,13 @@ export async function withRpcSocket<T>(
     pending?.reject(error)
     pending = undefined
   }
+  // options.timeoutMs bounds the whole conversation (connect, handshake and request), on a monotonic clock; a step's own
+  // budget can only shorten what is left of it.
+  const deadline = performance.now() + options.timeoutMs
   const arm = (timeoutMs: number) => {
     clear()
-    timer = setTimeout(() => { fail(new Error("thread RPC request timed out")); socket.destroy() }, Math.min(timeoutMs, options.timeoutMs))
+    const remaining = Math.max(0, deadline - performance.now())
+    timer = setTimeout(() => { fail(new Error("thread RPC request timed out")); socket.destroy() }, Math.min(timeoutMs, remaining))
   }
   socket.once("error", fail)
   socket.once("close", () => fail(new Error("thread RPC connection closed before the response arrived")))
