@@ -29,7 +29,10 @@ function job(file: string, name: string): Record<string, unknown> {
 }
 
 function toJavaScript(expression: string): string {
-  return expression.replace(/([!=])=/g, "$1==").replaceAll("needs.ci-mode.", 'needs["ci-mode"].')
+  return expression
+    .replace(/([!=])=/g, "$1==")
+    .replaceAll("needs.ci-mode.", 'needs["ci-mode"].')
+    .replace(/(?<=[\w\]])\.(?=[A-Za-z_])/g, "?.")
 }
 
 function resolveRunner(expression: string, os: string, fullMatrix: string): string {
@@ -65,6 +68,30 @@ describe("#given native binary parity, which has no ubuntu leg", () => {
       "needs.ci-mode.outputs.run_heavy == 'true' && needs.ci-mode.outputs.full_matrix == 'true'",
     )
   })
+})
+
+describe("#given the path-filtered workflows that also run macOS/Windows on dev pushes", () => {
+  test.each(["desktop-engine.yml", "desktop-windows-qa.yml", "desktop-linux-qa.yml", "get-worker-ci.yml"])(
+    "#then %s cancels a superseded PR run but lets a dev run finish and collapses pending dev runs",
+    (file) => {
+      const parsed: unknown = load(readFileSync(new URL(file, workflowsDir), "utf8"))
+      if (!isRecord(parsed) || !isRecord(parsed["concurrency"])) throw new Error(`${file} must define concurrency`)
+      const concurrency = parsed["concurrency"]
+      const evaluate = (expression: unknown, github: unknown) => {
+        const body = /^\$\{\{\s*(.+?)\s*\}\}$/.exec(String(expression))?.[1]
+        if (body === undefined) throw new Error(`${file} concurrency must be an expression`)
+        return new Function("github", `return ${toJavaScript(body)}`)(github)
+      }
+      const group = (github: unknown) => String(concurrency["group"]).replace(/\$\{\{\s*(.+?)\s*\}\}/g, (_match, body: string) => String(new Function("github", `return ${toJavaScript(body)}`)(github)))
+      const pr = { workflow: "W", event_name: "pull_request", event: { pull_request: { number: 7 } }, ref: "refs/pull/7/merge", sha: "a" }
+      const push = (sha: string) => ({ workflow: "W", event_name: "push", event: {}, ref: "refs/heads/dev", sha })
+
+      expect(group(pr)).toBe("W-7")
+      expect(evaluate(concurrency["cancel-in-progress"], pr)).toBe(true)
+      expect(group(push("a"))).toBe(group(push("b")))
+      expect(evaluate(concurrency["cancel-in-progress"], push("a"))).toBe(false)
+    },
+  )
 })
 
 describe("#given the label-triggered full-matrix run", () => {
