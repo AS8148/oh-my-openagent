@@ -116,6 +116,8 @@ export async function discoverConfigSourceSkills(options: {
   configDir: string
   provenance?: SkillProvenance
   onDiagnostic?: SkillDiagnosticSink
+  userSources?: readonly string[]
+  projectSources?: readonly string[]
 }): Promise<LoadedSkill[]> {
   const normalized = normalizeSkillsConfig(options.config)
   if (normalized.sources.length === 0) return []
@@ -125,12 +127,20 @@ export async function discoverConfigSourceSkills(options: {
 
   const loadedBySource = await Promise.all(
     normalized.sources.map((source) => {
+      const sourcePath = typeof source === "string" ? source : source.path
+      const userSelected = options.userSources?.some((path) =>
+        toAbsolutePath(path, options.configDir) === toAbsolutePath(sourcePath, options.configDir))
+      const projectSelected = options.projectSources?.some((path) =>
+        toAbsolutePath(path, options.configDir) === toAbsolutePath(sourcePath, options.configDir))
+      const sourceProvenance: SkillProvenance = userSelected
+        ? { ...provenance, kind: "user" }
+        : projectSelected ? { ...provenance, kind: "project-auto" } : provenance
       if (typeof source === "string") {
         return loadSourcePath({
           sourcePath: source,
           recursive: false,
           configDir: options.configDir,
-          provenance,
+          provenance: sourceProvenance,
           onDiagnostic: options.onDiagnostic,
         })
       }
@@ -140,7 +150,7 @@ export async function discoverConfigSourceSkills(options: {
         recursive: source.recursive ?? false,
         globPattern: source.glob,
         configDir: options.configDir,
-        provenance,
+        provenance: sourceProvenance,
         onDiagnostic: options.onDiagnostic,
       })
     }),

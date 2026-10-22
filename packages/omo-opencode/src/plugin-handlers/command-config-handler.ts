@@ -16,6 +16,7 @@ import {
   builtinSkillsToCommandDefinitionRecord,
   discoverConfigSourceSkills,
   getSkillSourceProvenance,
+  readOpencodeConfigSkills,
   isDisabledSkillAlias,
   isDisabledSkillName,
   loadGlobalAgentsSkills,
@@ -70,6 +71,7 @@ export async function applyCommandConfig(params: {
   }
 
   const hostSkillConfig = adaptHostSkillConfig(params.config.skills);
+  const diskHostSkills = readOpencodeConfigSkills(params.ctx.directory);
   const sourceProvenance = getSkillSourceProvenance(params.pluginConfig.skills);
   const [
     configSourceSkills,
@@ -92,6 +94,8 @@ export async function applyCommandConfig(params: {
     discoverConfigSourceSkills({
       config: hostSkillConfig,
       configDir: params.ctx.directory,
+      userSources: diskHostSkills?.userPaths,
+      projectSources: diskHostSkills?.projectPaths,
       provenance: { ...sourceProvenance, kind: "host", selectedRoot: params.ctx.directory, projectRoot: sourceProvenance?.projectRoot ?? detectWorktreePath(params.ctx.directory) ?? params.ctx.directory },
     }),
     includeClaudeCommands ? loadUserCommands() : Promise.resolve({}),

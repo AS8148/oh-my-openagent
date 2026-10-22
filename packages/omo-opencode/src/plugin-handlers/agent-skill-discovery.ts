@@ -3,6 +3,7 @@ import {
   deduplicateSkillsByName,
   discoverConfigSourceSkills,
   getSkillSourceProvenance,
+  readOpencodeConfigSkills,
   discoverGlobalAgentsSkills,
   discoverOpencodeGlobalSkills,
   discoverOpencodeProjectSkills,
@@ -19,6 +20,7 @@ export async function discoverAgentSkills(
 ): Promise<LoadedSkill[]> {
   const includeClaudeSkillsForAwareness = params.pluginConfig.claude_code?.skills ?? true;
   const hostSkillConfig = adaptHostSkillConfig(params.config.skills);
+  const diskHostSkills = readOpencodeConfigSkills(params.ctx.directory);
   const sourceProvenance = getSkillSourceProvenance(params.pluginConfig.skills);
   const [
     discoveredConfigSourceSkills,
@@ -37,6 +39,8 @@ export async function discoverAgentSkills(
     discoverConfigSourceSkills({
       config: hostSkillConfig,
       configDir: params.ctx.directory,
+      userSources: diskHostSkills?.userPaths,
+      projectSources: diskHostSkills?.projectPaths,
       provenance: { ...sourceProvenance, kind: "host", selectedRoot: params.ctx.directory, projectRoot: sourceProvenance?.projectRoot ?? detectWorktreePath(params.ctx.directory) ?? params.ctx.directory },
     }),
     includeClaudeSkillsForAwareness ? discoverUserClaudeSkills() : Promise.resolve([]),

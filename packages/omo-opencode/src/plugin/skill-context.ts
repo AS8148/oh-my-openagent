@@ -105,7 +105,8 @@ export async function createSkillContext(args: {
 
     const includeClaudeSkills = pluginConfig.claude_code?.skills !== false
     const sourceProvenance = getSkillSourceProvenance(pluginConfig.skills)
-    const hostSkillConfig = adaptHostSkillConfig(hostSkills ?? readOpencodeConfigSkills(directory))
+    const diskHostSkills = readOpencodeConfigSkills(directory)
+    const hostSkillConfig = adaptHostSkillConfig(hostSkills ?? diskHostSkills)
     const [
       configSourceSkills,
       hostConfigSkills,
@@ -124,6 +125,8 @@ export async function createSkillContext(args: {
       discoverConfigSourceSkills({
         config: hostSkillConfig,
         configDir: directory,
+        userSources: diskHostSkills?.userPaths,
+        projectSources: diskHostSkills?.projectPaths,
         provenance: { ...sourceProvenance, kind: "host", selectedRoot: directory, projectRoot: detectWorktreePath(directory) ?? directory },
       }),
       includeClaudeSkills ? discoverUserClaudeSkills() : Promise.resolve([]),
