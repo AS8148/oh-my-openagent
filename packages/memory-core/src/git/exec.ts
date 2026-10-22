@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { existsSync } from "../fs/resilient"
 import { win32 } from "node:path"
 import { GitAbortedError, GitNotFoundError, GitTimeoutError } from "./errors"
+import { recordGitTimeout } from "./timeout-diagnostics"
 
 export interface GitExecOptions {
   cwd: string
@@ -114,6 +115,7 @@ function runGitCommand(
     let killTimer: ReturnType<typeof setTimeout> | undefined
     const timer = setTimeout(() => {
       timedOut = true
+      recordGitTimeout(environment, child.pid, argv, options.cwd, options.timeoutMs)
       child.kill("SIGTERM")
       killTimer = setTimeout(() => child.kill("SIGKILL"), options.killGraceMs ?? GIT_KILL_GRACE_MS)
     }, options.timeoutMs)
