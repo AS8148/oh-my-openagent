@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "../fs/resilient"
 import { join } from "node:path"
 
 // Opt-in evidence for a git that outlives its timeout (omo #10821): on Windows CI one `git add` stalls
@@ -19,7 +19,7 @@ function processSnapshot(pid: number): string {
       // Thread states for the git and every child it started, in case the stalled work runs in a child.
       `@(${pid}) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid}" | ForEach-Object { $_.ProcessId }) | ForEach-Object { "threads of $_"; (Get-Process -Id $_ -ErrorAction SilentlyContinue).Threads | Group-Object ThreadState,WaitReason -NoElement | Format-Table -AutoSize | Out-String }`,
     ].join("; ")], { encoding: "utf8", timeout: SNAPSHOT_TIMEOUT_MS, windowsHide: true })
-    : spawnSync("ps", ["-axo", "pid,ppid,stat,wchan,etime,command"], { encoding: "utf8", timeout: SNAPSHOT_TIMEOUT_MS })
+    : spawnSync("ps", ["-axo", "pid,ppid,stat,wchan,etime,command"], { encoding: "utf8", timeout: SNAPSHOT_TIMEOUT_MS, windowsHide: true })
   if (command.error) return `process snapshot failed: ${command.error.message}`
   return `${command.stdout}${command.stderr}`
 }
