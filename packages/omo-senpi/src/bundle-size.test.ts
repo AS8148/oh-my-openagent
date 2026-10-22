@@ -133,7 +133,14 @@ const builtExtensionPath = join(packageRoot, "plugin", "extensions", "omo.js")
 // takes 116.37 ms on dev vs 114.65 ms on the batch (min of 11, interleaved, same host).
 // 1,450,000 is the measured need plus a 5,541-byte margin. #10860 wins the bytes back by lazy-loading what
 // startup does not need, and lowers this ceiling to 1,424,569 again.
-const BUDGET_BYTES = 1_450_000
+// Raised 1,450,000 -> 1,490,000 in a standalone measured budget PR for bundle-train batch #2 (20 cars: memory
+// recall/authority/agreements, gzip early session, git-lock kernel liveness, provider-count telemetry, senpi-task fixes).
+// MEASURED: batch #1 head 1,444,821 B -> batch #2 head 1,485,607 B (+40,786) after the canonical regen (linux container,
+// node 24 + bun 1.4.3, two hosts byte-identical). Cold start, fresh bun importing the built entry, interleaved, same host,
+// 31 runs each: min 126.37 -> 136.63 ms, p10 145.76 -> 145.94 ms, median 176.13 -> 186.27 ms.
+// 1,490,000 is the measured need plus a 4,393-byte margin. #10860 (memory commands -> lazy sidecar, measured -33,263 B)
+// returns this ceiling to 1,450,000.
+const BUDGET_BYTES = 1_490_000
 
 describe("omo-senpi bundle size budget", () => {
   it("#given the built extension #when its byte size is measured #then it stays within the documented byte budget", () => {
