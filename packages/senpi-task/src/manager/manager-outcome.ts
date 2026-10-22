@@ -209,6 +209,7 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
   function watchReplaced(taskId: string, handle: ManagedChildHandle, epoch: number): void {
     const stopReplaced = handle.onReplaced?.((event) => replaceOwned(taskId, handle, epoch, event))
     const stopDurable = handle.onDurableSessionId?.((id) => stampDurableId(taskId, handle, epoch, id))
+    if (stopReplaced === undefined && stopDurable === undefined) return
     replaceWatches.set(taskId, () => {
       stopReplaced?.()
       stopDurable?.()
@@ -216,11 +217,12 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
   }
 
   // The open's own state read did not return the durable id, so the record took none at spawn; the
-  // first heartbeat that learns it stamps it now (#10873).
+  // first heartbeat that learns it fills it now (#10873). It only fills: a record that already has an
+  // id changes solely through replaceOwned, which also moves host_session in step.
   function stampDurableId(taskId: string, handle: ManagedChildHandle, epoch: number, id: string): void {
     if (ownedRecord(ports, taskId, handle, epoch) === null) return
     ports.store.mutate(taskId, (fresh) =>
-      fresh.child_session_id === id ? fresh : { ...fresh, child_session_id: id, updated_at: nowIso(ports.now) })
+      fresh.child_session_id !== undefined ? fresh : { ...fresh, child_session_id: id, updated_at: nowIso(ports.now) })
   }
 
   function release(taskId: string): void {

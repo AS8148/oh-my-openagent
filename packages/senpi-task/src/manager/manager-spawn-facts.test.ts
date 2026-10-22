@@ -187,7 +187,10 @@ describe("TaskManager spawn-fact persistence", () => {
     if (result.kind !== "started") throw new Error("expected started")
     expect(store.load(result.task_id)?.child_session_id).toBeUndefined()
     for (const listener of [...learned]) listener("durable-learned-late")
+    expect(store.load(result.task_id)?.child_session_id).toBe("durable-learned-late")
 
+    // A later report never replaces a known id: that moves only through session_replaced.
+    for (const listener of [...learned]) listener("durable-stale")
     expect(store.load(result.task_id)?.child_session_id).toBe("durable-learned-late")
   })
 })
