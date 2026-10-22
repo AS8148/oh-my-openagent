@@ -70,4 +70,22 @@ describe("a lock is only ever its owner's", () => {
     // then
     expect(spoolNames(dir)).toEqual([live])
   })
+
+  test("#given stale locks naming our own pid #then the sweep deletes the one from an earlier boot and keeps this process's own", () => {
+    // given
+    const { dir, ctx } = spool()
+    const earlierBoot = lockName(batchName("logs", createBatchId(Date.now())))
+    const thisBoot = lockName(batchName("traces", createBatchId(Date.now())))
+    writeFileSync(join(dir, earlierBoot), `${ctx.pid} ${"e".repeat(32)} nonce`)
+    writeFileSync(join(dir, thisBoot), `${ctx.pid} ${ctx.bootId} nonce`)
+    const stale = new Date(Date.now() - CLAIM_LEASE_MS - 1_000)
+    utimesSync(join(dir, earlierBoot), stale, stale)
+    utimesSync(join(dir, thisBoot), stale, stale)
+
+    // when
+    sweepSpool({ ...ctx, isPidAlive: (pid) => pid === ctx.pid })
+
+    // then
+    expect(spoolNames(dir)).toEqual([thisBoot])
+  })
 })
