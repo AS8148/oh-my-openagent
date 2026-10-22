@@ -91,7 +91,9 @@ const MASS_ALIAS = String.raw`(?:mass[\s-]*ulw|ulw[\s-]*mass|mulw|meth)`
 const BIND_LEAD = String.raw`^\s*(?:\[(?:Image|Pasted text)\b[^\]\n]*\]\s*)*`
 const BIND_VERB = String.raw`(?:run|start|use|do|execute)`
 const BIND_FOLLOW = String.raw`(?=\s*(?:$|[,.!:;\n]|(?:to|on|for|with|and|now|here)\b))(?![^\n.!]*\?)`
-const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려|실행해|써)`
+// The Korean verb must end in a request ending, then the prompt ends or a break follows, with no `?` in the
+// sentence: "mass ulw 돌려봤는데" (I ran it) and "돌려도 돼?" (may I run it?) are not requests.
+const KOREAN_VERB = String.raw`\s*(?:(?:으로|로|를|을)\s*)?(?:돌려|실행해|써)(?:봐줘|봐|줘|주세요|라)?(?=[\s.!,]|$)(?![^\n.!]*\?)`
 const bindingForms = (command: string, keyword: string): RegExp =>
   new RegExp(
     [

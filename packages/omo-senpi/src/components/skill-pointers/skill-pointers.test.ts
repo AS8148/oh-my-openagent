@@ -114,7 +114,7 @@ describe("omo-senpi skill-pointers component", () => {
       const result = await dispatchInput(pi, "run mass ulw on the docs refresh")
 
       // then
-      expectPointerInjections(pi, result, [{ customType: MASS_ULW_CUSTOM_TYPE, skillName: "mass-ulw" }])
+      expectPointerInjections(pi, result, [{ customType: MASS_ULW_CUSTOM_TYPE, skillName: "mass-ulw", mode: true }])
       const content = pi.messages[0]?.message["content"]
       expect(content).toEndWith("</omo-mass-ulw-mode>")
     })
@@ -232,6 +232,8 @@ describe("omo-senpi skill-pointers component", () => {
         ["mass ulw 돌려", MASS],
         ["mass ulw로 실행해줘", MASS],
         ["ulw research 써줘", ["omo-ulw-research-mode"]],
+        ["mass ulw 돌려봐", MASS],
+        ["ulw research 실행해주세요.", ["omo-ulw-research-mode"]],
       ] as const) {
         expect({ text, modes: await modesOf(text) }).toEqual({ text, modes: [...modes] })
       }
@@ -258,6 +260,12 @@ describe("omo-senpi skill-pointers component", () => {
         ["Do mass ulw tests pass on dev?", ["mass-ulw"]],
         ["Use ulw research results from yesterday to write the summary", ["ulw-research"]],
         ["run mass ulw on dev?", ["mass-ulw"]],
+        // Korean questions and past-tense statements (#10822 round-5 review).
+        ["mass ulw 돌려도 돼?", ["mass-ulw"]],
+        ["mass ulw를 돌려볼까?", ["mass-ulw"]],
+        ["mass ulw 돌려봤는데 안 되네", ["mass-ulw"]],
+        ["mass ulw 써서 만든 결과가 이상해", ["mass-ulw"]],
+        ["mass ulw 실행해줘?", ["mass-ulw"]],
         // A verb that does not open the prompt, and 'in ...' forms.
         ["The suite is flaky. Run mass-ulw on it and report back", ["mass-ulw"]],
         ["please use mass-ulw to split the docs refresh", ["mass-ulw"]],
@@ -298,8 +306,8 @@ describe("omo-senpi skill-pointers component", () => {
 
       // then
       expectPointerInjections(pi, result, [
-        { customType: MASS_ULW_CUSTOM_TYPE, skillName: "mass-ulw" },
-        { customType: ULW_RESEARCH_CUSTOM_TYPE, skillName: "ulw-research" },
+        { customType: MASS_ULW_CUSTOM_TYPE, skillName: "mass-ulw", mode: true },
+        { customType: ULW_RESEARCH_CUSTOM_TYPE, skillName: "ulw-research", mode: true },
         { customType: BROWSER_CUSTOM_TYPE, skillName: "browser" },
         { customType: ULTIMATE_BROWSING_CUSTOM_TYPE, skillName: "ultimate-browsing" },
       ])
