@@ -1599,6 +1599,14 @@
           "type": "string",
           "minLength": 1
         },
+        "auto_identity": {
+          "default": "path",
+          "type": "string",
+          "enum": [
+            "path",
+            "git"
+          ]
+        },
         "reflection": {
           "default": {
             "enabled": true,
@@ -4010,6 +4018,13 @@
               "type": "string",
               "minLength": 1
             },
+            "auto_identity": {
+              "type": "string",
+              "enum": [
+                "path",
+                "git"
+              ]
+            },
             "reflection": {
               "type": "object",
               "properties": {
@@ -6276,6 +6291,13 @@
             "agent": {
               "type": "string",
               "minLength": 1
+            },
+            "auto_identity": {
+              "type": "string",
+              "enum": [
+                "path",
+                "git"
+              ]
             },
             "reflection": {
               "type": "object",
@@ -8544,6 +8566,13 @@
               "type": "string",
               "minLength": 1
             },
+            "auto_identity": {
+              "type": "string",
+              "enum": [
+                "path",
+                "git"
+              ]
+            },
             "reflection": {
               "type": "object",
               "properties": {
@@ -10808,6 +10837,13 @@
               "agent": {
                 "type": "string",
                 "minLength": 1
+              },
+              "auto_identity": {
+                "type": "string",
+                "enum": [
+                  "path",
+                  "git"
+                ]
               },
               "reflection": {
                 "type": "object",
@@ -13076,6 +13112,13 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "auto_identity": {
+                    "type": "string",
+                    "enum": [
+                      "path",
+                      "git"
+                    ]
+                  },
                   "reflection": {
                     "type": "object",
                     "properties": {
@@ -15343,6 +15386,13 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "auto_identity": {
+                    "type": "string",
+                    "enum": [
+                      "path",
+                      "git"
+                    ]
+                  },
                   "reflection": {
                     "type": "object",
                     "properties": {
@@ -17609,6 +17659,13 @@
                   "agent": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "auto_identity": {
+                    "type": "string",
+                    "enum": [
+                      "path",
+                      "git"
+                    ]
                   },
                   "reflection": {
                     "type": "object",
