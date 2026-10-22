@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
@@ -40,7 +40,9 @@ describe("project memory read grants (#10044)", () => {
     await grantProjectMemoryRead(setup.own, foreignRepo)
 
     // when / then
-    expect(await decide("read", setup.foreignFile)).toEqual({ allow: true })
+    expect(await decide("read", setup.foreignFile),
+      `grant comparison: child=${realpathSync.native(setup.foreignFile)}; parent=${realpathSync.native(foreignRepo)}`,
+    ).toEqual({ allow: true })
   })
 
   test("#given a granted project identity #when its notes are written, enumerated, or its git metadata read #then each stays denied", async () => {
@@ -95,7 +97,9 @@ describe("project memory read grants (#10044)", () => {
     const write = await call("write", { path: setup.foreignFile, content: "x" })
 
     // then
-    expect(read.some((result) => result !== undefined)).toBe(false)
+    expect(read.some((result) => result !== undefined),
+      `grant comparison: child=${realpathSync.native(setup.foreignFile)}; parent=${realpathSync.native(foreignRepo)}`,
+    ).toBe(false)
     expect(write).toContainEqual(expect.objectContaining({ block: true }))
   })
 
