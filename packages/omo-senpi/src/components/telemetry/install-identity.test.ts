@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, spyOn } from "bun:test"
 import * as os from "node:os"
 import { createHash } from "node:crypto"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir, userInfo } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
 import { automatedRunReason, isOmoNativeTelemetryEnabled } from "./omo-native-session"
 import { getOmoNativeAttribution } from "./product-identity"
@@ -137,5 +137,43 @@ describe("telemetry is off by default for automated runs that cannot hold a stab
     expect(enabled({ ...realHome, NODE_ENV: "test" })).toBe(false)
     expect(enabled({ HOME: home(), USERPROFILE: tmpdir() })).toBe(false)
     expect(enabled({ ...realHome, CI: "true", OMO_TELEMETRY_ALLOW_AUTOMATION: "1" })).toBe(true)
+  })
+})
+
+describe("temp-home detection is path-correct on every platform (#10935)", () => {
+  // Simulated Windows: os.tmpdir() reports the 8.3 short profile name, the home arrives in a different case and long
+  // form, and only the native realpath expands both to the same long name.
+  const LONG_TEMP = "C:\\Users\\runneradmin\\AppData\\Local\\Temp"
+  const nativeWin = (path: string) =>
+    path.replace(/^c:\\users\\runner~1/i, "C:\\Users\\runneradmin").replace(/^c:\\users\\runneradmin/i, "C:\\Users\\runneradmin").replace(/\\appdata\\local\\temp/i, "\\AppData\\Local\\Temp")
+  const win = { platform: "win32" as const, realpath: nativeWin, tmpdir: () => "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp", homedir: () => "C:\\Users\\runneradmin" }
+
+  it("#given a Windows temp profile (short-name tmpdir, mixed-case long-name home) #then it is an ephemeral home", () => {
+    expect(automatedRunReason({ USERPROFILE: "c:\\users\\RunnerAdmin\\appdata\\local\\temp\\omo-x1" }, win)).toBe("ephemeral_home")
+    expect(automatedRunReason({ USERPROFILE: "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp" }, win)).toBe("ephemeral_home")
+  })
+
+  it("#given the real Windows profile (temp lives UNDER it) #then it is NOT ephemeral, and a prefix sibling is not inside", () => {
+    expect(automatedRunReason({ USERPROFILE: "C:\\Users\\runneradmin" }, win)).toBeUndefined()
+    expect(automatedRunReason({ USERPROFILE: LONG_TEMP + "-sibling\\x" }, { ...win, realpath: (p: string) => p })).toBeUndefined()
+  })
+
+  it("#given a home that cannot be resolved #then it is not ephemeral (the containment check never throws)", () => {
+    const missing = { ...win, realpath: (p: string) => { if (/omo-gone/.test(p)) throw new Error("ENOENT"); return nativeWin(p) } }
+    expect(automatedRunReason({ USERPROFILE: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\omo-gone" }, missing)).toBeUndefined()
+  })
+
+  it.skipIf(process.platform === "win32")("#given a POSIX symlink inside the temp dir whose target uses '..' to escape it #then the home is NOT inside", () => {
+    const root = mkdtempSync(join(tmpdir(), "omo-escape-"))
+    const outside = mkdtempSync(join(userInfo().homedir, ".omo-escape-out-"))
+    try {
+      mkdirSync(join(root, "jump"))
+      symlinkSync(join(outside), join(root, "jump", "out"))
+      symlinkSync("jump/out/../" + basename(outside), join(root, "entry"))
+      expect(automatedRunReason({ HOME: join(root, "entry") }, { tmpdir: () => root })).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
   })
 })
