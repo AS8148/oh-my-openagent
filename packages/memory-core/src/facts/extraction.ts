@@ -134,7 +134,9 @@ export function parseFactsExtractionRecord(value: unknown, index: number): Facts
   return { scope: "person", person: { name, aliases: aliases as string[] }, text, date }
 }
 
-const PLACEHOLDER_NAMES = new Set(["n/a", "na", "none", "null", "undefined", "unknown", "-"])
+// Only null-like tokens that cannot be a name. A short word such as "Na" is a real surname, so a
+// project record carrying it is refused as a real person, never dropped as a placeholder.
+const PLACEHOLDER_NAMES = new Set(["n/a", "none", "null", "undefined", "unknown", "-"])
 
 function isPlaceholderName(value: unknown): boolean {
   if (value === undefined || value === null) return true

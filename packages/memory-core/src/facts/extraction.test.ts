@@ -172,12 +172,14 @@ describe("facts extraction JSONL validation", () => {
   })
 
   test("#given a project record whose person carries a real name #when validated #then it is still refused", () => {
-    // given
+    // given: a two-letter name such as the Korean surname Na is a real person, never a placeholder.
     const values = [
       { ...project(), person: { name: "Mina", aliases: [] } },
       { ...project(), person: { name: "", aliases: ["Min"] } },
       { ...project(), person: "Mina" },
       { ...project(), person: { name: "", aliases: [], extra: true } },
+      { ...project(), person: { name: "Na", aliases: [] } },
+      { ...project(), person: "Na" },
     ]
 
     // when
