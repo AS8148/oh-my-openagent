@@ -89,6 +89,8 @@ export function createResumptionChannelEmitter(
     lastIds = idsOf(channels)
     deps.pi.events?.emit(RESUMPTION_CHANNEL_STATE_EVENT, {
       source: RESUMPTION_CHANNEL_SOURCE,
+      // senpi#3864: children's work keeps the parent's lifecycle off "done" until it is delivered.
+      kind: "children",
       activeCount: channels.length,
       items: channels,
       channels,
