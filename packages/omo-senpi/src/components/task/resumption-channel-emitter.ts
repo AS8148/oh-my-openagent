@@ -65,7 +65,8 @@ export function createResumptionChannelEmitter(
     if (sessionId === undefined) return []
     const channels: ResumptionChannel[] = []
     // A workpool worker is claimed without a terminal notification, yet it is this session's child work (#10782).
-    // An unreadable pool store must not cost this emission: it is logged once and pool ownership is skipped.
+    // An unreadable pool store must not cost this emission: it is logged once, and every record it can no longer
+    // classify stays counted, so a store failure can delay "done" but never announce it while workers run.
     let poolStoreReadable = true
     const ownedByPool = (taskId: string): boolean => {
       if (!poolStoreReadable) return false
@@ -88,7 +89,7 @@ export function createResumptionChannelEmitter(
             stateDir: deps.stateDir,
             taskSettings: deps.settings,
           })
-      if (!background && !owned) continue
+      if (!background && !owned && poolStoreReadable) continue
       channels.push({
         id: record.task_id,
         description: taskStatusDescription(record),

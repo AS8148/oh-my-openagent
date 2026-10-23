@@ -123,8 +123,30 @@ describe("resumption-channel emitter wake-source items (#10026)", () => {
     // when
     await harness.emitter.emitSessionStart()
 
-    // then the background child is still published, and the corrupt store is reported, not swallowed
-    expect(harness.emitted.at(-1)?.items?.map((item) => item.id)).toEqual([background.task_id])
+    // then the emission still goes out, the record the store could not classify stays counted (fail safe), and the
+    // corrupt store is reported, not swallowed
+    expect(harness.emitted.at(-1)?.items?.map((item) => item.id)).toEqual([foreground.task_id, background.task_id])
     expect(warnings).toHaveLength(1)
+  })
+
+  it("#given only pool workers live and an unreadable pool store #when a store change is emitted #then the workers stay counted, so the parent is never told its children are done (#10782)", async () => {
+    // given a live pool worker the session already published
+    const worker = { ...child("st_00000051", "Pool worker", "2026-10-24T03:00:00.000Z"), notify_on_terminal: false }
+    let storeReadable = true
+    const harness = createHarness([worker], [], (taskId) => {
+      if (!storeReadable) throw new Error("store_corrupt")
+      return taskId === worker.task_id
+    }, [])
+    await harness.emitter.emitSessionStart()
+    expect(harness.emitted.at(-1)?.activeCount).toBe(1)
+
+    // when the pool store becomes unreadable and a store change triggers the next snapshot
+    storeReadable = false
+    await harness.emitter.emitIfChanged()
+
+    // then nothing claims the children are done: the worker is still the one live item
+    const last = harness.emitted.at(-1)
+    expect(last?.activeCount).toBe(1)
+    expect(last?.items?.map((item) => item.id)).toEqual([worker.task_id])
   })
 })
