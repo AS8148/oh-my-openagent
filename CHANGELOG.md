@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A relaunched task records its own session id, not the previous run's ([#10985](https://github.com/code-yeongyu/oh-my-openagent/pull/10985)).** When a task restarted on a new transcript (a model fallback or a revive) and its new session's first state read failed, the task kept the previous run's session id, so anything that looks a task up by its session id, such as the task tree or the cleanup when a parent stops, found the old session. The first id the new run learns now replaces it. ([#10892](https://github.com/code-yeongyu/oh-my-openagent/issues/10892))
+
 **The footer shows what your subagents are spending, live, next to the session's own cost ([#10730](https://github.com/code-yeongyu/oh-my-openagent/pull/10730)).** The session cost only counted the session itself, so the number stood still while subagents worked. The footer now adds the whole subagent tree's spend as `(+$X)`, including nested children and revived runs, and updates as tasks report instead of polling ([code-yeongyu/senpi#2471](https://github.com/code-yeongyu/senpi/issues/2471)).
 
 **Subagent rows no longer show `$0.0000` when the provider sent no usage ([#10727](https://github.com/code-yeongyu/oh-my-openagent/pull/10727)).** A turn whose provider streamed no usage block came back with an all-zero usage, and the task row counted it as a real $0, with no tok/s. Such a turn now counts as "cost not reported", so the row shows no amount, and a run where only some turns reported a cost is marked `partial` ([#10724](https://github.com/code-yeongyu/oh-my-openagent/issues/10724)).
