@@ -1,5 +1,4 @@
-/// <reference types="bun-types" />
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { once } from "node:events";
 import { acquiringEngineChildFactory, engineChildFactory } from "../src/service/child";
 import { DesktopService } from "../src/service/service";
@@ -8,6 +7,16 @@ import { legacySelf, legacyUnresolved, refusalChild, refusalRecord } from "../..
 import { fakeEngineFactory, rejectionOf } from "./harness";
 
 describe("actual child launch refusal", () => {
+	it("joins stderr fragments ordered by an explicit pipe acknowledgement", async () => {
+		const child = refusalChild({ split: true });
+		let chunks = 0;
+		child.stderr.on("data", () => { chunks += 1; });
+		child.stderr.once("data", () => child.stdin.write("\n"));
+		const service = new DesktopService({ createChild: () => child });
+		expect(await rejectionOf(service.open({}))).toMatchObject({ code: "launch-context-unavailable" });
+		expect(chunks).toBe(2);
+		await service.close();
+	}, 10_000);
 	for (const reason of ["self-responsible", "unresolved"]) {
 		it(`keeps ${reason} through initial activation and stderr tail eviction`, async () => {
 			// Given: the bounded record precedes more than one diagnostic tail.
@@ -35,7 +44,7 @@ describe("actual child launch refusal", () => {
 		await service.close();
 	}, 10_000);
 
-	it("keeps refusal through an explicit executable path", async () => {
+	it.skipIf(process.platform === "win32")("keeps refusal through an explicit executable path", async () => {
 		// The executable fixture implements the same --stdio spawn contract.
 		const path = new URL("./fixtures/refusing-engine", import.meta.url).pathname;
 		const service = new DesktopService({ createChild: engineChildFactory(path) });

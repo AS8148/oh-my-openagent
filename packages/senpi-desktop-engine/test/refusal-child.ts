@@ -13,6 +13,7 @@ export interface RefusalOptions {
 	readonly hello?: boolean;
 	readonly abi?: string;
 	readonly waitForCancel?: boolean;
+	readonly split?: boolean;
 }
 
 /** Real pipes and close events; stderr writes finish before the fixture exits. */
@@ -24,19 +25,23 @@ export function refusalChild(options: RefusalOptions = {}) {
 		const record = ${JSON.stringify(refusalRecord())};
 		const lines = createInterface({input: process.stdin});
 		let received = false;
+		let remaining;
 		lines.on("line", (line) => {
+			if (received && remaining) { const flush = remaining; remaining = undefined; flush(); return; }
 			if (received || (options.waitForCancel && JSON.parse(line).method !== "$/cancel")) return;
 			received = true;
 			const finish = () => {
 				const text = options.stderr ?? record;
 				const middle = Math.floor(text.length / 2);
-				process.stderr.write(text.slice(0, middle), () => {
-					process.stderr.write(text.slice(middle), () => {
+				const flush = () => process.stderr.write(text.slice(middle), () => {
 						process.exitCode = options.code ?? 1;
 						lines.close();
 						process.stdin.destroy();
-					});
 				});
+				if (options.split) {
+					remaining = flush;
+					process.stderr.write(text.slice(0, middle));
+				} else process.stderr.write(text.slice(0, middle), flush);
 			};
 			if (options.hello) {
 				hello.abi = options.abi ?? hello.abi;
