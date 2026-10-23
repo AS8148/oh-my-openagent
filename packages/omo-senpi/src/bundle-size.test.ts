@@ -153,6 +153,10 @@ const builtExtensionPath = join(packageRoot, "plugin", "extensions", "omo.js")
 // dev (dfbeeec9bc) measures 1,457,603 B; the batch #4 regen head measures 1,461,838 B (+4,235) after the canonical
 // regen (two clean linux containers, node 24 + bun 1.4.3, byte-identical). Ceiling = that measurement rounded up to
 // the next 5,000 bytes (never below what is measured).
+// To be reduced for #9915 (LSP slice, #10659): formatter.ts no longer imports the lsp-core root barrel, which
+// pulled lsp-core's whole in-process engine into omo.js although Senpi runs LSP only through the packaged daemon.
+// Measured in the canonical linux/amd64 container (bun 1.4.3) on three successive dev bases: -82,427, -82,471 and
+// -82,481 bytes. Batch #6 measures its regen head and sets the ceiling to that measurement rounded up to the next 5,000 bytes (the lead's standing rule).
 const BUDGET_BYTES = 1_465_000
 
 describe("omo-senpi bundle size budget", () => {
