@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -115,3 +115,16 @@ test("#given no wake directory and a status call that throws #when the tool awai
   })
   expect(result).toEqual(refusedFinal)
 })
+
+test("#given a watch that drops the wake touch made right after it was armed #when the await waits #then the wake file itself ends the wait, long before its 60 s timeout", async () => {
+  const file = wakeFile(true)
+  const opened: StoreExtensionResult<unknown> = { kind: "ok", value: { status: "opened" } }
+  const { calls, status, expire } = scripted([pending, opened], () => refusedFinal)
+  // A watch that never reports anything: the dropped event macOS can lose right after arming.
+  const deaf = ((..._args: unknown[]) => ({ close: () => undefined, on: () => undefined })) as unknown as typeof import("node:fs").watch
+  const started = Date.now()
+  const waiting = awaitSessionRequest({ file, timeoutMs: 60_000, status, expire, watch: deaf, onArmed: () => writeFileSync(file, "") })
+  expect(await waiting).toEqual(opened)
+  expect(calls).toEqual(["status", "status"])
+  expect(Date.now() - started).toBeLessThan(5_000)
+}, 10_000)

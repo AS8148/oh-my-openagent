@@ -30,6 +30,7 @@ describe("store extension migrations", () => {
     try {
       db.exec("DROP TABLE thread_creations")
       db.exec("DROP TABLE extension_registrations")
+      db.exec("DROP TABLE toolkit_replay_receipts")
       db.exec("DELETE FROM extension_objects WHERE owner IS NULL AND name NOT IN (SELECT name FROM sqlite_schema)")
       db.exec("PRAGMA user_version = 6")
     } finally {
@@ -47,8 +48,9 @@ describe("store extension migrations", () => {
   })
 
   test.each([
-    ["the old branch numbering (v8 = these tables, no provenance trigger)", "DROP TRIGGER deliveries_require_provenance", 8, 1],
-    ["dev's v8 (the provenance trigger, none of these tables)", "DROP TABLE thread_creations; DROP TABLE extension_registrations", 8, 0],
+    ["the old branch numbering at v8 (thread tables, no receipts table, no provenance trigger)", "DROP TRIGGER deliveries_require_provenance; DROP TABLE toolkit_replay_receipts", 8, 1],
+    ["the old branch numbering at v9 (thread tables and receipts table, no provenance trigger)", "DROP TRIGGER deliveries_require_provenance", 9, 1],
+    ["dev's v8 (the provenance trigger, none of these tables)", "DROP TABLE thread_creations; DROP TABLE extension_registrations; DROP TABLE toolkit_replay_receipts", 8, 0],
   ])("#given a store migrated by %s #when the new code opens it #then it reaches the current version with every table, the trigger and its rows", async (_label, rewind, version, keptRows) => {
     const h = (harness = createGatewayHarness())
     const first = h.store()
@@ -67,8 +69,8 @@ describe("store extension migrations", () => {
     const check = new Database(gatewayDatabasePath(h.agentDir), { readonly: true })
     try {
       expect(check.query("PRAGMA user_version").get()).toEqual({ user_version: GATEWAY_MIGRATIONS.length })
-      expect(check.query("SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('thread_creations', 'extension_registrations') ORDER BY name").all())
-        .toEqual([{ name: "extension_registrations" }, { name: "thread_creations" }])
+      expect(check.query("SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('thread_creations', 'extension_registrations', 'toolkit_replay_receipts') ORDER BY name").all())
+        .toEqual([{ name: "extension_registrations" }, { name: "thread_creations" }, { name: "toolkit_replay_receipts" }])
       expect(check.query("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND name = 'deliveries_require_provenance'").all()).toEqual([{ name: "deliveries_require_provenance" }])
       expect(check.query("SELECT count(*) AS rows FROM thread_creations WHERE creator_durable_id = 'parent' AND created_durable_id = 'child'").get()).toEqual({ rows: keptRows })
     } finally {
