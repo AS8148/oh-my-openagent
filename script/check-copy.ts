@@ -45,6 +45,9 @@ export function findEmDashCopy(content: string, path: string): { line: number; c
       && ts.isPropertyAssignment(node) && node.name.getText(source) === "mdash") return
     if (path === "packages/shared-skills/skills/ulw-research/scripts/gates-text.mjs"
       && ts.isVariableDeclaration(node) && node.name.getText(source) === "EM_DASH") return
+    // The OXC em-dash lint rule must name the character it forbids.
+    if (path === "packages/shared-skills/skills/programming/scripts/typescript/oxc/lint/oxlint-plugin/no-em-dash-copy.js"
+      && ts.isVariableDeclaration(node) && node.name.getText(source) === "EM_DASH") return
     if ((ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node)
       || ts.isTemplateTail(node) || ts.isJsxText(node)) && node.text.includes("\u2014")) {
       const position = source.getLineAndCharacterOfPosition(node.getStart(source))

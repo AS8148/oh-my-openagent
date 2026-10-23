@@ -94,6 +94,13 @@ describe("no-em-dash-copy", () => {
     expect(findEmDashCopy(`${data}\nconsole.log("Unavailable \\u2014 retry");`, filenamePath)).toHaveLength(1)
   })
 
+  test("allows the OXC em-dash rule's own EM_DASH constant but checks other copy in that file", () => {
+    const path = "packages/shared-skills/skills/programming/scripts/typescript/oxc/lint/oxlint-plugin/no-em-dash-copy.js"
+    const data = 'const EM_DASH = "\\u2014";'
+    expect(findEmDashCopy(data, path)).toEqual([])
+    expect(findEmDashCopy(`${data}\nconsole.log("Unavailable \\u2014 retry");`, path)).toHaveLength(1)
+  })
+
   test("allows Senpi sync heading matcher data but checks other shipped copy", () => {
     const path = "packages/omo-senpi/plugin/scripts/sync-skills.mjs"
     const data = [
