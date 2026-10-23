@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The side panel says, once, that its column needs the fullscreen TUI.** `side_panel.enabled` renders its right-hand column only in the fullscreen TUI (`--tui-mode fullscreen`, or `tuiMode` in senpi's settings); in the default regular mode the sections stay a block above the editor. The docs now say so at the top of the `side_panel` table, and the first regular-mode run with the panel on shows a one-time notice naming both ways to switch. ([#10560](https://github.com/code-yeongyu/oh-my-openagent/issues/10560), [#10565](https://github.com/code-yeongyu/oh-my-openagent/pull/10565))
+
 **Memory reflection and dream runs trim oversized note descriptions before completion validation.** The note body is preserved, instead of the run failing again and again and parking the identity. ([#10999](https://github.com/code-yeongyu/oh-my-openagent/pull/10999))
 
 **The frontend skill now decides what a screen leaves out before drawing it, and visual QA proves a redesign improved and stops after a few rounds ([#11023](https://github.com/code-yeongyu/oh-my-openagent/pull/11023)).** Before code, every screen names one primary action, its information priorities, what it leaves out on purpose, and the content it must keep; after the draft renders, a subtraction pass removes what the user does not need and checks nothing required was dropped or merged. Small changes now read the project's design file and at most one reference instead of the whole library, and atmosphere and award-grade styling are built only when the brief asks. Visual QA gains a before/after mode that captures fixed cases before the first edit and compares them side by side, and its review loop now ends after 2-3 rounds: layout, function, accessibility and missing-content defects earn another round, taste notes are recorded and stop it.
@@ -190,8 +192,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [5.1.40] - 2026-10-20
 
 **Onboarding saves only the facts you keep, and the TUI and the desktop share one completion flag.** The facts you accept are written through memory's own write path, and finishing onboarding in either the TUI or the desktop marks it done for both. ([#10506](https://github.com/code-yeongyu/oh-my-openagent/pull/10506))
-
-**The side panel says, once, that its column needs the fullscreen TUI.** `side_panel.enabled` renders its right-hand column only in the fullscreen TUI (`--tui-mode fullscreen`, or `tuiMode` in senpi's settings); in the default regular mode the sections stay a block above the editor. The docs now say so at the top of the `side_panel` table, and the first regular-mode run with the panel on shows a one-time notice naming both ways to switch. ([#10560](https://github.com/code-yeongyu/oh-my-openagent/issues/10560), [#10565](https://github.com/code-yeongyu/oh-my-openagent/pull/10565))
 
 ## [5.1.39] - 2026-10-20
 
