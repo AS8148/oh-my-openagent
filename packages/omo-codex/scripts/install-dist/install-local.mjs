@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:2ea0e34a063b5132105599626c6b47d94d137afb13e7a55c26c6c4921c162571:c630cf02b0c37ca61c5c487cb4c8371d6ceef2a0de9802dd80f8c535355cd0b5
+// omo-codex-install:4c1d00a1bdb93e1995b42d3dcd9c0ef545ba2ec5e85b798bad0228777ef98929:158108ebf1f2c4d05e30ae37350c40a9dd37b50f7a76c67a1c05039035b26841
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -20217,6 +20217,30 @@ var DEFAULT_READ_FILE_SYSTEM = {
   realpathSync: realpathSync2
 };
 
+// packages/omo-config-core/src/loader/diagnostic-values.ts
+function configFileErrorCode(error) {
+  const code = error instanceof Error ? Reflect.get(error, "code") : undefined;
+  return typeof code === "string" && ["EACCES", "EPERM", "ENOSPC", "EROFS", "EXDEV", "ENOENT", "EIO", "ENOTDIR", "EISDIR"].includes(code) ? ` (${code})` : "";
+}
+function configIssueSummary(issue) {
+  switch (issue.code) {
+    case "invalid_type":
+      return `Expected ${issue.expected}`;
+    case "invalid_value":
+      return "Expected a supported value";
+    case "too_big":
+      return "Value exceeds the maximum";
+    case "too_small":
+      return "Value is below the minimum";
+    case "invalid_format":
+      return "Invalid format";
+    case "unrecognized_keys":
+      return "Unrecognized keys";
+    default:
+      return "Invalid value";
+  }
+}
+
 // packages/omo-config-core/src/loader/disabled-skills.ts
 function toRecord(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -21220,8 +21244,10 @@ function prunePass(root, issues) {
       if (path.length === 0)
         return null;
       const key = path.map((segment) => String(segment)).join(".");
+      const summary = configIssueSummary(issue);
+      const message = path.length < issue.path.length ? `${summary} at ${segmentsOf(issue.path).join(".")}` : summary;
       if (!byKey.has(key))
-        byKey.set(key, { key, message: issue.message, path });
+        byKey.set(key, { key, message, path });
     }
   }
   const targets = [...byKey.values()];
@@ -21578,9 +21604,8 @@ function readConfigSource(path, scope, fileSystem) {
   try {
     content = fileSystem.readFileSync(path, "utf-8");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
     return {
-      diagnostics: [{ kind: "read", message: `Failed to read ${path}: ${message}`, path }],
+      diagnostics: [{ kind: "read", message: `Failed to read ${path}${configFileErrorCode(error)}`, path }],
       source: { exists: true, loaded: false, path, scope }
     };
   }
