@@ -31,9 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **The engine publishes its OpenTelemetry schema artifact.** `telemetry-schema.json` describes exactly what an OTel client of the engine may send, generated from the event schemas and kept byte-exact by a drift gate, so the telemetry collector can pin and enforce it. It is separate from the anonymous PostHog events, which are unchanged ([#10980](https://github.com/code-yeongyu/oh-my-openagent/pull/10980)).
 
-### Fixed
-
-- Parked facts leave the active queue without losing their contents; existing backlogs migrate once, manual retry restores them, and turn-end scans read only active entries. ([#11038](https://github.com/code-yeongyu/oh-my-openagent/pull/11038))
+**Parked facts leave the active queue without losing their contents.** Existing backlogs migrate once, manual retry restores them, and turn-end scans read only active entries. ([#11038](https://github.com/code-yeongyu/oh-my-openagent/pull/11038))
 
 **Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
 
@@ -93,9 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Anonymous usage stats now count each person once.** The anonymous id is kept once per user instead of per agent directory, so runs that use their own agent directory, and the CLI next to OmO Desktop, no longer show up as separate people; runs in CI, under a test runner, or with a temporary home directory send nothing by default (`OMO_TELEMETRY_ALLOW_AUTOMATION=1` opts back in). This also holds on Windows: a temporary home folder there is recognised too, a home folder that cannot be found turns usage stats off rather than on, and a real profile under the users folder is never treated as temporary. On some machines the anonymous id changes once with this update ([#10935](https://github.com/code-yeongyu/oh-my-openagent/pull/10935)).
 
-### Fixed
-
-- Refused child tasks report startup failure without waiting for slow teardown, while shutdown still waits for pending cleanup ([#10988](https://github.com/code-yeongyu/oh-my-openagent/pull/10988)).
+**Refused child tasks report startup failure without waiting for slow teardown.** Shutdown still waits for pending cleanup ([#10988](https://github.com/code-yeongyu/oh-my-openagent/pull/10988)).
 
 ## [5.1.44] - 2026-10-23
 
