@@ -92,6 +92,11 @@ const sorted = (counts: Counts): Counts =>
 
 // The tracked JS/TS sources (never built bundles or vendored output), linted with only the three rules.
 const SOURCE = /\.(?:[cm]?[jt]s|tsx)$/;
+// Generated sources are rewritten by their generator, so their disable comments are not new code:
+// protobuf-es output (`*_pb.ts`) and `*.generated.ts` files are not ratcheted. Any other file still is.
+const GENERATED = /(?:_pb|\.generated)\.(?:[cm]?[jt]s|tsx)$/;
+export const ratchetedFiles = (files: readonly string[]): string[] =>
+  files.filter((file) => SOURCE.test(file) && !GENERATED.test(file));
 const CONFIG = "script/lint-ratchet.oxlintrc.json";
 
 const run = (root: string, command: string, args: readonly string[]) =>
@@ -103,9 +108,7 @@ type Lint = { readonly counts: Counts; readonly unparsed: readonly string[] };
 const lint = (root: string): Lint => {
   const listed = run(root, "git", ["ls-files", "-z"]);
   if (listed.status !== 0) throw new Error(`git ls-files failed: ${listed.stderr}`);
-  const files = listed.stdout
-    .split("\0")
-    .filter((file) => SOURCE.test(file))
+  const files = ratchetedFiles(listed.stdout.split("\0"))
     // A tracked path missing on disk (an unchecked-out submodule) is not linted either.
     .filter((file) => NodeFS.existsSync(NodePath.join(root, file)));
   const diagnostics: Diagnostic[] = [];

@@ -1,6 +1,6 @@
 import { expect, it } from "bun:test";
 
-import { compare, countByFile, countSuppressions, SUPPRESSION } from "./lint-ratchet.ts";
+import { compare, countByFile, countSuppressions, ratchetedFiles, SUPPRESSION } from "./lint-ratchet.ts";
 
 const root = "/repo";
 
@@ -74,4 +74,16 @@ it("counts every disable comment that could hide one of the three rules, in both
 it("refuses a new disable comment like any other rise", () => {
   const { increases } = compare({}, { "script/probe.ts": { [SUPPRESSION]: 1 } });
   expect(increases).toEqual([{ file: "script/probe.ts", rule: SUPPRESSION, before: 0, after: 1 }]);
+});
+
+it("skips generated sources by path, so only hand-written files are ratcheted", () => {
+  expect(
+    ratchetedFiles([
+      "packages/telemetry-core/src/otlp-proto/opentelemetry/proto/common/v1/common_pb.ts",
+      "packages/senpi-desktop-protocol/src/engine-schema.generated.ts",
+      "packages/telemetry-core/src/otlp-proto/handwritten.ts",
+      "packages/web/lib/pb.ts",
+      "README.md",
+    ]),
+  ).toEqual(["packages/telemetry-core/src/otlp-proto/handwritten.ts", "packages/web/lib/pb.ts"]);
 });
