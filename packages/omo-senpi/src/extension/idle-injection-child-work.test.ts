@@ -151,3 +151,39 @@ describe("wake-queue count vs. delivery receipts (#10782)", () => {
     expect(emitted).toEqual([{ source: WAKE_QUEUE_SOURCE, kind: "children", activeCount: 0 }])
   })
 })
+
+// #11121 review: a receipt that throws must not leave the child counted (the session would never reach done).
+describe("wake-queue count when a receipt throws (#10782)", () => {
+  it("#given a receipt that throws #when the delivery succeeds #then the count still settles to 0", () => {
+    const counts: number[] = []
+    const coordinator = new IdleInjectionCoordinator(() => undefined, { onChildWorkChange: (count) => counts.push(count) })
+    coordinator.enqueue({ ...completion("task:st_8"), onFlushed: () => { throw new Error("receipt failed") } })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("receipt failed")
+    expect(counts).toEqual([1, 0])
+  })
+
+  it("#given a delivery that throws synchronously #when its receipt also throws #then the count still settles to 0", () => {
+    const counts: number[] = []
+    const coordinator = new IdleInjectionCoordinator(() => { throw new Error("delivery failed") }, { onChildWorkChange: (count) => counts.push(count) })
+    coordinator.enqueue({ ...completion("task:st_9"), onDeliveryFailed: () => { throw new Error("receipt failed") } })
+
+    expect(() => coordinator.flushOnIdle()).toThrow()
+    expect(counts).toEqual([1, 0])
+  })
+
+  it("#given an async delivery that resolves #when it settles #then the receipt fires before the count is reported", async () => {
+    const order: string[] = []
+    let resolveDelivery: () => void = () => undefined
+    const delivery = new Promise<void>((resolve) => { resolveDelivery = resolve })
+    const coordinator = new IdleInjectionCoordinator(() => delivery, { onChildWorkChange: (count) => order.push(`count:${count}`) })
+    coordinator.enqueue({ ...completion("task:st_10"), onFlushed: () => order.push("flushed") })
+
+    coordinator.flushOnIdle()
+    resolveDelivery()
+    await delivery
+    await Promise.resolve()
+
+    expect(order).toEqual(["count:1", "flushed", "count:0"])
+  })
+})
