@@ -1,5 +1,5 @@
 import { realpath, realpathSync } from "@oh-my-opencode/memory-core/fs"
-import { isPathInside, type PathContainmentOptions } from "@oh-my-opencode/utils/path-containment"
+import { containedRelativePath, type PathContainmentOptions } from "@oh-my-opencode/utils/path-containment"
 import * as path from "node:path"
 
 import type { MemoryIdentityContext } from "./context"
@@ -43,11 +43,17 @@ export function isGrantedProjectMemoryRead(context: MemoryIdentityContext, targe
   const windows = (options.platform ?? process.platform) === "win32"
   const paths = windows ? path.win32 : path.posix
   const canonicalPath = options.realpath ?? realpathSync.native
+  // A note that does not exist yet stays readable (the read reports it missing); only its existing
+  // ancestors are resolved, so a symlink on the way is still followed before the comparison.
+  const resolvedTarget = paths.resolve(target)
+  const resolve = (input: string) => input === resolvedTarget ? canonicalAllowingMissing(input, canonicalPath, paths) : canonicalPath(input)
   for (const root of roots) {
     try {
-      if (!isPathInside(target, root, { ...options, realpath: canonicalPath })) continue
-      const rel = paths.relative(canonicalPath(root), canonicalPath(target))
-      if (rel === "" || rel.startsWith("..") || paths.isAbsolute(rel)) continue
+      // Roots are stored canonical; a root that now resolves elsewhere was replaced (for example by a
+      // symlink into a third identity) and is no longer the repo the resolver granted.
+      if (!samePath(canonicalPath(root), root, paths, windows)) continue
+      const rel = containedRelativePath(target, root, { ...options, realpath: resolve })
+      if (rel === undefined || rel === "") continue
       const first = rel.split(paths.sep)[0] ?? ""
       if (EXCLUDED_TOP_LEVEL.includes(first.toLowerCase())) continue
       return true
@@ -57,6 +63,26 @@ export function isGrantedProjectMemoryRead(context: MemoryIdentityContext, targe
     }
   }
   return false
+}
+
+function samePath(left: string, right: string, paths: typeof path.posix, windows: boolean): boolean {
+  const a = paths.normalize(left)
+  const b = paths.normalize(right)
+  return windows ? a.toLowerCase() === b.toLowerCase() : a === b
+}
+
+function canonicalAllowingMissing(input: string, canonicalPath: (path: string) => string, paths: typeof path.posix): string {
+  try {
+    return canonicalPath(input)
+  } catch (error) {
+    const parent = paths.dirname(input)
+    if (!isMissingPathError(error) || parent === input) throw error
+    return paths.join(canonicalAllowingMissing(parent, canonicalPath, paths), paths.basename(input))
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")
 }
 
 async function canonicalAsync(path: string): Promise<string | undefined> {
