@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **A background task that wakes itself up, or reconnects after the task host restarts, keeps the right finished/running mark on the host ([#11094](https://github.com/code-yeongyu/oh-my-openagent/pull/11094)).** A task that started a new run on its own just as its previous turn finished could stay marked as finished, so a replaced task host might drop it while it was still working. A finished task whose host restarted could lose its finished mark, so the new host might reopen it. Both now keep the correct mark. ([#11092](https://github.com/code-yeongyu/oh-my-openagent/issues/11092))
 
-**The side panel shows subscription usage when you are signed in but the engine is serving through an environment token ([#10564](https://github.com/code-yeongyu/oh-my-openagent/issues/10564)).** It used to show nothing in that case; it still never shows a different signed-in account's numbers.
+**The side panel shows subscription usage when you are signed in but the engine is serving through an environment token ([#10564](https://github.com/code-yeongyu/oh-my-openagent/issues/10564)).** It used to show nothing in that case; it still never shows a different signed-in account's numbers. ([#11101](https://github.com/code-yeongyu/oh-my-openagent/pull/11101))
 
 **Memory reflection and dream runs trim oversized note descriptions before completion validation.** The note body is preserved, instead of the run failing again and again and parking the identity. ([#10999](https://github.com/code-yeongyu/oh-my-openagent/pull/10999))
 
