@@ -1,8 +1,6 @@
 {
   "$schema": "../../node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "typescript"
-  ],
+  "plugins": ["typescript"],
   "categories": {
     "correctness": "off"
   },
@@ -74,10 +72,5 @@
     "typescript/unbound-method": "off",
     "typescript/use-unknown-in-catch-callback-variable": "off"
   },
-  "ignorePatterns": [
-    "**/node_modules/**",
-    "**/.next/**",
-    "**/.open-next/**",
-    "**/dist/**"
-  ]
+  "ignorePatterns": ["**/node_modules/**", "**/.next/**", "**/.open-next/**", "**/dist/**"]
 }
