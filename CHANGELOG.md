@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Automated Windows runs no longer send anonymous usage stats.** A run whose home folder is a temporary one, such as a CI job or a test runner, is recognised on Windows too, and a home folder that cannot be found now turns usage stats off rather than on. A real profile under the users folder is never treated as temporary. ([#10935](https://github.com/code-yeongyu/oh-my-openagent/pull/10935))
+
 **Project memory reads work on Windows when a path uses a short user-directory name.** Read grants now compare native canonical paths on both sides, accounting for Windows case and separator differences without granting sibling memory repositories. A granted repository that is later replaced by a link elsewhere is no longer covered, and a note that does not exist yet is still allowed so the read can report it missing. ([#10982](https://github.com/code-yeongyu/oh-my-openagent/pull/10982))
 
 **Thread tools check that an RPC host is the one they selected before changing a session ([#10712](https://github.com/code-yeongyu/oh-my-openagent/pull/10712)).** The client proves the host's key with a challenge-response and attaches the selected session by its durable id on the same connection, so a host that reused a routing id cannot receive another session's mutation. A draining host answers with a retryable `host_draining` error instead of failing the call, and a change that took effect is never reported as failed.
