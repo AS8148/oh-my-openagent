@@ -160,6 +160,17 @@ describe("project memory read grants (#10044)", () => {
     expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, "draft", "missing.md"))).toBe(true)
   })
 
+  test("#given a dangling link in a granted repo #when a read names it #then it is not treated as a missing note", async () => {
+    // given
+    const { setup, foreignRepo } = projectGrantFixture()
+    const ghost = join(foreignRepo, "reference", "ghost.md")
+    symlinkSync(join(setup.memoryRoot, "agents", "third", "later.md"), ghost)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
+
+    // when / then
+    expect(isGrantedProjectMemoryRead(setup.own, ghost)).toBe(false)
+  })
+
   test("#given dot-dot after a link out of a granted repo #when the read is checked #then the verdict is about the path.resolve()d path a built-in read opens", async () => {
     // given
     const { setup, foreignRepo } = projectGrantFixture()

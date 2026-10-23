@@ -1,4 +1,4 @@
-import { realpath, realpathSync } from "@oh-my-opencode/memory-core/fs"
+import { lstatSync, realpath, realpathSync } from "@oh-my-opencode/memory-core/fs"
 import { containedRelativePath, type PathContainmentOptions } from "@oh-my-opencode/utils/path-containment"
 import * as path from "node:path"
 
@@ -76,8 +76,18 @@ function canonicalAllowingMissing(input: string, canonicalPath: (path: string) =
     return canonicalPath(input)
   } catch (error) {
     const parent = paths.dirname(input)
-    if (!isMissingPathError(error) || parent === input) throw error
+    // A dangling link is an entry, not a missing note: its target could appear outside the repo later.
+    if (!isMissingPathError(error) || parent === input || isEntry(input)) throw error
     return paths.join(canonicalAllowingMissing(parent, canonicalPath, paths), paths.basename(input))
+  }
+}
+
+function isEntry(input: string): boolean {
+  try {
+    lstatSync(input)
+    return true
+  } catch {
+    return false
   }
 }
 
