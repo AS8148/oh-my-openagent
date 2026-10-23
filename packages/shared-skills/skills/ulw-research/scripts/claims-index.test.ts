@@ -63,6 +63,32 @@ describe("indexClaims", () => {
 		])
 	})
 
+	test("a verified-claims line verifies only as a list item or a table row, never as prose", () => {
+		const text = [
+			"## verified-claims",
+			"",
+			"- C1",
+			"C2 is pending review",
+			"1) C3",
+			"| C4 | merged |",
+			"",
+			"| claim_id | statement | risk tier | status |",
+			"|---|---|---|---|",
+			"| C1 | a | high | supported |",
+			"| C2 | b | high | unresolved |",
+			"| C3 | c | high | supported |",
+			"| C4 | d | high | supported |",
+		].join("\n")
+		const { claims, errors } = indexClaims(text)
+		expect(errors).toEqual([])
+		expect(claims.map((claim: { claim_id: string; in_verified: boolean }) => [claim.claim_id, claim.in_verified])).toEqual([
+			["C1", true],
+			["C2", false],
+			["C3", true],
+			["C4", true],
+		])
+	})
+
 	test("the SKILL.md synthesis heading 'Verified claims' is recognized", () => {
 		const text = "## Verified claims\n\n- C1\n\n| claim_id | statement | risk tier | status |\n|---|---|---|---|\n| C1 | a | high | supported |\n"
 		expect(indexClaims(text).claims[0].in_verified).toBe(true)

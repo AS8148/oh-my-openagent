@@ -156,6 +156,13 @@ describe("ids and status", () => {
 		expect(ledger.rows[0].status).toBe("active")
 		expect(ledger.events).toHaveLength(1)
 	})
+
+	test("supersedeRow without a replacement throws and points at retract", () => {
+		const ledger = ledgerWith(measured("a"))
+		expect(() => supersedeRow(ledger, "F1", null, "newer filing")).toThrow(/supersede F1 needs a replacement row; use retract/)
+		expect(ledger.rows[0].status).toBe("active")
+		expect(ledger.events).toHaveLength(0)
+	})
 })
 
 describe("read and write", () => {

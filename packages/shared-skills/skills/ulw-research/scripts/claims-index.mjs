@@ -51,8 +51,9 @@ function verifiedIds(lines) {
 			continue
 		}
 		if (!inside) continue
-		// Only the id an entry starts with is verified; ids mentioned later in the line are not.
-		const leading = /^\s*(?:[-*+]|\d+[.)])?\s*\|?\s*`?(C\d+)\b/.exec(line)
+		// An entry is a list item or a table row; prose lines never verify. Only the id an entry
+		// starts with is verified; ids mentioned later in the line are not.
+		const leading = /^\s*(?:(?:[-*+]|\d+[.)])\s+|\|\s*)`?(C\d+)\b/.exec(line)
 		if (leading && !ids.includes(leading[1])) ids.push(leading[1])
 	}
 	return ids

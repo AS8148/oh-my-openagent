@@ -91,6 +91,9 @@ export function retractRow(ledger, id, reason) {
 }
 
 export function supersedeRow(ledger, id, replacementId, reason) {
+	if (replacementId === null || replacementId === undefined) {
+		throw new CliError(`supersede ${id} needs a replacement row; use retract for a fact with no replacement`)
+	}
 	return changeStatus(ledger, id, "superseded", replacementId, reason)
 }
 
