@@ -149,7 +149,11 @@ const builtExtensionPath = join(packageRoot, "plugin", "extensions", "omo.js")
 // bytes (-46,173): -33,386 from the commands sidecar, -12,787 from the device account sidecar.
 // Batch #3 (bundle train) adds more cars on top of #10860: measured omo.js on its regen head = 1,456,692 B, so the
 // ceiling is that measurement rounded up to the next 5,000 bytes (never below what is measured).
-const BUDGET_BYTES = 1_460_000
+// Batch #4 (bundle train, 9 cars: #10948 #10355 #10358 #10951 #10727 #10730 #10985 #10987 #10715) on top of batch #3:
+// dev (dfbeeec9bc) measures 1,457,603 B; the batch #4 regen head measures 1,461,838 B (+4,235) after the canonical
+// regen (two clean linux containers, node 24 + bun 1.4.3, byte-identical). Ceiling = that measurement rounded up to
+// the next 5,000 bytes (never below what is measured).
+const BUDGET_BYTES = 1_465_000
 
 describe("omo-senpi bundle size budget", () => {
   it("#given the built extension #when its byte size is measured #then it stays within the documented byte budget", () => {
