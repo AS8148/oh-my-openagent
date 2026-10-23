@@ -23,6 +23,10 @@ const CAP_MS = 400
 const FLUSH_DEADLINE_MS = 360
 // The outer breaker: far above any cap, so only a shutdown that never returns reaches it.
 const BREAKER_MS = 10_000
+// A generous bound for the never-settling test: ten caps (4 s against the real ~0.4 s). It is the one
+// check that also sees waits the timer recorder cannot (Bun.sleep, node:timers/promises, a synchronous
+// stall), and it is 10x the cap, not the 1.3x budget that a loaded Windows runner exceeded (#10967).
+const TEN_CAPS_MS = 10 * CAP_MS
 
 /**
  * Records the delay of every timer armed while installed; shutdown's deadlines are plain timers. The
@@ -54,21 +58,29 @@ function recordTimerDelays(): {
   return { delays, fired, restore }
 }
 
-/** "settled" when the work settles first, else a named breaker message (never a pass by timing). */
-async function settleOrBreak(work: Promise<unknown>, what: string): Promise<string> {
+/**
+ * "settled" when the work settles within `boundMs`, else a named breaker message (never a pass by timing).
+ * The clock is read when the work settles too, so a synchronous stall that holds the breaker's own timer
+ * back is still reported as a break.
+ */
+async function settleOrBreak(work: Promise<unknown>, what: string, boundMs = BREAKER_MS): Promise<string> {
+  const startedMs = performance.now()
+  const breakMessage = `breaker: no ${what} within ${boundMs} ms`
   let breaker: ReturnType<typeof setTimeout> | undefined
   const broke = new Promise<string>((resolve) => {
-    breaker = setTimeout(() => resolve(`breaker: no ${what} within ${BREAKER_MS} ms`), BREAKER_MS)
+    breaker = setTimeout(() => resolve(breakMessage), boundMs)
   })
   try {
-    return await Promise.race([work.then(() => "settled"), broke])
+    const settled = work.then(() => (performance.now() - startedMs <= boundMs ? "settled" : breakMessage))
+    return await Promise.race([settled, broke])
   } finally {
     clearTimeout(breaker)
   }
 }
 const roots: (() => void)[] = []
 afterEach(() => {
-  for (const cleanup of roots.splice(0)) cleanup()
+  // Undo in reverse: a test that installs two timer recorders gets the real setTimeout back, not the first patch.
+  for (const cleanup of roots.splice(0).reverse()) cleanup()
 })
 
 function root(): string {
@@ -231,7 +243,7 @@ describe("spool recovery", () => {
     expect(transport.droppedEvents()).toBe(0)
   }, 60_000)
 
-  test("#given a fetch that never settles #when the transport shuts down #then a shutdown deadline ends it within the cap, never a longer wait, and the batch stays on disk", async () => {
+  test("#given a fetch that never settles #when the transport shuts down #then the flush deadline alone ends it, no other wait reaches ten caps, and the batch stays on disk", async () => {
     // given
     const dir = root()
     const timers = recordTimerDelays()
@@ -245,16 +257,16 @@ describe("spool recovery", () => {
         transport.shutdown().then(() => {
           firedWhenShutdownReturned = [...timers.fired]
         }),
-        "shutdown returning once its cap fires",
+        "shutdown returning once its flush deadline fires",
+        TEN_CAPS_MS,
       )
 
       // then
+      // No wait of any kind (timer, Bun.sleep, a synchronous stall) held shutdown for ten caps...
       expect(outcome).toBe("settled")
-      // A shutdown deadline (the flush deadline, or the cap behind it) had fired when shutdown returned,
-      // so a deadline ended it, not the fetch...
-      expect(firedWhenShutdownReturned.some((ms) => ms === FLUSH_DEADLINE_MS || ms === CAP_MS)).toBe(true)
-      // ...and no deadline longer than the cap had: shutdown returns within the cap measured from the call.
-      expect(firedWhenShutdownReturned.filter((ms) => ms > CAP_MS)).toEqual([])
+      // ...and through setTimeout, exactly one shutdown deadline had fired when it returned: the flush
+      // deadline. The cap behind it was cancelled, and no second deadline (of any length) was waited on.
+      expect(firedWhenShutdownReturned.filter((ms) => ms >= FLUSH_DEADLINE_MS)).toEqual([FLUSH_DEADLINE_MS])
       expect(spoolNames(dir).length).toBe(1)
       expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
     } finally {
