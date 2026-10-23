@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 test("V8 echoes the invalid value witness but journal and settings diagnostics never do", async () => {
   const root = mkdtempSync(join(tmpdir(), "v8-config-diagnostics-"))
@@ -17,7 +17,7 @@ test("V8 echoes the invalid value witness but journal and settings diagnostics n
     writeFileSync(join(root, ".omo", ".migration-journal.json"), malformed)
     writeFileSync(join(root, "settings.json"), malformed)
     const built = await Bun.build({
-      entrypoints: [new URL("./journal.ts", import.meta.url).pathname],
+      entrypoints: [fileURLToPath(new URL("./journal.ts", import.meta.url))],
       target: "node", outdir: root, naming: "journal.mjs",
     })
     expect(built.success).toBe(true)
