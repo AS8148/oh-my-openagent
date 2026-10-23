@@ -52,6 +52,30 @@ describe("a task's earlier runs keep their spend across revives (senpi#2471)", (
     expect(revived.prior_runs_cost_usd).toBeUndefined()
   })
 
+  test("#given a finished run whose cost is only a lower bound (partial) #when it is revived #then that lower bound is folded in, as the live footer counts it", () => {
+    // given
+    const store = tempStore()
+    const partial = withRunStats(store, { task_id: "st_00024714", status: "completed" }, stats(0.4, "partial"))
+
+    // when
+    const revived = buildRevived(partial, NOW)
+
+    // then
+    expect(revived.prior_runs_cost_usd).toBeCloseTo(0.4, 10)
+  })
+
+  test("#given a finished run whose cost is invalid #when it is revived #then nothing is folded in", () => {
+    // given
+    const store = tempStore()
+    const invalid = withRunStats(store, { task_id: "st_00024715", status: "completed" }, stats(0.4, "invalid"))
+
+    // when
+    const revived = buildRevived(invalid, NOW)
+
+    // then
+    expect(revived.prior_runs_cost_usd).toBeUndefined()
+  })
+
   test("#given a revive that is rolled back #when the prior run is restored #then its cost is not counted twice", () => {
     // given
     const store = tempStore()
