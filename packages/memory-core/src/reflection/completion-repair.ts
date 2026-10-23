@@ -1,4 +1,5 @@
 import type { GitExec } from "../git"
+import { STABLE_LOG_OUTPUT } from "../git/stable-log-output"
 
 const GIT_TIMEOUT_MS = 30_000
 
@@ -63,7 +64,7 @@ export async function squashWithoutPaths(
 ): Promise<string> {
   const run = runner(exec, dir)
   const sources = await renameSources(run, baseSha, tipSha)
-  const identity = (await must(run, ["log", "-1", "--format=%an%n%ae%n%s", tipSha])).split("\n")
+  const identity = (await must(run, [...STABLE_LOG_OUTPUT, "log", "-1", "--format=%an%n%ae%n%s", tipSha])).split("\n")
   const restore = new Set(dropped)
   for (const path of dropped) {
     const source = sources.get(path)
