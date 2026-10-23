@@ -17,7 +17,7 @@ import {
   tokenSchema,
 } from "./protocol"
 
-// `code` is the service's refusal code (one of the four that end a session), never its message.
+// `code` is the service's terminal refusal code, never its message.
 export class SessionEnded extends SignInError {
   constructor(
     message: string,
@@ -29,8 +29,9 @@ export class SessionEnded extends SignInError {
 }
 
 // The service revokes the device row before answering reauth_required on refresh (token reuse);
-// account_deleted removes the account. unauthorized and invalid_grant leave the device's slot held.
-const DEVICE_REVOKING_REFUSALS = new Set(["account_deleted", "reauth_required"])
+// account_deleted removes the account and device_revoked confirms it is already revoked.
+// unauthorized and invalid_grant leave the device's slot held.
+const DEVICE_REVOKING_REFUSALS = new Set(["account_deleted", "reauth_required", "device_revoked"])
 
 export function createSession(options: { readonly api: string; readonly store: CredentialStore; readonly home?: string; readonly signal?: AbortSignal }) {
   const api = serviceOrigin(options.api)
@@ -66,7 +67,7 @@ export function createSession(options: { readonly api: string; readonly store: C
       return tokens.accessToken
     } catch (error) {
       if (error instanceof CredentialStoreError) throw error
-      if (error instanceof ApiRefusal && error.status < 500 && ["unauthorized", "account_deleted", "reauth_required", "invalid_grant"].includes(error.code)) {
+      if (error instanceof ApiRefusal && error.status < 500 && ["unauthorized", "account_deleted", "reauth_required", "invalid_grant", "device_revoked"].includes(error.code)) {
         await store.clear()
         throw new SessionEnded(
           error.code === "reauth_required"
