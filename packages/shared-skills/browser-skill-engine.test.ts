@@ -104,7 +104,10 @@ describe("the app's built-in browser", () => {
           }))
           const library = guardOmowright(raw, { env: { OMO_BROWSER_ENGINE: "builtin" }, host })
           const error = await (refresh
-            ? library.connectBuiltinBrowser().then(() => authorizer!.resolveAuthorization({ forceRefresh: true }))
+            ? library.connectBuiltinBrowser().then(() => {
+              if (authorizer === undefined) throw new Error("no authorizer attached")
+              return authorizer.resolveAuthorization({ forceRefresh: true })
+            })
             : library.connectBuiltinBrowser()).then(() => undefined, (cause: unknown) => cause)
           expect(error).toBeInstanceOf(BuiltinBrowserUnavailableError)
           expect((error as BuiltinBrowserUnavailableError).reason).toBe(reason)
@@ -303,7 +306,9 @@ describe("the app's built-in browser", () => {
 
       expect(await library.connectBuiltinBrowser()).toEqual({ kind: "connection" })
       expect(attached[0]?.url).toBe(grant.endpoint)
-      const authorizer = attached[0]!.options.client.authorizer
+      const first = attached[0]
+      if (first === undefined) throw new Error("no client attached")
+      const authorizer = first.options.client.authorizer
       expect(await authorizer.resolveAuthorization()).toBe("Bearer first-token")
       writeFileSync(tokenFile, "rotated-token\n", { mode: 0o600 })
       expect(await authorizer.resolveAuthorization({ forceRefresh: true })).toBe("Bearer rotated-token")
