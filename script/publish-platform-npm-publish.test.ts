@@ -91,21 +91,32 @@ describe("platform publish helper", () => {
     expect(calls()).toEqual(["publish --access public --loglevel verbose --tag latest --provenance | provenance=true"])
   })
 
-  test("#given Sigstore refuses a re-sent entry (TLOG 409) #when the helper runs #then it retries once without provenance and succeeds", () => {
+  test("#given Sigstore refuses a re-sent entry (TLOG 409) once #when the helper runs #then it retries once WITH provenance (a fresh signature) and succeeds", () => {
     const { publish, calls } = setup(["tlog", "ok"])
     const result = publish("")
     expect(result.status).toBe(0)
-    expect(result.stdout).toContain("retrying once without provenance")
     expect(calls()).toEqual([
+      "publish --access public --loglevel verbose --provenance | provenance=true",
+      "publish --access public --loglevel verbose --provenance | provenance=true",
+    ])
+  })
+
+  test("#given the provenance retry also hits the TLOG 409 #when the helper runs #then the last resort publishes without provenance and warns", () => {
+    const { publish, calls } = setup(["tlog", "tlog", "ok"])
+    const result = publish("")
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain("without provenance")
+    expect(calls()).toEqual([
+      "publish --access public --loglevel verbose --provenance | provenance=true",
       "publish --access public --loglevel verbose --provenance | provenance=true",
       "publish --access public --loglevel verbose --provenance=false | provenance=false",
     ])
   })
 
-  test("#given the TLOG 409 retry also fails #when the helper runs #then it exits non-zero after exactly two attempts", () => {
-    const { publish, calls } = setup(["tlog", "tlog"])
+  test("#given every attempt hits the TLOG 409 #when the helper runs #then it exits non-zero after exactly three attempts", () => {
+    const { publish, calls } = setup(["tlog", "tlog", "tlog"])
     expect(publish("").status).not.toBe(0)
-    expect(calls()).toHaveLength(2)
+    expect(calls()).toHaveLength(3)
   })
 
   test("#given a TLOG 409 but the version already reached the registry #when the helper runs #then it succeeds without a second publish", () => {
@@ -127,6 +138,7 @@ describe("platform publish helper", () => {
       expect(step?.["continue-on-error"]).toBeUndefined()
       expect(step?.run).toContain('bash "$RUNNER_TEMP/npm-publish.sh" "$DIST_TAG"')
       expect(step?.run).not.toContain("npm publish")
+      expect(isRecord(step) ? step.env : undefined).not.toHaveProperty("NPM_CONFIG_PROVENANCE")
     }
   })
 })
