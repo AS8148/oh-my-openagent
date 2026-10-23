@@ -14,7 +14,8 @@ function runChildBunTest(cwd: string, env: NodeJS.ProcessEnv, files: readonly st
   const result = spawnSync(process.execPath, ["test", "--parallel=1", "--no-isolate", ...files], { cwd, env, encoding: "utf8", timeout: CHILD_BUDGET_MS })
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`
   if (result.error !== undefined || result.signal !== null) {
-    throw new Error(`child bun test did not finish (${result.error?.message ?? `signal ${result.signal}`}) within ${CHILD_BUDGET_MS} ms:\n${output}`)
+    const cause = result.error?.message ?? `killed by signal ${result.signal}`
+    throw new Error(`child bun test did not complete (${cause}; budget ${CHILD_BUDGET_MS} ms):\n${output}`)
   }
   return { status: result.status, output }
 }
@@ -84,7 +85,7 @@ describe("test file environment integrity", () => {
 })
 
 describe("process.env replacement", () => {
-  test("#given a file that assigns a new object to process.env #when the next file pins TMPDIR #then teardown names the file and os.tmpdir() follows the pin again", () => {
+  test("#given a file that assigns a new object to process.env #when the next file pins the temp dir (TMPDIR, TEMP, TMP) #then teardown names the file and os.tmpdir() follows the pin again", () => {
     const root = mkdtempSync(join(tmpdir(), "omo-env-replace-"))
     try {
       const integrityPath = resolve(import.meta.dir, "../test-support/environment-integrity.ts")
@@ -102,7 +103,9 @@ describe("process.env replacement", () => {
       writeFileSync(nextPath, [
         'import { expect, test } from "bun:test"',
         'import { tmpdir } from "node:os"',
-        `test("next file pins TMPDIR", () => { const previous = process.env.TMPDIR; process.env.TMPDIR = ${JSON.stringify(pinned)}; try { expect(tmpdir()).toBe(${JSON.stringify(pinned)}) } finally { if (previous === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = previous } })`,
+        // os.tmpdir() reads TMPDIR on POSIX and TEMP/TMP on win32: pin all three, and restore them so this file leaks nothing.
+        'const names = ["TMPDIR", "TEMP", "TMP"] as const',
+        `test("next file pins the temp dir", () => { const previous = names.map((name) => process.env[name]); for (const name of names) process.env[name] = ${JSON.stringify(pinned)}; try { expect(tmpdir()).toBe(${JSON.stringify(pinned)}) } finally { names.forEach((name, index) => { const value = previous[index]; if (value === undefined) delete process.env[name]; else process.env[name] = value }) } })`,
       ].join("\n"))
       const env: NodeJS.ProcessEnv = { ...process.env }
       delete env.CI
@@ -110,7 +113,7 @@ describe("process.env replacement", () => {
       const result = runChildBunTest(root, env, [swapPath, nextPath])
       const output = result.output
       expect(output).toContain("a-swap.test.ts replaced process.env with another object")
-      expect(output).toContain("(pass) next file pins TMPDIR")
+      expect(output).toContain("(pass) next file pins the temp dir")
       // The next file restores what it pins, so the swap is the run's only failure: the exit status proves the guard.
       expect(output).not.toContain("b-next.test.ts leaked process.env")
       expect(output).not.toContain("b-next.test.ts replaced process.env")
