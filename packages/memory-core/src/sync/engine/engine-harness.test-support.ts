@@ -7,6 +7,7 @@ import { execFile } from "node:child_process"
 import { tmpdir } from "node:os"
 import { promisify } from "node:util"
 import { dirname, join, relative, sep } from "node:path"
+import { disableFixtureAutoMaintenance } from "../../git/test-repo-config.test-support"
 
 import { createDeviceItemStore } from "./adapters/device-item-store"
 import { createGitSyncRepo } from "./adapters/git-sync-repo"
@@ -46,6 +47,7 @@ async function gitWith(cwd: string, env: Record<string, string>, ...args: string
 export async function gitRepo(root: string, existing = false): Promise<SyncRepo> {
   if (!existing) {
     await git(root, "init", "-q", "-b", "main")
+    disableFixtureAutoMaintenance(root)
     await git(root, "config", "user.name", "Test Agent")
     await git(root, "config", "user.email", "agent@example.invalid")
     await git(root, "config", "commit.gpgsign", "false")
