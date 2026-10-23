@@ -507,6 +507,7 @@ describe("memory rpc bridge sync field (omo #10637)", () => {
     ["never synced", async () => ({ kind: "never_synced" }), { state: "never_synced" }],
     ["paused at a refused entry", async () => ({ kind: "paused", seq: 1, code: "signature" }), { state: "paused" }],
     ["unavailable on this device", async () => ({ kind: "sync-unavailable", reason: "Another process holds the engine." }), { state: "unavailable" }],
+    ["off because its configuration is invalid", async () => ({ kind: "sync-config-invalid", variable: "OMO_SERVICE_API_URL", reason: "OMO_SERVICE_API_URL is not a valid service URL" }), { state: "unavailable" }],
     ["not syncing on this device", async () => null, undefined],
     ["a reader that throws", async () => Promise.reject(new Error("runner gone")), undefined],
   ]

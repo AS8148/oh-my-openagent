@@ -30,6 +30,8 @@ export async function readMemoryRpcSync(read: SyncStatusReader | undefined, repo
     case "synced":
       return { state: "synced", lastSyncedAtISO: new Date(status.at).toISOString() }
     case "sync-unavailable":
+    // An invalid sync configuration (#10860) also means this device does not sync; the runner logs which variable.
+    case "sync-config-invalid":
       return { state: "unavailable" }
     case "failing": {
       const { failure } = status
