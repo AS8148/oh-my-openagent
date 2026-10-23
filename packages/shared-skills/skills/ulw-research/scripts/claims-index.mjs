@@ -41,13 +41,20 @@ function isSeparator(line) {
 	return /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)
 }
 
-function verifiedIds(lines) {
+const DIGEST_HEADING = normalizeHeader("verified-claims")
+
+/** `offset` is the index of `lines[0]` in the document, for line numbers in errors. */
+function verifiedIds(lines, offset, errors) {
 	const ids = []
 	let inside = false
-	for (const line of lines) {
+	for (const [index, line] of lines.entries()) {
 		const heading = /^(#{1,6})\s+(.*)$/.exec(line)
 		if (heading) {
-			inside = normalizeHeader(heading[2]) === normalizeHeader("verified-claims")
+			const name = normalizeHeader(heading[2])
+			inside = name === DIGEST_HEADING
+			if (!inside && name.startsWith(DIGEST_HEADING)) {
+				errors.push(`line ${offset + index + 1}: heading "${line.trim()}" is not the digest heading "## verified-claims"; drop the suffix so its entries are read`)
+			}
 			continue
 		}
 		if (!inside) continue
@@ -109,7 +116,7 @@ export function indexClaims(markdown) {
 		rows.push({ claim_id: claimId, statement: cells[columns.statement], risk: cells[columns.risk], status: cells[columns.status] })
 	}
 	// The digest section ends at the claim table: scan each side on its own so it cannot carry across.
-	const verified = [...new Set([...verifiedIds(lines.slice(0, headerAt)), ...verifiedIds(lines.slice(tableEnd))])]
+	const verified = [...new Set([...verifiedIds(lines.slice(0, headerAt), 0, errors), ...verifiedIds(lines.slice(tableEnd), tableEnd, errors)])]
 	for (const id of verified) {
 		if (!rows.some((row) => row.claim_id === id)) errors.push(`verified-claims lists ${id}, which has no claim row`)
 	}

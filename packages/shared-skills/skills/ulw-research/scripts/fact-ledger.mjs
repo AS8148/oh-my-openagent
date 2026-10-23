@@ -7,8 +7,10 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
-import { DECIMAL, LEDGER_SCHEMA_VERSION, ROW_DEFAULTS, ROW_FIELDS, isString, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
+import { DECIMAL, exactComesFromValue, exactFromDecimal, idPrefix, isString } from "./fact-ledger-kinds.mjs"
+import { LEDGER_SCHEMA_VERSION, ROW_DEFAULTS, ROW_FIELDS, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
 
+export { exactFromDecimal } from "./fact-ledger-kinds.mjs"
 export { FACT_KINDS, FACT_STATUSES, LEDGER_SCHEMA_VERSION, OPERATIONS, QUALIFIERS, ROW_FIELDS, TRANSITIONS, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
 
 export const LEDGER_FILENAME = "fact-ledger.json"
@@ -39,9 +41,9 @@ export function writeLedger(dir, ledger) {
 
 const ID_NUMBER = Object.freeze({ F: /^F(\d+)$/, Q: /^Q(\d+)$/ })
 
-/** F<n> for every value row (measured, derived, assumed, converted); Q<n> for quotes. */
+/** The next id with the kind's prefix from KIND_RULES (F<n> for value rows, Q<n> for quotes). */
 export function nextId(ledger, kind) {
-	const prefix = kind === "quote" ? "Q" : "F"
+	const prefix = idPrefix(kind)
 	let max = 0
 	for (const row of ledger.rows) {
 		const match = ID_NUMBER[prefix].exec(row.fact_id ?? "")
@@ -50,26 +52,15 @@ export function nextId(ledger, kind) {
 	return `${prefix}${max + 1}`
 }
 
-/** The exact rational of a decimal string, reduced. */
-export function exactFromDecimal(value) {
-	const [whole, fraction = ""] = value.replace(/^-/, "").split(".")
-	let num = BigInt(whole + fraction)
-	let den = 10n ** BigInt(fraction.length)
-	let a = num
-	let b = den
-	while (b !== 0n) [a, b] = [b, a % b]
-	if (a > 1n) [num, den] = [num / a, den / a]
-	return { num: `${value.startsWith("-") && num !== 0n ? "-" : ""}${num}`, den: `${den}` }
-}
-
 /**
  * Fill defaults, assign the next id, validate the whole ledger (provenance included), then append.
- * Only measured rows get exact from their decimal: derived and converted rows carry the exact
- * that derive computed from the operands and factor, never one read back from the rounded value.
+ * Only kinds whose KIND_RULES exact is from_value (measured) get exact from their decimal:
+ * derived and converted rows carry the exact that derive computed from the operands and factor,
+ * never one read back from the rounded value.
  */
 export function addRow(ledger, row) {
 	const filled = { ...structuredClone(ROW_DEFAULTS), ...row, fact_id: row.fact_id ?? nextId(ledger, row.kind) }
-	if (filled.kind === "measured" && filled.exact === null && isString(filled.value) && DECIMAL.test(filled.value)) {
+	if (exactComesFromValue(filled.kind) && filled.exact === null && isString(filled.value) && DECIMAL.test(filled.value)) {
 		filled.exact = exactFromDecimal(filled.value)
 	}
 	const ordered = Object.fromEntries(ROW_FIELDS.filter((key) => Object.hasOwn(filled, key)).map((key) => [key, filled[key]]))

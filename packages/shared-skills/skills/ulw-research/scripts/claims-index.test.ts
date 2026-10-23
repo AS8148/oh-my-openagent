@@ -113,6 +113,13 @@ describe("indexClaims", () => {
 		expect(indexClaims(text).claims[0].in_verified).toBe(true)
 	})
 
+	test("a digest heading with a suffix is an error naming the heading, not a silently empty digest", () => {
+		const text = "## Verified claims (2)\n\n- C1\n\n| claim_id | statement | risk tier | status |\n|---|---|---|---|\n| C1 | a | high | supported |\n"
+		const { claims, errors } = indexClaims(text)
+		expect(claims[0].in_verified).toBe(false)
+		expect(errors.some((e: string) => e.startsWith("line 1:") && e.includes('"## Verified claims (2)"'))).toBe(true)
+	})
+
 	test("the verified-claims section ends at the claim table", () => {
 		const text = [
 			"## verified-claims",

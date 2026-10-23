@@ -2,7 +2,7 @@
 
 `fact-ledger.json` is the single source of numbers and quotes for a research run. This file is
 the one definition of what a valid ledger is. `scripts/fact-ledger-schema.mjs` encodes it as
-data (`TRANSITIONS`, `transitionError`, `provenanceError`), and both the validator
+data (`TRANSITIONS`, `transitionError`, `provenanceErrors`), and both the validator
 (`validateLedger`) and every writer (`addRow`, `retractRow`, `supersedeRow`, `writeLedger`)
 call that same code. A writer can therefore never produce a ledger the validator rejects, and
 the validator can never accept a ledger no writer could produce.
@@ -32,21 +32,29 @@ unique across all rows.
 
 Every row carries every field of `ROW_FIELDS`; unknown fields are rejected.
 
+The per-kind table below is rendered from `KIND_RULES` in `scripts/fact-ledger-kinds.mjs`
+(`node scripts/fact-ledger-kinds.mjs --render-grammar`); the validator checks every per-kind
+column through that same table, and a test keeps this copy equal to the rendered output.
+
 Always required, never null: `fact_id`, `kind`, `raw` (string), `quote` (string),
 `extracted_by` (non-empty), `observed_at` (ISO timestamp), `label` (`[a-z0-9_-]{1,32}`),
 `status`.
 
+<!-- kind-rules:begin (rendered from KIND_RULES; do not edit by hand) -->
 | field | measured | quote | derived | assumed | converted |
 |---|---|---|---|---|---|
+| `fact_id` | `F<n>` | `Q<n>` | `F<n>` | `F<n>` | `F<n>` |
 | `value` | decimal | null | decimal | decimal | decimal |
 | `source_id` | `S<n>` | `S<n>` | `S<n>` or null | `S<n>` or null | `S<n>` or null |
 | `locator` | object | object | object or null | object or null | object or null |
 | `snapshot_sha256` | sha256 | sha256 | sha256 or null | sha256 or null | sha256 or null |
 | `rationale` | string or null | string or null | string or null | non-empty | string or null |
-| `exact` | from `value` | null | written by derive | rational or null | written by derive |
+| `exact` | from `value` | null | written by derive (rational or null) | rational or null | written by derive (rational or null) |
+<!-- kind-rules:end -->
 
-- `exact` is `{ num: integer string, den: positive integer string }` or null. `addRow` fills
-  it only for measured rows, from their decimal. Derived and converted rows get it from
+- `exact` is `{ num: integer string, den: positive integer string }` or null. A measured row's
+  `exact` must equal the reduced rational of its `value` (`exactFromDecimal`); `addRow` fills
+  it when the caller leaves it null. Derived and converted rows get it from
   derive (plan todo 9): a converted value's rational comes from the original and the factor,
   not from the rounded `value`, so `addRow` never computes it from `value`.
 - `locator` is `{ artifact, char_start <= char_end, page?, line?, table?, row_label?,
