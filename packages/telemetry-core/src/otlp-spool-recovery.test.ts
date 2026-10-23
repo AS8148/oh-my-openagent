@@ -226,8 +226,7 @@ describe("spool recovery", () => {
       // then
       expect(outcome).toBe("settled")
       expect(timers.delays).toContain(CAP_MS)
-      expect(spoolNames(dir).length).toBe(1)
-      expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
+      expect(spoolNames(dir).filter((name) => !name.endsWith(".lock"))).toEqual([expect.stringMatching(/^batch-logs-[0-9a-f-]{36}\.otlp$/)])
     } finally {
       timers.restore()
     }
@@ -257,7 +256,7 @@ describe("spool recovery", () => {
       // then
       expect(outcome).toBe("settled")
       expect(armedWhenFlushWorkRan).toEqual(expect.arrayContaining([FLUSH_DEADLINE_MS, CAP_MS]))
-      expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
+      expect(spoolNames(dir).filter((name) => !name.endsWith(".lock"))).toEqual([expect.stringMatching(/^batch-logs-[0-9a-f-]{36}\.otlp$/)])
     } finally {
       timers.restore()
     }
