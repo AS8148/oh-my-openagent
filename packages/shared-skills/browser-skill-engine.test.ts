@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { guardOmowright } from "./skills/browser/scripts/omowright.mjs"
+import { BuiltinBrowserUnavailableError, guardOmowright } from "./skills/browser/scripts/omowright.mjs"
 
 type Json = Record<string, unknown>
 
@@ -79,6 +79,113 @@ describe("inside OmO Desktop the library is the terminal's, plus the app's built
 })
 
 describe("the app's built-in browser", () => {
+  test("#given app refusals including user Stop #when acquiring or refreshing #then only genuine unavailability permits fallback", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-toolkit-refusal-"))
+    try {
+      const tokenFile = join(dir, "browser.token")
+      writeFileSync(tokenFile, "test-token")
+      for (const reason of ["user_stopped", "permission_denied", "toString", "unavailable", "timeout", "invalid_grant"]) {
+        for (const refresh of [false, true]) {
+          let acquireCount = 0
+          let authorizer: { resolveAuthorization: (options: { forceRefresh: boolean }) => Promise<string> } | undefined
+          const capture = (options: { authorizer: typeof authorizer }) => { authorizer = options.authorizer }
+          const raw = {
+            ...fakeRaw(),
+            connect: async (_url: string, options: { client: { authorizer: typeof authorizer } }) => { capture(options.client); return {} },
+            CdpClient: class {
+              constructor(options: { authorizer: typeof authorizer }) { capture(options) }
+            },
+            BrowserConnection: class { async initialize() { return this } },
+          }
+          const host = fakeHost(() => ({
+            details: refresh && acquireCount++ === 0
+              ? { ok: true, grant: { endpoint: "http://127.0.0.1:41234/toolkit/browser", tokenFile } }
+              : { ok: false, reason },
+          }))
+          const library = guardOmowright(raw, { env: { OMO_BROWSER_ENGINE: "builtin" }, host })
+          const error = await (refresh
+            ? library.connectBuiltinBrowser().then(() => authorizer!.resolveAuthorization({ forceRefresh: true }))
+            : library.connectBuiltinBrowser()).then(() => undefined, (cause: unknown) => cause)
+          expect(error).toBeInstanceOf(BuiltinBrowserUnavailableError)
+          expect((error as BuiltinBrowserUnavailableError).reason).toBe(reason)
+          expect(/connectBrowserSkill|connectPipe/.test((error as Error).message)).toBe(["unavailable", "timeout", "invalid_grant"].includes(reason))
+        }
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("#given a missing or unreadable token file #when acquiring #then the failure is typed and no browser attaches", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-toolkit-token-"))
+    try {
+      // Reading a directory is rejected even under a privileged test user, unlike chmod-based fixtures.
+      for (const tokenFile of [join(dir, "missing.token"), dir]) {
+        const raw = fakeRaw()
+        const host = fakeHost(() => ({ details: { ok: true, grant: { endpoint: "http://127.0.0.1:41234/toolkit/browser", tokenFile } } }))
+        const library = guardOmowright(raw, { env: { OMO_BROWSER_ENGINE: "builtin" }, host })
+        const error = await library.connectBuiltinBrowser().then(() => undefined, (cause: unknown) => cause)
+        expect(error).toBeInstanceOf(BuiltinBrowserUnavailableError)
+        expect((error as BuiltinBrowserUnavailableError).reason).toBe("invalid_grant")
+        expect(raw.calls).toEqual([])
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("#given a refreshed grant on another endpoint #when authorization refreshes during connect or later #then endpoint and token rotate together", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-toolkit-refresh-"))
+    try {
+      const firstToken = join(dir, "first.token")
+      const nextToken = join(dir, "next.token")
+      writeFileSync(firstToken, "first-token")
+      writeFileSync(nextToken, "next-token")
+      for (const duringConnect of [true, false]) {
+        let acquireCount = 0
+        let endpoint = ""
+        let authorize: (options?: { forceRefresh?: boolean }) => Promise<string> = async () => ""
+        const initialEndpoint = "http://127.0.0.1:41234/toolkit/browser"
+        const refreshedEndpoint = "http://127.0.0.1:42345/toolkit/browser"
+        const host = fakeHost(() => ({ details: { ok: true, grant: acquireCount++ === 0
+          ? { endpoint: initialEndpoint, tokenFile: firstToken }
+          : { endpoint: refreshedEndpoint, tokenFile: nextToken } } }))
+        const initialize = async () => {
+          if (duringConnect) {
+            expect(await authorize({ forceRefresh: true })).toBe("Bearer next-token")
+            expect(endpoint).toBe(refreshedEndpoint)
+          }
+          return { connected: true }
+        }
+        const raw = {
+          ...fakeRaw(),
+          connect: async (url: string, options: { client: { authorizer: { resolveAuthorization: typeof authorize } } }) => {
+            endpoint = url
+            authorize = options.client.authorizer.resolveAuthorization
+            return await initialize()
+          },
+          CdpClient: class {
+            constructor(options: { cdpUrl: string; authorizer: { resolveAuthorization: typeof authorize } }) {
+              endpoint = options.cdpUrl
+              authorize = options.authorizer.resolveAuthorization
+            }
+            set cdpUrl(value: string) { endpoint = value }
+          },
+          BrowserConnection: class { initialize = initialize },
+        }
+        const library = guardOmowright(raw, { env: { OMO_BROWSER_ENGINE: "builtin" }, host })
+        expect(await library.connectBuiltinBrowser()).toEqual({ connected: true })
+        if (!duringConnect) {
+          expect(await authorize()).toBe("Bearer first-token")
+          expect(await authorize({ forceRefresh: true })).toBe("Bearer next-token")
+          expect(endpoint).toBe(refreshedEndpoint)
+        }
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("#given the app grants it #when connectBuiltinBrowser runs #then OmOWright attaches to the granted endpoint with the token file's token, and re-acquires on refresh", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omo-toolkit-test-"))
     try {
@@ -87,7 +194,15 @@ describe("the app's built-in browser", () => {
       const grant = { endpoint: "http://127.0.0.1:41234/toolkit/browser", tokenFile }
       const host = fakeHost(() => ({ details: { ok: true, grant } }))
       const attached: Array<{ url: string; options: { client: { authorizer: { resolveAuthorization: (o?: { forceRefresh?: boolean }) => Promise<string> } } } }> = []
-      const raw = { ...fakeRaw(), connect: async (url: string, options: never) => { attached.push({ url, options }); return { kind: "connection" } } }
+      const raw = {
+        ...fakeRaw(),
+        CdpClient: class {
+          constructor(options: { cdpUrl: string; authorizer: typeof attached[number]["options"]["client"]["authorizer"] }) {
+            attached.push({ url: options.cdpUrl, options: { client: { authorizer: options.authorizer } } })
+          }
+        },
+        BrowserConnection: class { async initialize() { return { kind: "connection" } } },
+      }
       const library = guardOmowright(raw, { env: { OMO_BROWSER_ENGINE: "connected" }, host }) as unknown as { connectBuiltinBrowser: () => Promise<unknown> }
 
       expect(await library.connectBuiltinBrowser()).toEqual({ kind: "connection" })

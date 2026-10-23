@@ -11,8 +11,11 @@ const BUILTIN_UNAVAILABLE = {
 
 export class BuiltinBrowserUnavailableError extends Error {
   constructor(reason) {
+    const unavailable = Object.hasOwn(BUILTIN_UNAVAILABLE, reason)
     super(
-      `OmO's built-in browser is not available here: ${BUILTIN_UNAVAILABLE[reason] ?? `the app refused it (${reason})`}. Every other browser works as usual: connectBrowserSkill() for the user's own browser, connectPipe() for a browser of your own.`,
+      unavailable
+        ? `OmO's built-in browser is not available here: ${BUILTIN_UNAVAILABLE[reason]}. Every other browser works as usual: connectBrowserSkill() for the user's own browser, connectPipe() for a browser of your own.`
+        : `OmO's built-in browser was refused: ${reason === "user_stopped" ? "the user stopped browser work" : `the app refused it (${reason})`}. Stop browser work and report the refusal; do not open another browser.`,
     )
     this.name = "BuiltinBrowserUnavailableError"
     this.code = "browser_builtin_unavailable"
@@ -36,7 +39,12 @@ export function guardOmowright(raw, { env = process.env, host } = {}) {
       details = undefined
     }
     if (details?.ok !== true) throw new BuiltinBrowserUnavailableError(typeof details?.reason === "string" ? details.reason : "unavailable")
-    const token = (await readFile(details.grant.tokenFile, "utf8")).trim()
+    let token
+    try {
+      token = (await readFile(details.grant.tokenFile, "utf8")).trim()
+    } catch {
+      throw new BuiltinBrowserUnavailableError("invalid_grant")
+    }
     return { endpoint: details.grant.endpoint, authorization: `Bearer ${token}` }
   }
 
@@ -46,11 +54,15 @@ export function guardOmowright(raw, { env = process.env, host } = {}) {
     let current = await acquireBuiltinBrowser()
     const authorizer = {
       async resolveAuthorization({ forceRefresh } = {}) {
-        if (forceRefresh) current = await acquireBuiltinBrowser()
+        if (forceRefresh) {
+          current = await acquireBuiltinBrowser()
+          client.cdpUrl = current.endpoint
+        }
         return current.authorization
       },
     }
-    return await raw.connect(current.endpoint, { ...options, client: { ...options.client, authorizer } })
+    const client = new raw.CdpClient({ ...options.client, cdpUrl: current.endpoint, authorizer })
+    return await new raw.BrowserConnection(client, options).initialize()
   }
 
   return { ...raw, connectBuiltinBrowser }

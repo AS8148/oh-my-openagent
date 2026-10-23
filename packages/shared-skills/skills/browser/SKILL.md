@@ -38,8 +38,8 @@ await page.goto(url)
 It is an OmOWright connection like `connect()`. Work in few calls: take `page.snapshot()` once, act on its refs,
 and chain several actions in one eval cell (`page.locator(ref).fill()`, `.click()`, `.selectOption(value)`,
 `.setInputFiles(path)`), snapshotting again only after the page changed. It has one tab: navigate it rather than
-opening new ones. If the app does not offer it here, it throws `BuiltinBrowserUnavailableError` with the reason;
-carry on with the attached or owned engine as usual.
+opening new ones. `BuiltinBrowserUnavailableError` permits another engine only for `unavailable`, `timeout`, or
+`invalid_grant`. For `user_stopped` or any other app refusal, stop browser work and report it; do not open another browser.
 
 ## Step 1 — load omowright and prove the stack
 
