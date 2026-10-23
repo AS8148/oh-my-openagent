@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Account commands no longer repeat a failed keychain operation while reporting the error.** A native storage failure or timeout now returns exit 9 with `{"error":"store-unavailable"}` instead of attempting another store read, which could add a second 25-second wait. Existing success and locked-keychain outcomes are preserved; no new deadline or lock change is introduced ([#11040](https://github.com/code-yeongyu/oh-my-openagent/issues/11040)).
+**Account commands no longer repeat a failed keychain operation while reporting the error.** A native storage failure or timeout now returns exit 9 with `{"error":"store-unavailable"}` instead of attempting another store read, which could add a second 25-second wait. Existing success and locked-keychain outcomes are preserved; no new deadline or lock change is introduced ([#11040](https://github.com/code-yeongyu/oh-my-openagent/issues/11040), [#11049](https://github.com/code-yeongyu/oh-my-openagent/pull/11049)).
 
 **Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
 
