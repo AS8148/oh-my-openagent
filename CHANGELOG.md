@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**New TypeScript and JavaScript projects default to oxlint and oxfmt.** The programming skill now ships strict OXC configs and the t3code copy rules: product strings, templates, and JSX reject em dashes, and lint/type suppressions require an explanation. Existing repository toolchains are respected. ([#11025](https://github.com/code-yeongyu/oh-my-openagent/issues/11025))
+**New TypeScript and JavaScript projects default to oxlint and oxfmt.** The programming skill now ships strict OXC configs and the t3code copy rules: product strings, templates, and JSX reject em dashes, and lint/type suppressions require an explanation. Existing repository toolchains are respected. ([#11030](https://github.com/code-yeongyu/oh-my-openagent/pull/11030))
 
 ## [5.1.44] - 2026-10-23
 
