@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { registerMemoryGuard } from "./guard"
@@ -15,6 +15,11 @@ const roots: string[] = []
 afterEach(() => {
   for (const root of roots.splice(0)) rmSyncEfaultTolerant(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
+
+// Windows creates directory junctions without privileges; POSIX gets a plain directory symlink.
+function linkDir(target: string, path: string): void {
+  symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir")
+}
 
 function projectGrantFixture() {
   const setup = policyFixture(roots)
@@ -40,7 +45,9 @@ describe("project memory read grants (#10044)", () => {
     await grantProjectMemoryRead(setup.own, foreignRepo)
 
     // when / then
-    expect(await decide("read", setup.foreignFile)).toEqual({ allow: true })
+    expect(await decide("read", setup.foreignFile),
+      `grant comparison: child=${realpathSync.native(setup.foreignFile)}; parent=${realpathSync.native(foreignRepo)}`,
+    ).toEqual({ allow: true })
   })
 
   test("#given a granted project identity #when its notes are written, enumerated, or its git metadata read #then each stays denied", async () => {
@@ -95,7 +102,9 @@ describe("project memory read grants (#10044)", () => {
     const write = await call("write", { path: setup.foreignFile, content: "x" })
 
     // then
-    expect(read.some((result) => result !== undefined)).toBe(false)
+    expect(read.some((result) => result !== undefined),
+      `grant comparison: child=${realpathSync.native(setup.foreignFile)}; parent=${realpathSync.native(foreignRepo)}`,
+    ).toBe(false)
     expect(write).toContainEqual(expect.objectContaining({ block: true }))
   })
 
@@ -123,6 +132,62 @@ describe("project memory read grants (#10044)", () => {
 
     // when / then
     expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, "escape", "secret.md"))).toBe(false)
+  })
+
+  test("#given a granted repo later replaced by a link into a third identity #when a note is read through it #then the grant no longer covers it", async () => {
+    // given
+    const { setup, foreignRepo } = projectGrantFixture()
+    const third = join(setup.memoryRoot, "agents", "third", "repo")
+    mkdirSync(join(third, "reference"), { recursive: true })
+    writeFileSync(join(third, "reference", "secret.md"), "secret")
+    await grantProjectMemoryRead(setup.own, foreignRepo)
+
+    // when
+    renameSync(foreignRepo, `${foreignRepo}-moved`)
+    linkDir(third, foreignRepo)
+
+    // then
+    expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, "reference", "secret.md"))).toBe(false)
+  })
+
+  test("#given a granted repo #when a note that does not exist yet is read #then the grant still covers it so the read reports it missing", async () => {
+    // given
+    const { setup, foreignRepo } = projectGrantFixture()
+    await grantProjectMemoryRead(setup.own, foreignRepo)
+
+    // when / then
+    expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, "reference", "missing.md"))).toBe(true)
+    expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, "draft", "missing.md"))).toBe(true)
+  })
+
+  test("#given a dangling link in a granted repo #when a read names it #then it is not treated as a missing note", async () => {
+    // given
+    const { setup, foreignRepo } = projectGrantFixture()
+    const ghost = join(foreignRepo, "reference", "ghost.md")
+    symlinkSync(join(setup.memoryRoot, "agents", "third", "later.md"), ghost)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
+
+    // when / then
+    expect(isGrantedProjectMemoryRead(setup.own, ghost)).toBe(false)
+  })
+
+  test("#given dot-dot after a link out of a granted repo #when the read is checked #then the verdict is about the path.resolve()d path a built-in read opens", async () => {
+    // given
+    const { setup, foreignRepo } = projectGrantFixture()
+    const outside = join(setup.memoryRoot, "agents", "third", "subdir")
+    mkdirSync(join(outside, "..", "reference"), { recursive: true })
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(join(outside, "..", "reference", "deploy.md"), "third")
+    linkDir(outside, join(foreignRepo, "jump"))
+    await grantProjectMemoryRead(setup.own, foreignRepo)
+    const target = `${foreignRepo}/jump/../reference/deploy.md`
+
+    // when
+    const granted = isGrantedProjectMemoryRead(setup.own, target)
+
+    // then
+    expect(readFileSync(resolve(target), "utf8")).toBe("deploy")
+    expect(granted).toBe(true)
   })
 
   test("#given a granted project repo #when the grants are revoked #then its notes are denied again", async () => {

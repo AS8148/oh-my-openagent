@@ -1,5 +1,6 @@
-import { realpath, realpathSync } from "@oh-my-opencode/memory-core/fs"
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
+import { lstatSync, realpath, realpathSync } from "@oh-my-opencode/memory-core/fs"
+import { containedRelativePath, type PathContainmentOptions } from "@oh-my-opencode/utils/path-containment"
+import * as path from "node:path"
 
 import type { MemoryIdentityContext } from "./context"
 
@@ -36,19 +37,62 @@ export function revokeProjectMemoryReads(context: MemoryIdentityContext): void {
   grants.delete(context)
 }
 
-export function isGrantedProjectMemoryRead(context: MemoryIdentityContext, target: string): boolean {
+export function isGrantedProjectMemoryRead(context: MemoryIdentityContext, target: string, options: PathContainmentOptions = {}): boolean {
   const roots = grants.get(context)
   if (roots === undefined || roots.size === 0) return false
-  const resolved = canonicalTarget(target)
-  if (resolved === undefined) return false
+  const windows = (options.platform ?? process.platform) === "win32"
+  const paths = windows ? path.win32 : path.posix
+  const canonicalPath = options.realpath ?? realpathSync.native
+  // A note that does not exist yet stays readable (the read reports it missing); only its existing
+  // ancestors are resolved, so a symlink on the way is still followed before the comparison.
+  const resolvedTarget = paths.resolve(target)
+  const resolve = (input: string) => input === resolvedTarget ? canonicalAllowingMissing(input, canonicalPath, paths) : canonicalPath(input)
   for (const root of roots) {
-    const rel = relative(root, resolved)
-    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) continue
-    const first = rel.split(sep)[0] ?? ""
-    if (EXCLUDED_TOP_LEVEL.includes(first.toLowerCase())) continue
-    return true
+    try {
+      // Roots are stored canonical; a root that now resolves elsewhere was replaced (for example by a
+      // symlink into a third identity) and is no longer the repo the resolver granted.
+      if (!samePath(canonicalPath(root), root, paths, windows)) continue
+      const rel = containedRelativePath(target, root, { ...options, realpath: resolve })
+      if (rel === undefined || rel === "") continue
+      const first = rel.split(paths.sep)[0] ?? ""
+      if (EXCLUDED_TOP_LEVEL.includes(first.toLowerCase())) continue
+      return true
+    } catch {
+      // An absent or unreadable path is not a read grant; never trust a lexical fallback.
+      continue
+    }
   }
   return false
+}
+
+function samePath(left: string, right: string, paths: typeof path.posix, windows: boolean): boolean {
+  const a = paths.normalize(left)
+  const b = paths.normalize(right)
+  return windows ? a.toLowerCase() === b.toLowerCase() : a === b
+}
+
+function canonicalAllowingMissing(input: string, canonicalPath: (path: string) => string, paths: typeof path.posix): string {
+  try {
+    return canonicalPath(input)
+  } catch (error) {
+    const parent = paths.dirname(input)
+    // A dangling link is an entry, not a missing note: its target could appear outside the repo later.
+    if (!isMissingPathError(error) || parent === input || isEntry(input)) throw error
+    return paths.join(canonicalAllowingMissing(parent, canonicalPath, paths), paths.basename(input))
+  }
+}
+
+function isEntry(input: string): boolean {
+  try {
+    lstatSync(input)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")
 }
 
 async function canonicalAsync(path: string): Promise<string | undefined> {
@@ -56,27 +100,5 @@ async function canonicalAsync(path: string): Promise<string | undefined> {
     return await realpath(path)
   } catch {
     return undefined
-  }
-}
-
-function canonical(path: string): string | undefined {
-  try {
-    return realpathSync(path)
-  } catch {
-    return undefined
-  }
-}
-
-// A file that does not exist yet has no real path: canonicalize its nearest existing ancestor.
-function canonicalTarget(target: string): string | undefined {
-  let current = resolve(target)
-  const suffix: string[] = []
-  for (;;) {
-    const real = canonical(current)
-    if (real !== undefined) return suffix.length === 0 ? real : join(real, ...suffix.reverse())
-    const parent = dirname(current)
-    if (parent === current) return undefined
-    suffix.push(current.slice(parent.length).replace(/^[\\/]+/, ""))
-    current = parent
   }
 }
