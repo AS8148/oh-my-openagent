@@ -76,13 +76,14 @@ function hangulReading(char) {
 function numberReading(text) {
 	const match = TRAILING_DIGITS.exec(text)
 	if (!match) return null
+	// Decimals read digit by digit: 6.50 ends on yeong, so a trailing 0 after the point is closed.
 	if (match[2] !== undefined) return DIGIT_READINGS[Number(match[2].at(-1))]
 	const digits = match[1].replaceAll(",", "")
 	const trailingZeros = digits.length - digits.replace(/0+$/, "").length
 	if (trailingZeros === 0 || trailingZeros === digits.length) return DIGIT_READINGS[Number(digits.at(-1))]
-	const group = trailingZeros - (trailingZeros % 4)
-	if (trailingZeros % 4 !== 0) return TEN_POWER_READINGS[(trailingZeros % 4) - 1]
-	return GROUP_READINGS[group] ?? null
+	// From 10^4 up the spoken end is the last non-zero group word (sipjo ends on jo), not sip/baek/cheon.
+	if (trailingZeros >= 4) return GROUP_READINGS[trailingZeros - (trailingZeros % 4)] ?? null
+	return TEN_POWER_READINGS[trailingZeros - 1]
 }
 
 export function finalReading(valueText, unitToken) {

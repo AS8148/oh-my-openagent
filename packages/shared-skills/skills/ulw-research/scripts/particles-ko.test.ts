@@ -32,6 +32,14 @@ describe("finalReading", () => {
 		expect(finalReading("10,000", null)).toBe("closed")
 	})
 
+	test("given a round integer past one jo when read then the last 10^4 group word decides, not sip/baek/cheon", () => {
+		expect(finalReading("10000000000000", null)).toBe("open")
+		expect(finalReading("100000000000000", null)).toBe("open")
+		expect(finalReading("1000000000000000", null)).toBe("open")
+		expect(finalReading("100000", null)).toBe("closed")
+		expect(finalReading("1000000000", null)).toBe("closed")
+	})
+
 	test("given an explicit unit token when read then it overrides the value text", () => {
 		expect(finalReading("15.2", "%")).toBe("open")
 		expect(finalReading("15", "kg")).toBe("closed")
