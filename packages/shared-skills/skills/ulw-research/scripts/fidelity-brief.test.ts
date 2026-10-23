@@ -89,6 +89,18 @@ describe("parseFidelityBlock", () => {
 		// then
 		expect(parseFidelityBlock(markdown).missing).toEqual(["fallback"])
 	})
+
+	test("#given a second Fidelity block #when parsed #then the duplicate is an error", () => {
+		// given
+		const markdown = lockedMd + "\n## Fidelity\nas of: x (answered_by: user)\n"
+		// when
+		const parsed = parseFidelityBlock(markdown)
+		// then
+		expect(parsed.errors.length).toBe(1)
+		expect(parsed.errors[0]).toContain("duplicate")
+		expect(parsed.fields["as of"]).toBe("latest at run start, 2026-10-23")
+		expect(isLocked(parsed)).toBe(false)
+	})
 })
 
 describe("requireLockedBrief", () => {
@@ -103,6 +115,35 @@ describe("requireLockedBrief", () => {
 		const brief = briefFile(lockedMd)
 		try {
 			expect(requireLockedBrief(brief.path)).toMatchObject({ locked: true, exitCode: 0, defects: [], errors: [] })
+		} finally {
+			brief.cleanup()
+		}
+	})
+
+	test("#given field lines with trailing spaces, a tab, and CRLF endings #when required #then they parse like trimmed lines", () => {
+		// given
+		const markdown = lockedMd
+			.replace("meaning check: on (answered_by: default)", "meaning check: on (answered_by: default)  ")
+			.replace("fallback: block-quote (answered_by: request)", "fallback: block-quote (answered_by: request)\t")
+			.replace("as of: latest at run start, 2026-10-23 (answered_by: default)\n", "as of: latest at run start, 2026-10-23 (answered_by: default)  \r\n")
+		const brief = briefFile(markdown)
+		try {
+			// when
+			const result = requireLockedBrief(brief.path)
+			// then
+			expect(result).toMatchObject({ locked: true, exitCode: 0, defects: [], errors: [] })
+			expect(result.parsed.fields.fallback).toBe("block-quote")
+		} finally {
+			brief.cleanup()
+		}
+	})
+
+	test("#given a second Fidelity block #when required #then exit 2 naming the duplicate", () => {
+		const brief = briefFile(lockedMd + "\n## Fidelity\nas of: x (answered_by: user)\n")
+		try {
+			const result = requireLockedBrief(brief.path)
+			expect(result).toMatchObject({ locked: false, exitCode: 2, defects: [] })
+			expect(result.errors[0]).toContain("duplicate ## Fidelity block")
 		} finally {
 			brief.cleanup()
 		}

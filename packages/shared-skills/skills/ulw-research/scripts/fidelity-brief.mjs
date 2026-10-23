@@ -4,7 +4,8 @@
 // `## Fidelity` and ends at the next `## ` heading. It holds the seven field lines below, in any
 // order, each `<field>: <value> (answered_by: user|default|request|pending)`, plus an optional
 // `asked: <field>, <field>` history line. Values carry no parentheses, and `answered_by: pending`
-// is legal only with the value `pending`. This module parses; it never interprets a value, which
+// is legal only with the value `pending`. Trailing whitespace on a line is ignored; a second
+// `## Fidelity` block is a parse error. This module parses; it never interprets a value, which
 // is each consumer's job. Plain Node ESM, node: builtins only.
 
 import { readFileSync } from "node:fs"
@@ -31,15 +32,18 @@ const FIELD_LINE = /^([a-z][a-z ]*[a-z]): ([^()]+) \(answered_by: (user|default|
 const ASKED_LINE = /^asked:(.*)$/
 
 function blockLines(markdown) {
-	const lines = String(markdown).split(/\r?\n/)
-	const start = lines.findIndex((line) => BLOCK_HEADING.test(line))
-	if (start === -1) return null
+	const lines = String(markdown)
+		.split(/\r?\n/)
+		.map((line) => line.trimEnd())
+	const headings = lines.flatMap((line, index) => (BLOCK_HEADING.test(line) ? [index] : []))
+	if (headings.length === 0) return null
+	const [start, ...duplicates] = headings
 	const body = []
 	for (let index = start + 1; index < lines.length; index += 1) {
 		if (NEXT_HEADING.test(lines[index])) break
 		body.push({ text: lines[index], line: index + 1 })
 	}
-	return body
+	return { body, duplicates: duplicates.map((index) => index + 1) }
 }
 
 function parseAsked(rest, line, text, errors) {
@@ -76,9 +80,11 @@ function parseFieldLine({ text, line }, parsed, errors) {
  */
 export function parseFidelityBlock(briefMd) {
 	const parsed = { present: false, fields: {}, answered_by: {}, asked: [], missing: [], pending: [], errors: [] }
-	const body = blockLines(briefMd)
-	if (body !== null) {
+	const block = blockLines(briefMd)
+	if (block !== null) {
+		const { body, duplicates } = block
 		parsed.present = true
+		for (const line of duplicates) parsed.errors.push(`line ${line}: duplicate ## Fidelity block, only one is allowed`)
 		let sawAsked = false
 		for (const entry of body) {
 			if (entry.text.trim() === "") continue
