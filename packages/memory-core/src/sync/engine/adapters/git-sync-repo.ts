@@ -2,8 +2,9 @@
 // is built with plumbing so it never depends on a clean tree: the tree is HEAD plus exactly the
 // rendered paths, assembled in a private index; the commit is authored `OmO Sync`; HEAD moves by
 // compare-and-swap (`update-ref <new> <old>`), so an agent commit landing meanwhile is kept and
-// the sync is rebuilt on top of it; finally only the committed paths' index entries are synced.
-// A person's uncaptured edits elsewhere stay dirty and unstaged.
+// the sync is rebuilt on top of it. Only the committed paths' index entries are then synced, by
+// `syncIndex` once the journal records the commit. A person's uncaptured edits elsewhere stay dirty
+// and unstaged.
 
 import { randomBytes } from "node:crypto"
 import { join } from "node:path"
