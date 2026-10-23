@@ -35,8 +35,8 @@ test("task discovery excludes nested references and README files beside and belo
     ["grp/inner/docs/README.md", "readme-below"],
     ["grp/README.md", "readme-group"],
     ["top.md", "top"],
-  ]) {
-    const path = join(skills, relative!)
+  ] as const) {
+    const path = join(skills, relative)
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, `---\nname: ${name}\ndescription: fixture\n---\n${name}\n`)
   }

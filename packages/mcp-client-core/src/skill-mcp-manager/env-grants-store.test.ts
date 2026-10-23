@@ -16,7 +16,9 @@ const restorers: (() => void)[] = []
 const pendingTimers = new Set<ReturnType<typeof setTimeout>>()
 const label = { project: "/synthetic/project", skill: "carrier", server: "probe" }
 const identity = declarationDigest({ command: "synthetic-probe" })
-const platform = Object.getOwnPropertyDescriptor(process, "platform")!
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")
+if (platformDescriptor === undefined) throw new Error("process.platform has no property descriptor")
+const platform = platformDescriptor
 beforeEach(() => { root = fs.mkdtempSync(join(tmpdir(), "omo-10693-store-")) })
 afterEach(() => {
   Object.defineProperty(process, "platform", platform)

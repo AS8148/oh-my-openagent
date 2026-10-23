@@ -19,8 +19,8 @@ test.each([false, true])("global opencode skill paths keep user MCP authority wi
   for (const dir of [join(project, ".git"), join(project, ".opencode"), globalConfig, globalSkills, projectSkills, projectEscape]) {
     mkdirSync(dir, { recursive: true })
   }
-  for (const [dir, name] of [[globalSkills, "global-owned"], [projectSkills, "project-owned"], [projectEscape, "project-escape"]]) {
-    writeFileSync(join(dir!, "SKILL.md"), `---\nname: ${name}\ndescription: fixture\nmcp:\n  fixture:\n    command: synthetic\n    env:\n      AUTH: "\${REVIEW_TOKEN}"\n---\nBody\n`)
+  for (const [dir, name] of [[globalSkills, "global-owned"], [projectSkills, "project-owned"], [projectEscape, "project-escape"]] as const) {
+    writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: fixture\nmcp:\n  fixture:\n    command: synthetic\n    env:\n      AUTH: "\${REVIEW_TOKEN}"\n---\nBody\n`)
   }
   writeFileSync(join(globalConfig, "opencode.json"), JSON.stringify({ skills: { paths: [globalSkills] } }))
   writeFileSync(join(project, ".opencode", "opencode.json"), JSON.stringify({ skills: { paths: [projectSkills, projectEscape] } }))
