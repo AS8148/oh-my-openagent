@@ -359,6 +359,9 @@
   "packages/omo-senpi/src/components/memory/nudge-wiring.test.ts": {
     "typescript/no-non-null-assertion": 3
   },
+  "packages/omo-senpi/src/components/memory/project-memory-recall.test.ts": {
+    "typescript/no-non-null-assertion": 2
+  },
   "packages/omo-senpi/src/components/memory/recall-notice.test.ts": {
     "typescript/no-non-null-assertion": 1
   },
