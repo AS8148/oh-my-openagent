@@ -82,7 +82,7 @@ export function registerSearchCommand(pi: SenpiExtensionAPI, deps: MemoryCommand
 
       const { terms, phrases } = parseQuery(query)
       const needles = [...phrases, ...terms]
-      const lines = [`# Search: "${query}" — ${results.length} result${results.length === 1 ? "" : "s"}`, ""]
+      const lines = [`# Search: "${query}": ${results.length} result${results.length === 1 ? "" : "s"}`, ""]
       results.forEach((result, index) => {
         lines.push(
           `${index + 1}. session ${result.conversationId} · ${result.createdAt} · ${result.document.messageType ?? "unknown"}`,
