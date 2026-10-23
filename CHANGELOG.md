@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Tasks honour a `-fast` model alias that the provider config pairs with a model.** Kibitzer no longer stops at a model whose start is refused; it falls back to the next one. ([#10538](https://github.com/code-yeongyu/oh-my-openagent/pull/10538), fixes [#10536](https://github.com/code-yeongyu/oh-my-openagent/issues/10536))
+
 **Child startup failures keep their cause.** When a task child exits while the parent writes to stdin, its own typed failure is reported instead of a broken-pipe error. ([#11097](https://github.com/code-yeongyu/oh-my-openagent/pull/11097), fixes [#11096](https://github.com/code-yeongyu/oh-my-openagent/issues/11096))
 
 **The side panel says, once, that its column needs the fullscreen TUI.** `side_panel.enabled` renders its right-hand column only in the fullscreen TUI (`--tui-mode fullscreen`, or `tuiMode` in senpi's settings); in the default regular mode the sections stay a block above the editor. The docs now say so at the top of the `side_panel` table, and the first regular-mode run with the panel on shows a one-time notice naming both ways to switch. ([#10560](https://github.com/code-yeongyu/oh-my-openagent/issues/10560), [#10565](https://github.com/code-yeongyu/oh-my-openagent/pull/10565))
