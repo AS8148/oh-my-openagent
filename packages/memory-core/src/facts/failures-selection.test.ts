@@ -161,6 +161,13 @@ describe("facts launch selection", () => {
     expect(selection.skipped).toEqual({})
   })
 
+  test("#given a parked predecessor outside the hot queue #when selecting its successor #then its ledger boundary still blocks the conversation", () => {
+    const entries = [entry("alpha", "m2", 4), entry("beta", "m9", 2)]
+    const selection = selectLaunchable(entries, failures([parked("alpha", "m1", 2)]), T0)
+    expect(endpoints(selection)).toEqual(["beta/m9"])
+    expect(selection.skipped).toEqual({ [factsSelectionKey("alpha", "m2")]: "blocked-by-predecessor" })
+  })
+
   test("#given an out-of-order pending list #when a dropped entry has a lower snapshot boundary #then gating follows the boundary, not the list order", () => {
     // given: the successor is listed first; prefix gating is defined by the snapshot boundary.
     const entries = [entry("alpha", "m2", 6), entry("alpha", "m1", 2)]

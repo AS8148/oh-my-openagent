@@ -53,6 +53,16 @@ export function selectLaunchable(
 ): FactsLaunchSelection {
   const records = new Map((failures?.entries ?? []).map((record) => [recordKey(record), record]))
   if (records.size === 0) return { selected: [...entries], skipped: {} }
+  // Parked predecessors live outside the hot queue now. Their ledger boundary
+  // still blocks successors until manual retry, even when no pending file carries it.
+  const blockedThrough = new Map<string, number>()
+  for (const record of records.values()) {
+    if (dropReason(record, now) === undefined) continue
+    const boundary = blockedThrough.get(record.conversationId)
+    if (boundary === undefined || record.end_snapshot_line < boundary) {
+      blockedThrough.set(record.conversationId, record.end_snapshot_line)
+    }
+  }
 
   const byConversation = new Map<string, FactsQueueEntry[]>()
   for (const entry of entries) {
@@ -68,7 +78,9 @@ export function selectLaunchable(
     )
     let blocked = false
     for (const entry of ordered) {
+      const boundary = blockedThrough.get(entry.conversationId)
       const reason = blocked ? "blocked-by-predecessor" : dropReason(records.get(entryKey(entry)), now)
+        ?? (boundary !== undefined && entry.range.end_snapshot_line > boundary ? "blocked-by-predecessor" : undefined)
       if (reason === undefined) continue
       skipped[entryKey(entry)] = reason
       blocked = true
