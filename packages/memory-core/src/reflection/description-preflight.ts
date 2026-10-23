@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { lstat, readFile, writeFile } from "../fs/resilient"
 import { GitMemoryRepo, type GitExec } from "../git"
+import { STABLE_LOG_OUTPUT } from "../git/stable-log-output"
 import { parseMemoryFile } from "../memfs/frontmatter"
 import { FRONTMATTER_RE, renderStringScalar } from "../memfs/frontmatter-scalar"
 import { describeFrontmatterViolation, MAX_DESCRIPTION_LENGTH } from "../memfs/frontmatter-validation"
@@ -118,7 +119,7 @@ async function trimDescriptions(
   }
   if (trimmed.length === 0) return trimmed
 
-  const [authorName = "", authorEmail = ""] = (await git(["show", "-s", "--format=%an%x00%ae", tipSha])).split("\0")
+  const [authorName = "", authorEmail = ""] = (await git([...STABLE_LOG_OUTPUT, "show", "-s", "--format=%an%x00%ae", tipSha])).split("\0")
   await repo.commitWrite(
     trimmed.map(({ path }) => path),
     [
