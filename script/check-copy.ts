@@ -13,8 +13,8 @@ const GENERATED_SOURCES = new Set([
 
 export function isProductSource(path: string): boolean {
   return /\.[cm]?[jt]sx?$/.test(path)
-    && /^(?:(?:src|app|lib|workers)\/|packages\/[^/]+\/(?:src|app|lib|components|i18n|plugin)\/)/.test(path)
-    && !/(?:^|\/)(?:__tests__|tests?|testkit|testing|fixtures|testUtils|_generated|vendor|vendored|upstreams|node_modules|dist|scripts)(?:\/|$)/.test(path)
+    && /^(?:(?:src|app|lib|workers|bin)\/|packages\/[^/]+\/(?:src|app|lib|components|i18n|plugin)\/|packages\/omo-native\/bin\/)/.test(path)
+    && !/(?:^|\/)(?:__tests__|tests?|testkit|fixtures|testUtils|_generated|vendor|vendored|upstreams|node_modules|dist|scripts)(?:\/|$)/.test(path)
     && !/\.(?:test|spec|testkit|gen|generated)\.|\.d\.[cm]?ts$/.test(path)
     && !/(?:^|\/)testUtils\.[cm]?[jt]sx?$/.test(path)
     && !/^packages\/(?:lsp-daemon|lsp-tools-mcp)\//.test(path)
