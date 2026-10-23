@@ -1,0 +1,45 @@
+name: Diagnose Windows catalog import
+
+on:
+  push:
+    branches: [diag/10158-windows-provider-profile]
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: dev
+            head: a2595cb6ef90e9a7d24a4ed18f826eda1828ffc7
+          - variant: pr10673
+            head: 9a13dfd2ca53e59f3e742cacaadac39fc515304b
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: probe
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.head }}
+          path: target
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"
+      - name: Install dependencies
+        working-directory: target
+        run: bun install --frozen-lockfile
+      - name: Profile exact catalog case and held registry
+        env:
+          PROFILE_VARIANT: ${{ matrix.variant }}
+          PROFILE_HEAD: ${{ matrix.head }}
+          DO_NOT_TRACK: "1"
+          OMO_DISABLE_TELEMETRY: "1"
+        run: bun probe/script/diag-10158-profile.mjs target
