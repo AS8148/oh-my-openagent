@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The count of undelivered messages matches the messages actually dropped ([#10987](https://github.com/code-yeongyu/oh-my-openagent/pull/10987)).** When a stopped parent cancelled a task, or a task that could not be resumed was closed, its queued messages were dropped with a note saying how many. That count came from a read taken just before the queue was cleared, so a message sent in between was dropped without being counted. The count now comes from the same write that clears the queue. ([#10866](https://github.com/code-yeongyu/oh-my-openagent/issues/10866))
+
 ## [5.1.43] - 2026-10-22
 
 **A session's first prompt no longer freezes a shared host while it reads what changed in memory ([#10728](https://github.com/code-yeongyu/oh-my-openagent/pull/10728)).** A session resumed a few hours after its last turn read the memory commits since then with one `git diff-tree` process per commit, all started at once. On a busy memory repository that was thousands of processes, and starting them blocked every session on the same host for 28 s with one session and 142 s with seven, while the finished ones piled up unreaped. The range is now read with one `git log`; the same notices come out, the longest block with seven sessions fell to 16 s, and the host's memory footprint during prompts fell from a median of 1,258 MB to 813 MB. ([#10726](https://github.com/code-yeongyu/oh-my-openagent/issues/10726))
