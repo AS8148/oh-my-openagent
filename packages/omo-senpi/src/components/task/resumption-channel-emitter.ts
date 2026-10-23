@@ -7,7 +7,7 @@ import {
   type TaskRecord,
 } from "@oh-my-opencode/senpi-task"
 
-import type { SenpiExtensionAPI } from "../../extension/types"
+import type { ComponentLogger, SenpiExtensionAPI } from "../../extension/types"
 import { isTerminal, taskStatusDescription } from "./status-row-format"
 
 export const RESUMPTION_CHANNEL_STATE_EVENT = "wake_source_state"
@@ -44,6 +44,7 @@ export type ResumptionChannelEmitterDeps = {
   readonly stateDir: StateDirConfig
   readonly settings: OmoTaskSettings
   readonly isOwnedTeamMember?: OwnedTeamMemberResolver
+  readonly logger?: Pick<ComponentLogger, "warn">
 }
 
 export function createResumptionChannelEmitter(
@@ -63,10 +64,24 @@ export function createResumptionChannelEmitter(
     const sessionId = deps.sessionId()
     if (sessionId === undefined) return []
     const channels: ResumptionChannel[] = []
+    // A workpool worker is claimed without a terminal notification, yet it is this session's child work (#10782).
+    // An unreadable pool store must not cost this emission: it is logged once and pool ownership is skipped.
+    let poolStoreReadable = true
+    const ownedByPool = (taskId: string): boolean => {
+      if (!poolStoreReadable) return false
+      try {
+        return deps.manager.workpools?.ownsTask(taskId) === true
+      } catch (error) {
+        poolStoreReadable = false
+        deps.logger?.warn("resumption channels: workpool store unreadable, pool workers are not counted this round", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return false
+      }
+    }
     for (const { record } of deps.manager.list({ scope: "parent-session", session_id: sessionId })) {
       if (isTerminal(record.status)) continue
-      // A workpool worker is claimed without a terminal notification, yet it is this session's child work (#10782).
-      const background = deps.manager.wasBackground(record.task_id) || deps.manager.workpools?.ownsTask(record.task_id) === true
+      const background = deps.manager.wasBackground(record.task_id) || ownedByPool(record.task_id)
       const owned = background
         ? false
         : await resolveOwnedTeamMember(record, sessionId, {

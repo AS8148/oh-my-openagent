@@ -34,7 +34,12 @@ type Payload = {
   readonly items?: readonly { readonly id: string; readonly description?: string; readonly startedAtMs?: number }[]
 }
 
-function createHarness(records: TaskRecord[], poolTaskIds: readonly string[] = []) {
+function createHarness(
+  records: TaskRecord[],
+  poolTaskIds: readonly string[] = [],
+  ownsTask: (taskId: string) => boolean = (taskId) => poolTaskIds.includes(taskId),
+  warnings: string[] = [],
+) {
   const emitted: Payload[] = []
   const pi = new FakeExtensionAPI()
   pi.events = { emit: (_name, data) => emitted.push(data as Payload), on: () => () => {} }
@@ -43,8 +48,9 @@ function createHarness(records: TaskRecord[], poolTaskIds: readonly string[] = [
     manager: {
       list: (_scope: ListScope): readonly ListedTask[] => records.map((record) => ({ record })),
       wasBackground: (taskId: string) => records.find((record) => record.task_id === taskId)?.notify_on_terminal === true,
-      workpools: { ownsTask: (taskId: string) => poolTaskIds.includes(taskId) },
+      workpools: { ownsTask },
     },
+    logger: { warn: (message: string) => warnings.push(message) },
     sessionId: () => SESSION_ID,
     stateDir: { project_dir: "/tmp/omo-resumption-channel-items-test" },
     settings: {} as OmoTaskSettings,
@@ -103,5 +109,22 @@ describe("resumption-channel emitter wake-source items (#10026)", () => {
     expect(payload?.kind).toBe("children")
     expect(payload?.activeCount).toBe(1)
     expect(payload?.items?.map((item) => item.id)).toEqual([worker.task_id])
+  })
+
+  it("#given an unreadable workpool store #when the session snapshot is emitted #then the emission still goes out and the failure is logged once (#10782)", async () => {
+    // given a foreground record (so pool ownership is probed), a live background child, and a pool store that throws
+    const foreground = { ...child("st_00000041", "Foreground work", "2026-10-24T02:00:00.000Z"), notify_on_terminal: false }
+    const background = child("st_00000042", "Draft the notes", "2026-10-24T02:01:00.000Z")
+    const warnings: string[] = []
+    const harness = createHarness([foreground, background], [], () => {
+      throw new Error("store_corrupt")
+    }, warnings)
+
+    // when
+    await harness.emitter.emitSessionStart()
+
+    // then the background child is still published, and the corrupt store is reported, not swallowed
+    expect(harness.emitted.at(-1)?.items?.map((item) => item.id)).toEqual([background.task_id])
+    expect(warnings).toHaveLength(1)
   })
 })
