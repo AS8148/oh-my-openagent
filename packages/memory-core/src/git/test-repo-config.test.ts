@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { chmod, writeFile, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { createRepo, removeTempDirs, run, tempDir } from "../memfs/hooks.test-support"
 import { createMirrorRepo, initBareMirror } from "../sync/mirror.test-support"
 import { gitRepo } from "../sync/engine/engine-harness.test-support"
@@ -8,6 +8,8 @@ import { initGitSyncTestRepo } from "../sync/engine/adapters/git-sync-repo.test-
 import { ensureQaRepo } from "../sync/engine/adapters/qa-repo.test-support"
 
 afterEach(removeTempDirs)
+
+const normalizedPath = (path: string): string => path.replace(/\\/g, "/").toLowerCase()
 
 const factories = [
   { name: "hooks", create: () => createRepo() },
@@ -55,7 +57,9 @@ describe("fixture repositories never spawn unowned git maintenance (#10945)", ()
     const events: { event: string; argv?: string[] }[] = (await readFile(trace, "utf8"))
       .trim().split("\n").map((line) => JSON.parse(line))
     const children = events.filter((event) => event.event === "child_start").map((event) => event.argv ?? [])
-    expect(children.some((argv) => argv.includes(hook))).toBe(true)
+    // Git on Windows passes the hook path with its own separators and drive spelling, so match the normalized tail.
+    const hookTail = normalizedPath(`${basename(hooks)}/pre-commit`)
+    expect(children.some((argv) => argv.some((arg) => normalizedPath(arg).endsWith(hookTail)))).toBe(true)
     expect(children.some((argv) => argv.some((arg) => arg.includes("receive-pack")))).toBe(true)
     expect(children.filter((argv) => argv.includes("maintenance") || argv.includes("gc"))).toEqual([])
   }, 30_000)
