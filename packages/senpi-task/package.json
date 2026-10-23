@@ -81,8 +81,8 @@
     "typebox": "1.3.34"
   },
   "peerDependencies": {
-    "@code-yeongyu/senpi": "2026.10.21-2",
-    "@earendil-works/pi-tui": "2026.10.21-2",
+    "@code-yeongyu/senpi": "2026.10.21-3",
+    "@earendil-works/pi-tui": "2026.10.21-3",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
@@ -97,8 +97,8 @@
     }
   },
   "devDependencies": {
-    "@code-yeongyu/senpi": "2026.10.21-2",
-    "@earendil-works/pi-tui": "npm:@code-yeongyu/senpi-tui@2026.10.21-2",
+    "@code-yeongyu/senpi": "2026.10.21-3",
+    "@earendil-works/pi-tui": "npm:@code-yeongyu/senpi-tui@2026.10.21-3",
     "typebox": "1.3.34"
   },
   "sideEffects": false
