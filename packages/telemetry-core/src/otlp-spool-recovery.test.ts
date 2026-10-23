@@ -24,9 +24,10 @@ const CAP_MS = 400
 const FLUSH_DEADLINE_MS = 360
 // The outer breaker: far above any cap, so only a shutdown that never returns reaches it.
 const BREAKER_MS = 10_000
-// A generous bound for the never-settling test: ten caps (4 s against the real ~0.4 s). Timers and
-// Bun.sleep are caught by identity; this clock is the only check that sees a synchronous stall, and it
-// is 10x the cap, not the 1.3x budget a loaded Windows runner exceeded (#10967).
+// A generous bound for the never-settling test: ten caps (4 s against the real ~0.4 s). Waits through the
+// global setTimeout, Bun.sleep and node:timers/promises are caught by identity. Everything else (a
+// synchronous stall, setInterval or setImmediate polling, AbortSignal.timeout) is seen only by this clock.
+// It is 10x the cap, not the 1.3x budget a loaded Windows runner exceeded (#10967).
 const TEN_CAPS_MS = 10 * CAP_MS
 
 /** One timer armed while a recorder is installed: its arm order, delay, and whether it has fired. */
@@ -280,13 +281,14 @@ describe("spool recovery", () => {
       // then
       // No wait of any kind (a timer, Bun.sleep, a synchronous stall anywhere) held shutdown for ten caps...
       expect(outcome).toBe("settled")
-      // ...shutdown's own deadlines are the first flush-deadline and cap timers armed after the call...
-      const sinceShutdown = timers.armed.filter((timer) => timer.seq >= firstShutdownSeq)
-      const ownFlushDeadline = sinceShutdown.find((timer) => timer.ms === FLUSH_DEADLINE_MS)
-      const ownCap = sinceShutdown.find((timer) => timer.ms === CAP_MS)
+      // ...shutdown arms its two deadlines back to back before anything else, so they are, by position, the
+      // first two timers armed after the call: the flush deadline, then the cap. Matching by length instead
+      // would let an extra wait of the same length pass as one of them...
+      const ownFlushDeadline = timers.armed[firstShutdownSeq]
+      const ownCap = timers.armed[firstShutdownSeq + 1]
+      expect([ownFlushDeadline?.ms, ownCap?.ms]).toEqual([FLUSH_DEADLINE_MS, CAP_MS])
       // ...the flush deadline fired, and the only other timer that may have fired is shutdown's own cap
       // (it does when a claim is still in flight). Any other fired timer, of any length, is an extra wait.
-      expect(ownFlushDeadline).toBeDefined()
       expect(firedWhenShutdownReturned).toContain(ownFlushDeadline as RecordedTimer)
       expect(firedWhenShutdownReturned.filter((timer) => timer !== ownFlushDeadline && timer !== ownCap)).toEqual([])
       // ...and nothing waited through Bun.sleep or node:timers/promises either.
