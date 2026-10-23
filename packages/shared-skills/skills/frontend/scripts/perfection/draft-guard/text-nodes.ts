@@ -16,8 +16,9 @@ const HTML_TEMPLATE = /<template\b(?![^>]*\s(?:x-[\w-]+|v-[\w-]+|[:@#][\w.-]+))[
 const TAG = /<(\/?)([A-Za-z][\w.:-]*)((?:[^>"'{}]|"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\})*)>/g
 const CLASS_ATTR = /\b(?:class|className)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{((?:[^{}]|\{[^{}]*\})*)\})/
 const STRING_LITERAL = /["'`]([^"'`]*)["'`]/g
-const ANNOUNCED_ATTR = /(?:^|\s)(aria-label|title|alt|placeholder)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/g
-const VALUE_ATTR = /\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/
+const ANNOUNCED_NAME = /(?:^|\s)(?:aria-label|title|alt|placeholder)\s*=/g
+const VALUE_NAME = /(?:^|\s)value\s*=/
+const LITERAL_VALUE = /^\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/
 const HIDDEN_ATTR = /(?:^|\s)hidden(?=\s|=|\/|$)/
 const STATE_ATTR = /(?:^|\s)(?:data-status|data-state|aria-(?:current|selected|pressed|checked|expanded|busy|invalid|disabled|valuenow))\s*=/
 const ATTR_VALUES = /"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\}/g
@@ -48,11 +49,19 @@ function closeTo(stack: Element[], tag: string): void {
 }
 
 /** In a script, `<` opens JSX only where an expression can start; `Array<string>`, `pick<T>(` and `a<b` stay code. */
-function opensJsx(text: string, start: number, attrs: string): boolean {
+function opensJsx(text: string, start: number, name: string, attrs: string): boolean {
 	if (/^\s*,|^\s+extends\b/.test(attrs)) return false
+	if (/^(?:const|in|out)$/.test(name) && /^\s+[A-Za-z_$]/.test(attrs)) return false
 	const before = text.slice(0, start).trimEnd()
 	if (before === "" || /\b(?:return|yield|default)$/.test(before)) return true
 	return JSX_LEAD.has(before.at(-1) ?? "")
+}
+
+function literalAfter(attrs: string, from: number): { readonly value: string; readonly at: number } | null {
+	const m = LITERAL_VALUE.exec(attrs.slice(from))
+	if (!m) return null
+	const value = m[1] ?? m[2] ?? m[3] ?? ""
+	return { value, at: from + m[0].lastIndexOf(value) }
 }
 
 function keepLiterals(segment: string): string {
@@ -81,7 +90,7 @@ export function textNodes(source: string, kind: MarkupKind): TextNode[] {
 		const start = m.index ?? 0
 		const [whole, closing, rawName = "", attrs = ""] = m
 		const end = start + whole.length
-		if (kind === "jsx" && !closing && stack.length === 0 && !opensJsx(text, start, attrs)) continue
+		if (kind === "jsx" && !closing && stack.length === 0 && !opensJsx(text, start, rawName, attrs)) continue
 		flush(start)
 		cursor = end
 		const tag = rawName.toLowerCase()
@@ -96,13 +105,13 @@ export function textNodes(source: string, kind: MarkupKind): TextNode[] {
 		const attrsAt = start + 1 + rawName.length
 		const hidden = hiddenDepth > 0 || HIDDEN_ATTR.test(names)
 		if (!hidden) {
-			for (const a of attrs.matchAll(ANNOUNCED_ATTR)) {
-				const value = a[2] ?? a[3] ?? a[4] ?? ""
-				if (value.trim()) nodes.push({ kind: "label", text: value, offset: attrsAt + (a.index ?? 0) + a[0].indexOf(value), stack: [...stack, element] })
+			for (const a of names.matchAll(ANNOUNCED_NAME)) {
+				const lit = literalAfter(attrs, (a.index ?? 0) + a[0].length)
+				if (lit?.value.trim()) nodes.push({ kind: "label", text: lit.value, offset: attrsAt + lit.at, stack: [...stack, element] })
 			}
-			const v = isStatElement(element) ? VALUE_ATTR.exec(attrs) : null
-			const value = v ? (v[1] ?? v[2] ?? v[3] ?? "") : ""
-			if (v && value.trim()) nodes.push({ kind: "value", text: value, offset: attrsAt + v.index + v[0].indexOf(value), stack: [...stack, element] })
+			const v = isStatElement(element) ? VALUE_NAME.exec(names) : null
+			const lit = v ? literalAfter(attrs, v.index + v[0].length) : null
+			if (lit?.value.trim()) nodes.push({ kind: "value", text: lit.value, offset: attrsAt + lit.at, stack: [...stack, element] })
 		}
 		if (VOID_TAGS.has(tag) || attrs.trimEnd().endsWith("/")) continue
 		stack.push(element)
