@@ -1,8 +1,7 @@
-// Vendored from code-yeongyu/senpi@c7ac4b1a86 (formatting), with the Windows
-// rename-retry hunk from 1cbe1594e353126ab8016bb0183ab82ffc5715d5 and the
-// lost-lock refusal from b1b11bcde0b8e22dc2555c81ed0d3de0c5a3d0ba.
+// Vendored from code-yeongyu/senpi@c6317f5971 (senpi#3818, formatting only).
 // Source of truth: packages/coding-agent/src/core/extensions/builtin/mcp/env-grants-store.ts.
-// Replace this copy with the engine export after the senpi release.
+// This copy stays: omo-opencode consumes it and has no senpi dependency.
+// env-grants-store-drift.test.ts fails when it stops matching the pinned senpi store.
 /**
  * Shared native/legacy MCP environment grants, with no senpi-internal imports.
  *
