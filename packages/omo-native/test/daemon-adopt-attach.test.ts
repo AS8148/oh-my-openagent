@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 
 import { createGatewayStore } from "../../omo-senpi/src/components/thread/gateway/store"
 import { createLiveThreadSurface } from "../../omo-senpi/src/components/thread/live-surface"
@@ -52,7 +53,8 @@ describe("omo daemon adopt against an attach-capable host", () => {
   test("#given a release that fails after the session is already gone #when adopt asks again #then the gone session counts as released and is resumed here", async () => {
     await withContractHost({ auth: true, releaseFailsThenGone: true }, async (host) => {
       const { outcome } = await adopt(host)
-      expect(outcome).toEqual({ launch: ["--session", `${host.root}/session.jsonl`], cwd: host.root })
+      // The host names the session file as the contract host builds it: path.join, so backslashes on win32.
+      expect(outcome).toEqual({ launch: ["--session", join(host.root, "session.jsonl")], cwd: host.root })
     })
   })
 })
