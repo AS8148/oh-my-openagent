@@ -776,7 +776,7 @@ jobs:
           node packages/omo-senpi/plugin/scripts/build-install.mjs --check
           # The merge gate reads this map at the base tip to tell whether a PR can change a committed
           # bundle; it is traced from the three generators above, so a stale map is a red build.
-          node packages/omo-senpi/plugin/scripts/bundle-inputs.mjs --check
+          bun run bundle-inputs:check
 
       - name: Run Senpi compatibility tests
         id: senpi-tests-posix

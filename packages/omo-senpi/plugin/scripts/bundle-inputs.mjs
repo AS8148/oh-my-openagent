@@ -4,7 +4,9 @@
 // bundle-inputs-trace.mjs, which records each file read, directory listed, module loaded and bundler input.
 // The merge gate reads the map at the base tip to tell whether a PR can change a generated artifact;
 // `--check` (CI) re-traces and fails when the committed map differs. A `directories` entry is recursive: any file
-// added anywhere below it is an input. Written by build:senpi-plugin (via :stage); never by the :native release chain.
+// added anywhere below it is an input. Run only explicitly: `bun run bundle-inputs` (write) and `bun run bundle-inputs:check`
+// (CI). Never part of build:senpi-plugin:stage, `build`, `prepare` or a test chain: `bun install` runs `prepare`, and the trace
+// there hung every Windows install for the whole job timeout. Under an install lifecycle it refuses before any recipe step.
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -141,7 +143,15 @@ export function traceBundleInputs() {
   }
 }
 
+// Bun and npm set npm_lifecycle_event for lifecycle scripts; a fail-closed backstop should an install chain reach this script.
+export const INSTALL_LIFECYCLES = ["prepare", "postinstall", "install"]
+
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const lifecycle = process.env.npm_lifecycle_event
+  if (lifecycle !== undefined && INSTALL_LIFECYCLES.includes(lifecycle)) {
+    console.error(`bundle-inputs: refusing to trace during '${lifecycle}': the trace never runs during install; run bun run bundle-inputs`)
+    process.exit(1)
+  }
   const output = join(repoRoot, BUNDLE_INPUTS_PATH)
   try {
     const rendered = renderBundleInputs(traceBundleInputs())
@@ -152,7 +162,7 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
         const have = committed === undefined ? { files: [], directories: [] } : JSON.parse(committed)
         const added = [...want.files, ...want.directories].filter((p) => !have.files.includes(p) && !have.directories.includes(p))
         const removed = [...have.files, ...have.directories].filter((p) => !want.files.includes(p) && !want.directories.includes(p))
-        console.error(`${BUNDLE_INPUTS_PATH} is not current (${committed === undefined ? "missing" : `+${added.length} -${removed.length}`}): run node packages/omo-senpi/plugin/scripts/bundle-inputs.mjs`)
+        console.error(`${BUNDLE_INPUTS_PATH} is not current (${committed === undefined ? "missing" : `+${added.length} -${removed.length}`}): run bun run bundle-inputs`)
         for (const p of added.slice(0, 20)) console.error(`  + ${p}`)
         for (const p of removed.slice(0, 20)) console.error(`  - ${p}`)
         process.exit(1)

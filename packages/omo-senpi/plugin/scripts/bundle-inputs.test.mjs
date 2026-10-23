@@ -100,19 +100,69 @@ describe("bundling steps", () => {
   })
 })
 
-// guards: the release build (build:omo-native runs build:senpi-plugin:native into a temp output) neither
-// depends on the in-repo bundles being current nor rewrites the tracked map; the canonical regen path does write it.
+// guards: `bun install` runs `prepare` (= `bun run build` over script/build-nodes.ts), so anything that chain reaches runs on
+// every install; the trace there hung Windows installs for the whole job timeout. The trace runs only from the explicit
+// `bundle-inputs` regen script and CI's `bundle-inputs:check` step, never from an install, build or test chain.
 describe("package.json build scripts", () => {
   const scripts = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).scripts
 
-  test("build:senpi-plugin:native does not run the map step", () => {
-    expect(scripts["build:senpi-plugin:native"]).not.toContain("bundle-inputs.mjs")
+  // Every root script reachable from `names` through `bun run <script>` references, the named ones included.
+  const reachable = (names) => {
+    const seen = new Set()
+    const walk = (name) => {
+      if (seen.has(name) || scripts[name] === undefined) return
+      seen.add(name)
+      for (const match of scripts[name].matchAll(/\bbun run ([\w:.-]+)/g)) walk(match[1])
+    }
+    for (const name of names) walk(name)
+    return [...seen]
+  }
+
+  test("no script reachable from an install, build or test chain runs the trace", () => {
+    const names = reachable(["prepare", "build", "build:senpi-plugin", "build:senpi-plugin:stage", "build:senpi-plugin:native", "test:senpi"])
+    expect(names).toContain("build:senpi-plugin:stage")
+    expect(names.filter((name) => scripts[name].includes("bundle-inputs.mjs"))).toEqual([])
   })
 
-  test("build:senpi-plugin regenerates the map through build:senpi-plugin:stage", () => {
-    expect(scripts["build:senpi-plugin"]).toContain("build:senpi-plugin:stage")
-    expect(scripts["build:senpi-plugin:stage"]).toContain("node packages/omo-senpi/plugin/scripts/bundle-inputs.mjs")
+  test("no script/build-nodes.ts node reaches the trace through package.json", async () => {
+    const { BUILD_NODES } = await import(join(repoRoot, "script", "build-nodes.ts"))
+    const senpi = BUILD_NODES.find((node) => node.id === "senpi-plugin")
+    expect(senpi.args).toEqual(["run", "build:senpi-plugin:stage"])
+    for (const node of BUILD_NODES) {
+      expect(node.args.join(" ")).not.toContain("bundle-inputs.mjs")
+      const roots = node.command === "bun" && node.args[0] === "run" ? [node.args[1]] : []
+      expect(reachable(roots).filter((name) => scripts[name].includes("bundle-inputs.mjs"))).toEqual([])
+    }
   })
+
+  test("the trace has its own regen and check scripts", () => {
+    expect(scripts["bundle-inputs"]).toBe("node packages/omo-senpi/plugin/scripts/bundle-inputs.mjs")
+    expect(scripts["bundle-inputs:check"]).toBe("node packages/omo-senpi/plugin/scripts/bundle-inputs.mjs --check")
+  })
+})
+
+// guards: a fail-closed backstop for the rule above. Bun and npm set npm_lifecycle_event for lifecycle scripts; under an
+// install lifecycle the script refuses before any recipe step runs (no scratch dir, no generator spawned).
+describe("under an install lifecycle", () => {
+  for (const lifecycle of ["prepare", "postinstall", "install"]) {
+    test(`refuses to trace when npm_lifecycle_event=${lifecycle}`, () => {
+      const tmp = mkdtempSync(join(tmpdir(), "omo-bundle-inputs-lifecycle-"))
+      try {
+        const result = spawnSync("node", [join(import.meta.dir, "bundle-inputs.mjs"), "--check"], {
+          cwd: repoRoot,
+          env: { ...process.env, npm_lifecycle_event: lifecycle, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
+          encoding: "utf8",
+          timeout: 20000,
+        })
+        expect(result.status).not.toBe(0)
+        expect(result.status).not.toBeNull()
+        expect(result.stderr).toContain(`bundle-inputs: refusing to trace during '${lifecycle}'`)
+        expect(readdirSync(tmp)).toEqual([])
+      } finally {
+        rmSync(tmp, { recursive: true, force: true })
+      }
+    })
+  }
 })
 
 // A caller's environment (build:omo-native sets OMO_SENPI_PLUGIN_OUTPUT=<buildRoot>/plugin) or a developer shell must
