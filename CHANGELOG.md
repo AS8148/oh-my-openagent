@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Inside OmO Desktop the browser skill works as in the terminal, plus the app's built-in browser.** The agent's browsers (your own through BrowserSkill, or one it starts itself) are no longer refused or changed inside the app, and `connectBuiltinBrowser()` adds the thread's tab in the app's built-in browser, which you can watch beside the chat ([#11066](https://github.com/code-yeongyu/oh-my-openagent/pull/11066)).
+
 **A session in the OmO desktop app's Built-in browser mode can ask the app for its in-app browser.** The browser skill told the agent to use the app's in-app browser tools, but an OmO session had none, so agents reached for whatever outside browser the machine had (sisyphuslabs/omo-desktop-app#3292). A new eval-only `omo_desktop_toolkit` tool asks the app for a toolkit it hosts for the session's thread, and `connectBuiltinBrowser()` in the browser skill uses it to attach OmOWright to that thread's tab. The app's grant names a loopback endpoint and a token file, so the token never appears in a tool result; an app that offers no toolkit is answered at once, and one that does not answer within 15 s gets a timeout. Works once the desktop app ships its side.
 
 **The engine publishes its OpenTelemetry schema artifact.** `telemetry-schema.json` describes exactly what an OTel client of the engine may send, generated from the event schemas and kept byte-exact by a drift gate, so the telemetry collector can pin and enforce it. It is separate from the anonymous PostHog events, which are unchanged ([#10980](https://github.com/code-yeongyu/oh-my-openagent/pull/10980)).

@@ -18,29 +18,28 @@ one where a human is a single call away. Never substitute one engine for the oth
 the attached engine is not set up, run the onboarding script and tell the user its one remaining
 step.
 
-## Step 0 — which engine this session is allowed to use
+## Step 0 — inside OmO Desktop: everything above, plus the app's built-in browser
 
-When `OMO_BROWSER_ENGINE` is set (the OmO desktop app sets it for every session), it wins over the table above:
+When `OMO_BROWSER_ENGINE` is set (the OmO desktop app sets it for every session), everything above works exactly
+as in the terminal: `connectBrowserSkill()` for the user's own browser, `connectPipe()` / `connectCloakProfile()` /
+`connect()` for a browser of your own, with the same table to choose between them. The app adds one more option:
 
-| Value | What you do |
-|---|---|
-| `connected` | Use `connectBrowserSkill()` only. If the user's browser is not connected you get a "Connect your browser" error: relay it and stop. Never open another browser |
-| `builtin` | The app's in-app browser for this thread, the tab the user sees beside the chat, and nothing else: `const browser = await omowright.connectBuiltinBrowser(); const [tab] = await browser.listTargets(); const page = await browser.attachPage(tab.id); await page.goto(url)`. Work in few calls: take `page.snapshot()` once, act on its refs, and chain several actions in one eval cell (`page.locator(ref).fill()`, `.click()`, `.selectOption(value)`, `.setInputFiles(path)`), snapshotting again only after the page changed. It has one tab: navigate it, never open new tabs. If `connectBuiltinBrowser()` throws `browser_builtin_unavailable`, this session has no browser: tell the user with its message and stop. Never fall back to the `computer` tool, `connectBrowserSkill()`, `tool_search`, or any other browser |
-| `none` | Do not do browser work. Say that agent browser access is off for this project |
-| unset | The table above, as before (terminal use) |
+| Option | What it is | Use it when |
+|---|---|---|
+| `connectBuiltinBrowser()` | OmO's built-in browser for this thread: the tab the user sees beside the chat, which they can watch, take over and share | the user should see the page while you work, the task is QA of something in the app, or a sign-in the user should do themselves in a visible tab |
 
-While any engine is set, `loadOmowright()` returns a guarded library. The owned engine (`connectPipe`,
-`connectCloakProfile`, `connect`) and every other export that acts on a browser is refused, so the table above
-does not apply: do not look for a way around it, and tell the user what the session allows. Under `connected`
-the app sees what the browser is doing, and before a click, Enter or script that sends, posts, pays, orders,
-subscribes, deletes or closes an account, and before Enter in a message box, it asks the user first. A "No" fails the action with
-`BrowserActionDeclinedError`: report that, never retry it or go around it (`session.tool()` lets only reads
-through; `evaluate` is guarded too). If the user presses Stop, the next call throws `BrowserUserStoppedError`: tell
-the user browser use was stopped and start no new session this turn.
+```js
+const browser = await omowright.connectBuiltinBrowser()
+const [tab] = await browser.listTargets()
+const page = await browser.attachPage(tab.id)
+await page.goto(url)
+```
 
-The guard prevents mistakes by a cooperating agent. It is not a security boundary: code that imports the raw
-entry (`resolveOmowrightEntry()`) is not guarded, and a host without the `omo_browser_bridge` tool cannot show state or
-honor Stop, though questions are still asked.
+It is an OmOWright connection like `connect()`. Work in few calls: take `page.snapshot()` once, act on its refs,
+and chain several actions in one eval cell (`page.locator(ref).fill()`, `.click()`, `.selectOption(value)`,
+`.setInputFiles(path)`), snapshotting again only after the page changed. It has one tab: navigate it rather than
+opening new ones. If the app does not offer it here, it throws `BuiltinBrowserUnavailableError` with the reason;
+carry on with the attached or owned engine as usual.
 
 ## Step 1 — load omowright and prove the stack
 
