@@ -120,6 +120,14 @@ describe.skipIf(process.platform === "win32")("POSIX raw task host challenge-res
     })
   })
 
+  test("#given a host whose handshake answer takes longer than 2 s #when askHost has a larger budget #then the handshake uses that budget and warm succeeds", async () => {
+    await withContractHost({ auth: true, protocolDelayMs: 2500 }, async (host) => {
+      const reply = await Reflect.apply(askHost, undefined, [host.socket, { type: "warm", id: "warm-slow-handshake", cwd: host.root, kind: "worker" }, 6000, { keyRoot: host.root }]) as Awaited<ReturnType<typeof askHost>>
+      expect(reply).toMatchObject({ success: true, data: { warmed: true } })
+      expect(host.frames.map(({ frame }) => frame.type)).toEqual(["get_protocol_info", "authenticate", "warm"])
+    })
+  }, 10_000)
+
   test("#given a slow handshake and a host that never answers #when askHost runs #then timeoutMs bounds the whole exchange", async () => {
     await withContractHost({ auth: true, protocolDelayMs: 600, silent: ["warm"] }, async (host) => {
       const started = performance.now()

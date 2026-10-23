@@ -15,7 +15,11 @@ export type ContractHostOptions = {
   readonly badProof?: boolean
   readonly prepareRecord?: (path: string, root: string) => void
   /** attach_session refusals: a draining host (v1 session_busy_lifecycle + host_draining) or a caller with no connection (v1.1). */
-  readonly attachRefusal?: "host_draining" | "session_not_attached"
+  readonly attachRefusal?: "host_draining" | "session_not_attached" | "unknown_session"
+  /** The first release_session fails with release_failed after tearing the session down far enough that it is gone. */
+  readonly releaseFailsThenGone?: boolean
+  /** An out-of-contract host that answers release_attachment for a released session with unknown_session. */
+  readonly releasedAttachmentAnswer?: "unknown_session"
   /** After a mutation succeeds: the host drops the attachment itself, or the connection is lost before release answers. */
   readonly afterMutation?: "detached" | "connection_lost"
   /** Agent dir the key record is written under (`<keyRoot>/rpc/keys/<launch_id>`); the host's temp root by default. */
@@ -62,7 +66,10 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
   let nextConnection = 0
   let preset = "read-only"
   const durableId = options.durableId ?? "dur-selected"
-  const session = () => ({ sessionId: "rpc-1", durableSessionId: durableId, cwd: root, name: "target" })
+  const sessionPath = join(root, "session.jsonl")
+  const session = () => ({ sessionId: "rpc-1", durableSessionId: durableId, sessionPath, cwd: root, name: "target" })
+  // Host-wide, unlike attachments: a session that left the host is unknown to every later connection.
+  let gone = options.attachRefusal === "unknown_session"
   const server = createServer((client) => transport.authenticate(client, () => {
     const connection = nextConnection++
     sockets.add(client)
@@ -118,6 +125,7 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         if (frame.type === "attach_session") {
           if (options.attachRefusal === "host_draining") respond(frame, undefined, "session_busy_lifecycle", { reason: "host_draining" })
           else if (options.attachRefusal === "session_not_attached") respond(frame, undefined, "session_not_attached", { reason: "no_connection" })
+          else if (gone) respond(frame, undefined, "unknown_session")
           else if (frame.sessionId !== "rpc-1" || frame.durableSessionId !== durableId) {
             respond(frame, undefined, "session_identity_mismatch")
           } else { attached = true; respond(frame, { sessionId: "rpc-1", attached: true }) }
@@ -125,8 +133,8 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         }
         if (frame.type === "release_attachment") {
           if (options.afterMutation === "connection_lost") { client.destroy(); continue }
-          if (released) respond(frame, undefined, "unknown_session")
-          else if (attached) respond(frame, { deferred: false })
+          if (released && options.releasedAttachmentAnswer === "unknown_session") respond(frame, undefined, "unknown_session")
+          else if (attached && !released) respond(frame, { deferred: false })
           else respond(frame, undefined, "session_not_attached", { reason: "not_attached" })
           attached = false
           continue
@@ -157,6 +165,11 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
           })
           continue
         }
+        if (frame.type === "release_session" && options.releaseFailsThenGone && !gone) {
+          gone = true
+          respond(frame, undefined, "release_failed", { detail: "the hand-over entry could not be written" })
+          continue
+        }
         if (frame.type === "release_session" && options.otherAttachments && frame.force !== true) {
           respond(frame, undefined, "attached")
           continue
@@ -166,7 +179,7 @@ export async function withContractHost(options: ContractHostOptions, exercise: (
         // A released session leaves the host, so a later release_attachment names a session it no longer knows.
         if (frame.type === "release_session") released = true
         respond(frame, frame.type === "set_model" ? { provider: frame.provider, id: frame.modelId }
-          : frame.type === "release_session" ? { released: true, session_path: join(root, "session.jsonl"), attachments: 0, dropped: { deliveries: [], user_messages: [] } }
+          : frame.type === "release_session" ? { released: true, session_path: sessionPath, attachments: 0, dropped: { deliveries: [], user_messages: [] } }
           : frame.type === "interrupt" ? { interrupted: true } : {})
       }
     })

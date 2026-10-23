@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { createServer, type Socket } from "node:net"
 import { join, resolve } from "node:path"
 import { TASK_HOST_SOCKET_ENV_NAMES } from "../../../../senpi-task/src/runners/rpc-host/daemon"
+import { fakeHostTransport } from "../../../../senpi-task/src/runners/rpc-host/__fixtures__/fake-host-transport"
 import { createLiveThreadSurface, resolveThreadSocket, THREAD_SOCKET_ENV_NAMES } from "./live-surface"
 import type { ThreadHost } from "./tools"
 
@@ -25,7 +26,8 @@ async function withRpc(
   const socketPath = join(directory, "rpc.sock")
   const frames: Array<Record<string, unknown>> = []
   const sockets = new Set<Socket>()
-  const server = createServer((socket) => {
+  const transport = fakeHostTransport(socketPath)
+  const server = createServer((socket) => transport.authenticate(socket, () => {
     sockets.add(socket)
     socket.once("close", () => sockets.delete(socket))
     let buffer = ""
@@ -41,10 +43,10 @@ async function withRpc(
       const lines = [...preamble(String(frame.id)), { id: frame.id, type: "response", command: frame.type, ...answer }]
       socket.write(lines.map((line) => `${JSON.stringify(line)}\n`).join(""))
     })
-  })
+  }))
   try {
     const listening = once(server, "listening", { signal: AbortSignal.timeout(2000) })
-    server.listen(socketPath)
+    server.listen(transport.listenAddress)
     await listening
     await exercise(createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: socketPath }, statusAll: NO_ENUMERATION, registry: NO_REGISTRY }), frames)
   } finally {

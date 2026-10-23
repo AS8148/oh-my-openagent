@@ -47,7 +47,10 @@ export const HOST_STATUS_ALL_ARGS = ["host", "status", "--all", "--include-worke
 /**
  * Marks a read-only listing as an observation (senpi `OBSERVE_REQUEST_FIELD`): without it the supervisor
  * counts the connection as an attachment, so every thread tool call would reset each shard's idle window
- * and no shard would ever idle out. Never sent on a request that acts on a session.
+ * and no shard would ever idle out. A request that acts on a session never carries it itself, but on an
+ * rpc_host its connection still opens with an observing `get_protocol_info` (the auth challenge and capability
+ * probe, `requestFrame`); the session command is then held by `attach_session` (`attachment-fence.ts`) when
+ * the host advertises it.
  */
 const OBSERVE = { observe: true } as const
 
@@ -57,7 +60,7 @@ export const TUI_ENDPOINT_COMMANDS: ReadonlySet<string> = LEGACY_TUI_COMMANDS
 type RequestOptions = {
   readonly timeoutMs?: number
   readonly secret?: Uint8Array
-  readonly keyRoot?: () => string
+  readonly keyRoot: () => string
   readonly durableSessionId?: string
   readonly openedName?: string
   readonly rpcHost?: boolean
@@ -73,12 +76,12 @@ type RequestOptions = {
  * 32-byte secret, which is written before the request. The correlation id is written last: no
  * command field can overwrite it.
  */
-async function requestFrame(socketPath: string, command: Record<string, unknown>, connect: ThreadSocketConnect, options: RequestOptions = {}): Promise<RpcFrame> {
+async function requestFrame(socketPath: string, command: Record<string, unknown>, connect: ThreadSocketConnect, options: RequestOptions): Promise<RpcFrame> {
   return await withRpcSocket(socketPath, { connect, secret: options.secret, timeoutMs: options.timeoutMs ?? REQUEST_TIMEOUT_MS }, async (request) => {
     if (options.rpcHost !== true) return await request(command)
     const protocolRequest = command.type === "get_protocol_info" ? command : undefined
     const info = options.secret === undefined
-      ? await authenticateRpcHost(request, socketPath, options.keyRoot!, protocolRequest)
+      ? await authenticateRpcHost(request, socketPath, options.keyRoot, protocolRequest)
       : await request(protocolRequest ?? { type: "get_protocol_info", observe: true })
     if (command.type === "get_protocol_info") return info
     // An older host that refuses get_protocol_info advertises nothing: it gets today's unfenced request, as askHost does.

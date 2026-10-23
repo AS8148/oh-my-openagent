@@ -3,6 +3,7 @@ import { once } from "node:events"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createConnection, createServer, type Server, type Socket } from "node:net"
 import { join } from "node:path"
+import { fakeHostTransport } from "../../../../senpi-task/src/runners/rpc-host/__fixtures__/fake-host-transport"
 
 import type { ThreadToolName, ThreadToolResult } from "./contracts"
 import { createLiveThreadSurface, parseHostStatusAll, TUI_ENDPOINT_COMMANDS, type HostEndpointReport } from "./live-surface"
@@ -20,9 +21,9 @@ function tempDir(prefix: string): string {
   return directory
 }
 
-async function listen(server: Server, socketPath: string, sockets: Set<Socket>): Promise<void> {
+async function listen(server: Server, socketPath: string, sockets: Set<Socket>, address = socketPath): Promise<void> {
   const listening = once(server, "listening", { signal: AbortSignal.timeout(2000) })
-  server.listen(socketPath)
+  server.listen(address)
   await listening
   cleanups.push(async () => {
     const closed = once(server, "close", { signal: AbortSignal.timeout(2000) })
@@ -112,7 +113,9 @@ function sessionControl(frame: Frame, controls: TerminalControls): Record<string
 async function hostEndpoint(socketPath: string, replies: Readonly<Record<string, unknown>> = {}): Promise<{ readonly frames: Frame[] }> {
   const frames: Frame[] = []
   const sockets = new Set<Socket>()
-  const server = createServer((socket) => {
+  // An rpc_host listens on the transport its logical path names: a hashed pipe behind a raw secret on win32.
+  const transport = fakeHostTransport(socketPath)
+  const server = createServer((socket) => transport.authenticate(socket, () => {
     sockets.add(socket)
     socket.once("close", () => sockets.delete(socket))
     let buffer = ""
@@ -129,8 +132,8 @@ async function hostEndpoint(socketPath: string, replies: Readonly<Record<string,
         : frame.type === "wake" ? { admitted: [] } : {}
       socket.write(`${JSON.stringify({ id: frame.id, type: "response", command: frame.type, success: true, data })}\n`)
     })
-  })
-  await listen(server, socketPath, sockets)
+  }))
+  await listen(server, socketPath, sockets, transport.listenAddress)
   return { frames }
 }
 
