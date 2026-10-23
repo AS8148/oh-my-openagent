@@ -47,7 +47,7 @@ function buildText(
 		`Mode: ${mode}`,
 		`Plan: ${plan.goalsPath}`,
 		`Ledger: ${plan.ledgerPath}`,
-		`Goal: ${goal.id}: ${goal.title}`,
+		`Goal: ${goal.id} - ${goal.title}`,
 		"",
 		...activeGoalLines(goal),
 		"",
@@ -106,13 +106,13 @@ function successCriteriaLines(criteria: readonly UlwLoopSuccessCriterion[]): rea
 function formatCriterionLine(criterion: UlwLoopSuccessCriterion): string {
 	const remainingWork = criterion.status === "pending" ? " remaining work:" : "";
 	const marker = isEssentialCriterion(criterion) ? "essential" : "non-essential";
-	return `-${remainingWork} [${criterion.id}] [${marker}] (${criterion.userModel}) ${criterion.scenario}: expect: ${criterion.expectedEvidence}: status: ${criterion.status}`;
+	return `-${remainingWork} [${criterion.id}] [${marker}] (${criterion.userModel}) ${criterion.scenario} - expect: ${criterion.expectedEvidence} - status: ${criterion.status}`;
 }
 
 function evidenceLayoutLines(plan: UlwLoopPlan): string[] {
 	if (plan.evidenceLayoutVersion !== 2) return [];
 	return [
-		"- Evidence layout v2: write every artifact for the active goal (QA matrix, review reports, receipts) under the current attempt directory: read currentAttemptDir from `omo-agent-toolkit ulw-loop status --json` (.omo/evidence/ulw/<session>/<goalId>/a<attempt>). The final checkpoint rejects quality-gate artifacts outside that directory.",
+		"- Evidence layout v2: write every artifact for the active goal (QA matrix, review reports, receipts) under the current attempt directory. Read currentAttemptDir from `omo-agent-toolkit ulw-loop status --json` (.omo/evidence/ulw/<session>/<goalId>/a<attempt>). The final checkpoint rejects quality-gate artifacts outside that directory.",
 	];
 }
 

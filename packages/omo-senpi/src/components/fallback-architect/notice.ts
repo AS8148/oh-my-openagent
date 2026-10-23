@@ -41,7 +41,7 @@ export function buildFallbackArchitectNotice(input: FallbackArchitectNoticeDetai
   const to = friendlyModelName(input.to)
   return [
     `Model fallback engaged: ${input.from} -> ${input.to}.`,
-    `${from} declined that one, so ${to} now drives the session: and top-tier reasoning stays one consult away through task(category: "architect"), which still runs Fable 5 at xhigh.`,
+    `${from} declined that one, so ${to} now drives the session, and top-tier reasoning stays one consult away through task(category: "architect"), which still runs Fable 5 at xhigh.`,
     `${to} on execution + Fable 5 xhigh on deep reasoning: two frontier brains on one session.`,
   ].join("\n")
 }

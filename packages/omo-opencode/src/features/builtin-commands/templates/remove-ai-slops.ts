@@ -177,7 +177,7 @@ While any team task is \`pending | claimed | in_progress\`:
 - Wait for \`<system-reminder>\` or member messages. Do NOT tight-poll \`team_status\`; the runtime notifies on state changes. A single \`team_status\` check is acceptable if no notification arrives within roughly 10 seconds of expected completion.
 - On each worker completion report:
   - Log the report to the pending final summary (no blocking).
-  - Immediately dispatch an **external reviewer**: review runs OUTSIDE the team because team-member category routing downcasts to sisyphus-junior:
+  - Immediately dispatch an **external reviewer** (review runs OUTSIDE the team because team-member category routing downcasts to sisyphus-junior):
     \`\`\`
     task(
       category="deep-high",
@@ -199,7 +199,7 @@ Fixes happen incrementally during Phase 3's loop via rework tasks: this phase is
 
 ## Phase 5 (team): Team cleanup
 
-Before producing the summary report, dismantle the team on EVERY exit path: success, escalation, abort: otherwise the next session's Phase 2 precondition check catches the orphan.
+Before producing the summary report, dismantle the team on EVERY exit path (success, escalation, abort); otherwise the next session's Phase 2 precondition check catches the orphan.
 
 1. \`team_shutdown_request\` for each member, then \`team_approve_shutdown\` if members do not self-approve within a reasonable window.
 2. \`team_delete(teamRunId=<id>)\`.

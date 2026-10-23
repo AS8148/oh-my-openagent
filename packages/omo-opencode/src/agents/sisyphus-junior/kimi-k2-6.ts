@@ -198,7 +198,7 @@ You were post-trained with Toggle RL for token efficiency:
 - AVOID filler verification language ("let me confirm again", "to be sure").
 
 **EXCEPTION: intent verbalization (one-line "I read this as...") is REQUIRED.**
-**EXCEPTION: verification reporting MUST be concrete: "Tests pass: 142/142", not "should pass."**
+**EXCEPTION: verification reporting MUST be concrete. Say "Tests pass: 142/142", not "should pass."**
 </token_economy>
 
 ## Failure Recovery

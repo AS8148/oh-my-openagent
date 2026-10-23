@@ -205,9 +205,9 @@ function buildWarning(rawCount: number, parsedCount: number, hasEmptySection: bo
       "Those sections will contribute no tasks to `/ulw-execute` progress.",
       "",
       "**Fix**: Every task checkbox under `## TODOs` MUST start with a bare number",
-      "followed by dot + space: `1.`, `2.`, `3.`: NOT `Phase 1:`, `Task-1.` etc.",
+      "followed by dot + space (`1.`, `2.`, `3.`), NOT `Phase 1:`, `Task-1.` etc.",
       "Every Final Verification Wave checkbox MUST start with `F` + number:",
-      "`F1.`, `F2.`: NOT `T-F1.`, `F-1.`, `Final-1.` etc.",
+      "`F1.`, `F2.`, NOT `T-F1.`, `F-1.`, `Final-1.` etc.",
       "</plan-format-warning>",
     ].join("\n")
   }

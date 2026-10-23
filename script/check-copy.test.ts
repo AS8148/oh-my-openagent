@@ -38,6 +38,11 @@ describe("no-em-dash-copy", () => {
     "packages/example/src/_generated/copy.ts",
     "packages/example/src/copy.gen.ts",
     "packages/example/src/copy.generated.ts",
+    "packages/shared-skills/skills/browser/scripts/copy.generated.js",
+    "packages/shared-skills/skills/browser/scripts/vendor/copy.js",
+    "packages/shared-skills/skills/browser/scripts/install-dist/copy.js",
+    "packages/example/plugin/scripts/copy.mjs",
+    "packages/omo-senpi/plugin/scripts/sync-skills.mjs",
     "packages/example/src/vendor/copy.ts",
     "packages/example/plugin/dist/copy.js",
     "packages/shared-skills/upstreams/copy.ts",
@@ -67,8 +72,25 @@ describe("no-em-dash-copy", () => {
     "packages/web/components/copy.tsx",
     "packages/web/lib/copy.mjs",
     "packages/example/plugin/components/copy.ts",
+    "packages/shared-skills/skills/browser/scripts/browser-doctor.mjs",
+    "packages/shared-skills/skills/browser/scripts/browser-install.mjs",
+    "packages/shared-skills/skills/programming/scripts/typescript/check-no-excuse-rules.ts",
   ])("checks %s", (filename) => {
     expect(isProductSource(filename)).toBe(true)
+  })
+
+  test("reports copy in shipped skill scripts", () => {
+    expect(findEmDashCopy('console.log("Unavailable \\u2014 retry");',
+      "packages/shared-skills/skills/browser/scripts/browser-doctor.mjs")).toHaveLength(1)
+  })
+
+  test.each([
+    ["entities.mjs", 'const entities = { mdash: "\\u2014" };'],
+    ["gates-text.mjs", 'const EM_DASH = "\\u2014";'],
+  ])("allows punctuation data but still checks copy in %s", (filename, data) => {
+    const filenamePath = `packages/shared-skills/skills/ulw-research/scripts/${filename}`
+    expect(findEmDashCopy(data, filenamePath)).toEqual([])
+    expect(findEmDashCopy(`${data}\nconsole.log("Unavailable \\u2014 retry");`, filenamePath)).toHaveLength(1)
   })
 })
 

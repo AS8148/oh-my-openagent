@@ -13,8 +13,9 @@ const GENERATED_SOURCES = new Set([
 
 export function isProductSource(path: string): boolean {
   return /\.[cm]?[jt]sx?$/.test(path)
-    && /^(?:(?:src|app|lib|workers|bin)\/|packages\/[^/]+\/(?:src|app|lib|components|i18n|plugin)\/|packages\/omo-native\/bin\/)/.test(path)
-    && !/(?:^|\/)(?:__tests__|tests?|testkit|fixtures|testUtils|_generated|vendor|vendored|upstreams|node_modules|dist|scripts)(?:\/|$)/.test(path)
+    && /^(?:(?:src|app|lib|workers|bin)\/|packages\/[^/]+\/(?:src|app|lib|components|i18n|plugin)\/|packages\/omo-native\/bin\/|packages\/shared-skills\/skills\/[^/]+\/(?:[^/]+\/)*scripts\/)/.test(path)
+    && !/(?:^|\/)(?:__tests__|tests?|testkit|fixtures|testUtils|_generated|vendor|vendored|upstreams|node_modules|dist|install-dist)(?:\/|$)/.test(path)
+    && (!/(?:^|\/)scripts\//.test(path) || /^packages\/shared-skills\/skills\//.test(path))
     && !/\.(?:test|spec|testkit|gen|generated)\.|\.d\.[cm]?ts$/.test(path)
     && !/(?:^|\/)testUtils\.[cm]?[jt]sx?$/.test(path)
     && !/^packages\/(?:lsp-daemon|lsp-tools-mcp)\//.test(path)
@@ -27,6 +28,11 @@ export function findEmDashCopy(content: string, path: string): { line: number; c
   const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true)
   const hits: { line: number; column: number }[] = []
   const visit = (node: ts.Node): void => {
+    // These skill parsers use the character as data, not as display copy.
+    if (path === "packages/shared-skills/skills/ulw-research/scripts/entities.mjs"
+      && ts.isPropertyAssignment(node) && node.name.getText(source) === "mdash") return
+    if (path === "packages/shared-skills/skills/ulw-research/scripts/gates-text.mjs"
+      && ts.isVariableDeclaration(node) && node.name.getText(source) === "EM_DASH") return
     if ((ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node)
       || ts.isTemplateTail(node) || ts.isJsxText(node)) && node.text.includes("\u2014")) {
       const position = source.getLineAndCharacterOfPosition(node.getStart(source))

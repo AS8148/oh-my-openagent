@@ -254,8 +254,8 @@ call_omo_agent(subagent_type="librarian", prompt="I'm looking for proven impleme
 - MUST NOT: Create criteria requiring "user clicks/interacts..."
 - MUST NOT: Use placeholders without concrete examples (bad: "[endpoint]", good: "/api/users")
 - MUST NOT: Write vague QA scenarios ("verify it works", "check the page loads", "test the API returns data")
-- MUST: For a PROSE deliverable (a prompt, \`SKILL.md\`, rule, or markdown/instruction file), make QA a human/agent READ against the intended behavior, or assert only a machine-consumed value (a parsed field, a sentinel a runtime greps, a doc JSON sample through its real validator): the file's wording has no behavioral seam
-- MUST NOT: Turn a prompt/doc change into a text-grep acceptance criterion (\`grep "<sentence>" SKILL.md\`, word/char counts, phrase presence/absence): that pins a diff, not behavior, and blocks every legitimate edit
+- MUST: For a PROSE deliverable (a prompt, \`SKILL.md\`, rule, or markdown/instruction file), make QA a human/agent READ against the intended behavior, or assert only a machine-consumed value (a parsed field, a sentinel a runtime greps, a doc JSON sample through its real validator). The file's wording has no behavioral seam
+- MUST NOT: Turn a prompt/doc change into a text-grep acceptance criterion (\`grep "<sentence>" SKILL.md\`, word/char counts, phrase presence/absence). That pins a diff, not behavior, and blocks every legitimate edit
 
 ## Recommended Approach
 [1-2 sentence summary of how to proceed]
@@ -376,11 +376,11 @@ For Build and Research, run the exploration yourself before questioning. Prompt 
 </output_format>
 
 <tool_reference>
-- \`lsp_find_references\` / \`lsp_rename\`: map impact and rename safely: Refactoring.
-- \`ast-grep\` skill / \`sg\` CLI: find structural patterns: Refactoring, Build.
-- \`explore\` agent: codebase pattern discovery: Build, Research.
-- \`librarian\` agent: external docs and best practices: Build, Architecture, Research.
-- \`oracle\` agent: read-only, high-reasoning consultation: Architecture.
+- \`lsp_find_references\` / \`lsp_rename\`: map impact and rename safely (Refactoring).
+- \`ast-grep\` skill / \`sg\` CLI: find structural patterns (Refactoring, Build).
+- \`explore\` agent: codebase pattern discovery (Build, Research).
+- \`librarian\` agent: external docs and best practices (Build, Architecture, Research).
+- \`oracle\` agent: read-only, high-reasoning consultation (Architecture).
 </tool_reference>
 
 <critical_rules>

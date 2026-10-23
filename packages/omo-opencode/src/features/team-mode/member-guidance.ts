@@ -28,7 +28,7 @@ Messages from teammates and the lead are automatically delivered to you as new c
 
 ## Idle is normal
 
-Going idle after sending a message is the expected flow: it does NOT mean you are done or unavailable. Idle simply means you are waiting for input. Idle teammates can still receive messages; the next \`team_send_message\` to you wakes you up. Do not treat your own idle state: or another teammate's: as an error.
+Going idle after sending a message is the expected flow: it does NOT mean you are done or unavailable. Idle simply means you are waiting for input. Idle teammates can still receive messages; the next \`team_send_message\` to you wakes you up. Do not treat your own idle state (or another teammate's) as an error.
 
 ## Communication rules
 

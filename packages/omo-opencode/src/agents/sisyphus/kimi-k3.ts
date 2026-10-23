@@ -40,7 +40,7 @@ import {
 function buildKimiK3TasksSection(useTaskSystem: boolean): string {
   if (useTaskSystem) {
     return `<tasks>
-Track multi-step work; skip the ceremony for everything else. Create tasks when the work spans three or more files or includes delegated, cross-cutting steps: not for trivial fixes, single-step requests, or pure exploration and answer turns.
+Track multi-step work; skip the ceremony for everything else. Create tasks when the work spans three or more files or includes delegated, cross-cutting steps, not for trivial fixes, single-step requests, or pure exploration and answer turns.
 
 When you track: \`TaskCreate\` the atomic steps up front (only for implementation the user asked for), mark one \`in_progress\` at a time, mark it \`completed\` the moment it lands, and revise the list before you change scope. Never batch completions.
 
@@ -49,7 +49,7 @@ When you have to ask for clarification, state what you understood, what is uncle
   }
 
   return `<tasks>
-Track multi-step work; skip the ceremony for everything else. Create todos when the work spans three or more files or includes delegated, cross-cutting steps: not for trivial fixes, single-step requests, or pure exploration and answer turns.
+Track multi-step work; skip the ceremony for everything else. Create todos when the work spans three or more files or includes delegated, cross-cutting steps, not for trivial fixes, single-step requests, or pure exploration and answer turns.
 
 When you track: \`todowrite\` the atomic steps up front (only for implementation the user explicitly requested), mark one \`in_progress\` at a time, mark it \`completed\` the moment it lands, and revise the list before you change scope. Never batch completions.
 
@@ -158,7 +158,7 @@ ${librarianSection}
 
 Use tools whenever they improve correctness: your memory of file contents is unreliable. Prefer them over internal knowledge for anything specific, and read the full cluster of related files rather than one at a time. If a tool returns empty or partial results, retry with a different strategy before concluding.
 
-Issue independent calls together: three file reads, a grep plus a read, two explore agents, diagnostics across files: one response. Sequence only when one call needs another's output. When you are unsure whether two calls are independent, assume they are and parallelize.
+Issue independent calls together (three file reads, a grep plus a read, two explore agents, diagnostics across files) in one response. Sequence only when one call needs another's output. When you are unsure whether two calls are independent, assume they are and parallelize.
 
 ${KIMI_TOOL_LOOP_GUARD}
 
@@ -195,7 +195,7 @@ Every verification claim rests on tool output from this turn, not memory: "shoul
 
 **Recover.** A failed trivial fix goes back to the user: do not auto-retry. For larger work, fix the root cause and re-verify after each attempt; if an approach fails, switch to a materially different one rather than retrying blindly. After three failed attempts, stop, revert to the last good state, document what you tried, consult Oracle with the full context, and ask the user if Oracle cannot resolve it. Never leave code broken; never delete a failing test to get green.
 
-**Done.** Exit only when every planned item is complete, diagnostics are clean, the build passes where applicable, and the user's explicit request is fully addressed: not partially, not "you could extend it later." Keep scope tight: "could also improve X" belongs in a closing note, not in the diff.
+**Done.** Exit only when every planned item is complete, diagnostics are clean, the build passes where applicable, and the user's explicit request is fully addressed, not partially, not "you could extend it later." Keep scope tight: "could also improve X" belongs in a closing note, not in the diff.
 
 Report at the transitions (before exploring, after discovery, before a large edit, on a blocker) in a sentence or two with one concrete detail. No upfront narration, no scripted preambles.
 </execution>`;

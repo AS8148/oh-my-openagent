@@ -10,7 +10,7 @@ Team mode is enabled for this session. The rules below **override Phase 4-6** ab
 When invoking the Plan agent in Phase 4.1, append this additional requirement to the prompt:
 
 \`\`\`
-7. (REQUIRED when team mode is active) Output a Team Staffing Recommendation section with these fields: missing fields fail Phase 5.0:
+7. (REQUIRED when team mode is active) Output a Team Staffing Recommendation section with these fields (missing fields fail Phase 5.0):
    - total_atomic_steps: integer
    - file_independent_steps: integer (parallelizable, no cross-file blocker)
    - cross_file_dependent_steps: integer (has blockers)
@@ -20,8 +20,8 @@ When invoking the Plan agent in Phase 4.1, append this additional requirement to
 \`\`\`
 
 **Classification rules** the plan agent must apply to each step:
-- \`quick\`: mechanical edits: LSP rename, extract variable, inline, simple move, signature change without call-site logic.
-- \`unspecified-low\`: logic-preserving refactors that need reasoning: extract function, restructure conditional, pattern transformation, cross-file API change.
+- \`quick\` - mechanical edits: LSP rename, extract variable, inline, simple move, signature change without call-site logic.
+- \`unspecified-low\` - logic-preserving refactors that need reasoning: extract function, restructure conditional, pattern transformation, cross-file API change.
 - Recommend \`team\` path when \`file_independent_steps >= 3\`; recommend \`legacy\` otherwise.
 
 ## Phase 5 override: Dispatch path selection
@@ -97,7 +97,7 @@ Rationale for this composition:
 While any team task is \`pending | claimed | in_progress\`:
 
 - Wait for \`<system-reminder>\` or member messages. Avoid tight polling; a single \`team_status\` check is acceptable if no notification arrives within roughly 10 seconds of expected completion.
-- On a worker completion report, immediately dispatch an **external verifier**: verification runs OUTSIDE the team because team-member category routing downcasts to sisyphus-junior:
+- On a worker completion report, immediately dispatch an **external verifier** (verification runs OUTSIDE the team because team-member category routing downcasts to sisyphus-junior):
   \`\`\`
   task(
     category="deep-high",
@@ -118,7 +118,7 @@ Proceed to Phase 6 only when every team task is \`completed\` AND every paired v
 
 ## Phase 6 override: Team cleanup before summary
 
-If Phase 5 used the team path, dismantle \`refactor-squad\` BEFORE producing the 6.6 summary. Every exit path: success, escalation, abort: must cleanup; orphan teams poison the next session's precondition check.
+If Phase 5 used the team path, dismantle \`refactor-squad\` BEFORE producing the 6.6 summary. Every exit path (success, escalation, abort) must clean up; orphan teams poison the next session's precondition check.
 
 1. \`team_shutdown_request\` for each member, then \`team_approve_shutdown\` if members do not self-approve within a reasonable window.
 2. \`team_delete(teamRunId=<id>)\`.
