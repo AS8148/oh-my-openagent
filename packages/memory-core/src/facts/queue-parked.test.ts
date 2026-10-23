@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test"
-import { mkdtemp, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
@@ -62,6 +62,8 @@ function parked(conversationId: string, end = "m1"): FactsFailureRecord {
   }
 }
 
+// Writing 10,000 fixture files alone takes 7-9 s on a loaded host (measured with and without the change under test),
+// so this scale test owns an explicit bound instead of racing bun's 10 s default.
 test("#given 10000 parked-but-hot files and one live file #when enqueue and launch selection claim run #then only live files are read", async () => {
   const { paths, layout, queue } = await fixture()
   const records = Array.from({ length: 10_000 }, (_, index) => parked(`parked-${index}`))
@@ -84,7 +86,7 @@ test("#given 10000 parked-but-hot files and one live file #when enqueue and laun
   expect(reads).toBeLessThanOrEqual(5)
   expect(claimed.map((entry) => entry.range.end_message_id).sort()).toEqual(["m1", "m2"])
   expect(await readdir(join(layout.queueDir, "parked"))).toHaveLength(10_000)
-})
+}, 60_000)
 
 test("#given parked hot files beside backoff and live entries #when locked operations migrate twice #then exactly the parked files move without loss", async () => {
   const { paths, layout, queue } = await fixture()
@@ -156,6 +158,23 @@ test("#given an entry published before its cursor advanced and then parked #when
   expect(next.enqueued).toBe(true)
   if (!next.enqueued) throw new Error("expected a new tail")
   expect(next.entry.range).toMatchObject({ start_line: 1, start_message_id: "m2", end_message_id: "m2" })
+})
+
+// chmod 000 does not deny reads on Windows or to root, so the permission-denied path is POSIX non-root only.
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("#given parked/ cannot be listed #when the anchor needs it #then enqueue fails instead of moving the anchor backward", async () => {
+  const { layout, queue } = await fixture()
+  await writeFile(layout.entryPath("same", "m1", NOW), JSON.stringify(queued("same")))
+  await writeFile(layout.failuresPath, renderFailuresFile([parked("same")], NOW.toISOString()))
+  expect(await queue.listPending()).toEqual([])
+  await chmod(layout.parkedDir, 0o000)
+  try {
+    const attempt = queue.enqueue({
+      identity: "agent", sessionId: "same", conversationId: "same", entries: [message("m1"), message("m2")],
+    })
+    await expect(attempt).rejects.toThrow()
+  } finally {
+    await chmod(layout.parkedDir, 0o700)
+  }
 })
 
 test("#given retained files for many healthy conversations #when enqueue and a selected claim run #then unrelated payloads are never read", async () => {

@@ -13,8 +13,11 @@ export async function scanQueueEntries(dir: string, conversationId?: string): Pr
   let names: string[]
   try {
     names = await readdir(dir)
-  } catch {
-    return []
+  } catch (error) {
+    // Only an absent directory means "no entries"; any other error must surface, or a caller that needs every
+    // retained endpoint (the enqueue anchor) would silently move backward.
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return []
+    throw error
   }
   const conversationPart = conversationId === undefined ? undefined : `-${queueConversationHash(conversationId)}-`
   const entries: ScannedQueueEntry[] = []
