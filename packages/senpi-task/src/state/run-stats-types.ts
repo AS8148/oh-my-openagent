@@ -2,7 +2,8 @@ export const TOKEN_COVERAGE_STATUSES = ["complete", "partial", "unavailable"] as
 
 export type TokenCoverageStatus = (typeof TOKEN_COVERAGE_STATUSES)[number]
 
-export const COST_REPORT_STATUSES = ["reported", "unavailable", "invalid"] as const
+// "partial": some successful turns reported cost and some reported no usage, so cost_usd is a lower bound.
+export const COST_REPORT_STATUSES = ["reported", "partial", "unavailable", "invalid"] as const
 
 export type CostReportStatus = (typeof COST_REPORT_STATUSES)[number]
 

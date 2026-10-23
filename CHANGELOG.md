@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Subagent rows no longer show `$0.0000` when the provider sent no usage ([#10727](https://github.com/code-yeongyu/oh-my-openagent/pull/10727)).** A turn whose provider streamed no usage block came back with an all-zero usage, and the task row counted it as a real $0, with no tok/s. Such a turn now counts as "cost not reported", so the row shows no amount, and a run where only some turns reported a cost is marked `partial` ([#10724](https://github.com/code-yeongyu/oh-my-openagent/issues/10724)).
+
 **Internal: a telemetry spool lock this process could not delete no longer blocks its batch until the 14-day age limit.** After a transient file error (for example on Windows), the sweep reclaims the lock once the claim lease has passed, while a lock for a move still in progress is kept ([#10951](https://github.com/code-yeongyu/oh-my-openagent/pull/10951)).
 
 **Internal: every assistant turn opens one `omo.turn` OpenTelemetry span, and events emitted during the turn carry its trace and span ids.** On a transport with a span sink (the OTLP collector transport; the PostHog transport has none) the Senpi adapter starts the span at `turn_start` and ends it `ok`, or `error` for a failed or abandoned turn, so a `turn_completed` row, its span and an error event join on the (`trace_id`, `span_id`) pair. A process child launched by the task engine continues the delegating turn's trace. The `traceparent` header goes only to our own hosts, never to a model provider, and nothing is started or written while telemetry is off. ([#10358](https://github.com/code-yeongyu/oh-my-openagent/pull/10358))
