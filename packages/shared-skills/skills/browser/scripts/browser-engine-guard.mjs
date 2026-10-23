@@ -39,24 +39,37 @@ export function guardOmowright(raw, { env = process.env, host } = {}) {
       details = undefined
     }
     if (details?.ok !== true) throw new BuiltinBrowserUnavailableError(typeof details?.reason === "string" ? details.reason : "unavailable")
+    // Without an endpoint CdpClient falls back to 127.0.0.1:9222 and would send the token to whatever listens there.
+    const endpoint = details.grant?.endpoint
+    if (typeof endpoint !== "string" || endpoint === "") throw new BuiltinBrowserUnavailableError("invalid_grant")
     let token
     try {
       token = (await readFile(details.grant.tokenFile, "utf8")).trim()
     } catch {
       throw new BuiltinBrowserUnavailableError("invalid_grant")
     }
-    return { endpoint: details.grant.endpoint, authorization: `Bearer ${token}` }
+    return { endpoint, authorization: `Bearer ${token}` }
   }
 
   // A CDP endpoint that shows only this thread's tabs. The token is read from the file the grant names, so it never
   // passes through a tool result.
   const connectBuiltinBrowser = async (options = {}) => {
     let current = await acquireBuiltinBrowser()
+    // Concurrent refreshes share one acquire, so a token is never paired with another grant's endpoint.
+    let refreshing
     const authorizer = {
       async resolveAuthorization({ forceRefresh } = {}) {
         if (forceRefresh) {
-          current = await acquireBuiltinBrowser()
-          client.cdpUrl = current.endpoint
+          refreshing ??= acquireBuiltinBrowser()
+            .then((next) => {
+              current = next
+              client.cdpUrl = next.endpoint
+              return next
+            })
+            .finally(() => {
+              refreshing = undefined
+            })
+          return (await refreshing).authorization
         }
         return current.authorization
       },
