@@ -13,7 +13,7 @@ Before the first edit, name the references the request routes to and one reason 
 
 | Request | Read |
 |---|---|
-| Small change on an existing surface: a fix, a new control, a restyled component, a copy or spacing change | The project's `DESIGN.md` (or the nearest styled sibling when there is none) plus at most ONE reference: the Layer A style skill the project follows, or `references/design/redesign-skill.md` when the ask is "this looks bad" / "improve this". No `DESIGN.md` and no styled sibling either: README Phase 0 (it asks). |
+| Small change on an existing surface: a fix, a new control, a restyled component, a copy or spacing change | The project's `DESIGN.md` (or the nearest styled sibling when there is none) plus at most ONE design reference: the Layer A style skill the project follows, or `references/design/redesign-skill.md` when the ask is "this looks bad" / "improve this". No `DESIGN.md` and no styled sibling either: README Phase 0 (it asks). |
 | A new screen or flow in an existing project | ALSO `references/design/README.md` Phase 0 (the `DESIGN.md` gate and its branches) and the Layer A skill in use. |
 | Greenfield with no concrete reference | `references/design/README.md` in full: the gate, the greenfield research lanes (`_INDEX.md` shortlist, `lazyweb.md`, `stylegallery.md`, imagen drafts), and the style routing. One Layer A + one Layer B, read in full. |
 | A concrete visual reference: screenshot, mockup, Figma export, Stitch or imagen output | `references/design/image-to-code-skill.md`; a live site or URL to clone: `references/design/clone-from-url.md`. The reference is the contract and `/visual-qa` runs in reference-fidelity mode. |
@@ -43,7 +43,7 @@ Write this for every screen you build or change, into `DESIGN.md` section 5 besi
 
 ## 2. Build
 
-Take the branch in `references/design/README.md` Phase 0 first (a small change on a surface with no `DESIGN.md` follows its small-change rule), and on a React project its Phase 0.5 tooling check: `DESIGN.md` exists before components do, and every colour, size, and spacing value traces to a token in it. Then build to these rules; `/visual-qa` verifies them afterwards and should find nothing new.
+Take the branch in `references/design/README.md` Phase 0 first (a small change on a surface with no `DESIGN.md` follows its small-change rule), and on a React project its Phase 0.5 tooling check: `DESIGN.md` (or, under the small-change rule, the styled sibling) exists before components do, and every colour, size, and spacing value traces to a token in it. Then build to these rules; `/visual-qa` verifies them afterwards and should find nothing new.
 
 - **Hit targets.** Touch layouts: at least 44x44 pt (44 CSS px) per interactive element, 8-12 pt between neighbours. Pointer-only: about 10 px beyond the glyph. Grow the hit area with padding or a pseudo-element, never the glyph; adjacent bar buttons share continuous hit areas.
 - **Hierarchy.** The brief's primary action is the one prominent control; the most important content sits top-leading in reading order; each screen's title says what it is; neither a destructive action nor Cancel is the Enter default.

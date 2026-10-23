@@ -87,7 +87,7 @@ Run in order and stop at the first match.
 
 ## Execution checklist after routing
 
-1. `DESIGN.md` was read or created in Phase 0; the screen brief (`SKILL.md`) is written.
+1. `DESIGN.md` was read or created in Phase 0 (or, under the small-change rule, the styled sibling was copied); the screen brief (`SKILL.md`) is written.
 2. Verify dependencies in `package.json`; never assume `framer-motion`, `gsap`, `lucide-react`, or `tailwindcss` (and which version). If missing, output the install command first.
 3. Tailwind version lock: v4 uses `@tailwindcss/postcss` or the Vite plugin, never `tailwindcss` in `postcss.config.js`; v3 uses different config syntax. Pick from what is installed.
 4. Full-height heroes use `min-h-[100dvh]`, never `h-screen` (iOS Safari jumps).
