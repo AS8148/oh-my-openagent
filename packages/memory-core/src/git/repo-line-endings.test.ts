@@ -97,12 +97,73 @@ describe("memory repository line endings (#11109)", () => {
     expect((await git(repo.dir, ["config", "--local", "--get", "core.autocrlf"])).trim()).toBe("false")
   })
 
-  test("#given the repair cannot update the index #when the repository is opened #then the pin is not recorded and the next open repairs it", async () => {
+  test("#given a pre-pin repository left mid-merge with a conflicted note #when it is opened #then init succeeds and records the pin", async () => {
+    const root = await tempRoot()
+    const repo = new GitMemoryRepo({ dir: join(root, "memory"), agentId: AUTHOR.agentId })
+    await repo.init({ installHooks: async () => {} })
+    await writeFile(join(repo.dir, "note.md"), "base\n")
+    await repo.commitWrite(["note.md"], "base", AUTHOR)
+    await git(repo.dir, ["checkout", "-q", "-b", "side"])
+    await writeFile(join(repo.dir, "note.md"), "side\n")
+    await repo.commitWrite(["note.md"], "side", AUTHOR)
+    await git(repo.dir, ["checkout", "-q", "main"])
+    await writeFile(join(repo.dir, "note.md"), "main\n")
+    await repo.commitWrite(["note.md"], "main", AUTHOR)
+    await git(repo.dir, ["merge", "side"]).catch(() => "conflict")
+    expect((await git(repo.dir, ["ls-files", "-u", "--", "note.md"])).trim()).not.toBe("")
+    await git(repo.dir, ["config", "--local", "--unset", "core.autocrlf"])
+
+    await new GitMemoryRepo({ dir: repo.dir, agentId: AUTHOR.agentId }).init({ installHooks: async () => {} })
+
+    expect((await git(repo.dir, ["config", "--local", "--get", "core.autocrlf"])).trim()).toBe("false")
+    expect((await git(repo.dir, ["ls-files", "-u", "--", "note.md"])).trim()).not.toBe("")
+  })
+
+  test("#given a pre-pin repository stopped mid-rebase on a conflicted note #when it is opened #then init succeeds and the rebase state is untouched", async () => {
+    const root = await tempRoot()
+    const repo = new GitMemoryRepo({ dir: join(root, "memory"), agentId: AUTHOR.agentId })
+    await repo.init({ installHooks: async () => {} })
+    await writeFile(join(repo.dir, "note.md"), "base\n")
+    await repo.commitWrite(["note.md"], "base", AUTHOR)
+    await git(repo.dir, ["checkout", "-q", "-b", "side"])
+    await writeFile(join(repo.dir, "note.md"), "side\n")
+    await repo.commitWrite(["note.md"], "side", AUTHOR)
+    await git(repo.dir, ["checkout", "-q", "main"])
+    await writeFile(join(repo.dir, "note.md"), "main\n")
+    await repo.commitWrite(["note.md"], "main", AUTHOR)
+    await git(repo.dir, ["checkout", "-q", "side"])
+    await git(repo.dir, ["rebase", "main"]).catch(() => "conflict")
+    const rebaseDir = (await git(repo.dir, ["rev-parse", "--git-path", "rebase-merge"])).trim()
+    expect(await readFile(join(repo.dir, rebaseDir, "head-name"), "utf8").catch(() => "missing")).not.toBe("missing")
+    await git(repo.dir, ["config", "--local", "--unset", "core.autocrlf"])
+
+    await new GitMemoryRepo({ dir: repo.dir, agentId: AUTHOR.agentId }).init({ installHooks: async () => {} })
+
+    expect((await git(repo.dir, ["config", "--local", "--get", "core.autocrlf"])).trim()).toBe("false")
+    expect(await readFile(join(repo.dir, rebaseDir, "head-name"), "utf8").catch(() => "missing")).not.toBe("missing")
+    expect((await git(repo.dir, ["ls-files", "-u", "--", "note.md"])).trim()).not.toBe("")
+  })
+
+  test("#given a converted copy whose committed blob is missing #when it is opened #then init succeeds and the copy is left as it is", async () => {
+    const { repo } = await convertedRepository(await tempRoot())
+    const blob = (await git(repo.dir, ["rev-parse", ":converted.md"])).trim()
+    const objectPath = (await git(repo.dir, ["rev-parse", "--git-path", `objects/${blob.slice(0, 2)}/${blob.slice(2)}`])).trim()
+    await rm(join(repo.dir, objectPath))
+    // A fresh mtime makes git list the path as changed, so the repair has to read the missing blob.
+    await utimes(join(repo.dir, "converted.md"), new Date(), new Date())
+
+    await new GitMemoryRepo({ dir: repo.dir, agentId: AUTHOR.agentId }).init({ installHooks: async () => {} })
+
+    expect(await readFile(join(repo.dir, "converted.md"), "utf8")).toBe("alpha\r\nbeta\r\n")
+    expect(await readFile(join(repo.dir, "edited.md"), "utf8")).toBe("one\r\ntwo changed\r\n")
+  })
+
+  test("#given the repair cannot update the index #when the repository is opened #then init succeeds, the pin is not recorded, and the next open repairs it", async () => {
     const { repo } = await convertedRepository(await tempRoot())
     const lock = join(repo.dir, ".git", "index.lock")
     await writeFile(lock, "")
 
-    await expect(new GitMemoryRepo({ dir: repo.dir, agentId: AUTHOR.agentId }).init({ installHooks: async () => {} })).rejects.toThrow()
+    await new GitMemoryRepo({ dir: repo.dir, agentId: AUTHOR.agentId }).init({ installHooks: async () => {} })
     expect(await git(repo.dir, ["config", "--local", "--get", "core.autocrlf"]).catch(() => "unset")).toBe("unset")
 
     await rm(lock)

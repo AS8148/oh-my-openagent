@@ -239,7 +239,7 @@ export class GitMemoryRepo {
   }
 
   private ensureIdentity(authorName: string): Promise<void> {
-    return ensureRepoConfigDefaults(this, { git: (argv) => this.git(argv), result: (argv) => this.gitResult(argv) }, authorName)
+    return ensureRepoConfigDefaults(this, { result: (argv) => this.gitResult(argv) }, authorName)
   }
 
   private async stage(paths: readonly string[]): Promise<void> {
