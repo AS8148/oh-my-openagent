@@ -5,6 +5,8 @@ import { join } from "node:path"
 import {
   GitMemoryRepo,
   cleanupReflectionWorktree,
+  parseMemoryFile,
+  renderMemoryFile,
 } from "@oh-my-opencode/memory-core"
 
 import { finalizeRecordedOutcome } from "./run-finalization"
@@ -19,6 +21,30 @@ import type { ReservationRunLedger } from "./reservation-run-ledger"
 afterEach(cleanupFinalizationFixtures)
 
 describe("reflection finalization crash recovery", () => {
+  test("#given a committed oversized description #when the recorded outcome finalizes #then preflight runs before validation and the gate passes", async () => {
+    const item = await fixture(false)
+    const body = "learned\n"
+    await writeFile(join(item.worktree.dir, "system/learned.md"),
+      renderMemoryFile({ description: `${"summary ".repeat(139)}ending` }, body))
+    await new GitMemoryRepo({ dir: item.worktree.dir, agentId: item.identity.id }).commitWrite(
+      ["system/learned.md"], "reflection expanded summary",
+      { agentId: item.identity.id, authorName: "Reflection Agent" },
+    )
+
+    const result = await finalizeRecordedOutcome({
+      identity: item.identity,
+      reservation: item.store,
+      now: () => Date.parse("2026-08-11T10:01:00.000Z"),
+      withWriterLock: async (operation) => operation(),
+    }, item.runDir, item.ledger)
+
+    expect(result?.outcome).toBe("merged")
+    const parsed = parseMemoryFile(await readFile(join(item.repo.dir, "system/learned.md"), "utf8"))
+    expect(parsed.frontmatter.description).toBe(`${"summary ".repeat(127)}summary…`)
+    expect(parsed.body).toBe(body)
+    expect((await item.journal.getState()).reflected_completed_steps).toBe(1)
+  })
+
   test("#given integration landed before its checkpoint #when finalization retries #then receipt recovery settles exactly once", async () => {
     // given
     const item = await fixture()

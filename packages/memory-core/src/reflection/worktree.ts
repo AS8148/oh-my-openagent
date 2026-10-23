@@ -3,6 +3,7 @@ import { mkdir, readFile, rm } from "../fs/resilient"
 import { basename, isAbsolute, join, resolve } from "node:path"
 import { GitMemoryRepo, createNodeGitExec, type GitExec } from "../git"
 import { validateCompletion } from "./completion-validation"
+import { preflightReflectionDescriptions } from "./description-preflight"
 import { cleanupReflectionWorktree, integrateValidatedReflection } from "./worktree-integration"
 
 const GIT_TIMEOUT_MS = 30_000
@@ -111,6 +112,7 @@ export async function finalizeReflectionWorktree(
   let detail: string | undefined
 
   try {
+    await preflightReflectionDescriptions(worktree, worktree.baseSha, worktree.exec)
     const validation = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
     if (validation.status !== "valid") {
       status = validation.status
