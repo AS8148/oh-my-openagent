@@ -1,6 +1,6 @@
 import { homedir } from "node:os"
 
-import { resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
+import { isAutoAgentValue, resolveAutoIdentity, resolveMemoryIdentity } from "@oh-my-opencode/memory-core"
 import type { OmoSidePanelSettings } from "@oh-my-opencode/omo-config-core"
 
 import type { ComponentContext, SenpiExtensionAPI } from "../../extension/types"
@@ -48,10 +48,8 @@ import type {
   PanelTimers,
   PanelUi,
 } from "./types"
-import { createCredentialReader } from "./usage/credentials"
-import { createUsageFetch, type UsageFetch } from "./usage/http"
-import { createUsagePoller, type UsageCredentialSource, type UsagePoller } from "./usage/poller"
-import { usageCachePath } from "./usage/cache"
+import { createCredentialReader, type UsageCredentialSource } from "./usage/credentials"
+import { createEngineUsageSource, type UsageSource } from "./usage/engine-source"
 import { resolvePanelWidth } from "./width"
 
 export interface SidePanelRuntimeOptions {
@@ -79,11 +77,9 @@ export interface SidePanelRuntimeOptions {
   readonly readGitBranch?: (root: string) => string | undefined
   /** Sees each refresh the panel starts without the host waiting on it, so a test can wait instead. */
   readonly track?: (work: Promise<void>) => void
-  /** Ports for the one section that talks to the network, so tests never do. */
+  /** Which account is serving, read from the credential files; injected so tests never read a home. */
   readonly usage?: {
-    readonly fetch?: UsageFetch
     readonly readCredentials?: () => UsageCredentialSource
-    readonly cachePath?: string
   }
   /** Where the regular-mode notice claim marker lives; injected so tests never touch a real install. */
   readonly regularNoticeStateDir?: string
@@ -145,7 +141,7 @@ export function createSidePanelController(
   let epoch = 0
 
   let surface: PanelHostSurface | undefined
-  let usage: UsagePoller | undefined
+  let usage: UsageSource | undefined
   let hostUi: PanelUi | undefined
   let goal: PanelGoal | undefined
   let memory: PanelMemory | undefined
@@ -298,11 +294,9 @@ export function createSidePanelController(
     // the ordinary refresh; an unchanged file costs one stat and nothing more.
     if (active?.sections.goal === true) goal = readGoal(facts.goalStoreFile)
     surface.requestRender()
-    // A credential-pool rotation must not sit behind the poll interval: the numbers on screen
-    // would keep naming the account the session just moved off. This pass is self-gating - it
-    // reaches the network only when the entry is stale or the serving account changed - so it
-    // costs two small file reads on an ordinary turn.
-    void usage?.pollOnce()
+    // A credential-pool rotation must show at once: the numbers on screen would otherwise keep
+    // naming the account the session just moved off. Two small file reads, no network.
+    usage?.refresh()
     await Promise.all([refreshChildren(), refreshGit(false), refreshMemory(false)])
     scheduleLiveRefresh()
     return undefined
@@ -386,19 +380,22 @@ export function createSidePanelController(
     if (gitRoot !== undefined && exec === undefined) {
       ctx.logger.debug?.("omo-senpi side panel: host exposes no exec, the files section stays empty")
     }
-    // Nothing reaches the network unless the section that shows it is on.
-    if (settings.sections.usage) {
-      usage = createUsagePoller({
-        fetch: options.usage?.fetch ?? createUsageFetch(),
+    // The engine polls subscription usage and keeps one record per account (senpi#3684); the
+    // panel only reads it. A host that predates that API has no usage section.
+    const getLimits = pi.getSubscriptionLimits
+    const onLimits = pi.onSubscriptionLimits
+    if (settings.sections.usage && getLimits !== undefined && onLimits !== undefined) {
+      usage = createEngineUsageSource({
+        limits: {
+          get: () => getLimits.call(pi),
+          subscribe: (listener) => onLimits.call(pi, () => listener()),
+        },
         readCredentials: options.usage?.readCredentials ?? createCredentialReader(),
-        cachePath: options.usage?.cachePath ?? usageCachePath(),
-        pollMs: settings.usage_poll_seconds * 1_000,
         now,
-        timers,
         onChange: () => surface?.requestRender(),
-        logger: ctx.logger,
       })
-      usage.start()
+    } else if (settings.sections.usage) {
+      ctx.logger.debug?.("omo-senpi side panel: host exposes no subscription limits, the usage section stays empty")
     }
     // Resolving an identity probes the memory root, so it happens only for a section that is on.
     if (settings.sections.memory) memoryIdentity = resolveMemory(cwd)
@@ -455,16 +452,19 @@ function toolDetail(args: unknown): string | undefined {
 
 /**
  * The memory identity this session writes to, resolved exactly the way the memory component
- * resolves it (`resolveMemoryIdentity(memory.agent, cwd, env)`): a column naming a different
- * identity than the one being written to would be worse than no column at all. The resolver is
- * pure apart from two `exists` probes that keep a legacy directory attached, so it runs once on
- * mount rather than on the refresh path.
+ * resolves it (`resolveAutoIdentity` with `memory.auto_identity` for an auto agent, else
+ * `resolveMemoryIdentity`): a column naming a different identity than the one being written to
+ * would be worse than no column at all. The resolver is pure apart from a few bounded file reads
+ * (legacy directory probes and the git worktree pointers), so it runs once on mount rather than on
+ * the refresh path.
  */
 function defaultResolveMemory(cwd: string): PanelMemoryIdentity | undefined {
   try {
     const settings = loadSenpiOmoConfig({ cwd }).config.memory
     if (settings?.enabled === false) return undefined
-    const identity = resolveMemoryIdentity(settings?.agent, cwd, process.env)
+    const identity = isAutoAgentValue(settings?.agent)
+      ? resolveAutoIdentity(cwd, process.env, settings?.auto_identity)
+      : resolveMemoryIdentity(settings?.agent, cwd, process.env)
     return {
       id: identity.id,
       reflectionDir: identity.paths.reflection,

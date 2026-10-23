@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path"
+import { AGREEMENTS_PATH } from "../agreements/types"
 import { readFile } from "../fs/resilient"
 import { createNodeGitExec, type GitExec } from "../git"
 import { FRONTMATTER_RE } from "../memfs/frontmatter-scalar"
@@ -66,8 +67,7 @@ export async function validateCompletion(
       tipSha,
     )
     if (secretFailure !== null) return { status: "failed", detail: secretFailure }
-    const changed = await git(exec, worktree.dir, ["diff", "--name-only", "-z", `${recordedBase}..${tipSha}`, "--"])
-    const changedPaths = changed.stdout.split("\0").filter(Boolean)
+    const changedPaths = await listReflectionChangedPaths(exec, worktree.dir, recordedBase, tipSha)
     if (changedPaths.length === 0) {
       return { status: "failed", detail: "Reflection commits contain no changed paths" }
     }
@@ -76,12 +76,27 @@ export async function validateCompletion(
         return { status: "failed", detail: `Changed path escapes the memory repository: ${path}` }
       }
     }
+    // Rename detection is off here on purpose: `git mv system/agreements.md elsewhere` must read as a deletion.
+    const ledger = await git(exec, worktree.dir, ["diff", "--no-renames", "--name-only", "-z", `${recordedBase}..${tipSha}`, "--", AGREEMENTS_PATH])
+    if (ledger.stdout.split("\0").some(Boolean)) {
+      return { status: "failed", detail: `Reflection may not modify ${AGREEMENTS_PATH}; agreements change only through the facts lane and /agreements` }
+    }
     const frontmatterFailure = await findFrontmatterFailure(exec, worktree.dir, recordedBase, tipSha, changedPaths)
     if (frontmatterFailure !== null) return { status: "failed", detail: frontmatterFailure }
     return { status: "valid", tipSha, changedPaths }
   } catch (error) {
     return { status: "failed", detail: errorMessage(error) }
   }
+}
+
+export async function listReflectionChangedPaths(
+  exec: GitExec,
+  dir: string,
+  baseSha: string,
+  tipSha: string,
+): Promise<string[]> {
+  const changed = await git(exec, dir, ["diff", "--name-only", "-z", `${baseSha}..${tipSha}`, "--"])
+  return changed.stdout.split("\0").filter(Boolean)
 }
 
 /**
@@ -110,7 +125,7 @@ async function findFrontmatterFailure(
   return null
 }
 
-function frontmatterBlock(content: string): string | null {
+export function frontmatterBlock(content: string): string | null {
   const match = FRONTMATTER_RE.exec(content.replace(/\r\n?/g, "\n"))
   return match?.[1] ?? null
 }
