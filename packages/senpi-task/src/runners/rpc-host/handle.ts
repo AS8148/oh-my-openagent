@@ -320,9 +320,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     exitOutcome: () => outcome,
     waitForExit: () => waiters.waitForExit(outcome),
     dispose: teardown.detach,
-    detach: teardown.detach,
-    close: teardown.close,
-    terminate: teardown.terminate,
+    ...teardown,
     startInitialPrompt: (text) => delivery.runPrompt(text),
   }
 }

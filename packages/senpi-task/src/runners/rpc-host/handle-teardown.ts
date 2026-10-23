@@ -1,5 +1,6 @@
 import { log } from "@oh-my-opencode/utils"
 
+import type { TaskStatus } from "../../state"
 import { classifySessionExit, type SessionCloseIntent, type SessionExitClassification } from "./exit-mapping"
 import type { HostSessionPort } from "./handle-port"
 
@@ -25,6 +26,8 @@ export interface HandleTeardownHost extends HostTeardownInput {
 }
 
 export interface HandleTeardown {
+  /** Publish the task's status in the session's context while this handle still holds the attachment. */
+  publishTaskStatus(status: TaskStatus): Promise<void>
   detach(): Promise<void>
   close(): Promise<void>
   terminate(): Promise<void>
@@ -57,6 +60,9 @@ export function createHandleTeardown(host: HandleTeardownHost): HandleTeardown {
   }
 
   return {
+    publishTaskStatus: async (status) => {
+      await host.port().send({ type: "set_session_context", patch: { task_status: status } })
+    },
     detach: async () => {
       host.markDetached()
       host.clearActive()
