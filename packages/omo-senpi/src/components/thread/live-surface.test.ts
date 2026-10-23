@@ -153,7 +153,8 @@ describe("live thread session-control RPCs", () => {
 })
 
 describe("live thread frame decoding", () => {
-  test("#given a reply whose non-ASCII text arrives one byte per read #when it is decoded #then the text is identical to what the engine sent", async () => {
+  // win32 is simulated (process.platform), so the Windows transport path runs on every runner.
+  test.each([process.platform, "win32"] as const)("#given a reply whose non-ASCII text arrives one byte per read on %s #when it is decoded #then the text is identical to what the engine sent", async (platform) => {
     // given
     const name = "한국어 모델 🙂 ｍｏｄｅｌ"
     const socket = new EventEmitter() as EventEmitter & { write: (data: string | Uint8Array) => boolean; destroy: () => void }
@@ -169,7 +170,10 @@ describe("live thread frame decoding", () => {
     const surface = createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: "/tmp/byte-split.sock" }, exists: () => true, statusAll: NO_ENUMERATION, registry: NO_REGISTRY, connect: () => { queueMicrotask(() => socket.emit("connect")); return socket as never } })
 
     // when
-    const models = await surface.getAvailableModels?.("route-peer")
+    const realPlatform = process.platform
+    Object.defineProperty(process, "platform", { value: platform, configurable: true })
+    let models: unknown
+    try { models = await surface.getAvailableModels?.("route-peer") } finally { Object.defineProperty(process, "platform", { value: realPlatform, configurable: true }) }
 
     // then
     expect(models).toEqual([{ provider: "p", id: "m", name }])
