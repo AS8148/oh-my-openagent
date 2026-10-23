@@ -48,7 +48,7 @@ function restoreLegacyBin(binPath, io) {
   if (!legacy || !source.slice(legacy[0].length).startsWith(`# entry: ${io.scriptPath}\n`)) return "foreign-file"
   const temporary = `${binPath}.${io.pid}.tmp`
   try {
-    io.symlink(relative(dirname(binPath), io.scriptPath), temporary)
+    io.symlink(relative(io.realpath(dirname(binPath)), io.scriptPath), temporary)
     io.rename(temporary, binPath)
   } finally {
     io.remove(temporary, { force: true })

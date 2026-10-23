@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { join } from "node:path"
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import { ensureBunBinShim } from "../bin/lib/bun-bin-shim.js"
 import { baseInput, bunTreePackage, legacyShim, NON_POSIX_HOST, POSIX_HOME, recorder, stockLinkTarget } from "./bun-bin-shim.test-support"
 
@@ -42,6 +44,41 @@ describe.skipIf(NON_POSIX_HOST)("Bun owns its global bin links", () => {
       expect(result.action).toBe("repaired")
       expect(fs.linked).toEqual([{ target: stockLinkTarget(), path: `${binPath}.4242.tmp` }])
       expect(fs.lstat(binPath).isSymbolicLink()).toBe(true)
+    })
+  }
+
+  for (const customRoot of [true, false]) {
+    test(`#given a symlinked ${customRoot ? "BUN_INSTALL" : "~/.bun"} #then migrated links resolve across launches`, () => {
+      const root = mkdtempSync(join(tmpdir(), "omo-symlinked-bun-"))
+      try {
+        const actualHome = join(root, "a", "b")
+        mkdirSync(actualHome, { recursive: true })
+        const home = join(root, "link")
+        symlinkSync(actualHome, home, "dir")
+        const bunRoot = join(home, customRoot ? "bun" : ".bun")
+        const entry = bunTreePackage(bunRoot)
+        mkdirSync(dirname(entry), { recursive: true })
+        writeFileSync(entry, "#!/usr/bin/env node\nexport {}\n")
+        const scriptPath = realpathSync(entry)
+        const bun = join(bunRoot, "bin", "bun")
+        mkdirSync(dirname(bun), { recursive: true })
+        writeFileSync(bun, "")
+        const bins = [join(bunRoot, "bin", "omo"), join(bunRoot, "install", "global", "node_modules", ".bin", "omo")]
+        for (const bin of bins) {
+          mkdirSync(dirname(bin), { recursive: true })
+          writeFileSync(bin, legacyShim(scriptPath, bun))
+        }
+        const input = { scriptPath, homedir: () => home, env: customRoot ? { BUN_INSTALL: bunRoot } : {} }
+
+        expect(ensureBunBinShim(input).entries.map(entry => entry.action)).toEqual(["repaired", "repaired"])
+        for (const bin of bins) {
+          expect(existsSync(bin)).toBe(true)
+          expect(realpathSync(bin)).toBe(scriptPath)
+        }
+        expect(ensureBunBinShim(input).entries.map(entry => entry.action)).toEqual(["current", "current"])
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
     })
   }
 
