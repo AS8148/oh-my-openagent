@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises"
 import { realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -47,6 +47,26 @@ async function withWindowsDefaultAutocrlf<T>(root: string, task: () => Promise<T
   }
 }
 
+// An older build never pinned core.autocrlf, so a converting checkout (Git for Windows) rewrote
+// committed LF notes as CRLF and the index cached that copy's stat as clean. The file's mtime is moved
+// into the past before the refresh, so the index entry is not "racily clean" and git trusts its stat.
+async function convertedRepository(root: string): Promise<{ repo: GitMemoryRepo }> {
+  const repo = new GitMemoryRepo({ dir: join(root, "memory"), agentId: AUTHOR.agentId })
+  await repo.init({ installHooks: async () => {} })
+  await writeFile(join(repo.dir, "converted.md"), "alpha\nbeta\n")
+  await writeFile(join(repo.dir, "edited.md"), "one\ntwo\n")
+  await repo.commitWrite(["converted.md", "edited.md"], "seed", AUTHOR)
+  await git(repo.dir, ["config", "--local", "core.autocrlf", "true"])
+  await rm(join(repo.dir, "converted.md"))
+  await git(repo.dir, ["checkout", "--", "converted.md"])
+  const past = new Date("2020-01-01T00:00:00Z")
+  await utimes(join(repo.dir, "converted.md"), past, past)
+  await git(repo.dir, ["update-index", "-q", "--refresh"])
+  await git(repo.dir, ["config", "--local", "--unset", "core.autocrlf"])
+  await writeFile(join(repo.dir, "edited.md"), "one\r\ntwo changed\r\n")
+  return { repo }
+}
+
 describe("memory repository line endings (#11109)", () => {
   test("#given a host whose git converts line endings #when a note is committed and checked out in a worktree #then git keeps every byte", async () => {
     const root = await tempRoot()
@@ -63,22 +83,32 @@ describe("memory repository line endings (#11109)", () => {
     })
   })
 
-  test("#given an existing repository whose checkout gained CRLF copies #when it is opened #then only CRLF-only copies are restored from the index", async () => {
-    const root = await tempRoot()
-    const repo = new GitMemoryRepo({ dir: join(root, "memory"), agentId: AUTHOR.agentId })
-    await repo.init({ installHooks: async () => {} })
-    await writeFile(join(repo.dir, "converted.md"), "alpha\nbeta\n")
-    await writeFile(join(repo.dir, "edited.md"), "one\ntwo\n")
-    await repo.commitWrite(["converted.md", "edited.md"], "seed", AUTHOR)
-    // An older build never pinned core.autocrlf, so a Windows checkout wrote CRLF copies.
-    await git(repo.dir, ["config", "--local", "--unset-all", "core.autocrlf"]).catch(() => "")
-    await writeFile(join(repo.dir, "converted.md"), "alpha\r\nbeta\r\n")
-    await writeFile(join(repo.dir, "edited.md"), "one\r\ntwo changed\r\n")
+  test("#given a converted CRLF copy that git's stat cache calls clean #when the repository is opened #then the committed bytes are restored and a real edit is kept", async () => {
+    const { repo } = await convertedRepository(await tempRoot())
+    // Precondition of the field case: git reports the CRLF copy as unchanged.
+    expect(await readFile(join(repo.dir, "converted.md"), "utf8")).toBe("alpha\r\nbeta\r\n")
+    expect((await git(repo.dir, ["status", "--porcelain", "--", "converted.md"])).trim()).toBe("")
 
     await new GitMemoryRepo({ dir: repo.dir, agentId: AUTHOR.agentId }).init({ installHooks: async () => {} })
 
     expect(await readFile(join(repo.dir, "converted.md"), "utf8")).toBe("alpha\nbeta\n")
     expect(await readFile(join(repo.dir, "edited.md"), "utf8")).toBe("one\r\ntwo changed\r\n")
+    expect((await git(repo.dir, ["status", "--porcelain"])).trim()).toBe("M edited.md")
+    expect((await git(repo.dir, ["config", "--local", "--get", "core.autocrlf"])).trim()).toBe("false")
+  })
+
+  test("#given the repair cannot update the index #when the repository is opened #then the pin is not recorded and the next open repairs it", async () => {
+    const { repo } = await convertedRepository(await tempRoot())
+    const lock = join(repo.dir, ".git", "index.lock")
+    await writeFile(lock, "")
+
+    await expect(new GitMemoryRepo({ dir: repo.dir, agentId: AUTHOR.agentId }).init({ installHooks: async () => {} })).rejects.toThrow()
+    expect(await git(repo.dir, ["config", "--local", "--get", "core.autocrlf"]).catch(() => "unset")).toBe("unset")
+
+    await rm(lock)
+    await new GitMemoryRepo({ dir: repo.dir, agentId: AUTHOR.agentId }).init({ installHooks: async () => {} })
+    expect(await readFile(join(repo.dir, "converted.md"), "utf8")).toBe("alpha\nbeta\n")
+    expect((await git(repo.dir, ["status", "--porcelain", "--", "converted.md"])).trim()).toBe("")
     expect((await git(repo.dir, ["config", "--local", "--get", "core.autocrlf"])).trim()).toBe("false")
   })
 })
