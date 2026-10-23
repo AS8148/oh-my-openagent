@@ -15,6 +15,8 @@ export interface BuildExtensionOptions {
   telemetryPosthogOutputPath?: string
   memorySyncOutputPath?: string
   threadClientOutputPath?: string
+  feedbackOutputPath?: string
+  claimReceiptOutputPath?: string
   computerUseOutputPath?: string
   gatewayStoreWorkerOutputPath?: string
   threadSdkOutputPath?: string
@@ -34,6 +36,8 @@ export function buildExtension(options?: BuildExtensionOptions): Promise<{
   telemetryPosthogInputs: string[]
   memorySyncInputs: string[]
   threadClientInputs: string[]
+  feedbackInputs: string[]
+  claimReceiptInputs: string[]
   computerUseInputs: string[]
   toolkitSdkInputs: string[]
   rollbackRuntimeInputs: string[]

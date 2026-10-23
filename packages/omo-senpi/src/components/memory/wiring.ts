@@ -11,9 +11,13 @@ import { createShutdownDrain, type ShutdownDrainInput, type ShutdownEvaluator } 
 import { type SkillsUsageTracker } from "./skills-usage"
 import { type MemoryUsageTracker } from "./memory-usage"
 import { createMemoryNoticeWiring } from "./memory-notice-wiring"
+import { createConfiguredFactsApplier, publishSessionFactsApplier } from "./facts-apply-rpc"
 import { createKibitzerComposition, type KibitzerComposition } from "./kibitzer"
 import { createPressureDreamAdmission } from "./pressure-dream-admission"
 import { createMemoryRecallWiring, createSharedRecallCorpusCache } from "./recall-wiring"
+import { loadRecallStoreRuntime } from "./recall-store-runtime-loader"
+import { memoryBlockBuild } from "./memory-block-build"
+import type { MemoryIdentityContext } from "./context"
 import { branchEntryCount, sessionIdFrom } from "./wiring-context"
 import { createMemoryUserActivity } from "./user-activity"
 import { logBindReconcileFailure } from "./bind-reconcile-log"
@@ -29,7 +33,21 @@ import type { MemoryWiring, MemoryWiringOptions } from "./wiring-types"
 export type { MemorySessionStateLike, MemoryWiring, MemoryWiringOptions } from "./wiring-types"
 
 export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
-  const promptCache = new MemoryBlockCache()
+  // Persisted compiled blocks: a relaunch reads the block of a commit an earlier process compiled (the store ships
+  // in the lazily loaded recall-store sidecar). Keyed by the build, so an upgrade never reads an older build's bytes.
+  const blockBuild = memoryBlockBuild()
+  const promptCache = new MemoryBlockCache(blockBuild === undefined ? {} : {
+    store: loadRecallStoreRuntime,
+    build: blockBuild,
+    onStoreError: (error) => options.logger?.warn("omo-senpi persisted memory block unavailable; compiling instead", {
+      error: error instanceof Error ? error.message : String(error),
+    }),
+    onDegraded: ({ revision, reasons }) => options.logger?.warn("omo-senpi memory block compiled from incomplete git reads; used for this turn only, not persisted", {
+      revision,
+      reasons,
+    }),
+  })
+  const promptPrebuild: { current?: (context: MemoryIdentityContext) => Promise<void> } = {}
   const lastEventCtx: { current?: unknown } = {}
   const activeSession: { current?: string } = {}
   const userActivity = createMemoryUserActivity(options.env)
@@ -142,7 +160,9 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   return {
     registerStatic(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
       userActivity.register(pi)
-      reflectionLive.registerRpc(pi, resolveContext)
+      const applyFacts = createConfiguredFactsApplier(options, (sessionId) => resolveContext(sessionId ?? activeSession.current ?? ""))
+      reflectionLive.registerRpc(pi, resolveContext, applyFacts)
+      publishSessionFactsApplier(applyFacts)
       const kibitzer = createKibitzerComposition({
         env: options.env,
         cwd: options.cwd,
@@ -163,6 +183,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
         ctx,
         options,
         promptCache,
+        promptPrebuild,
         nudgeWiring,
         noticeWiring,
         recallWiring,
@@ -204,6 +225,13 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
     },
 
     async afterBind(pi, sessionId, identity, eventCtx): Promise<void> {
+      // Off the prompt path: a NEW session's first prompt shares this compile of HEAD, or reads what it persisted.
+      // A resumed session is pinned to its recorded revision, which may not be HEAD; it gets no prebuild.
+      if (branchEntryCount(eventCtx) === 0) void promptPrebuild.current?.(identity).catch((error: unknown) => {
+        options.logger?.warn("omo-senpi memory block prebuild failed; the first prompt compiles it", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
       activeSession.current = sessionId
       userActivity.reset(sessionId)
       pressureDreamAdmission.reset(sessionId)
@@ -244,6 +272,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
       await shutdownDrain.raceDetached(input, "status-settle", () => reflectionLive.settled())
       // A recall ranking saves the repository's terms into its `.git` after the prompt; let that write finish.
       await shutdownDrain.raceDetached(input, "recall-store-settle", () => corpusCache.settled())
+      await shutdownDrain.raceDetached(input, "memory-block-settle", () => promptCache.settled())
       reflectionLive.shutdown(options.sessions.get(input.sessionId)?.context?.identity)
       // senpi awaits this handler with no host cap, so neither cleanup may be awaited past the
       // drain deadline: both are started and raced against it, and whichever loses keeps running
