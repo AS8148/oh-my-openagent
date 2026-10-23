@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:dc8009a46b10fba20b07107a81e3ac8fa5d806f913b36873ffa48a2a291d9ebe:9ec8e393fda3e905324efc2e573c3f9db0323c1490f88e0b333b8562ccbbaf99
+// omo-codex-install:4c1d00a1bdb93e1995b42d3dcd9c0ef545ba2ec5e85b798bad0228777ef98929:158108ebf1f2c4d05e30ae37350c40a9dd37b50f7a76c67a1c05039035b26841
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -21244,8 +21244,10 @@ function prunePass(root, issues) {
       if (path.length === 0)
         return null;
       const key = path.map((segment) => String(segment)).join(".");
+      const summary = configIssueSummary(issue);
+      const message = path.length < issue.path.length ? `${summary} at ${segmentsOf(issue.path).join(".")}` : summary;
       if (!byKey.has(key))
-        byKey.set(key, { key, message: configIssueSummary(issue), path });
+        byKey.set(key, { key, message, path });
     }
   }
   const targets = [...byKey.values()];
