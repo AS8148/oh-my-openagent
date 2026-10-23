@@ -479,9 +479,6 @@
   "packages/senpi-task/src/workpool/aggregate.test.ts": {
     "typescript/no-non-null-assertion": 2
   },
-  "packages/shared-skills/skills/programming/scripts/typescript/new-project.ts": {
-    "typescript/no-non-null-assertion": 2
-  },
   "packages/telemetry-core/src/event-id.test.ts": {
     "typescript/no-non-null-assertion": 11
   },
