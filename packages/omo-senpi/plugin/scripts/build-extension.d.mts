@@ -14,6 +14,7 @@ export interface BuildExtensionOptions {
   memoryCommandsOutputPath?: string
   sessionHistoryOutputPath?: string
   recallStoreOutputPath?: string
+  doriMigrationOutputPath?: string
   telemetryPosthogOutputPath?: string
   memorySyncOutputPath?: string
   threadClientOutputPath?: string
@@ -37,6 +38,7 @@ export function buildExtension(options?: BuildExtensionOptions): Promise<{
   memoryCommandsInputs: string[]
   sessionHistoryInputs: string[]
   recallStoreInputs: string[]
+  doriMigrationInputs: string[]
   telemetryPosthogInputs: string[]
   memorySyncInputs: string[]
   threadClientInputs: string[]

@@ -26,6 +26,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryCommandsOutput,
     sessionHistoryOutput,
     recallStoreOutput,
+    doriMigrationOutput,
     telemetryPosthogOutput,
     memorySyncOutput,
     threadClientOutput,
@@ -59,6 +60,7 @@ export async function checkExtensionCurrent(options = {}) {
   const currentMemoryCommands = await readBuiltEntry(memoryCommandsOutput)
   const currentSessionHistory = await readBuiltEntry(sessionHistoryOutput)
   const currentRecallStore = await readBuiltEntry(recallStoreOutput)
+  const currentDoriMigration = await readBuiltEntry(doriMigrationOutput)
   const currentTelemetryPosthog = await readBuiltEntry(telemetryPosthogOutput)
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
   const currentFeedback = await readBuiltEntry(feedbackOutput)
@@ -80,6 +82,7 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentMemoryCommands === undefined) return { ok: false, reason: "missing-output", output: memoryCommandsOutput }
   if (currentSessionHistory === undefined) return { ok: false, reason: "missing-output", output: sessionHistoryOutput }
   if (currentRecallStore === undefined) return { ok: false, reason: "missing-output", output: recallStoreOutput }
+  if (currentDoriMigration === undefined) return { ok: false, reason: "missing-output", output: doriMigrationOutput }
   if (currentTelemetryPosthog === undefined) return { ok: false, reason: "missing-output", output: telemetryPosthogOutput }
   if (currentThreadClient === undefined) return { ok: false, reason: "missing-output", output: threadClientOutput }
   if (currentFeedback === undefined) return { ok: false, reason: "missing-output", output: feedbackOutput }
@@ -109,6 +112,7 @@ export async function checkExtensionCurrent(options = {}) {
     memoryCommandsOutputPath: join(tempRoot, "omo-memory-commands.js"),
     sessionHistoryOutputPath: join(tempRoot, "omo-session-history.js"),
     recallStoreOutputPath: join(tempRoot, "omo-recall-store.js"),
+    doriMigrationOutputPath: join(tempRoot, "omo-dori-migration.js"),
     telemetryPosthogOutputPath: join(tempRoot, "omo-telemetry-posthog.js"),
     memorySyncOutputPath: join(tempRoot, "omo-memory-sync.js"),
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
@@ -137,6 +141,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentMemoryCommands, expected.memoryCommandsOutputPath, memoryCommandsOutput],
       [currentSessionHistory, expected.sessionHistoryOutputPath, sessionHistoryOutput],
       [currentRecallStore, expected.recallStoreOutputPath, recallStoreOutput],
+      [currentDoriMigration, expected.doriMigrationOutputPath, doriMigrationOutput],
       [currentTelemetryPosthog, expected.telemetryPosthogOutputPath, telemetryPosthogOutput],
       [currentMemorySync, expected.memorySyncOutputPath, memorySyncOutput],
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
