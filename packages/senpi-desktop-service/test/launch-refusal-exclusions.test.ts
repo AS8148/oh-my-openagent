@@ -29,6 +29,7 @@ describe("startup classification exclusions", () => {
 	}
 	for (const [name, options] of [
 		["successful exit", { code: 0 }],
+		["structured marker with a non-gate exit", { code: 3 }],
 		["ordinary crash", { stderr: "crashed\n", code: 3 }],
 		["post-hello marker", { hello: true }],
 		["ABI mismatch", { hello: true, abi: "wrong" }],
