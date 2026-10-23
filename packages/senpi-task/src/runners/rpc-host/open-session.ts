@@ -15,7 +15,6 @@ import { HostUnavailableError } from "./daemon"
 import {
   HostSessionOpenError,
   SessionHeldElsewhereError,
-  type HostSessionCommand,
   type OpenedHostSession,
 } from "./session-client"
 import { buildChildContext } from "./session-context"
@@ -30,7 +29,6 @@ export async function openTaskHostSession(input: {
     getState?(): Promise<HostSessionLiveness>
     getAvailableModels?(): Promise<readonly unknown[]>
     close?(): Promise<void>
-    send?(command: HostSessionCommand): Promise<void>
   }
   readonly spec: RpcRunnerSpec
   readonly sessionPath: string
@@ -59,7 +57,6 @@ export async function openTaskHostSession(input: {
       cause: error,
     })
   }
-  if (opened.attached === true) await publishRunning(input.client, input.spec.task_id)
   // Post-start check (#9722): a FRESH open (attached !== true) must have opened on the requested
   // base id. The host answers get_state with its effective model; a mismatch, an unreadable
   // state, or a state carrying NO model all fail typed - a check that silently skips on error is
@@ -130,17 +127,6 @@ export async function openTaskHostSession(input: {
     return { ...opened, ...reported, ...withDurableId(state?.sessionId) }
   }
   return opened
-}
-
-// A session the open re-joined keeps the context its last detach published, a terminal `task_status`
-// included: a successor host would drop it as finished while it runs again (omo#10778). A fresh open
-// starts from an empty overlay. A host that refuses the patch must not cost the child its open.
-async function publishRunning(client: { send?(command: HostSessionCommand): Promise<void> }, taskId: string): Promise<void> {
-  try {
-    await client.send?.({ type: "set_session_context", patch: { task_status: "running" } })
-  } catch (error) {
-    log("senpi-task host session running status publish failed", { taskId, error: String(error) })
-  }
 }
 
 function withDurableId(sessionId: unknown): { readonly durableSessionId?: string } {
