@@ -38,6 +38,49 @@ export function findEmDashCopy(content: string, path: string): { line: number; c
   return hits
 }
 
+export function findUnexplainedSuppressions(content: string, path: string): { line: number; column: number }[] {
+  if (!isProductSource(path)) return []
+  const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true)
+  const comments = new Map<number, ts.CommentRange>()
+  const visit = (node: ts.Node): void => {
+    const positions = [node.pos, node.end]
+    if (ts.isJsxExpression(node)) positions.push(node.getStart(source) + 1)
+    for (const position of positions) {
+      for (const range of [
+        ...ts.getLeadingCommentRanges(content, position) ?? [],
+        ...ts.getTrailingCommentRanges(content, position) ?? [],
+      ]) comments.set(range.pos, range)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  const parsed = [...comments.values()].sort((a, b) => a.pos - b.pos).map((range) => {
+    const start = source.getLineAndCharacterOfPosition(range.pos)
+    const end = source.getLineAndCharacterOfPosition(range.end)
+    const text = content.slice(range.pos + 2, range.end - (range.kind === ts.SyntaxKind.MultiLineCommentTrivia ? 2 : 0))
+    return { start, end, text, ownLine: !content.slice(source.getPositionOfLineAndCharacter(start.line, 0), range.pos).trim() }
+  })
+  const ownLines = new Map(parsed.filter((comment) => comment.ownLine).map((comment) => [comment.end.line, comment]))
+  const directive = /^\s*\*?\s*(?:(?:oxlint|eslint)-(?:disable|enable)|biome-ignore|@ts-(?:expect-error|ignore|nocheck)|@effect-diagnostics)/
+  const hits: { line: number; column: number }[] = []
+  for (const comment of parsed) {
+    const lint = /^\s*\*?\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?![\w-])([\s\S]*)$/.exec(comment.text)
+    const typescript = /^\s*\*?\s*@ts-(?:expect-error|ignore|nocheck)(?![\w-])([\s\S]*)$/.exec(comment.text)
+    const biome = /^\s*\*?\s*biome-ignore(?:-all|-start)?(?![\w-])([\s\S]*)$/.exec(comment.text)
+    if (!lint && !typescript && !biome) continue
+    const reason = lint ? /--\s*\S/.test(lint[1]!)
+      : typescript ? !!typescript[1]!.replace(/^[\s:-]+/, "").trim()
+      : /:\s*\S/.test(biome![1]!)
+    if (reason) continue
+    let above = ownLines.get(comment.start.line - 1)
+    while (above && (directive.test(above.text) || /^[\s*]*$/.test(above.text))) {
+      above = ownLines.get(above.start.line - 1)
+    }
+    if (!above) hits.push({ line: comment.start.line + 1, column: comment.start.character + 1 })
+  }
+  return hits
+}
+
 if (import.meta.main) {
   const root = resolve(import.meta.dir, "..")
   const paths = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
@@ -47,8 +90,13 @@ if (import.meta.main) {
   }).split("\0").filter(isProductSource)
   let count = 0
   for (const path of new Set(paths)) {
-    for (const hit of findEmDashCopy(readFileSync(resolve(root, path), "utf8"), path)) {
+    const content = readFileSync(resolve(root, path), "utf8")
+    for (const hit of findEmDashCopy(content, path)) {
       console.error(`${path}:${hit.line}:${hit.column}: ${MESSAGE}`)
+      count += 1
+    }
+    for (const hit of findUnexplainedSuppressions(content, path)) {
+      console.error(`${path}:${hit.line}:${hit.column}: Say why: give the suppression reason after the directive or in a comment on the line above.`)
       count += 1
     }
   }

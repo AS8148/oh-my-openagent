@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { findEmDashCopy, isProductSource } from "./check-copy"
+import { findEmDashCopy, findUnexplainedSuppressions, isProductSource } from "./check-copy"
 
 describe("no-em-dash-copy", () => {
   const path = "packages/example/src/copy.tsx"
@@ -69,5 +69,61 @@ describe("no-em-dash-copy", () => {
     "packages/example/plugin/components/copy.ts",
   ])("checks %s", (filename) => {
     expect(isProductSource(filename)).toBe(true)
+  })
+})
+
+describe("require-suppression-reason", () => {
+  const path = "packages/example/src/copy.tsx"
+
+  test.each([
+    "// oxlint-disable-next-line no-control-regex -- ANSI sequences start with ESC.",
+    "/* eslint-disable no-console -- this script reports to the terminal */",
+    "// Positions are stable.\n// oxlint-disable-next-line react/no-array-index-key",
+    "// Invalid fixture.\n// @ts-expect-error\n// oxlint-disable-next-line no-unused-vars",
+    "// @ts-expect-error the fixture passes a string on purpose",
+    "// @ts-ignore: upstream types omit this property",
+    "/* @ts-nocheck -- generated client types are checked separately */",
+    "const el = <div>{/* oxlint-disable-next-line react/no-danger -- sanitized above */}</div>",
+    "/* oxlint-enable no-console */",
+    "// Positions are stable.\n//\n// eslint-disable-next-line no-shadow",
+    "/* Positions\n * are stable. */\n// eslint-disable-next-line no-shadow",
+    "// biome-ignore lint/suspicious/noExplicitAny: external payload has no schema",
+    "// biome-ignore-all format: stable generated layout",
+    "// biome-ignore-start lint/suspicious/noExplicitAny: external payload has no schema",
+    "// External payload has no schema.\n// biome-ignore lint/suspicious/noExplicitAny:",
+    'const text = "// @ts-ignore";',
+    "const text = `\n// @ts-ignore\n`;",
+    'const expression = /https?:\\/\\//;',
+  ])("allows %s", (content) => {
+    expect(findUnexplainedSuppressions(content, path)).toEqual([])
+  })
+
+  test.each([
+    "// oxlint-disable-next-line no-control-regex",
+    "/* oxlint-disable eslint/no-useless-escape */",
+    "// eslint-disable-line no-unused-vars",
+    "// eslint-disable no-console -- ",
+    "// @ts-expect-error",
+    "// @ts-ignore:",
+    "/* @ts-nocheck */",
+    "// Positions are stable.\n\n// eslint-disable-next-line no-shadow",
+    "//\n/* */\n// oxlint-disable-next-line no-unused-vars",
+    "const first = 1; // first value\nconst second = 2; // oxlint-disable-line no-unused-vars",
+    "const el = <div>{/* eslint-disable-next-line react/no-danger */}</div>",
+    "// biome-ignore lint/suspicious/noExplicitAny",
+    "// biome-ignore-all format:",
+    "// biome-ignore-start lint/suspicious/noExplicitAny",
+    "// biome-ignore lint/suspicious/noExplicitAny:",
+    "/* biome-ignore lint/suspicious/noExplicitAny: */",
+    "// @ts-ignore\n// eslint-disable-next-line no-shadow",
+  ])("reports %s", (content) => {
+    expect(findUnexplainedSuppressions(content, path).length).toBeGreaterThan(0)
+  })
+
+  test("reports directive positions and uses the existing source scope", () => {
+    expect(findUnexplainedSuppressions("const a = 1;\n// @ts-ignore\nconst b = 2", path))
+      .toEqual([{ line: 2, column: 1 }])
+    expect(findUnexplainedSuppressions("// @ts-ignore", "script/example.ts")).toEqual([])
+    expect(findUnexplainedSuppressions("// @ts-ignore", "packages/example/src/copy.test.ts")).toEqual([])
   })
 })
