@@ -47,6 +47,37 @@ describe("store extension migrations", () => {
     }
   })
 
+  test.each([
+    ["the old branch numbering at v8 (thread tables, no receipts table, no provenance trigger)", "DROP TRIGGER deliveries_require_provenance; DROP TABLE toolkit_replay_receipts", 8, 1],
+    ["the old branch numbering at v9 (thread tables and receipts table, no provenance trigger)", "DROP TRIGGER deliveries_require_provenance", 9, 1],
+    ["dev's v8 (the provenance trigger, none of these tables)", "DROP TABLE thread_creations; DROP TABLE extension_registrations; DROP TABLE toolkit_replay_receipts", 8, 0],
+  ])("#given a store migrated by %s #when the new code opens it #then it reaches the current version with every table, the trigger and its rows", async (_label, rewind, version, keptRows) => {
+    const h = (harness = createGatewayHarness())
+    const first = h.store()
+    expect(await first.registerStoreExtension(extension())).toMatchObject({ kind: "ok" })
+    await first.dispose()
+    const db = new Database(gatewayDatabasePath(h.agentDir))
+    try {
+      db.exec("INSERT INTO thread_creations (creator_durable_id, created_durable_id, created_at) VALUES ('parent', 'child', 1)")
+      db.exec(rewind as string)
+      db.exec("DELETE FROM extension_objects WHERE owner IS NULL AND name NOT IN (SELECT name FROM sqlite_schema)")
+      db.exec(`PRAGMA user_version = ${version}`)
+    } finally {
+      db.close()
+    }
+    expect(await h.store().registerStoreExtension(extension())).toMatchObject({ kind: "ok" })
+    const check = new Database(gatewayDatabasePath(h.agentDir), { readonly: true })
+    try {
+      expect(check.query("PRAGMA user_version").get()).toEqual({ user_version: GATEWAY_MIGRATIONS.length })
+      expect(check.query("SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('thread_creations', 'extension_registrations', 'toolkit_replay_receipts') ORDER BY name").all())
+        .toEqual([{ name: "extension_registrations" }, { name: "thread_creations" }, { name: "toolkit_replay_receipts" }])
+      expect(check.query("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND name = 'deliveries_require_provenance'").all()).toEqual([{ name: "deliveries_require_provenance" }])
+      expect(check.query("SELECT count(*) AS rows FROM thread_creations WHERE creator_durable_id = 'parent' AND created_durable_id = 'child'").get()).toEqual({ rows: keptRows })
+    } finally {
+      check.close()
+    }
+  })
+
   test("#given a core table added after the v6 snapshot #when an extension takes its name #then registration is refused and the table stays core", async () => {
     const h = (harness = createGatewayHarness())
     const store = h.store()

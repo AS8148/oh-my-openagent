@@ -47,6 +47,7 @@ test.each<[string, Partial<SessionCallableOp>]>([
   ["a timeoutMs out of range", { await: { statusOp: "threadOpenStatus", expireOp: "expireThreadOpen", timeoutMs: 0 } }],
   ["an await statusOp the module does not export", { await: { statusOp: "nope", expireOp: "expireThreadOpen", timeoutMs: 2_000 } }],
   ["a wake name with a slash", { wake: "../escape" }],
+  ["a schema keyword the store cannot check (format)", { parameters: { type: "object", additionalProperties: false, properties: { target_session_durable_id: { type: "string", format: "uuid" } } } }],
 ])("#given a declaration with %s #when registering #then it is refused and nothing is persisted", async (_label, broken) => {
   const h = (harness = createGatewayHarness())
   const store = h.store()

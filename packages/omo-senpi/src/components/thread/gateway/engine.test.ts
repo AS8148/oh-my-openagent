@@ -253,9 +253,7 @@ describe("causal_cycle_hop_rate_and_fanout_budgets", () => {
     }
     const fifth = await send(h, "H4", "H5", "hop 5", { cause_delivery_id: cause })
     expect(fifth.kind === "error" && { code: fifth.error.code, guard: fifth.error.details?.guard }).toEqual({ code: "loop_detected", guard: "hop_limit" })
-    // Six sessions and a store worker per hop, sequenced through quiesce; no timer is under test, and a
-    // CPU-capped runner measured 5.3 s, so the 5 s default needs room past it.
-  }, 30_000)
+  })
 
   test("#given one sender turn #when it reaches a 17th distinct session #then that send is refused while a second send to a known target passes", async () => {
     const h = open()
@@ -350,9 +348,10 @@ describe("cli_sender_principal", () => {
       origin: { external: { platform: "cli", account_id: "tester", chat_id: "@cli", thread_id: "@chat", message_id: id } },
     })
     const text = b.runtime.textOf(id) ?? ""
+    expect(text.split("\n")[0]).toStartWith("From unclassified / ")
     expect(text.split("\n")[0]).toContain("source=external")
     expect(text.split("\n")[2]).toBe(JSON.stringify("from the shell"))
-    expect(b.runtime.senderOf(id)).toEqual({ sender: { kind: "command_line", user: "tester" }, display_text: "from the shell" })
+    expect(b.runtime.senderOf(id)).toEqual({ sender: { kind: "command_line", user: "tester" }, display_text: "From unclassified / fixture\nfrom the shell" })
   })
 
   test("#given a named session sends to another #when it lands #then the receiver is told the sending session's id and name and the message as written, apart from the provenance header the model reads", async () => {
@@ -363,12 +362,13 @@ describe("cli_sender_principal", () => {
     const result = await named.deliver({ sender: { kind: "session", durable_id: "A", name: "planner" }, target: "B", text: "review the diff" })
     const id = okId(result)
     await h.quiesce()
-    expect(b.runtime.senderOf(id)).toEqual({ sender: { kind: "agent", session_id: "A", name: "planner" }, display_text: "review the diff" })
+    expect(b.runtime.senderOf(id)).toEqual({ sender: { kind: "agent", session_id: "A", name: "planner" }, display_text: 'From unclassified / fixture / session "planner"\nreview the diff' })
+    expect((b.runtime.textOf(id) ?? "").split("\n")[0]).toContain('/ session "planner" [OMO_GATEWAY v=1 ')
     expect((b.runtime.textOf(id) ?? "").split("\n")[0]).toContain("source=peer_agent")
 
     const unnamed = await named.deliver({ sender: { kind: "session", durable_id: "A" }, target: "B", text: "and the tests" })
     await h.quiesce()
-    expect(b.runtime.senderOf(okId(unnamed))).toEqual({ sender: { kind: "agent", session_id: "A" }, display_text: "and the tests" })
+    expect(b.runtime.senderOf(okId(unnamed))).toEqual({ sender: { kind: "agent", session_id: "A" }, display_text: "From unclassified / fixture\nand the tests" })
   })
 })
 

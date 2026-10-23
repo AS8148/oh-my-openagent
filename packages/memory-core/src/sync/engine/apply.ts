@@ -17,13 +17,14 @@
 // on: the landed render (inv. 5), or the old baseline when the render never landed.
 
 import { createHash, randomBytes } from "node:crypto"
-import { existsSync, mkdir, readdir, readFile, rename, rm } from "../../fs/resilient"
+import { existsSync, mkdir, readdir, readFile, rename } from "../../fs/resilient"
 import { dirname, join, relative, sep } from "node:path"
 
 import { syncJournalDirectory } from "../../journal/fsync"
-import { TEMP_MARK, writeAtomic } from "./atomic"
+import { removeAtomic, TEMP_MARK, writeAtomic } from "./atomic"
 import type { EngineDeps } from "./engine-deps"
 import { type CycleRecord, fromBase64, type RenderRecord, type SyncJournal, toBase64, type WireItem } from "./journal"
+import { adoptLegacyRenders } from "./legacy-cycle"
 
 export interface Applied {
   readonly batches: number
@@ -57,11 +58,13 @@ const latestByKey = (records: readonly RenderRecord[]): Map<string, RenderRecord
 
 /** Invariant 5: a landed render becomes the baseline only while the doc is still at its frontier. */
 async function adoptLandedRenders(deps: EngineDeps, journal: SyncJournal, cycle: CycleRecord): Promise<void> {
-  for (const record of latestByKey(await journal.renders(cycle.id)).values()) {
+  const latest = latestByKey(await journal.renders(cycle.id))
+  for (const record of latest.values()) {
     if (!journal.renderLanded(cycle.id, record)) continue
     if ((await deps.store.version(record.key)) !== record.frontier) continue
     await deps.store.markMaterialized(record.key, record.text)
   }
+  await adoptLegacyRenders(deps, cycle, new Set(latest.keys()), (key) => readWorking(deps.repo.root, key))
 }
 
 export async function capture(deps: EngineDeps, journal: SyncJournal, resuming: CycleRecord | null = null): Promise<number> {
@@ -165,7 +168,7 @@ export async function advance(deps: EngineDeps, journal: SyncJournal, start: Cyc
       const record: RenderRecord = { seq: await journal.nextRenderSeq(cycle.id), key, frontier, hash: textHash(text), text }
       // A crash at `staged` leaves a staged file with no record at this seq; it must not survive
       // into a delete record, where a present staged file means "landed" (invariant 4).
-      await rm(journal.stagedPath(cycle.id, record.seq), { force: true })
+      await removeAtomic(journal.stagedPath(cycle.id, record.seq))
       if (text !== null) await writeAtomic(journal.stagedPath(cycle.id, record.seq), text)
       deps.fault?.("staged")
       await journal.appendRender(cycle.id, record)

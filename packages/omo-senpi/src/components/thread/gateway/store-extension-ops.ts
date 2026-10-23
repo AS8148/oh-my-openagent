@@ -2,7 +2,7 @@ import { declarationProblem, declaredOpNames, importExtensionModule, persistDesc
 import { assertExtensionName, checkExtensionSchema, ExtensionSchemaViolation, extensionSchema, extensionSql, sqliteName } from "./extension-sql"
 import { ExtensionArgumentError, extensionTransaction } from "./extension-transaction"
 import { singleExtensionStatement } from "./extension-statement"
-import type { GatewayResolve } from "./engine"
+import type { GatewayEngineOptions, GatewayResolve } from "./engine"
 import { isLockWaitExceeded } from "./lock-wait"
 import { GatewaySchemaVersionError } from "./schema"
 import { transaction, type StoreContext } from "./store-ops"
@@ -39,7 +39,7 @@ export type ExtensionRun = {
 export class StoreExtensions {
   private readonly registered = new Map<string, Registered>()
 
-  constructor(private readonly ctx: StoreContext, private readonly resolveTarget: GatewayResolve) {}
+  constructor(private readonly ctx: StoreContext, private readonly resolveTarget: GatewayResolve, private readonly senderProvenance: GatewayEngineOptions["senderProvenance"]) {}
 
   /** `restoredAt`: a restarted worker replaying a registration this process made then (`persistDescriptor`). */
   async register(descriptor: StoreExtensionRegistration, now: number, restoredAt?: number): Promise<StoreExtensionResult<{ readonly version: number }>> {
@@ -172,7 +172,7 @@ export class StoreExtensions {
         const locked = Number(row?.version ?? 0)
         if (locked !== version) throw new GatewaySchemaVersionError(locked, request.descriptor.migrations.length, `Extension ${name}`)
         const before = extensionSchema(this.ctx.sql)
-        const scope = extensionTransaction({ ...this.ctx, afterCommit: effects, afterRollback: compensations }, name, now, this.resolveTarget)
+        const scope = extensionTransaction({ ...this.ctx, afterCommit: effects, afterRollback: compensations }, name, now, this.resolveTarget, this.senderProvenance)
         let timer: ReturnType<typeof setTimeout> | undefined
         try {
           const run = async () => {

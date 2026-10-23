@@ -5,11 +5,12 @@ import { Worker } from "node:worker_threads"
 
 import { GATEWAY_BUSY_TIMEOUT_MS, GATEWAY_LOCK_WAIT_MAX_MS, GATEWAY_STORE_IDLE_RETIRE_MS } from "./constants"
 import type { GatewayResolve } from "./engine"
+import { resolveProvenance } from "./provenance-resolver"
 import type { GatewayStore } from "./store-api"
 export type { Deduplicated, DeliveryView, GatewayStore, OutboxPage, ReceiptScope } from "./store-api"
 import { createExtensionFacade, type ExtensionRegisterReply, type RetainedRegistration } from "./store-extension-facade"
 export type { DeclaredSessionOp, SessionCallableOp, SessionCaller, StoreExtensionApi, StoreExtensionOperation, StoreExtensionRefusal, StoreExtensionRefusalCode, StoreExtensionRegistration, StoreExtensionResult, StoreExtensionSessionApi, StoreExtensionTransaction } from "./store-extensions"
-import type { GatewayStoreConfig, GatewayStoreEvent, GatewayStoreTestHooks, ProcessIdentity } from "./types"
+import type { GatewayStoreConfig, GatewayStoreEvent, GatewayStoreTestHooks, ProcessIdentity, Provenance } from "./types"
 
 export type GatewayStoreOptions = {
   readonly agentDir: string
@@ -22,6 +23,8 @@ export type GatewayStoreOptions = {
   readonly workerModuleUrl?: string | URL
   /** Resolves extension enqueue targets through the caller's live-and-disk address book. */
   readonly resolveTarget?: GatewayResolve
+  /** Sender-owned resolution for deliveries created by extension transactions. */
+  readonly senderProvenance?: () => Promise<Provenance>
   /** Test seams only: a shorter busy timeout and lock-wait bound, commit-boundary hooks, and the module location the worker is resolved from. */
   readonly _test?: GatewayStoreTestHooks & {
     readonly busyTimeoutMs?: number
@@ -55,6 +58,7 @@ type Pending = { readonly worker: Worker; readonly resolve: (value: unknown) => 
 
 type WorkerMessage =
   | { readonly type: "resolve"; readonly id: number; readonly address: string; readonly request: Parameters<GatewayResolve>[1] }
+  | { readonly type: "provenance"; readonly id: number }
   | { readonly type: "response"; readonly id: number; readonly ok: true; readonly value: unknown }
   | { readonly type: "response"; readonly id: number; readonly ok: false; readonly error: { readonly message: string; readonly stack?: string; readonly code?: string } }
   | { readonly type: "event"; readonly event: GatewayStoreEvent }
@@ -142,6 +146,13 @@ export function createGatewayStore(options: GatewayStoreOptions): GatewayStore {
     worker = spawned
     spawned.unref()
     spawned.on("message", (message: WorkerMessage) => {
+      if (message.type === "provenance") {
+        void (options.senderProvenance?.() ?? resolveProvenance({ cwd: process.cwd() })).then(
+          (value) => { if (worker === spawned) spawned.postMessage({ type: "provenance_resolved", id: message.id, ok: true, value }) },
+          (error: unknown) => { if (worker === spawned) spawned.postMessage({ type: "provenance_resolved", id: message.id, ok: false, error: error instanceof Error ? error.message : String(error) }) },
+        )
+        return
+      }
       if (message.type === "resolve") {
         void resolveExtensionTarget(message.address, message.request).then(
           (value) => { if (worker === spawned) spawned.postMessage({ type: "resolution", id: message.id, ok: true, value }) },

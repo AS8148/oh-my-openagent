@@ -8,10 +8,10 @@
 import { randomUUID } from "node:crypto"
 import { rmSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { Value } from "typebox/value"
 
 import { AWAIT_REQUEST_ID, RESERVED_CALLER_KEYS, isToolSessionOp } from "./extension-registrations"
 import { gatewayDatabasePath } from "./paths"
+import { argumentFailure } from "./session-args-schema"
 import type { StoreExtensions } from "./store-extension-ops"
 import { transaction, type StoreContext } from "./store-ops"
 import { TOOLKIT_REPLAY_RETENTION_MS, type StoreExtensionRefusal, type StoreExtensionResult, type ToolkitReplayRequest } from "./store-extensions"
@@ -81,17 +81,14 @@ export async function sessionCall(ctx: StoreContext, extensions: StoreExtensions
   let op = entry.op
   const awaited = isToolSessionOp(entry) ? entry.await : undefined
   if (phase === "op") {
-    let valid: boolean
+    let failure: ReturnType<typeof argumentFailure>
     try {
-      valid = Value.Check(entry.parameters, args)
+      failure = argumentFailure(entry.parameters, args)
     } catch (error) {
-      // A schema typebox only rejects once a value reaches the bad part (an invalid pattern).
+      // A schema that only breaks once a value reaches the bad part (an invalid pattern).
       return refused("invalid_arguments", `${name}.${entry.op} declares parameters that cannot be checked: ${error instanceof Error ? error.message : String(error)}`)
     }
-    if (!valid) {
-      const [first] = Value.Errors(entry.parameters, args)
-      return refused("invalid_arguments", `Parameter validation failed at ${first?.instancePath || "/"}: ${first?.message ?? "invalid value"}`)
-    }
+    if (failure !== undefined) return refused("invalid_arguments", `Parameter validation failed at ${failure.path || "/"}: ${failure.message}`)
   } else if (phase === "status" || phase === "expire") {
     const id = (args as { readonly await_request_id?: unknown }).await_request_id
     if (awaited === undefined) return refused("extension_unknown_op", `${name}.${entry.op} declares no await.`)

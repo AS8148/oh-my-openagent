@@ -11,6 +11,8 @@ export type SessionAwait = {
   readonly expire: () => Promise<StoreExtensionResult<unknown>>
   /** Test seam (the store's `_test.onAwaitArmed`): called once, when the watch is armed and a status read answered not final, just before the first wait. */
   readonly onArmed?: () => void
+  /** Test seam: replaces `fs.watch`, so a test can model a watch that drops every event. */
+  readonly watch?: typeof watch
 }
 
 /** A status or expire call that throws (the worker exited mid-call, a reopen hit the lock-wait bound) answers like a refusal, so it never ends the wait early. */
@@ -54,11 +56,22 @@ async function expireAndRead(request: SessionAwait): Promise<StoreExtensionResul
  * lock held past its bound, a failed import) keeps waiting. At `timeoutMs`, `expire` runs and then
  * `status` once more, so an open that completes during the expiry still returns as opened. A missing
  * wake directory means no connector has started, so nothing can complete the request: it expires at
- * once instead of making the caller wait `timeoutMs`. A dropped event costs at most `timeoutMs`,
- * never correctness.
+ * once instead of making the caller wait `timeoutMs`. A watch can drop an event (macOS starts its
+ * FSEvents stream asynchronously, so a touch right after arming may never be reported), so while
+ * waiting the wake file's existence is also checked every `WAKE_FILE_RECHECK_MS`: the file is unique
+ * to the request and written only after its completion commits, so its presence is a wake that a
+ * dropped event cannot lose. It wakes the waiter once; after that only the watch and the deadline do.
  */
+export const WAKE_FILE_RECHECK_MS = 1_000
+
 export async function awaitSessionRequest(request: SessionAwait): Promise<StoreExtensionResult<unknown>> {
   let woken = false
+  let sawWakeFile = false
+  const wakeFileArrived = (): boolean => {
+    if (sawWakeFile || !existsSync(request.file)) return false
+    sawWakeFile = true
+    return true
+  }
   let wake: (() => void) | undefined
   const signal = (): void => {
     woken = true
@@ -72,7 +85,7 @@ export async function awaitSessionRequest(request: SessionAwait): Promise<StoreE
   const watchers: FSWatcher[] = []
   for (const [path, only] of [[dirname(request.file), name], [request.file, undefined]] as const) {
     try {
-      const watcher = watch(path, (_event, filename) => {
+      const watcher = (request.watch ?? watch)(path, (_event, filename) => {
         if (only === undefined || filename === null || String(filename) === only) signal()
       })
       watcher.on("error", () => undefined)
@@ -96,15 +109,18 @@ export async function awaitSessionRequest(request: SessionAwait): Promise<StoreE
         request.onArmed?.()
       }
       const arrived = await new Promise<boolean>((resolve) => {
-        if (woken) {
+        if (woken || wakeFileArrived()) {
           resolve(true)
           return
         }
-        const timer = setTimeout(() => resolve(false), remaining)
-        wake = () => {
+        const done = (value: boolean): void => {
           clearTimeout(timer)
-          resolve(true)
+          clearInterval(recheck)
+          resolve(value)
         }
+        const timer = setTimeout(() => done(false), remaining)
+        const recheck = setInterval(() => { if (wakeFileArrived()) done(true) }, Math.min(WAKE_FILE_RECHECK_MS, remaining))
+        wake = () => done(true)
       })
       wake = undefined
       if (!arrived) break

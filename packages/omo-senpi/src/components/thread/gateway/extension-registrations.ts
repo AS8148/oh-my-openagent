@@ -1,5 +1,5 @@
 /**
- * The persisted half of store extension registrations (`extension_registrations`, schema v10): the
+ * The persisted half of store extension registrations (`extension_registrations`, schema v8): the
  * descriptor `register()` upserts by name, the session-op declaration rules both `register()` and
  * every reader apply, and the worker's lazy import of a persisted module. An engine process lists
  * session tools from these rows without importing anything; only a call imports the module.
@@ -8,6 +8,7 @@ import { existsSync } from "node:fs"
 import { extname } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { schemaProblem } from "./session-args-schema"
 import type { StoreContext } from "./store-ops"
 import type { DeclaredSessionOp, SessionCallableOp, StoreExtensionRegistration, ToolSessionOp } from "./store-extensions"
 
@@ -70,6 +71,8 @@ function entryProblem(entry: unknown, extension: string, wakeDir: string | undef
   const properties = parameters.properties ?? {}
   if (!isRecord(properties)) return `${label}: parameters.properties must be an object`
   if (RESERVED_CALLER_KEYS.some((key) => Object.hasOwn(properties, key))) return `${label}: parameters must not declare ${RESERVED_CALLER_KEYS.join(" or ")}; the store stamps them`
+  const schema = schemaProblem(parameters)
+  if (schema !== undefined) return `${label}: ${schema}`
   if (targetArg !== undefined && (typeof targetArg !== "string" || !Object.hasOwn(properties, targetArg))) return `${label}: targetArg ${String(targetArg)} must name a field of parameters.properties`
   if (awaited !== undefined) {
     if (!isRecord(awaited) || !nonEmpty(awaited.statusOp) || !nonEmpty(awaited.expireOp)) return `${label}: await needs statusOp and expireOp`
