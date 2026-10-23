@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, win32 } from "node:path"
 
 import { transformReasoningUnification } from "../config-migration/reasoning-unification"
 import { BrowserAutomationProviderSchema } from "../config/schema/browser-automation"
@@ -35,10 +35,11 @@ function noSecrets(value: unknown) {
 }
 
 describe("migration and doctor diagnostic security", () => {
-  for (const json of [false, true]) {
-    test(`migration ${json ? "JSON" : "text"} report hides every transform leaf and conflicting value`, () => {
-      const home = mkdtempSync(join(tmpdir(), "omo-report-security-"))
-      roots.push(home)
+  for (const [json, windowsPath] of [[false, false], [true, false], [false, true], [true, true]] as const) {
+    test(`migration ${json ? "JSON" : "text"} report hides every transform leaf and conflicting value${windowsPath ? " with a Windows short-name path" : ""}`, () => {
+      const root = mkdtempSync(join(tmpdir(), "omo-report-security-"))
+      roots.push(root)
+      const home = windowsPath ? join(root, win32.join("RUNNER~1", "AppData", "Local", "Temp")) : root
       mkdirSync(join(home, ".omo"), { recursive: true })
       writeFileSync(join(home, ".omo", "config.jsonc"), JSON.stringify({
         "[opencode]": { provider: { custom: { apiKey: secret, headers: { Authorization: token }, options: [true, 123, null, "ordinary"] } } },
@@ -50,10 +51,11 @@ describe("migration and doctor diagnostic security", () => {
       const lines: string[] = []
       expect(runConfigMigrate({ cwd: home, environment: { HOME: home }, dryRun: true, json, output: (line) => lines.push(line) })).toBe(0)
       expect(lines.join("\n")).toContain("apiKey")
-      expect(lines.join("\n")).toContain(targetPath)
+      if (!json) expect(lines.join("\n")).toContain(targetPath)
       noSecrets(lines)
       if (json) {
         const report = JSON.parse(lines.join("\n"))
+        expect(report.migrations.map((entry: { targetPath?: string }) => entry.targetPath)).toContain(targetPath)
         expect(report.migrations.some((entry: { transform?: unknown }) => entry.transform !== undefined)).toBe(true)
         const leaves = (value: unknown): unknown[] => value !== null && typeof value === "object"
           ? Object.values(value).flatMap(leaves)
