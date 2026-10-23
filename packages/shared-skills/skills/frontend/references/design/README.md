@@ -222,7 +222,7 @@ Once references are loaded, before writing any UI code:
 8. **All tokens trace back to `DESIGN.md`.** No orphan hex codes, no magic px values. If you need a new token, update `DESIGN.md` first.
 9. **New reusable patterns (used 2+ times) get documented back into `DESIGN.md` Section 5.**
 10. **No generic-default drift (expressive briefs).** The shipped CSS must use the `DESIGN.md` material, not the model's priors. Load the declared fonts (do not silently fall back to Inter or system fonts), build elevated surfaces from the declared multi-layer recipe (not a lone `backdrop-filter: blur`), and color from the ramp stops (not one tint at varied opacity). Grep your styles before QA: finding `Inter`, a single blur on "glass", or one brand hex reused everywhere means you regressed to priors — fix it before declaring done.
-11. **No coloured edge stripes.** Run `bun ../../scripts/perfection/check-accent-stripes.ts <changed files or dirs>` (from this directory; `$SKILL_DIR/scripts/perfection/check-accent-stripes.ts` from anywhere). It must exit 0 before Phase Final; every finding is a decorative or state stripe, or an accent outline, to replace, per the anti-pattern above.
+11. **No coloured edge stripes.** Run `bun ../../scripts/perfection/check-draft-guard.ts <changed files or dirs>` (from this directory; `$SKILL_DIR/scripts/perfection/check-draft-guard.ts` from anywhere). It must exit 0 before Phase Final; every finding is a decorative or state stripe, or an accent outline, to replace, per the anti-pattern above.
 
 ## Quick lookup table — most common requests
 
