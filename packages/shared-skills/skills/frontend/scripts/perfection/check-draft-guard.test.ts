@@ -27,6 +27,8 @@ const EXPECTED: Readonly<Record<string, ReadonlyArray<[number, DraftRuleId]>>> =
 		[12, "vanity-stat"],
 		[13, "promo-copy"],
 	],
+	"attribute-edges.html": [[2, "promo-copy"], [3, "promo-copy"], [4, "vanity-stat"], [5, "decorative-badge"], [6, "promo-copy"]],
+	"jsx-edges.tsx": [[1, "promo-copy"]],
 }
 
 function lintFixture(dir: string, name: string) {

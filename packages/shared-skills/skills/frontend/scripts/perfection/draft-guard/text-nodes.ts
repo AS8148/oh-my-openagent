@@ -12,15 +12,16 @@ export type TextNode = { readonly kind: NodeKind; readonly text: string; readonl
 export type MarkupKind = "html" | "jsx" | "sfc"
 
 const NEVER_RENDERED = /<(script|style|pre|code|textarea|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->|\{\/\*[\s\S]*?\*\/\}/gi
-const HTML_TEMPLATE = /<template\b[^>]*>[\s\S]*?<\/template\s*>/gi
+const HTML_TEMPLATE = /<template\b(?![^>]*\s(?:x-[\w-]+|v-[\w-]+|[:@#][\w.-]+))[^>]*>[\s\S]*?<\/template\s*>/gi
 const TAG = /<(\/?)([A-Za-z][\w.:-]*)((?:[^>"'{}]|"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\})*)>/g
 const CLASS_ATTR = /\b(?:class|className)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{((?:[^{}]|\{[^{}]*\})*)\})/
 const STRING_LITERAL = /["'`]([^"'`]*)["'`]/g
-const ANNOUNCED_ATTR = /\b(aria-label|title|alt|placeholder)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/g
+const ANNOUNCED_ATTR = /(?:^|\s)(aria-label|title|alt|placeholder)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/g
 const VALUE_ATTR = /\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/
 const HIDDEN_ATTR = /(?:^|\s)hidden(?=\s|=|\/|$)/
-const STATE_ATTR = /(?:^|\s)(?:data-status|data-state|aria-[a-z-]+)\s*=/
-const STAT_COMPONENT = /^(?:Stat|Metric|Kpi|KPI)\w*$/
+const STATE_ATTR = /(?:^|\s)(?:data-status|data-state|aria-(?:current|selected|pressed|checked|expanded|busy|invalid|disabled|valuenow))\s*=/
+const ATTR_VALUES = /"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\}/g
+const STAT_COMPONENT = /^(?:Stats?|Metrics?|Kpis?|KPIs?)(?:[A-Z]\w*)?$/
 const STAT_CLASS = /^(?:stat|stats|metric|metrics|kpi)(?:$|[-_])/
 const VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"])
 const JSX_LEAD = new Set(["(", "[", "{", "}", ",", ":", "?", "=", ">", "&", "|", ";"])
@@ -47,8 +48,8 @@ function closeTo(stack: Element[], tag: string): void {
 }
 
 /** In a script, `<` opens JSX only where an expression can start; `Array<string>`, `pick<T>(` and `a<b` stay code. */
-function opensJsx(text: string, start: number, attrs: string, end: number): boolean {
-	if (attrs.trimStart().startsWith(",") || text[end] === "(") return false
+function opensJsx(text: string, start: number, attrs: string): boolean {
+	if (/^\s*,|^\s+extends\b/.test(attrs)) return false
 	const before = text.slice(0, start).trimEnd()
 	if (before === "" || /\b(?:return|yield|default)$/.test(before)) return true
 	return JSX_LEAD.has(before.at(-1) ?? "")
@@ -80,7 +81,7 @@ export function textNodes(source: string, kind: MarkupKind): TextNode[] {
 		const start = m.index ?? 0
 		const [whole, closing, rawName = "", attrs = ""] = m
 		const end = start + whole.length
-		if (kind === "jsx" && !closing && stack.length === 0 && !opensJsx(text, start, attrs, end)) continue
+		if (kind === "jsx" && !closing && stack.length === 0 && !opensJsx(text, start, attrs)) continue
 		flush(start)
 		cursor = end
 		const tag = rawName.toLowerCase()
@@ -90,9 +91,10 @@ export function textNodes(source: string, kind: MarkupKind): TextNode[] {
 			closeTo(stack, tag)
 			continue
 		}
-		const element: Element = { tag, name: rawName, classes: classesOf(attrs), stateful: STATE_ATTR.test(attrs) }
+		const names = attrs.replace(ATTR_VALUES, (v) => " ".repeat(v.length))
+		const element: Element = { tag, name: rawName, classes: classesOf(attrs), stateful: STATE_ATTR.test(names) }
 		const attrsAt = start + 1 + rawName.length
-		const hidden = hiddenDepth > 0 || HIDDEN_ATTR.test(attrs)
+		const hidden = hiddenDepth > 0 || HIDDEN_ATTR.test(names)
 		if (!hidden) {
 			for (const a of attrs.matchAll(ANNOUNCED_ATTR)) {
 				const value = a[2] ?? a[3] ?? a[4] ?? ""
@@ -104,7 +106,7 @@ export function textNodes(source: string, kind: MarkupKind): TextNode[] {
 		}
 		if (VOID_TAGS.has(tag) || attrs.trimEnd().endsWith("/")) continue
 		stack.push(element)
-		if (hiddenDepth === 0 && HIDDEN_ATTR.test(attrs)) hiddenDepth = stack.length
+		if (hiddenDepth === 0 && HIDDEN_ATTR.test(names)) hiddenDepth = stack.length
 	}
 	return nodes
 }

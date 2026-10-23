@@ -30,7 +30,8 @@ const NUMERIC_ENTITY = /&#(?:x([0-9a-f]+)|(\d+));/gi
 const BADGE_CLASS = /^(?:badge|chip|pill|tag)(?:$|[-_])/
 const BADGE_COMPONENT = /^(?:Badge|Chip|Pill|Tag)$/
 const HYPE_LABEL = /^(?:new!?|hot|trending|popular|featured|ai|ai[- ]powered|premium|recommended|best|신규|인기|추천|베스트)$/i
-const MARKETING_NUMBER = /^(?:[$€£¥₩]?\d+(?:[.,]\d+)?\s*(?:[kmb]|%)?\s*\+|\d+(?:[.,]\d+)?\s*[x×]|24\/7)$/i
+const AMOUNT = String.raw`(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?`
+const MARKETING_NUMBER = new RegExp(String.raw`^(?:[$€£¥₩]?${AMOUNT}\s*(?:[kmb]|%)?\s*\+|${AMOUNT}\s*[x×]|24\/7)$`, "i")
 
 const isBadge = (element: Element | undefined): boolean =>
 	element !== undefined && !element.stateful && (BADGE_COMPONENT.test(element.name) || element.classes.some((c) => BADGE_CLASS.test(c)))
