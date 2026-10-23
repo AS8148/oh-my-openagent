@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { linkSync, mkdirSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import * as timersPromises from "node:timers/promises"
 
 import { createBatchId, parseSpoolName, type SpoolContext } from "./otlp-spool-dir"
 import { frame } from "./otlp-spool-file"
@@ -23,60 +24,68 @@ const CAP_MS = 400
 const FLUSH_DEADLINE_MS = 360
 // The outer breaker: far above any cap, so only a shutdown that never returns reaches it.
 const BREAKER_MS = 10_000
-// A generous bound for the never-settling test: ten caps (4 s against the real ~0.4 s). It is the one
-// check that also sees waits the timer recorder cannot (Bun.sleep, node:timers/promises, a synchronous
-// stall), and it is 10x the cap, not the 1.3x budget that a loaded Windows runner exceeded (#10967).
+// A generous bound for the never-settling test: ten caps (4 s against the real ~0.4 s). Timers and
+// Bun.sleep are caught by identity; this clock is the only check that sees a synchronous stall, and it
+// is 10x the cap, not the 1.3x budget a loaded Windows runner exceeded (#10967).
 const TEN_CAPS_MS = 10 * CAP_MS
 
+/** One timer armed while a recorder is installed: its arm order, delay, and whether it has fired. */
+type RecordedTimer = { readonly seq: number; readonly ms: number; fired: boolean }
+
 /**
- * Records the delay of every timer armed while installed; shutdown's deadlines are plain timers. The
- * restore is also queued on the file's cleanup list, so a test that throws before its own finally
- * never leaves the patched setTimeout in place for later tests.
+ * Records every timer armed while installed (shutdown's deadlines are plain timers), and every Bun.sleep and
+ * node:timers/promises setTimeout call: neither goes through the global setTimeout, so both are spied by
+ * identity. The restore is also queued on the file's cleanup list, so a test that throws before its own
+ * finally never leaks the patches.
  */
-function recordTimerDelays(): {
-  readonly delays: number[]
-  readonly fired: number[]
+function recordTimers(): {
+  readonly armed: RecordedTimer[]
+  readonly otherWaits: () => number
   readonly restore: () => void
 } {
   const original = globalThis.setTimeout
-  const delays: number[] = []
-  const fired: number[] = []
+  const armed: RecordedTimer[] = []
   const recording = (handler: Parameters<typeof setTimeout>[0], ms?: number, ...args: unknown[]) => {
-    const delayMs = Number(ms ?? 0)
-    delays.push(delayMs)
+    const timer: RecordedTimer = { seq: armed.length, ms: Number(ms ?? 0), fired: false }
+    armed.push(timer)
     if (typeof handler !== "function") return original(handler, ms, ...args)
     return original((...handlerArgs: unknown[]) => {
-      fired.push(delayMs)
+      timer.fired = true
       return handler(...handlerArgs)
     }, ms, ...args)
   }
   globalThis.setTimeout = recording as unknown as typeof setTimeout
+  const sleep = spyOn(Bun, "sleep")
+  const promisedTimeout = spyOn(timersPromises, "setTimeout")
   const restore = (): void => {
     globalThis.setTimeout = original
+    sleep.mockRestore()
+    promisedTimeout.mockRestore()
   }
   roots.push(restore)
-  return { delays, fired, restore }
+  return { armed, otherWaits: () => sleep.mock.calls.length + promisedTimeout.mock.calls.length, restore }
 }
 
 /**
  * "settled" when the work settles within `boundMs`, else a named breaker message (never a pass by timing).
- * The clock is read when the work settles too, so a synchronous stall that holds the breaker's own timer
- * back is still reported as a break.
+ * The clock starts before `start` runs, so a synchronous stall anywhere in the work counts, and it is read
+ * again on settle, because a synchronous stall also holds the breaker's own timer back.
  */
-async function settleOrBreak(work: Promise<unknown>, what: string, boundMs = BREAKER_MS): Promise<string> {
-  const startedMs = performance.now()
+async function settleOrBreak(start: () => Promise<unknown>, what: string, boundMs = BREAKER_MS): Promise<string> {
   const breakMessage = `breaker: no ${what} within ${boundMs} ms`
   let breaker: ReturnType<typeof setTimeout> | undefined
   const broke = new Promise<string>((resolve) => {
     breaker = setTimeout(() => resolve(breakMessage), boundMs)
   })
+  const startedMs = performance.now()
   try {
-    const settled = work.then(() => (performance.now() - startedMs <= boundMs ? "settled" : breakMessage))
+    const settled = start().then(() => (performance.now() - startedMs <= boundMs ? "settled" : breakMessage))
     return await Promise.race([settled, broke])
   } finally {
     clearTimeout(breaker)
   }
 }
+
 const roots: (() => void)[] = []
 afterEach(() => {
   // Undo in reverse: a test that installs two timer recorders gets the real setTimeout back, not the first patch.
@@ -243,30 +252,45 @@ describe("spool recovery", () => {
     expect(transport.droppedEvents()).toBe(0)
   }, 60_000)
 
-  test("#given a fetch that never settles #when the transport shuts down #then the flush deadline alone ends it, no other wait reaches ten caps, and the batch stays on disk", async () => {
+  test("#given a fetch that never settles #when the transport shuts down #then only its own deadlines end it, nothing else is waited on, and the batch stays on disk", async () => {
     // given
     const dir = root()
-    const timers = recordTimerDelays()
+    const timers = recordTimers()
     const transport = makeTransport(dir, { shutdownTimeoutMs: CAP_MS, fetch: () => new Promise<Response>(() => undefined) })
     capture(transport, "feature_used", { feature: "a" })
 
     try {
       // when
-      let firedWhenShutdownReturned: number[] = []
+      let firstShutdownSeq = 0
+      let firedWhenShutdownReturned: RecordedTimer[] = []
+      let otherWaitsWhenShutdownReturned = 0
       const outcome = await settleOrBreak(
-        transport.shutdown().then(() => {
-          firedWhenShutdownReturned = [...timers.fired]
-        }),
-        "shutdown returning once its flush deadline fires",
+        () => {
+          firstShutdownSeq = timers.armed.length
+          const waitsBefore = timers.otherWaits()
+          return transport.shutdown().then(() => {
+            firedWhenShutdownReturned = timers.armed.filter((timer) => timer.seq >= firstShutdownSeq && timer.fired)
+            otherWaitsWhenShutdownReturned = timers.otherWaits() - waitsBefore
+          })
+        },
+        "shutdown returning once its deadlines fire",
         TEN_CAPS_MS,
       )
 
       // then
-      // No wait of any kind (timer, Bun.sleep, a synchronous stall) held shutdown for ten caps...
+      // No wait of any kind (a timer, Bun.sleep, a synchronous stall anywhere) held shutdown for ten caps...
       expect(outcome).toBe("settled")
-      // ...and through setTimeout, exactly one shutdown deadline had fired when it returned: the flush
-      // deadline. The cap behind it was cancelled, and no second deadline (of any length) was waited on.
-      expect(firedWhenShutdownReturned.filter((ms) => ms >= FLUSH_DEADLINE_MS)).toEqual([FLUSH_DEADLINE_MS])
+      // ...shutdown's own deadlines are the first flush-deadline and cap timers armed after the call...
+      const sinceShutdown = timers.armed.filter((timer) => timer.seq >= firstShutdownSeq)
+      const ownFlushDeadline = sinceShutdown.find((timer) => timer.ms === FLUSH_DEADLINE_MS)
+      const ownCap = sinceShutdown.find((timer) => timer.ms === CAP_MS)
+      // ...the flush deadline fired, and the only other timer that may have fired is shutdown's own cap
+      // (it does when a claim is still in flight). Any other fired timer, of any length, is an extra wait.
+      expect(ownFlushDeadline).toBeDefined()
+      expect(firedWhenShutdownReturned).toContain(ownFlushDeadline as RecordedTimer)
+      expect(firedWhenShutdownReturned.filter((timer) => timer !== ownFlushDeadline && timer !== ownCap)).toEqual([])
+      // ...and nothing waited through Bun.sleep or node:timers/promises either.
+      expect(otherWaitsWhenShutdownReturned).toBe(0)
       const entries = spoolNames(dir).map(parseSpoolName)
       expect(entries.filter((entry) => entry.kind !== "lock"), `spool entries: ${JSON.stringify(entries)}`).toEqual([
         expect.objectContaining({ kind: expect.stringMatching(/^(batch|sending)$/), signal: "logs" }),
@@ -279,13 +303,13 @@ describe("spool recovery", () => {
   test("#given shutdown's flush starts with synchronous work #then both shutdown deadlines were armed before that work ran, so it counts against the cap measured from the call", async () => {
     // given
     const dir = root()
-    const timers = recordTimerDelays()
+    const timers = recordTimers()
     let armedWhenFlushWorkRan: number[] | undefined
     let markNextConsentCheck = false
     const consent = (): boolean => {
       if (markNextConsentCheck) {
         markNextConsentCheck = false
-        armedWhenFlushWorkRan = [...timers.delays]
+        armedWhenFlushWorkRan = timers.armed.map((timer) => timer.ms)
       }
       return true
     }
@@ -295,7 +319,7 @@ describe("spool recovery", () => {
 
     try {
       // when
-      const outcome = await settleOrBreak(transport.shutdown(), "shutdown returning once its cap fires")
+      const outcome = await settleOrBreak(() => transport.shutdown(), "shutdown returning once its cap fires")
 
       // then
       expect(outcome).toBe("settled")
