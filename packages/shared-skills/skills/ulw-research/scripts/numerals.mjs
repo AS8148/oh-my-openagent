@@ -42,7 +42,8 @@ const WORD_RE = new RegExp(`\\b(?:${WORDS.join("|")})\\b`, "gi")
 /** Korean scale words: cheon (1e3) inside a group, then man, eok, jo as group scales. */
 const CHEON = "\uCC9C"
 const BIG = new Map([["\uB9CC", 10000n], ["\uC5B5", 100000000n], ["\uC870", 1000000000000n]])
-const KO_GROUP = /^(\s?)(?:(\uCC9C)?([\uB9CC\uC5B5\uC870])|(\uCC9C))/
+/** A scale word that starts a longer word is not a scale: jogak (pieces), mankeum (as much as). */
+const KO_GROUP = /^(\s?)(?:(\uCC9C)?([\uB9CC\uC5B5\uC870])|(\uCC9C))(?![\uAC01\uD07C])/
 const KO_NEXT = new RegExp(`^\\s?(${NUM})(\uCC9C)?([\uB9CC\uC5B5\uC870])?`, "u")
 const LATIN_SCALE = /^(?:(k|K|M|bn|B)|\s(thousand|million|billion|trillion|bn))(?![\p{L}\d])/u
 const LATIN_FACTOR = { k: 1000n, K: 1000n, M: 1000000n, bn: 1000000000n, B: 1000000000n, thousand: 1000n, million: 1000000n, billion: 1000000000n, trillion: 1000000000000n }
@@ -50,6 +51,13 @@ const CURRENCY = "$\u20AC\u00A3\u00A5\u20A9"
 const SYMBOL_UNIT = /^\s?(%p|%|\u2030|\u00D7|\u00B0C|\u00B0F|\u2103|\u2109)/
 const LATIN_UNIT = /^\s?([A-Za-z]+)(?![\p{L}\d])/u
 const HANGUL_UNIT = /^\s?([\uAC00-\uD7A3]+)/
+/** "3 bun-ui 1" is the fraction one third, not 3 minutes. */
+const FRACTION = /^\s?\uBD84\uC758\s?\d/
+const UNIT_AFTER = new RegExp(`^\\s?${UNIT}`, "iu")
+const NUM_AT = new RegExp(`^${NUM}`, "u")
+/** Range separators: hyphen, en dash, tilde, "to". */
+const RANGE_SEP = /^(?:\s?[-\u2013~]\s?|\sto\s)/
+const SIGN = "-\u2212"
 /** Bounding qualifiers: before the value (Korean and English) and right after it (Korean). */
 const QUALIFIERS_BEFORE = ["up to", "at least", "at most", "more than", "less than", "about", "approximately", "nearly", "over", "under", "\uCD5C\uB300", "\uCD5C\uC18C", "\uC57D"]
 const QUALIFIER_AFTER = /^\s?(\uC774\uC0C1|\uC774\uD558|\uBBF8\uB9CC|\uCD08\uACFC|\uB0B4\uC678|\uAE4C\uC9C0)/
@@ -61,23 +69,42 @@ function cleanDigits(raw) {
 	return { digits: plain, length: plain.length }
 }
 
+/** The bare-year and four-digit-date patterns: a numeral they cover can still be a value. */
+const YEAR_SHAPED = new Set([NOT_CLAIMS[0], NOT_CLAIMS[12]])
+
 function excludedRanges(text) {
 	const ranges = []
-	for (const re of NOT_CLAIMS) for (const match of text.matchAll(re)) ranges.push([match.index, match.index + match[0].length])
+	for (const re of NOT_CLAIMS) {
+		for (const match of text.matchAll(re)) ranges.push([match.index, match.index + match[0].length, YEAR_SHAPED.has(re)])
+	}
 	return ranges
 }
 
-/** First digit run or number word at or after `from` that no NOT_CLAIMS pattern covers. */
+/** A year-shaped numeral is a value when it has a decimal part or a currency, scale word or unit touches it. */
+function anchored(text, at, end, digits) {
+	if (digits.includes(".") || (at > 0 && CURRENCY.includes(text[at - 1]))) return true
+	return UNIT_AFTER.test(text.slice(end)) || unitAfter(text, end) !== null
+}
+
+/**
+ * First digit run or number word at or after `from` that no NOT_CLAIMS pattern covers. A year-shaped
+ * match exactly over the numeral (not "2020s", not "2020-03") is lifted when the numeral is anchored.
+ */
 function findStart(text, from, ranges) {
-	const free = (at) => !ranges.some(([s, e]) => at >= s && at < e)
+	const covering = (at) => ranges.filter(([s, e]) => at >= s && at < e)
 	let digit = null
 	for (const match of text.slice(from).matchAll(new RegExp(NUM, "gu"))) {
 		const at = from + match.index
-		if (free(at)) {
-			digit = { at, ...cleanDigits(match[0]) }
+		const candidate = { at, ...cleanDigits(match[0]) }
+		const end = at + candidate.length
+		const cover = covering(at)
+		const lifted = cover.every(([s, e, yearShaped]) => yearShaped && s === at && e <= end)
+		if (cover.length === 0 || (lifted && anchored(text, at, end, candidate.digits))) {
+			digit = candidate
 			break
 		}
 	}
+	const free = (at) => covering(at).length === 0
 	for (const match of text.slice(from).matchAll(WORD_RE)) {
 		const at = from + match.index
 		if (digit && digit.at < at) break
@@ -91,9 +118,11 @@ function koreanScale(text, at, digits) {
 	const first = KO_GROUP.exec(text.slice(at))
 	if (!first) return null
 	const big = first[3] ? BIG.get(first[3]) : 1n
-	let value = mul(fromDecimal(digits), (first[2] || first[4] ? 1000n : 1n) * big)
+	const firstFactor = (first[2] || first[4] ? 1000n : 1n) * big
+	let value = mul(fromDecimal(digits), firstFactor)
 	let end = at + first[0].length
 	let last = first[3] ? big : 0n
+	let groups = 1
 	while (last > 1n) {
 		const next = KO_NEXT.exec(text.slice(end))
 		if (!next) break
@@ -102,12 +131,36 @@ function koreanScale(text, at, digits) {
 		value = add(value, mul(fromDecimal(cleanDigits(next[1]).digits), factor))
 		end += next[0].length
 		last = next[3] ? BIG.get(next[3]) : 0n
+		groups++
 	}
-	return { value, end }
+	return { value, end, factor: groups === 1 ? firstFactor : null }
+}
+
+/** Scale words after a numeral: { value (rational) | null, end, factor | null (one plain factor) }. */
+function scaled(text, end, digits) {
+	const korean = koreanScale(text, end, digits)
+	if (korean) return korean
+	const latin = LATIN_SCALE.exec(text.slice(end))
+	if (!latin) return { value: null, end, factor: null }
+	const factor = LATIN_FACTOR[latin[1] ?? latin[2].toLowerCase()]
+	return { value: mul(fromDecimal(digits), factor), end: end + latin[0].length, factor }
+}
+
+/** The second endpoint of "5-10", "5 to 10", "5~10" or "5\u201310", or null. */
+function rangeEnd(text, at, ranges) {
+	const sep = RANGE_SEP.exec(text.slice(at))
+	if (!sep) return null
+	const pos = at + sep[0].length
+	const num = NUM_AT.exec(text.slice(pos))
+	if (!num || ranges.some(([s, e]) => pos >= s && pos < e)) return null
+	const { digits, length } = cleanDigits(num[0])
+	const scale = scaled(text, pos + length, digits)
+	return { value: scale.value ? toDecimal(scale.value) : digits, end: scale.end, factor: scale.factor }
 }
 
 function unitAfter(text, at) {
 	const rest = text.slice(at)
+	if (FRACTION.test(rest)) return null
 	const symbol = SYMBOL_UNIT.exec(rest)
 	if (symbol) return { unitRaw: symbol[1], end: at + symbol[0].length }
 	const latin = LATIN_UNIT.exec(rest)
@@ -137,25 +190,34 @@ function qualifierBefore(text, at) {
 /**
  * The first numeral at or after `from`: { value, raw, span: [start, end], unitRaw, qualifierRaw },
  * or null. `value` is an exact decimal string with scale words folded in ("3eok won" -> "300000000",
- * unit "won"); `span` covers an adjacent currency symbol, the numeral, scale words and the unit.
+ * unit "won") and a leading minus sign ("-" or U+2212) kept as "-"; `span` covers the sign, an
+ * adjacent currency symbol, the numeral, scale words and the unit. A range ("5-10 m", "5 to 10 m",
+ * "5~10%") adds `valueEnd` and `range: true`; the unit, and a scale word written only on the second
+ * endpoint ("3~5eok"), apply to both endpoints.
  */
 export function parseNumeral(text, from = 0) {
-	const found = findStart(text, from, excludedRanges(text))
+	const ranges = excludedRanges(text)
+	const found = findStart(text, from, ranges)
 	if (!found) return null
 	let start = found.at
-	let end = found.at + found.length
-	let value = null
-	const korean = koreanScale(text, end, found.digits)
-	if (korean) [value, end] = [korean.value, korean.end]
-	const latin = korean ? null : LATIN_SCALE.exec(text.slice(end))
-	if (latin) [value, end] = [mul(fromDecimal(found.digits), LATIN_FACTOR[latin[1] ?? latin[2].toLowerCase()]), end + latin[0].length]
+	const first = scaled(text, found.at + found.length, found.digits)
+	let value = first.value
+	let end = first.end
+	const second = rangeEnd(text, end, ranges)
+	if (second) {
+		end = second.end
+		if (!value && second.factor) value = mul(fromDecimal(found.digits), second.factor)
+	}
 	let unitRaw = null
 	if (start > 0 && CURRENCY.includes(text[start - 1])) [unitRaw, start] = [text[start - 1], start - 1]
+	const negative = start > 0 && SIGN.includes(text[start - 1]) && !/[\p{L}\p{N}]/u.test(text[start - 2] ?? "")
+	if (negative) start--
 	const unit = unitRaw ? null : unitAfter(text, end)
 	if (unit) [unitRaw, end] = [unit.unitRaw, unit.end]
 	const after = QUALIFIER_AFTER.exec(text.slice(end))
 	return {
-		value: value ? toDecimal(value) : found.digits,
+		value: (negative ? "-" : "") + (value ? toDecimal(value) : found.digits),
+		...(second ? { valueEnd: second.value, range: true } : {}),
 		raw: text.slice(start, end),
 		span: [start, end],
 		unitRaw,

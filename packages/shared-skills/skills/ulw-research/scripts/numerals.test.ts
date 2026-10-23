@@ -71,6 +71,46 @@ describe("parseNumeral", () => {
 		expect(parseNumeral("v2.3.1 shipped 40 fixes")?.value).toBe("40")
 	})
 
+	test("year-shaped values next to a currency, scale word or unit, or with a decimal part, are numerals", () => {
+		expect(parseNumeral("2000억 원")).toMatchObject({ value: "200000000000", unitRaw: "원" })
+		expect(parseNumeral("1900만 원")).toMatchObject({ value: "19000000", unitRaw: "원" })
+		expect(parseNumeral("2050명")).toMatchObject({ value: "2050", unitRaw: "명" })
+		expect(parseNumeral("$2000")).toMatchObject({ value: "2000", raw: "$2000", unitRaw: "$" })
+		expect(parseNumeral("1999 users")?.value).toBe("1999")
+		expect(parseNumeral("1234.56 m")).toMatchObject({ value: "1234.56", unitRaw: "m" })
+		expect(parseNumeral("$1500.25")).toMatchObject({ value: "1500.25", unitRaw: "$" })
+		expect(parseNumeral("2020.5억")?.value).toBe("202050000000")
+	})
+
+	test("bare years and dates stay excluded", () => {
+		expect(parseNumeral("in 2020")).toBeNull()
+		expect(parseNumeral("2020-03-01")).toBeNull()
+		expect(parseNumeral("the 2020s")).toBeNull()
+		expect(parseNumeral("in 2020, 5 users")?.value).toBe("5")
+	})
+
+	test("a leading minus sign is part of the value and the span", () => {
+		expect(parseNumeral("-5%")).toMatchObject({ value: "-5", raw: "-5%", span: [0, 3], unitRaw: "%" })
+		expect(parseNumeral("fell \u22123.2%")).toMatchObject({ value: "-3.2", span: [5, 10], unitRaw: "%" })
+		expect(parseNumeral("COVID-19 cases")?.value).toBe("19")
+	})
+
+	test("ranges carry both endpoints and share the unit", () => {
+		expect(parseNumeral("5-10 m")).toMatchObject({ value: "5", valueEnd: "10", range: true, raw: "5-10 m", span: [0, 6], unitRaw: "m" })
+		expect(parseNumeral("5 to 10 m")).toMatchObject({ value: "5", valueEnd: "10", range: true, raw: "5 to 10 m", unitRaw: "m" })
+		expect(parseNumeral("5~10%")).toMatchObject({ value: "5", valueEnd: "10", range: true, unitRaw: "%" })
+		expect(parseNumeral("5\u201310%")).toMatchObject({ value: "5", valueEnd: "10", range: true, unitRaw: "%" })
+		expect(parseNumeral("3~5억 원")).toMatchObject({ value: "300000000", valueEnd: "500000000", range: true, unitRaw: "원" })
+		expect(parseNumeral("320 m")).not.toHaveProperty("valueEnd")
+	})
+
+	test("Korean scale words and units need a word boundary", () => {
+		expect(parseNumeral("5조각")).toMatchObject({ value: "5", raw: "5", unitRaw: null })
+		expect(parseNumeral("3분의 1")).toMatchObject({ value: "3", raw: "3", unitRaw: null })
+		expect(parseNumeral("3분의 휴식")?.unitRaw).toBe("분")
+		expect(parseNumeral("매출 10억은")?.value).toBe("1000000000")
+	})
+
 	test("from skips earlier numerals", () => {
 		const text = "320 m and 15%"
 		const first = parseNumeral(text)
