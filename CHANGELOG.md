@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Memory notes keep their exact line endings on Windows.** Git for Windows converts line endings by default, so a note committed with LF or mixed endings came back with CRLF in a reflection worktree, and the description preflight that must keep every non-description byte failed there. Every memory repository now pins `core.autocrlf=false`, and opening an older repository restores only the working copies whose sole difference from the committed note is the converted line endings. ([#11109](https://github.com/code-yeongyu/oh-my-openagent/issues/11109))
+**Memory notes keep their exact line endings on Windows.** Git for Windows converts line endings by default, so a note committed with LF or mixed endings came back with CRLF in a reflection worktree, and the description preflight that must keep every non-description byte failed there. Every memory repository now pins `core.autocrlf=false`, and opening an older repository restores only the working copies whose sole difference from the committed note is the converted line endings. ([#11112](https://github.com/code-yeongyu/oh-my-openagent/pull/11112), fixes [#11109](https://github.com/code-yeongyu/oh-my-openagent/issues/11109))
 
 **Memory reflection and dream runs trim oversized note descriptions before completion validation.** The note body is preserved, instead of the run failing again and again and parking the identity. ([#10999](https://github.com/code-yeongyu/oh-my-openagent/pull/10999))
 
