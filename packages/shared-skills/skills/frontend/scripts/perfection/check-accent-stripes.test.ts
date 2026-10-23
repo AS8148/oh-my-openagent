@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { readdirSync, readFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { RuleId } from "./accent-stripes/findings"
 import { lintFiles } from "./accent-stripes/lint"
@@ -85,6 +86,19 @@ describe("#given the CLI", () => {
 	test("#when --json is passed #then stdout is a parseable findings array", () => {
 		const result = run("--json", join(FIXTURES, "positive", "pseudo-bar.css"))
 		expect(JSON.parse(result.stdout)).toEqual([expect.objectContaining({ line: 12, rule: "pseudo-bar" })])
+	})
+
+	test("#when a scanned directory holds a dangling symlink #then it skips the link and still lints the rest", () => {
+		const dir = mkdtempSync(join(tmpdir(), "accent-stripes-"))
+		try {
+			symlinkSync(join(dir, "missing-target"), join(dir, "broken-link.css"))
+			writeFileSync(join(dir, "card.css"), ".card { border-left: 4px solid #f97316; }\n")
+			const result = run("--json", dir)
+			expect(result.status).toBe(1)
+			expect(JSON.parse(result.stdout)).toEqual([expect.objectContaining({ line: 1, rule: "edge-stripe" })])
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
 	})
 
 	test("#when no path is given #then it exits 2 with usage", () => {

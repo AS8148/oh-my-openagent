@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { readdirSync, readFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DraftRuleId } from "./draft-guard/findings"
 import { lintDraft } from "./draft-guard/lint"
@@ -66,6 +67,19 @@ describe("#given the CLI", () => {
 
 	test("#when it scans both negative fixture sets #then it exits 0", () => {
 		expect(run(join(FIXTURES, "negative"), join(ACCENT_FIXTURES, "negative")).status).toBe(0)
+	})
+
+	test("#when a scanned directory holds a dangling symlink #then it skips the link and still lints the rest", () => {
+		const dir = mkdtempSync(join(tmpdir(), "draft-guard-"))
+		try {
+			symlinkSync(join(dir, "missing-target"), join(dir, "broken-link.tsx"))
+			writeFileSync(join(dir, "page.html"), "<p>Supercharge your team</p>\n")
+			const result = run("--json", dir)
+			expect(result.status).toBe(1)
+			expect(JSON.parse(result.stdout)).toEqual([expect.objectContaining({ line: 1, rule: "promo-copy" })])
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
 	})
 
 	test("#when no path is given #then it exits 2 with usage", () => {

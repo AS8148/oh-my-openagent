@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**The frontend draft guard now catches promotional copy, emoji icons, hype badges and vanity stats, not only accent stripes ([#11022](https://github.com/code-yeongyu/oh-my-openagent/pull/11022)).** One command, `check-draft-guard.ts`, runs the accent-stripe rules plus four checks on visible markup text: promotional filler in English and Korean copy, an emoji used as an icon, a badge whose only content is a hype label such as "New" or "AI-powered", and a stat tile holding a hard-coded number such as "10x" or "99.9%" instead of bound data. Code, scripts, styles, comments and bound values are not flagged. The frontend and visualize skills now run it before visual QA in place of `check-accent-stripes.ts`, which still works on its own.
+**The frontend draft guard now catches promotional copy, emoji icons, hype badges and vanity stats, not only accent stripes ([#11022](https://github.com/code-yeongyu/oh-my-openagent/pull/11022)).** One command, `check-draft-guard.ts`, runs the accent-stripe rules plus four checks on visible markup text: promotional filler in English and Korean copy, an emoji used as an icon, a badge whose only content is a hype label such as "New" or "AI-powered", and a stat tile holding a hard-coded number such as "10x" or "99.9%" instead of bound data. Code, scripts, styles, comments and bound values are not flagged. The frontend and visualize skills now run it before visual QA in place of `check-accent-stripes.ts`, which still works on its own. Both commands now skip a dangling symlink in a scanned folder instead of crashing, and report an unreadable path given on the command line with exit 2.
 
 ## [5.1.44] - 2026-10-23
 
