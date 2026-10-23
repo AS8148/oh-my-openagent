@@ -27,7 +27,6 @@ import {
 } from "./wiring-reflection-live"
 import { createMemoryRuntimeWiring } from "./wiring-runtime"
 import { registerMemoryStatic } from "./wiring-static"
-import type { MemoryIdentityContext } from "./context"
 import { recoverStaleReflectionHolder } from "./reflection-stale-active"
 import type { MemoryCommandSettings } from "./commands/types"
 import type { MemoryWiring, MemoryWiringOptions } from "./wiring-types"
