@@ -14,7 +14,7 @@ import { dirname as dirname4, join as join5, resolve as resolve4 } from "node:pa
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-// packages/senpi-task/src/agent-home.ts
+// packages/omo-senpi/src/components/agent-home/resolve-agent-home.ts
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -39,6 +39,7 @@ function resolveAgentHome(options) {
     return brandedHome;
   return join(homeDir, ".senpi", "agent");
 }
+
 // packages/omo-senpi/src/install/local-launcher.ts
 import { chmodSync, existsSync as existsSync2, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir as homedir2 } from "node:os";
