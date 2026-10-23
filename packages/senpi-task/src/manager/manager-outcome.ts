@@ -8,6 +8,7 @@ import type { ForgetOptions } from "./types"
 import { terminalFailureMessage } from "./credential-failure"
 import { nowIso } from "./manager-helpers"
 import { createProvisionalExitTracker, type ExitConfirmationSchedule } from "./provisional-exit"
+import { publishHostTaskStatus } from "./host-task-status"
 
 export type ManagedOutcome = Awaited<ReturnType<ManagedChildHandle["waitForOutcome"]>>
 
@@ -123,6 +124,7 @@ export function createOutcomeTracker(ports: OutcomeTrackerPorts): OutcomeTracker
   function persistTerminal(taskId: string, owned: TaskRecord, timestamp: string, transition: TaskTransition): void {
     try {
       ports.store.transition(taskId, transition)
+      publishHostTaskStatus(ports.liveHandle(taskId), taskId, ports.tryLoad(taskId)?.status)
     } catch (error) {
       log("senpi-task manager terminal record write failed", {
         taskId,
