@@ -775,20 +775,49 @@ jobs:
             fi
           done
 
+      # A failed publish must fail the job (no continue-on-error), or `gh run rerun --failed` never retries
+      # it and publish-main only finds the gap at its registry check. One failure is retried: Sigstore can
+      # store an entry, answer npm's first POST with a 5xx, then refuse the re-POST of the same signature with
+      # TLOG_CREATE_ENTRY_ERROR "(409) an equivalent entry already exists", which aborts before the upload.
+      - name: Write npm publish helper
+        if: steps.check.outputs.skip_all != 'true' && steps.download.outcome == 'success'
+        run: |
+          cat > "$RUNNER_TEMP/npm-publish.sh" <<'HELPER'
+          set -uo pipefail
+          dist_tag="${1:-}"
+          args=(--access public --loglevel verbose)
+          if [ -n "$dist_tag" ]; then
+            args+=(--tag "$dist_tag")
+          fi
+          log="$(mktemp)"
+          trap 'rm -f "$log"' EXIT
+          NPM_CONFIG_PROVENANCE=true npm publish "${args[@]}" --provenance >"$log" 2>&1
+          status=$?
+          cat "$log"
+          if [ "$status" -eq 0 ]; then
+            exit 0
+          fi
+          if grep -q "TLOG_CREATE_ENTRY_ERROR" "$log" && grep -q "equivalent entry already exists" "$log"; then
+            name="$(node -p "require('./package.json').name")"
+            version="$(node -p "require('./package.json').version")"
+            if [ "$(npm view "${name}@${version}" version 2>/dev/null)" = "$version" ]; then
+              echo "${name}@${version} is already on the registry"
+              exit 0
+            fi
+            echo "::warning::${name}: Sigstore refused a re-sent transparency-log entry (409); retrying once without provenance"
+            NPM_CONFIG_PROVENANCE=false npm publish "${args[@]}" --provenance=false
+            exit $?
+          fi
+          exit "$status"
+          HELPER
+
       - name: Publish oh-my-opencode-${{ matrix.platform }}
         if: steps.check.outputs.skip_opencode != 'true' && steps.download.outcome == 'success'
-        continue-on-error: true
         env:
           DIST_TAG: ${{ steps.validate.outputs.dist_tag }}
-          NPM_CONFIG_PROVENANCE: true
         run: |
           cd "packages/oh-my-opencode-${{ matrix.platform }}"
-
-          if [ -n "$DIST_TAG" ]; then
-            npm publish --access public --provenance --tag "$DIST_TAG" --loglevel verbose
-          else
-            npm publish --access public --provenance --loglevel verbose
-          fi
+          bash "$RUNNER_TEMP/npm-publish.sh" "$DIST_TAG"
         timeout-minutes: 15
 
       - name: Publish oh-my-openagent-${{ matrix.platform }}
@@ -805,11 +834,7 @@ jobs:
              '.name = $name | .description = $desc' \
              package.json > tmp.json && mv tmp.json package.json
 
-          if [ -n "$DIST_TAG" ]; then
-            npm publish --access public --provenance --tag "$DIST_TAG" --loglevel verbose
-          else
-            npm publish --access public --provenance --loglevel verbose
-          fi
+          bash "$RUNNER_TEMP/npm-publish.sh" "$DIST_TAG"
         timeout-minutes: 15
 
       - name: Write job summary
