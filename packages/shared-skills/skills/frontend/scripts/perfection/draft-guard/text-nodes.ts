@@ -1,10 +1,29 @@
-export type Element = { readonly tag: string; readonly classes: readonly string[] }
-export type TextNode = { readonly text: string; readonly offset: number; readonly stack: readonly Element[] }
+export type Element = {
+	readonly tag: string
+	readonly name: string
+	readonly classes: readonly string[]
+	readonly stateful: boolean
+}
 
-const HIDDEN_BLOCKS = /<(script|style|pre|code|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->|\{\/\*[\s\S]*?\*\/\}/gi
+/** `text` is visible copy, `label` an announced attribute (aria-label, title, alt, placeholder), `value` a stat component's value prop. */
+export type NodeKind = "text" | "label" | "value"
+export type TextNode = { readonly kind: NodeKind; readonly text: string; readonly offset: number; readonly stack: readonly Element[] }
+
+export type MarkupKind = "html" | "jsx" | "sfc"
+
+const NEVER_RENDERED = /<(script|style|pre|code|textarea|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->|\{\/\*[\s\S]*?\*\/\}/gi
+const HTML_TEMPLATE = /<template\b[^>]*>[\s\S]*?<\/template\s*>/gi
 const TAG = /<(\/?)([A-Za-z][\w.:-]*)((?:[^>"'{}]|"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\})*)>/g
-const CLASS_ATTR = /\b(?:class|className)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/
+const CLASS_ATTR = /\b(?:class|className)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{((?:[^{}]|\{[^{}]*\})*)\})/
+const STRING_LITERAL = /["'`]([^"'`]*)["'`]/g
+const ANNOUNCED_ATTR = /\b(aria-label|title|alt|placeholder)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/g
+const VALUE_ATTR = /\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["'`]([^"'`]*)["'`]\s*\})/
+const HIDDEN_ATTR = /(?:^|\s)hidden(?=\s|=|\/|$)/
+const STATE_ATTR = /(?:^|\s)(?:data-status|data-state|aria-[a-z-]+)\s*=/
+const STAT_COMPONENT = /^(?:Stat|Metric|Kpi|KPI)\w*$/
+const STAT_CLASS = /^(?:stat|stats|metric|metrics|kpi)(?:$|[-_])/
 const VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"])
+const JSX_LEAD = new Set(["(", "[", "{", "}", ",", ":", "?", "=", ">", "&", "|", ";"])
 
 function blank(text: string, pattern: RegExp): string {
 	return text.replace(pattern, (m) => m.replace(/[^\n]/g, " "))
@@ -12,7 +31,14 @@ function blank(text: string, pattern: RegExp): string {
 
 function classesOf(attrs: string): string[] {
 	const m = CLASS_ATTR.exec(attrs)
-	return (m?.[1] ?? m?.[2] ?? m?.[3] ?? "").split(/\s+/).filter(Boolean)
+	if (!m) return []
+	const literal = m[1] ?? m[2]
+	const raw = literal ?? [...(m[3] ?? "").matchAll(STRING_LITERAL)].map((s) => s[1] ?? "").join(" ")
+	return raw.split(/\s+/).filter(Boolean)
+}
+
+export function isStatElement(element: Element): boolean {
+	return STAT_COMPONENT.test(element.name) || element.classes.some((c) => STAT_CLASS.test(c))
 }
 
 function closeTo(stack: Element[], tag: string): void {
@@ -20,25 +46,65 @@ function closeTo(stack: Element[], tag: string): void {
 	if (at >= 0) stack.length = at
 }
 
-/** Visible text between tags, each with the elements open around it. Code outside any element is skipped. */
-export function textNodes(source: string): TextNode[] {
-	const text = blank(source, HIDDEN_BLOCKS)
+/** In a script, `<` opens JSX only where an expression can start; `Array<string>`, `pick<T>(` and `a<b` stay code. */
+function opensJsx(text: string, start: number, attrs: string, end: number): boolean {
+	if (attrs.trimStart().startsWith(",") || text[end] === "(") return false
+	const before = text.slice(0, start).trimEnd()
+	if (before === "" || /\b(?:return|yield|default)$/.test(before)) return true
+	return JSX_LEAD.has(before.at(-1) ?? "")
+}
+
+function keepLiterals(segment: string): string {
+	return segment.replace(/\{[^{}]*\}/g, (m) => {
+		const lit = /^\{\s*(["'`])([^"'`]*)\1\s*\}$/.exec(m)
+		if (!lit) return " ".repeat(m.length)
+		const inner = lit[2] ?? ""
+		const at = m.indexOf(lit[1] ?? "") + 1
+		return " ".repeat(at) + inner + " ".repeat(m.length - at - inner.length)
+	})
+}
+
+/** Copy a reader sees or hears, each piece with the elements open around it. Code, hidden elements and never-rendered blocks are skipped. */
+export function textNodes(source: string, kind: MarkupKind): TextNode[] {
+	const text = kind === "html" ? blank(blank(source, NEVER_RENDERED), HTML_TEMPLATE) : blank(source, NEVER_RENDERED)
 	const nodes: TextNode[] = []
 	const stack: Element[] = []
+	let hiddenDepth = 0
 	let cursor = 0
 	const flush = (end: number) => {
-		if (stack.length === 0) return
-		const segment = text.slice(cursor, end).replace(/\{[^{}]*\}/g, (m) => " ".repeat(m.length))
-		if (segment.trim()) nodes.push({ text: segment, offset: cursor, stack: [...stack] })
+		if (stack.length === 0 || hiddenDepth > 0) return
+		const segment = keepLiterals(text.slice(cursor, end))
+		if (segment.trim()) nodes.push({ kind: "text", text: segment, offset: cursor, stack: [...stack] })
 	}
 	for (const m of text.matchAll(TAG)) {
 		const start = m.index ?? 0
+		const [whole, closing, rawName = "", attrs = ""] = m
+		const end = start + whole.length
+		if (kind === "jsx" && !closing && stack.length === 0 && !opensJsx(text, start, attrs, end)) continue
 		flush(start)
-		cursor = start + m[0].length
-		const [, closing, rawTag = "", attrs = ""] = m
-		const tag = rawTag.toLowerCase()
-		if (closing) closeTo(stack, tag)
-		else if (!VOID_TAGS.has(tag) && !attrs.trimEnd().endsWith("/")) stack.push({ tag, classes: classesOf(attrs) })
+		cursor = end
+		const tag = rawName.toLowerCase()
+		if (closing) {
+			const at = stack.map((e) => e.tag).lastIndexOf(tag)
+			if (at >= 0 && hiddenDepth > at) hiddenDepth = 0
+			closeTo(stack, tag)
+			continue
+		}
+		const element: Element = { tag, name: rawName, classes: classesOf(attrs), stateful: STATE_ATTR.test(attrs) }
+		const attrsAt = start + 1 + rawName.length
+		const hidden = hiddenDepth > 0 || HIDDEN_ATTR.test(attrs)
+		if (!hidden) {
+			for (const a of attrs.matchAll(ANNOUNCED_ATTR)) {
+				const value = a[2] ?? a[3] ?? a[4] ?? ""
+				if (value.trim()) nodes.push({ kind: "label", text: value, offset: attrsAt + (a.index ?? 0) + a[0].indexOf(value), stack: [...stack, element] })
+			}
+			const v = isStatElement(element) ? VALUE_ATTR.exec(attrs) : null
+			const value = v ? (v[1] ?? v[2] ?? v[3] ?? "") : ""
+			if (v && value.trim()) nodes.push({ kind: "value", text: value, offset: attrsAt + v.index + v[0].indexOf(value), stack: [...stack, element] })
+		}
+		if (VOID_TAGS.has(tag) || attrs.trimEnd().endsWith("/")) continue
+		stack.push(element)
+		if (hiddenDepth === 0 && HIDDEN_ATTR.test(attrs)) hiddenDepth = stack.length
 	}
 	return nodes
 }

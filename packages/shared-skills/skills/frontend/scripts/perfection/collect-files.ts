@@ -16,6 +16,14 @@ function statOrNull(path: string): Stats | null {
 	}
 }
 
+function entriesOrNull(path: string): string[] | null {
+	try {
+		return readdirSync(path)
+	} catch {
+		return null
+	}
+}
+
 /** Lintable source files under the targets; dangling links and unreadable entries are skipped, an unreadable explicit target is reported. */
 export function collectFiles(targets: readonly string[]): { readonly paths: string[]; readonly missing: string[] } {
 	const paths: string[] = []
@@ -27,7 +35,12 @@ export function collectFiles(targets: readonly string[]): { readonly paths: stri
 			return
 		}
 		if (stat.isDirectory()) {
-			for (const entry of readdirSync(path)) {
+			const entries = entriesOrNull(path)
+			if (entries === null) {
+				if (explicit) missing.push(path)
+				return
+			}
+			for (const entry of entries) {
 				if (!SKIPPED_DIRS.has(entry)) walk(join(path, entry), false)
 			}
 			return

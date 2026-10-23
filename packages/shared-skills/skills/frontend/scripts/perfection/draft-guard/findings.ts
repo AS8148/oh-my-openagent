@@ -12,5 +12,5 @@ export const DRAFT_RULE_MESSAGES: Readonly<Record<DraftRuleId, string>> = {
 	"promo-copy": "promotional filler in visible copy; say what the screen does or shows instead",
 	"emoji-icon": "emoji used as an icon or bullet; use an SVG icon from the project's icon set, or nothing",
 	"decorative-badge": "badge or chip carrying a hype label instead of a state; remove it or show a real status",
-	"vanity-stat": "stat tile with a hard-coded vanity number; bind it to real data or remove the tile",
+	"vanity-stat": "stat tile with a marketing-form number (10x, 500+, 24/7); show the measured figure with its unit and period, or remove the tile",
 }
