@@ -1,5 +1,4 @@
-/// <reference types="bun-types" />
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { helloDesktopEngine } from "../src/handshake";
 import { legacySelf, refusalChild, refusalRecord } from "./refusal-child";
 

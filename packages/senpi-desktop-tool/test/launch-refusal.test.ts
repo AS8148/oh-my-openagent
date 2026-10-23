@@ -1,5 +1,4 @@
-/// <reference types="bun-types" />
-import { expect, it } from "bun:test";
+import { expect, it } from "vitest";
 import { DesktopService, runComputerCode } from "@oh-my-opencode/senpi-desktop-service";
 import { refusalChild } from "../../senpi-desktop-engine/test/refusal-child";
 import { ComputerHandle } from "../src/activation";

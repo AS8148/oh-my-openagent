@@ -1,5 +1,4 @@
-/// <reference types="bun-types" />
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { RpcClient } from "../src/service/rpc-client";
 import { DesktopService } from "../src/service/service";
 import { legacySelf, refusalChild, refusalRecord, type RefusalOptions } from "../../senpi-desktop-engine/test/refusal-child";
