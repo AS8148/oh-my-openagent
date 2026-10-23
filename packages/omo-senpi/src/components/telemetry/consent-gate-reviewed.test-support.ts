@@ -61,6 +61,12 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
     call: "state.capture(name)", reason: FAN_IN,
   },
   {
+    file: "omo-native-component.ts", fn: "createOmoNativeTelemetryComponent>register>captureEvent>run(=>)",
+    guard: "",
+    route: VIA_FAN_IN,
+    call: "client.captureEvent(name)", reason: THROUGH_FAN_IN,
+  },
+  {
     file: "omo-native-component.ts", fn: "installCaptureFacade",
     guard: "",
     call: "createEventTelemetryClient({ diagnostics: options.diagnostics, distinctId: template.dis)", reason: FAN_IN,
@@ -243,6 +249,16 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
     file: "product-identity.ts", fn: "readOrCreateInstallId",
     guard: "unless(persisted !== undefined) unless(concurrentlyCreated !== undefined)",
     call: "writeFileSync(path)", reason: IDENTITY_FILES,
+  },
+  {
+    file: "product-identity.ts", fn: "resolveUserInstallId",
+    guard: "unless(legacy === canonical) unless(shared !== undefined) unless(adopted === undefined)",
+    call: "mkdirSync(dirname(canonical))", reason: IDENTITY_FILES,
+  },
+  {
+    file: "product-identity.ts", fn: "resolveUserInstallId",
+    guard: "unless(legacy === canonical) unless(shared !== undefined) unless(adopted === undefined)",
+    call: "writeFileSync(canonical)", reason: IDENTITY_FILES,
   },
   {
     file: "session-summary-store.ts", fn: "createSummaryStore>write",
