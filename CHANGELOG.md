@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Memory reflection and dream runs trim oversized note descriptions before completion validation.** The note body is preserved, instead of the run failing again and again and parking the identity. ([#10999](https://github.com/code-yeongyu/oh-my-openagent/pull/10999))
+
 **A memory sync that stops working now says so in the TUI, with what to do.** When a sync cycle failed, the error went only to the log, and the status kept reporting the last successful sync. Now the memory footer shows `sync blocked` while sync is failing, and one notice says why and what to do: `/memory unlock <path>` for a git lock left behind by a crashed writer, sign in again for an expired sign-in, or check your connection when the sync service cannot be reached. A single dropped request still retries quietly; the offline notice appears only after three failed cycles in a row. When sync recovers, a notice says so and the footer clears. ([#10637](https://github.com/code-yeongyu/oh-my-openagent/issues/10637), [#10958](https://github.com/code-yeongyu/oh-my-openagent/pull/10958))
 **Agents can now reach the dori extension through the one toolkit SDK, and a retried turn never repeats a call that already ran.** With the `dori` section on, the toolkit gains its route, reply, room, send, thread, describe, file, rules, iam, call and work namespaces, and `help()` lists them with their signatures; with it off they do not exist and no dori code loads. Every call carries the caller the engine stamped and a replay key, so a replayed turn gets the recorded result back, a replay with different arguments stops with a typed error, and one older than seven days is refused instead of running again. A session waiting on a dori request also wakes when a macOS file watch drops the wake event, instead of sleeping until its timeout. ([#10458](https://github.com/code-yeongyu/oh-my-openagent/pull/10458))
 
@@ -73,10 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [5.1.44] - 2026-10-23
 
 **The engine moves to senpi 2026.10.21-3: long 1M-context conversations stop re-writing their cached prefix, Anthropic subscription context is counted once, and "No credential slots available" no longer locks every account out ([#10965](https://github.com/code-yeongyu/oh-my-openagent/pull/10965)).** When context reduction trims a long conversation on a 1M window, the reduced prefix now stays identical and keeps its cache checkpoint, so each step writes only what changed. Anthropic subscription turns with internal SDK re-requests no longer double the context percentage or start compaction early, and a configured compaction model now summarizes while your session provider is healthy, overflow recovery included. The subscription lane is the only layer that picks its accounts, so one revoked or briefly rate-limited account no longer blocks the rest until you log in again. Every turn end says what happens next, a turn-end report names the hold your queued message released, the trailing "Anything else? (optional)" card is gone from clients without native questions, and moving a session between machines runs through one implementation. Forced recovery after a context overflow no longer picks the same compaction cut again when an invisible entry leads the session; an overflow still never moves a task to its next fallback model.
-
-### Fixed
-
-- Memory reflection and dream runs trim oversized note descriptions before completion validation, preserving the note body instead of repeatedly failing and parking the identity. ([#10999](https://github.com/code-yeongyu/oh-my-openagent/pull/10999))
 
 ## [5.1.43] - 2026-10-22
 
