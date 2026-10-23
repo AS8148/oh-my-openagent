@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { createNodeGitExec, type GitExec } from "../../../git/exec"
 import { createGitSyncRepo } from "./git-sync-repo"
+import { initGitSyncTestRepo } from "./git-sync-repo.test-support"
 
 const dirs: string[] = []
 afterEach(async () => {
@@ -26,13 +27,7 @@ async function porcelain(cwd: string): Promise<string> {
 async function repo(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "omo-sync-repo-"))
   dirs.push(root)
-  await git(root, "init", "-q", "-b", "main")
-  await git(root, "config", "user.name", "Agent")
-  await git(root, "config", "user.email", "agent@example.invalid")
-  await git(root, "config", "commit.gpgsign", "false")
-  await writeFile(join(root, "base.md"), "base\n")
-  await git(root, "add", "base.md")
-  await git(root, "commit", "-q", "-m", "init")
+  await initGitSyncTestRepo(root)
   return root
 }
 
