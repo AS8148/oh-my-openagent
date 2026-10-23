@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { installHooks } from "./hooks"
+import { disableFixtureAutoMaintenance } from "../git/test-repo-config.test-support"
 import { removeTree } from "../../../../test-support/remove-tree"
 
 const tempDirs: string[] = []
@@ -63,8 +64,7 @@ export async function createRepo(options: Parameters<typeof installHooks>[1] = {
   // A commit otherwise starts `git maintenance run --auto --detach`: a process this support never spawned, so
   // removeTempDirs cannot reap it, and it can still write into the repo while teardown removes it (#10945). The
   // production memory repos turn auto-maintenance off for the same reason (#10177).
-  await run(["git", "config", "maintenance.auto", "false"], dir)
-  await run(["git", "config", "gc.auto", "0"], dir)
+  disableFixtureAutoMaintenance(dir)
   installHooks(dir, options)
   return dir
 }
