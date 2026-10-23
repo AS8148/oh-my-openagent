@@ -1,3 +1,5 @@
+import { PROVENANCE_MIGRATION } from "./provenance-record"
+
 export class GatewaySchemaVersionError extends Error {
   readonly code = "gateway_schema_too_new"
   constructor(readonly found: number, readonly supported: number, scope = "Gateway") {
@@ -234,18 +236,24 @@ export const GATEWAY_MIGRATIONS: readonly (readonly string[])[] = [
     "CREATE UNIQUE INDEX bindings_one_active_thread ON bindings (platform, account_id, chat_id, thread_id) WHERE status = 'active'",
     "CREATE INDEX bindings_session ON bindings (session_durable_id, status)",
   ],
-  // v8 (todo 14): who thread_create'd which session (`thread_creations`, durable so a parent is still
+  // v8: new deliveries require sender provenance; old envelopes are not rewritten.
+  PROVENANCE_MIGRATION,
+
+  // v9 (todo 14): who thread_create'd which session (`thread_creations`, durable so a parent is still
   // recognised after a host handoff or restart), and each store extension's persisted descriptor
   // (`extension_registrations`: module URL, migrations, session-callable ops, wake dir), upserted by
   // name, so an engine process lists the session tools another process registered.
+  // A store a build from before the renumber migrated already sits at v8 with these tables but without
+  // the provenance trigger, so this step replays v8 (idempotent) and creates only what is missing.
   [
-    `CREATE TABLE thread_creations (
+    ...PROVENANCE_MIGRATION,
+    `CREATE TABLE IF NOT EXISTS thread_creations (
       creator_durable_id TEXT NOT NULL,
       created_durable_id TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       PRIMARY KEY (creator_durable_id, created_durable_id)
     )`,
-    "CREATE TABLE extension_registrations (name TEXT PRIMARY KEY, descriptor_json TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS extension_registrations (name TEXT PRIMARY KEY, descriptor_json TEXT NOT NULL, updated_at INTEGER NOT NULL)",
     `INSERT OR IGNORE INTO extension_objects (type, name, owner)
      SELECT s.type, s.name, NULL FROM sqlite_schema s
      WHERE NOT EXISTS (SELECT 1 FROM extension_objects e WHERE e.type = s.type AND e.name = s.name COLLATE NOCASE)`,

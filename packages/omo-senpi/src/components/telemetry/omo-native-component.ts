@@ -1,9 +1,9 @@
 import type { TurnEndEvent } from "@code-yeongyu/senpi"
 import {
   createConsentGatedFetch,
-  createDefaultPostHogTransport,
   createEventTelemetryClient,
-} from "@oh-my-opencode/telemetry-core"
+} from "@oh-my-opencode/telemetry-core/injected"
+import { createLazyPostHogTransportFactory } from "./lazy-posthog"
 import type {
   EventTelemetryClient,
   EventTelemetryProperties,
@@ -22,6 +22,7 @@ import {
   registerOmoNativeComputerUseTelemetry,
 } from "./omo-native-computer-use"
 import { createOmoNativeDelegationCapture } from "./omo-native-delegation"
+import { registerOmoNativeHandoffHintTelemetry } from "./omo-native-handoff-hint"
 import { createOmoNativeNoticeRegistration } from "./omo-native-notice"
 import { registerOmoNativeKibitzerSummary } from "./omo-native-kibitzer-summary"
 import { registerOmoNativeParallelSummary } from "./omo-native-parallel-summary"
@@ -93,7 +94,10 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
     },
   }
   const transportFactory = sharedTransportFactory(
-    options.transportFactory ?? createDefaultPostHogTransport,
+    options.transportFactory ?? createLazyPostHogTransportFactory({
+      diagnostics: options.diagnostics,
+      source: "omo-native-component",
+    }),
     state,
     options,
   )
@@ -177,6 +181,11 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
         client,
         hashSessionId: hashSession,
       }).register(pi, ctx)
+
+      registerOmoNativeHandoffHintTelemetry(pi, {
+        captureEvent: client.captureEvent,
+        hashSessionId: hashSession,
+      })
 
       registerOmoNativeComputerUseTelemetry(pi, {
         captureEvent: client.captureEvent,
