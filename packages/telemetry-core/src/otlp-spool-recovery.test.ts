@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { linkSync, mkdirSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { createBatchId, type SpoolContext } from "./otlp-spool-dir"
+import { createBatchId, parseSpoolName, type SpoolContext } from "./otlp-spool-dir"
 import { frame } from "./otlp-spool-file"
 import {
   attributeMap,
@@ -267,8 +267,10 @@ describe("spool recovery", () => {
       // ...and through setTimeout, exactly one shutdown deadline had fired when it returned: the flush
       // deadline. The cap behind it was cancelled, and no second deadline (of any length) was waited on.
       expect(firedWhenShutdownReturned.filter((ms) => ms >= FLUSH_DEADLINE_MS)).toEqual([FLUSH_DEADLINE_MS])
-      expect(spoolNames(dir).length).toBe(1)
-      expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
+      const entries = spoolNames(dir).map(parseSpoolName)
+      expect(entries.filter((entry) => entry.kind !== "lock"), `spool entries: ${JSON.stringify(entries)}`).toEqual([
+        expect.objectContaining({ kind: expect.stringMatching(/^(batch|sending)$/), signal: "logs" }),
+      ])
     } finally {
       timers.restore()
     }
@@ -298,7 +300,10 @@ describe("spool recovery", () => {
       // then
       expect(outcome).toBe("settled")
       expect(armedWhenFlushWorkRan).toEqual(expect.arrayContaining([FLUSH_DEADLINE_MS, CAP_MS]))
-      expect(spoolNames(dir)[0]).toMatch(/^batch-logs-[0-9a-f-]{36}\.otlp$/)
+      const entries = spoolNames(dir).map(parseSpoolName)
+      expect(entries.filter((entry) => entry.kind !== "lock"), `spool entries: ${JSON.stringify(entries)}`).toEqual([
+        expect.objectContaining({ kind: expect.stringMatching(/^(batch|sending)$/), signal: "logs" }),
+      ])
     } finally {
       timers.restore()
     }
