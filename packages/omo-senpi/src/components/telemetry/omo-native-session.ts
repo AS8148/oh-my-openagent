@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs"
 import * as os from "node:os"
 import { posix, win32 } from "node:path"
 
@@ -224,21 +225,21 @@ function readTimeZone(provider: (() => string) | undefined): string | undefined 
 
 /** The one enablement decision: the env opt-out matrix plus the omo config gate for the event's cwd. */
 export function isOmoNativeTelemetryEnabled(
-  options: Pick<OmoNativeSessionOptions, "diagnostics" | "isConfigEnabled">,
+  options: Pick<OmoNativeSessionOptions, "diagnostics" | "isConfigEnabled"> & { readonly automationDeps?: TempDirDeps },
   eventCtx: unknown,
   env: TelemetryEnv,
 ): boolean {
   return (
-    notAutomated(env) &&
+    notAutomated(env, options.automationDeps) &&
     isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }) &&
     configEnabled(options, eventCtx, env)
   )
 }
 
 /** The automation check sits on the consent path, which must never throw: if it cannot decide, telemetry is off. */
-function notAutomated(env: TelemetryEnv): boolean {
+function notAutomated(env: TelemetryEnv, deps: TempDirDeps = {}): boolean {
   try {
-    return automatedRunReason(env) === undefined
+    return automatedRunReason(env, deps) === undefined
   } catch {
     return false
   }
@@ -261,45 +262,68 @@ export function automatedRunReason(
   if (env["NODE_ENV"]?.trim() === "test" || env["VITEST"] || env["JEST_WORKER_ID"]) return "test_runner"
   const platform = deps.platform ?? process.platform
   const home = (platform === "win32" ? env["USERPROFILE"] : env["HOME"])?.trim()
-  if (home && isInsideTempDir(home, deps)) return "ephemeral_home"
+  if (home && isInsideTempDir(home, env, deps)) return "ephemeral_home"
   return undefined
 }
 
-/** What the temp-home check reads from the OS; injected only by tests that simulate another platform. */
+/** What the temp-home check reads from the OS; injected only by tests that simulate another platform or filesystem. */
 export type TempDirDeps = PathContainmentOptions & {
   readonly tmpdir?: () => string
-  readonly homedir?: () => string
+  /** The fixed POSIX temp roots checked besides os.tmpdir(); never used on win32. */
+  readonly posixTempRoots?: readonly string[]
 }
 
 const POSIX_TEMP_ROOTS = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
+const POSIX_USERS_DIRS = ["/Users", "/home", "/var/home"]
+const POSIX_ROOT_HOMES = ["/root", "/var/root"]
 
 /**
- * Whether `path` lies inside an OS temp dir, decided by the shared path-containment helper (#10935): native realpath on
- * both sides (8.3 short names expanded, '..' resolved by the kernel, never lexically), case-insensitive on Windows.
- * A path that cannot be resolved is not inside.
+ * Whether `path` (the HOME being classified) is a home that cannot hold a stable install id (#10934, #10935).
+ *
+ * - A HOME that cannot be resolved cannot hold anything either: it counts as ephemeral, so the check fails toward
+ *   telemetry OFF, never ON.
+ * - A real account profile, a direct child of the OS users directory (`/Users/<name>`, `/home/<name>`,
+ *   `C:\Users\<name>`) or root's home, is never ephemeral, whatever TMPDIR says (TMPDIR=/, =/Users, =the home).
+ *   The account home is taken from the path's shape, not from os.userInfo(): under Bun that reads HOME/USERPROFILE,
+ *   the very value being classified.
+ * - Otherwise it is ephemeral when it lies inside os.tmpdir() (or a fixed POSIX temp root), decided by the shared
+ *   path-containment helper: native realpath on both sides, case-insensitive on win32. A temp root that resolves to
+ *   a filesystem root is ignored.
  */
-function isInsideTempDir(path: string, deps: TempDirDeps): boolean {
-  const options: PathContainmentOptions = { ...(deps.platform === undefined ? {} : { platform: deps.platform }), ...(deps.realpath === undefined ? {} : { realpath: deps.realpath }) }
-  const inside = (child: string, parent: string): boolean => {
+function isInsideTempDir(path: string, env: TelemetryEnv, deps: TempDirDeps): boolean {
+  const windows = (deps.platform ?? process.platform) === "win32"
+  const paths = windows ? win32 : posix
+  const options: PathContainmentOptions = { platform: windows ? "win32" : (deps.platform ?? process.platform), ...(deps.realpath === undefined ? {} : { realpath: deps.realpath }) }
+  const realpath = deps.realpath ?? realpathSync.native
+  const resolve = (candidate: string): string | undefined => {
     try {
-      return isPathInside(child, parent, options)
+      return paths.normalize(realpath(candidate))
+    } catch {
+      return undefined
+    }
+  }
+  const same = (left: string, right: string): boolean => {
+    try {
+      return isPathInside(left, right, options) && isPathInside(right, left, options)
     } catch {
       return false
     }
   }
-  const windows = (deps.platform ?? process.platform) === "win32"
-  const accountHome = (deps.homedir ?? (() => os.userInfo().homedir))()
-  const candidates = [(deps.tmpdir ?? os.tmpdir)(), ...(windows ? [] : POSIX_TEMP_ROOTS)]
-  // A misconfigured temp dir (TMPDIR=/, or one that holds the account's real home) is not a temp root: it would
-  // silently turn off a real user's telemetry.
-  const roots = candidates.filter((root) => !isFilesystemRoot(root, windows) && !inside(accountHome, root))
-  return roots.some((root) => inside(path, root))
-}
-
-function isFilesystemRoot(path: string, windows: boolean): boolean {
-  const paths = windows ? win32 : posix
-  const normalized = paths.normalize(path)
-  return paths.dirname(normalized) === normalized
+  const target = resolve(path)
+  if (target === undefined) return true
+  const usersDirs = windows ? [win32.join(`${env["SystemDrive"]?.trim() || "C:"}\\`, "Users")] : POSIX_USERS_DIRS
+  const rootHomes = windows ? [] : POSIX_ROOT_HOMES
+  if (usersDirs.some((dir) => same(paths.dirname(target), dir)) || rootHomes.some((home) => same(target, home))) return false
+  const candidates = [(deps.tmpdir ?? os.tmpdir)(), ...(windows ? [] : (deps.posixTempRoots ?? POSIX_TEMP_ROOTS))]
+  return candidates.some((candidate) => {
+    const root = resolve(candidate)
+    if (root === undefined || paths.dirname(root) === root) return false
+    try {
+      return isPathInside(path, candidate, options)
+    } catch {
+      return false
+    }
+  })
 }
 
 function configEnabled(
