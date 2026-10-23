@@ -14,7 +14,7 @@ import { isStaleExtensionContextError } from "./stale-extension-context"
 import { MEMORY_STATUS_KEY, refreshMemoryStatus } from "./status"
 import { createActiveReflectionRuns } from "./status-active-runs"
 import { createMemoryFooterStatusLive } from "./status-live-wiring"
-import { createSyncStatusNotifier } from "./sync-status-surface"
+import { createSyncStatusNotifier, deliverSyncStatusChange } from "./sync-status-surface"
 import {
   consumePendingReflectionCompletions,
   emitReflectionHealthAlert,
@@ -183,11 +183,19 @@ export function createMemoryReflectionLiveWiring(
     async onSyncStatusChanged(repo): Promise<void> {
       const sessionId = activeSession.current
       const context = sessionId === undefined ? undefined : options.sessions.get(sessionId)?.context
-      if (context === undefined || context.identityPaths.repo !== repo) return
       const ui = readUi(lastEventCtx.current)
-      await syncNotifier?.changed(repo, ui)
-      track(footerLive.refresh(sessionId, ui))
-      await rpcBridge.current?.sync()
+      await deliverSyncStatusChange({
+        repo,
+        isActiveRepo: sessionId !== undefined && context?.identityPaths.repo === repo,
+        notifier: syncNotifier,
+        ui,
+        refreshFooter: () => {
+          if (sessionId !== undefined) track(footerLive.refresh(sessionId, ui))
+        },
+        pushRpc: async () => {
+          await rpcBridge.current?.sync()
+        },
+      })
     },
   }
 }

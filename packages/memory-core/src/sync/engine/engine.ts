@@ -44,6 +44,8 @@ export class SyncEngine {
   private loaded = false
   private running: Promise<CycleReport> | null = null
   private rerun = false
+  /** Set by stop(): no new cycle starts after it, so close() can release the device lease safely. */
+  private stopped = false
   private eventHead = 0
   private appliedMirror = 0
   private waiters: { readonly resolve: (report: CycleReport) => void; readonly reject: (error: unknown) => void }[] = []
@@ -73,6 +75,7 @@ export class SyncEngine {
   }
 
   start(): void {
+    this.stopped = false
     this.unsubscribe = this.deps.transport.subscribe({
       onAdvanced: (head) => {
         this.eventHead = Math.max(this.eventHead, head)
@@ -88,7 +91,9 @@ export class SyncEngine {
     this.unsubscribe = null
     this.stopPolling()
     this.cancelDebounce?.()
-    await this.running?.catch(() => undefined)
+    this.stopped = true
+    this.rerun = false
+    while (this.running !== null) await this.running.catch(() => undefined)
   }
 
   notifyLocalCommit(): void {
@@ -163,6 +168,7 @@ export class SyncEngine {
   }
 
   private request(): void {
+    if (this.stopped) return
     if (this.running !== null) {
       this.rerun = true
       return

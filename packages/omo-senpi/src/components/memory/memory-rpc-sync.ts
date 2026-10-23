@@ -45,5 +45,9 @@ export async function readMemoryRpcSync(read: SyncStatusReader | undefined, repo
         },
       }
     }
+    default: {
+      const unhandled: never = status
+      return unhandled
+    }
   }
 }

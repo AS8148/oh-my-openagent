@@ -119,3 +119,31 @@ test("a cycle that fails settles nextCycle() with that failure, and a request qu
   expect(rerunWithin).toBe("ran")
   load.mockRestore()
 }, GIT_TEST_TIMEOUT)
+
+test("a request queued during a failing cycle never starts a cycle after stop() returns (omo #10637 review of #10971, HIGH)", async () => {
+  const { b } = await started()
+  await b.restart()
+  let loads = 0
+  let release = (): void => undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const load = spyOn(b.store, "load").mockImplementation(async () => {
+    loads += 1
+    if (loads === 1) await gate
+    throw new Error("store unavailable")
+  })
+  const first = b.engine.runCycle().then(() => null, (error: unknown) => error)
+  b.engine.notifyLocalCommit()
+  b.clock.advance(LOCAL_DEBOUNCE_MS)
+
+  const stopped = b.engine.stop()
+  release()
+  await stopped
+  const loadsAtStop = loads
+  await first
+
+  expect(loadsAtStop).toBe(1)
+  expect(loads).toBe(1)
+  load.mockRestore()
+}, GIT_TEST_TIMEOUT)
