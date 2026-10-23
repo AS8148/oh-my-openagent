@@ -43,9 +43,12 @@ export const oxlintLines = (rule: string, corpus: string): number[] => {
   try {
     const file = join(dir, "corpus.ts");
     copyFileSync(join(parityDir, `${corpus}.corpus`), file);
-    const result = Bun.spawnSync([join(root, "node_modules/.bin/oxlint"), "-c", join(root, ".oxlintrc.json"), "-f", "unix", file], { cwd: root });
-    const code = rule.replace(/^([^/]+)\/(.+)$/, "$1($2)").replace(/[()]/g, "\\$&");
-    return linesIn(result.stdout.toString(), new RegExp(`^[^:]+:(\\d+):\\d+: .*\\[\\w+/${code}\\]$`, "gm"));
+    // JSON output, not unix lines: a Windows path (D:\...) has its own colon before the line number.
+    const result = Bun.spawnSync([join(root, "node_modules/.bin/oxlint"), "-c", join(root, ".oxlintrc.json"), "-f", "json", file], { cwd: root });
+    const code = rule.replace(/^([^/]+)\/(.+)$/, "$1($2)");
+    const { diagnostics }: { diagnostics: { code?: string; labels: { span: { line: number } }[] }[] } = JSON.parse(result.stdout.toString());
+    const lines = diagnostics.filter((diagnostic) => diagnostic.code === code).flatMap((diagnostic) => diagnostic.labels.map((label) => label.span.line));
+    return [...new Set(lines)].sort((left, right) => left - right);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
