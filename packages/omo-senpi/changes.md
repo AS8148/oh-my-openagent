@@ -21,7 +21,6 @@ The tool-result path never blocks on the filesystem: the switches are read once 
 ## 2026-10-21 - Sender workspace and project on gateway deliveries (#10794)
 
 `renderDeliveryText` starts with the sender's workspace/project and optional lane/session. Resolution uses the sender runtime's environment, then git-origin owner and configured path prefixes from `provenance.workspaces` in the normal profile-selected config. Tool arguments cannot supply provenance. For a bound external chat or the CLI, the sender is the connector process, so the provenance is that process's workspace and project, not the human author's (the author stays in the binding header). Schema v8 requires provenance on new delivery inserts without rewriting historical envelopes; old rows remain readable and render `From (provenance not recorded)`. Older writers that omit provenance must upgrade before inserting into a v8 store. Legacy mailbox imports have no recoverable sender context and are explicitly `unclassified / legacy-mailbox`.
-||||||| parent of 611b16f9c0 (fix(browser): Full access approves irreversible browser actions without asking (#2465))
 
 ## 2026-10-19 - The feedback core is a lazy sidecar, so omo.js stays inside its byte budget (#10546)
 

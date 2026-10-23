@@ -50,7 +50,6 @@ Enforcement is one registry filter, `senpi-task` `withoutExcludedModels` (exclud
 `senpi-task/model-chains` (`describeModelChains`) reports each category and task agent: `resolveCategory` / `resolveAgent` give the runtime chain, and the declared rungs (omo.json candidates, the builtin default unless it is the chain head, each borrowed category's runtime chain, the builtin chain resolved to its first logged-in listed provider) are classified primary / fallback / excluded / no-login / not-reached. `omo-senpi` `model-profile/describe.ts` does the same for the main session's lane without the credential probe. `omo-native` exposes both as `modelChains` in the category-coverage runtime bundle; `bin/lib/model-chains.js` prints the text or `--json` report for `omo doctor --models` in the npm launcher and the compiled binary, exiting 1 when the runtime cannot load and 2 on an unknown option. The task-agent merge moves from omo-senpi `engine-runners.ts` to `senpi-task` `resolveTaskAgents` so the doctor and spawns build the same set. `category/resolver.ts` (428 code lines) is split by responsibility into `registry-models.ts`, `user-candidates.ts`, `available-names.ts` and `chain-diagnostics.ts` (pure moves, re-exported).
 
 ## 2026-10-19 - Obsessive lanes: the Geeky rename, and Obsessive · Normal heads with GPT-6 Astra at medium (#10590)
-||||||| parent of 611b16f9c0 (fix(browser): Full access approves irreversible browser actions without asking (#2465))
 
 ## 2026-10-20 - Adopt senpi 2026.10.19-2 for the 5.1.39 cut
 
