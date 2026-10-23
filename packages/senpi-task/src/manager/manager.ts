@@ -108,6 +108,7 @@ type TaskWaiter = {
 
 type RpcRespawnRunner = {
   start(spec: RpcRunnerSpec): Promise<RpcChildHandle>
+  settleTeardowns?(): Promise<void>
 }
 
 type TaskManagerImplOptions = TaskManagerOptions & {
@@ -939,12 +940,16 @@ class TaskManagerImpl implements TaskManager {
   async settleLaunchesForShutdown(boundMs: number): Promise<void> {
     this.#shutdownStarted = true
     const inFlight = [...this.#launching.values()].map((launch) => launch.then(() => undefined, () => undefined))
-    if (inFlight.length > 0 && boundMs > 0) {
+    if (boundMs > 0) {
       let timer: ReturnType<typeof setTimeout> | undefined
       const bound = new Promise<void>((resolveBound) => {
         timer = setTimeout(resolveBound, boundMs)
       })
-      await Promise.race([Promise.all(inFlight), bound])
+      const settled = Promise.all(inFlight).then(() => Promise.all([
+        ...Object.values(this.#options.runners).map((runner) => runner.settleTeardowns?.()),
+        this.#rpcRespawnRunner.settleTeardowns?.(),
+      ]))
+      await Promise.race([settled, bound])
       clearTimeout(timer)
     }
     for (const taskId of this.#launching.keys()) this.#parkUnadmittedLaunch(taskId)
