@@ -940,19 +940,33 @@ class TaskManagerImpl implements TaskManager {
   async settleLaunchesForShutdown(boundMs: number): Promise<void> {
     this.#shutdownStarted = true
     const inFlight = [...this.#launching.values()].map((launch) => launch.then(() => undefined, () => undefined))
-    if (boundMs > 0) {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const bound = new Promise<void>((resolveBound) => {
-        timer = setTimeout(resolveBound, boundMs)
-      })
-      const settled = Promise.all(inFlight).then(() => Promise.all([
-        ...Object.values(this.#options.runners).map((runner) => runner.settleTeardowns?.()),
-        this.#rpcRespawnRunner.settleTeardowns?.(),
-      ]))
-      await Promise.race([settled, bound])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      if (boundMs > 0) {
+        const bound = new Promise<void>((resolveBound) => {
+          timer = setTimeout(resolveBound, boundMs)
+        })
+        const runners = [...Object.values(this.#options.runners), this.#rpcRespawnRunner]
+        const settleTeardowns = () => Promise.all(
+          runners.map(async (runner) => {
+            try {
+              await runner.settleTeardowns?.()
+            } catch (error) {
+              log("senpi-task shutdown teardown failed", { error: String(error) })
+            }
+          }),
+        )
+        const settled = Promise.all([
+          settleTeardowns(),
+          // A launch can register detached cleanup after the initial teardown snapshot.
+          Promise.all(inFlight).then(settleTeardowns),
+        ])
+        await Promise.race([settled, bound])
+      }
+    } finally {
       clearTimeout(timer)
+      for (const taskId of this.#launching.keys()) this.#parkUnadmittedLaunch(taskId)
     }
-    for (const taskId of this.#launching.keys()) this.#parkUnadmittedLaunch(taskId)
   }
 
   // Parks only a launch that is still this host's and has never reached a child: no session, no pid.
