@@ -751,5 +751,5 @@ Append to the 6.6 summary a "Dispatch path" line and, when team path was used, t
 - Do not inline the Intent Card or verify-spec into task descriptions: rely on the broadcasts.
 - Do not recreate the team mid-session.
 - Do not run tests from Lead: the external verifier owns that lane.
-- Do not put \`oracle\` / \`librarian\` / a deep lane into the team spec: oracle/librarian are team-ineligible, and a deep lane under category routing downcasts to sisyphus-junior. Use them via \`task()\` outside the team when needed.
+- Do not put \`oracle\` / \`librarian\` / a deep lane into the team spec: oracle/librarian are team-ineligible, and a deep lane under category routing downcasts to the category worker. Use them via \`task()\` outside the team when needed.
 `
