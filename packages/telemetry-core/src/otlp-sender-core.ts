@@ -1,6 +1,8 @@
 import { context } from "@opentelemetry/api"
 
 import { createTelemetryProviders, type TelemetryProviders } from "./otel-providers"
+import { createTraceparentFetch, OMO_TRACE_HOSTS, urlHost } from "./otel-traceparent-fetch"
+import { createTurnTracing } from "./otel-turn-span"
 import { BatchSender } from "./otlp-batch-sender"
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "./otlp-http"
 import { resolveOtlpEndpoint, type WireAttributes } from "./otlp-config"
@@ -82,7 +84,8 @@ class OtlpSender {
       ctx: this.#ctx,
       endpoint,
       ingestKey: input.ingestKey,
-      fetch: input.fetch ?? fetch,
+      // The collector this transport was pointed at is ours by definition (OMO_TELEMETRY_ENDPOINT included).
+      fetch: createTraceparentFetch(input.fetch ?? fetch, [...OMO_TRACE_HOSTS, urlHost(endpoint) ?? ""].filter((host) => host !== "")),
       requestTimeoutMs: input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
       leaseRenewIntervalMs: input.leaseRenewIntervalMs ?? LEASE_RENEW_INTERVAL_MS,
       sleep: input.sleep ?? abortableSleep,
@@ -102,6 +105,7 @@ class OtlpSender {
     this.transport = {
       sampling: { rawTurnRate: 1 },
       tracer: this.#providers.tracer,
+      traces: createTurnTracing({ tracer: this.#providers.tracer, isEnabled: () => !this.#stopped && this.#consent() }),
       endpoint,
       ready: this.#started,
       capture: (message) => this.#capture(message),
