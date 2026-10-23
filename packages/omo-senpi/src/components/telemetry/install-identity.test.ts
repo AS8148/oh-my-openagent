@@ -156,7 +156,7 @@ describe("temp-home detection is path-correct on every platform (#10935)", () =>
     const testHome = runRoot + "\\omo-test-home-1"
     // Bun's os.userInfo().homedir reads USERPROFILE/HOME, so the "account home" IS the home being classified: the
     // check must not depend on it (the guard that read it dropped the only Windows temp root, #10935 review H1).
-    const spy = spyOn(os, "userInfo").mockImplementation(() => ({ uid: -1, gid: -1, username: "runneradmin", homedir: testHome, shell: null }))
+    const spy = spyOn(os, "userInfo").mockImplementation((() => ({ uid: -1, gid: -1, username: "runneradmin", homedir: testHome, shell: null })) as typeof os.userInfo)
     try {
       expect(automatedRunReason({ USERPROFILE: testHome }, win(runRoot))).toBe("ephemeral_home")
       expect(automatedRunReason({ USERPROFILE: runRoot }, win(runRoot))).toBe("ephemeral_home")
