@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Parked facts leave the active queue without losing their contents; existing backlogs migrate once, manual retry restores them, and turn-end scans read only active entries. ([#PRNUM](https://github.com/code-yeongyu/oh-my-openagent/pull/PRNUM))
+- Parked facts leave the active queue without losing their contents; existing backlogs migrate once, manual retry restores them, and turn-end scans read only active entries. ([#11038](https://github.com/code-yeongyu/oh-my-openagent/pull/11038))
 
 **Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
 
