@@ -776,7 +776,7 @@ jobs:
           done
 
       # A failed publish must fail the job (no continue-on-error), or `gh run rerun --failed` never retries
-      # it and publish-main only finds the gap at its registry check. Only one failure is retried: Sigstore can
+      # it and publish-main only finds the gap at its registry check. Only the TLOG 409 is retried (at most twice): Sigstore can
       # store an entry, answer npm's first POST with a 5xx, then refuse the re-POST of the same signature with
       # TLOG_CREATE_ENTRY_ERROR "(409) an equivalent entry already exists", which aborts before the upload. A fresh
       # publish signs anew, so the retry keeps provenance; only a second 409 falls back to no provenance.
