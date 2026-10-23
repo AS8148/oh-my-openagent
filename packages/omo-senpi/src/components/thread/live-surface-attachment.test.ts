@@ -35,7 +35,9 @@ async function capturingLogs(exercise: (lines: { readonly log: string[]; readonl
 }
 
 describe("thread RPC attachment refusals and release outcomes (wire contract v1.1)", () => {
-  test.each(operations)("#given a draining host #when %s attaches #then a transient host_draining error surfaces and nothing is mutated, aborted or closed", async (_command, run) => {
+  // release_session and extension_ui_response answer with a reply union that carries the host's refusal; the rest throw a typed error.
+  const typedRefusal = new Set(["release_session", "extension_ui_response"])
+  test.each(operations.filter(([command]) => !typedRefusal.has(command)))("#given a draining host #when %s attaches #then a transient host_draining error surfaces and nothing is mutated, aborted or closed", async (_command, run) => {
     await withContractHost({ auth: true, attachRefusal: "host_draining" }, async (host) => {
       const refusal = await run(surface(host), host).then(() => undefined, (error: unknown) => error)
       expect(refusal).toBeInstanceOf(Error)
@@ -43,6 +45,28 @@ describe("thread RPC attachment refusals and release outcomes (wire contract v1.
       expect(host.mutations).toEqual([])
       expect(host.frames.map(({ frame }) => frame.type))
         .toEqual(["get_protocol_info", ...(process.platform === "win32" ? [] : ["authenticate"]), "attach_session"])
+    })
+  })
+
+  test("#given a draining host #when release_session attaches #then the release answers its typed host_draining refusal and nothing is mutated", async () => {
+    await withContractHost({ auth: true, attachRefusal: "host_draining" }, async (host) => {
+      expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: false, error: "host_draining" })
+      expect(host.mutations).toEqual([])
+    })
+  })
+
+  const vanished = [["unknown_session", { attachRefusal: "unknown_session" }], ["session_not_attached", { attachRefusal: "session_not_attached" }], ["session_identity_mismatch", { durableId: "dur-replacement" }]] as const
+  test.each(vanished)("#given an attach refused %s #when release_session runs #then the release answers that code as its refusal", async (code, options) => {
+    await withContractHost({ auth: true, ...options }, async (host) => {
+      expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: false, error: code })
+      expect(host.mutations).toEqual([])
+    })
+  })
+
+  test("#given a draining host #when a relayed UI answer attaches #then the session's host_draining refusal is the reply, not a thrown error", async () => {
+    await withContractHost({ auth: true, attachRefusal: "host_draining" }, async (host) => {
+      expect(await surface(host).gateway.respondUi!(endpoint(host), { ui_request_id: "question", fields: { value: "yes" } })).toEqual({ delivered: false, error: "host_draining" })
+      expect(host.mutations).toEqual([])
     })
   })
 
@@ -119,8 +143,18 @@ describe("thread RPC attachment refusals and release outcomes (wire contract v1.
     })
   })
 
-  test("#given a release_session that succeeded #when release_attachment answers unknown_session #then the hold counts as released and nothing is logged", async () => {
+  test("#given a release_session that succeeded #when release_attachment answers v1.1 session_not_attached #then the hold counts as released and nothing is logged", async () => {
     await withContractHost({ auth: true }, async (host) => {
+      await capturingLogs(async (lines) => {
+        expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: true })
+        expect(host.frames.some(({ frame }) => frame.type === "release_attachment")).toBe(true)
+        expect(lines.log.filter((line) => line.includes("release_attachment"))).toEqual([])
+      })
+    })
+  })
+
+  test("#given a release_session that succeeded #when an out-of-contract host answers release_attachment unknown_session #then it is still released and nothing is logged", async () => {
+    await withContractHost({ auth: true, releasedAttachmentAnswer: "unknown_session" }, async (host) => {
       await capturingLogs(async (lines) => {
         expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: true })
         expect(host.frames.some(({ frame }) => frame.type === "release_attachment")).toBe(true)
