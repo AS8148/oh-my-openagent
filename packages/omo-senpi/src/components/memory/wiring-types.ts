@@ -12,6 +12,7 @@ import type { MemoryMaintenance, MemoryMaintenanceOptions } from "./memory-maint
 import type { ShutdownDrainInput, ShutdownEvaluator } from "./shutdown-drain"
 import type { refreshMemoryStatus } from "./status"
 import type { MemoryFooterTimers } from "./status-live"
+import type { SyncStatusReader } from "./sync-status-surface"
 
 export interface MemorySessionStateLike {
   readonly context?: MemoryIdentityContext
@@ -41,6 +42,8 @@ export interface MemoryWiringOptions {
   readonly reflectionHolderSeams?: ActiveHolderSeams
   /** A sync principal's device name for the memory notice's "synced from"; production passes the sync runner's. */
   readonly deviceName?: (principal: string) => string | undefined
+  /** A memory repository's sync status for the footer and its notice; production passes the sync runner's. */
+  readonly syncStatus?: SyncStatusReader
 }
 
 export interface MemoryWiring {
@@ -53,6 +56,8 @@ export interface MemoryWiring {
   registerShutdownEvaluator(evaluator: ShutdownEvaluator): void
   /** Clears the memory status footer for the session behind this event context. */
   clearStatus(eventCtx: unknown): void
+  /** The sync failure shown for a repository appeared, changed kind or cleared: redraw the footer and tell the person. */
+  onSyncStatusChanged(repo: string): Promise<void>
   whenIdle(): Promise<void>
 }
 

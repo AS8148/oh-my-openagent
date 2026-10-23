@@ -99,8 +99,7 @@ async function screenEntries(
   let tipSha = startTip
   for (let round = 0; ; round += 1) {
     if (tipSha === recordedBase) return { status: "no_changes", tipSha, changedPaths: [], ...droppedList() }
-    const changed = await git(exec, dir, ["diff", "--name-only", "-z", `${recordedBase}..${tipSha}`, "--"])
-    const changedPaths = changed.stdout.split("\0").filter(Boolean)
+    const changedPaths = await listReflectionChangedPaths(exec, dir, recordedBase, tipSha)
     for (const path of changedPaths) {
       if (!isConfinedRepoPath(worktree.parent.dir, path) || path.split("/").includes(".git")) {
         return { status: "failed", detail: `Changed path escapes the memory repository: ${path}` }
@@ -136,6 +135,16 @@ async function screenEntries(
   }
 }
 
+export async function listReflectionChangedPaths(
+  exec: GitExec,
+  dir: string,
+  baseSha: string,
+  tipSha: string,
+): Promise<string[]> {
+  const changed = await git(exec, dir, ["diff", "--name-only", "-z", `${baseSha}..${tipSha}`, "--"])
+  return changed.stdout.split("\0").filter(Boolean)
+}
+
 /**
  * A reflection may not introduce or alter frontmatter that a strict YAML
  * consumer rejects. Legacy files whose frontmatter block is byte-identical to
@@ -163,7 +172,7 @@ async function findFrontmatterFailures(
   return failures
 }
 
-function frontmatterBlock(content: string): string | null {
+export function frontmatterBlock(content: string): string | null {
   const match = FRONTMATTER_RE.exec(content.replace(/\r\n?/g, "\n"))
   return match?.[1] ?? null
 }
