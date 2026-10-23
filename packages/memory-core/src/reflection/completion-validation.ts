@@ -125,7 +125,7 @@ async function findFrontmatterFailure(
   return null
 }
 
-function frontmatterBlock(content: string): string | null {
+export function frontmatterBlock(content: string): string | null {
   const match = FRONTMATTER_RE.exec(content.replace(/\r\n?/g, "\n"))
   return match?.[1] ?? null
 }

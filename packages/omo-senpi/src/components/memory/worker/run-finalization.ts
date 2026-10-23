@@ -74,7 +74,7 @@ export async function recoverUnpublishedWorktreeTip(
   if (exit === undefined) return false
   const worktree = worktreeFromLedger(context.identity, ledger)
   if (!existsSync(worktree.dir)) return false
-  await preflightReflectionDescriptions(worktree, ledger.baseSha, worktree.exec)
+  await preflightReflectionDescriptions(worktree, ledger.baseSha, worktree.exec, context.warn)
   const validation = await validateCompletion(worktree, ledger.baseSha, worktree.exec)
   if (validation.status !== "valid") return false
   const outcome: RunOutcome = {
