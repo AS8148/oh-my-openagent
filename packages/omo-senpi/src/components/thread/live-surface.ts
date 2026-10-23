@@ -47,7 +47,10 @@ export const HOST_STATUS_ALL_ARGS = ["host", "status", "--all", "--include-worke
 /**
  * Marks a read-only listing as an observation (senpi `OBSERVE_REQUEST_FIELD`): without it the supervisor
  * counts the connection as an attachment, so every thread tool call would reset each shard's idle window
- * and no shard would ever idle out. Never sent on a request that acts on a session.
+ * and no shard would ever idle out. A request that acts on a session never carries it itself, but on an
+ * rpc_host its connection still opens with an observing `get_protocol_info` (the auth challenge and capability
+ * probe, `requestFrame`); the session command is then held by `attach_session` (`attachment-fence.ts`) when
+ * the host advertises it.
  */
 const OBSERVE = { observe: true } as const
 
