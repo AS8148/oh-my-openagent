@@ -9,7 +9,7 @@ function headerValue(value: string): string {
 
 /** A JSON string whose brackets are escaped too, so a quoted value can never close the `[...]` header. */
 function quotedHeaderValue(value: string): string {
-  return JSON.stringify(value).replace(/\[/g, "\\u005b").replace(/\]/g, "\\u005d").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")
+  return JSON.stringify(value).replace(/\[/g, "\\u005b").replace(/\]/g, "\\u005d").replace(/[\u0080-\u009f\u2028\u2029]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)
 }
 
 export function deliveryProvenanceLine(provenance: Provenance | undefined): string {
@@ -64,5 +64,7 @@ export function renderDeliveryText(row: DeliveryRow): string {
     `hop=${envelope.hop}`,
     ...(row.binding_id === null ? [] : [`binding=${headerValue(row.binding_id)}@${row.binding_revision ?? 0}`]),
   ].join(" ")
-  return `${deliveryProvenanceLine(envelope.provenance)}\n[${header}]\n${GATEWAY_PROVENANCE_SENTENCE}\n${JSON.stringify(row.body)}`
+  // One header line, workspace and project first: readers split the text as header, sentence, body. Every label is
+  // quoted with its brackets escaped, so the line still ends at the header's own `]`.
+  return `${deliveryProvenanceLine(envelope.provenance)} [${header}]\n${GATEWAY_PROVENANCE_SENTENCE}\n${JSON.stringify(row.body)}`
 }

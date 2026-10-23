@@ -28,7 +28,7 @@ test("#given a v7 row with no provenance #when migrated and read #then the envel
   const row = (await store.deliveryView("old"))?.row
   if (row === undefined) throw new Error("old row was lost")
   expect(row.envelope).toEqual(envelope)
-  expect(renderDeliveryText(row).split("\n")[0]).toBe("From (provenance not recorded)")
+  expect(renderDeliveryText(row).split("\n")[0]).toStartWith("From (provenance not recorded) [OMO_GATEWAY v=1 ")
   const migrated = new Database(gatewayDatabasePath(h.agentDir))
   try {
     expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 8 })
