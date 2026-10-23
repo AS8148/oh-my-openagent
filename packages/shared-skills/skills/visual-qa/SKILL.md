@@ -64,7 +64,7 @@ For reference-fidelity work, repeat the capture and diff for every referenced vi
 ```js
 await page.evaluate(() => [...document.querySelectorAll("*")]
   .filter((el) => /auto|scroll/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight)
-  .map((el) => el.id ? "#" + el.id : el.tagName.toLowerCase() + "." + (el.getAttribute("class") || "").trim().split(/\s+/).join("."))
+  .map((el) => el.id ? "#" + el.id : el.tagName.toLowerCase() + (el.getAttribute("class") ? "." + el.getAttribute("class").trim().split(/\s+/).join(".") : ""))
   .concat(document.scrollingElement.scrollHeight > innerHeight ? ["document"] : []))
 ```
 
