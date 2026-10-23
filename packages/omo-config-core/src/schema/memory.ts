@@ -1,5 +1,9 @@
 import * as z from "zod"
 
+import { OMO_MEMORY_AGREEMENTS_DEFAULTS, OmoMemoryAgreementsLayerSchema, OmoMemoryAgreementsSchema } from "./memory-agreements"
+
+export * from "./memory-agreements"
+
 // ---------------------------------------------------------------------------
 // Reflection
 // ---------------------------------------------------------------------------
@@ -19,11 +23,13 @@ export const OmoMemoryReflectionSchema = z.object({
 }).strict()
 
 // ---------------------------------------------------------------------------
-// Sync + Search (unchanged)
+// Sync + Search
 // ---------------------------------------------------------------------------
 
 export const OmoMemorySyncSchema = z.object({
+  /** @deprecated No-op kept so existing configs load; the git mirror reads its URL from git config, not here. */
   remote: z.string().min(1).optional(),
+  /** Run end-to-end encrypted memory sync on this device while signed in and sync is on for the account. */
   enabled: z.boolean().default(true),
 }).strict()
 
@@ -130,6 +136,7 @@ export const OmoMemoryReflectionLayerSchema = z.object({
 }).strict()
 
 export const OmoMemorySyncLayerSchema = z.object({
+  /** @deprecated No-op; see OmoMemorySyncSchema. */
   remote: z.string().min(1).optional(),
   enabled: z.boolean().optional(),
 }).strict()
@@ -216,6 +223,7 @@ export const OmoMemoryAgentOverridesSchema = z.object({
   facts: OmoMemoryFactsLayerSchema.optional(),
   dream: OmoMemoryDreamLayerSchema.optional(),
   people: OmoMemoryPeopleLayerSchema.optional(),
+  agreements: OmoMemoryAgreementsLayerSchema.optional(),
   soul: OmoMemorySoulLayerSchema.optional(),
   write_notice: OmoMemoryWriteNoticeLayerSchema.optional(),
   sync: OmoMemorySyncLayerSchema.optional(),
@@ -229,9 +237,14 @@ export const OmoMemoryAgentOverridesSchema = z.object({
 // Root settings schema
 // ---------------------------------------------------------------------------
 
+// How `agent: "auto"` derives the identity: "path" hashes the checkout path, "git" maps a linked
+// git worktree onto its main working tree so every worktree of one clone shares that memory.
+export const OmoMemoryAutoIdentitySchema = z.enum(["path", "git"])
+
 export const OmoMemorySettingsSchema = z.object({
   enabled: z.boolean().default(true),
   agent: z.string().min(1).default("auto"),
+  auto_identity: OmoMemoryAutoIdentitySchema.default("path"),
   // "direct" registers the memory tools as always-on ToolDefinitions; "search" opts in to the
   // extension-declared MCP server surfaced through senpi's tool_search catalog.
   reflection: OmoMemoryReflectionSchema.default({
@@ -253,6 +266,7 @@ export const OmoMemorySettingsSchema = z.object({
     auto_select_max_chars: 150000,
   }),
   people: OmoMemoryPeopleSchema.default({ enabled: true, max_entries: 40, max_entry_chars: 200 }),
+  agreements: OmoMemoryAgreementsSchema.default(OMO_MEMORY_AGREEMENTS_DEFAULTS),
   soul: OmoMemorySoulSchema.default({ edit_notice: true }),
   write_notice: OmoMemoryWriteNoticeSchema.default({ enabled: true }),
   sync: OmoMemorySyncSchema.default({ enabled: true }),
@@ -275,11 +289,13 @@ export const OmoMemorySettingsSchema = z.object({
 export const OmoMemorySettingsLayerSchema = z.object({
   enabled: z.boolean().optional(),
   agent: z.string().min(1).optional(),
+  auto_identity: OmoMemoryAutoIdentitySchema.optional(),
   reflection: OmoMemoryReflectionLayerSchema.optional(),
   nudge: OmoMemoryNudgeLayerSchema.optional(),
   facts: OmoMemoryFactsLayerSchema.optional(),
   dream: OmoMemoryDreamLayerSchema.optional(),
   people: OmoMemoryPeopleLayerSchema.optional(),
+  agreements: OmoMemoryAgreementsLayerSchema.optional(),
   soul: OmoMemorySoulLayerSchema.optional(),
   write_notice: OmoMemoryWriteNoticeLayerSchema.optional(),
   sync: OmoMemorySyncLayerSchema.optional(),

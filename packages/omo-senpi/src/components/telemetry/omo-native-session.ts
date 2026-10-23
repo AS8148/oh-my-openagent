@@ -9,7 +9,8 @@ import {
   type TelemetryEnv,
   type TelemetryOsProvider,
   type TelemetryTransportFactory,
-} from "@oh-my-opencode/telemetry-core"
+} from "@oh-my-opencode/telemetry-core/injected"
+import { createLazyPostHogTransportFactory } from "./lazy-posthog"
 import { isOmoTelemetryEnabled, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 
 import { deferUntilAfterFirstPaint } from "../../extension/startup-deferral"
@@ -27,6 +28,7 @@ import {
   getOmoNativeStateDir,
   hashSessionId,
 } from "./product-identity"
+import { loadEngineTables, readConnectedAccounts } from "./account-inventory"
 import { readOmoNativeInventory, type OmoNativeInventoryDiagnostic } from "./session-inventory"
 import { resolveSessionModelRegistry } from "./session-model-registry"
 
@@ -57,6 +59,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
   return {
     name: "omo-native-session",
     register(pi, ctx) {
+      void loadEngineTables()
       // Reading the inventory, loading omo config twice and building the PostHog client is ~14 ms of
       // analytics on the session_start dispatch path, and nothing in the session observes it. It
       // runs one tick past the first paint instead, still inside this session.
@@ -78,7 +81,10 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           schemaVersion: OMO_NATIVE_SCHEMA_VERSION,
           setTimeoutFn: options.setTimeoutFn,
           source: SOURCE,
-          transportFactory: options.transportFactory,
+          transportFactory: options.transportFactory ?? createLazyPostHogTransportFactory({
+            diagnostics: options.diagnostics,
+            source: SOURCE,
+          }),
         })
         if (!client.enabled) return
 
@@ -97,6 +103,7 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
         }
 
         const inventory = readOmoNativeInventory(resolveAgentHome({ env }), options.diagnostics)
+        const connectedAccounts = readConnectedAccounts(resolveAgentHome({ env }), env)
         const reason = sessionReason(payload)
         const timezone = readTimeZone(options.timeZone)
         client.captureEvent("session_started", {
@@ -107,6 +114,9 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           cpu_count: osProvider.cpus().length,
           memory_bucket: memoryBucket(osProvider.totalmem()),
           provider_count: inventory.providerCount,
+          signed_in_provider_count: inventory.signedInProviderCount,
+          configured_provider_count: inventory.configuredProviderCount,
+          connected_account_count: connectedAccounts,
           model_count: inventory.modelCount,
           providers: inventory.providers,
           reason,

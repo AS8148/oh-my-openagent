@@ -28,6 +28,7 @@ import {
 import { parseRunStats } from "./run-stats-parse"
 import { parseOptionalProvisionalExit } from "./provisional-exit-parse"
 import { parseUncertainInputs } from "./input-effects-parse"
+import { parseOptionalParentModelFallback } from "./parent-model-fallback-parse"
 import {
   isRecord,
   readNumber,
@@ -78,6 +79,8 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const resolvedModel = parseOptionalResolvedModel(value, "resolved_model")
   const resolvedTier = isRecord(value["resolved_model"]) ? readOptionalString(value["resolved_model"], "service_tier") : undefined
   const effectiveModel = parseOptionalEffectiveModel(value)
+  const parentModel = readOptionalString(value, "parent_model")
+  const parentModelFallback = parseOptionalParentModelFallback(value)
   const effectiveTier = isRecord(value["effective_model"]) ? readOptionalString(value["effective_model"], "service_tier") : undefined
   const spawnSpec = parseOptionalSpawnSpec(value)
   const owner = parseOptionalOwner(value)
@@ -96,6 +99,8 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
   const revivalDeferredReason = readOptionalString(value, "revival_deferred_reason")
   const recoveryDeadlineAt = readOptionalNumber(value, "recovery_deadline_at")
   const failureKind = readOptionalTaskStartFailureKind(value)
+  // An unknown cause (a newer build's) is dropped: the record still parses and the interrupt stays silent.
+  const interruptCause = value.interrupt_cause === "session_replaced" ? "session_replaced" : undefined
   const failureReason = readOptionalTaskStartFailureReason(value)
   const hostSession = parseOptionalHostSession(value)
   validateHostSessionConsistency(runnerKind, hostSession)
@@ -146,6 +151,8 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
     ...(effectiveModel === undefined ? {} : {
       effective_model: { ...effectiveModel, ...(effectiveTier === undefined ? {} : { service_tier: effectiveTier }) },
     }),
+    ...(parentModel === undefined ? {} : { parent_model: parentModel }),
+    ...(parentModelFallback === undefined ? {} : { parent_model_fallback: parentModelFallback }),
     ...(spawnSpec === undefined ? {} : { spawn_spec: spawnSpec }),
     ...(owner === undefined ? {} : { owner }),
     ...(pendingSteering !== undefined && pendingSteering.length > 0 ? { pending_steering: pendingSteering } : {}),
@@ -158,6 +165,7 @@ export function parseTaskRecord(value: unknown, path: string, warnings?: string[
     ...(stopReason === undefined ? {} : { stop_reason: stopReason }),
     ...(deadline === undefined ? {} : { deadline }),
     ...(failureKind === undefined ? {} : { failure_kind: failureKind }),
+    ...(interruptCause === undefined ? {} : { interrupt_cause: interruptCause }),
     ...(failureReason === undefined ? {} : { failure_reason: failureReason }),
     ...(killed === undefined ? {} : { killed }),
     ...(runStats === undefined ? {} : { run_stats: runStats }),

@@ -1,4 +1,6 @@
+import type { RecallCorpusCache } from "@oh-my-opencode/memory-core"
 import type { ActiveHolderSeams } from "./reflection-stale-active"
+
 import type { ComponentContext, ComponentLogger, SenpiExtensionAPI } from "../../extension/types"
 import type { SenpiOmoConfigResult } from "../config-resolution"
 import type { MemoryIdentityContext } from "./context"
@@ -27,6 +29,8 @@ export interface MemoryWiringOptions {
   readonly createFactsExtractor?: (options: FactsExtractorRunnerOptions) => FactsExtractorPort
   /** Background repo maintenance; tests substitute one whose in-flight pass they control. */
   readonly createMaintenance?: (options: MemoryMaintenanceOptions) => MemoryMaintenance
+  /** The shared recall corpus cache; tests substitute one whose pending term-store save they control. */
+  readonly createCorpusCache?: (logger: ComponentLogger | undefined) => RecallCorpusCache
   /** Resident Kibitzer child seams; tests and the live QA driver substitute a scripted child here. */
   readonly kibitzerChildStarter?: KibitzerChildStarterSeams
   readonly now?: () => number
@@ -35,6 +39,8 @@ export interface MemoryWiringOptions {
   readonly footerTimers?: MemoryFooterTimers
   /** Process-liveness and hostname seams for the stale reflection lock check (#10377). */
   readonly reflectionHolderSeams?: ActiveHolderSeams
+  /** A sync principal's device name for the memory notice's "synced from"; production passes the sync runner's. */
+  readonly deviceName?: (principal: string) => string | undefined
 }
 
 export interface MemoryWiring {
