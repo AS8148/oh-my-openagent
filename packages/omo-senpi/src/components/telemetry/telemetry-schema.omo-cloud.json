@@ -993,6 +993,7 @@
         "type": "string",
         "values": [
           "reported",
+          "partial",
           "unavailable",
           "invalid"
         ],
@@ -3823,5 +3824,5 @@
       }
     }
   },
-  "sha256": "1c280e3622a0b0389f3d5b495997ef9389d86b872d014af624d81edde13bd567"
+  "sha256": "271acb3130652fd1ab902b7ea6ea4a6c71c338f63583228a8524bee9a945d689"
 }
