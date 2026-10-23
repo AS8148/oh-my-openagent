@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Memory reflection and dream runs trim oversized note descriptions before completion validation, preserving the note body instead of repeatedly failing and parking the identity. ([#PRNUM](https://github.com/code-yeongyu/oh-my-openagent/pull/PRNUM))
+- Memory reflection and dream runs trim oversized note descriptions before completion validation, preserving the note body instead of repeatedly failing and parking the identity. ([#10999](https://github.com/code-yeongyu/oh-my-openagent/pull/10999))
 
 ## [5.1.43] - 2026-10-22
 
