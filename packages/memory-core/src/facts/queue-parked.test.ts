@@ -140,6 +140,24 @@ test("#given a parked enqueue range #when its conversation grows #then the enque
   expect((await queue.readCursor("same")).enqueued_through_message_id).toBe("m2")
 })
 
+test("#given an entry published before its cursor advanced and then parked #when its conversation grows #then the new range starts after the parked one", async () => {
+  // The crash window enqueue documents: the queue file landed, the cursor write did not. Parking moves the only
+  // record of that endpoint into parked/, so the anchor must still read it there or m1 is extracted twice.
+  const { layout, queue } = await fixture()
+  await writeFile(layout.entryPath("same", "m1", NOW), JSON.stringify(queued("same")))
+  await writeFile(layout.failuresPath, renderFailuresFile([parked("same")], NOW.toISOString()))
+  expect(await queue.listPending()).toEqual([])
+  expect((await queue.readCursor("same")).enqueued_through_message_id).toBeNull()
+
+  const next = await queue.enqueue({
+    identity: "agent", sessionId: "same", conversationId: "same", entries: [message("m1"), message("m2")],
+  })
+
+  expect(next.enqueued).toBe(true)
+  if (!next.enqueued) throw new Error("expected a new tail")
+  expect(next.entry.range).toMatchObject({ start_line: 1, start_message_id: "m2", end_message_id: "m2" })
+})
+
 test("#given retained files for many healthy conversations #when enqueue and a selected claim run #then unrelated payloads are never read", async () => {
   const { layout, queue } = await fixture()
   for (let index = 0; index < 40; index += 1) {
