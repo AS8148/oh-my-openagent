@@ -42,7 +42,6 @@ describe("no-em-dash-copy", () => {
     "packages/shared-skills/skills/browser/scripts/vendor/copy.js",
     "packages/shared-skills/skills/browser/scripts/install-dist/copy.js",
     "packages/example/plugin/scripts/copy.mjs",
-    "packages/omo-senpi/plugin/scripts/sync-skills.mjs",
     "packages/example/src/vendor/copy.ts",
     "packages/example/plugin/dist/copy.js",
     "packages/shared-skills/upstreams/copy.ts",
@@ -75,6 +74,8 @@ describe("no-em-dash-copy", () => {
     "packages/shared-skills/skills/browser/scripts/browser-doctor.mjs",
     "packages/shared-skills/skills/browser/scripts/browser-install.mjs",
     "packages/shared-skills/skills/programming/scripts/typescript/check-no-excuse-rules.ts",
+    "packages/omo-codex/plugin/scripts/sync-skills.mjs",
+    "packages/omo-senpi/plugin/scripts/sync-skills.mjs",
   ])("checks %s", (filename) => {
     expect(isProductSource(filename)).toBe(true)
   })
@@ -91,6 +92,16 @@ describe("no-em-dash-copy", () => {
     const filenamePath = `packages/shared-skills/skills/ulw-research/scripts/${filename}`
     expect(findEmDashCopy(data, filenamePath)).toEqual([])
     expect(findEmDashCopy(`${data}\nconsole.log("Unavailable \\u2014 retry");`, filenamePath)).toHaveLength(1)
+  })
+
+  test("allows Senpi sync heading matcher data but checks other shipped copy", () => {
+    const path = "packages/omo-senpi/plugin/scripts/sync-skills.mjs"
+    const data = [
+      'const before = "## ABSOLUTE RULE: YOU ARE AN ORCHESTRATOR \\u2014 NEVER THE IMPLEMENTER";',
+      'const after = "## ABSOLUTE RULE (root session): YOU ARE AN ORCHESTRATOR \\u2014 NEVER THE IMPLEMENTER";',
+    ].join("\n")
+    expect(findEmDashCopy(data, path)).toEqual([])
+    expect(findEmDashCopy(`${data}\nconsole.log("Unavailable \\u2014 retry");`, path)).toHaveLength(1)
   })
 })
 

@@ -82,7 +82,7 @@ export function registerMemoryCommand(pi: MemoryCommandPort, deps: MemoryCommand
 
       const lines = [
         `# Memory: ${identity.identity}`,
-        `HEAD: ${shortSha(head)} (${porcelain.length === 0 ? "clean" : `dirty: ${porcelain.length} entr${porcelain.length === 1 ? "y" : "ies"}`})`,
+        `HEAD: ${shortSha(head)} (${porcelain.length === 0 ? "clean" : `dirty - ${porcelain.length} entr${porcelain.length === 1 ? "y" : "ies"}`})`,
         `Repository: ${identity.identityPaths.repo}`,
         "",
         ...(await renderSystemSection(repo, head, paths)),
