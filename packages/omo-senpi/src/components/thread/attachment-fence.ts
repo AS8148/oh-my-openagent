@@ -12,21 +12,32 @@ function errorReasonOf(frame: RpcObject): unknown {
   return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Record<string, unknown>).reason : undefined
 }
 
+// Commands whose reply union carries the host's refusal (ReleaseSessionReply, UiAnswerReply): their callers branch
+// on the refusal code, so an attach refusal is answered as that command's own refusal frame instead of a throw.
+const TYPED_REFUSAL: ReadonlySet<string> = new Set(["release_session", "extension_ui_response"])
+
+type AttachRefusal = { readonly code: string; readonly errorData?: unknown; readonly frame: RpcObject }
+
 /**
- * Attaches the selected session on this connection. A draining host refuses with the v1 code
- * `session_busy_lifecycle` and `errorData.reason: "host_draining"`: nothing was attached and the
- * entry is unchanged, so it surfaces as the transient `host_draining:` error (retry after the
- * restart), never as an abort or close. `session_not_attached` (v1.1) is typed the same way; only
- * its code is read, never `errorData.action`.
+ * Attaches the selected session on this connection; undefined once attached, else the refusal. A
+ * draining host refuses with the v1 code `session_busy_lifecycle` and `errorData.reason:
+ * "host_draining"`: nothing was attached and the entry is unchanged, so it reads as the transient
+ * `host_draining` (retry after the restart), never an abort or close. Only codes are read, never
+ * `errorData.action`. `auth_required` is never a session refusal and always throws.
  */
-async function attachSelectedSession(request: RpcRequest, socketPath: string, sessionId: unknown, durableSessionId: string): Promise<void> {
+async function attachSelectedSession(request: RpcRequest, socketPath: string, sessionId: unknown, durableSessionId: string): Promise<AttachRefusal | undefined> {
   const frame = await request({ type: "attach_session", sessionId, durableSessionId })
-  if (frame.success === true) return
+  if (frame.success === true) return undefined
   const code = errorCodeOf(frame)
-  if (code === "session_busy_lifecycle" && errorReasonOf(frame) === "host_draining") throw new Error(`host_draining:${socketPath}`)
-  if (code === "session_not_attached") throw new Error(`session_not_attached:${String(sessionId)}`)
   if (code === "auth_required") throw authRequiredError(socketPath)
-  throw new Error(`thread RPC request failed: ${JSON.stringify(frame.error ?? frame)}`)
+  if (code === "session_busy_lifecycle" && errorReasonOf(frame) === "host_draining") return { code: "host_draining", errorData: frame.errorData, frame }
+  return { code: typeof code === "string" ? code : "attach_refused", ...(frame.errorData === undefined ? {} : { errorData: frame.errorData }), frame }
+}
+
+function attachRefusalError(refusal: AttachRefusal, socketPath: string, sessionId: unknown): Error {
+  if (refusal.code === "host_draining") return new Error(`host_draining:${socketPath}`)
+  if (refusal.code === "session_not_attached") return new Error(`session_not_attached:${String(sessionId)}`)
+  return new Error(`thread RPC request failed: ${JSON.stringify(refusal.frame.error ?? refusal.frame)}`)
 }
 
 /**
@@ -67,7 +78,11 @@ export async function fencedCommand(
     && (command.type !== "release_session" || capabilities.has("release_caller_aware"))
   if (!attach) return await send()
   if (durableSessionId === undefined) throw new Error("session_identity_mismatch:missing selected durable session id")
-  await attachSelectedSession(request, socketPath, command.sessionId, durableSessionId)
+  const refusal = await attachSelectedSession(request, socketPath, command.sessionId, durableSessionId)
+  if (refusal !== undefined) {
+    if (!TYPED_REFUSAL.has(String(command.type))) throw attachRefusalError(refusal, socketPath, command.sessionId)
+    return { id: command.id, type: "response", command: command.type, success: false, error: refusal.code, errorCode: refusal.code, ...(refusal.errorData === undefined ? {} : { errorData: refusal.errorData }) }
+  }
   const result = await send()
   if (capabilities.has("release_attachment")) await releaseAttachment(request, command)
   return result

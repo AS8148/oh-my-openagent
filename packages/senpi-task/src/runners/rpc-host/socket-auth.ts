@@ -79,7 +79,8 @@ export async function authenticateRpcHost(
   command: RpcObject = { type: "get_protocol_info", observe: true },
 ): Promise<RpcObject> {
   const clientNonce = randomBytes(32).toString("hex")
-  const reply = await request({ ...command, auth: { client_nonce: clientNonce } }, 2000)
+  // The handshake steps run on the caller's remaining deadline: 2 s is the host's pre-auth read limit, not a client cap.
+  const reply = await request({ ...command, auth: { client_nonce: clientNonce } })
   const data = object(reply.data) ? reply.data : undefined
   if (data?.auth === undefined) return reply
   const auth = data.auth
@@ -102,7 +103,7 @@ export async function authenticateRpcHost(
   if (!timingSafeEqual(proof("senpi-rpc-server", clientNonce, auth.server_nonce), Buffer.from(auth.server_proof, "hex"))) {
     throw new RpcIdentityError("host_identity_unproven", endpoint)
   }
-  const answer = await request({ type: "authenticate", client_proof: proof("senpi-rpc-client", auth.server_nonce, clientNonce).toString("hex") }, 2000)
+  const answer = await request({ type: "authenticate", client_proof: proof("senpi-rpc-client", auth.server_nonce, clientNonce).toString("hex") })
   if (answer.success !== true) throw new RpcIdentityError("auth_failed", endpoint)
   return reply
 }

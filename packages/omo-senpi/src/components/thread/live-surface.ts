@@ -57,7 +57,7 @@ export const TUI_ENDPOINT_COMMANDS: ReadonlySet<string> = LEGACY_TUI_COMMANDS
 type RequestOptions = {
   readonly timeoutMs?: number
   readonly secret?: Uint8Array
-  readonly keyRoot?: () => string
+  readonly keyRoot: () => string
   readonly durableSessionId?: string
   readonly openedName?: string
   readonly rpcHost?: boolean
@@ -73,12 +73,12 @@ type RequestOptions = {
  * 32-byte secret, which is written before the request. The correlation id is written last: no
  * command field can overwrite it.
  */
-async function requestFrame(socketPath: string, command: Record<string, unknown>, connect: ThreadSocketConnect, options: RequestOptions = {}): Promise<RpcFrame> {
+async function requestFrame(socketPath: string, command: Record<string, unknown>, connect: ThreadSocketConnect, options: RequestOptions): Promise<RpcFrame> {
   return await withRpcSocket(socketPath, { connect, secret: options.secret, timeoutMs: options.timeoutMs ?? REQUEST_TIMEOUT_MS }, async (request) => {
     if (options.rpcHost !== true) return await request(command)
     const protocolRequest = command.type === "get_protocol_info" ? command : undefined
     const info = options.secret === undefined
-      ? await authenticateRpcHost(request, socketPath, options.keyRoot!, protocolRequest)
+      ? await authenticateRpcHost(request, socketPath, options.keyRoot, protocolRequest)
       : await request(protocolRequest ?? { type: "get_protocol_info", observe: true })
     if (command.type === "get_protocol_info") return info
     // An older host that refuses get_protocol_info advertises nothing: it gets today's unfenced request, as askHost does.
