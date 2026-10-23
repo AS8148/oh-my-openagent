@@ -2,6 +2,7 @@ import { describe, expect, it, onTestFinished, spyOn } from "bun:test"
 import * as childProcess from "node:child_process"
 import { mkdtempSync } from "node:fs"
 import * as fs from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
