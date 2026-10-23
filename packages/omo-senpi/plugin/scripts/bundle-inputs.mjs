@@ -10,7 +10,7 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join, relative, sep } from "node:path"
+import nodePath, { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -72,23 +72,27 @@ export function checkStepRows(step, rows) {
   return [...rows, { kind: "missing-bundle-rows", path: step.name }]
 }
 
-const portable = (path) => path.split(sep).join("/")
 const RESOLUTION_FILES = ["package.json", "tsconfig.json", "bunfig.toml"]
 
 /**
  * Pure: trace rows -> map. A file under node_modules is pinned by the lockfile, so it becomes bun.lock.
  * Every package.json, tsconfig.json and bunfig.toml between an input and the repo root steers resolution,
- * so those are inputs too. Paths outside the repo (scratch output, the toolchain) and .git are dropped.
+ * so those are inputs too. Paths outside the repo (scratch output, the toolchain, another drive) and .git are dropped.
+ * Map entries are portable ("/"); `exists` gets platform paths built with `path` (injectable to exercise win32 anywhere).
  */
-export function mapFromTrace(rows, { repoRoot: root, exists = existsSync, realpath = realpathSync.native }) {
+export function mapFromTrace(rows, { repoRoot: root, exists = existsSync, realpath = realpathSync.native, path: platform = nodePath }) {
+  const portable = (path) => path.split(platform.sep).join("/")
   const absRoot = realpath(root)
   const files = new Set()
   const directories = new Set()
   const inRepo = (path) => {
     let real = path
     try { real = realpath(path) } catch { /* a scratch file may be gone already */ }
-    const rel = portable(relative(absRoot, real))
-    return rel === "" || rel.startsWith("..") || rel.startsWith("/") || rel === ".git" || rel.startsWith(".git/") ? undefined : rel
+    const relative = platform.relative(absRoot, real)
+    // On win32 a path on another drive has no relative form: relative() returns it absolute.
+    if (platform.isAbsolute(relative)) return undefined
+    const rel = portable(relative)
+    return rel === "" || rel === ".." || rel.startsWith("../") || rel === ".git" || rel.startsWith(".git/") ? undefined : rel
   }
   for (const { kind, path } of rows) {
     if (kind === "missing-metafile") throw new Error(`bundle-inputs: the bundler metafile was not written (${path}); the trace would under-report`)
@@ -100,10 +104,10 @@ export function mapFromTrace(rows, { repoRoot: root, exists = existsSync, realpa
     files.add(rel.split("/").includes("node_modules") ? "bun.lock" : rel)
   }
   for (const file of [...files]) {
-    for (let dir = dirname(file); ; dir = dirname(dir)) {
+    for (let dir = nodePath.posix.dirname(file); ; dir = nodePath.posix.dirname(dir)) {
       for (const name of RESOLUTION_FILES) {
         const candidate = dir === "." ? name : `${dir}/${name}`
-        if (exists(join(absRoot, candidate))) files.add(candidate)
+        if (exists(platform.join(absRoot, ...candidate.split("/")))) files.add(candidate)
       }
       if (dir === ".") break
     }

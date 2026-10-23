@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { builtinModules } from "node:module"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, sep, win32 } from "node:path"
 import { pathToFileURL } from "node:url"
 
 import * as bundleInputs from "./bundle-inputs.mjs"
@@ -32,6 +32,9 @@ const traceScript = (runtime, files, entry) => {
   }
 }
 
+// The platform form of a path with "/" separators, so the same fakes and expectations hold on win32 and POSIX.
+const portable = (p) => p.split(sep).join("/")
+
 const root = "/repo"
 const existing = new Set([
   "/repo/package.json",
@@ -40,7 +43,7 @@ const existing = new Set([
   "/repo/packages/memory-core/tsconfig.json",
   "/repo/packages/omo-senpi/package.json",
 ])
-const deps = { repoRoot: root, exists: (path) => existing.has(path), realpath: (path) => path }
+const deps = { repoRoot: root, exists: (path) => existing.has(portable(path)), realpath: (path) => path }
 const row = (kind, path) => ({ kind, path })
 
 describe("mapFromTrace", () => {
@@ -77,6 +80,32 @@ describe("mapFromTrace", () => {
 
   test("a module load the runtime could not trace fails the trace instead of under-reporting", () => {
     expect(() => mapFromTrace([row("missing-module-hooks", "/repo/a.ts -> ./b.ts")], deps)).toThrow("module hooks")
+  })
+})
+
+// Simulated win32 (no Windows host): the path module is injected, and the fakes accept only backslash paths under a drive root,
+// so a POSIX-only join, relative or separator in mapFromTrace fails here on every host.
+describe("mapFromTrace on win32 paths", () => {
+  const winRoot = "C:\\repo"
+  const winExisting = new Set(["package.json", "bun.lock", "packages/memory-core/package.json", "packages/memory-core/tsconfig.json"].map((p) => win32.join(winRoot, p)))
+  const winDeps = { repoRoot: winRoot, path: win32, exists: (path) => winExisting.has(path), realpath: (path) => path }
+
+  test("keeps backslash repo paths as portable files and finds the manifests by their backslash paths", () => {
+    const map = mapFromTrace([row("bundle", win32.join(winRoot, "packages", "memory-core", "src", "a.ts"))], winDeps)
+    expect(map.files).toEqual(["package.json", "packages/memory-core/package.json", "packages/memory-core/src/a.ts", "packages/memory-core/tsconfig.json"])
+  })
+
+  test("collapses node_modules to the lockfile and drops .git, the parent dir and another drive", () => {
+    const map = mapFromTrace([
+      row("read", win32.join(winRoot, "node_modules", "zod", "index.js")),
+      row("read", win32.join(winRoot, ".git", "HEAD")),
+      row("read", "C:\\elsewhere\\x.js"),
+      row("read", "D:\\Temp\\omo-bundle-inputs-1\\codex\\install-local.mjs"),
+      row("list", win32.join(winRoot, "packages", "omo-codex", "src", "install")),
+      row("list", "D:\\Temp"),
+    ], winDeps)
+    expect(map.files).toEqual(["bun.lock", "package.json"])
+    expect(map.directories).toEqual(["packages/omo-codex/src/install"])
   })
 })
 
@@ -172,7 +201,7 @@ describe("the recipe environment", () => {
   const knobs = new Set(scripts.flatMap((name) => readFileSync(join(import.meta.dir, name), "utf8").match(/\bOMO_[A-Z0-9_]*(?:OUTPUT|TARGET|ENTRY|DIST)\b/g) ?? []))
 
   test("drops every output-steering knob the recipe scripts read", () => {
-    const scratch = "/scratch"
+    const scratch = join(tmpdir(), "omo-bundle-inputs-scratch")
     const base = Object.fromEntries([...knobs, "OMO_SENPI_STAGE_FAIL_AFTER_BACKUP"].map((key) => [key, "/elsewhere/plugin"]))
     const env = bundleInputs.recipeEnv(scratch, { ...base, PATH: "/bin" })
     expect(bundleInputs.SCRUBBED_ENV).toContain("OMO_SENPI_PLUGIN_OUTPUT")
@@ -189,7 +218,7 @@ describe("the trace preload", () => {
       "src/a.txt": "a",
       "main.mjs": `import { cpSync } from "node:fs"\ncpSync(new URL("./src", import.meta.url), new URL("./out", import.meta.url), { recursive: true })\n`,
     }, "main.mjs")
-    const src = rows.filter((r) => r.path.endsWith("/src"))
+    const src = rows.filter((r) => portable(r.path).endsWith("/src"))
     expect(src.map((r) => r.kind)).toEqual(["list"])
   })
 
@@ -208,7 +237,7 @@ describe("the trace preload", () => {
       "gen.mjs": `import { readFile } from "node:fs/promises"\nexport const run = () => readFile(new URL(import.meta.url))\n`,
     }, { eval: (dir) => `const m = await import(${JSON.stringify(pathToFileURL(join(dir, "gen.mjs")).href)}); await m.run()` })
     expect(rows.filter((r) => r.kind === "missing-module-hooks")).toEqual([])
-    expect(rows.some((r) => r.kind === "module" && r.path.endsWith("/gen.mjs"))).toBe(true)
+    expect(rows.some((r) => r.kind === "module" && portable(r.path).endsWith("/gen.mjs"))).toBe(true)
   })
 
   // build-install spawns bun with shell: true on win32, which joins argv unquoted.
