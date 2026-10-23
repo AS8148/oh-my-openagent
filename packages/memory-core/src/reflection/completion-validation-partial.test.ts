@@ -108,6 +108,30 @@ describe("reflection completion keeps valid notes when one entry fails validatio
     expect(paths).not.toContain("reference/notes-dump.md")
   })
 
+  it("#given a repaired tip #when validated again #then the dropped entries are still reported and the commit message carries no secret", async () => {
+    const { worktree } = await fixture()
+    await commit(worktree.dir, {
+      "reference/good.md": GOOD,
+      "reference/leak.md": `---\ndescription: Leak\n---\n\n${PEM}`,
+      "reference/token=abc123456.md": "---\ndescription: Named\n---\n\nclean\n",
+    }, "notes with password=hunter2Abrx9 in the subject")
+
+    const first = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
+    const second = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
+
+    expect(first.status).toBe("valid")
+    expect(second.status).toBe("valid")
+    if (first.status !== "valid" || second.status !== "valid") return
+    expect(second.tipSha).toBe(first.tipSha)
+    expect(second.dropped?.length).toBe(2)
+    expect(second.dropped?.map((entry) => entry.path).sort()).toEqual(["reference/***", "reference/leak.md"])
+    const message = await git(worktree.dir, "log", "-1", "--format=%B")
+    expect(message).toContain("Omo-Completion-Dropped: reference/leak.md | secret_like_content")
+    expect(message).not.toContain("hunter2Abrx9")
+    expect(message).not.toContain("abc123456")
+    expect(message).not.toContain("MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSk")
+  })
+
   it("#given every changed note is invalid #when validated #then nothing is committed and the run reports no changes", async () => {
     const { worktree } = await fixture()
     await commit(worktree.dir, { "reference/leak.md": `---\ndescription: Leak\n---\n\n${PEM}` }, "leak")

@@ -79,7 +79,7 @@ async function findCommitSecretFailures(run: CompletionGitRun, commit: string): 
     const content = blobs.get(record.dstSha)
     if (content === undefined) continue
     const hit = scanSecretLikeMaterial(content)[0]
-    if (hit !== undefined) flag(record.path, `secret_like_content: ${record.path} (${hit.class}) @${commit.slice(0, 7)}`)
+    if (hit !== undefined) flag(record.path, `secret_like_content: ${redactSecretLikeMaterial(record.path)} (${hit.class}) @${commit.slice(0, 7)}`)
   }
   return failures
 }

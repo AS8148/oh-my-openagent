@@ -6,13 +6,14 @@ import { FRONTMATTER_RE } from "../memfs/frontmatter-scalar"
 import { describeFrontmatterViolation } from "../memfs/frontmatter-validation"
 import { isMemoryContentPath } from "../memfs/paths"
 import { redactSecretLikeMaterial } from "../sync/redact"
-import { commitCount, squashWithoutPaths, type DroppedEntry } from "./completion-repair"
+import { commitCount, readDroppedTrailers, squashWithoutPaths, type DroppedEntry } from "./completion-repair"
 import { findSecretLikeFailures } from "./completion-secret-scan"
 import type { ReflectionWorktree } from "./worktree"
 
 const GIT_TIMEOUT_MS = 30_000
 
 export type { DroppedEntry }
+export { describeDroppedEntries, readDroppedTrailers } from "./completion-repair"
 
 /** `dropped` lists entries the gate removed so the valid ones could land; absent when nothing was dropped. */
 export type CompletionValidation =
@@ -75,7 +76,12 @@ export async function validateCompletion(
 const MAX_REPAIR_ROUNDS = 3
 
 /**
- * One entry that fails validation must not discard the run's valid entries. Each round collects
+ * One entry that fails validation must not discard the run's valid entries.
+ *
+ * This REWRITES the run's branch when an entry is dropped (reset --soft to the base, then one commit without
+ * the dropped paths), also when a caller only probes eligibility, and also on a later failure: a run that then
+ * fails is discarded, so the rewrite is never merged. The squashed commit carries one
+ * `Omo-Completion-Dropped` trailer per dropped entry, so validating the same tip again reports them. Each round collects
  * every per-entry failure (secret-like content or name, invalid frontmatter); when there are any,
  * the branch is rewritten without those entries and screened again. Structural refusals (a path
  * escaping the repository, no changed paths) still fail the whole run.
@@ -110,7 +116,12 @@ async function screenEntries(
     if (secrets.length === 0 && frontmatter.size === 0 && changedPaths.length === 0) {
       return { status: "failed", detail: "Reflection commits contain no changed paths" }
     }
-    if (secrets.length === 0 && frontmatter.size === 0) return { status: "valid", tipSha, changedPaths, ...droppedList() }
+    if (secrets.length === 0 && frontmatter.size === 0) {
+      if (dropped.size === 0) {
+        for (const entry of await readDroppedTrailers(exec, dir, recordedBase, tipSha)) dropped.set(entry.path, entry.reason)
+      }
+      return { status: "valid", tipSha, changedPaths, ...droppedList() }
+    }
     if (round >= MAX_REPAIR_ROUNDS) {
       return { status: "failed", detail: secrets[0]?.detail ?? [...frontmatter.values()][0] ?? "completion validation failed" }
     }
@@ -121,7 +132,7 @@ async function screenEntries(
     const now = new Map<string, string>(frontmatter)
     if (!multiCommit) for (const { path, detail } of secrets) now.set(path, detail)
     for (const [path, reason] of now) if (!dropped.has(path)) dropped.set(path, reason)
-    tipSha = await squashWithoutPaths(exec, dir, recordedBase, tipSha, new Set(now.keys()))
+    tipSha = await squashWithoutPaths(exec, dir, recordedBase, tipSha, new Set(now.keys()), droppedList().dropped ?? [])
   }
 }
 

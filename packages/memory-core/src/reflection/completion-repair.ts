@@ -1,5 +1,6 @@
 import type { GitExec } from "../git"
 import { STABLE_LOG_OUTPUT } from "../git/stable-log-output"
+import { redactSecretLikeMaterial } from "../sync/redact"
 
 const GIT_TIMEOUT_MS = 30_000
 
@@ -7,6 +8,36 @@ const GIT_TIMEOUT_MS = 30_000
 export interface DroppedEntry {
   readonly path: string
   readonly reason: string
+}
+
+/** The squashed commit records what it left out, so a later validation of the same tip still knows. */
+export const DROPPED_TRAILER = "Omo-Completion-Dropped"
+
+/** One line a finalizer can put in the run's detail; paths and reasons are already redacted. */
+export function describeDroppedEntries(dropped: readonly DroppedEntry[]): string {
+  return `Dropped ${dropped.length} invalid memory entr${dropped.length === 1 ? "y" : "ies"}: ${dropped.map((entry) => `${entry.path} (${entry.reason})`).join("; ")}`
+}
+
+const trailerLine = (entry: DroppedEntry): string =>
+  `${DROPPED_TRAILER}: ${redactSecretLikeMaterial(entry.path)} | ${redactSecretLikeMaterial(entry.reason).replace(/[\r\n]+/g, " ")}`
+
+/**
+ * The dropped entries a previous squash recorded on `tipSha`, when the branch is exactly that one commit on
+ * the base; empty otherwise. Lets a second validation of an already-repaired tip report what was dropped.
+ */
+export async function readDroppedTrailers(exec: GitExec, dir: string, baseSha: string, tipSha: string): Promise<DroppedEntry[]> {
+  const run = runner(exec, dir)
+  const parent = await run(["rev-parse", "--verify", `${tipSha}^`])
+  if (parent.code !== 0 || parent.stdout.trim() !== baseSha) return []
+  const body = await must(run, [...STABLE_LOG_OUTPUT, "log", "-1", "--format=%B", tipSha])
+  const entries: DroppedEntry[] = []
+  for (const line of body.split("\n")) {
+    if (!line.startsWith(`${DROPPED_TRAILER}: `)) continue
+    const value = line.slice(DROPPED_TRAILER.length + 2)
+    const split = value.indexOf(" | ")
+    if (split > 0) entries.push({ path: value.slice(0, split), reason: value.slice(split + 3) })
+  }
+  return entries
 }
 
 type Run = (argv: readonly string[], env?: Readonly<Record<string, string>>) => Promise<{ code: number; stdout: string; stderr: string }>
@@ -61,6 +92,7 @@ export async function squashWithoutPaths(
   baseSha: string,
   tipSha: string,
   dropped: ReadonlySet<string>,
+  record: readonly DroppedEntry[] = [],
 ): Promise<string> {
   const run = runner(exec, dir)
   const sources = await renameSources(run, baseSha, tipSha)
@@ -78,9 +110,11 @@ export async function squashWithoutPaths(
   }
   if ((await run(["diff", "--cached", "--quiet", baseSha, "--"])).code !== 0) {
     const [name = "reflection", email = "reflection@omo.local", subject = "reflection"] = identity
+    // The agent's subject is copied forward, so it gets the same redaction as every other recorded text.
+    const message = [`${redactSecretLikeMaterial(subject)} (kept valid entries)`, "", ...record.map(trailerLine)].join("\n")
     await must(run, [
       "-c", `user.name=${name}`, "-c", `user.email=${email}`,
-      "commit", "-q", "--no-verify", "-m", `${subject} (kept valid entries)`,
+      "commit", "-q", "--no-verify", "-m", message,
     ])
   }
   return (await must(run, ["rev-parse", "--verify", "HEAD"])).trim()

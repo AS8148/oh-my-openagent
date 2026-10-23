@@ -15,6 +15,11 @@ describe("secret scanner: assignments that only reference a credential", () => {
     "token: undefined",
     "secret: example",
     "Authorization: Bearer",
+    "token: process.env.GITHUB_TOKEN",
+    "password: os.environ",
+    'secret: os.environ["SECRET"]',
+    "api_key: env.API_KEY",
+    "token: {{ secrets.TOKEN }}",
   ]
   for (const text of references) {
     it(`#given ${JSON.stringify(text)} #when scanned #then it is not secret-like`, () => {
@@ -33,6 +38,10 @@ describe("secret scanner: assignments that only reference a credential", () => {
     "sk-proj-AbCdEf123456",
     "AKIAABCDEFGHIJKLMNOP",
     "ghp_Ab3dEf5hJ7kL9mN1pQ3rS5tU7vW9xY1zB3C5",
+    "password=process.env.X||hunter2real",
+    "token={{x}}realsecretvalue",
+    "secret: os.environDEFAULT9xQ",
+    "api_key=env.FOO.realtail9xQ",
   ]
   for (const text of credentials) {
     it(`#given ${JSON.stringify(text)} #when scanned #then it is still secret-like`, () => {

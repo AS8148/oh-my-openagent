@@ -14,6 +14,10 @@ describe("pre-commit hook: assignments that only reference a credential", () => 
     "client_secret=[FILTERED]",
     "Authorization: Bearer <key>",
     "token: $GITHUB_TOKEN",
+    "token: process.env.GITHUB_TOKEN",
+    'secret: os.environ["SECRET"]',
+    "api_key: env.API_KEY",
+    "Authorization: Bearer $TOKEN",
   ]
   for (const line of references) {
     it(`#given ${JSON.stringify(line)} #when committed #then the hook accepts it`, async () => {
@@ -25,7 +29,18 @@ describe("pre-commit hook: assignments that only reference a credential", () => 
     })
   }
 
-  const credentials = ["password: hunter2Abrx9", "token=nullable-9fQ2xK7", "Authorization: Bearer abcdef123456"]
+  const credentials = [
+    "password: hunter2Abrx9",
+    "token=nullable-9fQ2xK7",
+    "Authorization: Bearer abcdef123456",
+    // a reference-looking tail after the real value must not hide it (#10528 review)
+    "password=hunter2Xyz9Qreal:true",
+    "api_key=Qx9realSecretVal=env.",
+    "token=s3cr3tRealValue:$HOME",
+    // a value that only STARTS with a reference token still carries a literal secret
+    "password=process.env.X||hunter2real",
+    "token={{x}}realsecretvalue",
+  ]
   for (const line of credentials) {
     it(`#given ${JSON.stringify(line)} #when committed #then the hook still refuses it`, async () => {
       const dir = await createRepo()

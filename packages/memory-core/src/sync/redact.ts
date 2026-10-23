@@ -41,10 +41,21 @@ const VALUE_END = "(?![^\\s\"'<>,}\\])])"
 /**
  * An assignment whose value only REFERS to a secret (an environment lookup, a shell variable, a template
  * slot, an already-masked `[FILTERED]`, the `Bearer` scheme word, a literal such as null or example) holds no
- * credential, so describing credentials in notes and scripts is not a hit. A real value that merely begins
- * with such a word (`nullable-9fQ2...`) still matches: the literal words must end the value.
+ * credential, so describing credentials in notes and scripts is not a hit. Each reference must be the WHOLE
+ * value: `process.env.X||hunter2`, `{{x}}secret` and `nullable-9fQ2...` keep the literal after the reference
+ * and still match. `memfs/hooks-scripts.ts` mirrors this list as its ERE exclusion.
  */
-const REFERENCE_VALUE = `(?!(?:process\\.env\\.|os\\.environ|env\\.|\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?${VALUE_END}|\\{\\{|\\[?(?:redacted|filtered)\\]?${VALUE_END}|(?:bearer|changeme|placeholder|example|none|null|undefined|true|false)${VALUE_END}))`
+const REFERENCE_TOKEN = [
+  "process\\.env\\.[A-Za-z_][A-Za-z0-9_]*",
+  "os\\.environ(?:\\.get\\(|\\[)?",
+  "env\\.[A-Za-z_][A-Za-z0-9_]*",
+  "\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?",
+  "\\{\\{[^}\\n]*\\}\\}",
+  "\\[?(?:redacted|filtered)\\]?",
+  "(?:bearer|changeme|placeholder|example|none|null|undefined|true|false)",
+].join("|")
+
+const REFERENCE_VALUE = `(?!(?:${REFERENCE_TOKEN})${VALUE_END})`
 
 export const SECRET_PATTERN_SOURCES: ReadonlyArray<readonly [SecretPatternClass, string, string]> = [
   ["aws_access_key", "\\bAKIA[0-9A-Z]{16}\\b", ""],
@@ -53,7 +64,7 @@ export const SECRET_PATTERN_SOURCES: ReadonlyArray<readonly [SecretPatternClass,
     `\\b(?:bearer|token|api[_-]?key|secret|password|passwd|pwd)\\s*[=:]\\s*${REFERENCE_VALUE}${SECRET_VALUE_TAIL}{1,256}`,
     "i",
   ],
-  ["authorization_header", `\\bAuthorization\\s*:\\s*Bearer\\s+${SECRET_VALUE_TAIL}{1,256}`, "i"],
+  ["authorization_header", `\\bAuthorization\\s*:\\s*Bearer\\s+${REFERENCE_VALUE}${SECRET_VALUE_TAIL}{1,256}`, "i"],
   ["openai_key", "\\bsk-(?:proj-)?[-_A-Za-z0-9]+\\b", ""],
   ["vendor_token", "\\b(?:ghp|github_pat|glpat|xox[baprs])[-_][-_A-Za-z0-9]+\\b", ""],
 ]
