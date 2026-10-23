@@ -3,7 +3,8 @@
 // The list is TRACED from the recipe, never hand-kept: the three generator checks below run under
 // bundle-inputs-trace.mjs, which records each file read, directory listed, module loaded and bundler input.
 // The merge gate reads the map at the base tip to tell whether a PR can change a generated artifact;
-// `--check` (CI) re-traces and fails when the committed map differs.
+// `--check` (CI) re-traces and fails when the committed map differs. A `directories` entry is recursive: any file
+// added anywhere below it is an input. Written by build:senpi-plugin (via :stage); never by the :native release chain.
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -18,22 +19,25 @@ export const BUNDLE_INPUTS_PATH = "packages/omo-senpi/bundle-inputs.json"
 
 // The generators of the committed artifacts (GENERATED_BUNDLES): the omo-senpi extensions, runtimes and
 // staged assets, the omo-senpi installer, and the Codex installer. Each runs in its non-writing form.
+// `bundles: true` marks a step that runs the bundler: it must record at least one `bundle` row (checkStepRows),
+// so a bundler call the trace failed to recognise fails the trace instead of dropping its source list.
 // The staged LSP daemon and ast-grep runtimes (plugin/runtime/lsp-daemon, plugin/runtime/ast-grep-mcp) and the staged x-search
 // skill (plugin/skills-conditional) are gitignored output, so they are not inputs of anything committed; their --check steps are
 // pointed at a missing local copy (OMO_LSP_DAEMON_DIST, OMO_AST_GREP_MCP_ENTRY, OMO_X_SEARCH_SKILL_TARGET) so every host traces
 // the same reads, staged locally or not.
 export const RECIPE = [
-  { name: "build-extension --check", command: "node", args: ["packages/omo-senpi/plugin/scripts/build-extension.mjs", "--check"] },
-  { name: "build-install --check", command: "node", args: ["packages/omo-senpi/plugin/scripts/build-install.mjs", "--check"] },
+  { name: "build-extension --check", bundles: true, command: "node", args: ["packages/omo-senpi/plugin/scripts/build-extension.mjs", "--check"] },
+  { name: "build-install --check", bundles: true, command: "node", args: ["packages/omo-senpi/plugin/scripts/build-install.mjs", "--check"] },
   {
     name: "build:codex-install (scratch output)",
+    bundles: true,
     command: "bun",
     args: ["--preload", tracer, "-e", "const m = await import(process.env.OMO_BUNDLE_INPUTS_CODEX_SCRIPT); await m.buildCodexInstaller({ outputPath: process.env.OMO_BUNDLE_INPUTS_TMP + '/codex/install-local.mjs' })"],
   },
 ]
 
-// Output-steering knobs the recipe scripts read. build:omo-native sets OMO_SENPI_PLUGIN_OUTPUT (and a developer
-// shell may too): inherited, it points the --check steps at a staged copy outside the repo, whose reads drop
+// Output-steering knobs the recipe scripts read. A developer shell (or a caller like build:omo-native, whose
+// build:senpi-plugin:native chain does not run this script) may set OMO_SENPI_PLUGIN_OUTPUT: inherited, it points the --check steps at a staged copy outside the repo, whose reads drop
 // out of the map. The trace always checks the in-repo outputs, so these never reach the recipe.
 export const SCRUBBED_ENV = [
   "OMO_SENPI_PLUGIN_OUTPUT",
@@ -60,6 +64,12 @@ export function recipeEnv(scratch, base = process.env) {
   }
 }
 
+/** One step's trace rows, plus a `missing-bundle-rows` row when a bundling step recorded no bundle input. */
+export function checkStepRows(step, rows) {
+  if (step.bundles !== true || rows.some((row) => row.kind === "bundle")) return rows
+  return [...rows, { kind: "missing-bundle-rows", path: step.name }]
+}
+
 const portable = (path) => path.split(sep).join("/")
 const RESOLUTION_FILES = ["package.json", "tsconfig.json", "bunfig.toml"]
 
@@ -80,6 +90,7 @@ export function mapFromTrace(rows, { repoRoot: root, exists = existsSync, realpa
   }
   for (const { kind, path } of rows) {
     if (kind === "missing-metafile") throw new Error(`bundle-inputs: the bundler metafile was not written (${path}); the trace would under-report`)
+    if (kind === "missing-bundle-rows") throw new Error(`bundle-inputs: recipe step '${path}' bundles but recorded no bundler inputs; the trace would under-report`)
     if (kind === "missing-module-hooks") throw new Error(`bundle-inputs: a module load ran without module hooks (${path}); the trace would under-report`)
     const rel = inRepo(path)
     if (rel === undefined || rel === BUNDLE_INPUTS_PATH) continue
@@ -111,13 +122,19 @@ export function traceBundleInputs() {
   const scratch = mkdtempSync(join(tmpdir(), "omo-bundle-inputs-"))
   const env = recipeEnv(scratch)
   const trace = env.OMO_BUNDLE_INPUTS_TRACE
+  const readRows = () => (existsSync(trace) ? readFileSync(trace, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [])
   try {
+    const rows = []
+    let seen = 0
     for (const step of RECIPE) {
       const result = spawnSync(step.command, step.args, { cwd: repoRoot, env, stdio: ["ignore", "ignore", "inherit"] })
       if (result.error !== undefined) throw result.error
       if (result.status !== 0) throw new Error(`bundle-inputs: recipe step '${step.name}' exited ${result.status}`)
+      // Steps run one at a time, so the rows appended since the last read are this step's.
+      const all = readRows()
+      rows.push(...checkStepRows(step, all.slice(seen)))
+      seen = all.length
     }
-    const rows = existsSync(trace) ? readFileSync(trace, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []
     return mapFromTrace(rows, { repoRoot })
   } finally {
     rmSync(scratch, { recursive: true, force: true })

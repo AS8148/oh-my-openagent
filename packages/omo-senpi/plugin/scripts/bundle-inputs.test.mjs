@@ -80,7 +80,42 @@ describe("mapFromTrace", () => {
   })
 })
 
-// The --check legs of build:omo-native (OMO_SENPI_PLUGIN_OUTPUT=<buildRoot>/plugin) and a developer shell must
+// A bundling step whose bun build call the trace failed to recognise writes no bundle rows; the map would
+// silently lose the bundler's whole source list.
+describe("bundling steps", () => {
+  test("every recipe step is marked as bundling", () => {
+    expect(bundleInputs.RECIPE.map((step) => [step.name, step.bundles])).toEqual(bundleInputs.RECIPE.map((step) => [step.name, true]))
+  })
+
+  test("a bundling step that recorded no bundle rows fails the trace, naming the step", () => {
+    const step = { name: "build-install --check", bundles: true }
+    const rows = bundleInputs.checkStepRows(step, [row("read", "/repo/packages/omo-senpi/package.json")])
+    expect(() => mapFromTrace(rows, deps)).toThrow("build-install --check")
+  })
+
+  test("a bundling step with bundle rows passes", () => {
+    const step = { name: "build-install --check", bundles: true }
+    const rows = bundleInputs.checkStepRows(step, [row("bundle", "/repo/packages/memory-core/src/a.ts")])
+    expect(mapFromTrace(rows, deps).files).toContain("packages/memory-core/src/a.ts")
+  })
+})
+
+// guards: the release build (build:omo-native runs build:senpi-plugin:native into a temp output) neither
+// depends on the in-repo bundles being current nor rewrites the tracked map; the canonical regen path does write it.
+describe("package.json build scripts", () => {
+  const scripts = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).scripts
+
+  test("build:senpi-plugin:native does not run the map step", () => {
+    expect(scripts["build:senpi-plugin:native"]).not.toContain("bundle-inputs.mjs")
+  })
+
+  test("build:senpi-plugin regenerates the map through build:senpi-plugin:stage", () => {
+    expect(scripts["build:senpi-plugin"]).toContain("build:senpi-plugin:stage")
+    expect(scripts["build:senpi-plugin:stage"]).toContain("node packages/omo-senpi/plugin/scripts/bundle-inputs.mjs")
+  })
+})
+
+// A caller's environment (build:omo-native sets OMO_SENPI_PLUGIN_OUTPUT=<buildRoot>/plugin) or a developer shell must
 // not steer the traced generators at a staged copy outside the repo: those reads would drop out of the map.
 describe("the recipe environment", () => {
   const scripts = readdirSync(import.meta.dir).filter((name) => name.endsWith(".mjs") && !name.includes(".test"))
@@ -126,6 +161,25 @@ describe("the trace preload", () => {
     expect(rows.some((r) => r.kind === "module" && r.path.endsWith("/gen.mjs"))).toBe(true)
   })
 
+  // build-install spawns bun with shell: true on win32, which joins argv unquoted.
+  test("under a shell spawn, a metafile path with spaces stays one argument", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-bundle-inputs-test-"))
+    try {
+      const scratch = join(dir, "with space")
+      mkdirSync(scratch)
+      writeFileSync(join(dir, "entry.mjs"), "export const x = 1\n")
+      writeFileSync(join(dir, "main.mjs"), `import { spawnSync } from "node:child_process"\nconst r = spawnSync("bun", ["build", "entry.mjs", "--outfile", "out.js"], { shell: true, stdio: "ignore" })\nprocess.exit(r.status ?? 1)\n`)
+      const log = join(dir, "trace.jsonl")
+      const result = spawnSync("node", [`--import=${pathToFileURL(tracer).href}`, join(dir, "main.mjs")], { cwd: dir, env: { ...process.env, OMO_BUNDLE_INPUTS_TRACE: log, OMO_BUNDLE_INPUTS_TMP: scratch }, encoding: "utf8" })
+      expect(result.status).toBe(0)
+      const rows = readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line))
+      expect(rows.filter((r) => r.kind === "missing-metafile")).toEqual([])
+      expect(rows.some((r) => r.kind === "bundle" && r.path.endsWith("entry.mjs"))).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("under bun, a step that imports only builtins traces cleanly", () => {
     const { rows } = traceScript("bun", { "main.mjs": `import { readFile } from "node:fs/promises"\nawait readFile(new URL(import.meta.url))\n` }, "main.mjs")
     expect(rows.filter((r) => r.kind === "missing-module-hooks")).toEqual([])
@@ -139,6 +193,7 @@ describe("script/build-codex-install.ts", () => {
   const source = readFileSync(join(repoRoot, "script", "build-codex-install.ts"), "utf8")
   const imports = [...source.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/gm)].map((m) => m[1])
 
+  // guards: the Codex step's trace completeness (bun has no load hooks, so only builtin imports are safe).
   test("imports builtins only, so the bun trace sees every file it reads", () => {
     expect(imports.length).toBeGreaterThan(0)
     const builtins = new Set(builtinModules)
@@ -157,6 +212,7 @@ describe("the committed map", () => {
 
   // The bundle marker hashes the build scripts next to the sources (build-artifact.mjs digestBuildSources),
   // so a comment-only edit to either changes every header: both must be inputs.
+  // guards: the trace sees the header-digest reads, so the merge gate counts a build-script edit as a bundle change.
   test("covers the files every bundle header hashes", () => {
     for (const path of [
       "packages/omo-senpi/plugin/scripts/build-artifact.mjs",

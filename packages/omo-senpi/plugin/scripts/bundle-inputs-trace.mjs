@@ -60,7 +60,9 @@ childProcess.spawnSync = function tracedSpawnSync(command, args, options) {
   if (!isBunBuild(command, args)) return spawnSync.call(this, command, args, options)
   const given = args.find((arg) => typeof arg === "string" && arg.startsWith("--metafile="))
   const metafile = given?.slice("--metafile=".length) ?? join(scratch ?? process.cwd(), `meta-${process.pid}-${metafiles++}.json`)
-  const result = spawnSync.call(this, command, given === undefined ? [...args, `--metafile=${metafile}`] : args, options)
+  // A shell spawn (build-install uses shell: true on win32) joins argv unquoted, so a scratch path with spaces would split.
+  const added = options?.shell ? `--metafile="${metafile}"` : `--metafile=${metafile}`
+  const result = spawnSync.call(this, command, given === undefined ? [...args, added] : args, options)
   if (result.status === 0) recordMetafile(metafile, options?.cwd ?? process.cwd())
   return result
 }
