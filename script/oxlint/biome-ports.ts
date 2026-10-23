@@ -22,33 +22,63 @@ const child = (node: Node, key: string): Node | undefined => {
 };
 const nodes = (value: unknown): readonly Node[] => (Array.isArray(value) ? value.filter(isNode) : []);
 
-// The text of a string literal, or of a template literal with no expressions.
+// The source text of a static value, as Biome's `as_static_value().text()` gives it: a string's
+// characters between the quotes (escapes still written out), a template with no expressions, and the
+// written form of `null`, `undefined`, a boolean, a number or a bigint.
 const constantText = (node: Node | undefined): string | undefined => {
-  if (node?.type === "Literal") return typeof node["value"] === "string" ? node["value"] : undefined;
+  if (node?.type === "Identifier") return node["name"] === "undefined" ? "undefined" : undefined;
+  if (node?.type === "Literal") {
+    const raw = node["raw"];
+    if (typeof raw !== "string" || node["regex"] !== undefined) return undefined;
+    return typeof node["value"] === "string" ? raw.slice(1, -1) : raw;
+  }
   if (node?.type !== "TemplateLiteral" || nodes(node["expressions"]).length > 0) return undefined;
-  const cooked = Reflect.get(Object(nodes(node["quasis"])[0]?.["value"]), "cooked");
-  return typeof cooked === "string" ? cooked : undefined;
+  const raw = Reflect.get(Object(nodes(node["quasis"])[0]?.["value"]), "raw");
+  return typeof raw === "string" ? raw : undefined;
 };
 
 // `s.toUpperCase()`, `s?.toUpperCase()` and `s["toUpperCase"]()` change case; anything else does not.
 const caseOf = (node: Node | undefined): Case | undefined => {
   const call = node?.type === "ChainExpression" ? child(node, "expression") : node;
-  const callee = call?.type === "CallExpression" ? child(call, "callee") : undefined;
+  // Biome counts only a call with no arguments.
+  const callee = call?.type === "CallExpression" && nodes(call["arguments"]).length === 0 ? child(call, "callee") : undefined;
   if (callee?.type !== "MemberExpression") return undefined;
   const property = child(callee, "property");
   const name = callee["computed"] === true ? constantText(property) : property?.type === "Identifier" ? property["name"] : undefined;
   return name === "toUpperCase" ? "upper" : name === "toLowerCase" ? "lower" : undefined;
 };
 
-// A literal mismatches when it holds a letter of the other case; titlecase letters (ǅ) and letters
-// without case belong to neither, as in Biome.
+// The case of each character, read the way Biome's CharCaseIterator reads the source text. An escape is
+// skipped, not decoded, with its exact quirks: `\xHH` skips two characters, `\u{...}` up to the brace,
+// `\uHHHH` five (one more than the escape), and any other escape (`\n`, `\\`) the next character too.
+// Unicode's Uppercase and Lowercase properties match Rust's char::is_uppercase / is_lowercase.
+function* charCases(text: string): Generator<Case> {
+  const chars = [...text];
+  let index = 0;
+  while (index < chars.length) {
+    const char = chars[index++] ?? "";
+    if (char !== "\\") {
+      if (/\p{Uppercase}/u.test(char)) yield "upper";
+      else if (/\p{Lowercase}/u.test(char)) yield "lower";
+      continue;
+    }
+    if (index >= chars.length) return;
+    const escape = chars[index++];
+    if (escape === "x") index += 2;
+    else if (escape === "u") {
+      if (index >= chars.length) return;
+      if (chars[index++] === "{") {
+        while (true) {
+          if (index >= chars.length) return;
+          if (chars[index++] === "}") break;
+        }
+      } else index += 4;
+    } else index += 1;
+  }
+}
+
 const mismatches = (text: string | undefined, expected: Case): boolean =>
-  text !== undefined &&
-  [...text].some((char) => {
-    const upper = char.toUpperCase();
-    const lower = char.toLowerCase();
-    return expected === "upper" ? char === lower && char !== upper : char === upper && char !== lower;
-  });
+  text !== undefined && [...charCases(text)].some((found) => found !== expected);
 
 const caseMessage = (expected: Case): string =>
   `This compares a ${expected}-cased string with a literal that is not ${expected}case, so it never matches (Biome noStringCaseMismatch).`;

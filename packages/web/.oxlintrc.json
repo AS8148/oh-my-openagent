@@ -8,7 +8,12 @@
     "eslint/no-unused-vars": "error",
     "eslint/prefer-const": "error",
     "typescript/consistent-type-imports": "error",
-    "eslint/no-console": "warn",
+    "eslint/no-console": [
+      "warn",
+      {
+        "allow": ["warn", "error"]
+      }
+    ],
     "typescript/no-explicit-any": "error",
     "eslint/no-var": "error",
     "typescript/await-thenable": "off",

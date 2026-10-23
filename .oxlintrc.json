@@ -11,7 +11,13 @@
   ],
   "categories": {},
   "rules": {
-    "eslint/array-callback-return": "error",
+    "eslint/array-callback-return": [
+      "error",
+      {
+        "checkForEach": true,
+        "allowVoid": true
+      }
+    ],
     "eslint/constructor-super": "error",
     "eslint/default-case-last": "error",
     "eslint/eqeqeq": [
