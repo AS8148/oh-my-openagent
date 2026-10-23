@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { EventEmitter, once } from "node:events"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, type Socket } from "node:net"
+import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { TASK_HOST_SOCKET_ENV_NAMES } from "../../../../senpi-task/src/runners/rpc-host/daemon"
 import { fakeHostTransport } from "../../../../senpi-task/src/runners/rpc-host/__fixtures__/fake-host-transport"
@@ -167,13 +168,21 @@ describe("live thread frame decoding", () => {
       queueMicrotask(() => { for (const byte of reply) socket.emit("data", Buffer.from([byte])) })
       return true
     }
-    const surface = createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: "/tmp/byte-split.sock" }, exists: () => true, statusAll: NO_ENUMERATION, registry: NO_REGISTRY, connect: () => { queueMicrotask(() => socket.emit("connect")); return socket as never } })
+    // A win32 host publishes <socket>.secret beside its logical path and listens on the pipe derived from both
+    // (senpi socket-transport.ts); the client resolves that transport before it dials, as it does for a real host.
+    const directory = mkdtempSync(join(tmpdir(), "byte-split-"))
+    const socketPath = join(directory, "rpc.sock")
+    writeFileSync(`${socketPath}.secret`, Buffer.alloc(32, 7))
+    const surface = createLiveThreadSurface({} as never, { env: { SENPI_RPC_SOCKET: socketPath }, exists: () => true, statusAll: NO_ENUMERATION, registry: NO_REGISTRY, connect: () => { queueMicrotask(() => socket.emit("connect")); return socket as never } })
 
     // when
     const realPlatform = process.platform
     Object.defineProperty(process, "platform", { value: platform, configurable: true })
     let models: unknown
-    try { models = await surface.getAvailableModels?.("route-peer") } finally { Object.defineProperty(process, "platform", { value: realPlatform, configurable: true }) }
+    try { models = await surface.getAvailableModels?.("route-peer") } finally {
+      Object.defineProperty(process, "platform", { value: realPlatform, configurable: true })
+      rmSync(directory, { recursive: true, force: true })
+    }
 
     // then
     expect(models).toEqual([{ provider: "p", id: "m", name }])
