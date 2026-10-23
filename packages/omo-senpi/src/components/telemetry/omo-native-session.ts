@@ -1,3 +1,7 @@
+import { realpathSync } from "node:fs"
+import * as os from "node:os"
+import { dirname, sep } from "node:path"
+
 import {
   createEventTelemetryClient,
   getDailyActiveCaptureState,
@@ -224,7 +228,57 @@ export function isOmoNativeTelemetryEnabled(
   eventCtx: unknown,
   env: TelemetryEnv,
 ): boolean {
-  return isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }) && configEnabled(options, eventCtx, env)
+  return (
+    notAutomated(env) &&
+    isTelemetryClientEnabled({ env, product: createOmoNativeProductConfig() }) &&
+    configEnabled(options, eventCtx, env)
+  )
+}
+
+/** The automation check sits on the consent path, which must never throw: if it cannot decide, telemetry is off. */
+function notAutomated(env: TelemetryEnv): boolean {
+  try {
+    return automatedRunReason(env) === undefined
+  } catch {
+    return false
+  }
+}
+
+const ALLOW_AUTOMATION_VALUES = ["1", "true", "yes"]
+
+/**
+ * Automated runs cannot hold a stable anonymous id (a CI job, a test runner, or a HOME inside the OS temp dir starts
+ * from nothing each time), so each one would count as a new person (#10934). Telemetry is off for them by default;
+ * `OMO_TELEMETRY_ALLOW_AUTOMATION=1` opts a deliberate run back in.
+ */
+export function automatedRunReason(env: TelemetryEnv): "ci" | "test_runner" | "ephemeral_home" | undefined {
+  if (ALLOW_AUTOMATION_VALUES.includes(env["OMO_TELEMETRY_ALLOW_AUTOMATION"]?.trim().toLowerCase() ?? "")) return undefined
+  const ci = env["CI"]?.trim().toLowerCase() ?? ""
+  if (ci !== "" && ci !== "0" && ci !== "false") return "ci"
+  if (env["NODE_ENV"]?.trim() === "test" || env["VITEST"] || env["JEST_WORKER_ID"]) return "test_runner"
+  const home = (process.platform === "win32" ? env["USERPROFILE"] : env["HOME"])?.trim()
+  if (home && isInsideTempDir(home)) return "ephemeral_home"
+  return undefined
+}
+
+function isInsideTempDir(path: string): boolean {
+  const accountHome = realOrSelf(os.userInfo().homedir)
+  const contains = (root: string, target: string) => target === root || target.startsWith(root.endsWith(sep) ? root : root + sep)
+  // A misconfigured temp dir (TMPDIR=/, or one that holds the account's real home) is not a temp root: it would
+  // silently turn off a real user's telemetry.
+  const roots = [os.tmpdir(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]
+    .map(realOrSelf)
+    .filter((root) => dirname(root) !== root && !contains(root, accountHome))
+  const target = realOrSelf(path)
+  return roots.some((root) => contains(root, target))
+}
+
+function realOrSelf(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
 }
 
 function configEnabled(
