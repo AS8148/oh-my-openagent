@@ -210,3 +210,36 @@ describe("read and write", () => {
 		expect(text).toContain("| Q1 | quote | claim |")
 	})
 })
+
+describe("validateLedger checks events against rows", () => {
+	test("a retracted event that carries a replacement is an error", () => {
+		const ledger = ledgerWith(measured("a"), measured("b"))
+		retractRow(ledger, "F1", "wrong page")
+		ledger.events[0].replacement = "F2"
+		expect(validateLedger(ledger).some((e: string) => /F1 is retracted but names replacement F2/.test(e))).toBe(true)
+	})
+
+	test("the last event for a fact must match its row status", () => {
+		const ledger = ledgerWith(measured("a"), measured("b"))
+		retractRow(ledger, "F1", "wrong page")
+		ledger.rows[0].status = "active"
+		expect(validateLedger(ledger).some((e: string) => /F1 has status active but its last event moves it to retracted/.test(e))).toBe(true)
+	})
+
+	test("a non-active row with no event is an error", () => {
+		const ledger = ledgerWith(measured("a"))
+		ledger.rows[0].status = "superseded"
+		expect(validateLedger(ledger).some((e: string) => /F1 is superseded but has no status event/.test(e))).toBe(true)
+	})
+
+	test("an event with an invalid from or to status is an error naming the fact", () => {
+		const ledger = ledgerWith(measured("a"))
+		retractRow(ledger, "F1", "wrong page")
+		ledger.events[0].from = "gone"
+		const errors = validateLedger(ledger)
+		expect(errors.some((e: string) => /events\[0\]\.from must be one of active, superseded, retracted \(fact F1\)/.test(e))).toBe(true)
+		ledger.events[0].from = "active"
+		ledger.events[0].to = "active"
+		expect(validateLedger(ledger).some((e: string) => /events\[0\]\.to must be retracted or superseded \(fact F1\)/.test(e))).toBe(true)
+	})
+})

@@ -67,4 +67,31 @@ describe("indexClaims", () => {
 		const text = "## Verified claims\n\n- C1\n\n| claim_id | statement | risk tier | status |\n|---|---|---|---|\n| C1 | a | high | supported |\n"
 		expect(indexClaims(text).claims[0].in_verified).toBe(true)
 	})
+
+	test("the verified-claims section ends at the claim table", () => {
+		const text = [
+			"## verified-claims",
+			"- C1",
+			"",
+			"| claim_id | statement | risk tier | status |",
+			"|---|---|---|---|",
+			"| C1 | a | high | supported |",
+			"| C2 | b | high | unresolved |",
+			"",
+			"C2 still pending",
+		].join("\n")
+		const { claims, errors } = indexClaims(text)
+		expect(errors).toEqual([])
+		expect(claims.map((claim: { claim_id: string; in_verified: boolean }) => [claim.claim_id, claim.in_verified])).toEqual([
+			["C1", true],
+			["C2", false],
+		])
+	})
+
+	test("a GFM two-dash separator row is accepted and the first data row is read", () => {
+		const text = "| claim_id | statement | risk tier | status |\n|--|--|--|--|\n| C1 | a | high | supported |\n| C2 | b | normal | unresolved |\n"
+		const { claims, errors } = indexClaims(text)
+		expect(errors).toEqual([])
+		expect(claims.map((claim: { claim_id: string }) => claim.claim_id)).toEqual(["C1", "C2"])
+	})
 })

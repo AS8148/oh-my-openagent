@@ -145,9 +145,23 @@ function validateEvent(event, index, ids, errors) {
 	const at = `events[${index}]`
 	if (!isObject(event)) return errors.push(`${at} must be an object`)
 	check(errors, ids.has(event.fact_id), `${at}.fact_id must name a ledger row`)
-	check(errors, event.to === "retracted" || event.to === "superseded", `${at}.to must be retracted or superseded`)
+	check(errors, FACT_STATUSES.includes(event.from), `${at}.from must be one of ${FACT_STATUSES.join(", ")} (fact ${event.fact_id})`)
+	check(errors, event.to === "retracted" || event.to === "superseded", `${at}.to must be retracted or superseded (fact ${event.fact_id})`)
 	check(errors, event.replacement === null || ids.has(event.replacement), `${at}.replacement must be null or a ledger row`)
+	check(errors, event.to !== "retracted" || event.replacement === null, `${at}: ${event.fact_id} is retracted but names replacement ${event.replacement}`)
 	check(errors, isNonEmpty(event.reason), `${at}.reason must be a non-empty string`)
+}
+
+/** Each row's status must be the one its last event moved it to; a non-active row needs an event. */
+function validateHistory(ledger, errors) {
+	const last = new Map()
+	for (const event of ledger.events) if (isObject(event)) last.set(event.fact_id, event.to)
+	ledger.rows.forEach((row, index) => {
+		if (!isObject(row) || !FACT_STATUSES.includes(row.status)) return
+		const to = last.get(row.fact_id)
+		if (to === undefined) check(errors, row.status === "active", `rows[${index}]: ${row.fact_id} is ${row.status} but has no status event`)
+		else check(errors, to === row.status, `rows[${index}]: ${row.fact_id} has status ${row.status} but its last event moves it to ${to}`)
+	})
 }
 
 /** @returns {string[]} every schema error; empty when the ledger is valid. */
@@ -171,8 +185,10 @@ export function validateLedger(ledger) {
 			if (isObject(row) && Array.isArray(row[key])) for (const ref of row[key]) check(errors, ids.has(ref), `rows[${index}].${key} references ${ref}, which has no ledger row`)
 		}
 	})
-	if (Array.isArray(ledger.events)) ledger.events.forEach((event, index) => validateEvent(event, index, ids, errors))
-	else errors.push("events must be an array")
+	if (Array.isArray(ledger.events)) {
+		ledger.events.forEach((event, index) => validateEvent(event, index, ids, errors))
+		validateHistory(ledger, errors)
+	} else errors.push("events must be an array")
 	return errors
 }
 

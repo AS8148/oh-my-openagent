@@ -38,7 +38,7 @@ function columnIndexes(header) {
 }
 
 function isSeparator(line) {
-	return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line)
+	return /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)
 }
 
 function verifiedIds(lines) {
@@ -68,10 +68,12 @@ export function indexClaims(markdown) {
 	}
 	const header = splitRow(lines[headerAt])
 	const columns = columnIndexes(header)
-	if (!isSeparator(lines[headerAt + 1] ?? "")) errors.push(`line ${headerAt + 2}: claim table header must be followed by a separator row`)
+	const hasSeparator = isSeparator(lines[headerAt + 1] ?? "")
+	if (!hasSeparator) errors.push(`line ${headerAt + 2}: claim table header must be followed by a separator row`)
+	const firstRow = headerAt + (hasSeparator ? 2 : 1)
 	const rows = []
-	let tableEnd = headerAt + 2
-	for (let index = headerAt + 2; index < lines.length && lines[index].trim().startsWith("|"); index += 1) {
+	let tableEnd = firstRow
+	for (let index = firstRow; index < lines.length && lines[index].trim().startsWith("|"); index += 1) {
 		tableEnd = index + 1
 		const cells = splitRow(lines[index])
 		const at = `line ${index + 1}`
@@ -90,7 +92,8 @@ export function indexClaims(markdown) {
 		}
 		rows.push({ claim_id: claimId, statement: cells[columns.statement], risk: cells[columns.risk], status: cells[columns.status] })
 	}
-	const verified = verifiedIds(lines.slice(0, headerAt).concat(lines.slice(tableEnd)))
+	// The digest section ends at the claim table: scan each side on its own so it cannot carry across.
+	const verified = [...new Set([...verifiedIds(lines.slice(0, headerAt)), ...verifiedIds(lines.slice(tableEnd))])]
 	for (const id of verified) {
 		if (!rows.some((row) => row.claim_id === id)) errors.push(`verified-claims lists ${id}, which has no claim row`)
 	}
