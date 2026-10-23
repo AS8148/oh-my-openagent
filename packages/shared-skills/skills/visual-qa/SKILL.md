@@ -94,7 +94,7 @@ node script/qa/web-terminal-visual-qa.mjs --title "TUI Visual QA" \
 node "$SKILL_DIR/scripts/visual-qa.mjs" tui-check .omo/evidence/<slug>/tui-web-terminal/terminal.txt --cols <N>
 ```
 
-Key fields: `maxWidth`, `overflowLines[]`, `borderMisaligned`, `wideCharColumns[]`, `hasAnsi`.
+Key fields: `maxWidth`, `expectedColumns`, `overflowLines[]`, `borderMisaligned`, `wideCharColumns[]`, `hasAnsi`.
 
 This JSON (diff ratio, similarity score, hotspots or overflow lines, border alignment, wide-char columns, alpha) is REFERENCE evidence to aim the reviewers. It is not the verdict by itself: a 99/100 `similarityScore` can still hide a pasted-image fake, a broken interaction, or clipped CJK descenders.
 
@@ -125,7 +125,7 @@ This is the platform baseline, distilled from Apple's Human Interface Guidelines
 - A9 One readable column at 390 with no horizontal scroll of primary content; nothing clips or overlaps at 1440/1920 or under empty, long-label and unbroken-string content.
 - A10 Content that continues out of view shows a cue (partial item, fade, chevron).
 - A11 (mac) Nothing important lives only at the window's bottom edge; the minimum window size keeps toolbar and content legible; the sidebar collapses when the window narrows.
-- A12 Layout contract: every changed screen or region has a `Layout:` line (in `DESIGN.md`, or in the change description when the project has none; the `frontend` skill's Brief step); the capture shows that pattern's structure; the logged owner is the region's main scroller in the probe output, every other scroller listed is nested inside it for its own content (a code block, a dropdown, a composer) or is named in the line too; none of the line's anti-patterns appear. A missing line, a different main scroller, an unexplained sibling scroller, or a present anti-pattern is a FAIL; a logged skip still owes the scroll-owner check.
+- A12 (web and app screens; N/A for a TUI, a printed page, or a figure) Layout contract: every changed screen or region has a `Layout:` line (in `DESIGN.md`, or in the change description when the project has none; the `frontend` skill's Brief step); the capture shows that pattern's structure; the logged owner is the region's main scroller in the probe output, every other scroller listed is nested inside it for its own content (a code block, a dropdown, a composer) or is named in the line too; none of the line's anti-patterns appear. A missing line, a different main scroller, an unexplained sibling scroller, or a present anti-pattern is a FAIL; a logged skip still owes the scroll-owner check.
 
 **B. Hierarchy**
 - B1 One primary action per view, in the prominent style (accent on its background, not its glyph); peers differ by style, never by size.
@@ -134,7 +134,7 @@ This is the platform baseline, distilled from Apple's Human Interface Guidelines
 - B4 The most important content sits top/leading in reading order; secondary detail does not crowd it.
 - B5 One or two accents per screen; toolbars and tab bars stay monochrome over colourful content; nothing decorative carries accent.
 - B6 Type hierarchy comes from weight, size and colour, holds in both themes, and uses at most two typefaces.
-- B7 The screen matches its brief (the `frontend` skill's Brief step): the named primary action is the single prominent control, priorities 1-3 appear in that order in reading order on the first viewport, and nothing listed under "left out on purpose" is on the screen. A screen built or changed in this session with no brief is a FAIL; a pre-existing screen under audit with no brief is N/A.
+- B7 (web and app screens; N/A for a TUI, a printed page, or a figure) The screen matches its brief (the `frontend` skill's Brief step): the named primary action is the single prominent control, priorities 1-3 appear in that order in reading order on the first viewport, and nothing listed under "left out on purpose" is on the screen. A screen built or changed in this session with no brief is a FAIL; a pre-existing screen under audit with no brief is N/A.
 
 **C. Text and copy**
 - C1 Body text is at least 17 pt-equivalent at 390 (15 pt for secondary text) and 14 px on desktop; no thin weights at small sizes.
@@ -210,7 +210,7 @@ Dispatch through your harness's own subagent tool. In OpenCode: `task(subagent_t
 
 Send BOTH calls in a single message so they run concurrently. Each oracle is read-only: it reviews and reports, it cannot modify files. Each returns PASS, REVISE, or FAIL with concrete, located findings. Pass A proves the surface is a real design-system implementation, not a mock-only or faked-image substitute, and judges behaviour and required content: motion, states, keyboard, platform (checklist G-J). Pass B directly opens screenshots and judges what is seen: layout, hierarchy, text, targets, themes, consistency (checklist A-F), reference fidelity, before/after pairs, and CJK.
 
-Paste evidence directly into each prompt: source code, the plain-text TUI captures, the script JSON, and the screenshot paths plus your described observations for web. Never fork parent history into a reviewer - the message carries everything it needs. Require each finding to be tagged `[product]` (the rendered UI is wrong) or `[evidence]` (the capture artifact is defective - wrong signature, partial compositing, stale file), and each `[product]` finding as `[defect]` (hierarchy, function, accessibility, required content, CJK or layout breakage) or `[taste]` (spacing within the scale, shadow depth, radius, colour preference, copy wording); the loop in Step 4 treats them differently. The two passes differ in depth by charter, not by any model or effort setting, which cannot be pinned per call.
+Paste evidence directly into each prompt: source code, the plain-text TUI captures, the script JSON, and the screenshot paths plus your described observations for web. Never fork parent history into a reviewer - the message carries everything it needs. Require each finding to be tagged `[product]` (the rendered UI is wrong) or `[evidence]` (the capture artifact is defective - wrong signature, partial compositing, stale file), and each `[product]` finding as `[defect]` (hierarchy, function, accessibility, required content, CJK or layout breakage) or `[taste]` (spacing within the scale, shadow depth, radius, colour preference, copy wording); the loop in Step 4 treats them differently. Under a concrete reference (Step 5) there is no taste: any deviation from the reference, spacing and radius included, is a `[defect]`. The two passes differ in depth by charter, not by any model or effort setting, which cannot be pinned per call.
 
 ### Pass A - Design-system and functional integrity (deeper, strict)
 
@@ -280,8 +280,8 @@ TIER INTENT: Treat this as the focused visual pass. Directly open the screenshot
 INTENT:
 {What the user requested and the mock or baseline to match.}
 
-BRIEF:
-{The screen brief: primary action, priorities 1-3, left out on purpose. Write NONE if no brief exists.}
+BRIEF AND REQUIRED CONTENT:
+{The screen brief: primary action, priorities 1-3, left out on purpose. Then the required-content list: every input, datum, label, and copy the request, reference, or existing screen requires, by name. Write NONE if no brief exists.}
 
 LAYOUT LOG:
 {The `Layout:` lines for every changed screen or region, and the scroll-owner probe output per viewport. Write NONE if there is no such line.}
@@ -440,7 +440,7 @@ RULE (mandatory, non-negotiable): the reference-fidelity task is NOT done until 
 
 A redesign nobody can see beside its baseline cannot be judged, and a regression hidden in it ships. This mode starts BEFORE the first edit and feeds Pass B.
 
-1. **Fix the cases before editing** and do not change them afterwards: the states that matter (typically empty, loading, populated, error, plus any state the change targets) x the widths (390 and 1440, plus 1920 for page layouts) x the theme(s) the surface ships. A case discovered mid-work is added to both sides, never to `after` alone.
+1. **Fix the cases before editing** and do not change them afterwards: the states that matter (typically empty, loading, populated, error, plus any state the change targets) x the widths (web: 390 and 1440, plus 1920 for page layouts; a TUI: the column counts it supports, such as 80 and 120; paged output: each page size it prints to) x the theme(s) the surface ships. A case discovered mid-work is added to both sides, never to `after` alone.
 2. **Capture `before` on the pre-edit build**, one PNG per case with the Step 2 tooling, as `<case>-<state>-<width>-<theme>-before.png`. Seed or mock the data so every state is reachable on demand; the same seed produces `after`.
 3. **Capture `after` under identical conditions** on the current build (tooling, viewport, scroll position, theme, data, state) as `<case>-<state>-<width>-<theme>-after.png`.
 4. **Compose each pair** side by side into `<case>-<state>-<width>-<theme>-pair.png` (before left, after right, same scale, a one-line caption naming the case), and run `image-diff <before.png> <after.png>` to aim the reviewer at what moved.

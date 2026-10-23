@@ -32,6 +32,8 @@ Look for `DESIGN.md`, `design-system.md`, or `design-tokens.md` at the project r
 3. **Existing UI with implicit patterns or components.** Extract the colours, typography, spacing, primitives, states, and motion already in use into `DESIGN.md` before changing UI code.
 4. **Existing UI with no reusable component layer.** STOP and ask one focused question: preserve the current look with copy-nearby styling, or extract `DESIGN.md` plus reusable components first? Do not silently choose the cheaper path or the larger refactor. With copy-nearby styling the brief and the `Layout:` line live in the change description.
 
+**Small-change rule.** A small change (the `SKILL.md` router's first row: a fix, a new control, a restyled component, a copy or spacing change) on a surface with no `DESIGN.md` copies the nearest styled sibling: no extraction, no question, with the brief and any `Layout:` line in the change description. Branches 3 and 4 apply to a new screen or flow. When there is no styled sibling to copy, it is not a small change: take branch 3 or 4.
+
 **Primitive Showcase Gate.** No product screen until `DESIGN.md` section 5 names the reusable primitives and their states, and each primitive plus required state passes mobile/tablet/desktop visual QA in a component showcase or equivalent state harness. Skipping it ships ad-hoc-styled screens and re-enters the redesign loop.
 
 ### Expressive briefs (only when the brief asks for surface ambition)
@@ -42,7 +44,7 @@ Look for `DESIGN.md`, `design-system.md`, or `design-tokens.md` at the project r
 
 ## Phase 0.5: React Dev Tooling Gate (React projects)
 
-If `react` is in `package.json`, three dev-only tools are installed before any UI implementation; the user opts out, not in. Grep the entry file (`app/layout.tsx`, `pages/_document.tsx`, `src/main.tsx`, `src/index.tsx`, `app/root.tsx`) for `react-grab` and `react-scan`, and `package.json` plus the skills directory for `react-doctor`.
+If `react` is in `package.json`, three dev-only tools are installed before any UI implementation, a small change included; the user opts out, not in. Grep the entry file (`app/layout.tsx`, `pages/_document.tsx`, `src/main.tsx`, `src/index.tsx`, `app/root.tsx`) for `react-grab` and `react-scan`, and `package.json` plus the skills directory for `react-doctor`.
 
 Missing: run from the project root, then read `react-dev-tooling-skill.md` for per-framework manual snippets, the `*_DISABLE_REACT_DEVTOOLS` flag pattern, and the production-leak check.
 
@@ -106,6 +108,6 @@ Run in order and stop at the first match.
 
 ## Phase Final: Design QA (after implementation)
 
-The verification authority is `/visual-qa`, not a checklist here. Run it with the screen brief, the `Layout:` line, the required-content list, and, for a changed surface, the `before` set, so it judges the brief (B7), the layout contract (A12), required content (Pass A), and the before/after pair alongside its HIG checklist on its full capture matrix. Its loop is bounded (2-3 rounds); taste findings stop it and are recorded. A concrete reference or clone runs reference-fidelity mode.
+The verification authority is `/visual-qa`, not a checklist here. Run it with the screen brief, the `Layout:` line, the required-content list, and, for a changed surface, the `before` set, so it judges the brief (B7), the layout contract (A12), required content (Pass A), and the before/after pair alongside its HIG checklist on its full capture matrix. Its loop is bounded (its Step 4 sets the budget); taste findings stop it and are recorded. A concrete reference or clone runs reference-fidelity mode.
 
 For an expressive brief only, this skill adds the one judgment `/visual-qa` cannot make: a bug-free render that reads generic next to the loaded reference is not done. Raise the material layering, give the colour a real ramp, render the hero's focal object as a lit, dimensional thing (a generated bitmap or real light, shadow, and depth; never flat geometric primitives), and add the one signature moment, then re-check. An operational brief is done when `/visual-qa` passes within its budget and the brief holds.
