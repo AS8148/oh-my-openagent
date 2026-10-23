@@ -11,7 +11,7 @@ bunx oxfmt --check
 bunx tsc --noEmit
 ```
 
-The scaffold at `../../scripts/typescript/new-project.ts` copies the configs and plugin below. For manual setup, copy the contents of `../../scripts/typescript/oxc/` into the project root, including dotfiles and `lint/oxlint-plugin/LICENSE`. The plugin is plain ESM JavaScript; use `"type": "module"` in `package.json`.
+The scaffold at `../../scripts/typescript/new-project.ts` copies the configs and plugin below. For manual setup, copy `.oxlintrc.json`, `.oxfmtrc.json`, and `lint/oxlint-plugin/` (including `LICENSE`) from `../../scripts/typescript/oxc/` into the project root. Merge the `tsconfig.json` flags into an existing project's config; copy that file only for a new project. The plugin is plain ESM JavaScript; use `"type": "module"` in `package.json`.
 
 `--type-aware` requires the installed `oxlint-tsgolint` companion and a supported runtime/platform and TS project. Use it wherever supported. For syntax-only JS or an unsupported target, use `oxlint --deny-warnings`; retain the compiler gate for TS/checked JS and report that type-aware rules did not run. Type-aware lint does not replace `tsc --noEmit`. JS plugins are experimental, so keep these tested versions pinned and re-verify upgrades.
 

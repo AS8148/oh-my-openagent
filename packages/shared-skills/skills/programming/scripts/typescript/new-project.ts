@@ -12,7 +12,7 @@
  * Creates:
  *   <name>/
  *     package.json          (Bun + Hono + Zod + oxlint + oxfmt)
- *     tsconfig.json         (ultra-strict from tsconfig-strict.md)
+ *     tsconfig.json         (static ultra-strict config copied from oxc/)
  *     .oxlintrc.json         (strict rules and local copy plugin)
  *     .oxfmtrc.json          (format defaults)
  *     lint/oxlint-plugin/    (plain-JS rules and MIT license)
