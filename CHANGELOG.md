@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A relaunched task records its own session id, not the previous run's ([#10985](https://github.com/code-yeongyu/oh-my-openagent/pull/10985)).** When a task restarted on a new transcript (a model fallback or a revive) and its new session's first state read failed, the task kept the previous run's session id, so anything that looks a task up by its session id, such as the task tree or the cleanup when a parent stops, found the old session. The first id the new run learns now replaces it. ([#10892](https://github.com/code-yeongyu/oh-my-openagent/issues/10892))
+
 ## [5.1.43] - 2026-10-22
 
 **A session's first prompt no longer freezes a shared host while it reads what changed in memory ([#10728](https://github.com/code-yeongyu/oh-my-openagent/pull/10728)).** A session resumed a few hours after its last turn read the memory commits since then with one `git diff-tree` process per commit, all started at once. On a busy memory repository that was thousands of processes, and starting them blocked every session on the same host for 28 s with one session and 142 s with seven, while the finished ones piled up unreaped. The range is now read with one `git log`; the same notices come out, the longest block with seven sessions fell to 16 s, and the host's memory footprint during prompts fell from a median of 1,258 MB to 813 MB. ([#10726](https://github.com/code-yeongyu/oh-my-openagent/issues/10726))
