@@ -1,0 +1,46 @@
+import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
+import { indexClaims } from "./claims-index.mjs"
+
+const FIXTURE = join(import.meta.dir, "tests", "fixtures", "fidelity", "claim-graph.md")
+
+describe("indexClaims", () => {
+	test("indexes the fixture claim graph", () => {
+		const { claims, errors } = indexClaims(readFileSync(FIXTURE, "utf8"))
+		expect(errors).toEqual([])
+		expect(claims.map((claim: { claim_id: string; in_verified: boolean }) => claim.claim_id)).toEqual(["C1", "C2", "C3"])
+		expect(claims.filter((claim: { claim_id: string; in_verified: boolean }) => claim.in_verified).map((claim: { claim_id: string; in_verified: boolean }) => claim.claim_id)).toEqual(["C1"])
+		expect(claims[0]).toEqual({
+			claim_id: "C1",
+			statement: "The bridge span is up to 320 m.",
+			risk: "high",
+			status: "supported",
+			in_verified: true,
+		})
+		expect(claims[2].status).toBe("refuted")
+	})
+
+	test("a malformed table returns errors", () => {
+		const bad = [
+			"| claim_id | statement | risk tier | status |",
+			"|---|---|---|---|",
+			"| X1 | bad id | high | supported |",
+			"| C2 | too few cells |",
+		].join("\n")
+		const { errors } = indexClaims(bad)
+		expect(errors.length).toBeGreaterThanOrEqual(2)
+	})
+
+	test("a document without the claim table returns an error", () => {
+		const { claims, errors } = indexClaims("# claim graph\n\nno table here\n")
+		expect(claims).toEqual([])
+		expect(errors.length).toBe(1)
+	})
+
+	test("a verified id with no claim row is an error", () => {
+		const text = "## verified-claims\n\n- C9\n\n| claim_id | statement | risk tier | status |\n|---|---|---|---|\n| C1 | a | high | supported |\n"
+		expect(indexClaims(text).errors.some((e: string) => e.includes("C9"))).toBe(true)
+	})
+})
