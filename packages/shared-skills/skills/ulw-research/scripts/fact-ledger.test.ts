@@ -87,6 +87,15 @@ describe("validateLedger", () => {
 		expect(validateLedger(ledger).some((e: string) => e.includes("exact"))).toBe(true)
 	})
 
+	test("rejects operands and derived_from ids with no ledger row", () => {
+		const ledger = ledgerWith(measured("span"))
+		ledger.rows.push({ ...ledger.rows[0], fact_id: "F2", kind: "derived", label: "ratio", operation: "ratio", operands: ["F9"], derived_from: ["F1", "Q7"] })
+		const errors = validateLedger(ledger)
+		expect(errors.some((e: string) => e.includes("operands") && e.includes("F9"))).toBe(true)
+		expect(errors.some((e: string) => e.includes("derived_from") && e.includes("Q7"))).toBe(true)
+		expect(errors.some((e: string) => e.includes("F1"))).toBe(false)
+	})
+
 	test("a bare row with only fact_id returns at least three errors", () => {
 		expect(validateLedger({ rows: [{ fact_id: "F1" }] }).length).toBeGreaterThanOrEqual(3)
 	})
@@ -138,6 +147,14 @@ describe("ids and status", () => {
 		expect(ledger.rows[0].status).toBe("superseded")
 		expect(ledger.events[0]).toMatchObject({ fact_id: "F1", replacement: "F2" })
 		expect(validateLedger(ledger)).toEqual([])
+	})
+
+	test("supersedeRow refuses a replacement that is not active", () => {
+		const ledger = ledgerWith(measured("a"), measured("b"))
+		retractRow(ledger, "F2", "wrong page")
+		expect(() => supersedeRow(ledger, "F1", "F2", "newer filing")).toThrow(/F2 is retracted/)
+		expect(ledger.rows[0].status).toBe("active")
+		expect(ledger.events).toHaveLength(1)
 	})
 })
 

@@ -43,4 +43,28 @@ describe("indexClaims", () => {
 		const text = "## verified-claims\n\n- C9\n\n| claim_id | statement | risk tier | status |\n|---|---|---|---|\n| C1 | a | high | supported |\n"
 		expect(indexClaims(text).errors.some((e: string) => e.includes("C9"))).toBe(true)
 	})
+
+	test("only the leading claim id of a verified entry is verified", () => {
+		const text = [
+			"## verified-claims",
+			"",
+			"- C1 (merged from C2)",
+			"",
+			"| claim_id | statement | risk tier | status |",
+			"|---|---|---|---|",
+			"| C1 | a, see C2 | high | supported |",
+			"| C2 | b | high | unresolved |",
+		].join("\n")
+		const { claims, errors } = indexClaims(text)
+		expect(errors).toEqual([])
+		expect(claims.map((claim: { claim_id: string; in_verified: boolean }) => [claim.claim_id, claim.in_verified])).toEqual([
+			["C1", true],
+			["C2", false],
+		])
+	})
+
+	test("the SKILL.md synthesis heading 'Verified claims' is recognized", () => {
+		const text = "## Verified claims\n\n- C1\n\n| claim_id | statement | risk tier | status |\n|---|---|---|---|\n| C1 | a | high | supported |\n"
+		expect(indexClaims(text).claims[0].in_verified).toBe(true)
+	})
 })

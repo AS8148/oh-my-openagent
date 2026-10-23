@@ -27,7 +27,7 @@ function splitRow(line) {
 }
 
 function normalizeHeader(value) {
-	return value.replace(/`/g, "").trim().toLowerCase().replace(/[\s_]+/g, " ")
+	return value.replace(/`/g, "").trim().toLowerCase().replace(/[\s_-]+/g, " ")
 }
 
 function columnIndexes(header) {
@@ -47,11 +47,13 @@ function verifiedIds(lines) {
 	for (const line of lines) {
 		const heading = /^(#{1,6})\s+(.*)$/.exec(line)
 		if (heading) {
-			inside = normalizeHeader(heading[2]) === "verified-claims"
+			inside = normalizeHeader(heading[2]) === normalizeHeader("verified-claims")
 			continue
 		}
 		if (!inside) continue
-		for (const match of line.matchAll(/\bC\d+\b/g)) if (!ids.includes(match[0])) ids.push(match[0])
+		// Only the id an entry starts with is verified; ids mentioned later in the line are not.
+		const leading = /^\s*(?:[-*+]|\d+[.)])?\s*\|?\s*`?(C\d+)\b/.exec(line)
+		if (leading && !ids.includes(leading[1])) ids.push(leading[1])
 	}
 	return ids
 }

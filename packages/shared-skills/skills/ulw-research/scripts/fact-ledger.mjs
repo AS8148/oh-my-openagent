@@ -166,6 +166,11 @@ export function validateLedger(ledger) {
 		ids.add(row.fact_id)
 		labels.add(row.label)
 	})
+	ledger.rows.forEach((row, index) => {
+		for (const key of ["operands", "derived_from"]) {
+			if (isObject(row) && Array.isArray(row[key])) for (const ref of row[key]) check(errors, ids.has(ref), `rows[${index}].${key} references ${ref}, which has no ledger row`)
+		}
+	})
 	if (Array.isArray(ledger.events)) ledger.events.forEach((event, index) => validateEvent(event, index, ids, errors))
 	else errors.push("events must be an array")
 	return errors
@@ -236,9 +241,9 @@ function changeStatus(ledger, id, to, replacement, reason) {
 	if (!row) throw new CliError(`no ledger row ${id}`)
 	if (row.status !== "active") throw new CliError(`ledger row ${id} is already ${row.status}`)
 	if (!isNonEmpty(reason)) throw new CliError(`a reason is required to mark ${id} ${to}`)
-	if (replacement !== null && !ledger.rows.some((candidate) => candidate.fact_id === replacement && candidate.fact_id !== id)) {
-		throw new CliError(`no replacement row ${replacement}`)
-	}
+	const next = replacement === null ? null : ledger.rows.find((candidate) => candidate.fact_id === replacement && candidate.fact_id !== id)
+	if (replacement !== null && !next) throw new CliError(`no replacement row ${replacement}`)
+	if (next && next.status !== "active") throw new CliError(`replacement row ${replacement} is ${next.status}`)
 	ledger.events.push({ fact_id: id, from: row.status, to, replacement, reason })
 	row.status = to
 	return row
