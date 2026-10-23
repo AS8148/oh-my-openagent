@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **The engine publishes its OpenTelemetry schema artifact.** `telemetry-schema.json` describes exactly what an OTel client of the engine may send, generated from the event schemas and kept byte-exact by a drift gate, so the telemetry collector can pin and enforce it. It is separate from the anonymous PostHog events, which are unchanged ([#10980](https://github.com/code-yeongyu/oh-my-openagent/pull/10980)).
 
+### Fixed
+
+- Parked facts leave the active queue without losing their contents; existing backlogs migrate once, manual retry restores them, and turn-end scans read only active entries. ([#11038](https://github.com/code-yeongyu/oh-my-openagent/pull/11038))
+
 **Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
 
 **The side panel's usage section reads the subscription limits the engine already keeps, so it shows the same numbers as the desktop, before the first turn, and makes no network request of its own ([#10553](https://github.com/code-yeongyu/oh-my-openagent/pull/10553)).** senpi now polls each signed-in Claude and ChatGPT subscription itself ([code-yeongyu/senpi#3687](https://github.com/code-yeongyu/senpi/pull/3687)); the panel only picks the serving account and draws its record. A rotation to an account the engine has not read yet shows nothing rather than the previous account's numbers. `side_panel.usage_poll_seconds` is retired: still accepted, now ignored.
