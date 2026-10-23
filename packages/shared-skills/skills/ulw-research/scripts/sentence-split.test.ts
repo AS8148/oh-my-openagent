@@ -60,6 +60,41 @@ describe("splitSentences", () => {
 		expectSlices(text, records)
 	})
 
+	test("#given Korean quoted speech closed right after a da ending #when split #then the quote stays inside one sentence", () => {
+		// given
+		const single = '그는 "매출이 늘었다."라고 말했다.'
+		const pair = '그는 "매출이 늘었다."라고 말했다. 다음 날 떨어졌다.'
+		const bracket = "그는 「좋아요.」라고 답했다."
+		// when
+		const singleRecords = splitSentences(single) as Sentence[]
+		const pairRecords = splitSentences(pair) as Sentence[]
+		const bracketRecords = splitSentences(bracket) as Sentence[]
+		// then
+		expect(singleRecords.map((r) => r.text)).toEqual([single])
+		expect(pairRecords.map((r) => r.text)).toEqual(['그는 "매출이 늘었다."라고 말했다.', "다음 날 떨어졌다."])
+		expect(pairRecords.map((r) => r.sid)).toEqual(["s1", "s2"])
+		expect(pairRecords[0]!.start).toBe(0)
+		expect(pairRecords[1]!.start).toBe(pair.indexOf("다음 날"))
+		expect(pairRecords[1]!.end).toBe(pair.length)
+		expect(bracketRecords.map((r) => r.text)).toEqual([bracket])
+		expectSlices(pair, pairRecords)
+	})
+
+	test("#given the word no #when split #then it is an abbreviation only before a number", () => {
+		// given
+		const answer = "The answer was no. Then we left."
+		const numbered = "See No. 5 for details. Then stop."
+		// when
+		const answerRecords = splitSentences(answer) as Sentence[]
+		const numberedRecords = splitSentences(numbered) as Sentence[]
+		// then
+		expect(answerRecords.map((r) => r.text)).toEqual(["The answer was no.", "Then we left."])
+		expect(answerRecords[1]!.start).toBe(answer.indexOf("Then"))
+		expect(numberedRecords.map((r) => r.text)).toEqual(["See No. 5 for details.", "Then stop."])
+		expectSlices(answer, answerRecords)
+		expectSlices(numbered, numberedRecords)
+	})
+
 	test("#given empty or whitespace-only text #when split #then no records are produced", () => {
 		// when / then
 		expect(splitSentences("")).toEqual([])

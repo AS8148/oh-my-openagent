@@ -4,7 +4,9 @@
 // start/end as offsets into the raw text, so text.slice(start, end) === record.text.
 // Boundaries: a line break; ". ! ?" followed by whitespace or end of line (known
 // abbreviations such as "e.g." excepted); and the Korean endings da. yo. nida. kka? even
-// with no following space. Plain Node ESM, no dependencies.
+// with no following space, unless closing punctuation follows (quoted speech such as
+// '...da."rago' then needs whitespace like any other terminator). "no." is an abbreviation
+// only before a number ("No. 5"). Plain Node ESM, no dependencies.
 
 import { normalizeText } from "./text-normalize.mjs"
 
@@ -27,6 +29,7 @@ function isAbbreviation(line, from, at) {
 	let k = at
 	while (k > from && !SPACE.test(line[k - 1])) k--
 	const word = line.slice(k, at).replace(/^[("'[]+/u, "").toLowerCase()
+	if (word === "no") return /^\s*\d/u.test(line.slice(at + 1))
 	return ABBREVIATIONS.has(word)
 }
 
@@ -47,7 +50,8 @@ function splitLine(line, base, out) {
 		let j = i + 1
 		while (j < line.length && (TERMINATORS.includes(line[j]) || CLOSERS.includes(line[j]))) j++
 		const atBreak = j >= line.length || SPACE.test(line[j])
-		const korean = isKoreanEnding(line, i)
+		const closed = [...line.slice(i + 1, j)].some((c) => CLOSERS.includes(c))
+		const korean = !closed && isKoreanEnding(line, i)
 		const abbreviation = line[i] === "." && !korean && isAbbreviation(line, from, i)
 		if ((atBreak || korean) && !abbreviation) {
 			pushSegment(line, base, from, j, out)
