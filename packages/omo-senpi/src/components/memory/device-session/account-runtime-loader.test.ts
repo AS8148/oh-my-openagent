@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import type { DeviceAccount } from "./account-source"
+import { SyncSidecarUnavailableError } from "../sync-runner"
 import { type DeviceAccountRuntimeModule, lazyCliAccountSource } from "./account-runtime-loader"
 
 const account = (accountId: string): DeviceAccount => ({
@@ -49,7 +50,9 @@ describe("lazyCliAccountSource", () => {
       return { createCliAccountSource: () => async () => account("acct_2") }
     })
 
-    await expect(source()).rejects.toThrow("Cannot find module '#omo-device-account-runtime'")
+    const failure = await source().then(() => undefined, (error: unknown) => error)
+    expect(failure).toBeInstanceOf(SyncSidecarUnavailableError)
+    expect(String(failure)).toContain("Cannot find module '#omo-device-account-runtime'")
     const [first, second] = await Promise.all([source(), source()])
 
     expect(first?.accountId).toBe("acct_2")
