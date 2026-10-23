@@ -62,7 +62,8 @@ composition notes, and anti-patterns. The two that silently break on the next sc
 
 Every layout or structure change gets one `Layout:` line before the code, an existing
 `DESIGN.md` included: its tokens and components do not decide this screen's spatial
-structure, so the line is added beside them in section 5, or written in the change
+structure, so the line goes under section 4 (Spacing & Layout), one per changed screen or
+region (keep the existing line when the pattern is unchanged), or into the change
 description when the project has no `DESIGN.md`. This is the one copy of the format;
 `/visual-qa` A12 checks the build against it:
 

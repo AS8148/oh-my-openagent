@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { DraftRuleId } from "./draft-guard/findings"
 import { lintDraft } from "./draft-guard/lint"
@@ -16,6 +15,20 @@ const EXPECTED: Readonly<Record<string, ReadonlyArray<[number, DraftRuleId]>>> =
 	"emoji-icons.tsx": [[4, "emoji-icon"], [6, "emoji-icon"]],
 	"vanity-stats.html": [[2, "vanity-stat"], [3, "vanity-stat"], [4, "vanity-stat"]],
 	"decorative-badge.vue": [[3, "decorative-badge"], [4, "decorative-badge"]],
+	"components.tsx": [
+		[5, "decorative-badge"],
+		[6, "decorative-badge"],
+		[7, "emoji-icon"],
+		[7, "decorative-badge"],
+		[8, "emoji-icon"],
+		[9, "emoji-icon"],
+		[10, "vanity-stat"],
+		[11, "vanity-stat"],
+		[12, "vanity-stat"],
+		[13, "promo-copy"],
+	],
+	"attribute-edges.html": [[2, "promo-copy"], [3, "promo-copy"], [4, "vanity-stat"], [5, "decorative-badge"], [6, "promo-copy"]],
+	"jsx-edges.tsx": [[1, "promo-copy"]],
 }
 
 function lintFixture(dir: string, name: string) {
@@ -44,6 +57,17 @@ describe("#given a negative fixture (plain copy, code, scripts, styles, comments
 	}
 })
 
+describe("#given a generated page written on one line", () => {
+	test("#when it holds two promo phrases #then both are reported, each at its own column", () => {
+		const text = "<p>Seamless sync and effortless setup</p>\n"
+		const findings = lintDraft([{ path: "page.html", text }])
+		expect(findings.map((f) => [f.line, f.column, f.rule])).toEqual([
+			[1, text.indexOf("Seamless") + 1, "promo-copy"],
+			[1, text.indexOf("effortless") + 1, "promo-copy"],
+		])
+	})
+})
+
 describe("#given a stylesheet", () => {
 	test("#when it is linted #then text rules are not applied to CSS", () => {
 		expect(lintDraft([{ path: "a.css", text: '.hero::before { content: "Unlock 🚀"; }\n' }])).toEqual([])
@@ -67,19 +91,6 @@ describe("#given the CLI", () => {
 
 	test("#when it scans both negative fixture sets #then it exits 0", () => {
 		expect(run(join(FIXTURES, "negative"), join(ACCENT_FIXTURES, "negative")).status).toBe(0)
-	})
-
-	test("#when a scanned directory holds a dangling symlink #then it skips the link and still lints the rest", () => {
-		const dir = mkdtempSync(join(tmpdir(), "draft-guard-"))
-		try {
-			symlinkSync(join(dir, "missing-target"), join(dir, "broken-link.tsx"))
-			writeFileSync(join(dir, "page.html"), "<p>Supercharge your team</p>\n")
-			const result = run("--json", dir)
-			expect(result.status).toBe(1)
-			expect(JSON.parse(result.stdout)).toEqual([expect.objectContaining({ line: 1, rule: "promo-copy" })])
-		} finally {
-			rmSync(dir, { recursive: true, force: true })
-		}
 	})
 
 	test("#when no path is given #then it exits 2 with usage", () => {

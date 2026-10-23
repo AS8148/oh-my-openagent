@@ -31,7 +31,7 @@ Before the first edit, name the references the request routes to and one reason 
 
 ## 1. Brief: decide what the screen is for before drawing it
 
-Write this for every screen you build or change, into `DESIGN.md` section 5 beside the screen's components, or into the change description when the project has no `DESIGN.md`. The build follows it; `/visual-qa` checks the rendered screen against it.
+Write this for every screen you build or change, into `DESIGN.md` section 5 beside the screen's components (the `Layout:` line goes under section 4, as `references/design/stylegallery.md` says), or into the change description when the project has no `DESIGN.md`. The build follows it; `/visual-qa` checks the rendered screen against it.
 
 - **Primary action.** Exactly one. It gets the prominent style; its peers differ by style, never by size.
 - **Information priorities 1-3.** In reading order. Priority 1 is the first thing the eye lands on.
