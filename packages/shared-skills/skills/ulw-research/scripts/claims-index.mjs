@@ -59,9 +59,24 @@ function verifiedIds(lines) {
 	return ids
 }
 
+/** Blank every line of a fenced code block (``` or ~~~, fences included) so nothing in it is read. */
+function unfenced(lines) {
+	let fence = null
+	return lines.map((line) => {
+		const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)
+		if (fence === null) {
+			if (marker) fence = marker[1]
+			return marker ? "" : line
+		}
+		const closes = marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && line.trim() === marker[1]
+		if (closes) fence = null
+		return ""
+	})
+}
+
 /** @returns {{ claims: { claim_id: string, statement: string, risk: string, status: string, in_verified: boolean }[], errors: string[] }} */
 export function indexClaims(markdown) {
-	const lines = markdown.split(/\r?\n/)
+	const lines = unfenced(markdown.split(/\r?\n/))
 	const errors = []
 	const headerAt = lines.findIndex((line) => line.trim().startsWith("|") && columnIndexes(splitRow(line)) !== null)
 	if (headerAt < 0) {

@@ -1,5 +1,6 @@
 // fact-ledger-schema.mjs - the fact ledger's vocabulary and validation: row fields and defaults,
 // kinds, statuses, qualifiers, and validateLedger over rows, status events, and their history.
+// The grammar it encodes is references/fact-ledger-grammar.md.
 // Pure functions with no IO; fact-ledger.mjs owns reading, writing, and row changes. node: builtins only.
 
 export const LEDGER_SCHEMA_VERSION = 1
@@ -135,27 +136,85 @@ function validateRow(row, index, errors) {
 	check(errors, row.status === undefined || FACT_STATUSES.includes(row.status), `${at}.status must be one of ${FACT_STATUSES.join(", ")}`)
 }
 
-function validateEvent(event, index, ids, errors) {
-	const at = `events[${index}]`
-	if (!isObject(event)) return errors.push(`${at} must be an object`)
-	check(errors, ids.has(event.fact_id), `${at}.fact_id must name a ledger row`)
-	check(errors, FACT_STATUSES.includes(event.from), `${at}.from must be one of ${FACT_STATUSES.join(", ")} (fact ${event.fact_id})`)
-	check(errors, event.to === "retracted" || event.to === "superseded", `${at}.to must be retracted or superseded (fact ${event.fact_id})`)
-	check(errors, event.replacement === null || ids.has(event.replacement), `${at}.replacement must be null or a ledger row`)
-	check(errors, event.to !== "retracted" || event.replacement === null, `${at}: ${event.fact_id} is retracted but names replacement ${event.replacement}`)
-	check(errors, isNonEmpty(event.reason), `${at}.reason must be a non-empty string`)
+// The status machine and event rule of references/fact-ledger-grammar.md. validateLedger replays
+// events through transitionError, and every writer in fact-ledger.mjs calls it before appending.
+export const TRANSITIONS = Object.freeze({ active: Object.freeze(["retracted", "superseded"]), retracted: Object.freeze([]), superseded: Object.freeze([]) })
+const EVENT_FIELDS = Object.freeze(["fact_id", "from", "to", "replacement", "reason"])
+
+/**
+ * @param {Map<string, string>} statuses each fact's status at the event's position
+ * @returns {string | null} why the event is not a legal transition, or null
+ */
+export function transitionError(statuses, event) {
+	if (!isObject(event)) return "an event must be an object"
+	const id = event.fact_id
+	if (!statuses.has(id)) return `no ledger row ${id}`
+	if (EVENT_FIELDS.some((key) => !Object.hasOwn(event, key)) || Object.keys(event).some((key) => !EVENT_FIELDS.includes(key))) {
+		return `${id}: an event has exactly the fields ${EVENT_FIELDS.join(", ")}`
+	}
+	const current = statuses.get(id)
+	if (event.from !== current) return `${id} is ${current}, but the event moves it from ${event.from}`
+	if (!TRANSITIONS[current].includes(event.to)) return `${id} cannot move from ${current} to ${event.to}`
+	if (event.to === "superseded") {
+		if (event.replacement === null) return `supersede ${id} needs a replacement row; use retract for a fact with no replacement`
+		if (event.replacement === id) return `${id} cannot be its own replacement`
+		if (!statuses.has(event.replacement)) return `no replacement row ${event.replacement} for ${id}`
+		if (statuses.get(event.replacement) !== "active") return `replacement row ${event.replacement} is ${statuses.get(event.replacement)} (superseding ${id})`
+	} else if (event.replacement !== null) return `${id} is ${event.to} but names replacement ${event.replacement}`
+	if (!isNonEmpty(event.reason)) return `a reason is required to mark ${id} ${event.to}`
+	return null
 }
 
-/** Each row's status must be the one its last event moved it to; a non-active row needs an event. */
+/** Replay every event from all-active; each row's status must be where its event chain leaves it. */
 function validateHistory(ledger, errors) {
-	const last = new Map()
-	for (const event of ledger.events) if (isObject(event)) last.set(event.fact_id, event.to)
+	const statuses = new Map(ledger.rows.filter(isObject).map((row) => [row.fact_id, "active"]))
+	const counts = new Map()
+	ledger.events.forEach((event, index) => {
+		const problem = transitionError(statuses, event)
+		if (problem) errors.push(`events[${index}]: ${problem}`)
+		if (!isObject(event) || !statuses.has(event.fact_id) || !FACT_STATUSES.includes(event.to)) return
+		statuses.set(event.fact_id, event.to)
+		counts.set(event.fact_id, (counts.get(event.fact_id) ?? 0) + 1)
+	})
 	ledger.rows.forEach((row, index) => {
 		if (!isObject(row) || !FACT_STATUSES.includes(row.status)) return
-		const to = last.get(row.fact_id)
-		if (to === undefined) check(errors, row.status === "active", `rows[${index}]: ${row.fact_id} is ${row.status} but has no status event`)
+		const to = statuses.get(row.fact_id)
+		if (!counts.has(row.fact_id)) check(errors, row.status === "active", `rows[${index}]: ${row.fact_id} is ${row.status} but has no status event`)
 		else check(errors, to === row.status, `rows[${index}]: ${row.fact_id} has status ${row.status} but its last event moves it to ${to}`)
 	})
+}
+
+/** operands and derived_from name existing rows, never the row itself, and close no cycle. */
+export function provenanceErrors(rows) {
+	const errors = []
+	const refs = new Map()
+	for (const row of rows) if (isObject(row)) refs.set(row.fact_id, [row.operands, row.derived_from].flatMap((list) => (Array.isArray(list) ? list : [])))
+	rows.forEach((row, index) => {
+		for (const key of ["operands", "derived_from"]) {
+			if (!isObject(row) || !Array.isArray(row[key])) continue
+			for (const ref of row[key]) {
+				if (ref === row.fact_id) errors.push(`rows[${index}].${key}: ${ref} references itself`)
+				else check(errors, refs.has(ref), `rows[${index}].${key}: ${row.fact_id} references ${ref}, which has no ledger row`)
+			}
+		}
+	})
+	const state = new Map()
+	const visit = (id, path) => {
+		if (state.get(id) === "done") return null
+		if (state.get(id) === "open") return [...path.slice(path.indexOf(id)), id]
+		state.set(id, "open")
+		for (const next of refs.get(id)) {
+			const cycle = next !== id && refs.has(next) ? visit(next, [...path, id]) : null
+			if (cycle) return cycle
+		}
+		state.set(id, "done")
+		return null
+	}
+	for (const id of refs.keys()) {
+		const cycle = visit(id, [])
+		if (cycle) return [...errors, `${cycle[0]} derives from itself through ${cycle.join(" -> ")}`]
+	}
+	return errors
 }
 
 /** @returns {string[]} every schema error; empty when the ledger is valid. */
@@ -170,18 +229,12 @@ export function validateLedger(ledger) {
 	ledger.rows.forEach((row, index) => {
 		if (!isObject(row)) return
 		check(errors, !ids.has(row.fact_id), `rows[${index}].fact_id ${row.fact_id} is a duplicate`)
-		check(errors, row.label === undefined || !labels.has(row.label), `rows[${index}] has duplicate label ${row.label}`)
+		check(errors, row.label === undefined || !labels.has(row.label), `rows[${index}]: ${row.fact_id} has duplicate label ${row.label}`)
 		ids.add(row.fact_id)
 		labels.add(row.label)
 	})
-	ledger.rows.forEach((row, index) => {
-		for (const key of ["operands", "derived_from"]) {
-			if (isObject(row) && Array.isArray(row[key])) for (const ref of row[key]) check(errors, ids.has(ref), `rows[${index}].${key} references ${ref}, which has no ledger row`)
-		}
-	})
-	if (Array.isArray(ledger.events)) {
-		ledger.events.forEach((event, index) => validateEvent(event, index, ids, errors))
-		validateHistory(ledger, errors)
-	} else errors.push("events must be an array")
+	errors.push(...provenanceErrors(ledger.rows))
+	if (Array.isArray(ledger.events)) validateHistory(ledger, errors)
+	else errors.push("events must be an array")
 	return errors
 }

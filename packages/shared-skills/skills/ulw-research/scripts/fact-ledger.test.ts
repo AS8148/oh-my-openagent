@@ -244,9 +244,9 @@ describe("validateLedger checks events against rows", () => {
 		retractRow(ledger, "F1", "wrong page")
 		ledger.events[0].from = "gone"
 		const errors = validateLedger(ledger)
-		expect(errors.some((e: string) => /events\[0\]\.from must be one of active, superseded, retracted \(fact F1\)/.test(e))).toBe(true)
+		expect(errors.some((e: string) => /events\[0\]: F1 is active, but the event moves it from gone/.test(e))).toBe(true)
 		ledger.events[0].from = "active"
 		ledger.events[0].to = "active"
-		expect(validateLedger(ledger).some((e: string) => /events\[0\]\.to must be retracted or superseded \(fact F1\)/.test(e))).toBe(true)
+		expect(validateLedger(ledger).some((e: string) => /events\[0\]: F1 cannot move from active to active/.test(e))).toBe(true)
 	})
 })

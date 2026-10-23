@@ -33,6 +33,25 @@ describe("indexClaims", () => {
 		expect(errors.length).toBeGreaterThanOrEqual(2)
 	})
 
+	test("fenced code blocks are skipped: a fenced heading does not end the digest and a fenced entry does not verify", () => {
+		const text = [
+			"| claim_id | statement | risk tier | status |",
+			"|---|---|---|---|",
+			"| C1 | one | high | supported |",
+			"| C2 | two | low | supported |",
+			"",
+			"## verified-claims",
+			"```",
+			"# not a heading",
+			"- C2",
+			"```",
+			"- C1",
+		].join("\n")
+		const { claims, errors } = indexClaims(text)
+		expect(errors).toEqual([])
+		expect(claims.map((claim: { in_verified: boolean }) => claim.in_verified)).toEqual([true, false])
+	})
+
 	test("a document without the claim table returns an error", () => {
 		const { claims, errors } = indexClaims("# claim graph\n\nno table here\n")
 		expect(claims).toEqual([])

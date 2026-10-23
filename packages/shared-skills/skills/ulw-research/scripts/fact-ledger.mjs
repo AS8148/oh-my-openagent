@@ -7,9 +7,9 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
-import { DECIMAL, LEDGER_SCHEMA_VERSION, ROW_DEFAULTS, ROW_FIELDS, isNonEmpty, isString, validateLedger } from "./fact-ledger-schema.mjs"
+import { DECIMAL, LEDGER_SCHEMA_VERSION, ROW_DEFAULTS, ROW_FIELDS, isString, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
 
-export { FACT_KINDS, FACT_STATUSES, LEDGER_SCHEMA_VERSION, OPERATIONS, QUALIFIERS, ROW_FIELDS, validateLedger } from "./fact-ledger-schema.mjs"
+export { FACT_KINDS, FACT_STATUSES, LEDGER_SCHEMA_VERSION, OPERATIONS, QUALIFIERS, ROW_FIELDS, TRANSITIONS, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
 
 export const LEDGER_FILENAME = "fact-ledger.json"
 
@@ -37,12 +37,14 @@ export function writeLedger(dir, ledger) {
 	return file
 }
 
+const ID_NUMBER = Object.freeze({ F: /^F(\d+)$/, Q: /^Q(\d+)$/ })
+
 /** F<n> for every value row (measured, derived, assumed, converted); Q<n> for quotes. */
 export function nextId(ledger, kind) {
 	const prefix = kind === "quote" ? "Q" : "F"
 	let max = 0
 	for (const row of ledger.rows) {
-		const match = new RegExp(`^${prefix}(\\d+)$`).exec(row.fact_id ?? "")
+		const match = ID_NUMBER[prefix].exec(row.fact_id ?? "")
 		if (match) max = Math.max(max, Number(match[1]))
 	}
 	return `${prefix}${max + 1}`
@@ -60,7 +62,11 @@ export function exactFromDecimal(value) {
 	return { num: `${value.startsWith("-") && num !== 0n ? "-" : ""}${num}`, den: `${den}` }
 }
 
-/** Fill defaults, assign the next id, validate the whole ledger, then append. */
+/**
+ * Fill defaults, assign the next id, validate the whole ledger (provenance included), then append.
+ * Only measured rows get exact from their decimal: derived and converted rows carry the exact
+ * that derive computed from the operands and factor, never one read back from the rounded value.
+ */
 export function addRow(ledger, row) {
 	const filled = { ...structuredClone(ROW_DEFAULTS), ...row, fact_id: row.fact_id ?? nextId(ledger, row.kind) }
 	if (filled.kind === "measured" && filled.exact === null && isString(filled.value) && DECIMAL.test(filled.value)) {
@@ -73,15 +79,13 @@ export function addRow(ledger, row) {
 	return ordered
 }
 
+/** Build the event from the row's current status and append it only if transitionError allows it. */
 function changeStatus(ledger, id, to, replacement, reason) {
 	const row = ledger.rows.find((candidate) => candidate.fact_id === id)
-	if (!row) throw new CliError(`no ledger row ${id}`)
-	if (row.status !== "active") throw new CliError(`ledger row ${id} is already ${row.status}`)
-	if (!isNonEmpty(reason)) throw new CliError(`a reason is required to mark ${id} ${to}`)
-	const next = replacement === null ? null : ledger.rows.find((candidate) => candidate.fact_id === replacement && candidate.fact_id !== id)
-	if (replacement !== null && !next) throw new CliError(`no replacement row ${replacement}`)
-	if (next && next.status !== "active") throw new CliError(`replacement row ${replacement} is ${next.status}`)
-	ledger.events.push({ fact_id: id, from: row.status, to, replacement, reason })
+	const event = { fact_id: id, from: row?.status ?? null, to, replacement: replacement ?? null, reason }
+	const problem = transitionError(new Map(ledger.rows.map((candidate) => [candidate.fact_id, candidate.status])), event)
+	if (problem) throw new CliError(problem)
+	ledger.events.push(event)
 	row.status = to
 	return row
 }
@@ -91,9 +95,6 @@ export function retractRow(ledger, id, reason) {
 }
 
 export function supersedeRow(ledger, id, replacementId, reason) {
-	if (replacementId === null || replacementId === undefined) {
-		throw new CliError(`supersede ${id} needs a replacement row; use retract for a fact with no replacement`)
-	}
 	return changeStatus(ledger, id, "superseded", replacementId, reason)
 }
 
