@@ -28,6 +28,7 @@ describe("project memory grant Windows canonical paths", () => {
     win32.join(shortRepo, "reference", "deploy.md"),
     "c:/users/RUNNER~1/memory/agents/PROJECT-A/repo/reference/deploy.md",
     "c:/USERS/runneradmin/memory/agents/PROJECT-A/repo\\reference/deploy.md",
+    win32.join(shortRepo, "reference", "missing.md"),
   ]) {
     test(`#given a native canonical grant #when reading ${target} #then the note is granted`, async () => {
       const own = context()
@@ -40,7 +41,6 @@ describe("project memory grant Windows canonical paths", () => {
   }
 
   for (const target of [
-    win32.join(shortRepo, "reference", "missing.md"),
     win32.join(shortRepo, "..", "..", "project-b", "repo", "reference", "deploy.md"),
     `${shortRepo}-other\\reference\\deploy.md`,
     shortRepo,

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Project memory reads work on Windows when a path uses a short user-directory name.** Read grants now compare native canonical paths on both sides, accounting for Windows case and separator differences without granting sibling memory repositories. Missing or unreadable paths remain denied. ([#10982](https://github.com/code-yeongyu/oh-my-openagent/pull/10982))
+**Project memory reads work on Windows when a path uses a short user-directory name.** Read grants now compare native canonical paths on both sides, accounting for Windows case and separator differences without granting sibling memory repositories. A granted repository that is later replaced by a link elsewhere is no longer covered, and a note that does not exist yet is still allowed so the read can report it missing. ([#10982](https://github.com/code-yeongyu/oh-my-openagent/pull/10982))
 
 **Anonymous usage stats now count how many accounts you have linked per provider.** `session_started` reports, per provider kind, how many accounts the engine lists for it (the same list the app's account list shows: signed-in accounts and environment-variable slots), used or not, as capped counts only, never an account name, email, token or value ([#10919](https://github.com/code-yeongyu/oh-my-openagent/issues/10919)).
 
