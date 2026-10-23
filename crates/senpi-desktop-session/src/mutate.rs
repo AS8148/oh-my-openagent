@@ -14,11 +14,11 @@ use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, MutexGuard};
 use senpi_desktop_core::backend::DeliveryMode;
-use senpi_desktop_core::error::{CoreResult, DesktopError, ErrorCode};
+use senpi_desktop_core::error::{CoreResult, DesktopError, ErrorCode, TccPermission};
 use senpi_desktop_core::protocol_results::AuditEvent;
 use senpi_desktop_safety::{
-    gate, FrameContext, FrameId, GateError, LockState, MonotonicClock, MutatingAction, PermissionGate, StopPolicy,
-    Supervisor,
+    gate, FrameContext, FrameId, GateError, LockState, MonotonicClock, MutatingAction, PermissionGate, StopPathReason,
+    StopPolicy, Supervisor,
 };
 
 use crate::audit::audit_event;
@@ -273,12 +273,17 @@ impl Worker {
 /// latches a stop, because nobody pressed one.
 pub(crate) fn interruption(supervisor: &Supervisor, policy: &StopPolicy) -> Option<DesktopError> {
     let status = supervisor.status();
-    if supervisor.is_suspended() || status.suspended {
+    if status.suspended {
         return Some(DesktopError::from(GateError::Suspended));
     }
-    status
-        .stop_path_unavailable(policy)
-        .map(|reason| DesktopError::from(GateError::StopPathUnavailable { reason }))
+    status.stop_path_unavailable(policy).map(|reason| {
+        DesktopError::from(match reason {
+            StopPathReason::AccessibilityDenied => GateError::PermissionDenied {
+                permission: TccPermission::Accessibility,
+            },
+            reason => GateError::StopPathUnavailable { reason },
+        })
+    })
 }
 
 /// `prompt-or-granted` (Wayland before the first input) lets the action

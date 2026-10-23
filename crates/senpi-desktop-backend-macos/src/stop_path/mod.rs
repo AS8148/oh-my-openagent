@@ -24,7 +24,9 @@ use std::thread;
 use std::time::Duration;
 
 use parking_lot::{Condvar, Mutex};
-use senpi_desktop_safety::{Chord, StopPathError, StopPathFailure, StopPathId, StopPathListener, Supervisor};
+use senpi_desktop_safety::{
+    Chord, DeafProbe, StopPathError, StopPathFailure, StopPathId, StopPathListener, Supervisor,
+};
 
 use chord::{AtomicHotkey, Hotkey};
 pub use chord::DEFAULT_STOP_CHORD;
@@ -66,8 +68,6 @@ struct Control {
     failures: u64,
     /// Stops this listener latched.
     stops: u64,
-    /// Secure Event Input was on at the last check.
-    deaf: bool,
     restart: bool,
     shutdown: bool,
     #[cfg(test)]
@@ -122,10 +122,8 @@ impl Shared {
         self.changed.notify_all();
     }
 
-    /// A live tap counts only while it can hear the chord.
     fn set_live(&self, live: bool) {
-        let hears = !live || self.hears_keys();
-        self.supervisor.set_live(StopPathId::Global, live && hears);
+        self.supervisor.set_live(StopPathId::Global, live);
         self.update(|control| {
             control.live = live;
             #[cfg(test)]
@@ -144,25 +142,15 @@ impl Shared {
     }
 
     fn heartbeat(&self) {
-        if self.hears_keys() {
-            self.supervisor.heartbeat(StopPathId::Global);
-        }
+        self.supervisor.heartbeat(StopPathId::Global);
     }
 
-    /// Re-reads Secure Event Input. While it is on, the tap stays up but the
-    /// `Global` path stops authorizing input and names the cause; once it
-    /// ends, the path is live again without re-creating the tap.
-    fn hears_keys(&self) -> bool {
-        let deaf = (self.secure_input)();
-        let was_deaf = std::mem::replace(&mut self.control.lock().deaf, deaf);
-        if deaf {
-            self.supervisor.note_global_failure(Some(StopPathFailure::SecureInput));
-            self.supervisor.set_live(StopPathId::Global, false);
-        } else if was_deaf {
-            self.supervisor.note_global_failure(None);
-            self.supervisor.set_live(StopPathId::Global, true);
-        }
-        !deaf
+    /// Reports Secure Event Input as deafness. The supervisor asks on every
+    /// status read, so the gate and each typed character see it at once; the
+    /// tap itself stays up and is not re-created when secure input ends.
+    fn deaf_probe(&self) -> DeafProbe {
+        let secure_input = self.secure_input;
+        Arc::new(move || secure_input().then_some(StopPathFailure::SecureInput))
     }
 
     /// The tap saw a key-down; latches a stop when it is the chord.
@@ -259,6 +247,7 @@ impl StopPathListener for CgEventTapListener {
             (Arc::clone(shared), failures)
         } else {
             let shared = Arc::new(Shared::new(sup, hotkey)?);
+            shared.supervisor.set_deaf_probe(Some(shared.deaf_probe()));
             let listener = Arc::clone(&shared);
             thread::Builder::new()
                 .name(THREAD_NAME.to_owned())
@@ -294,6 +283,7 @@ impl StopPathListener for CgEventTapListener {
 impl Drop for CgEventTapListener {
     fn drop(&mut self) {
         if let Some(shared) = &self.shared {
+            shared.supervisor.set_deaf_probe(None);
             shared.update(|control| control.shutdown = true);
         }
     }
