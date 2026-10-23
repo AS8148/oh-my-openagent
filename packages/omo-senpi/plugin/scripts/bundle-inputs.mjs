@@ -32,6 +32,34 @@ export const RECIPE = [
   },
 ]
 
+// Output-steering knobs the recipe scripts read. build:omo-native sets OMO_SENPI_PLUGIN_OUTPUT (and a developer
+// shell may too): inherited, it points the --check steps at a staged copy outside the repo, whose reads drop
+// out of the map. The trace always checks the in-repo outputs, so these never reach the recipe.
+export const SCRUBBED_ENV = [
+  "OMO_SENPI_PLUGIN_OUTPUT",
+  "OMO_LSP_DAEMON_TARGET",
+  "OMO_AST_GREP_MCP_TARGET",
+  "OMO_AGENT_TOOLKIT_SOURCE_ENTRY",
+  "OMO_AGENT_TOOLKIT_TARGET",
+  "OMO_SENPI_STAGE_FAIL_AFTER_BACKUP",
+]
+
+/** The environment every recipe step runs in: the caller's, minus SCRUBBED_ENV, plus the trace wiring. */
+export function recipeEnv(scratch, base = process.env) {
+  const env = { ...base }
+  for (const key of SCRUBBED_ENV) delete env[key]
+  return {
+    ...env,
+    OMO_BUNDLE_INPUTS_TRACE: join(scratch, "trace.jsonl"),
+    OMO_BUNDLE_INPUTS_TMP: scratch,
+    OMO_BUNDLE_INPUTS_CODEX_SCRIPT: pathToFileURL(join(repoRoot, "script", "build-codex-install.ts")).href,
+    OMO_LSP_DAEMON_DIST: join(scratch, "no-local-build", "lsp-daemon-dist"),
+    OMO_AST_GREP_MCP_ENTRY: join(scratch, "no-local-build", "ast-grep-cli.js"),
+    OMO_X_SEARCH_SKILL_TARGET: join(scratch, "no-local-build", "x-search", "SKILL.md"),
+    NODE_OPTIONS: `${base.NODE_OPTIONS ?? ""} --import=${pathToFileURL(tracer).href}`.trim(),
+  }
+}
+
 const portable = (path) => path.split(sep).join("/")
 const RESOLUTION_FILES = ["package.json", "tsconfig.json", "bunfig.toml"]
 
@@ -52,6 +80,7 @@ export function mapFromTrace(rows, { repoRoot: root, exists = existsSync, realpa
   }
   for (const { kind, path } of rows) {
     if (kind === "missing-metafile") throw new Error(`bundle-inputs: the bundler metafile was not written (${path}); the trace would under-report`)
+    if (kind === "missing-module-hooks") throw new Error(`bundle-inputs: a module load ran without module hooks (${path}); the trace would under-report`)
     const rel = inRepo(path)
     if (rel === undefined || rel === BUNDLE_INPUTS_PATH) continue
     if (kind === "list") { directories.add(rel); continue }
@@ -80,10 +109,10 @@ export function renderBundleInputs(map) {
 
 export function traceBundleInputs() {
   const scratch = mkdtempSync(join(tmpdir(), "omo-bundle-inputs-"))
-  const trace = join(scratch, "trace.jsonl")
+  const env = recipeEnv(scratch)
+  const trace = env.OMO_BUNDLE_INPUTS_TRACE
   try {
     for (const step of RECIPE) {
-      const env = { ...process.env, OMO_BUNDLE_INPUTS_TRACE: trace, OMO_BUNDLE_INPUTS_TMP: scratch, OMO_BUNDLE_INPUTS_CODEX_SCRIPT: pathToFileURL(join(repoRoot, "script", "build-codex-install.ts")).href, OMO_LSP_DAEMON_DIST: join(scratch, "no-local-build", "lsp-daemon-dist"), OMO_AST_GREP_MCP_ENTRY: join(scratch, "no-local-build", "ast-grep-cli.js"), OMO_X_SEARCH_SKILL_TARGET: join(scratch, "no-local-build", "x-search", "SKILL.md"), NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(tracer).href}`.trim() }
       const result = spawnSync(step.command, step.args, { cwd: repoRoot, env, stdio: ["ignore", "ignore", "inherit"] })
       if (result.error !== undefined) throw result.error
       if (result.status !== 0) throw new Error(`bundle-inputs: recipe step '${step.name}' exited ${result.status}`)
