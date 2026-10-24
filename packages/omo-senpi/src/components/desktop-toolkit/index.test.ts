@@ -37,7 +37,7 @@ function setup(options: { readonly sessionContext?: unknown; readonly timeoutMs?
   createDesktopToolkitComponent({ timeoutMs: options.timeoutMs ?? 1_000 }).register(pi, ctx)
   const tool = pi.tools.find((entry) => entry.name === DESKTOP_TOOLKIT_TOOL_NAME) as unknown as ToolkitTool
   const nextRequest = async () => {
-    while (pi.rpcEvents.length === 0) await Promise.resolve()
+    expect(pi.rpcEvents.length).toBeGreaterThan(0)
     return pi.rpcEvents.at(-1) as { name: string; data: { requestId: string; toolkit: string } }
   }
   return { pi, handlers, tool, nextRequest }
