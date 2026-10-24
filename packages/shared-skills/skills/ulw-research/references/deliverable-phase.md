@@ -78,6 +78,8 @@ format description: none
 
 ### The fidelity fields and the lock
 
+The values below are read by `scripts/fidelity-policy.mjs`, the single registry: `SOURCE_FLOOR_RULES` and `parseSourceFloor()` for the `source floor` forms (`pointedFlag` in source registration reads the same grammar), and `FIDELITY_VALUE_RULES` for `derived numbers`, `languages`, `fallback`, and `meaning check`.
+
 Beside `## Deliverable`, the brief records what the report must stay faithful to, under `## Fidelity`. The fields are inferred first; only `as of`, `meaning check`, `source floor`, and `derived numbers` may be asked, each on its own trigger, in the same question call as Q1-Q3 (at most four questions in that call). The inference rules, the triggers, and the question texts are in `SKILL.md`.
 
 | Field | Values | Default | Read by |

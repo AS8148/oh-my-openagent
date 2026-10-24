@@ -14,9 +14,37 @@ import { join, resolve } from "node:path"
 
 import { CliError } from "./cli-support.mjs"
 import { DEFECT_CODES } from "./contracts.mjs"
-import { requireLockedBrief } from "./fidelity-brief.mjs"
+import { KIND_RULES } from "./fact-ledger-kinds.mjs"
+import { meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
 
-const DERIVED_KINDS = new Set(["derived", "converted", "assumed"])
+export { meaningCheckEnabled }
+
+/**
+ * Ledger kinds a brief with `derived numbers: none` refuses. A policy list, not the ledger's
+ * derivation set: it also names assumed. Every name must be a KIND_RULES kind (checked at load).
+ */
+const DERIVED_KINDS = Object.freeze(["derived", "converted", "assumed"])
+for (const kind of DERIVED_KINDS) {
+	if (!Object.hasOwn(KIND_RULES, kind)) throw new Error(`fidelity-policy: ${kind} is not a KIND_RULES kind`)
+}
+
+/** How each field value the fill stages consume is read; the single owner of those readings. */
+export const FIDELITY_VALUE_RULES = Object.freeze({
+	derivedKinds: DERIVED_KINDS,
+	derivedRefused: (kind) => DERIVED_KINDS.includes(kind),
+	derivedNone: (value) => /^none$/iu.test(value.trim()),
+	fallback: (value) => (/^omit$/iu.test(value.trim()) ? "omit" : "quote"),
+	translations: (value) => /with translation beside/iu.test(value),
+	meaningCheck: (value) => meaningCheckEnabled({ fields: { "meaning check": value } }),
+})
+
+/** The `source floor` forms: `pattern` reads one, `listed` forms carry a comma list. */
+export const SOURCE_FLOOR_RULES = Object.freeze([
+	Object.freeze({ kind: "standard", form: "standard", pattern: /^standard$/iu, listed: false }),
+	Object.freeze({ kind: "primary", form: "primary only", pattern: /^primary only$/iu, listed: false }),
+	Object.freeze({ kind: "pointed", form: "pointed only: <list>", pattern: /^pointed only:\s*(.+)$/iu, listed: true }),
+	Object.freeze({ kind: "classes", form: "classes: <list>", pattern: /^classes:\s*(.+)$/iu, listed: true }),
+])
 const lineOf = (text, at) => text.slice(0, at).split("\n").length
 const listOf = (text) => text.split(",").map((entry) => entry.trim()).filter(Boolean)
 
@@ -40,21 +68,27 @@ export function lockedBrief(command, flags) {
 	return { parsed: null, refusal: { json, summary: `${command}: ${lock.defects[0].message}`, exitCode: 1 } }
 }
 
-/** The source floor as a rule, or null for `standard`. */
-function floorRule(value) {
+/**
+ * The source floor as a rule, or null for `standard`; a usage error for any other text.
+ * @returns {null | { kind: "primary" } | { kind: "pointed" | "classes", list: string[] }}
+ */
+export function parseSourceFloor(value) {
 	const text = value.trim()
-	if (/^standard$/iu.test(text)) return null
-	if (/^primary only$/iu.test(text)) return { kind: "primary" }
-	const listed = /^(pointed only|classes):\s*(.+)$/iu.exec(text)
-	if (listed) return { kind: listed[1].toLowerCase() === "classes" ? "classes" : "pointed", list: listOf(listed[2]) }
-	throw new CliError(`source floor "${value}" is not standard, primary only, pointed only: <list>, or classes: <list>`)
+	for (const rule of SOURCE_FLOOR_RULES) {
+		const match = rule.pattern.exec(text)
+		if (!match) continue
+		if (rule.kind === "standard") return null
+		return rule.listed ? { kind: rule.kind, list: listOf(match[1]) } : { kind: rule.kind }
+	}
+	throw new CliError(`source floor "${value}" is not ${SOURCE_FLOOR_RULES.map((rule) => rule.form).join(", ")}`)
 }
 
 function hostOf(url) {
 	return typeof url === "string" && URL.canParse(url) ? new URL(url).hostname.toLowerCase() : null
 }
 
-function insideFloor(rule, sourceId, meta) {
+/** Whether one source (id and meta.json) satisfies a parsed floor rule. */
+export function sourceInsideFloor(rule, sourceId, meta) {
 	if (rule.kind === "primary") return meta.provenance === "primary"
 	if (rule.kind === "pointed") return rule.list.includes(sourceId) || rule.list.includes(meta.url)
 	const host = hostOf(meta.url)
@@ -63,11 +97,12 @@ function insideFloor(rule, sourceId, meta) {
 
 /** The fields fact fill consumes: the fallback form and whether a translation binds to its quote. */
 export function fillPolicy(parsed) {
+	const field = (name) => parsed.fields[name]
 	return {
-		fallback: /^omit$/iu.test(parsed.fields.fallback.trim()) ? "omit" : "quote",
-		translations: /with translation beside/iu.test(parsed.fields.languages),
-		derivedNone: /^none$/iu.test(parsed.fields["derived numbers"].trim()),
-		floor: floorRule(parsed.fields["source floor"]),
+		fallback: FIDELITY_VALUE_RULES.fallback(field("fallback")),
+		translations: FIDELITY_VALUE_RULES.translations(field("languages")),
+		derivedNone: FIDELITY_VALUE_RULES.derivedNone(field("derived numbers")),
+		floor: parseSourceFloor(field("source floor")),
 	}
 }
 
@@ -103,12 +138,12 @@ export function policyErrors(text, found, ledger, sessionDir, policy) {
 	for (const pointer of found) {
 		const row = rows.get(pointer.parsed?.id)
 		if (row === undefined || row.status !== "active") continue
-		if (policy.derivedNone && DERIVED_KINDS.has(row.kind)) {
+		if (policy.derivedNone && FIDELITY_VALUE_RULES.derivedRefused(row.kind)) {
 			errors.push(defect("derived_not_allowed", pointer, text, `${row.fact_id} is ${row.kind}; the brief records derived numbers: none`))
 		}
 		const sources = sourcesOf(row, rows)
 		if (sources.length === 0) continue
-		const outside = policy.floor === null ? [] : sources.filter((id) => !insideFloor(policy.floor, id, metaOf(sessionDir, id, metas)))
+		const outside = policy.floor === null ? [] : sources.filter((id) => !sourceInsideFloor(policy.floor, id, metaOf(sessionDir, id, metas)))
 		if (row.outside_floor !== outside.length > 0) cacheChanged = true
 		row.outside_floor = outside.length > 0
 		if (outside.length > 0) errors.push(defect("source_outside_floor", pointer, text, `${row.fact_id} rests on ${outside.join(", ")}, outside the source floor`))

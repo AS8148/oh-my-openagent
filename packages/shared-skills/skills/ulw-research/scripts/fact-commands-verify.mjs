@@ -18,12 +18,14 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
+import { countDefects } from "./contracts.mjs"
 import { recompute } from "./fact-derive.mjs"
 import { LEDGER_FILENAME, readLedger } from "./fact-ledger.mjs"
+import { validateLedger } from "./fact-ledger-schema.mjs"
 import { lockedBrief } from "./fidelity-policy.mjs"
 import { blocksDelivery, checkFidelity, deliveryBlockReason } from "./gates-fidelity.mjs"
 import { parseMarkdown } from "./md-lite.mjs"
-import { escapeHtml, renderQuote, renderValueHtml } from "./placeholder.mjs"
+import { escapeHtml, parseRenderedQuote, renderQuote, renderValueHtml } from "./placeholder.mjs"
 import { sessionDirOf } from "./source-commands.mjs"
 
 export const FIDELITY_RECORD = "fidelity-defects.json"
@@ -38,26 +40,34 @@ function readText(path) {
 	}
 }
 
-const TAG = { heading: null, paragraph: "p", list_item: "li", blockquote: "blockquote", code: "code" }
-const GROUP = { list_item: ["<ul>", "</ul>"], table_row: ["<table>", "</table>"] }
+/**
+ * md-lite block kind -> its projection: the element tag (null = h<level>) and, for a run of one kind,
+ * the container that wraps the run. Code and table rows also take the specialized bodies below.
+ */
+export const MD_HTML_BLOCK_RULES = Object.freeze({
+	heading: Object.freeze({ tag: null }),
+	paragraph: Object.freeze({ tag: "p" }),
+	list_item: Object.freeze({ tag: "li", group: Object.freeze(["<ul>", "</ul>"]) }),
+	blockquote: Object.freeze({ tag: "blockquote" }),
+	code: Object.freeze({ tag: "code" }),
+	table_row: Object.freeze({ tag: "tr", group: Object.freeze(["<table>", "</table>"]) }),
+})
 
 /** Escaped text with inline links and code spans kept as elements, so a URL is never read as prose. */
-const inline = (text) =>
+export const projectMarkdownInline = (text) =>
 	escapeHtml(text)
 		.replace(/\[([^\]]+)\]\(([^)\s]+)\)/gu, '<a href="$2">$1</a>')
 		.replace(/`([^`]+)`/gu, "<code>$1</code>")
-
-const QUOTED = /^"([\s\S]*)" (\[S\d+\])$/u
 
 /** The element the HTML fill writes for one fill-map entry, or null when its bytes were edited since. */
 function entryHtml(text, entry, rows) {
 	const body = text.slice(entry.start, entry.end)
 	if (body !== entry.rendered) return null
 	const row = rows.get(entry.fact_id)
-	if (entry.translates) return `<span data-translates="${entry.translates}">${inline(body.replace(/^<!--[\s\S]*?-->\s*/u, ""))}</span>`
+	if (entry.translates) return `<span data-translates="${entry.translates}">${projectMarkdownInline(body.replace(/^<!--[\s\S]*?-->\s*/u, ""))}</span>`
 	if (!row) return `<data data-fact="${entry.fact_id}">${escapeHtml(body)}</data>`
-	const quoted = row.kind === "quote" ? QUOTED.exec(body) : null
-	if (quoted) return renderQuote(row, entry.selector ?? "full", quoted[1], "html")
+	const quoted = row.kind === "quote" ? parseRenderedQuote(body) : null
+	if (quoted) return renderQuote(row, entry.selector ?? "full", quoted.text, "html")
 	return row.kind === "quote" ? null : renderValueHtml(row, body)
 }
 
@@ -70,10 +80,10 @@ function spanHtml(text, from, to, entries, rows, stale) {
 		const element = entryHtml(text, entry, rows)
 		if (element === null) continue
 		stale.delete(entry)
-		html += inline(text.slice(cursor, entry.start)) + element
+		html += projectMarkdownInline(text.slice(cursor, entry.start)) + element
 		cursor = entry.end
 	}
-	return html + inline(text.slice(cursor, to))
+	return html + projectMarkdownInline(text.slice(cursor, to))
 }
 
 /**
@@ -89,32 +99,60 @@ export function markdownAsHtml(text, entries, ledger) {
 	const rows = new Map((ledger?.rows ?? []).map((row) => [row.fact_id, row]))
 	const stale = new Set(sorted.filter((entry) => entry.replaced === undefined))
 	const lineAt = (offset) => text.slice(0, offset).split("\n").length
+	const parsed = parseMarkdown(text)
+	if (parsed.problems.length > 0) {
+		throw new CliError(`the Markdown edition is malformed: ${parsed.problems.map((problem) => `${problem.code} at line ${problem.line}`).join(", ")}; fix it before verifying`)
+	}
 	let html = "<!doctype html><html><head><title>md</title></head><body>"
 	let line = 1
 	let open = null
-	for (const block of parseMarkdown(text).blocks) {
-		if (open && open !== block.kind) html += GROUP[open][1]
+	for (const block of parsed.blocks) {
+		const rule = MD_HTML_BLOCK_RULES[block.kind]
+		if (rule === undefined) throw new CliError(`md-lite block kind ${block.kind} has no projection rule`)
+		if (open && open !== block.kind) html += MD_HTML_BLOCK_RULES[open].group[1]
 		const target = lineAt(block.start)
 		if (target > line) html += "\n".repeat(target - line)
 		line = Math.max(line, target) + (text.slice(block.start, block.end).match(/\n/gu)?.length ?? 0)
-		if (GROUP[block.kind] && open !== block.kind) html += GROUP[block.kind][0]
-		open = GROUP[block.kind] ? block.kind : null
+		if (rule.group && open !== block.kind) html += rule.group[0]
+		open = rule.group ? block.kind : null
 		const inner = (from, to) => spanHtml(text, from, to, sorted, rows, stale)
-		if (block.kind === "table_row") html += `<tr>${block.cells.map((cell) => `<td>${inner(cell.start, cell.end)}</td>`).join("")}</tr>`
-		else if (block.kind === "code") html += `<pre><code>${escapeHtml(block.text)}</code></pre>`
+		if (block.kind === "table_row") html += `<${rule.tag}>${block.cells.map((cell) => `<td>${inner(cell.start, cell.end)}</td>`).join("")}</${rule.tag}>`
+		else if (block.kind === "code") html += `<pre><${rule.tag}>${escapeHtml(block.text)}</${rule.tag}></pre>`
 		else {
-			const tag = TAG[block.kind] ?? `h${block.level}`
+			const tag = rule.tag ?? `h${block.level}`
 			const replaced = block.kind === "blockquote" ? sorted.find((entry) => entry.replaced !== undefined && entry.start <= block.start && entry.end >= block.end) : undefined
 			const attrs = replaced ? ` data-fact="${replaced.fact_id}" data-replaced="${escapeHtml(replaced.replaced)}"` : ""
 			html += `<${tag}${attrs}>${inner(block.start, block.end)}</${tag}>`
 		}
 	}
-	return { html: `${html}${open ? GROUP[open][1] : ""}</body></html>\n`, stale: [...stale] }
+	return { html: `${html}${open ? MD_HTML_BLOCK_RULES[open].group[1] : ""}</body></html>\n`, stale: [...stale] }
 }
+
+/** The session dir from --session-dir or SESSION_DIR, or null; a bare flag names no session. */
+export const sessionOf = (flags) => {
+	const dir = flags["session-dir"] ?? process.env.SESSION_DIR
+	return dir && dir !== true ? resolve(dir) : null
+}
+
+/** The ledger from --ledger (validated) or from the session dir; every fact command loads it here. */
+export function ledgerFrom(flags, session = sessionOf(flags)) {
+	if (flags.ledger === undefined) {
+		if (session === null) throw new CliError("--ledger is required without --session-dir (or SESSION_DIR)")
+		return readLedger(session)
+	}
+	const ledger = readJsonFile(flags.ledger)
+	const errors = validateLedger(ledger)
+	if (errors.length > 0) throw new CliError(`${flags.ledger} is not a valid fact ledger: ${errors[0]}`)
+	return ledger
+}
+
+const MARKDOWN_EXTENSION = /\.(md|markdown)$/iu
+/** The edition format: the explicit flag, else md for a .md or .markdown path (any case), else html. */
+export const editionFormatOf = (path, flag) => flag ?? (MARKDOWN_EXTENSION.test(path) ? "md" : "html")
 
 /** The report's format (from --format or its extension) and, for Markdown, its fill map entries. */
 export function readEdition(report, flags) {
-	const format = flags.format ?? (/\.(md|markdown)$/iu.test(report) ? "md" : "html")
+	const format = editionFormatOf(report, flags.format)
 	if (format !== "html" && format !== "md") throw new CliError(`--format ${format}: verify html or md (a LaTeX edition is verified through its Markdown source)`)
 	const text = readText(report)
 	if (format === "html") return { format, text, entries: flags["fill-map"] === undefined ? null : readJsonFile(flags["fill-map"]).entries }
@@ -145,8 +183,7 @@ export function runFactVerify(args) {
 		baseDir: dirname(resolve(report)),
 		recompute,
 	})
-	const counts = { blocker: 0, major: 0, minor: 0, total: result.defects.length }
-	for (const defect of result.defects) counts[defect.severity] += 1
+	const counts = countDefects(result.defects)
 	const status = result.defects.some(blocksDelivery) ? "fail" : "pass"
 	const exitCode = status === "fail" ? 1 : 0
 	const record = { command: "fact verify", status, exitCode, format: edition.format, artifact: resolve(report), artifact_sha256: sha256Of(edition.text), defects: result.defects, counts, gatesRun: result.gatesRun }

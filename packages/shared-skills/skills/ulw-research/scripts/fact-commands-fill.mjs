@@ -13,12 +13,20 @@ import { dirname, extname, resolve } from "node:path"
 
 import { CliError, writeJsonAtomic } from "./cli-support.mjs"
 import { DEFECT_CODES } from "./contracts.mjs"
-import { fill } from "./fact-fill.mjs"
+import { FILL_FORMATS, fill } from "./fact-fill.mjs"
 import { readLedger, writeLedger } from "./fact-ledger.mjs"
 import { fillPolicy, lockedBrief, policyErrors } from "./fidelity-policy.mjs"
 import { readState, writeState } from "./fidelity-state.mjs"
 import { findPlaceholders } from "./placeholder.mjs"
 import { sessionDirOf } from "./source-commands.mjs"
+
+/** The CLI's input vocabulary: fill's output formats plus aliases (tex is filled as md), and the extension defaults. */
+export const FILL_INPUT_FORMAT_RULES = Object.freeze({
+	aliases: Object.freeze({ tex: "md" }),
+	extensions: Object.freeze({ ".md": "md", ".tex": "tex" }),
+})
+export const FILL_INPUT_FORMATS = Object.freeze([...FILL_FORMATS, ...Object.keys(FILL_INPUT_FORMAT_RULES.aliases)])
+const fillFormatOf = (format) => FILL_INPUT_FORMAT_RULES.aliases[format] ?? format
 
 const sha256Of = (content) => createHash("sha256").update(content).digest("hex")
 
@@ -47,8 +55,8 @@ export function runFactFill(args) {
 	const [source] = args.positionals
 	const { flags } = args
 	if (!source || (flags.out === undefined && !flags.view)) throw new CliError("usage: fact fill <src> (--out <path> | --view) [--format html|md|tex] [--inline] [--replace-failed] [--brief brief.md]")
-	const format = flags.format ?? ({ ".md": "md", ".tex": "tex" }[extname(source).toLowerCase()] ?? "html")
-	if (!["html", "md", "tex"].includes(format)) throw new CliError("--format must be html, md, or tex")
+	const format = flags.format ?? FILL_INPUT_FORMAT_RULES.extensions[extname(source).toLowerCase()] ?? "html"
+	if (!FILL_INPUT_FORMATS.includes(format)) throw new CliError(`--format must be ${FILL_INPUT_FORMATS.slice(0, -1).join(", ")}, or ${FILL_INPUT_FORMATS.at(-1)}`)
 	if (flags.inline && format !== "html") throw new CliError("--inline applies to the html edition only")
 	const sessionDir = sessionDirOf(flags)
 	const { parsed, refusal } = lockedBrief("fact fill", flags)
@@ -59,7 +67,7 @@ export function runFactFill(args) {
 	const refused = policyErrors(text, findPlaceholders(text), ledger, sessionDir, policy)
 	if (refused.cacheChanged && !flags.view) writeLedger(sessionDir, ledger)
 	const state = flags["replace-failed"] ? readState(sessionDir) : null
-	const result = fill(text, ledger, { format: format === "tex" ? "md" : format, view: flags.view === true, fallback: policy.fallback, ...(state ? { replaceFailed: state } : {}) })
+	const result = fill(text, ledger, { format: fillFormatOf(format), view: flags.view === true, fallback: policy.fallback, ...(state ? { replaceFailed: state } : {}) })
 	const warnings = result.warnings
 	if (result.out === null || refused.errors.length > 0) {
 		const filled = result.errors.map((error) => ({ ...error, severity: DEFECT_CODES[error.code]?.severity ?? "blocker", hint: DEFECT_CODES[error.code]?.hint ?? null }))

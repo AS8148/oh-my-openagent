@@ -15,23 +15,22 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import { CliError, parseArgs, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
-import { DEFECT_CODES } from "./contracts.mjs"
-import { markdownAsHtml } from "./fact-commands-verify.mjs"
-import { readLedger } from "./fact-ledger.mjs"
-import { validateLedger } from "./fact-ledger-schema.mjs"
+import { countDefects, DEFECT_CODES } from "./contracts.mjs"
+import { editionFormatOf, ledgerFrom, markdownAsHtml, sessionOf } from "./fact-commands-verify.mjs"
 import { extractPairs } from "./fact-pairs.mjs"
 import { lockedBrief } from "./fidelity-policy.mjs"
-import { applyEdits } from "./polish-apply.mjs"
+import { applyEdits, POLISH_EDIT_FIELDS, validatePolishEdits } from "./polish-apply.mjs"
 import { diffPolish } from "./polish-diff.mjs"
 import { normalizeText } from "./text-normalize.mjs"
 
+export { ledgerFrom, POLISH_EDIT_FIELDS, validatePolishEdits }
+
 export const POLISH_RECORD = "polish-defects.json"
 
+/** The polish-diff exit policy: only a registry blocker fails the command; majors are reported. */
+export const polishDiffFails = (defects) => defects.some((defect) => (DEFECT_CODES[defect.code]?.severity ?? defect.severity) === "blocker")
+
 const sha256 = (text) => createHash("sha256").update(text).digest("hex")
-const sessionOf = (flags) => {
-	const dir = flags["session-dir"] ?? process.env.SESSION_DIR
-	return dir && dir !== true ? resolve(dir) : null
-}
 
 function readText(path) {
 	try {
@@ -41,33 +40,22 @@ function readText(path) {
 	}
 }
 
-/** The ledger from --ledger (validated) or from the session dir. */
-export function ledgerFrom(flags) {
-	if (flags.ledger === undefined) {
-		const session = sessionOf(flags)
-		if (session === null) throw new CliError("--ledger is required without --session-dir (or SESSION_DIR)")
-		return readLedger(session)
-	}
-	const ledger = readJsonFile(flags.ledger)
-	const errors = validateLedger(ledger)
-	if (errors.length > 0) throw new CliError(`${flags.ledger} is not a valid fact ledger: ${errors[0]}`)
-	return ledger
-}
-
 const withSeverity = (entry) => ({ ...entry, severity: DEFECT_CODES[entry.code].severity, hint: DEFECT_CODES[entry.code].hint })
 
 function runPolishApply(args) {
 	const [report] = args.positionals
 	const { flags } = args
 	if (!report || flags.edits === undefined || flags.out === undefined) throw new CliError("usage: fact polish-apply <report.html> --edits polish-edits.json --out <report.polished.html> [--ledger F] [--brief brief.md] [--session-dir D]")
-	if (/\.(md|markdown)$/iu.test(report)) throw new CliError("fact polish-apply takes the filled HTML edition; polish a Markdown edition through its HTML source")
+	if (editionFormatOf(report) === "md") throw new CliError("fact polish-apply takes the filled HTML edition; polish a Markdown edition through its HTML source")
 	const { refusal } = lockedBrief("fact polish-apply", flags)
 	if (refusal) return refusal
 	const html = readText(report)
 	const editsText = readText(flags.edits)
 	const edits = readJsonFile(flags.edits)
-	if (!Array.isArray(edits) || edits.some((edit) => typeof edit?.before !== "string" || typeof edit?.after !== "string")) {
-		throw new CliError(`${flags.edits} must be an array of {before, after, reason} objects with string before and after`)
+	try {
+		validatePolishEdits(edits)
+	} catch (error) {
+		throw new CliError(`${flags.edits} must be an array of {${Object.keys(POLISH_EDIT_FIELDS).join(", ")}} objects: ${error.message}`)
 	}
 	const result = applyEdits(html, edits, ledgerFrom(flags))
 	writeFileSync(flags.out, result.out)
@@ -85,9 +73,8 @@ function runPolishDiff(args) {
 	if (refusal) return refusal
 	const after = readText(flags.after)
 	const defects = diffPolish(readText(flags.before), after, ledgerFrom(flags)).map((defect) => ({ ...defect, hint: DEFECT_CODES[defect.code]?.hint ?? null }))
-	const counts = { blocker: 0, major: 0, minor: 0, total: defects.length }
-	for (const defect of defects) counts[defect.severity] += 1
-	const status = counts.blocker > 0 ? "fail" : "pass"
+	const counts = countDefects(defects)
+	const status = polishDiffFails(defects) ? "fail" : "pass"
 	const exitCode = status === "fail" ? 1 : 0
 	const record = { command: "fact polish-diff", status, exitCode, before: resolve(flags.before), artifact: resolve(flags.after), artifact_sha256: sha256(after), defects, counts }
 	const session = sessionOf(flags)

@@ -15,6 +15,7 @@ import { join, resolve } from "node:path"
 import { indexClaims } from "./claims-index.mjs"
 import { CliError, parseArgs, writeJsonAtomic } from "./cli-support.mjs"
 import { parseFidelityBlock } from "./fidelity-brief.mjs"
+import { parseSourceFloor } from "./fidelity-policy.mjs"
 import { writeSnapshot } from "./source-snapshot.mjs"
 
 const FETCH_TIMEOUT_MS = 30_000
@@ -51,8 +52,13 @@ export function snapshotOf(sessionDir, id) {
 export function pointedFlag(sessionDir, url) {
 	const brief = join(sessionDir, "brief.md")
 	const floor = existsSync(brief) ? (parseFidelityBlock(readInput(brief)).fields?.["source floor"] ?? "") : ""
-	const match = /^pointed only:\s*(.+)$/i.exec(floor.trim())
-	return match ? match[1].split(",").map((entry) => entry.trim()).includes(url) : false
+	let rule = null
+	try {
+		rule = parseSourceFloor(floor === "" ? "standard" : floor)
+	} catch {
+		return false
+	}
+	return rule?.kind === "pointed" && rule.list.includes(url)
 }
 
 async function fetchSource(url) {
