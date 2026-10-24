@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 import { renderValueHtml } from "./placeholder.mjs"
-import { diffPolish } from "./polish-diff.mjs"
+import { DEFECT_CODES } from "./contracts.mjs"
+import * as polishDiff from "./polish-diff.mjs"
+import { HIDDEN_ELEMENT_TAGS } from "./html-visible.mjs"
+import * as polishProject from "./polish-project.mjs"
+import * as polishRules from "./polish-rules.mjs"
+
+const { diffPolish } = polishDiff
 
 const SPAN = { fact_id: "F2", kind: "measured", quote: "The bridge has a main span of 320 m.", raw: "320 m", value: "320", unit: "m", qualifier: null }
 const MAKER = { fact_id: "F5", kind: "measured", quote: "In May, Samsung Electronics shipped 12 units.", raw: "12 units", value: "12", unit: "units", qualifier: null }
-const LEDGER = { schemaVersion: 1, rows: [SPAN, MAKER], events: [] }
+const SALES = { fact_id: "F6", kind: "measured", quote: "Sales were approximately 7 units.", raw: "7 units", value: "7", unit: "units", qualifier: null }
+const LEDGER = { schemaVersion: 1, rows: [SPAN, MAKER, SALES], events: [] }
 const span = renderValueHtml(SPAN, SPAN.raw)
 const doc = (body: string) => `<html><body>\n${body}\n</body></html>`
 const codes = (list: { code: string }[]) => list.map((item) => item.code)
@@ -75,7 +84,75 @@ describe("diffPolish: hedges, churn, links and names", () => {
 	test("every defect carries its fixed severity", () => {
 		const before = doc("<p>Results may improve and are provisional [S1].</p><table><tr><td>A</td></tr><tr><td>B</td></tr></table>")
 		const after = doc("<p>Results improve and are final [S1].</p><table><tr><td>A</td></tr></table>")
-		const bySeverity = Object.fromEntries(diffPolish(before, after, LEDGER).map((d: { code: string; severity: string }) => [d.code, d.severity]))
-		expect(bySeverity).toEqual({ polish_diff_fail: "blocker", polish_hedging_decreased: "major" })
+		const defects = diffPolish(before, after, LEDGER)
+		expect(codes(defects)).toEqual(["polish_diff_fail", "polish_hedging_decreased"])
+		for (const defect of defects) expect(defect.severity).toBe(DEFECT_CODES[defect.code].severity)
+	})
+})
+
+describe("diffPolish: severities come from DEFECT_CODES (review #11152 round 1)", () => {
+	test("no polish module exports a local severity table", () => {
+		for (const mod of [polishDiff, polishRules]) expect(Object.keys(mod).filter((name) => /severity/i.test(name))).toEqual([])
+		for (const file of ["polish-diff.mjs", "polish-rules.mjs", "polish-apply.mjs", "polish-project.mjs"]) {
+			const source = readFileSync(join(import.meta.dir, file), "utf8")
+			expect(source.match(/["'](?:blocker|major|minor)["']/g) ?? [], file).toEqual([])
+		}
+	})
+
+	test("every polish code resolves through DEFECT_CODES and each defect carries that severity", () => {
+		for (const code of polishRules.POLISH_CODES) expect(Object.hasOwn(DEFECT_CODES, code), code).toBe(true)
+		const before = doc('<p>Samsung Electronics may improve [S1].</p><p><a href="/a">x</a> abcdefghij</p><table><tr><td>A</td></tr><tr><td>B</td></tr></table>')
+		const after = doc('<p>The firm improves [S1].</p><p><a href="/b">x</a> klmnopqrstuvwxyz</p><table><tr><td>A</td></tr></table>')
+		const defects = diffPolish(before, after, LEDGER)
+		expect(codes(defects)).toEqual([...polishRules.POLISH_CODES])
+		for (const defect of defects) expect(defect.severity, defect.code).toBe(DEFECT_CODES[defect.code].severity)
+	})
+})
+
+describe("diffPolish: rendered visibility and hedge comparison (review #11152 round 1)", () => {
+	test.each([
+		["a hidden attribute", `<span hidden>${span}</span>`],
+		["display:none", `<span style="display:none">${span}</span>`],
+		["aria-hidden", `<span aria-hidden="true">${span}</span>`],
+		["a template", `<template>${span}</template>`],
+	])("a fact span hidden by %s is polish_diff_fail", (_label, hidden) => {
+		expect(codes(diffPolish(doc(`<p>The span is ${span} [S1].</p>`), doc(`<p>The span is ${hidden} [S1].</p>`), LEDGER))).toContain("polish_diff_fail")
+	})
+
+	test("a hedge hidden by a hidden attribute is polish_hedging_decreased", () => {
+		const after = doc("<p>Results <span hidden>may</span> improve [S1].</p>")
+		expect(codes(diffPolish(doc("<p>Results may improve [S1].</p>"), after, LEDGER))).toEqual(["polish_hedging_decreased"])
+	})
+
+	test("a ledger hedge the sentence never held is not a decrease", () => {
+		const sales = renderValueHtml(SALES, SALES.raw)
+		const before = doc(`<p>The share of revenue was ${sales} [S1].</p>`)
+		const after = doc(`<p>The share in revenue was ${sales} [S1].</p>`)
+		expect(diffPolish(before, after, LEDGER)).toEqual([])
+	})
+
+	test("single-quoted and unquoted href changes are polish_link_changed", () => {
+		expect(codes(diffPolish(doc("<p><a href='/a'>x</a></p>"), doc("<p><a href='/b'>x</a></p>"), LEDGER))).toEqual(["polish_link_changed"])
+		expect(codes(diffPolish(doc("<p><a href=/a>x</a></p>"), doc("<p><a href=/b>x</a></p>"), LEDGER))).toEqual(["polish_link_changed"])
+	})
+
+	test("the same input gives byte-identical output", () => {
+		const before = doc("<p>Results may improve and are provisional [S1].</p>")
+		const after = doc("<p>Results improve and are final [S1].</p>")
+		expect(JSON.stringify(diffPolish(before, after, LEDGER))).toBe(JSON.stringify(diffPolish(before, after, LEDGER)))
+	})
+})
+
+describe("polish policies have one owner (duplication sweep)", () => {
+	test("the ignored-body tags are the visibility projection's list by identity", () => {
+		expect(polishRules.POLISH_BODY_IGNORED_TAGS).toBe(HIDDEN_ELEMENT_TAGS)
+	})
+
+	test("the named policies are exported once, from their owners", () => {
+		expect(polishRules.POLISH_CHURN_LIMIT).toBe(0.5)
+		expect("Samsung Electronics".match(polishRules.POLISH_NAME)).toEqual(["Samsung", "Electronics"])
+		expect(polishDiff.TICKER).toBe(polishRules.TICKER)
+		expect(polishProject.POLISH_LINK_ATTRIBUTES).toEqual(["href", "data-claim"])
+		expect("v1.25 and 3,000".match(polishProject.POLISH_DIGITS)).toEqual(["1.25", "3,000"])
 	})
 })
