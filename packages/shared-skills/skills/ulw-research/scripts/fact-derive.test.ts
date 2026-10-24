@@ -99,6 +99,29 @@ describe("derive: checked operations", () => {
 	})
 })
 
+describe("derive: rendered precision", () => {
+	const precision = () =>
+		ledgerOf([measured("F1", "1000", "m"), measured("F2", "3", "m"), measured("F3", "9", "m"), measured("F4", "1.5", "m"), measured("F5", "20.25", "%"), measured("F6", "15.5", "%"), measured("F7", "19.0", "m")])
+
+	test("a difference keeps the fewest decimal places: 1000 m - 3 m is 997 m", () => {
+		const row = rowOf(derive(precision(), { op: "diff", operands: ["F1", "F2"], unit: "m" }))
+		expect(row).toMatchObject({ value: "997", render: "997 m", exact: { num: "997", den: "1" } })
+	})
+
+	test("a difference keeps the fewest decimal places: 9 m - 1.5 m is 8 m, 19.0 m - 1.5 m is 17.5 m", () => {
+		const ledger = precision()
+		expect(rowOf(derive(ledger, { op: "diff", operands: ["F3", "F4"], unit: "m" }))).toMatchObject({ value: "8", render: "8 m", exact: { num: "15", den: "2" } })
+		expect(rowOf(derive(ledger, { op: "diff", operands: ["F7", "F4"], unit: "m" }))).toMatchObject({ value: "17.5", render: "17.5 m", exact: { num: "35", den: "2" } })
+	})
+
+	test("pp with mixed decimal places rounds to the fewest: 20.25 % - 15.5 % is 4.8 pp", () => {
+		const ledger = precision()
+		const row = rowOf(derive(ledger, { op: "diff", operands: ["F5", "F6"], unit: "pp" }))
+		expect(row).toMatchObject({ value: "4.8", render: "4.8 pp", exact: { num: "19", den: "4" } })
+		expect(recompute(ledger, row).ok).toBe(true)
+	})
+})
+
 describe("derive: convert", () => {
 	test("320 m to mm keeps the original beside the converted value", () => {
 		const ledger = fixture()

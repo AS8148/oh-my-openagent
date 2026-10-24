@@ -1,9 +1,9 @@
 // fact-derive.mjs - script-computed derivations and conversions over the fact ledger.
-//
-// derive() checks a declared operation's operand rows, computes in exact rationals from each operand's
-// `exact` (never its rounded `value`), and appends a derived or converted row rendered at the operands'
-// fewest significant figures. recompute() repeats the arithmetic so the verifier compares exact, value,
-// and render with no epsilon. Every failure is incompatible_operands, and no row is written.
+// derive() checks a declared operation's operand rows, computes in exact rationals from each operand's `exact` (never
+// its rounded `value`), and appends a derived or converted row. Sums and differences (pp included) render at the
+// operands' fewest decimal places, half away from zero (1000 - 3 is 997, 9 - 1.5 is 8, 19.0 - 1.5 is 17.5, 1.25 + 2.5
+// is 3.8); every other operation at their fewest significant figures. recompute() repeats the arithmetic so the
+// verifier compares exact, value, and render with no epsilon. Every failure is incompatible_operands; no row is written.
 
 import { addRow, nextId, OPERATIONS } from "./fact-ledger.mjs"
 import { add, div, fromDecimal, mul, sigFigsOf, sub, toDecimal } from "./rational.mjs"
@@ -14,28 +14,31 @@ const HUNDRED = fromDecimal("100")
 const EXPR_HINT = "currencies never convert by table: add a dated rate row and use --op expr with a rationale"
 
 class DeriveError extends Error {}
-
-function refuse(detail, hint) {
-	throw Object.assign(new DeriveError(detail), { detail, hint })
-}
-
+const refuse = (detail, hint) => { throw Object.assign(new DeriveError(detail), { detail, hint }) }
 const isNonEmpty = (value) => typeof value === "string" && value.trim().length > 0
 const unitKey = (unit) => (unit === null || unit === undefined ? null : (normalizeUnit(unit) ?? String(unit).replace(/\s+/g, "")))
-const sameDeclared = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+const sameDeclared = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null) // null matches only null: null vs "all" is refused
 const toBig = (exact) => ({ num: BigInt(exact.num), den: BigInt(exact.den) })
 const toText = (r) => ({ num: r.num.toString(), den: r.den.toString() })
+const placesOf = (decimal) => (String(decimal).split(".")[1] ?? "").length
 
 function terminates(r) {
 	let den = r.den
-	while (den % 2n === 0n) den /= 2n
-	while (den % 5n === 0n) den /= 5n
+	for (const prime of [2n, 5n]) while (den % prime === 0n) den /= prime
 	return den === 1n
 }
 
-/** The operands' precision, but never trailing zeros the exact result does not have: 20 - 15 is 5, not 5.0. */
-function renderValue(exact, sigFigs) {
-	if (terminates(exact) && sigFigsOf(toDecimal(exact)) < sigFigs) return toDecimal(exact)
-	return toDecimal(exact, sigFigs)
+function toPlaces(r, places) {
+	const digits = ((r.num < 0n ? -r.num : r.num) * 10n ** BigInt(places) * 2n + r.den) / (r.den * 2n)
+	const text = digits.toString().padStart(places + 1, "0")
+	return (r.num < 0n && digits !== 0n ? "-" : "") + (places ? `${text.slice(0, -places)}.${text.slice(-places)}` : text)
+}
+
+/** The header's precision rule, but never trailing zeros the exact result does not have: 20 - 15 is 5, not 5.0. */
+function renderValue(exact, precision, byPlaces) {
+	const plain = terminates(exact) ? toDecimal(exact) : null
+	if (plain !== null && (byPlaces ? placesOf(plain) <= precision : sigFigsOf(plain) < precision)) return plain
+	return byPlaces ? toPlaces(exact, precision) : toDecimal(exact, precision)
 }
 
 function display(value, unit) {
@@ -113,10 +116,7 @@ function evaluate(node, values) {
 	return { "+": add, "-": sub, "*": mul, "/": div }[node.op](left, right)
 }
 
-function nonZero(r, what) {
-	if (r.num === 0n) refuse(`${what} is zero`)
-	return r
-}
+const nonZero = (r, what) => (r.num === 0n ? refuse(`${what} is zero`) : r)
 
 function convertOf(row, target) {
 	const factor = convertFactor(row.unit, target)
@@ -153,7 +153,8 @@ function compute(op, rows, unit, ast) {
 		sigFigs = Math.min(sigFigs, ...literals)
 		out = { exact: evaluate(ast, new Map(ids.map((id, index) => [id, values[index]]))), unit: unit ?? null, formula: null }
 	} else refuse(`unknown operation ${op}; use one of ${OPERATIONS.join(", ")}`)
-	const value = renderValue(out.exact, sigFigs)
+	const byPlaces = op === "sum" || op === "diff"
+	const value = renderValue(out.exact, byPlaces ? Math.min(...rows.map((row) => placesOf(row.value))) : sigFigs, byPlaces)
 	const shown = display(value, out.unit)
 	const render = op === "convert" ? `${shown} (${display(rows[0].value, rows[0].unit)})` : shown
 	return { exact: toText(out.exact), value, unit: out.unit, render, formula: out.formula, factor: out.factor ?? null }
