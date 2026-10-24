@@ -3,7 +3,6 @@ import { join } from "node:path"
 import { existsSync, mkdir, rm } from "@oh-my-opencode/memory-core/fs"
 
 import {
-  FactsPlanParentDirtyError,
   GitMemoryRepo,
   LockContentionError,
   applyFactsRecovery,
@@ -12,7 +11,6 @@ import {
   findFactsBatchReceipt,
   getProcessStartIdentity,
   memoryWriterLockPath,
-  planFactsMutation,
   validateFactsRecovery,
   withLock,
   type AgreementEvent,
@@ -182,6 +180,7 @@ async function applyClaimed(options: ClaimedApplyOptions): Promise<Applied> {
     recovery = options.ledger.applyRecovery
     validateFactsRecovery(recovery, batch)
   } else {
+    const { planFactsMutation, FactsPlanParentDirtyError } = await import("#omo-memory-commands-runtime")
     try {
       recovery = await planFactsMutation(options.repo, batch, options.people, (tie) => options.logger?.warn(
         "facts person alias tie resolved by slug order",

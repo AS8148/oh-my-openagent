@@ -26,15 +26,15 @@ export function parseAgreementRecord(value: unknown, index: number): AgreementEx
   return { action: "reaffirm", id: record.id, date, ...(text === undefined ? {} : { text }), ...withSource }
 }
 
-export function validateAgreementSource(record: AgreementExtractionRecord, payload: FactsPayload): void {
+export function validateAgreementSource(record: AgreementExtractionRecord, payload: FactsPayload, index = 0): void {
   if (record.source === undefined) {
-    if (payload.agreementEventVersion !== undefined) throw invalid(0, "source user-message identity is required")
+    if (payload.agreementEventVersion !== undefined) throw invalid(index, "source user-message identity is required")
     return
   }
   const source = record.source
   if (!payload.entries.some((entry) => entry.sessionId === source.sessionId
     && entry.entries.some((message) => message.kind === "user" && message.source_message_id === source.messageId))) {
-    throw invalid(0, "source must identify a user message in the extraction payload, not lead context")
+    throw invalid(index, "source must identify a user message in the extraction payload, not lead context")
   }
 }
 

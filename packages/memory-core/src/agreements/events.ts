@@ -7,9 +7,7 @@ const LINE = /^<!-- agreement-event: ([0-9a-f]{64}) -->$/
 
 export function parseAgreementEventLine(line: string): string | undefined {
   if (!line.startsWith(PREFIX)) return undefined
-  const key = LINE.exec(line)?.[1]
-  if (key === undefined) throw new TypeError("Malformed agreement event receipt")
-  return key
+  return LINE.exec(line)?.[1]
 }
 
 export function serializeAgreementEvents(keys: readonly string[]): string[] {

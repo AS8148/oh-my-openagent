@@ -1,5 +1,5 @@
 import { agreementId, normalizeAgreementText, sortAgreements } from "./format"
-import { agreementEventKey, legacyAgreementEventKey, legacyAgreementEvents } from "./events"
+import { agreementEventKey, legacyAgreementEvents } from "./events"
 import type { AgreementExtractionRecord, AgreementItem, AgreementScope, AgreementsPolicy } from "./types"
 
 export interface AgreementsMutation {
@@ -24,8 +24,8 @@ export function applyAgreementRecords(
   const committed = new Set(existing.map((item) => item.id))
   const flagged = new Set<string>()
   const events: AgreementEvent[] = []
-  const receipts = new Set(priorReceipts)
-  const known = new Set([...priorReceipts, ...legacyAgreementEvents(existing)])
+  const receipts = new Set(priorReceipts.length === 0 ? legacyAgreementEvents(existing) : priorReceipts)
+  const known = new Set(receipts)
   const claim = (id: string, record: AgreementExtractionRecord): boolean => {
     // Rewording preserves the original id. A "new" record matching that wording must also
     // remain recognizable after drop, when only its text-derived target id is available.
@@ -39,8 +39,7 @@ export function applyAgreementRecords(
       }
       return false
     }
-    // Also remember the coarse legacy date so a pre-upgrade pending record cannot count it again.
-    for (const receipt of [...keys, ...ids.map((target) => legacyAgreementEventKey(target, record.date))]) {
+    for (const receipt of keys) {
       known.add(receipt)
       receipts.add(receipt)
     }

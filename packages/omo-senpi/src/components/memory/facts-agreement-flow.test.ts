@@ -48,13 +48,16 @@ function handle(spec: ChildSpec): ChildHandle {
 }
 
 describe("facts lane: a repeat correction counts against its agreement", () => {
-  test("finalization refuses a source identity not present in the persisted payload", async () => {
+  test.each([
+    ["foreign", { sessionId: "foreign-session", messageId: "m1" }],
+    ["missing", undefined],
+  ] as const)("finalization refuses a %s source identity in a fresh extraction", async (_kind, source) => {
     const { root, identity, queue } = await fixture()
     const createRunner = (): InProcessRunnerLike => ({
       start: async (spec: ChildSpec) => {
         await writeFile(join(spec.cwd, "agreements.jsonl"), `${JSON.stringify({
           action: "new", applies: "global", text: "Use the fixture convention", date: "2026-08-10",
-          source: { sessionId: "foreign-session", messageId: "m1" },
+          source,
         })}\n`)
         return handle(spec)
       },

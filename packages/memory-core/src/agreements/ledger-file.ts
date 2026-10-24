@@ -29,8 +29,9 @@ export function agreementItemsOf(content: string | undefined): readonly Agreemen
 export function renderAgreementsFile(existing: string | undefined, items: readonly AgreementItem[], receipts?: readonly string[]): string {
   const parsed = existing === undefined ? undefined : parseMemoryFile(existing)
   const ledger = parsed === undefined ? undefined : parseAgreementsLedger(parsed.body)
-  // Human ack/drop retain receipts, including known dates from a pre-upgrade ledger.
-  const kept = receipts ?? [...(ledger?.receipts ?? []), ...legacyAgreementEvents(ledger?.items ?? [])]
+  // The first journal snapshots pre-upgrade dates; later ack/drop must not seed modern dates.
+  const prior = ledger?.receipts ?? []
+  const kept = receipts ?? (prior.length === 0 ? legacyAgreementEvents(ledger?.items ?? []) : prior)
   const serialized = serializeAgreementsLedger(items, [...(ledger?.unparsed ?? []), ...serializeAgreementEvents(kept)])
   const body = serialized.length === 0 ? "" : `${serialized}\n`
   // Neither ledger writer (/agreements, the facts lane) is the memory tool, so the header follows the rule the hooks

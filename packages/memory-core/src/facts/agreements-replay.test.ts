@@ -5,11 +5,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { agreementItemsOf, renderAgreementsFile } from "../agreements/ledger-file"
+import { agreementId, parseAgreementsLedger } from "../agreements/format"
 import { ackAgreement, dropAgreement } from "../agreements/mutate"
 import { describeAgreementsToolViolation } from "../agreements/guard"
 import { parseAgreementRecord } from "../agreements/record"
 import { AGREEMENTS_PATH, DEFAULT_AGREEMENTS_POLICY, type AgreementExtractionRecord } from "../agreements/types"
 import { GitMemoryRepo } from "../git"
+import { parseMemoryFile } from "../memfs"
 import { renderAgreementsTarget } from "./agreements-target"
 import { applyFactsBatch } from "./extraction"
 
@@ -57,6 +59,51 @@ test("legacy identityless records count at most once per agreement and date", as
   expect((await apply([{ ...legacy, date: "2026-10-02" }]))[0]?.n).toBe(2)
 })
 
+test("a legacy last-date seed survives a modern correction before pending legacy replay", async () => {
+  const { apply, path } = await fixture()
+  const id = agreementId(TEXT)
+  await writeFile(path, renderAgreementsFile(undefined, [{
+    id, scope: "global", by: "agent", text: TEXT, n: 1,
+    since: DATE, last: DATE, status: "active",
+  }]))
+
+  expect((await apply([{ ...record("modern"), date: "2026-10-02" }]))[0]?.n).toBe(2)
+  expect((await apply([{ action: "reaffirm", id, date: DATE }]))[0]?.n).toBe(2)
+})
+
+test("modern events add one source receipt each without later date seeds from acknowledgements", async () => {
+  const { apply, path } = await fixture()
+  await apply([record("turn-1")])
+  expect(parseAgreementsLedger(parseMemoryFile(await readFile(path, "utf8")).body).receipts).toHaveLength(1)
+  const items = await apply([{ ...record("turn-2"), date: "2026-10-02" }])
+  const id = items[0]?.id
+  if (id === undefined) throw new Error("missing agreement")
+  const acknowledged = ackAgreement(items, id)
+  if (acknowledged === undefined) throw new Error("ack failed")
+  await writeFile(path, renderAgreementsFile(await readFile(path, "utf8"), acknowledged))
+  expect(parseAgreementsLedger(parseMemoryFile(await readFile(path, "utf8")).body).receipts).toHaveLength(2)
+})
+
+test("a reworded new record adds two source keys rather than four source and date keys", async () => {
+  const { apply, path } = await fixture()
+  const initial = await apply([record("turn-1")])
+  const id = initial[0]?.id
+  if (id === undefined) throw new Error("missing agreement")
+  const text = "Run every relevant test before reporting completion"
+  await apply([{ action: "reaffirm", id, text, date: "2026-10-02", source: { sessionId: "session-a", messageId: "turn-2" } }])
+  await apply([{ ...record("turn-3"), text, date: "2026-10-03" }])
+  expect(parseAgreementsLedger(parseMemoryFile(await readFile(path, "utf8")).body).receipts).toHaveLength(4)
+})
+
+test("an unsourced date does not alias a modern event after migration", async () => {
+  const { apply } = await fixture()
+  const modern = record("turn-1")
+  expect((await apply([modern]))[0]?.n).toBe(1)
+  const { source: _source, ...legacy } = modern
+  expect((await apply([legacy]))[0]?.n).toBe(2)
+  expect((await apply([legacy]))[0]?.n).toBe(2)
+})
+
 test("acknowledge and drop retain history without suppressing a distinct future turn", async () => {
   const { apply, path } = await fixture()
   const items = await apply([record("turn-1")])
@@ -83,6 +130,10 @@ test("a receipt-only dropped ledger cannot be deleted or edited through memory t
   const dropped = renderAgreementsFile(await readFile(path, "utf8"), [])
   expect(describeAgreementsToolViolation(dropped, undefined)).toBeDefined()
   expect(describeAgreementsToolViolation(dropped, "---\ndescription: Agreements\n---\n")).toBeDefined()
+  const forged = `<!-- agreement-event: ${"a".repeat(64)} -->`
+  expect(describeAgreementsToolViolation(dropped, `${dropped}${forged}\n`)).toBeDefined()
+  expect(describeAgreementsToolViolation(dropped, dropped.replace(/<!-- agreement-event: [0-9a-f]{64} -->/, forged))).toBeDefined()
+  expect(describeAgreementsToolViolation(undefined, `---\ndescription: Agreements\n---\n${forged}\n`)).toBeDefined()
   expect(describeAgreementsToolViolation(dropped, dropped)).toBeUndefined()
 })
 
@@ -130,7 +181,9 @@ test("independent committed batches replay one event without a second increment"
   await repo.init({ seedFiles: [{ relativePath: "system/persona.md", content: "---\ndescription: Fixture\n---\n" }] })
   const batch = () => ({ batchId: randomUUID(), records: [], agreements: [record("turn-1")] })
   expect((await applyFactsBatch(repo, batch(), AUTHOR)).outcome).toBe("committed")
-  await applyFactsBatch(repo, batch(), AUTHOR)
+  const head = await repo.head()
+  expect((await applyFactsBatch(repo, batch(), AUTHOR)).outcome).toBe("no_facts")
+  expect(await repo.head()).toBe(head)
   expect(agreementItemsOf(await readFile(join(root, AGREEMENTS_PATH), "utf8"))[0]?.n).toBe(1)
   expect((await repo.status()).trim()).toBe("")
 }, 30_000)

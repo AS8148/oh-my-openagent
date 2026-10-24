@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { FactsPayload, TranscriptEntry } from "@oh-my-opencode/memory-core"
+import { validateAgreementSource } from "@oh-my-opencode/memory-core"
 
 import { createFactsAgreementTool } from "./facts-agreement-tool"
 
@@ -48,4 +49,11 @@ test("assistant messages, lead context and foreign sessions cannot supply event 
   for (const candidate of [params("a1"), params("lead"), params("missing"), params("u1", "foreign")]) {
     expect((await tool.execute("tool-1", candidate)).isError).toBe(true)
   }
+})
+
+test("source validation identifies the actual failing record index", () => {
+  expect(() => validateAgreementSource(params("missing"), payload, 2)).toThrow(/record 3:/)
+  const { source: _source, ...unsourced } = params("u1")
+  expect(() => validateAgreementSource(unsourced, { ...payload, agreementEventVersion: 1 }, 1)).toThrow(/record 2:/)
+  expect(() => validateAgreementSource(unsourced, payload)).not.toThrow()
 })

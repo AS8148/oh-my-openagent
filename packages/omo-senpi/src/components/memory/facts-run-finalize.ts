@@ -71,7 +71,7 @@ export async function finalizeClaimedFactsRun(input: FinalizeClaimedFactsRunInpu
   try {
     records = parseFactsExtractionJsonl(await readFile(join(runDir, "extraction.jsonl"), "utf8"))
     agreements = parseAgreementRecordsJsonl(await readOptional(join(runDir, FACTS_AGREEMENTS_FILENAME)))
-    for (const record of agreements) validateAgreementSource(record, payload)
+    for (const [index, record] of agreements.entries()) validateAgreementSource(record, payload, index)
   } catch (error) {
     await fail("invalid_extraction", describe(error))
     return { status: "failed", runId }
