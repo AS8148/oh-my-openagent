@@ -9,18 +9,32 @@ export function parseAgreementRecord(value: unknown, index: number): AgreementEx
   const record: Record<string, unknown> = { ...value }
   const date = validDate(record.date)
   if (date === undefined) throw invalid(index, "date must be YYYY-MM-DD")
+  const source = parseSource(record.source, index)
+  const sourced = source === undefined ? {} : { source }
   if (record.action === "new") {
-    assertKeys(record, ["action", "applies", "text", "date"], index)
+    assertKeys(record, ["action", "applies", "text", "date", "source"], index)
     const text = boundedText(record.text, index)
     if (text === undefined) throw invalid(index, "text must be non-empty")
     if (record.applies !== "global" && record.applies !== "project") throw invalid(index, "applies must be global or project")
-    return { action: "new", applies: record.applies, text, date }
+    return { action: "new", applies: record.applies, text, date, ...sourced }
   }
   if (record.action !== "reaffirm") throw invalid(index, "action must be new or reaffirm")
-  assertKeys(record, ["action", "id", "date", "text"], index)
+  assertKeys(record, ["action", "id", "date", "text", "source"], index)
   if (typeof record.id !== "string" || !/^[0-9a-f]{10}$/.test(record.id)) throw invalid(index, "id must name an existing agreement")
   const text = record.text === undefined ? undefined : boundedText(record.text, index)
-  return { action: "reaffirm", id: record.id, date, ...(text === undefined ? {} : { text }) }
+  return { action: "reaffirm", id: record.id, date, ...(text === undefined ? {} : { text }), ...sourced }
+}
+
+function parseSource(value: unknown, index: number): AgreementExtractionRecord["source"] {
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw invalid(index, "source must identify a session and user message")
+  const source: Record<string, unknown> = { ...value }
+  assertKeys(source, ["sessionId", "messageId"], index)
+  if (typeof source.sessionId !== "string" || source.sessionId.trim().length === 0
+    || typeof source.messageId !== "string" || source.messageId.trim().length === 0) {
+    throw invalid(index, "source must identify a session and user message")
+  }
+  return { sessionId: source.sessionId, messageId: source.messageId }
 }
 
 export function parseAgreementRecordsJsonl(raw: string): AgreementExtractionRecord[] {

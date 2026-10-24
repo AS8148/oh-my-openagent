@@ -1,6 +1,7 @@
 import { parseMemoryFile } from "../memfs"
 import { parseAgreementsLedger } from "./format"
 import type { AgreementItem } from "./types"
+import { readAgreementEvents } from "./source-event"
 
 export function readAgreementsBody(content: string | undefined): readonly AgreementItem[] {
   if (content === undefined) return []
@@ -15,6 +16,15 @@ export function describeAgreementsToolViolation(
   before: string | undefined,
   after: string | undefined,
 ): string | undefined {
+  const receipts = (content: string | undefined): readonly string[] => content === undefined
+    ? [] : readAgreementEvents(parseAgreementsLedger(parseMemoryFile(content).body).unparsed).toSorted()
+  try {
+    if (JSON.stringify(receipts(before)) !== JSON.stringify(receipts(after))) {
+      return "agreement source-event receipts are managed by the facts extractor and cannot be changed by memory tools"
+    }
+  } catch (error) {
+    return `system/agreements.md is not a valid memory file: ${error instanceof Error ? error.message : String(error)}`
+  }
   const itemsBefore = readAgreementsBody(before)
   const humanBefore = itemsBefore.filter((item) => item.by === "human")
   if (after === undefined) {

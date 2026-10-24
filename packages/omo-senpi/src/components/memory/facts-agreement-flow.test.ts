@@ -21,6 +21,7 @@ import { enqueue, fixture, runnerOptions } from "./facts-runner.test-support"
 
 const MONITOR = "Never filter the message monitor output"
 const MONITOR_ID = agreementId(MONITOR)
+const SOURCE = { sessionId: "session-1", messageId: "m2" } as const
 const LEDGER = `---\ndescription: Agreements\n---\n\n- [global] ${MONITOR} <!-- id: ${MONITOR_ID}; by: agent; n: 2; since: 2026-08-01; last: 2026-08-09; status: active -->\n`
 
 function withMaxItems(load: FactsExtractorRunnerOptions["loadConfig"], maxItems: number): FactsExtractorRunnerOptions["loadConfig"] {
@@ -62,8 +63,9 @@ describe("facts lane: a repeat correction counts against its agreement", () => {
         seen.payloadIds = payload.agreements?.map((item) => item.id)
         const tool = (spec.memberScopedTools as readonly AgreementToolLike[] | undefined)?.find((candidate) => candidate.name === FACTS_AGREEMENT_TOOL_NAME)
         if (tool === undefined) throw new Error("record_agreement was not offered to the facts child")
-        seen.unknown = (await tool.execute("a-0", { action: "reaffirm", id: "0000000000", date: "2026-08-10" })).isError === true
-        await tool.execute("a-1", { action: "reaffirm", id: MONITOR_ID, date: "2026-08-10" })
+        seen.unknown = (await tool.execute("a-0", { action: "reaffirm", id: "0000000000", date: "2026-08-10", source: SOURCE })).isError === true
+        await tool.execute("a-1", { action: "reaffirm", id: MONITOR_ID, date: "2026-08-10", source: SOURCE })
+        await tool.execute("a-2", { action: "reaffirm", id: MONITOR_ID, date: "2026-08-10", source: SOURCE })
         return handle(spec)
       },
     })
@@ -102,7 +104,7 @@ describe("facts lane: a repeat correction counts against its agreement", () => {
       start: async (spec: ChildSpec): Promise<ChildHandle> => {
         const tool = (spec.memberScopedTools as readonly AgreementToolLike[] | undefined)?.find((candidate) => candidate.name === FACTS_AGREEMENT_TOOL_NAME)
         if (tool === undefined) throw new Error("record_agreement was not offered to the facts child")
-        await tool.execute("a-1", { action: "reaffirm", id: MONITOR_ID, date: "2026-08-10" })
+        await tool.execute("a-1", { action: "reaffirm", id: MONITOR_ID, date: "2026-08-10", source: SOURCE })
         await writeFile(join(repo.dir, AGREEMENTS_PATH), "---\ndescription: Agreements\n---\n")
         await repo.commitWrite([AGREEMENTS_PATH], "/agreements drop", { agentId: identity.id, authorName: "Person" })
         droppedHead = await repo.head()
@@ -135,7 +137,7 @@ describe("facts lane: a repeat correction counts against its agreement", () => {
       start: async (spec: ChildSpec): Promise<ChildHandle> => {
         const tool = (spec.memberScopedTools as readonly AgreementToolLike[] | undefined)?.find((candidate) => candidate.name === FACTS_AGREEMENT_TOOL_NAME)
         if (tool === undefined) throw new Error("record_agreement was not offered to the facts child")
-        await tool.execute("a-1", { action: "new", applies: "project", text: "Keep run roots out of tmp", date: "2026-08-10" })
+        await tool.execute("a-1", { action: "new", applies: "project", text: "Keep run roots out of tmp", date: "2026-08-10", source: SOURCE })
         return handle(spec)
       },
     })

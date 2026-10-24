@@ -85,6 +85,7 @@ export async function applyFactsBatch(
   if (count === 0) return { outcome: "no_facts", affectedPaths: [] }
   try {
     const recovery = await planFactsMutation(repo, batch, options.people, options.onAliasTie, options.agreements)
+    if (recovery.paths.length === 0) return { outcome: "no_facts", affectedPaths: [] }
     await options.publishRecovery?.(recovery)
     return applyFactsRecovery(repo, recovery, count, author)
   } catch (error) {

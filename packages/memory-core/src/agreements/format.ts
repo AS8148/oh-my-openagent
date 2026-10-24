@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 
 import { normalizeObservationText } from "../facts/person-routing"
 import type { AgreementAuthor, AgreementItem, AgreementScope, AgreementStatus } from "./types"
+import { readAgreementEvents } from "./source-event"
 
 export interface AgreementsLedgerParse {
   readonly items: readonly AgreementItem[]
@@ -29,6 +30,10 @@ export function parseAgreementsLedger(body: string): AgreementsLedgerParse {
   for (const [index, raw] of body.split(/\r?\n/).entries()) {
     const line = raw.trim()
     if (line.length === 0) continue
+    if (readAgreementEvents([line]).length > 0) {
+      unparsed.push(line)
+      continue
+    }
     const match = LINE_RE.exec(line)
     const scope = match?.[1]
     const text = match?.[2]?.trim()

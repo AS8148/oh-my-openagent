@@ -1,10 +1,12 @@
 import { agreementId, normalizeAgreementText, sortAgreements } from "./format"
 import type { AgreementExtractionRecord, AgreementItem, AgreementScope, AgreementsPolicy } from "./types"
+import { agreementEventId } from "./source-event"
 
 export interface AgreementsMutation {
   readonly items: readonly AgreementItem[]
   readonly newlyFlagged: readonly string[]
   readonly events: readonly AgreementEvent[]
+  readonly recordedEvents: readonly string[]
 }
 
 export type AgreementEvent =
@@ -16,30 +18,41 @@ export function applyAgreementRecords(
   existing: readonly AgreementItem[],
   records: readonly AgreementExtractionRecord[],
   policy: AgreementsPolicy,
+  priorEvents: readonly string[] = [],
 ): AgreementsMutation {
   let items = [...existing]
   const committed = new Set(existing.map((item) => item.id))
   const flagged = new Set<string>()
   const events: AgreementEvent[] = []
-  const bump = (at: number, date: string, text: string | undefined): void => {
+  const seenEvents = new Set(priorEvents)
+  const recordedEvents: string[] = []
+  const remember = (record: AgreementExtractionRecord, id: string): boolean => {
+    const key = agreementEventId(record, id)
+    if (key === undefined) return true
+    if (seenEvents.has(key)) return false
+    seenEvents.add(key)
+    recordedEvents.push(key)
+    return true
+  }
+  const bump = (at: number, record: AgreementExtractionRecord, text: string | undefined): void => {
     const found = items[at]
-    if (found === undefined) return
+    if (found === undefined || !remember(record, found.id)) return
     const n = found.n + 1
     const reworded = found.by === "agent" && text !== undefined ? text : found.text
     const status = n >= policy.needsHumanThreshold ? "needs-human" : found.status
     if (status === "needs-human" && found.status !== "needs-human") flagged.add(found.id)
-    items[at] = { ...found, text: reworded, n, last: date, status }
+    items[at] = { ...found, text: reworded, n, last: record.date, status }
   }
   for (const record of records) {
     if (record.action === "reaffirm") {
       const at = items.findIndex((item) => item.id === record.id)
       if (at < 0) events.push({ kind: "stale-reaffirm", date: record.date, id: record.id })
-      else bump(at, record.date, record.text)
+      else bump(at, record, record.text)
       continue
     }
     const at = findAgreement(items, record.text)
     if (at >= 0) {
-      bump(at, record.date, undefined)
+      bump(at, record, undefined)
       continue
     }
     const status = 1 >= policy.needsHumanThreshold ? "needs-human" : "active"
@@ -47,6 +60,8 @@ export function applyAgreementRecords(
       id: agreementId(record.text), scope: record.applies, by: "agent", text: record.text,
       n: 1, since: record.date, last: record.date, status,
     }
+    const eventId = agreementEventId(record, created.id)
+    if (eventId !== undefined && seenEvents.has(eventId)) continue
     if (items.length >= policy.maxItems) {
       const victim = evictionCandidate(items.filter((item) => committed.has(item.id)))
       if (victim === undefined) {
@@ -57,9 +72,10 @@ export function applyAgreementRecords(
       events.push({ kind: "evicted", date: record.date, item: victim, forText: record.text })
     }
     if (status === "needs-human") flagged.add(created.id)
+    remember(record, created.id)
     items.push(created)
   }
-  return { items: sortAgreements(items), newlyFlagged: [...flagged], events }
+  return { items: sortAgreements(items), newlyFlagged: [...flagged], events, recordedEvents }
 }
 
 /** At the cap only a committed agent item that was never reaffirmed and is not flagged may go: the oldest one. */

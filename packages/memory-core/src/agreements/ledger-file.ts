@@ -6,6 +6,7 @@ import { parseMemoryFile, renderMemoryFile } from "../memfs"
 import { stampReceipt } from "../tools/claim-frontmatter"
 import { parseAgreementsLedger, serializeAgreementsLedger } from "./format"
 import { AGREEMENTS_DESCRIPTION, AGREEMENTS_PATH, type AgreementItem, type FactsKnownAgreement } from "./types"
+import { renderAgreementEvent } from "./source-event"
 
 export async function readAgreementsWorktree(repoDir: string): Promise<string | undefined> {
   try {
@@ -25,10 +26,10 @@ export function agreementItemsOf(content: string | undefined): readonly Agreemen
   return content === undefined ? [] : parseAgreementsLedger(parseMemoryFile(content).body).items
 }
 
-export function renderAgreementsFile(existing: string | undefined, items: readonly AgreementItem[]): string {
+export function renderAgreementsFile(existing: string | undefined, items: readonly AgreementItem[], recordedEvents: readonly string[] = []): string {
   const parsed = existing === undefined ? undefined : parseMemoryFile(existing)
   const unparsed = parsed === undefined ? [] : parseAgreementsLedger(parsed.body).unparsed
-  const serialized = serializeAgreementsLedger(items, unparsed)
+  const serialized = serializeAgreementsLedger(items, [...new Set([...unparsed, ...recordedEvents.map(renderAgreementEvent)])])
   const body = serialized.length === 0 ? "" : `${serialized}\n`
   // Neither ledger writer (/agreements, the facts lane) is the memory tool, so the header follows the rule the hooks
   // enforce on every other writer: a user-record header is lowered to "mixed" and a legacy one is dropped.

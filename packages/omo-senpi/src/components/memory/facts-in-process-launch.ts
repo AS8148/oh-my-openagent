@@ -100,6 +100,10 @@ async function launchCandidate(
   const known = typeof input.payload === "string" ? undefined : input.payload.agreements
   const agreementTool = known === undefined ? undefined : createFactsAgreementTool({
     extractionPath: agreementsPath, state, knownIds: new Set(known.map((item) => item.id)),
+    sources: typeof input.payload === "string" ? [] : input.payload.entries.flatMap((entry) =>
+      entry.entries.filter((message) => message.kind === "user").map((message) => ({
+        sessionId: entry.sessionId, messageId: message.source_message_id,
+      }))),
     ...(guard === undefined ? {} : { onFailure: guard.fail }),
   })
   const createSession = guard?.createSession ?? input.options.createSession

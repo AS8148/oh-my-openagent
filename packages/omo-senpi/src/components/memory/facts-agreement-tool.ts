@@ -14,6 +14,10 @@ const FactsAgreementParams = Type.Object({
   applies: Type.Optional(Type.Union([Type.Literal("global"), Type.Literal("project")])),
   text: Type.Optional(Type.String()),
   date: Type.String(),
+  source: Type.Object({
+    sessionId: Type.String(),
+    messageId: Type.String(),
+  }, { additionalProperties: false }),
 }, { additionalProperties: false })
 
 type FactsAgreementParams = Static<typeof FactsAgreementParams>
@@ -32,6 +36,7 @@ export type FactsAgreementTool = Omit<FactsRecordTool, "parameters" | "execute">
 type FactsAgreementToolInput = {
   readonly extractionPath: string
   readonly knownIds: ReadonlySet<string>
+  readonly sources: readonly { readonly sessionId: string; readonly messageId: string }[]
   readonly onFailure?: (reason: string) => void
   readonly state?: { readonly cancelled: boolean }
 }
@@ -40,6 +45,7 @@ export function createFactsAgreementTool(input: FactsAgreementToolInput): FactsA
   let active = true
   let count = 0
   let bytes = 0
+  const sources = new Set(input.sources.map((source) => JSON.stringify([source.sessionId, source.messageId])))
   const reject = (reason: string): FactsRecordToolResult => {
     input.onFailure?.(reason)
     return result(`Agreement rejected: ${reason}`, true)
@@ -53,6 +59,9 @@ export function createFactsAgreementTool(input: FactsAgreementToolInput): FactsA
       if (count >= AGREEMENT_RECORD_LIMIT) return reject(`the agreement limit (${AGREEMENT_RECORD_LIMIT}) has been reached`)
       try {
         const record = parseAgreementRecord(params, count)
+        if (record.source === undefined || !sources.has(JSON.stringify([record.source.sessionId, record.source.messageId]))) {
+          return reject("source must identify a user message in this payload, not a context lead or another session")
+        }
         if (record.action === "reaffirm" && !input.knownIds.has(record.id)) {
           return reject(`no agreement has id ${record.id}; use one of the ids in the payload's agreements, or action "new"`)
         }

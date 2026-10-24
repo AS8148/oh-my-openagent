@@ -33,6 +33,10 @@ export interface FactsKnownAgreement {
   readonly n: number
 }
 
-export type AgreementExtractionRecord =
+export type AgreementExtractionRecord = (
   | { readonly action: "new"; readonly applies: AgreementScope; readonly text: string; readonly date: string }
   | { readonly action: "reaffirm"; readonly id: string; readonly date: string; readonly text?: string }
+) & {
+  /** Absent only on pre-source-binding extraction artifacts; a fresh facts apply refuses those for re-extraction. */
+  readonly source?: { readonly sessionId: string; readonly messageId: string }
+}
