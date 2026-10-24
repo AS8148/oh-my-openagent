@@ -34,6 +34,19 @@ export function parseConfigSelection(value: unknown): ConfigSelection | undefine
   return selection
 }
 
+/**
+ * `env` with its config selection replaced by a record's: the keys of `CONFIG_SELECTION_ENV_KEYS` are taken from
+ * `selection` only, every other key (the env opt-outs included) stays this process's own.
+ */
+export function withConfigSelection(
+  env: Readonly<Record<string, string | undefined>>,
+  selection: ConfigSelection,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = { ...env }
+  for (const key of CONFIG_SELECTION_ENV_KEYS) delete out[key]
+  return Object.assign(out, selection)
+}
+
 type QueuedScope = { readonly cwd?: string; readonly config?: ConfigSelection }
 
 /** `<state>/session-summary`: windows at the top, events awaiting delivery under `pending/`. */
@@ -90,8 +103,11 @@ function sendable(value: unknown, isScopeConsented: (scope: QueuedScope) => bool
   // A record that names no cwd fails closed, as at send time (isRecordSendable): consent read without a cwd would
   // be this process's default, not the writer's.
   if (typeof cwd !== "string" || cwd.length === 0) return false
-  const config = parseConfigSelection(Reflect.get(scope, "config"))
-  return isScopeConsented(config === undefined ? { cwd } : { cwd, config })
+  const rawConfig: unknown = Reflect.get(scope, "config")
+  if (rawConfig === undefined) return isScopeConsented({ cwd })
+  const config = parseConfigSelection(rawConfig)
+  // A selection that cannot be read back cannot be judged: leave the record to the recorder's own reading.
+  return config === undefined ? undefined : isScopeConsented({ cwd, config })
 }
 
 function names(dir: string): string[] {

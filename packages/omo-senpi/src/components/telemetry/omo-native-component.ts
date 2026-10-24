@@ -47,7 +47,7 @@ import { isTelemetryHostWarmup, resolveTelemetrySessionRole } from "./session-ro
 import type { LoadSummaryRecovery } from "./session-summary-lazy-recovery"
 import { removeLegacyRollupsOnce } from "./session-summary-legacy-rollups"
 import { startOptOutPurge } from "./session-summary-optout-start"
-import { configSelectionOf } from "./session-summary-purge"
+import { configSelectionOf, withConfigSelection } from "./session-summary-purge"
 import type { ConsentScope } from "./session-summary-storage"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
@@ -139,7 +139,11 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       // read would let a turn right after an opt-out still persist a window.
       const readConsent = (cwd: string | undefined): boolean =>
         isOmoNativeTelemetryEnabled(consentOptions, cwd === undefined ? {} : { cwd }, env)
-      const isScopeConsented = (scope: ConsentScope): boolean => readConsent(scope.cwd)
+      // A record is sent, resumed or kept by its writer's config (#11198), with this process's own env opt-outs.
+      const isScopeConsented = (scope: ConsentScope): boolean =>
+        scope.config === undefined
+          ? readConsent(scope.cwd)
+          : isOmoNativeTelemetryEnabled(consentOptions, scope.cwd === undefined ? {} : { cwd: scope.cwd }, withConfigSelection(env, scope.config))
       let consentCwd = typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : undefined
       const consentedAtRegistration = readConsent(consentCwd)
       // An opted-out process deletes what dead processes left for it at once, not only when it quits.

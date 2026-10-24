@@ -23,7 +23,7 @@ import type { OmoSenpiComponent } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { loadSenpiOmoConfig } from "../config-resolution"
 import { userInfo } from "node:os"
-import { CONFIG_SELECTION_ENV_KEYS, type ConfigSelection } from "./session-summary-purge"
+import { CONFIG_SELECTION_ENV_KEYS, withConfigSelection, type ConfigSelection } from "./session-summary-purge"
 import { getSenpiTelemetryStateDir, recordSenpiDailyActive } from "./index"
 import { createCategoryConfigCapture } from "./omo-native-category-config"
 import { captureProcessCrashes } from "./omo-native-crash"
@@ -349,9 +349,10 @@ export function isOmoNativeTelemetryConfigEnabled(
 ): boolean {
   const shared: Record<string, string | undefined> = { ...env }
   for (const key of CONFIG_SELECTION_ENV_KEYS) delete shared[key]
-  shared.HOME = accountHomeDir
-  if (selection !== undefined) Object.assign(shared, selection)
-  return configEnabled(options, eventCtx, shared)
+  // The account's own home, unless the record names the home its writer read (HOME, or USERPROFILE on Windows).
+  const ownHome = selection?.HOME === undefined && selection?.USERPROFILE === undefined
+  if (ownHome) shared.HOME = accountHomeDir
+  return configEnabled(options, eventCtx, selection === undefined ? shared : withConfigSelection(shared, selection))
 }
 
 function configEnabled(
