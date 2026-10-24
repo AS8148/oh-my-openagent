@@ -94,6 +94,7 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
           { pid: 100, name: "node.exe", commandLine: `node ${INSTALL_DIR}\\omo-ai\\bin\\omo.js update` },
           { pid: 4242, name: "claude.exe", executablePath: `${INSTALL_DIR.toLowerCase()}\\@anthropic-ai\\claude-agent-sdk-win32-x64\\claude.exe` },
           { pid: 777, name: "explorer.exe", executablePath: String.raw`C:\Windows\explorer.exe` },
+          { pid: 999, name: "other.exe", executablePath: `${INSTALL_DIR}\\@anthropic-ai\\claude-agent-sdk-win32-x64-extra\\other.exe` },
           { pid: 888, name: "node.exe", commandLine: `node ${INSTALL_DIR}\\typescript\\lib\\tsserver.js` },
         ],
       })
@@ -106,6 +107,7 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
       expect(text).not.toContain("pid 100")
       expect(text).not.toContain("explorer.exe")
       expect(text).not.toContain("pid 888")
+      expect(text).not.toContain("pid 999")
       expect(text).toContain("Quit claude.exe and run omo update again.")
       expect(text).toContain("omo 5.1.1 is still installed.")
     })
@@ -116,8 +118,8 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
       const h = harness({ outcomes: [{ status: 1, stderr: HELD_STDERR }] })
       expect(await runSelfUpdate([], h.options)).toBe(1)
       const text = h.errors.join("\n")
-      expect(text).toContain("No omo process holds it")
-      expect(text).toContain("wait a minute and run omo update again")
+      expect(text).toContain("No omo command-line process was found holding it.")
+      expect(text).toContain("close it, or wait a minute, then run omo update again.")
     })
   })
 
@@ -190,6 +192,16 @@ describe("runChild captureStderr", () => {
     })
     expect(result.status).toBe(3)
     expect(result.stderr).toBe("held")
+  })
+
+  test("#then a multi-byte character split across two writes is returned whole", async () => {
+    const child = [
+      "const bytes = Buffer.from('held \u00e9', 'utf8')",
+      "process.stderr.write(bytes.subarray(0, bytes.length - 1))",
+      "setTimeout(() => { process.stderr.write(bytes.subarray(bytes.length - 1)); process.exit(0) }, 50)",
+    ].join(";")
+    const result = await runChild(process.execPath, ["-e", child], { captureStderr: true, stdio: "inherit" })
+    expect(result.stderr).toBe("held \u00e9")
   })
 
   test("#then a grandchild that keeps the stderr pipe open does not hold the result back", async () => {

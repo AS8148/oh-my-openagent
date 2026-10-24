@@ -165,7 +165,7 @@ async function reportHeldInstall({ result, before, install, resolveUpdate, readI
     const names = [...new Set(holders.map((holder) => holder.name))].join(", ")
     error(`omo: Quit ${names} and run omo update again.`)
   } else {
-    error("omo: No omo process holds it; antivirus is likely still scanning the new files, so wait a minute and run omo update again.")
+    error("omo: No omo command-line process was found holding it. Another app (for example the OmO desktop app or an editor) or antivirus may be holding it: close it, or wait a minute, then run omo update again.")
   }
 
   const now = readInstalledOrUndefined(readInstalled)

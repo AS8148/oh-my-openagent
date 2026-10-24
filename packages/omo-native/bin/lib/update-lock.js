@@ -60,7 +60,7 @@ export function findHolders(installDir, processes, excludePids, held = undefined
   const needles = OMO_PACKAGES.map((name) => `${root}\\${normalizePath(name)}\\`)
   if (held !== undefined) {
     const target = normalizePath(held)
-    needles.push(/^[a-z]:\\|^\\\\/.test(target) ? target : `${root}\\${target}`)
+    needles.push(`${/^[a-z]:\\|^\\\\/.test(target) ? target : `${root}\\${target}`}\\`)
   }
   return processes.filter((entry) => {
     if (excludePids.includes(entry.pid)) return false

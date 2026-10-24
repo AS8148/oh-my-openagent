@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { StringDecoder } from "node:string_decoder"
 
 // POSIX launchers prefer execve and leave no wrapper. This async fallback remains for Windows
 // and missing/failed execve.
@@ -58,9 +59,11 @@ export function runChild(command, args, options = {}) {
     })
     let stderr = ""
     if (captureStderr) {
+      // The decoder keeps a multi-byte character split across chunks whole; the echo stays raw bytes.
+      const decoder = new StringDecoder("utf8")
       child.stderr.on("data", (chunk) => {
         process.stderr.write(chunk)
-        stderr = (stderr + chunk.toString()).slice(-STDERR_TAIL_CHARS)
+        stderr = (stderr + decoder.write(chunk)).slice(-STDERR_TAIL_CHARS)
       })
     }
 
