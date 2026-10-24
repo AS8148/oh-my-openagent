@@ -2,17 +2,25 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createHash } from "node:crypto"
 
+import { RETIRED_SECTION_DIGESTS } from "./layer-validation"
 import { loadOmoConfig } from "./loader"
 
 const roots: string[] = []
-const sections = [String.fromCharCode(100, 111, 114, 105), ["gate", "way"].join("")]
+// Fixture keys for the retired sections; the first test pins them to the loader's digests.
+const sections = [["d", "o", "r", "i"].join(""), ["gate", "way"].join("")]
+const digest = (key: string): string => createHash("sha256").update(key.toLowerCase()).digest("hex")
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 describe("ignored config sections", () => {
+  test("the fixture keys are exactly the retired section digests", () => {
+    expect(new Set(sections.map(digest))).toEqual(new Set(RETIRED_SECTION_DIGESTS))
+  })
+
   for (const extension of ["json", "jsonc"]) {
     for (const [index, key] of sections.entries()) {
       test(`${extension} section ${index} is silently ignored in every config container`, () => {

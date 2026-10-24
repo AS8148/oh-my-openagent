@@ -45,7 +45,6 @@ export type ThreadComponentOptions = Partial<Omit<ThreadToolSurfaceOptions, "cal
   readonly controlEndpointTest?: ControlEndpointRegistrantOptions["_test"]
 }
 
-
 /**
  * `cause`: the newest delivery whose message the model has taken into its context (a send from this
  * run continues its causal root). A delivery admitted but still waiting in a queue is not a cause yet.

@@ -9,6 +9,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// A private host name the gate blocks (char codes keep this file from matching its own rule).
 const PERSONAL_HOST = String.fromCharCode(106, 111, 98, 100, 111, 114, 105);
 
 const DEFAULT_SCAN_DIRS = [

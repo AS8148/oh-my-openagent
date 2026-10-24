@@ -1355,7 +1355,6 @@
     "packages/omo-senpi/src/components/thread/gateway/store-extension-facade.ts",
     "packages/omo-senpi/src/components/thread/gateway/store-extension-ops.ts",
     "packages/omo-senpi/src/components/thread/gateway/store-extension-session-ops.ts",
-    "packages/omo-senpi/src/components/thread/gateway/store-extensions.ts",
     "packages/omo-senpi/src/components/thread/gateway/store-ops.ts",
     "packages/omo-senpi/src/components/thread/gateway/store-ownership.ts",
     "packages/omo-senpi/src/components/thread/gateway/store-relay-ops.ts",
