@@ -180,13 +180,6 @@
       "installNow": "Instalar ahora",
       "readTheDocs": "Leer la documentación"
     },
-    "dori": {
-      "eyebrow": "Spoiler",
-      "title": "Alguien ha estado trabajando mientras duermes.",
-      "body": "No es OmO. Es un nuevo fichaje del mismo equipo. No tiene horario de salida y le pagas en tokens.",
-      "cta": "Conoce a Dori",
-      "alt": "Dori, un perro blanco de dibujo animado sosteniendo una piedra, asomándose desde la parte inferior de la página"
-    },
     "dag": {
       "region": "App de escritorio de OmO con el grafo de flujo de trabajo abierto",
       "windowTitle": "OmO — estudio de mercado, 12k fuentes",
