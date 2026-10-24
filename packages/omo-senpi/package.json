@@ -20,7 +20,6 @@
     "#omo-memory-commands-runtime": "./src/components/memory/commands/runtime.ts",
     "#omo-session-history-runtime": "./src/components/onboarding/session-history/runtime.ts",
     "#omo-recall-store-runtime": "./src/components/memory/recall-store-runtime.ts",
-    "#omo-dori-migration-runtime": "./src/components/config-startup/dori-migration-runtime.ts",
     "#omo-memory-sync-runtime": "./src/components/memory/sync-runtime.ts",
     "#omo-agent-toolkit-sdk": "./src/extension/agent-toolkit-sdk.ts"
   },

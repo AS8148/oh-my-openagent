@@ -80,14 +80,6 @@
       },
       "additionalProperties": false
     },
-    "dori": {
-      "type": "object",
-      "propertyNames": {
-        "type": "string"
-      },
-      "additionalProperties": {},
-      "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-    },
     "$schema": {
       "type": "string"
     },
@@ -2636,14 +2628,6 @@
           },
           "additionalProperties": false
         },
-        "dori": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {},
-          "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-        },
         "categories": {
           "type": "object",
           "propertyNames": {
@@ -4974,14 +4958,6 @@
           },
           "additionalProperties": false
         },
-        "dori": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {},
-          "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-        },
         "categories": {
           "type": "object",
           "propertyNames": {
@@ -7311,14 +7287,6 @@
             }
           },
           "additionalProperties": false
-        },
-        "dori": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {},
-          "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
         },
         "categories": {
           "type": "object",
@@ -9656,14 +9624,6 @@
             },
             "additionalProperties": false
           },
-          "dori": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {},
-            "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-          },
           "categories": {
             "type": "object",
             "propertyNames": {
@@ -11993,14 +11953,6 @@
                   }
                 },
                 "additionalProperties": false
-              },
-              "dori": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {},
-                "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
               },
               "categories": {
                 "type": "object",
@@ -14332,14 +14284,6 @@
                 },
                 "additionalProperties": false
               },
-              "dori": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {},
-                "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-              },
               "categories": {
                 "type": "object",
                 "propertyNames": {
@@ -16669,14 +16613,6 @@
                   }
                 },
                 "additionalProperties": false
-              },
-              "dori": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {},
-                "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
               },
               "categories": {
                 "type": "object",
