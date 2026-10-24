@@ -73,21 +73,22 @@ export const RULES = Object.freeze({
 	},
 	rational_or_null: { cell: "rational or null", says: "null or { num: integer string, den: positive integer string }", test: orNull(isRational) },
 	by_derive: { cell: "written by derive (rational or null)", says: "null or { num: integer string, den: positive integer string }", test: orNull(isRational) },
+	context_by_derive: { cell: "written by derive (object or null)", says: "null or an object", test: orNull(isObject) },
 })
 
 /** The grammar's per-kind columns, in table order; `exact` follows `value` because it reads it. */
-export const KIND_COLUMNS = Object.freeze(["fact_id", "value", "source_id", "locator", "snapshot_sha256", "rationale", "exact"])
+export const KIND_COLUMNS = Object.freeze(["fact_id", "value", "source_id", "locator", "snapshot_sha256", "rationale", "exact", "context"])
 
 const sourced = { source_id: "source", locator: "locator", snapshot_sha256: "sha256" }
 const unsourced = { source_id: "source_or_null", locator: "locator_or_null", snapshot_sha256: "sha256_or_null" }
 const row = (cells) => Object.freeze(Object.fromEntries(KIND_COLUMNS.map((column) => [column, cells[column]])))
 
 export const KIND_RULES = Object.freeze({
-	measured: row({ fact_id: "f_id", value: "decimal", ...sourced, rationale: "string_or_null", exact: "from_value" }),
-	quote: row({ fact_id: "q_id", value: "null", ...sourced, rationale: "string_or_null", exact: "null" }),
-	derived: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "string_or_null", exact: "by_derive" }),
-	assumed: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "non_empty", exact: "rational_or_null" }),
-	converted: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "string_or_null", exact: "by_derive" }),
+	measured: row({ fact_id: "f_id", value: "decimal", ...sourced, rationale: "string_or_null", exact: "from_value", context: "null" }),
+	quote: row({ fact_id: "q_id", value: "null", ...sourced, rationale: "string_or_null", exact: "null", context: "null" }),
+	derived: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "string_or_null", exact: "by_derive", context: "context_by_derive" }),
+	assumed: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "non_empty", exact: "rational_or_null", context: "null" }),
+	converted: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "string_or_null", exact: "by_derive", context: "context_by_derive" }),
 })
 
 /** The id prefix nextId assigns for a kind; an unknown kind gets F and fails validation later. */

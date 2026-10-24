@@ -34,7 +34,17 @@ const needsContext = (row) => (isObject(row.context) ? null : `${row.operation} 
 const noContext = (row) => (row.context === null || row.context === undefined ? null : `${row.operation} rows carry no context, got ${show(row.context)}`)
 const SNAPSHOT = ["population", "snapshot_window"]
 /** Malformed shapes every operation shares; each rule's `malformed` names the shapes the property test must cover. */
-const COMMON = ["operands null", "operands empty", "wrong arity", "missing operand id", "invalid rational", "no operation"]
+const COMMON = ["operands null", "operands empty", "wrong arity", "missing operand id", "invalid rational", "no operation", "repeated operand", "self reference"]
+
+/**
+ * Operand identity: the operands of one row are distinct facts. sum(F1, F1) is not two disjoint shares, and an
+ * operation over one fact twice would dodge every pair guard. expr may repeat an id inside its formula (F1 * F1), but
+ * its operand list is the formula's id set, so an id listed twice there is malformed as well.
+ */
+function repeatedOperand(ids) {
+	const repeated = ids.find((id, index) => ids.indexOf(id) !== index)
+	return repeated === undefined ? null : `operand ${repeated} is repeated: the operands of one row are distinct facts`
+}
 const shapes = (...own) => Object.freeze([...COMMON, ...own])
 
 /** A persisted convert target must be stored canonical text: an alias at rest is a relabel, compared exactly. */
@@ -155,12 +165,12 @@ export const OPERATION_RULES = Object.freeze({
 			const [from] = units
 			const target = context.target
 			if (from === target) refuse(`${rows[0].fact_id} is already in ${target}`)
-			if ([from, target].some((unit) => dimensionOf(unit)?.startsWith("currency:"))) refuse(`${rows[0].fact_id} in ${show(from)} has no table conversion to ${target}`, EXPR_HINT)
+			if ([from, target].some((unit) => dimensionOf(unit)?.startsWith("currency:"))) refuse(`${rows[0].fact_id} in ${show(from)} has no table conversion to ${target} (a currency)`, EXPR_HINT)
 			if (!convertFactor(from, target)) refuse(`${rows[0].fact_id} in ${show(from)} has no table conversion to ${target}`)
 			return target
 		},
 		shape: convertShape,
-		malformed: shapes("no context", "empty target", "alias target", "no factor to target"),
+		malformed: shapes("no context", "empty target", "alias target", "currency target", "no factor to target"),
 	}),
 	expr: Object.freeze({
 		arity: (n) => n >= 1,
@@ -188,6 +198,8 @@ export function operandUnit(row) {
 /** The canonical result unit of `op` over operand rows, after every metadata and operand guard; refuses otherwise. */
 export function expectedUnit(op, rows, { ast = null, context = null } = {}) {
 	const rule = ruleOf(op)
+	const repeated = repeatedOperand(rows.map((row) => row.fact_id))
+	if (repeated) refuse(repeated)
 	if (!rule.arity(rows.length)) refuse(`${op} takes ${rule.arityText}, got ${rows.length}`)
 	const units = rows.map(operandUnit)
 	for (const field of rule.metadata) {
@@ -215,6 +227,9 @@ export function malformed(row) {
 	const rule = OPERATION_RULES[row.operation]
 	const { operands, exact } = row
 	if (!Array.isArray(operands) || operands.length === 0 || !operands.every(isNonEmpty)) return `operands must be a non-empty array of fact ids, got ${show(operands)}`
+	const repeated = repeatedOperand(operands)
+	if (repeated) return repeated
+	if (operands.includes(row.fact_id)) return `${row.fact_id} cites itself as an operand`
 	if (!rule.arity(operands.length)) return `${row.operation} takes ${rule.arityText}, got ${operands.length}`
 	if (!isObject(exact) || !/^-?\d+$/.test(String(exact.num)) || !/^[1-9]\d*$/.test(String(exact.den))) return `exact must be { num, den } integer strings, got ${show(exact)}`
 	return rule.shape?.(row) ?? null

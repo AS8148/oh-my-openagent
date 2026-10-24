@@ -50,6 +50,7 @@ Always required, never null: `fact_id`, `kind`, `raw` (string), `quote` (string)
 | `snapshot_sha256` | sha256 | sha256 | sha256 or null | sha256 or null | sha256 or null |
 | `rationale` | string or null | string or null | string or null | non-empty | string or null |
 | `exact` | from `value` | null | written by derive (rational or null) | rational or null | written by derive (rational or null) |
+| `context` | null | null | written by derive (object or null) | null | written by derive (object or null) |
 <!-- kind-rules:end -->
 
 - `exact` is `{ num: integer string, den: positive integer string }` or null. A measured row's

@@ -12,6 +12,12 @@ numeric guards may read `exact` values, unit selection may not. The property tes
   (`pp` -> `%p`, `kilometre` -> `km`, ...) are canonicalized ONLY at input (derive/fact add); a relabel to an alias
   at rest is a relabel and is detected. Unit text with no alias is stored as given: whitespace is trimmed only around
   `*`, `/`, `^`, and parentheses, so `million people`, `metric ton`, and `USD per person` keep their inner spaces.
+- A scale word (`million`, `M`, `bn`, `billion`, `thousand`, `e6`, ...; the `scale` rows of `units.mjs`) is a
+  multiplier, not a unit, and denomination scaling is out of scope, so it never becomes a unit atom: `million`,
+  `USD/M`, and `million*person` are refused at input (derive, and every operand read). Either store the scaled numeral
+  in the counted unit (5 million people as `5000000 person`) or keep the whole phrase as plain unit text:
+  `million people` has no table alias as a whole, so it is stored as given and sums only with `million people`, never
+  with `person`.
 - `null` = dimensionless. Omitted unit on a derived spec is an error, not null (distinguish omission from declared null).
 - Percent `%` stores percentage numerals (20% stores 20). Delta `%p` (percentage points). 1 basis point = 0.01 %p
   (input alias `bp` -> `%p` with /100 scaling).
@@ -29,8 +35,22 @@ numeric guards may read `exact` values, unit selection may not. The property tes
 | growth | 2 (from,to) | equal non-affine units; same entity; two different valid_at; from.exact > 0 | none | `%` (= 100(to-from)/from) | arity; unequal/affine units; entity/valid_at; from<=0; stray context |
 | share | 2 (part,whole) | equal non-affine units; whole.exact > 0; 0 <= part <= whole | none | `%` (= 100 part/whole) | arity; units; whole<=0; part outside [0,whole]; stray context |
 | ratio | 2 (num,den) | non-affine units; den.exact != 0; unequal `%`/`%p` REFUSED | none | registry composite: equal units -> null; else canonical `U(num)/U(den)` with cancellation | arity; den=0; stray context |
-| convert | 1 | U(a) has a registered factor to `target`; currencies REFUSED (use expr with a dated rate row) | target (persisted as canonical text; the ONLY accepted declared unit; `row.unit` is compared to it exactly, never canonicalized at rest) | the persisted target | arity; no context; target missing; target not canonical (an alias at rest); no factor; declared unit != persisted target |
+| convert | 1 | U(a) has a registered factor to `target`; currencies REFUSED (use expr with a dated rate row) | target (persisted as canonical text; the ONLY accepted declared unit; `row.unit` is compared to it exactly, never canonicalized at rest) | the persisted target | arity; no context; target missing; target not canonical (an alias at rest); currency target; no factor; declared unit != persisted target |
 | expr | n>=1 | formula ids == operand set; node rules: `+`/`-` follow the sum/diff typed-pair rules, affine refusal included (so `20% - 10%` is `%p`, never `%`, and `25 C + 30 C` is refused); `+` also takes `%` + `%p` in either order -> `%` (as diff's `%-%p`), while `%` + `%` is refused (use sum); `*` and `/` compose canonical composites, `%`/`%p` operands normalize by /100 to dimensionless first; result must be fully inferred: NO rationale escape | none | the inferred unit; an explicit null->`%` conversion is a separate `convert`-like node (`pct()`) | formula/operand id mismatch; parse error; /0; uninferable unit; affine operands; stray context |
+
+Every row's malformed column also holds the two operand-identity shapes below (`repeated operand`, `self reference`).
+
+## Operand identity (applies to every row)
+- Operand ids are DISTINCT within one derived row. sum of F1, F1 is not a sum of two shares, and diff, ratio, share,
+  growth, or convert of an operand with itself is meaningless and would dodge every pair guard. A repeated id is
+  refused by `derive()` (`operand F1 is repeated`) and is `ok:false` at `recompute()` (malformed shape
+  `repeated operand`). The check sits in the registry (`expectedUnit` and `malformed`), so no operation can skip it.
+- expr may reference the same id in several leaves (`F1 * F1` is a legitimate square). Its stored operand list is the
+  formula's id SET, which must equal the formula ids (`formula id mismatch`); an id listed twice in that list is the
+  `repeated operand` shape too.
+- A derived row may not cite itself, directly (`self reference`: its own id among its operands) or through nested
+  derived operands (a cycle). `recompute()` refuses both. `derive()` recomputes every derived operand first and
+  refuses one that does not recompute (tampered, cyclic, or self-citing), so nothing is built on such a row.
 
 ## Invariants (property tests iterate the table)
 1. For each op: generate valid typed operands (rational boundaries, aliases at input, composites, %/%p, affine,
@@ -41,7 +61,8 @@ numeric guards may read `exact` values, unit selection may not. The property tes
 3. Malformed: per op, every shape in the table's malformed column has one case, named in the registry's
    `OPERATION_RULES[op].malformed` list (the test asserts its case names equal that list): `recompute` returns
    `ok:false` for that shape's own reason, never throws.
-4. Nested derived rows are verified recursively (operands may be derived rows); cycles are refused.
+4. Nested derived rows are verified recursively (operands may be derived rows); cycles and self references are
+   refused, by `recompute()` and by `derive()` before it builds on a derived operand.
 5. Render precision (`renderPrecision` in `unit-rules.mjs`): fewest decimal places for sum, diff, an expr whose root
    node is `+` or `-`, and every `%p` result; fewest significant figures otherwise (an expr `*` or `/` root with a
    non-`%p` result included). Operand values and expr literals both count.
@@ -58,8 +79,9 @@ same-currency denomination scaling (M/B), summing ratios over a common base. Eac
 
 ## Implementation notes
 
-- Context fields live in the row's `context` column (null or an object; optional when reading a ledger written before
-  it existed): sum stores `{ disjoint, reference }`, convert stores `{ target }`. The sum rationale stays in `rationale`.
+- Context fields live in the row's `context` column (null or an object on derived and converted rows, always null on
+  measured, quote, and assumed rows: a `KIND_RULES` column; optional when reading a ledger written before it existed):
+  sum stores `{ disjoint, reference }`, convert stores `{ target }`. The sum rationale stays in `rationale`.
   The schema accepts a sum or convert row without `context` on read, but `recompute` refuses it, so a hand-written
   sum or convert row must carry its context. On every other operation (context "none") a stored non-null context is
   malformed ("stray context"); null or an absent field passes.

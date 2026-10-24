@@ -55,6 +55,8 @@ function ledger(): Ledger {
 		measured("F18", "0", "case", { valid_at: "2025", entity: "acme" }),
 		measured("F19", "-5", "person"),
 		measured("F20", "2", "%p"),
+		measured("F21", "105", "case", { valid_at: "2025", entity: "acme" }),
+		measured("F22", "200", "person"),
 	]
 	for (const row of rows) addRow(built, row)
 	return built
@@ -77,7 +79,7 @@ const VALID: Record<string, Array<{ spec: Spec; unit: string | null; precision?:
 	growth: [{ spec: { op: "growth", from: "F6", to: "F7", unit: "%" }, unit: "%" }],
 	share: [
 		{ spec: { op: "share", part: "F8", whole: "F9", unit: "%" }, unit: "%" },
-		{ spec: { op: "share", part: "F9", whole: "F9", unit: "%" }, unit: "%" },
+		{ spec: { op: "share", part: "F22", whole: "F9", unit: "%" }, unit: "%" },
 	],
 	ratio: [
 		{ spec: { op: "ratio", num: "F10", den: "F11", unit: "person" }, unit: "person" },
@@ -113,7 +115,11 @@ const generic = (base: Spec, arity: string[], arityReason = "takes ", missingRea
 	{ name: "missing operand id", base, mutate: (row) => ({ ...row, operands: (row.operands as string[]).map((id, index) => (index === 0 ? "F999" : id)) }), reason: missingReason },
 	{ name: "invalid rational", base, mutate: (row) => ({ ...row, exact: { num: "x", den: "1" } }), reason: "exact must be { num, den }" },
 	{ name: "no operation", base, mutate: (row) => ({ ...row, operation: "mean" }), reason: 'operation "mean" is not one of' },
+	{ name: "repeated operand", base, mutate: (row) => ({ ...row, operands: repeatFirst(row.operands as string[]) }), reason: "is repeated" },
+	{ name: "self reference", base, mutate: (row) => ({ ...row, operands: (row.operands as string[]).map((id, index) => (index === 0 ? row.fact_id : id)) }), reason: "cites itself" },
 ]
+/** The first operand id in a second slot: [F1, F2] -> [F1, F1]; a one-operand row gets [F1, F1]. */
+const repeatFirst = (ids: string[]) => (ids.length === 1 ? [ids[0], ids[0]] : [...ids.slice(0, -1), ids[0]])
 const operands = (ids: string[]) => (row: Row) => ({ ...row, operands: ids })
 
 const MALFORMED: Record<string, Mutation[]> = {
@@ -127,7 +133,7 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "affine units", base: VALID.sum[0].spec, mutate: operands(["F13", "F14"]), reason: "sum refuses affine" },
 	],
 	diff: [
-		...generic(VALID.diff[0].spec, ["F2", "F1", "F1"]),
+		...generic(VALID.diff[0].spec, ["F2", "F1", "F8"]),
 		{ name: "%p - % pair", base: VALID.diff[2].spec, mutate: operands(["F5", "F3"]), reason: '"%p" - "%" is not a typed pair' },
 		{ name: "unit - other unit pair", base: VALID.diff[0].spec, mutate: operands(["F1", "F8"]), reason: '"m" - "person" is not a typed pair' },
 		{ name: "affine units", base: VALID.diff[0].spec, mutate: operands(["F14", "F13"]), reason: "affine (temperature)" },
@@ -138,7 +144,7 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "affine units", base: VALID.growth[0].spec, mutate: operands(["F13", "F14"]), reason: "growth refuses affine" },
 		{ name: "unequal units", base: VALID.growth[0].spec, mutate: operands(["F6", "F8"]), reason: "unit differs" },
 		{ name: "entity mismatch", base: VALID.growth[0].spec, mutate: operands(["F6", "F17"]), reason: "growth needs one declared entity" },
-		{ name: "one period", base: VALID.growth[0].spec, mutate: operands(["F6", "F6"]), reason: "two different valid_at periods" },
+		{ name: "one period", base: VALID.growth[0].spec, mutate: operands(["F6", "F21"]), reason: "two different valid_at periods" },
 		{ name: "from <= 0", base: VALID.growth[0].spec, mutate: operands(["F18", "F7"]), reason: "positive starting value in F18" },
 		{ name: "stray context", base: VALID.growth[0].spec, mutate: (row) => ({ ...row, context: { target: "km" } }), reason: "growth rows carry no context" },
 	],
@@ -158,11 +164,12 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "stray context", base: VALID.ratio[0].spec, mutate: (row) => ({ ...row, context: { target: "km" } }), reason: "ratio rows carry no context" },
 	],
 	convert: [
-		...generic(VALID.convert[0].spec, ["F12", "F12"]),
+		...generic(VALID.convert[0].spec, ["F12", "F1"]),
 		{ name: "no context", base: VALID.convert[0].spec, mutate: (row) => ({ ...row, context: null }), reason: "convert rows carry a context object" },
 		{ name: "empty target", base: VALID.convert[0].spec, mutate: (row) => ({ ...row, context: { target: "" } }), reason: "carries its target in context.target" },
 		{ name: "alias target", base: VALID.convert[0].spec, mutate: (row) => ({ ...relabel(row, "kilometre")[0], context: { target: "kilometre" } }), reason: 'context.target "kilometre" is not canonical' },
-		{ name: "no factor to target", base: VALID.convert[0].spec, mutate: (row) => ({ ...row, context: { target: "USD" } }), reason: "has no table conversion to USD" },
+		{ name: "currency target", base: VALID.convert[0].spec, mutate: (row) => ({ ...row, context: { target: "USD" } }), reason: "no table conversion to USD (a currency)" },
+		{ name: "no factor to target", base: VALID.convert[0].spec, mutate: (row) => ({ ...row, context: { target: "person" } }), reason: 'F12 in "m" has no table conversion to person' },
 	],
 	expr: [
 		...generic(VALID.expr[0].spec, ["F3", "F4", "F5"], "do not match operands", "do not match operands F999, F4"),
@@ -173,6 +180,17 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "affine sum", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, formula: "F13 + F14", operands: ["F13", "F14"] }), reason: "adding affine (temperature)" },
 		{ name: "stray context", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, context: { target: "km" } }), reason: "expr rows carry no context" },
 	],
+}
+
+/** Review r6 HIGH: one id twice is never disjoint shares; expr repeats F1 inside its formula and stores the id set. */
+const REPEATED: Record<string, Spec> = {
+	sum: { ...PCT_SUM, operands: ["F3", "F3"] },
+	diff: { op: "diff", operands: ["F3", "F3"], unit: "%p" },
+	growth: { op: "growth", from: "F6", to: "F6", unit: "%" },
+	share: { op: "share", part: "F9", whole: "F9", unit: "%" },
+	ratio: { op: "ratio", num: "F10", den: "F10", unit: null },
+	convert: { op: "convert", operands: ["F12", "F12"], to: "km" },
+	expr: { op: "expr", formula: "F1 * F1 / F2", unit: "m" },
 }
 
 function rowOf(result: { row?: Row; error?: string; detail?: string }): Row {
@@ -244,6 +262,16 @@ describe.each(OPS)("%s", (op) => {
 		expect(MALFORMED[op].map((mutation) => mutation.name).sort()).toEqual([...OPERATION_RULES[op].malformed].sort())
 	})
 
+	test("operand identity: derive refuses a repeated operand id; only expr may repeat an id, and only inside its formula", () => {
+		const spec = REPEATED[op]
+		const result = derive(ledger(), spec)
+		if (op === "expr") {
+			expect(rowOf(result).operands).toEqual(["F1", "F2"])
+			return
+		}
+		expect({ error: result.error, detail: result.detail }).toEqual({ error: "incompatible_operands", detail: expect.stringContaining("is repeated") })
+	})
+
 	test("each malformed shape is ok:false for its own reason and never throws", () => {
 		for (const { name, base, mutate, reason } of MALFORMED[op]) {
 			const book = ledger()
@@ -285,6 +313,18 @@ describe("units", () => {
 		}
 	})
 
+	test("review r6 LOW 2: a scale word is never a unit atom; plain unit text that contains one is stored as given", () => {
+		for (const unit of ["million", "M", "bn", "billion", "e6", "thousand", "USD/M", "million*person"]) {
+			expect(() => canonicalUnit(unit)).toThrow("scale word")
+			const book = emptyLedger() as Ledger
+			addRow(book, measured("F1", "5", unit))
+			addRow(book, measured("F2", "7", unit))
+			const result = derive(book, { op: "sum", operands: ["F1", "F2"], unit: "m" })
+			expect({ unit, error: result.error, detail: result.detail }).toEqual({ unit, error: "incompatible_operands", detail: expect.stringContaining("scale word") })
+		}
+		expect(canonicalUnit("million people")).toBe("million people")
+	})
+
 	test("expectedUnit is the registry's answer for stored operand rows", () => {
 		const book = ledger()
 		const rows = (ids: string[]) => ids.map((id) => book.rows.find((row) => row.fact_id === id) as Row)
@@ -302,8 +342,8 @@ describe("units", () => {
 		const tampered = recompute(book, outer)
 		expect(tampered.ok).toBe(false)
 		expect(tampered.detail).toContain(String(inner.fact_id))
-		const a = { ...inner, fact_id: "F90", operands: ["F91", "F1"], exact: { num: "4", den: "1" } }
-		const b = { ...inner, fact_id: "F91", operands: ["F90", "F1"], exact: { num: "4", den: "1" } }
+		const a = { ...inner, fact_id: "F90", label: "cycle-a", operands: ["F91", "F1"], exact: { num: "4", den: "1" } }
+		const b = { ...inner, fact_id: "F91", label: "cycle-b", operands: ["F90", "F1"], exact: { num: "4", den: "1" } }
 		book.rows.push(a, b)
 		let cycle: { ok: boolean; detail?: string } = { ok: true }
 		expect(() => {
@@ -311,5 +351,12 @@ describe("units", () => {
 		}).not.toThrow()
 		expect(cycle.ok).toBe(false)
 		expect(cycle.detail).toContain("cycle")
+		const through = derive(book, { op: "sum", operands: ["F90", "F2"], unit: "m" })
+		expect({ error: through.error, detail: through.detail }).toEqual({ error: "incompatible_operands", detail: expect.stringContaining("cycle") })
+		const self = { ...inner, fact_id: "F92", label: "self", operands: ["F92", "F1"] }
+		book.rows.push(self)
+		expect(recompute(book, self)).toMatchObject({ ok: false, detail: expect.stringContaining("cites itself") })
+		const onSelf = derive(book, { op: "convert", operands: ["F92"], to: "km" })
+		expect({ error: onSelf.error, detail: onSelf.detail }).toEqual({ error: "incompatible_operands", detail: expect.stringContaining("cites itself") })
 	})
 })

@@ -32,10 +32,16 @@ export function inputScale(raw) {
 	return typeof raw === "string" ? (SCALED_ALIASES[squash(raw).toLowerCase()]?.scale ?? null) : null
 }
 
-/** A table alias becomes its token; any other atom is kept as given, inner whitespace included ("million people"). */
+/**
+ * A table alias becomes its token; any other atom is kept as given, inner whitespace included ("million people").
+ * A scale word (million, M, bn, thousand, e6) is a multiplier, not a unit, and denomination scaling is out of scope, so
+ * it never becomes an atom: it is refused, while a phrase with no table alias as a whole stays plain text.
+ */
 function atomOf(text) {
 	if (text === "1") return null
-	return SCALED_ALIASES[squash(text).toLowerCase()]?.unit ?? normalizeUnit(text) ?? text
+	const atom = SCALED_ALIASES[squash(text).toLowerCase()]?.unit ?? normalizeUnit(text) ?? text
+	if (dimensionOf(atom) === "scale") refuse(`"${text}" is a scale word (${atom}), not a unit: store the scaled numeral in the counted unit, or write the unit as one plain phrase ("million people")`)
+	return atom
 }
 
 /** Parse unit text into factor exponents; `*`, `/`, `^n`, and parentheses, left to right; whitespace trims around them. */

@@ -99,7 +99,6 @@ function validateRow(row, index, errors) {
 	for (const key of ["operands", "derived_from"]) {
 		if (row[key] !== undefined) check(errors, Array.isArray(row[key]) && row[key].every((v) => isString(v) && FACT_REF.test(v)), `${at}.${key} must be an array of fact ids`)
 	}
-	if (row.context !== undefined) check(errors, nullOr(row.context, isObject), `${at}.context must be null or an object`)
 	if (row.factor !== undefined) check(errors, nullOr(row.factor, (v) => isString(v) && DECIMAL.test(v)), `${at}.factor must be null or a decimal string`)
 	check(errors, row.status === undefined || FACT_STATUSES.includes(row.status), `${at}.status must be one of ${FACT_STATUSES.join(", ")}`)
 }

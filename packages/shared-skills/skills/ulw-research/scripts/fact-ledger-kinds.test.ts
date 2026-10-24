@@ -61,6 +61,7 @@ const GENERATORS: Record<string, Gen> = {
 	},
 	rational_or_null: { valid: (r) => pick(r, [null, rational(r)]), invalid: (r) => pick(r, [{ num: "1", den: "0" }, { num: 1, den: "2" }, "1/2"]) },
 	by_derive: { valid: (r) => pick(r, [null, rational(r)]), invalid: (r) => pick(r, [{ num: "1", den: "0" }, { num: "x", den: "2" }, "1/2"]) },
+	context_by_derive: { valid: (r) => pick(r, [null, { target: "km" }, { disjoint: true, reference: "all" }]), invalid: (r) => pick(r, ["km", 3, ["km"], false]) },
 }
 
 function baseRow(kind: string): Row {
@@ -114,6 +115,14 @@ describe("rows generated from KIND_RULES", () => {
 		const row = { ...validRow("measured", prng(1)), value: "-0.50", exact: { num: "7", den: "1" } }
 		expect(validateLedger(ledgerOf(row)).some((error: string) => error.startsWith("rows[0].exact"))).toBe(true)
 		expect(validateLedger(ledgerOf({ ...row, exact: { num: "-1", den: "2" } }))).toEqual([])
+	})
+
+	test("review r6 LOW 3: context is a derived or converted column; a measured, quote, or assumed row carrying one is rejected", () => {
+		for (const kind of ["measured", "quote", "assumed"]) {
+			const row = { ...validRow(kind, prng(3)), context: { target: "km" } }
+			expect({ kind, named: validateLedger(ledgerOf(row)).some((error: string) => error.startsWith("rows[0].context")) }).toEqual({ kind, named: true })
+		}
+		for (const kind of ["derived", "converted"]) expect(validateLedger(ledgerOf({ ...validRow(kind, prng(4)), context: { target: "km" } }))).toEqual([])
 	})
 
 	test("review LOW 1: a quote row with a non-null exact is rejected", () => {

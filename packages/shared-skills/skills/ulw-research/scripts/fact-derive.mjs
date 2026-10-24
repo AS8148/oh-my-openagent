@@ -10,12 +10,13 @@
 
 import { evaluate, leaves, parseExpr } from "./fact-expr.mjs"
 import { addRow, nextId } from "./fact-ledger.mjs"
+import { recompute } from "./fact-recompute.mjs"
 import { add, div, fromDecimal, mul, sigFigsOf, sub, toDecimal } from "./rational.mjs"
 import { inputScale, RuleError } from "./unit-algebra.mjs"
 import { canonicalUnit, expectedUnit, inferExpr, operandUnit, renderPrecision, ruleOf, unitMismatch } from "./unit-rules.mjs"
 import { convertFactor, normalizeUnit } from "./units.mjs"
 
-export { recompute } from "./fact-recompute.mjs"
+export { recompute }
 
 const INCOMPATIBLE = "incompatible_operands"
 const HUNDRED = fromDecimal("100")
@@ -121,6 +122,11 @@ export function derive(ledger, spec) {
 		const rule = ruleOf(spec.op)
 		const ast = spec.op === "expr" ? parseExpr(spec.formula) : null
 		const rows = operandIds(spec, ast).map((id) => lookup(ledger, id, true))
+		// A derived operand must recompute itself: a tampered, cyclic, or self-citing row is never built upon.
+		for (const operand of rows.filter((row) => row.operation !== null && row.operation !== undefined)) {
+			const verified = recompute(ledger, operand)
+			if (!verified.ok) refuse(`operand ${operand.fact_id} does not recompute: ${verified.detail ?? "its stored values differ"}`)
+		}
 		const context = rule.context(spec)
 		const expected = expectedUnit(spec.op, rows, { ast, context: { ...context, rationale: spec.rationale ?? null } })
 		const declared = declaredUnit(spec)
