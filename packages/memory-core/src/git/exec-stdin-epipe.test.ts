@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, spyOn, test } from "bun:test"
+import * as childProcess from "node:child_process"
 import { mkdtemp } from "node:fs/promises"
 import { realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -26,4 +27,24 @@ test("#given a git command that exits before reading a large stdin #when it runs
   const result = await git(["update-index", "-q", "-z", "--stdin"], paths)
 
   expect(result.code).not.toBe(0)
+  expect(result.stderr).not.toContain("git stdin was not fully delivered")
+})
+
+test("#given a stdin error other than EPIPE #when git still exits normally #then the error is reported in the result", async () => {
+  const root = realpathSync.native(await mkdtemp(join(tmpdir(), "git-stdin-eio-")))
+  roots.push(root)
+  const realSpawn = childProcess.spawn
+  const spawnSpy = spyOn(childProcess, "spawn").mockImplementation(((...args: Parameters<typeof childProcess.spawn>) => {
+    const child = Reflect.apply(realSpawn, childProcess, args)
+    queueMicrotask(() => child.stdin?.emit("error", Object.assign(new Error("injected stdin failure"), { code: "EIO" })))
+    return child
+  }) as typeof childProcess.spawn)
+  try {
+    const result = await createNodeGitExec().run(["hash-object", "--stdin"], { cwd: root, timeoutMs: 30_000, stdin: "note\n" })
+
+    expect(spawnSpy).toHaveBeenCalled()
+    expect(result.stderr).toContain("git stdin was not fully delivered (EIO)")
+  } finally {
+    spawnSpy.mockRestore()
+  }
 })
