@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:77e8f2e7f78559ce14687599925f59ebcbbefb89ee8f1176d2010a48c4736993:b2c166fcbfa761cb96d5ebd284aaf05018c0a208e25a887a2c82ff72594c8fd2
+// omo-codex-install:e3e61e725f12cb66a501882eb5306350f304d0275a89b043834f690b83187d34:8091ad197b2409cdc1a96b3dc29c2b7607a32ba8c8a1c7ffd5f94ae9776a2f24
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -19616,6 +19616,7 @@ var OmoMemoryReflectionSchema = object({
   merge: _enum(["auto", "integration"]).default("auto"),
   category: string2().min(1).default("quick"),
   timeout_minutes: number2().int().positive().default(15),
+  max_concurrent_runs: number2().int().positive().default(1),
   sandbox: _enum(["auto", "required", "off"]).default("auto")
 }).strict();
 var OmoMemorySyncSchema = object({
@@ -19687,6 +19688,7 @@ var OmoMemoryReflectionLayerSchema = object({
   merge: _enum(["auto", "integration"]).optional(),
   category: string2().min(1).optional(),
   timeout_minutes: number2().int().positive().optional(),
+  max_concurrent_runs: number2().int().positive().optional(),
   sandbox: _enum(["auto", "required", "off"]).optional()
 }).strict();
 var OmoMemorySyncLayerSchema = object({
@@ -19751,7 +19753,7 @@ var OmoMemoryProjectionLayerSchema = object({
 var OmoMemoryAgentOverridesSchema = object({
   enabled: boolean2().optional(),
   agent: string2().min(1).optional(),
-  reflection: OmoMemoryReflectionLayerSchema.optional(),
+  reflection: OmoMemoryReflectionLayerSchema.omit({ max_concurrent_runs: true }).optional(),
   nudge: OmoMemoryNudgeLayerSchema.optional(),
   facts: OmoMemoryFactsLayerSchema.optional(),
   dream: OmoMemoryDreamLayerSchema.optional(),
@@ -19776,6 +19778,7 @@ var OmoMemorySettingsSchema = object({
     merge: "auto",
     category: "quick",
     timeout_minutes: 15,
+    max_concurrent_runs: 1,
     sandbox: "auto"
   }),
   nudge: OmoMemoryNudgeSchema.default({ enabled: true, every_user_turns: 10 }),
