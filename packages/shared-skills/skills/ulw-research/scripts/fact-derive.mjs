@@ -2,9 +2,9 @@
 // derive() asks the operation registry (unit-rules.mjs) for the operand guards and the result unit, computes in exact
 // rationals from each operand's `exact` (never its rounded `value`), and appends a derived or converted row whose
 // declared unit must equal the registry's canonical unit and whose context fields (sum: disjoint, reference; convert:
-// target) are persisted for recompute. Sums and differences (%p included) render at the
-// operands' fewest decimal places, half away from zero (1000 - 3 is 997, 9 - 1.5 is 8, 19.0 - 1.5 is 17.5, 1.25 + 2.5
-// is 3.8); every other operation at their fewest significant figures. recompute() repeats the arithmetic so the
+// target) are persisted for recompute. Sums, differences, an expr whose root is + or -, and every %p result render at
+// the operands' (and literals') fewest decimal places, half away from zero (1000 - 3 is 997, 9 - 1.5 is 8, 19.0 - 1.5
+// is 17.5, 1.25 + 2.5 is 3.8); everything else at their fewest significant figures (renderPrecision, unit-rules.mjs). recompute() repeats the arithmetic so the
 // verifier compares exact, value, and render with no epsilon (fact-recompute.mjs). Every failure is incompatible_operands;
 // no row is written.
 
@@ -12,7 +12,7 @@ import { evaluate, leaves, parseExpr } from "./fact-expr.mjs"
 import { addRow, nextId } from "./fact-ledger.mjs"
 import { add, div, fromDecimal, mul, sigFigsOf, sub, toDecimal } from "./rational.mjs"
 import { inputScale, RuleError } from "./unit-algebra.mjs"
-import { canonicalUnit, expectedUnit, inferExpr, operandUnit, ruleOf, unitMismatch } from "./unit-rules.mjs"
+import { canonicalUnit, expectedUnit, inferExpr, operandUnit, renderPrecision, ruleOf, unitMismatch } from "./unit-rules.mjs"
 import { convertFactor, normalizeUnit } from "./units.mjs"
 
 export { recompute } from "./fact-recompute.mjs"
@@ -77,7 +77,9 @@ function compute(op, rows, unit, ast, context) {
 	const values = rows.map((row) => toBig(row.exact))
 	const ids = rows.map((row) => row.fact_id)
 	const [a, b] = values
-	let sigFigs = Math.min(...rows.map((row) => sigFigsOf(row.value)))
+	const literals = ast ? leaves(ast).literals : []
+	const sigFigs = Math.min(...rows.map((row) => sigFigsOf(row.value)), ...literals.map((literal) => sigFigsOf(literal)))
+	const places = Math.min(...rows.map((row) => placesOf(row.value)), ...literals.map(placesOf))
 	let out
 	if (op === "sum") out = { exact: values.reduce((total, value) => add(total, value)), formula: ids.join(" + ") }
 	else if (op === "diff") out = { exact: sub(a, b), formula: `${ids[0]} - ${ids[1]}` }
@@ -86,12 +88,11 @@ function compute(op, rows, unit, ast, context) {
 	else if (op === "ratio") out = { exact: div(a, nonZero(b, ids[1])), formula: `${ids[0]} / ${ids[1]}` }
 	else if (op === "convert") out = convertOf(rows[0], context.target)
 	else {
-		sigFigs = Math.min(sigFigs, ...leaves(ast).literals.map((literal) => sigFigsOf(literal)))
 		const { units } = inferExpr(ast, new Map(rows.map((row) => [row.fact_id, operandUnit(row)])))
 		out = { exact: evaluate(ast, new Map(ids.map((id, index) => [id, values[index]])), units), formula: null }
 	}
-	const byPlaces = op === "sum" || op === "diff"
-	const value = renderValue(out.exact, byPlaces ? Math.min(...rows.map((row) => placesOf(row.value))) : sigFigs, byPlaces)
+	const byPlaces = renderPrecision(op, unit, ast) === "places"
+	const value = renderValue(out.exact, byPlaces ? places : sigFigs, byPlaces)
 	const shown = display(value, unit)
 	const render = op === "convert" ? `${shown} (${display(rows[0].value, rows[0].unit)})` : shown
 	return { exact: toText(out.exact), value, render, formula: out.formula, factor: out.factor ?? null }

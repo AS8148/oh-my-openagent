@@ -314,11 +314,61 @@ describe("unit rules: the design review's counterexamples", () => {
 		expect(relabeled.detail).toContain("km")
 	})
 
+	test("expr % + %p is %, in either order; a ratio over unequal % and %p is refused", () => {
+		const ledger = book()
+		for (const formula of ["F1 + F3", "F3 + F1"]) {
+			const row = rowOf(derive(ledger, { op: "expr", formula, unit: "%" }))
+			expect(row).toMatchObject({ value: "25", unit: "%" })
+			expect(recompute(ledger, row).ok).toBe(true)
+		}
+		const ratio = derive(ledger, { op: "ratio", num: "F1", den: "F3", unit: null })
+		expect(ratio.error).toBe("incompatible_operands")
+		expect(ratio.detail).toContain("needs equal units")
+	})
+
+	test("a stored context on an operation that has none is malformed", () => {
+		const ledger = book()
+		const diff = rowOf(derive(ledger, { op: "diff", operands: ["F1", "F2"], unit: "%p" }))
+		const expr = rowOf(derive(ledger, { op: "expr", formula: "F1 - F2", unit: "%p" }))
+		for (const [row, context] of [[diff, "x"], [expr, { target: "km" }]] as const) {
+			const result = recompute(ledger, { ...row, context })
+			expect(result.ok).toBe(false)
+			expect(result.detail).toContain("rows carry no context")
+		}
+	})
+
 	test("expr 20% - 10% is %p, never %", () => {
 		const ledger = book()
 		expect(derive(ledger, { op: "expr", formula: "F1 - F2", unit: "%" }).error).toBe("incompatible_operands")
 		const row = rowOf(derive(ledger, { op: "expr", formula: "F1 - F2", unit: "%p" }))
 		expect(row).toMatchObject({ value: "10", unit: "%p" })
+		expect(recompute(ledger, row).ok).toBe(true)
+	})
+})
+
+describe("render precision of expr results (invariant 5)", () => {
+	const book = () => ledgerOf([measured("F1", "20.25", "%"), measured("F2", "15.5", "%"), measured("F3", "1000", "m"), measured("F4", "3", "m"), measured("F5", "12.34", "m")])
+
+	test("an expr difference giving %p renders by decimal places, as diff does", () => {
+		const ledger = book()
+		const viaDiff = rowOf(derive(ledger, { op: "diff", operands: ["F1", "F2"], unit: "%p" }))
+		const viaExpr = rowOf(derive(ledger, { op: "expr", formula: "F1 - F2", unit: "%p" }))
+		expect(viaDiff).toMatchObject({ value: "4.8", render: "4.8 %p" })
+		expect(viaExpr).toMatchObject({ value: "4.8", render: "4.8 %p" })
+		expect(recompute(ledger, viaExpr).ok).toBe(true)
+	})
+
+	test("an expr with a - root renders 1000 m - 3 m as 997 m", () => {
+		const ledger = book()
+		const row = rowOf(derive(ledger, { op: "expr", formula: "F3 - F4", unit: "m" }))
+		expect(row).toMatchObject({ value: "997", render: "997 m", exact: { num: "997", den: "1" } })
+		expect(recompute(ledger, row).ok).toBe(true)
+	})
+
+	test("an expr with a * root keeps significant figures", () => {
+		const ledger = book()
+		const row = rowOf(derive(ledger, { op: "expr", formula: "F5 * 1.5", unit: "m" }))
+		expect(row).toMatchObject({ value: "19", render: "19 m" })
 		expect(recompute(ledger, row).ok).toBe(true)
 	})
 })

@@ -1,6 +1,7 @@
 // unit-algebra.mjs - canonical unit text for derived facts (references/unit-rules.md).
 // canonicalUnit() is the INPUT canonicalizer: table aliases become their token (units.mjs), and a composite such as
-// "USD / (USD/person)" is rebuilt algebraically with equal factors cancelled ("person"; "m/m" is null, dimensionless).
+// "USD / (USD/person)" is rebuilt algebraically with equal factors cancelled ("person"; "m/m" is null, dimensionless);
+// whitespace is trimmed only around operators, so unit text with no alias ("metric ton") is stored as given.
 // Stored rows are compared against canonical text exactly, so an alias written onto a row at rest is a relabel.
 // RuleError is the one refusal type of the derivation modules: a detail and an optional hint.
 
@@ -31,14 +32,15 @@ export function inputScale(raw) {
 	return typeof raw === "string" ? (SCALED_ALIASES[squash(raw).toLowerCase()]?.scale ?? null) : null
 }
 
+/** A table alias becomes its token; any other atom is kept as given, inner whitespace included ("million people"). */
 function atomOf(text) {
 	if (text === "1") return null
-	return SCALED_ALIASES[text.toLowerCase()]?.unit ?? normalizeUnit(text) ?? text
+	return SCALED_ALIASES[squash(text).toLowerCase()]?.unit ?? normalizeUnit(text) ?? text
 }
 
-/** Parse unit text into factor exponents; `*`, `/`, `^n`, and parentheses, left to right. */
+/** Parse unit text into factor exponents; `*`, `/`, `^n`, and parentheses, left to right; whitespace trims around them. */
 function factorsOf(text) {
-	const tokens = squash(text).match(/[*/()^]|[^*/()^]+/g) ?? []
+	const tokens = (text.match(/[*/()^]|[^*/()^]+/g) ?? []).map((token) => token.trim()).filter(Boolean)
 	let index = 0
 	const combine = (into, from, sign) => {
 		for (const [atom, power] of from) into.set(atom, (into.get(atom) ?? 0) + sign * power)

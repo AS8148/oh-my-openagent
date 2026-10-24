@@ -30,6 +30,8 @@ function sharedReference(rows, reference) {
 const pair = (a, b) => (spec) => [spec[a], spec[b]]
 const listOf = (spec) => spec.operands
 const needsContext = (row) => (isObject(row.context) ? null : `${row.operation} rows carry a context object, got ${show(row.context)}`)
+/** Operations whose table row says context "none": a stored non-null context is a tampered row (null or absent passes). */
+const noContext = (row) => (row.context === null || row.context === undefined ? null : `${row.operation} rows carry no context, got ${show(row.context)}`)
 const SNAPSHOT = ["population", "snapshot_window"]
 /** Malformed shapes every operation shares; each rule's `malformed` names the shapes the property test must cover. */
 const COMMON = ["operands null", "operands empty", "wrong arity", "missing operand id", "invalid rational", "no operation"]
@@ -88,7 +90,8 @@ export const OPERATION_RULES = Object.freeze({
 		context: () => null,
 		metadata: [...SNAPSHOT, "accounting_basis"],
 		resultUnit: (rows, units) => minusUnit(units[0], units[1], `diff ${listed(rows, units)}`),
-		malformed: shapes("%p - % pair", "unit - other unit pair", "affine units"),
+		shape: noContext,
+		malformed: shapes("%p - % pair", "unit - other unit pair", "affine units", "stray context"),
 	}),
 	growth: Object.freeze({
 		arity: (n) => n === 2,
@@ -105,7 +108,8 @@ export const OPERATION_RULES = Object.freeze({
 			if (toBig(from.exact).num <= 0n) refuse(`growth needs a positive starting value in ${from.fact_id}`)
 			return "%"
 		},
-		malformed: shapes("affine units", "unequal units", "entity mismatch", "one period", "from <= 0"),
+		shape: noContext,
+		malformed: shapes("affine units", "unequal units", "entity mismatch", "one period", "from <= 0", "stray context"),
 	}),
 	share: Object.freeze({
 		arity: (n) => n === 2,
@@ -121,7 +125,8 @@ export const OPERATION_RULES = Object.freeze({
 			if (part.num < 0n || compare(part, whole) > 0n) refuse(`share needs 0 <= part <= whole: ${rows[0].fact_id} is outside [0, ${rows[1].fact_id}]`)
 			return "%"
 		},
-		malformed: shapes("affine units", "unequal units", "whole <= 0", "part < 0", "part above whole"),
+		shape: noContext,
+		malformed: shapes("affine units", "unequal units", "whole <= 0", "part < 0", "part above whole", "stray context"),
 	}),
 	ratio: Object.freeze({
 		arity: (n) => n === 2,
@@ -136,7 +141,8 @@ export const OPERATION_RULES = Object.freeze({
 			if (units.some(isPercentish)) refuse(`a ratio over % or %p needs equal units: ${listed(rows, units)}; use expr`)
 			return unitOver(units[0], units[1])
 		},
-		malformed: shapes("affine units", "divides by zero"),
+		shape: noContext,
+		malformed: shapes("affine units", "divides by zero", "stray context"),
 	}),
 	convert: Object.freeze({
 		arity: (n) => n === 1,
@@ -163,8 +169,8 @@ export const OPERATION_RULES = Object.freeze({
 		context: () => null,
 		metadata: [],
 		resultUnit: (rows, units, context, ast) => inferExpr(ast, new Map(rows.map((row, index) => [row.fact_id, units[index]]))).unit,
-		shape: exprShape,
-		malformed: shapes("formula id mismatch", "parse error", "divides by zero", "uninferable unit", "affine sum"),
+		shape: (row) => noContext(row) ?? exprShape(row),
+		malformed: shapes("formula id mismatch", "parse error", "divides by zero", "uninferable unit", "affine sum", "stray context"),
 	}),
 })
 
@@ -190,6 +196,12 @@ export function expectedUnit(op, rows, { ast = null, context = null } = {}) {
 		}
 	}
 	return rule.resultUnit(rows, units, context ?? {}, op === "expr" ? (ast ?? refuse("expr needs its parsed formula")) : null)
+}
+
+/** Invariant 5: sum, diff, an expr whose root is + or -, and every %p result render by fewest decimal places; the rest by fewest significant figures. */
+export function renderPrecision(op, unit, ast = null) {
+	if (op === "sum" || op === "diff" || unit === "%p") return "places"
+	return op === "expr" && (ast?.op === "+" || ast?.op === "-") ? "places" : "sigfigs"
 }
 
 export function unitMismatch(op, rows, unit, expected) {

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
 import { derive, display, recompute } from "./fact-derive.mjs"
+import { parseExpr } from "./fact-expr.mjs"
 import { addRow, emptyLedger, OPERATIONS } from "./fact-ledger.mjs"
-import { canonicalUnit, expectedUnit, isAffine, OPERATION_RULES } from "./unit-rules.mjs"
+import { canonicalUnit, expectedUnit, isAffine, OPERATION_RULES, renderPrecision } from "./unit-rules.mjs"
 
 // Property checks of references/unit-rules.md: every case table below is keyed by the registry's own operation list,
 // so a new operation without valid, relabel, and malformed cases fails here.
@@ -61,7 +62,7 @@ function ledger(): Ledger {
 
 const PCT_SUM = { op: "sum", operands: ["F3", "F4"], unit: "%", disjoint: true, reference: "all respondents", rationale: "disjoint answer shares" }
 
-const VALID: Record<string, Array<{ spec: Spec; unit: string | null }>> = {
+const VALID: Record<string, Array<{ spec: Spec; unit: string | null; precision?: "places" | "sigfigs" }>> = {
 	sum: [
 		{ spec: { op: "sum", operands: ["F1", "F2"], unit: "m" }, unit: "m" },
 		{ spec: { op: "sum", operands: ["F1", "F2"], unit: "metre" }, unit: "m" },
@@ -89,13 +90,18 @@ const VALID: Record<string, Array<{ spec: Spec; unit: string | null }>> = {
 		{ spec: { op: "convert", operands: ["F2"], to: "kilometre" }, unit: "km" },
 	],
 	expr: [
-		{ spec: { op: "expr", formula: "F3 - F4", unit: "%p" }, unit: "%p" },
+		{ spec: { op: "expr", formula: "F3 - F4", unit: "%p" }, unit: "%p", precision: "places" },
+		{ spec: { op: "expr", formula: "F2 - F1", unit: "m" }, unit: "m", precision: "places" },
+		{ spec: { op: "expr", formula: "F5", unit: "%p" }, unit: "%p", precision: "places" },
 		{ spec: { op: "expr", formula: "F1 * F1 / F2", unit: "m" }, unit: "m" },
 		{ spec: { op: "expr", formula: "F10 / F11", unit: "person" }, unit: "person" },
 		{ spec: { op: "expr", formula: "pct(F8 / F9)", unit: "%" }, unit: "%" },
 		{ spec: { op: "expr", formula: "F3 * F9", unit: "person" }, unit: "person" },
 	],
 }
+
+/** Invariant 5 per operation: sum and diff render by decimal places, the rest by significant figures (expr cases override). */
+const PRECISION: Record<string, "places" | "sigfigs"> = { sum: "places", diff: "places", growth: "sigfigs", share: "sigfigs", ratio: "sigfigs", convert: "sigfigs", expr: "sigfigs" }
 
 const RELABELS = [null, "%", "%p", "pp", "bp", "m", "metre", "km", "kilometre", "cm", "C", "case", "person", "USD", "USD/person", "person/USD", "KRW-e8"]
 
@@ -125,6 +131,7 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "%p - % pair", base: VALID.diff[2].spec, mutate: operands(["F5", "F3"]), reason: '"%p" - "%" is not a typed pair' },
 		{ name: "unit - other unit pair", base: VALID.diff[0].spec, mutate: operands(["F1", "F8"]), reason: '"m" - "person" is not a typed pair' },
 		{ name: "affine units", base: VALID.diff[0].spec, mutate: operands(["F14", "F13"]), reason: "affine (temperature)" },
+		{ name: "stray context", base: VALID.diff[0].spec, mutate: (row) => ({ ...row, context: "x" }), reason: "diff rows carry no context" },
 	],
 	growth: [
 		...generic(VALID.growth[0].spec, ["F6"]),
@@ -133,6 +140,7 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "entity mismatch", base: VALID.growth[0].spec, mutate: operands(["F6", "F17"]), reason: "growth needs one declared entity" },
 		{ name: "one period", base: VALID.growth[0].spec, mutate: operands(["F6", "F6"]), reason: "two different valid_at periods" },
 		{ name: "from <= 0", base: VALID.growth[0].spec, mutate: operands(["F18", "F7"]), reason: "positive starting value in F18" },
+		{ name: "stray context", base: VALID.growth[0].spec, mutate: (row) => ({ ...row, context: { target: "km" } }), reason: "growth rows carry no context" },
 	],
 	share: [
 		...generic(VALID.share[0].spec, ["F8"]),
@@ -141,11 +149,13 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "whole <= 0", base: VALID.share[0].spec, mutate: operands(["F8", "F15"]), reason: "positive whole in F15" },
 		{ name: "part < 0", base: VALID.share[0].spec, mutate: operands(["F19", "F9"]), reason: "F19 is outside [0, F9]" },
 		{ name: "part above whole", base: VALID.share[0].spec, mutate: operands(["F9", "F8"]), reason: "F9 is outside [0, F8]" },
+		{ name: "stray context", base: VALID.share[0].spec, mutate: (row) => ({ ...row, context: "x" }), reason: "share rows carry no context" },
 	],
 	ratio: [
 		...generic(VALID.ratio[0].spec, ["F10"]),
 		{ name: "affine units", base: VALID.ratio[0].spec, mutate: operands(["F13", "F14"]), reason: "ratio refuses affine" },
 		{ name: "divides by zero", base: VALID.ratio[0].spec, mutate: operands(["F10", "F15"]), reason: "denominator F15 is zero" },
+		{ name: "stray context", base: VALID.ratio[0].spec, mutate: (row) => ({ ...row, context: { target: "km" } }), reason: "ratio rows carry no context" },
 	],
 	convert: [
 		...generic(VALID.convert[0].spec, ["F12", "F12"]),
@@ -161,6 +171,7 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "divides by zero", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, formula: "F3 / (F4 - F4)" }), reason: "the expression divides by zero" },
 		{ name: "uninferable unit", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, formula: "F3 + F4" }), reason: "adding % values" },
 		{ name: "affine sum", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, formula: "F13 + F14", operands: ["F13", "F14"] }), reason: "adding affine (temperature)" },
+		{ name: "stray context", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, context: { target: "km" } }), reason: "expr rows carry no context" },
 	],
 }
 
@@ -221,6 +232,14 @@ describe.each(OPS)("%s", (op) => {
 		}
 	})
 
+	test("render precision follows invariant 5: sum, diff, a +/- expr root, and %p by decimal places; the rest by significant figures", () => {
+		for (const { spec, unit, precision } of VALID[op]) {
+			const row = rowOf(derive(ledger(), spec))
+			const ast = op === "expr" ? parseExpr(spec.formula) : null
+			expect({ spec, precision: renderPrecision(op, row.unit, ast) }).toEqual({ spec, precision: precision ?? PRECISION[op] })
+		}
+	})
+
 	test("the malformed cases are exactly the registry's malformed shapes", () => {
 		expect(MALFORMED[op].map((mutation) => mutation.name).sort()).toEqual([...OPERATION_RULES[op].malformed].sort())
 	})
@@ -251,6 +270,19 @@ describe("units", () => {
 		expect(isAffine("C")).toBe(true)
 		expect(isAffine("F")).toBe(true)
 		expect(isAffine("m")).toBe(false)
+	})
+
+	test("unit text with no registered alias is stored as given, inner whitespace kept", () => {
+		expect(canonicalUnit("USD / million people")).toBe("USD/million people")
+		for (const unit of ["million people", "metric ton", "USD per person"]) {
+			expect(canonicalUnit(` ${unit} `)).toBe(unit)
+			const book = emptyLedger() as Ledger
+			addRow(book, measured("F1", "5", unit))
+			addRow(book, measured("F2", "7", unit))
+			const row = rowOf(derive(book, { op: "sum", operands: ["F1", "F2"], unit }))
+			expect(row).toMatchObject({ unit, render: `12 ${unit}` })
+			expect(recompute(book, row)).toMatchObject({ ok: true })
+		}
 	})
 
 	test("expectedUnit is the registry's answer for stored operand rows", () => {
