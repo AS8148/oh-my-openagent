@@ -42,7 +42,16 @@ export function createUlwExecuteContinuationComponent(
         // This run's agent_end payload and session identity. The decision runs on agent_settled.
         pendingRun: undefined as { payload: unknown; sessionId: string | undefined; cwd: string | undefined } | undefined,
       }
-      const runCompletion = createRunCompletionTracker((runId) => pi.lifecycle?.markRunCompleted({ runId }))
+      const runCompletion = createRunCompletionTracker((runId) => {
+        try {
+          pi.lifecycle?.markRunCompleted({ runId })
+        } catch (error) {
+          ctx.logger.warn("omo-senpi ulw-execute run completion not recorded", {
+            runId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      })
 
       pi.on("input", async (payload, eventCtx) => {
         if (!isInputEvent(payload)) return { action: "continue" }

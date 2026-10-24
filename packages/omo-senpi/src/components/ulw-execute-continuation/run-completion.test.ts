@@ -142,6 +142,41 @@ describe("omo-senpi ulw-execute-continuation run completion (#10782)", () => {
     expect(completed).toEqual([])
   })
 
+  it("#given an unreadable boulder.json at the first look #when a later run finds the work completed #then it is not marked", async () => {
+    const root = workspace()
+    const { pi, completed } = await setup()
+    writeFileSync(join(root, ".omo", "boulder.json"), "{ not json")
+    await pi.dispatch("input", { type: "input", text: "hi", source: "user" }, ctxFor(root))
+
+    writeWork(root, "completed")
+    await dispatchRunEnd(pi, stopped, ctxFor(root))
+
+    expect(completed).toEqual([])
+  })
+
+  it("#given a host whose lifecycle port throws #when the work completes #then the run still settles and the failure is logged", async () => {
+    const root = workspace()
+    const warnings: string[] = []
+    const pi = new FakeExtensionAPI()
+    pi.lifecycle = {
+      markRunCompleted: () => {
+        throw new Error("stale generation")
+      },
+    }
+    await createUlwExecuteContinuationComponent().register(pi, {
+      logger: { info: () => {}, warn: (message: string) => warnings.push(message), error: () => {} },
+      config: { getFlag: () => false },
+      idleCoordinator: new IdleInjectionCoordinator(() => {}),
+    })
+    writeWork(root, "active")
+    await dispatchRunEnd(pi, stopped, ctxFor(root))
+
+    writeWork(root, "completed")
+    await dispatchRunEnd(pi, stopped, ctxFor(root))
+
+    expect(warnings).toContain("omo-senpi ulw-execute run completion not recorded")
+  })
+
   it("#given a host without the lifecycle port #when the work completes #then the run ends without error", async () => {
     const root = workspace()
     const { pi } = await setup()
