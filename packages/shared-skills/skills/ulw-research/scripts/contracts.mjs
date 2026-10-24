@@ -48,7 +48,7 @@ export const DEFECT_CODES = deepFreeze({
 	pointer_label_mismatch: { severity: "blocker", integrity: true, hint: "The placeholder's label is not the row's label; check the id, then the label." },
 	quote_anchor_unresolved: { severity: "blocker", integrity: true, hint: "A from or to anchor is missing or occurs more than once in the quote; pick unique anchor words." },
 	unit_duplicated: { severity: "blocker", integrity: true, hint: "The unit after the placeholder repeats the row's unit; use :value or remove the unit." },
-	polish_diff_fail: { severity: "blocker", integrity: true, hint: "The polish pass changed numbers, tickers, or table rows; revert to the pre-polish artifact and apply the language fixes only." },
+	polish_diff_fail: { severity: "blocker", integrity: true, hint: "The polish pass changed numbers, tickers, table rows, claim ids, markup, or hidden content; revert to the pre-polish artifact and apply the language fixes only." },
 	fidelity_interview_incomplete: { severity: "blocker", integrity: true, hint: "A fidelity field is pending or missing in brief.md; answer the open question or record its default, then rerun." },
 	derived_not_allowed: { severity: "blocker", integrity: true, hint: "The brief allows no derived or assumed numbers; cite a source row directly or change the brief with the requester." },
 	source_outside_floor: { severity: "blocker", integrity: true, hint: "The row's source is outside the source floor the brief records; use a source the brief allows or remove the fact." },

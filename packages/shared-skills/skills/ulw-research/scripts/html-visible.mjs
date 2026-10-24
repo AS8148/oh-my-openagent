@@ -1,10 +1,15 @@
 // html-visible.mjs - the rendered-markup projection: what a reader can actually see.
 //
-// visibleMarkup(html) returns the markup with every region a reader cannot see replaced by one
-// space: comments and <!...>/<?...> declarations; HIDDEN_ELEMENT_TAGS elements; and any element
-// (with its descendants) that carries the hidden attribute, aria-hidden="true", or an inline style
-// with display:none, visibility:hidden|collapse, font-size:0 or opacity:0. An element that never
-// closes is hidden to the end of the input (fail closed). Stylesheet rules are not resolved.
+// hiddenRegions(html) lists, in order, every region a reader cannot see as {start, end, markup}:
+// comments and <!...>/<?...> declarations; HIDDEN_ELEMENT_TAGS elements; and any element (with its
+// descendants) that carries the hidden attribute or an inline style with display:none,
+// visibility:hidden|collapse, font-size:0 or opacity:0. aria-hidden is not visual hiding (browsers
+// render it), so it never hides. An element that never closes is hidden to the end of the input:
+// that fails closed for presence (everything after it counts as absent) and, because callers
+// compare each region's raw markup byte for byte, for edits inside it too. Stylesheet rules are not
+// resolved. visibleMarkup(html) replaces each region with one space. markedVisibility(html, names)
+// gives each opening tag carrying one of the named attributes as "name=value visible|hidden".
+// elementSpans(html, accept) finds whole elements by tag scan (nesting and quoted ">" handled).
 // tagAttributes(html) lists each opening tag's attributes in order, comments skipped, parsed by
 // html-lite's attribute reader (double, single or no quotes). Plain Node ESM, no dependencies.
 
@@ -21,7 +26,6 @@ const isLetter = (ch) => (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z")
 /** True when an element with this tag name and these attributes renders nothing. */
 export function isHiddenElement(name, attrs) {
 	if (HIDDEN.has(name) || Object.hasOwn(attrs, "hidden")) return true
-	if ((attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true") return true
 	for (const declaration of (attrs.style ?? "").split(";")) {
 		const colon = declaration.indexOf(":")
 		if (colon === -1) continue
@@ -85,22 +89,61 @@ function closeOf(src, from, name) {
 	return stop
 }
 
+const endOf = (src, end, tag) => (tag.selfClosing || VOID.has(tag.name) ? end : closeOf(src, end, tag.name))
+
+/** Every region a reader cannot see, in document order, as {start, end, markup}. */
+export function hiddenRegions(html) {
+	const src = String(html)
+	const regions = []
+	const add = (start, end) => {
+		regions.push({ start, end, markup: src.slice(start, end) })
+		return end
+	}
+	scan(src, 0, (kind, start, end, tag) => {
+		if (kind === "skip") return add(start, end)
+		if (kind !== "open" || !isHiddenElement(tag.name, tag.attrs)) return undefined
+		return add(start, endOf(src, end, tag))
+	})
+	return regions
+}
+
 /** The markup with every region a reader cannot see replaced by one space. */
 export function visibleMarkup(html) {
 	const src = String(html)
 	let out = ""
 	let kept = 0
-	const cut = (start, end) => {
+	for (const { start, end } of hiddenRegions(src)) {
 		out += `${src.slice(kept, start)} `
 		kept = end
-		return end
 	}
-	scan(src, 0, (kind, start, end, tag) => {
-		if (kind === "skip") return cut(start, end)
-		if (kind !== "open" || !isHiddenElement(tag.name, tag.attrs)) return undefined
-		return cut(start, tag.selfClosing || VOID.has(tag.name) ? end : closeOf(src, end, tag.name))
-	})
 	return out + src.slice(kept)
+}
+
+/** "attribute=value visible|hidden" for each opening tag carrying one of `names`, in order. */
+export function markedVisibility(html, names) {
+	const src = String(html)
+	const regions = hiddenRegions(src)
+	const marks = []
+	scan(src, 0, (kind, start, _end, tag) => {
+		if (kind !== "open") return undefined
+		const hidden = regions.some((region) => region.start <= start && start < region.end)
+		for (const name of names) if (Object.hasOwn(tag.attrs, name)) marks.push(`${name}=${tag.attrs[name]} ${hidden ? "hidden" : "visible"}`)
+		return undefined
+	})
+	return marks
+}
+
+/** Whole elements whose opening tag passes accept(name, attrs), as {start, end, tag}; nested matches skipped. */
+export function elementSpans(html, accept) {
+	const src = String(html)
+	const spans = []
+	scan(src, 0, (kind, start, end, tag) => {
+		if (kind !== "open" || !accept(tag.name, tag.attrs)) return undefined
+		const stop = endOf(src, end, tag)
+		spans.push({ start, end: stop, tag })
+		return stop
+	})
+	return spans
 }
 
 /** Each opening tag's {name, attrs} in document order; comments and declarations are skipped. */

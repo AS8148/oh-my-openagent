@@ -3,8 +3,9 @@
 // diffPolish(beforeHtml, afterHtml, ledger) runs the polish-rules.mjs rule set (the same rules
 // polish-apply runs per edit) over the whole document, as multisets, and returns at most one defect
 // per code. Severity is looked up in contracts.DEFECT_CODES for every emitted code; a code missing
-// there throws. A clean polish-apply run can fail here only through a cross-edit interaction (e.g.
-// cumulative churn). No IO, no model. Plain Node ESM.
+// there throws. polish-apply checks every edit against this same whole-document baseline (ordered,
+// so stricter), so a clean polish-apply run is clean here; this catches hand edits. No IO, no model.
+// Plain Node ESM.
 
 import { DEFECT_CODES } from "./contracts.mjs"
 import { POLISH_CODES, polishDefects } from "./polish-rules.mjs"

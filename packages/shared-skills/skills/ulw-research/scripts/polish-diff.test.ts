@@ -113,7 +113,6 @@ describe("diffPolish: rendered visibility and hedge comparison (review #11152 ro
 	test.each([
 		["a hidden attribute", `<span hidden>${span}</span>`],
 		["display:none", `<span style="display:none">${span}</span>`],
-		["aria-hidden", `<span aria-hidden="true">${span}</span>`],
 		["a template", `<template>${span}</template>`],
 	])("a fact span hidden by %s is polish_diff_fail", (_label, hidden) => {
 		expect(codes(diffPolish(doc(`<p>The span is ${span} [S1].</p>`), doc(`<p>The span is ${hidden} [S1].</p>`), LEDGER))).toContain("polish_diff_fail")
@@ -121,7 +120,7 @@ describe("diffPolish: rendered visibility and hedge comparison (review #11152 ro
 
 	test("a hedge hidden by a hidden attribute is polish_hedging_decreased", () => {
 		const after = doc("<p>Results <span hidden>may</span> improve [S1].</p>")
-		expect(codes(diffPolish(doc("<p>Results may improve [S1].</p>"), after, LEDGER))).toEqual(["polish_hedging_decreased"])
+		expect(codes(diffPolish(doc("<p>Results may improve [S1].</p>"), after, LEDGER))).toEqual(["polish_diff_fail", "polish_hedging_decreased"])
 	})
 
 	test("a ledger hedge the sentence never held is not a decrease", () => {
@@ -143,6 +142,22 @@ describe("diffPolish: rendered visibility and hedge comparison (review #11152 ro
 	})
 })
 
+describe("claim ids and fact-span scanning (review #11152 round 2, L1 and L2)", () => {
+	test("L1: a changed data-claim id is a blocking polish_diff_fail, as apply treats it, not a minor link change", () => {
+		const defects = diffPolish(doc('<p data-claim="C1">Results improve [S1].</p>'), doc('<p data-claim="C2">Results improve [S1].</p>'), LEDGER)
+		expect(codes(defects)).toEqual(["polish_diff_fail"])
+		expect(defects[0].severity).toBe(DEFECT_CODES.polish_diff_fail.severity)
+		expect(defects[0].message).toContain("data-claim")
+	})
+
+	test("L2: a nested same-name element and a quoted '>' stay inside one fact span", () => {
+		const nested = '<p><q data-fact="F1">a <q>b</q> c</q> d</p>'
+		expect(polishProject.factSpans(nested).map((s: { html: string }) => s.html)).toEqual(['<q data-fact="F1">a <q>b</q> c</q>'])
+		const quoted = '<p><data title="a>b" data-fact="F2">320 m</data> d</p>'
+		expect(polishProject.factSpans(quoted).map((s: { id: string; html: string }) => [s.id, s.html])).toEqual([["F2", '<data title="a>b" data-fact="F2">320 m</data>']])
+	})
+})
+
 describe("polish policies have one owner (duplication sweep)", () => {
 	test("the ignored-body tags are the visibility projection's list by identity", () => {
 		expect(polishRules.POLISH_BODY_IGNORED_TAGS).toBe(HIDDEN_ELEMENT_TAGS)
@@ -152,7 +167,7 @@ describe("polish policies have one owner (duplication sweep)", () => {
 		expect(polishRules.POLISH_CHURN_LIMIT).toBe(0.5)
 		expect("Samsung Electronics".match(polishRules.POLISH_NAME)).toEqual(["Samsung", "Electronics"])
 		expect(polishDiff.TICKER).toBe(polishRules.TICKER)
-		expect(polishProject.POLISH_LINK_ATTRIBUTES).toEqual(["href", "data-claim"])
+		expect(polishProject.POLISH_LINK_ATTRIBUTES).toEqual(["href"])
 		expect("v1.25 and 3,000".match(polishProject.POLISH_DIGITS)).toEqual(["1.25", "3,000"])
 	})
 })

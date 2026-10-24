@@ -12,15 +12,15 @@ describe("visibleMarkup", () => {
 		["visibility:collapse", "a <span style='visibility:collapse'>b</span> c"],
 		["font-size:0", "a <span style=\"font-size: 0em\">b</span> c"],
 		["opacity:0", "a <span style=\"opacity:0\">b</span> c"],
-		["aria-hidden", "a <span aria-hidden=true>b</span> c"],
 		["a template", "a <template><p>b</p></template> c"],
 		["a script holding markup", "a <script>x = \"<span>b</span>\"</script> c"],
 	])("drops content hidden by %s", (_label, html) => {
 		expect(seen(html)).toBe("a c")
 	})
 
-	test("keeps visible styling and aria-hidden=false", () => {
+	test("keeps visible styling and aria-hidden content, which browsers render", () => {
 		expect(seen("a <span style=\"opacity:0.5; font-size:12px\" aria-hidden=\"false\">b</span> c")).toBe("a b c")
+		expect(seen("a <span aria-hidden=true>b</span> c")).toBe("a b c")
 	})
 
 	test("counts nested elements of the same name", () => {

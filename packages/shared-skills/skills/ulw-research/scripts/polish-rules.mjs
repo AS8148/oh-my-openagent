@@ -1,19 +1,23 @@
 // polish-rules.mjs - the one rule set behind polish-apply (per edit) and polish-diff (whole document).
 //
 // polishDefects(beforeHtml, afterHtml, ledger, {ordered}) compares the visible projections
-// (html-visible.visibleMarkup, then polish-project.project) and returns {code, message} per failure:
+// (html-visible.visibleMarkup, then polish-project.project) and returns {code, message} per failure.
+// Visibility decides presence only; what is hidden is itself protected:
 //   polish_diff_fail: fact spans (id + rendered markup), numerals outside fact spans (with units),
 //     tickers (TICKER: 1-5 capitals with an optional ".XX" class, or a 6-digit KRX code), or a
-//     table's row count changed;
+//     table's row count changed; the raw markup of a hidden region (hiddenRegions) differs by any
+//     byte; a data-fact or data-claim element changed visibility class (visible <-> hidden); or the
+//     opening tags (name plus every attribute but MARKUP_FREE_ATTRIBUTES) changed, which also makes
+//     a data-claim id change a blocking fact-binding change and closes inline-style hiding;
 //   polish_hedging_decreased: a hedge or qualifier the before text holds and must keep is gone;
 //   polish_text_churn: more than POLISH_CHURN_LIMIT of the normalized visible prose changed;
-//   polish_link_changed: href / data-claim values changed or an internal #target stopped resolving;
+//   polish_link_changed: href values changed or an internal #target stopped resolving;
 //   polish_name_changed: a proper noun (POLISH_NAME) of a ledger quote, present before, is gone.
 // ordered (polish-apply) also refuses a reordering of fact spans, numerals, tickers and links;
 // without it they compare as multisets. Severity lives only in contracts.DEFECT_CODES.
 // No IO, no model. Plain Node ESM.
 
-import { HIDDEN_ELEMENT_TAGS, tagAttributes, visibleMarkup } from "./html-visible.mjs"
+import { HIDDEN_ELEMENT_TAGS, hiddenRegions, markedVisibility, tagAttributes, visibleMarkup } from "./html-visible.mjs"
 import { missingTerms, numeralKeys, project, requiredTerms } from "./polish-project.mjs"
 import { splitSentences } from "./sentence-split.mjs"
 import { normalizeText } from "./text-normalize.mjs"
@@ -27,6 +31,8 @@ export const POLISH_NAME = /\p{Lu}[\p{L}\p{N}&'-]+/gu
 export const POLISH_BODY_IGNORED_TAGS = HIDDEN_ELEMENT_TAGS
 /** Above this share of changed normalized prose a polish composed instead of proofreading. */
 export const POLISH_CHURN_LIMIT = 0.5
+/** Attributes the markup rule leaves to polish_link_changed (href values, internal #targets). */
+export const MARKUP_FREE_ATTRIBUTES = Object.freeze(["href", "id"])
 /** Above this many cells a gap counts as fully rewritten instead of running the quadratic distance. */
 const DISTANCE_CELLS = 25_000_000
 
@@ -46,6 +52,18 @@ function listChange(label, before, after, ordered) {
 	if (remaining.length > 0 || added.length > 0) return `${label} changed: removed [${remaining.join(", ")}], added [${added.join(", ")}]`
 	return ordered ? `${label} reordered: [${before.join(", ")}] became [${after.join(", ")}]` : null
 }
+
+/** null when the hidden regions' raw markup is byte-identical (as a sequence when ordered). */
+function hiddenChange(beforeHtml, afterHtml, ordered) {
+	const [a, b] = [beforeHtml, afterHtml].map((html) => hiddenRegions(html).map((region) => region.markup)).map((list) => (ordered ? list : sorted(list)))
+	if (same(a, b)) return null
+	const at = Math.max(0, a.findIndex((markup, k) => markup !== b[k]))
+	const clip = (markup) => JSON.stringify(markup === undefined ? "(none)" : markup.slice(0, 80))
+	return `hidden markup changed: ${a.length} hidden regions before, ${b.length} after; region ${at + 1} was ${clip(a[at])}, now ${clip(b[at])}`
+}
+
+const tagKeys = (html) =>
+	tagAttributes(html).map(({ name, attrs }) => [name, ...Object.entries(attrs).filter(([key]) => !MARKUP_FREE_ATTRIBUTES.includes(key)).map(([key, value]) => `${key}=${value}`)].join(" "))
 
 const tableRows = (html) => html.split(/<table\b/i).slice(1).map((part) => (part.split(/<\/table\s*>/i)[0].match(/<tr\b/gi) ?? []).length)
 
@@ -134,6 +152,10 @@ export function polishDefects(beforeHtml, afterHtml, ledger, { ordered = false }
 	note("polish_diff_fail", listChange("fact spans", from.facts.map(factKey), to.facts.map(factKey), ordered))
 	note("polish_diff_fail", listChange("numerals outside fact spans", numeralKeys(from.masked), numeralKeys(to.masked), ordered))
 	note("polish_diff_fail", listChange("tickers", tickers(from.masked), tickers(to.masked), ordered))
+	note("polish_diff_fail", hiddenChange(beforeHtml, afterHtml, ordered))
+	const marked = (html) => markedVisibility(html, ["data-fact", "data-claim"])
+	note("polish_diff_fail", listChange("visibility of fact and claim spans", marked(beforeHtml), marked(afterHtml), ordered))
+	note("polish_diff_fail", listChange("markup tags", tagKeys(beforeHtml), tagKeys(afterHtml), ordered))
 	const [rowsBefore, rowsAfter] = [tableRows(before), tableRows(after)]
 	if (!same(rowsBefore, rowsAfter)) note("polish_diff_fail", `table row counts changed: [${rowsBefore}] became [${rowsAfter}]`)
 	const missing = missingTerms(requiredTerms(from, new Map(rows.map((row) => [row.fact_id, row]))), to.visible)
