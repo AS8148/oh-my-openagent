@@ -1,9 +1,9 @@
 // fidelity-values.mjs - value, quote, and chart checks of the deterministic fidelity gate.
 //
-// Every numeral in prose and table cells outside sources and toc (dates included) must sit in a
-// data-fact element or a fill-map entry; each data-fact element must match its ledger row, and
-// each Q element the script's reconstruction of its selection (report text never gets a fuzzy
-// pass). Cited rows, table rows, snapshots, and chart CSVs are rechecked. No model, no network.
+// Each data-fact element must match its ledger row, and each Q element the script's
+// reconstruction of its selection (report text never gets a fuzzy pass). Cited rows, table rows,
+// snapshots, and chart CSVs are rechecked; the numeral and quotation trace is fidelity-trace.mjs.
+// No model, no network.
 
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
@@ -11,19 +11,14 @@ import { join, resolve } from "node:path"
 
 import { proseSentences, sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimsToolCheck } from "./fidelity-lexicon.mjs"
+import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
-import { NOT_CLAIMS, parseNumeral } from "./numerals.mjs"
+import { parseNumeral } from "./numerals.mjs"
 import { div, fromDecimal, sub } from "./rational.mjs"
 import { normalizeText } from "./text-normalize.mjs"
 
-/** Structural numerals: versions, figure/table/section references, times (NOT_CLAIMS 7-11), pages, citations, placeholders. */
-const STRUCTURAL = [...NOT_CLAIMS.slice(7, 12), /\b(?:p|pp|page|pages)\.?\s*\d+(?:\s*[-\u2013]\s*\d+)?/gi, /\[(?:S|Source\s*)\d+\]|\[\^\d+\]/gi, /\{\{[^}]*\}\}/g]
-const NUMERAL = /\d+(?:[.,\-/:]\d+)*/g
-const TRACED = "\u0000"
-const QUOTE_RUNS = [/"([^"]+)"/g, /\u201C([^\u201C\u201D]+)\u201D/g, /\u300C([^\u300C\u300D]+)\u300D/g, /\u300E([^\u300E\u300F]+)\u300F/g]
 const DECIMAL = /^-?\d+(?:\.\d+)?$/
 
-const clip = (text) => String(text).replace(/\s+/g, " ").trim().slice(0, 80)
 const bare = (text) => normalizeText(String(text ?? "").replace(/\s*\[(?:S|Source\s*)\d+\]\s*$/i, "")).replace(/\u2026/g, "...").replace(/\s*\.\.\.\s*/g, "...").replace(/^["']+|["']+$/g, "").trim()
 
 /** The text fill renders for a quote selection: full, lead=<n>, or from=<a>;to=<b> (placeholder form accepted). */
@@ -60,6 +55,14 @@ function factProblem(row, shown, attrs = {}) {
 	if (!sameValue(parsed.value, row.value)) return ["value_mismatch", `"${clip(shown)}" reads ${parsed.value}, but ${row.fact_id} is ${row.value}`]
 	if (parsed.unitRaw && unitKey(parsed.unitRaw) !== unitKey(row.unit)) return ["unit_mismatch", `"${clip(shown)}" is in ${parsed.unitRaw}, but ${row.fact_id} is in ${row.unit}`]
 	return null
+}
+
+/** Whether a candidate fill site reads as what fill wrote there or as the entry's row ("1,237 million" is neither 1,237 nor F2). */
+const fillSiteFits = (rows) => (entry, tail) => {
+	const [row, site, own] = [rows.get(entry.fact_id), parseNumeral(tail, 0), parseNumeral(entry.rendered, 0)]
+	if (!row || row.kind === "quote" || !site || !own) return true
+	if (sameValue(site.value, own.value) && unitKey(site.unitRaw ?? "") === unitKey(own.unitRaw ?? "")) return true
+	return factProblem(row, tail.slice(0, Math.max(entry.rendered.length, site.span[1]))) === null
 }
 
 const withoutFooter = (node) => proseText({ children: node.children.filter((child) => child.tag !== "footer") })
@@ -132,33 +135,6 @@ function chartProblem(ctx, fig, labels, ledger) {
 	return stray === undefined ? null : `caption numeral ${stray} is not a plot_value of ${source}`
 }
 
-function ownerTexts(ctx, charts) {
-	const owners = new Map()
-	for (const entry of ctx.texts) {
-		const kind = ctx.kindOf(entry.scope)
-		if (kind === "sources" || kind === "toc") continue
-		if (charts.has(ctx.util.closest(entry.node, (cur) => cur.tag === "figure"))) continue
-		const hidden = ctx.util.closest(entry.node, (cur) => cur.attrs["data-fact"] !== undefined || cur.attrs["data-translates"] !== undefined || cur.tag === "q" || cur.tag === "blockquote")
-		owners.set(entry.owner, (owners.get(entry.owner) ?? "") + (hidden ? ` ${TRACED} ` : entry.node.text))
-	}
-	return owners
-}
-
-function scanOwner(ctx, owner, raw, rendered, flag) {
-	let text = rendered.reduce((rest, shown) => rest.split(shown).join(TRACED), raw)
-	if (/^h[1-6]$/.test(owner.tag)) text = text.replace(/^\s*\d+(?:[.-]\d+)*[.):]?\s+/, " ")
-	if (text.includes("{{")) flag("unresolved_placeholder", owner, `leftover placeholder: "${clip(text.slice(text.indexOf("{{")))}"`)
-	for (const re of QUOTE_RUNS) {
-		for (const match of text.matchAll(re)) {
-			const inner = match[1].replaceAll(TRACED, " ").trim()
-			const after = text.slice(match.index + match[0].length).trim().split(/\s+/).slice(0, 6).join(" ")
-			if (inner && (inner.split(/\s+/).length >= 3 || ctx.util.citationMarker.test(after))) flag("quote_unbound", owner, `direct quotation with no Q row: "${clip(match[0])}"`)
-		}
-	}
-	const rest = STRUCTURAL.reduce((acc, re) => acc.replace(re, " "), text)
-	for (const match of rest.matchAll(NUMERAL)) flag("untraceable_number", owner, `number "${match[0]}" has no ledger row: "${clip(rest.slice(Math.max(0, match.index - 30), match.index + 30))}"`)
-}
-
 /**
  * @param {object} ctx buildContext(...) from gates-static.mjs
  * @param {{ rows: object[] }} ledger
@@ -201,8 +177,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		const kind = ctx.kindOf(scope)
 		if ((node.tag === "q" || node.tag === "blockquote") && node.attrs["data-fact"] === undefined && kind !== "sources" && kind !== "toc") flag("quote_unbound", node, `<${node.tag}> with no Q row: "${clip(proseText(node))}"`)
 	}
-	const rendered = (fillMap ?? []).map((entry) => entry.rendered).filter(Boolean)
-	for (const [owner, raw] of ownerTexts(ctx, charts)) scanOwner(ctx, owner, raw, rendered, flag)
+	traceChecks(ctx, charts, fillMap, flag, fillSiteFits(rows))
 	for (const [fig, labels] of charts) {
 		const problem = chartProblem(ctx, fig, labels, ledger)
 		if (problem) flag("chart_value_untraceable", fig, problem)

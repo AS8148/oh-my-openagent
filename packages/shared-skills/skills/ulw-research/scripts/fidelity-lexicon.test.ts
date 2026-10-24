@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { lexiconChecks } from "./fidelity-lexicon.mjs"
+import { claimsToolCheck, lexiconChecks } from "./fidelity-lexicon.mjs"
 
 type Pair = { pair_id: string; quote: string; sentence: string; span?: [number, number] | null; qualifier?: string | null; acronyms?: Record<string, string> }
 type Finding = { pair_id: string; code: string; message: string }
@@ -85,4 +85,28 @@ describe("names and routing", () => {
 		expect(codes(result)).toEqual([])
 		expect(result.forceStrong).toEqual(["P1"])
 	})
+})
+
+describe("claimsToolCheck", () => {
+	const fires = [
+		"We verified the span by running the survey script.",
+		"We ran the measurement again.",
+		"The value was checked with the export command.",
+		"The benchmark suite confirmed the latency.",
+		"Tested via the CLI, the count held.",
+		"실행해 확인한 길이",
+		"스크립트로 확인한 값",
+		"벤치마크 결과 검증된 수치",
+	]
+	const quiet = [
+		"Coverage was confirmed with the annual inspection report.",
+		"The figure was checked against the 2025 filing.",
+		"The bridge ran across the river.",
+		"We verified the span is 320 m.",
+		"확인된 길이",
+		"콘테스트에서 확인된 기록",
+		"보고서로 검증된 수치",
+	]
+	for (const text of fires) test(`#given "${text}" #when classified #then a tool-backed check`, () => expect(claimsToolCheck(text)).toBe(true))
+	for (const text of quiet) test(`#given "${text}" #when classified #then ordinary prose`, () => expect(claimsToolCheck(text)).toBe(false))
 })

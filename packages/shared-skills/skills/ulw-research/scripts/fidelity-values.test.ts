@@ -196,7 +196,7 @@ describe("derivations, joins, snapshots", () => {
 	})
 
 	test("#given a verification claim on a page-sourced fact #when checked #then unsupported_verification", () => {
-		expect(codes(run(`<p>We verified the span is ${fact("F1", "up to 320 m", "m")} [S4].</p>`))).toEqual(["unsupported_verification"])
+		expect(codes(run(`<p>We verified the span is ${fact("F1", "up to 320 m", "m")} by running the survey script [S4].</p>`))).toEqual(["unsupported_verification"])
 		expect(run(`<p>The suite ran with ${fact("F7", "42 passed")} [S5].</p>`)).toEqual([])
 	})
 
