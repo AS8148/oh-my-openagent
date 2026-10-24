@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**OmO Native init-deep committed mode no longer dead-ends.** Committed mode now finishes through its own pull-request handoff instead of pointing at a skill that does not ship with OmO Native, and it reports how to finish by hand when no PR can be opened. Thanks to @HolisticDeveloper for the report and @surlymochan for the fix. ([#11228](https://github.com/code-yeongyu/oh-my-openagent/pull/11228), fixes [#9686](https://github.com/code-yeongyu/oh-my-openagent/issues/9686))
+
 **The LSP MCP server negotiates supported protocol versions.** It preserves supported client versions and answers unsupported or missing versions with `2025-06-18`, rather than claiming an arbitrary protocol revision. ([#11208](https://github.com/code-yeongyu/oh-my-openagent/pull/11208))
 
 **Skill MCP tool errors are reported as errors.** Structured output and result metadata reach the caller, tool failures are not retried as connection failures, and plain content keeps its existing output format. ([#11207](https://github.com/code-yeongyu/oh-my-openagent/pull/11207))
