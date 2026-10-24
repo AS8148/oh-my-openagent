@@ -2,6 +2,7 @@ import { serveChannel } from "./channels"
 import { serveDownloadStats } from "./download-stats"
 import { runDownloadsRollup } from "./downloads-rollup"
 import type { Env, RequestContext } from "./env"
+import { LAUNCH_PAGE, serveLaunchMedia } from "./launch"
 import { isChannel } from "./release-names"
 import { docsRedirect, isScriptName, scriptForRoot, serveScript } from "./scripts"
 import { serveReleaseAsset } from "./serve-release"
@@ -16,6 +17,14 @@ function plain(status: number, body: string): Response {
 export async function route(request: Request, ctx: RequestContext): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") return plain(405, "method not allowed")
   const { pathname } = new URL(request.url)
+  if (pathname === "/launch" || pathname === "/launch/") {
+    return new Response(request.method === "HEAD" ? null : LAUNCH_PAGE, {
+      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" },
+    })
+  }
+  if (pathname === "/media/launch-20261024.mp4" || pathname === "/media/launch-20261024.jpg") {
+    return serveLaunchMedia(request, ctx, pathname)
+  }
   if (pathname === "/") {
     const script = scriptForRoot(request)
     return script === null ? docsRedirect() : serveScript(request, ctx, script)

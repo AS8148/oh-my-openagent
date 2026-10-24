@@ -21,13 +21,16 @@ export class FakeBucket {
   }
 
   async head(key: string): Promise<object | null> {
-    return this.guard(key) === undefined ? null : { key }
+    const stored = this.guard(key)
+    return stored === undefined ? null : { key, size: stored.body.byteLength, httpEtag: `"${key}"` }
   }
 
-  async get(key: string): Promise<object | null> {
+  async get(key: string, options?: { readonly range: { readonly offset: number; readonly length: number } }): Promise<object | null> {
     const stored = this.guard(key)
     if (stored === undefined) return null
-    const bytes = stored.body
+    const bytes = options === undefined
+      ? stored.body
+      : stored.body.slice(options.range.offset, options.range.offset + options.range.length)
     return {
       key,
       size: bytes.byteLength,
