@@ -194,7 +194,7 @@ export const GATEWAY_MIGRATIONS: readonly (readonly string[])[] = [
     "CREATE TABLE extension_objects (type TEXT NOT NULL, name TEXT NOT NULL, owner TEXT, PRIMARY KEY (type, name))",
     "INSERT INTO extension_objects (type, name, owner) SELECT type, name, NULL FROM sqlite_schema",
   ],
-  // v7: `whatsapp` is a binding platform (the omo-gateway WhatsApp channel binds its chats here).
+  // v7: `whatsapp` is a binding platform (a WhatsApp connector binds its chats here).
   // SQLite cannot widen a CHECK in place, so `bindings` is rebuilt with the widened list; every
   // column is carried over verbatim and the two indexes are recreated before the old table drops.
   // This step runs with foreign_keys OFF (set in migrate()): a table drop would otherwise fire

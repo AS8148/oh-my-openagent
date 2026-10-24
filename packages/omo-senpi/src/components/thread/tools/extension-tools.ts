@@ -1,5 +1,5 @@
 /**
- * The session tools of store extensions (omo-gateway todo 14): one tool per session-callable op
+ * The session tools of store extensions: one tool per session-callable op
  * declared in the store (`extension_registrations`), named `ext_<extension>_<toolName>`. A tool resolves the
  * engine's caller (`ectx.sessionManager.getSessionId()`) to its durable id through the address book
  * and calls the op through the store's session channel, which stamps that caller into the op's args
