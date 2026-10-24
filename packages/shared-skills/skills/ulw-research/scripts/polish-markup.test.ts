@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import { markupParts } from "./html-markup.mjs"
-import { applyEdits, POLISH_MARKUP_REASON } from "./polish-apply.mjs"
+import { markupParts, skeletonChange } from "./html-markup.mjs"
+import { applyEdits, POLISH_MARKUP_REASON, textOf } from "./polish-apply.mjs"
 import { diffPolish } from "./polish-diff.mjs"
 
 const LEDGER = { rows: [{ fact_id: "F1", quote: "Revenue may reach 320 m." }] }
@@ -107,7 +107,7 @@ describe("polish edits never carry markup characters", () => {
 			return
 		}
 		expect(result.out).toBe(html)
-		expect(result.rejected[0]?.reason).toBe(POLISH_MARKUP_REASON)
+		expect(result.rejected[0]?.reason).toContain(POLISH_MARKUP_REASON)
 	})
 
 	test("#given double-escaped script code #then the ambiguity refusal blocks a text-only edit of it", () => {
@@ -138,5 +138,50 @@ describe("polish edits never carry markup characters", () => {
 	test("#given a double-escaped script #then the script runs to the close outside the escape", () => {
 		expect(markupParts(`${SCRIPT}<p>x</p>`).markup).toEqual(["<p>", "</p>", "<script><!--<script></script>foo();</script>", "<p>", "</p>"])
 		expect(markupParts("<script><!-- a --></script><b>x</b>").markup).toEqual(["<script><!-- a --></script>", "<b>", "</b>"])
+	})
+})
+
+// Review #11152 round 5: the primary rule is a whole-document skeleton comparison. Every markup
+// token and every character reference in text must be byte-identical; an edit's located region may
+// not touch a character reference either, so an edit can neither change nor create one.
+const AMPD = "<p>We fund R&amp;D labs here.</p>"
+const TOM = "<p>Tom & Jerry ran.</p>"
+describe("polish keeps character references intact", () => {
+	test.each([
+		["an edit starting inside an entity", AMPD, "amp;D labs", "lt;D labs"],
+		["an edit starting right after a bare ampersand", TOM, " Jerry ran", "lt; ran"],
+	])("#given %s #then apply refuses it and diff blocks the hand edit", (_label: string, html: string, from: string, to: string) => {
+		const result = applyEdits(html, [{ before: from, after: to }], LEDGER)
+		expect(result.applied).toEqual([])
+		expect(result.out).toBe(html)
+		expect(result.rejected[0]?.reason).toContain("character reference")
+		const defects = diffPolish(html, html.replace(from, to), LEDGER)
+		expect(defects.find((item: { code: string }) => item.code === "polish_diff_fail")?.severity).toBe("blocker")
+	})
+
+	test("#given a hand edit from R&amp;D to R&lt;D #then diff blocks it", () => {
+		const defect = diffPolish(AMPD, AMPD.replace("&amp;", "&lt;"), LEDGER).find((item: { code: string }) => item.code === "polish_diff_fail")
+		expect(defect?.message).toContain("skeleton changed")
+	})
+
+	test.each([
+		["an entity changed", AMPD, AMPD.replace("&amp;", "&lt;")],
+		["an entity created", TOM, "<p>Tom &lt; ran.</p>"],
+		["an entity removed", AMPD, AMPD.replace("R&amp;D", "RD")],
+		["a tag changed", AMPD, AMPD.replace("<p>", "<div>")],
+	])("#given %s #then the skeleton check alone names the first differing token", (_label: string, before: string, after: string) => {
+		expect(skeletonChange(before, after)).toContain("skeleton changed at token")
+	})
+
+	test.each([
+		["words beside an entity", AMPD, AMPD.replace("labs here", "labs nearby")],
+		["words beside a bare ampersand", TOM, TOM.replace("ran", "walked")],
+		["an unchanged document", AMPD, AMPD],
+	])("#given %s #then the skeleton is unchanged", (_label: string, before: string, after: string) => {
+		expect(skeletonChange(before, after)).toBeNull()
+	})
+
+	test("#given a quoted greater-than in an attribute #then the text projection follows the scanner", () => {
+		expect(textOf('<p title="a>b">Results may improve.</p>').trim()).toBe("Results may improve.")
 	})
 })

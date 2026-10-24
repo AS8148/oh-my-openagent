@@ -2,7 +2,11 @@
 //
 // polishDefects(beforeHtml, afterHtml, ledger, {ordered}) compares the visible projections
 // (html-markup.markupParts, then polish-project.project) and returns {code, message} per failure.
-// Polish may change text nodes only. Markup is compared byte for byte, in sequence:
+// Polish may change text nodes only. The primary rule is the whole-document skeleton comparison
+// (html-markup.skeletonChange): every markup token (tags, comments, bogus comments and frozen
+// script/style/template content) and every character reference of a text node must be byte-identical
+// in document order; an edited span holds no skeleton token, so any difference is polish_diff_fail
+// naming the first differing token and its offset. The remaining checks compare the projections:
 //   polish_diff_fail: fact spans (id + rendered markup), numerals outside fact spans (with units),
 //     tickers (TICKER: 1-5 capitals with an optional ".XX" class, or a 6-digit KRX code), or a
 //     table's row count changed; any tag, attribute, comment, declaration, or script/style/template
@@ -18,7 +22,7 @@
 // without it they compare as multisets. Severity lives only in contracts.DEFECT_CODES.
 // No IO, no model. Plain Node ESM.
 
-import { ambiguousMarkup, markupParts, tagAttributes } from "./html-markup.mjs"
+import { ambiguousMarkup, markupParts, skeletonChange, tagAttributes } from "./html-markup.mjs"
 import { missingTerms, numeralKeys, project, requiredTerms, termCounts, textOf } from "./polish-project.mjs"
 import { splitSentences } from "./sentence-split.mjs"
 import { normalizeText } from "./text-normalize.mjs"
@@ -139,6 +143,7 @@ export function polishDefects(beforeHtml, afterHtml, ledger, { ordered = false }
 	const tickers = (text) => text.match(TICKER) ?? []
 	const markupEqual = same(beforeParts.markup, afterParts.markup)
 	note("polish_diff_fail", markupEqual ? null : "markup changed")
+	note("polish_diff_fail", skeletonChange(beforeHtml, afterHtml))
 	note("polish_diff_fail", listChange("fact spans", from.facts.map(factKey), to.facts.map(factKey), ordered))
 	note("polish_diff_fail", listChange("numerals outside fact spans", numeralKeys(from.masked), numeralKeys(to.masked), ordered))
 	note("polish_diff_fail", listChange("tickers", tickers(from.masked), tickers(to.masked), ordered))

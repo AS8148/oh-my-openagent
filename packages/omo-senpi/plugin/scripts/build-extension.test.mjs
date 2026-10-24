@@ -17,6 +17,7 @@ import {
 import { runBoundedStage, systemTar } from "./bounded-stage.test-support.mjs"
 import { createBuildFixture } from "./build-extension.test-support.mjs"
 import { runtimePersonaSources } from "./persona-artifacts.mjs"
+import { removeTestRootBestEffort } from "../../../../test-support/held-test-root.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const pluginRoot = join(scriptDir, "..")
@@ -463,7 +464,7 @@ describe("checkExtensionCurrent", () => {
       expect(run.stdout, run.stderr).toContain("sync-sidecar-ok")
       expect(run.status, run.stderr).toBe(0)
     } finally {
-      await rm(work, { recursive: true, force: true })
+      removeTestRootBestEffort(work)
     }
   }, PACKED_TEST_TIMEOUT_MS)
 

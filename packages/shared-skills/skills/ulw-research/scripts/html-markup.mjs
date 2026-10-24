@@ -143,3 +143,40 @@ export function ambiguousMarkup(html) {
 	})
 	return [...found]
 }
+
+/** One character reference token of a text node: & up to the first ; or non-name character. */
+export const CHARACTER_REFERENCE = /&[^;\s<&]*;?/g
+
+/**
+ * The skeleton of a document: every markup token (tags, comments, bogus comments and the frozen
+ * content of script/style/template) and every character reference of a text node, in document
+ * order, each with its byte offset. Polish may change text node characters only, and an edit can
+ * carry neither <, > nor & and may not touch a character reference, so an edited span holds no
+ * skeleton token: a polished document keeps this sequence byte-identical.
+ */
+export function skeletonTokens(html) {
+	const { markup, text } = markupParts(html)
+	const tokens = []
+	let at = 0
+	text.forEach((slot, index) => {
+		for (const match of slot.matchAll(CHARACTER_REFERENCE)) tokens.push({ kind: "reference", value: match[0], offset: at + match.index })
+		at += slot.length
+		if (index < markup.length) {
+			tokens.push({ kind: "markup", value: markup[index], offset: at })
+			at += markup[index].length
+		}
+	})
+	return tokens
+}
+
+const describeToken = (token) => (token ? `${token.kind} ${JSON.stringify(token.value)} at offset ${token.offset}` : "end of document")
+
+/** The first skeleton token two documents disagree on, as a message, or null when they agree. */
+export function skeletonChange(beforeHtml, afterHtml) {
+	const [before, after] = [skeletonTokens(beforeHtml), skeletonTokens(afterHtml)]
+	for (let index = 0; index < Math.max(before.length, after.length); index++) {
+		if (before[index]?.value === after[index]?.value) continue
+		return `skeleton changed at token ${index}: ${describeToken(before[index])} became ${describeToken(after[index])}`
+	}
+	return null
+}
