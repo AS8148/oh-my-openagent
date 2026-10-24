@@ -109,7 +109,7 @@ describe("applyEdits: links and location", () => {
 		const html = doc('<p data-claim="C1">Results improve [S1].</p>')
 		const result = applyEdits(html, [edit('data-claim="C1"', 'data-claim="C2"')], LEDGER)
 		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
-		expect(result.rejected[0].reason).toContain("data-claim")
+		expect(result.rejected[0].reason).toContain("markup changed")
 	})
 
 	test("a before that is not found is unlocated", () => {
@@ -169,7 +169,7 @@ describe("applyEdits: rendered visibility (review #11152 round 1)", () => {
 	])("a fact span wrapped in %s is rejected and leaves the document unchanged", (_label, after) => {
 		const result = hide(after)
 		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
-		expect(result.rejected[0].reason).toContain("fact spans")
+		expect(result.rejected[0].reason).toContain("markup changed")
 		expect(result.out).toBe(html)
 	})
 
@@ -183,7 +183,7 @@ describe("applyEdits: rendered visibility (review #11152 round 1)", () => {
 		const claim = doc("<p>Results may improve [S1].</p>")
 		const result = applyEdits(claim, [edit("Results may improve", "Results <span hidden>may</span> improve")], LEDGER)
 		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
-		expect(result.rejected[0].reason).toContain("may")
+		expect(result.rejected[0].reason).toContain("markup changed")
 	})
 })
 
@@ -263,7 +263,7 @@ describe("applyEdits: hidden content keeps its bytes and its class (review #1115
 
 	test("probe 2: a number after an unclosed <p hidden> is inside the hidden region, whose bytes may not change", () => {
 		const html = doc("<p hidden>note<div>Revenue was 5 billion.</div>")
-		refused(html, [edit("5 billion", "50 billion")], "hidden markup changed")
+		refused(html, [edit("5 billion", "50 billion")], "numerals")
 		flagged(html, html.replace("5 billion", "50 billion"))
 	})
 
@@ -277,7 +277,7 @@ describe("applyEdits: hidden content keeps its bytes and its class (review #1115
 	const shown = doc(`<p>The span is <span>${f(SPAN)}</span> [S1].</p>`)
 	const changed = f(SPAN).replace(">320 m<", ">321 m<")
 	test("relabelling a visible fact span as hidden while changing its number, in one edit, is refused and flagged", () => {
-		refused(shown, [edit(`<span>${f(SPAN)}</span>`, `<span hidden>${changed}</span>`)], "visibility")
+		refused(shown, [edit(`<span>${f(SPAN)}</span>`, `<span hidden>${changed}</span>`)], "markup changed")
 		flagged(shown, shown.replace(`<span>${f(SPAN)}</span>`, `<span hidden>${changed}</span>`))
 	})
 
@@ -285,13 +285,13 @@ describe("applyEdits: hidden content keeps its bytes and its class (review #1115
 		const edits = [edit(`<span>${f(SPAN)}`, `<span style="display:none">${f(SPAN)}`), edit(">320 m<", ">321 m<")]
 		const result = applyEdits(shown, edits, LEDGER)
 		expect(result.applied).toEqual([])
-		expect(result.rejected[0].reason).toContain("visibility")
+		expect(result.rejected[0].reason).toContain("markup changed")
 		flagged(shown, shown.replace(`<span>${f(SPAN)}</span>`, `<span style="display:none">${changed}</span>`))
 	})
 
 	test("unhiding a hidden fact span with a changed value is refused and flagged", () => {
 		const hidden = doc(`<p>The span is <span hidden>${f(SPAN)}</span> [S1].</p>`)
-		refused(hidden, [edit(`<span hidden>${f(SPAN)}</span>`, `<span>${changed}</span>`)], "visibility")
+		refused(hidden, [edit(`<span hidden>${f(SPAN)}</span>`, `<span>${changed}</span>`)], "markup changed")
 		flagged(hidden, hidden.replace(`<span hidden>${f(SPAN)}</span>`, `<span>${changed}</span>`))
 	})
 
@@ -299,7 +299,7 @@ describe("applyEdits: hidden content keeps its bytes and its class (review #1115
 		const claim = doc('<p><span data-claim="C1">Results improve</span> [S1].</p>')
 		const hiddenClaim = claim.replace('<span data-claim="C1">', '<span hidden data-claim="C1">')
 		for (const [before, after] of [[claim, hiddenClaim], [hiddenClaim, claim]]) {
-			expect(diffPolish(before, after, LEDGER).find((d: { code: string }) => d.code === "polish_diff_fail")?.message).toContain("visibility")
+			expect(diffPolish(before, after, LEDGER).find((d: { code: string }) => d.code === "polish_diff_fail")?.message).toContain("markup changed")
 		}
 	})
 

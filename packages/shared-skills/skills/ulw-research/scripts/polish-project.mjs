@@ -2,15 +2,15 @@
 //
 // project(markup) yields the ordered fact spans {id, html}, the visible text, the masked text (each
 // fact span replaced by SLOT) and the ordered href values. Callers pass markup already reduced by
-// html-visible.visibleMarkup, so hidden content never counts as present. Fact spans are the
+// html-markup.markupParts().source, with frozen script/style/template content omitted. Fact spans are the
 // placeholder.mjs FACT_ELEMENT_TAGS elements carrying data-fact (any quoting), found by
-// html-visible.elementSpans (a same-name nested element and a quoted ">" stay inside). Hedge and
+// html-markup.elementSpans (a same-name nested element and a quoted ">" stay inside). Hedge and
 // qualifier terms come from fidelity-lexicon (guardedTerms, lexicalPattern "guard" mode).
 // No IO, no model. Plain Node ESM.
 
 import { decodeEntities } from "./entities.mjs"
 import { guardedTerms, lexicalPattern, QUALIFIER_FORMS } from "./fidelity-lexicon.mjs"
-import { elementSpans, tagAttributes } from "./html-visible.mjs"
+import { elementSpans, tagAttributes } from "./html-markup.mjs"
 import { HEDGES } from "./lexicon.mjs"
 import { parseNumeral } from "./numerals.mjs"
 import { FACT_ELEMENT_TAGS } from "./placeholder.mjs"

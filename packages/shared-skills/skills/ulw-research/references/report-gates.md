@@ -44,7 +44,7 @@ Raised only by the fidelity verifier (the fact ledger, fill, verify, meaning, an
 | `pointer_label_mismatch` | blocker | true | A placeholder's label differs from the referenced ledger row's label (a typo guard on the id). | The placeholder's label is not the row's label; check the id, then the label. |
 | `quote_anchor_unresolved` | blocker | true | A quote cut's from or to anchor is absent, occurs more than once, or appears in reverse order in the quote. | A from or to anchor is missing or occurs more than once in the quote; pick unique anchor words. |
 | `unit_duplicated` | blocker | true | A unit-bearing placeholder is followed by another copy of its own unit. | The unit after the placeholder repeats the row's unit; use :value or remove the unit. |
-| `polish_diff_fail` | blocker | true | The polish pass changed protected fact values, numerals outside fact spans, tickers, table row counts, the markup tags (a data-claim id included), any byte of hidden markup, or whether a fact or claim span is hidden (see Polish Visibility Rules). | The polish pass changed numbers, tickers, table rows, claim ids, markup, or hidden content; revert to the pre-polish artifact and apply the language fixes only. |
+| `polish_diff_fail` | blocker | true | The polish pass changed protected fact spans, numerals or units, tickers, table rows, or any markup byte (including every attribute, comments, and script/style/template content). | Revert to the pre-polish artifact and apply text-node edits only; markup changes require the full fidelity gates. |
 | `fidelity_interview_incomplete` | blocker | true | A fidelity field in the brief is still pending or missing when a fidelity command runs. | A fidelity field is pending or missing in brief.md; answer the open question or record its default, then rerun. |
 | `derived_not_allowed` | blocker | true | A placeholder resolves to a derived, converted, or assumed row while the brief allows no derived numbers. | The brief allows no derived or assumed numbers; cite a source row directly or change the brief with the requester. |
 | `source_outside_floor` | blocker | true | A ledger row's source lies outside the source floor the brief records (pointed sources only, or the allowed source classes). | The row's source is outside the source floor the brief records; use a source the brief allows or remove the fact. |
@@ -103,15 +103,13 @@ Gates emit a manifest-level outcome with one of three statuses:
 
 The `layout` gate only runs when a probe file (a rendering artifact: PDF, PNG, or HTML snapshot) is provided alongside the manifest. If no probe file is available, the manifest records `layout: not_run` and the gate does not emit defects.
 
-## Polish Visibility Rules
+## Polish Text-Node Contract
 
-The polish checks (`scripts/polish-rules.mjs`, run per edit by `polish-apply` and over the whole report by `polish-diff`) read what a reader sees, and protect what a reader does not see:
+Polish edits change text nodes only; markup changes go through the full fidelity gates, not polish.
 
-- **Presence.** Content counts as present only when it renders. Hidden means a comment or declaration, a `head`, `script`, `style`, `template` or `noscript` element, or an element with the `hidden` attribute or an inline `display:none`, `visibility:hidden|collapse`, `font-size:0` or `opacity:0`. `aria-hidden="true"` is not hidden: browsers draw it.
-- **Hidden markup is frozen.** The raw markup of every hidden region must be byte-identical before and after polish; any difference is `polish_diff_fail`, and `polish-apply` rejects the edit.
-- **Unclosed hidden elements.** A hidden element that never closes is hidden to the end of the input. That fails closed both ways: everything after it counts as absent, and because that whole region is compared byte for byte, no edit inside it passes.
-- **Visibility class.** Every `data-fact` and `data-claim` element keeps its class (visible or hidden). Hiding a visible span or unhiding a hidden one is `polish_diff_fail`, whether or not its value also changed.
-- **Markup.** The opening tags (names and every attribute except `href` and `id`, which `polish_link_changed` owns) must not change, so a wrapper with a hiding style, an inserted stylesheet, or a changed `data-claim` id is `polish_diff_fail`.
+The shared rule in `scripts/polish-rules.mjs` runs per edit against the current and original report in `polish-apply`, and against the whole document in `polish-diff`. The sequence of opening and closing tags, every attribute name and value (including `href`, `id`, `class`, and `style`), comments, declarations, and all content of `script`, `style`, and `template` elements must be byte-identical. Attribute reordering, different quoting, tag case, whitespace inside a tag, and a self-closing slash are markup changes too. Any difference raises the blocker `polish_diff_fail`; apply rejects it with reason `markup changed`.
+
+Text nodes remain subject to the existing fact-span, number/unit, ticker, hedge, qualifier, name, and churn checks. Protected numbers, tickers, and required hedges cannot migrate between text nodes. A text edit inside an existing fact span is still a fact-span change, including under `aria-hidden`. Script/style/template content is frozen through the end of input when unclosed. No CSS or HTML visibility model is used by polish.
 
 ## Lineage and Citation Markers
 

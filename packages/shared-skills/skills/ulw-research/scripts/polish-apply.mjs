@@ -9,8 +9,8 @@
 // document with the edit (whole document: the baseline polish-diff uses). Ordered is stricter than
 // polish-diff's multiset comparison and the last accepted candidate is the output, so a clean run
 // is always polish-diff clean: no cross-edit case is left to the backstop. The rules see the
-// rendered (visible) projection and also protect hidden markup byte for byte, the visibility class
-// of fact and claim spans, and the tag sequence. validatePolishEdits and POLISH_EDIT_FIELDS are the edit
+// text-node projection and freeze every markup byte, including script/style/template content.
+// validatePolishEdits and POLISH_EDIT_FIELDS are the edit
 // contract every caller (the CLI included) uses. No IO, no model. Plain Node ESM.
 
 import { factSpans } from "./polish-project.mjs"
@@ -72,7 +72,8 @@ export function applyEdits(html, edits, ledger) {
 		}
 		const cut = cutSpan(result.out, where.start, where.end)
 		const candidate = result.out.slice(0, where.start) + edit.after + result.out.slice(where.end)
-		const reasons = cut === null ? defects(candidate) : [`the edit cuts through fact span ${cut}`]
+		const reasons = defects(candidate)
+		if (cut !== null) reasons.push(`the edit cuts through fact span ${cut}`)
 		if (reasons.length > 0) {
 			result.rejected.push({ index, code: "polish_edit_rejected", reason: reasons.join("; ") })
 			return
