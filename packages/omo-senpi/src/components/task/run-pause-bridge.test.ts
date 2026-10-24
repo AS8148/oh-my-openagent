@@ -145,7 +145,7 @@ test("the real session_start bridge awaits registry restoration before lifecycle
   wireEventBridge(pi, {
     logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
     config: { getFlag: () => false }, getCapturedTools: () => [],
-  }, engine, { scheduleSync: () => undefined, syncNow: () => undefined, dispose: () => undefined },
+  }, engine, { scheduleSync: () => undefined, syncNow: () => undefined, observeRecord: () => undefined, dispose: () => undefined },
   createSessionTransitionBridge({ runtime: engine.runtime, notifier: engine.notifier }), {
     runPause: h.bridge,
     reconcileTeamMailbox: async () => undefined,
