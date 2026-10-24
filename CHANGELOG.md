@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Protocol-2 account storage has separate credential and pending-revocation namespaces.** Legacy credential writes and deletes cannot overwrite either namespace; the origin key and native storage-error mappings stay shared. This is storage support for the protocol-2 rollout, not enrollment activation. ([omo-service#628](https://github.com/sisyphuslabs/omo-service/issues/628))
+
 ## [5.1.45] - 2026-10-24
 
 **Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
