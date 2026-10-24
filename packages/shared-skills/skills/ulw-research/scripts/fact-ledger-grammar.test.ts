@@ -5,6 +5,10 @@ import { TRANSITIONS, addRow, emptyLedger, nextId, retractRow, supersedeRow, tra
 // Property-style checks of references/fact-ledger-grammar.md: every ledger the writers build is
 // valid, and every single-invariant break the validator rejects is also refused by the writers.
 
+type Row = { fact_id: string; status: string; kind: string; label: string; operands: string[]; derived_from: string[] }
+type LedgerEvent = { fact_id: string; from: string; to: string; replacement?: string | null; reason?: string }
+type Ledger = { rows: Row[]; events: LedgerEvent[] }
+
 function measured(label: string) {
 	return {
 		kind: "measured",
@@ -59,13 +63,13 @@ function pick<T>(random: () => number, list: T[]): T {
 	return list[Math.floor(random() * list.length)]
 }
 
-const ids = (ledger: any, keep: (row: any) => boolean) => ledger.rows.filter(keep).map((row: any) => row.fact_id)
+const ids = (ledger: Ledger, keep: (row: Row) => boolean) => ledger.rows.filter(keep).map((row) => row.fact_id)
 
 /** Writes the writers must refuse on any ledger; each returns nothing and must throw. */
-function illegalWrites(ledger: any, random: () => number): (() => unknown)[] {
+function illegalWrites(ledger: Ledger, random: () => number): (() => unknown)[] {
 	const active = ids(ledger, (row) => row.status === "active")
 	const ended = ids(ledger, (row) => row.status !== "active")
-	const writes: (() => unknown)[] = [() => addRow(ledger, derivedRow("dangling", ["F999"])), () => addRow(ledger, measured(pick(random, ledger.rows as any[]).label))]
+	const writes: (() => unknown)[] = [() => addRow(ledger, derivedRow("dangling", ["F999"])), () => addRow(ledger, measured(pick(random, ledger.rows).label))]
 	if (active.length > 0) {
 		const id = pick(random, active)
 		writes.push(() => supersedeRow(ledger, id, id, "self"), () => supersedeRow(ledger, id, null, "none"), () => retractRow(ledger, id, ""))
@@ -78,7 +82,7 @@ function illegalWrites(ledger: any, random: () => number): (() => unknown)[] {
 /** Random addRow / retractRow / supersedeRow sequences from an empty ledger, with refused writes mixed in. */
 function randomLedger(seed: number) {
 	const random = prng(seed)
-	const ledger: any = emptyLedger()
+	const ledger: Ledger = emptyLedger()
 	const steps = 4 + Math.floor(random() * 14)
 	for (let step = 0; step < steps; step += 1) {
 		const active = ids(ledger, (row) => row.status === "active")
@@ -106,17 +110,17 @@ describe("every ledger the writers build is valid", () => {
 	test("200 seeded random write sequences all validate, and refused writes leave the ledger unchanged", () => {
 		for (const ledger of LEDGERS) expect(validateLedger(ledger)).toEqual([])
 		const events = LEDGERS.flatMap((ledger) => ledger.events)
-		expect(events.some((event: any) => event.to === "superseded")).toBe(true)
-		expect(events.some((event: any) => event.to === "retracted")).toBe(true)
-		expect(LEDGERS.some((ledger) => ledger.rows.some((row: any) => row.kind === "converted"))).toBe(true)
+		expect(events.some((event) => event.to === "superseded")).toBe(true)
+		expect(events.some((event) => event.to === "retracted")).toBe(true)
+		expect(LEDGERS.some((ledger) => ledger.rows.some((row) => row.kind === "converted"))).toBe(true)
 	})
 })
 
-type Break = { name: string; mutate: (ledger: any) => string | null; rejects: RegExp; write: (ledger: any) => unknown; refuses: RegExp }
+type Break = { name: string; mutate: (ledger: Ledger) => string | null; rejects: RegExp; write: (ledger: Ledger) => unknown; refuses: RegExp }
 
-const firstEvent = (ledger: any, to?: string) => ledger.events.find((event: any) => to === undefined || event.to === to)
-const firstRow = (ledger: any, keep: (row: any) => boolean) => ledger.rows.find(keep)
-const activeId = (ledger: any) => firstRow(ledger, (row) => row.status === "active")?.fact_id
+const firstEvent = (ledger: Ledger, to?: string) => ledger.events.find((event) => to === undefined || event.to === to) as LedgerEvent
+const firstRow = (ledger: Ledger, keep: (row: Row) => boolean) => ledger.rows.find(keep) as Row
+const activeId = (ledger: Ledger) => firstRow(ledger, (row) => row.status === "active")?.fact_id
 
 const BREAKS: Break[] = [
 	{ name: "superseded event with a null replacement", mutate: (l) => { const e = firstEvent(l, "superseded"); if (!e || !activeId(l)) return null; e.replacement = null; return e.fact_id }, rejects: /needs a replacement row/, write: (l) => supersedeRow(l, activeId(l), null, "x"), refuses: /needs a replacement row/ },
@@ -124,7 +128,7 @@ const BREAKS: Break[] = [
 	{ name: "duplicate transition", mutate: (l) => { const e = firstEvent(l); if (!e) return null; l.events.push({ ...e }); return e.fact_id }, rejects: /but the event moves it from active/, write: (l) => retractRow(l, firstEvent(l).fact_id, "x"), refuses: /cannot move from (retracted|superseded)/ },
 	{ name: "from mismatch", mutate: (l) => { const e = firstEvent(l); if (!e) return null; e.from = e.to; return e.fact_id }, rejects: /is active, but the event moves it from/, write: (l) => supersedeRow(l, firstEvent(l).fact_id, activeId(l) ?? "F1", "x"), refuses: /cannot move from|own replacement/ },
 	{ name: "active row with events", mutate: (l) => { const r = firstRow(l, (row) => row.status !== "active"); if (!r) return null; r.status = "active"; return r.fact_id }, rejects: /has status active but its last event moves it to/, write: (l) => { const r = firstRow(l, (row) => row.status !== "active"); const problem = transitionError(new Map([[r.fact_id, r.status]]), { fact_id: r.fact_id, from: r.status, to: "active", replacement: null, reason: "x" }); if (problem) throw new Error(problem) }, refuses: /cannot move from (retracted|superseded) to active/ },
-	{ name: "non-active row without events", mutate: (l) => { const e = firstEvent(l); if (!e) return null; l.events = l.events.filter((event: any) => event.fact_id !== e.fact_id); return e.fact_id }, rejects: /but has no status event/, write: (l) => addRow(l, { ...measured("fresh"), status: "retracted" }), refuses: /but has no status event/ },
+	{ name: "non-active row without events", mutate: (l) => { const e = firstEvent(l); if (!e) return null; l.events = l.events.filter((event) => event.fact_id !== e.fact_id); return e.fact_id }, rejects: /but has no status event/, write: (l) => addRow(l, { ...measured("fresh"), status: "retracted" }), refuses: /but has no status event/ },
 	{ name: "dangling operand", mutate: (l) => { const r = firstRow(l, (row) => row.operands.length > 0); if (!r) return null; r.operands[0] = "F999"; return r.fact_id }, rejects: /references F999, which has no ledger row/, write: (l) => addRow(l, derivedRow("fresh", ["F999"])), refuses: /references F999, which has no ledger row/ },
 	{ name: "self derived_from", mutate: (l) => { const r = firstRow(l, (row) => row.derived_from.length > 0); if (!r) return null; r.derived_from.push(r.fact_id); return r.fact_id }, rejects: /references itself/, write: (l) => addRow(l, { ...derivedRow("fresh", []), derived_from: [nextId(l, "derived")] }), refuses: /references itself/ },
 	{ name: "cyclic derived_from", mutate: (l) => { const r = firstRow(l, (row) => row.derived_from.length > 0); if (!r) return null; firstRow(l, (row) => row.fact_id === r.derived_from[0]).derived_from.push(r.fact_id); return r.fact_id }, rejects: /derives from itself through/, write: (l) => addRow(l, derivedRow("fresh", [`F${l.rows.length + 5}`])), refuses: /which has no ledger row/ },

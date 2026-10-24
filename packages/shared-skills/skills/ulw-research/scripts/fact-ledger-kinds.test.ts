@@ -35,7 +35,8 @@ const rational = (random: Random) => ({ num: `${int(random, 200) - 100}`, den: `
 const locator = (random: Random) => ({ artifact: `sources/S${1 + int(random, 9)}/text.txt`, char_start: 3, char_end: 3 + int(random, 80) })
 const sha = (random: Random) => Array.from({ length: 64 }, () => "0123456789abcdef"[int(random, 16)]).join("")
 
-type Gen = { valid: (random: Random, row: any) => unknown; invalid: (random: Random, row: any) => unknown }
+type Row = Record<string, unknown> & { value: string }
+type Gen = { valid: (random: Random, row: Row) => unknown; invalid: (random: Random, row: Row) => unknown }
 
 /** One valid and one invalid generator per rule name; an unknown rule name fails the test below. */
 const GENERATORS: Record<string, Gen> = {
@@ -62,13 +63,14 @@ const GENERATORS: Record<string, Gen> = {
 	by_derive: { valid: (r) => pick(r, [null, rational(r)]), invalid: (r) => pick(r, [{ num: "1", den: "0" }, { num: "x", den: "2" }, "1/2"]) },
 }
 
-function baseRow(kind: string) {
-	return { ...structuredClone(ROW_DEFAULTS), kind, raw: "raw", quote: "quoted text", extracted_by: "fact add", observed_at: "2026-10-23T08:00:00Z", label: "x" }
+function baseRow(kind: string): Row {
+	const row: Record<string, unknown> = { ...structuredClone(ROW_DEFAULTS), kind, raw: "raw", quote: "quoted text", extracted_by: "fact add", observed_at: "2026-10-23T08:00:00Z", label: "x" }
+	return row as Row
 }
 
 /** A row whose every KIND_COLUMNS field follows its kind's rule, in column order (exact after value). */
 function validRow(kind: string, random: Random) {
-	const row: any = baseRow(kind)
+	const row = baseRow(kind)
 	for (const column of KIND_COLUMNS) row[column] = GENERATORS[KIND_RULES[kind][column]].valid(random, row)
 	return row
 }
