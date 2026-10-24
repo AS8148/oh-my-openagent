@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 
 import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
 import { FakeExtensionAPI } from "../../test-support/fake-extension-api"
@@ -185,5 +185,177 @@ describe("wake-queue count when a receipt throws (#10782)", () => {
     await Promise.resolve()
 
     expect(order).toEqual(["count:1", "flushed", "count:0"])
+  })
+})
+
+// #11122 review: one producer's throwing receipt must not cost the others theirs, a receipt error must not
+// replace the delivery error, and an async receipt error must be reported instead of escaping unhandled.
+describe("delivery receipts are isolated from each other (#10782)", () => {
+  it("#given two injections in one batch #when the first receipt throws #then the second still gets its receipt", () => {
+    const flushed: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => undefined)
+    coordinator.enqueue({ ...completion("task:st_11"), onFlushed: () => { throw new Error("first receipt failed") } })
+    coordinator.enqueue({ ...completion("task:st_12"), onFlushed: () => flushed.push("task:st_12") })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("first receipt failed")
+    expect(flushed).toEqual(["task:st_12"])
+  })
+
+  it("#given a delivery that throws synchronously #when a receipt also throws #then the delivery error surfaces", () => {
+    const coordinator = new IdleInjectionCoordinator(() => { throw new Error("delivery failed") })
+    coordinator.enqueue({ ...completion("task:st_13"), onDeliveryFailed: () => { throw new Error("receipt failed") } })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("delivery failed")
+  })
+
+  it("#given an async delivery that rejects #when a receipt throws #then the error is reported, the count settles, and the order holds", async () => {
+    const order: string[] = []
+    const reported: unknown[] = []
+    let rejectDelivery: (error: Error) => void = () => undefined
+    const delivery = new Promise<void>((_resolve, reject) => { rejectDelivery = reject })
+    const coordinator = new IdleInjectionCoordinator(() => delivery, {
+      onChildWorkChange: (count) => order.push(`count:${count}`),
+      onReceiptError: (error) => reported.push(error),
+    })
+    coordinator.enqueue({ ...completion("task:st_14"), onDeliveryFailed: () => { order.push("failed"); throw new Error("receipt failed") } })
+
+    coordinator.flushOnIdle()
+    rejectDelivery(new Error("provider rejected"))
+    await delivery.catch(() => undefined)
+    await Promise.resolve()
+
+    expect(order).toEqual(["count:1", "failed", "count:0"])
+    expect(reported.map((error) => (error as Error).message)).toEqual(["receipt failed"])
+  })
+})
+
+// #11123 review: retire() must isolate receipts as #flush does, a thenable whose then() throws must still settle,
+// and a receipt error that is not rethrown must be reported, never dropped.
+describe("receipts on retire and on a broken thenable (#10782)", () => {
+  it("#given two queued injections #when retire() and the first failure receipt throws #then the second still gets its receipt", () => {
+    const failed: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => undefined, { scheduleFlush: () => undefined })
+    coordinator.enqueue({ ...completion("task:st_15"), onDeliveryFailed: () => { throw new Error("first receipt failed") } })
+    coordinator.enqueue({ ...completion("task:st_16"), onDeliveryFailed: () => failed.push("task:st_16") })
+
+    expect(() => coordinator.retire()).toThrow("first receipt failed")
+    expect(failed).toEqual(["task:st_16"])
+  })
+
+  it("#given a thenable whose then() throws #when it is delivered #then the failure receipt fires and the count settles", () => {
+    const counts: number[] = []
+    const failed: string[] = []
+    const broken = { then: () => { throw new Error("then failed") } }
+    const coordinator = new IdleInjectionCoordinator(() => broken as unknown as Promise<void>, { onChildWorkChange: (count) => counts.push(count) })
+    coordinator.enqueue({ ...completion("task:st_17"), onDeliveryFailed: () => failed.push("task:st_17") })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("then failed")
+    expect(failed).toEqual(["task:st_17"])
+    expect(counts).toEqual([1, 0])
+  })
+
+  it("#given a sync delivery throw #when two receipts also throw #then both receipt errors are reported, not dropped", () => {
+    const reported: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => { throw new Error("delivery failed") }, {
+      onReceiptError: (error) => reported.push((error as Error).message),
+    })
+    coordinator.enqueue({ ...completion("task:st_18"), onDeliveryFailed: () => { throw new Error("receipt one") } })
+    coordinator.enqueue({ ...completion("task:st_19"), onDeliveryFailed: () => { throw new Error("receipt two") } })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("delivery failed")
+    expect(reported).toEqual(["receipt one", "receipt two"])
+  })
+
+  it("#given a successful sync delivery #when two receipts throw #then the first is rethrown and the second is reported", () => {
+    const reported: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => undefined, {
+      onReceiptError: (error) => reported.push((error as Error).message),
+    })
+    coordinator.enqueue({ ...completion("task:st_20"), onFlushed: () => { throw new Error("receipt one") } })
+    coordinator.enqueue({ ...completion("task:st_21"), onFlushed: () => { throw new Error("receipt two") } })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("receipt one")
+    expect(reported).toEqual(["receipt two"])
+  })
+
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["0", 0],
+    ["an empty string", ""],
+  ])("#given a receipt that throws %s #when the delivery succeeds or the coordinator retires #then the failure still surfaces", (_label, thrown) => {
+    // when a successful delivery's only receipt throws a falsy value
+    const flushing = new IdleInjectionCoordinator(() => undefined)
+    flushing.enqueue({ ...completion("task:st_22"), onFlushed: () => { throw thrown } })
+    let flushThrew = false
+    try {
+      flushing.flushOnIdle()
+    } catch {
+      flushThrew = true
+    }
+
+    // and a retiring coordinator's only failure receipt throws the same value
+    const retiring = new IdleInjectionCoordinator(() => undefined, { scheduleFlush: () => undefined })
+    retiring.enqueue({ ...completion("task:st_23"), onDeliveryFailed: () => { throw thrown } })
+    let retireThrew = false
+    try {
+      retiring.retire()
+    } catch {
+      retireThrew = true
+    }
+
+    // then neither failure was swallowed
+    expect(flushThrew).toBe(true)
+    expect(retireThrew).toBe(true)
+  })
+})
+
+// #11123 review LOWs 2 and 3: a misbehaving thenable settles receipts and the count once, and a throwing
+// onReceiptError costs neither the remaining reports nor the delivery error.
+describe("receipt settlement and reporting guards (#10782)", () => {
+  it("#given a thenable that calls back and then throws #when it is delivered #then receipts and the count settle once", () => {
+    const counts: number[] = []
+    const flushed: string[] = []
+    const failed: string[] = []
+    const callsBackThenThrows = {
+      then: (onFulfilled: () => void) => {
+        onFulfilled()
+        throw new Error("then failed after calling back")
+      },
+    }
+    const coordinator = new IdleInjectionCoordinator(() => callsBackThenThrows as unknown as Promise<void>, {
+      onChildWorkChange: (count) => counts.push(count),
+    })
+    coordinator.enqueue({
+      ...completion("task:st_24"),
+      onFlushed: () => flushed.push("task:st_24"),
+      onDeliveryFailed: () => failed.push("task:st_24"),
+    })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("then failed after calling back")
+    expect(flushed).toEqual(["task:st_24"])
+    expect(failed).toEqual([])
+    expect(counts).toEqual([1, 0])
+  })
+
+  it("#given an onReceiptError that throws #when two receipts throw on a failed delivery #then both are reported and the delivery error surfaces", () => {
+    const reported: string[] = []
+    const consoleError = spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const coordinator = new IdleInjectionCoordinator(() => { throw new Error("delivery failed") }, {
+        onReceiptError: (error) => {
+          reported.push((error as Error).message)
+          throw new Error("reporter failed")
+        },
+      })
+      coordinator.enqueue({ ...completion("task:st_25"), onDeliveryFailed: () => { throw new Error("receipt one") } })
+      coordinator.enqueue({ ...completion("task:st_26"), onDeliveryFailed: () => { throw new Error("receipt two") } })
+
+      expect(() => coordinator.flushOnIdle()).toThrow("delivery failed")
+      expect(reported).toEqual(["receipt one", "receipt two"])
+      expect(consoleError).toHaveBeenCalledTimes(2)
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })
