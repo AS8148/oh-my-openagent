@@ -6,7 +6,10 @@
 // non-empty substrings after whitespace normalization; every other verdict is dropped and logged.
 // Both tiers naming the same drift_kind (not "other") on a pair is meaning_drift_confirmed (major,
 // never integrity); one tier is meaning_drift_warn (minor). Each flagged pair yields one
-// calibration line; a dispute is recorded there and never removes the defect. No model, no fetch.
+// calibration line; a dispute is recorded there and never removes the defect. Coverage is
+// fail-closed: every pair no reader judged, and every force_strong pair no strong reader judged,
+// is listed in `unverified`, so a gate can tell a clean check apart from a pair nobody read.
+// No model, no fetch.
 
 import { appendFileSync, readFileSync } from "node:fs"
 
@@ -23,9 +26,24 @@ const DRIFT_SET = new Set(DRIFT_KINDS)
 /** NFC, every whitespace run collapsed to one space, trimmed. */
 const squash = (text) => String(text ?? "").normalize("NFC").replace(/\s+/gu, " ").trim()
 
+/** Read a verdict file, mapping an unreadable path or invalid JSON to a short typed error. */
+function parseFile(path) {
+	let text
+	try {
+		text = readFileSync(path, "utf8")
+	} catch {
+		throw new TypeError(`${path}: cannot read the verdict file`)
+	}
+	try {
+		return JSON.parse(text)
+	} catch {
+		throw new TypeError(`${path}: the verdict file is not valid JSON`)
+	}
+}
+
 function verdictsOf(input) {
 	const label = typeof input === "string" ? input : "<inline>"
-	const parsed = typeof input === "string" ? JSON.parse(readFileSync(input, "utf8")) : input
+	const parsed = typeof input === "string" ? parseFile(input) : input
 	const list = Array.isArray(parsed) ? parsed : parsed?.verdicts
 	if (!Array.isArray(list)) throw new TypeError(`${label}: a verdict file is an array of verdicts or { verdicts: [...] }`)
 	const tier = Array.isArray(parsed) ? undefined : parsed.model_tier
@@ -50,7 +68,9 @@ function dropReason(verdict, pair) {
 
 function defect(code, pair, driftKind, tiers, verdicts) {
 	const entry = DEFECT_CODES[code]
-	const first = verdicts[0]
+	// The fragment must come from the verdict whose drift_kind is being reported, not from whichever
+	// verdict happened to arrive first on the pair.
+	const first = verdicts.find((verdict) => verdict.drift_kind === driftKind) ?? verdicts[0]
 	return {
 		code,
 		severity: entry.severity,
@@ -66,6 +86,21 @@ function defect(code, pair, driftKind, tiers, verdicts) {
 		message: `${pair.pair_id}: ${tiers.join(" and ")} reader${tiers.length > 1 ? "s" : ""} found ${driftKind} at "${squash(first.fragment)}"`,
 		hint: entry.hint,
 	}
+}
+
+/** Pairs with no accepted verdict, and force_strong pairs with no accepted strong verdict, in pair order. */
+function coverageGaps(list, accepted) {
+	const tiersByPair = new Map()
+	for (const verdict of accepted) {
+		tiersByPair.set(verdict.pair_id, (tiersByPair.get(verdict.pair_id) ?? new Set()).add(verdict.model_tier))
+	}
+	const gaps = []
+	for (const pair of list) {
+		const tiers = tiersByPair.get(pair.pair_id)
+		if (tiers === undefined || tiers.size === 0) gaps.push({ pair_id: pair.pair_id, reason: "no_verdict" })
+		else if (pair.force_strong === true && !tiers.has("strong")) gaps.push({ pair_id: pair.pair_id, reason: "no_strong_verdict" })
+	}
+	return gaps
 }
 
 /** Group accepted drift verdicts per pair, then per tier. */
@@ -91,7 +126,11 @@ function agreedKind(tiers) {
  * @param {(string | object[] | { verdicts: object[], model_tier?: string })[]} verdictFiles paths, or parsed verdict lists
  * @param {{ dispute?: { pair_id: string, reason: string }, calibrationPath?: string }} [options]
  *   calibrationPath: append each calibration line to this JSONL file (fidelity-calibration.jsonl)
- * @returns {{ defects: object[], dropped: object[], calibrationLines: string[] }}
+ * @returns {{ defects: object[], dropped: object[], unverified: { pair_id: string, reason: string }[], calibrationLines: string[] }}
+ *   unverified lists, in pair order, every pair no reader judged (`no_verdict`) and every
+ *   force_strong pair no strong reader judged (`no_strong_verdict`); a verdict that was dropped
+ *   does not count as read. A consumer MUST treat a non-empty list as blocking: the pairs were
+ *   never checked, so an empty `defects` list does not mean the report is clean.
  */
 export function ingestVerdicts(pairs, verdictFiles, options = {}) {
 	const list = Array.isArray(pairs) ? pairs : (pairs?.pairs ?? [])
@@ -121,9 +160,10 @@ export function ingestVerdicts(pairs, verdictFiles, options = {}) {
 		const disputed = dispute !== null && dispute.pair_id === pair.pair_id
 		calibrationLines.push(JSON.stringify({ kind: pair.kind, pair_id: pair.pair_id, tiers: tierNames, drift_kind: kind, confirmed, disputed, reason: disputed ? String(dispute.reason ?? "") : null }))
 	}
+	const unverified = coverageGaps(list, accepted)
 	if (dispute !== null && !flagged.has(dispute.pair_id)) {
 		dropped.push({ file: "<dispute>", pair_id: dispute.pair_id, model_tier: null, reason: "dispute_not_flagged" })
 	}
 	if (options.calibrationPath && calibrationLines.length > 0) appendFileSync(options.calibrationPath, `${calibrationLines.join("\n")}\n`)
-	return { defects, dropped, calibrationLines }
+	return { defects, dropped, unverified, calibrationLines }
 }

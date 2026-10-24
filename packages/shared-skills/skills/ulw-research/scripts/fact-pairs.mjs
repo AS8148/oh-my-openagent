@@ -31,8 +31,17 @@ const HEDGE_RES = HEDGES.map((term) => {
 	return [...term].length >= 2 ? new RegExp(escape(term), "gu") : new RegExp(`(?<=^|[\\s\\p{P}])${escape(term)}`, "gu")
 })
 
+/** Hedge terms that are also month names; capitalized and followed by a date number, they are months. */
+const MONTH_WORDS = new Set(["may"])
+
 /** A capitalized Latin match after the first word is a name or a month ("in May"), not a hedge. */
-const isHedgeAt = (text, match) => match.index === 0 || !/^\p{Lu}/u.test(match[0]) || KOREAN.test(match[0])
+const isHedgeAt = (text, match) => {
+	if (!/^\p{Lu}/u.test(match[0]) || KOREAN.test(match[0])) return true
+	if (match.index !== 0) return false
+	// At the start of a text a capital is only sentence case, so the word still hedges - unless it is a
+	// month name followed by a date number ("May 2024 sales rose.").
+	return !(MONTH_WORDS.has(match[0].toLowerCase()) && /^\s+\p{Nd}/u.test(text.slice(match.index + match[0].length)))
+}
 
 export const hasHedge = (text) => {
 	const normal = normalizeText(text)
@@ -131,11 +140,11 @@ function claimPairs(ctx, block, sentence, byClaim, slug, reportLang) {
 		}))
 }
 
-function translationPair(node, rows, slug, reportLang) {
+function translationPair(node, rows, filled, slug, reportLang) {
 	const id = node.attrs["data-translates"]
 	const row = rows.get(id)
 	const text = proseText(node)
-	if (!row?.quote || text === "") return null
+	if (!row?.quote || text === "" || (filled && !filled.has(id))) return null
 	return {
 		kind: "translation",
 		sentence_key: sentenceKey(slug, [id]),
@@ -174,7 +183,7 @@ export function extractPairs(html, ledger, claims, fillMap) {
 		for (const node of ctx.util.descendants(block.owner)) {
 			if (node.attrs?.["data-translates"] === undefined || seenSpans.has(node)) continue
 			seenSpans.add(node)
-			const pair = translationPair(node, rows, slug, reportLang)
+			const pair = translationPair(node, rows, filled, slug, reportLang)
 			if (pair) out.push(pair)
 		}
 	}
