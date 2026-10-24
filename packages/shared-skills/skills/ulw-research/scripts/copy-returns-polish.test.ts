@@ -171,3 +171,39 @@ describe("fact polish-apply prints every rejection reason verbatim", () => {
 		expect(run.summary.split("\n")[1]).toBe(line)
 	})
 })
+
+describe("--changed-since stays fail-closed", () => {
+	const { pairsChangedSince } = polishCommand as unknown as { pairsChangedSince: (pairs: unknown[], mapPath: string, ledger: unknown, claims: unknown) => unknown[] }
+	const artifact = file("pre-polish.html", doc("<p>The span is 320 m [S1].</p>"))
+
+	test("#given a fill map without artifact_sha256 #when --changed-since reads it #then it refuses", () => {
+		const mapPath = file("fill-map-no-sha.json", JSON.stringify({ artifact, format: "html", entries: [] }))
+		expect(outcome(() => pairsChangedSince([], mapPath, LEDGER, null))).toContain("fill map has no artifact_sha256")
+	})
+
+	test("#given a fill map whose artifact changed since fill #when read #then it still refuses", () => {
+		const mapPath = file("fill-map-stale.json", JSON.stringify({ artifact, artifact_sha256: "0".repeat(64), format: "html", entries: [] }))
+		expect(outcome(() => pairsChangedSince([], mapPath, LEDGER, null))).toContain("changed after fill")
+	})
+})
+
+describe("polish-diff refuses an unknown defect code", () => {
+	test("#given a defect whose code is not in the registry #when classified #then it refuses instead of reading its severity", () => {
+		expect(outcome(() => polishDiffFails([{ code: "not_a_real_code", severity: "minor" }]))).toContain("unknown defect code not_a_real_code")
+		expect(source("fact-commands-polish.mjs")).not.toMatch(/\?\?\s*defect\.severity/u)
+	})
+})
+
+describe("polish-apply writes atomically and honours --format", () => {
+	test("#given the command module #when read #then it writes the edition through writeTextAtomic", () => {
+		const text = source("fact-commands-polish.mjs")
+		expect(text).not.toMatch(/writeFileSync\s*\(/u)
+		expect(text).toMatch(/writeTextAtomic\(flags\.out/u)
+	})
+
+	test("#given --format md on an .html report #when polish-apply runs #then it refuses the Markdown edition", () => {
+		const editsPath = file("edits-format.json", "[]")
+		const result = outcome(() => runFactPolish("polish-apply", [reportPath, "--edits", editsPath, "--ledger", ledgerPath, "--out", join(dir, "fmt.html"), "--format", "md"]))
+		expect(result).toContain("takes the filled HTML edition")
+	})
+})
