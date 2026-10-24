@@ -468,20 +468,6 @@ describe("checkExtensionCurrent", () => {
     }
   }, PACKED_TEST_TIMEOUT_MS)
 
-  test("#given the split extension build #when config-startup inputs are inspected #then the gateway -> dori rename loads only from its lazy entry", async () => {
-    const { mainInputs, doriMigrationInputs, doriMigrationOutputPath } = await sharedOutputs()
-    for (const suffix of [
-      "packages/omo-senpi/src/components/config-startup/dori-migration-runtime.ts",
-      "packages/omo-opencode/src/config-migration/dori-section-rename.ts",
-      "packages/omo-config-core/src/schema/legacy-dori-section.ts",
-    ]) {
-      expect(mainInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(false)
-      expect(doriMigrationInputs.some((input) => toPortableBuildPath(input).endsWith(suffix)), suffix).toBe(true)
-    }
-    expect(doriMigrationInputs.some((input) => toPortableBuildPath(input).endsWith("packages/omo-senpi/src/components/config-startup/dori-migration-loader.ts"))).toBe(false)
-    expect(await readFile(doriMigrationOutputPath, "utf8")).not.toContain("#omo-dori-migration-runtime")
-  })
-
   test("#given a packaged task import map #when generated artifacts are inspected #then the main bundle resolves its task sidecar", async () => {
     const outputs = await sharedOutputs()
     const main = await readFile(outputs.outputPath, "utf8")
@@ -497,7 +483,6 @@ describe("checkExtensionCurrent", () => {
     expect(main).toContain('import("#omo-device-account-runtime")')
     expect(main).toContain('import("#omo-session-history-runtime")')
     expect(main).toContain('import("#omo-recall-store-runtime")')
-    expect(main).toContain('import("#omo-dori-migration-runtime")')
     expect(main).toContain('import("#omo-telemetry-posthog-runtime")')
     expect(main).toContain('import("#omo-thread-client-runtime")')
     expect(main).toContain('import("#omo-telemetry-recovery-runtime")')
@@ -518,7 +503,6 @@ describe("checkExtensionCurrent", () => {
       "#omo-device-account-runtime": "./extensions/omo-device-account.js",
       "#omo-session-history-runtime": "./extensions/omo-session-history.js",
       "#omo-recall-store-runtime": "./extensions/omo-recall-store.js",
-      "#omo-dori-migration-runtime": "./extensions/omo-dori-migration.js",
       "#omo-telemetry-posthog-runtime": "./extensions/omo-telemetry-posthog.js",
       "#omo-memory-sync-runtime": "./extensions/omo-memory-sync.js",
       "#omo-feedback-runtime": "./extensions/omo-feedback.js",
