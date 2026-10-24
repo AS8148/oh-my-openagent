@@ -154,6 +154,11 @@ export class IdleInjectionCoordinator {
     })
   }
 
+  /** The child work count last reported (queued plus in delivery). */
+  childWorkCount(): number {
+    return this.#reportedChildWork
+  }
+
   pendingCount(): number {
     return this.#pending.size
   }
@@ -229,22 +234,23 @@ export class IdleInjectionCoordinator {
         { deliverAs },
       )
     } catch (error) {
-      settleChildren()
+      // Receipts first: the count is a report, and nothing about reporting may cost a producer its receipt.
       for (const injection of ordered) injection.onDeliveryFailed?.(error)
+      settleChildren()
       throw error
     }
     if (!isPromiseLike(delivery)) {
-      settleChildren()
       for (const injection of ordered) injection.onFlushed?.()
+      settleChildren()
     } else {
       void delivery.then(
         () => {
-          settleChildren()
           for (const injection of ordered) injection.onFlushed?.()
+          settleChildren()
         },
         (error: unknown) => {
-          settleChildren()
           for (const injection of ordered) injection.onDeliveryFailed?.(error)
+          settleChildren()
         },
       )
     }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
 
 import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
-import { WAKE_QUEUE_SOURCE, publishWakeQueueChildWork } from "./wake-queue-source"
+import { FakeExtensionAPI } from "../../test-support/fake-extension-api"
+import { WAKE_QUEUE_SOURCE, publishWakeQueueBaselineOnSessionStart, publishWakeQueueChildWork } from "./wake-queue-source"
 
 // omo#10782 item 2: a child result waiting in the batch window is children's work the parent still owes.
 // The coordinator reports how many child entries are queued or in delivery, so the engine never reads
@@ -97,5 +98,56 @@ describe("publishWakeQueueChildWork", () => {
       { name: "wake_source_state", data: { source: WAKE_QUEUE_SOURCE, kind: "children", activeCount: 2 } },
       { name: "wake_source_state", data: { source: WAKE_QUEUE_SOURCE, kind: "children", activeCount: 0 } },
     ])
+  })
+})
+
+// #11115 review LOWs: a failing publish must never cost a delivery receipt, and a new session generation
+// must publish a baseline so a count left by the old one cannot outlive a reload.
+describe("wake-queue count vs. delivery receipts (#10782)", () => {
+  it("#given a child result #when it is delivered #then its receipt fires before the count is reported", () => {
+    const order: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => undefined, { onChildWorkChange: (count) => order.push(`count:${count}`) })
+    coordinator.enqueue({ ...completion("task:st_6"), onFlushed: () => order.push("flushed") })
+
+    coordinator.flushOnIdle()
+
+    expect(order).toEqual(["count:1", "flushed", "count:0"])
+  })
+
+  it("#given an async delivery that rejects #when it settles #then the failure receipt fires before the count is reported", async () => {
+    const order: string[] = []
+    let rejectDelivery: (error: Error) => void = () => undefined
+    const delivery = new Promise<void>((_resolve, reject) => { rejectDelivery = reject })
+    const coordinator = new IdleInjectionCoordinator(() => delivery, { onChildWorkChange: (count) => order.push(`count:${count}`) })
+    coordinator.enqueue({ ...completion("task:st_7"), onDeliveryFailed: () => order.push("failed") })
+
+    coordinator.flushOnIdle()
+    rejectDelivery(new Error("provider rejected"))
+    await delivery.catch(() => undefined)
+    await Promise.resolve()
+
+    expect(order).toEqual(["count:1", "failed", "count:0"])
+  })
+
+  it("#given a host whose event bus throws #when the count is published #then the error is logged, not thrown", () => {
+    const warnings: string[] = []
+    const publish = publishWakeQueueChildWork(
+      { events: { emit: () => { throw new Error("stale extension generation") } } },
+      { warn: (message: string) => warnings.push(message) },
+    )
+
+    expect(() => publish(1)).not.toThrow()
+    expect(warnings).toHaveLength(1)
+  })
+
+  it("#given a new session generation #when session_start fires #then the current count is published as a baseline", async () => {
+    const emitted: unknown[] = []
+    const pi = new FakeExtensionAPI()
+    pi.events = { emit: (_name, data) => emitted.push(data), on: () => () => {} }
+    publishWakeQueueBaselineOnSessionStart(pi, () => 0, publishWakeQueueChildWork(pi))
+
+    await pi.dispatch("session_start", { type: "session_start" })
+
+    expect(emitted).toEqual([{ source: WAKE_QUEUE_SOURCE, kind: "children", activeCount: 0 }])
   })
 })
