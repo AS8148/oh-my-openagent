@@ -20,7 +20,7 @@ for (const code of ["ENOTFOUND", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", 
 }
 
 for (const mode of ["500", "502", "500-terminal-code", "lost-response", "timeout", "invalid-json", "invalid-grant-shape"]) {
-  test(`refresh retains keys and holds a possibly consumed token until its backoff after ${mode}`, async () => {
+  test(`refresh retains keys without replaying a possibly consumed legacy token after ${mode}`, async () => {
     let requests = 0
     const api = fakeApi(() => {
       requests++

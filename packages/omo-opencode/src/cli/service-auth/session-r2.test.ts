@@ -69,7 +69,7 @@ test("refresh 429 restores the original record and a later retry succeeds", asyn
   expect(refreshes).toBe(2)
 })
 
-test("failed not-sent restoration retains the durable fence and the next run resends it under the same key", async () => {
+test("failed legacy not-sent restoration retains the durable fence without inventing recovery proof", async () => {
   const keys: (string | null)[] = []
   const api = fakeApi(request => { keys.push(request.headers.get("idempotency-key")); return Response.json(grant) })
   const base = memorySecrets().store(api)
@@ -87,9 +87,9 @@ test("failed not-sent restoration retains the durable fence and the next run res
   const journal = await base.read()
   expect(journal).toMatchObject({ ...expired, refreshState: "uncertain" })
   await time.sleep(5_000)
-  expect(await createSession({ api, store: base, home, now: time.now }).accessToken()).toBe(grant.accessToken)
-  expect(fetcher).toHaveBeenCalledTimes(2)
-  expect(keys).toEqual([journal?.refreshAttempt?.idempotencyKey ?? ""])
+  await expect(createSession({ api, store: base, home, now: time.now }).accessToken()).rejects.toMatchObject({ code: "refresh_recovery_expired" })
+  expect(fetcher).toHaveBeenCalledTimes(1)
+  expect(keys).toEqual([])
   expect(writes).toBe(2)
 })
 
