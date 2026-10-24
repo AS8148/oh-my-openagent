@@ -187,3 +187,44 @@ describe("wake-queue count when a receipt throws (#10782)", () => {
     expect(order).toEqual(["count:1", "flushed", "count:0"])
   })
 })
+
+// #11122 review: one producer's throwing receipt must not cost the others theirs, a receipt error must not
+// replace the delivery error, and an async receipt error must be reported instead of escaping unhandled.
+describe("delivery receipts are isolated from each other (#10782)", () => {
+  it("#given two injections in one batch #when the first receipt throws #then the second still gets its receipt", () => {
+    const flushed: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => undefined)
+    coordinator.enqueue({ ...completion("task:st_11"), onFlushed: () => { throw new Error("first receipt failed") } })
+    coordinator.enqueue({ ...completion("task:st_12"), onFlushed: () => flushed.push("task:st_12") })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("first receipt failed")
+    expect(flushed).toEqual(["task:st_12"])
+  })
+
+  it("#given a delivery that throws synchronously #when a receipt also throws #then the delivery error surfaces", () => {
+    const coordinator = new IdleInjectionCoordinator(() => { throw new Error("delivery failed") })
+    coordinator.enqueue({ ...completion("task:st_13"), onDeliveryFailed: () => { throw new Error("receipt failed") } })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("delivery failed")
+  })
+
+  it("#given an async delivery that rejects #when a receipt throws #then the error is reported, the count settles, and the order holds", async () => {
+    const order: string[] = []
+    const reported: unknown[] = []
+    let rejectDelivery: (error: Error) => void = () => undefined
+    const delivery = new Promise<void>((_resolve, reject) => { rejectDelivery = reject })
+    const coordinator = new IdleInjectionCoordinator(() => delivery, {
+      onChildWorkChange: (count) => order.push(`count:${count}`),
+      onReceiptError: (error) => reported.push(error),
+    })
+    coordinator.enqueue({ ...completion("task:st_14"), onDeliveryFailed: () => { order.push("failed"); throw new Error("receipt failed") } })
+
+    coordinator.flushOnIdle()
+    rejectDelivery(new Error("provider rejected"))
+    await delivery.catch(() => undefined)
+    await Promise.resolve()
+
+    expect(order).toEqual(["count:1", "failed", "count:0"])
+    expect(reported.map((error) => (error as Error).message)).toEqual(["receipt failed"])
+  })
+})

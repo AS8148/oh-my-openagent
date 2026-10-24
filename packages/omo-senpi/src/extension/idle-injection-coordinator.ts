@@ -38,10 +38,14 @@ export type IdleInjectionDelivery = (
 // that still fires has nothing left to deliver.
 export type FlushScheduler = (flush: () => void) => (() => void) | void
 
+type ReceiptOutcome = { readonly failed: false } | { readonly failed: true; readonly error: unknown }
+
 export interface IdleInjectionCoordinatorOptions {
   readonly scheduleFlush?: FlushScheduler
   /** Called with each new count of child results queued or still in delivery (#10782). */
   readonly onChildWorkChange?: (count: number) => void
+  /** Receives a producer receipt that threw on the async path, where nothing can catch it. */
+  readonly onReceiptError?: (error: unknown) => void
 }
 
 // Sources that carry a child's result to its parent: until they are delivered, the parent still owes
@@ -99,6 +103,7 @@ export class IdleInjectionCoordinator {
   #retired = false
   #cancelScheduledFlush: (() => void) | undefined
   readonly #onChildWorkChange: ((count: number) => void) | undefined
+  readonly #onReceiptError: ((error: unknown) => void) | undefined
   #childrenInDelivery = 0
   #reportedChildWork = 0
 
@@ -106,6 +111,7 @@ export class IdleInjectionCoordinator {
     this.#deliver = deliver
     this.#scheduleFlush = options.scheduleFlush ?? ((flush) => queueMicrotask(flush))
     this.#onChildWorkChange = options.onChildWorkChange
+    this.#onReceiptError = options.onReceiptError
   }
 
   #reportChildWork(): void {
@@ -209,6 +215,23 @@ export class IdleInjectionCoordinator {
       this.#childrenInDelivery -= children
       this.#reportChildWork()
     }
+    // Every producer gets its receipt even when an earlier one throws, and the count settles after all of
+    // them; the first receipt error is handed back to the caller's path.
+    const receiptsThenSettle = (receipt: (injection: IdleInjection) => void): ReceiptOutcome => {
+      let outcome: ReceiptOutcome = { failed: false }
+      try {
+        for (const injection of ordered) {
+          try {
+            receipt(injection)
+          } catch (error) {
+            if (!outcome.failed) outcome = { failed: true, error }
+          }
+        }
+      } finally {
+        settleChildren()
+      }
+      return outcome
+    }
     this.#pending.clear()
     this.#childrenInDelivery += children
     let delivery: unknown
@@ -235,27 +258,22 @@ export class IdleInjectionCoordinator {
       )
     } catch (error) {
       // Receipts first: the count is a report, and nothing about reporting may cost a producer its receipt.
-      // A receipt that throws must not leave the children counted: the session would never reach done.
-      try {
-        for (const injection of ordered) injection.onDeliveryFailed?.(error)
-      } finally {
-        settleChildren()
-      }
+      // The delivery error is the one the caller needs, so a receipt that throws does not replace it.
+      receiptsThenSettle((injection) => injection.onDeliveryFailed?.(error))
       throw error
     }
-    const receiptThenSettle = (receipt: (injection: IdleInjection) => void): void => {
-      try {
-        for (const injection of ordered) receipt(injection)
-      } finally {
-        settleChildren()
-      }
-    }
     if (!isPromiseLike(delivery)) {
-      receiptThenSettle((injection) => injection.onFlushed?.())
+      const receiptError = receiptsThenSettle((injection) => injection.onFlushed?.())
+      if (receiptError.failed) throw receiptError.error
     } else {
+      // Nothing awaits this chain, so a receipt that throws here is handed to onReceiptError instead of
+      // becoming an unhandled rejection.
+      const reportAsync = (outcome: ReceiptOutcome): void => {
+        if (outcome.failed) this.#onReceiptError?.(outcome.error)
+      }
       void delivery.then(
-        () => receiptThenSettle((injection) => injection.onFlushed?.()),
-        (error: unknown) => receiptThenSettle((injection) => injection.onDeliveryFailed?.(error)),
+        () => reportAsync(receiptsThenSettle((injection) => injection.onFlushed?.())),
+        (error: unknown) => reportAsync(receiptsThenSettle((injection) => injection.onDeliveryFailed?.(error))),
       )
     }
     return collapsed

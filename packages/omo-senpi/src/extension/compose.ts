@@ -135,6 +135,10 @@ export function composeOmoSenpiExtension(
           return () => clearTimeout(timer)
         },
         onChildWorkChange: publishChildWork,
+        onReceiptError: (error) =>
+          logger.warn("omo-senpi idle injection receipt failed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
       },
     )
     publishWakeQueueBaselineOnSessionStart(pi, () => idleCoordinator.childWorkCount(), publishChildWork)
