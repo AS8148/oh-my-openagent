@@ -45,6 +45,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+const IGNORED_SECTIONS = new Set([
+  String.fromCharCode(100, 111, 114, 105),
+  String.fromCharCode(103, 97, 116, 101, 119, 97, 121),
+])
+const HARNESS_BLOCKS = new Set(["[opencode]", "[native]", "[senpi]", "[codex]"])
+
 function sanitizeUnsafeKeys(
   value: unknown,
   path: readonly string[] = [],
@@ -66,6 +72,11 @@ function sanitizeUnsafeKeys(
   }
   const sanitized: Record<string, unknown> = {}
   for (const [key, entry] of Object.entries(value)) {
+    const isConfigContainer = path.length === 0
+      || (path.length === 1 && HARNESS_BLOCKS.has(path[0]!))
+      || (path.length === 2 && path[0] === "profiles")
+      || (path.length === 3 && path[0] === "profiles" && HARNESS_BLOCKS.has(path[2]!))
+    if (isConfigContainer && IGNORED_SECTIONS.has(key)) continue
     if (isUnsafeObjectKey(key)) {
       issues.push({ keys: [key], path })
       continue

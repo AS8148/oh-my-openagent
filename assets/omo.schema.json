@@ -80,14 +80,6 @@
       },
       "additionalProperties": false
     },
-    "dori": {
-      "type": "object",
-      "propertyNames": {
-        "type": "string"
-      },
-      "additionalProperties": {},
-      "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-    },
     "$schema": {
       "type": "string"
     },
@@ -932,9 +924,13 @@
       "properties": {
         "commit_footer": {
           "default": false,
-          "type": [
-            "boolean",
-            "string"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string"
+            }
           ]
         },
         "include_co_authored_by": {
@@ -2636,14 +2632,6 @@
           },
           "additionalProperties": false
         },
-        "dori": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {},
-          "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-        },
         "categories": {
           "type": "object",
           "propertyNames": {
@@ -3484,9 +3472,13 @@
           "type": "object",
           "properties": {
             "commit_footer": {
-              "type": [
-                "boolean",
-                "string"
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string"
+                }
               ]
             },
             "include_co_authored_by": {
@@ -4974,14 +4966,6 @@
           },
           "additionalProperties": false
         },
-        "dori": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {},
-          "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-        },
         "categories": {
           "type": "object",
           "propertyNames": {
@@ -5822,9 +5806,13 @@
           "type": "object",
           "properties": {
             "commit_footer": {
-              "type": [
-                "boolean",
-                "string"
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string"
+                }
               ]
             },
             "include_co_authored_by": {
@@ -7312,14 +7300,6 @@
           },
           "additionalProperties": false
         },
-        "dori": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {},
-          "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-        },
         "categories": {
           "type": "object",
           "propertyNames": {
@@ -8160,9 +8140,13 @@
           "type": "object",
           "properties": {
             "commit_footer": {
-              "type": [
-                "boolean",
-                "string"
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string"
+                }
               ]
             },
             "include_co_authored_by": {
@@ -9656,14 +9640,6 @@
             },
             "additionalProperties": false
           },
-          "dori": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {},
-            "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-          },
           "categories": {
             "type": "object",
             "propertyNames": {
@@ -10504,9 +10480,13 @@
             "type": "object",
             "properties": {
               "commit_footer": {
-                "type": [
-                  "boolean",
-                  "string"
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string"
+                  }
                 ]
               },
               "include_co_authored_by": {
@@ -11994,14 +11974,6 @@
                 },
                 "additionalProperties": false
               },
-              "dori": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {},
-                "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-              },
               "categories": {
                 "type": "object",
                 "propertyNames": {
@@ -12842,9 +12814,13 @@
                 "type": "object",
                 "properties": {
                   "commit_footer": {
-                    "type": [
-                      "boolean",
-                      "string"
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string"
+                      }
                     ]
                   },
                   "include_co_authored_by": {
@@ -14332,14 +14308,6 @@
                 },
                 "additionalProperties": false
               },
-              "dori": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {},
-                "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-              },
               "categories": {
                 "type": "object",
                 "propertyNames": {
@@ -15180,9 +15148,13 @@
                 "type": "object",
                 "properties": {
                   "commit_footer": {
-                    "type": [
-                      "boolean",
-                      "string"
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string"
+                      }
                     ]
                   },
                   "include_co_authored_by": {
@@ -16670,14 +16642,6 @@
                 },
                 "additionalProperties": false
               },
-              "dori": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {},
-                "description": "Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it."
-              },
               "categories": {
                 "type": "object",
                 "propertyNames": {
@@ -17518,9 +17482,13 @@
                 "type": "object",
                 "properties": {
                   "commit_footer": {
-                    "type": [
-                      "boolean",
-                      "string"
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "string"
+                      }
                     ]
                   },
                   "include_co_authored_by": {
@@ -28563,9 +28531,13 @@
           "properties": {
             "commit_footer": {
               "default": false,
-              "type": [
-                "boolean",
-                "string"
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string"
+                }
               ]
             },
             "include_co_authored_by": {

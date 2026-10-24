@@ -20122,9 +20122,6 @@ var OmoFormatOnMutationSchema = OmoFormatOnMutationLayerSchema.extend({
   timeoutMs: number2().int().positive().default(3000)
 }).strict();
 
-// packages/omo-config-core/src/schema/dori.ts
-var OmoDoriSectionSchema = record(string2(), unknown()).describe("Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it.");
-
 // packages/omo-config-core/src/schema/provenance.ts
 var OmoProvenanceSettingsSchema = object({
   workspaces: array(object({
@@ -20141,7 +20138,6 @@ var OmoExcludedModelsSchema = array(string2());
 var OmoTypedHarnessConfigSchema = object({
   provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
-  dori: OmoDoriSectionSchema.optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
   git_master: OmoGitMasterSettingsLayerSchema.optional(),
@@ -20160,7 +20156,6 @@ var OmoTypedHarnessConfigSchema = object({
 var OmoConfigProfileSchema = object({
   provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
-  dori: OmoDoriSectionSchema.optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
   git_master: OmoGitMasterSettingsLayerSchema.optional(),
@@ -20183,7 +20178,6 @@ var OmoConfigProfileSchema = object({
 var OmoConfigSchema = object({
   provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationSchema.optional(),
-  dori: OmoDoriSectionSchema.optional(),
   $schema: string2().optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
@@ -20210,7 +20204,6 @@ var OmoConfigSchema = object({
 var OmoConfigLayerSchema = object({
   provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
-  dori: OmoDoriSectionSchema.optional(),
   $schema: string2().optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),

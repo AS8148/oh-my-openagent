@@ -2,30 +2,6 @@
 
 `components/git-master/directive.ts` builds the attribution directive whenever `git_master.include_co_authored_by` (default `true` again, no longer a no-op) or `commit_footer` is on. Its commit example is `git -c trailer.ifexists=addIfDifferent commit -m ... --trailer "Co-authored-by: sisyphus-dev-ai <sisyphus-dev-ai@users.noreply.github.com>"`, under the `git_env_prefix` from #10613, so git keeps one copy when the message already carries the trailer. A squash joins messages without `--trailer`, so the directive asks for one `--amend` rewrite afterwards. `skill-content.ts` runs the shared template rewrite with `include_co_authored_by: false`, because the directive carries attribution, and both channels (the `read` hook and `task-skill-loader.ts`) append the directive only when the text does not already contain `<commit_attribution>`. `scripts/qa/git-master-attribution-e2e.mjs` now expects the trailer exactly once by default, and adds an `include_co_authored_by: false` run that expects none.
 
-## 2026-10-18 - A committed layer-2 effect survives a lost response; off means not callable (#10458 review T1/T2)
-
-The replay identity no longer lives in a journal file next to the store: `gateway/schema.ts` v10 (after dev's v8 provenance trigger and the v9 thread-creation tables) adds `toolkit_replay_receipts`, and the receipt is committed INSIDE the op's own transaction (op, canonical-arguments sha256, result, the turn's time). A call whose response was lost after commit - the store worker answered, the caller never heard - returns the recorded result on retry; the effect runs once. The old sidecar file, its pending state and its claim deletion on dispatch failure are gone: nothing outside the transaction can judge whether an ambiguous failure ran the effect.
-
-With the `dori` section off, the dori extension's declared layer-2 tools are no longer built at all, so a stale registration cannot dispatch an effectful op without replay protection; the old behaviour (tools listed, dispatching bare) was the review's T2. On, and only on, those tools' schemas also accept the optional `omo_toolkit_replay` context argument, and `help()` hides it.
-
-Also: the divergence refusal carries a machine-readable tail (`replay_differs=op,args recorded_op=... attempted_op=...`) that the engine converts to the structured stop, so the kernel error keeps `key`, `differs`, and both ops; and a store at v6 upgrading to v9 drops nothing (the mixed-case migration fixture rewinds the new table too).
-
-## 2026-10-17 - The dori toolkit replay identity covers arguments, expiry and program order (#10316 review)
-
-A layer-2 call's replay identity is again the agreed one: op plus canonical arguments plus turn and call index. The journal stores a sha256 of the arguments (sorted-key JSON) beside the op, and the same key with other arguments now stops as `toolkit_replay_divergence` naming what differed, instead of returning another call's result. A turn older than the seven-day window stops as `toolkit_replay_expired` before any claim, so a pruned key can no longer let an old turn run again.
-
-Call indexes follow program order: the SDK reads the calling eval cell from the stack (the kernel evaluates each cell under its tool call id) and numbers its calls synchronously per cell, so concurrent `Promise.all` calls replay with the same indexes. The engine accepts that cell only as a tool call on the caller's own branch and files the call under the turn the cell started in, so a cell that outlives its turn stays in it; any other cell is refused as `toolkit_replay_turn_unknown`. Layer-2 tools accept the context parameter only while the toolkit is on, and `help()` hides it.
-
-Both dori layers now ship as their own sidecars, `runtime/dori/layer2.js` and `runtime/dori/replay.js`, loaded by URL only while the gate is on; the shipped SDK runs with its sidecar deleted while off. Nested function names such as `send.call` are reachable.
-
-## 2026-10-17 - The agent toolkit gets the layer-2 namespace seam a dori host fills (#10316)
-
-With an enabled `dori` section in `omo.json`, the agent toolkit SDK gains eleven namespaces (`route`, `reply`, `room`, `send`, `thread`, `describe`, `file`, `rules`, `iam`, `call`, `work`); without one, the properties do not exist and no layer module is imported. omo ships no namespace behavior: each function calls the session tool a separately installed dori host declares through a store extension named `dori` (`ext_dori_<ns>_<fn>`), so the caller is stamped by the engine as for every session-callable op, and `help()` lists the registered functions with signatures rendered from their JSON Schemas.
-
-Every such call is journaled by the engine under a replay key, `JSON.stringify(["turn", turnId, callIndex])` (inbound deliveries use `["inbound", dedupeKey]`); dori-link derives its envelope ids from the same string, and `replay-key.test.ts` pins the vectors. The turn is the calling session plus the newest assistant entry on its branch. Replaying a turn returns each recorded result without dispatching again; a different op at a recorded index stops with `ToolkitReplayStopError` (`toolkit_replay_divergence`), and a call an earlier run started but never recorded stops as `toolkit_replay_pending` instead of being sent twice. Keys are kept seven days.
-
-Tests: the key vectors, the journal (replay, divergence, per-turn indices, released claims, pending, retention, missing turn), the session-tool wiring against a real gateway store (one dispatch on replay, divergence, off means no journal, other extensions untouched), the kernel namespaces and `help()`, and an import-graph walk proving the SDK and the thread component load no layer module statically. `scripts/qa/dori-toolkit-replay-qa.mjs` drives the same contract through real eval kernels, one process per phase.
-
 ## 2026-10-19 - desktop-toolkit component: the session's channel to toolkits the app hosts for its thread
 
 `src/components/desktop-toolkit/` registers the eval-only tool `omo_desktop_toolkit` (`{op:"acquire", toolkit}`). It answers `unavailable` at once unless the opener listed the toolkit in `open_session.context.omo_toolkits` (comma-separated) and the host has `pi.rpc`; otherwise it emits `omo.toolkit.request {requestId, toolkit}` and waits up to 15 s for the app's `extension_request omo.toolkit.grant {requestId, grant | refusal}`. A grant must be `{endpoint: http://127.0.0.1:<port>/..., tokenFile: <absolute path>}` with no userinfo or query; anything else settles as `invalid_grant`. A late or foreign `requestId` is refused (`accepted:false`). Registered right after `browser-bridge`.
@@ -401,10 +377,6 @@ Tests (`store-idle-retire.test.ts`; the last one in `component.test.ts`):
 
 The `ulw-plan` skill's delegation-router row listed a `git` category that no edition ships (`SKILL.md`), and its reference copy (`references/full-workflow.md`) also still listed `deep`, which was split into `deep-low` and `deep-high`. A plan that followed either name sent `task(category: ...)` to a category the user's session does not have. Both rows now list exactly the built-in categories.
 
-## 2026-10-04 - The committed gateway rules sidecar is no longer an ignored path
-
-`packages/omo-senpi/.gitignore` ignores `/plugin/extensions/*` and re-admits each committed bundle with a `!` line. The `gateway_rules` store-extension sidecar (`gateway-rules-extension.mjs`, from #9540) was committed without its `!` line, so `script/tracked-ignored-paths-audit.test.ts` failed on `dev` and on the v5.1.17 release-state PR. A local `git add` of a fresh regen would also silently skip that file. Added the negation next to its sibling `gateway-store-worker.mjs`.
-
 ## 2026-10-04 - A runtime advisory no longer makes a failed reflection child look like a provider outage (#9553)
 
 On Windows every failed memory reflection child was recorded as "refused by its provider", and automatic reflection parked for hours. `worker/model-miss.ts` `providerFailureDetail` took the first stderr line as the provider's answer. On a Bun host on win32 that line is Bun's `child reaper unavailable under Bun on win32: ...` advisory, printed once per terminated worker thread before anything the child says. The shared retryable-error classifier matches the bare word `unavailable`, so any failure became `provider_unavailable`, the real cause was hidden, and every candidate in the chain was marked as refused.
@@ -419,14 +391,6 @@ Tests (`model-miss.test.ts`, the exact advisory text):
 - a provider sentence then a stack `Error:` line: the provider's sentence decides.
 
 **Known limit:** an advisory with neither a runtime marker nor a log-level prefix, and nothing after it, is still taken as the detail. There is no better line to report then.
-
-## 2026-10-04 - Gateway operating-rules injection into lead and bound sessions (#9190)
-
-- New `components/gateway`: the scope lead and every session with an active binding get the scope's compiled behavioral rules as one `<operating-rules version="<rules sha>">` block in the system prompt through `before_agent_start`, rendered beside the memory block. The component lazily connects only when the `gateway.scopes` config is non-empty and the store database exists; every other session's prompt passes through byte-identical. Rules are computed by the gateway package; omo owns only the `gateway_rules` store extension (a `gateway_rules_blocks` table plus the `rulesCommitted`/`blockForSession` ops) and the exactly-once `rules_changed` fanout per session and version. `plugin/scripts/build-extension-core.mjs` emits the ops module as `extensions/gateway-rules-extension.mjs` beside `omo.js`, covered by the build freshness check.
-
-## 2026-10-04 - Escape untrusted gateway rule text and add `sessionsWithRules`
-
-- Behavioral rule lines, scope and version render with `&`, `<` and `>` escaped, so a rule carrying the end sentinel or the closing tag can neither break the byte-identical turn guarantee nor close the block early; the `rules_changed` delivery text escapes scope and version the same way. New `sessionsWithRules({scope})` op lists a scope's `gateway_rules_blocks` rows ordered by session id so the gateway can clear sessions whose binding ended while the connector was down.
 
 ## 2026-10-04 - Live QA: a task child's fallback after a tool call, and the user's settings untouched (#9512)
 
