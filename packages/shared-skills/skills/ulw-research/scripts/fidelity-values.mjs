@@ -10,6 +10,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import { proseSentences, sameValue, unitKey } from "./fidelity-binding.mjs"
+import { claimsToolCheck } from "./fidelity-lexicon.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
 import { NOT_CLAIMS, parseNumeral } from "./numerals.mjs"
 import { div, fromDecimal, sub } from "./rational.mjs"
@@ -20,8 +21,6 @@ const STRUCTURAL = [...NOT_CLAIMS.slice(7, 12), /\b(?:p|pp|page|pages)\.?\s*\d+(
 const NUMERAL = /\d+(?:[.,\-/:]\d+)*/g
 const TRACED = "\u0000"
 const QUOTE_RUNS = [/"([^"]+)"/g, /\u201C([^\u201C\u201D]+)\u201D/g, /\u300C([^\u300C\u300D]+)\u300D/g, /\u300E([^\u300E\u300F]+)\u300F/g]
-/** Verification verbs, English and Korean (verify, confirm, execute). */
-const VERIFY = /\b(?:verified|confirmed|ran|executed)\b|\uAC80\uC99D|\uD655\uC778|\uC2E4\uD589/i
 const DECIMAL = /^-?\d+(?:\.\d+)?$/
 
 const clip = (text) => String(text).replace(/\s+/g, " ").trim().slice(0, 80)
@@ -212,6 +211,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 }
 
 function rowChecks(ctx, ledger, rows, cited, options, flag) {
+	// An as-of of "latest ..." or "... per snapshot" names no fixed revision, so quote_stale_version is skipped.
 	const asOf = options.asOf && !/^latest\b|per snapshot/i.test(options.asOf) ? options.asOf : null
 	for (const [id, node] of cited) {
 		const row = rows.get(id)
@@ -242,7 +242,7 @@ function sourceChecks(ctx, rows, cited, sourcesDir, flag) {
 	for (const block of proseSentences(ctx)) {
 		if (block.kind === "sources" || block.kind === "toc") continue
 		for (const sentence of block.sentences) {
-			if (!VERIFY.test(sentence.text)) continue
+			if (!claimsToolCheck(sentence.text)) continue
 			const unbacked = sentence.facts.find((f) => meta.get(rows.get(f.id)?.source_id)?.kind !== "command")
 			if (unbacked) flag("unsupported_verification", block.owner, `"${clip(sentence.text)}" claims a check, but ${unbacked.id} is not recorded command output`)
 		}

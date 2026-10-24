@@ -23,6 +23,18 @@ export const QUALIFIER_FORMS = Object.freeze({
 })
 /** Irregular and synonym direction forms the stem match cannot reach ("rose", "reduced"). */
 const DIRECTION_FORMS = { up: ["rose", "risen", "rising", "grew", "grown", "gain"], down: ["reduc", "fell", "fallen", "falling", "drop", "lower"] }
+// Verification claims (unsupported_verification). A sentence counts only when it clearly claims a
+// tool-backed check: English "verified ... by running|with|using|via", a first-person "we ran /
+// verified / executed", or "ran|executed (the) command|script|test|suite|query|benchmark"; Korean
+// "silhaeng-hae hwagin/geomjeung" (run then check) or a command/script/test word followed by
+// hwagin/geomjeung/tonggwa/silhaeng. Bare verbs ("ran across") and the bare stem hwagin
+// ("confirmed length") are ordinary findings prose and never match.
+const VERIFY_EN = /\b(?:verified|confirmed|checked|tested)\b.*\b(?:by running|with|using|via)\b|\bwe\s+(?:have\s+)?(?:verified|confirmed|checked|tested|ran|re-?ran|executed)\b|\b(?:ran|executed)\s+(?:(?:the|a|an|our)\s+)?(?:command|script|test|suite|query|benchmark)s?\b/i
+const VERIFY_KO = /\uC2E4\uD589\S{0,3}\s*(?:\uD655\uC778|\uAC80\uC99D)|(?:\uBA85\uB839|\uC2A4\uD06C\uB9BD\uD2B8|\uD14C\uC2A4\uD2B8)[^.]*?(?:\uD655\uC778|\uAC80\uC99D|\uD1B5\uACFC|\uC2E4\uD589)/
+
+/** True when the sentence claims a check that only a recorded command or test could back. */
+export const claimsToolCheck = (text) => VERIFY_EN.test(text) || VERIFY_KO.test(text)
+
 const KOREAN = /[\uAC00-\uD7A3]/
 const ACRONYM = /(?<![\p{L}\p{N}])[A-Z]{2,6}(?![\p{L}\p{N}])/gu
 const WINDOW = 6

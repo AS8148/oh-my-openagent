@@ -199,6 +199,18 @@ describe("derivations, joins, snapshots", () => {
 		expect(codes(run(`<p>We verified the span is ${fact("F1", "up to 320 m", "m")} [S4].</p>`))).toEqual(["unsupported_verification"])
 		expect(run(`<p>The suite ran with ${fact("F7", "42 passed")} [S5].</p>`)).toEqual([])
 	})
+
+	test("#given a Korean claim of a run-and-check on a page-sourced fact #when checked #then unsupported_verification", () => {
+		expect(codes(run(`<p>실행해 확인한 길이는 ${fact("F1", "최대 320 m", "m")} [S4].</p>`))).toEqual(["unsupported_verification"])
+	})
+
+	test("#given English findings prose that only uses the verb ran #when checked #then no unsupported_verification", () => {
+		expect(run(`<p>The bridge, which ran across the river, spans ${fact("F1", "up to 320 m", "m")} [S4].</p>`)).toEqual([])
+	})
+
+	test("#given Korean findings prose that only uses the stem 확인 #when checked #then no unsupported_verification", () => {
+		expect(run(`<p>확인된 길이는 ${fact("F1", "최대 320 m", "m")} [S4].</p>`)).toEqual([])
+	})
 })
 
 describe("charts", () => {
