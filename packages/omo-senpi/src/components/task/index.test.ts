@@ -35,6 +35,7 @@ const TASK_EVENTS = [
   "context",
   "session_start",
   "session_before_reload",
+  "session_resumed",
   "session_before_switch",
   "session_before_compact",
   "session_compact",
@@ -92,7 +93,7 @@ function fakeUi(): CapturedUi {
   }
 }
 
-const noopStatusUi = { scheduleSync: () => {}, syncNow: () => {}, dispose: () => {} }
+const noopStatusUi = { scheduleSync: () => {}, syncNow: () => {}, observeRecord: () => {}, dispose: () => {} }
 const noopResumptionChannels = {
   emitSessionStart: () => Promise.resolve(),
   emitShutdown: () => Promise.resolve(),

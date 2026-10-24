@@ -241,3 +241,127 @@ describe("session_summary consent", () => {
     })
   })
 })
+
+// Lead ruling (2026-10-20): an opt-out set by environment variable belongs to one process. It must not
+// delete what another, consented session queued; only the persisted setting decides for everyone.
+function writeConsentedQueue(agentDir: string): string[] {
+  const dir = summaryDirOf(agentDir)
+  mkdirSync(join(dir, "pending"), { recursive: true })
+  const now = Date.now()
+  const owner = { pid: process.pid, bootId: "consented-session-boot" }
+  const uuid = "0395eae0-1111-4222-8333-944455556677"
+  writeFileSync(join(dir, "pending", `${uuid}.json`), JSON.stringify({
+    v: 2, consent: "enabled", scope: { cwd: "/repo" }, uuid, sessionHash: "hashed:consented", owner, createdAt: now,
+    properties: { $session_id: "hashed:consented", turns: 1, ended_by: "shutdown" },
+  }))
+  writeFileSync(join(dir, "hashed_consented.json"), JSON.stringify({
+    v: 2, consent: "enabled", scope: { cwd: "/repo" }, sessionHash: "hashed:consented", sessionRole: "root", owner,
+    heartbeatAt: now, epoch: "0123456789abcdef", seq: 1, sampleRate: 0.05, windowId: null, window: null,
+  }))
+  return queuedFilesOf(agentDir).sort()
+}
+
+describe("a per-process opt-out leaves other sessions' queue alone", () => {
+  for (const [label, env] of [
+    ["OMO_DISABLE_TELEMETRY=1", { OMO_DISABLE_TELEMETRY: "1" }],
+    ["DO_NOT_TRACK=1", { DO_NOT_TRACK: "1" }],
+    ["OMO_SENPI_SEND_ANONYMOUS_TELEMETRY=0", { OMO_SENPI_SEND_ANONYMOUS_TELEMETRY: "0" }],
+  ] as const) {
+    test(`#given a consented session's window and pending event #when another session opted out by ${label} runs #then both survive`, async () => {
+      await withTempAgentDir(async (agentDir) => {
+        const before = writeConsentedQueue(agentDir)
+        const recorder = createTransportRecorder()
+        await runSession(agentDir, recorder.factory, false, { env })
+
+        expect(recorder.messages).toEqual([])
+        expect(queuedFilesOf(agentDir).sort()).toEqual(before)
+      })
+    })
+  }
+
+  test("#given a consented session's queue #when the persisted setting turns telemetry off for its project #then the queue is purged", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      writeConsentedQueue(agentDir)
+      const recorder = createTransportRecorder()
+      await runSession(agentDir, recorder.factory, false, { configEnabled: false })
+
+      expect(recorder.messages).toEqual([])
+      expect(queuedFilesOf(agentDir)).toEqual([])
+    })
+  })
+})
+
+// Review LOW (8c6b1a8959): the persisted setting is read the way every process reads it, from the real config
+// files, and never through this process's own profile selection.
+describe("the purge reads the persisted setting from the real config files", () => {
+  async function runRealConfigSession(agentDir: string, env: TelemetryEnv, cwd: string, accountHomeDir = agentDir): Promise<void> {
+    const pi = new FakeExtensionAPI()
+    const session = { cwd, sessionManager: { getSessionId: () => "real-config-session" } }
+    createOmoNativeTelemetryComponent({
+      rawTurnSampleRate: 0,
+      env: { ...createEnabledEnv(agentDir), HOME: agentDir, ...env },
+      hashSessionId: (raw) => `hashed:${raw}`,
+      now: FIXED_NOW,
+      osProvider: createOsProvider("real-config-host"),
+      accountHomeDir,
+      stateDir: join(agentDir, "omo-senpi", "omo-native"),
+      transportFactory: createTransportRecorder().factory,
+    }).register(pi, { config: pi, logger: createSilentLogger() })
+    await pi.dispatch("session_start", { type: "session_start", reason: "startup" }, session)
+    await pi.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, session)
+  }
+
+  function writeScopedPending(agentDir: string, uuid: string, cwd: string): void {
+    const dir = join(summaryDirOf(agentDir), "pending")
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `${uuid}.json`), JSON.stringify({
+      v: 2, consent: "enabled", scope: { cwd }, uuid, sessionHash: `hashed:${uuid}`, owner: { pid: process.pid, bootId: "other-session" }, createdAt: Date.now(),
+      properties: { turns: 1 },
+    }))
+  }
+
+  test("#given a project whose .omo/omo.json turns telemetry off #when any session quits #then that project's records go and another project's stay", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const offProject = join(agentDir, "off-project")
+      const onProject = join(agentDir, "on-project")
+      mkdirSync(join(offProject, ".omo"), { recursive: true })
+      mkdirSync(onProject, { recursive: true })
+      writeFileSync(join(offProject, ".omo", "omo.json"), JSON.stringify({ telemetry: { enabled: false } }))
+      writeScopedPending(agentDir, "0395eae0-1111-4222-8333-944455556681", offProject)
+      writeScopedPending(agentDir, "0395eae0-1111-4222-8333-944455556682", onProject)
+
+      await runRealConfigSession(agentDir, { OMO_DISABLE_TELEMETRY: "1" }, onProject)
+
+      expect(queuedFilesOf(agentDir).map((name) => basename(name))).toEqual(["0395eae0-1111-4222-8333-944455556682.json"])
+    })
+  })
+
+  test("#given this process selects a profile that turns telemetry off #when it quits opted out #then other sessions' records survive", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const project = join(agentDir, "project")
+      mkdirSync(join(agentDir, ".omo"), { recursive: true })
+      mkdirSync(project, { recursive: true })
+      writeFileSync(join(agentDir, ".omo", "omo.jsonc"), JSON.stringify({ profiles: { quiet: { telemetry: { enabled: false } } } }))
+      writeScopedPending(agentDir, "0395eae0-1111-4222-8333-944455556683", project)
+
+      await runRealConfigSession(agentDir, { OMO_PROFILE: "quiet" }, project)
+
+      expect(queuedFilesOf(agentDir).map((name) => basename(name))).toEqual(["0395eae0-1111-4222-8333-944455556683.json"])
+    })
+  })
+
+  test("#given this process points HOME at a config that turns telemetry off #when it quits opted out #then other sessions' records survive", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const project = join(agentDir, "project")
+      const otherHome = join(agentDir, "other-home")
+      mkdirSync(join(otherHome, ".omo"), { recursive: true })
+      mkdirSync(project, { recursive: true })
+      writeFileSync(join(otherHome, ".omo", "omo.jsonc"), JSON.stringify({ telemetry: { enabled: false } }))
+      writeScopedPending(agentDir, "0395eae0-1111-4222-8333-944455556684", project)
+
+      await runRealConfigSession(agentDir, { HOME: otherHome }, project, agentDir)
+
+      expect(queuedFilesOf(agentDir).map((name) => basename(name))).toEqual(["0395eae0-1111-4222-8333-944455556684.json"])
+    })
+  })
+})

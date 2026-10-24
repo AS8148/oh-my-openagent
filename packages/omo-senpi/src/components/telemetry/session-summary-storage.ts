@@ -2,6 +2,7 @@ import { join } from "node:path"
 import type { EventTelemetryProperties } from "@oh-my-opencode/telemetry-core"
 
 import { CORRUPT, listNames, readJsonOrCorrupt, removeFile, writeJsonAtomic } from "./session-summary-files"
+import { summaryDir } from "./session-summary-purge"
 import { createOwnerRegistry, parseOwner, type ProcessOwner } from "./session-summary-owner"
 import { parseTelemetrySessionRole, type TelemetrySessionRole } from "./session-role"
 import { SUMMARY_EPOCH_SHAPE, isSummaryWindow, type SummaryWindow } from "./session-summary-window"
@@ -87,9 +88,7 @@ export type SummaryStorage = {
 const SAFE_NAME = /^[A-Za-z0-9:_-]{1,128}$/
 const SAFE_UUID = /^[0-9a-f-]{36}$/
 
-export function summaryDir(stateDir: string): string {
-  return join(stateDir, "session-summary")
-}
+export { purgeUnconsentedQueue, summaryDir } from "./session-summary-purge"
 
 export function createSummaryStorage(input: {
   readonly stateDir: string
