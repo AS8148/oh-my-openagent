@@ -1,7 +1,7 @@
 // Iterative postorder verifier: one snapshot and one arithmetic evaluation per reachable node.
 import { compute } from "./fact-derive.mjs"
 import { parseExpr } from "./fact-expr.mjs"
-import { isLegacyDerived, kindRuleErrors, readRow } from "./fact-ledger-kinds.mjs"
+import { isLegacyDerived, kindRuleErrors, readFlaws, readRow } from "./fact-ledger-kinds.mjs"
 import { rowErrors } from "./fact-ledger-schema.mjs"
 import { refuse } from "./unit-algebra.mjs"
 import { refusal } from "./unit-errors.mjs"
@@ -50,6 +50,8 @@ export function verifyGraph(ledger, roots, requireActive = false, override = nul
 				const row = { ...readRow(original) }
 				snapshots.set(id, row)
 				if (requireActive && row.status !== "active") refuse(`${id} is ${row.status}`, undefined, "inactive_dependency", "active dependencies at every depth")
+				const [flaw] = readFlaws(row)
+				if (flaw) refuse(`${id}: ${flaw.detail}`, undefined, flaw.shape, flaw.expected)
 				if (derived(row)) {
 					refuseLegacy(row)
 					const shape = malformed(row)

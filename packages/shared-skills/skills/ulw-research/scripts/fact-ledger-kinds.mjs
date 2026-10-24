@@ -7,6 +7,7 @@
 import { isCliEntry } from "./entry-guard.mjs"
 import { canonicalUnit, inputScale, RuleError } from "./unit-algebra.mjs"
 import { metadataErrors } from "./unit-metadata.mjs"
+import { mul } from "./rational.mjs"
 import { OPERATION_RULES } from "./unit-rules.mjs"
 
 export const DECIMAL = /^-?\d+(?:\.\d+)?$/
@@ -123,6 +124,17 @@ const PRE_REGISTRY_COLUMNS = KIND_COLUMNS.slice(0, KIND_COLUMNS.indexOf("exact")
 
 /** A derived or converted row written before the later columns existed: loadable, never an operand. */
 export const isLegacyDerived = (row) => isObject(row) && DERIVED_KINDS.includes(row.kind) && LATER_COLUMNS.every((column) => !Object.hasOwn(row, column))
+/** A derived or converted row carrying this version's columns: the only rows checked strictly at read time. */
+export const isCurrentDerived = (row) => isObject(row) && DERIVED_KINDS.includes(row.kind) && !isLegacyDerived(row)
+
+/** Any integer pair dev's writer accepted, reduced: sign on num, no leading zeros, gcd 1; anything else as given. */
+function readExact(exact) {
+	if (!isObject(exact) || !isString(exact.num) || !isString(exact.den) || !INTEGER.test(exact.num) || !/^\d+$/.test(exact.den) || /^0+$/.test(exact.den)) return exact
+	const { num, den } = mul({ num: BigInt(exact.num), den: BigInt(exact.den) }, 1n)
+	return { num: String(num), den: String(den) }
+}
+
+const readDecimal = (value) => (isDecimal(value) ? value.replace(/^(-?)0+(?=\d)/, "$1") : value)
 
 /** A source unit read through the alias table; unknown, scaled, or unparseable text stays as given. */
 export function sourceUnit(unit) {
@@ -135,12 +147,43 @@ export function sourceUnit(unit) {
 	}
 }
 
-/** A row as derive and recompute read it: source rows get canonical units and null later columns. */
+/**
+ * A row as every reader sees it (dimension 31 wins at read time): rows not written by derive in this
+ * version get reduced exacts and decimals; source rows also get canonical units and null later columns.
+ * Current derived rows stay as stored so tampering is still detected. Idempotent.
+ */
 export function readRow(row) {
-	if (!isObject(row) || !Object.hasOwn(KIND_RULES, row.kind) || DERIVED_KINDS.includes(row.kind)) return row
-	const read = { ...row, unit: sourceUnit(row.unit) }
+	if (!isObject(row) || !Object.hasOwn(KIND_RULES, row.kind) || isCurrentDerived(row)) return row
+	const read = { ...row, value: readDecimal(row.value), exact: exactComesFromValue(row.kind) ? row.exact : readExact(row.exact) }
+	if (DERIVED_KINDS.includes(row.kind)) return read
+	read.unit = sourceUnit(row.unit)
 	for (const column of LATER_COLUMNS) if (!Object.hasOwn(read, column)) read[column] = null
 	return read
+}
+
+const carriesDerivation = (row) => row.operation !== null || row.operands?.length || row.derived_from?.length || row.formula !== null || row.factor !== null
+function unitFlaw(unit) {
+	try {
+		return isString(unit) && (canonicalUnit(unit) !== unit || inputScale(unit)) ? `unit ${unit} has no canonical stored text` : null
+	} catch (error) {
+		if (error instanceof RuleError) return `unit ${unit}: ${error.message}`
+		throw error
+	}
+}
+
+/**
+ * What a loadable source row (read through readRow) still breaks under the strict dimensions: dev's
+ * writer accepted it, so it loads, but derive and recompute refuse it as an operand with this shape.
+ * addRow refuses a new row that has any. Empty for derived and converted rows.
+ */
+export function readFlaws(row) {
+	if (!isObject(row) || DERIVED_KINDS.includes(row.kind)) return []
+	const flaws = []
+	if (carriesDerivation(row)) flaws.push({ shape: "dimension 1", detail: "a source row carries an operation or derivation fields", expected: "null operation and empty derivation fields on measured, quote, and assumed rows" })
+	const unit = unitFlaw(row.unit)
+	if (unit) flaws.push({ shape: "dimension 6", detail: unit, expected: "a registered or canonical unit without scale" })
+	for (const detail of metadataErrors(row)) flaws.push({ shape: "dimension 18", detail, expected: "present, type-valid metadata; explicit null when unknown" })
+	return flaws
 }
 
 /** @returns {string[]} every per-kind column error of one row; empty for an unknown kind. */
@@ -149,7 +192,8 @@ export function kindRuleErrors(candidate, at) {
 	if (rules === undefined) return []
 	const errors = []
 	const legacy = isLegacyDerived(candidate)
-	for (const column of legacy ? PRE_REGISTRY_COLUMNS : KIND_COLUMNS) {
+	const columns = legacy ? PRE_REGISTRY_COLUMNS : isCurrentDerived(candidate) ? KIND_COLUMNS : KIND_COLUMNS.filter((column) => column !== "operation")
+	for (const column of columns) {
 		const value = candidate[column] === undefined && LATER_COLUMNS.includes(column) ? null : candidate[column]
 		const rule = RULES[legacy && column === "exact" ? "rational_or_null" : rules[column]]
 		if (rule.test(value, candidate)) continue
@@ -159,15 +203,13 @@ export function kindRuleErrors(candidate, at) {
 	return errors
 }
 
-/** At-rest rules: derived rows store canonical units; source units are canonicalized on read instead. */
+/** At-rest rules of current derived rows; source rows answer to readFlaws at use and at write instead. */
 export function storedErrors(row) {
+	if (!isCurrentDerived(row)) return []
 	const errors = metadataErrors(row)
-	if (DERIVED_KINDS.includes(row.kind) && !isLegacyDerived(row)) {
-		try {
-			if (canonicalUnit(row.unit) !== row.unit || inputScale(row.unit)) errors.push("unit must be canonical stored text")
-		} catch (error) { errors.push(error.message) }
-	}
-	if (!["derived", "converted"].includes(row.kind) && (row.operands?.length || row.derived_from?.length || row.formula !== null || row.factor !== null)) errors.push("source rows carry no derivation fields")
+	try {
+		if (canonicalUnit(row.unit) !== row.unit || inputScale(row.unit)) errors.push("unit must be canonical stored text")
+	} catch (error) { errors.push(error.message) }
 	return errors
 }
 

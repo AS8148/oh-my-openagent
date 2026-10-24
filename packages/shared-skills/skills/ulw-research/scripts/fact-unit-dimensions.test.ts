@@ -113,13 +113,24 @@ test("dimension 06: aliases normalize at input; derived rows store canonical uni
 	expect(recompute(l, relabeled).ok).toBe(false)
 })
 
-test("dimension 07: exact rationals are reduced canonical integer strings", () => {
-	for (const exact of [{ num: "2", den: "2" }, { num: "01", den: "1" }, { num: "-0", den: "1" }, { num: 1, den: "1" }, { num: "1", den: "-1" }]) {
+test("dimension 07: exact rationals are reduced canonical integer strings; dev's integer pairs read reduced (dimension 31)", () => {
+	for (const [exact, reduced] of [[{ num: "2", den: "2" }, "1"], [{ num: "01", den: "1" }, "1"], [{ num: "-0", den: "1" }, "0"], [{ num: "-6", den: "06" }, "-1"]] as const) {
+		const l = book(["1", "3"])
+		Object.assign(l.rows[0], { kind: "assumed", rationale: "given", value: reduced, source_id: null, locator: null, snapshot_sha256: null, exact })
+		expect(validateLedger(l)).toEqual([])
+		expect(row(l, { op: "expr", formula: "F1", unit: "m" }).exact).toEqual({ num: reduced, den: "1" })
+	}
+	for (const exact of [{ num: 1, den: "1" }, { num: "1", den: "-1" }, { num: "1", den: "0" }, { num: "1.5", den: "1" }]) {
 		const l = book()
 		Object.assign(l.rows[0], { kind: "assumed", rationale: "given", exact })
 		expect(validateLedger(l).length).toBeGreaterThan(0)
 		refused(l, { op: "expr", formula: "F1", unit: "m" })
 	}
+	const l = book()
+	const made = row(l, sum)
+	made.exact = { num: "8", den: "2" }
+	expect(validateLedger(l).length).toBeGreaterThan(0)
+	expect(recompute(l, made).ok).toBe(false)
 })
 
 test("dimension 08: context schemas reject foreign keys and wrong types", () => {

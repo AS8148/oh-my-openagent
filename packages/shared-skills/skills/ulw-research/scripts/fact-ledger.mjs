@@ -7,7 +7,7 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
-import { DECIMAL, exactComesFromValue, exactFromDecimal, idPrefix, isString, readRow } from "./fact-ledger-kinds.mjs"
+import { DECIMAL, exactComesFromValue, exactFromDecimal, idPrefix, isString, readFlaws, readRow } from "./fact-ledger-kinds.mjs"
 import { LEDGER_SCHEMA_VERSION, ROW_DEFAULTS, ROW_FIELDS, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
 import { normalizeInput } from "./unit-algebra.mjs"
 
@@ -32,7 +32,10 @@ function ordered(row) {
 	return out
 }
 
-/** Source rows come back with canonical units and null later columns; the file changes on the next write. */
+/**
+ * Every row comes back as readRow normalizes it (reduced exacts and decimals; source rows with canonical
+ * units and null later columns) before any strict rule runs; the file changes on the next write.
+ */
 export function readLedger(dir) {
 	const file = join(dir, LEDGER_FILENAME)
 	if (!existsSync(file)) return emptyLedger()
@@ -74,12 +77,14 @@ export function addRow(ledger, row) {
 	if (!["derived", "converted"].includes(filled.kind)) {
 		const normalized = normalizeInput(filled.unit, filled.value)
 		if (normalized.value !== filled.value && filled.exact !== null) throw new CliError("scaled input must omit exact; it is computed after normalization")
-		Object.assign(filled, normalized)
+		Object.assign(filled, readRow({ ...filled, ...normalized }))
 	}
 	if (exactComesFromValue(filled.kind) && filled.exact === null && isString(filled.value) && DECIMAL.test(filled.value)) {
 		filled.exact = exactFromDecimal(filled.value)
 	}
 	const added = ordered(filled)
+	const flaws = readFlaws(added)
+	if (flaws.length > 0) throw new CliError(`invalid fact ledger: ${flaws.map((flaw) => `${flaw.shape}: ${flaw.detail}`).join("; ")}`)
 	assertValid({ ...ledger, rows: [...ledger.rows, added] })
 	ledger.rows.push(added)
 	return added
