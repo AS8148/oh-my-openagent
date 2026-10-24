@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Concurrent file touches show each project memory nudge once.** Project memory reads reserve the nudge before asynchronous loading, retry failed reads, and discard stale results after compaction or session changes. ([#11165](https://github.com/code-yeongyu/oh-my-openagent/pull/11165), addresses item 1 of [#10927](https://github.com/code-yeongyu/oh-my-openagent/issues/10927))
 
+- Memory path-state recovery and commit hooks now keep literal Git lookups working when global glob or case-insensitive pathspec modes are enabled ([#11130](https://github.com/code-yeongyu/oh-my-openagent/issues/11130), [#11167](https://github.com/code-yeongyu/oh-my-openagent/pull/11167)).
+
 ## [5.1.45] - 2026-10-24
 
 **Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
