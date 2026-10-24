@@ -44,6 +44,7 @@ describe("desktop thread discovery lifecycle", () => {
       first = false
       options.listFailure = false
       await host.turn()
+      await host.registered
       expect(host.tools()).toHaveLength(1)
       expect(host.pi.rpcEvents).toHaveLength(2)
       await host.turn()
@@ -55,9 +56,26 @@ describe("desktop thread discovery lifecycle", () => {
     const host = await setup({ reply: () => ({ refusal: { reason: "denied" } }) })
     await host.start()
     for (let turn = 1; turn <= 3; turn++) {
+      const settled = host.failures(turn + 1)
       await host.turn()
+      await settled
       expect(host.pi.rpcEvents).toHaveLength(turn + 1)
     }
+  })
+
+  it("#given an app that never answers #when later turns start #then they retry in the background without waiting for the timeout", async () => {
+    const host = await setup({ timeoutMs: 300 })
+    await host.start()
+    expect(host.failureCount()).toBe(1)
+    // A waited retry would hold this turn for the full 300 ms grant timeout, logging the second failure first.
+    await host.turn()
+    expect(host.pi.rpcEvents).toHaveLength(2)
+    expect(host.failureCount()).toBe(1)
+    const settled = host.failures(2)
+    await settled
+    await host.turn()
+    expect(host.pi.rpcEvents).toHaveLength(3)
+    expect(host.failureCount()).toBe(2)
   })
 
   it("#given deferred startup #when the first turn beats the scheduler #then it registers once before the turn returns", async () => {

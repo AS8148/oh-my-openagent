@@ -132,8 +132,7 @@ export function listThreadTools(
           continue
         }
         const tool = object(value)
-        if (typeof tool.name !== "string" || tool.name.length === 0 ||
-          /^[a-zA-Z0-9_-]{1,64}$/.exec(`desktop_${tool.name}`)?.[0] !== `desktop_${tool.name}`) {
+        if (typeof tool.name !== "string" || tool.name.length === 0 || !/^[a-zA-Z0-9_-]{1,64}$/.test(`desktop_${tool.name}`)) {
           onInvalid?.("invalid_name")
           continue
         }

@@ -22,6 +22,8 @@ interface SessionDiscovery {
   readonly controller: AbortController
   startupPending: boolean
   running?: Promise<void>
+  // Set after a failed attempt: later turns retry in the background instead of waiting on an app that may never answer.
+  failed: boolean
 }
 
 function reply(details: Settled) {
@@ -46,6 +48,12 @@ function parseGrant(value: unknown): ToolkitGrant | undefined {
     return undefined
   }
   return { endpoint, tokenFile }
+}
+
+// A failed attempt is over before it is reported, so the next turn starts a fresh retry instead of joining it.
+function failAttempt(state: SessionDiscovery): void {
+  state.failed = true
+  state.running = undefined
 }
 
 function isPreviewEvent(event: unknown): boolean {
@@ -131,8 +139,11 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
         if (state.controller.signal.aborted || grants.has(sessionId)) return
         if (state.running !== undefined) return state.running
         state.startupPending = false
-        state.running = runDiscovery(sessionId, state).finally(() => { state.running = undefined })
-        return state.running
+        const run: Promise<void> = runDiscovery(sessionId, state).finally(() => {
+          if (state.running === run) state.running = undefined
+        })
+        state.running = run
+        return run
       }
 
       async function runDiscovery(sessionId: string, state: SessionDiscovery): Promise<void> {
@@ -141,12 +152,14 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
           const settled = await acquire("thread", signal)
           if (signal.aborted) return
           if (!settled.ok) {
+            failAttempt(state)
             ctx.logger.info("desktop thread toolkit unavailable", { reason: settled.reason === "timeout" ? "timeout" : "grant_refused" })
             return
           }
           const tools = await listThreadTools(settled.grant, timeoutMs, signal, (reason) =>
             ctx.logger.info("desktop thread toolkit skipped tool", { reason }))
           if (signal.aborted) return
+          state.failed = false
           grants.set(sessionId, settled.grant)
           for (const tool of tools) {
             const name = `desktop_${tool.name}`
@@ -170,7 +183,9 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
           }
         } catch {
           // Remote errors may echo the bearer. Only a fixed diagnostic crosses this boundary.
-          if (!signal.aborted) ctx.logger.info("desktop thread toolkit unavailable", { reason: "discovery_failed" })
+          if (signal.aborted) return
+          failAttempt(state)
+          ctx.logger.info("desktop thread toolkit unavailable", { reason: "discovery_failed" })
         }
       }
 
@@ -185,18 +200,21 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
           return
         }
         if (sessions.has(sessionId)) return
-        const state: SessionDiscovery = { controller: new AbortController(), startupPending: true }
+        const state: SessionDiscovery = { controller: new AbortController(), startupPending: true, failed: false }
         sessions.set(sessionId, state)
         deferUntilAfterFirstPaint(ctx, "desktop thread toolkit", () =>
           state.startupPending ? discover(sessionId, state) : undefined)
       })
-      // Each real turn retries once after failure, or joins the bounded attempt already running. A
-      // prompt-cache preview pass must not start a grant request: only the real turn does (senpi#3994).
+      // The first real turn joins the bounded startup attempt. After a failure each turn starts one retry in the
+      // background without waiting, so an app that never answers cannot hold every prompt for the timeout.
+      // A prompt-cache preview pass must not start a grant request: only the real turn does (senpi#3994).
       pi.on("before_agent_start", (event, eventCtx) => {
         if (isPreviewEvent(event)) return
         const sessionId = callingSessionId(eventCtx)
         const state = sessionId === undefined ? undefined : sessions.get(sessionId)
-        if (sessionId !== undefined && state !== undefined) return discover(sessionId, state)
+        if (sessionId === undefined || state === undefined) return
+        if (!state.failed) return discover(sessionId, state)
+        void discover(sessionId, state)
       }, { previewSafe: true })
       pi.on("session_shutdown", (_event, eventCtx) => {
         const sessionId = callingSessionId(eventCtx)

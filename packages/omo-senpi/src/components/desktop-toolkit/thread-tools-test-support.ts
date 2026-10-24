@@ -42,7 +42,24 @@ export async function setup(options: {
   const deferred: (() => void | Promise<void>)[] = []
   const requested = Promise.withResolvers<Record<string, unknown>>()
   const logs: unknown[] = []
-  const log = (message: string, details?: unknown) => logs.push({ message, details })
+  const failureWaiters: { readonly count: number; readonly resolve: () => void }[] = []
+  let failureCount = 0
+  const log = (message: string, details?: unknown) => {
+    logs.push({ message, details })
+    if (message !== "desktop thread toolkit unavailable") return
+    failureCount += 1
+    for (const waiter of failureWaiters.filter((entry) => entry.count <= failureCount)) {
+      failureWaiters.splice(failureWaiters.indexOf(waiter), 1)
+      waiter.resolve()
+    }
+  }
+  // Resolves once `count` failed discoveries have been logged; register it before the turn that triggers one.
+  const failures = (count: number) => {
+    if (failureCount >= count) return Promise.resolve()
+    const waiter = Promise.withResolvers<void>()
+    failureWaiters.push({ count, resolve: waiter.resolve })
+    return waiter.promise
+  }
   const ctx: ComponentContext = { logger: { debug: log, info: log, warn: log, error: log }, config: { getFlag: () => undefined } }
   if (options.deferred !== false) ctx.deferStartupWork = (_label, work) => { deferred.push(work) }
   const rpc: NonNullable<SenpiExtensionAPI["rpc"]> = {
@@ -64,7 +81,8 @@ export async function setup(options: {
   const shutdown = (id = "A") => pi.dispatch("session_shutdown", { type: "session_shutdown" }, session(id))
   cleanups.push(async () => { await shutdown() })
   return {
-    pi, logs, handlers, deferred, dispatchStart, flushStartup, shutdown,
+    pi, logs, handlers, deferred, dispatchStart, flushStartup, shutdown, failures,
+    failureCount: () => failureCount,
     registered: registered.promise, requested: requested.promise,
     turn: (id = "A") => pi.dispatch("before_agent_start", { type: "before_agent_start" }, session(id)),
     start: async (id = "A") => { await dispatchStart(id); await flushStartup() },
