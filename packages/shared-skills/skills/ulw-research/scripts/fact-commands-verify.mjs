@@ -8,6 +8,8 @@
 //
 // fidelityProblems applies the gate's registry policy independently of the repair budget.
 // HTML/PDF/DOCX need a gate record or an explicitly logged not_run reason, even without a ledger.
+// That logged exemption covers deliveries this harness never gated: once a ledger or a fidelity
+// record exists for the session, the barrier refuses the unverified edition regardless of it.
 // Recorded editions must match their source bytes (`edition_unverified`).
 
 import { createHash } from "node:crypto"
@@ -83,7 +85,7 @@ export function fidelityProblems(sessionDir, manifest) {
 	const exempt = manifest.gates.fidelity === "not_run" && lastFidelity?.status === "not_run" && lastFidelity.reason?.trim()
 	for (const row of manifest.deliverables) {
 		if (row.status !== "delivered") continue
-		if (!row.verifiedBy && exempt) continue
+		if (!row.verifiedBy && exempt && !hasFidelity) continue
 		if (!hasFidelity && !row.verifiedBy) {
 			if (["html", "pdf", "docx"].includes(row.format)) problems.push({ code: "edition_unverified", format: row.format, message: `${row.format}: fidelity gate not run`, path: row.path })
 			continue

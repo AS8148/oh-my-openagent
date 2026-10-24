@@ -86,6 +86,28 @@ test("#given a missing gate #when skipped without a meaningful reason #then the 
 	}
 })
 
+test("#given a fact ledger and an unverified edition #when the gate is skipped with a reason #then delivery still refuses", async () => {
+	const { dir, invoke } = await delivered()
+	writeFileSync(join(dir, "fact-ledger.json"), JSON.stringify({ version: 1, facts: [] }))
+	await invoke(["gate", "fidelity", "not_run", "--reason", "This harness has no verifier"])
+	for (const command of ["verify", "finish"]) {
+		const result = await invoke([command])
+		expect(result.exitCode).toBe(1)
+		expect(JSON.stringify(result.json.problems)).toContain("fidelity gate not run")
+	}
+})
+
+test("#given a stale fidelity record nobody attached #when the gate is skipped with a reason #then delivery still refuses", async () => {
+	const { dir, invoke } = await delivered()
+	writeFileSync(join(dir, "fidelity-defects.json"), JSON.stringify({ artifact_sha256: "0".repeat(64), defects: [] }))
+	await invoke(["gate", "fidelity", "not_run", "--reason", "This harness has no verifier"])
+	for (const command of ["verify", "finish"]) {
+		const result = await invoke([command])
+		expect(result.exitCode).toBe(1)
+		expect(JSON.stringify(result.json.problems)).toContain("fidelity gate not run")
+	}
+})
+
 test("#given an explicit skip and an existing blocker #when verified #then the skip cannot release the blocker", async () => {
 	const { invoke } = await delivered("html", ["claim_status_invalid"])
 	await invoke(["gate", "fidelity", "not_run", "--reason", "Unsupported edition"])

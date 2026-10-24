@@ -50,7 +50,7 @@ The request and its destination usually answer the format question already. Deri
 | A prior report of the same kind in this workspace, not pointed at | that report's format, offered as the Q1 default | `template-vibe` | full |
 | A complete existing deliverable for this question (section 2) | its existing format | `edit-existing` | the original's tier |
 
-QA tiers: **light** runs the static gates and one render check of the answer, and records the fidelity gate as `not_run` until Markdown deliverable support ships for it. **Full** runs the static gates, the fidelity gate, the layout gates, visual QA of every page, and the proofread gate (section 7).
+QA tiers: **light** runs the static gates and one render check of the answer, and records the fidelity gate as `not_run --reason "<why>"` (the reason is required) until Markdown deliverable support ships for it. **Full** runs the static gates, the fidelity gate, the layout gates, visual QA of every page, and the proofread gate (section 7).
 
 ## 4. The empty-info interview
 
@@ -137,7 +137,7 @@ Nothing reaches the requester until the gates for its QA tier pass, in this orde
 
 **Every reader-facing edition is verified.** The main report, the inline edition (section 9), LaTeX per-section sources, and slide sources are filled by `fact fill` from one placeholder source and each is verified by `fact verify` into its own record; PDF and DOCX are renders of a verified source. A delivered row is recorded with `outcome set <format> delivered --path <file> --verified-by <record>`, where the record's `artifact_sha256` equals the sha256 of the delivered source; a PDF or DOCX adds `--rendered-from <source>` and is matched against that source. In a session with a fact ledger, `outcome verify` refuses a delivered row without a matching record (`edition_unverified`, blocker, integrity). Markdown and LaTeX verification arrive with the Markdown stage; until then `fact verify --format md|tex` exits `2`, and such an edition is recorded `blocked_capability` with that reason rather than delivered unverified.
 
-The light tier runs gate 1 and one render (recorded as `visual`) and records `fidelity`, `layout`, and `proofread` as `not_run`; `fidelity` stays `not_run` in the light tier until Markdown deliverable support ships for the fidelity verifier. The full tier runs all five.
+The light tier runs gate 1 and one render (recorded as `visual`) and records `fidelity`, `layout`, and `proofread` as `not_run` (`fidelity not_run` needs `--reason "<why>"`); `fidelity` stays `not_run` in the light tier until Markdown deliverable support ships for the fidelity verifier. The full tier runs all five.
 
 ## 8. Bounded repair loop
 
@@ -173,7 +173,7 @@ node "$SKILL_DIR/scripts/report-tools.mjs" outcome briefing --session-dir "$SESS
 
 - `init` runs when the brief is written (section 4): one `pending` row per promised format (`pdf`, `docx`, `html`, `md`, `latex`, `slides`, `post`).
 - `set` resolves a row: `delivered` (absolute path; bytes are read from disk; pages when paginated), `blocked_capability` (this session cannot produce it), `skipped` (the requester or the lane dropped it), or `failed`. Every status except `delivered` needs `--reason`; `outcome set <format> delivered` records intent permissively, while the required `outcome verify` and `outcome finish` enforce the delivery barrier.
-- `verify` runs before delivery and exits `1` while a row is `pending`, a status lacks its reason, a delivered file is missing or empty, a registry blocker remains (`fidelity_unresolved`), or a delivered edition has no matching verify record (`edition_unverified`, section 7). Delivered HTML/PDF/DOCX without any ledger or record also refuse with `fidelity gate not run`; explicitly record `outcome gate fidelity not_run --reason "<text>"` to exempt an unverified edition. This choice is logged in `gateHistory` with its timestamp and reason; it never releases defects in existing records, and a subsequent fidelity gate status replaces the exemption.
+- `verify` runs before delivery and exits `1` while a row is `pending`, a status lacks its reason, a delivered file is missing or empty, a registry blocker remains (`fidelity_unresolved`), or a delivered edition has no matching verify record (`edition_unverified`, section 7). Delivered HTML/PDF/DOCX without any ledger or record also refuse with `fidelity gate not run`; explicitly record `outcome gate fidelity not_run --reason "<text>"` to exempt an unverified edition. This choice is logged in `gateHistory` with its timestamp and reason; it never releases an existing ledger requirement, record, or defect, and a subsequent fidelity gate status replaces the exemption.
 - `finish` refuses (exit `1`, nothing stamped) while the fidelity barrier holds.
 - `finish` stamps the finish time, the elapsed minutes from the session directory's start stamp, and the source and domain counts from `sources-ledger.md`.
 - `briefing` prints the closing block from the manifest and the ledger: sources and distinct domains, elapsed minutes, every deliverable with its status, the gate results, the residual defects, and the repair summary. That text is the closing briefing, pasted as printed, never filled in from memory.

@@ -1,3 +1,6 @@
+// outcome.mjs - the per-run outcome manifest (`outcome.json`) and the closing briefing. Manifest functions are pure (they return a new manifest).
+// The briefing reads only the manifest, the sources-ledger text, and an injected `now`. node: builtins only.
+
 import * as nodeFs from "node:fs"
 import { basename, dirname, join } from "node:path"
 
