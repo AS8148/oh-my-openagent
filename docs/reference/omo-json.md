@@ -231,14 +231,16 @@ The block may live at the shared top level, in `[native]`, or in profile layers,
 
 The optional `side_panel` block controls the omo side panel (`schema/side-panel.ts`): a right-hand
 column in the Senpi TUI carrying session, goal, context, usage, subagent, tool, git and memory
-state. The transcript reflows into the remaining width instead of being covered. The panel is **off by
-default** because it rearranges the whole screen.
+state. The transcript reflows into the remaining width instead of being covered. The column
+needs the **fullscreen TUI** (`--tui-mode fullscreen`, or `tuiMode: "fullscreen"` in senpi's
+settings); in the default regular mode the same sections render as a block above the editor
+instead. The panel is **off by default** because it rearranges the whole screen.
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
-| `enabled` | boolean | `false` | Render the panel. |
+| `enabled` | boolean | `false` | Render the panel. The side-by-side column needs the fullscreen TUI; in the default regular mode the sections render as a block above the editor. |
 | `width` | number \| string | `"26%"` | Column count, or a percentage of the terminal width between `10%` and `50%`. Clamped to 32-80 columns, and further reduced so the transcript keeps at least 60 columns. |
-| `min_columns` | integer | `120` | Terminals narrower than this keep the classic single-column layout; the panel hides itself rather than squeezing the transcript. |
+| `min_columns` | integer | `120` | In fullscreen mode, terminals narrower than this keep the classic single-column layout; the panel hides itself rather than squeezing the transcript. |
 | `clickable` | boolean | `true` | Paint file and subagent rows as OSC 8 links, so a mouse click opens the same viewer a command would. Set it to `false` on a terminal that mangles hyperlinks. |
 | `usage_poll_seconds` | integer | `150` | Retired. The engine now reads subscription usage itself, on each provider's own cadence, so this value is ignored. It is still accepted so an existing file keeps loading. |
 | `sections` | object | all `true` except `usage` | Per-section switches: `session`, `goal`, `context`, `usage`, `agents`, `tools`, `files`, `memory`. `usage` is `false` by default (see below). |
