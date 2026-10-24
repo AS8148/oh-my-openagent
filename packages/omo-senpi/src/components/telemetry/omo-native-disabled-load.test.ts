@@ -92,9 +92,9 @@ function withAgentDir<T>(run: (agentDir: string) => Promise<T>): Promise<T> {
 const seedQueue = (stateDir: string): void => {
   const pending = join(summaryDir(stateDir), "pending")
   mkdirSync(pending, { recursive: true })
-  const record = { v: 2, consent: "enabled", scope: {}, uuid: "0b6c5d3e-2f1a-4c8b-9d7e-6a5b4c3d2e1f" }
+  const record = { v: 2, consent: "enabled", scope: { cwd: "/repo" }, uuid: "0b6c5d3e-2f1a-4c8b-9d7e-6a5b4c3d2e1f" }
   writeFileSync(join(pending, `${record.uuid}.json`), JSON.stringify(record))
-  writeFileSync(join(summaryDir(stateDir), "hashed_old.json"), JSON.stringify({ v: 2, consent: "enabled", scope: {} }))
+  writeFileSync(join(summaryDir(stateDir), "hashed_old.json"), JSON.stringify({ v: 2, consent: "enabled", scope: { cwd: "/repo" } }))
 }
 
 const queuedFiles = (stateFiles: readonly string[]): readonly string[] =>

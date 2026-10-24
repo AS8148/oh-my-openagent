@@ -22,13 +22,15 @@ export type ConsentScope = { readonly cwd?: string }
 
 /**
  * The single send/resume gate for a persisted record: it must carry the `enabled` mark AND its originating
- * scope must still be opted in now. A record whose scope cannot be read back (older file) fails closed.
+ * scope must still be opted in now. A record whose scope cannot be read back (older file) or names no cwd
+ * fails closed: consent read without a cwd would be the reading process's default, not the writer's.
  */
 export function isRecordSendable(
   record: { readonly consent: RecordConsent; readonly scope: ConsentScope | undefined },
   isScopeConsented: (scope: ConsentScope) => boolean,
 ): boolean {
-  return record.consent === "enabled" && record.scope !== undefined && isScopeConsented(record.scope)
+  const cwd = record.scope?.cwd
+  return record.consent === "enabled" && cwd !== undefined && cwd.length > 0 && isScopeConsented({ cwd })
 }
 
 export type WindowRecord = {
@@ -205,7 +207,6 @@ function parseScope(value: unknown): ConsentScope | undefined {
   if (cwd === undefined) return {}
   return typeof cwd === "string" ? { cwd } : undefined
 }
-
 
 function fileName(sessionHash: string): string {
   return SAFE_NAME.test(sessionHash) ? sessionHash.replaceAll(":", "_") : Buffer.from(sessionHash).toString("hex").slice(0, 128)

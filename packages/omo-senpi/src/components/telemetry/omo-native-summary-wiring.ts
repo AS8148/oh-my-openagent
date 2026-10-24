@@ -50,6 +50,7 @@ export function createNativeSummaryRecorder(input: {
   readonly rawTurnSampleRate?: number
   readonly isPidAlive?: (pid: number) => boolean
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
+  readonly loadRecovery?: SessionSummaryOptions["loadRecovery"]
   readonly loadRuntime?: LoadSummaryRuntime
 }): SessionSummaryRecorder {
   const { state, env } = input
@@ -75,6 +76,7 @@ export function createNativeSummaryRecorder(input: {
           sessionRole: input.sessionRole,
           sampleRate,
           ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
+          ...(input.loadRecovery === undefined ? {} : { loadRecovery: input.loadRecovery }),
         })),
       (error: unknown) => {
         loading = undefined

@@ -4,9 +4,11 @@ import { join } from "node:path"
 
 import { CHECKPOINT_MAX_TURNS } from "./omo-native-session-summary"
 import { CORRUPT } from "./session-summary-files"
+import { purgeOptedOutQueue } from "./session-summary-optout-purge"
 import { withRecoveryOps } from "./session-summary-recovery-storage"
+import { currentProcessOwner } from "./session-summary-owner"
 import { PENDING_CAP, RESENDS_PER_SWEEP, RESEND_BACKOFF_MS } from "./session-summary-recovery"
-import { OWNER_STALE_MS, SUMMARY_TTL_MS, purgeUnconsentedQueue, summaryDir, type SummaryStorage } from "./session-summary-storage"
+import { OWNER_STALE_MS, SUMMARY_TTL_MS, createSummaryStorage, summaryDir, type SummaryStorage } from "./session-summary-storage"
 import { createTempStateDirs, createTestRecorder, rows, summaryTurn } from "./session-summary.test-support"
 
 // Protocol contract (plan todo 8): a window is claimed only when its heartbeat is older than 5 minutes AND
@@ -153,9 +155,9 @@ describe("session_summary recovery hygiene", () => {
     expect(later.published.map(({ properties }) => properties.dropped_events)).toEqual([0])
   })
 
-  test("#given queued records from an opted-out scope #when an opted-out session purges the queue #then they are deleted at rest and opted-in ones stay", () => {
+  test("#given a dead owner's queued records from an opted-out scope #when an opted-out session purges the queue #then they are deleted at rest and opted-in ones stay", () => {
     const dir = stateDirs.make()
-    const storage = createTestRecorder({ dir, startAt: T0 }).storage
+    const storage = createTestRecorder({ dir, pid: 191_919, startAt: T0 }).storage
     const pending = (uuid: string, cwd: string) => ({
       consent: "enabled" as const, scope: { cwd }, uuid, sessionHash: `h-${cwd}`, owner: storage.owner, createdAt: T0, properties: { turns: 1 },
     })
@@ -168,7 +170,8 @@ describe("session_summary recovery hygiene", () => {
     storage.writeWindow("w-off", window("/off"))
     storage.writeWindow("w-on", window("/on"))
 
-    purgeUnconsentedQueue(dir, (scope) => scope.cwd !== "/off")
+    const purger = createSummaryStorage({ stateDir: dir, owner: currentProcessOwner(), isPidAlive: (pid) => pid === process.pid })
+    purgeOptedOutQueue({ storage: withRecoveryOps(purger), isScopeConsented: (scope) => scope.cwd !== "/off" })
 
     expect(storage.pendingUuids()).toEqual(["0395eae0-1111-4222-8333-944455556662"])
     expect(storage.windowKeys()).toEqual(["w-on"])
@@ -198,10 +201,11 @@ function readWindow(recorder: ReturnType<typeof createTestRecorder>, sessionHash
 }
 
 // A long outage must not grow the write-ahead spool without bound or hammer the endpoint (#10225 review).
+// The events carry a cwd: a record with no stored cwd fails closed and is dropped unsent (#10234).
 const queuePending = (storage: SummaryStorage, count: number, owner = { pid: 999_100, bootId: "gone" }): string[] =>
   Array.from({ length: count }, (_, index) => {
     const uuid = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`
-    storage.writePending({ consent: "enabled", scope: {}, uuid, sessionHash: "s", owner, createdAt: T0 + index, properties: { turns: 1 } })
+    storage.writePending({ consent: "enabled", scope: { cwd: "/repo" }, uuid, sessionHash: "s", owner, createdAt: T0 + index, properties: { turns: 1 } })
     return uuid
   })
 
