@@ -4,6 +4,7 @@ import { basename, dirname, join, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import type { RpcRunnerSpec } from "../types"
+import { rpcChildAncestry } from "../child-ancestry"
 import { asSenpiThinkingLevel } from "../../senpi/thinking-level"
 import { MEMBER_EXTENSION_BUNDLE_NAME, MEMBER_PROCESS_ENV_NAMES, WORKPOOL_PROCESS_ENV_NAMES } from "../../team/member-extension/identity"
 import {
@@ -31,6 +32,8 @@ export const OMO_SENPI_TASK_DEPTH = "OMO_SENPI_TASK_DEPTH"
 export const OMO_SENPI_TASK_ROOT_SESSION_ID = "OMO_SENPI_TASK_ROOT_SESSION_ID"
 export const OMO_SENPI_TASK_TRACEPARENT = "OMO_SENPI_TASK_TRACEPARENT"
 const RPC_ENTRY_SPECIFIER = "@code-yeongyu/senpi/rpc-entry"
+// Enable only with the engine pin containing senpi#4205; 2026.10.23-1 rejects this CLI flag.
+const PINNED_ENGINE_SUPPORTS_SPAWNED_BY_CLI = false
 
 export type RpcSpawnSpec = RpcRunnerSpec & {
   readonly memberEnv?: Readonly<Record<string, string>>
@@ -44,6 +47,7 @@ export type RpcSpawnDescriptor = {
 }
 
 export type RpcSpawnRuntime = {
+  readonly supportsSpawnedBy?: boolean
   readonly isBunBinary: boolean
   // The running process embeds the engine (a compiled omo or senpi binary), so it IS the child engine.
   readonly isCompiledEngine?: boolean
@@ -186,16 +190,19 @@ export function buildRpcSpawn(spec: RpcSpawnSpec, runtime?: Partial<RpcSpawnRunt
   const profile = buildChildProfile(spec, resolved)
   const env = profile.env
   const childArgs = buildChildArgs(profile.spec)
+  const spawnedBy = rpcChildAncestry(spec)
+  const ancestryArgs = (resolved.supportsSpawnedBy ?? PINNED_ENGINE_SUPPORTS_SPAWNED_BY_CLI) && spawnedBy !== undefined
+    ? ["--spawned-by", JSON.stringify(spawnedBy)] : []
   const launcher = resolveSenpiLauncher(resolved)
   if (launcher !== null) {
     return {
       command: launcher.command,
-      args: [...launcher.prefixArgs, "--mode", "rpc", ...childArgs],
+      args: [...launcher.prefixArgs, "--mode", "rpc", ...childArgs, ...ancestryArgs],
       cwd: spec.cwd,
       env,
     }
   }
-  return { command: resolved.execPath, args: [resolved.resolveRpcEntry(), ...childArgs], cwd: spec.cwd, env }
+  return { command: resolved.execPath, args: [resolved.resolveRpcEntry(), ...childArgs, ...ancestryArgs], cwd: spec.cwd, env }
 }
 
 export function buildRpcModelCatalogSpawn(
