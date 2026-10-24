@@ -97,7 +97,7 @@ Opinionated defaults, adjustable if you insist. Your settings live in `~/.omo/om
 
 ## Reporting a bug
 
-The fastest way to report a bug is `/bug` inside a session (available in the omo app). It shows you the whole report before anything is sent, then sends it to the OmO team: the recent engine log, your environment and config with secrets blanked, the session transcript, and identity lines - your device name and install id, plus your account details (email, account and device id, plan) when you report from the desktop app, so we can reply. Everything but the identity lines goes through the upload redactor. GitHub issues stay open for anyone who cannot use the in-app report.
+The fastest way to report a bug is `/bug` inside a session (available in the omo app). It lists what it includes and lets you see the exact report before you send it, then sends it to the OmO team: the recent engine log, your environment and config with secrets blanked, the session transcript, and identity lines - your device name and, when telemetry is on, an install id and a session hash, plus your account details (email, name, account, user and device ids, plan, device name) when you report from the desktop app, so we can reply. Everything but the identity lines goes through the upload redactor. GitHub issues stay open for anyone who cannot use the in-app report.
 
 ## Reviews
 
