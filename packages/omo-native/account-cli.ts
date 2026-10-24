@@ -54,7 +54,9 @@ const parseInput = (text: string): Credentials | null => {
   try {
     const parsed = credentialSchema.safeParse(JSON.parse(text))
     if (!parsed.success) return null
-    const { refreshState: _ignored, ...credentials } = parsed.data
+    // Local recovery markers are not fresh-adoption input. Keep service owner/proof fields
+    // for the protocol-2 adoption adapter; they do not activate protocol 2 on their own.
+    const { refreshState: _state, refreshAttempt: _attempt, ...credentials } = parsed.data
     return credentials
   } catch {
     return null
@@ -110,7 +112,7 @@ async function token(dependencies: AccountCommandDependencies): Promise<number> 
     dependencies.error(error instanceof Error ? error.message : "omo account token: the refresh failed")
     // A non-terminal error with the item gone means another process signed out meanwhile.
     if (after === null) return reply(dependencies, { signedIn: false }, ACCOUNT_EXIT.signedOut)
-    if (after.refreshState === "uncertain") return ACCOUNT_EXIT.uncertain
+    if (after.refreshState === "uncertain") return reply(dependencies, { ended: { code: "refresh_recovery_expired" } }, ACCOUNT_EXIT.ended)
     return ACCOUNT_EXIT.failed
   }
 }
