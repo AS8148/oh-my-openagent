@@ -31,10 +31,12 @@ omo-senpi plugin payload produced by `bun run build:omo-native` (gitignored, nev
     resident wrapper. Windows, missing execve and thrown execve retain async `runChild`. The fallback forwards `SIGTERM`/`SIGHUP`, waits up to
     `OMO_SIGNAL_GRACE_MS` (default 10s), then re-raises an ignored signal. It waits for `SIGINT`
     without forwarding it twice. Never use `spawnSync` for these long-lived handoffs.
-  - `bun-bin-shim.js` — `ensureBunBinShim`: keeps the user-facing bun-global bin an sh shim that
-    execs bun directly (POSIX only, fail-open). Every launch repairs it, under node or bun, and so
-    does postinstall (`bin/senpi-patch.mjs`), which bun runs on itself right after `bun add -g`
-    relinks the bin when node is not on PATH (#9293)
+  - `bun-bin-shim.js` — `ensureBunBinShim`: prepares a shell/JS prelude in the package-owned
+    entrypoint for direct Bun startup (POSIX Bun-global installs only, fail-open). Launch and
+    trusted postinstall prepare it, preserving Bun-only startup (#9293). Both global bin paths
+    remain Bun-owned symlinks; only marked legacy wrappers for this install are restored to links
+    (#11019). Windows/npm keep the shipped Node shebang. A first manual upgrade from an older
+    shim can fail before the new code runs; one new-version launch migrates it for the next update.
   - `doctor.js` — diagnostics plus stale-orphan detection: `classifyEngineProcesses` splits live
     engines into stale (interactive, PPID 1), attached and managed (`--mode`), and
     `reapStaleEngines` terminates ONLY explicitly named pids that are still stale at request time.
