@@ -142,35 +142,38 @@ export function createProjectMemoryScope(options: ProjectMemoryNudgeOptions): Pr
 
     const cwd = sessionCwd(eventCtx)
     const scope = scopeFor(sessionId, cwd, context)
-    const project = await scope.resolver.forPath(touchedPath)
+    const resolver = scope.resolver
+    const project = await resolver.forPath(touchedPath)
     if (project === undefined || project.identity.id === context.identity) return undefined
+    const projectId = project.identity.id
     const live = () => sessions.get(sessionId) === scope
-    await grantProjectMemoryRead(context, project.identity.paths.repo, { realPath: scope.resolver.realPath, stillLive: live })
+    await grantProjectMemoryRead(context, project.identity.paths.repo, { realPath: resolver.realPath, stillLive: live })
     if (!live()) return undefined
-    const index = scope.touched.findIndex((entry) => entry.identity.id === project.identity.id)
-    if (index >= 0) scope.touched.splice(index, 1)
-    scope.touched.unshift(project)
-    const within = await projectRelativePath(scope.resolver, project.projectDir, resolve(cwd, touchedPath))
-    if (within !== undefined) scope.touchedPaths.set(project.identity.id, within)
+    const touched = scope.touched
+    const index = touched.findIndex((entry) => entry.identity.id === projectId)
+    if (index >= 0) touched.splice(index, 1)
+    touched.unshift(project)
+    const within = await projectRelativePath(resolver, project.projectDir, resolve(cwd, touchedPath))
+    if (within !== undefined) scope.touchedPaths.set(projectId, within)
 
-    if (!switches.nudge || scope.nudged.has(project.identity.id)) return undefined
+    const nudged = scope.nudged
+    if (!switches.nudge || nudged.has(projectId)) return undefined
     // Reserve before I/O; the token distinguishes this read from one started after compaction.
     const reservation = Symbol()
-    scope.nudged.set(project.identity.id, reservation)
+    nudged.set(projectId, reservation)
     let notes: readonly RecallDocument[]
     try {
       notes = await notesOf(project)
     } catch (error) {
-      if (scope.nudged.get(project.identity.id) === reservation) scope.nudged.delete(project.identity.id)
+      if (nudged.get(projectId) === reservation) nudged.delete(projectId)
       // Advice only: a project repo that cannot be read leaves the tool result untouched and is retried on the next touch.
-      options.logger?.warn("omo-senpi project memory nudge skipped", {
+      options.logger?.warn("project memory nudge skipped", {
         project: project.projectDir,
         error: error instanceof Error ? error.message : String(error),
       })
       return undefined
     }
-    if (!live() || scope.nudged.get(project.identity.id) !== reservation) return undefined
-    if (notes.length === 0) return undefined
+    if (!live() || nudged.get(projectId) !== reservation || notes.length === 0) return undefined
     const content = isRecord(payload) && Array.isArray(payload.content) ? payload.content : []
     return { content: [...content, { type: "text", text: formatProjectMemoryNudge(project, notes), audience: "model" }] }
   }
