@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Nested team members retain the original session tree.** A child session leading a team now gives each member its own session as parent and the original tree root, with depth increasing from the lead. Persisted member ancestry is preserved when rebuilding a respawn. ([#PENDING](https://github.com/code-yeongyu/oh-my-openagent/pull/PENDING))
+**Nested team members retain the original session tree.** A child session leading a team now gives each member its own session as parent and the original tree root, with depth increasing from the lead. Persisted member ancestry is preserved when rebuilding a respawn. ([#11229](https://github.com/code-yeongyu/oh-my-openagent/pull/11229))
 
 **Nested in-process tasks retain their original session tree.** A child's own tasks now record the tree root and increasing depth, so nested delegation obeys `max_depth` instead of restarting at depth 1. The root session's own view now also covers its nested in-process descendants: the footer, `/tasks`, the default `task_output` list, and `task_send` and cancel. Process-mode descendants already appeared there. ([#11226](https://github.com/code-yeongyu/oh-my-openagent/pull/11226))
 
