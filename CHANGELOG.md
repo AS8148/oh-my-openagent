@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Memory notices survive a directory-sync failure after publication.** Soul and agreement watermarks still flush before atomic rename and attempt directory sync, but a sync error after publication is logged without discarding that turn's announcement. Failed writes clean up their temporary files, repeated agreement ids use set comparison, and HEAD reads defer to git for worktree configuration. Part of [#10707](https://github.com/code-yeongyu/oh-my-openagent/issues/10707).
+**Memory notices survive a directory-sync failure after publication.** Soul and agreement watermarks still flush before atomic rename and attempt directory sync, but a sync error after publication is logged without discarding that turn's announcement. Failed writes clean up their temporary files, repeated agreement ids use set comparison, and HEAD reads defer to git for worktree configuration. ([#11234](https://github.com/code-yeongyu/oh-my-openagent/pull/11234), part of [#10707](https://github.com/code-yeongyu/oh-my-openagent/issues/10707))
 
 **Unchanged memory notices no longer yield a warm prompt to cold recall.** Soul and agreement notices read their small atomic watermarks directly and skip lock acquisition only when valid state confirms nothing needs announcing or updating. Missing, malformed, or unreadable state is rechecked under the identity lock. Writers publish through unique, exclusively created temporary files, flush them before rename, and sync the directory where supported. ([#11215](https://github.com/code-yeongyu/oh-my-openagent/pull/11215), part of [#10707](https://github.com/code-yeongyu/oh-my-openagent/issues/10707))
 
