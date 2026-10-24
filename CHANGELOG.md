@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **ulw-research ships a fact ledger, a fidelity state file and a claim index for research reports.** They give each research run a machine-readable record of its facts and verified claims; nothing in the CLI uses them yet. ([#11046](https://github.com/code-yeongyu/oh-my-openagent/pull/11046), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009); batch [#11148](https://github.com/code-yeongyu/oh-my-openagent/pull/11148))
 
+**Computer-use cancellation retains engine crash diagnostics.** Cancelled and timed-out calls keep their error code and carry the engine exit diagnostic as their cause. Capability-query permission failures remain structured tool results, hard engine diagnostics survive unrelated successful replies, and legacy launch refusals now share the structured record's exit-code and UTF-8 size rules. ([#11150](https://github.com/code-yeongyu/oh-my-openagent/pull/11150)) Follow-up to [#11086](https://github.com/code-yeongyu/oh-my-openagent/pull/11086), part of [#11073](https://github.com/code-yeongyu/oh-my-openagent/issues/11073).
+
 **Windows dori sidecar paths pass the extension's path checks.** The omo-senpi tests accept the Windows form of the sidecar path, so the Windows suite no longer fails on a correct path. ([#11111](https://github.com/code-yeongyu/oh-my-openagent/pull/11111), fixes [#11110](https://github.com/code-yeongyu/oh-my-openagent/issues/11110))
 
 **Child-task, workflow and workpool wake sources report kind `children`.** ([#11114](https://github.com/code-yeongyu/oh-my-openagent/pull/11114), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))
