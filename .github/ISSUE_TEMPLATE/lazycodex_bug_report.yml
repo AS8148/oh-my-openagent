@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        **If you hit this in the omo app, run `/bug` inside a session instead.** It sends the report with your recent engine logs attached. This form stays open for LazyCodex and for anyone who cannot use the in-app report.
+        **If you hit this in the omo app, run `/bug` inside a session instead.** It shows you the report first, then sends the redacted engine log, environment, config with secrets blanked and session transcript, plus identity lines - device name and install id, and your account details (email, account and device id, plan) from the desktop app - so we can reply. This form stays open for LazyCodex and for anyone who cannot use the in-app report.
 
   - type: markdown
     attributes:
