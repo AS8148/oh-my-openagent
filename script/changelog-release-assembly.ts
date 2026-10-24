@@ -7,6 +7,7 @@
  * own PR gets one, so a grouped entry still names the PR that made it.
  */
 import { assembleUnreleasedBody } from "./changelog-gate-rules.ts"
+import { blocksOf, linkEntry, scanFences } from "./changelog-notes-markdown.ts"
 
 const PULL_URL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
 const SECTION = /^### (.+?)\s*$/
@@ -21,51 +22,30 @@ export function parseNotes(text: string): Notes {
   const paragraphs: string[] = []
   const sections = new Map<string, string[]>()
   let current: string[] | null = null
-  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
-    const heading = SECTION.exec(line)?.[1]
+  for (const { text: line, fenced } of scanFences(text)) {
+    const heading = fenced ? undefined : SECTION.exec(line)?.[1]
     if (heading !== undefined) {
       current = sections.get(heading) ?? []
       sections.set(heading, current)
     } else if (current === null) {
       paragraphs.push(line)
-    } else if (line.startsWith("- ")) {
+    } else if (!fenced && line.startsWith("- ")) {
       current.push(line)
-    } else if (line.trim() !== "") {
+    } else if (fenced || line.trim() !== "") {
       const last = current.pop()
-      if (last === undefined || !/^\s/.test(line)) throw new Error(`text under a ### heading must be a "- " bullet or an indented continuation of one: ${line}`)
+      const blankInFence = fenced && line.trim() === ""
+      if (last === undefined || (!blankInFence && !/^\s/.test(line))) throw new Error(`text under a ### heading must be a "- " bullet or an indented continuation of one: ${line}`)
       current.push(`${last}\n${line}`)
     }
   }
   return { paragraphs: paragraphs.join("\n").trim(), sections }
 }
 
-const FENCE = /^\s*(?:```|~~~)/
+const linkBullet = (entry: string, pr: number): string => linkEntry(entry, pr, PULL_URL)
 
-/** An entry that already links a PR (a folded car's) or holds a code fence is left exactly as written. */
-const linkBullet = (bullet: string, pr: number): string =>
-  /\/pull\/\d+\)/.test(bullet) || bullet.split("\n").some((line) => FENCE.test(line)) ? bullet : `${bullet} ([#${pr}](${PULL_URL}/${pr}))`
-
-/** Paragraphs split on blank lines outside code fences, so a fenced block stays one unit. */
-function paragraphsOf(text: string): string[] {
-  const paragraphs: string[] = []
-  let current: string[] = []
-  let fenced = false
-  for (const line of text.split("\n")) {
-    if (FENCE.test(line)) fenced = !fenced
-    if (!fenced && line.trim() === "") {
-      if (current.length > 0) paragraphs.push(current.join("\n"))
-      current = []
-    } else {
-      current.push(line)
-    }
-  }
-  if (current.length > 0) paragraphs.push(current.join("\n"))
-  return paragraphs
-}
-
-/** Every prose paragraph names the PR that made it: one without a PR link gets one at its end. */
+/** Every paragraph names the PR that made it (code fences untouched; see changelog-notes-markdown.ts). */
 const linkParagraphs = (text: string, pr: number): string =>
-  paragraphsOf(text).map((paragraph) => linkBullet(paragraph.trim(), pr)).join("\n\n")
+  blocksOf(text).map((paragraph) => linkBullet(paragraph.trim(), pr)).join("\n\n")
 
 /** One notes text from several, in order: their paragraphs first, then one group per section name, first seen first. */
 export function mergeNotes(texts: readonly string[]): string {

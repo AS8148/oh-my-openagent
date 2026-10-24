@@ -5,6 +5,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { markerLine, splitFragment } from "./package-log-blocks.ts"
 
+// Each case spawns git and bun several times (about 4 s alone), so it gets a budget above bun's 5 s default.
+const SPAWN_TIMEOUT_MS = 30_000
 const SCRIPT_DIR = import.meta.dir
 const LOG = "packages/omo-senpi/changes.md"
 const ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" }
@@ -46,7 +48,7 @@ describe("the gate runner's release decision (#10682 review HIGH)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }, SPAWN_TIMEOUT_MS)
 })
 
 describe("stamp-release-changelog.ts with package-log blocks", () => {
@@ -66,7 +68,7 @@ describe("stamp-release-changelog.ts with package-log blocks", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }, SPAWN_TIMEOUT_MS)
 
   test("a release whose fragments carry no paragraph is refused and writes nothing", () => {
     const dir = scratch()
@@ -79,7 +81,7 @@ describe("stamp-release-changelog.ts with package-log blocks", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }, SPAWN_TIMEOUT_MS)
 })
 
 describe("changelog-fragments-cli.ts from-diff on package logs", () => {
@@ -100,7 +102,7 @@ describe("changelog-fragments-cli.ts from-diff on package logs", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
-  })
+  }, SPAWN_TIMEOUT_MS)
 })
 
 test("block targets with dot segments or escapes are refused (#10682 review LOW 4)", () => {

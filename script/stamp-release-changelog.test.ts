@@ -12,7 +12,7 @@ const published = "## [5.1.44] - 2026-10-23\n\nPublished payload.\n"
 const scriptFiles = [
   "stamp-release-changelog.ts", "changelog-release-notes.ts", "changelog-fragments.ts",
   "changelog-gate-rules.ts", "check-pr-changelog.ts", "changelog-gate.config.ts", "release-pr-marker.ts",
-  "package-log-blocks.ts", "package-log-gate.ts", "changelog-shipping-policy.mjs", "changelog-release-assembly.ts",
+  "package-log-blocks.ts", "package-log-gate.ts", "changelog-shipping-policy.mjs", "changelog-release-assembly.ts", "changelog-notes-markdown.ts",
 ]
 const PULL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
 
@@ -118,7 +118,7 @@ describe("release stamp CLI", () => {
     expect(readdirSync(join(root, "changes/unreleased"))).toEqual([])
   })
 
-  test("a fenced code block is never split or linked, and a bullet that already links a PR gets no second link", () => {
+  test("a fenced code block is never split or linked, and a folded car's bullet names both the car and the batch", () => {
     // given: a paragraph followed by a code block with a blank line inside it, and a folded car's bullet (#10477 review r2)
     const { root, stamp } = fixture("", {
       "8.md": "**Thing.** Use it:\n\n```sh\nfoo\n\nbar\n```\n",
@@ -129,7 +129,7 @@ describe("release stamp CLI", () => {
     // then
     expect(result.status, result.stderr).toBe(0)
     expect(extractReleaseNotes(readFileSync(join(root, "CHANGELOG.md"), "utf8"), "5.1.45")).toBe(
-      `**Thing.** Use it: ([#8](${PULL}/8))\n\n\`\`\`sh\nfoo\n\nbar\n\`\`\`\n\n### Fixed\n\n- Car fix. ([#21](${PULL}/21))`,
+      `**Thing.** Use it: ([#8](${PULL}/8))\n\n\`\`\`sh\nfoo\n\nbar\n\`\`\`\n\n### Fixed\n\n- Car fix. ([#21](${PULL}/21)) ([#30](${PULL}/30))`,
     )
   })
 
