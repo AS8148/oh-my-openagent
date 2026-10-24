@@ -1,4 +1,4 @@
-// fact-commands-verify.mjs - `fact verify` and the fidelity delivery barrier of `outcome verify`.
+// fact-commands-verify.mjs - `fact verify` and the Markdown projection it checks.
 //
 // fact verify runs the deterministic fidelity gate over one filled HTML or Markdown edition and
 // writes a record (default $SESSION_DIR/fidelity-defects.json) carrying the artifact's sha256. It
@@ -7,11 +7,8 @@
 // escaped HTML projection (same line numbers) and checked with its fill map, which is the only
 // record of where its values sit; LaTeX is verified through its Markdown source.
 //
-// fidelityProblems applies the gate's registry policy independently of the repair budget.
-// HTML/PDF/DOCX need a gate record or an explicitly logged not_run reason, even without a ledger.
-// That logged exemption covers deliveries this harness never gated: once a ledger or a fidelity
-// record exists for the session, the barrier refuses the unverified edition regardless of it.
-// Recorded editions must match their source bytes (`edition_unverified`).
+// The delivery barrier that reads these records (and every other fidelity record) is
+// fidelity-records.mjs.
 
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
@@ -20,14 +17,14 @@ import { dirname, join, resolve } from "node:path"
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
 import { countDefects } from "./contracts.mjs"
 import { recompute } from "./fact-derive.mjs"
-import { LEDGER_FILENAME, readLedger } from "./fact-ledger.mjs"
+import { readLedger } from "./fact-ledger.mjs"
 import { validateLedger } from "./fact-ledger-schema.mjs"
-import { blocksDelivery, checkFidelity, deliveryBlockReason } from "./gates-fidelity.mjs"
+import { FIDELITY_RECORD } from "./fidelity-records.mjs"
+import { blocksDelivery, checkFidelity } from "./gates-fidelity.mjs"
 import { parseMarkdown } from "./md-lite.mjs"
 import { escapeHtml, parseRenderedQuote, renderQuote, renderValueHtml } from "./placeholder.mjs"
 import { sessionDirOf } from "./source-commands.mjs"
 
-export const FIDELITY_RECORD = "fidelity-defects.json"
 
 const sha256Of = (content) => createHash("sha256").update(content).digest("hex")
 
@@ -63,8 +60,8 @@ function entryHtml(text, entry, rows) {
 	const body = text.slice(entry.start, entry.end)
 	if (body !== entry.rendered) return null
 	const row = rows.get(entry.fact_id)
-	if (entry.translates) return `<span data-translates="${entry.translates}">${projectMarkdownInline(body.replace(/^<!--[\s\S]*?-->\s*/u, ""))}</span>`
-	if (!row) return `<data data-fact="${entry.fact_id}">${escapeHtml(body)}</data>`
+	if (entry.translates) return `<span data-translates="${escapeHtml(entry.translates)}">${projectMarkdownInline(body.replace(/^<!--[\s\S]*?-->\s*/u, ""))}</span>`
+	if (!row) return `<data data-fact="${escapeHtml(entry.fact_id)}">${escapeHtml(body)}</data>`
 	const quoted = row.kind === "quote" ? parseRenderedQuote(body) : null
 	if (quoted) return renderQuote(row, entry.selector ?? "full", quoted.text, "html")
 	return row.kind === "quote" ? null : renderValueHtml(row, body)
@@ -120,7 +117,7 @@ export function markdownAsHtml(text, entries, ledger) {
 		else {
 			const tag = rule.tag ?? `h${block.level}`
 			const replaced = block.kind === "blockquote" ? sorted.find((entry) => entry.replaced !== undefined && entry.start <= block.start && entry.end >= block.end) : undefined
-			const attrs = replaced ? ` data-fact="${replaced.fact_id}" data-replaced="${escapeHtml(replaced.replaced)}"` : ""
+			const attrs = replaced ? ` data-fact="${escapeHtml(replaced.fact_id)}" data-replaced="${escapeHtml(replaced.replaced)}"` : ""
 			html += `<${tag}${attrs}>${inner(block.start, block.end)}</${tag}>`
 		}
 	}
@@ -187,50 +184,4 @@ export function runFactVerify(args) {
 	const out = resolve(flags.out ?? join(sessionDir, FIDELITY_RECORD))
 	writeJsonAtomic(out, record)
 	return { json: { ...record, out }, summary: `fact verify: ${status.toUpperCase()} - ${counts.blocker} blocker, ${counts.major} major, ${counts.minor} minor`, exitCode }
-}
-
-function unresolvedIn(record) {
-	const defects = Array.isArray(record) ? record : record?.defects
-	if (!Array.isArray(defects)) throw new CliError("a fidelity record must be a defect array or an object with a defects array")
-	return [...new Set(defects.filter(blocksDelivery).map((defect) => defect?.code))].sort()
-}
-
-const unresolved = (format, codes, path) => ({ code: "fidelity_unresolved", format, codes, message: codes.map((code) => deliveryBlockReason({ code })).join("; "), path })
-
-/** Barrier problems for `outcome verify` and `outcome finish`; empty when nothing blocks delivery. */
-export function fidelityProblems(sessionDir, manifest) {
-	const problems = []
-	const sessionRecord = join(sessionDir, FIDELITY_RECORD)
-	if (existsSync(sessionRecord)) {
-		const codes = unresolvedIn(readJsonFile(sessionRecord))
-		if (codes.length > 0) problems.push(unresolved(null, codes, sessionRecord))
-	}
-	const hasFidelity = existsSync(join(sessionDir, LEDGER_FILENAME)) || existsSync(sessionRecord)
-	const lastFidelity = manifest.gateHistory?.findLast((entry) => entry.gate === "fidelity")
-	const exempt = manifest.gates.fidelity === "not_run" && lastFidelity?.status === "not_run" && lastFidelity.reason?.trim()
-	for (const row of manifest.deliverables) {
-		if (row.status !== "delivered") continue
-		if (!row.verifiedBy && exempt && !hasFidelity) continue
-		if (!hasFidelity && !row.verifiedBy) {
-			if (["html", "pdf", "docx"].includes(row.format)) problems.push({ code: "edition_unverified", format: row.format, message: `${row.format}: fidelity gate not run`, path: row.path })
-			continue
-		}
-		if (!row.path) continue
-		const subject = row.renderedFrom ?? row.path
-		const unverified = (message) => problems.push({ code: "edition_unverified", format: row.format, message: `${row.format}: ${message}`, path: subject })
-		if (!row.verifiedBy) {
-			unverified(`fidelity gate not run; run fact verify on ${subject} and set it with --verified-by`)
-			continue
-		}
-		if (!existsSync(row.verifiedBy)) {
-			unverified(`verify record ${row.verifiedBy} is missing`)
-			continue
-		}
-		const record = readJsonFile(row.verifiedBy)
-		const actual = existsSync(subject) ? sha256Of(readFileSync(subject)) : null
-		if (record.artifact_sha256 !== actual) unverified(`verify record ${row.verifiedBy} is for other bytes than ${subject}`)
-		const codes = resolve(row.verifiedBy) === sessionRecord ? [] : unresolvedIn(record)
-		if (codes.length > 0) problems.push(unresolved(row.format, codes, row.verifiedBy))
-	}
-	return problems
 }

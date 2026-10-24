@@ -3,12 +3,14 @@
 // reader lane gets and nothing else (with --changed-since, only the pairs whose sentence polish
 // rewrote); it honours the brief's `meaning check` field and writes
 // `{ skipped: true }` when it is off. fact meaning-check ingests the readers' verdict files
-// (meaning-check.mjs), writes fidelity-meaning-defects.json, and appends one calibration line per
-// flagged pair to fidelity-calibration.jsonl (header with the promotion criterion on first write;
-// the same run id never appends twice). Neither command calls a model or the network.
+// (meaning-check.mjs), writes fidelity-meaning-defects.json, and records the run in
+// fidelity-calibration.jsonl: a header with the promotion criterion on first write, then per run
+// one run line plus one line per flagged pair. The run id hashes the inputs only, so a rerun or a
+// --dispute rerun of the same inputs replaces that run's lines in place (disputes carry forward)
+// instead of counting a second run. Neither command calls a model or the network.
 
 import { createHash } from "node:crypto"
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
 import { CliError, parseArgs, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
@@ -16,12 +18,12 @@ import { countDefects } from "./contracts.mjs"
 import { ledgerFrom, markdownAsHtml, readEdition, sessionOf } from "./fact-commands-verify.mjs"
 import { pairsChangedSince } from "./fact-commands-polish.mjs"
 import { extractPairs, PAIR_KINDS } from "./fact-pairs.mjs"
-import { meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
+import { FIDELITY_INCOMPLETE, meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
+import { MEANING_RECORD } from "./fidelity-records.mjs"
 import { blocksDelivery } from "./gates-fidelity.mjs"
 import { ingestVerdicts, unverifiedDefects, VERDICT_SCHEMA } from "./meaning-check.mjs"
 
 export const PAIRS_FILE = "pairs.json"
-export const MEANING_RECORD = "fidelity-meaning-defects.json"
 export const CALIBRATION_FILE = "fidelity-calibration.jsonl"
 /** Starting values, recorded in the calibration log header; changed only with evidence. */
 export const PROMOTION = Object.freeze({ code: "meaning_drift_confirmed", to: "integrity", min_runs: 20, max_disputed_to_confirmed: 0.1, false_block_window: 20, max_report_false_blocks_in_window: 2 })
@@ -73,19 +75,25 @@ function runPairs(args) {
 	return { json: { command: "fact pairs", status: "pass", exitCode: 0, data: { out, ...record, pairs: undefined } }, summary, exitCode: 0 }
 }
 
+/** Every line of the log after the header, in file order; a corrupt line is a usage error naming path:line. */
 function calibrationRows(path) {
 	if (!existsSync(path)) return []
-	return readFileSync(path, "utf8")
-		.split("\n")
-		.filter((line) => line.trim() !== "")
-		.map((line) => JSON.parse(line))
-		.filter((row) => row.header !== true)
+	const rows = []
+	for (const [index, line] of readFileSync(path, "utf8").split("\n").entries()) {
+		if (line.trim() === "") continue
+		try {
+			rows.push(JSON.parse(line))
+		} catch (error) {
+			throw new CliError(`${path}:${index + 1}: corrupt calibration log line (${error.message}); repair or move the file`)
+		}
+	}
+	return rows.filter((row) => row.header !== true)
 }
 
 /** The promotion criterion evaluated over the log: runs, disputed-to-confirmed, report-level false blocks. */
 export function promotionEligibility(rows) {
 	const runs = [...new Set(rows.map((row) => row.run_id))]
-	const confirmed = rows.filter((row) => row.confirmed)
+	const confirmed = rows.filter((row) => row.run !== true && row.confirmed)
 	const disputed = confirmed.filter((row) => row.disputed).length
 	const ratio = confirmed.length === 0 ? null : disputed / confirmed.length
 	const falseBlocks = runs.slice(-PROMOTION.false_block_window).filter((run) => {
@@ -96,13 +104,35 @@ export function promotionEligibility(rows) {
 	return { runs: runs.length, confirmed: confirmed.length, disputed_confirmed: disputed, disputed_to_confirmed: ratio, report_false_blocks_in_window: falseBlocks, eligible }
 }
 
-function appendCalibration(path, lines, runId, pairsSha) {
+/**
+ * Writes this run's lines: one run line (so a run with no flagged pair still counts) and one line per
+ * flagged pair. A run id already in the log is replaced in place, keeping its position in the false
+ * block window and any earlier dispute on a pair the new lines do not dispute.
+ */
+function recordCalibration(path, lines, runId, pairsSha) {
 	const before = calibrationRows(path)
-	if (before.some((row) => row.run_id === runId)) return { appended: 0, rows: before }
-	if (!existsSync(path)) writeFileSync(path, `${JSON.stringify({ header: true, schemaVersion: 1, promotion: PROMOTION, note: "starting values; change them only with evidence" })}\n`)
-	const rows = lines.map((line) => ({ ...JSON.parse(line), run_id: runId, pairs_sha256: pairsSha }))
-	if (rows.length > 0) appendFileSync(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`)
-	return { appended: rows.length, rows: [...before, ...rows] }
+	const previous = before.filter((row) => row.run_id === runId)
+	const disputes = new Map(previous.filter((row) => row.disputed).map((row) => [row.pair_id, row.reason]))
+	const pairRows = lines.map((line) => {
+		const row = { ...JSON.parse(line), run_id: runId, pairs_sha256: pairsSha }
+		return !row.disputed && disputes.has(row.pair_id) ? { ...row, disputed: true, reason: disputes.get(row.pair_id) } : row
+	})
+	const rows = [{ run: true, run_id: runId, pairs_sha256: pairsSha, flagged: pairRows.length }, ...pairRows]
+	const at = previous.length === 0 ? before.length : before.indexOf(previous[0])
+	const after = [...before.slice(0, at).filter((row) => row.run_id !== runId), ...rows, ...before.slice(at).filter((row) => row.run_id !== runId)]
+	const header = { header: true, schemaVersion: 1, promotion: PROMOTION, note: "starting values; change them only with evidence" }
+	const temp = `${path}.${process.pid}.tmp`
+	writeFileSync(temp, `${[header, ...after].map((row) => JSON.stringify(row)).join("\n")}\n`)
+	renameSync(temp, path)
+	return { written: pairRows.length, replaced: previous.length > 0, rows: after }
+}
+
+/** A `{ skipped: true }` pairs file is accepted only when the locked brief turns the meaning check off. */
+function skippedRefusal(flags, session) {
+	const brief = briefState(flags, session)
+	if (!brief.locked) return { error: FIDELITY_INCOMPLETE, message: `${brief.path} has no locked ## Fidelity block, so a skipped meaning check cannot be accepted` }
+	if (!brief.off) return { error: "meaning_check_required", message: `${flags.pairs} says skipped but ${brief.path} has meaning check on; rerun fact pairs` }
+	return null
 }
 
 function runMeaningCheck(args) {
@@ -112,7 +142,11 @@ function runMeaningCheck(args) {
 	const session = sessionOf(flags)
 	const pairsText = readFileSync(flags.pairs, "utf8")
 	const pairsDoc = readJsonFile(flags.pairs)
-	if (pairsDoc?.skipped === true) return { json: { command: "fact meaning-check", status: "skipped", exitCode: 0, defects: [] }, summary: JSON.stringify({ command: "fact meaning-check", status: "skipped" }), exitCode: 0 }
+	if (pairsDoc?.skipped === true) {
+		const refusal = skippedRefusal(flags, session)
+		if (refusal !== null) return { json: { command: "fact meaning-check", status: "fail", exitCode: 1, ...refusal }, summary: `fact meaning-check: ${refusal.message}`, exitCode: 1 }
+		return { json: { command: "fact meaning-check", status: "skipped", exitCode: 0, defects: [] }, summary: JSON.stringify({ command: "fact meaning-check", status: "skipped" }), exitCode: 0 }
+	}
 	for (const file of flags.verdicts) readJsonFile(file)
 	const verdictTexts = flags.verdicts.map((file) => readFileSync(file, "utf8"))
 	const dispute = flags.dispute === undefined ? undefined : { pair_id: flags.dispute, reason: args.required("reason") }
@@ -124,14 +158,14 @@ function runMeaningCheck(args) {
 	}
 	const out = resolve(flags.out ?? inSession(session, MEANING_RECORD, "--out"))
 	const calibration = resolve(flags.calibration ?? join(session ?? dirname(out), CALIBRATION_FILE))
-	const runId = flags["run-id"] ?? sha256([pairsText, ...verdictTexts, JSON.stringify(dispute ?? null)].join("\0")).slice(0, 16)
+	const runId = flags["run-id"] ?? sha256([pairsText, ...verdictTexts].join("\0")).slice(0, 16)
 	const pairsSha = pairsDoc.pairs_sha256 ?? sha256(pairsText)
-	const log = appendCalibration(calibration, result.calibrationLines, runId, pairsSha)
+	const log = recordCalibration(calibration, result.calibrationLines, runId, pairsSha)
 	const defects = [...result.defects, ...unverifiedDefects(result.unverified)]
 	const counts = countDefects(defects)
 	const status = meaningStatus(defects)
 	const exitCode = status === "fail" ? 1 : 0
-	const record = { command: "fact meaning-check", status, exitCode, run_id: runId, pairs_sha256: pairsSha, defects, counts, dropped: result.dropped, unverified: result.unverified, calibration_path: calibration, calibration_appended: log.appended, promotion_eligibility: promotionEligibility(log.rows) }
+	const record = { command: "fact meaning-check", status, exitCode, run_id: runId, pairs_sha256: pairsSha, defects, counts, dropped: result.dropped, unverified: result.unverified, calibration_path: calibration, calibration_written: log.written, calibration_replaced: log.replaced, promotion_eligibility: promotionEligibility(log.rows) }
 	writeJsonAtomic(out, record)
 	const confirmed = result.defects.filter((defect) => defect.code === "meaning_drift_confirmed").length
 	const summary = JSON.stringify({ command: "fact meaning-check", status, defects: defects.length, confirmed, warn: result.defects.length - confirmed, dropped: result.dropped.length, unverified: result.unverified.length })

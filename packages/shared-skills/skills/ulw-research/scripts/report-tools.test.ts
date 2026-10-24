@@ -365,7 +365,14 @@ const calibrationRows = (dir: string) =>
 		.trim()
 		.split("\n")
 		.map((line) => JSON.parse(line))
-		.filter((row) => row.header !== true)
+		.filter((row) => row.header !== true && row.run !== true)
+
+const runLines = (dir: string) =>
+	readFileSync(join(dir, "fidelity-calibration.jsonl"), "utf8")
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line))
+		.filter((row) => row.run === true)
 
 describe("meaning verifier under node", () => {
 	test("#given the filled fixture #when fact pairs runs #then pairs.json holds one quote pair per cited ledger quote", () => {
@@ -433,6 +440,56 @@ describe("meaning verifier under node", () => {
 			writeFileSync(join(dir, "bad-pairs.json"), body)
 			expect(nodeJson(["fact", "meaning-check", "--pairs", join(dir, "bad-pairs.json"), "--verdicts", ok, ...s]).code, body).toBe(2)
 		}
+	})
+
+	test("#given a confirmed run then a dispute on the same inputs #when meaning-check reruns #then the log still holds one run with the dispute", () => {
+		const { dir, s } = pairedSession()
+		const drift = { pair_id: "P2", verdict: "drift", drift_kind: "hedge_dropped", fragment: "no earlier than 2027", source_fragment: "we estimate" }
+		const files = ["--verdicts", verdicts(dir, "cheap.json", "cheap", [drift, { pair_id: "P1", verdict: "ok" }]), "--verdicts", verdicts(dir, "strong.json", "strong", [drift])]
+		const first = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), ...files, ...s])
+		const disputed = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), ...files, "--dispute", "P2", "--reason", "the operator states it", ...s])
+		expect(disputed.code).toBe(1)
+		expect(disputed.json.run_id).toBe(first.json.run_id)
+		expect(disputed.json.promotion_eligibility).toMatchObject({ runs: 1, confirmed: 1, disputed_confirmed: 1, disputed_to_confirmed: 1 })
+		expect(calibrationRows(dir)).toEqual([expect.objectContaining({ pair_id: "P2", disputed: true, reason: "the operator states it" })])
+		const plain = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), ...files, ...s])
+		expect(plain.json.promotion_eligibility).toMatchObject({ runs: 1, disputed_confirmed: 1 })
+	})
+
+	test("#given a run with no flagged pair #when meaning-check runs #then the run is still logged and counted", () => {
+		const { dir, s } = pairedSession()
+		const ok = (pair_id: string) => ({ pair_id, verdict: "ok" })
+		const files = ["--verdicts", verdicts(dir, "cheap.json", "cheap", [ok("P1"), ok("P2")]), "--verdicts", verdicts(dir, "strong.json", "strong", [ok("P1"), ok("P2")])]
+		const checked = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), ...files, ...s])
+		expect(checked.code).toBe(0)
+		expect(calibrationRows(dir)).toEqual([])
+		expect(runLines(dir)).toEqual([expect.objectContaining({ run_id: checked.json.run_id, flagged: 0 })])
+		expect(checked.json.promotion_eligibility.runs).toBe(1)
+	})
+
+	test("#given a corrupt calibration log #when meaning-check runs #then it exits 2 naming the file and line", () => {
+		const { dir, s } = pairedSession()
+		writeFileSync(join(dir, "fidelity-calibration.jsonl"), "{ not json\n")
+		const checked = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), "--verdicts", verdicts(dir, "cheap.json", "cheap", []), ...s])
+		expect(checked.code).toBe(2)
+		expect(checked.stderr).toContain(`${join(dir, "fidelity-calibration.jsonl")}:1`)
+	})
+
+	test("#given a skipped pairs file #when meaning-check runs #then it is accepted only when the locked brief says off", () => {
+		const { dir, s } = fidelitySession()
+		const skip = join(dir, "skip.json")
+		writeFileSync(skip, JSON.stringify({ schemaVersion: 1, skipped: true, pairs: [] }))
+		const check = () => nodeJson(["fact", "meaning-check", "--pairs", skip, "--verdicts", verdicts(dir, "cheap.json", "cheap", []), ...s])
+		const on = check()
+		expect(on.code).toBe(1)
+		expect(on.json.error).toBe("meaning_check_required")
+		writeFileSync(join(dir, "brief.md"), "# Brief\n")
+		expect(check().json.error).toBe("fidelity_interview_incomplete")
+		expect(check().code).toBe(1)
+		writeFileSync(join(dir, "brief.md"), readFileSync(join(FIXTURES, "fidelity-brief-locked.md"), "utf8").replace("meaning check: on", "meaning check: off"))
+		const off = check()
+		expect(off.code).toBe(0)
+		expect(off.json.status).toBe("skipped")
 	})
 
 	test("#given a brief with meaning check off #when fact pairs runs #then it exits 0 and writes skipped", () => {
@@ -592,8 +649,12 @@ describe("repair decide with several defect files", () => {
 })
 
 describe("fidelity delivery barrier", () => {
+	/** The locked brief has meaning check on, so a deliverable session also carries a clean meaning record. */
+	const meaningRan = (dir: string) => writeFileSync(join(dir, "fidelity-meaning-defects.json"), JSON.stringify({ command: "fact meaning-check", status: "pass", defects: [] }))
+
 	async function deliveredSession(codes: string[]) {
 		const { dir, s } = fidelitySession()
+		meaningRan(dir)
 		nodeJson(["fact", "fill", join(dir, "report.src.html"), "--out", join(dir, "report.html"), ...s])
 		const record = (list: string[]) => writeFileSync(join(dir, "fidelity-defects.json"), JSON.stringify({ command: "fact verify", artifact_sha256: sha256(join(dir, "report.html")), defects: list.map((code) => ({ code, message: code })) }))
 		record(codes)
@@ -641,6 +702,7 @@ describe("fidelity delivery barrier", () => {
 		const { dir, s } = fidelitySession()
 		nodeJson(["fact", "fill", join(dir, "report.src.html"), "--out", join(dir, "report.html"), ...s])
 		expect(verify(dir, "report.html").code).toBe(0)
+		meaningRan(dir)
 		expect(nodeJson(["fact", "fill", join(dir, "report.src.html"), "--inline", "--out", join(dir, "report.inline.html"), ...s]).code).toBe(0)
 		await run(["outcome", "init", "--session-dir", dir, "--promised", "html,pdf"])
 		await run(["outcome", "set", "html", "delivered", "--path", join(dir, "report.html"), "--verified-by", join(dir, "fidelity-defects.json"), "--session-dir", dir])
