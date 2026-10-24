@@ -18,7 +18,8 @@ import { createMemoryRecallWiring, createSharedRecallCorpusCache } from "./recal
 import { loadRecallStoreRuntime } from "./recall-store-runtime-loader"
 import { memoryBlockBuild } from "./memory-block-build"
 import type { MemoryIdentityContext } from "./context"
-import { branchEntryCount, sessionIdFrom } from "./wiring-context"
+import { createProjectMemoryScope } from "./project-memory-nudge"
+import { readUi, branchEntryCount, sessionIdFrom } from "./wiring-context"
 import { createMemoryUserActivity } from "./user-activity"
 import { logBindReconcileFailure } from "./bind-reconcile-log"
 import {
@@ -27,6 +28,7 @@ import {
 } from "./wiring-reflection-live"
 import { createMemoryRuntimeWiring } from "./wiring-runtime"
 import { registerMemoryStatic } from "./wiring-static"
+import { recoverStaleReflectionHolder } from "./reflection-stale-active"
 import type { MemoryCommandSettings } from "./commands/types"
 import type { MemoryWiring, MemoryWiringOptions } from "./wiring-types"
 
@@ -54,6 +56,35 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   const skillsUsageTrackersRef: { current: Map<string, SkillsUsageTracker> } = { current: new Map() }
   const memoryUsageTrackersRef: { current: Map<string, MemoryUsageTracker> } = { current: new Map() }
   const reflectionLive = createMemoryReflectionLiveWiring(options, activeSession, lastEventCtx)
+  const staleLockNoticesShown = new Set<string>()
+  const staleHolderReconciles = new Set<string>()
+  // Session-start reconciliation runs once per session, so a holder that died after it would keep
+  // the reflection lock for good (#10377). Each later turn settles a provably dead holder, and shows
+  // a holder whose liveness cannot be proven once per session and run.
+  const recoverStaleHolderAfterTurn = async (sessionId: string, identity: MemoryIdentityContext, eventCtx: unknown): Promise<void> => {
+    if (!userActivity.has(sessionId) || !userActivity.hasReconciled(sessionId)) return
+    try {
+      const recovery = await recoverStaleReflectionHolder({
+        reflectionDir: identity.identityPaths.reflection,
+        reconcile: () => runtimeFor(identity).reconcile(),
+        // A holder that one reconciliation could not release is reported, not reconciled every turn.
+        shouldReconcile: (runId) => {
+          const key = `${sessionId}:${runId}`
+          if (staleHolderReconciles.has(key)) return false
+          staleHolderReconciles.add(key)
+          return true
+        },
+        ...(options.reflectionHolderSeams === undefined ? {} : { seams: options.reflectionHolderSeams }),
+      })
+      if (recovery.notice === undefined || recovery.verdict.state === "none") return
+      const key = `${sessionId}:${recovery.verdict.runId}`
+      if (staleLockNoticesShown.has(key)) return
+      staleLockNoticesShown.add(key)
+      readUi(eventCtx)?.notify(recovery.notice, "warning")
+    } catch (error) {
+      options.logger?.warn("omo-senpi memory could not check the reflection lock holder", { error: error instanceof Error ? error.message : String(error) })
+    }
+  }
   const runtimeWiring = createMemoryRuntimeWiring(
     options,
     lastEventCtx,
@@ -92,11 +123,22 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   // One corpus cache for both: the sidecar's read-only memory tool reads the corpus the candidates came from.
   const corpusCache = (options.createCorpusCache ?? createSharedRecallCorpusCache)(options.logger)
 
+  const projectScope = createProjectMemoryScope({
+    resolveContext,
+    switches: () => resolveMemorySettings(options.loadConfig({ cwd: options.cwd() }).config.memory).project_scope,
+    fallbackCwd: options.cwd,
+    env: options.env,
+    corpusCache,
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+  })
+
   const recallWiring = createMemoryRecallWiring({
     resolveContext,
     resolveSettings: () => resolveMemorySettings(options.loadConfig({ cwd: options.cwd() }).config.memory),
     env: options.env,
     corpusCache,
+    projectCorpora: projectScope.recallCorpora,
+    projectSource: projectScope.sourceFor,
     drainQueued: (sessionId, context) => deliveryRef.current?.drainForPrompt(sessionId, context) ?? [],
     ...(options.logger === undefined ? {} : { logger: options.logger }),
   })
@@ -160,6 +202,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
   return {
     registerStatic(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
       userActivity.register(pi)
+      projectScope.register(pi)
       const applyFacts = createConfiguredFactsApplier(options, (sessionId) => resolveContext(sessionId ?? activeSession.current ?? ""))
       reflectionLive.registerRpc(pi, resolveContext, applyFacts)
       publishSessionFactsApplier(applyFacts)
@@ -170,6 +213,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
         resolveContext: (sessionId) => userActivity.hasInput(sessionId) ? resolveContext(sessionId) : undefined,
         recall: recallWiring,
         corpusCache,
+        projectScope,
         ...(ctx.idleCoordinator === undefined ? {} : { coordinator: ctx.idleCoordinator }),
         sendMessage: (message, sendOptions) => pi.sendMessage(message, sendOptions),
         appendEntry: (customType, data) => pi.appendEntry?.(customType, data),
@@ -209,6 +253,7 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
         onSettled: async (sessionId, eventCtx) => {
           const identity = resolveContext(sessionId)
           if (identity !== undefined) {
+            await recoverStaleHolderAfterTurn(sessionId, identity, eventCtx)
             await userActivity.reconcileOnce(sessionId, async () => {
               try {
                 await runtimeFor(identity).reconcile()
@@ -301,9 +346,8 @@ export function createMemoryWiring(options: MemoryWiringOptions): MemoryWiring {
       shutdownDrain.registerEvaluator(evaluator)
     },
 
-    clearStatus(eventCtx: unknown): void {
-      reflectionLive.clearStatus(eventCtx)
-    },
+    clearStatus: reflectionLive.clearStatus,
+    onSyncStatusChanged: reflectionLive.onSyncStatusChanged,
 
     async whenIdle(): Promise<void> {
       await kibitzerRef.current?.whenIdle()
