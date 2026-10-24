@@ -45,6 +45,26 @@ Since 5.1.35 the anonymous `distinct_id` was read from the install-id file under
 
 `sdk-storage.ts` gains `getSdkSessionMessagePage` (one `GET /session/:id/message?limit=N[&before=cursor]`, reading `X-Next-Cursor`), `forEachSdkSessionMessagePage` (pages of `SDK_MESSAGE_PAGE_SIZE` = 100, newest first, each ascending) and `getSdkSessionMessageWindow`. `sdkSessionExists` asks for `limit: 1`. `storage.ts` `readSessionMessages(sessionID, { limit, fromEnd, signal })` reads only the window, `forEachSessionMessagePage` walks with a file-storage fallback that runs only when no SDK page was visited, and `getSessionInfo` counts page by page. `searchInSession` scans newest first and stops at its result limit. `getSessionInfo(sessionID, signal)` takes the call's abort signal, and so do `formatSessionList` and `filterSessionsByDate` (`session_list`) and the file-storage metadata reads behind `getFileSessionInfo`; a cancelled list rethrows instead of reporting every session as skipped, so in all four session tools every page loop stops at the next page boundary on abort. The cursor is read from any response with `headers.get`, and a full page whose headers cannot be read fails loudly (`Cannot page session ...`) instead of ending the walk early. `tools.ts` replaces `withTimeout` with `runWithAbortableTimeout`, which aborts the signal handed to every read (linked with the tool call's abort); `fetchSdkResponse` never retries an aborted read, and an aborted read never falls back to files. `file-storage.ts` reads message metadata first and parts only for returned or scanned messages. The server has no oldest-first order, so `from_end: false` with a limit walks back from the newest page and keeps the oldest `limit` messages. Covered by `session-paging.test.ts` (5 RED on the old sources); the bench is on the PR.
 
+## 2026-10-22 - Address skill containment review findings (#10693)
+
+Task discovery preserves SKILL.md stopping rules and repository-wide link
+boundaries. I/O failures remain unloaded and report their real errno; only actual
+escapes use the security notice. Global OpenCode skill sources retain user
+authority, and pending MCP grants are bounded and invalidate superseded handles.
+The vendored grants-store header identifies both formatting and Windows retry
+source commits. The PR's existing Unreleased paragraph records these behaviors.
+
+Allowed-path walks remain uncached: a session cache could keep a removed or
+retargeted user link authorized, while a safe per-operation cache would require
+threading an explicit lifetime through discovery and declaration revalidation.
+The optional optimization is deferred rather than changing the trust lifetime.
+
+## 2026-10-20 - Contain legacy and task skill links and scope skill MCP environments (#10693)
+
+Legacy discovery keeps the spelled project path and its provenance through config sources, directory traversal, native fallback and invocation. Project reads use a canonical containment check and a checked descriptor, including MCP sidecars; user skill roots and sibling skill aliases remain supported. Task skill loading uses the same boundary and reports rejected links in its result.
+
+Project-policy MCP servers receive the finite safe environment base, declared values, caller-supplied values and per-declaration grants. User-policy servers keep the previous environment filter and expansion. Withheld names appear in the tool output, OpenCode toast and log with the exact `/omo-mcp-env-grant` command. The grant boundary vendors the native atomic store and declaration identity protocol with the same configured-directory resolver and file format; generation gaps and store recreation invalidate project connections, including pending handshakes. This boundary assumes a filesystem stable during loading; descriptor checks detect some concurrent replacements, not every ancestor swap.
+
 ## 2026-10-22 - Telemetry counts how many accounts you have linked per provider (#10919)
 
 `session_started` gains `connected_account_count`: per provider kind, the number of accounts the engine itself lists for that provider (senpi `getCredentialAccounts`, the list the app's account list shows), used or not. For Claude (`anthropic-subscription`) that is the stored `accounts` list (the managed sign-in sentinel without a list counts zero) plus every `CLAUDE_CODE_OAUTH_TOKEN` env slot; for other providers it is the stored list when non-empty, else the flat credential as one, and env-key slots only when nothing is stored. It is a `kind:count` list over the shipped provider kinds; any other provider is summed into `custom`, and each count is capped at `10_plus`. senpi does not export its listing function, so `account-inventory.ts` (`packages/omo-senpi/src/components/telemetry`) mirrors its rules through the engine's own `@earendil-works/pi-ai` provider and env-variable tables, and `account-inventory.test.ts` asserts parity with the real engine function from the installed senpi dist on every fixture. Only lengths and whether a variable is set are read. An unreadable `auth.json` counts nothing here; the provider inventory reports it once. `docs/reference/senpi-telemetry.md` regenerates the schema block and adds the disclosure row.
