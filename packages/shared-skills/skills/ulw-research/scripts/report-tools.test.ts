@@ -85,6 +85,7 @@ describe("outcome", () => {
 		await run(["outcome", "set", "pdf", "delivered", "--path", pdf, "--session-dir", dir])
 		await run(["outcome", "set", "docx", "skipped", "--reason", "no editing audience", "--session-dir", dir])
 		await run(["outcome", "gate", "static", "pass", "--session-dir", dir])
+		await run(["outcome", "gate", "fidelity", "not_run", "--reason", "Fixture has no factual content", "--session-dir", dir])
 		const after = await run(["outcome", "verify", "--session-dir", dir])
 		// then
 		expect(before.exitCode).toBe(1)
@@ -186,6 +187,7 @@ describe("manifest bookkeeping", () => {
 		await run(["outcome", "init", "--session-dir", dir, "--promised", "pdf"])
 		await run(["outcome", "set", "pdf", "delivered", "--path", pdf, "--session-dir", dir])
 		writeFileSync(join(dir, "sources-ledger.md"), ["[S1] https://a.example/x", "[S2] https://b.example/y"].join("\n"))
+		await run(["outcome", "gate", "fidelity", "not_run", "--reason", "Fixture has no factual content", "--session-dir", dir])
 		const now = new Date(new Date(2026, 0, 1, 12, 0, 0).getTime() + 30 * 60_000).toISOString()
 		const result = await run(["outcome", "finish", "--session-dir", dir, "--now", now])
 		const manifest = JSON.parse(readFileSync(join(dir, "outcome.json"), "utf8"))

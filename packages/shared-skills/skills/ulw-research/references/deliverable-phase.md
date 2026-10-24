@@ -50,7 +50,7 @@ The request and its destination usually answer the format question already. Deri
 | A prior report of the same kind in this workspace, not pointed at | that report's format, offered as the Q1 default | `template-vibe` | full |
 | A complete existing deliverable for this question (section 2) | its existing format | `edit-existing` | the original's tier |
 
-QA tiers: **light** runs the static gates and one render check of the answer, and records the fidelity gate as `not_run` until Markdown deliverable support ships for it. **Full** runs the static gates, the fidelity gate, the layout gates, visual QA of every page, and the proofread gate (section 7).
+QA tiers: **light** runs the static gates and one render check of the answer, and records the fidelity gate as `not_run --reason "<why>"` (the reason is required) until Markdown deliverable support ships for it. **Full** runs the static gates, the fidelity gate, the layout gates, visual QA of every page, and the proofread gate (section 7).
 
 ## 4. The empty-info interview
 
@@ -142,7 +142,7 @@ Nothing reaches the requester until the gates for its QA tier pass, in this orde
 
 **Every reader-facing edition is verified.** The main report, the inline edition (section 9), LaTeX per-section sources, and slide sources are filled by `fact fill` from one placeholder source and each is verified by `fact verify` into its own record; PDF and DOCX are renders of a verified source. A delivered row is recorded with `outcome set <format> delivered --path <file> --verified-by <record>`, where the record's `artifact_sha256` equals the sha256 of the delivered source; a PDF or DOCX adds `--rendered-from <source>` and is matched against that source. In a session with a fact ledger, `outcome verify` refuses a delivered row without a matching record (`edition_unverified`, blocker, integrity). Markdown and LaTeX verification arrive with the Markdown stage; until then `fact verify --format md|tex` exits `2`, and such an edition is recorded `blocked_capability` with that reason rather than delivered unverified.
 
-The light tier runs gate 1 and one render (recorded as `visual`) and records `fidelity`, `layout`, and `proofread` as `not_run`; `fidelity` stays `not_run` in the light tier until Markdown deliverable support ships for the fidelity verifier. The full tier runs all five.
+The light tier runs gate 1 and one render (recorded as `visual`) and records `fidelity`, `layout`, and `proofread` as `not_run` (`fidelity not_run` needs `--reason "<why>"`); `fidelity` stays `not_run` in the light tier until Markdown deliverable support ships for the fidelity verifier. The full tier runs all five.
 
 ## 8. Bounded repair loop
 
@@ -158,7 +158,7 @@ node "$SKILL_DIR/scripts/report-tools.mjs" repair decide --state "$SESSION_DIR/r
 - `action: deliver`: stop repairing and deliver. `reason` is `clean` or the stop condition that fired; the residual defects are written into the manifest and listed in the closing briefing.
 - `action: block` (exit `1`): do not deliver. Either a content-integrity defect remains (`missing_closing_section`, `missing_citation_section`, `broken_asset_reference`, `missing_required_section`, `missing_promised_deliverable`, or a fidelity integrity code: `unresolved_placeholder`, `value_mismatch`, `unit_mismatch`, `quote_not_verbatim`, `claim_status_invalid`, `incompatible_operands`, `pointer_label_mismatch`, `quote_anchor_unresolved`, `unit_duplicated`, `polish_diff_fail`, `fidelity_interview_incomplete`, `derived_not_allowed`, `source_outside_floor`, `snapshot_hash_mismatch`, `chart_value_untraceable`, `quote_unbound`, `edition_unverified`), or a stop fired without proof of a usable artifact (`--artifact-bytes` and `--renders`). Tell the requester what blocks delivery and record the affected rows as `failed` with the reason.
 
-**The fidelity barrier is separate from the budget.** A `deliver` decision does not release fidelity defects: while `$SESSION_DIR/fidelity-defects.json` lists `untraceable_number`, `value_mismatch`, `unit_mismatch`, `quote_not_verbatim`, `quote_unbound`, `unbound_sentence`, or `chart_value_untraceable`, `outcome verify` fails with `fidelity_unresolved: <codes>` and `outcome finish` refuses, even when the repair budget is spent. The only ways out are a ledger row, an `assumed` row with its rationale (`fact add --assumed`), or removing the sentence.
+**The fidelity barrier is separate from the budget.** A `deliver` decision does not release fidelity defects: `outcome verify` and `outcome finish` use the fidelity gate's `blocksDelivery` predicate over `DEFECT_CODES` (integrity, blocker, or major), never a CLI code list or the row's claimed severity. Unknown codes refuse with `unknown defect code <code>`; known blockers produce `fidelity_unresolved`. Fix the defect and re-verify the edition before delivery.
 
 Defaults: 3 repair attempts, a plateau of 2 consecutive attempts that do not improve the (blocker, major, minor) counts compared in that order, and 15 minutes of wall clock from the first decision. A defect set that repeats an earlier attempt exactly stops the loop as an oscillation. When several conditions hold at once the reported reason follows `clean`, `blocking`, `oscillation`, `plateau`, `max_attempts`, `wall_clock`.
 
@@ -177,8 +177,8 @@ node "$SKILL_DIR/scripts/report-tools.mjs" outcome briefing --session-dir "$SESS
 ```
 
 - `init` runs when the brief is written (section 4): one `pending` row per promised format (`pdf`, `docx`, `html`, `md`, `latex`, `slides`, `post`).
-- `set` resolves a row: `delivered` (absolute path; bytes are read from disk; pages when paginated), `blocked_capability` (this session cannot produce it), `skipped` (the requester or the lane dropped it), or `failed`. Every status except `delivered` needs `--reason`.
-- `verify` runs before delivery and exits `1` while a row is `pending`, a status lacks its reason, a delivered file is missing or empty, a fidelity code from section 8's barrier is unresolved (`fidelity_unresolved`), or, in a session with a fact ledger, a delivered edition has no matching verify record (`edition_unverified`, section 7).
+- `set` resolves a row: `delivered` (absolute path; bytes are read from disk; pages when paginated), `blocked_capability` (this session cannot produce it), `skipped` (the requester or the lane dropped it), or `failed`. Every status except `delivered` needs `--reason`; `outcome set <format> delivered` records intent permissively, while the required `outcome verify` and `outcome finish` enforce the delivery barrier.
+- `verify` runs before delivery and exits `1` while a row is `pending`, a status lacks its reason, a delivered file is missing or empty, a registry blocker remains (`fidelity_unresolved`), or a delivered edition has no matching verify record (`edition_unverified`, section 7). Delivered HTML/PDF/DOCX without any ledger or record also refuse with `fidelity gate not run`; explicitly record `outcome gate fidelity not_run --reason "<text>"` to exempt an unverified edition. This choice is logged in `gateHistory` with its timestamp and reason; it never releases an existing ledger requirement, record, or defect, and a subsequent fidelity gate status replaces the exemption.
 - `finish` refuses (exit `1`, nothing stamped) while the fidelity barrier holds.
 - `finish` stamps the finish time, the elapsed minutes from the session directory's start stamp, and the source and domain counts from `sources-ledger.md`.
 - `briefing` prints the closing block from the manifest and the ledger: sources and distinct domains, elapsed minutes, every deliverable with its status, the gate results, the residual defects, and the repair summary. That text is the closing briefing, pasted as printed, never filled in from memory.
@@ -204,7 +204,7 @@ Invoke every command as `node "$SKILL_DIR/scripts/report-tools.mjs" <command>`. 
 | `repair decide` | `--state <file>` and `--defects <json>` (required; repeatable, the files are concatenated), `--artifact-bytes N`, `--renders N`, `--session-dir <dir>`, `--max-attempts N`, `--plateau-limit N`, `--wall-clock-ms N`, `--now <ISO>` | the decision is `block` |
 | `outcome init` | `--promised <list>` (required), `--lane <lane>`, `--session-dir <dir>`, `--now <ISO>` | never |
 | `outcome set <format> <status>` | `--path <file>`, `--pages N`, `--reason <text>`, `--verified-by <fidelity record>`, `--rendered-from <source>`, `--session-dir <dir>`, `--now <ISO>` | never |
-| `outcome gate <gate> <status>` | `--session-dir <dir>` | never |
+| `outcome gate <gate> <status>` | `--session-dir <dir>`, `--now <ISO>`, `--reason <text>` (required for `fidelity not_run`; logged in `gateHistory`) | never (a missing reason exits `2`) |
 | `outcome render <png>` | `--page N` (required), `--session-dir <dir>` | never |
 | `outcome state` | `--deliverable <path>` (required), `--session-dir <dir>` | never |
 | `outcome verify` | `--session-dir <dir>` | a promise is unresolved, a delivered file is missing or empty, `fidelity_unresolved`, or `edition_unverified` |
