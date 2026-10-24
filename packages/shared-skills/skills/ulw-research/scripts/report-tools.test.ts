@@ -422,6 +422,61 @@ describe("meaning verifier under node", () => {
 	})
 })
 
+type PolishJson = { data: { out: string; applied: number; rejected: number; unlocated: number }; defects: { code: string; index: number }[] }
+
+/** A filled session whose first finding names an acquirer and a target around F1. */
+function polishSession() {
+	const session = fidelitySession()
+	const { dir, s } = session
+	const source = readFileSync(join(dir, "report.src.html"), "utf8").replace("<p>The span length is", "<p>Acme acquired Bolt before the span length reached")
+	writeFileSync(join(dir, "report.src.html"), source)
+	nodeJson(["fact", "fill", join(dir, "report.src.html"), "--out", join(dir, "report.html"), ...s])
+	return session
+}
+
+function polishApply(dir: string, edits: string) {
+	const args = ["fact", "polish-apply", join(dir, "report.html"), "--edits", edits, "--ledger", join(dir, "fact-ledger.json"), "--out", join(dir, "report.polished.html")]
+	const proc = nodeJson(args)
+	return { ...proc, json: proc.json as unknown as PolishJson }
+}
+
+describe("polish wiring under node", () => {
+	test("#given the fixture edits #when fact polish-apply runs #then it exits 0, applies the wording edit, and rejects the numeral edit", () => {
+		const { dir } = polishSession()
+		const applied = polishApply(dir, join(FIDELITY, "polish-edits.json"))
+		const polished = readFileSync(join(dir, "report.polished.html"), "utf8")
+		expect(applied.code).toBe(0)
+		expect(applied.json.data).toMatchObject({ applied: 1, rejected: 1, unlocated: 0 })
+		expect(applied.json.defects.map((d) => [d.code, d.index])).toEqual([["polish_edit_rejected", 1]])
+		expect(polished).toContain("Collected from a single cited public page")
+		expect(polished).toContain("retrieved 2026-10-01")
+		expect(polished).not.toContain("2026-10-02")
+	})
+
+	test("#given a polished copy edited by hand #when fact polish-diff runs #then it exits 1 with polish_diff_fail", () => {
+		const { dir } = polishSession()
+		const html = readFileSync(join(dir, "report.html"), "utf8")
+		writeFileSync(join(dir, "hand.html"), html.replace("320 m", "321 m"))
+		const diffed = nodeJson(["fact", "polish-diff", "--before", join(dir, "report.html"), "--after", join(dir, "hand.html"), "--ledger", join(dir, "fact-ledger.json")])
+		expect(diffed.code).toBe(1)
+		expect(codesOf(diffed.json)).toContain("polish_diff_fail")
+	})
+
+	test("#given an accepted subject and object swap #when fact pairs runs with --changed-since #then only that sentence's pair is emitted, with the new text", () => {
+		const { dir, s } = polishSession()
+		const edits = join(dir, "swap.json")
+		writeFileSync(edits, JSON.stringify([{ before: "Acme acquired Bolt", after: "Bolt acquired Acme", reason: "word order" }]))
+		const applied = polishApply(dir, edits)
+		const map = join(dir, "report.html.fill-map.json")
+		const changed = nodeJson(["fact", "pairs", join(dir, "report.polished.html"), "--changed-since", map, "--out", join(dir, "pairs-changed.json"), ...s])
+		const written = JSON.parse(readFileSync(join(dir, "pairs-changed.json"), "utf8"))
+		expect(applied.json.data).toMatchObject({ applied: 1, rejected: 0 })
+		expect(changed.code).toBe(0)
+		expect(written.pairs.map((p: Pair) => [p.kind, p.fact_ids])).toEqual([["quote", ["F1"]]])
+		expect(written.pairs[0].sentence).toContain("Bolt acquired Acme")
+	})
+})
+
 describe("markdown editions under node", () => {
 	const MD = ["# Bridge", "", "## Findings", "", "The span length is {{F1:span_len}} [S4].", "", "The operator wrote {{Q1:completion}} [S4].", "", "## How this report was made", "", "Collected from one cited public page [S4].", "", "## Sources", "", "1. [S4] Bridge page, retrieved 2026-10-01.", ""].join("\n")
 
