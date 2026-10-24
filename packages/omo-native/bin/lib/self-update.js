@@ -152,11 +152,12 @@ function readInstalledOrUndefined(readInstalled) {
 }
 
 async function reportHeldInstall({ result, before, install, resolveUpdate, readInstalled, error, options, attempts }) {
-  const file = heldTarget(result.stderr) ?? "a package file"
+  const held = heldTarget(result.stderr)
+  const file = held ?? "a package file"
   const listProcesses = options.listProcesses ?? listWindowsProcesses
   const installDir = options.installDir ?? dirname(packageRoot)
   const selfPids = options.selfPids ?? [process.pid, process.ppid]
-  const holders = findHolders(installDir, listProcesses(), selfPids)
+  const holders = findHolders(installDir, listProcesses(), selfPids, held)
 
   error(`omo: update stopped: Windows would not let the package manager replace ${file}; it was still held after ${attempts} attempts.`)
   if (holders.length > 0) {
@@ -184,5 +185,6 @@ async function reportHeldInstall({ result, before, install, resolveUpdate, readI
     error(`omo: restored omo ${before.omo}.`)
     return
   }
-  error(`omo: the previous omo ${before.omo} could not be restored; after quitting the holder, run: ${previous.command}`)
+  const when = holders.length > 0 ? "after quitting the holder" : "once the file is released"
+  error(`omo: the previous omo ${before.omo} could not be restored; ${when}, run: ${previous.command}`)
 }

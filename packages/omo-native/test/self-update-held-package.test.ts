@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { runChild } from "../bin/lib/child-process.js"
+import { heldTarget } from "../bin/lib/update-lock.js"
 import { runSelfUpdate } from "../bin/lib/self-update.js"
 
 // #10090: on Windows `bun add -g` dies with EPERM (NtSetInformationFile) when another process holds
@@ -90,6 +94,7 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
           { pid: 100, name: "node.exe", commandLine: `node ${INSTALL_DIR}\\omo-ai\\bin\\omo.js update` },
           { pid: 4242, name: "claude.exe", executablePath: `${INSTALL_DIR.toLowerCase()}\\@anthropic-ai\\claude-agent-sdk-win32-x64\\claude.exe` },
           { pid: 777, name: "explorer.exe", executablePath: String.raw`C:\Windows\explorer.exe` },
+          { pid: 888, name: "node.exe", commandLine: `node ${INSTALL_DIR}\typescript\lib\tsserver.js` },
         ],
       })
       expect(await runSelfUpdate([], h.options)).toBe(1)
@@ -100,6 +105,7 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
       expect(text).toContain("claude.exe (pid 4242)")
       expect(text).not.toContain("pid 100")
       expect(text).not.toContain("explorer.exe")
+      expect(text).not.toContain("pid 888")
       expect(text).toContain("Quit claude.exe and run omo update again.")
       expect(text).toContain("omo 5.1.1 is still installed.")
     })
@@ -124,6 +130,36 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
       expect(await runSelfUpdate([], h.options)).toBe(1)
       expect(h.spawned.at(-1)).toEqual(["bun", "add", "-g", "omo-ai@5.1.1"])
       expect(h.errors.join("\n")).toContain("restored omo 5.1.1")
+    })
+
+    test("#then a failed restore with no holder found gives the reinstall command without naming a holder", async () => {
+      const h = harness({ outcomes: [{ status: 1, stderr: HELD_STDERR }], versions: ["5.1.1", "unreadable"] })
+      expect(await runSelfUpdate([], h.options)).toBe(1)
+      const last = h.errors.at(-1) ?? ""
+      expect(last).toContain("once the file is released, run: bun add -g omo-ai@5.1.1")
+      expect(last).not.toContain("holder")
+    })
+  })
+
+  describe("#given a Windows permission failure (EACCES on a protected prefix)", () => {
+    test("#then it is not treated as a held file and fails once", async () => {
+      const h = harness({ outcomes: [{ status: 1, stderr: String.raw`npm error code EACCES
+npm error syscall mkdir
+npm error path C:\Program Files\nodejs\node_modules\omo-ai
+npm error Error: EACCES: permission denied` }] })
+      expect(await runSelfUpdate([], h.options)).toBe(1)
+      expect(h.spawned).toHaveLength(1)
+      expect(h.sleeps).toEqual([])
+    })
+  })
+
+  describe("#given npm's unquoted lock report", () => {
+    test("#then the held path comes from the npm error path line", () => {
+      const npmStderr = String.raw`npm error code EPERM
+npm error syscall rename
+npm error path C:\Users\u\AppData\Roaming\npm\node_modules\omo-ai
+npm error errno -4048`
+      expect(heldTarget(npmStderr)).toBe(String.raw`C:\Users\u\AppData\Roaming\npm\node_modules\omo-ai`)
     })
   })
 
@@ -155,4 +191,30 @@ describe("runChild captureStderr", () => {
     expect(result.status).toBe(3)
     expect(result.stderr).toBe("held")
   })
+
+  test("#then a grandchild that keeps the stderr pipe open does not hold the result back", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omo-10090-"))
+    const pidFile = join(dir, "grandchild.pid")
+    const parent = [
+      "const { spawn } = require('node:child_process')",
+      "const fs = require('node:fs')",
+      "const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: ['ignore', 'ignore', 'inherit'], detached: true })",
+      `fs.writeFileSync(${JSON.stringify(pidFile)}, String(g.pid))`,
+      "g.unref()",
+      "process.stderr.write('held')",
+      "process.exit(1)",
+    ].join(";")
+    try {
+      const result = await runChild(process.execPath, ["-e", parent], { captureStderr: true, stdio: "inherit" })
+      expect(result.status).toBe(1)
+      expect(result.stderr).toBe("held")
+    } finally {
+      try {
+        process.kill(Number(readFileSync(pidFile, "utf8")))
+      } catch {
+        // The grandchild may already be gone.
+      }
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 10_000)
 })

@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process"
 
-// Bun reports a file Windows will not let it move or replace as EPERM/EBUSY (NtSetInformationFile),
-// and some paths surface the same sharing violation as EACCES.
-const LOCK_PATTERN = /\b(EPERM|EBUSY|EACCES)\b|NtSetInformationFile|being used by another process/i
+// Bun reports a file Windows will not let it move or replace as EPERM/EBUSY (NtSetInformationFile).
+// EACCES is left out: on Windows it is a permission problem (a protected prefix), which no retry fixes.
+const LOCK_PATTERN = /\b(EPERM|EBUSY)\b|NtSetInformationFile|being used by another process/i
+const NPM_PATH_LINE = /^npm (?:error|ERR!) path (.+)$/
 
 /** Backoff between attempts while the file is held; the lock is usually a short antivirus scan. */
 export const LOCK_RETRY_DELAYS_MS = [2000, 5000]
@@ -26,6 +27,11 @@ export function heldTarget(stderr) {
       if (quoted) return quoted[1] ?? quoted[2]
     }
   }
+  // npm names the file on its own unquoted `npm error path <path>` line.
+  for (const line of lines) {
+    const npmPath = NPM_PATH_LINE.exec(line.trim())
+    if (npmPath) return npmPath[1].trim()
+  }
   return undefined
 }
 
@@ -37,18 +43,32 @@ function normalizePath(path) {
   return path.replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase()
 }
 
+// The packages an omo install runs processes from: the launcher and its pinned senpi engine.
+const OMO_PACKAGES = ["omo-ai", "@code-yeongyu"]
+
 /**
- * Processes running from, or started with a path inside, the install directory, minus this update's own
- * processes. Only those can hold a file of the install; anything else (an antivirus scan) is invisible here.
- * @param {string} installDir
+ * Processes running from, or started with a path inside, omo's own packages or the held package in the
+ * global `node_modules`, minus this update's own processes. Other global CLIs share that directory but
+ * cannot hold these files, so they are not reported; anything outside it (an antivirus scan) is invisible.
+ * @param {string} installDir the global `node_modules` omo is installed in
  * @param {readonly ProcessEntry[]} processes
  * @param {readonly number[]} excludePids
+ * @param {string | undefined} held the package or path the manager reported as held
  */
-export function findHolders(installDir, processes, excludePids) {
-  const needle = `${normalizePath(installDir)}\\`
+export function findHolders(installDir, processes, excludePids, held = undefined) {
+  const root = normalizePath(installDir)
+  const needles = OMO_PACKAGES.map((name) => `${root}\\${normalizePath(name)}\\`)
+  if (held !== undefined) {
+    const target = normalizePath(held)
+    needles.push(/^[a-z]:\\|^\\\\/.test(target) ? target : `${root}\\${target}`)
+  }
   return processes.filter((entry) => {
     if (excludePids.includes(entry.pid)) return false
-    return [entry.executablePath, entry.commandLine].some((value) => typeof value === "string" && normalizePath(value).includes(needle))
+    return [entry.executablePath, entry.commandLine].some((value) => {
+      if (typeof value !== "string") return false
+      const path = normalizePath(value)
+      return needles.some((needle) => path.includes(needle))
+    })
   })
 }
 

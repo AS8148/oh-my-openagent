@@ -17,6 +17,7 @@ const HANDLED_SIGNALS = [
 const DEFAULT_GRACE_MS = 10_000
 
 const STDERR_TAIL_CHARS = 64 * 1024
+const STDERR_DRAIN_MS = 500
 
 function graceMs(env) {
   const configured = Number(env.OMO_SIGNAL_GRACE_MS)
@@ -111,9 +112,24 @@ export function runChild(command, args, options = {}) {
     // A child that died of the forwarded signal needs no special case: `propagateResult` turns a
     // signaled result into this process dying by the same signal, which is exactly right.
     const finish = (status, signal) => settle(() => resolve(captureStderr ? { status, signal, stderr } : { status, signal }))
-    // `close` waits for the piped stderr to drain, so the captured tail is complete.
-    if (captureStderr) child.on("close", finish)
-    else child.on("exit", finish)
+    child.on("exit", (status, signal) => {
+      if (!captureStderr || child.stderr.readableEnded) {
+        finish(status, signal)
+        return
+      }
+      // The pipe usually ends right after exit. A grandchild that inherited it can hold it open, so the
+      // drain is bounded and the result never waits on a process the manager left behind.
+      const drained = () => {
+        clearTimeout(drainTimer)
+        finish(status, signal)
+      }
+      const drainTimer = setTimeout(() => {
+        child.stderr.off("end", drained)
+        child.stderr.destroy()
+        finish(status, signal)
+      }, STDERR_DRAIN_MS)
+      child.stderr.once("end", drained)
+    })
   })
 }
 
