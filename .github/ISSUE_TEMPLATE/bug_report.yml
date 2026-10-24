@@ -6,6 +6,11 @@ body:
   - type: markdown
     attributes:
       value: |
+        **Fastest way to report a bug: run `/bug` inside a session.** It sends the report to the OmO team with your recent engine logs attached. Use this form if you cannot use the in-app report.
+
+  - type: markdown
+    attributes:
+      value: |
         **Please write your issue in English.** See our [Language Policy](https://github.com/code-yeongyu/oh-my-openagent/blob/dev/CONTRIBUTING.md#language-policy) for details.
 
   - type: checkboxes

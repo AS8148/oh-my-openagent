@@ -95,6 +95,10 @@ Opinionated defaults, adjustable if you insist. Your settings live in `~/.omo/om
 - [Computer use](docs/guide/computer-use.md) (experimental)
 - [Ultrawork Manifesto](docs/manifesto.md)
 
+## Reporting a bug
+
+The fastest way to report a bug is `/bug` inside a session: it sends the report to the OmO team with your recent engine logs attached, so we can usually see the failure without asking for a repro. GitHub issues stay open for anyone who cannot use the in-app report.
+
 ## Reviews
 
 > "It made me cancel my Cursor subscription. Unbelievable things are happening in the open source community." - [Arthur Guiot](https://x.com/arthur_guiot/status/2008736347092382053?s=20)
