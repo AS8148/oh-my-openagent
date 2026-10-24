@@ -9,15 +9,14 @@ import { createChildExtensionEvents } from "../child-extension-events"
 import { socketAcceptsConnection } from "./busy-host"
 import { HostUnavailableError } from "./daemon"
 import { SESSION_PARKED_CAUSE } from "./exit-mapping"
+import { dispatchHostCommand } from "./host-command-dispatch"
 import {
   assertHostUsable,
   createSenpiRpcClient,
   probeWithEngine,
   RETRY_FALLBACK_PROFILE_CAPABILITY,
   toWireOpen,
-  type HostPromptDisposition,
   type HostProtocolProbe,
-  type HostQueuedInputDisposition,
   type HostRpcClient,
   type HostRpcClientFactory,
   type HostSessionOpenInput,
@@ -33,9 +32,6 @@ import {
 import { createHostTaskParentWire } from "./task-parent-wire"
 import type { TaskParentWire } from "../task-parent-control"
 
-
-// send() settles with no value: the runner does not consume the host's input disposition.
-const ignoreHostDisposition = (_disposition: HostPromptDisposition | HostQueuedInputDisposition): void => undefined
 
 /**
  * ONE senpi `RpcClient` per child, over the machine-wide daemon's public socket. The client probes
@@ -142,23 +138,7 @@ export class HostSessionClient {
   }
 
   send(command: HostSessionCommand): Promise<void> {
-    const client = this.connected(command.type)
-    switch (command.type) {
-      case "prompt":
-        return client.prompt(
-          command.message,
-          { ...(command.streamingBehavior === undefined ? {} : { streamingBehavior: command.streamingBehavior }),
-            ...(command.clientMessageId === undefined ? {} : { clientMessageId: command.clientMessageId }) },
-        ).then(ignoreHostDisposition)
-      case "steer":
-        return client.steer(command.message, undefined, { clientMessageId: command.clientMessageId }).then(ignoreHostDisposition)
-      case "followUp":
-        return client.followUp(command.message, undefined, { clientMessageId: command.clientMessageId }).then(ignoreHostDisposition)
-      case "abort":
-        return client.abort()
-      default:
-        return unreachable(command)
-    }
+    return dispatchHostCommand(this.connected(command.type), this.routingId, command)
   }
 
   taskParentWire(): TaskParentWire {

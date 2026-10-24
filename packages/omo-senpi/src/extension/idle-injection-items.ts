@@ -1,5 +1,6 @@
 import type { RunRef } from "../../../senpi-task/src/pause/ports"
 import type { IdleInjection, IdleInjectionMessage } from "./idle-injection-coordinator"
+import { runReceipts, type ReceiptErrors } from "./idle-injection-receipts"
 
 export type AdmissionItem = {
   readonly itemId: string
@@ -62,23 +63,25 @@ export function admissionBatches(injections: readonly QueuedInjection[]) {
   }]
 }
 
-export function failItems(injections: readonly QueuedInjection[], error: unknown): void {
-  for (const injection of injections) for (const entry of withSuperseded(injection)) entry.onDeliveryFailed?.(error)
+// Every entry (superseded ones included) gets its receipt in its own try; the errors come back to the caller.
+export function failItems(injections: readonly QueuedInjection[], error: unknown): ReceiptErrors {
+  return runReceipts(injections.flatMap(withSuperseded), entry => entry.onDeliveryFailed?.(error))
 }
 
-export function settleItemReceipts(injections: readonly QueuedInjection[], result: unknown): void {
-  for (const injection of injections) {
-    // A host with no custody receipts retains its synchronous successful-send contract.
-    const receipt: unknown = result === undefined || !Array.isArray(result)
-      ? undefined : result.find(value => isReceipt(value) && value.itemId === injection.itemId)
-    for (const entry of withSuperseded(injection)) {
-      if (result === undefined || !Array.isArray(result)) entry.onFlushed?.()
-      else if (!isReceipt(receipt)) entry.onDeliveryFailed?.(new Error(`missing custody receipt for ${injection.itemId}`))
-      // A held notice is engine custody: a producer that does not track holds treats it as delivered.
-      else if (receipt.disposition === "notice_persisted" && entry.onHeld !== undefined) entry.onHeld(receipt)
-      else entry.onFlushed?.()
-    }
-  }
+export function settleItemReceipts(injections: readonly QueuedInjection[], result: unknown): ReceiptErrors {
+  // A host with no custody receipts retains its synchronous successful-send contract.
+  const custody = result !== undefined && Array.isArray(result)
+  const entries = injections.flatMap(injection => {
+    const receipt: unknown = custody ? result.find(value => isReceipt(value) && value.itemId === injection.itemId) : undefined
+    return withSuperseded(injection).map(entry => ({ entry, itemId: injection.itemId, receipt }))
+  })
+  return runReceipts(entries, ({ entry, itemId, receipt }) => {
+    if (!custody) entry.onFlushed?.()
+    else if (!isReceipt(receipt)) entry.onDeliveryFailed?.(new Error(`missing custody receipt for ${itemId}`))
+    // A held notice is engine custody: a producer that does not track holds treats it as delivered.
+    else if (receipt.disposition === "notice_persisted" && entry.onHeld !== undefined) entry.onHeld(receipt)
+    else entry.onFlushed?.()
+  })
 }
 
 function isReceipt(value: unknown): value is ItemReceipt {
