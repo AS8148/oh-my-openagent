@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { existsSync, readFileSync } from "@oh-my-opencode/memory-core/fs"
 import { mkdir } from "@oh-my-opencode/memory-core/fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import {
   readRunJson,
@@ -51,7 +51,7 @@ export async function runReflectionChild(
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
   if (graceMs < 0 || maxOutputBytes <= 0) throw new TypeError("reflection spawn limits are invalid")
 
-  const prepared = await (options.sandbox ?? passthroughSandbox)(spawnArgs)
+  const prepared = options.sandbox === undefined ? spawnArgs : await options.sandbox(spawnArgs)
   const metadata = requireRunMetadata(prepared)
   const launchedAt = (options.now ?? Date.now)()
   if (!Number.isFinite(prepared.hardDeadlineAt) || prepared.hardDeadlineAt <= 0) {
@@ -70,6 +70,9 @@ export async function runReflectionChild(
     thinking: prepared.thinking,
     nextAttempt: prepared.nextAttempt,
     hardDeadlineAt: prepared.hardDeadlineAt,
+    queuedAt: launchedAt,
+    memoryRoot: prepared.memoryRoot ?? dirname(dirname(dirname(metadata.worktree.parent.dir))),
+    maxConcurrentRuns: prepared.maxConcurrentRuns,
     terminationGraceMs: graceMs,
     maxOutputBytes,
     supervisorPath: options.supervisorPath,
@@ -123,6 +126,9 @@ async function runSupervisedChild(input: {
   readonly cwd: string
   readonly env: NodeJS.ProcessEnv
   readonly hardDeadlineAt: number
+  readonly queuedAt: number
+  readonly memoryRoot: string
+  readonly maxConcurrentRuns?: number
   readonly terminationGraceMs: number
   readonly maxOutputBytes: number
   readonly supervisorPath?: string
@@ -144,6 +150,9 @@ async function runSupervisedChild(input: {
     cwd: input.cwd,
     env: definedEnvironment(input.env),
     hardDeadlineAt: input.hardDeadlineAt,
+    queuedAt: input.queuedAt,
+    memoryRoot: input.memoryRoot,
+    maxConcurrentRuns: input.maxConcurrentRuns,
     terminationGraceMs: input.terminationGraceMs,
     maxOutputBytes: input.maxOutputBytes,
     stdoutPath,
@@ -155,6 +164,7 @@ async function runSupervisedChild(input: {
     model: input.model,
     ...(input.thinking === undefined ? {} : { thinking: input.thinking }),
     launching: true,
+    queued: true,
     hardDeadlineAt: input.hardDeadlineAt,
     deadlineAt: input.hardDeadlineAt + input.terminationGraceMs,
   }
@@ -210,7 +220,12 @@ async function runSupervisedChild(input: {
       outcomePath,
       launchPath,
       hasCompleteOutcome,
-      input.hardDeadlineAt + input.terminationGraceMs + OUTCOME_PUBLICATION_MARGIN_MS,
+      () => {
+        const current = JSON.parse(readFileSync(join(input.runDir, "ledger.json"), "utf8")) as {
+          queued?: boolean; deadlineAt: number
+        }
+        return current.queued === true ? undefined : current.deadlineAt + OUTCOME_PUBLICATION_MARGIN_MS
+      },
       Date.now,
       outcomeWait.signal,
     ).then((result) => settle({ kind: "outcome", result }))
@@ -247,8 +262,4 @@ function launchedRun(ledger: Readonly<Record<string, unknown>>): RunReceiptLedge
     ...(typeof ledger.origin === "string" ? { origin: ledger.origin } : {}),
     startedAt: String(ledger.startedAt),
   }
-}
-
-function passthroughSandbox(spawnArgs: ReflectionSpawnArgs): ReflectionSpawnArgs {
-  return spawnArgs
 }
