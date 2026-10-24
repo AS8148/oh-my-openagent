@@ -168,9 +168,24 @@ export function createDagRuntime(deps: DagRuntimeDeps): DagRuntime {
     }
   }
 
+  // omo#10782 item 5: a workflow run that completes tells the engine, so the session's next `done` reads
+  // completion kind "run". The engine ignores it outside an open epoch. A host fault here must never reach the
+  // scheduler's event fan-out.
+  const markRunCompleted = (runId: DagRunId): void => {
+    try {
+      deps.pi.lifecycle?.markRunCompleted({ runId })
+    } catch (error) {
+      deps.logger.warn("omo-senpi dag could not tell the engine a run completed", {
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   const publishSchedulerEvent = (event: DagRunEvent): void => {
     if ((deliveredSeq.get(event.runId) ?? 0) >= event.seq) return
     deliveredSeq.set(event.runId, event.seq)
+    if (event.type === "dag.run.completed") markRunCompleted(event.runId)
     deliverDurableEvent(durableEventListener, event)
     for (const listener of runListeners.get(event.runId) ?? []) deliverDurableEvent(listener, event)
   }
