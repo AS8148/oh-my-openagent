@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, expect, spyOn, test, type Mock } from "bun:test"
 import { chmod, mkdtemp, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
@@ -13,22 +13,21 @@ import { renderFailuresFile, type FactsFailureRecord } from "./failures-schema"
 import { selectLaunchable } from "./failures-selection"
 import { factsQueuePaths, type FactsQueueEntry } from "./schema"
 
-const realFs = { ...resilient }
-let observed: string[] | undefined
-mock.module("../fs/resilient", () => ({
-  ...realFs,
-  readFile: (...args: unknown[]) => {
-    const path = String(args[0])
-    if (/-[a-f0-9]{12}-[a-f0-9]{8}\.json$/.test(path)) observed?.push(path)
-    return Reflect.apply(realFs.readFile, undefined, args)
-  },
-}))
-afterAll(() => mock.module("../fs/resilient", () => realFs))
+// Entry reads are counted at the fs boundary with a spy installed per test and restored after it;
+// a module mock would replace ../fs/resilient for every test file sharing the process.
+let readSpy: Mock<typeof resilient.readFile> | undefined
+beforeEach(() => {
+  readSpy = spyOn(resilient, "readFile")
+})
+function entryReads(): string[] {
+  return (readSpy?.mock.calls ?? []).map((call) => String(call[0])).filter((path) => /-[a-f0-9]{12}-[a-f0-9]{8}\.json$/.test(path))
+}
 
 const roots: string[] = []
 const NOW = new Date("2026-10-23T00:00:00.000Z")
 afterEach(async () => {
-  observed = undefined
+  readSpy?.mockRestore()
+  readSpy = undefined
   await Promise.all(roots.splice(0).map((root) => removeTree(root)))
 })
 
@@ -75,13 +74,13 @@ test("#given 10000 parked-but-hot files and one live file #when enqueue and laun
   await writeFile(layout.failuresPath, renderFailuresFile(records, NOW.toISOString()))
   await writeFile(layout.entryPath("live", "m1", NOW), JSON.stringify(queued("live")))
 
-  observed = []
+  readSpy?.mockClear()
   await queue.enqueue({ identity: "agent", sessionId: "live", conversationId: "live", entries: [message("m1"), message("m2")] })
   const pending = await queue.listPending()
   const failures = await new FactsFailureStore({ identityPaths: paths }).readFailures()
   const selected = selectLaunchable(pending, failures, NOW).selected
   const claimed = await queue.claim(selected, "settle")
-  const reads = observed.length
+  const reads = entryReads().length
   console.log(`facts backlog: parked=10000 entryReads=${reads} bound=5 claimed=${claimed.length}`)
   expect(reads).toBeLessThanOrEqual(5)
   expect(claimed.map((entry) => entry.range.end_message_id).sort()).toEqual(["m1", "m2"])
@@ -184,17 +183,17 @@ test("#given retained files for many healthy conversations #when enqueue and a s
     await writeFile(layout.entryPath(conversation, "m1", NOW), JSON.stringify(queued(conversation)))
   }
   await writeFile(layout.entryPath("same", "m1", NOW), JSON.stringify(queued("same")))
-  observed = []
+  readSpy?.mockClear()
   const next = await queue.enqueue({
     identity: "agent", sessionId: "same", conversationId: "same", entries: [message("m1"), message("m2")],
   })
   expect(next.enqueued).toBe(true)
-  expect(observed).toEqual([layout.entryPath("same", "m1", NOW)])
+  expect(entryReads()).toEqual([layout.entryPath("same", "m1", NOW)])
   const pending = (await queue.listPending()).filter((entry) => entry.conversationId === "same")
-  observed = []
+  readSpy?.mockClear()
   const first = await queue.claim([...pending, ...pending], "first")
   expect(first).toHaveLength(2)
-  expect(observed).toHaveLength(2)
+  expect(entryReads()).toHaveLength(2)
   expect(await queue.claim(pending, "second")).toEqual([])
   await queue.releaseClaim(first, "first")
   const older = first.find((entry) => entry.range.end_message_id === "m1")
