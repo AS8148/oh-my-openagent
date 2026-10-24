@@ -16,6 +16,7 @@ ulw-research/
 │   ├── fact-ledger-grammar.md       # the one definition of a valid fact ledger; its per-kind table is rendered from KIND_RULES
 │   ├── fact-ledger.md               # working guide to the ledger: files, row fields, locators, operations
 │   ├── fidelity-claim-kinds.md      # claim kinds a sentence can be marked with (data-claim-kind); its table is rendered from CLAIM_KINDS
+│   ├── unit-rules.md                # per-operation unit rules for derived facts; the reviewer's checklist for unit-rules.mjs
 │   └── latex-report.md
 └── scripts/
     ├── report-tools.mjs             # CLI entry + dispatcher (COMMANDS, run, main)
@@ -32,6 +33,10 @@ ulw-research/
     ├── fact-ledger.mjs              # fact ledger IO and writers (addRow, retractRow, supersedeRow, --view table)
     ├── fact-ledger-schema.mjs       # ledger vocabulary, validateLedger, the status machine (transitionError) shared with the writers
     ├── fact-ledger-kinds.mjs        # KIND_RULES: every per-kind column rule; drives the validator, renders the grammar table (--render-grammar)
+    ├── fact-derive.mjs / fact-recompute.mjs   # script-computed derived rows and their tamper detector, both driven by unit-rules.mjs
+    ├── unit-rules.mjs               # OPERATION_RULES: arity, context, guards, result unit, row shape, and malformed shapes per operation
+    ├── unit-pairs.mjs               # typed operand-unit rules (equal, non-affine, +/- pairs) shared by operations and expr nodes
+    ├── unit-algebra.mjs / fact-expr.mjs       # canonical unit text and composites; the expr parser and evaluator
     ├── claim-kinds.mjs              # CLAIM_KINDS: claim kind -> placeholder mark, accepted rows, defect, unmarked warning; renders its doc table (--render-doc)
     ├── claims-index.mjs             # claim-graph.md index: the claim table plus the verified-claims digest
     ├── fidelity-state.mjs           # per-sentence failure counts for the fidelity repair loop
@@ -53,7 +58,7 @@ ulw-research/
 - The CLI never launches a browser. The layout probe is printed as one async expression; the orchestrator evaluates it through the browser skill's owned headless engine and passes the result back with `check --layout`.
 - Time is always injected (`--now`, `startedAt`); no module reads the clock inside a decision.
 - Tests are co-located given/when/then bun tests; CLI tests spawn `node` with bun removed from `PATH`. Fixtures live only under `scripts/tests/fixtures/`, are depersonalized, and never ship.
-- The senpi source dir (`packages/omo-senpi/skills/ulw-research/`) intentionally has no `scripts/`, `references/report-gates.md`, `references/deliverable-phase.md`, `references/report-visualization.md`, `references/fact-ledger-grammar.md`, `references/fidelity-claim-kinds.md`, or `references/fact-ledger.md`: the senpi sync overlays them from here byte-for-byte (`sharedAssets` in `packages/omo-senpi/plugin/scripts/native-skill-sources.mjs`), and both editions' sync suites assert the shipped copies equal these sources.
+- The senpi source dir (`packages/omo-senpi/skills/ulw-research/`) intentionally has no `scripts/`, `references/report-gates.md`, `references/deliverable-phase.md`, `references/report-visualization.md`, `references/fact-ledger-grammar.md`, `references/fidelity-claim-kinds.md`, `references/unit-rules.md`, or `references/fact-ledger.md`: the senpi sync overlays them from here byte-for-byte (`sharedAssets` in `packages/omo-senpi/plugin/scripts/native-skill-sources.mjs`), and both editions' sync suites assert the shipped copies equal these sources.
 - References and scripts carry no Hangul (Korean match strings are `\u` escapes) and never three consecutive newlines (the senpi sync normalizes those and would break byte equality).
 
 ## ANTI-PATTERNS
