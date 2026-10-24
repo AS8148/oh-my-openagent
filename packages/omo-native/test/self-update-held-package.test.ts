@@ -143,6 +143,30 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
     })
   })
 
+  describe("#given the new omo landed before the manager hit the held file", () => {
+    test("#then it keeps the new version, reinstalls nothing and says the update must be finished", async () => {
+      const h = harness({ outcomes: [{ status: 1, stderr: HELD_STDERR }], versions: ["5.1.1", "5.1.2"] })
+      expect(await runSelfUpdate([], h.options)).toBe(1)
+      expect(h.spawned).toHaveLength(3)
+      expect(h.spawned.every((argv) => argv.at(-1) === "omo-ai@5.1.2")).toBe(true)
+      const text = h.errors.join("\n")
+      expect(text).toContain("omo 5.1.2 is installed, but the package manager did not finish")
+      expect(text).not.toContain("restore")
+    })
+  })
+
+  describe("#given npm names the held executable itself", () => {
+    test("#then the process running exactly that file is named as the holder", async () => {
+      const exe = String.raw`C:\Users\u\.bun\install\global\node_modules\some-tool\bin\tool.exe`
+      const h = harness({
+        outcomes: [{ status: 1, stderr: `npm error code EPERM\nnpm error syscall unlink\nnpm error path ${exe}` }],
+        processes: [{ pid: 5150, name: "tool.exe", executablePath: exe }],
+      })
+      expect(await runSelfUpdate([], h.options)).toBe(1)
+      expect(h.errors.join("\n")).toContain("tool.exe (pid 5150)")
+    })
+  })
+
   describe("#given a Windows permission failure (EACCES on a protected prefix)", () => {
     test("#then it is not treated as a held file and fails once", async () => {
       const h = harness({ outcomes: [{ status: 1, stderr: String.raw`npm error code EACCES

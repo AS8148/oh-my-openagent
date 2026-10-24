@@ -125,7 +125,7 @@ export async function runSelfUpdate(args, options = {}) {
   }
 
   if (failed(result) && heldOnWindows(result)) {
-    await reportHeldInstall({ result, before, install, resolveUpdate, readInstalled, error, options, attempts: LOCK_RETRY_DELAYS_MS.length + 1 })
+    await reportHeldInstall({ result, before, target, install, resolveUpdate, readInstalled, error, options, attempts: LOCK_RETRY_DELAYS_MS.length + 1 })
     return 1
   }
   if (failed(result)) {
@@ -151,7 +151,7 @@ function readInstalledOrUndefined(readInstalled) {
   }
 }
 
-async function reportHeldInstall({ result, before, install, resolveUpdate, readInstalled, error, options, attempts }) {
+async function reportHeldInstall({ result, before, target, install, resolveUpdate, readInstalled, error, options, attempts }) {
   const held = heldTarget(result.stderr)
   const file = held ?? "a package file"
   const listProcesses = options.listProcesses ?? listWindowsProcesses
@@ -171,6 +171,12 @@ async function reportHeldInstall({ result, before, install, resolveUpdate, readI
   const now = readInstalledOrUndefined(readInstalled)
   if (now?.omo === before.omo) {
     error(`omo: omo ${before.omo} is still installed.`)
+    return
+  }
+  // The manager can fail while moving an old dependency after the new omo-ai is already in place;
+  // rolling that back would undo a working update and hit the same held file.
+  if (target !== undefined && now?.omo === target) {
+    error(`omo: omo ${target} is installed, but the package manager did not finish; run omo update again afterwards to complete it.`)
     return
   }
   const previous = resolveUpdate(before.omo)

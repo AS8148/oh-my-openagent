@@ -58,12 +58,16 @@ const OMO_PACKAGES = ["omo-ai", "@code-yeongyu"]
 export function findHolders(installDir, processes, excludePids, held = undefined) {
   const root = normalizePath(installDir)
   const needles = OMO_PACKAGES.map((name) => `${root}\\${normalizePath(name)}\\`)
+  let heldPath
   if (held !== undefined) {
     const target = normalizePath(held)
-    needles.push(`${/^[a-z]:\\|^\\\\/.test(target) ? target : `${root}\\${target}`}\\`)
+    heldPath = /^[a-z]:\\|^\\\\/.test(target) ? target : `${root}\\${target}`
+    needles.push(`${heldPath}\\`)
   }
   return processes.filter((entry) => {
     if (excludePids.includes(entry.pid)) return false
+    // npm can name the held file itself; the process running exactly that executable holds it.
+    if (heldPath !== undefined && typeof entry.executablePath === "string" && normalizePath(entry.executablePath) === heldPath) return true
     return [entry.executablePath, entry.commandLine].some((value) => {
       if (typeof value !== "string") return false
       const path = normalizePath(value)
