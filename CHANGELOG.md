@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Bun-installed `omo` keeps its command links intact so later upgrades can succeed.** Launches still start directly on Bun, and a new-version launch restores older generated wrappers to symlinks. This fixes recurring `EEXIST` failures on Bun 1.4.4; the first upgrade from an old wrapper may need the one-time removal described in the PR. ([#11024](https://github.com/code-yeongyu/oh-my-openagent/pull/11024))
+
 **Tasks honour a `-fast` model alias that the provider config pairs with a model.** Kibitzer no longer stops at a model whose start is refused; it falls back to the next one. ([#10538](https://github.com/code-yeongyu/oh-my-openagent/pull/10538), fixes [#10536](https://github.com/code-yeongyu/oh-my-openagent/issues/10536))
 
 **Child startup failures keep their cause.** When a task child exits while the parent writes to stdin, its own typed failure is reported instead of a broken-pipe error. ([#11097](https://github.com/code-yeongyu/oh-my-openagent/pull/11097), fixes [#11096](https://github.com/code-yeongyu/oh-my-openagent/issues/11096))
