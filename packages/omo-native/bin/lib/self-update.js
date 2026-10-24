@@ -37,7 +37,7 @@ export function formatVersionChange(before, after) {
  *
  * On Windows a manager failure whose stderr says a file is held (EPERM/EBUSY, #10090) is retried with
  * backoff. If the file stays held, the report names the file, the processes of this install that hold it
- * and one action, and a failed install that no longer reads as the previous version is reinstalled at it.
+ * and one action, and only an install that can no longer be read is reinstalled at the previous version; any readable version is kept.
  *
  * @typedef {{ omo: string, engine: string }} InstalledVersion
  * @typedef {{ status: number | null, signal: string | null, stderr?: string }} ChildResult
@@ -125,7 +125,7 @@ export async function runSelfUpdate(args, options = {}) {
   }
 
   if (failed(result) && heldOnWindows(result)) {
-    await reportHeldInstall({ result, before, target, install, resolveUpdate, readInstalled, error, options, attempts: LOCK_RETRY_DELAYS_MS.length + 1 })
+    await reportHeldInstall({ result, before, install, resolveUpdate, readInstalled, error, options, attempts: LOCK_RETRY_DELAYS_MS.length + 1 })
     return 1
   }
   if (failed(result)) {
@@ -151,7 +151,7 @@ function readInstalledOrUndefined(readInstalled) {
   }
 }
 
-async function reportHeldInstall({ result, before, target, install, resolveUpdate, readInstalled, error, options, attempts }) {
+async function reportHeldInstall({ result, before, install, resolveUpdate, readInstalled, error, options, attempts }) {
   const held = heldTarget(result.stderr)
   const file = held ?? "a package file"
   const listProcesses = options.listProcesses ?? listWindowsProcesses
@@ -173,10 +173,11 @@ async function reportHeldInstall({ result, before, target, install, resolveUpdat
     error(`omo: omo ${before.omo} is still installed.`)
     return
   }
-  // The manager can fail while moving an old dependency after the new omo-ai is already in place;
-  // rolling that back would undo a working update and hit the same held file.
-  if (target !== undefined && now?.omo === target) {
-    error(`omo: omo ${target} is installed, but the package manager did not finish; run omo update again afterwards to complete it.`)
+  // Any readable omo is a working install, even when the pinned target is unknown (registry down): the
+  // manager can fail moving an old dependency after the new omo-ai is in place, and reinstalling over it
+  // would undo a working update and hit the same held file. Only an unreadable install is restored.
+  if (now !== undefined) {
+    error(`omo: omo ${now.omo} is installed, but the package manager did not finish; run omo update again afterwards to complete it.`)
     return
   }
   const previous = resolveUpdate(before.omo)

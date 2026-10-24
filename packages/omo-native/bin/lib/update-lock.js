@@ -3,6 +3,10 @@ import { execFileSync } from "node:child_process"
 // Bun reports a file Windows will not let it move or replace as EPERM/EBUSY (NtSetInformationFile).
 // EACCES is left out: on Windows it is a permission problem (a protected prefix), which no retry fixes.
 const LOCK_PATTERN = /\b(EPERM|EBUSY)\b|NtSetInformationFile|being used by another process/i
+// A bare EPERM is also npm's spelling of a real permission failure (mkdir under a protected prefix), so it
+// only counts as a lock when the failing call moved or deleted an existing file.
+const CERTAIN_LOCK = /NtSetInformationFile|\bEBUSY\b|being used by another process/i
+const MOVE_OR_DELETE_SYSCALL = /\bsyscall:? '?(rename|unlink|rmdir)\b|\b(rename|unlink|rmdir) '/i
 const NPM_PATH_LINE = /^npm (?:error|ERR!) path (.+)$/
 
 /** Backoff between attempts while the file is held; the lock is usually a short antivirus scan. */
@@ -10,7 +14,9 @@ export const LOCK_RETRY_DELAYS_MS = [2000, 5000]
 
 /** @param {string | undefined} stderr */
 export function isLockFailure(stderr) {
-  return typeof stderr === "string" && LOCK_PATTERN.test(stderr)
+  if (typeof stderr !== "string") return false
+  if (CERTAIN_LOCK.test(stderr)) return true
+  return /\bEPERM\b/.test(stderr) && MOVE_OR_DELETE_SYSCALL.test(stderr)
 }
 
 /**

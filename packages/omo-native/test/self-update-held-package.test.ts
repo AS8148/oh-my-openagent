@@ -155,6 +155,39 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
     })
   })
 
+  describe("#given the registry was unreachable and a new omo landed anyway", () => {
+    test("#then the unpinned update is kept and nothing is reinstalled", async () => {
+      const h = harness({ outcomes: [{ status: 1, stderr: HELD_STDERR }], versions: ["5.1.1", "5.1.3"] })
+      const offline = { ...h.options, fetchDistTags: () => null }
+      expect(await runSelfUpdate([], offline)).toBe(1)
+      expect(h.spawned).toHaveLength(3)
+      expect(h.spawned.every((argv) => argv.at(-1) === "omo-ai@latest")).toBe(true)
+      expect(h.errors.join("\n")).toContain("omo 5.1.3 is installed, but the package manager did not finish")
+    })
+  })
+
+  describe("#given npm reports EPERM", () => {
+    test("#then a failed mkdir is a permission failure and is not retried", async () => {
+      const h = harness({ outcomes: [{ status: 1, stderr: String.raw`npm error code EPERM
+npm error syscall mkdir
+npm error path C:\Program Files\nodejs\node_modules\omo-ai
+npm error Error: EPERM: operation not permitted, mkdir 'C:\Program Files\nodejs\node_modules\omo-ai'` }] })
+      expect(await runSelfUpdate([], h.options)).toBe(1)
+      expect(h.spawned).toHaveLength(1)
+      expect(h.sleeps).toEqual([])
+    })
+
+    test("#then a failed rename of an existing file is a lock and is retried", async () => {
+      const h = harness({ outcomes: [{ status: 1, stderr: String.raw`npm error code EPERM
+npm error syscall rename
+npm error path C:\Users\u\AppData\Roaming\npm\node_modules\omo-ai
+npm error errno -4048` }] })
+      expect(await runSelfUpdate([], h.options)).toBe(1)
+      expect(h.spawned).toHaveLength(3)
+      expect(h.sleeps).toEqual([2000, 5000])
+    })
+  })
+
   describe("#given npm names the held executable itself", () => {
     test("#then the process running exactly that file is named as the holder", async () => {
       const exe = String.raw`C:\Users\u\.bun\install\global\node_modules\some-tool\bin\tool.exe`
