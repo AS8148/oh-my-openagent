@@ -201,10 +201,11 @@ function readWindow(recorder: ReturnType<typeof createTestRecorder>, sessionHash
 }
 
 // A long outage must not grow the write-ahead spool without bound or hammer the endpoint (#10225 review).
+// The events carry a cwd: a record with no stored cwd fails closed and is dropped unsent (#10234).
 const queuePending = (storage: SummaryStorage, count: number, owner = { pid: 999_100, bootId: "gone" }): string[] =>
   Array.from({ length: count }, (_, index) => {
     const uuid = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`
-    storage.writePending({ consent: "enabled", scope: {}, uuid, sessionHash: "s", owner, createdAt: T0 + index, properties: { turns: 1 } })
+    storage.writePending({ consent: "enabled", scope: { cwd: "/repo" }, uuid, sessionHash: "s", owner, createdAt: T0 + index, properties: { turns: 1 } })
     return uuid
   })
 
