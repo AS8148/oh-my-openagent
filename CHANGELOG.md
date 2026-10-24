@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Computer-use cancellation retains engine crash diagnostics.** Cancelled and timed-out calls keep their error code and carry the engine exit diagnostic as their cause. Capability-query permission failures remain structured tool results, hard engine diagnostics survive unrelated successful replies, and legacy launch refusals now share the structured record's exit-code and UTF-8 size rules. ([#11150](https://github.com/code-yeongyu/oh-my-openagent/pull/11150)) Follow-up to [#11086](https://github.com/code-yeongyu/oh-my-openagent/pull/11086), part of [#11073](https://github.com/code-yeongyu/oh-my-openagent/issues/11073).
 
+**Reflection and dream children share a machine-wide FIFO concurrency cap.** The default is one running child across memory identities, configurable with `memory.reflection.max_concurrent_runs`. Queued runs retain their execution budget and remain protected from crash reconciliation until admitted. ([#11161](https://github.com/code-yeongyu/oh-my-openagent/pull/11161), fixes [#11154](https://github.com/code-yeongyu/oh-my-openagent/issues/11154))
+
 **Windows dori sidecar paths pass the extension's path checks.** The omo-senpi tests accept the Windows form of the sidecar path, so the Windows suite no longer fails on a correct path. ([#11111](https://github.com/code-yeongyu/oh-my-openagent/pull/11111), fixes [#11110](https://github.com/code-yeongyu/oh-my-openagent/issues/11110))
 
 **Child-task, workflow and workpool wake sources report kind `children`.** ([#11114](https://github.com/code-yeongyu/oh-my-openagent/pull/11114), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))
