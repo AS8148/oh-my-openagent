@@ -68,7 +68,8 @@ function runner(exec: GitExec, dir: string): Run {
     exec.run(argv, {
       cwd: dir,
       timeoutMs: GIT_TIMEOUT_MS,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_LITERAL_PATHSPECS: "1", ...env },
+      // git refuses literal pathspecs combined with glob/icase ones, so a user's own setting must not fail every drop.
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_LITERAL_PATHSPECS: "1", GIT_GLOB_PATHSPECS: "0", GIT_ICASE_PATHSPECS: "0", GIT_NOGLOB_PATHSPECS: "0", ...env },
     })
 }
 

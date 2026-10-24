@@ -177,8 +177,13 @@ export function frontmatterBlock(content: string): string | null {
   return match?.[1] ?? null
 }
 
+/**
+ * Reads one blob, or null when the path is absent at that revision. `git show rev:path` would fall back to reading a
+ * missing glob-named path (`k*.md`, `k[x].md`) as a pathspec and exit 0 with empty output; `cat-file blob` takes
+ * only an object name, so a missing path is always a failure, never a pattern.
+ */
 async function showOptional(exec: GitExec, dir: string, revision: string, path: string): Promise<string | null> {
-  const result = await run(exec, dir, ["show", `${revision}:${path}`])
+  const result = await run(exec, dir, ["cat-file", "blob", `${revision}:${path}`])
   return result.code === 0 ? result.stdout : null
 }
 
