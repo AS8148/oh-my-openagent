@@ -31,6 +31,8 @@ function skill(path: string) {
 
 describe("legacy skill containment at discovery and reread", () => {
   test("mode-000 skill fails closed with its real EACCES error, not a security block", async () => {
+    // chmod 000 denies reads only under POSIX permissions; on Windows the file stays readable, so the case cannot arise.
+    if (process.platform === "win32") return
     // given
     const f = fixture()
     const path = join(f.skillsDir, "unreadable", "SKILL.md")
