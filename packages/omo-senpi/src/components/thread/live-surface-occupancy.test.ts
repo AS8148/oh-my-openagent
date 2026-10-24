@@ -81,7 +81,10 @@ describe("occupancy on a released host (no attach_session, no socket_auth)", () 
 
   test("#given a task host warm #when askHost sends it #then the connection stays an observer", async () => {
     const { attachedAtLine, frames } = await releasedHost((socket, root) => askHost(socket, { type: "warm", id: "warm-occupancy", cwd: root, kind: "worker" }, 2000, { keyRoot: root }))
-    expect(frames.map((frame) => [frame.type, frame.observe])).toEqual([["get_protocol_info", true], ["warm", undefined]])
+    // win32 authenticates by the pipe secret, so askHost sends no observing get_protocol_info probe first (host-request.ts,
+    // pinned by host-request-auth.test.ts "raw pipe secret transport remains unchanged"); the warm itself is the same frame.
+    const probe = process.platform === "win32" ? [] : [["get_protocol_info", true]]
+    expect(frames.map((frame) => [frame.type, frame.observe])).toEqual([...probe, ["warm", undefined]])
     expect(attachedAtLine).toBeUndefined()
   })
 })
