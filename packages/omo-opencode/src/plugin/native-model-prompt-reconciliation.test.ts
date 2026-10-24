@@ -54,7 +54,8 @@ describe("per-request Native model prompt selection", () => {
       sessionID: "override-session", agent: "hephaestus",
       model: { providerID: "anthropic", modelID: "claude-opus-5-5" },
     })
-    const previous = createHephaestusAgent("openai/gpt-5.4").prompt!
+    const previous = createHephaestusAgent("openai/gpt-5.4").prompt
+    expect(previous).toBeString()
     const output = { system: [previous] }
     await createSystemTransformHandler()({ model: { providerID: "anthropic", id: "claude-opus-5-5" } }, output)
     expect(warnings).toHaveLength(1)

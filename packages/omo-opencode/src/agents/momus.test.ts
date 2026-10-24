@@ -3,7 +3,7 @@ import { createMomusAgent } from "./momus";
 
 describe("createMomusAgent", () => {
   test.each(["anthropic/claude-opus-5-5", "openai/gpt-5.5", "openai/gpt-6-astra"])("preserves the planner verdict protocol for %s", (model) => {
-    const prompt = createMomusAgent(model).prompt!
+    const prompt = createMomusAgent(model).prompt ?? ""
     const role = prompt.slice(prompt.indexOf("\n</omo-model-core>") + "\n</omo-model-core>".length)
     expect(role).toContain("[OKAY]")
     expect(role).toContain("[REJECT]")
