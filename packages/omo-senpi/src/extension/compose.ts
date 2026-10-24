@@ -4,6 +4,7 @@ import { createDagSdkRootProvisioning } from "./dag-sdk-root-provisioning"
 import { isOmoSenpiDisabledByEnv } from "./disable-env"
 import { AGENT_TOOLKIT_SDK_ROOT_ENV, createSdkRootProvisioning } from "./sdk-root-provisioning"
 import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
+import { publishWakeQueueChildWork } from "./wake-queue-source"
 import { createFirstPaintScheduler, createStartupDeferral, type StartupWorkScheduler } from "./startup-deferral"
 import { installToolCaptureRegistry } from "./tool-capture-registry"
 import { createPrewarmDiagnostics } from "./prewarm-diagnostics"
@@ -132,6 +133,7 @@ export function composeOmoSenpiExtension(
           timer.unref?.()
           return () => clearTimeout(timer)
         },
+        onChildWorkChange: publishWakeQueueChildWork(pi),
       },
     )
     // senpi emits session_shutdown on the old runner before it invalidates that generation; retire the

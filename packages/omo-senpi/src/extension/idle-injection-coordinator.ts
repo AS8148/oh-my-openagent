@@ -40,7 +40,13 @@ export type FlushScheduler = (flush: () => void) => (() => void) | void
 
 export interface IdleInjectionCoordinatorOptions {
   readonly scheduleFlush?: FlushScheduler
+  /** Called with each new count of child results queued or still in delivery (#10782). */
+  readonly onChildWorkChange?: (count: number) => void
 }
+
+// Sources that carry a child's result to its parent: until they are delivered, the parent still owes
+// that work, so the engine must not read it as done. Continuations and nudges are the parent's own.
+const CHILD_WORK_SOURCES: ReadonlySet<IdleInjectionSource> = new Set(["task-completion", "workpool-aggregate", "team-message", "dag-run"])
 
 /**
  * Handed to `onDeliveryFailed` for every injection still queued when the coordinator retires, and
@@ -92,10 +98,22 @@ export class IdleInjectionCoordinator {
   #soonScheduled = false
   #retired = false
   #cancelScheduledFlush: (() => void) | undefined
+  readonly #onChildWorkChange: ((count: number) => void) | undefined
+  #childrenInDelivery = 0
+  #reportedChildWork = 0
 
   constructor(deliver: IdleInjectionDelivery, options: IdleInjectionCoordinatorOptions = {}) {
     this.#deliver = deliver
     this.#scheduleFlush = options.scheduleFlush ?? ((flush) => queueMicrotask(flush))
+    this.#onChildWorkChange = options.onChildWorkChange
+  }
+
+  #reportChildWork(): void {
+    let count = this.#childrenInDelivery
+    for (const injection of this.#pending.values()) if (CHILD_WORK_SOURCES.has(injection.source)) count++
+    if (count === this.#reportedChildWork) return
+    this.#reportedChildWork = count
+    this.#onChildWorkChange?.(count)
   }
 
   /**
@@ -107,6 +125,7 @@ export class IdleInjectionCoordinator {
   enqueue(injection: IdleInjection): boolean {
     if (this.#retired) return false
     this.#pending.set(injection.key, injection)
+    this.#reportChildWork()
     return true
   }
 
@@ -140,7 +159,9 @@ export class IdleInjectionCoordinator {
   }
 
   remove(key: string): boolean {
-    return this.#pending.delete(key)
+    const removed = this.#pending.delete(key)
+    this.#reportChildWork()
+    return removed
   }
 
   /**
@@ -162,6 +183,7 @@ export class IdleInjectionCoordinator {
     cancelScheduledFlush?.()
     const dropped = [...this.#pending.values()]
     this.#pending.clear()
+    this.#reportChildWork()
     for (const injection of dropped) injection.onDeliveryFailed?.(new IdleInjectionRetiredError())
   }
 
@@ -177,7 +199,13 @@ export class IdleInjectionCoordinator {
       (left, right) => SOURCE_RANK[left.source] - SOURCE_RANK[right.source],
     )
     const collapsed = ordered.length
+    const children = ordered.filter((injection) => CHILD_WORK_SOURCES.has(injection.source)).length
+    const settleChildren = () => {
+      this.#childrenInDelivery -= children
+      this.#reportChildWork()
+    }
     this.#pending.clear()
+    this.#childrenInDelivery += children
     let delivery: unknown
     try {
       const contents = ordered.map((injection) => injection.content)
@@ -201,17 +229,21 @@ export class IdleInjectionCoordinator {
         { deliverAs },
       )
     } catch (error) {
+      settleChildren()
       for (const injection of ordered) injection.onDeliveryFailed?.(error)
       throw error
     }
     if (!isPromiseLike(delivery)) {
+      settleChildren()
       for (const injection of ordered) injection.onFlushed?.()
     } else {
       void delivery.then(
         () => {
+          settleChildren()
           for (const injection of ordered) injection.onFlushed?.()
         },
         (error: unknown) => {
+          settleChildren()
           for (const injection of ordered) injection.onDeliveryFailed?.(error)
         },
       )
