@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Memory path-state recovery and commit hooks now keep literal Git lookups working when global glob or case-insensitive pathspec modes are enabled ([#11130](https://github.com/code-yeongyu/oh-my-openagent/issues/11130), [#11167](https://github.com/code-yeongyu/oh-my-openagent/pull/11167)).
+
 **A user Stop pauses the workflow run it started instead of cancelling it.** DAG nodes, workpool workers and task children hold where they are; a message to the paused run or Resume continues it from where it stopped. ([#10808](https://github.com/code-yeongyu/oh-my-openagent/pull/10808), fixes [#6752](https://github.com/code-yeongyu/oh-my-openagent/issues/6752))
+
+**Concurrent file touches show each project memory nudge once.** Project memory reads reserve the nudge before asynchronous loading, retry failed reads, and discard stale results after compaction or session changes. ([#11165](https://github.com/code-yeongyu/oh-my-openagent/pull/11165), addresses item 1 of [#10927](https://github.com/code-yeongyu/oh-my-openagent/issues/10927))
+
+**A finished workflow run now shows as a finished run.** When a workflow (DAG) run started from a session completes, including one that completes after recovery, the engine records the session's completion as a finished run instead of a plain reply ([#11155](https://github.com/code-yeongyu/oh-my-openagent/pull/11155)).
+
+**A finished ulw-execute plan now shows as a finished run.** When this session's own ulw-execute work is marked completed, the engine records the session's completion as a finished run instead of a plain reply. Work finished by an earlier run, abandoned work, and another session's work are not counted ([#11174](https://github.com/code-yeongyu/oh-my-openagent/pull/11174)).
+
+**A completed ulw-loop plan now shows as a finished run.** When this session's ulw-loop plan reaches its aggregate completion, the engine records the session's completion as a finished run instead of a plain reply. A plan that was already complete when the session started is not counted ([#11175](https://github.com/code-yeongyu/oh-my-openagent/pull/11175)).
+
+**CI exposes the lint ratchet as its own required-free status check.** Pull requests, pushes and merge groups run `Lint ratchet` independently of the heavy-validation typecheck path. ([#11128](https://github.com/code-yeongyu/oh-my-openagent/pull/11128), thanks @Dante-dan)
+
+**The 10k parked-backlog memory test now fails if it observed no entry reads.** ([#11164](https://github.com/code-yeongyu/oh-my-openagent/pull/11164), part of [#11091](https://github.com/code-yeongyu/oh-my-openagent/issues/11091), thanks @Dante-dan)
 
 **Usage summaries from older versions no longer stay on disk after an upgrade.** Versions 5.1.34 to 5.1.44 kept session summaries in a `rollups` folder that nothing reads or sends any more. The first start after upgrading now deletes it, whether telemetry is on or off, and never follows a link out of that folder. With telemetry turned off in `omo.json`, a summary file that was cut short by a crash is deleted too. ([#10234](https://github.com/code-yeongyu/oh-my-openagent/issues/10234)) ([#11147](https://github.com/code-yeongyu/oh-my-openagent/pull/11147)) (batch [#11168](https://github.com/code-yeongyu/oh-my-openagent/pull/11168))
 
@@ -19,10 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **One bad memory entry no longer discards a whole reflection run, and credential-shaped prose is not a secret.** Completion validation used to fail the entire run when any entry was refused (secret-like content, invalid frontmatter, a `description` over 1024 characters), so automatic reflection parked after a few runs. It now rewrites the run's branch as one commit without the refused entries, keeps the valid ones, and reports each dropped path with its reason (never the matched value); a run whose entries are all refused lands as no changes. The secret scanner and the pre-commit hook no longer flag assignments whose value only refers to a secret (`process.env.X`, `$VAR`, `{{ slot }}`, `[FILTERED]`, the `Bearer` word, null/example literals), while a real value still matches. The dream's `path_orphan` finding now says when a file has no frontmatter, and its persona tells it to add a `description` in the same commit as the move instead of a bare `git mv`, which validation refused on every run. Thanks to @PGY0403 (#10385) and @floweredao (#10511) for the reports. ([#10385](https://github.com/code-yeongyu/oh-my-openagent/issues/10385), [#10511](https://github.com/code-yeongyu/oh-my-openagent/issues/10511), [#10528](https://github.com/code-yeongyu/oh-my-openagent/pull/10528)) (batch [#11168](https://github.com/code-yeongyu/oh-my-openagent/pull/11168))
 
-**Concurrent file touches show each project memory nudge once.** Project memory reads reserve the nudge before asynchronous loading, retry failed reads, and discard stale results after compaction or session changes. ([#11165](https://github.com/code-yeongyu/oh-my-openagent/pull/11165), addresses item 1 of [#10927](https://github.com/code-yeongyu/oh-my-openagent/issues/10927))
-
-- Memory path-state recovery and commit hooks now keep literal Git lookups working when global glob or case-insensitive pathspec modes are enabled ([#11130](https://github.com/code-yeongyu/oh-my-openagent/issues/11130), [#11167](https://github.com/code-yeongyu/oh-my-openagent/pull/11167)).
-
 ## [5.1.45] - 2026-10-24
 
 **Reading the end of a long session takes 42 ms and 68 MB instead of 40 s and 1.8 GB.** `session_read`, `session_search` and `session_info` page through OpenCode's message API instead of loading the whole session: on a 23,000-message session, `session_read` with `limit: 2, from_end: true` dropped from 39.6 s and 1,848 MB peak memory to 42 ms and 68 MB, and a search that runs out its 60-second timeout now stops reading when it returns, where it used to read another 228 MB in the background ([#10738](https://github.com/code-yeongyu/oh-my-openagent/issues/10738), [#10741](https://github.com/code-yeongyu/oh-my-openagent/pull/10741)).
@@ -32,12 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Every session start reads about 33 KB less of `omo.js`: eleven memory slash commands and memory sync's device account load on first use ([#10902](https://github.com/code-yeongyu/oh-my-openagent/pull/10902), [#10860](https://github.com/code-yeongyu/oh-my-openagent/issues/10860)).** The commands (`/memory`, `/remember`, `/init`, `/recompile`, `/memory-repository`, `/sleeptime`, `/reflect`, `/dream`, `/search`, `/facts`, `/agreements`) still appear at startup with the same names, descriptions and hints; their handlers load from `extensions/omo-memory-commands.js`. The signed-in device account loads from `extensions/omo-device-account.js` the first time a session resolves its sync, and if that file cannot load, memory sync reports `sync-unavailable` with the reason instead of looking signed out.
 
 **ulw-research ships a fact ledger, a fidelity state file and a claim index for research reports.** They give each research run a machine-readable record of its facts and verified claims; nothing in the CLI uses them yet. ([#11046](https://github.com/code-yeongyu/oh-my-openagent/pull/11046), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009); batch [#11148](https://github.com/code-yeongyu/oh-my-openagent/pull/11148))
-
-**A finished workflow run now shows as a finished run.** When a workflow (DAG) run started from a session completes, including one that completes after recovery, the engine records the session's completion as a finished run instead of a plain reply ([#11155](https://github.com/code-yeongyu/oh-my-openagent/pull/11155)).
-
-**A finished ulw-execute plan now shows as a finished run.** When this session's own ulw-execute work is marked completed, the engine records the session's completion as a finished run instead of a plain reply. Work finished by an earlier run, abandoned work, and another session's work are not counted ([#11174](https://github.com/code-yeongyu/oh-my-openagent/pull/11174)).
-
-**A completed ulw-loop plan now shows as a finished run.** When this session's ulw-loop plan reaches its aggregate completion, the engine records the session's completion as a finished run instead of a plain reply. A plan that was already complete when the session started is not counted ([#11175](https://github.com/code-yeongyu/oh-my-openagent/pull/11175)).
 
 **Windows dori sidecar paths pass the extension's path checks.** The omo-senpi tests accept the Windows form of the sidecar path, so the Windows suite no longer fails on a correct path. ([#11111](https://github.com/code-yeongyu/oh-my-openagent/pull/11111), fixes [#11110](https://github.com/code-yeongyu/oh-my-openagent/issues/11110))
 
