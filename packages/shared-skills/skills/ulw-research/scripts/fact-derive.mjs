@@ -3,11 +3,15 @@
 // its rounded `value`), and appends a derived or converted row. Sums and differences (pp included) render at the
 // operands' fewest decimal places, half away from zero (1000 - 3 is 997, 9 - 1.5 is 8, 19.0 - 1.5 is 17.5, 1.25 + 2.5
 // is 3.8); every other operation at their fewest significant figures. recompute() repeats the arithmetic so the
-// verifier compares exact, value, and render with no epsilon. Every failure is incompatible_operands; no row is written.
+// verifier compares exact, value, and render with no epsilon (fact-recompute.mjs). Every failure is incompatible_operands;
+// no row is written.
 
 import { addRow, nextId, OPERATIONS } from "./fact-ledger.mjs"
+import { unitMismatch } from "./fact-recompute.mjs"
 import { add, div, fromDecimal, mul, sigFigsOf, sub, toDecimal } from "./rational.mjs"
 import { convertFactor, dimensionOf, normalizeUnit } from "./units.mjs"
+
+export { recompute } from "./fact-recompute.mjs"
 
 const INCOMPATIBLE = "incompatible_operands"
 const HUNDRED = fromDecimal("100")
@@ -207,6 +211,8 @@ export function derive(ledger, spec) {
 		const unit = spec.op === "convert" ? (spec.to ?? spec.unit) : (spec.unit ?? null)
 		if (spec.op !== "expr" && spec.op !== "convert") checkCompatibility(spec.op, rows, unit, spec)
 		const result = compute(spec.op, rows, unit, ast)
+		const mismatch = unitMismatch(spec.op, rows, result.unit, ast)
+		if (mismatch) refuse(mismatch)
 		const kind = spec.op === "convert" ? "converted" : "derived"
 		const ids = rows.map((row) => row.fact_id)
 		const row = addRow(ledger, {
@@ -234,16 +240,4 @@ export function derive(ledger, spec) {
 	}
 }
 
-/** Repeat a stored row's arithmetic from its operands' exact values; ok only when exact, value, and render all match. */
-export function recompute(ledger, row) {
-	try {
-		const ast = row.operation === "expr" ? parseExpr(row.formula) : null
-		const rows = row.operands.map((id) => lookup(ledger, id, false))
-		const expected = compute(row.operation, rows, row.unit, ast)
-		const ok = expected.exact.num === row.exact?.num && expected.exact.den === row.exact?.den && expected.value === row.value && expected.render === row.render
-		return { ok, expected: { exact: expected.exact, value: expected.value, render: expected.render } }
-	} catch (error) {
-		if (!(error instanceof DeriveError)) throw error
-		return { ok: false, expected: null, detail: error.detail }
-	}
-}
+export { compute, DeriveError, leaves, lookup, parseExpr, unitKey }

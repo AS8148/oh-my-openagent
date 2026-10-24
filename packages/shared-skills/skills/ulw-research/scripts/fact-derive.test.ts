@@ -194,4 +194,34 @@ describe("recompute", () => {
 		expect(recompute(ledger, sum).ok).toBe(true)
 		expect(recompute(ledger, { ...sum, exact: { num: "301", den: "1" } }).ok).toBe(false)
 	})
+
+	const meters = () => ledgerOf([measured("F1", "1", "m"), measured("F2", "3", "m"), measured("F3", "5", "m")])
+
+	test("a unit relabel with a matching render is refused: 1 m + 3 m relabeled 4 km", () => {
+		const ledger = meters()
+		const sum = rowOf(derive(ledger, { op: "sum", operands: ["F1", "F2"], unit: "m" }))
+		expect(recompute(ledger, sum).ok).toBe(true)
+		const relabeled = recompute(ledger, { ...sum, unit: "km", raw: "4 km", render: "4 km" })
+		expect(relabeled.ok).toBe(false)
+		expect(relabeled.detail).toContain("unit")
+		const expr = rowOf(derive(ledger, { op: "expr", formula: "F1 + F2", unit: "m", rationale: "r" }))
+		expect(recompute(ledger, expr).ok).toBe(true)
+		expect(recompute(ledger, { ...expr, unit: "km", raw: "4 km", render: "4 km" }).ok).toBe(false)
+	})
+
+	test("a row with null operands is not ok and does not throw", () => {
+		const ledger = meters()
+		const sum = rowOf(derive(ledger, { op: "sum", operands: ["F1", "F2"], unit: "m" }))
+		const result = recompute(ledger, { ...sum, operands: null })
+		expect(result.ok).toBe(false)
+		expect(result.detail).toContain("operands")
+	})
+
+	test("an expr row whose operands no longer match its formula ids is not ok and does not throw", () => {
+		const ledger = meters()
+		const expr = rowOf(derive(ledger, { op: "expr", formula: "F1 + F2", unit: "m", rationale: "r" }))
+		const result = recompute(ledger, { ...expr, operands: ["F1", "F3"] })
+		expect(result.ok).toBe(false)
+		expect(result.detail).toContain("F2")
+	})
 })
