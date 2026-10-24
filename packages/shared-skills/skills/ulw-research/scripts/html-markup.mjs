@@ -14,11 +14,16 @@ function scan(src, at, visit) {
 		let kind
 		let end
 		let tag = null
-		if (src.startsWith("<!--", start) || next === "!" || next === "?") {
+		if (src.startsWith("<!--", start)) {
+			// From start + 2 so the abrupt closes <!--> and <!---> end where the HTML tokenizer ends them.
 			kind = "skip"
-			const comment = src.startsWith("<!--", start)
-			const stop = src.indexOf(comment ? "-->" : ">", start + (comment ? 4 : 1))
-			end = stop === -1 ? src.length : stop + (comment ? 3 : 1)
+			const stop = src.indexOf("-->", start + 2)
+			end = stop === -1 ? src.length : stop + 3
+		} else if (next === "!" || next === "?" || (next === "/" && !isLetter(src[start + 2]))) {
+			// Declarations, <?...> and </ + non-letter (</> included) are bogus comments up to the next ">".
+			kind = "skip"
+			const stop = src.indexOf(">", start + 2)
+			end = stop === -1 ? src.length : stop + 1
 		} else if (isLetter(next) || (next === "/" && isLetter(src[start + 2]))) {
 			kind = next === "/" ? "close" : "open"
 			tag = readTag(src, start + (kind === "close" ? 2 : 1))
@@ -33,7 +38,28 @@ function scan(src, at, visit) {
 	}
 }
 
+// Script data with its escaped and double-escaped states: a </script> inside <!--<script>...-->
+// does not end the script. Returns the end of the closing tag, or the end of input.
+const SCRIPT_MARKS = { data: /<!--|<\/script(?=[\s/>])/gi, escaped: /-->|<\/?script(?=[\s/>])/gi, double: /-->|<\/script(?=[\s/>])/gi }
+function scriptEnd(src, from) {
+	let state = "data"
+	let at = from
+	for (;;) {
+		const marks = SCRIPT_MARKS[state]
+		marks.lastIndex = at
+		const match = marks.exec(src)
+		if (!match) return src.length
+		const token = match[0].toLowerCase()
+		if (token === "-->") [state, at] = ["data", match.index + 3]
+		else if (token === "<!--") [state, at] = ["escaped", match.index + 2]
+		else if (token === "<script") [state, at] = ["double", match.index + 7]
+		else if (state === "double") [state, at] = ["escaped", match.index + 8]
+		else return readTag(src, match.index + 2).end
+	}
+}
+
 function closeOf(src, from, name) {
+	if (name === "script") return scriptEnd(src, from)
 	if (RAW.has(name)) {
 		const close = new RegExp(`</${name}(?=[\\s/>])[^>]*>`, "gi")
 		close.lastIndex = from
@@ -97,4 +123,23 @@ export function tagAttributes(html) {
 		return undefined
 	})
 	return tags
+}
+
+/**
+ * Constructs this tokenizer does not model exactly; renderer output never contains them, so polish
+ * refuses a document holding any of them instead of trusting the markup comparison.
+ */
+export function ambiguousMarkup(html) {
+	const src = String(html)
+	const found = new Set()
+	if (/<\/(?![a-z])/i.test(src)) found.add("</ before a non-letter")
+	if (/<!\[CDATA\[/i.test(src)) found.add("<![CDATA[")
+	if (src.includes("<?")) found.add("<?")
+	if (src.includes("--!>")) found.add("--!>")
+	scan(src, 0, (kind, start, end, tag) => {
+		if (kind !== "skip" && src.slice(start + 1, end).includes("<")) found.add("< inside a tag or attribute value")
+		if (kind === "open" && RAW.has(tag.name) && src.slice(end, closeOf(src, end, tag.name)).includes("<!--")) found.add(`<!-- inside ${tag.name}`)
+		return undefined
+	})
+	return [...found]
 }

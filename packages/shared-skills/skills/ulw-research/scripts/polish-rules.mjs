@@ -11,11 +11,14 @@
 //   polish_text_churn: more than POLISH_CHURN_LIMIT of the normalized visible prose changed;
 //   polish_link_changed: href values changed or an internal #target stopped resolving;
 //   polish_name_changed: a proper noun (POLISH_NAME) of a ledger quote, present before, is gone.
+// A document holding a construct html-markup.ambiguousMarkup lists (</ + non-letter, <!-- inside
+// script/style, <![CDATA[, <?, --!>, or < inside a tag) is refused first with polish_diff_fail
+// "ambiguous markup": the byte comparison is only trusted where the tokenizer is exact.
 // ordered (polish-apply) also refuses a reordering of fact spans, numerals, tickers and links;
 // without it they compare as multisets. Severity lives only in contracts.DEFECT_CODES.
 // No IO, no model. Plain Node ESM.
 
-import { markupParts, tagAttributes } from "./html-markup.mjs"
+import { ambiguousMarkup, markupParts, tagAttributes } from "./html-markup.mjs"
 import { missingTerms, numeralKeys, project, requiredTerms, termCounts, textOf } from "./polish-project.mjs"
 import { splitSentences } from "./sentence-split.mjs"
 import { normalizeText } from "./text-normalize.mjs"
@@ -124,6 +127,8 @@ const hasWord = (text, word) => new RegExp(`(?<![\\p{L}\\p{N}])${word.replace(/[
  * @returns {{ code: string, message: string }[]} in POLISH_CODES order
  */
 export function polishDefects(beforeHtml, afterHtml, ledger, { ordered = false } = {}) {
+	const ambiguous = [...new Set([...ambiguousMarkup(beforeHtml), ...ambiguousMarkup(afterHtml)])]
+	if (ambiguous.length > 0) return [{ code: "polish_diff_fail", message: `ambiguous markup: ${ambiguous.join(", ")}` }]
 	const [beforeParts, afterParts] = [markupParts(beforeHtml), markupParts(afterHtml)]
 	const [before, after] = [beforeParts.source, afterParts.source]
 	const [from, to] = [project(before), project(after)]

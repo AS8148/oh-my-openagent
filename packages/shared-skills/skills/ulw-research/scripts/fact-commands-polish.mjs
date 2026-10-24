@@ -4,7 +4,9 @@
 // The writing lane returns polish-edits.json ([{before, after, reason}]) and never edits the
 // report. polish-apply applies each edit through polish-apply.mjs and writes the result; a
 // rejected (major) or unlocated (minor) edit leaves its region unchanged and is listed with its
-// index and reason so the orchestrator can re-send it. It exits 0 whenever it wrote the output.
+// index and reason so the orchestrator can re-send it; every rejection reason is printed verbatim, one
+// line per rejected edit (index and the first 60 characters of its before), in the summary and in
+// data.rejected_reasons. It exits 0 whenever it wrote the output.
 // polish-diff is the whole-document backstop (polish-diff.mjs) between the pre-polish artifact
 // and any later copy; it exits 1 on a blocker. pairsChangedSince keeps only the pairs whose
 // sentence text (normalized) is not in the pre-polish artifact that a fill map names, so the
@@ -41,6 +43,12 @@ function readText(path) {
 
 const withSeverity = (entry) => ({ ...entry, severity: DEFECT_CODES[entry.code].severity, hint: DEFECT_CODES[entry.code].hint })
 
+/** The first 60 characters of an edit's before, on one line. */
+const beforePreview = (before) => (typeof before === "string" ? before : "").replace(/\s+/gu, " ").slice(0, 60)
+
+/** One line per rejected edit: its index, the start of its before, and its reason verbatim. */
+const rejectionLine = (entry, edit) => `  rejected edit ${entry.index} ("${beforePreview(edit?.before)}"): ${entry.reason}`
+
 function runPolishApply(args) {
 	const [report] = args.positionals
 	const { flags } = args
@@ -59,8 +67,9 @@ function runPolishApply(args) {
 	const defects = [...result.rejected, ...result.unlocated].sort((a, b) => a.index - b.index).map(withSeverity)
 	const counts = { applied: result.applied.length, rejected: result.rejected.length, unlocated: result.unlocated.length }
 	const data = { out: resolve(flags.out), ...counts, applied_indexes: result.applied, input_sha256: sha256(html), edits_sha256: sha256(editsText), out_sha256: sha256(result.out) }
-	const summary = `fact polish-apply: ${counts.applied} applied, ${counts.rejected} rejected, ${counts.unlocated} unlocated of ${edits.length} edit(s)`
-	return { json: { command: "fact polish-apply", status: "pass", exitCode: 0, defects, data }, summary, exitCode: 0 }
+	const rejected_reasons = result.rejected.map((entry) => rejectionLine(entry, edits[entry.index]))
+	const summary = [`fact polish-apply: ${counts.applied} applied, ${counts.rejected} rejected, ${counts.unlocated} unlocated of ${edits.length} edit(s)`, ...rejected_reasons].join("\n")
+	return { json: { command: "fact polish-apply", status: "pass", exitCode: 0, defects, data: { ...data, rejected_reasons } }, summary, exitCode: 0 }
 }
 
 function runPolishDiff(args) {

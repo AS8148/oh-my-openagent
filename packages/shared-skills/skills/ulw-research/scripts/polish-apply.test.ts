@@ -36,7 +36,7 @@ describe("applyEdits: hedges and qualifiers", () => {
 
 	test("removing a hedge the row quote lacks is applied", () => {
 		const html = doc(`<p>The span was about ${f(SPAN)}.</p>`)
-		const result = applyEdits(html, [edit(`The span was about ${f(SPAN)}.`, `The span was ${f(SPAN)}.`)], LEDGER)
+		const result = applyEdits(html, [edit("The span was about ", "The span was ")], LEDGER)
 		expect(result.applied).toEqual([0])
 		expect(result.rejected).toEqual([])
 		expect(result.out).toBe(doc(`<p>The span was ${f(SPAN)}.</p>`))
@@ -58,7 +58,7 @@ describe("applyEdits: hedges and qualifiers", () => {
 describe("applyEdits: fact spans and numerals", () => {
 	test("splitting a sentence with its fact spans intact is applied", () => {
 		const html = doc(`<p>The span is ${f(SPAN)} and usage is ${f(USERS)}.</p>`)
-		const result = applyEdits(html, [edit(` and usage is ${f(USERS)}.`, `. Usage is ${f(USERS)}.`)], LEDGER)
+		const result = applyEdits(html, [edit(" and usage is ", ". Usage is ")], LEDGER)
 		expect(result.applied).toEqual([0])
 		expect(result.out).toBe(doc(`<p>The span is ${f(SPAN)}. Usage is ${f(USERS)}.</p>`))
 	})

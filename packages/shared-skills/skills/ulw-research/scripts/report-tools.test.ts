@@ -7,6 +7,7 @@ import { delimiter, join } from "node:path"
 import { PROMOTION } from "./fact-commands-meaning.mjs"
 import { PAIR_KINDS } from "./fact-pairs.mjs"
 import { VERDICT_SCHEMA } from "./meaning-check.mjs"
+import { POLISH_MARKUP_REASON } from "./polish-apply.mjs"
 import { COMMANDS, run } from "./report-tools.mjs"
 
 const SCRIPT = join(import.meta.dir, "report-tools.mjs")
@@ -492,6 +493,19 @@ describe("polish wiring under node", () => {
 		expect(diffed.code).toBe(1)
 		expect(codesOf(diffed.json)).toContain("polish_diff_fail")
 		expect(JSON.stringify(diffed.json)).toContain("markup changed")
+	})
+
+	test("#given an edit whose before holds & #when fact polish-apply runs #then it prints polish-apply's own markup reason verbatim for that edit", () => {
+		const { dir } = polishSession()
+		const before = "Acme & Bolt"
+		const edits = join(dir, "ampersand.json")
+		writeFileSync(edits, JSON.stringify([{ before, after: "Acme and Bolt", reason: "ampersand" }]))
+		const applied = polishApply(dir, edits)
+		const line = `  rejected edit 0 ("${before}"): ${POLISH_MARKUP_REASON}`
+		expect(applied.code).toBe(0)
+		expect(applied.json.data).toMatchObject({ applied: 0, rejected: 1, unlocated: 0 })
+		expect(applied.json.defects.map((d) => [d.code, d.index, d.reason])).toEqual([["polish_edit_rejected", 0, POLISH_MARKUP_REASON]])
+		expect(applied.stderr.split("\n")).toContain(line)
 	})
 
 	test("#given a polished copy edited by hand #when fact polish-diff runs #then it exits 1 with polish_diff_fail", () => {
