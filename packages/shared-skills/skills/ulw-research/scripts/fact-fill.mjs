@@ -2,7 +2,8 @@
 // ledger, all or nothing. Fatal errors (pointer_label_mismatch, unresolved_placeholder,
 // quote_anchor_unresolved, unit_duplicated) return out null; warnings (particle_unverified,
 // fallback_without_entity) never block. A twice-failed sentence can be replaced by an attributed
-// block quote of its source row (replaceFailed). Pure function; node: builtins only.
+// block quote of its source row (replaceFailed). No IO, but not pure: unless options.view is set,
+// it records each replaced sentence in options.replaceFailed through markReplaced. node: builtins only.
 
 import { finalReading, rewriteParticle } from "./particles-ko.mjs"
 import { failureCount, markReplaced, sentenceKey } from "./fidelity-state.mjs"
@@ -54,6 +55,15 @@ function unitDuplicated(text, item) {
 	return units.some((unit) => following.startsWith(unit) && !/[A-Za-z0-9]/u.test(following[unit.length] ?? ""))
 }
 
+/*
+ * Sentence-key rules (fidelity-state.mjs sentenceKey(slug, ids)); any other producer of keys must match:
+ * - slug source: an HTML heading's id attribute wins over its text; md headings use their text.
+ * - slugify: strip tags, lowercase, turn each run of non-letters/digits (\p{L}\p{N}) into "-",
+ *   trim leading and trailing "-".
+ * - a sentence takes the nearest heading that starts strictly before the sentence's start offset;
+ *   a sentence before the first heading gets slug "".
+ * - fact ids cited in the sentence are de-duplicated before sentenceKey sorts them.
+ */
 function slugify(text) {
 	return text
 		.replace(/<[^>]*>/gu, "")
