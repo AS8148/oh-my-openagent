@@ -104,6 +104,31 @@
       "ownerHandle": "synthetic-owner-handle-a"
     }
   },
+  "adoptionStatusUnknown": {
+    "version": 1,
+    "outcome": "unknown"
+  },
+  "adoptionStatusApproved": {
+    "version": 1,
+    "outcome": "approved",
+    "adoptionId": "adoption_fixture_b",
+    "action": "replace_account",
+    "owner": {
+      "accountId": "account_fixture_b",
+      "deviceId": "device_fixture_b",
+      "familyId": "family_fixture_b",
+      "generation": 1,
+      "ownerHandle": "synthetic-owner-handle-b"
+    },
+    "writerFloor": 2,
+    "expectedActiveOwner": {
+      "accountId": "account_fixture_a",
+      "deviceId": "device_fixture_a",
+      "familyId": "family_fixture_a",
+      "generation": 8,
+      "ownerHandle": "synthetic-owner-handle-a"
+    }
+  },
   "capabilities": {
     "refreshWriterProtocols": [1, 2],
     "refreshWriterBootstrap": "device-signature-v1",
