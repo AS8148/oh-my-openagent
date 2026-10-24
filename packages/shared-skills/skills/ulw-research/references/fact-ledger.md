@@ -15,7 +15,8 @@ Every command is `node "$SKILL_DIR/scripts/report-tools.mjs" <command> --session
 | `sources/S<n>/command.json` | `source snapshot --command` | argv, working directory, exit status, stdout and stderr hashes |
 | `fact-ledger.json` | `fact add`, `fact quote`, `fact derive`, `fact retract` | `{ schemaVersion: 1, rows, events }` |
 | `claims.json` | `claims index` | the claim table and the `verified-claims` membership |
-| `fidelity-defects.json` | `fact verify` | the verify record: `artifact`, `artifact_sha256`, `defects`, `counts` |
+| `fidelity-defects.json` | `fact verify` | the verify record: the fidelity envelope (`record_kind: "fidelity"`, `artifact_sha256`, `report`, `written_at`, `defects`) plus `command`, `status`, `exitCode`, `format`, `counts`, `gatesRun` |
+| `fidelity-meaning-defects.json` | `fact meaning-check` | the meaning record: the fidelity envelope (`record_kind: "meaning"`) plus the run fields under Meaning verdicts |
 
 A source directory is immutable. Snapshotting the same id again with the same text is a no-op; different text fails with `snapshot_exists`, because rows pin the snapshot hash.
 
@@ -61,6 +62,8 @@ A locator that finds nothing returns `fact_not_located`, more than one candidate
 | `calibrationLines` | one JSON line per flagged pair, appended to `fidelity-calibration.jsonl` when `calibrationPath` is given |
 
 Coverage is fail-closed. A consumer treats a non-empty `unverified` list as blocking: those pairs were never read, so an empty `defects` list does not mean the report is clean. An unreadable verdict path or invalid JSON raises a `TypeError` naming the file, which the CLI maps to exit code 2.
+
+`fact meaning-check` writes these lists into `fidelity-meaning-defects.json` through the one fidelity record writer (`writeFidelityRecord` in `scripts/fidelity-records.mjs`). The record is the envelope every fidelity record carries, `record_kind` (`meaning`), `artifact_sha256` and `report` (copied from `pairs.json`, so the record names the edition the readers judged), `written_at`, and `defects` (the folded defects plus one `meaning_unverified` per unread pair), followed by the run fields `command`, `status`, `exitCode`, `run_id`, `pairs_sha256`, `counts`, `dropped`, `unverified`, `calibration_path`, `calibration_written`, `calibration_replaced`, and `promotion_eligibility`. Any other field makes the record malformed. A pairs file without `artifact_sha256` and `report` exits 2 before anything is written. The delivery barrier refuses the record when no delivered edition's source bytes hash to its `artifact_sha256`, so a rewrite needs a fresh `fact pairs` and reader run.
 
 ## Operations
 

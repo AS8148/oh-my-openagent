@@ -1,9 +1,10 @@
 // Architecture contract (retention bar): each shared table, list, regex, or classifier has one owner
 // export, so a reintroduced local copy in a consumer fails one of these tests (#11156 sweep).
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { sha256Of } from "./cli-support.mjs"
 import { countDefects, DEFECT_CODES, SEVERITIES } from "./contracts.mjs"
 import { meaningStatus, PROMOTION, promotionEligibility } from "./fact-commands-meaning.mjs"
 import { editionFormatOf, MD_HTML_BLOCK_RULES, markdownAsHtml, projectMarkdownInline } from "./fact-commands-verify.mjs"
@@ -43,6 +44,16 @@ describe("severity vocabulary comes from contracts", () => {
 			expect(text, name).not.toMatch(/slice\(-\d+\)/u)
 			expect(text, name).not.toMatch(/counts\.blocker \+ counts\.major/u)
 		}
+	})
+})
+
+describe("one sha256 helper", () => {
+	test("#given every runtime module #when read #then only cli-support builds a hash, so records and receipts share sha256Of", () => {
+		const modules = readdirSync(import.meta.dir).filter((name) => name.endsWith(".mjs") && name !== "cli-support.mjs")
+		expect(modules.length).toBeGreaterThan(0)
+		for (const name of modules) expect(source(name), name).not.toMatch(/createHash\(/u)
+		expect(sha256Of("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+		expect(sha256Of(Buffer.from("abc"))).toBe(sha256Of("abc"))
 	})
 })
 

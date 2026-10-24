@@ -6,11 +6,10 @@
 // with --json). Exit 0 ok, 1 semantic failure (fact_not_located, fill errors, a refused
 // derivation), 2 usage. node: builtins and sibling imports only.
 
-import { createHash } from "node:crypto"
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, extname, join, resolve } from "node:path"
 
-import { CliError, parseArgs, writeJsonAtomic } from "./cli-support.mjs"
+import { CliError, parseArgs, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
 import { DEFECT_CODES } from "./contracts.mjs"
 import { derive } from "./fact-derive.mjs"
 import { fill } from "./fact-fill.mjs"
@@ -24,7 +23,6 @@ import { pointedFlag, sessionDirOf, snapshotOf } from "./source-commands.mjs"
 const CONTEXT = 60
 const BOOLEANS = ["json", "csv", "md", "inline", "view", "replace-failed", "disjoint"]
 const QUALIFIER_OF = new Map(Object.entries(QUALIFIER_FORMS).flatMap(([term, forms]) => forms.map((form) => [form, term])))
-const sha256Of = (content) => createHash("sha256").update(content).digest("hex")
 const slug = (text) => String(text).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32) || "fact"
 
 function readText(path) {
