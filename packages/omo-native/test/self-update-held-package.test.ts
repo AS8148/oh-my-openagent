@@ -94,7 +94,7 @@ describe("omo update on Windows when a package file is held (#10090)", () => {
           { pid: 100, name: "node.exe", commandLine: `node ${INSTALL_DIR}\\omo-ai\\bin\\omo.js update` },
           { pid: 4242, name: "claude.exe", executablePath: `${INSTALL_DIR.toLowerCase()}\\@anthropic-ai\\claude-agent-sdk-win32-x64\\claude.exe` },
           { pid: 777, name: "explorer.exe", executablePath: String.raw`C:\Windows\explorer.exe` },
-          { pid: 888, name: "node.exe", commandLine: `node ${INSTALL_DIR}\typescript\lib\tsserver.js` },
+          { pid: 888, name: "node.exe", commandLine: `node ${INSTALL_DIR}\\typescript\\lib\\tsserver.js` },
         ],
       })
       expect(await runSelfUpdate([], h.options)).toBe(1)
