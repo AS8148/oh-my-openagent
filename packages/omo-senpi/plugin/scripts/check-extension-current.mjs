@@ -34,6 +34,7 @@ export async function checkExtensionCurrent(options = {}) {
     threadClientOutput,
     telemetryRecoveryOutput,
     feedbackOutput,
+    desktopToolkitOutput,
     claimReceiptOutput,
     gatewayStoreWorkerOutput,
     threadSdkOutput,
@@ -71,6 +72,7 @@ export async function checkExtensionCurrent(options = {}) {
   const currentTelemetryPosthog = await readBuiltEntry(telemetryPosthogOutput)
   const currentThreadClient = await readBuiltEntry(threadClientOutput)
   const currentFeedback = await readBuiltEntry(feedbackOutput)
+  const currentDesktopToolkit = await readBuiltEntry(desktopToolkitOutput)
   const currentClaimReceipt = await readBuiltEntry(claimReceiptOutput)
   const currentMemorySync = await readBuiltEntry(memorySyncOutput)
   if (currentMemorySync === undefined) return { ok: false, reason: "missing-output", output: memorySyncOutput }
@@ -95,6 +97,7 @@ export async function checkExtensionCurrent(options = {}) {
   const currentTelemetryRecovery = await readBuiltEntry(telemetryRecoveryOutput)
   if (currentTelemetryRecovery === undefined) return { ok: false, reason: "missing-output", output: telemetryRecoveryOutput }
   if (currentFeedback === undefined) return { ok: false, reason: "missing-output", output: feedbackOutput }
+  if (currentDesktopToolkit === undefined) return { ok: false, reason: "missing-output", output: desktopToolkitOutput }
   if (currentClaimReceipt === undefined) return { ok: false, reason: "missing-output", output: claimReceiptOutput }
   const currentComputerUse = await readBuiltEntry(computerUseOutput)
   if (currentComputerUse === undefined) return { ok: false, reason: "missing-output", output: computerUseOutput }
@@ -129,6 +132,7 @@ export async function checkExtensionCurrent(options = {}) {
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
     telemetryRecoveryOutputPath: join(tempRoot, "omo-telemetry-recovery.js"),
     feedbackOutputPath: join(tempRoot, "omo-feedback.js"),
+    desktopToolkitOutputPath: join(tempRoot, "omo-desktop-toolkit.js"),
     claimReceiptOutputPath: join(tempRoot, "omo-claim-receipt.js"),
     computerUseOutputPath: join(tempRoot, "omo-computer-use.js"),
     gatewayStoreWorkerOutputPath: join(tempRoot, GATEWAY_STORE_WORKER_NAME),
@@ -161,6 +165,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
       [currentTelemetryRecovery, expected.telemetryRecoveryOutputPath, telemetryRecoveryOutput],
       [currentFeedback, expected.feedbackOutputPath, feedbackOutput],
+      [currentDesktopToolkit, expected.desktopToolkitOutputPath, desktopToolkitOutput],
       [currentClaimReceipt, expected.claimReceiptOutputPath, claimReceiptOutput],
       [currentComputerUse, expected.computerUseOutputPath, computerUseOutput],
       [currentGatewayStoreWorker, expected.gatewayStoreWorkerOutputPath, gatewayStoreWorkerOutput],
