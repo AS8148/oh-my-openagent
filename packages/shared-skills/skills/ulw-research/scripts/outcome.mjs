@@ -86,7 +86,7 @@ export function setDeliverable(manifest, format, status, detail = {}) {
 	const next = clone(manifest)
 	const index = next.deliverables.findIndex((row) => row.format === format)
 	const row = { format, status, promised: index >= 0 ? next.deliverables[index].promised : false, updatedAt: stamp(detail.now) }
-	for (const key of ["path", "reason", "pages", "bytes"]) {
+	for (const key of ["path", "reason", "pages", "bytes", "verifiedBy", "renderedFrom"]) {
 		if (detail[key] !== undefined) row[key] = detail[key]
 	}
 	if (index >= 0) next.deliverables[index] = row
