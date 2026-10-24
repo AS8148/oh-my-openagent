@@ -5,6 +5,7 @@ import { findContinuableBoulderWork } from "../ulw-execute-continuation/boulder-
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { createUlwLoopFooterStatus, type UlwLoopFooterStatusOptions } from "./footer-status"
 import { readUlwLoopStatusInProcess } from "./status-source"
+import { createRunCompletionTracker, type PlanSnapshot } from "./run-completion"
 import { extractSessionId, resolveUlwLoopSessionScope, ulwLoopScopedGoalsPath } from "./session-scope"
 
 const CONTINUATION_LIMIT = 8
@@ -39,6 +40,8 @@ interface ActiveStatus {
   active: boolean
   // false marks a probe that never ran because this host could not prove which run it owns.
   sessionScoped?: boolean
+  // The plan this status read, for run completion; absent when the session has no readable plan.
+  plan?: PlanSnapshot
 }
 
 type ReadStatus = NonNullable<UlwLoopComponentOptions["readStatus"]>
@@ -51,6 +54,13 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
       const readStatus = options.readStatus ?? readUlwLoopStatusInProcess
       const planExists = options.planExists ?? ulwLoopPlanExists
       const footerStatus = createUlwLoopFooterStatus(options.footerStatus)
+      const runCompletion = createRunCompletionTracker((runId) => pi.lifecycle?.markRunCompleted({ runId }))
+      // Every session-scoped status read also feeds run completion, so a plan's stop condition is seen wherever it is read.
+      const readSessionStatus = async (eventCtx: unknown): Promise<ActiveStatus | null> => {
+        const status = await readActiveStatus(readStatus, planExists, eventCtx, ctx)
+        if (status !== null && status.sessionScoped !== false) runCompletion.observe(status.plan)
+        return status
+      }
       const state = {
         consecutiveContinuations: 0,
         previousStatusRaw: undefined as string | undefined,
@@ -62,7 +72,7 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
       pi.registerRemovedToolHint?.("omo_agent_toolkit", 'omo_agent_toolkit was removed. Inside an eval js cell: const { agentToolkit } = await import(`${env("OMO_AGENT_TOOLKIT_SDK_ROOT")}/sdk.js`); print(await agentToolkit.status()). Never spawn the toolkit CLI.')
 
       pi.on("session_start", async (_payload, eventCtx) => {
-        const status = await readActiveStatus(readStatus, planExists, eventCtx, ctx)
+        const status = await readSessionStatus(eventCtx)
         footerStatus.sync(eventCtx, status?.active ?? false)
       })
 
@@ -74,7 +84,7 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
         state.previousStatusRaw = undefined
         state.pendingRun = undefined
         if (payload.streamingBehavior === undefined) return { action: "continue" }
-        const status = await readActiveStatus(readStatus, planExists, eventCtx, ctx)
+        const status = await readSessionStatus(eventCtx)
         footerStatus.sync(eventCtx, status?.active ?? false)
         if (status === null || !status.active) return { action: "continue" }
         return {
@@ -107,7 +117,7 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
           return
         }
 
-        const status = await readActiveStatus(readStatus, planExists, eventCtx, ctx)
+        const status = await readSessionStatus(eventCtx)
         footerStatus.sync(eventCtx, status?.active ?? false)
         if (status === null) {
           return
@@ -157,7 +167,7 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
 
       pi.on("tool_result", async (payload, eventCtx) => {
         if (!shouldRefreshFooterAfterToolResult(payload)) return
-        const status = await readActiveStatus(readStatus, planExists, eventCtx, ctx)
+        const status = await readSessionStatus(eventCtx)
         footerStatus.sync(eventCtx, status?.active ?? false)
       })
 
@@ -250,7 +260,15 @@ async function readActiveStatus(
     return { raw: result.stdout, active: false }
   }
 
-  return { raw: result.stdout, active: statusHasActiveIncompleteRun(parsed) }
+  return { raw: result.stdout, active: statusHasActiveIncompleteRun(parsed), plan: planSnapshot(parsed) }
+}
+
+function planSnapshot(value: unknown): PlanSnapshot | undefined {
+  if (!isRecord(value) || value["ok"] !== true || !isRecord(value["plan"])) return undefined
+  const plan = value["plan"]
+  const createdAt = typeof plan["createdAt"] === "string" ? plan["createdAt"] : undefined
+  const aggregateComplete = isRecord(plan["aggregateCompletion"]) && plan["aggregateCompletion"]["status"] === "complete"
+  return { createdAt, aggregateComplete }
 }
 
 function toolkitErrorCode(stdout: string): string | undefined {
