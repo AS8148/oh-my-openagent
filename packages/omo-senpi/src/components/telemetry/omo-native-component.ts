@@ -171,13 +171,14 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       const hashSession = (rawId: string): string =>
         currentConsent(false) ? (options.hashSessionId ?? hashSessionId)(rawId) : OPTED_OUT_SESSION_HASH
       // The span keeps the engine's own role name (dev's `omo.session.role`), separate from the closed event vocabulary above.
-      const turnSpanRole = readSessionRole(pi, env) ?? "main"
+      // A host whose session context cannot be read must not stop registration (the event role is `unknown` then).
+      const turnSpanContext = readTurnSpanContext(pi, env)
       const turnSpans = createOmoNativeTurnSpans({
         traces: () => state.traces,
         isConsented: () => currentConsent(false),
         isSendAllowed: () => currentConsent(true),
-        sessionRole: turnSpanRole,
-        inheritedTraceparent: readSessionTraceparent(pi, env),
+        sessionRole: turnSpanContext.role,
+        inheritedTraceparent: turnSpanContext.traceparent,
       })
       // Every event this session emits goes through here, so one emitted while a turn is open carries that turn's span ids.
       const sessionClient: Pick<EventTelemetryClient, "captureEvent"> = {
@@ -298,8 +299,8 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       pi.on("turn_end", async (payload, eventCtx) => {
         if (!isTurnEndEvent(payload)) return
         consentCwd = cwdOf(eventCtx) ?? consentCwd
-        // An opted-out registration has no summary and records no turn, but a span started after a
-        // mid-session opt-in still ends with its turn below.
+        // An opted-out registration has no summary and records no turn; the span step below runs either way
+        // and is a no-op when no span was started.
         if (summary !== undefined) {
           // The first turn waits for the summary sidecar, so its window is on disk when the turn ends.
           await summary.prepare?.()
@@ -507,6 +508,14 @@ function scheduleUnrefInterval(check: () => void): () => void {
 function cwdOf(eventCtx: unknown): string | undefined {
   const cwd = isRecord(eventCtx) ? eventCtx.cwd : undefined
   return typeof cwd === "string" && cwd.length > 0 ? cwd : undefined
+}
+
+function readTurnSpanContext(pi: unknown, env: NodeJS.ProcessEnv): { readonly role: string; readonly traceparent: string | undefined } {
+  try {
+    return { role: readSessionRole(pi, env) ?? "main", traceparent: readSessionTraceparent(pi, env) }
+  } catch {
+    return { role: "unknown", traceparent: undefined }
+  }
 }
 
 function rawSessionIdOf(eventCtx: unknown): string | undefined {
