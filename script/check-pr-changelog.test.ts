@@ -48,10 +48,15 @@ describe("changelog gate CLI", () => {
     { name: "a CI-only script may carry the no-changelog label", files: { "script/ci-only.mjs": "export {}\n" }, labels: ["no-changelog"], status: 0 },
     { name: "a shipped file outside the package directories needs a fragment", files: { "launcher.mjs": "export const v = 2\n" }, status: 1 },
     { name: "a shipped file refuses the no-changelog label", files: { "launcher.mjs": "export const v = 2\n" }, labels: ["no-changelog"], status: 1 },
+    // Removing a shipped file and its manifest entry together is still a shipped change: the base's manifest decides.
+    { name: "a removed shipped file needs a fragment", files: { "package.json": JSON.stringify({ files: ["packages/fixture/src"] }), "launcher.mjs": null }, status: 1 },
   ])("$name", ({ files, status, labels = [] }) => {
     // given: committed base and head trees, not a mocked path inventory
     const { root, git, write, base } = fixture()
-    for (const [path, content] of Object.entries(files)) write(path, content)
+    for (const [path, content] of Object.entries(files)) {
+      if (content === null) git("rm", "-q", path)
+      else write(path, content)
+    }
     git("add", ".")
     git("commit", "-qm", "PR change")
 
