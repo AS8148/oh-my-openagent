@@ -125,6 +125,17 @@ describe("markdown projection rules", () => {
 		expect(projectMarkdownInline("a <b> [x](https://e.x) `c`")).toBe('a &lt;b&gt; <a href="https://e.x">x</a> <code>c</code>')
 	})
 
+	test("#given a fill map with quotes in translates and fact_id #when projected #then the attributes are escaped", () => {
+		const md = "Before X after.\n\n> Quoted block.\n"
+		const span = { fact_id: 'F"1', start: 7, end: 8, rendered: "X", translates: 'T"1' }
+		const block = { fact_id: 'Q"2', start: md.indexOf(">"), end: md.length - 1, rendered: "", replaced: "a" }
+		const { html } = markdownAsHtml(md, [span, block], { rows: [] })
+		expect(html).toContain('data-translates="T&quot;1"')
+		expect(html).toContain('data-fact="Q&quot;2"')
+		expect(markdownAsHtml("Before X after.\n", [{ ...span, translates: undefined }], { rows: [] }).html).toContain('data-fact="F&quot;1"')
+		expect(html).not.toMatch(/="[^"]*"1"/u)
+	})
+
 	test("#given paths of each case #when the format is inferred #then md and markdown are Markdown and a flag wins", () => {
 		expect(["r.md", "R.MD", "r.markdown", "r.html", "r.txt"].map((path) => editionFormatOf(path, undefined))).toEqual(["md", "md", "md", "html", "html"])
 		expect(editionFormatOf("r.md", "html")).toBe("html")
