@@ -13,11 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **An unreadable workpool store no longer drops or falsely clears the children wake source.** ([#11118](https://github.com/code-yeongyu/oh-my-openagent/pull/11118), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))
 
+**The children wake source reads the workpool store once per snapshot.** ([#11124](https://github.com/code-yeongyu/oh-my-openagent/pull/11124), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))
+
 **Child results waiting in the wake queue keep the parent from reading as done.** ([#11115](https://github.com/code-yeongyu/oh-my-openagent/pull/11115), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))
 
 **The wake-queue count can no longer cost a delivery receipt and is re-published per session generation.** ([#11121](https://github.com/code-yeongyu/oh-my-openagent/pull/11121), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))
 
 **A receipt that throws no longer leaves the wake-queue count up.** ([#11122](https://github.com/code-yeongyu/oh-my-openagent/pull/11122), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))
+
+**Delivery receipts are isolated from each other, on retire too, and no receipt error is dropped.** ([#11123](https://github.com/code-yeongyu/oh-my-openagent/pull/11123), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))
 
 **Windows helper tree kills are guarded against recycled parent PIDs.** A QA helper no longer stops an unrelated process tree that reused a parent's PID. ([#11007](https://github.com/code-yeongyu/oh-my-openagent/pull/11007))
 
