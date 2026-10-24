@@ -4,10 +4,13 @@
 // against the output of the edits accepted before it. `before` must occur exactly once (runs of
 // whitespace match any whitespace run) and must not cut through a fact span; otherwise the edit is
 // polish_edit_unlocated. A located edit is applied whole or not at all: it is polish_edit_rejected
-// when polish-rules.polishDefects(document, document with the edit, ledger, {ordered: true}) finds
-// any defect. That is the rule set polish-diff runs as a backstop, evaluated on the rendered
-// (visible) projection of the whole document, so a span hidden by a comment, a hidden ancestor or
-// an unclosed wrapper counts as removed. validatePolishEdits and POLISH_EDIT_FIELDS are the edit
+// when polish-rules.polishDefects(..., {ordered: true}) finds any defect between the current
+// document and the document with the edit (per edit), or between the ORIGINAL input and the
+// document with the edit (whole document: the baseline polish-diff uses). Ordered is stricter than
+// polish-diff's multiset comparison and the last accepted candidate is the output, so a clean run
+// is always polish-diff clean: no cross-edit case is left to the backstop. The rules see the
+// text-node projection and freeze every markup byte, including script/style/template content.
+// validatePolishEdits and POLISH_EDIT_FIELDS are the edit
 // contract every caller (the CLI included) uses. No IO, no model. Plain Node ESM.
 
 import { factSpans } from "./polish-project.mjs"
@@ -55,7 +58,12 @@ export function cutSpan(html, start, end) {
  */
 export function applyEdits(html, edits, ledger) {
 	validatePolishEdits(edits)
-	const result = { out: String(html), applied: [], rejected: [], unlocated: [] }
+	const original = String(html)
+	const result = { out: original, applied: [], rejected: [], unlocated: [] }
+	const defects = (candidate) => {
+		const messages = [result.out, original].flatMap((base) => polishDefects(base, candidate, ledger, { ordered: true }).map((d) => d.message))
+		return [...new Set(messages)]
+	}
 	edits.forEach((edit, index) => {
 		const where = locate(result.out, edit.before)
 		if (where.count !== 1) {
@@ -64,7 +72,8 @@ export function applyEdits(html, edits, ledger) {
 		}
 		const cut = cutSpan(result.out, where.start, where.end)
 		const candidate = result.out.slice(0, where.start) + edit.after + result.out.slice(where.end)
-		const reasons = cut === null ? polishDefects(result.out, candidate, ledger, { ordered: true }).map((d) => d.message) : [`the edit cuts through fact span ${cut}`]
+		const reasons = defects(candidate)
+		if (cut !== null) reasons.push(`the edit cuts through fact span ${cut}`)
 		if (reasons.length > 0) {
 			result.rejected.push({ index, code: "polish_edit_rejected", reason: reasons.join("; ") })
 			return
