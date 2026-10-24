@@ -1,5 +1,9 @@
 // polish-apply.mjs - checked, per-edit application of a proofread lane's polish edits.
 //
+// An edit whose before or after holds <, > or & is polish_edit_rejected (POLISH_MARKUP_REASON)
+// before anything else, so no edit can create, alter, close or escape a tag, comment,
+// bogus comment, CDATA section, entity or script, whatever the tokenizer models; existing entities
+// stay usable only by leaving them untouched.
 // applyEdits(html, edits, ledger) applies each {before, after, reason} edit in edits-file order,
 // against the output of the edits accepted before it. `before` must occur exactly once (runs of
 // whitespace match any whitespace run) and must not cut through a fact span; otherwise the edit is
@@ -34,6 +38,11 @@ export function validatePolishEdits(edits) {
 	return edits
 }
 
+/** Characters an edit's before and after may never contain. */
+export const POLISH_MARKUP_CHARACTERS = /[<>&]/
+/** The actionable rejection reason for an edit holding a markup character. */
+export const POLISH_MARKUP_REASON = "edit contains markup characters (<, >, &): route this section through the full fidelity gates"
+
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 /** The single whitespace-normalized match of `before` in html as {start, end}, or {count} otherwise. */
@@ -65,15 +74,19 @@ export function applyEdits(html, edits, ledger) {
 		return [...new Set(messages)]
 	}
 	edits.forEach((edit, index) => {
+		const touches = POLISH_MARKUP_CHARACTERS.test(edit.before) || POLISH_MARKUP_CHARACTERS.test(edit.after)
 		const where = locate(result.out, edit.before)
-		if (where.count !== 1) {
+		if (where.count !== 1 && !touches) {
 			result.unlocated.push({ index, code: "polish_edit_unlocated", reason: `before matches ${where.count} times; it must match exactly once` })
 			return
 		}
-		const cut = cutSpan(result.out, where.start, where.end)
-		const candidate = result.out.slice(0, where.start) + edit.after + result.out.slice(where.end)
-		const reasons = defects(candidate)
-		if (cut !== null) reasons.push(`the edit cuts through fact span ${cut}`)
+		const reasons = touches ? [POLISH_MARKUP_REASON] : []
+		const candidate = where.count === 1 ? result.out.slice(0, where.start) + edit.after + result.out.slice(where.end) : result.out
+		if (where.count === 1) {
+			const cut = cutSpan(result.out, where.start, where.end)
+			reasons.push(...defects(candidate))
+			if (cut !== null) reasons.push(`the edit cuts through fact span ${cut}`)
+		}
 		if (reasons.length > 0) {
 			result.rejected.push({ index, code: "polish_edit_rejected", reason: reasons.join("; ") })
 			return

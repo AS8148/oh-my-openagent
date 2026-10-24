@@ -66,7 +66,7 @@ export const DEFECT_CODES = deepFreeze({
 	qualifier_dropped: { severity: "major", integrity: false, hint: "The source bounds this value (up to, at least, about); restore the qualifier or use :q." },
 	unbound_sentence: { severity: "major", integrity: false, hint: "Bind the sentence to a fact, a quote, a citation, or a claim-graph node with data-claim." },
 	meaning_drift_confirmed: { severity: "major", integrity: false, hint: "Two independent readers found the same drift; rewrite from the quote or dispute with a reason." },
-	polish_edit_rejected: { severity: "major", integrity: false, hint: "The edit changed a number, a hedge, a qualifier, a link, or a claim id; re-propose the language fix only." },
+	polish_edit_rejected: { severity: "major", integrity: false, hint: "The edit changed a number, a hedge, a qualifier, a link, or a claim id, or contained <, > or &; re-propose the language fix only, narrowed to the words around any entity or tag." },
 	polish_hedging_decreased: { severity: "major", integrity: false, hint: "The polish pass removed qualifiers; restore them." },
 	polish_text_churn: { severity: "major", integrity: false, hint: "More than half the text changed during polish; the pass composed instead of proofreading." },
 	snapshot_mismatch: { severity: "major", integrity: false, hint: "The operands come from different collection windows; use rows from one window or state the windows separately." },
