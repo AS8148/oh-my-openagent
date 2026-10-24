@@ -42,6 +42,9 @@ interface ActiveStatus {
   sessionScoped?: boolean
   // The plan this status read, for run completion; absent when the session has no readable plan.
   plan?: PlanSnapshot
+  // true only when the read positively showed there is no plan (no scoped goals.json, or ULW_LOOP_PLAN_MISSING). A
+  // failed or unparseable read leaves both `plan` and this unset: unknown, which run completion must not count.
+  noPlan?: boolean
 }
 
 type ReadStatus = NonNullable<UlwLoopComponentOptions["readStatus"]>
@@ -54,11 +57,23 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
       const readStatus = options.readStatus ?? readUlwLoopStatusInProcess
       const planExists = options.planExists ?? ulwLoopPlanExists
       const footerStatus = createUlwLoopFooterStatus(options.footerStatus)
-      const runCompletion = createRunCompletionTracker((runId) => pi.lifecycle?.markRunCompleted({ runId }))
+      const runCompletion = createRunCompletionTracker((runId) => {
+        try {
+          pi.lifecycle?.markRunCompleted({ runId })
+        } catch (error) {
+          ctx.logger.warn("omo-senpi ulw-loop run completion not recorded", {
+            runId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      })
       // Every session-scoped status read also feeds run completion, so a plan's stop condition is seen wherever it is read.
       const readSessionStatus = async (eventCtx: unknown): Promise<ActiveStatus | null> => {
         const status = await readActiveStatus(readStatus, planExists, eventCtx, ctx)
-        if (status !== null && status.sessionScoped !== false) runCompletion.observe(status.plan)
+        if (status !== null && status.sessionScoped !== false) {
+          if (status.plan !== undefined) runCompletion.observe(status.plan)
+          else if (status.noPlan === true) runCompletion.observe(undefined)
+        }
         return status
       }
       const state = {
@@ -229,7 +244,7 @@ async function readActiveStatus(
   const sessionId = resolveUlwLoopSessionScope(eventCtx)
   if (sessionId === null) return { raw: "", active: false, sessionScoped: false }
 
-  if (!planExists(cwd, sessionId)) return { raw: "", active: false }
+  if (!planExists(cwd, sessionId)) return { raw: "", active: false, noPlan: true }
 
   let result: { code: number; stdout: string }
   try {
@@ -246,7 +261,7 @@ async function readActiveStatus(
     const details = { reason: "non-zero-exit" as const, code: result.code, errorCode }
     if (errorCode === "ULW_LOOP_PLAN_MISSING") {
       ctx.logger.debug?.("omo-senpi ulw-loop status ignored", details)
-      return { raw: result.stdout, active: false }
+      return { raw: result.stdout, active: false, noPlan: true }
     }
     ctx.logger.warn("omo-senpi ulw-loop status ignored", details)
     return { raw: result.stdout, active: false }

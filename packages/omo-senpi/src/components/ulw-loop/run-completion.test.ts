@@ -91,6 +91,40 @@ describe("omo-senpi ulw-loop run completion (#10782)", () => {
     expect(completed).toEqual([`ulw-loop:${PLAN_A}`])
   })
 
+  it("#given a first status read that fails #when a later read shows an already-complete plan #then the inherited completion is not marked", async () => {
+    for (const failedRead of [
+      { code: 2, stdout: JSON.stringify({ ok: false, error: { code: "ULW_LOOP_LOCKED" } }) },
+      { code: 0, stdout: "not json" },
+    ]) {
+      const { pi, completed } = await setup([failedRead, status(PLAN_A, "aggregate-complete")])
+      await pi.dispatch("session_start", { type: "session_start" }, sessionEventCtx("/repo"))
+
+      await dispatchRunEnd(pi, stopped, sessionEventCtx("/repo"))
+
+      expect(completed).toEqual([])
+    }
+  })
+
+  it("#given a host whose lifecycle port throws #when the plan completes #then the run still settles and the failure is logged", async () => {
+    const logger = createLogger()
+    const queue = [status(PLAN_A, "active"), status(PLAN_A, "aggregate-complete")]
+    const pi = new FakeExtensionAPI()
+    pi.lifecycle = {
+      markRunCompleted: () => {
+        throw new Error("stale generation")
+      },
+    }
+    await createUlwLoopComponent({
+      readStatus: async () => ({ code: 0, stdout: queue.shift() ?? status(PLAN_A, "aggregate-complete") }),
+      planExists: () => true,
+    }).register(pi, { logger, config: { getFlag: () => false } })
+    await pi.dispatch("session_start", { type: "session_start" }, sessionEventCtx("/repo"))
+
+    await dispatchRunEnd(pi, stopped, sessionEventCtx("/repo"))
+
+    expect(logger.entries.map((entry) => entry.message)).toContain("omo-senpi ulw-loop run completion not recorded")
+  })
+
   it("#given an active plan #when every goal is done but the aggregate is not complete #then nothing is marked", async () => {
     const { pi, completed } = await setup([status(PLAN_A, "active"), status(PLAN_A, "goals-done")])
     await pi.dispatch("session_start", { type: "session_start" }, sessionEventCtx("/repo"))

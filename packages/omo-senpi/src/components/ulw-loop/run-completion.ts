@@ -15,7 +15,10 @@ export interface PlanSnapshot {
 }
 
 export interface RunCompletionTracker {
-  /** `plan` is the session-scoped status read; `undefined` means this session has no plan right now. */
+  /**
+   * `plan` is a successful session-scoped status read; `undefined` means the read positively showed there is no plan.
+   * A failed or unparseable read is unknown and must not be observed at all.
+   */
   observe(plan: PlanSnapshot | undefined): void
 }
 
