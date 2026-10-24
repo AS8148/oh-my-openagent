@@ -8,7 +8,7 @@
 import { readdir, rm } from "node:fs/promises"
 import { FRAGMENT_DIR, mergeUnreleased, parseFragment, readFragments, unreleasedBody } from "./changelog-fragments"
 import { stampUnreleased } from "./changelog-release-notes"
-import { assembleUnreleasedBody } from "./changelog-gate-rules.ts"
+import { assembleRelease } from "./changelog-release-assembly.ts"
 import { compileBlocks, splitFragment } from "./package-log-blocks.ts"
 
 async function main(): Promise<void> {
@@ -31,8 +31,8 @@ async function main(): Promise<void> {
     return content
   })
   if (fragments.length === 0) throw new Error(`no changelog fragments under ${FRAGMENT_DIR}/ to release`)
-  // Package-log blocks the hourly compile has not written yet land in their logs in this commit;
-  // only each fragment's preamble goes into CHANGELOG.md.
+  // Change-log blocks land in their logs (changes.md, packages/<name>/changes.md) in this commit; only each
+  // fragment's preamble goes into CHANGELOG.md. Nothing compiles fragments before the release cut.
   const repoRoot = new URL("../", import.meta.url)
   const logReads = new Map<string, string | null>()
   for (const fragment of fragments) {
@@ -47,13 +47,12 @@ async function main(): Promise<void> {
     .filter((fragment) => fragment.content !== "")
   if (preambles.length === 0) throw new Error(`no CHANGELOG paragraph in any fragment under ${FRAGMENT_DIR}/ to release`)
   const changelog = await Bun.file(changelogPath).text()
-  const legacy = unreleasedBody(changelog)
-  const assembled = [legacy, assembleUnreleasedBody(preambles)].filter((part) => part.trim()).join("\n\n")
-  const existing = unreleasedBody(changelog)
-  if (existing && existing !== assembled && existing !== legacy) {
-    throw new Error(`## [Unreleased] holds content that is neither the legacy notes nor the fragment assembly`)
+  // Unreleased text written before the fragments gate (#10841) is released first, exactly as written.
+  const assembly = assembleRelease(unreleasedBody(changelog), preambles)
+  if (assembly.duplicates.length > 0) {
+    console.error(`consumed without a second entry (an Unreleased paragraph already links them): ${assembly.duplicates.map((pr) => `#${pr}`).join(", ")}`)
   }
-  const stamped = stampUnreleased(mergeUnreleased(changelog, assembled), version, date)
+  const stamped = stampUnreleased(mergeUnreleased(changelog, assembly.body), version, date)
   await Bun.write(changelogPath, stamped)
   for (const [path, content] of compiled.logs) await Bun.write(new URL(path, repoRoot), content)
   // Delete by the file name read from disk, not the reconstructed `<pr>.md`: a leading-zero alias

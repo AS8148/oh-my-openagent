@@ -22,8 +22,12 @@ describe("splitFragment", () => {
     expect(splitFragment("**Only text**\n")).toEqual({ preamble: "**Only text**", blocks: [], reasons: [] })
   })
 
-  test("refuses a non-package target, a duplicate target, an undated heading and conflict markers", () => {
-    expect(splitFragment(fragment("", ["changes.md", "## 2026-10-20 - x"])).reasons[0]).toContain("is not a package log")
+  test("the root changes.md is a log target too: its notes stop conflicting the same way", () => {
+    expect(splitFragment(fragment("", ["changes.md", "## 2026-10-20 - x"])).reasons).toEqual([])
+  })
+
+  test("refuses a non-log target, a duplicate target, an undated heading and conflict markers", () => {
+    expect(splitFragment(fragment("", ["docs/changes.md", "## 2026-10-20 - x"])).reasons[0]).toContain("is not a change log")
     expect(splitFragment(fragment("", [LOG, "## 2026-10-20 - a"], [LOG, "## 2026-10-20 - b"])).reasons).toContain(`\`${LOG}\` has two blocks; write one`)
     expect(splitFragment(fragment("", [LOG, "## Title"])).reasons[0]).toContain("must start with")
     expect(splitFragment(fragment("", [LOG, "## 2026-10-20 - a\n<<<<<<< HEAD"])).reasons).toContain("the fragment holds a merge-conflict marker")

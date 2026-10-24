@@ -32,9 +32,14 @@ const NUMERIC_FRAGMENT = /^\d+\.md$/;
 export type GatePolicy = {
   /** Branch names that may carry release commits, e.g. /^release\//. */
   readonly releaseBranchPattern: RegExp;
-  /** GitHub actor identities allowed to run a release, e.g. ["release-bot[bot]"]. */
+  /** Logins (pull_request.user.login) allowed to author a release PR, e.g. ["release-bot[bot]"]. */
   readonly releaseActors: readonly string[];
   readonly userFacingRoots: readonly string[];
+  /** A repo whose shipped surface is computed (for example from its package manifests) passes
+   * its own classifier. When present it REPLACES userFacingRoots and the default exemptions for
+   * every verdict, including the release PR's check; the classifier must answer false for the
+   * changelog and fragment paths. Absent means the root-based classifier below. */
+  readonly isUserFacing?: (path: string) => boolean;
   /** Paths a release PR may carry besides the changelog and fragments, even under a
    * user-facing root: the version bumps, lockfile and generated bundles the release workflow
    * itself writes, e.g. /^packages\/[^/]+\/package\.json$/. A pattern must start with ^ (an
@@ -50,9 +55,11 @@ export type GatePolicy = {
 const DEFAULT_NON_USER_FACING =
   /^(?:docs?|dist|fixtures?|tests?|__tests__)\/|(?:^|\/)node_modules\/(?:$|\/.*)|(?:^|\/)__tests__\/|\.(?:test|spec|snap|fixture)(?:\.[cm]?[jt]sx?)?$|\.generated\.[cm]?[jt]sx?$/i;
 
-/** A path whose behaviour a user or client of the repo can observe. Markdown is NOT exempt by
- * default: prompts and docs shipped under a user-facing root are user-facing. */
+/** A path whose behaviour a user or client of the repo can observe: the repo's own classifier
+ * when the policy has one, else the root rule. Markdown is NOT exempt by default: prompts and
+ * docs shipped under a user-facing root are user-facing. */
 export function isUserFacingPath(path: string, policy: GatePolicy): boolean {
+  if (policy.isUserFacing) return policy.isUserFacing(path);
   if (DEFAULT_NON_USER_FACING.test(path)) return false;
   return policy.userFacingRoots.some((root) => path.startsWith(root.endsWith("/") ? root : `${root}/`));
 }
@@ -73,8 +80,7 @@ export type GateInput = {
   readonly branch: string;
   /** True only when the release workflow itself runs the gate (its own marker, never a label). */
   readonly isReleaseWorkflow: boolean;
-  /** The release-identity actor of the run: the PR author's login (pull_request.user.login),
-   *  as the CI gate passes it. A PR cannot forge its author. */
+  /** The PR author's login (pull_request.user.login), as the CI gate passes it; a PR cannot forge its author. */
   readonly actor: string;
   readonly labels: readonly string[];
   /** This PR's number; the single added fragment must be exactly fragmentPath(prNumber). */
@@ -139,7 +145,8 @@ export function checkPrChangelog(input: GateInput, policy: GatePolicy): { pass: 
     return above.length === 0 || (above.length === 1 && above[0] === "# Changelog");
   };
   const changelogPathsInPr = paths.filter((path) => path === "CHANGELOG.md" || path === "changes.md");
-  const changelogAdded = changelogPathsInPr.length === 1 && input.addedFiles.includes(changelogPathsInPr[0]!);
+  const onlyChangelog = changelogPathsInPr.length === 1 ? changelogPathsInPr[0] : undefined;
+  const changelogAdded = onlyChangelog !== undefined && input.addedFiles.includes(onlyChangelog);
   if (changelogTouched && !(changelogAdded && input.baseHasChangelog === false)) {
     return { pass: false, reason: "only the release PR may edit the changelog; add a fragment instead" };
   }

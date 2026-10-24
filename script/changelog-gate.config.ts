@@ -3,7 +3,9 @@ export const GATE_CONFIG = {
   releaseBranchPattern: /^release\//,
   // publish.yml opens the release-state PR with GH_PAT, so its author is this account.
   releaseActors: ["sisyphus-dev-ai"],
-  userFacingRoots: ["packages/", "crates/", "bin/", "script/"],
+  // Unused here: check-pr-changelog.ts passes the shipped-surface classifier (changelog-shipping-policy.mjs) as
+  // isUserFacing, which replaces the root rule for every verdict (#10841).
+  userFacingRoots: [],
   // Exactly what publish.yml's release commit stages besides CHANGELOG.md and the fragments.
   releaseArtifacts: [
     /^package\.json$/,
@@ -17,7 +19,7 @@ export const GATE_CONFIG = {
     /^packages\/omo-codex\/plugin\/components\/[^/]+\/(?:package\.json|hooks\/hooks\.json)$/,
     /^packages\/omo-codex\/plugin\/hooks\/[^/]+\.json$/,
     /^packages\/omo-codex\/scripts\/install-dist\/install-local\.mjs$/,
-    // stamp-release-changelog.ts compiles package-log blocks the hourly job has not written yet.
+    // stamp-release-changelog.ts writes the fragments' log blocks into their logs in the release commit.
     /^packages\/[^/]+\/changes\.md$/,
   ],
 } as const;

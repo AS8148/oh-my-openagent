@@ -1,21 +1,21 @@
 /**
- * Package-log blocks inside per-PR fragments (#9961 follow-up).
+ * Change-log blocks inside per-PR fragments (#9961, #10841).
  *
- * `changes/unreleased/<pr>.md` starts with the CHANGELOG paragraph (the preamble, assembled at
- * release) and may carry one block per package log it would have prepended to:
+ * `changes/unreleased/<pr>.md` starts with the CHANGELOG text (the preamble, assembled at release)
+ * and may carry one block per log it would have prepended to (`changes.md` or a package's):
  *
  *   <!-- changes-log: packages/omo-senpi/changes.md -->
  *   ## 2026-10-20 - Title (#123)
  *   ...
  *
- * The marker and heading grammar is the omo-desktop-app one (#3072), so a later move of the root
- * CHANGELOG into the same compile needs no second migration. `compileBlocks` writes every block into
- * its log, newest PR on top, and leaves each fragment with its preamble only.
+ * The marker and heading grammar is the omo-desktop-app one (#3072). At the release cut,
+ * `compileBlocks` writes every block into its log, newest PR on top, and leaves each fragment with
+ * its preamble only.
  */
 
 const MARKER = /^<!-- changes-log: (\S+) -->$/
-// One plain package segment: no ".", "..", "%" escapes or other characters a URL resolver could reinterpret.
-const PACKAGE_LOG = /^packages\/(?!\.\.?\/)[A-Za-z0-9_][A-Za-z0-9._-]*\/changes\.md$/
+// The root changes.md, or one plain package segment: no ".", "..", "%" escapes or other characters a URL resolver could reinterpret.
+const CHANGE_LOG = /^(?:changes\.md|packages\/(?!\.\.?\/)[A-Za-z0-9_][A-Za-z0-9._-]*\/changes\.md)$/
 const DATED_HEADING = /^## \d{4}-\d{2}-\d{2} (?:-|—) \S/
 const CONFLICT_MARKER = /^(?:<{7}|\|{7}|={7}|>{7})(?:\s|$)/m
 
@@ -38,12 +38,29 @@ export function splitFragment(content: string): SplitFragment {
   const blocks = raw.map(({ log, lines: body }) => ({ log, body: body.join("\n").trim() }))
   const seen = new Set<string>()
   for (const block of blocks) {
-    if (!PACKAGE_LOG.test(block.log)) reasons.push(`\`${block.log}\` is not a package log (packages/<name>/changes.md)`)
+    if (!CHANGE_LOG.test(block.log)) reasons.push(`\`${block.log}\` is not a change log (changes.md or packages/<name>/changes.md)`)
     if (seen.has(block.log)) reasons.push(`\`${block.log}\` has two blocks; write one`)
     seen.add(block.log)
     if (!DATED_HEADING.test(block.body.split("\n")[0] ?? "")) reasons.push(`the block for \`${block.log}\` must start with \`## YYYY-MM-DD - <title>\``)
   }
   return { preamble: preamble.join("\n").trim(), blocks, reasons }
+}
+
+/**
+ * One fragment from several, in the given order: their preambles joined, and one block per log whose body is every
+ * input's entry for that log. Used when a branch gains entries (from-diff) or a batch absorbs its cars (fold-batch).
+ */
+export function combineFragments(contents: readonly string[]): string {
+  const preambles: string[] = []
+  const byLog = new Map<string, string[]>()
+  for (const content of contents) {
+    const split = splitFragment(content)
+    if (split.reasons.length > 0) throw new Error(split.reasons.join("; "))
+    if (split.preamble !== "") preambles.push(split.preamble)
+    for (const block of split.blocks) byLog.set(block.log, [...(byLog.get(block.log) ?? []), block.body])
+  }
+  const blocks = [...byLog].map(([log, bodies]) => `${markerLine(log)}\n${bodies.join("\n\n")}`)
+  return `${[preambles.join("\n\n"), ...blocks].filter((part) => part !== "").join("\n\n")}\n`
 }
 
 /** Puts `entries` (newest first) on top of a log, below a leading `# title` line when it has one. */

@@ -310,4 +310,37 @@ describe("the classifier", () => {
     expect(isUserFacingPath("srcfoo/x.ts", p)).toBe(false);
     expect(isUserFacingPath("src/x.ts", p)).toBe(true);
   });
+  test("a repo classifier replaces the roots and the default exemptions in both directions", () => {
+    const shipped = new Set(["package.json", "apps/api/test-support/seed.ts"]);
+    const p = { ...POLICY, isUserFacing: (path: string) => shipped.has(path) };
+    expect(isUserFacingPath("package.json", p)).toBe(true);
+    expect(isUserFacingPath("apps/api/test-support/seed.ts", p)).toBe(true);
+    expect(isUserFacingPath("apps/api/src/index.ts", p)).toBe(false);
+    expect(isUserFacingPath("docs/guide.md", p)).toBe(false);
+  });
+  test("the gate verdicts use the repo classifier", () => {
+    const p = { ...POLICY, isUserFacing: (path: string) => path === "bin/cli.ts" };
+    // Under a root but not shipped: no fragment needed, and the label escape stays open.
+    expect(checkPrChangelog({ ...base, modifiedFiles: ["apps/api/src/ci-only.ts"] }, p)).toEqual({ pass: true, reason: "no user-facing changes" });
+    expect(checkPrChangelog({ ...base, labels: ["no-changelog"], modifiedFiles: ["apps/api/src/ci-only.ts"] }, p).pass).toBe(true);
+    // Shipped but outside every root: the fragment is required and the label is refused.
+    expect(checkPrChangelog({ ...base, modifiedFiles: ["bin/cli.ts"] }, p).pass).toBe(false);
+    expect(checkPrChangelog({ ...base, labels: ["no-changelog"], modifiedFiles: ["bin/cli.ts"] }, p).reason).toBe("no-changelog refused: user-facing paths changed");
+    const withFragment = { ...base, modifiedFiles: ["bin/cli.ts"], addedFiles: ["changes/unreleased/7.md"], addedFragment: { content: "**Fixed.**" } };
+    expect(checkPrChangelog(withFragment, p).pass).toBe(true);
+  });
+  test("a release PR is judged by the repo classifier too", () => {
+    const p = { ...POLICY, isUserFacing: (path: string) => path === "bin/cli.ts" };
+    const release = {
+      ...base,
+      branch: "release/1.2.3",
+      isReleaseWorkflow: true,
+      actor: "release-bot[bot]",
+      baseFragments: ["7.md"],
+      headFragments: [] as string[],
+      deletedFiles: ["changes/unreleased/7.md"],
+    };
+    expect(checkPrChangelog({ ...release, modifiedFiles: ["CHANGELOG.md", "apps/api/src/index.ts"] }, p).pass).toBe(true);
+    expect(checkPrChangelog({ ...release, modifiedFiles: ["CHANGELOG.md", "bin/cli.ts"] }, p).reason).toBe("a release PR must not change user-facing files: bin/cli.ts");
+  });
 });

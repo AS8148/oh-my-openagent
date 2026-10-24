@@ -2,6 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { checkPrChangelog, fetchBaseIfMissing, FRAGMENT_DIR, fragmentPath } from "./changelog-gate-rules.ts";
 import { GATE_CONFIG } from "./changelog-gate.config.ts";
+import { isUserFacingPath as isShippedPath, shippingPolicy } from "./changelog-shipping-policy.mjs";
 import { checkPackageLogs } from "./package-log-gate.ts";
 import { isReleaseStatePr } from "./release-pr-marker.ts";
 
@@ -41,6 +42,14 @@ function run(): number {
   const baseHead = baseBranchHead ?? git("rev-parse", "--verify", "--end-of-options", `${base}^{commit}`).trim();
   const mergeBase = git("merge-base", baseHead, head).trim();
   const list = (filter: string) => git("diff", "--no-renames", "--name-only", "--diff-filter=" + filter, "-z", mergeBase, head).split("\0").filter(Boolean);
+  // User-facing means shipped, at either end of the diff (#10841): the manifests' files/bin, build generators and binary
+  // crates decide, so a test helper or a CI script needs no fragment while a removed shipped file still does.
+  const policyAt = (rev: string) => shippingPolicy(
+    git("ls-tree", "-r", "--name-only", "-z", rev).split("\0").filter(Boolean),
+    (path) => git("show", `${rev}:${path}`),
+  );
+  const shipped = [policyAt(head), policyAt(mergeBase)];
+  const policy = { ...GATE_CONFIG, isUserFacing: (path: string) => shipped.some((at) => isShippedPath(path, at)) };
   const addedFiles = list("A");
   const modifiedFiles = list("M");
   const deletedFiles = list("D");
@@ -76,7 +85,7 @@ function run(): number {
       addedFiles, modifiedFiles, deletedFiles, branch, isReleaseWorkflow, actor, labels, prNumber, addedFragment,
       addedChangelog, addedChangelogMode, baseHasChangelog, baseFragments, headFragments,
     },
-    GATE_CONFIG,
+    policy,
   );
   console.log(`changelog-gate: ${result.pass ? "PASS" : "FAIL"} - ${result.reason}`);
   const packageLogs = checkPackageLogs({

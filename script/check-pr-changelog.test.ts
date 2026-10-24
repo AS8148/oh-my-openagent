@@ -26,7 +26,8 @@ function fixture() {
   git("init", "-q")
   git("config", "user.name", "Changelog test")
   git("config", "user.email", "changelog@example.invalid")
-  write("package.json", JSON.stringify({ files: ["packages/fixture/src"] }))
+  write("package.json", JSON.stringify({ files: ["packages/fixture/src", "launcher.mjs"] }))
+  write("launcher.mjs", "export {}\n")
   write("packages/fixture/src/index.ts", "export const value = 1\n")
   write("CHANGELOG.md", changelog)
   git("add", ".")
@@ -42,7 +43,12 @@ describe("changelog gate CLI", () => {
     { name: "user-facing PR without a fragment or exemption", files: { "packages/fixture/src/index.ts": "export const value = 2\n" }, status: 1 },
     { name: "non-release Unreleased edit", files: { "CHANGELOG.md": changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\nHand edit.\n") }, status: 1 },
     { name: "fragment cannot exempt a non-release Unreleased edit", files: { "changes/unreleased/7.md": "Fragment. (#7)\n", "CHANGELOG.md": changelog.replace("## [Unreleased]\n", "## [Unreleased]\n\nHand edit.\n") }, status: 1 },
-  ])("$name", ({ files, status }) => {
+    // #10841: user-facing means shipped (changelog-shipping-policy.mjs), the same classification the Unreleased-line gate used.
+    { name: "test support under a shipped package needs no fragment", files: { "packages/fixture/src/seed.test-support.ts": "export const seed = 1\n" }, status: 0 },
+    { name: "a CI-only script may carry the no-changelog label", files: { "script/ci-only.mjs": "export {}\n" }, labels: ["no-changelog"], status: 0 },
+    { name: "a shipped file outside the package directories needs a fragment", files: { "launcher.mjs": "export const v = 2\n" }, status: 1 },
+    { name: "a shipped file refuses the no-changelog label", files: { "launcher.mjs": "export const v = 2\n" }, labels: ["no-changelog"], status: 1 },
+  ])("$name", ({ files, status, labels = [] }) => {
     // given: committed base and head trees, not a mocked path inventory
     const { root, git, write, base } = fixture()
     for (const [path, content] of Object.entries(files)) write(path, content)
@@ -60,7 +66,7 @@ describe("changelog gate CLI", () => {
         CHANGELOG_GATE_PR: "7",
         CHANGELOG_GATE_BRANCH: "feature/fixture",
         CHANGELOG_GATE_ACTOR: "contributor",
-        CHANGELOG_GATE_LABELS: "[]",
+        CHANGELOG_GATE_LABELS: JSON.stringify(labels),
         CHANGELOG_GATE_RELEASE: "0",
         CHANGELOG_GATE_TITLE: "",
         CHANGELOG_GATE_BODY: "",

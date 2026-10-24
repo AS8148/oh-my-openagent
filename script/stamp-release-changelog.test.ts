@@ -12,7 +12,9 @@ const published = "## [5.1.44] - 2026-10-23\n\nPublished payload.\n"
 const scriptFiles = [
   "stamp-release-changelog.ts", "changelog-release-notes.ts", "changelog-fragments.ts",
   "changelog-gate-rules.ts", "check-pr-changelog.ts", "changelog-gate.config.ts", "release-pr-marker.ts",
+  "package-log-blocks.ts", "package-log-gate.ts", "changelog-shipping-policy.mjs", "changelog-release-assembly.ts",
 ]
+const PULL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -81,6 +83,38 @@ describe("release stamp CLI", () => {
     expect(result.status).toBe(1)
     expect(readFileSync(join(root, "CHANGELOG.md"), "utf8")).toBe(before)
     expect(readFileSync(join(root, "changes/unreleased/7.md"), "utf8")).toBe("Pending payload.")
+  })
+
+  test("section fragments group under one heading after the paragraphs, and each bullet links its PR", () => {
+    // given: the `### Section` + bullet fragments dev already carries, beside a paragraph fragment
+    const { root, stamp } = fixture("", {
+      "7.md": "### Fixed\n\n- Seven fix (#6).\n",
+      "8.md": `**Eight.** Paragraph ([#8](${PULL}/8))\n`,
+      "9.md": `### Fixed\n\n- Nine fix ([#9](${PULL}/9)).\n  continued line\n\n### Added\n\n- Nine add.\n`,
+    })
+    // when
+    const result = stamp()
+    // then: one ### Fixed group, newest PR first, a PR link only where the bullet lacks its own
+    expect(result.status, result.stderr).toBe(0)
+    expect(extractReleaseNotes(readFileSync(join(root, "CHANGELOG.md"), "utf8"), "5.1.45")).toBe([
+      `**Eight.** Paragraph ([#8](${PULL}/8))`,
+      `### Fixed\n\n- Nine fix ([#9](${PULL}/9)).\n  continued line\n- Seven fix (#6). ([#7](${PULL}/7))`,
+      `### Added\n\n- Nine add. ([#9](${PULL}/9))`,
+    ].join("\n\n"))
+  })
+
+  test("a fragment whose PR a legacy paragraph already links is consumed without a second entry", () => {
+    // given: a PR that wrote both an Unreleased paragraph and a fragment before the gate switched
+    const { root, stamp } = fixture(`**Legacy.** ([#5](${PULL}/5))`, { "5.md": "### Fixed\n\n- Same change.\n", "6.md": "### Fixed\n\n- Other change.\n" })
+    // when
+    const result = stamp()
+    // then
+    expect(result.status, result.stderr).toBe(0)
+    expect(extractReleaseNotes(readFileSync(join(root, "CHANGELOG.md"), "utf8"), "5.1.45")).toBe(
+      `**Legacy.** ([#5](${PULL}/5))\n\n### Fixed\n\n- Other change. ([#6](${PULL}/6))`,
+    )
+    expect(result.stderr).toContain("#5")
+    expect(readdirSync(join(root, "changes/unreleased"))).toEqual([])
   })
 
   test("an empty fragment set refuses without mutating legacy notes", () => {

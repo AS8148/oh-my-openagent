@@ -82,22 +82,7 @@ describe("stamp-release-changelog.ts with package-log blocks", () => {
   })
 })
 
-describe("compile-package-logs.ts commands", () => {
-  test("compile writes blocks newest first, keeps paragraphs, deletes blocks-only fragments, and reads CRLF fragments", () => {
-    const dir = scratch()
-    try {
-      writeFileSync(join(dir, "changes/unreleased/10.md"), `**ten** ([#10](u))\r\n\r\n${markerLine(LOG)}\r\n## 2026-10-20 - ten (#10)\r\n`)
-      writeFileSync(join(dir, "changes/unreleased/11.md"), `${markerLine(LOG)}\n## 2026-10-20 - eleven (#11)\n`)
-      const result = bun(dir, ["script/compile-package-logs.ts", "compile"])
-      expect(result.status).toBe(0)
-      expect(readFileSync(join(dir, LOG), "utf8")).toBe("# omo-senpi changes\n\n## 2026-10-20 - eleven (#11)\n\n## 2026-10-20 - ten (#10)\n\n## 2026-10-01 - old\n")
-      expect(readFileSync(join(dir, "changes/unreleased/10.md"), "utf8")).toBe("**ten** ([#10](u))\n")
-      expect(spawnSync("test", ["-e", join(dir, "changes/unreleased/11.md")]).status).not.toBe(0)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
+describe("changelog-fragments-cli.ts from-diff on package logs", () => {
   test("from-diff converts against the merge base even after dev's log moved (#10682 review MEDIUM 2)", () => {
     const dir = scratch()
     try {
@@ -108,7 +93,7 @@ describe("compile-package-logs.ts commands", () => {
       writeFileSync(join(dir, LOG), "# omo-senpi changes\n\n## 2026-10-19 - compiled on dev\n\n## 2026-10-01 - old\n")
       commit(dir, "dev moved")
       git(dir, "checkout", "-q", "feat")
-      const result = bun(dir, ["script/compile-package-logs.ts", "from-diff", "--base", "dev", "--pr", "12"])
+      const result = bun(dir, ["script/changelog-fragments-cli.ts", "from-diff", "--base", "dev", "--pr", "12"])
       expect(result.status).toBe(0)
       expect(splitFragment(readFileSync(join(dir, "changes/unreleased/12.md"), "utf8")).blocks).toEqual([{ log: LOG, body: "## 2026-10-20 - mine (#12)" }])
       expect(readFileSync(join(dir, LOG), "utf8")).toBe("# omo-senpi changes\n\n## 2026-10-01 - old\n")

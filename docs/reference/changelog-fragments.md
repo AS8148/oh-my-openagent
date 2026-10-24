@@ -1,44 +1,82 @@
-# Changelog fragments (#9961)
+# Changelog fragments (#9961, #10841)
 
-A PR that changes user-facing paths adds exactly one file here, named for the PR:
-`changes/unreleased/<pr-number>.md` (#9961). Its body is the paragraph that used to go under
-`## [Unreleased]` in `CHANGELOG.md`, linking its own PR:
+Pull requests never edit `CHANGELOG.md`, the root `changes.md` or any `packages/<name>/changes.md`.
+Every pull request used to prepend to the same first lines of those files, so each merge into `dev`
+left the other open pull requests conflicting. A pull request that changes what ships adds exactly one
+file instead, named for the pull request: `changes/unreleased/<pr-number>.md`.
+
+## What goes in the fragment
+
+The text that used to go under `## [Unreleased]`, in either of the shapes the changelog uses:
 
 ```md
 **OmO loads the analytics SDK only when an event is captured.** PostHog now ships as a lazy
 sidecar ... ([#10640](https://github.com/code-yeongyu/oh-my-openagent/pull/10640))
 ```
 
-- Never edit `CHANGELOG.md` or the root `changes.md` in a normal PR; the `changelog-gate`
-  workflow refuses it. Notes that used to go in root `changes.md` go in the fragment too.
-- Fragments are immutable once merged. Only the release-state PR (`release/*`, opened by the
-  release workflow) edits `CHANGELOG.md`: `script/stamp-release-changelog.ts` assembles the
-  fragments newest-PR-first into the release section and deletes them in the same commit.
-- The `no-changelog` label waives the fragment only for a PR with no user-facing paths.
-- This guide lives outside `changes/unreleased/` because the gate accepts only `<pr-number>.md` files there.
+```md
+### Fixed
 
-## Package logs (`packages/<name>/changes.md`)
+- A relaunched task records its own session id.
+```
 
-A PR never edits a package log either: two open PRs that both prepended to the same log
-conflicted on its first lines. Put each entry in the same fragment, after the paragraph, as a block
-that names its log:
+After it, one block for each log you used to prepend to, naming the log:
 
 ```md
-**OmO ... user-facing paragraph** ([#123](https://github.com/code-yeongyu/oh-my-openagent/pull/123))
-
 <!-- changes-log: packages/omo-senpi/changes.md -->
-## 2026-10-20 - What changed in omo-senpi (#123)
+## 2026-10-24 - What changed in omo-senpi (#123)
 
 The text you used to prepend to that log.
 ```
 
-- One block per log; the heading is `## YYYY-MM-DD - <title>`; the log must already exist. The
-  `changelog-gate` workflow checks every block (`script/package-log-gate.ts`).
-- `bun script/compile-package-logs.ts compile` writes the blocks into their logs, newest PR on top,
-  and leaves each fragment with only its paragraph (a fragment with no paragraph is deleted). The
-  release stamp does the same for any block still waiting. A release needs at least one paragraph: if
-  every fragment is blocks-only the stamp refuses and writes nothing, and the blocks wait for the hourly job.
-- Only the paragraph goes into `CHANGELOG.md`. The marker grammar matches omo-desktop-app's
-  `changes/unreleased`, so the root changelog can move to the same compile later without a second migration.
-- A branch that still prepends to a package log converts with
-  `bun script/compile-package-logs.ts from-diff --base origin/dev --pr <n>`, then commit.
+- One block per log; it starts with `## YYYY-MM-DD - <title>`; the log (`changes.md` or
+  `packages/<name>/changes.md`) must already exist.
+- Fragments are immutable once merged; a later pull request adds its own.
+
+## What the gate checks
+
+The `changelog-gate` workflow runs `script/check-pr-changelog.ts` from the base branch:
+
+- A pull request that touches a shipped path (the package manifests' `files`/`bin`, the build
+  generators and binary crates; `script/changelog-shipping-policy.mjs`) adds exactly one fragment,
+  `changes/unreleased/<its number>.md`, non-empty. Tests, test helpers, CI scripts and docs need none.
+- The `no-changelog` label waives the fragment only when no shipped path changed.
+- Editing `CHANGELOG.md`, any `changes.md`, or another pull request's fragment fails. Every log block
+  must be valid and name an existing log.
+
+The rules live in `script/changelog-gate-rules.ts`, vendored byte-identical from
+`sisyphuslabs/common-infra` (`bun script/check-gate-sync.ts` compares them).
+
+## Release
+
+Only the release-state pull request (`release/*`, opened by `publish.yml` as `sisyphus-dev-ai`) edits
+those files. `script/stamp-release-changelog.ts` writes the release section (paragraphs first, newest
+pull request first, then one `### Section` group per name, each bullet linking its pull request),
+writes every log block into its log, and deletes the fragments, all in the release commit. Nothing
+compiles fragments before the release cut. Unreleased text written before the gate switched is
+released first, as written.
+
+## Converting a branch written before fragments
+
+```sh
+bun script/changelog-fragments-cli.ts from-diff --base origin/dev --pr <n>
+```
+
+It moves the paragraphs your branch added under `## [Unreleased]` and the entries it prepended to any
+`changes.md` into `changes/unreleased/<n>.md`, and puts those files back to the merge base. Review
+the fragment and commit. It refuses, and writes nothing, when the branch edited a released section or
+an existing entry; move that text by hand.
+
+## Batch pull requests
+
+A batch that merges other pull requests' branches carries their fragments, but a pull request adds
+exactly one. After merging the cars, run
+
+```sh
+bun script/changelog-fragments-cli.ts fold-batch --base origin/dev --pr <batch>
+```
+
+It moves every added fragment into `changes/unreleased/<batch>.md` (newest pull request first, one
+block per log) and deletes the cars' files. Commit the result.
+
+This guide lives outside `changes/unreleased/` because the gate accepts only `<pr-number>.md` files there.
