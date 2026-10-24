@@ -191,18 +191,32 @@ describe("OAuth credential issuer stamps", () => {
     expect(requests.every((request) => !request.url.endsWith("/token"))).toBe(true)
   })
 
-  it("does not fall back to a configured client belonging to the previous issuer", async () => {
+  it("uses configured client IDs consistently across two provider instances after issuer changes", async () => {
     // given
     saveToken(resource, resource, {
-      accessToken: "old", issuer: firstIssuer, clientInfo: { clientId: "configured", issuer: firstIssuer },
+      accessToken: "old", issuer: firstIssuer,
+      clientInfo: { clientId: "old-registration", clientSecret: "old-secret", issuer: firstIssuer },
     })
     selectedIssuer = "https://new.example.com"
     registrationAvailable = false
     const provider = new RedirectProvider({ serverUrl: resource, clientId: "configured" })
     // when
-    await expect(provider.login()).rejects.toThrow()
+    await provider.login()
+    selectedIssuer = "https://third.example.com"
+    const restartedProvider = new RedirectProvider({ serverUrl: resource, clientId: "configured" })
+    await restartedProvider.login()
     // then
-    expect(requests).toEqual([])
-    expect(provider.tokens()).toBeNull()
+    expect(requests).toHaveLength(2)
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://new.example.com/token",
+      "https://third.example.com/token",
+    ])
+    for (const request of requests) {
+      const body = new URLSearchParams(request.body)
+      expect(body.get("client_id")).toBe("configured")
+      expect(body.has("client_secret")).toBe(false)
+    }
+    expect(provider.tokens()?.issuer).toBe(selectedIssuer)
+    expect(restartedProvider.tokens()?.issuer).toBe(selectedIssuer)
   })
 })

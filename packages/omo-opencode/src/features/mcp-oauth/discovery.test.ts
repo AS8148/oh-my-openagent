@@ -113,7 +113,7 @@ describe("discoverOAuthServerMetadata", () => {
       if (url === rootAsUrl) {
         return new Response(
           JSON.stringify({
-            issuer: resource,
+            issuer: new URL(resource).origin,
             authorization_endpoint: "https://mcp.example.com/oauth/authorize",
             token_endpoint: "https://mcp.example.com/oauth/token",
             registration_endpoint: "https://mcp.example.com/oauth/register",
@@ -129,7 +129,7 @@ describe("discoverOAuthServerMetadata", () => {
     return discoverOAuthServerMetadata(resource).then((result) => {
       // then
       expect(result).toEqual({
-        issuer: resource,
+        issuer: new URL(resource).origin,
         authorizationEndpoint: "https://mcp.example.com/oauth/authorize",
         tokenEndpoint: "https://mcp.example.com/oauth/token",
         registrationEndpoint: "https://mcp.example.com/oauth/register",

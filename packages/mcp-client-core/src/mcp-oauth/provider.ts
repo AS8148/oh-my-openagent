@@ -71,7 +71,6 @@ export class McpOAuthProvider {
   private storedClientInfo: ClientCredentials | null = null
   private callbackPort: number | null = null
   private issuer: string | undefined
-  private configClientIssuer: string | undefined
 
   constructor(options: McpOAuthProviderOptions) {
     this.serverUrl = options.serverUrl
@@ -96,7 +95,6 @@ export class McpOAuthProvider {
     const token = this.tokens()
     const stamps = [token?.issuer, token?.clientInfo?.issuer, this.storedClientInfo?.issuer, this.issuer]
     const changed = stamps.some((stamp) => stamp !== undefined && stamp !== issuer)
-    this.configClientIssuer ??= token?.clientInfo?.issuer ?? token?.issuer ?? this.issuer ?? issuer
     if (changed) {
       this.storedClientInfo = null
       this.storedCodeVerifier = null
@@ -136,7 +134,6 @@ export class McpOAuthProvider {
   }
 
   async redirectToAuthorization(metadata: OAuthServerMetadata): Promise<{ code: string }> {
-    this.bindIssuer(metadata.issuer)
     const clientInfo = this.clientInformation()
     if (!clientInfo) {
       throw new Error("No client information available. Run login() or register a client first.")
@@ -179,7 +176,7 @@ export class McpOAuthProvider {
       clientName: PLUGIN_NAME,
       redirectUris: [this.redirectUrl()],
       tokenEndpointAuthMethod: "none",
-      ...(this.configClientId && this.configClientIssuer === metadata.issuer ? { clientId: this.configClientId } : {}),
+      ...(this.configClientId ? { clientId: this.configClientId } : {}),
       storage: clientRegistrationStorage,
     })
 
@@ -219,8 +216,7 @@ export class McpOAuthProvider {
     const metadata = await discoverOAuthServerMetadata(this.serverUrl, true)
     if (this.bindIssuer(metadata.issuer)) return this.login()
     const clientInfo = this.clientInformation()
-    const clientId = clientInfo?.clientId
-      ?? (this.configClientIssuer === metadata.issuer ? this.configClientId : undefined)
+    const clientId = clientInfo?.clientId ?? this.configClientId
     if (!clientId) {
       throw new Error("No client information available. Run login() or register a client first.")
     }

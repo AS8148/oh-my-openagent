@@ -70,7 +70,11 @@ function parseMetadataFields(json: Record<string, unknown>, resource: string, ex
   }
 }
 
-async function fetchAuthorizationServerMetadata(issuer: string, resource: string): Promise<OAuthServerMetadata> {
+async function fetchAuthorizationServerMetadata(
+  issuer: string,
+  resource: string,
+  allowOriginFallback = false,
+): Promise<OAuthServerMetadata> {
   const issuerUrl = parseHttpsUrl(issuer, "Authorization server URL")
   const issuerPath = issuerUrl.pathname.replace(/\/+$/, "")
   const metadataUrl = new URL(`/.well-known/oauth-authorization-server${issuerPath}`, issuerUrl).toString()
@@ -81,7 +85,7 @@ async function fetchAuthorizationServerMetadata(issuer: string, resource: string
       const rootMetadataUrl = new URL("/.well-known/oauth-authorization-server", issuerUrl).toString()
       const rootMetadata = await fetchMetadata(rootMetadataUrl)
       if (rootMetadata.ok) {
-        return parseMetadataFields(rootMetadata.json, resource, issuer)
+        return parseMetadataFields(rootMetadata.json, resource, allowOriginFallback ? issuerUrl.origin : issuer)
       }
     }
     if (metadata.status === 404) {
@@ -125,7 +129,7 @@ export async function discoverOAuthServerMetadata(resource: string, forceRefresh
       throw new Error(`OAuth protected resource metadata fetch failed (${prmResponse.status})`)
     }
 
-    return fetchAuthorizationServerMetadata(resource, resource)
+    return fetchAuthorizationServerMetadata(resource.replace(/\/+$/, ""), resource, true)
   })()
 
   pendingDiscovery.set(resourceKey, discoveryPromise)
