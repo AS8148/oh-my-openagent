@@ -195,9 +195,41 @@ describe("derivations, joins, snapshots", () => {
 		}
 	})
 
-	test("#given a verification claim on a page-sourced fact #when checked #then unsupported_verification", () => {
-		expect(codes(run(`<p>We verified the span is ${fact("F1", "up to 320 m", "m")} [S4].</p>`))).toEqual(["unsupported_verification"])
-		expect(run(`<p>The suite ran with ${fact("F7", "42 passed")} [S5].</p>`)).toEqual([])
+})
+
+describe("verification claims are structural (data-claim-kind)", () => {
+	const verified = (id: string, text: string, unit = "") => fact(id, text, unit).replace("<data ", '<data data-claim-kind="verified" ')
+	const severities = (defects: Defect[]) => defects.map((defect) => `${defect.code}:${defect.severity}`)
+
+	test("#given a claim MARKED verified citing a measured page row #when checked #then unsupported_verification major", () => {
+		expect(severities(run(`<p>The span is ${verified("F1", "up to 320 m", "m")} [S4].</p>`))).toEqual(["unsupported_verification:major"])
+	})
+
+	test("#given a claim MARKED verified citing a recorded command row #when checked #then no defect", () => {
+		expect(run(`<p>The suite ran with ${verified("F7", "42 passed")} [S5].</p>`)).toEqual([])
+	})
+
+	test("#given an UNMARKED pretend-verification sentence #when checked #then verification_claim_unmarked as a minor warning and no major", () => {
+		expect(severities(run("<p>We verified the span by running the measurement script [S4].</p>"))).toEqual(["verification_claim_unmarked:minor"])
+	})
+
+	const quiet = [
+		`<p>The tests showed a ${fact("F3", "12%", "%")} drop [S4].</p>`,
+		`<p>The bridge, which ran across the river, spans ${fact("F1", "up to 320 m", "m")} [S4].</p>`,
+		`<p>The span is ${fact("F1", "up to 320 m", "m")}, as confirmed with the annual inspection report [S4].</p>`,
+		`<p>Clinical tests confirmed the span of ${fact("F1", "up to 320 m", "m")} [S4].</p>`,
+		`<p>확인된 길이는 ${fact("F1", "최대 320 m", "m")} [S4].</p>`,
+	]
+	for (const body of quiet) {
+		test(`#given findings prose ${JSON.stringify(body.replace(/<[^>]+>/g, ""))} #when checked #then no warning and no major`, () => expect(run(body)).toEqual([]))
+	}
+
+	test("#given an UNMARKED Korean run-and-check sentence #when checked #then verification_claim_unmarked minor only", () => {
+		expect(severities(run(`<p>우리가 실행해 확인한 길이는 ${fact("F1", "최대 320 m", "m")} [S4].</p>`))).toEqual(["verification_claim_unmarked:minor"])
+	})
+
+	test("#given the same run-and-check sentence MARKED verified on a command row #when checked #then no warning", () => {
+		expect(run(`<p>We ran the suite by running the test script, and it reported ${verified("F7", "42 passed")} [S5].</p>`)).toEqual([])
 	})
 })
 

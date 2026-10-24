@@ -122,15 +122,19 @@ describe("facts oversize payload classification", () => {
     expect((await store.readFailures()).entries).toMatchObject([{ conversationId: "session-2", state: "parked" }])
     await publish(queue, identity, "session-2", [message("m2", oversizeText()), message("m3", "Small tail.")])
     await enqueue(queue, identity, "session-3", "m4", "The project uses Bun.")
+    const runsBefore = new Set(await readdir(join(identity.paths.facts, "runs")))
 
     // when
     const result = await launch(root, identity, queue, { now: () => new Date(NOW.getTime() + 60_000) })
 
     // then: a parked predecessor no longer holds session-2's newer entry back; it stays queued itself.
     expect(result.status).toBe("committed")
-    const runs = (await readdir(join(identity.paths.facts, "runs"))).sort()
+    // Run dirs are named by a digest of their queue keys, so their sort order says nothing about which
+    // launch made them (#11143); the second launch's run is the one dir that was not there before it.
+    const newRuns = (await readdir(join(identity.paths.facts, "runs"))).filter((name) => !runsBefore.has(name))
+    expect(newRuns).toHaveLength(1)
     const latest = JSON.parse(
-      await readFile(join(identity.paths.facts, "runs", runs[runs.length - 1] ?? "missing", "ledger.json"), "utf8"),
+      await readFile(join(identity.paths.facts, "runs", newRuns[0] ?? "missing", "ledger.json"), "utf8"),
     ) as FactsRunLedger
     expect(latest.queued.map((key) => `${key.conversationId}/${key.end_message_id}`).sort()).toEqual(["session-2/m3", "session-3/m4"])
     expect(await queue.listPending()).toEqual([])

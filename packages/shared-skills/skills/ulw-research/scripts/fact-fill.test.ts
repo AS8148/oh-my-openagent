@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { fill } from "./fact-fill.mjs"
-import { validateLedger } from "./fact-ledger.mjs"
+import { retractRow, supersedeRow, validateLedger } from "./fact-ledger.mjs"
 import { failureCount, sentenceKey } from "./fidelity-state.mjs"
 
 const LEDGER = JSON.parse(readFileSync(join(import.meta.dir, "tests/fixtures/fidelity/ledger-basic.json"), "utf8"))
@@ -82,6 +82,26 @@ describe("fill: fatal errors write nothing", () => {
 		expect(result.out).toBeNull()
 		expect(codes(result.errors)).toEqual(["unit_duplicated"])
 		expect(fill("<p>{{F13:rate:value}}%</p>", LEDGER, { format: "html" }).errors).toEqual([])
+	})
+
+	test("a retracted row is unresolved_placeholder; fill never renders it", () => {
+		const ledger = structuredClone(LEDGER)
+		retractRow(ledger, "F12", "source withdrawn")
+		expect(validateLedger(ledger)).toEqual([])
+		const result = fill("<p>Line one.</p>\n<p>{{F12:span_len}}</p>", ledger, { format: "html" })
+		expect(result.out).toBeNull()
+		expect(result.fillMap).toEqual([])
+		expect(result.errors).toEqual([{ code: "unresolved_placeholder", token: "{{F12:span_len}}", line: 2, message: "F12 is retracted; cite its replacement" }])
+	})
+
+	test("a superseded row is unresolved_placeholder; fill never renders it", () => {
+		const ledger = structuredClone(LEDGER)
+		supersedeRow(ledger, "F12", "F40", "restated in mm")
+		expect(validateLedger(ledger)).toEqual([])
+		const result = fill("{{F12:span_len:value}}", ledger, { format: "md" })
+		expect(result.out).toBeNull()
+		expect(result.fillMap).toEqual([])
+		expect(result.errors).toEqual([{ code: "unresolved_placeholder", token: "{{F12:span_len:value}}", line: 1, message: "F12 is superseded; cite its replacement" }])
 	})
 
 	test("an anchor occurring twice is quote_anchor_unresolved", () => {
