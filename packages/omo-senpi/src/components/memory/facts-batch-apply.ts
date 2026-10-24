@@ -200,6 +200,9 @@ async function applyClaimed(options: ClaimedApplyOptions): Promise<Applied> {
   const result = await applyFactsRecovery(options.repo, recovery, options.records.length + agreements.length, {
     agentId: options.identity.id,
     authorName: "Facts Extractor",
+  }, {
+    batch, agreementsPolicy: options.agreementsPolicy,
+    publishRecovery: async (next) => { await updateRunLedger(`${options.runDir}/ledger.json`, { applyRecovery: next }) },
   })
   return result.outcome === "parent_dirty"
     ? result
