@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Skill MCP tool errors are reported as errors.** Structured output and result metadata reach the caller, tool failures are not retried as connection failures, and plain content keeps its existing output format. ([#11207](https://github.com/code-yeongyu/oh-my-openagent/pull/11207))
 
+**The repository now has a security policy.** `SECURITY.md` explains how to report a vulnerability privately through GitHub's Security tab, what to include, and when to expect triage and an acknowledgement; `CONTRIBUTING.md` links to it. Adapted from the policy proposed by @marklapointe in [#10752](https://github.com/code-yeongyu/oh-my-openagent/pull/10752). ([#11221](https://github.com/code-yeongyu/oh-my-openagent/pull/11221))
+
 **ulw-research can check that a report's sentences keep the meaning of their sources.** It pairs each report sentence with the quote, claim or original text it rests on, and records drift only when two independent readers name the same kind of change; a single reader's flag is kept as a minor warning. A pair no reader judged, or a pair that needs the strong reader and only got the cheap one, is reported as unverified instead of passing as clean. Nothing in the CLI runs it yet. ([#11151](https://github.com/code-yeongyu/oh-my-openagent/pull/11151), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009))
 
 **Skill MCP catalogs include every page.** Tools, resources, and prompts follow opaque pagination cursors in order, with a clear error if a server exceeds 100 pages. ([#11204](https://github.com/code-yeongyu/oh-my-openagent/pull/11204))
