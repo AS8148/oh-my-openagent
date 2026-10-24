@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Account sharing now activates protocol-2 credentials through signed enrollment or fresh sign-in proof.** The CLI publishes one committed token and owner snapshot, reports unsupported services distinctly, and resumes pending revocations without overwriting a newer sign-in. Login, account commands and memory sync share the same credential authority. ([omo-service#628](https://github.com/sisyphuslabs/omo-service/issues/628))
+**Account sharing now activates protocol-2 credentials through signed enrollment or fresh sign-in proof.** The CLI publishes one committed token and owner snapshot, reports unsupported services distinctly, and resumes pending revocations without overwriting a newer sign-in. Login, account commands and memory sync share the same credential authority. ([#11193](https://github.com/code-yeongyu/oh-my-openagent/pull/11193), refs [omo-service#628](https://github.com/sisyphuslabs/omo-service/issues/628))
 
 ### Fixed
 
