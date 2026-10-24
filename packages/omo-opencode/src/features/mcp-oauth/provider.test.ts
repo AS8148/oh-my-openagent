@@ -216,6 +216,7 @@ describe("McpOAuthProvider", () => {
       // given
       const provider = new McpOAuthProvider({ serverUrl: "https://mcp.example.com" })
       const metadata = {
+        issuer: "https://auth.example.com",
         authorizationEndpoint: "https://auth.example.com/authorize",
         tokenEndpoint: "https://auth.example.com/token",
         resource: "https://mcp.example.com",

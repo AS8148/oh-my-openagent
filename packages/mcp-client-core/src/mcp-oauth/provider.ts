@@ -11,7 +11,6 @@ import {
   generateCodeChallenge,
   generateCodeVerifier,
   runAuthorizationCodeRedirect,
-  startCallbackServer,
 } from "./oauth-authorization-flow"
 
 export type McpOAuthProviderOptions = {
@@ -117,6 +116,8 @@ export class McpOAuthProvider {
     }
 
     const result = await runAuthorizationCodeRedirect({
+      issuer: metadata.issuer,
+      authorizationResponseIssParameterSupported: metadata.authorizationResponseIssParameterSupported,
       authorizationEndpoint: metadata.authorizationEndpoint,
       callbackPort: this.callbackPort,
       clientId: clientInfo.clientId,

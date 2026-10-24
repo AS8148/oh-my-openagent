@@ -1,4 +1,6 @@
 export interface OAuthServerMetadata {
+  issuer: string
+  authorizationResponseIssParameterSupported?: boolean
   authorizationEndpoint: string
   tokenEndpoint: string
   registrationEndpoint?: string
@@ -36,7 +38,12 @@ async function fetchMetadata(url: string): Promise<{ ok: true; json: Record<stri
   return { ok: true, json }
 }
 
-function parseMetadataFields(json: Record<string, unknown>, resource: string): OAuthServerMetadata {
+function parseMetadataFields(json: Record<string, unknown>, resource: string, expectedIssuer: string): OAuthServerMetadata {
+  const issuer = readStringField(json, "issuer")
+  parseHttpsUrl(issuer, "issuer")
+  if (issuer !== expectedIssuer) {
+    throw new Error("OAuth metadata issuer mismatch")
+  }
   const authorizationEndpoint = parseHttpsUrl(
     readStringField(json, "authorization_endpoint"),
     "authorization_endpoint"
@@ -52,6 +59,10 @@ function parseMetadataFields(json: Record<string, unknown>, resource: string): O
       : undefined
 
   return {
+    issuer,
+    ...(json.authorization_response_iss_parameter_supported === true
+      ? { authorizationResponseIssParameterSupported: true }
+      : {}),
     authorizationEndpoint,
     tokenEndpoint,
     registrationEndpoint,
@@ -70,7 +81,7 @@ async function fetchAuthorizationServerMetadata(issuer: string, resource: string
       const rootMetadataUrl = new URL("/.well-known/oauth-authorization-server", issuerUrl).toString()
       const rootMetadata = await fetchMetadata(rootMetadataUrl)
       if (rootMetadata.ok) {
-        return parseMetadataFields(rootMetadata.json, resource)
+        return parseMetadataFields(rootMetadata.json, resource, issuer)
       }
     }
     if (metadata.status === 404) {
@@ -79,7 +90,7 @@ async function fetchAuthorizationServerMetadata(issuer: string, resource: string
     throw new Error(`OAuth authorization server metadata fetch failed (${metadata.status})`)
   }
 
-  return parseMetadataFields(metadata.json, resource)
+  return parseMetadataFields(metadata.json, resource, issuer)
 }
 
 function parseAuthorizationServers(metadata: Record<string, unknown>): string[] {
@@ -114,7 +125,7 @@ export async function discoverOAuthServerMetadata(resource: string): Promise<OAu
       throw new Error(`OAuth protected resource metadata fetch failed (${prmResponse.status})`)
     }
 
-    return fetchAuthorizationServerMetadata(resourceKey, resource)
+    return fetchAuthorizationServerMetadata(resource, resource)
   })()
 
   pendingDiscovery.set(resourceKey, discoveryPromise)
