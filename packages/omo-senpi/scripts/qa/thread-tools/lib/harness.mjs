@@ -42,7 +42,25 @@ const { PINNED_HOST_CLIENT_CAPABILITIES } = await import(join(SENPI_RPC, "host-l
 const { RPC_CLIENT_CAPABILITIES_ENV } = await import(join(SENPI_RPC, "custom-capability.ts"))
 
 export const { startFakeModelServer, writeMockModelsJson, hermeticEnv } = qaEnv
-export const { installCleanupHooks, cleanupAllAndWait, trackChild, trackCloser, shouldDetachChildren } = qaCleanup
+export const { installCleanupHooks, trackChild, trackCloser, shouldDetachChildren } = qaCleanup
+
+/**
+ * Stops for detached hosts whose state lives inside a scratch dir. Senpi's scratch closer is registered
+ * first and runs first, so a host stopped by a later closer writes its shutdown state into a tree that
+ * was already removed. These run before it; each is also a tracked closer, so an aborted run still stops them.
+ */
+const hostStops = new Set()
+
+export function trackHostStop(stop) {
+  hostStops.add(stop)
+  trackCloser(stop)
+}
+
+export async function cleanupAllAndWait(timeoutMs) {
+  for (const stop of hostStops) stop()
+  hostStops.clear()
+  await qaCleanup.cleanupAllAndWait(timeoutMs)
+}
 
 /**
  * Variables a supervised omo/senpi session (desktop host, `omo --mode rpc` child) carries about
@@ -218,7 +236,7 @@ export function trackDesktopManagedHost(socketPath) {
       for (const survivor of pgrepPids(socketPath)) terminate(Number(survivor))
     }
   }
-  trackCloser(stop)
+  trackHostStop(stop)
   return { stop, observe, pid: () => observedPid }
 }
 
