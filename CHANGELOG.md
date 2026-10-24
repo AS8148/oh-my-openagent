@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Usage summaries from older versions no longer stay on disk after an upgrade.** Versions 5.1.34 to 5.1.44 kept session summaries in a `rollups` folder that nothing reads or sends any more. The first start after upgrading now deletes it, whether telemetry is on or off, and never follows a link out of that folder. With telemetry turned off in `omo.json`, a summary file that was cut short by a crash is deleted too. ([#10234](https://github.com/code-yeongyu/oh-my-openagent/issues/10234)) ([#11147](https://github.com/code-yeongyu/oh-my-openagent/pull/11147))
+
 **ulw-research ships a fact ledger, a fidelity state file and a claim index for research reports.** They give each research run a machine-readable record of its facts and verified claims; nothing in the CLI uses them yet. ([#11046](https://github.com/code-yeongyu/oh-my-openagent/pull/11046), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009); batch [#11148](https://github.com/code-yeongyu/oh-my-openagent/pull/11148))
 
 **Computer-use cancellation retains engine crash diagnostics.** Cancelled and timed-out calls keep their error code and carry the engine exit diagnostic as their cause. Capability-query permission failures remain structured tool results, hard engine diagnostics survive unrelated successful replies, and legacy launch refusals now share the structured record's exit-code and UTF-8 size rules. ([#11150](https://github.com/code-yeongyu/oh-my-openagent/pull/11150)) Follow-up to [#11086](https://github.com/code-yeongyu/oh-my-openagent/pull/11086), part of [#11073](https://github.com/code-yeongyu/oh-my-openagent/issues/11073).
