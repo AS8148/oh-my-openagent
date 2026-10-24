@@ -49,8 +49,8 @@ describe("findNormalized", () => {
 		// when
 		const hit = findNormalized(hay, "\"growth is strong\"")
 		// then
-		expect(hit).not.toBeNull()
-		expect(hay.slice(hit!.start, hit!.end)).toBe("\u201Cgrowth  is\n strong\u201D")
+		if (hit === null) throw new Error("needle not found")
+		expect(hay.slice(hit.start, hit.end)).toBe("\u201Cgrowth  is\n strong\u201D")
 	})
 
 	test("#given NFD Korean raw text with double spaces #when an NFC needle is found #then RAW offsets slice the NFD substring", () => {
@@ -61,8 +61,8 @@ describe("findNormalized", () => {
 		// when
 		const hit = findNormalized(hay, "매출은 100억 원이다")
 		// then
-		expect(hit).not.toBeNull()
-		expect(hay.slice(hit!.start, hit!.end)).toBe(expected)
+		if (hit === null) throw new Error("needle not found")
+		expect(hay.slice(hit.start, hit.end)).toBe(expected)
 	})
 
 	test("#given a needle absent from the text #when searched #then null is returned", () => {
