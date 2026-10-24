@@ -153,6 +153,9 @@ export function escapeHtml(text) {
 	return String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 }
 
+/** The elements the renderers below emit as fact spans; recognizers build their patterns from this. */
+export const FACT_ELEMENT_TAGS = Object.freeze(["data", "q", "blockquote"])
+
 export function renderValueHtml(row, text) {
 	const unit = row.unit === null ? "" : ` data-unit="${escapeHtml(row.unit)}"`
 	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
