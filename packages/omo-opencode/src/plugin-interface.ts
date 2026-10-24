@@ -19,16 +19,7 @@ import type { CreatedHooks } from "./create-hooks"
 import type { Managers } from "./create-managers"
 import { reconcileNativeModelPrompts } from "./agents/native-model-prompt"
 import type { NativePromptContext } from "./agents/native-prompt-frame"
-import { z } from "zod"
-import { log } from "./shared/logger"
-
-const sessionToolPermissionsSchema = z.object({
-  permission: z.array(z.object({
-    permission: z.string(),
-    pattern: z.string(),
-    action: z.enum(["allow", "ask", "deny"]),
-  })).optional(),
-})
+import { createSessionToolPermissionLookup } from "./plugin/session-tool-permissions"
 
 export function createPluginInterface(args: {
   ctx: PluginContext
@@ -48,6 +39,14 @@ export function createPluginInterface(args: {
   const toolSnippets = Object.fromEntries(
     Object.entries(tools).map(([name, definition]) => [name, definition.description]),
   )
+  const sessionToolPermissions = createSessionToolPermissionLookup(ctx)
+  const handleEvent = createEventHandler({
+    ctx,
+    pluginConfig,
+    firstMessageVariantGate,
+    managers,
+    hooks,
+  })
 
   return {
     tool: tools,
@@ -99,25 +98,7 @@ export function createPluginInterface(args: {
       getUltraworkMessage,
       hooks.keywordDetector,
       () => toolSnippets,
-      async (sessionID) => {
-        if (!sessionID) return []
-        const sessionsApi = ctx.client.session
-        if (!sessionsApi?.get) return undefined
-        const response = await sessionsApi.get({
-          path: { id: sessionID },
-          query: { directory: ctx.directory },
-          signal: AbortSignal.timeout(3000),
-        }).catch((error: unknown) => {
-          log("[native-prompt] Could not refresh session tool permissions", { sessionID, error })
-          return undefined
-        })
-        if (!response?.data) return undefined
-        const session = sessionToolPermissionsSchema.safeParse(response.data)
-        if (!session.success) return undefined
-        return (session.data.permission ?? []).map((rule) => ({
-          pattern: rule.permission, permission: rule.action, scope: rule.pattern,
-        }))
-      },
+      sessionToolPermissions.lookup,
     ),
 
     config: async (config) => {
@@ -148,13 +129,10 @@ export function createPluginInterface(args: {
       }
     },
 
-    event: createEventHandler({
-      ctx,
-      pluginConfig,
-      firstMessageVariantGate,
-      managers,
-      hooks,
-    }),
+    event: async (input) => {
+      sessionToolPermissions.observe(input)
+      await handleEvent(input)
+    },
 
     "tool.definition": createToolDefinitionHandler({
       hooks,

@@ -17,9 +17,11 @@ function defined<T>(value: T | null | undefined, name: string): T {
 
 function createHarness(sessionRead: "ok" | "throw" | "malformed" = "ok") {
   const sessionPermissions = new Map<string, Array<{ permission: string; pattern: string; action: "allow" | "ask" | "deny" }>>()
+  const sessionReads: string[] = []
   const ctx = {
     directory: "/workspace",
     client: { session: { get: async ({ path }: { path: { id: string } }) => {
+      sessionReads.push(path.id)
       if (sessionRead === "throw") throw new Error("Session metadata unavailable")
       if (sessionRead === "malformed") return { data: { permission: "invalid" } }
       return { data: { permission: sessionPermissions.get(path.id) ?? [] } }
@@ -39,9 +41,14 @@ function createHarness(sessionRead: "ok" | "throw" | "malformed" = "ok") {
       },
     },
     tools,
-    firstMessageVariantGate: {},
+    firstMessageVariantGate: {
+      shouldOverride: () => false,
+      markApplied: () => {},
+      markSessionCreated: () => {},
+      clear: () => {},
+    },
   } as Parameters<typeof createPluginInterface>[0])
-  return { api, tools, sessionPermissions }
+  return { api, tools, sessionPermissions, sessionReads }
 }
 
 test("production registration includes the real registered names and descriptions", async () => {
@@ -94,8 +101,32 @@ test("session-level CLI restrictions do not leak into another session or later t
   expect(output.system[0]).not.toContain("- question: HOST_QUESTION_DESCRIPTION")
   await transform(input("interactive"), output)
   expect(output.system[0]).toContain("- question: HOST_QUESTION_DESCRIPTION")
-  sessionPermissions.set("cli", [])
+  await defined(api.event, "event hook")({
+    event: { type: "session.updated", properties: { info: { id: "cli", permission: [] } } },
+  } as Parameters<NonNullable<typeof api.event>>[0])
   await transform(input("cli"), output)
+  expect(output.system[0]).toContain("- question: HOST_QUESTION_DESCRIPTION")
+})
+
+test("a session's tool permissions are read once, then follow its update events", async () => {
+  const { api, sessionPermissions, sessionReads } = createHarness()
+  const config: Parameters<NonNullable<typeof api.config>>[0] = {}
+  await defined(api.config, "config hook")(config)
+  await defined(api["tool.definition"], "tool.definition hook")({ toolID: "question" }, { description: "HOST_QUESTION_DESCRIPTION", parameters: {} })
+  sessionPermissions.set("cli", [{ permission: "question", pattern: "*", action: "deny" }])
+  const transform = defined(api["experimental.chat.system.transform"], "system transform hook")
+  const event = defined(api.event, "event hook")
+  const input = { sessionID: "cli", model: { providerID: "anthropic", id: "claude-opus-5-5" } } as Parameters<typeof transform>[0]
+  const output = { system: [defined(config.agent?.oracle?.prompt, "oracle prompt")] }
+  await transform(input, output)
+  await transform(input, output)
+  expect(sessionReads).toEqual(["cli"])
+  expect(output.system[0]).not.toContain("- question: HOST_QUESTION_DESCRIPTION")
+  await event({
+    event: { type: "session.updated", properties: { info: { id: "cli", permission: [] } } },
+  } as Parameters<typeof event>[0])
+  await transform(input, output)
+  expect(sessionReads).toEqual(["cli"])
   expect(output.system[0]).toContain("- question: HOST_QUESTION_DESCRIPTION")
 })
 
