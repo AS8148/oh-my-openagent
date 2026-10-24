@@ -59,7 +59,8 @@ describe("derive: checked operations", () => {
 	test("sum of compatible rows stores the exact sum and appends a derived row", () => {
 		const ledger = fixture()
 		const row = rowOf(derive(ledger, { op: "sum", operands: ["F5", "F6"], unit: EOK_WON }))
-		expect(row).toMatchObject({ fact_id: "F31", kind: "derived", operation: "sum", value: "300", unit: EOK_WON, exact: { num: "300", den: "1" } })
+		// unit-rules.md: derived rows store the canonical unit text, so the input alias is stored as its table token.
+		expect(row).toMatchObject({ fact_id: "F31", kind: "derived", operation: "sum", value: "300", unit: "KRW-e8", exact: { num: "300", den: "1" } })
 		expect(row.operands).toEqual(["F5", "F6"])
 		expect(row.derived_from).toEqual(["F5", "F6"])
 		expect(ledger.rows.at(-1)).toBe(row)
@@ -77,10 +78,13 @@ describe("derive: checked operations", () => {
 		const ledger = fixture()
 		expect(derive(ledger, { op: "sum", operands: ["F8", "F9"], unit: "%" }).error).toBe("incompatible_operands")
 		expect(derive(ledger, { op: "diff", operands: ["F9", "F8"], unit: "%" }).error).toBe("incompatible_operands")
-		expect(rowOf(derive(ledger, { op: "diff", operands: ["F9", "F8"], unit: "pp" }))).toMatchObject({ value: "5", unit: "pp" })
+		// unit-rules.md: `pp` is an input alias; the stored unit is canonical `%p`.
+		expect(rowOf(derive(ledger, { op: "diff", operands: ["F9", "F8"], unit: "pp" }))).toMatchObject({ value: "5", unit: "%p" })
 		expect(derive(ledger, { op: "sum", operands: ["F8", "F9"], unit: "%", disjoint: true }).error).toBe("incompatible_operands")
-		const disjoint = rowOf(derive(ledger, { op: "sum", operands: ["F8", "F9"], unit: "%", disjoint: true, rationale: "x" }))
-		expect(disjoint).toMatchObject({ value: "35", unit: "%", rationale: "x" })
+		// unit-rules.md: a % sum also needs one shared reference (denominator), persisted in context.
+		expect(derive(ledger, { op: "sum", operands: ["F8", "F9"], unit: "%", disjoint: true, rationale: "x" }).error).toBe("incompatible_operands")
+		const disjoint = rowOf(derive(ledger, { op: "sum", operands: ["F8", "F9"], unit: "%", disjoint: true, reference: "all", rationale: "x" }))
+		expect(disjoint).toMatchObject({ value: "35", unit: "%", rationale: "x", context: { disjoint: true, reference: "all" } })
 	})
 
 	test("growth needs two periods of the same entity", () => {
@@ -117,7 +121,8 @@ describe("derive: rendered precision", () => {
 	test("pp with mixed decimal places rounds to the fewest: 20.25 % - 15.5 % is 4.8 pp", () => {
 		const ledger = precision()
 		const row = rowOf(derive(ledger, { op: "diff", operands: ["F5", "F6"], unit: "pp" }))
-		expect(row).toMatchObject({ value: "4.8", render: "4.8 pp", exact: { num: "19", den: "4" } })
+		// unit-rules.md: the canonical delta unit is `%p`; precision is unchanged.
+		expect(row).toMatchObject({ value: "4.8", unit: "%p", render: "4.8 %p", exact: { num: "19", den: "4" } })
 		expect(recompute(ledger, row).ok).toBe(true)
 	})
 })
@@ -149,10 +154,12 @@ describe("derive: convert", () => {
 })
 
 describe("derive: expr and exact chaining", () => {
-	test("expr is unchecked and needs a rationale", () => {
+	// unit-rules.md: expr units are inferred with no rationale escape, and an omitted unit is an error, not null.
+	test("expr needs a declared unit that follows from its operands", () => {
 		const ledger = fixture()
-		expect(derive(ledger, { op: "expr", formula: "F12 / F30" }).error).toBeDefined()
-		const result = derive(ledger, { op: "expr", formula: "F12 / F30", rationale: "span over sample length" })
+		expect(derive(ledger, { op: "expr", formula: "F12 / F30", rationale: "span over sample length" }).error).toBeDefined()
+		expect(derive(ledger, { op: "expr", formula: "F12 / F30", unit: "m" }).error).toBeDefined()
+		const result = derive(ledger, { op: "expr", formula: "F12 / F30", unit: null })
 		expect(result.compatibility).toBe("unchecked")
 		expect(rowOf(result)).toMatchObject({ value: "100", formula: "F12 / F30", operands: ["F12", "F30"] })
 	})
@@ -160,17 +167,18 @@ describe("derive: expr and exact chaining", () => {
 	test("expr refuses unsupported tokens and absent ids", () => {
 		const ledger = fixture()
 		for (const formula of ["F12 ** 2", "Math.max(F12)", "F12 / F404", "F12 / 0", "(F12"]) {
-			expect(derive(ledger, { op: "expr", formula, rationale: "r" }).error).toBeDefined()
+			expect(derive(ledger, { op: "expr", formula, unit: null }).error).toBeDefined()
 		}
 		expect(ledger.rows).toHaveLength(9)
 	})
 
 	test("ratio of 1.00 / 3.00 stores 1/3 and chains exactly through expr", () => {
 		const ledger = ledgerOf([measured("F5", "1.00", EOK_WON, { population: "all" }), measured("F6", "3.00", EOK_WON, { population: "all" })])
-		const ratio = rowOf(derive(ledger, { op: "ratio", num: "F5", den: "F6" }))
+		// unit-rules.md: the result unit is always declared; a same-unit ratio is dimensionless (null).
+		const ratio = rowOf(derive(ledger, { op: "ratio", num: "F5", den: "F6", unit: null }))
 		expect(ratio.exact).toEqual({ num: "1", den: "3" })
 		expect(ratio.value).toBe("0.333")
-		const chained = rowOf(derive(ledger, { op: "expr", formula: `${ratio.fact_id} * 3`, rationale: "undo the ratio" }))
+		const chained = rowOf(derive(ledger, { op: "expr", formula: `${ratio.fact_id} * 3`, unit: null }))
 		expect(chained.exact).toEqual({ num: "1", den: "1" })
 		expect(chained.value).toBe("1")
 
@@ -204,7 +212,7 @@ describe("recompute", () => {
 		const relabeled = recompute(ledger, { ...sum, unit: "km", raw: "4 km", render: "4 km" })
 		expect(relabeled.ok).toBe(false)
 		expect(relabeled.detail).toContain("unit")
-		const expr = rowOf(derive(ledger, { op: "expr", formula: "F1 + F2", unit: "m", rationale: "r" }))
+		const expr = rowOf(derive(ledger, { op: "expr", formula: "F1 + F2", unit: "m" }))
 		expect(recompute(ledger, expr).ok).toBe(true)
 		expect(recompute(ledger, { ...expr, unit: "km", raw: "4 km", render: "4 km" }).ok).toBe(false)
 	})
@@ -219,9 +227,72 @@ describe("recompute", () => {
 
 	test("an expr row whose operands no longer match its formula ids is not ok and does not throw", () => {
 		const ledger = meters()
-		const expr = rowOf(derive(ledger, { op: "expr", formula: "F1 + F2", unit: "m", rationale: "r" }))
+		const expr = rowOf(derive(ledger, { op: "expr", formula: "F1 + F2", unit: "m" }))
 		const result = recompute(ledger, { ...expr, operands: ["F1", "F3"] })
 		expect(result.ok).toBe(false)
 		expect(result.detail).toContain("F2")
+	})
+})
+
+describe("unit rules: the design review's counterexamples", () => {
+	const book = () =>
+		ledgerOf([
+			measured("F1", "20", "%"),
+			measured("F2", "10", "%"),
+			measured("F3", "5", "pp"),
+			measured("F4", "25", "C", { valid_at: "2025", entity: "x" }),
+			measured("F5", "30", "C", { valid_at: "2026", entity: "x" }),
+			measured("F6", "200", "person"),
+			measured("F7", "100", "person"),
+			measured("F8", "100", "USD"),
+			measured("F9", "20", "USD/person"),
+			measured("F10", "0", "m"),
+		])
+
+	test("a sum of % operands without one shared reference is refused", () => {
+		const ledger = book()
+		const base = { op: "sum", operands: ["F1", "F2"], unit: "%", disjoint: true, rationale: "disjoint shares" }
+		expect(derive(ledger, base).error).toBe("incompatible_operands")
+		expect(derive(ledger, { ...base, reference: { F1: "voters", F2: "residents" } }).error).toBe("incompatible_operands")
+		expect(rowOf(derive(ledger, { ...base, reference: { F1: "voters", F2: "voters" } }))).toMatchObject({ value: "30", unit: "%" })
+	})
+
+	test("20% - 5pp is 15%", () => {
+		const row = rowOf(derive(book(), { op: "diff", operands: ["F1", "F3"], unit: "%" }))
+		expect(row).toMatchObject({ value: "15", unit: "%", render: "15%" })
+	})
+
+	test("growth on a Celsius scale is refused", () => {
+		const result = derive(book(), { op: "growth", from: "F4", to: "F5", unit: "%" })
+		expect(result.error).toBe("incompatible_operands")
+		expect(result.detail).toContain("affine")
+	})
+
+	test("a share of 200 out of 100 is refused", () => {
+		expect(derive(book(), { op: "share", part: "F6", whole: "F7", unit: "%" }).error).toBe("incompatible_operands")
+	})
+
+	test("100 USD / (20 USD/person) is 5 person", () => {
+		const ledger = book()
+		const row = rowOf(derive(ledger, { op: "ratio", num: "F8", den: "F9", unit: "person" }))
+		expect(row).toMatchObject({ value: "5", unit: "person", exact: { num: "5", den: "1" } })
+		expect(recompute(ledger, row).ok).toBe(true)
+	})
+
+	test("convert 0 m to km relabeled cm is detected though the value is unchanged", () => {
+		const ledger = book()
+		const row = rowOf(derive(ledger, { op: "convert", operands: ["F10"], to: "km" }))
+		expect(recompute(ledger, row).ok).toBe(true)
+		const relabeled = recompute(ledger, { ...row, unit: "cm", raw: "0 cm (0 m)", render: "0 cm (0 m)" })
+		expect(relabeled.ok).toBe(false)
+		expect(relabeled.detail).toContain("km")
+	})
+
+	test("expr 20% - 10% is %p, never %", () => {
+		const ledger = book()
+		expect(derive(ledger, { op: "expr", formula: "F1 - F2", unit: "%" }).error).toBe("incompatible_operands")
+		const row = rowOf(derive(ledger, { op: "expr", formula: "F1 - F2", unit: "%p" }))
+		expect(row).toMatchObject({ value: "10", unit: "%p" })
+		expect(recompute(ledger, row).ok).toBe(true)
 	})
 })

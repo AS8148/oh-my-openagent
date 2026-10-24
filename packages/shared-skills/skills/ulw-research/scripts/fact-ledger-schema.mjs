@@ -50,8 +50,11 @@ export const ROW_DEFAULTS = Object.freeze({
 	formula: null,
 	factor: null,
 	rationale: null,
+	context: null,
 	status: "active",
 })
+/** Fields added after schema version 1 shipped: written on every new row, optional when reading an older ledger. */
+const OPTIONAL_FIELDS = new Set(["context"])
 const REQUIRED = ["fact_id", "kind", "raw", "quote", "extracted_by", "observed_at", "label"]
 export const ROW_FIELDS = Object.freeze([...REQUIRED, ...Object.keys(ROW_DEFAULTS)])
 
@@ -70,7 +73,7 @@ function nullOr(value, test) {
 function validateRow(row, index, errors) {
 	const at = `rows[${index}]`
 	if (!isObject(row)) return errors.push(`${at} must be an object`)
-	for (const key of ROW_FIELDS) check(errors, Object.hasOwn(row, key), `${at}.${key} is required`)
+	for (const key of ROW_FIELDS) check(errors, OPTIONAL_FIELDS.has(key) || Object.hasOwn(row, key), `${at}.${key} is required`)
 	for (const key of Object.keys(row)) check(errors, ROW_FIELDS.includes(key), `${at}.${key} is not a ledger field`)
 	check(errors, FACT_KINDS.includes(row.kind), `${at}.kind must be one of ${FACT_KINDS.join(", ")}`)
 	errors.push(...kindRuleErrors(row, at))
@@ -96,6 +99,7 @@ function validateRow(row, index, errors) {
 	for (const key of ["operands", "derived_from"]) {
 		if (row[key] !== undefined) check(errors, Array.isArray(row[key]) && row[key].every((v) => isString(v) && FACT_REF.test(v)), `${at}.${key} must be an array of fact ids`)
 	}
+	if (row.context !== undefined) check(errors, nullOr(row.context, isObject), `${at}.context must be null or an object`)
 	if (row.factor !== undefined) check(errors, nullOr(row.factor, (v) => isString(v) && DECIMAL.test(v)), `${at}.factor must be null or a decimal string`)
 	check(errors, row.status === undefined || FACT_STATUSES.includes(row.status), `${at}.status must be one of ${FACT_STATUSES.join(", ")}`)
 }
