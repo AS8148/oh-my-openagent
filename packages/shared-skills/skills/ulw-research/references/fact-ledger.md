@@ -56,7 +56,7 @@ A locator that finds nothing returns `fact_not_located`, more than one candidate
 - `fact derive --op <sum|diff|growth|ratio|share|convert|expr> ...` computes a new row from active rows and prints its id; the placeholder uses that id. Operands go by position for sum, diff, and convert (`--to <unit>`), as `--from/--to`, `--part/--whole`, or `--num/--den` for growth, share, and ratio, and as one formula argument for expr. Every op except convert declares its result unit with `--unit <unit>` (`--unit null` for dimensionless); a `%` sum also needs `--disjoint --reference <denominator> --rationale <why>`. The unit rules are in `unit-rules.md`.
 - `fact retract <id> --reason <why>` retires a row; `--replacement <id>` marks it superseded by another active row. Rows that depend on a retired row fail at fill time.
 - `fact export --csv --out <file>` writes `fact_id,label,plot_value,unit` for every active value row: the only data a chart may plot.
-- `fact fill <src> --out <file>` renders every placeholder from the ledger; `fact verify <file>` checks the filled edition against the ledger, the snapshots, and the claim index.
+- `fact fill <src> --out <file>` renders every placeholder from the ledger; `fact verify <file>` checks the filled edition against the ledger, the snapshots, and the claim index; `outcome set <format> delivered` records intent permissively, while the required `outcome verify` and `outcome finish` enforce the delivery barrier.
 - `fact pairs <file>` writes `pairs.json` for the meaning readers; `fact meaning-check --pairs pairs.json --verdicts <file> ...` ingests their verdicts.
 
 ## Meaning verdicts
