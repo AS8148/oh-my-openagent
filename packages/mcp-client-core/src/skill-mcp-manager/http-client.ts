@@ -42,8 +42,10 @@ const defaultHttpClientDependencies: HttpClientDependencies = {
       }
       const response = await fetch(input, { ...init, headers })
       if (response.status === 400 && response.headers.get("content-type")?.includes("application/json")) {
-        const body: { error?: { code?: number } } = await response.clone().json()
-        if (body.error?.code === -32022) {
+        const body: unknown = await response.clone().json()
+        if (typeof body === "object" && body !== null && "error" in body
+          && typeof body.error === "object" && body.error !== null && "code" in body.error
+          && body.error.code === -32022) {
           return new Response(response.body, { status: 200, headers: response.headers })
         }
       }
