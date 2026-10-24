@@ -104,6 +104,7 @@ $rows = @(
     } catch {
       $diagnosticErrors.Add("process ${holderPid}: $($_.Exception.Message)")
     }
+    if ([string]::IsNullOrWhiteSpace($image)) { $image = 'unknown' }
     @{ pid = $holderPid; image = $image; parentPid = $parentPid }
   }
 )

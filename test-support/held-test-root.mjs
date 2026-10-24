@@ -2,6 +2,7 @@ import { rmSync } from "node:fs"
 import { diagnoseHeldTestRoot } from "./windows-held-root.mjs"
 
 // Exact skipped paths are retained for the suite's leak report, never a prefix-wide exemption.
+// The preload and tests must resolve this same module instance; otherwise the leak check fails loudly.
 export const skippedTestRoots = new Map()
 
 export function removeTestRootBestEffort(root, {
