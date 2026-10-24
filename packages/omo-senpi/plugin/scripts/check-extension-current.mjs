@@ -18,6 +18,8 @@ export async function checkExtensionCurrent(options = {}) {
     onboardingScanRuntimeOutput,
     toolkitSdkOutput,
     rollbackRuntimeOutput,
+    doriLayerOutput,
+    doriReplayOutput,
     computerUseOutput,
     memoryDoctorOutput,
     memoryMemfsOutput,
@@ -30,6 +32,7 @@ export async function checkExtensionCurrent(options = {}) {
     telemetryPosthogOutput,
     memorySyncOutput,
     threadClientOutput,
+    telemetryRecoveryOutput,
     feedbackOutput,
     claimReceiptOutput,
     gatewayStoreWorkerOutput,
@@ -39,6 +42,10 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentToolkitSdk === undefined) return { ok: false, reason: "missing-output", output: toolkitSdkOutput }
   const currentRollbackRuntime = await readBuiltEntry(rollbackRuntimeOutput)
   if (currentRollbackRuntime === undefined) return { ok: false, reason: "missing-output", output: rollbackRuntimeOutput }
+  const currentDoriLayer = await readBuiltEntry(doriLayerOutput)
+  if (currentDoriLayer === undefined) return { ok: false, reason: "missing-output", output: doriLayerOutput }
+  const currentDoriReplay = await readBuiltEntry(doriReplayOutput)
+  if (currentDoriReplay === undefined) return { ok: false, reason: "missing-output", output: doriReplayOutput }
   const currentMain = await readBuiltEntry(output)
   if (currentMain === undefined) return { ok: false, reason: "missing-output", output }
   const currentTask = await readBuiltEntry(taskOutput)
@@ -85,6 +92,8 @@ export async function checkExtensionCurrent(options = {}) {
   if (currentDoriMigration === undefined) return { ok: false, reason: "missing-output", output: doriMigrationOutput }
   if (currentTelemetryPosthog === undefined) return { ok: false, reason: "missing-output", output: telemetryPosthogOutput }
   if (currentThreadClient === undefined) return { ok: false, reason: "missing-output", output: threadClientOutput }
+  const currentTelemetryRecovery = await readBuiltEntry(telemetryRecoveryOutput)
+  if (currentTelemetryRecovery === undefined) return { ok: false, reason: "missing-output", output: telemetryRecoveryOutput }
   if (currentFeedback === undefined) return { ok: false, reason: "missing-output", output: feedbackOutput }
   if (currentClaimReceipt === undefined) return { ok: false, reason: "missing-output", output: claimReceiptOutput }
   const currentComputerUse = await readBuiltEntry(computerUseOutput)
@@ -105,6 +114,8 @@ export async function checkExtensionCurrent(options = {}) {
     onboardingScanRuntimeOutputPath: join(tempRoot, "omo-onboarding-scan.js"),
     toolkitSdkOutputPath: join(tempRoot, "runtime", "agent-toolkit-sdk", "sdk.js"),
     rollbackRuntimeOutputPath: join(tempRoot, "runtime", "rollback-migrate.js"),
+    doriLayerOutputPath: join(tempRoot, "runtime", "dori", "layer2.js"),
+    doriReplayOutputPath: join(tempRoot, "runtime", "dori", "replay.js"),
     memoryDoctorOutputPath: join(tempRoot, "omo-memory-doctor.js"),
     memoryMemfsOutputPath: join(tempRoot, "omo-memory-memfs.js"),
     memoryPalaceOutputPath: join(tempRoot, "omo-memory-palace.js"),
@@ -116,6 +127,7 @@ export async function checkExtensionCurrent(options = {}) {
     telemetryPosthogOutputPath: join(tempRoot, "omo-telemetry-posthog.js"),
     memorySyncOutputPath: join(tempRoot, "omo-memory-sync.js"),
     threadClientOutputPath: join(tempRoot, "omo-thread-client.js"),
+    telemetryRecoveryOutputPath: join(tempRoot, "omo-telemetry-recovery.js"),
     feedbackOutputPath: join(tempRoot, "omo-feedback.js"),
     claimReceiptOutputPath: join(tempRoot, "omo-claim-receipt.js"),
     computerUseOutputPath: join(tempRoot, "omo-computer-use.js"),
@@ -126,6 +138,8 @@ export async function checkExtensionCurrent(options = {}) {
     await buildExtension(expected)
     for (const [current, built, outputFile] of [
       [currentRollbackRuntime, expected.rollbackRuntimeOutputPath, rollbackRuntimeOutput],
+      [currentDoriLayer, expected.doriLayerOutputPath, doriLayerOutput],
+      [currentDoriReplay, expected.doriReplayOutputPath, doriReplayOutput],
       [currentToolkitSdk, expected.toolkitSdkOutputPath, toolkitSdkOutput],
       [currentMain, expected.outputPath, output],
       [currentTask, expected.taskOutputPath, taskOutput],
@@ -145,6 +159,7 @@ export async function checkExtensionCurrent(options = {}) {
       [currentTelemetryPosthog, expected.telemetryPosthogOutputPath, telemetryPosthogOutput],
       [currentMemorySync, expected.memorySyncOutputPath, memorySyncOutput],
       [currentThreadClient, expected.threadClientOutputPath, threadClientOutput],
+      [currentTelemetryRecovery, expected.telemetryRecoveryOutputPath, telemetryRecoveryOutput],
       [currentFeedback, expected.feedbackOutputPath, feedbackOutput],
       [currentClaimReceipt, expected.claimReceiptOutputPath, claimReceiptOutput],
       [currentComputerUse, expected.computerUseOutputPath, computerUseOutput],

@@ -607,6 +607,18 @@ jobs:
         if: needs.ci-mode.outputs.run_heavy == 'true'
         run: bun run typecheck
 
+      # oxlint for the packages that linted with Biome (root .oxlintrc.json, packages/web's own
+      # .oxlintrc.json); Biome stays their formatter.
+      - name: Lint
+        if: needs.ci-mode.outputs.run_heavy == 'true'
+        run: bun run lint
+
+      # Every file's count of no-explicit-any / ban-ts-comment / no-non-null-assertion must match
+      # script/lint-ratchet.baseline.json: a rise or a drop fails until the baseline is updated.
+      - name: Lint ratchet
+        if: needs.ci-mode.outputs.run_heavy == 'true'
+        run: bun run lint:ratchet
+
       - name: Write job summary
         if: always()
         shell: bash
@@ -774,6 +786,9 @@ jobs:
           # The installer embeds the required-artifact list, so a stale copy demands files the
           # plugin no longer ships and refuses to install. Nothing else in CI reads it.
           node packages/omo-senpi/plugin/scripts/build-install.mjs --check
+          # The merge gate reads this map at the base tip to tell whether a PR can change a committed
+          # bundle; it is traced from the three generators above, so a stale map is a red build.
+          bun run bundle-inputs:check
 
       - name: Run Senpi compatibility tests
         id: senpi-tests-posix

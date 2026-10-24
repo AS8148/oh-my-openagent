@@ -162,6 +162,8 @@ Security invariant: the OpenCode plugin honors `mcp_env_allowlist` and `browser_
 
 The optional `telemetry` block controls OmO Native product telemetry in Senpi. `telemetry.enabled` is a boolean and defaults to `true`, so telemetry ships enabled. Set it to `false` to turn telemetry off. This setting applies only to OmO Native.
 
+`telemetry.rawTurnSampleRate` is a number from `0` to `1`: the share of sessions that also send one `turn_completed` event per assistant turn. Every session always sends its exact totals in `session_summary`. When unset it is `0.05`; the `OMO_TELEMETRY_RAW_TURN_SAMPLE_RATE` environment variable overrides it, and a value outside `0..1` is ignored. Turns a session does not send are never recoverable, so lower it only on purpose.
+
 ```jsonc
 {
   "[native]": {
@@ -231,17 +233,19 @@ The block may live at the shared top level, in `[native]`, or in profile layers,
 
 The optional `side_panel` block controls the omo side panel (`schema/side-panel.ts`): a right-hand
 column in the Senpi TUI carrying session, goal, context, usage, subagent, tool, git and memory
-state. The transcript reflows into the remaining width instead of being covered. The panel is **off by
-default** because it rearranges the whole screen.
+state. The transcript reflows into the remaining width instead of being covered. The column
+needs the **fullscreen TUI** (`--tui-mode fullscreen`, or `tuiMode: "fullscreen"` in senpi's
+settings); in the default regular mode the same sections render as a block above the editor
+instead. The panel is **off by default** because it rearranges the whole screen.
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
-| `enabled` | boolean | `false` | Render the panel. |
+| `enabled` | boolean | `false` | Render the panel. The side-by-side column needs the fullscreen TUI; in the default regular mode the sections render as a block above the editor. |
 | `width` | number \| string | `"26%"` | Column count, or a percentage of the terminal width between `10%` and `50%`. Clamped to 32-80 columns, and further reduced so the transcript keeps at least 60 columns. |
-| `min_columns` | integer | `120` | Terminals narrower than this keep the classic single-column layout; the panel hides itself rather than squeezing the transcript. |
+| `min_columns` | integer | `120` | In fullscreen mode, terminals narrower than this keep the classic single-column layout; the panel hides itself rather than squeezing the transcript. |
 | `clickable` | boolean | `true` | Paint file and subagent rows as OSC 8 links, so a mouse click opens the same viewer a command would. Set it to `false` on a terminal that mangles hyperlinks. |
-| `usage_poll_seconds` | integer | `150` | Subscription usage refresh interval, and a floor rather than a ceiling: each provider keeps its own freshness window (five minutes for Anthropic, two and a half for Codex), so a smaller value does not poll faster than that. The cache is shared across sessions on one machine, so this is per machine, not per session. Minimum `60`. |
-| `sections` | object | all `true` except `usage` | Per-section switches: `session`, `goal`, `context`, `usage`, `agents`, `tools`, `files`, `memory`. `usage` is `false` by default: it is the one section that reads credentials and contacts a vendor, so it is its own opt-in (see below). |
+| `usage_poll_seconds` | integer | `150` | Retired. The engine now reads subscription usage itself, on each provider's own cadence, so this value is ignored. It is still accepted so an existing file keeps loading. |
+| `sections` | object | all `true` except `usage` | Per-section switches: `session`, `goal`, `context`, `usage`, `agents`, `tools`, `files`, `memory`. `usage` is `false` by default (see below). |
 
 Rows are clickable because the fullscreen renderer already captures the mouse and activates OSC 8
 hyperlinks; the panel paints its rows as links to a private scheme and claims the renderer's URL
@@ -291,16 +295,14 @@ block is read on a five-second floor rather than a watcher, because a park takes
 reflection runs and the queue drains per reflection - nothing here can change between two tool
 calls of one turn.
 
-The `usage` section is **off by default** and is the only part of the panel that reaches the
-network. Turning it on (`"sections": { "usage": true }`) makes the panel read, from the agent
-directory, `auth.json` (the OAuth access token of the subscription the session is serving from) and
-`credential-pool-state.json` (which pooled account is pinned or rotated in), and send that token as a
-bearer to the vendor's own usage endpoint: `api.anthropic.com/api/oauth/usage` for a Claude
-subscription, `chatgpt.com/backend-api/wham/usage` for Codex. Nothing else is read or sent, and no
-API key is ever used. While it is off the poller is never created: no credential read, no timer,
-no request. The answers land in one cache file
-per machine (`$XDG_CACHE_HOME/omo-senpi/side-panel-usage.json`), so parallel sessions share both
-the numbers and the backoff instead of each asking on its own.
+The `usage` section is **off by default**. Turning it on (`"sections": { "usage": true }`) draws the
+subscription limits the engine already keeps: senpi reads each signed-in Claude and ChatGPT
+subscription's usage endpoint itself (about every five minutes for Claude and two and a half for
+ChatGPT, one request per account per machine however many sessions are open) and updates the same
+numbers from every turn, so they are there before the first message. The panel makes no network
+request of its own. It reads `auth.json` and `credential-pool-state.json` from the agent directory
+only to decide which pooled account is serving, so the numbers it shows belong to that account. On
+an engine too old to report limits the section stays empty.
 
 ```jsonc
 {

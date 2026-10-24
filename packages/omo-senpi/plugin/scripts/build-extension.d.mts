@@ -7,6 +7,8 @@ export interface BuildExtensionOptions {
   sidePanelRuntimeOutputPath?: string
   toolkitSdkOutputPath?: string
   rollbackRuntimeOutputPath?: string
+  doriLayerOutputPath?: string
+  doriReplayOutputPath?: string
   memoryDoctorOutputPath?: string
   memoryMemfsOutputPath?: string
   memoryPalaceOutputPath?: string
@@ -18,6 +20,7 @@ export interface BuildExtensionOptions {
   telemetryPosthogOutputPath?: string
   memorySyncOutputPath?: string
   threadClientOutputPath?: string
+  telemetryRecoveryOutputPath?: string
   feedbackOutputPath?: string
   claimReceiptOutputPath?: string
   computerUseOutputPath?: string
@@ -42,11 +45,14 @@ export function buildExtension(options?: BuildExtensionOptions): Promise<{
   telemetryPosthogInputs: string[]
   memorySyncInputs: string[]
   threadClientInputs: string[]
+  telemetryRecoveryInputs: string[]
   feedbackInputs: string[]
   claimReceiptInputs: string[]
   computerUseInputs: string[]
   toolkitSdkInputs: string[]
   rollbackRuntimeInputs: string[]
+  doriLayerInputs: string[]
+  doriReplayInputs: string[]
   gatewayStoreWorkerInputs: string[]
   threadSdkInputs: string[]
 }>

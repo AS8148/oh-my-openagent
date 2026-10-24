@@ -106,6 +106,7 @@ export function loroWasmSourcePath() {
   return createRequire(join(repoRoot, "packages", "memory-core", "package.json")).resolve(`loro-crdt/bundler/${MEMORY_SYNC_WASM_NAME}`)
 }
 const threadClientEntryPath = join(packageRoot, "src", "components", "thread", "live-surface.ts")
+const telemetryRecoveryEntryPath = join(packageRoot, "src", "components", "telemetry", "session-summary-recovery.ts")
 const feedbackEntryPath = join(packageRoot, "src", "components", "feedback", "runtime.ts")
 const claimReceiptEntryPath = join(packageRoot, "src", "components", "claim-receipt", "runtime.ts")
 const memoryDoctorOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-doctor.js")
@@ -119,6 +120,7 @@ const doriMigrationOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? plug
 const telemetryPosthogOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-posthog.js")
 const memorySyncOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-sync.js")
 const threadClientOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-thread-client.js")
+const telemetryRecoveryOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-recovery.js")
 const feedbackOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-feedback.js")
 const claimReceiptOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-claim-receipt.js")
 // The computer-use prelude JSON: bundled modules read it from beside the bundle (extensions/), the
@@ -127,6 +129,11 @@ export const COMPUTER_PRELUDE_ASSET_NAME = "assets.generated.json"
 const computerPreludeAssetSource = join(repoRoot, "packages", "senpi-desktop-prelude", "src", "assets.generated.json")
 const rollbackRuntimeEntryPath = join(packageRoot, "src", "extension", "rollback-migrate-runtime.ts")
 const rollbackRuntimeOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "rollback-migrate.js")
+// The dori toolkit layers: loaded by URL only while the `dori` section is on, so the SDK and omo.js carry none of them.
+const doriLayerEntryPath = join(packageRoot, "src", "components", "ulw-loop", "sdk", "dori", "layer2.ts")
+const doriLayerOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "dori", "layer2.js")
+const doriReplayEntryPath = join(packageRoot, "src", "components", "thread", "tools", "dori-replay.ts")
+const doriReplayOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "dori", "replay.js")
 const builtinModuleNames = builtinModules.filter((moduleName) => !moduleName.startsWith("_")).sort()
 const externalSpecifiers = [
   "#omo-task-runtime",
@@ -142,6 +149,9 @@ const externalSpecifiers = [
   "#omo-telemetry-posthog-runtime",
   "#omo-memory-sync-runtime",
   "#omo-thread-client-runtime",
+  "#omo-telemetry-recovery-runtime",
+  // telemetry-core loads its immediate sender through this import; the plugin manifest maps it to the recovery sidecar.
+  "#telemetry-immediate-send",
   "#omo-feedback-runtime",
   "#omo-claim-receipt-runtime",
   "#omo-agent-toolkit-sdk",
@@ -175,6 +185,8 @@ export const extensionBuildPaths = {
   sidePanelRuntimeOutputPath,
   onboardingScanRuntimeOutputPath,
   rollbackRuntimeOutputPath,
+  doriLayerOutputPath,
+  doriReplayOutputPath,
   computerUseOutputPath,
   memoryDoctorOutputPath,
   memoryMemfsOutputPath,
@@ -187,6 +199,7 @@ export const extensionBuildPaths = {
   telemetryPosthogOutputPath,
   memorySyncOutputPath,
   threadClientOutputPath,
+  telemetryRecoveryOutputPath,
   feedbackOutputPath,
   claimReceiptOutputPath,
   gatewayStoreWorkerOutputPath,
@@ -209,6 +222,8 @@ export function resolveOutputs(options) {
     toolkitSdkOutput: sibling(options.toolkitSdkOutputPath, toolkitSdkOutputPath, join("runtime", "agent-toolkit-sdk", "sdk.js")),
     threadSdkOutput: sibling(options.threadSdkOutputPath, threadSdkOutputPath, THREAD_SDK_RELATIVE_PATH),
     rollbackRuntimeOutput: sibling(options.rollbackRuntimeOutputPath, rollbackRuntimeOutputPath, join("runtime", "rollback-migrate.js")),
+    doriLayerOutput: sibling(options.doriLayerOutputPath, doriLayerOutputPath, join("runtime", "dori", "layer2.js")),
+    doriReplayOutput: sibling(options.doriReplayOutputPath, doriReplayOutputPath, join("runtime", "dori", "replay.js")),
     memoryDoctorOutput: sibling(options.memoryDoctorOutputPath, memoryDoctorOutputPath, "omo-memory-doctor.js"),
     memoryMemfsOutput: sibling(options.memoryMemfsOutputPath, memoryMemfsOutputPath, "omo-memory-memfs.js"),
     memoryPalaceOutput: sibling(options.memoryPalaceOutputPath, memoryPalaceOutputPath, "omo-memory-palace.js"),
@@ -220,6 +235,7 @@ export function resolveOutputs(options) {
     telemetryPosthogOutput: sibling(options.telemetryPosthogOutputPath, telemetryPosthogOutputPath, "omo-telemetry-posthog.js"),
     memorySyncOutput: sibling(options.memorySyncOutputPath, memorySyncOutputPath, "omo-memory-sync.js"),
     threadClientOutput: sibling(options.threadClientOutputPath, threadClientOutputPath, "omo-thread-client.js"),
+    telemetryRecoveryOutput: sibling(options.telemetryRecoveryOutputPath, telemetryRecoveryOutputPath, "omo-telemetry-recovery.js"),
     feedbackOutput: sibling(options.feedbackOutputPath, feedbackOutputPath, "omo-feedback.js"),
     claimReceiptOutput: sibling(options.claimReceiptOutputPath, claimReceiptOutputPath, "omo-claim-receipt.js"),
     computerUseOutput: sibling(options.computerUseOutputPath, computerUseOutputPath, "omo-computer-use.js"),
@@ -248,6 +264,8 @@ export async function buildExtension(options = {}) {
     toolkitSdkOutput,
     threadSdkOutput,
     rollbackRuntimeOutput,
+    doriLayerOutput,
+    doriReplayOutput,
     computerUseOutput,
     memoryDoctorOutput,
     memoryMemfsOutput,
@@ -260,6 +278,7 @@ export async function buildExtension(options = {}) {
     telemetryPosthogOutput,
     memorySyncOutput,
     threadClientOutput,
+    telemetryRecoveryOutput,
     feedbackOutput,
     claimReceiptOutput,
     gatewayStoreWorkerOutput,
@@ -274,6 +293,8 @@ export async function buildExtension(options = {}) {
   const sidePanelRuntimeInputs = await buildEntry(sidePanelRuntimeEntryPath, sidePanelRuntimeOutput, buildDefines)
   const onboardingScanRuntimeInputs = await buildEntry(onboardingScanRuntimeEntryPath, onboardingScanRuntimeOutput, buildDefines)
   const rollbackRuntimeInputs = await buildEntry(rollbackRuntimeEntryPath, rollbackRuntimeOutput, buildDefines, sdkExternalSpecifiers)
+  const doriLayerInputs = await buildEntry(doriLayerEntryPath, doriLayerOutput, buildDefines, sdkExternalSpecifiers)
+  const doriReplayInputs = await buildEntry(doriReplayEntryPath, doriReplayOutput, buildDefines, sdkExternalSpecifiers)
   const memoryDoctorInputs = await buildEntry(memoryDoctorEntryPath, memoryDoctorOutput, buildDefines)
   const memoryMemfsInputs = await buildEntry(memoryMemfsEntryPath, memoryMemfsOutput, buildDefines)
   const memoryPalaceInputs = await buildEntry(memoryPalaceEntryPath, memoryPalaceOutput, buildDefines)
@@ -285,6 +306,7 @@ export async function buildExtension(options = {}) {
   const telemetryPosthogInputs = await buildEntry(telemetryPosthogEntryPath, telemetryPosthogOutput, buildDefines)
   const memorySyncInputs = await buildEntry(memorySyncEntryPath, memorySyncOutput, buildDefines, externalSpecifiers, { assets: true })
   const threadClientInputs = await buildEntry(threadClientEntryPath, threadClientOutput, buildDefines)
+  const telemetryRecoveryInputs = await buildEntry(telemetryRecoveryEntryPath, telemetryRecoveryOutput, buildDefines)
   const feedbackInputs = await buildEntry(feedbackEntryPath, feedbackOutput, buildDefines)
   const claimReceiptInputs = await buildEntry(claimReceiptEntryPath, claimReceiptOutput, buildDefines)
   const computerUseInputs = await buildEntry(computerUseEntryPath, computerUseOutput, buildDefines)
@@ -307,6 +329,8 @@ export async function buildExtension(options = {}) {
     onboardingScanRuntimeInputs,
     toolkitSdkInputs,
     rollbackRuntimeInputs,
+    doriLayerInputs,
+    doriReplayInputs,
     computerUseInputs,
     memoryDoctorInputs,
     memoryMemfsInputs,
@@ -319,6 +343,7 @@ export async function buildExtension(options = {}) {
     telemetryPosthogInputs,
     memorySyncInputs,
     threadClientInputs,
+    telemetryRecoveryInputs,
     feedbackInputs,
     claimReceiptInputs,
     gatewayStoreWorkerInputs,
