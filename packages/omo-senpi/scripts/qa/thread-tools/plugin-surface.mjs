@@ -63,8 +63,10 @@ report.assert("thread-list-tool-result", deliveryOk, `tool_result=${resultText}`
 // scratch removal in cleanupAllAndWait: the shard's agent dir is inside scratch and it writes there on exit.
 const shardSockets = stopOwnedShardHosts(scratch.dir)
 await cleanupAllAndWait()
-const shardSurvivors = shardSockets.flatMap((socket) => pgrepPids(socket))
-report.assert("shard-hosts-stopped", shardSurvivors.length === 0, `shards=${JSON.stringify(shardSockets)} survivor_pids=${JSON.stringify(shardSurvivors)}`)
+// The main host ran until cleanup; a shard it re-ensured after the first stop would escape `shardSockets`.
+const lateShards = stopOwnedShardHosts(scratch.dir)
+const shardSurvivors = [...shardSockets, ...lateShards].flatMap((socket) => pgrepPids(socket))
+report.assert("shard-hosts-stopped", shardSurvivors.length === 0 && lateShards.length === 0, `shards=${JSON.stringify(shardSockets)} late_shards=${JSON.stringify(lateShards)} survivor_pids=${JSON.stringify(shardSurvivors)}`)
 verifyCleanup(report, { scratchDir: scratch.dir, socketPaths: [socketPath, ...shardSockets] })
 // Match the other lanes: run-all passes the out path as `--out <file>`, and it parses that file
 // for SKIP lines to build the summary's skipped count. Reading process.env.OUT instead left the
