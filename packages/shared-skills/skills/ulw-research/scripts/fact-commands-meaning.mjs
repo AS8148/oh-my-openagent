@@ -2,24 +2,24 @@
 // separate-session meaning verifier. fact pairs writes the (source, report sentence) pairs a
 // reader lane gets and nothing else; it honours the brief's `meaning check` field and writes
 // `{ skipped: true }` when it is off. fact meaning-check ingests the readers' verdict files
-// (meaning-check.mjs), writes fidelity-meaning-defects.json, and records the run in
+// (meaning-check.mjs), writes fidelity-meaning-defects.json (a fidelity record bound to the pairs'
+// artifact_sha256 and report, through writeFidelityRecord), and records the run in
 // fidelity-calibration.jsonl: a header with the promotion criterion on first write, then per run
 // one run line plus one line per flagged pair. The run id hashes the inputs only, so a rerun or a
 // --dispute rerun of the same inputs replaces that run's lines in place (disputes carry forward)
 // instead of counting a second run. Neither command calls a model or the network.
 
-import { createHash } from "node:crypto"
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
-import { CliError, parseArgs, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
+import { CliError, parseArgs, readJsonFile, sha256Of, writeJsonAtomic, writeTextAtomic } from "./cli-support.mjs"
 import { countDefects } from "./contracts.mjs"
 import { markdownAsHtml, readEdition } from "./fact-commands-verify.mjs"
 import { readLedger } from "./fact-ledger.mjs"
 import { validateLedger } from "./fact-ledger-schema.mjs"
 import { extractPairs, PAIR_KINDS } from "./fact-pairs.mjs"
 import { FIDELITY_INCOMPLETE, meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
-import { MEANING_RECORD } from "./fidelity-records.mjs"
+import { MEANING_RECORD, writeFidelityRecord } from "./fidelity-records.mjs"
 import { blocksDelivery } from "./gates-fidelity.mjs"
 import { ingestVerdicts, unverifiedDefects, VERDICT_SCHEMA } from "./meaning-check.mjs"
 
@@ -31,7 +31,6 @@ export const PROMOTION = Object.freeze({ code: "meaning_drift_confirmed", to: "i
 /** The command status: fail when any defect blocks delivery under the registry policy. */
 export const meaningStatus = (defects) => (defects.some(blocksDelivery) ? "fail" : "pass")
 
-const sha256 = (text) => createHash("sha256").update(text).digest("hex")
 const sessionOf = (flags) => {
 	const dir = flags["session-dir"] ?? process.env.SESSION_DIR
 	return dir && dir !== true ? resolve(dir) : null
@@ -84,7 +83,7 @@ function runPairs(args) {
 	const pairs = extractPairs(html, ledger, claims, changed)
 	const counts = { total: pairs.length, force_strong: pairs.filter((pair) => pair.force_strong).length }
 	for (const kind of PAIR_KINDS) counts[kind] = pairs.filter((pair) => pair.kind === kind).length
-	const record = { schemaVersion: 1, skipped: false, report: resolve(report), format: edition.format, artifact_sha256: sha256(edition.text), pairs_sha256: sha256(JSON.stringify(pairs)), counts, verdict_schema: VERDICT_SCHEMA, pairs }
+	const record = { schemaVersion: 1, skipped: false, report: resolve(report), format: edition.format, artifact_sha256: sha256Of(edition.text), pairs_sha256: sha256Of(JSON.stringify(pairs)), counts, verdict_schema: VERDICT_SCHEMA, pairs }
 	writeJsonAtomic(out, record)
 	const summary = `fact pairs: ${counts.total} pair(s), ${counts.force_strong} routed to the strong reader`
 	return { json: { command: "fact pairs", status: "pass", exitCode: 0, data: { out, ...record, pairs: undefined } }, summary, exitCode: 0 }
@@ -136,9 +135,7 @@ function recordCalibration(path, lines, runId, pairsSha) {
 	const at = previous.length === 0 ? before.length : before.indexOf(previous[0])
 	const after = [...before.slice(0, at).filter((row) => row.run_id !== runId), ...rows, ...before.slice(at).filter((row) => row.run_id !== runId)]
 	const header = { header: true, schemaVersion: 1, promotion: PROMOTION, note: "starting values; change them only with evidence" }
-	const temp = `${path}.${process.pid}.tmp`
-	writeFileSync(temp, `${[header, ...after].map((row) => JSON.stringify(row)).join("\n")}\n`)
-	renameSync(temp, path)
+	writeTextAtomic(path, `${[header, ...after].map((row) => JSON.stringify(row)).join("\n")}\n`)
 	return { written: pairRows.length, replaced: previous.length > 0, rows: after }
 }
 
@@ -162,6 +159,7 @@ function runMeaningCheck(args) {
 		if (refusal !== null) return { json: { command: "fact meaning-check", status: "fail", exitCode: 1, ...refusal }, summary: `fact meaning-check: ${refusal.message}`, exitCode: 1 }
 		return { json: { command: "fact meaning-check", status: "skipped", exitCode: 0, defects: [] }, summary: JSON.stringify({ command: "fact meaning-check", status: "skipped" }), exitCode: 0 }
 	}
+	if (typeof pairsDoc?.artifact_sha256 !== "string" || typeof pairsDoc.report !== "string") throw new CliError(`${flags.pairs} names no artifact_sha256 and report, so the meaning record cannot be bound to an edition; rerun fact pairs`)
 	for (const file of flags.verdicts) readJsonFile(file)
 	const verdictTexts = flags.verdicts.map((file) => readFileSync(file, "utf8"))
 	const dispute = flags.dispute === undefined ? undefined : { pair_id: flags.dispute, reason: args.required("reason") }
@@ -173,15 +171,14 @@ function runMeaningCheck(args) {
 	}
 	const out = resolve(flags.out ?? inSession(session, MEANING_RECORD, "--out"))
 	const calibration = resolve(flags.calibration ?? join(session ?? dirname(out), CALIBRATION_FILE))
-	const runId = flags["run-id"] ?? sha256([pairsText, ...verdictTexts].join("\0")).slice(0, 16)
-	const pairsSha = pairsDoc.pairs_sha256 ?? sha256(pairsText)
+	const runId = flags["run-id"] ?? sha256Of([pairsText, ...verdictTexts].join("\0")).slice(0, 16)
+	const pairsSha = pairsDoc.pairs_sha256 ?? sha256Of(pairsText)
 	const log = recordCalibration(calibration, result.calibrationLines, runId, pairsSha)
 	const defects = [...result.defects, ...unverifiedDefects(result.unverified)]
 	const counts = countDefects(defects)
 	const status = meaningStatus(defects)
 	const exitCode = status === "fail" ? 1 : 0
-	const record = { command: "fact meaning-check", status, exitCode, run_id: runId, pairs_sha256: pairsSha, defects, counts, dropped: result.dropped, unverified: result.unverified, calibration_path: calibration, calibration_written: log.written, calibration_replaced: log.replaced, promotion_eligibility: promotionEligibility(log.rows) }
-	writeJsonAtomic(out, record)
+	const record = writeFidelityRecord(out, "meaning", { command: "fact meaning-check", status, exitCode, artifact_sha256: pairsDoc.artifact_sha256, report: pairsDoc.report, run_id: runId, pairs_sha256: pairsSha, defects, counts, dropped: result.dropped, unverified: result.unverified, calibration_path: calibration, calibration_written: log.written, calibration_replaced: log.replaced, promotion_eligibility: promotionEligibility(log.rows) })
 	const confirmed = result.defects.filter((defect) => defect.code === "meaning_drift_confirmed").length
 	const summary = JSON.stringify({ command: "fact meaning-check", status, defects: defects.length, confirmed, warn: result.defects.length - confirmed, dropped: result.dropped.length, unverified: result.unverified.length })
 	return { json: { ...record, out }, summary, exitCode }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 
 import { PROMOTION } from "./fact-commands-meaning.mjs"
+import { writeFidelityRecord } from "./fidelity-records.mjs"
 import { PAIR_KINDS } from "./fact-pairs.mjs"
 import { VERDICT_SCHEMA } from "./meaning-check.mjs"
 import { COMMANDS, run } from "./report-tools.mjs"
@@ -563,13 +564,13 @@ describe("repair decide with several defect files", () => {
 
 describe("fidelity delivery barrier", () => {
 	/** The locked brief has meaning check on, so a deliverable session also carries a clean meaning record. */
-	const meaningRan = (dir: string) => writeFileSync(join(dir, "fidelity-meaning-defects.json"), JSON.stringify({ command: "fact meaning-check", status: "pass", defects: [] }))
+	const meaningRan = (dir: string) => writeFidelityRecord(join(dir, "fidelity-meaning-defects.json"), "meaning", { artifact_sha256: sha256(join(dir, "report.html")), report: join(dir, "report.html"), defects: [] })
 
 	async function deliveredSession(codes: string[]) {
 		const { dir, s } = fidelitySession()
-		meaningRan(dir)
 		nodeJson(["fact", "fill", join(dir, "report.src.html"), "--out", join(dir, "report.html"), ...s])
-		const record = (list: string[]) => writeFileSync(join(dir, "fidelity-defects.json"), JSON.stringify({ command: "fact verify", artifact_sha256: sha256(join(dir, "report.html")), defects: list.map((code) => ({ code, message: code })) }))
+		meaningRan(dir)
+		const record = (list: string[]) => writeFidelityRecord(join(dir, "fidelity-defects.json"), "fidelity", { artifact_sha256: sha256(join(dir, "report.html")), report: join(dir, "report.html"), defects: list.map((code) => ({ code, message: code })) })
 		record(codes)
 		await run(["outcome", "init", "--session-dir", dir, "--promised", "html"])
 		await run(["outcome", "set", "html", "delivered", "--path", join(dir, "report.html"), "--verified-by", join(dir, "fidelity-defects.json"), "--session-dir", dir])
@@ -578,6 +579,32 @@ describe("fidelity delivery barrier", () => {
 		const decision = await run(decide)
 		return { dir, record, decision }
 	}
+
+	test("#given a clean meaning record #when the report is edited and fact verify re-run #then the stale meaning record refuses, and a fresh one passes", async () => {
+		// given: meaning check on, readers clean, the edition verified and delivered
+		const { dir, s } = pairedSession()
+		const report = join(dir, "report.html")
+		const clean = [{ pair_id: "P1", verdict: "ok" }, { pair_id: "P2", verdict: "ok" }]
+		const readers = () => nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), "--verdicts", verdicts(dir, "cheap.json", "cheap", clean), "--verdicts", verdicts(dir, "strong.json", "strong", clean), ...s])
+		expect(readers().code).toBe(0)
+		expect(verify(dir, "report.html").code).toBe(0)
+		await run(["outcome", "init", "--session-dir", dir, "--promised", "html"])
+		await run(["outcome", "set", "html", "delivered", "--path", report, "--verified-by", join(dir, "fidelity-defects.json"), "--session-dir", dir])
+		const first = await run(["outcome", "verify", "--session-dir", dir])
+		// when: draft 2 (a repair rewrite) is re-verified by fact verify only
+		writeFileSync(report, `${readFileSync(report, "utf8")}\n<!-- draft 2 -->\n`)
+		expect(verify(dir, "report.html").code).toBe(0)
+		const stale = await run(["outcome", "verify", "--session-dir", dir])
+		// when: the meaning readers run again on draft 2
+		expect(nodeJson(["fact", "pairs", report, "--out", join(dir, "pairs.json"), ...s]).code).toBe(0)
+		expect(readers().code).toBe(0)
+		const fresh = await run(["outcome", "verify", "--session-dir", dir])
+		// then
+		expect(first.exitCode).toBe(0)
+		expect(stale.exitCode).toBe(1)
+		expect(stale.json.problems).toContainEqual(expect.objectContaining({ code: "edition_unverified", path: join(dir, "fidelity-meaning-defects.json"), message: expect.stringContaining("meaning record") }))
+		expect(fresh.exitCode).toBe(0)
+	})
 
 	test("#given an unregistered appendix value #when verified #then untraceable_number and outcome verify refuses", async () => {
 		const { dir, s } = fidelitySession()
