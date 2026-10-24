@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Re-extracting a conversation no longer counts the same agreement correction again.** Corrections are bound to validated user turns and recorded atomically with their replay receipts. Distinct turns on the same date still count separately; acknowledgement, drop and eviction retain replay history. Pending records from older versions use a documented agreement/date migration. ([#11214](https://github.com/code-yeongyu/oh-my-openagent/pull/11214), fixes [#11191](https://github.com/code-yeongyu/oh-my-openagent/issues/11191))
+
 **The LSP MCP server negotiates supported protocol versions.** It preserves supported client versions and answers unsupported or missing versions with `2025-06-18`, rather than claiming an arbitrary protocol revision. ([#11208](https://github.com/code-yeongyu/oh-my-openagent/pull/11208))
 
 **Skill MCP tool errors are reported as errors.** Structured output and result metadata reach the caller, tool failures are not retried as connection failures, and plain content keeps its existing output format. ([#11207](https://github.com/code-yeongyu/oh-my-openagent/pull/11207))
