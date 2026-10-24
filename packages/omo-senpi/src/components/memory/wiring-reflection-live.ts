@@ -7,12 +7,14 @@ import type { SenpiExtensionAPI } from "../../extension/types"
 import { hasMemoryCapabilities } from "./capabilities"
 import type { MemoryIdentityContext } from "./context"
 import { resolveMemorySettings } from "./identity-runtime"
+import type { MemoryFactsApplier } from "./facts-apply-rpc"
 import { createMemoryRpcBridge, type MemoryRpcBridge } from "./memory-rpc-bridge"
 import { resolveAgentReflectionSettings } from "./reflection-settings"
 import { isStaleExtensionContextError } from "./stale-extension-context"
 import { MEMORY_STATUS_KEY, refreshMemoryStatus } from "./status"
 import { createActiveReflectionRuns } from "./status-active-runs"
 import { createMemoryFooterStatusLive } from "./status-live-wiring"
+import { createSyncStatusNotifier, deliverSyncStatusChange } from "./sync-status-surface"
 import {
   consumePendingReflectionCompletions,
   emitReflectionHealthAlert,
@@ -26,7 +28,7 @@ import type { MemoryWiringOptions, StatusUi } from "./wiring-types"
 
 export interface MemoryReflectionLiveWiring {
   currentSession(): ReflectionLiveSession | undefined
-  registerRpc(pi: SenpiExtensionAPI, resolveContext: (sessionId: string) => MemoryIdentityContext | undefined): void
+  registerRpc(pi: SenpiExtensionAPI, resolveContext: (sessionId: string) => MemoryIdentityContext | undefined, applyFacts?: MemoryFactsApplier): void
   attach(sessionId: string): void
   bind(
     pi: SenpiExtensionAPI,
@@ -43,6 +45,7 @@ export interface MemoryReflectionLiveWiring {
   /** Resolves once every status refresh started by bind or settle has finished (each one runs git in the identity dir). */
   settled(): Promise<void>
   clearStatus(eventCtx: unknown): void
+  onSyncStatusChanged(repo: string): Promise<void>
 }
 
 // A pi captured at bind is retired by session replacement or runtime reload. Under --multi-session
@@ -88,7 +91,9 @@ export function createMemoryReflectionLiveWiring(
     resolveContext: (sessionId) => options.sessions.get(sessionId)?.context,
     isActive: (identity) => activeRuns.isActive(identity),
     ...(options.footerTimers === undefined ? {} : { timers: options.footerTimers }),
+    ...(options.syncStatus === undefined ? {} : { syncStatus: options.syncStatus }),
   })
+  const syncNotifier = options.syncStatus === undefined ? undefined : createSyncStatusNotifier(options.syncStatus)
 
   async function onReflectionLaunched(identity: string, run: ReservedRun): Promise<void> {
     activeRuns.start(identity, run.runId, launchDetails(options, identity, run))
@@ -106,10 +111,12 @@ export function createMemoryReflectionLiveWiring(
 
   return {
     currentSession: () => liveSession.current,
-    registerRpc(pi, resolveContext): void {
+    registerRpc(pi, resolveContext, applyFacts): void {
       rpcBridge.current = createMemoryRpcBridge(pi, {
         resolveContext,
         activeRun: (identity) => activeRuns.current(identity),
+        ...(applyFacts === undefined ? {} : { applyFacts }),
+        ...(options.syncStatus === undefined ? {} : { syncStatus: options.syncStatus }),
       })
     },
     attach(sessionId): void {
@@ -173,6 +180,23 @@ export function createMemoryReflectionLiveWiring(
       footerLive.stop()
       readUi(eventCtx)?.setStatus(MEMORY_STATUS_KEY, undefined)
     },
+    async onSyncStatusChanged(repo): Promise<void> {
+      const sessionId = activeSession.current
+      const context = sessionId === undefined ? undefined : options.sessions.get(sessionId)?.context
+      const ui = readUi(lastEventCtx.current)
+      await deliverSyncStatusChange({
+        repo,
+        isActiveRepo: sessionId !== undefined && context?.identityPaths.repo === repo,
+        notifier: syncNotifier,
+        ui,
+        refreshFooter: () => {
+          if (sessionId !== undefined) track(footerLive.refresh(sessionId, ui))
+        },
+        pushRpc: async () => {
+          await rpcBridge.current?.sync()
+        },
+      })
+    },
   }
 }
 
@@ -201,6 +225,7 @@ function refreshInitialStatus(
     alreadyNotified: false,
     requestPressureDream,
     sessionId,
+    ...(options.syncStatus === undefined ? {} : { syncStatus: options.syncStatus }),
   })
 }
 

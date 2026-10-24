@@ -50,7 +50,7 @@ The request and its destination usually answer the format question already. Deri
 | A prior report of the same kind in this workspace, not pointed at | that report's format, offered as the Q1 default | `template-vibe` | full |
 | A complete existing deliverable for this question (section 2) | its existing format | `edit-existing` | the original's tier |
 
-QA tiers: **light** runs the static gates and one render check of the answer. **Full** runs the static gates, the layout gates, visual QA of every page, and the proofread gate (section 7).
+QA tiers: **light** runs the static gates and one render check of the answer, and records the fidelity gate as `not_run` until Markdown deliverable support ships for it. **Full** runs the static gates, the fidelity gate, the layout gates, visual QA of every page, and the proofread gate (section 7).
 
 ## 4. The empty-info interview
 
@@ -123,14 +123,15 @@ Nothing reaches the requester until the gates for its QA tier pass, in this orde
    node "$SKILL_DIR/scripts/report-tools.mjs" check "$SESSION_DIR/report.html" --design-spec "$SESSION_DIR/design-spec.md" > "$SESSION_DIR/defects.json"
    ```
    It checks keep-all, palette tokens, emoji, em dashes in prose (en dashes outside numeric ranges are advisory), heading length and generic headings, unsourced numbers (section 6), figure containers and captions, chart SVG text, a report with no visual at all, images without alt text, Korean serif fonts, sections without citations, the closing section, the sources section, broken local assets, and any `--require-section <regex>` the brief requires. Every code, severity, and fix is in [report-gates.md](report-gates.md).
-2. **Layout gates.** Print the probe, evaluate it in the rendered page through the browser skill's owned headless engine, save the returned object as `$SESSION_DIR/boxes.json`, and re-run `check` with `--layout "$SESSION_DIR/boxes.json"`. It adds overflow past the container, clipped text, scroll containers, distorted images, and overlapping siblings.
+2. **Fidelity gate.** The fidelity verifier checks every number, quote, and claim binding against the fact ledger and the source snapshots; its codes are the Fidelity Gate table in [report-gates.md](report-gates.md). It runs before layout and visual QA because a content failure would otherwise force an expensive re-render. Until the fidelity verifier ships in this edition, record `outcome gate fidelity not_run`.
+3. **Layout gates.** Print the probe, evaluate it in the rendered page through the browser skill's owned headless engine, save the returned object as `$SESSION_DIR/boxes.json`, and re-run `check` with `--layout "$SESSION_DIR/boxes.json"`. It adds overflow past the container, clipped text, scroll containers, distorted images, and overlapping siblings.
    ```bash
    node "$SKILL_DIR/scripts/report-tools.mjs" layout-probe --json   # .source is one async expression
    ```
-3. **Visual QA.** Render the artifact to images (PDF pages to PNG, the HTML in the browser skill's engine at desktop and phone widths) and look at the pixels for what a machine cannot see: composition, hierarchy, page breaks, figure legibility.
-4. **Proofread.** A dedicated writing lane proofreads the final text only (grammar, spelling, punctuation, terminology, native register); it never composes or rewrites content.
+4. **Visual QA.** Render the artifact to images (PDF pages to PNG, the HTML in the browser skill's engine at desktop and phone widths) and look at the pixels for what a machine cannot see: composition, hierarchy, page breaks, figure legibility.
+5. **Proofread.** A dedicated writing lane proofreads the final text only (grammar, spelling, punctuation, terminology, native register); it never composes or rewrites content.
 
-The light tier runs gate 1 and one render (recorded as `visual`) and records `layout` and `proofread` as `not_run`. The full tier runs all four.
+The light tier runs gate 1 and one render (recorded as `visual`) and records `fidelity`, `layout`, and `proofread` as `not_run`; `fidelity` stays `not_run` in the light tier until Markdown deliverable support ships for the fidelity verifier. The full tier runs all five.
 
 ## 8. Bounded repair loop
 
@@ -142,7 +143,7 @@ node "$SKILL_DIR/scripts/report-tools.mjs" repair decide --state "$SESSION_DIR/r
 
 - `action: repair`: fix the listed defects, re-render, re-run the gate, and ask again.
 - `action: deliver`: stop repairing and deliver. `reason` is `clean` or the stop condition that fired; the residual defects are written into the manifest and listed in the closing briefing.
-- `action: block` (exit `1`): do not deliver. Either a content-integrity defect remains (`missing_closing_section`, `missing_citation_section`, `broken_asset_reference`, `missing_required_section`, `missing_promised_deliverable`), or a stop fired without proof of a usable artifact (`--artifact-bytes` and `--renders`). Tell the requester what blocks delivery and record the affected rows as `failed` with the reason.
+- `action: block` (exit `1`): do not deliver. Either a content-integrity defect remains (`missing_closing_section`, `missing_citation_section`, `broken_asset_reference`, `missing_required_section`, `missing_promised_deliverable`, or a fidelity integrity code: `unresolved_placeholder`, `value_mismatch`, `unit_mismatch`, `quote_not_verbatim`, `claim_status_invalid`, `incompatible_operands`, `pointer_label_mismatch`, `quote_anchor_unresolved`, `unit_duplicated`, `polish_diff_fail`, `fidelity_interview_incomplete`, `derived_not_allowed`, `source_outside_floor`, `snapshot_hash_mismatch`, `chart_value_untraceable`, `quote_unbound`, `edition_unverified`), or a stop fired without proof of a usable artifact (`--artifact-bytes` and `--renders`). Tell the requester what blocks delivery and record the affected rows as `failed` with the reason.
 
 Defaults: 3 repair attempts, a plateau of 2 consecutive attempts that do not improve the (blocker, major, minor) counts compared in that order, and 15 minutes of wall clock from the first decision. A defect set that repeats an earlier attempt exactly stops the loop as an oscillation. When several conditions hold at once the reported reason follows `clean`, `blocking`, `oscillation`, `plateau`, `max_attempts`, `wall_clock`.
 
@@ -165,6 +166,16 @@ node "$SKILL_DIR/scripts/report-tools.mjs" outcome briefing --session-dir "$SESS
 - `verify` runs before delivery and exits `1` while a row is `pending`, a status lacks its reason, or a delivered file is missing or empty.
 - `finish` stamps the finish time, the elapsed minutes from the session directory's start stamp, and the source and domain counts from `sources-ledger.md`.
 - `briefing` prints the closing block from the manifest and the ledger: sources and distinct domains, elapsed minutes, every deliverable with its status, the gate results, the residual defects, and the repair summary. That text is the closing briefing, pasted as printed, never filled in from memory.
+
+### Showing the report inline
+
+When the session has a tool that shows a self-contained HTML page inline in the conversation (`show_html_page` in OmO, `html_render` on hosts that offer it), the requester sees the report there first, after `verify` passes and before the closing briefing. A path to a file the requester has to go and open is not the first thing they read.
+
+- **Which page.** The gated `report.html` itself when the promised deliverable is a self-contained HTML report within the tool's size limit. Otherwise (a PDF, DOCX, LaTeX, or slide deliverable, or an HTML report over the limit) build an inline edition from the same `SYNTHESIS.md` and the same assets: the answer, the headline figures, the reference-compare pairs when the run has them, the key findings with their citations, the numbered sources, and the paths of the promised artifacts. Run `check` on the inline edition like any HTML deliverable.
+- **Self-contained.** No network: styles and scripts inline, no remote fonts, no CDN. Pass local images as absolute file paths (the tool inlines them) or as data URIs. Render it once at the reply width and at 390 px before showing it, and pass the measured height. When the session has the `visualize` skill, follow its inline-page constraints.
+- **Every tier, and always the report.** A light-tier chat answer with no promised document still ends with an inline page: the answer, its figures, the reference-compare pairs, and the sources. When the thing built is itself a page (an app, a 3D scene, a demo), show it too, but it never stands in for the report page, and a page that only links or redirects to a file is not a report.
+- **Not a manifest format.** The inline page never replaces or resolves a promised format; every manifest row still ends `delivered`, `blocked_capability`, `skipped`, or `failed` with its own artifact.
+- **No inline tool.** Deliver the artifact paths and the chat summary as before.
 
 ## 10. Command reference
 

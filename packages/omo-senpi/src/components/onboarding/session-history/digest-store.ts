@@ -21,6 +21,25 @@ function isMissing(cause: unknown): boolean {
 }
 
 /**
+ * Digests held only in this process's memory: nothing reaches disk. The onboarding scan uses it, because
+ * nothing may be persisted before the user consents; `drop` (or letting the store go) releases them.
+ */
+export function createMemorySessionDigestStore(): SessionDigestStore {
+  const scans = new Map<string, SessionDigest[]>()
+  return {
+    async put(scanId, digest) {
+      scans.set(scanId, [...(scans.get(scanId) ?? []), digest])
+    },
+    async list(scanId) {
+      return scans.get(scanId) ?? []
+    },
+    async drop(scanId) {
+      scans.delete(scanId)
+    },
+  }
+}
+
+/**
  * Digests stay on this machine under the engine's own state directory (`<stateDir>/onboarding/scans/<scanId>/`,
  * owner-only permissions) and are never sent anywhere; `drop` removes a scan's digests.
  */
