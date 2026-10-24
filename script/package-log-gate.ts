@@ -33,7 +33,8 @@ export function checkPackageLogs(input: PackageLogInput): { readonly pass: boole
   try {
     parseNotes(split.preamble)
   } catch (error) {
-    return { pass: false, reason: error instanceof Error ? error.message : String(error) }
+    const detail = error instanceof Error ? error.message : String(error)
+    return { pass: false, reason: `the release cannot place this fragment text (docs/reference/changelog-fragments.md): ${detail}` }
   }
   return { pass: true, reason: `${split.blocks.length} package-log block(s) valid` }
 }

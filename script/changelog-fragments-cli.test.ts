@@ -11,6 +11,8 @@ const SCRIPT_DIR = import.meta.dir
 const LOG = "packages/omo-senpi/changes.md"
 const PULL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
 const ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" }
+// Each case spawns git and bun several times (about 4 s alone), so it gets a budget above bun's 5 s default.
+const SPAWN_TIMEOUT_MS = 30_000
 const CHANGELOG = "# Changelog\n\n## [Unreleased]\n\n**Old entry.** ([#1](u))\n\n## [1.0.0] - 2026-10-01\n\nold\n"
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", env: ENV })
@@ -79,7 +81,7 @@ describe("from-diff converts an open branch written before fragments (#10841 mig
     expect(read(dir, "changes.md")).toBe("## 2026-10-01 - root old\n")
     const verdict = gate(dir, 12)
     expect(verdict.status, verdict.stdout + verdict.stderr).toBe(0)
-  }))
+  }), SPAWN_TIMEOUT_MS)
 
   test("an edit to a released section is refused and nothing is written", withScratch((dir) => {
     // given
@@ -93,7 +95,7 @@ describe("from-diff converts an open branch written before fragments (#10841 mig
     expect(result.stderr).toContain("outside ## [Unreleased]")
     expect(existsSync(join(dir, "changes/unreleased/12.md"))).toBe(false)
     expect(git(dir, "status", "--porcelain")).toBe("")
-  }))
+  }), SPAWN_TIMEOUT_MS)
 })
 
 test("from-diff refuses, and keeps the file, when a changelog file has uncommitted edits", withScratch((dir) => {
@@ -109,7 +111,7 @@ test("from-diff refuses, and keeps the file, when a changelog file has uncommitt
   expect(result.stderr).toContain("uncommitted")
   expect(read(dir, LOG)).toContain("still typing")
   expect(existsSync(join(dir, "changes/unreleased/12.md"))).toBe(false)
-}))
+}), SPAWN_TIMEOUT_MS)
 
 describe("fold-batch merges the cars' fragments into the batch PR's own (bundle train)", () => {
   test("two cars with paragraphs, sections and blocks for the same log become one fragment the gate accepts", withScratch((dir) => {
@@ -135,5 +137,5 @@ describe("fold-batch merges the cars' fragments into the batch PR's own (bundle 
     expect(existsSync(join(dir, "changes/unreleased/21.md"))).toBe(false)
     const verdict = gate(dir, 30)
     expect(verdict.status, verdict.stdout + verdict.stderr).toBe(0)
-  }))
+  }), SPAWN_TIMEOUT_MS)
 })

@@ -39,12 +39,33 @@ export function parseNotes(text: string): Notes {
   return { paragraphs: paragraphs.join("\n").trim(), sections }
 }
 
-const linkBullet = (bullet: string, pr: number): string =>
-  bullet.includes(`/pull/${pr})`) ? bullet : `${bullet} ([#${pr}](${PULL_URL}/${pr}))`
+const FENCE = /^\s*(?:```|~~~)/
 
-/** Every paragraph names the PR that made it: one without its own PR link gets one at its end. */
+/** An entry that already links a PR (a folded car's) or holds a code fence is left exactly as written. */
+const linkBullet = (bullet: string, pr: number): string =>
+  /\/pull\/\d+\)/.test(bullet) || bullet.split("\n").some((line) => FENCE.test(line)) ? bullet : `${bullet} ([#${pr}](${PULL_URL}/${pr}))`
+
+/** Paragraphs split on blank lines outside code fences, so a fenced block stays one unit. */
+function paragraphsOf(text: string): string[] {
+  const paragraphs: string[] = []
+  let current: string[] = []
+  let fenced = false
+  for (const line of text.split("\n")) {
+    if (FENCE.test(line)) fenced = !fenced
+    if (!fenced && line.trim() === "") {
+      if (current.length > 0) paragraphs.push(current.join("\n"))
+      current = []
+    } else {
+      current.push(line)
+    }
+  }
+  if (current.length > 0) paragraphs.push(current.join("\n"))
+  return paragraphs
+}
+
+/** Every prose paragraph names the PR that made it: one without a PR link gets one at its end. */
 const linkParagraphs = (text: string, pr: number): string =>
-  text.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter((paragraph) => paragraph !== "").map((paragraph) => linkBullet(paragraph, pr)).join("\n\n")
+  paragraphsOf(text).map((paragraph) => linkBullet(paragraph.trim(), pr)).join("\n\n")
 
 /** One notes text from several, in order: their paragraphs first, then one group per section name, first seen first. */
 export function mergeNotes(texts: readonly string[]): string {

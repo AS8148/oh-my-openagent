@@ -54,7 +54,8 @@ The rules live in `script/changelog-gate-rules.ts`, vendored byte-identical from
 
 Only the release-state pull request (`release/*`, opened by `publish.yml` as `sisyphus-dev-ai`) edits
 those files. `script/stamp-release-changelog.ts` writes the release section (paragraphs first, newest
-pull request first, then one `### Section` group per name, each bullet linking its pull request),
+pull request first, then one `### Section` group per name, each entry linking its pull request;
+an entry that already links a pull request, or holds a code block, is kept exactly as written),
 writes every log block into its log, and deletes the fragments, all in the release commit. Nothing
 compiles fragments before the release cut. Unreleased text written before the gate switched is
 released first, as written.

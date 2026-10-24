@@ -118,6 +118,21 @@ describe("release stamp CLI", () => {
     expect(readdirSync(join(root, "changes/unreleased"))).toEqual([])
   })
 
+  test("a fenced code block is never split or linked, and a bullet that already links a PR gets no second link", () => {
+    // given: a paragraph followed by a code block with a blank line inside it, and a folded car's bullet (#10477 review r2)
+    const { root, stamp } = fixture("", {
+      "8.md": "**Thing.** Use it:\n\n```sh\nfoo\n\nbar\n```\n",
+      "30.md": `### Fixed\n\n- Car fix. ([#21](${PULL}/21))\n`,
+    })
+    // when
+    const result = stamp()
+    // then
+    expect(result.status, result.stderr).toBe(0)
+    expect(extractReleaseNotes(readFileSync(join(root, "CHANGELOG.md"), "utf8"), "5.1.45")).toBe(
+      `**Thing.** Use it: ([#8](${PULL}/8))\n\n\`\`\`sh\nfoo\n\nbar\n\`\`\`\n\n### Fixed\n\n- Car fix. ([#21](${PULL}/21))`,
+    )
+  })
+
   test("an empty fragment set refuses without mutating legacy notes", () => {
     // given
     const { root, before, stamp } = fixture("Legacy payload.", {})
