@@ -4,24 +4,21 @@
 // paragraph, list_item, table_row, code, blockquote, with start/end offsets into the raw text
 // so text.slice(start, end) === block.text (table cells carry their own offsets). Headings carry
 // level 1-6. Code blocks are fenced (``` or ~~~); an unterminated fence runs to the end of the
-// text. Callers skip kind 'code' when they look for numbers. sectionKindsMd(blocks) classifies
-// sections by heading text the way gates-static does for HTML h2/h3. It never renders HTML.
-// Plain Node ESM, sibling imports only.
+// text and is reported in problems as unterminated_fence, which a caller must refuse rather than
+// skip. Callers skip kind 'code' when they look for numbers. sectionKindsMd(blocks) classifies
+// sections with the gates-static classifier itself (sectionKind, closingTest). It never renders
+// HTML. Plain Node ESM, sibling imports only.
 
-import { CLOSING_HEADING, SOURCES_HEADING } from "./gates-static.mjs"
+import { closingTest, sectionKind } from "./gates-static.mjs"
 
-/** Markdown closing headings ("Closing", "maMuRi") on top of the HTML closing heading set. */
-const MD_CLOSING_HEADING = /\bclosing\b|\uB9C8\uBB34\uB9AC/i
-/** Same order and patterns as OTHER_KINDS in gates-static.mjs. */
-const OTHER_KINDS = [
-	["toc", /\b(?:contents|toc)\b|\uBAA9\uCC28/i],
-	["appendix", /appendix|\uBD80\uB85D/i],
-	["glossary", /glossary|\uC6A9\uC5B4/i],
-]
-const FENCE = /^ {0,3}(`{3,}|~{3,})/
+export { closingTest, sectionKind }
+
+/** A fence opener: a backtick fence's info string holds no backtick (else it is an inline span). */
+const FENCE = /^ {0,3}(?:(`{3,})[^`]*|(~{3,}).*)$/
 const HEADING = /^ {0,3}(#{1,6})(?=[ \t]|$)/
 const BLOCKQUOTE = /^ {0,3}> ?/
-const LIST_ITEM = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+/
+/** A bullet or an ordered marker (digits, then . or ), then a space); group 1 is the number. */
+const LIST_ITEM = /^[ \t]*(?:[-*+]|(\d{1,9})[.)])[ \t]+/
 const TABLE_SEPARATOR = /^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/
 const CLOSING_HASHES = /[ \t]+#+[ \t]*$|^#+[ \t]*$/
 const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/
@@ -61,7 +58,11 @@ function isSeparator(line) {
 /** Cells split on unescaped pipes, outer pipes dropped, each cell trimmed with offsets. */
 function tableCells(text, range) {
 	const bounds = []
-	for (let k = range.start; k < range.end; k++) if (text[k] === "|" && text[k - 1] !== "\\") bounds.push(k)
+	for (let k = range.start; k < range.end; k++) {
+		let slashes = 0
+		while (k - slashes - 1 >= range.start && text[k - slashes - 1] === "\\") slashes++
+		if (text[k] === "|" && slashes % 2 === 0) bounds.push(k)
+	}
 	const edges = [range.start - 1, ...bounds, range.end]
 	if (bounds[0] === range.start) edges.shift()
 	if (bounds.at(-1) === range.end - 1 && bounds.length > 0) edges.pop()
@@ -85,12 +86,14 @@ function headingBlock(text, line, marker) {
  * Parse Markdown into a flat block list.
  * @param {string} text
  * @returns {{ blocks: { kind: string, level?: number, text: string, start: number, end: number,
- *   cells?: { text: string, start: number, end: number }[] }[] }}
+ *   cells?: { text: string, start: number, end: number }[] }[],
+ *   problems: { code: "unterminated_fence", line: number, start: number }[] }}
  */
 export function parseMarkdown(text) {
 	const source = String(text ?? "")
 	const lines = linesOf(source)
 	const blocks = []
+	const problems = []
 	let paragraph = null
 	let inTable = false
 	const flush = () => {
@@ -103,7 +106,7 @@ export function parseMarkdown(text) {
 		if (fence) {
 			flush()
 			inTable = false
-			const open = fence[1]
+			const open = fence[1] ?? fence[2]
 			const codeStart = Math.min(line.next, source.length)
 			let close = lines.length
 			for (let k = i + 1; k < lines.length; k++) {
@@ -114,7 +117,8 @@ export function parseMarkdown(text) {
 				}
 			}
 			let codeEnd = source.length
-			if (close < lines.length) {
+			if (close === lines.length) problems.push({ code: "unterminated_fence", line: i + 1, start: line.start })
+			else {
 				codeEnd = Math.max(codeStart, lines[close].start - 1)
 				if (codeEnd > codeStart && source[codeEnd - 1] === "\r") codeEnd--
 			}
@@ -146,7 +150,9 @@ export function parseMarkdown(text) {
 			continue
 		}
 		const marker = line.raw.match(BLOCKQUOTE) ?? line.raw.match(LIST_ITEM)
-		if (marker) {
+		// Only an ordered marker numbered 1 may interrupt a paragraph (CommonMark); else it is text.
+		const continues = paragraph !== null && marker?.[1] !== undefined && Number(marker[1]) !== 1
+		if (marker && !continues) {
 			flush()
 			const kind = BLOCKQUOTE.test(line.raw) ? "blockquote" : "list_item"
 			const content = trimRange(source, line.start + marker[0].length, line.end)
@@ -157,13 +163,7 @@ export function parseMarkdown(text) {
 		else paragraph = { start: range.start, end: range.end }
 	}
 	flush()
-	return { blocks }
-}
-
-function sectionKind(heading, isClosing) {
-	if (SOURCES_HEADING.test(heading)) return "sources"
-	if (isClosing(heading)) return "closing"
-	return OTHER_KINDS.find(([, re]) => re.test(heading))?.[0] ?? null
+	return { blocks, problems }
 }
 
 /**
@@ -171,12 +171,11 @@ function sectionKind(heading, isClosing) {
  * its heading text (sources, closing, toc, appendix, glossary, or null for findings); an h3 that
  * reads as a closing heading marks its blocks closing until the next h2 or h3, as in gates-static.
  * @param {{ kind: string, level?: number, text: string }[]} blocks
- * @param {{ closingPattern?: RegExp }} [options] extra closing heading pattern (the spec's)
+ * @param {{ closingPattern?: RegExp|string }} [options] extra closing heading pattern (the spec's)
  * @returns {(string|null)[]}
  */
 export function sectionKindsMd(blocks, options = {}) {
-	const extra = options.closingPattern ?? null
-	const isClosing = (heading) => CLOSING_HEADING.test(heading) || MD_CLOSING_HEADING.test(heading) || Boolean(extra?.test(heading))
+	const isClosing = closingTest(options.closingPattern)
 	let section = null
 	let closingH3 = false
 	return blocks.map((entry) => {
