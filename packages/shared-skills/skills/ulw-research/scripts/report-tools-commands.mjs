@@ -155,7 +155,7 @@ export async function runOutcome(argv) {
 		case "gate": {
 			const [gate, status] = args.positionals
 			if (!gate || !status) throw new CliError(`usage: outcome gate <${GATE_NAMES.join("|")}> <${GATE_STATUSES.join("|")}>`)
-			outcome.writeManifest(file, outcome.setGate(outcome.readManifest(file), gate, status))
+			outcome.writeManifest(file, outcome.setGate(outcome.readManifest(file), gate, status, { reason: args.flags.reason, now: nowFrom(args.flags) }))
 			return { json: { command: "outcome gate", gate, status }, exitCode: 0 }
 		}
 		case "render": {
