@@ -6,6 +6,7 @@ import { registerProcessCleanup, startCleanupTimer } from "./cleanup"
 import { redactSensitiveData } from "./error-redaction"
 import type { ManagedClient, McpClient, McpTransport, SkillMcpClientConnectionParams } from "./types"
 import { log } from "../logger"
+import { createProtocolTransport } from "./protocol-transport"
 import { connectWithPolicySignal, McpEnvironmentPolicyChangedError } from "./policy-connection"
 
 type StdioClientFactory = (
@@ -24,7 +25,7 @@ interface StdioClientDependencies {
 
 const defaultStdioClientDependencies: StdioClientDependencies = {
   createClient: (clientInfo, options) => new Client(clientInfo, options),
-  createTransport: (options) => new StdioClientTransport(options),
+  createTransport: (options) => createProtocolTransport(new StdioClientTransport(options)),
 }
 
 let stdioClientDependencies: StdioClientDependencies = defaultStdioClientDependencies
