@@ -287,8 +287,8 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
     call: "rmSync(path)", reason: SUMMARY_REMOVAL,
   },
   { file: "session-summary-purge.ts", fn: "remove", guard: "", call: "unlinkSync(path)", reason: SUMMARY_REMOVAL },
-  { file: "session-summary-legacy-rollups.ts", fn: "removeLegacyRollups", guard: 'unless(kind === undefined) if(kind === "link")', call: "unlink(dir)", reason: LEGACY_ROLLUPS },
-  { file: "session-summary-legacy-rollups.ts", fn: "removeLegacyRollups", guard: 'unless(kind === undefined) unless(kind === "link") unless(kind !== "directory")', call: "unlink(join(dir, entry.name))", reason: LEGACY_ROLLUPS },
+  { file: "session-summary-legacy-rollups.ts", fn: "removeLegacyRollups", guard: 'unless(start === undefined) if(start.kind === "link")', call: "unlink(dir)", reason: LEGACY_ROLLUPS },
+  { file: "session-summary-legacy-rollups.ts", fn: "removeLegacyRollups", guard: 'unless(start === undefined) unless(start.kind === "link") unless(start.kind !== "directory") unless(!isSameDirectory(identity(dir), start))', call: "unlink(join(dir, entry.name))", reason: LEGACY_ROLLUPS },
   { file: "session-summary-legacy-rollups.ts", fn: "unlink", guard: "", call: "unlinkSync(path)", reason: LEGACY_ROLLUPS },
   {
     file: "session-summary-files.ts", fn: "renameIfPresent",

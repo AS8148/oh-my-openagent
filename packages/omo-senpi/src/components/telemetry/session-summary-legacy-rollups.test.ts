@@ -36,7 +36,7 @@ describe("pre-#10225 rollups are removed", () => {
 
     const result = removeLegacyRollups(stateDir)
 
-    expect(result).toEqual({ removed: 3, kept: 0 })
+    expect(result).toEqual({ removed: 3, skipped: 0, failed: 0 })
     expect(existsSync(dir)).toBe(false)
   })
 
@@ -48,7 +48,7 @@ describe("pre-#10225 rollups are removed", () => {
 
     const result = removeLegacyRollups(stateDir)
 
-    expect(result).toEqual({ removed: 3, kept: 1 })
+    expect(result).toEqual({ removed: 3, skipped: 1, failed: 0 })
     expect(readdirSync(dir)).toEqual(["nested"])
     expect(readFileSync(join(dir, "nested", "keep.txt"), "utf8")).toBe("x")
   })
@@ -62,7 +62,7 @@ describe("pre-#10225 rollups are removed", () => {
 
     const result = removeLegacyRollups(stateDir)
 
-    expect(result).toEqual({ removed: 1, kept: 0 })
+    expect(result).toEqual({ removed: 1, skipped: 0, failed: 0 })
     expect(existsSync(legacyRollupDir(stateDir))).toBe(false)
     expect(readdirSync(elsewhere)).toEqual(["precious.json"])
   })
@@ -77,7 +77,7 @@ describe("pre-#10225 rollups are removed", () => {
 
     const result = removeLegacyRollups(stateDir)
 
-    expect(result).toEqual({ removed: 1, kept: 0 })
+    expect(result).toEqual({ removed: 1, skipped: 0, failed: 0 })
     expect(readFileSync(target, "utf8")).toBe("{}")
   })
 
@@ -87,14 +87,28 @@ describe("pre-#10225 rollups are removed", () => {
     mkdirSync(dir, { recursive: true })
     for (let index = 0; index < 5; index += 1) writeFileSync(join(dir, `hashed_${index}.json`), "{}")
 
-    expect(removeLegacyRollups(stateDir, 2)).toEqual({ removed: 2, kept: 3 })
+    expect(removeLegacyRollups(stateDir, 2)).toEqual({ removed: 2, skipped: 3, failed: 0 })
     expect(readdirSync(dir)).toHaveLength(3)
-    expect(removeLegacyRollups(stateDir, 10)).toEqual({ removed: 3, kept: 0 })
+    expect(removeLegacyRollups(stateDir, 10)).toEqual({ removed: 3, skipped: 0, failed: 0 })
     expect(existsSync(dir)).toBe(false)
   })
 
   test("#given no rollups directory #when removed #then nothing happens", () => {
-    expect(removeLegacyRollups(tempRoot())).toEqual({ removed: 0, kept: 0 })
+    expect(removeLegacyRollups(tempRoot())).toEqual({ removed: 0, skipped: 0, failed: 0 })
+  })
+
+  test("#given a subdirectory left inside rollups #when a process registers #then the skip is not reported as a write failure", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const stateDir = join(agentDir, "omo-senpi", "omo-native")
+      const dir = seedLegacyRollups(stateDir)
+      mkdirSync(join(dir, "nested"))
+      const diagnostics: Array<{ readonly event: string; readonly source?: string; readonly count?: number }> = []
+
+      await registerProcess({ agentDir, recorder: createTransportRecorder(), env: {}, cwd: "/repo", options: { isConfigEnabled: () => true, stateDir, diagnostics: (input) => diagnostics.push(input) } })
+
+      expect(readdirSync(dir)).toEqual(["nested"])
+      expect(diagnostics.filter(({ event }) => event === "telemetry_activity_state_write_failed")).toEqual([])
+    })
   })
 
   // Lead ruling (2026-10-24): nothing reads rollups/ any more, so the data goes for every upgrader, opted in or not.
