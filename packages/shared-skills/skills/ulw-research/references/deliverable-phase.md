@@ -54,7 +54,7 @@ QA tiers: **light** runs the static gates and one render check of the answer, an
 
 ## 4. The empty-info interview
 
-The interview has exactly three questions, asked together through the harness question tool without waiting for the answer. A question is **skipped** when the request, the destination, a pointed-at document, or a declared memory episode already answers it; when all three are answered, nothing is asked.
+The interview has three format questions, asked together through the harness question tool without waiting for the answer; the fidelity questions (below) ride in the same call only when their triggers fire. A question is **skipped** when the request, the destination, a pointed-at document, or a declared memory episode already answers it; when all three are answered, nothing is asked.
 
 - **Q1 - destination and format.** Options in this order: the memory hit (the choice recorded for the most similar prior context, section 5) when there is one; the derived default from section 3; "describe the format in your own words" (free text, which becomes the brief for the design spec); "don't care, you decide" (resolves to the derived default).
 - **Q2 - audience and length.** Who reads it, and a length band: `short` (a page or a post), `standard` (a report of about 5 to 12 pages), or `deep` (a full dossier). The derived default is first.
@@ -75,6 +75,45 @@ format description: none
 ```
 
 `answered_by` is one of `user`, `default`, `request`. Run `outcome init` (section 9) in the same step, with the formats as the promised list.
+
+### The fidelity fields and the lock
+
+Beside `## Deliverable`, the brief records what the report must stay faithful to, under `## Fidelity`. The fields are inferred first; only `as of`, `meaning check`, `source floor`, and `derived numbers` may be asked, each on its own trigger, in the same question call as Q1-Q3 (at most four questions in that call). The inference rules, the triggers, and the question texts are in `SKILL.md`.
+
+| Field | Values | Default | Read by |
+| --- | --- | --- | --- |
+| `as of` | `latest at run start, <YYYY-MM-DD>`; one anchor (version, release, tag, commit, date, period); `multiple: <anchor>, <anchor>; rows tagged` | `latest at run start, <run date>` | `fact verify` (`quote_stale_version` when a quoted source's revision is not the anchor) |
+| `meaning check` | `on`, `off`, `on; force strong: <scope>` | `on` in the full tier, `off` in the light tier | `fact pairs` (`off` writes `{"skipped": true}`) and the orchestrator's reader lanes |
+| `source floor` | `standard`, `primary only`, `pointed only: <list>`, `classes: <list>` | `standard` | `fact fill` (`source_outside_floor`) |
+| `derived numbers` | `allowed`, `none` | `allowed` | `fact fill` (`derived_not_allowed`) |
+| `languages` | `report <lang>; sources <langs>; quotes original`, or `...; quotes original with translation beside` | report in the requester's language; quotes with translation when a source language differs | `fact fill` (whether a translation binds to its quote) |
+| `identifier classes` | `none`, or a list of token classes | from the domain of the Phase 0 axes | recorded only: no gate enforces it yet |
+| `fallback` | `block-quote`, `omit` | `block-quote` | `fact fill --replace-failed` |
+
+```text
+## Fidelity
+as of: latest at run start, 2026-10-23 (answered_by: default)
+meaning check: on (answered_by: default)
+source floor: standard (answered_by: default)
+derived numbers: pending (answered_by: pending)
+languages: report en; sources en; quotes original (answered_by: default)
+identifier classes: version strings, package names, commit ids (answered_by: default)
+fallback: block-quote (answered_by: default)
+asked: derived numbers
+```
+
+Each line is `<field>: <value> (answered_by: user|default|request|pending)`; values carry no parentheses, `pending` goes only with `answered_by: pending`, and `asked:` is an optional history line. A malformed line or a second block is a usage error (exit `2`) naming the line.
+
+**The lock.** The brief is locked when all seven fields are present and none is `pending`. Six stages refuse an unlocked brief with one `fidelity_interview_incomplete` defect (blocker, integrity), exit `1`, and write nothing: `fact fill`, `fact verify`, `fact pairs`, `fact meaning-check`, `fact polish-apply`, `fact polish-diff`. Each reads `--brief`, default `$SESSION_DIR/brief.md`. Collection never waits: `source snapshot`, `fact add`, `fact quote`, `fact derive`, `fact retract`, `fact export`, and `claims index` never read the lock. Provisional defaults are written at brief time, so the lock fires only on a `pending` field still open when the assembly lane is about to start; that one question is then asked again, blocking.
+
+**What fill enforces.** At every `fact fill`, each placeholder's row is checked against the current lock:
+
+- `derived numbers: none` refuses a `derived`, `converted`, or `assumed` row (`derived_not_allowed`): the requester was promised measured values only.
+- The source floor is evaluated live against the `meta.json` of every source behind the row (a derived row's sources are its operands' sources): `pointed only: <list>` admits a source whose id (`S4`), URL, or path is in the list; `primary only` admits a source whose declared provenance is `primary` (`source snapshot --provenance primary|secondary`, default `unknown`; `secondary` and `unknown` are refused); `classes: <list>` admits a source whose URL host equals a listed host suffix or ends with `.<suffix>` (`sec.gov`, `go.kr`); `standard` refuses nothing. A refused row is `source_outside_floor`. Rows registered while the floor was pending are reclassified the moment it locks or changes. The row's `outside_floor` is the cached result of the last fill, never an input.
+- `languages` with `quotes original with translation beside` lets a `{{Q7:label}}` be followed by its translation, `<span data-translates="Q7">...</span>` in HTML or `<!-- translates: Q7 -->` and the sentence in Markdown; fill binds it to Q7, and `fact pairs` emits it as a `translation` pair. Under `quotes original` fill does not bind it.
+- `fallback: omit` makes `--replace-failed` remove a twice-failed sentence instead of replacing it with an attributed block quote.
+
+**Re-entry.** A session started before this block existed (an `edit-existing` run included) has no `## Fidelity`: run the inference step and write the block with `answered_by: default` before any `fact` command.
 
 ## 5. Report-format memory episodes
 
@@ -212,17 +251,17 @@ Invoke every command as `node "$SKILL_DIR/scripts/report-tools.mjs" <command>`. 
 | `outcome briefing` | `--json`, `--ledger <file>`, `--session-dir <dir>`, `--now <ISO>` | never |
 | `format-extract <reference>` | `--out <design-spec.md>` (required), `--from-url` | never (an unsupported reference exits `2`) |
 | `--help` | `--json` | never |
-| `source snapshot` | `--id S<n>` (required), one of `--url <u>`, `--html <file>`, `--text <file>` (with optional `--extractor NAME@VERSION`), `--command '<argv json>' --cwd <dir>`; `--kind page\|command\|document`, `--provenance primary\|secondary`, `--revision <r>`, `--session-dir <dir>` | the id already holds different content (`snapshot_exists`) |
+| `source snapshot` | `--id S<n>` (required), one of `--url <u>`, `--html <file>`, `--text <file>` (with optional `--extractor NAME@VERSION`), `--command '<argv json>' --cwd <dir>`; `--kind page\|command\|document`, `--provenance primary\|secondary` (default `unknown`, read by `source floor: primary only`), `--revision <r>`, `--session-dir <dir>` | the id already holds different content (`snapshot_exists`) |
 | `fact add` | `--source S<n>` with `--find <text>` (`--unit-expected <unit>`), or `--table <id> --row <label> --col <label>`, or `--page N --line N`; `--label`, `--entity`, `--valid-at`, `--population`, `--accounting-basis`, `--observation O<n>`, `--json`, `--session-dir <dir>`. Or `--assumed <value> --unit <unit> --rationale <text> --label <label>` | `fact_not_located`, `fact_ambiguous`, `unit_mismatch` (no row written) |
 | `fact quote` | `--source S<n> --match <text>` (required), `--label`, `--json`, `--session-dir <dir>` | `fact_not_located`, `fact_ambiguous` |
 | `fact retract <id>` | `--reason <text>` (required), `--replacement <id>`, `--session-dir <dir>` | never (an illegal transition exits `2`) |
 | `fact export` | `--csv`, `--out <file>`, `--session-dir <dir>` | never |
-| `fact fill <src>` | `--out <file>` or `--view`, `--format html\|md\|tex`, `--inline`, `--replace-failed`, `--session-dir <dir>` | a fill error (nothing is written) |
-| `fact verify <report>` | `--format html\|md` (from the extension by default), `--sources <dir>`, `--claims <claims.json>`, `--fill-map <file>` (a Markdown edition reads `<report>.fill-map.json` by default), `--brief <brief.md>`, `--out <record>`, `--session-dir <dir>` | any blocker or major defect |
-| `fact pairs <report>` | `--format html\|md`, `--ledger <fact-ledger.json>`, `--claims <claims.json>`, `--changed-since <fill-map.json>` (keep only the pairs whose normalized sentence text is not in the pre-polish artifact that map names), `--brief <brief.md>`, `--out <pairs.json>`, `--session-dir <dir>` | the brief has no locked `## Fidelity` block (with `meaning check: off` it writes `{"skipped": true}` and exits `0`) |
-| `fact meaning-check` | `--pairs <pairs.json>` and `--verdicts <file>` (required; repeatable, one per reader tier), `--dispute P<n> --reason <text>`, `--run-id <id>`, `--calibration <file>` (default `fidelity-calibration.jsonl`), `--out <record>` (default `fidelity-meaning-defects.json`), `--session-dir <dir>` | `meaning_drift_confirmed` (stderr carries one JSON line with the defect and dropped-verdict counts) |
-| `fact polish-apply <report.html>` | `--edits <polish-edits.json>` and `--out <file>` (required), `--ledger <fact-ledger.json>`, `--session-dir <dir>` | never once the output is written; rejected (`polish_edit_rejected`, major) and unlocated (`polish_edit_unlocated`, minor) edits are listed with their index and reason, and their text is left unchanged |
-| `fact polish-diff` | `--before <file>` and `--after <file>` (required), `--ledger <fact-ledger.json>`, `--out <record>` (default `polish-defects.json` in the session), `--session-dir <dir>` | `polish_diff_fail` (blocker) |
+| `fact fill <src>` | `--out <file>` or `--view`, `--format html\|md\|tex`, `--inline`, `--replace-failed`, `--brief <brief.md>`, `--session-dir <dir>` | `fidelity_interview_incomplete`, `derived_not_allowed`, `source_outside_floor` (section 4), or a fill error (nothing is written) |
+| `fact verify <report>` | `--format html\|md` (from the extension by default), `--sources <dir>`, `--claims <claims.json>`, `--fill-map <file>` (a Markdown edition reads `<report>.fill-map.json` by default), `--brief <brief.md>`, `--out <record>`, `--session-dir <dir>` | `fidelity_interview_incomplete` (no record written), or any blocker or major defect |
+| `fact pairs <report>` | `--format html\|md`, `--ledger <fact-ledger.json>`, `--claims <claims.json>`, `--changed-since <fill-map.json>` (keep only the pairs whose normalized sentence text is not in the pre-polish artifact that map names), `--brief <brief.md>`, `--out <pairs.json>`, `--session-dir <dir>` | `fidelity_interview_incomplete` (with `meaning check: off` it writes `{"skipped": true}` and exits `0`) |
+| `fact meaning-check` | `--pairs <pairs.json>` and `--verdicts <file>` (required; repeatable, one per reader tier), `--dispute P<n> --reason <text>`, `--run-id <id>`, `--calibration-log <file>` (default `$SESSION_DIR/fidelity-calibration.jsonl`), `--brief <brief.md>`, `--out <record>` (default `fidelity-meaning-defects.json`), `--session-dir <dir>` | `fidelity_interview_incomplete`, or `meaning_drift_confirmed` (stderr carries one JSON line with the defect and dropped-verdict counts) |
+| `fact polish-apply <report.html>` | `--edits <polish-edits.json>` and `--out <file>` (required), `--ledger <fact-ledger.json>`, `--brief <brief.md>`, `--session-dir <dir>` | `fidelity_interview_incomplete` (nothing written); otherwise never once the output is written; rejected (`polish_edit_rejected`, major) and unlocated (`polish_edit_unlocated`, minor) edits are listed with their index and reason, and their text is left unchanged |
+| `fact polish-diff` | `--before <file>` and `--after <file>` (required), `--ledger <fact-ledger.json>`, `--out <record>` (default `polish-defects.json` in the session), `--brief <brief.md>`, `--session-dir <dir>` | `fidelity_interview_incomplete` (nothing written), or `polish_diff_fail` (blocker) |
 | `fact derive` | `--op <op>` (required) with the operation's operands (section 11), `--unit`, `--to`, `--rationale`, `--disjoint`, `--label`, `--json`, `--session-dir <dir>` | `incompatible_operands` (no row written) |
 | `claims index <claim-graph.md>` | `--out <claims.json>` (required) | never (a malformed claim table exits `2`) |
 

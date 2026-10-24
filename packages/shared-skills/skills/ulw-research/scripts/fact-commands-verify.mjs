@@ -19,6 +19,7 @@ import { dirname, join, resolve } from "node:path"
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
 import { recompute } from "./fact-derive.mjs"
 import { LEDGER_FILENAME, readLedger } from "./fact-ledger.mjs"
+import { lockedBrief } from "./fidelity-policy.mjs"
 import { checkFidelity } from "./gates-fidelity.mjs"
 import { parseMarkdown } from "./md-lite.mjs"
 import { escapeHtml, renderQuote, renderValueHtml } from "./placeholder.mjs"
@@ -128,8 +129,10 @@ export function runFactVerify(args) {
 	const [report] = args.positionals
 	const { flags } = args
 	if (!report) throw new CliError("usage: fact verify <report> [--format html|md] [--sources D] [--claims claims.json] [--fill-map F] [--brief brief.md] [--out fidelity-defects.json]")
-	const edition = readEdition(report, flags)
 	const sessionDir = sessionDirOf(flags)
+	const { refusal } = lockedBrief("fact verify", flags)
+	if (refusal) return refusal
+	const edition = readEdition(report, flags)
 	const claimsPath = flags.claims ?? join(sessionDir, "claims.json")
 	const briefPath = flags.brief ?? join(sessionDir, "brief.md")
 	const ledger = readLedger(sessionDir)

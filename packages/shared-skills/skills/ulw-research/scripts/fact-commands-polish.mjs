@@ -20,6 +20,7 @@ import { markdownAsHtml } from "./fact-commands-verify.mjs"
 import { readLedger } from "./fact-ledger.mjs"
 import { validateLedger } from "./fact-ledger-schema.mjs"
 import { extractPairs } from "./fact-pairs.mjs"
+import { lockedBrief } from "./fidelity-policy.mjs"
 import { applyEdits } from "./polish-apply.mjs"
 import { diffPolish } from "./polish-diff.mjs"
 import { normalizeText } from "./text-normalize.mjs"
@@ -58,8 +59,10 @@ const withSeverity = (entry) => ({ ...entry, severity: DEFECT_CODES[entry.code].
 function runPolishApply(args) {
 	const [report] = args.positionals
 	const { flags } = args
-	if (!report || flags.edits === undefined || flags.out === undefined) throw new CliError("usage: fact polish-apply <report.html> --edits polish-edits.json --out <report.polished.html> [--ledger F] [--session-dir D]")
+	if (!report || flags.edits === undefined || flags.out === undefined) throw new CliError("usage: fact polish-apply <report.html> --edits polish-edits.json --out <report.polished.html> [--ledger F] [--brief brief.md] [--session-dir D]")
 	if (/\.(md|markdown)$/iu.test(report)) throw new CliError("fact polish-apply takes the filled HTML edition; polish a Markdown edition through its HTML source")
+	const { refusal } = lockedBrief("fact polish-apply", flags)
+	if (refusal) return refusal
 	const html = readText(report)
 	const editsText = readText(flags.edits)
 	const edits = readJsonFile(flags.edits)
@@ -77,7 +80,9 @@ function runPolishApply(args) {
 
 function runPolishDiff(args) {
 	const { flags } = args
-	if (flags.before === undefined || flags.after === undefined) throw new CliError("usage: fact polish-diff --before <pre-polish.html> --after <polished.html> [--ledger F] [--out polish-defects.json] [--session-dir D]")
+	if (flags.before === undefined || flags.after === undefined) throw new CliError("usage: fact polish-diff --before <pre-polish.html> --after <polished.html> [--ledger F] [--out polish-defects.json] [--brief brief.md] [--session-dir D]")
+	const { refusal } = lockedBrief("fact polish-diff", flags)
+	if (refusal) return refusal
 	const after = readText(flags.after)
 	const defects = diffPolish(readText(flags.before), after, ledgerFrom(flags)).map((defect) => ({ ...defect, hint: DEFECT_CODES[defect.code]?.hint ?? null }))
 	const counts = { blocker: 0, major: 0, minor: 0, total: defects.length }

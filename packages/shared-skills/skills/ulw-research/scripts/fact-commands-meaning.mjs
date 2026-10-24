@@ -4,8 +4,10 @@
 // rewrote); it honours the brief's `meaning check` field and writes
 // `{ skipped: true }` when it is off. fact meaning-check ingests the readers' verdict files
 // (meaning-check.mjs), writes fidelity-meaning-defects.json, and appends one calibration line per
-// flagged pair to fidelity-calibration.jsonl (header with the promotion criterion on first write;
-// the same run id never appends twice). Neither command calls a model or the network.
+// flagged pair to the calibration log (--calibration-log, default fidelity-calibration.jsonl in the
+// session; header with the promotion criterion on first write; the same run id never appends
+// twice). Both refuse an unlocked brief (fidelity_interview_incomplete) before reading anything
+// else. Neither command calls a model or the network.
 
 import { createHash } from "node:crypto"
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
@@ -17,7 +19,7 @@ import { readLedger } from "./fact-ledger.mjs"
 import { validateLedger } from "./fact-ledger-schema.mjs"
 import { pairsChangedSince } from "./fact-commands-polish.mjs"
 import { extractPairs } from "./fact-pairs.mjs"
-import { isLocked, parseFidelityBlock } from "./fidelity-brief.mjs"
+import { lockedBrief } from "./fidelity-policy.mjs"
 import { ingestVerdicts } from "./meaning-check.mjs"
 
 export const PAIRS_FILE = "pairs.json"
@@ -47,24 +49,15 @@ function readLedgerFrom(flags, session) {
 	return ledger
 }
 
-function briefState(flags, session) {
-	const path = flags.brief ?? inSession(session, "brief.md", "--brief")
-	const parsed = parseFidelityBlock(existsSync(path) ? readFileSync(path, "utf8") : "")
-	return { path, parsed, locked: isLocked(parsed), off: /^off\b/iu.test(parsed.fields["meaning check"] ?? "") }
-}
-
 function runPairs(args) {
 	const [report] = args.positionals
 	const { flags } = args
 	if (!report) throw new CliError("usage: fact pairs <report> [--format html|md] [--ledger F] [--claims claims.json] [--changed-since <fill-map.json>] [--brief brief.md] [--out pairs.json]")
 	const session = sessionOf(flags)
 	const out = resolve(flags.out ?? inSession(session, PAIRS_FILE, "--out"))
-	const brief = briefState(flags, session)
-	if (!brief.locked) {
-		const json = { command: "fact pairs", status: "fail", exitCode: 1, error: "fidelity_interview_incomplete", message: `${brief.path} has no locked ## Fidelity block` }
-		return { json, summary: `fact pairs: ${json.message}`, exitCode: 1 }
-	}
-	if (brief.off) {
+	const { parsed, refusal } = lockedBrief("fact pairs", flags)
+	if (refusal) return refusal
+	if (/^off\b/iu.test(parsed.fields["meaning check"])) {
 		const record = { schemaVersion: 1, skipped: true, reason: "meaning check: off", pairs: [] }
 		writeJsonAtomic(out, record)
 		return { json: { command: "fact pairs", status: "skipped", exitCode: 0, data: { out, ...record } }, summary: "fact pairs: skipped (meaning check: off)", exitCode: 0 }
@@ -118,9 +111,11 @@ function appendCalibration(path, lines, runId, pairsSha) {
 
 function runMeaningCheck(args) {
 	const { flags } = args
-	const usage = "usage: fact meaning-check --pairs pairs.json --verdicts cheap.json [--verdicts strong.json] [--dispute P<n> --reason TEXT] [--run-id ID] [--calibration F] [--out F]"
+	const usage = "usage: fact meaning-check --pairs pairs.json --verdicts cheap.json [--verdicts strong.json] [--dispute P<n> --reason TEXT] [--run-id ID] [--calibration-log F] [--brief brief.md] [--out F]"
 	if (flags.pairs === undefined || !Array.isArray(flags.verdicts)) throw new CliError(usage)
 	const session = sessionOf(flags)
+	const { refusal } = lockedBrief("fact meaning-check", flags)
+	if (refusal) return refusal
 	const pairsText = readFileSync(flags.pairs, "utf8")
 	const pairsDoc = readJsonFile(flags.pairs)
 	if (pairsDoc.skipped === true) return { json: { command: "fact meaning-check", status: "skipped", exitCode: 0, defects: [] }, summary: JSON.stringify({ command: "fact meaning-check", status: "skipped" }), exitCode: 0 }
@@ -134,7 +129,7 @@ function runMeaningCheck(args) {
 		throw new CliError(`invalid verdict input: ${error.message}`)
 	}
 	const out = resolve(flags.out ?? inSession(session, MEANING_RECORD, "--out"))
-	const calibration = resolve(flags.calibration ?? join(session ?? dirname(out), CALIBRATION_FILE))
+	const calibration = resolve(flags["calibration-log"] ?? flags.calibration ?? join(session ?? dirname(out), CALIBRATION_FILE))
 	const runId = flags["run-id"] ?? sha256([pairsText, ...verdictTexts, JSON.stringify(dispute ?? null)].join("\0")).slice(0, 16)
 	const pairsSha = pairsDoc.pairs_sha256 ?? sha256(pairsText)
 	const log = appendCalibration(calibration, result.calibrationLines, runId, pairsSha)
