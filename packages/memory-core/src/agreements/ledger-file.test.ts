@@ -16,9 +16,14 @@ function fixture() {
   const exec: GitExec = {
     async run(argv) {
       commands.push([...argv])
+      const revision = argv.map((arg) => /^(HEAD|[0-9a-f]{40})(?::|$)/.exec(arg)?.[1])
+        .find((value) => value !== undefined)
+      if (revision === undefined) throw new Error(`Unexpected git argv: ${JSON.stringify(argv)}`)
+      expect(argv).toEqual(argv[0] === "ls-tree"
+        ? ["ls-tree", "-r", "--name-only", "-z", revision, "--", AGREEMENTS_PATH]
+        : ["show", `${revision}:${AGREEMENTS_PATH}`])
       if (fail) return { code: 128, stdout: "", stderr: "unavailable object" }
-      const revision = argv[0] === "ls-tree" ? argv[4] : argv[1]?.split(":")[0]
-      const content = contents.get(revision ?? "")
+      const content = contents.get(revision)
       return {
         code: 0,
         stdout: argv[0] === "ls-tree" ? (content === undefined ? "" : `${AGREEMENTS_PATH}\0`) : content ?? "",

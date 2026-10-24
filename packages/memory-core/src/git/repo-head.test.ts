@@ -7,6 +7,7 @@ import { removeTree } from "../../../../test-support/remove-tree"
 import { createNodeGitExec, GitMemoryRepo, type GitExec } from "./index"
 import { disableFixtureAutoMaintenance } from "./test-repo-config.test-support"
 
+const GIT_INTEGRATION_TEST_TIMEOUT = 60_000
 const roots: string[] = []
 
 afterEach(async () => {
@@ -50,7 +51,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(heads).toEqual([f.first, f.first])
     expect(f.spawns()).toBe(0)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given a branch only in packed-refs #when read #then resolves it without spawning git", async () => {
     // given
@@ -62,7 +63,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(head).toBe(f.second)
     expect(f.spawns()).toBe(0)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given a linked worktree with relative gitdir and packed shared refs #when read #then uses its own HEAD", async () => {
     // given
@@ -79,7 +80,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(head).toBe(f.first)
     expect(f.spawns()).toBe(0)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given a warm loose ref #when updated between calls #then the memo returns the new SHA", async () => {
     // given
@@ -92,7 +93,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(next).toBe(f.first)
     expect(f.spawns()).toBe(0)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given a warm packed ref #when repacked at another SHA #then the memo invalidates", async () => {
     // given
@@ -107,7 +108,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(next).toBe(f.first)
     expect(f.spawns()).toBe(0)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given a warm packed ref #when a loose override appears #then the loose value wins", async () => {
     // given
@@ -119,9 +120,11 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     await f.git("update-ref", "refs/heads/main", f.first)
     const next = await repo.head()
     // then
+    expect((await readFile(join(f.dir, ".git/packed-refs"), "utf8")).split("\n"))
+      .toContain(`${f.second} refs/heads/main`)
     expect(next).toBe(f.first)
     expect(f.spawns()).toBe(0)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given a warm HEAD #when checkout detaches it #then a new repo instance sees the new SHA", async () => {
     // given
@@ -133,7 +136,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(next).toBe(f.first)
     expect(f.spawns()).toBe(0)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given an indirect symbolic branch #when read #then delegates to git", async () => {
     // given
@@ -145,7 +148,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(head).toBe(f.second)
     expect(f.spawns()).toBe(1)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given an unborn branch #when read #then preserves git's null result", async () => {
     // given
@@ -156,7 +159,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(head).toBeNull()
     expect(f.spawns()).toBe(1)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given a reftable repository #when read #then delegates to git", async () => {
     // given
@@ -167,7 +170,7 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(head).toBe(f.second)
     expect(f.spawns()).toBe(1)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 
   it("#given malformed loose data over a packed ref #when read #then preserves git's failure", async () => {
     // given
@@ -182,5 +185,5 @@ describe("GitMemoryRepo.head filesystem fast path", () => {
     // then
     expect(head).toBeNull()
     expect(f.spawns()).toBe(1)
-  })
+  }, GIT_INTEGRATION_TEST_TIMEOUT)
 })
