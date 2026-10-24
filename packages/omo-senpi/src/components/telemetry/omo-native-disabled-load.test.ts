@@ -124,7 +124,7 @@ describe("telemetry turned off loads and writes nothing", () => {
     await withAgentDir(async (agentDir) => {
       seedQueue(join(agentDir, "omo-senpi", "omo-native"))
 
-      const run = await runSession(agentDir, DISABLED[1]![1](agentDir))
+      const run = await runSession(agentDir, { env: {}, configEnabled: false })
 
       expect(run.sidecarLoaded).toBe(false)
       expect(queuedFiles(run.stateFiles)).toEqual([])
@@ -135,7 +135,7 @@ describe("telemetry turned off loads and writes nothing", () => {
     await withAgentDir(async (agentDir) => {
       seedQueue(join(agentDir, "omo-senpi", "omo-native"))
 
-      const run = await runSession(agentDir, DISABLED[0]![1](agentDir))
+      const run = await runSession(agentDir, { env: { OMO_DISABLE_TELEMETRY: "1" }, configEnabled: true })
 
       expect(run.sidecarLoaded).toBe(false)
       expect(queuedFiles(run.stateFiles)).toEqual(["session-summary/hashed_old.json", "session-summary/pending/0b6c5d3e-2f1a-4c8b-9d7e-6a5b4c3d2e1f.json"])
