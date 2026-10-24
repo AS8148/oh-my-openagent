@@ -38,18 +38,25 @@ export type IdleInjectionDelivery = (
 // that still fires has nothing left to deliver.
 export type FlushScheduler = (flush: () => void) => (() => void) | void
 
+type ReceiptErrors = { readonly threw: boolean; readonly first: unknown; readonly rest: readonly unknown[] }
+
 // Runs one receipt per producer, each in its own try, and returns every error: one producer's throwing receipt
 // must never cost a later producer its receipt, or that producer's completion is never recorded or redelivered.
-function runReceipts(injections: readonly IdleInjection[], receipt: (injection: IdleInjection) => void): unknown[] {
-  const errors: unknown[] = []
+// `threw` is set in the catch block, never from the caught value, so a thrown undefined, null, 0 or '' still counts.
+function runReceipts(injections: readonly IdleInjection[], receipt: (injection: IdleInjection) => void): ReceiptErrors {
+  let threw = false
+  let first: unknown
+  const rest: unknown[] = []
   for (const injection of injections) {
     try {
       receipt(injection)
     } catch (error) {
-      errors.push(error)
+      if (threw) rest.push(error)
+      else first = error
+      threw = true
     }
   }
-  return errors
+  return { threw, first, rest }
 }
 
 export interface IdleInjectionCoordinatorOptions {
@@ -207,13 +214,17 @@ export class IdleInjectionCoordinator {
     const dropped = [...this.#pending.values()]
     this.#pending.clear()
     this.#reportChildWork()
-    const [first, ...rest] = runReceipts(dropped, (injection) => injection.onDeliveryFailed?.(new IdleInjectionRetiredError()))
-    this.#reportReceiptErrors(rest)
-    if (first !== undefined) throw first
+    const errors = runReceipts(dropped, (injection) => injection.onDeliveryFailed?.(new IdleInjectionRetiredError()))
+    this.#reportReceiptErrors(errors.rest)
+    if (errors.threw) throw errors.first
   }
 
   #reportReceiptErrors(errors: readonly unknown[]): void {
     for (const error of errors) this.#onReceiptError?.(error)
+  }
+
+  #reportAllReceiptErrors(errors: ReceiptErrors): void {
+    if (errors.threw) this.#reportReceiptErrors([errors.first, ...errors.rest])
   }
 
   // Flush the whole queue as one idle-edge steer. Returns how many queued items were collapsed (0 = no-op).
@@ -234,7 +245,7 @@ export class IdleInjectionCoordinator {
       this.#reportChildWork()
     }
     // Every producer gets its receipt even when an earlier one throws, and the count settles after all of them.
-    const receiptsThenSettle = (receipt: (injection: IdleInjection) => void): unknown[] => {
+    const receiptsThenSettle = (receipt: (injection: IdleInjection) => void): ReceiptErrors => {
       try {
         return runReceipts(ordered, receipt)
       } finally {
@@ -268,25 +279,25 @@ export class IdleInjectionCoordinator {
     } catch (error) {
       // Receipts first: the count is a report, and nothing about reporting may cost a producer its receipt.
       // The delivery error is the one the caller needs, so a receipt that throws does not replace it.
-      this.#reportReceiptErrors(receiptsThenSettle((injection) => injection.onDeliveryFailed?.(error)))
+      this.#reportAllReceiptErrors(receiptsThenSettle((injection) => injection.onDeliveryFailed?.(error)))
       throw error
     }
     if (!isPromiseLike(delivery)) {
-      const [first, ...rest] = receiptsThenSettle((injection) => injection.onFlushed?.())
-      this.#reportReceiptErrors(rest)
-      if (first !== undefined) throw first
+      const errors = receiptsThenSettle((injection) => injection.onFlushed?.())
+      this.#reportReceiptErrors(errors.rest)
+      if (errors.threw) throw errors.first
     } else {
       // Nothing awaits this chain, so every receipt error here goes to onReceiptError instead of becoming an
       // unhandled rejection.
       try {
         void delivery.then(
-          () => this.#reportReceiptErrors(receiptsThenSettle((injection) => injection.onFlushed?.())),
-          (error: unknown) => this.#reportReceiptErrors(receiptsThenSettle((injection) => injection.onDeliveryFailed?.(error))),
+          () => this.#reportAllReceiptErrors(receiptsThenSettle((injection) => injection.onFlushed?.())),
+          (error: unknown) => this.#reportAllReceiptErrors(receiptsThenSettle((injection) => injection.onDeliveryFailed?.(error))),
         )
       } catch (error) {
         // A thenable whose then() throws never settles: treat it as a failed delivery so receipts and the count
         // still settle.
-        this.#reportReceiptErrors(receiptsThenSettle((injection) => injection.onDeliveryFailed?.(error)))
+        this.#reportAllReceiptErrors(receiptsThenSettle((injection) => injection.onDeliveryFailed?.(error)))
         throw error
       }
     }

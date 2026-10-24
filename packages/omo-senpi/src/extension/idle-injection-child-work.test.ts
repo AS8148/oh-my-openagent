@@ -277,4 +277,35 @@ describe("receipts on retire and on a broken thenable (#10782)", () => {
     expect(() => coordinator.flushOnIdle()).toThrow("receipt one")
     expect(reported).toEqual(["receipt two"])
   })
+
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["0", 0],
+    ["an empty string", ""],
+  ])("#given a receipt that throws %s #when the delivery succeeds or the coordinator retires #then the failure still surfaces", (_label, thrown) => {
+    // when a successful delivery's only receipt throws a falsy value
+    const flushing = new IdleInjectionCoordinator(() => undefined)
+    flushing.enqueue({ ...completion("task:st_22"), onFlushed: () => { throw thrown } })
+    let flushThrew = false
+    try {
+      flushing.flushOnIdle()
+    } catch {
+      flushThrew = true
+    }
+
+    // and a retiring coordinator's only failure receipt throws the same value
+    const retiring = new IdleInjectionCoordinator(() => undefined, { scheduleFlush: () => undefined })
+    retiring.enqueue({ ...completion("task:st_23"), onDeliveryFailed: () => { throw thrown } })
+    let retireThrew = false
+    try {
+      retiring.retire()
+    } catch {
+      retireThrew = true
+    }
+
+    // then neither failure was swallowed
+    expect(flushThrew).toBe(true)
+    expect(retireThrew).toBe(true)
+  })
 })
