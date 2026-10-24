@@ -49,6 +49,19 @@ A source directory is immutable. Snapshotting the same id again with the same te
 
 A locator that finds nothing returns `fact_not_located`, more than one candidate `fact_ambiguous`, and nothing is written. Read the printed row and its 60 characters of context on each side before using it; a wrong row is retracted, never edited.
 
+## Meaning verdicts
+
+`ingestVerdicts(pairs, verdictFiles, options)` (`scripts/meaning-check.mjs`) folds the meaning readers' verdict files over the pairs of `extractPairs` and returns four lists:
+
+| Field | Holds |
+| --- | --- |
+| `defects` | one `meaning_drift_confirmed` (both tiers named the same kind, never `other`) or `meaning_drift_warn` (one tier) per flagged pair, in pair order; the fragment comes from the verdict whose kind is reported |
+| `dropped` | every verdict that was not accepted, with its file, pair, tier, and reason (unknown pair, invalid tier or verdict, unknown or empty drift kind, a fragment missing from the sentence or the source) |
+| `unverified` | every pair no reader judged (`no_verdict`) and every `force_strong` pair no strong reader judged (`no_strong_verdict`), in pair order; a dropped verdict does not count as read |
+| `calibrationLines` | one JSON line per flagged pair, appended to `fidelity-calibration.jsonl` when `calibrationPath` is given |
+
+Coverage is fail-closed. A consumer treats a non-empty `unverified` list as blocking: those pairs were never read, so an empty `defects` list does not mean the report is clean. An unreadable verdict path or invalid JSON raises a `TypeError` naming the file, which the CLI maps to exit code 2.
+
 ## Operations
 
 - `fact add --source S<n> <locator> --label <label>` registers a measured row; `fact add --assumed <value> --unit <unit> --rationale <why> --label <label>` registers an assumption.
@@ -59,9 +72,9 @@ A locator that finds nothing returns `fact_not_located`, more than one candidate
 - `fact fill <src> --out <file>` renders every placeholder from the ledger; `fact verify <file>` checks the filled edition against the ledger, the snapshots, and the claim index; `outcome set <format> delivered` records intent permissively, while the required `outcome verify` and `outcome finish` enforce the delivery barrier.
 - `fact pairs <file>` writes `pairs.json` for the meaning readers; `fact meaning-check --pairs pairs.json --verdicts <file> ...` ingests their verdicts.
 
-## Meaning verdicts
+## Meaning command
 
-`pairs.json` is `{ schemaVersion, skipped, report, format, artifact_sha256, pairs_sha256, counts, pairs }`. Each pair has `pair_id` (`P<n>` in document order), `kind` (`quote`, `claim`, or `translation`), `sentence_key`, `sentence`, `source_lang`, `report_lang`, `force_strong`, and either `fact_ids` with `quote` or `claim_id` with `statement`.
+`pairs.json` is `{ schemaVersion, skipped, report, format, artifact_sha256, pairs_sha256, counts, verdict_schema, pairs }`. `verdict_schema` is the machine-read verdict contract (the allowed `model_tier`, `verdict`, and `drift_kind` values and the required fields), built from the registries in `meaning-check.mjs`; hand it to the reader with the pairs. Each pair has `pair_id` (`P<n>` in document order), `kind` (`quote`, `claim`, or `translation`), `sentence_key`, `sentence`, `source_lang`, `report_lang`, `force_strong`, and either `fact_ids` with `quote` or `claim_id` with `statement`.
 
 A reader writes one verdict file per tier: `{ "model_tier": "cheap" | "strong", "verdicts": [...] }` (a bare array works when each verdict names its own `model_tier`). One verdict per pair:
 
@@ -74,6 +87,6 @@ A reader writes one verdict file per tier: `{ "model_tier": "cheap" | "strong", 
 | `source_fragment` | for `drift`, a non-empty verbatim substring of the pair's `quote` or `statement` |
 | `explanation` | one sentence, for the briefing; never read by the scripts |
 
-A verdict that breaks any rule is dropped and listed in the record's `dropped` with its reason; it never becomes a defect. Both tiers naming the same `drift_kind` other than `other` on one pair is `meaning_drift_confirmed` (major); one tier, or two tiers that disagree, is `meaning_drift_warn` (minor). `--dispute P<n> --reason` keeps the defect and marks its calibration line `disputed`.
+A verdict that breaks any rule is dropped and listed in the record's `dropped` with its reason; it never becomes a defect. Both tiers naming the same `drift_kind` other than `other` on one pair is `meaning_drift_confirmed` (major); one tier, or two tiers that disagree, is `meaning_drift_warn` (minor). `--dispute P<n> --reason` keeps the defect and marks its calibration line `disputed`. Every entry of `unverified` becomes one `meaning_unverified` defect (major), so a pair no reader judged fails the command (exit 1) through the same registry policy as any other defect. A malformed `pairs.json` or an unreadable verdict file exits 2.
 
-`fidelity-calibration.jsonl` starts with a header line `{ "header": true, "promotion": ... }` holding the promotion criterion, then one line per flagged pair: `kind`, `pair_id`, `tiers`, `drift_kind`, `confirmed`, `disputed`, `reason`, `run_id`, `pairs_sha256`. A run id (`--run-id`, or a hash of the inputs) is logged once, so re-running the same check appends nothing. The record's `promotion_eligibility` evaluates the criterion over the log.
+`fidelity-calibration.jsonl` starts with a header line `{ "header": true, "promotion": ... }` holding the promotion criterion, then one line per flagged pair: `kind`, `pair_id`, `tiers`, `drift_kind`, `confirmed`, `disputed`, `reason`, `run_id`, `pairs_sha256`. A run id (`--run-id`, or a hash of the inputs) is logged once, so re-running the same check appends nothing. The record's `promotion_eligibility` evaluates the criterion over the log, counting report-level false blocks over the last `false_block_window` runs.

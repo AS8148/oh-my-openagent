@@ -4,6 +4,9 @@ import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 
+import { PROMOTION } from "./fact-commands-meaning.mjs"
+import { PAIR_KINDS } from "./fact-pairs.mjs"
+import { VERDICT_SCHEMA } from "./meaning-check.mjs"
 import { COMMANDS, run } from "./report-tools.mjs"
 
 const SCRIPT = join(import.meta.dir, "report-tools.mjs")
@@ -374,6 +377,8 @@ describe("meaning verifier under node", () => {
 			["P2", "quote", ["Q1"]],
 		])
 		expect(written.pairs_sha256).toMatch(/^[0-9a-f]{64}$/)
+		expect(Object.keys(written.counts).filter((key) => key !== "total" && key !== "force_strong")).toEqual([...PAIR_KINDS])
+		expect(written.verdict_schema).toEqual(JSON.parse(JSON.stringify(VERDICT_SCHEMA)))
 	})
 
 	test("#given cheap and strong verdicts agreeing on hedge_dropped #when meaning-check runs #then it exits 1 with one confirmed defect and one calibration line", () => {
@@ -388,6 +393,8 @@ describe("meaning verifier under node", () => {
 		expect(codesOf(record)).toEqual(["meaning_drift_confirmed"])
 		expect(calibrationRows(dir)).toHaveLength(1)
 		expect(calibrationRows(dir)[0]).toMatchObject({ pair_id: "P2", drift_kind: "hedge_dropped", confirmed: true, disputed: false })
+		const header = JSON.parse(readFileSync(join(dir, "fidelity-calibration.jsonl"), "utf8").split("\n")[0])
+		expect(header.promotion).toEqual({ ...PROMOTION })
 		const again = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), "--verdicts", cheap, "--verdicts", strong, ...s])
 		expect(again.code).toBe(1)
 		expect(calibrationRows(dir)).toHaveLength(1)
@@ -396,21 +403,35 @@ describe("meaning verifier under node", () => {
 	test("#given a dispute on the confirmed pair #when meaning-check runs #then the defect stays and the calibration line is disputed", () => {
 		const { dir, s } = pairedSession()
 		const drift = { pair_id: "P2", verdict: "drift", drift_kind: "hedge_dropped", fragment: "no earlier than 2027", source_fragment: "we estimate" }
-		const files = ["--verdicts", verdicts(dir, "cheap.json", "cheap", [drift]), "--verdicts", verdicts(dir, "strong.json", "strong", [drift])]
+		const files = ["--verdicts", verdicts(dir, "cheap.json", "cheap", [drift, { pair_id: "P1", verdict: "ok" }]), "--verdicts", verdicts(dir, "strong.json", "strong", [drift])]
 		const checked = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), ...files, "--dispute", "P2", "--reason", "the operator states it", ...s])
 		expect(checked.code).toBe(1)
 		expect(codesOf(checked.json)).toEqual(["meaning_drift_confirmed"])
 		expect(calibrationRows(dir)[0]).toMatchObject({ pair_id: "P2", disputed: true, reason: "the operator states it" })
 	})
 
-	test("#given a verdict whose fragment is not in the sentence #when meaning-check runs #then no defect and stderr JSON counts one dropped verdict", () => {
+	test("#given a dropped verdict and an unread pair #when meaning-check runs #then both pairs are meaning_unverified and it exits 1", () => {
 		const { dir, s } = pairedSession()
 		const cheap = verdicts(dir, "cheap.json", "cheap", [{ pair_id: "P2", verdict: "drift", drift_kind: "hedge_dropped", fragment: "certainly by 2027", source_fragment: "we estimate" }])
 		const checked = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), "--verdicts", cheap, ...s])
 		const summary = JSON.parse(checked.stderr.trim().split("\n").at(-1) ?? "{}")
-		expect(checked.code).toBe(0)
-		expect(codesOf(checked.json)).toEqual([])
-		expect(summary).toMatchObject({ command: "fact meaning-check", defects: 0, dropped: 1 })
+		expect(checked.code).toBe(1)
+		expect(checked.json.status).toBe("fail")
+		expect(codesOf(checked.json)).toEqual(["meaning_unverified", "meaning_unverified"])
+		expect(checked.json.unverified.map((gap: { pair_id: string }) => gap.pair_id)).toEqual(["P1", "P2"])
+		expect(summary).toMatchObject({ command: "fact meaning-check", defects: 2, dropped: 1, unverified: 2 })
+	})
+
+	test("#given an unreadable verdict file or a malformed pairs file #when meaning-check runs #then it exits 2", () => {
+		const { dir, s } = pairedSession()
+		const broken = join(dir, "broken.json")
+		writeFileSync(broken, "{ not json")
+		expect(nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), "--verdicts", broken, ...s]).code).toBe(2)
+		const ok = verdicts(dir, "cheap.json", "cheap", [])
+		for (const body of ["{}", "null", '{ "pairs": "P1" }']) {
+			writeFileSync(join(dir, "bad-pairs.json"), body)
+			expect(nodeJson(["fact", "meaning-check", "--pairs", join(dir, "bad-pairs.json"), "--verdicts", ok, ...s]).code, body).toBe(2)
+		}
 	})
 
 	test("#given a brief with meaning check off #when fact pairs runs #then it exits 0 and writes skipped", () => {
@@ -452,6 +473,16 @@ describe("markdown editions under node", () => {
 		const typed = verify(dir, "typed.md", ["--format", "md"])
 		expect(typed.code).toBe(1)
 		expect(codesOf(typed.json)).toContain("untraceable_number")
+	})
+
+	test("#given a filled markdown edition with an unterminated fence #when verified or paired #then both refuse with exit 2", () => {
+		const { dir, s } = mdSession()
+		writeFileSync(join(dir, "fence.md"), `${readFileSync(join(dir, "report.md"), "utf8")}\n\`\`\`\nunclosed code\n`)
+		copyFileSync(join(dir, "report.md.fill-map.json"), join(dir, "fence.md.fill-map.json"))
+		const checked = verify(dir, "fence.md", ["--format", "md"])
+		expect(checked.code).toBe(2)
+		expect(checked.stderr).toContain("unterminated_fence")
+		expect(nodeJson(["fact", "pairs", join(dir, "fence.md"), "--out", join(dir, "pairs.json"), ...s]).code).toBe(2)
 	})
 
 	test("#given a filled markdown edition #when fact pairs runs on it #then it pairs the same quotes as the html edition", () => {

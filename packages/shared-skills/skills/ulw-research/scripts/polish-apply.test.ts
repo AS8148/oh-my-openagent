@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
-import { renderValueHtml } from "./placeholder.mjs"
-import { applyEdits } from "./polish-apply.mjs"
+import { FACT_ELEMENT_TAGS, renderBlockquote, renderQuote, renderValueHtml } from "./placeholder.mjs"
+import { applyEdits, cutSpan, POLISH_EDIT_FIELDS, project, validatePolishEdits } from "./polish-apply.mjs"
+import { diffPolish } from "./polish-diff.mjs"
 
 type Row = { fact_id: string; kind: string; quote: string; raw: string; value: string; unit: string | null; qualifier: string | null }
 const row = (fact_id: string, quote: string, raw: string, value: string, unit: string | null, qualifier: string | null = null): Row => ({
@@ -151,5 +152,106 @@ describe("applyEdits: links and location", () => {
 		expect(result.applied).toEqual([1])
 		expect(result.rejected.map((item: { index: number }) => item.index)).toEqual([0])
 		expect(result.out).toBe(doc(`<p>Revenue was about ${f(REVENUE)}.</p><p>Results clearly improve [S1].</p>`))
+	})
+})
+
+describe("applyEdits: rendered visibility (review #11152 round 1)", () => {
+	const html = doc(`<p>The span is ${f(SPAN)} [S1].</p>`)
+	const hide = (after: string) => applyEdits(html, [edit(f(SPAN), after)], LEDGER)
+	test.each([
+		["an HTML comment", `<!-- ${f(SPAN)} -->`],
+		["a hidden attribute", `<span hidden>${f(SPAN)}</span>`],
+		["display:none", `<span style="display: none">${f(SPAN)}</span>`],
+		["visibility:hidden", `<span style="visibility:hidden">${f(SPAN)}</span>`],
+		["font-size:0", `<span style="font-size:0px">${f(SPAN)}</span>`],
+		["aria-hidden", `<span aria-hidden="true">${f(SPAN)}</span>`],
+		["a template", `<template>${f(SPAN)}</template>`],
+		["an unclosed hidden wrapper", `<div hidden>${f(SPAN)}`],
+	])("a fact span wrapped in %s is rejected and leaves the document unchanged", (_label, after) => {
+		const result = hide(after)
+		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
+		expect(result.rejected[0].reason).toContain("fact spans")
+		expect(result.out).toBe(html)
+	})
+
+	test("a data-claim span moved into a comment is rejected", () => {
+		const claim = doc('<p><span data-claim="C1">Results improve</span> [S1].</p>')
+		const before = '<span data-claim="C1">Results improve</span>'
+		expect(codes(applyEdits(claim, [edit(before, `<!-- ${before} -->Results improve`)], LEDGER).rejected)).toEqual(["polish_edit_rejected"])
+	})
+
+	test("a hedge hidden with a hidden attribute is rejected", () => {
+		const claim = doc("<p>Results may improve [S1].</p>")
+		const result = applyEdits(claim, [edit("Results may improve", "Results <span hidden>may</span> improve")], LEDGER)
+		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
+		expect(result.rejected[0].reason).toContain("may")
+	})
+})
+
+describe("applyEdits: the same rules as diffPolish (review #11152 round 1)", () => {
+	test("adding a ticker is rejected", () => {
+		const result = applyEdits(doc("<p>The firm reported growth [S1].</p>"), [edit("The firm reported", "AAPL reported")], LEDGER)
+		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
+		expect(result.rejected[0].reason).toContain("tickers")
+	})
+
+	test("renaming an id that an internal link targets is rejected", () => {
+		const html = doc('<h2 id="s1">Method</h2><p><a href="#s1">Method</a> [S1].</p>')
+		const result = applyEdits(html, [edit('id="s1"', 'id="s2"')], LEDGER)
+		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
+		expect(result.rejected[0].reason).toContain("#s1")
+	})
+
+	test("dropping a table row is rejected", () => {
+		const html = doc("<table><tr><td>A</td></tr><tr><td>B</td></tr></table>")
+		expect(codes(applyEdits(html, [edit("<tr><td>B</td></tr>", "")], LEDGER).rejected)).toEqual(["polish_edit_rejected"])
+	})
+
+	test("cross-edit interaction: cumulative churn passes each edit and is caught only by diffPolish", () => {
+		const html = doc("<p>Alpha beta gamma. Delta epsilon zeta. Eta theta iota. Kappa lambda mu.</p>")
+		const edits = [edit("Alpha beta gamma.", "Nu xi omicron."), edit("Delta epsilon zeta.", "Rho sigma tau."), edit("Eta theta iota.", "Phi chi psi.")]
+		const result = applyEdits(html, edits, LEDGER)
+		expect(result.applied).toEqual([0, 1, 2])
+		expect(codes(diffPolish(html, result.out, LEDGER))).toEqual(["polish_text_churn"])
+	})
+})
+
+describe("polish fact spans come from the placeholder renderers (duplication sweep)", () => {
+	const source = { ...SPAN, source_id: "S1", entity: null, valid_at: null }
+	const rendered = [renderValueHtml(source, source.raw), renderQuote(source, "p:nth-of-type(1)", source.quote, "html"), renderBlockquote(source, "k1", "html")]
+
+	test("the renderers emit exactly the FACT_ELEMENT_TAGS elements", () => {
+		expect(rendered.map((html) => html.match(/^<([a-z]+)/)?.[1]).sort()).toEqual([...FACT_ELEMENT_TAGS].sort())
+	})
+
+	test.each(rendered.map((html) => [html.match(/^<([a-z]+)/)?.[1], html]))("project and cutSpan recognize a rendered <%s>", (_tag, html) => {
+		const markup = `<p>Before ${html} after.</p>`
+		expect(project(markup).facts.map((fact: { id: string }) => fact.id)).toEqual(["F2"])
+		const at = markup.indexOf(html)
+		expect(cutSpan(markup, at + 3, at + html.length + 2)).toBe("F2")
+		expect(cutSpan(markup, at, at + html.length)).toBeNull()
+	})
+})
+
+describe("validatePolishEdits: the edit contract (duplication sweep)", () => {
+	test("the contract names before and after as required and reason as optional", () => {
+		expect(POLISH_EDIT_FIELDS).toEqual({ before: "required", after: "required", reason: "optional" })
+	})
+
+	test.each([
+		["a non-array", { before: "a", after: "b" }, "array"],
+		["a null entry", [null], "edit 0"],
+		["a non-string before", [{ before: 1, after: "b" }], "before"],
+		["a missing after", [{ before: "a" }], "after"],
+		["a non-string reason", [{ before: "a", after: "b", reason: 3 }], "reason"],
+	])("%s is refused with a TypeError, by the validator and by applyEdits alike", (_label, edits, word) => {
+		expect(() => validatePolishEdits(edits)).toThrow(TypeError)
+		expect(() => validatePolishEdits(edits)).toThrow(word)
+		expect(() => applyEdits("<p>a</p>", edits as never, LEDGER)).toThrow(word)
+	})
+
+	test("an edit without a reason is valid", () => {
+		const edits = [{ before: "a", after: "b" }]
+		expect(validatePolishEdits(edits)).toBe(edits)
 	})
 })
