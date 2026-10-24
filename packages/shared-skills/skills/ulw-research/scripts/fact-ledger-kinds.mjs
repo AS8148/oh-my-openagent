@@ -8,6 +8,7 @@ import { isCliEntry } from "./entry-guard.mjs"
 import { canonicalUnit, inputScale, RuleError } from "./unit-algebra.mjs"
 import { metadataErrors } from "./unit-metadata.mjs"
 import { mul } from "./rational.mjs"
+import { placesOf, roundPlaces, toBig } from "./unit-precision.mjs"
 import { OPERATION_RULES } from "./unit-rules.mjs"
 
 export const DECIMAL = /^-?\d+(?:\.\d+)?$/
@@ -127,9 +128,11 @@ export const isLegacyDerived = (row) => isObject(row) && DERIVED_KINDS.includes(
 /** A derived or converted row carrying this version's columns: the only rows checked strictly at read time. */
 export const isCurrentDerived = (row) => isObject(row) && DERIVED_KINDS.includes(row.kind) && !isLegacyDerived(row)
 
+/** An exact carrying keys beyond num and den: never normalized, never silently stripped, flagged on use. */
+export const hasUnknownExactKeys = (exact) => isObject(exact) && isString(exact.num) && isString(exact.den) && Object.keys(exact).sort().join(",") !== "den,num"
 /** Any integer pair dev's writer accepted, reduced: sign on num, no leading zeros, gcd 1; anything else as given. */
 function readExact(exact) {
-	if (!isObject(exact) || !isString(exact.num) || !isString(exact.den) || !INTEGER.test(exact.num) || !/^\d+$/.test(exact.den) || /^0+$/.test(exact.den)) return exact
+	if (!isObject(exact) || hasUnknownExactKeys(exact) || !isString(exact.num) || !isString(exact.den) || !INTEGER.test(exact.num) || !/^\d+$/.test(exact.den) || /^0+$/.test(exact.den)) return exact
 	const { num, den } = mul({ num: BigInt(exact.num), den: BigInt(exact.den) }, 1n)
 	return { num: String(num), den: String(den) }
 }
@@ -162,6 +165,14 @@ export function readRow(row) {
 }
 
 const carriesDerivation = (row) => row.operation !== null || row.operands?.length || row.derived_from?.length || row.formula !== null || row.factor !== null
+
+/** Dimension 32: a stored exact must equal the row's own value at the value's decimal places. */
+function valueExactDisagreement(row) {
+	const exact = readExact(row.exact)
+	const value = readDecimal(row.value)
+	if (!isRational(exact) || !isDecimal(value) || roundPlaces(toBig(exact), placesOf(value)) === value) return null
+	return `value ${value} disagrees with exact ${exact.num}/${exact.den} at ${placesOf(value)} decimal places`
+}
 function unitFlaw(unit) {
 	try {
 		return isString(unit) && (canonicalUnit(unit) !== unit || inputScale(unit)) ? `unit ${unit} has no canonical stored text` : null
@@ -183,6 +194,10 @@ export function readFlaws(row) {
 	const unit = unitFlaw(row.unit)
 	if (unit) flaws.push({ shape: "dimension 6", detail: unit, expected: "a registered or canonical unit without scale" })
 	for (const detail of metadataErrors(row)) flaws.push({ shape: "dimension 18", detail, expected: "present, type-valid metadata; explicit null when unknown" })
+	const unknownKeys = hasUnknownExactKeys(row.exact)
+	const disagreement = unknownKeys ? null : valueExactDisagreement(row)
+	if (unknownKeys) flaws.push({ shape: "dimension 7", detail: `exact has unknown keys: ${Object.keys(row.exact).filter((key) => key !== "num" && key !== "den").join(", ")}`, expected: "an exact with exactly num and den (the stored row is kept as written)" })
+	if (disagreement) flaws.push({ shape: "dimension 32", detail: disagreement, expected: "an exact equal to value at the value's decimal places" })
 	return flaws
 }
 
@@ -196,6 +211,8 @@ export function kindRuleErrors(candidate, at) {
 	for (const column of columns) {
 		const value = candidate[column] === undefined && LATER_COLUMNS.includes(column) ? null : candidate[column]
 		const rule = RULES[legacy && column === "exact" ? "rational_or_null" : rules[column]]
+		// An exact with unknown keys loads as written (never stripped); readFlaws refuses it at use and at write.
+		if (column === "exact" && hasUnknownExactKeys(value) && !isCurrentDerived(candidate)) continue
 		if (rule.test(value, candidate)) continue
 		errors.push(`${at}.${column} must be ${rule.says} for a ${candidate.kind} row`)
 		if (rule.detail) errors.push(...rule.detail(value, `${at}.${column}`))

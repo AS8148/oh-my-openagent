@@ -1,5 +1,5 @@
 import { describe, expect, onTestFinished, test } from "bun:test"
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -38,7 +38,7 @@ describe("ledgers written by dev's writer (dimension 31 wins at read time)", () 
 		const { ledger } = loaded()
 		expect(["F1", "F3", "F4", "F5", "F6", "F8", "F11"].map((id) => rowOf(ledger, id).unit)).toEqual(["km", "%", "%p", "person", "KRW-e3", "%", "km"])
 		const exacts = Object.fromEntries(["F10", "F11", "F12", "F13", "F14", "F15", "F18"].map((id) => [id, rowOf(ledger, id).exact]))
-		expect(exacts).toEqual({ F10: { num: "1", den: "1" }, F11: { num: "5", den: "2" }, F12: { num: "7", den: "1" }, F13: { num: "-5", den: "2" }, F14: { num: "41", den: "2" }, F15: { num: "12000", den: "1" }, F18: { num: "3", den: "1" } })
+		expect(exacts).toEqual({ F10: { num: "1", den: "1" }, F11: { num: "5", den: "2" }, F12: { num: "7", den: "1" }, F13: { num: "-5", den: "2" }, F14: { num: "41", den: "2" }, F15: { num: "12000", den: "1" }, F18: { num: "3", den: "1", note: "from the brief" } })
 		expect(rowOf(ledger, "F7").value).toBe("7")
 		for (const id of SOURCE_IDS) {
 			for (const column of ["context", "precision", "compatibility"]) expect(rowOf(ledger, id)[column]).toBeNull()
@@ -131,5 +131,30 @@ describe("ledgers written by dev's writer (dimension 31 wins at read time)", () 
 		writeLedger(dir, readLedger(dir))
 		expect(readFileSync(join(dir, LEDGER_FILENAME), "utf8")).toBe(first)
 		expect(readLedger(dir)).toEqual(JSON.parse(first))
+	})
+
+	test("#given a legacy exact with an unknown key #when read and written #then the key survives and the row is refused as an operand", () => {
+		const { dir, ledger } = loaded()
+		writeLedger(dir, ledger)
+		const written = JSON.parse(readFileSync(join(dir, LEDGER_FILENAME), "utf8")) as Ledger
+		expect(rowOf(written, "F18").exact).toEqual({ num: "3", den: "1", note: "from the brief" })
+		const result = derive(ledger, { op: "sum", operands: ["F18", "F2"], unit: "km" })
+		expect(result.error).toBe("incompatible_operands")
+		expect(result.shape).toBe("dimension 7")
+		expect(recompute(ledger, rowOf(ledger, "F18")).ok).toBe(false)
+	})
+
+	test("#given an assumed row whose value and exact disagree #when read #then it loads flagged and a new row is refused (dimension 32)", () => {
+		const dir = tempDir()
+		const seed = fixture()
+		const mismatched = { ...rowOf(seed, "F11"), fact_id: "F19", label: "mismatched-exact", unit: "km", value: "1.5", exact: { num: "3", den: "1" } }
+		seed.rows.push(mismatched)
+		writeFileSync(join(dir, LEDGER_FILENAME), JSON.stringify(seed))
+		const ledger = readLedger(dir) as Ledger
+		expect(rowOf(ledger, "F19").value).toBe("1.5")
+		const result = derive(ledger, { op: "sum", operands: ["F19", "F2"], unit: "km" })
+		expect(result.error).toBe("incompatible_operands")
+		expect(result.shape).toBe("dimension 32")
+		expect(() => addRow(ledger, { ...mismatched, fact_id: undefined, label: "mismatch-new" })).toThrow("dimension 32")
 	})
 })
