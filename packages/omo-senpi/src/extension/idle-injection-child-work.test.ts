@@ -228,3 +228,53 @@ describe("delivery receipts are isolated from each other (#10782)", () => {
     expect(reported.map((error) => (error as Error).message)).toEqual(["receipt failed"])
   })
 })
+
+// #11123 review: retire() must isolate receipts as #flush does, a thenable whose then() throws must still settle,
+// and a receipt error that is not rethrown must be reported, never dropped.
+describe("receipts on retire and on a broken thenable (#10782)", () => {
+  it("#given two queued injections #when retire() and the first failure receipt throws #then the second still gets its receipt", () => {
+    const failed: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => undefined, { scheduleFlush: () => undefined })
+    coordinator.enqueue({ ...completion("task:st_15"), onDeliveryFailed: () => { throw new Error("first receipt failed") } })
+    coordinator.enqueue({ ...completion("task:st_16"), onDeliveryFailed: () => failed.push("task:st_16") })
+
+    expect(() => coordinator.retire()).toThrow("first receipt failed")
+    expect(failed).toEqual(["task:st_16"])
+  })
+
+  it("#given a thenable whose then() throws #when it is delivered #then the failure receipt fires and the count settles", () => {
+    const counts: number[] = []
+    const failed: string[] = []
+    const broken = { then: () => { throw new Error("then failed") } }
+    const coordinator = new IdleInjectionCoordinator(() => broken as unknown as Promise<void>, { onChildWorkChange: (count) => counts.push(count) })
+    coordinator.enqueue({ ...completion("task:st_17"), onDeliveryFailed: () => failed.push("task:st_17") })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("then failed")
+    expect(failed).toEqual(["task:st_17"])
+    expect(counts).toEqual([1, 0])
+  })
+
+  it("#given a sync delivery throw #when two receipts also throw #then both receipt errors are reported, not dropped", () => {
+    const reported: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => { throw new Error("delivery failed") }, {
+      onReceiptError: (error) => reported.push((error as Error).message),
+    })
+    coordinator.enqueue({ ...completion("task:st_18"), onDeliveryFailed: () => { throw new Error("receipt one") } })
+    coordinator.enqueue({ ...completion("task:st_19"), onDeliveryFailed: () => { throw new Error("receipt two") } })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("delivery failed")
+    expect(reported).toEqual(["receipt one", "receipt two"])
+  })
+
+  it("#given a successful sync delivery #when two receipts throw #then the first is rethrown and the second is reported", () => {
+    const reported: string[] = []
+    const coordinator = new IdleInjectionCoordinator(() => undefined, {
+      onReceiptError: (error) => reported.push((error as Error).message),
+    })
+    coordinator.enqueue({ ...completion("task:st_20"), onFlushed: () => { throw new Error("receipt one") } })
+    coordinator.enqueue({ ...completion("task:st_21"), onFlushed: () => { throw new Error("receipt two") } })
+
+    expect(() => coordinator.flushOnIdle()).toThrow("receipt one")
+    expect(reported).toEqual(["receipt two"])
+  })
+})
