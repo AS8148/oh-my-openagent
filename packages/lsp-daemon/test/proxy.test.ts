@@ -61,13 +61,14 @@ describe("mcp stdio proxy", () => {
 			input: inputStream([
 				{ jsonrpc: "2.0", id: 1, method: "server/discover", params: { _meta } },
 				{ jsonrpc: "2.0", id: 2, method: "tools/call", params: { _meta, name: "status", arguments: {} } },
+				{ jsonrpc: "2.0", id: 3, method: "tools/list", params: { _meta } },
 			]),
 			output: collectingWritable(out),
 			paths,
 			ensure: noSpawn,
 		});
 		const responses = parseResponses(out);
-		expect(responses).toHaveLength(2);
+		expect(responses).toHaveLength(3);
 		for (const response of responses) {
 			expect(response["result"]).toMatchObject({
 				resultType: "complete",
@@ -75,6 +76,7 @@ describe("mcp stdio proxy", () => {
 			});
 		}
 		expect(responses[1]?.["result"]).toMatchObject({ isError: false });
+		expect(responses[2]?.["result"]).toMatchObject({ ttlMs: 0, cacheScope: "public" });
 	});
 
 	it("rejects unsupported tool-call versions before starting or contacting the daemon", async () => {

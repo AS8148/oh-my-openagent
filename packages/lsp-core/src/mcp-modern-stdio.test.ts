@@ -100,6 +100,7 @@ describe("LSP modern client over real stdio", () => {
 		expect(responses[0]?.result?.["tools"]).toEqual(
 			expect.arrayContaining([expect.objectContaining({ name: "status" })]),
 		);
+		expect(responses[0]?.result).toMatchObject({ ttlMs: 0, cacheScope: "public" });
 		expect(responses[1]?.result?.["isError"]).toBe(false);
 		expect(responses[2]?.result?.["isError"]).toBe(true);
 	});
@@ -130,6 +131,38 @@ describe("LSP modern client over real stdio", () => {
 		const [response] = await exchange([{ jsonrpc: "2.0", id: 1, method: "tools/list", params: { _meta } }]);
 		expect(response).toMatchObject({ id: 1, error: { code: -32602 } });
 	});
+
+	it.each([
+		{ method: "notifications/initialized", params: modernRequest(1, "notifications/initialized").params },
+		{ method: "tools/list", params: { _meta: { [versionKey]: "2026-07-28" } } },
+		{ method: "tools/list", params: modernRequest(1, "tools/list", {}, "2099-01-01").params },
+		{ method: "legacy/unknown" },
+		{ method: "tools/list" },
+		{ method: "tools/call", params: modernRequest(1, "tools/call", { name: "status", arguments: {} }).params },
+	])("never replies to an id-less notification %j", async (notification) => {
+		const responses = await exchange([
+			{ jsonrpc: "2.0", ...notification },
+			{ jsonrpc: "2.0", id: 0, method: "ping" },
+		]);
+		expect(responses).toEqual([{ jsonrpc: "2.0", id: 0, result: {} }]);
+	});
+
+	it.each(["2025-06-18", "2025-03-26", "2024-11-05"])(
+		"rejects legacy per-request metadata version %s without dispatch",
+		async (version) => {
+			const responses = await exchange([
+				modernRequest(1, "server/discover", {}, version),
+				modernRequest(2, "tools/list", {}, version),
+				modernRequest(3, "tools/call", { name: "status", arguments: {} }, version),
+			]);
+			expect(responses).toHaveLength(3);
+			for (const response of responses) {
+				expect(response).toMatchObject({
+					error: { code: -32022, data: { supported, requested: version } },
+				});
+			}
+		},
+	);
 
 	it.each(["2025-06-18", "2025-03-26", "2024-11-05"])(
 		"preserves the legacy initialize and tool-call flow for %s",

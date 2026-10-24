@@ -44,6 +44,7 @@ export async function handleLspMcpRequest(
 	if (!isPlainRecord(input)) {
 		return errorResponse(null, -32600, "Invalid Request");
 	}
+	if (typeof input["method"] === "string" && !Object.hasOwn(input, "id")) return undefined;
 
 	const id = jsonRpcId(input["id"]);
 	const method = input["method"];
@@ -57,7 +58,7 @@ export async function handleLspMcpRequest(
 		if (typeof version !== "string" || !isPlainRecord(meta?.[CAPABILITIES_META_KEY])) {
 			return errorResponse(id, -32602, "Protocol version and client capabilities are required in params._meta");
 		}
-		if (!SUPPORTED_VERSIONS.includes(version)) {
+		if (version !== MODERN_PROTOCOL_VERSION) {
 			return errorResponse(id, -32022, "Unsupported protocol version", {
 				supported: SUPPORTED_VERSIONS,
 				requested: version,
@@ -99,7 +100,8 @@ export async function handleLspMcpRequest(
 	}
 
 	if (method === "tools/list") {
-		return respond({ tools: LSP_MCP_TOOLS.map(describeTool) });
+		const tools = LSP_MCP_TOOLS.map(describeTool);
+		return respond(modern ? { tools, ttlMs: 0, cacheScope: "public" } : { tools });
 	}
 
 	if (method === "tools/call") {
