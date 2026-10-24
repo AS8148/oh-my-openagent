@@ -648,6 +648,11 @@ jobs:
         if: needs.ci-mode.outputs.run_heavy == 'true'
         run: bun run lint
 
+      # Keep this check until dev requires the standalone Lint ratchet status.
+      - name: Lint ratchet
+        if: needs.ci-mode.outputs.run_heavy == 'true'
+        run: bun run lint:ratchet
+
       - name: Write job summary
         if: always()
         shell: bash
@@ -1207,7 +1212,7 @@ jobs:
   auto-commit-schema:
     # Pin until this release/deploy path is proven on Ubuntu 26.04: #9947.
     runs-on: ubuntu-24.04
-    needs: [ci-mode, test, macos-test-1-status, macos-test-2-status, typecheck, codex-compatibility, macos-codex-status, senpi-compatibility, macos-senpi-status, build, omo-ai-payload-check]
+    needs: [ci-mode, lint-ratchet, test, macos-test-1-status, macos-test-2-status, typecheck, codex-compatibility, macos-codex-status, senpi-compatibility, macos-senpi-status, build, omo-ai-payload-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     permissions:
       contents: write
@@ -1258,7 +1263,7 @@ jobs:
   draft-release:
     # Pin until this release/deploy path is proven on Ubuntu 26.04: #9948.
     runs-on: ubuntu-24.04
-    needs: [ci-mode, test, macos-test-1-status, macos-test-2-status, typecheck, codex-compatibility, macos-codex-status, senpi-compatibility, macos-senpi-status, build, omo-ai-payload-check]
+    needs: [ci-mode, lint-ratchet, test, macos-test-1-status, macos-test-2-status, typecheck, codex-compatibility, macos-codex-status, senpi-compatibility, macos-senpi-status, build, omo-ai-payload-check]
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/dev' &&
