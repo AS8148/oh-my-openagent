@@ -24,62 +24,85 @@ function tokenize(formula) {
 	return tokens
 }
 
-/** Recursive descent over + - * /, parentheses, and pct(...). */
+/** Shunting-yard parser: parentheses and AST depth do not consume the JS call stack. */
 export function parseExpr(formula) {
+	if (typeof formula !== "string") refuse("expr needs an expression")
 	const tokens = tokenize(formula)
-	let index = 0
-	const group = () => {
-		if (tokens[index++]?.op !== "(") refuse("pct needs a parenthesized argument")
-		const inner = sum()
-		if (tokens[index++]?.op !== ")") refuse("the expression is missing a closing parenthesis")
-		return inner
+	const values = []
+	const ops = []
+	const precedence = (op) => op === "*" || op === "/" ? 2 : 1
+	const reduce = () => {
+		const op = ops.pop()
+		if (op === "pct") values.push({ fn: op, arg: values.pop() })
+		else { const right = values.pop(); values.push({ op, left: values.pop(), right }) }
 	}
-	const primary = () => {
-		const token = tokens[index]
-		if (!token) refuse("the expression ends early")
-		if (token.id || token.literal) return tokens[index++]
-		if (token.fn) {
-			index++
-			return { fn: token.fn, arg: group() }
-		}
-		if (token.op !== "(") refuse(`unexpected "${token.op}" in the expression`)
-		return group()
+	let need = true
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i]
+		if (need) {
+			if (token.id || token.literal) { values.push(token); need = false }
+			else if (token.fn) {
+				if (tokens[i + 1]?.op !== "(") refuse("pct needs a parenthesized argument")
+				ops.push("pct")
+			} else if (token.op === "(") ops.push("(")
+			else refuse(`unexpected "${token.op}" in the expression`)
+		} else if (token.op === ")") {
+			while (ops.length && ops.at(-1) !== "(") reduce()
+			if (ops.pop() !== "(") refuse("unexpected closing parenthesis")
+			if (ops.at(-1) === "pct") reduce()
+		} else if (["+", "-", "*", "/"].includes(token.op)) {
+			while (ops.length && ops.at(-1) !== "(" && precedence(ops.at(-1)) >= precedence(token.op)) reduce()
+			ops.push(token.op)
+			need = true
+		} else refuse("unexpected text after the expression")
 	}
-	const binary = (next, ops) => () => {
-		let left = next()
-		while (ops.includes(tokens[index]?.op)) {
-			const op = tokens[index++].op
-			left = { op, left, right: next() }
-		}
-		return left
-	}
-	const product = binary(primary, ["*", "/"])
-	const sum = binary(product, ["+", "-"])
-	const ast = sum()
-	if (index < tokens.length) refuse("unexpected text after the expression")
-	return ast
+	if (need) refuse("the expression ends early")
+	if (ops.includes("(")) refuse("the expression is missing a closing parenthesis")
+	while (ops.length) reduce()
+	return values[0]
 }
 
 const childrenOf = (node) => (node.op ? [node.left, node.right] : node.fn ? [node.arg] : [])
 
 export function leaves(node, found = { ids: [], literals: [] }) {
-	if (node.id && !found.ids.includes(node.id)) found.ids.push(node.id)
-	if (node.literal) found.literals.push(node.literal)
-	for (const child of childrenOf(node)) leaves(child, found)
+	const ids = new Set(found.ids)
+	const stack = [node]
+	while (stack.length) {
+		const current = stack.pop()
+		if (current.id) ids.add(current.id)
+		if (current.literal) found.literals.push(current.literal)
+		stack.push(...childrenOf(current).reverse())
+	}
+	found.ids = [...ids]
 	return found
+}
+
+export function postorder(node) {
+	const stack = [node]
+	const order = []
+	while (stack.length) { const current = stack.pop(); order.push(current); stack.push(...childrenOf(current)) }
+	return order.reverse()
 }
 
 /** Exact value of the tree; `units` maps each node to its inferred canonical unit (inferExpr in unit-rules.mjs). */
 export function evaluate(node, values, units) {
-	if (node.id) return values.get(node.id)
-	if (node.literal) return fromDecimal(node.literal)
-	if (node.fn === "pct") return mul(evaluate(node.arg, values, units), HUNDRED)
-	const operand = (child) => {
-		const value = evaluate(child, values, units)
-		return (node.op === "*" || node.op === "/") && isPercentish(units.get(child)) ? div(value, HUNDRED) : value
+	const results = new Map()
+	for (const current of postorder(node)) {
+		let value
+		if (current.id) value = values.get(current.id)
+		else if (current.literal) value = fromDecimal(current.literal)
+		else if (current.fn === "pct") value = mul(results.get(current.arg), HUNDRED)
+		else {
+			const operand = (child) => {
+				const v = results.get(child)
+				return (current.op === "*" || current.op === "/") && isPercentish(units.get(child)) ? div(v, HUNDRED) : v
+			}
+			const left = operand(current.left)
+			const right = operand(current.right)
+			if (current.op === "/" && right.num === 0n) refuse("the expression divides by zero", undefined, "divides_by_zero", "a nonzero denominator")
+			value = { "+": add, "-": sub, "*": mul, "/": div }[current.op](left, right)
+		}
+		results.set(current, value)
 	}
-	const left = operand(node.left)
-	const right = operand(node.right)
-	if (node.op === "/" && right.num === 0n) refuse("the expression divides by zero")
-	return { "+": add, "-": sub, "*": mul, "/": div }[node.op](left, right)
+	return results.get(node)
 }

@@ -1,43 +1,82 @@
-// fact-recompute.mjs - the tamper detector for derived and converted fact rows.
-// recompute() checks the row's shape with the operation registry (unit-rules.mjs), verifies derived operands
-// recursively (a cycle is refused), re-derives the result unit with the same registry derive() uses, and repeats the
-// arithmetic, comparing unit text, exact, value, and render with no epsilon. A convert row is checked against its
-// persisted context.target, never against its own `unit`. It never throws: a malformed row is ok:false with a detail.
-
-import { compute, lookup } from "./fact-derive.mjs"
+// Iterative postorder verifier: one snapshot and one arithmetic evaluation per reachable node.
+import { compute } from "./fact-derive.mjs"
 import { parseExpr } from "./fact-expr.mjs"
-import { RuleError } from "./unit-algebra.mjs"
-import { expectedUnit, malformed, unitMismatch } from "./unit-rules.mjs"
+import { kindRuleErrors } from "./fact-ledger-kinds.mjs"
+import { rowErrors } from "./fact-ledger-schema.mjs"
+import { refuse } from "./unit-algebra.mjs"
+import { refusal } from "./unit-errors.mjs"
+import { object, sameDeclared } from "./unit-metadata.mjs"
+import { expectedUnit, malformed, ruleOf, unitMismatch } from "./unit-rules.mjs"
 
-const fail = (detail, expected = null) => ({ ok: false, expected, detail })
-const isDerived = (row) => row.operation !== null && row.operation !== undefined
+const derived = (row) => row.kind === "derived" || row.kind === "converted"
+const fail = (detail, shape, expected) => ({ ok: false, detail, shape, expected })
 
-function check(ledger, row, visiting) {
-	const shape = malformed(row)
-	if (shape) return fail(`${row?.fact_id}: ${shape}`)
-	if (visiting.has(row.fact_id)) return fail(`${row.fact_id}: operands form a cycle through ${[...visiting, row.fact_id].join(" -> ")}`)
-	const path = new Set([...visiting, row.fact_id])
-	try {
-		const rows = row.operands.map((id) => lookup(ledger, id, false))
-		for (const operand of rows.filter(isDerived)) {
-			const inner = check(ledger, operand, path)
-			if (!inner.ok) return fail(`${row.fact_id}: operand ${operand.fact_id} does not recompute: ${inner.detail ?? "its stored values differ"}`)
-		}
-		const ast = row.operation === "expr" ? parseExpr(row.formula) : null
-		const context = { ...(row.context ?? {}), rationale: row.rationale ?? null }
-		const unit = expectedUnit(row.operation, rows, { ast, context })
-		const result = compute(row.operation, rows, unit, ast, context)
-		const expected = { unit, exact: result.exact, value: result.value, render: result.render }
-		if (row.unit !== unit) return fail(`${row.fact_id}: ${unitMismatch(row.operation, rows, row.unit, unit)}`, expected)
-		const ok = result.exact.num === row.exact.num && result.exact.den === row.exact.den && result.value === row.value && result.render === row.render
-		return ok ? { ok, expected } : { ok, expected, detail: `${row.fact_id}: stored exact, value, or render differs from the recomputed result` }
-	} catch (error) {
-		if (error instanceof RuleError) return fail(`${row.fact_id}: ${error.detail}`)
-		return fail(`${row.fact_id}: malformed row: ${error instanceof Error ? error.message : String(error)}`)
+function verifyRow(row, rows) {
+	const rule = ruleOf(row.operation)
+	const ast = rule.expression ? parseExpr(row.formula) : null
+	const context = { ...row.context, rationale: row.rationale }
+	const unit = expectedUnit(row.operation, rows, { ast, context })
+	const expected = { unit, ...compute(row.operation, rows, unit, ast, context, row.formula), derived_from: rows.map((r) => r.fact_id) }
+	if (row.unit !== unit) return fail(`${row.fact_id}: ${unitMismatch(row.operation, rows, row.unit, unit)}`, "result_unit", expected)
+	for (const field of Object.keys(expected)) {
+		if (!sameDeclared(row[field], expected[field])) return fail(`${row.fact_id}: stored ${field} differs from the recomputed result`, `${field}_mismatch`, expected)
 	}
+	return { ok: true, expected }
 }
 
-/** Repeat a stored row's arithmetic; ok only when its unit follows from the operands and exact, value, and render match. */
+export function verifyGraph(ledger, roots, requireActive = false, override = null) {
+	try {
+		if (!object(ledger) || !Array.isArray(ledger.rows)) refuse("ledger rows must be an array")
+		const byId = new Map()
+		for (const r of ledger.rows) {
+			if (!object(r) || typeof r.fact_id !== "string" || byId.has(r.fact_id)) refuse("ledger rows need distinct fact ids", undefined, "identity", "distinct fact ids")
+			byId.set(r.fact_id, r)
+		}
+		if (override) byId.set(override.fact_id, override)
+		const states = new Map()
+		const snapshots = new Map()
+		const results = new Map()
+		const stack = roots.map((id) => ({ id, finish: false }))
+		while (stack.length) {
+			const { id, finish } = stack.pop()
+			if (states.get(id) === "done") continue
+			if (!finish) {
+				if (states.get(id) === "open") refuse(`${id}: operands form a cycle`, undefined, "cycle", "an acyclic dependency graph")
+				const original = byId.get(id)
+				if (!original) refuse(`no ledger row ${id}`, undefined, "missing_operand", "an existing fact id")
+				const row = { ...original }
+				snapshots.set(id, row)
+				if (requireActive && row.status !== "active") refuse(`${id} is ${row.status}`, undefined, "inactive_dependency", "active dependencies at every depth")
+				if (derived(row)) {
+					const shape = malformed(row)
+					if (shape) refuse(`${id}: ${shape}`, undefined, "malformed_row", "the operation's registry row shape")
+				}
+				const errors = derived(row) ? kindRuleErrors(row, id) : rowErrors(row)
+				if (errors.length) refuse(errors.join("; "), undefined, "row_schema", "a canonical row matching its kind and operation")
+				if (row.exact === null || row.value === null) refuse(`${id} has no exact value to derive from`)
+				states.set(id, "open")
+				stack.push({ id, finish: true })
+				if (derived(row)) for (const dependency of row.operands) stack.push({ id: dependency, finish: false })
+			} else {
+				const row = snapshots.get(id)
+				if (derived(row)) {
+					const result = verifyRow(row, row.operands.map((ref) => snapshots.get(ref)))
+					if (!result.ok) return result
+					const errors = rowErrors(row)
+					if (errors.length) refuse(errors.join("; "), undefined, "row_schema", "a complete canonical row")
+					results.set(id, result)
+				}
+				states.set(id, "done")
+			}
+		}
+		return results.get(roots[0]) ?? { ok: true }
+	} catch (error) { return { ok: false, ...refusal(error) } }
+}
+
 export function recompute(ledger, row) {
-	return check(ledger, row, new Set())
+	try {
+		const shape = malformed(row)
+		if (shape) refuse(shape, undefined, "malformed_row", "a valid derived or converted row")
+		return verifyGraph(ledger, [row.fact_id], false, row)
+	} catch (error) { return { ok: false, ...refusal(error) } }
 }

@@ -3,6 +3,8 @@
 // use and that expr's `-` and `+` nodes follow; inferExpr assigns a canonical unit to every node of an expr tree.
 
 import { isAffine, isPercentish, refuse, unitOver, unitTimes } from "./unit-algebra.mjs"
+import { postorder } from "./fact-expr.mjs"
+import { checkMetadata, propagatedMetadata } from "./unit-metadata.mjs"
 
 export const show = (unit) => JSON.stringify(unit ?? null)
 export const listed = (rows, units) => rows.map((row, index) => `${row.fact_id} ${units[index] ?? "null"}`).join(", ")
@@ -33,19 +35,20 @@ export function plusUnit(a, b, where) {
 }
 
 /** Unit of every node of an expr tree; refuses when a node's unit cannot be inferred. */
-export function inferExpr(ast, unitsById) {
+export function inferExpr(ast, unitsById, rowsById = null) {
 	const units = new Map()
-	const visit = (node) => {
+	const metadata = new Map()
+	for (const node of postorder(ast)) {
 		let unit
 		if (node.id) unit = unitsById.get(node.id)
 		else if (node.literal) unit = null
 		else if (node.fn === "pct") {
-			unit = visit(node.arg)
+			unit = units.get(node.arg)
 			if (unit !== null) refuse(`pct() takes a dimensionless value, got ${show(unit)}`)
 			unit = "%"
 		} else {
-			const left = visit(node.left)
-			const right = visit(node.right)
+			const left = units.get(node.left)
+			const right = units.get(node.right)
 			if (node.op === "+") unit = plusUnit(left, right, "expr")
 			else if (node.op === "-") unit = minusUnit(left, right, "expr")
 			else {
@@ -55,7 +58,15 @@ export function inferExpr(ast, unitsById) {
 			}
 		}
 		units.set(node, unit)
-		return unit
+		if (rowsById) {
+			const children = node.id ? [rowsById.get(node.id)] : node.literal ? [] : node.fn ? [metadata.get(node.arg)] : [metadata.get(node.left), metadata.get(node.right)]
+			const rows = children.filter(Boolean)
+			if (rows.length) {
+				const fields = node.op === "+" || node.op === "-" ? ["population", "snapshot_window", "accounting_basis"] : node.op === "/" ? ["population", "snapshot_window"] : []
+				checkMetadata(rows, fields)
+				metadata.set(node, { fact_id: "expression", ...propagatedMetadata(rows) })
+			}
+		}
 	}
-	return { unit: visit(ast), units }
+	return { unit: units.get(ast), units, metadata: metadata.get(ast) }
 }

@@ -65,7 +65,7 @@ for (const [token, dimension, factor, reading, aliases, offset] of TABLE) {
 	for (const alias of [token, ...aliases]) {
 		const key = squash(alias)
 		EXACT.set(key, entry)
-		if (key.length > 1 && /^[A-Za-z]+$/.test(key) && !WORD.has(key.toLowerCase())) WORD.set(key.toLowerCase(), entry)
+		if (alias !== token && key.length > 2 && /^[a-z]+$/.test(key) && !WORD.has(key.toLowerCase())) WORD.set(key.toLowerCase(), entry)
 	}
 }
 

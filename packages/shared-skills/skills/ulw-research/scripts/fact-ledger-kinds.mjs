@@ -5,6 +5,9 @@
 // Also the value primitives the schema shares. Pure functions with no IO; node: builtins only.
 
 import { isCliEntry } from "./entry-guard.mjs"
+import { canonicalUnit, inputScale } from "./unit-algebra.mjs"
+import { metadataErrors } from "./unit-metadata.mjs"
+import { OPERATION_RULES } from "./unit-rules.mjs"
 
 export const DECIMAL = /^-?\d+(?:\.\d+)?$/
 const INTEGER = /^-?\d+$/
@@ -16,7 +19,15 @@ export const isString = (value) => typeof value === "string"
 export const isNonEmpty = (value) => typeof value === "string" && value.length > 0
 export const isCount = (value) => Number.isInteger(value) && value >= 0
 const isDecimal = (value) => isString(value) && DECIMAL.test(value)
-const isRational = (exact) => isObject(exact) && isString(exact.num) && isString(exact.den) && INTEGER.test(exact.num) && /^\d+$/.test(exact.den) && !/^0+$/.test(exact.den)
+export function isRational(exact) {
+	if (!isObject(exact) || Object.keys(exact).sort().join(",") !== "den,num" || !isString(exact.num) || !isString(exact.den) || !INTEGER.test(exact.num) || !/^[1-9]\d*$/.test(exact.den)) return false
+	let a = BigInt(exact.num)
+	let b = BigInt(exact.den)
+	if (String(a) !== exact.num) return false
+	if (a < 0n) a = -a
+	while (b !== 0n) [a, b] = [b, a % b]
+	return a === 1n
+}
 
 /** The exact rational of a decimal string, reduced. */
 export function exactFromDecimal(value) {
@@ -72,23 +83,27 @@ export const RULES = Object.freeze({
 		test: (v, row) => isRational(v) && (!isDecimal(row.value) || (v.num === exactFromDecimal(row.value).num && v.den === exactFromDecimal(row.value).den)),
 	},
 	rational_or_null: { cell: "rational or null", says: "null or { num: integer string, den: positive integer string }", test: orNull(isRational) },
-	by_derive: { cell: "written by derive (rational or null)", says: "null or { num: integer string, den: positive integer string }", test: orNull(isRational) },
+	by_derive: { cell: "reduced rational", says: "a reduced { num: integer string, den: positive integer string }", test: isRational },
 	context_by_derive: { cell: "written by derive (object or null)", says: "null or an object", test: orNull(isObject) },
+	derived_operation: { cell: "sum/diff/growth/share/ratio/expr", says: "a derived operation", test: (v) => Object.hasOwn(OPERATION_RULES, v) && OPERATION_RULES[v].kind === "derived" },
+	convert_operation: { cell: "`convert`", says: "convert", test: (v) => Object.hasOwn(OPERATION_RULES, v) && OPERATION_RULES[v].kind === "converted" },
+	precision: { cell: "`{ places, sigfigs }`", says: "nonnegative places and positive sigfigs", test: (v) => isObject(v) && Object.keys(v).sort().join(",") === "places,sigfigs" && Number.isSafeInteger(v.places) && v.places >= 0 && Number.isSafeInteger(v.sigfigs) && v.sigfigs >= 1 },
+	compatibility: { cell: "checked or unchecked (expr)", says: "the operation's compatibility", test: (v, r) => Object.hasOwn(OPERATION_RULES, r.operation) && v === OPERATION_RULES[r.operation].compatibility },
 })
 
 /** The grammar's per-kind columns, in table order; `exact` follows `value` because it reads it. */
-export const KIND_COLUMNS = Object.freeze(["fact_id", "value", "source_id", "locator", "snapshot_sha256", "rationale", "exact", "context"])
+export const KIND_COLUMNS = Object.freeze(["fact_id", "value", "source_id", "locator", "snapshot_sha256", "rationale", "exact", "context", "operation", "precision", "compatibility"])
 
 const sourced = { source_id: "source", locator: "locator", snapshot_sha256: "sha256" }
 const unsourced = { source_id: "source_or_null", locator: "locator_or_null", snapshot_sha256: "sha256_or_null" }
-const row = (cells) => Object.freeze(Object.fromEntries(KIND_COLUMNS.map((column) => [column, cells[column]])))
+const row = (cells) => Object.freeze(Object.fromEntries(KIND_COLUMNS.map((column) => [column, cells[column] ?? (["precision", "compatibility"].includes(column) && cells.operation !== "null" ? column : "null")])))
 
 export const KIND_RULES = Object.freeze({
-	measured: row({ fact_id: "f_id", value: "decimal", ...sourced, rationale: "string_or_null", exact: "from_value", context: "null" }),
-	quote: row({ fact_id: "q_id", value: "null", ...sourced, rationale: "string_or_null", exact: "null", context: "null" }),
-	derived: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "string_or_null", exact: "by_derive", context: "context_by_derive" }),
-	assumed: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "non_empty", exact: "rational_or_null", context: "null" }),
-	converted: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "string_or_null", exact: "by_derive", context: "context_by_derive" }),
+	measured: row({ fact_id: "f_id", value: "decimal", ...sourced, rationale: "string_or_null", exact: "from_value", context: "null", operation: "null" }),
+	quote: row({ fact_id: "q_id", value: "null", ...sourced, rationale: "string_or_null", exact: "null", context: "null", operation: "null" }),
+	derived: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "string_or_null", exact: "by_derive", context: "context_by_derive", operation: "derived_operation" }),
+	assumed: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "non_empty", exact: "rational_or_null", context: "null", operation: "null" }),
+	converted: row({ fact_id: "f_id", value: "decimal", ...unsourced, rationale: "string_or_null", exact: "by_derive", context: "context_by_derive", operation: "convert_operation" }),
 })
 
 /** The id prefix nextId assigns for a kind; an unknown kind gets F and fails validation later. */
@@ -108,12 +123,20 @@ export function kindRuleErrors(candidate, at) {
 	const errors = []
 	for (const column of KIND_COLUMNS) {
 		const value = candidate[column]
-		if (value === undefined) continue
 		const rule = RULES[rules[column]]
 		if (rule.test(value, candidate)) continue
 		errors.push(`${at}.${column} must be ${rule.says} for a ${candidate.kind} row`)
 		if (rule.detail) errors.push(...rule.detail(value, `${at}.${column}`))
 	}
+	return errors
+}
+
+export function storedErrors(row) {
+	const errors = metadataErrors(row)
+	try {
+		if (canonicalUnit(row.unit) !== row.unit || inputScale(row.unit)) errors.push("unit must be canonical stored text")
+	} catch (error) { errors.push(error.message) }
+	if (!["derived", "converted"].includes(row.kind) && (row.operands?.length || row.derived_from?.length || row.formula !== null || row.factor !== null)) errors.push("source rows carry no derivation fields")
 	return errors
 }
 

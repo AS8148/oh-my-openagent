@@ -25,6 +25,7 @@ numeric guards may read `exact` values, unit selection may not. The property tes
   operand strings: equal factors cancel (`USD/(USD/person)` -> `person`).
 - Affine scales (temperature: `C`, `F`) are flagged in the unit table; sum/diff/growth/share/ratio and every expr
   node refuse them (temperatures are not summed or differenced as absolute values); only convert takes them.
+  Affine atoms in composites are refused before cancellation. Exponents are exact signed bigint integers, including zero.
 
 ## Operation table
 
@@ -77,22 +78,61 @@ Every row's malformed column also holds the two operand-identity shapes below (`
 Per-capita identity, named index/base and index-point differences, weighted means, dated FX / nominal-real bases,
 same-currency denomination scaling (M/B), summing ratios over a common base. Each needs its own table row + tests.
 
+## Dimensions
+
+1. Enforced: kind and operation agree; a changed discriminator cannot disable recursive verification.
+2. Enforced: expression and direct arithmetic check population, snapshot, and accounting metadata; common metadata propagates.
+3. Enforced: stored `precision: { places, sigfigs }` carries operand precision independently of display trailing zeros.
+4. Enforced: scaled aliases normalize at every composite factor and exponent, scaling the input numeral exactly.
+5. Enforced: derive and recompute return classified refusals with `shape`, `expected`, and `detail`; derive never appends on refusal.
+6. Enforced: aliases canonicalize only at input; noncanonical stored operands, results, and conversion targets are refused.
+7. Enforced: stored rationals are reduced integer strings with positive denominators and canonical zero.
+8. Enforced: operation contexts have closed keys and types, including non-percent sums and context-free operations.
+9. Enforced: formula, factor, derived_from, raw, render, metadata, precision, and compatibility are compared on replay.
+10. Enforced: metadata object equality ignores key insertion order; missing and invalid metadata never equal explicit null.
+11. Enforced: new derivations require active transitive dependencies; historical arithmetic remains reproducible after retraction.
+12. Enforced: graph and expression traversal use explicit stacks; shared nodes are evaluated once per verification.
+13. Enforced: factor exponents use bigint, preserve grouping and quotient direction, and canonicalize idempotently.
+14. Enforced: affine atoms cannot hide in composites or cancellation; scale words are never unit atoms.
+15. Enforced: disjoint percentage shares are individually in [0,100], total at most 100, and use exactly one reference.
+16. Enforced: currency table conversion is refused; FX expressions require a dated rate and persist compatibility `unchecked`.
+17. Enforced: symbols are case-sensitive; only registered spelling aliases normalize; opaque Unicode and phrases stay distinct.
+18. Enforced: missing, undefined, and empty required fields do not substitute for explicit null; zero remains valid.
+19. Enforced: identifiers allocate exactly beyond 2^53 using bigint; operand lists remain distinct.
+20. Enforced: a supplied expression operand list must equal the formula's unique leaf set.
+21. Enforced: additive expression roots and percentage-point results use decimal places; other roots count literal significant figures.
+22. Enforced: cloned snapshots with the same spec and timestamp produce identical rows; replay appends a new identity.
+23. Documented limitation: coherent rewrites of trusted operands, context, and all dependent audit fields require external provenance to detect.
+24. Enforced: arity belongs to each table row; sums are permutation-invariant while ordered operations keep positional meaning.
+25. Enforced: denominators, positive growth starts, and bounded shares obey numeric domains; ordinary negative arithmetic remains valid.
+26. Enforced: percent, percentage-point, and fraction semantics follow typed pairs, multiplicative normalization, and explicit pct nodes.
+27. Enforced: table factors and affine offsets compose exactly; unknown and cross-dimension conversions are refused.
+28. Enforced: only decimal literals, fact identifiers, binary arithmetic, parentheses, and pct parse; unsupported syntax is refused.
+29. Enforced: rounding is half away from zero; values are plain decimals and display uses canonical units and grouping.
+30. Enforced: seeded factor trees and conversion compositions have expected values computed independently of OPERATION_RULES.
+
+## Trust boundary
+
+Recomputation verifies arithmetic against the ledger's trusted operands and operation context, not against an external
+immutable source. A zero-metre conversion rewritten from km to cm together with its target, formula, factor, precision,
+and display is indistinguishable from an honestly generated cm conversion. Single-field relabels are detected; a coherent
+rewrite needs an immutable ledger baseline or source provenance outside this arithmetic verifier.
+
 ## Implementation notes
 
 - Context fields live in the row's `context` column (null or an object on derived and converted rows, always null on
-  measured, quote, and assumed rows: a `KIND_RULES` column; optional when reading a ledger written before it existed):
+  measured, quote, and assumed rows: a `KIND_RULES` column):
   sum stores `{ disjoint, reference }`, convert stores `{ target }`. The sum rationale stays in `rationale`.
-  The schema accepts a sum or convert row without `context` on read, but `recompute` refuses it, so a hand-written
-  sum or convert row must carry its context. On every other operation (context "none") a stored non-null context is
-  malformed ("stray context"); null or an absent field passes.
-- Readers older than this version reject ledgers with `context` ("is not a ledger field"); `schemaVersion` stays 1
-  by decision, and old ledgers still read here.
+  Schema and recomputation both require the operation's context. Context-free rows carry explicit null.
+- Derived rows from older writers must be regenerated to carry precision, compatibility, and complete audit fields.
+  `schemaVersion` remains 1; readers reject incomplete derivation rows rather than guessing lost precision.
 - `reference` is either one text (the caller asserts one shared denominator) or a map from each operand id to its
   denominator; the map passes only when every operand names the same non-empty denominator.
-- Operand rows are read through the same input canonicalizer, so a measured row stored as `pp` or `kilometre` derives
-  as `%p` or `km`. A measured row stored in `bp` is refused until it is stored as `%p` (scaled by 0.01), and a declared
-  result unit of `bp` is refused for the same reason.
+- `addRow` canonicalizes source units and scales alias numerals, including `100 bp/person` to `1 %p/person`.
+  At rest, aliases are refused without recanonicalization. A declared result unit with a nontrivial alias scale is refused.
+  Scale exponents with absolute value above 10000 are explicitly refused instead of allocating an unbounded numeral.
 - A ratio over `%` or `%p` operands with unequal units is refused (use expr, where `%` enters `*` and `/` as a fraction).
 - convert reads its target from `to`; a declared `unit` is optional and must equal that target.
-- expr still returns compatibility `unchecked`: the population/snapshot predicates do not apply to expr, while its unit
-  is always inferred.
+- expr persists compatibility `unchecked` on the row as well as returning it. Population, snapshot, and accounting
+  predicates apply; a currency-rate operand needs a nonempty `valid_at`. This is arithmetic and unit verification,
+  not a guarantee of rate freshness, matching dates, population identity, or financial comparability.

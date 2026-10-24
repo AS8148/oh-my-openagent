@@ -9,6 +9,7 @@ import { join } from "node:path"
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
 import { DECIMAL, exactComesFromValue, exactFromDecimal, idPrefix, isString } from "./fact-ledger-kinds.mjs"
 import { LEDGER_SCHEMA_VERSION, ROW_DEFAULTS, ROW_FIELDS, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
+import { normalizeInput } from "./unit-algebra.mjs"
 
 export { exactFromDecimal } from "./fact-ledger-kinds.mjs"
 export { FACT_KINDS, FACT_STATUSES, LEDGER_SCHEMA_VERSION, OPERATIONS, QUALIFIERS, ROW_FIELDS, TRANSITIONS, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
@@ -44,12 +45,12 @@ const ID_NUMBER = Object.freeze({ F: /^F(\d+)$/, Q: /^Q(\d+)$/ })
 /** The next id with the kind's prefix from KIND_RULES (F<n> for value rows, Q<n> for quotes). */
 export function nextId(ledger, kind) {
 	const prefix = idPrefix(kind)
-	let max = 0
+	let max = 0n
 	for (const row of ledger.rows) {
 		const match = ID_NUMBER[prefix].exec(row.fact_id ?? "")
-		if (match) max = Math.max(max, Number(match[1]))
+		if (match && BigInt(match[1]) > max) max = BigInt(match[1])
 	}
-	return `${prefix}${max + 1}`
+	return `${prefix}${max + 1n}`
 }
 
 /**
@@ -60,6 +61,11 @@ export function nextId(ledger, kind) {
  */
 export function addRow(ledger, row) {
 	const filled = { ...structuredClone(ROW_DEFAULTS), ...row, fact_id: row.fact_id ?? nextId(ledger, row.kind) }
+	if (!["derived", "converted"].includes(filled.kind)) {
+		const normalized = normalizeInput(filled.unit, filled.value)
+		if (normalized.value !== filled.value && filled.exact !== null) throw new CliError("scaled input must omit exact; it is computed after normalization")
+		Object.assign(filled, normalized)
+	}
 	if (exactComesFromValue(filled.kind) && filled.exact === null && isString(filled.value) && DECIMAL.test(filled.value)) {
 		filled.exact = exactFromDecimal(filled.value)
 	}

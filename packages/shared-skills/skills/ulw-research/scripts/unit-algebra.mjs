@@ -1,128 +1,101 @@
-// unit-algebra.mjs - canonical unit text for derived facts (references/unit-rules.md).
-// canonicalUnit() is the INPUT canonicalizer: table aliases become their token (units.mjs), and a composite such as
-// "USD / (USD/person)" is rebuilt algebraically with equal factors cancelled ("person"; "m/m" is null, dimensionless);
-// whitespace is trimmed only around operators, so unit text with no alias ("metric ton") is stored as given.
-// Stored rows are compared against canonical text exactly, so an alias written onto a row at rest is a relabel.
-// RuleError is the one refusal type of the derivation modules: a detail and an optional hint.
-
+// Canonical factor algebra. Exponents are bigint; aliases enter only through normalizeInput.
+import { fromDecimal, mul, sigFigsOf, toDecimal } from "./rational.mjs"
 import { dimensionOf, normalizeUnit } from "./units.mjs"
+import { refuse } from "./unit-errors.mjs"
+export { refuse, RuleError } from "./unit-errors.mjs"
 
-export class RuleError extends Error {
-	constructor(detail, hint) {
-		super(detail)
-		this.detail = detail
-		if (hint) this.hint = hint
-	}
-}
+const SCALED = new Set(["bp", "basispoint", "basispoints"])
+export const isPercentish = (unit) => unit === "%" || unit === "%p"
+const scaled = (text) => SCALED.has(text.replace(/\s+/g, "").toLowerCase())
 
-export const refuse = (detail, hint) => {
-	throw new RuleError(detail, hint)
-}
-
-/** Aliases whose numerals need rescaling at input: 1 basis point is 0.01 percentage points. */
-const SCALED_ALIASES = Object.freeze({ bp: Object.freeze({ unit: "%p", scale: "0.01" }), basispoint: Object.freeze({ unit: "%p", scale: "0.01" }), basispoints: Object.freeze({ unit: "%p", scale: "0.01" }) })
-
-const squash = (text) => text.replace(/\s+/g, "")
-const PERCENTISH = new Set(["%", "%p"])
-
-export const isPercentish = (unit) => PERCENTISH.has(unit)
-
-/** The scale an input alias applies to its numeral ("0.01" for bp), or null when it applies none. */
-export function inputScale(raw) {
-	return typeof raw === "string" ? (SCALED_ALIASES[squash(raw).toLowerCase()]?.scale ?? null) : null
-}
-
-/**
- * A table alias becomes its token; any other atom is kept as given, inner whitespace included ("million people").
- * A scale word (million, M, bn, thousand, e6) is a multiplier, not a unit, and denomination scaling is out of scope, so
- * it never becomes an atom: it is refused, while a phrase with no table alias as a whole stays plain text.
- */
 function atomOf(text) {
 	if (text === "1") return null
-	const atom = SCALED_ALIASES[squash(text).toLowerCase()]?.unit ?? normalizeUnit(text) ?? text
-	if (dimensionOf(atom) === "scale") refuse(`"${text}" is a scale word (${atom}), not a unit: store the scaled numeral in the counted unit, or write the unit as one plain phrase ("million people")`)
+	const atom = scaled(text) ? "%p" : normalizeUnit(text) ?? text
+	if (dimensionOf(atom) === "scale") refuse(`"${text}" is a scale word (${atom}), not a unit`, undefined, "scale_atom", "a counted unit with scale in the numeral")
 	return atom
 }
 
-/** Parse unit text into factor exponents; `*`, `/`, `^n`, and parentheses, left to right; whitespace trims around them. */
-function factorsOf(text) {
-	const tokens = (text.match(/[*/()^]|[^*/()^]+/g) ?? []).map((token) => token.trim()).filter(Boolean)
-	let index = 0
-	const combine = (into, from, sign) => {
-		for (const [atom, power] of from) into.set(atom, (into.get(atom) ?? 0) + sign * power)
-		return into
-	}
-	const primary = () => {
-		const token = tokens[index++]
-		if (token === undefined) refuse(`unit "${text}" ends early`)
-		let factors
-		if (token === "(") {
-			factors = product()
-			if (tokens[index++] !== ")") refuse(`unit "${text}" is missing a closing parenthesis`)
-		} else if (/^[*/()^]$/.test(token)) refuse(`unexpected "${token}" in unit "${text}"`)
-		else {
-			const atom = atomOf(token)
-			factors = new Map(atom === null ? [] : [[atom, 1]])
-		}
-		if (tokens[index] === "^") {
-			index++
-			const power = Number(tokens[index++])
-			if (!Number.isInteger(power) || power === 0) refuse(`unit "${text}" has a bad exponent`)
-			factors = combine(new Map(), factors, power)
-		}
-		return factors
-	}
-	const product = () => {
-		let factors = primary()
-		while (tokens[index] === "*" || tokens[index] === "/") {
-			const sign = tokens[index++] === "*" ? 1 : -1
-			factors = combine(factors, primary(), sign)
-		}
-		return factors
-	}
-	const factors = product()
-	if (index < tokens.length) refuse(`unexpected text in unit "${text}"`)
-	return factors
+const combine = (a, b, sign) => {
+	for (const [atom, power] of b) a.set(atom, (a.get(atom) ?? 0n) + sign * power)
+	return a
 }
 
-/** Canonical text of factor exponents: sorted numerator factors, then "/" and the denominator; null when all cancel. */
+/** Iterative unit parser: factor maps plus the input's decimal scaling exponent. */
+function parse(raw) {
+	if (raw === null) return { factors: new Map(), shift: 0n }
+	if (typeof raw !== "string" || !raw.trim()) refuse("unit must be text or explicit null", undefined, "unit_text", "canonical unit text or null")
+	const tokens = raw.match(/[*/()^]|[^*/()^]+/g).map((x) => x.trim()).filter(Boolean)
+	const frames = [{ factors: new Map(), shift: 0n, sign: 1n, need: true }]
+	let affine = false
+	const apply = (value, i) => {
+		if (tokens[i] === "^") {
+			const power = tokens[i + 1]
+			if (!/^[+-]?\d+$/.test(power ?? "")) refuse(`unit "${raw}" has a bad exponent`, undefined, "exponent", "an integer exponent")
+			const n = BigInt(power)
+			value = { factors: new Map([...value.factors].map(([a, p]) => [a, p * n])), shift: value.shift * n }
+			i += 2
+		}
+		const frame = frames.at(-1)
+		combine(frame.factors, value.factors, frame.sign)
+		frame.shift += frame.sign * value.shift
+		frame.need = false
+		return i
+	}
+	for (let i = 0; i < tokens.length;) {
+		const frame = frames.at(-1)
+		const token = tokens[i]
+		if (frame.need) {
+			if (token === "(") {
+				frames.push({ factors: new Map(), shift: 0n, sign: 1n, need: true })
+				i++
+			} else {
+				if (/^[*/()^]$/.test(token)) refuse(`unexpected "${token}" in unit "${raw}"`)
+				const atom = atomOf(token)
+				affine ||= dimensionOf(atom) === "temperature"
+				i = apply({ factors: new Map(atom === null ? [] : [[atom, 1n]]), shift: scaled(token) ? -2n : 0n }, i + 1)
+			}
+		} else if (token === ")" && frames.length > 1) {
+			const value = frames.pop()
+			i = apply(value, i + 1)
+		} else if (token === "*" || token === "/") {
+			frame.sign = token === "*" ? 1n : -1n
+			frame.need = true
+			i++
+		} else refuse(`unexpected "${token}" in unit "${raw}"`)
+	}
+	if (frames.length !== 1 || frames[0].need) refuse(`unit "${raw}" ends early or is missing a closing parenthesis`)
+	// Refuse affine composites before cancellation loses the atom that made them unsafe.
+	if (affine && (tokens.length !== 1 || frames[0].shift !== 0n)) refuse("affine (temperature) units cannot occur in composites", undefined, "affine_units", "a non-affine composite or bare temperature for convert")
+	return frames[0]
+}
+
 function format(factors) {
-	const side = (sign) =>
-		[...factors]
-			.filter(([, power]) => Math.sign(power) === sign)
-			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-			.map(([atom, power]) => (Math.abs(power) === 1 ? atom : `${atom}^${Math.abs(power)}`))
-	const top = side(1)
-	const bottom = side(-1)
-	if (top.length === 0 && bottom.length === 0) return null
-	const numerator = top.join("*") || "1"
-	if (bottom.length === 0) return numerator
-	return `${numerator}/${bottom.length === 1 ? bottom[0] : `(${bottom.join("*")})`}`
+	const side = (sign) => [...factors].filter(([, p]) => sign * p > 0n).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+		.map(([a, p]) => { const n = sign * p; return n === 1n ? a : `${a}^${n}` })
+	const top = side(1n)
+	const bottom = side(-1n)
+	if (!top.length && !bottom.length) return null
+	return `${top.join("*") || "1"}${bottom.length ? `/${bottom.length === 1 ? bottom[0] : `(${bottom.join("*")})`}` : ""}`
 }
 
-/** Canonical unit text for an input unit: null stays null (dimensionless); refuses a non-string or bad syntax. */
-export function canonicalUnit(raw) {
-	if (raw === null) return null
-	if (typeof raw !== "string" || raw.trim() === "") refuse(`unit ${JSON.stringify(raw ?? null)} is not unit text or null`)
-	return format(factorsOf(raw))
+export const canonicalUnit = (raw) => format(parse(raw).factors)
+export function inputScale(raw) {
+	const { shift } = parse(raw)
+	if (shift === 0n) return null
+	if (shift > 10000n || shift < -10000n) refuse("scaled alias exponent exceeds exact input capacity", undefined, "scale_range", "an absolute decimal scale exponent <= 10000")
+	return shift > 0n ? `1${"0".repeat(Number(shift))}` : `0.${"0".repeat(Number(-shift - 1n))}1`
 }
 
-const factorsOfCanonical = (unit) => (unit === null ? new Map() : factorsOf(unit))
-
-/** Canonical product and quotient of two canonical units, factors cancelled. */
-export function unitTimes(a, b) {
-	const out = factorsOfCanonical(a)
-	for (const [atom, power] of factorsOfCanonical(b)) out.set(atom, (out.get(atom) ?? 0) + power)
-	return format(out)
+export function normalizeInput(unit, value) {
+	const canonical = canonicalUnit(unit)
+	const factor = inputScale(unit)
+	return { unit: canonical, value: factor ? toDecimal(mul(fromDecimal(value), fromDecimal(factor)), sigFigsOf(value)) : value }
 }
 
-export function unitOver(a, b) {
-	const out = factorsOfCanonical(a)
-	for (const [atom, power] of factorsOfCanonical(b)) out.set(atom, (out.get(atom) ?? 0) - power)
-	return format(out)
-}
-
-/** Affine scales (temperature) have an offset zero, so growth, share, ratio, and products refuse them. */
-export function isAffine(unit) {
-	return typeof unit === "string" && dimensionOf(unit) === "temperature"
+export const unitTimes = (a, b) => format(combine(parse(a).factors, parse(b).factors, 1n))
+export const unitOver = (a, b) => format(combine(parse(a).factors, parse(b).factors, -1n))
+export const isAffine = (unit) => typeof unit === "string" && dimensionOf(unit) === "temperature"
+export function isCurrencyRate(unit) {
+	const currencies = [...parse(unit).factors].filter(([a, n]) => n !== 0n && dimensionOf(a)?.startsWith("currency:"))
+	return currencies.some(([, n]) => n > 0n) && currencies.some(([, n]) => n < 0n)
 }

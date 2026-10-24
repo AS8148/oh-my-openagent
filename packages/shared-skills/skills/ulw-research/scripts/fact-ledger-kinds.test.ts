@@ -31,7 +31,7 @@ function decimal(random: Random) {
 	const whole = `${pick(random, ["-", ""])}${int(random, 5000)}`
 	return random() < 0.5 ? whole : `${whole}.${String(int(random, 1000)).padStart(pick(random, [1, 2, 3]), "0").slice(0, 3)}`
 }
-const rational = (random: Random) => ({ num: `${int(random, 200) - 100}`, den: `${1 + int(random, 50)}` })
+const rational = (random: Random) => exactFromDecimal(decimal(random))
 const locator = (random: Random) => ({ artifact: `sources/S${1 + int(random, 9)}/text.txt`, char_start: 3, char_end: 3 + int(random, 80) })
 const sha = (random: Random) => Array.from({ length: 64 }, () => "0123456789abcdef"[int(random, 16)]).join("")
 
@@ -60,12 +60,17 @@ const GENERATORS: Record<string, Gen> = {
 		},
 	},
 	rational_or_null: { valid: (r) => pick(r, [null, rational(r)]), invalid: (r) => pick(r, [{ num: "1", den: "0" }, { num: 1, den: "2" }, "1/2"]) },
-	by_derive: { valid: (r) => pick(r, [null, rational(r)]), invalid: (r) => pick(r, [{ num: "1", den: "0" }, { num: "x", den: "2" }, "1/2"]) },
-	context_by_derive: { valid: (r) => pick(r, [null, { target: "km" }, { disjoint: true, reference: "all" }]), invalid: (r) => pick(r, ["km", 3, ["km"], false]) },
+	by_derive: { valid: rational, invalid: (r) => pick(r, [null, { num: "1", den: "0" }, { num: "x", den: "2" }, "1/2"]) },
+	context_by_derive: { valid: (_r, row) => row.kind === "converted" ? { target: "km" } : null, invalid: (r) => pick(r, ["km", 3, ["km"], false]) },
+	derived_operation: { valid: () => "expr", invalid: (r) => pick(r, [null, "convert", "mean"]) },
+	convert_operation: { valid: () => "convert", invalid: (r) => pick(r, [null, "sum", "mean"]) },
+	precision: { valid: () => ({ places: 2, sigfigs: 3 }), invalid: (r) => pick(r, [null, { places: -1, sigfigs: 3 }, { places: 2, sigfigs: 0 }]) },
+	compatibility: { valid: (_r, row) => row.operation === "expr" ? "unchecked" : "checked", invalid: () => "invalid" },
 }
 
 function baseRow(kind: string): Row {
 	const row: Record<string, unknown> = { ...structuredClone(ROW_DEFAULTS), kind, raw: "raw", quote: "quoted text", extracted_by: "fact add", observed_at: "2026-10-23T08:00:00Z", label: "x" }
+	if (kind === "derived" || kind === "converted") Object.assign(row, { operands: ["F1000"], derived_from: ["F1000"], formula: "F1000", render: "raw" })
 	return row as Row
 }
 
@@ -76,7 +81,7 @@ function validRow(kind: string, random: Random) {
 	return row
 }
 
-const ledgerOf = (row: object) => ({ schemaVersion: LEDGER_SCHEMA_VERSION, rows: [row], events: [] })
+const ledgerOf = (row: object) => ({ schemaVersion: LEDGER_SCHEMA_VERSION, rows: [row, { ...validRow("measured", prng(42)), fact_id: "F1000", label: "dependency" }], events: [] })
 const SEEDS = Array.from({ length: 60 }, (_, index) => index + 1)
 
 describe("KIND_RULES covers the grammar", () => {
@@ -122,7 +127,8 @@ describe("rows generated from KIND_RULES", () => {
 			const row = { ...validRow(kind, prng(3)), context: { target: "km" } }
 			expect({ kind, named: validateLedger(ledgerOf(row)).some((error: string) => error.startsWith("rows[0].context")) }).toEqual({ kind, named: true })
 		}
-		for (const kind of ["derived", "converted"]) expect(validateLedger(ledgerOf({ ...validRow(kind, prng(4)), context: { target: "km" } }))).toEqual([])
+		expect(validateLedger(ledgerOf(validRow("converted", prng(4))))).toEqual([])
+		expect(validateLedger(ledgerOf({ ...validRow("derived", prng(4)), context: { target: "km" } })).length).toBeGreaterThan(0)
 	})
 
 	test("review LOW 1: a quote row with a non-null exact is rejected", () => {

@@ -107,7 +107,7 @@ const PRECISION: Record<string, "places" | "sigfigs"> = { sum: "places", diff: "
 
 const RELABELS = [null, "%", "%p", "pp", "bp", "m", "metre", "km", "kilometre", "cm", "C", "case", "person", "USD", "USD/person", "person/USD", "KRW-e8"]
 
-type Mutation = { name: string; base: Spec; mutate: (row: Row) => Row; reason: string }
+type Mutation = { name: string; base: Spec; mutate: (row: Row, book: Ledger) => Row; reason: string }
 const generic = (base: Spec, arity: string[], arityReason = "takes ", missingReason = "no ledger row F999"): Mutation[] => [
 	{ name: "operands null", base, mutate: (row) => ({ ...row, operands: null }), reason: "operands must be a non-empty array" },
 	{ name: "operands empty", base, mutate: (row) => ({ ...row, operands: [] }), reason: "operands must be a non-empty array" },
@@ -117,6 +117,17 @@ const generic = (base: Spec, arity: string[], arityReason = "takes ", missingRea
 	{ name: "no operation", base, mutate: (row) => ({ ...row, operation: "mean" }), reason: 'operation "mean" is not one of' },
 	{ name: "repeated operand", base, mutate: (row) => ({ ...row, operands: repeatFirst(row.operands as string[]) }), reason: "is repeated" },
 	{ name: "self reference", base, mutate: (row) => ({ ...row, operands: (row.operands as string[]).map((id, index) => (index === 0 ? row.fact_id : id)) }), reason: "cites itself" },
+	{ name: "kind operation", base, mutate: (row) => ({ ...row, kind: "assumed" }), reason: "kind assumed" },
+	{ name: "audit fields", base, mutate: (row) => ({ ...row, factor: "999" }), reason: "factor" },
+	{ name: "precision field", base, mutate: (row) => ({ ...row, precision: { places: -1, sigfigs: 0 } }), reason: "precision" },
+	{ name: "compatibility field", base, mutate: (row) => ({ ...row, compatibility: "invalid" }), reason: "compatibility" },
+	{ name: "metadata fields", base, mutate: (row) => ({ ...row, population: { tampered: true } }), reason: "population" },
+	{ name: "noncanonical operand", base, mutate: (row, book) => {
+		const operand = book.rows.find((r) => r.fact_id === (row.operands as string[])[0])
+		if (!operand) throw Error("fixture operand missing")
+		operand.unit = ({ m: "metre", "%": "percent", case: "cases", person: "people", USD: "dollar" } as Record<string, string>)[String(operand.unit)]
+		return row
+	}, reason: "canonical" },
 ]
 /** The first operand id in a second slot: [F1, F2] -> [F1, F1]; a one-operand row gets [F1, F1]. */
 const repeatFirst = (ids: string[]) => (ids.length === 1 ? [ids[0], ids[0]] : [...ids.slice(0, -1), ids[0]])
@@ -131,6 +142,11 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "% without rationale", base: PCT_SUM, mutate: (row) => ({ ...row, rationale: null }), reason: "needs a rationale" },
 		{ name: "unequal units", base: VALID.sum[0].spec, mutate: operands(["F1", "F8"]), reason: "unit differs" },
 		{ name: "affine units", base: VALID.sum[0].spec, mutate: operands(["F13", "F14"]), reason: "sum refuses affine" },
+		{ name: "closed context", base: VALID.sum[0].spec, mutate: (row) => ({ ...row, context: { disjoint: "true", reference: 7, extra: true } }), reason: "sum context" },
+		{ name: "share total", base: PCT_SUM, mutate: (row, book) => {
+			for (const operand of book.rows.filter((r) => ["F3", "F4"].includes(String(r.fact_id)))) Object.assign(operand, { value: "60", exact: { num: "60", den: "1" } })
+			return row
+		}, reason: "total <= 100" },
 	],
 	diff: [
 		...generic(VALID.diff[0].spec, ["F2", "F1", "F8"]),
@@ -170,6 +186,7 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "alias target", base: VALID.convert[0].spec, mutate: (row) => ({ ...relabel(row, "kilometre")[0], context: { target: "kilometre" } }), reason: 'context.target "kilometre" is not canonical' },
 		{ name: "currency target", base: VALID.convert[0].spec, mutate: (row) => ({ ...row, context: { target: "USD" } }), reason: "no table conversion to USD (a currency)" },
 		{ name: "no factor to target", base: VALID.convert[0].spec, mutate: (row) => ({ ...row, context: { target: "person" } }), reason: 'F12 in "m" has no table conversion to person' },
+		{ name: "closed context", base: VALID.convert[0].spec, mutate: (row) => ({ ...row, context: { target: "km", extra: true } }), reason: "exactly target" },
 	],
 	expr: [
 		...generic(VALID.expr[0].spec, ["F3", "F4", "F5"], "do not match operands", "do not match operands F999, F4"),
@@ -179,6 +196,12 @@ const MALFORMED: Record<string, Mutation[]> = {
 		{ name: "uninferable unit", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, formula: "F3 + F4" }), reason: "adding % values" },
 		{ name: "affine sum", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, formula: "F13 + F14", operands: ["F13", "F14"] }), reason: "adding affine (temperature)" },
 		{ name: "stray context", base: VALID.expr[0].spec, mutate: (row) => ({ ...row, context: { target: "km" } }), reason: "expr rows carry no context" },
+		{ name: "undated rate", base: VALID.expr[0].spec, mutate: (row, book) => {
+			const rate = book.rows.find((r) => r.fact_id === "F3")
+			if (!rate) throw Error("fixture rate missing")
+			rate.unit = "USD/EUR"
+			return { ...row, formula: "F3 * F4" }
+		}, reason: "dated valid_at" },
 	],
 }
 
@@ -239,7 +262,7 @@ describe.each(OPS)("%s", (op) => {
 					// A rewritten convert target is ok only when it is exactly the row an honest derive to that target writes
 					// (0 m to cm is 0 cm); an alias target, or any other rewrite, is ok:false.
 					const honest = op === "convert" ? derive(ledger(), { ...spec, to: other }).row : undefined
-					const consistent = honest !== undefined && ["unit", "exact", "value", "render"].every((key) => JSON.stringify(honest[key]) === JSON.stringify(variant[key]))
+					const consistent = honest !== undefined && ["unit", "exact", "value", "render", "formula", "factor", "precision", "compatibility"].every((key) => JSON.stringify(honest[key]) === JSON.stringify(variant[key]))
 					const rewritten = recompute(book, variant)
 					expect({ other, context: variant.context, ok: rewritten.ok }).toEqual({ other, context: variant.context, ok: consistent })
 				}
@@ -278,9 +301,10 @@ describe.each(OPS)("%s", (op) => {
 			const row = rowOf(derive(book, base))
 			let result: { ok: boolean; detail?: string } = { ok: true }
 			expect(() => {
-				result = recompute(book, mutate(row))
+				result = recompute(book, mutate(row, book))
 			}).not.toThrow()
 			expect({ name, ok: result.ok }).toEqual({ name, ok: false })
+			expect(result).toMatchObject({ shape: expect.any(String), expected: expect.anything() })
 			expect({ name, detail: result.detail }).toEqual({ name, detail: expect.stringContaining(reason) })
 		}
 	})
@@ -317,8 +341,10 @@ describe("units", () => {
 		for (const unit of ["million", "M", "bn", "billion", "e6", "thousand", "USD/M", "million*person"]) {
 			expect(() => canonicalUnit(unit)).toThrow("scale word")
 			const book = emptyLedger() as Ledger
-			addRow(book, measured("F1", "5", unit))
-			addRow(book, measured("F2", "7", unit))
+			expect(() => addRow(book, measured("F1", "5", unit))).toThrow("scale word")
+			addRow(book, measured("F1", "5", "m"))
+			addRow(book, measured("F2", "7", "m"))
+			book.rows[0].unit = unit
 			const result = derive(book, { op: "sum", operands: ["F1", "F2"], unit: "m" })
 			expect({ unit, error: result.error, detail: result.detail }).toEqual({ unit, error: "incompatible_operands", detail: expect.stringContaining("scale word") })
 		}
