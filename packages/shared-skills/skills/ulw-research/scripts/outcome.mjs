@@ -1,7 +1,3 @@
-// outcome.mjs - the per-run outcome manifest (`outcome.json`) and the closing briefing.
-// Manifest functions are pure (they return a new manifest); the briefing reads only the
-// manifest, the sources-ledger text, and an injected `now`. node: builtins only.
-
 import * as nodeFs from "node:fs"
 import { basename, dirname, join } from "node:path"
 
@@ -94,11 +90,13 @@ export function setDeliverable(manifest, format, status, detail = {}) {
 	return next
 }
 
-export function setGate(manifest, gate, status) {
+export function setGate(manifest, gate, status, detail = {}) {
 	assertOneOf("unknown_gate", "gate", gate, GATE_NAMES)
 	assertOneOf("unknown_gate_status", "gate status", status, GATE_STATUSES)
+	if (gate === "fidelity" && status === "not_run" && (typeof detail.reason !== "string" || !detail.reason.trim())) throw new OutcomeError("gate_reason_required", "fidelity not_run requires a non-empty --reason")
 	const next = clone(manifest)
 	next.gates[gate] = status
+	next.gateHistory = [...(next.gateHistory ?? []), { gate, status, ...(detail.reason !== undefined ? { reason: detail.reason.trim() } : {}), at: stamp(detail.now) }]
 	return next
 }
 
