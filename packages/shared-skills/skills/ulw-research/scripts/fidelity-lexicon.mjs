@@ -24,21 +24,30 @@ export const QUALIFIER_FORMS = Object.freeze({
 /** Irregular and synonym direction forms the stem match cannot reach ("rose", "reduced"). */
 const DIRECTION_FORMS = { up: ["rose", "risen", "rising", "grew", "grown", "gain"], down: ["reduc", "fell", "fallen", "falling", "drop", "lower"] }
 const KOREAN = /[\uAC00-\uD7A3]/
+/** True when the term holds a Hangul syllable (Korean terms match by the Korean rules below). */
+export const isKoreanTerm = (term) => KOREAN.test(term)
+/** The guarded hedge and qualifier vocabulary: the union of HEDGES, QUALIFIERS and every QUALIFIER_FORMS surface form. */
+export const guardedTerms = () => [...new Set([...HEDGES, ...QUALIFIERS, ...Object.values(QUALIFIER_FORMS).flat()])]
 const ACRONYM = /(?<![\p{L}\p{N}])[A-Z]{2,6}(?![\p{L}\p{N}])/gu
 const WINDOW = 6
 const cache = new Map()
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-/** mode: "stem" (inflections, Korean one-syllable token prefix), "exact", "word", "suffix" (Korean attached to a value). */
-function pattern(term, mode) {
+/**
+ * The lexical pattern engine. mode: "stem" (inflections, Korean one-syllable token prefix), "exact",
+ * "word", "suffix" (Korean attached to a value), "guard" (single Latin words of four or more letters
+ * take inflections, multiword terms never do; Korean terms match as plain substrings).
+ */
+export function lexicalPattern(term, mode) {
 	const key = `${mode}\u0001${term}`
 	if (cache.has(key)) return cache.get(key)
 	let source
 	if (!KOREAN.test(term)) {
-		const tail = mode === "stem" && term.length >= 4 ? "\\p{L}*" : ""
-		source = `(?<![\\p{L}\\p{N}])${escape(term).replace(/ /g, "\\s+")}${tail}(?![\\p{L}\\p{N}])`
-	} else if (mode === "suffix") source = `(?<=^|[\\s\\p{P}\\p{N}A-Za-z])${escape(term)}(?=$|[\\s\\p{P}])`
+		const stems = term.length >= 4 && (mode === "stem" || (mode === "guard" && !term.includes(" ")))
+		source = `(?<![\\p{L}\\p{N}])${escape(term).replace(/ /g, "\\s+")}${stems ? "\\p{L}*" : ""}(?![\\p{L}\\p{N}])`
+	} else if (mode === "guard") source = escape(term)
+	else if (mode === "suffix") source = `(?<=^|[\\s\\p{P}\\p{N}A-Za-z])${escape(term)}(?=$|[\\s\\p{P}])`
 	else if ([...term].length >= 2 || mode === "word") source = escape(term)
 	else source = `(?<=^|[\\s\\p{P}])${escape(term)}${mode === "stem" ? "" : "(?=$|[\\s\\p{P}])"}`
 	const re = new RegExp(source, "giu")
@@ -48,13 +57,13 @@ function pattern(term, mode) {
 
 function positions(text, terms, mode) {
 	const out = []
-	for (const term of terms) for (const match of text.matchAll(pattern(term, mode))) out.push({ term, at: match.index })
+	for (const term of terms) for (const match of text.matchAll(lexicalPattern(term, mode))) out.push({ term, at: match.index })
 	return out.sort((a, b) => a.at - b.at)
 }
 
 const has = (text, terms, mode) => positions(text, terms, mode).length > 0
 const tokens = (text) => text.split(/\s+/).filter(Boolean)
-const stripQualifiers = (text) => QUALIFIERS.reduce((rest, term) => rest.replace(pattern(term, "exact"), " "), text)
+const stripQualifiers = (text) => QUALIFIERS.reduce((rest, term) => rest.replace(lexicalPattern(term, "exact"), " "), text)
 
 function directions(text) {
 	const rest = stripQualifiers(text)
