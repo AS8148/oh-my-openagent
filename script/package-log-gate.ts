@@ -1,3 +1,4 @@
+import { parseNotes } from "./changelog-release-assembly.ts"
 import { splitFragment } from "./package-log-blocks.ts"
 
 /** Any changes.md below the repo root; the root one stays the shared gate's (release-only) file. */
@@ -27,5 +28,12 @@ export function checkPackageLogs(input: PackageLogInput): { readonly pass: boole
   if (split.reasons.length > 0) return { pass: false, reason: split.reasons.join("; ") }
   const missing = split.blocks.filter((block) => !input.existsAtHead(block.log)).map((block) => block.log)
   if (missing.length > 0) return { pass: false, reason: `a block names a log that does not exist: ${missing.join(", ")}` }
+  // A merged fragment is immutable, so refuse here whatever the release stamp would refuse (#10477 review HIGH 1).
+  if (split.preamble === "") return { pass: false, reason: "the fragment needs CHANGELOG text before its log blocks (a paragraph or ### bullets)" }
+  try {
+    parseNotes(split.preamble)
+  } catch (error) {
+    return { pass: false, reason: error instanceof Error ? error.message : String(error) }
+  }
   return { pass: true, reason: `${split.blocks.length} package-log block(s) valid` }
 }

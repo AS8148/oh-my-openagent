@@ -43,6 +43,9 @@ The `changelog-gate` workflow runs `script/check-pr-changelog.ts` from the base 
 - The `no-changelog` label waives the fragment only when no shipped path changed.
 - Editing `CHANGELOG.md`, any `changes.md`, or another pull request's fragment fails. Every log block
   must be valid and name an existing log.
+- The fragment's text must be what the release can place: paragraphs, or `- ` bullets (with indented
+  continuation lines) under `### ` headings, before any log block. A fragment with only log blocks
+  fails. A merged fragment cannot be edited, so this is checked before merge.
 
 The rules live in `script/changelog-gate-rules.ts`, vendored byte-identical from
 `sisyphuslabs/common-infra` (`bun script/check-gate-sync.ts` compares them).

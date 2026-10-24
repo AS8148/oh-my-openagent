@@ -13,6 +13,8 @@
  * its preamble only.
  */
 
+import { mergeNotes } from "./changelog-release-assembly.ts"
+
 const MARKER = /^<!-- changes-log: (\S+) -->$/
 // The root changes.md, or one plain package segment: no ".", "..", "%" escapes or other characters a URL resolver could reinterpret.
 const CHANGE_LOG = /^(?:changes\.md|packages\/(?!\.\.?\/)[A-Za-z0-9_][A-Za-z0-9._-]*\/changes\.md)$/
@@ -60,7 +62,7 @@ export function combineFragments(contents: readonly string[]): string {
     for (const block of split.blocks) byLog.set(block.log, [...(byLog.get(block.log) ?? []), block.body])
   }
   const blocks = [...byLog].map(([log, bodies]) => `${markerLine(log)}\n${bodies.join("\n\n")}`)
-  return `${[preambles.join("\n\n"), ...blocks].filter((part) => part !== "").join("\n\n")}\n`
+  return `${[mergeNotes(preambles), ...blocks].filter((part) => part !== "").join("\n\n")}\n`
 }
 
 /** Puts `entries` (newest first) on top of a log, below a leading `# title` line when it has one. */

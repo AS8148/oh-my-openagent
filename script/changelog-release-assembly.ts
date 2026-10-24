@@ -13,7 +13,10 @@ const SECTION = /^### (.+?)\s*$/
 
 export type Notes = { readonly paragraphs: string; readonly sections: ReadonlyMap<string, readonly string[]> }
 
-/** Text before the first `### ` heading, then each heading's bullets; a bullet keeps its continuation lines. */
+/**
+ * Text before the first `### ` heading, then each heading's bullets. A bullet keeps its indented continuation lines;
+ * any other text under a heading throws, so the PR check (package-log-gate.ts) refuses what the release cannot place.
+ */
 export function parseNotes(text: string): Notes {
   const paragraphs: string[] = []
   const sections = new Map<string, string[]>()
@@ -29,7 +32,7 @@ export function parseNotes(text: string): Notes {
       current.push(line)
     } else if (line.trim() !== "") {
       const last = current.pop()
-      if (last === undefined) throw new Error(`text under a ### heading must be a "- " bullet: ${line}`)
+      if (last === undefined || !/^\s/.test(line)) throw new Error(`text under a ### heading must be a "- " bullet or an indented continuation of one: ${line}`)
       current.push(`${last}\n${line}`)
     }
   }
@@ -38,6 +41,30 @@ export function parseNotes(text: string): Notes {
 
 const linkBullet = (bullet: string, pr: number): string =>
   bullet.includes(`/pull/${pr})`) ? bullet : `${bullet} ([#${pr}](${PULL_URL}/${pr}))`
+
+/** Every paragraph names the PR that made it: one without its own PR link gets one at its end. */
+const linkParagraphs = (text: string, pr: number): string =>
+  text.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter((paragraph) => paragraph !== "").map((paragraph) => linkBullet(paragraph, pr)).join("\n\n")
+
+/** One notes text from several, in order: their paragraphs first, then one group per section name, first seen first. */
+export function mergeNotes(texts: readonly string[]): string {
+  const paragraphs: string[] = []
+  const groups = new Map<string, string[]>()
+  for (const text of texts) {
+    const notes = parseNotes(text)
+    if (notes.paragraphs !== "") paragraphs.push(notes.paragraphs)
+    for (const [name, bullets] of notes.sections) groups.set(name, [...(groups.get(name) ?? []), ...bullets])
+  }
+  const sections = [...groups].filter(([, bullets]) => bullets.length > 0).map(([name, bullets]) => `### ${name}\n\n${bullets.join("\n")}`)
+  return [...paragraphs, ...sections].join("\n\n")
+}
+
+/** The notes with every paragraph and bullet that lacks a link to `pr` linked to it (a folded car keeps its credit). */
+export function linkNotes(text: string, pr: number): string {
+  const notes = parseNotes(text)
+  const sections = [...notes.sections].map(([name, bullets]) => `### ${name}\n\n${bullets.map((bullet) => linkBullet(bullet, pr)).join("\n")}`)
+  return [linkParagraphs(notes.paragraphs, pr), ...sections].filter((part) => part !== "").join("\n\n")
+}
 
 export type Assembly = { readonly body: string; readonly duplicates: readonly number[] }
 
@@ -53,7 +80,7 @@ export function assembleRelease(legacy: string, fragments: readonly { readonly p
   const old = parseNotes(legacy)
   const parsed = kept.map((fragment) => ({ pr: fragment.pr, notes: parseNotes(fragment.content) }))
   const paragraphs = assembleUnreleasedBody(
-    parsed.map(({ pr, notes }) => ({ pr, content: notes.paragraphs })).filter((entry) => entry.content !== ""),
+    parsed.map(({ pr, notes }) => ({ pr, content: linkParagraphs(notes.paragraphs, pr) })).filter((entry) => entry.content !== ""),
   )
   const groups = new Map<string, string[]>()
   for (const [name, bullets] of old.sections) groups.set(name, [...bullets])

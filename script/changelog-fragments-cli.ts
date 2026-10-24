@@ -12,7 +12,8 @@
 import { execFileSync } from "node:child_process"
 import { rm } from "node:fs/promises"
 import { fragmentPath, FRAGMENT_DIR, mergeUnreleased, unreleasedBody } from "./changelog-fragments"
-import { blockFromPrepend, combineFragments, markerLine } from "./package-log-blocks.ts"
+import { linkNotes } from "./changelog-release-assembly.ts"
+import { blockFromPrepend, combineFragments, markerLine, splitFragment } from "./package-log-blocks.ts"
 
 const root = new URL("../", import.meta.url)
 const at = (path: string) => new URL(path, root)
@@ -27,7 +28,9 @@ function addedUnreleased(base: string, head: string): string[] {
   const before = paragraphs(unreleasedBody(base))
   const after = paragraphs(unreleasedBody(head))
   const removed = before.filter((paragraph) => !after.includes(paragraph))
-  if (removed.length > 0) throw new Error(`the branch changed an existing Unreleased entry; move it by hand: ${removed[0]?.slice(0, 80)}`)
+  if (removed.length > 0) {
+    throw new Error(`the branch changed an existing Unreleased entry (or added a bullet inside an existing ### group); move that text into your fragment by hand: ${removed[0]?.slice(0, 80)}`)
+  }
   return after.filter((paragraph) => !before.includes(paragraph))
 }
 
@@ -40,6 +43,8 @@ async function fromDiff(base: string, pr: number): Promise<void> {
   // The merge base, not the base tip: dev moves after the branch forked, and the gate diffs against the merge base too.
   const mergeBase = git("merge-base", base, "HEAD").trim()
   const changed = (...paths: string[]) => git("diff", "--name-only", `${mergeBase}...HEAD`, "--", ...paths).split("\n").filter(Boolean)
+  const dirty = git("status", "--porcelain", "--", "CHANGELOG.md", "changes.md", "packages/*/changes.md", FRAGMENT_DIR).split("\n").filter(Boolean)
+  if (dirty.length > 0) throw new Error(`commit or discard the uncommitted changelog edits first: ${dirty.map((line) => line.slice(3)).join(", ")}`)
   const added: string[] = []
   if (changed("CHANGELOG.md").length > 0) {
     added.push(...addedUnreleased(git("show", `${mergeBase}:CHANGELOG.md`), git("show", "HEAD:CHANGELOG.md")))
@@ -70,7 +75,12 @@ async function foldBatch(base: string, pr: number): Promise<void> {
     console.log(`no other fragment to fold into ${own}`)
     return
   }
-  const contents = await Promise.all(cars.map((car) => Bun.file(at(fragmentPath(car))).text()))
+  // Each car's text is linked to the car before folding, so the batch's release notes still credit every car.
+  const contents = await Promise.all(cars.map(async (car) => {
+    const split = splitFragment(await Bun.file(at(fragmentPath(car))).text())
+    const blocks = split.blocks.map((block) => `${markerLine(block.log)}\n${block.body}`)
+    return [linkNotes(split.preamble, car), ...blocks].filter((part) => part !== "").join("\n\n")
+  }))
   const fragment = combineFragments([await existingFragment(pr), ...contents])
   await Bun.write(at(own), fragment)
   for (const car of cars) await rm(at(fragmentPath(car)))

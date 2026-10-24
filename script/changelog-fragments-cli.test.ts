@@ -96,6 +96,21 @@ describe("from-diff converts an open branch written before fragments (#10841 mig
   }))
 })
 
+test("from-diff refuses, and keeps the file, when a changelog file has uncommitted edits", withScratch((dir) => {
+  // given: a committed old-style entry plus an uncommitted edit to the same log (#10477 review LOW 9)
+  git(dir, "checkout", "-q", "-b", "feat")
+  write(dir, LOG, "# omo-senpi changes\n\n## 2026-10-20 - mine (#12)\n\n## 2026-10-01 - old\n")
+  commit(dir, "old-style edit")
+  write(dir, LOG, "# omo-senpi changes\n\n## 2026-10-20 - mine, still typing (#12)\n\n## 2026-10-01 - old\n")
+  // when
+  const result = bun(dir, ["script/changelog-fragments-cli.ts", "from-diff", "--base", "dev", "--pr", "12"])
+  // then
+  expect(result.status).not.toBe(0)
+  expect(result.stderr).toContain("uncommitted")
+  expect(read(dir, LOG)).toContain("still typing")
+  expect(existsSync(join(dir, "changes/unreleased/12.md"))).toBe(false)
+}))
+
 describe("fold-batch merges the cars' fragments into the batch PR's own (bundle train)", () => {
   test("two cars with paragraphs, sections and blocks for the same log become one fragment the gate accepts", withScratch((dir) => {
     // given: a batch branch that merged two car branches, each carrying its own fragment
@@ -111,10 +126,10 @@ describe("fold-batch merges the cars' fragments into the batch PR's own (bundle 
     expect(result.status, result.stderr).toBe(0)
     commit(dir, "fold")
 
-    // then: newest car first, one block per log, the car files gone, and the batch PR passes its gate
+    // then: paragraphs before ### groups, one block per log (newest car first), the car files gone, and the gate passes
     const split = splitFragment(read(dir, "changes/unreleased/30.md"))
     expect(split.reasons).toEqual([])
-    expect(split.preamble).toBe(`### Fixed\n\n- Car twenty-one. ([#21](${PULL}/21))\n\n**Car twenty.** ([#20](${PULL}/20))`)
+    expect(split.preamble).toBe(`**Car twenty.** ([#20](${PULL}/20))\n\n### Fixed\n\n- Car twenty-one. ([#21](${PULL}/21))`)
     expect(split.blocks).toEqual([{ log: LOG, body: "## 2026-10-24 - twenty-one (#21)\n\n## 2026-10-24 - twenty (#20)" }])
     expect(existsSync(join(dir, "changes/unreleased/20.md"))).toBe(false)
     expect(existsSync(join(dir, "changes/unreleased/21.md"))).toBe(false)

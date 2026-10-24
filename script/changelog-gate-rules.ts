@@ -36,9 +36,10 @@ export type GatePolicy = {
   readonly releaseActors: readonly string[];
   readonly userFacingRoots: readonly string[];
   /** A repo whose shipped surface is computed (for example from its package manifests) passes
-   * its own classifier. When present it REPLACES userFacingRoots and the default exemptions for
-   * every verdict, including the release PR's check; the classifier must answer false for the
-   * changelog and fragment paths. Absent means the root-based classifier below. */
+   * its own classifier. When present it REPLACES userFacingRoots (pass []) and the default
+   * exemptions for every verdict, including the release PR's check. The changelog and fragment
+   * paths are never user-facing, whatever it answers. A classifier that throws fails the run.
+   * Absent means the root-based classifier below. */
   readonly isUserFacing?: (path: string) => boolean;
   /** Paths a release PR may carry besides the changelog and fragments, even under a
    * user-facing root: the version bumps, lockfile and generated bundles the release workflow
@@ -59,6 +60,7 @@ const DEFAULT_NON_USER_FACING =
  * when the policy has one, else the root rule. Markdown is NOT exempt by default: prompts and
  * docs shipped under a user-facing root are user-facing. */
 export function isUserFacingPath(path: string, policy: GatePolicy): boolean {
+  if (path === "CHANGELOG.md" || path === "changes.md" || path.startsWith(`${FRAGMENT_DIR}/`)) return false;
   if (policy.isUserFacing) return policy.isUserFacing(path);
   if (DEFAULT_NON_USER_FACING.test(path)) return false;
   return policy.userFacingRoots.some((root) => path.startsWith(root.endsWith("/") ? root : `${root}/`));

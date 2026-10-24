@@ -67,7 +67,8 @@ describe("release stamp CLI", () => {
     // then: consumed files are gone and their exact payloads occur only in the new section
     const after = readFileSync(join(root, "CHANGELOG.md"), "utf8")
     expect(unreleasedBody(after)).toBe("")
-    expect(extractReleaseNotes(after, "5.1.45")).toBe([legacy, "Newer payload.", "Older payload."].filter(Boolean).join("\n\n"))
+    // Each fragment paragraph names its PR (#10477 review LOW 5); legacy text is released as written.
+    expect(extractReleaseNotes(after, "5.1.45")).toBe([legacy, `Newer payload. ([#8](${PULL}/8))`, `Older payload. ([#7](${PULL}/7))`].filter(Boolean).join("\n\n"))
     expect(after.slice(after.indexOf("## [5.1.44]"))).toBe(published)
     expect(readdirSync(join(root, "changes/unreleased"))).toEqual([])
     expect(git("diff", "--name-only", "--diff-filter=D", base, "HEAD").split("\n")).toEqual(["changes/unreleased/008.md", "changes/unreleased/7.md"])
@@ -89,7 +90,7 @@ describe("release stamp CLI", () => {
     // given: the `### Section` + bullet fragments dev already carries, beside a paragraph fragment
     const { root, stamp } = fixture("", {
       "7.md": "### Fixed\n\n- Seven fix (#6).\n",
-      "8.md": `**Eight.** Paragraph ([#8](${PULL}/8))\n`,
+      "8.md": `**Eight.** Paragraph ([#8](${PULL}/8))\n\n**Eight b.** No link of its own.\n`,
       "9.md": `### Fixed\n\n- Nine fix ([#9](${PULL}/9)).\n  continued line\n\n### Added\n\n- Nine add.\n`,
     })
     // when
@@ -97,7 +98,7 @@ describe("release stamp CLI", () => {
     // then: one ### Fixed group, newest PR first, a PR link only where the bullet lacks its own
     expect(result.status, result.stderr).toBe(0)
     expect(extractReleaseNotes(readFileSync(join(root, "CHANGELOG.md"), "utf8"), "5.1.45")).toBe([
-      `**Eight.** Paragraph ([#8](${PULL}/8))`,
+      `**Eight.** Paragraph ([#8](${PULL}/8))\n\n**Eight b.** No link of its own. ([#8](${PULL}/8))`,
       `### Fixed\n\n- Nine fix ([#9](${PULL}/9)).\n  continued line\n- Seven fix (#6). ([#7](${PULL}/7))`,
       `### Added\n\n- Nine add. ([#9](${PULL}/9))`,
     ].join("\n\n"))

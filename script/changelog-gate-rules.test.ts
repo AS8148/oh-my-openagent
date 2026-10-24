@@ -318,6 +318,22 @@ describe("the classifier", () => {
     expect(isUserFacingPath("apps/api/src/index.ts", p)).toBe(false);
     expect(isUserFacingPath("docs/guide.md", p)).toBe(false);
   });
+  test("the changelog and fragment paths are never user-facing, whatever a repo classifier answers", () => {
+    const p = { ...POLICY, isUserFacing: () => true };
+    for (const path of ["CHANGELOG.md", "changes.md", "changes/unreleased/7.md", "changes/unreleased/README.md"]) {
+      expect(isUserFacingPath(path, p)).toBe(false);
+    }
+    const release = {
+      ...base,
+      branch: "release/1.2.3",
+      isReleaseWorkflow: true,
+      actor: "release-bot[bot]",
+      baseFragments: ["7.md"],
+      modifiedFiles: ["CHANGELOG.md"],
+      deletedFiles: ["changes/unreleased/7.md"],
+    };
+    expect(checkPrChangelog(release, p).pass).toBe(true);
+  });
   test("the gate verdicts use the repo classifier", () => {
     const p = { ...POLICY, isUserFacing: (path: string) => path === "bin/cli.ts" };
     // Under a root but not shipped: no fragment needed, and the label escape stays open.
