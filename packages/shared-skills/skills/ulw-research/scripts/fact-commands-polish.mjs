@@ -12,10 +12,10 @@
 // sentence text (normalized) is not in the pre-polish artifact that a fill map names, so the
 // meaning readers re-check exactly what polish rewrote. No model, no network.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
-import { CliError, parseArgs, readJsonFile, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
+import { CliError, parseArgs, readJsonFile, sha256Of, writeJsonAtomic, writeTextAtomic } from "./cli-support.mjs"
 import { countDefects, DEFECT_CODES } from "./contracts.mjs"
 import { editionFormatOf, ledgerFrom, markdownAsHtml, sessionOf } from "./fact-commands-verify.mjs"
 import { extractPairs } from "./fact-pairs.mjs"
@@ -28,8 +28,16 @@ export { ledgerFrom, POLISH_EDIT_FIELDS, validatePolishEdits }
 
 export const POLISH_RECORD = "polish-defects.json"
 
-/** The polish-diff exit policy: only a registry blocker fails the command; majors are reported. */
-export const polishDiffFails = (defects) => defects.some((defect) => (DEFECT_CODES[defect.code]?.severity ?? defect.severity) === "blocker")
+/**
+ * The polish-diff exit policy: only a registry blocker fails the command; majors are reported.
+ * Fail-closed like the delivery barrier: a code the registry does not know refuses outright,
+ * because a caller-claimed severity may not demote it.
+ */
+export const polishDiffFails = (defects) =>
+	defects.some((defect) => {
+		if (!Object.hasOwn(DEFECT_CODES, defect?.code)) throw new CliError(`unknown defect code ${defect?.code}`)
+		return DEFECT_CODES[defect.code].severity === "blocker"
+	})
 
 function readText(path) {
 	try {
@@ -51,7 +59,7 @@ function runPolishApply(args) {
 	const [report] = args.positionals
 	const { flags } = args
 	if (!report || flags.edits === undefined || flags.out === undefined) throw new CliError("usage: fact polish-apply <report.html> --edits polish-edits.json --out <report.polished.html> [--ledger F] [--brief brief.md] [--session-dir D]")
-	if (editionFormatOf(report) === "md") throw new CliError("fact polish-apply takes the filled HTML edition; polish a Markdown edition through its HTML source")
+	if (editionFormatOf(report, flags.format) === "md") throw new CliError("fact polish-apply takes the filled HTML edition; polish a Markdown edition through its HTML source")
 	const { refusal } = lockedBrief("fact polish-apply", flags)
 	if (refusal) return refusal
 	const html = readText(report)
@@ -63,7 +71,7 @@ function runPolishApply(args) {
 		throw new CliError(`${flags.edits} must be an array of {${Object.keys(POLISH_EDIT_FIELDS).join(", ")}} objects: ${error.message}`)
 	}
 	const result = applyEdits(html, edits, ledgerFrom(flags))
-	writeFileSync(flags.out, result.out)
+	writeTextAtomic(flags.out, result.out)
 	const defects = [...result.rejected, ...result.unlocated].sort((a, b) => a.index - b.index).map(withSeverity)
 	const counts = { applied: result.applied.length, rejected: result.rejected.length, unlocated: result.unlocated.length }
 	const data = { out: resolve(flags.out), ...counts, applied_indexes: result.applied, input_sha256: sha256Of(html), edits_sha256: sha256Of(editsText), out_sha256: sha256Of(result.out) }
@@ -94,7 +102,9 @@ const pairKey = (pair) => [pair.kind, pair.sentence_key, pair.claim_id ?? "", no
 
 /**
  * The pairs whose sentence text changed since the pre-polish artifact a fill map names: a pair is
- * kept unless the same (kind, sentence key, normalized sentence) occurs in that artifact.
+ * kept unless the same (kind, sentence key, normalized sentence) occurs in that artifact. The map
+ * must carry the artifact's `artifact_sha256` and the bytes must still match it, so the filter is
+ * fail-closed on a hand-made or stale map.
  * @param {object[]} pairs extractPairs output on the polished edition
  * @param {string} mapPath the pre-polish fill map (fact fill's `<out>.fill-map.json`)
  */
@@ -102,7 +112,8 @@ export function pairsChangedSince(pairs, mapPath, ledger, claims) {
 	const map = readJsonFile(mapPath)
 	if (typeof map.artifact !== "string" || !existsSync(map.artifact)) throw new CliError(`${mapPath} names no readable pre-polish artifact`)
 	const text = readText(map.artifact)
-	if (map.artifact_sha256 !== undefined && sha256Of(text) !== map.artifact_sha256) throw new CliError(`${map.artifact} changed after fill; --changed-since needs the pre-polish bytes`)
+	if (typeof map.artifact_sha256 !== "string") throw new CliError(`${mapPath} fill map has no artifact_sha256; --changed-since needs the pre-polish hash`)
+	if (sha256Of(text) !== map.artifact_sha256) throw new CliError(`${map.artifact} changed after fill; --changed-since needs the pre-polish bytes`)
 	const html = map.format === "md" ? markdownAsHtml(text, map.entries, ledger).html : text
 	const before = new Map()
 	for (const pair of extractPairs(html, ledger, claims)) before.set(pairKey(pair), (before.get(pairKey(pair)) ?? 0) + 1)

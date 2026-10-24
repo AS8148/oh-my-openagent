@@ -96,11 +96,11 @@ function lexiconRouted(group, sentence) {
 	return lexiconChecks(probes).forceStrong.length > 0
 }
 
-function quotePairs(sentence, rows, filled, slug, reportLang) {
+function quotePairs(sentence, rows, slug, reportLang) {
 	const groups = new Map()
 	for (const fact of sentence.facts) {
 		const row = rows.get(fact.id)
-		if (!row?.quote || (filled && !filled.has(fact.id))) continue
+		if (!row?.quote) continue
 		const group = groups.get(row.quote) ?? { quote: row.quote, row, rows, facts: [], ids: [] }
 		group.facts.push(fact)
 		if (!group.ids.includes(fact.id)) group.ids.push(fact.id)
@@ -136,11 +136,11 @@ function claimPairs(ctx, block, sentence, byClaim, slug, reportLang) {
 		}))
 }
 
-function translationPair(node, rows, filled, slug, reportLang) {
+function translationPair(node, rows, slug, reportLang) {
 	const id = node.attrs["data-translates"]
 	const row = rows.get(id)
 	const text = proseText(node)
-	if (!row?.quote || text === "" || (filled && !filled.has(id))) return null
+	if (!row?.quote || text === "") return null
 	return {
 		kind: "translation",
 		sentence_key: sentenceKey(slug, [id]),
@@ -157,13 +157,11 @@ function translationPair(node, rows, filled, slug, reportLang) {
  * @param {string} html the filled report
  * @param {{ rows: object[] }} ledger
  * @param {{ claims: object[] } | object[] | null} claims indexClaims(...) output or its claims array
- * @param {{ fact_id: string }[]} [fillMap] fact fill's map; when given, only facts it filled are paired
  * @returns {object[]} pairs with pair_id P1, P2, ... in document order
  */
-export function extractPairs(html, ledger, claims, fillMap) {
+export function extractPairs(html, ledger, claims) {
 	const ctx = buildContext(parseHtml(html), {})
 	const rows = new Map((ledger?.rows ?? []).map((row) => [row.fact_id, row]))
-	const filled = Array.isArray(fillMap) ? new Set(fillMap.map((entry) => entry.fact_id)) : null
 	const byClaim = claimMap(claims)
 	const htmlLang = ctx.all.find((node) => node.tag === "html")?.attrs.lang
 	const reportLang = htmlLang ? htmlLang.toLowerCase().split("-")[0] : null
@@ -174,12 +172,12 @@ export function extractPairs(html, ledger, claims, fillMap) {
 		if (!findings) continue
 		const slug = slugOf(block.scope)
 		for (const sentence of block.sentences) {
-			out.push(...quotePairs(sentence, rows, filled, slug, reportLang), ...claimPairs(ctx, block, sentence, byClaim, slug, reportLang))
+			out.push(...quotePairs(sentence, rows, slug, reportLang), ...claimPairs(ctx, block, sentence, byClaim, slug, reportLang))
 		}
 		for (const node of ctx.util.descendants(block.owner)) {
 			if (node.attrs?.["data-translates"] === undefined || seenSpans.has(node)) continue
 			seenSpans.add(node)
-			const pair = translationPair(node, rows, filled, slug, reportLang)
+			const pair = translationPair(node, rows, slug, reportLang)
 			if (pair) out.push(pair)
 		}
 	}
