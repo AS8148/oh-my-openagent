@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Warm memory prompts avoid repeated git processes for HEAD and agreements.** Committed agreement reads are cached by repository and full revision, and cache misses inspect only the ledger path. Standard file-backed HEADs resolve from stat-validated Git files, including packed refs and linked worktrees, with git fallback for unusual layouts. Part of [#10707](https://github.com/code-yeongyu/oh-my-openagent/issues/10707).
+**Warm memory prompts avoid repeated git processes for HEAD and agreements.** Committed agreement reads are cached by repository and full revision, and cache misses inspect only the ledger path. Standard file-backed HEADs resolve from stat-validated Git files, including packed refs and linked worktrees, with git fallback for unusual layouts. ([#11216](https://github.com/code-yeongyu/oh-my-openagent/pull/11216), part of [#10707](https://github.com/code-yeongyu/oh-my-openagent/issues/10707))
 
 **Skill MCP catalogs include every page.** Tools, resources, and prompts follow opaque pagination cursors in order, with a clear error if a server exceeds 100 pages. ([#11204](https://github.com/code-yeongyu/oh-my-openagent/pull/11204))
 
