@@ -139,14 +139,18 @@ test("#given bind reconciliation is still pending #when the stale-lock fixture i
   const item = await staleLockFixture(undefined, {
     createFactsExtractor: (options) => {
       const runner = new FactsExtractorRunner(options)
-      const pending = gate.promise.then(() => runner.reconcilePending())
+      const pending: Promise<unknown>[] = []
       settleReconcile = async () => {
         gate.resolve()
-        await pending
+        await Promise.all(pending)
         await runner.cancelActive()
       }
       return {
-        reconcilePending: () => pending,
+        reconcilePending: () => {
+          const reconcile = gate.promise.then(() => runner.reconcilePending())
+          pending.push(reconcile)
+          return reconcile
+        },
         launchPending: (signal, selection) => runner.launchPending(signal, selection),
         cancelActive: () => settleReconcile(),
       }
