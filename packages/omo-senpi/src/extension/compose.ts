@@ -135,6 +135,10 @@ export function composeOmoSenpiExtension(
           return () => clearTimeout(timer)
         },
         onChildWorkChange: publishChildWork,
+        onReceiptError: (error) =>
+          logger.warn("omo-senpi idle injection receipt failed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
       },
     )
     publishWakeQueueBaselineOnSessionStart(pi, () => idleCoordinator.childWorkCount(), publishChildWork)
@@ -144,7 +148,14 @@ export function composeOmoSenpiExtension(
     // still-queued injection back to its producer as a delivery failure, so a completion caught inside
     // the batch window is recorded as undelivered and redelivered after the reload.
     // See: https://github.com/code-yeongyu/oh-my-openagent/issues/7932
-    pi.on("session_shutdown", () => idleCoordinator.retire())
+    // A receipt error must not escape session_shutdown: later shutdown handlers (startup deferral) still run.
+    pi.on("session_shutdown", () => {
+      try {
+        idleCoordinator.retire()
+      } catch (error) {
+        logger.warn("omo-senpi idle injection receipt failed on shutdown", { error: error instanceof Error ? error.message : String(error) })
+      }
+    })
 
     // Startup work that is not needed before the first user turn (telemetry capture, the init-deep
     // advisor's git/fs preflight, the LSP project-config notice) is queued here instead of running
