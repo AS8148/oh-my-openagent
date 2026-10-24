@@ -235,23 +235,27 @@ export class IdleInjectionCoordinator {
       )
     } catch (error) {
       // Receipts first: the count is a report, and nothing about reporting may cost a producer its receipt.
-      for (const injection of ordered) injection.onDeliveryFailed?.(error)
-      settleChildren()
+      // A receipt that throws must not leave the children counted: the session would never reach done.
+      try {
+        for (const injection of ordered) injection.onDeliveryFailed?.(error)
+      } finally {
+        settleChildren()
+      }
       throw error
     }
+    const receiptThenSettle = (receipt: (injection: IdleInjection) => void): void => {
+      try {
+        for (const injection of ordered) receipt(injection)
+      } finally {
+        settleChildren()
+      }
+    }
     if (!isPromiseLike(delivery)) {
-      for (const injection of ordered) injection.onFlushed?.()
-      settleChildren()
+      receiptThenSettle((injection) => injection.onFlushed?.())
     } else {
       void delivery.then(
-        () => {
-          for (const injection of ordered) injection.onFlushed?.()
-          settleChildren()
-        },
-        (error: unknown) => {
-          for (const injection of ordered) injection.onDeliveryFailed?.(error)
-          settleChildren()
-        },
+        () => receiptThenSettle((injection) => injection.onFlushed?.()),
+        (error: unknown) => receiptThenSettle((injection) => injection.onDeliveryFailed?.(error)),
       )
     }
     return collapsed
