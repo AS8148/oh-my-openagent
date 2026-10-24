@@ -225,7 +225,7 @@ describe("verification claims are structural (data-claim-kind)", () => {
 	}
 
 	test("#given an UNMARKED Korean run-and-check sentence #when checked #then verification_claim_unmarked minor only", () => {
-		expect(severities(run(`<p>실행해 확인한 길이는 ${fact("F1", "최대 320 m", "m")} [S4].</p>`))).toEqual(["verification_claim_unmarked:minor"])
+		expect(severities(run(`<p>우리가 실행해 확인한 길이는 ${fact("F1", "최대 320 m", "m")} [S4].</p>`))).toEqual(["verification_claim_unmarked:minor"])
 	})
 
 	test("#given the same run-and-check sentence MARKED verified on a command row #when checked #then no warning", () => {

@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { join, resolve, sep } from "node:path"
 
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
@@ -173,7 +173,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		if (groups.size > 1) flag("join_integrity_fail", tr, `one table row joins observations ${[...groups].join(", ")}`)
 	}
 	const meta = sourceChecks(ctx, rows, cited, sourcesDir, flag)
-	claimChecks(ctx, rows, (sourceId) => meta.get(sourceId)?.kind, flag)
+	claimChecks(ctx, rows, (row) => provenance(sourcesDir, meta, row), flag)
 	const charts = chartFigures(ctx)
 	for (const { node, scope } of ctx.elements) {
 		const kind = ctx.kindOf(scope)
@@ -203,6 +203,15 @@ function rowChecks(ctx, ledger, rows, cited, options, flag) {
 			if (outside) flag("snapshot_mismatch", node, `operand ${outside} of ${id} was observed outside ${window.start} to ${window.end}`)
 		}
 	}
+}
+
+/** meta.json kind of the snapshot holding the row's own locator artifact; undefined when the artifact is absent or escapes sources/<source_id>/. */
+function provenance(sourcesDir, meta, row) {
+	const artifact = row.locator?.artifact
+	if (!sourcesDir || typeof row.source_id !== "string" || typeof artifact !== "string") return undefined
+	const dir = resolve(sourcesDir, row.source_id)
+	const path = resolve(dir, artifact)
+	return path.startsWith(`${dir}${sep}`) && existsSync(path) ? meta.get(row.source_id)?.kind : undefined
 }
 
 function sourceChecks(ctx, rows, cited, sourcesDir, flag) {
