@@ -12,11 +12,10 @@
 // sentence text (normalized) is not in the pre-polish artifact that a fill map names, so the
 // meaning readers re-check exactly what polish rewrote. No model, no network.
 
-import { createHash } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
-import { CliError, parseArgs, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
+import { CliError, parseArgs, readJsonFile, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
 import { countDefects, DEFECT_CODES } from "./contracts.mjs"
 import { editionFormatOf, ledgerFrom, markdownAsHtml, sessionOf } from "./fact-commands-verify.mjs"
 import { extractPairs } from "./fact-pairs.mjs"
@@ -31,8 +30,6 @@ export const POLISH_RECORD = "polish-defects.json"
 
 /** The polish-diff exit policy: only a registry blocker fails the command; majors are reported. */
 export const polishDiffFails = (defects) => defects.some((defect) => (DEFECT_CODES[defect.code]?.severity ?? defect.severity) === "blocker")
-
-const sha256 = (text) => createHash("sha256").update(text).digest("hex")
 
 function readText(path) {
 	try {
@@ -69,7 +66,7 @@ function runPolishApply(args) {
 	writeFileSync(flags.out, result.out)
 	const defects = [...result.rejected, ...result.unlocated].sort((a, b) => a.index - b.index).map(withSeverity)
 	const counts = { applied: result.applied.length, rejected: result.rejected.length, unlocated: result.unlocated.length }
-	const data = { out: resolve(flags.out), ...counts, applied_indexes: result.applied, input_sha256: sha256(html), edits_sha256: sha256(editsText), out_sha256: sha256(result.out) }
+	const data = { out: resolve(flags.out), ...counts, applied_indexes: result.applied, input_sha256: sha256Of(html), edits_sha256: sha256Of(editsText), out_sha256: sha256Of(result.out) }
 	const rejected_reasons = result.rejected.map((entry) => rejectionLine(entry, edits[entry.index]))
 	const summary = [`fact polish-apply: ${counts.applied} applied, ${counts.rejected} rejected, ${counts.unlocated} unlocated of ${edits.length} edit(s)`, ...rejected_reasons].join("\n")
 	return { json: { command: "fact polish-apply", status: "pass", exitCode: 0, defects, data: { ...data, rejected_reasons } }, summary, exitCode: 0 }
@@ -85,7 +82,7 @@ function runPolishDiff(args) {
 	const counts = countDefects(defects)
 	const status = polishDiffFails(defects) ? "fail" : "pass"
 	const exitCode = status === "fail" ? 1 : 0
-	const record = { command: "fact polish-diff", status, exitCode, before: resolve(flags.before), artifact: resolve(flags.after), artifact_sha256: sha256(after), defects, counts }
+	const record = { command: "fact polish-diff", status, exitCode, before: resolve(flags.before), artifact: resolve(flags.after), artifact_sha256: sha256Of(after), defects, counts }
 	const session = sessionOf(flags)
 	const out = flags.out ?? (session === null ? null : join(session, POLISH_RECORD))
 	if (out !== null) writeJsonAtomic(resolve(out), record)
@@ -105,7 +102,7 @@ export function pairsChangedSince(pairs, mapPath, ledger, claims) {
 	const map = readJsonFile(mapPath)
 	if (typeof map.artifact !== "string" || !existsSync(map.artifact)) throw new CliError(`${mapPath} names no readable pre-polish artifact`)
 	const text = readText(map.artifact)
-	if (map.artifact_sha256 !== undefined && sha256(text) !== map.artifact_sha256) throw new CliError(`${map.artifact} changed after fill; --changed-since needs the pre-polish bytes`)
+	if (map.artifact_sha256 !== undefined && sha256Of(text) !== map.artifact_sha256) throw new CliError(`${map.artifact} changed after fill; --changed-since needs the pre-polish bytes`)
 	const html = map.format === "md" ? markdownAsHtml(text, map.entries, ledger).html : text
 	const before = new Map()
 	for (const pair of extractPairs(html, ledger, claims)) before.set(pairKey(pair), (before.get(pairKey(pair)) ?? 0) + 1)

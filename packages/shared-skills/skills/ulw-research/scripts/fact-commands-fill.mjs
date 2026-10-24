@@ -7,11 +7,10 @@
 // block quote or omission for --replace-failed. All or nothing: any error writes no output.
 // node: builtins and sibling imports only.
 
-import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, extname, resolve } from "node:path"
 
-import { CliError, writeJsonAtomic } from "./cli-support.mjs"
+import { CliError, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
 import { DEFECT_CODES } from "./contracts.mjs"
 import { FILL_FORMATS, fill } from "./fact-fill.mjs"
 import { readLedger, writeLedger } from "./fact-ledger.mjs"
@@ -27,8 +26,6 @@ export const FILL_INPUT_FORMAT_RULES = Object.freeze({
 })
 export const FILL_INPUT_FORMATS = Object.freeze([...FILL_FORMATS, ...Object.keys(FILL_INPUT_FORMAT_RULES.aliases)])
 const fillFormatOf = (format) => FILL_INPUT_FORMAT_RULES.aliases[format] ?? format
-
-const sha256Of = (content) => createHash("sha256").update(content).digest("hex")
 
 function readText(path) {
 	try {

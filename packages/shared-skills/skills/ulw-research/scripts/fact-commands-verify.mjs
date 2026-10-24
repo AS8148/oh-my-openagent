@@ -1,7 +1,8 @@
 // fact-commands-verify.mjs - `fact verify` and the Markdown projection it checks.
 //
 // fact verify runs the deterministic fidelity gate over one filled HTML or Markdown edition and
-// writes a record (default $SESSION_DIR/fidelity-defects.json) carrying the artifact's sha256. It
+// writes a fidelity record (default $SESSION_DIR/fidelity-defects.json, through
+// writeFidelityRecord) carrying the artifact's sha256. It
 // exits 1 on any blocker or major defect (the orchestrator then records `outcome gate fidelity
 // fail`); minors alone exit 0 and are listed. A Markdown edition is read through md-lite into an
 // escaped HTML projection (same line numbers) and checked with its fill map, which is the only
@@ -10,24 +11,20 @@
 // The delivery barrier that reads these records (and every other fidelity record) is
 // fidelity-records.mjs.
 
-import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
-import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
+import { CliError, readJsonFile, sha256Of } from "./cli-support.mjs"
 import { countDefects } from "./contracts.mjs"
 import { recompute } from "./fact-derive.mjs"
 import { readLedger } from "./fact-ledger.mjs"
 import { validateLedger } from "./fact-ledger-schema.mjs"
 import { lockedBrief } from "./fidelity-policy.mjs"
-import { FIDELITY_RECORD } from "./fidelity-records.mjs"
+import { FIDELITY_RECORD, writeFidelityRecord } from "./fidelity-records.mjs"
 import { blocksDelivery, checkFidelity } from "./gates-fidelity.mjs"
 import { parseMarkdown } from "./md-lite.mjs"
 import { escapeHtml, parseRenderedQuote, renderQuote, renderValueHtml } from "./placeholder.mjs"
 import { sessionDirOf } from "./source-commands.mjs"
-
-
-const sha256Of = (content) => createHash("sha256").update(content).digest("hex")
 
 function readText(path) {
 	try {
@@ -183,8 +180,7 @@ export function runFactVerify(args) {
 	const counts = countDefects(result.defects)
 	const status = result.defects.some(blocksDelivery) ? "fail" : "pass"
 	const exitCode = status === "fail" ? 1 : 0
-	const record = { command: "fact verify", status, exitCode, format: edition.format, artifact: resolve(report), artifact_sha256: sha256Of(edition.text), defects: result.defects, counts, gatesRun: result.gatesRun }
 	const out = resolve(flags.out ?? join(sessionDir, FIDELITY_RECORD))
-	writeJsonAtomic(out, record)
+	const record = writeFidelityRecord(out, "fidelity", { command: "fact verify", status, exitCode, format: edition.format, report: resolve(report), artifact_sha256: sha256Of(edition.text), defects: result.defects, counts, gatesRun: result.gatesRun })
 	return { json: { ...record, out }, summary: `fact verify: ${status.toUpperCase()} - ${counts.blocker} blocker, ${counts.major} major, ${counts.minor} minor`, exitCode }
 }
