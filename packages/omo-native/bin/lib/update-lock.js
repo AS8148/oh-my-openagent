@@ -49,7 +49,7 @@ function normalizePath(path) {
   return path.replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase()
 }
 
-// The packages an omo install runs processes from: the launcher and its pinned senpi engine.
+// The packages omo runs processes from: the launcher and its pinned senpi engine.
 const OMO_PACKAGES = ["omo-ai", "@code-yeongyu"]
 
 /**
