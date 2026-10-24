@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Desktop thread tools are available to agents in their own session.** When the app offers its thread toolkit, OmO acquires the session's grant and registers the app's tools with a `desktop_` prefix, including `desktop_thread_organize`. Calls use only the calling session's grant and read its bearer from the credential file at call time. Sessions without a grant register no desktop thread tools. The dependency-free HTTP client loads only for offered toolkits, keeping desktop integration out of other sessions' startup. ([#11217](https://github.com/code-yeongyu/oh-my-openagent/pull/11217))
+**Desktop thread tools are available to agents in their own session.** When the app offers its thread toolkit, OmO acquires the session's grant without blocking session startup and registers valid, non-conflicting tools with a `desktop_` prefix, including `desktop_thread_organize`. Failed discovery retries once on the next turn; shutdown cancels discovery and clears the grant. Calls use only the calling session's grant and read its bearer from the credential file at call time. Sessions without a grant register no desktop thread tools. The dependency-free HTTP client loads only for offered toolkits, keeping desktop integration out of other sessions' startup. ([#11217](https://github.com/code-yeongyu/oh-my-openagent/pull/11217))
 
 **Skill MCP catalogs include every page.** Tools, resources, and prompts follow opaque pagination cursors in order, with a clear error if a server exceeds 100 pages. ([#11204](https://github.com/code-yeongyu/oh-my-openagent/pull/11204))
 

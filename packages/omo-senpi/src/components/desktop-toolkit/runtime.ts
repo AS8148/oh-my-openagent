@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path"
 
+import { deferUntilAfterFirstPaint } from "../../extension/startup-deferral"
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { DESKTOP_TOOLKIT_TOOL_NAME, TOOLKIT_REQUEST_EVENT, TOOLKIT_GRANT_RPC, TOOLKITS_CONTEXT_KEY, type ToolkitGrant } from "./index"
 import { callThreadTool, listThreadTools } from "./thread-tools"
@@ -17,6 +18,11 @@ const PARAMETERS = {
 } as const
 
 type Settled = { readonly ok: true; readonly grant: ToolkitGrant } | { readonly ok: false; readonly reason: string }
+interface SessionDiscovery {
+  readonly controller: AbortController
+  startupPending: boolean
+  running?: Promise<void>
+}
 
 function reply(details: Settled) {
   return { content: [{ type: "text", text: JSON.stringify(details) }], details }
@@ -58,25 +64,27 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
       if (typeof pi.registerTool !== "function") return
       const pending = new Map<string, (settled: Settled) => void>()
-      const attempted = new Set<string>()
+      const sessions = new Map<string, SessionDiscovery>()
       const grants = new Map<string, ToolkitGrant>()
       const registered = new Set<string>()
 
-      async function acquire(toolkit: string): Promise<Settled> {
+      async function acquire(toolkit: string, signal?: AbortSignal): Promise<Settled> {
+        if (signal?.aborted) return { ok: false, reason: "cancelled" }
         if (pi.rpc === undefined || !offeredToolkits(pi.sessionContext).has(toolkit)) {
           return { ok: false, reason: "unavailable" }
         }
         const requestId = crypto.randomUUID()
         return new Promise<Settled>((resolve) => {
-          const timer = setTimeout(() => {
-            pending.delete(requestId)
-            resolve({ ok: false, reason: "timeout" })
-          }, timeoutMs)
-          pending.set(requestId, (value) => {
+          const timer = setTimeout(() => settle({ ok: false, reason: "timeout" }), timeoutMs)
+          const onAbort = () => settle({ ok: false, reason: "cancelled" })
+          const settle = (value: Settled) => {
             clearTimeout(timer)
             pending.delete(requestId)
+            signal?.removeEventListener("abort", onAbort)
             resolve(value)
-          })
+          }
+          pending.set(requestId, settle)
+          signal?.addEventListener("abort", onAbort, { once: true })
           pi.rpc?.emit(TOOLKIT_REQUEST_EVENT, { requestId, toolkit })
         })
       }
@@ -115,29 +123,33 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
         return { accepted: true }
       })
 
-      pi.on("session_start", async (_event, eventCtx) => {
-        if (pi.rpc === undefined || !offeredToolkits(pi.sessionContext).has("thread")) {
-          ctx.logger.debug?.("desktop thread toolkit unavailable", { reason: "not_offered" })
-          return
-        }
-        const sessionId = callingSessionId(eventCtx)
-        if (sessionId === undefined) {
-          ctx.logger.info("desktop thread toolkit unavailable", { reason: "missing_session" })
-          return
-        }
-        if (attempted.has(sessionId)) return
-        attempted.add(sessionId)
+      async function discover(sessionId: string, state: SessionDiscovery): Promise<void> {
+        if (state.controller.signal.aborted || grants.has(sessionId)) return
+        if (state.running !== undefined) return state.running
+        state.startupPending = false
+        state.running = runDiscovery(sessionId, state).finally(() => { state.running = undefined })
+        return state.running
+      }
+
+      async function runDiscovery(sessionId: string, state: SessionDiscovery): Promise<void> {
+        const signal = state.controller.signal
         try {
-          const settled = await acquire("thread")
+          const settled = await acquire("thread", signal)
+          if (signal.aborted) return
           if (!settled.ok) {
             ctx.logger.info("desktop thread toolkit unavailable", { reason: settled.reason === "timeout" ? "timeout" : "grant_refused" })
             return
           }
-          const tools = await listThreadTools(settled.grant, timeoutMs)
+          const tools = await listThreadTools(settled.grant, timeoutMs, signal, (reason) =>
+            ctx.logger.info("desktop thread toolkit skipped tool", { reason }))
+          if (signal.aborted) return
           grants.set(sessionId, settled.grant)
           for (const tool of tools) {
             const name = `desktop_${tool.name}`
             if (registered.has(name)) continue
+            const inventory: unknown = "getAllTools" in pi && typeof pi.getAllTools === "function" ? pi.getAllTools() : []
+            if (Array.isArray(inventory) && inventory.some((entry: unknown) =>
+              typeof entry === "object" && entry !== null && "name" in entry && entry.name === name)) continue
             pi.registerTool({
               name,
               label: name,
@@ -154,8 +166,38 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
           }
         } catch {
           // Remote errors may echo the bearer. Only a fixed diagnostic crosses this boundary.
-          ctx.logger.info("desktop thread toolkit unavailable", { reason: "discovery_failed" })
+          if (!signal.aborted) ctx.logger.info("desktop thread toolkit unavailable", { reason: "discovery_failed" })
         }
+      }
+
+      pi.on("session_start", (_event, eventCtx) => {
+        if (pi.rpc === undefined || !offeredToolkits(pi.sessionContext).has("thread")) {
+          ctx.logger.debug?.("desktop thread toolkit unavailable", { reason: "not_offered" })
+          return
+        }
+        const sessionId = callingSessionId(eventCtx)
+        if (sessionId === undefined) {
+          ctx.logger.info("desktop thread toolkit unavailable", { reason: "missing_session" })
+          return
+        }
+        if (sessions.has(sessionId)) return
+        const state: SessionDiscovery = { controller: new AbortController(), startupPending: true }
+        sessions.set(sessionId, state)
+        deferUntilAfterFirstPaint(ctx, "desktop thread toolkit", () =>
+          state.startupPending ? discover(sessionId, state) : undefined)
+      })
+      // Each real turn retries once after failure, or joins the bounded attempt already running.
+      pi.on("before_agent_start", (_event, eventCtx) => {
+        const sessionId = callingSessionId(eventCtx)
+        const state = sessionId === undefined ? undefined : sessions.get(sessionId)
+        if (sessionId !== undefined && state !== undefined) return discover(sessionId, state)
+      })
+      pi.on("session_shutdown", (_event, eventCtx) => {
+        const sessionId = callingSessionId(eventCtx)
+        if (sessionId === undefined) return
+        sessions.get(sessionId)?.controller.abort()
+        sessions.delete(sessionId)
+        grants.delete(sessionId)
       })
     },
   }

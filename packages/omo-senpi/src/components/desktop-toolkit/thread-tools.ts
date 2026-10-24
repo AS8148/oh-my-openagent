@@ -84,6 +84,7 @@ async function withClient<T>(
     const message = await responseMessage(response, id)
     if ("error" in message) throw new Error("desktop toolkit RPC request failed")
     const result = object(message.result)
+    // This guard catches only the exact bearer substring in JSON, not encoded or transformed secrets.
     if (JSON.stringify(result).includes(token)) throw new Error("desktop toolkit response contains a credential")
     return result
   }
@@ -97,8 +98,12 @@ async function withClient<T>(
     return await operation(request)
   } finally {
     if (headers.has("Mcp-Session-Id")) {
-      const response = await fetch(grant.endpoint, { method: "DELETE", headers, redirect: "error", signal })
-      await response.body?.cancel()
+      try {
+        const response = await fetch(grant.endpoint, { method: "DELETE", headers, redirect: "error", signal: AbortSignal.timeout(2_000) })
+        await response.body?.cancel()
+      } catch {
+        // Best-effort session cleanup must not replace the operation's outcome.
+      }
     }
   }
 }
@@ -109,7 +114,12 @@ interface DesktopTool {
   readonly inputSchema: Record<string, unknown>
 }
 
-export function listThreadTools(grant: ToolkitGrant, timeoutMs: number) {
+export function listThreadTools(
+  grant: ToolkitGrant,
+  timeoutMs: number,
+  signal?: AbortSignal,
+  onInvalid?: (reason: "invalid_descriptor" | "invalid_name" | "invalid_schema") => void,
+) {
   return withClient(grant, timeoutMs, async (request) => {
     const tools: DesktopTool[] = []
     let cursor: string | undefined
@@ -117,18 +127,33 @@ export function listThreadTools(grant: ToolkitGrant, timeoutMs: number) {
       const page = await request("tools/list", cursor === undefined ? undefined : { cursor })
       if (!Array.isArray(page.tools)) throw new Error("invalid desktop toolkit tools")
       for (const value of page.tools) {
-        const tool = object(value)
-        const inputSchema = object(tool.inputSchema)
-        if (typeof tool.name !== "string" || inputSchema.type !== "object" || (tool.description !== undefined && typeof tool.description !== "string")) {
-          throw new Error("invalid desktop toolkit tool")
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+          onInvalid?.("invalid_descriptor")
+          continue
         }
+        const tool = object(value)
+        if (typeof tool.name !== "string" || tool.name.length === 0 ||
+          /^[a-zA-Z0-9_-]{1,64}$/.exec(`desktop_${tool.name}`)?.[0] !== `desktop_${tool.name}`) {
+          onInvalid?.("invalid_name")
+          continue
+        }
+        if (typeof tool.inputSchema !== "object" || tool.inputSchema === null || Array.isArray(tool.inputSchema) ||
+          !("type" in tool.inputSchema) || tool.inputSchema.type !== "object") {
+          onInvalid?.("invalid_schema")
+          continue
+        }
+        if (tool.description !== undefined && typeof tool.description !== "string") {
+          onInvalid?.("invalid_descriptor")
+          continue
+        }
+        const inputSchema = object(tool.inputSchema)
         tools.push({ name: tool.name, inputSchema, ...(tool.description === undefined ? {} : { description: tool.description }) })
       }
       if (page.nextCursor !== undefined && typeof page.nextCursor !== "string") throw new Error("invalid desktop toolkit cursor")
       cursor = page.nextCursor
     } while (cursor !== undefined)
     return tools
-  })
+  }, signal)
 }
 
 export async function callThreadTool(
