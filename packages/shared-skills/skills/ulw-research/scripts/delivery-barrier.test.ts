@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { DEFECT_CODES } from "./contracts.mjs"
+import { FIDELITY_RECORDS, MEANING_RECORD } from "./fidelity-records.mjs"
 import { run } from "./report-tools.mjs"
 
 async function delivered(format = "html", codes: string[] | null = null) {
@@ -112,4 +113,57 @@ test("#given an explicit skip and an existing blocker #when verified #then the s
 	const { invoke } = await delivered("html", ["claim_status_invalid"])
 	await invoke(["gate", "fidelity", "not_run", "--reason", "Unsupported edition"])
 	expect((await invoke(["verify"])).exitCode).toBe(1)
+})
+
+const LOCKED_BRIEF = readFileSync(join(import.meta.dir, "tests", "fixtures", "fidelity-brief-locked.md"), "utf8")
+
+/** A delivered, fidelity-verified html edition in a session whose locked brief sets `meaning check`. */
+async function meaningSession(meaning: "on" | "off", codes: string[] | null) {
+	const session = await delivered("html", [])
+	writeFileSync(join(session.dir, "brief.md"), LOCKED_BRIEF.replace("meaning check: on", `meaning check: ${meaning}`))
+	if (codes !== null) writeFileSync(join(session.dir, MEANING_RECORD), JSON.stringify({ command: "fact meaning-check", defects: codes.map((code) => ({ code, severity: "major", message: code })) }))
+	return session
+}
+
+test("#given the record table #when read #then it names the fidelity and meaning records, each with a required-when rule", () => {
+	expect(FIDELITY_RECORDS.map((entry) => entry.file)).toEqual(["fidelity-defects.json", MEANING_RECORD])
+	for (const entry of FIDELITY_RECORDS) expect(typeof entry.requiredWhen).toBe("function")
+})
+
+for (const code of ["meaning_drift_confirmed", "meaning_unverified"]) {
+	test(`#given a meaning record with ${code} #when verified and finished #then delivery refuses`, async () => {
+		const { dir, invoke } = await meaningSession("on", [code])
+		for (const command of ["verify", "finish"]) {
+			const result = await invoke([command])
+			expect(result.exitCode).toBe(1)
+			expect(result.json.problems).toContainEqual(expect.objectContaining({ code: "fidelity_unresolved", codes: [code], path: join(dir, MEANING_RECORD) }))
+		}
+	})
+}
+
+test("#given the brief says meaning check on and the meaning step was skipped #when verified and finished #then delivery refuses: meaning gate not run", async () => {
+	const { invoke } = await meaningSession("on", null)
+	for (const command of ["verify", "finish"]) {
+		const result = await invoke([command])
+		expect(result.exitCode).toBe(1)
+		expect(JSON.stringify(result.json.problems)).toContain("meaning gate not run")
+	}
+})
+
+test("#given the brief says meaning check off and no meaning record #when verified and finished #then delivery passes", async () => {
+	const { invoke } = await meaningSession("off", null)
+	expect((await invoke(["verify"])).exitCode).toBe(0)
+	expect((await invoke(["finish"])).exitCode).toBe(0)
+})
+
+test("#given a clean meaning record (warn only) under meaning check on #when verified #then delivery passes", async () => {
+	const { invoke } = await meaningSession("on", ["meaning_drift_warn"])
+	expect((await invoke(["verify"])).exitCode).toBe(0)
+})
+
+test("#given meaning check on, no fidelity evidence, and an explicit fidelity not_run #when verified #then the logged exemption covers the meaning step too", async () => {
+	const { dir, invoke } = await delivered()
+	writeFileSync(join(dir, "brief.md"), LOCKED_BRIEF)
+	await invoke(["gate", "fidelity", "not_run", "--reason", "No factual content in this edition"])
+	expect((await invoke(["verify"])).exitCode).toBe(0)
 })
