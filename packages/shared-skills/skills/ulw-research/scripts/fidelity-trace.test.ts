@@ -47,12 +47,12 @@ describe("fill-site trace (Markdown fill map)", () => {
 	})
 })
 
-describe("verification claims need a tool", () => {
+describe("verification claims are judged by their mark, not their wording", () => {
 	test("#given the reviewer's prose 'as confirmed with the annual inspection report' #when checked #then no unsupported_verification", () => {
 		expect(run(GOOD.replace(F1_SENTENCE, "long, as confirmed with the annual inspection report [S4].</p>"))).toEqual([])
 	})
 
-	test("#given 'confirmed using the survey script' on a page-sourced fact #when checked #then unsupported_verification", () => {
-		expect(codes(run(GOOD.replace(F1_SENTENCE, "long, as confirmed using the survey script [S4].</p>")))).toEqual(["unsupported_verification"])
+	test("#given report-good's F7 marked verified but pointed at a page-sourced row #when checked #then unsupported_verification", () => {
+		expect(codes(run(GOOD.replace('value="42" data-fact="F7" data-claim-kind="verified" data-lineage="MEASURED">42 passed', 'value="320" data-fact="F1" data-unit="m" data-claim-kind="verified" data-lineage="MEASURED">up to 320 m')))).toEqual(["unsupported_verification"])
 	})
 })

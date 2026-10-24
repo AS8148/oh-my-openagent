@@ -23,32 +23,6 @@ export const QUALIFIER_FORMS = Object.freeze({
 })
 /** Irregular and synonym direction forms the stem match cannot reach ("rose", "reduced"). */
 const DIRECTION_FORMS = { up: ["rose", "risen", "rising", "grew", "grown", "gain"], down: ["reduc", "fell", "fallen", "falling", "drop", "lower"] }
-// Verification claims (unsupported_verification). A sentence counts only when it names the tool
-// that did the checking; a check verb alone ("as confirmed with the annual inspection report",
-// "ran across", the Korean stem hwagin) is ordinary findings prose. Each row is one way to name it:
-//   by running          English "by running ..."
-//   we ran              first-person "we ran / re-ran / executed"
-//   verb, then tool     a check or run verb with a tool noun at most four words later
-//   tool, then verb     a tool noun with a check or run verb at most four words later
-//   silhaeng, then check  Korean "run" (silhaeng) followed by hwagin / geomjeung
-//   tool, then check    Korean command / script / test / query / benchmark, then hwagin /
-//                       geomjeung / tonggwa / silhaeng within twelve characters ("contest" excluded)
-const VERB_EN = "(?:verified|confirmed|checked|tested|ran|re-?ran|executed)"
-const TOOL_EN = "(?:commands?|scripts?|tests?|suites?|quer(?:y|ies)|benchmarks?|CLI|shell|tools?)"
-const NEAR = "(?:\\s+\\S+){0,3}?\\s+"
-const TOOL_KO = "(?:\uBA85\uB839|\uC2A4\uD06C\uB9BD\uD2B8|(?<!\uCF58)\uD14C\uC2A4\uD2B8|\uCFFC\uB9AC|\uBCA4\uCE58\uB9C8\uD06C)"
-const VERIFY = [
-	/\bby\s+running\b/i,
-	/\bwe\s+(?:have\s+)?(?:ran|re-?ran|executed)\b/i,
-	new RegExp(`\\b${VERB_EN}\\b${NEAR}${TOOL_EN}\\b`, "i"),
-	new RegExp(`\\b${TOOL_EN}\\b${NEAR}${VERB_EN}\\b`, "i"),
-	/\uC2E4\uD589\S{0,3}\s*(?:\uD655\uC778|\uAC80\uC99D)/,
-	new RegExp(`${TOOL_KO}[^.]{0,12}?(?:\uD655\uC778|\uAC80\uC99D|\uD1B5\uACFC|\uC2E4\uD589)`),
-]
-
-/** True when the sentence claims a check that only a recorded command or test could back. */
-export const claimsToolCheck = (text) => VERIFY.some((re) => re.test(text))
-
 const KOREAN = /[\uAC00-\uD7A3]/
 const ACRONYM = /(?<![\p{L}\p{N}])[A-Z]{2,6}(?![\p{L}\p{N}])/gu
 const WINDOW = 6

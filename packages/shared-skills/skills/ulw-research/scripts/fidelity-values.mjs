@@ -2,15 +2,16 @@
 //
 // Each data-fact element must match its ledger row, and each Q element the script's
 // reconstruction of its selection (report text never gets a fuzzy pass). Cited rows, table rows,
-// snapshots, and chart CSVs are rechecked; the numeral and quotation trace is fidelity-trace.mjs.
+// snapshots, and chart CSVs are rechecked; the numeral and quotation trace is fidelity-trace.mjs,
+// and the claim-kind checks (data-claim-kind, unsupported_verification) are fidelity-claims.mjs.
 // No model, no network.
 
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
-import { proseSentences, sameValue, unitKey } from "./fidelity-binding.mjs"
-import { claimsToolCheck } from "./fidelity-lexicon.mjs"
+import { sameValue, unitKey } from "./fidelity-binding.mjs"
+import { claimChecks } from "./fidelity-claims.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
 import { parseNumeral } from "./numerals.mjs"
@@ -171,7 +172,8 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		const groups = new Set(ctx.util.descendants(tr).map((node) => rows.get(node.attrs["data-fact"])?.observation_id).filter(Boolean))
 		if (groups.size > 1) flag("join_integrity_fail", tr, `one table row joins observations ${[...groups].join(", ")}`)
 	}
-	sourceChecks(ctx, rows, cited, sourcesDir, flag)
+	const meta = sourceChecks(ctx, rows, cited, sourcesDir, flag)
+	claimChecks(ctx, rows, (sourceId) => meta.get(sourceId)?.kind, flag)
 	const charts = chartFigures(ctx)
 	for (const { node, scope } of ctx.elements) {
 		const kind = ctx.kindOf(scope)
@@ -214,12 +216,5 @@ function sourceChecks(ctx, rows, cited, sourcesDir, flag) {
 		const actual = createHash("sha256").update(readFileSync(textPath)).digest("hex")
 		if (meta.get(id).sha256 !== actual) flag("snapshot_hash_mismatch", ctx.body, `${id}/text.txt changed after its snapshot was pinned`)
 	}
-	for (const block of proseSentences(ctx)) {
-		if (block.kind === "sources" || block.kind === "toc") continue
-		for (const sentence of block.sentences) {
-			if (!claimsToolCheck(sentence.text)) continue
-			const unbacked = sentence.facts.find((f) => meta.get(rows.get(f.id)?.source_id)?.kind !== "command")
-			if (unbacked) flag("unsupported_verification", block.owner, `"${clip(sentence.text)}" claims a check, but ${unbacked.id} is not recorded command output`)
-		}
-	}
+	return meta
 }
