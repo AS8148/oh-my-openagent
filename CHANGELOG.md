@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 **Tasks honour a `-fast` model alias that the provider config pairs with a model.** Kibitzer no longer stops at a model whose start is refused; it falls back to the next one. ([#10538](https://github.com/code-yeongyu/oh-my-openagent/pull/10538), fixes [#10536](https://github.com/code-yeongyu/oh-my-openagent/issues/10536))
+**Thread tools check that an RPC host is the one they selected before changing a session ([#10712](https://github.com/code-yeongyu/oh-my-openagent/pull/10712)).** The client proves the host's key with a challenge-response and attaches the selected session by its durable id on the same connection, so a host that reused a routing id cannot receive another session's mutation. A draining host answers with a retryable `host_draining` error instead of failing the call, and a change that took effect is never reported as failed.
+
+## [5.1.41] - 2026-10-22
 
 **Child startup failures keep their cause.** When a task child exits while the parent writes to stdin, its own typed failure is reported instead of a broken-pipe error. ([#11097](https://github.com/code-yeongyu/oh-my-openagent/pull/11097), fixes [#11096](https://github.com/code-yeongyu/oh-my-openagent/issues/11096))
 
