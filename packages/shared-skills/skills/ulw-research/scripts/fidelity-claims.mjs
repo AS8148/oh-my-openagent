@@ -6,11 +6,12 @@
 // (unsupported_verification for `verified`). A fact under two marks of different kinds is a
 // claim_kind_mismatch, and a mark that owns no fact of its own kind (every fact under it cites
 // nothing or is shadowed by another kind) is its kind's defect: shadowing never satisfies a parent.
-// A sentence that matches a kind's unmarked patterns warns (minor, verification_claim_unmarked)
+// An unmarked fact citing a row neither fact nor quote accepts (an assumed row) is a
+// claim_kind_mismatch naming the mark it needs. A sentence that matches a kind's unmarked patterns warns (minor, verification_claim_unmarked)
 // unless every fact it cites is marked that kind; a sentence citing no fact warns unless its block
 // is marked. No model, no network.
 
-import { CLAIM_ATTRIBUTE, CLAIM_KINDS, claimSatisfied, unmarkedKinds } from "./claim-kinds.mjs"
+import { CLAIM_ATTRIBUTE, CLAIM_KINDS, claimSatisfied, unmarkedKinds, unmarkedRequires } from "./claim-kinds.mjs"
 import { proseSentences } from "./fidelity-binding.mjs"
 import { clip } from "./fidelity-trace.mjs"
 import { proseText } from "./html-lite.mjs"
@@ -59,9 +60,14 @@ export function claimChecks(ctx, rows, provenanceOf, flag) {
 	}
 	for (const fact of ctx.all.filter(isFact)) {
 		const [nearest, ...outer] = marksOver(fact)
-		if (!nearest) continue
-		const name = kindOf(nearest)
 		const id = fact.attrs["data-fact"]
+		if (!nearest) {
+			const need = unmarkedRequires(rows.get(id))
+			const mark = need && `{{${CLAIM_KINDS[need].prefix}:${id}}} (${CLAIM_ATTRIBUTE}="${need}")`
+			if (need) flag("claim_kind_mismatch", fact, `${id} is a ${rows.get(id).kind} row cited with no mark; an unmarked numeral reads as a fact, so mark it ${mark}`)
+			continue
+		}
+		const name = kindOf(nearest)
 		const conflict = outer.find((mark) => kindOf(mark) !== name)
 		if (conflict) flag("claim_kind_mismatch", fact, `${id} is marked ${name} inside a ${kindOf(conflict)} mark; a fact carries one claim kind`)
 		const entry = CLAIM_KINDS[name]

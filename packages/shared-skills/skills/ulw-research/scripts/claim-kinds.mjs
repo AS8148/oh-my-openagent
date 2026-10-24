@@ -15,9 +15,11 @@ export const CLAIM_ATTRIBUTE = "data-claim-kind"
 
 const kind = (entry) => Object.freeze({ ...entry, rowKinds: Object.freeze(entry.rowKinds), sourceKinds: entry.sourceKinds && Object.freeze(entry.sourceKinds), unmarked: entry.unmarked && Object.freeze({ ...entry.unmarked, patterns: Object.freeze(entry.unmarked.patterns) }) })
 
-// Korean pieces as \u escapes: WE = uri|jeohui, DIRECT = jikjeop, RUN = silhaeng | dol-li/ryeo/ryeot/rin/ril,
+// Korean pieces as \u escapes: WE_SUBJECT = uri|jeohui as a standalone subject word (+ ga|neun, or " tim-i"),
+// WE_RUN = silhaeng-haet/hayeo/hae | dol-lyeot/lyeo, DIRECT = jikjeop, RUN = silhaeng | dol-li/ryeo/ryeot/rin/ril,
 // SUBJECT = a word ending in the particle ga|i|eun|neun|kkeseo (a third party ran it, not us).
-const KO_WE = "(?:\uC6B0\uB9AC|\uC800\uD76C)"
+const KO_WE_SUBJECT = "(?:^|[\\s,.;!?(])(?:\uC6B0\uB9AC|\uC800\uD76C)(?:[\uAC00\uB294]|\\s+\uD300\uC774)\\s+"
+const KO_WE_RUN = "(?:\uC2E4\uD589(?:\uD588|\uD558\uC5EC|\uD574)|\uB3CC[\uB838\uB824])"
 const KO_RUN = "(?:\uC2E4\uD589|\uB3CC[\uB9AC\uB824\uB838\uB9B0\uB9B4])"
 const KO_SUBJECT = "[^\\s,.;!?]*(?:[\uAC00\uC774\uC740\uB294]|\uAED8\uC11C)(?=\\s)"
 
@@ -35,7 +37,7 @@ export const CLAIM_KINDS = Object.freeze({
 		rowKinds: ["measured", "converted", "derived"],
 		sourceKinds: null,
 		defect: "claim_kind_mismatch",
-		note: "Accepts exactly what an unmarked numeral accepts, so marking fact is never stricter than not marking.",
+		note: "Accepts exactly what an unmarked numeral accepts, so marking fact is never stricter than not marking. Neither accepts an `assumed` row: an unmarked assumption reads as a fact, so it needs its `{{A:F12:label}}` mark (`claim_kind_mismatch` otherwise).",
 		unmarked: null,
 	}),
 	quote: kind({ prefix: null, placeholder: "{{Q7:label}}", rowKinds: ["quote"], sourceKinds: null, defect: "claim_kind_mismatch", note: "", unmarked: null }),
@@ -48,11 +50,11 @@ export const CLAIM_KINDS = Object.freeze({
 		note: "The cited row itself must have a locator artifact inside `sources/<source_id>/` whose `meta.json` kind is `command`; another command row in the sentence never counts. Whether it is the right command for the claim is the meaning verifier's call (minor), not this gate's.",
 		unmarked: {
 			code: "verification_claim_unmarked",
-			rule: "a first-person run: we/I (have) ran, run, executed, verified by (not ran out of); by running after we/our in the sentence; \\uC6B0\\uB9AC or \\uC800\\uD76C, or \\uC9C1\\uC811 with no third-party subject, then \\uC2E4\\uD589 or \\uB3CC\\uB9AC in the clause",
+			rule: "a first-person run: we/I (have) ran, run, executed, verified by (not ran out of); by running after we/our in the sentence; \\uC6B0\\uB9AC or \\uC800\\uD76C as the subject word (+ \\uAC00, \\uB294, or \\uD300\\uC774), then \\uC2E4\\uD589\\uD588, \\uC2E4\\uD589\\uD558\\uC5EC, \\uC2E4\\uD589\\uD574, \\uB3CC\\uB838, or \\uB3CC\\uB824 in the clause with no third-party subject between; \\uC9C1\\uC811 with no third-party subject, then \\uC2E4\\uD589 or \\uB3CC\\uB9AC in the clause",
 			patterns: [
 				/\b(?:we|I)(?:'ve)?\s+(?:(?:have|had|also|then|first|just|again)\s+)*(?:ran|run|re-?ran|re-?run|executed|verified\s+by)\b(?!\s+out\s+of\b)/i,
 				/\b(?:we|our)\b.*?\bby\s+running\b/i,
-				new RegExp(`${KO_WE}[^,.;!?]*?${KO_RUN}`),
+				new RegExp(`${KO_WE_SUBJECT}(?:(?!${KO_SUBJECT})[^\\s,.;!?]+\\s+)*?${KO_WE_RUN}`),
 				new RegExp(`(?:^|[,.;!?])\\s*(?:(?!${KO_SUBJECT})[^\\s,.;!?]+\\s+)*\uC9C1\uC811\\s*(?:[^\\s,.;!?]+\\s*)??${KO_RUN}`),
 			],
 		},
@@ -73,6 +75,12 @@ export const CLAIM_KINDS = Object.freeze({
 export function claimSatisfied(name, row, sourceKind) {
 	const entry = CLAIM_KINDS[name]
 	return Boolean(entry && row && entry.rowKinds.includes(row.kind) && (entry.sourceKinds === null || entry.sourceKinds.includes(sourceKind)))
+}
+
+/** The kind an unmarked element citing `row` must be marked with (an assumed row needs `assumed`), or null when unmarked is fine. */
+export function unmarkedRequires(row) {
+	if (!row || ["fact", "quote"].some((name) => CLAIM_KINDS[name].rowKinds.includes(row.kind))) return null
+	return Object.keys(CLAIM_KINDS).find((name) => CLAIM_KINDS[name].rowKinds.includes(row.kind)) ?? null
 }
 
 /** The kinds whose unmarked patterns match the sentence. */

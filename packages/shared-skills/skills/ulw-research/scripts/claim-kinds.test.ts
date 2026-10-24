@@ -38,6 +38,8 @@ const ORACLE: Record<string, { rows: string[]; command: boolean }> = {
 	derived: { rows: ["derived", "converted"], command: false },
 	assumed: { rows: ["assumed"], command: false },
 }
+/** Rows an unmarked element refuses (an unmarked numeral reads as a fact, so an assumption needs its A mark). */
+const UNMARKED_REFUSED = new Set(["F9"])
 /** Rows whose own locator artifact sits in a snapshot whose meta.json kind is command (S5/text.txt). */
 const COMMAND_BACKED = new Set(["F7"])
 const MAJOR_FOR: Record<string, string> = { fact: "claim_kind_mismatch", quote: "claim_kind_mismatch", verified: "unsupported_verification", derived: "claim_kind_mismatch", assumed: "claim_kind_mismatch" }
@@ -85,12 +87,14 @@ describe("every claim kind against the hand-written oracle", () => {
 	}
 
 	for (const row of SUBJECTS) {
-		test(`#given ${row.fact_id} unmarked in a first-person run sentence #then only the minor verification_claim_unmarked`, () => {
+		const refused = UNMARKED_REFUSED.has(row.fact_id) ? ["claim_kind_mismatch:major"] : []
+		const refusedLabel = refused.length ? "claim_kind_mismatch major" : "no claim code"
+		test(`#given ${row.fact_id} unmarked in a first-person run sentence #then the minor verification_claim_unmarked, plus ${refusedLabel}`, () => {
 			const found = claims(prose(value(row), "We ran the check and it reported"))
-			expect(found.map((d) => `${d.code}:${d.severity}`)).toEqual(["verification_claim_unmarked:minor"])
+			expect(found.map((d) => `${d.code}:${d.severity}`).sort()).toEqual([...refused, "verification_claim_unmarked:minor"].sort())
 		})
-		test(`#given ${row.fact_id} unmarked in a plain sentence #then no claim code`, () => {
-			expect(codes(prose(value(row)))).toEqual([])
+		test(`#given ${row.fact_id} unmarked in a plain sentence in prose and in a table cell #then ${refusedLabel}`, () => {
+			for (const body of [prose(value(row)), cell(value(row))]) expect(claims(body).map((d) => `${d.code}:${d.severity}`)).toEqual(refused)
 		})
 	}
 
@@ -116,8 +120,19 @@ describe("design-check regressions", () => {
 	})
 
 	test("#given a truthful converted and derived value marked fact (F3) #then no stricter than unmarked", () => {
-		for (const row of [F8, F10]) expect(codes(prose(value(row, "fact")))).toEqual(codes(prose(value(row))))
+		for (const row of [F8, F9, F10]) expect(codes(prose(value(row, "fact")))).toEqual(codes(prose(value(row))))
 		expect(codes(prose(value(F8, "fact")))).toEqual([])
+	})
+
+	test("#given the assumed row F9 unmarked or marked fact #then both refuse it, and the unmarked message names the A mark", () => {
+		expect(codes(prose(value(F9)))).toEqual(["claim_kind_mismatch"])
+		expect(codes(prose(value(F9, "fact")))).toEqual(["claim_kind_mismatch"])
+		expect(JSON.stringify(claims(prose(value(F9))))).toContain("{{A:F9}}")
+	})
+
+	test("#given the assumed row F9 marked {{A:F9}} (data-claim-kind=assumed) #then no claim defect", () => {
+		expect(codes(prose(value(F9, "assumed")))).toEqual([])
+		expect(codes(cell(value(F9, "assumed")))).toEqual([])
 	})
 
 	test("#given verified citing a command-sourced row with no, a missing, or an escaping locator artifact (F4) #then unsupported_verification", () => {
@@ -137,6 +152,8 @@ describe("unmarked phrases", () => {
 		"우리가 실행해 확인한 길이",
 		"저희가 스크립트를 실행하여 검증한 값",
 		"저희가 테스트를 돌렸다",
+		"우리 팀이 벤치마크를 돌려 얻은 값",
+		"그래서 우리는 스크립트를 실행했다",
 		"직접 실행한 결과",
 	]
 	const quiet = [
@@ -149,6 +166,10 @@ describe("unmarked phrases", () => {
 		"확인된 길이는 최대 320 m",
 		"개발자가 직접 실행한 결과를 보고했다",
 		"실행해 확인한 길이",
+		"우리나라에서 실행된 정책은 320개다",
+		"우리 정부가 실행한 예산",
+		"우리가 의뢰한 업체가 테스트를 돌렸다",
+		"우리는 결과를 확인했다",
 	]
 	for (const text of fires) test(`#given "${text}" #then verified`, () => expect(unmarkedKinds(text)).toEqual(["verified"]))
 	for (const text of quiet) test(`#given "${text}" #then nothing`, () => expect(unmarkedKinds(text)).toEqual([]))
