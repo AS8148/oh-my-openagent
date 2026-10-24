@@ -1,6 +1,6 @@
 ## 2026-10-24 - Share Native model prompt builders with OpenCode (#9856, fixes #9851)
 
-OpenCode imports the public generation facade from the senpi version OmO Native pins, applies one documented host-tool transform, and appends explicit agent roles instead of maintaining duplicate model bodies; runtime model switches preserve task mode and Hephaestus model eligibility, with catalog-wide byte parity and mutation checks covering both construction and reconciliation.
+OpenCode imports the public generation facade from the senpi version OmO Native pins, applies one documented host-tool transform, and appends explicit agent roles instead of maintaining duplicate model bodies; runtime model switches preserve task mode and Hephaestus model eligibility, with catalog-wide byte parity and mutation checks covering both construction and reconciliation. Session tool permissions are read once per session and then follow its update and delete events instead of a 3 s lookup on every request; the Native toast keeps dev's interactive gating and show records.
 
 ## 2026-10-23 - Inside OmO Desktop the browser skill is the terminal's, plus the app's built-in browser (sisyphuslabs/omo-desktop-app#4227)
 

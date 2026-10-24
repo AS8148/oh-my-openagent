@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 
 import {
   createNativeEditionNudgeHook,
+  isInteractiveLaunch,
   NATIVE_NUDGE_TOAST_MESSAGE,
   NATIVE_NUDGE_TOAST_TITLE,
 } from "./hook"
@@ -27,7 +28,7 @@ function fakeStore(state: NudgeStateRead): NudgeStateStore & { readonly writes: 
   const writes: NudgeState[] = []
   return {
     writes,
-    read: () => state,
+    read: () => writes.at(-1) ?? state,
     write: (next) => {
       writes.push(next)
       return true
@@ -70,6 +71,7 @@ function createCtx(options: {
   const deps = {
     store,
     detectNativeEdition: () => nativeInstalled,
+    interactive: () => true,
   }
   return { ctx, deps, toasts, store }
 }
@@ -158,7 +160,7 @@ describe("createNativeEditionNudgeHook", () => {
     await hook.event(sessionCreated())
 
     expect(toasts).toHaveLength(1)
-    expect(store.writes).toHaveLength(0)
+    expect(store.writes.map((write) => write.autoShows)).toEqual([1])
   })
 
   it("#given OmO Native already installed #then no toast fires", async () => {
@@ -207,5 +209,38 @@ describe("createNativeEditionNudgeHook", () => {
 
     expect(outcome).toBe("event-resolved")
     expect(toasts).toHaveLength(1)
+  })
+
+  it("#given a CI or non-interactive launch #then no toast fires and nothing is recorded", async () => {
+    const { ctx, deps, toasts, store } = createCtx({})
+    const hook = createNativeEditionNudgeHook(ctx, { ...deps, interactive: () => false })
+
+    await hook.event(sessionCreated())
+
+    expect(toasts).toHaveLength(0)
+    expect(store.writes).toHaveLength(0)
+  })
+
+  it("#given the launch environment #then CI, OMO_NON_INTERACTIVE and a non-TTY stdout count as non-interactive", () => {
+    expect(isInteractiveLaunch({}, true)).toBe(true)
+    expect(isInteractiveLaunch({ CI: "true" }, true)).toBe(false)
+    expect(isInteractiveLaunch({ OMO_NON_INTERACTIVE: "1" }, true)).toBe(false)
+    expect(isInteractiveLaunch({}, false)).toBe(false)
+    expect(isInteractiveLaunch({}, undefined)).toBe(false)
+  })
+
+  it("#given a shown toast #then the show is recorded and the next launch waits for the interval", async () => {
+    const start = 1_000_000
+    const first = createCtx({})
+    await createNativeEditionNudgeHook(first.ctx, { ...first.deps, now: () => start }).event(sessionCreated())
+    expect(first.toasts).toHaveLength(1)
+    const recorded = first.store.writes.at(-1)
+    expect(recorded?.autoShows).toBe(1)
+    expect(recorded?.lastShownAt).toBe(start)
+
+    const nextLaunch = createCtx({ state: recorded })
+    const before = recorded ? recorded.nextEligibleAt - 1 : start
+    await createNativeEditionNudgeHook(nextLaunch.ctx, { ...nextLaunch.deps, now: () => before }).event(sessionCreated())
+    expect(nextLaunch.toasts).toHaveLength(0)
   })
 })

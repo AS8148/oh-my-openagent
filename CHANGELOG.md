@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**OpenCode agents use the same model-specific prompt bodies as OmO Native.** The plugin imports senpi's shared prompt builders, translates host tool names, and appends each agent's role explicitly. Switching models also switches the prompt body without losing task mode or Hephaestus's model restriction. ([#9856](https://github.com/code-yeongyu/oh-my-openagent/pull/9856), fixes [#9851](https://github.com/code-yeongyu/oh-my-openagent/issues/9851))
+**OpenCode agents use the same model-specific prompt bodies as OmO Native.** The plugin imports senpi's shared prompt builders, translates host tool names, and appends each agent's role explicitly. Switching models also switches the prompt body without losing task mode or Hephaestus's model restriction. The OmO Native recommendation toast appears only in interactive launches, never in CI or non-TTY runs, and records each show so it waits days between launches. ([#9856](https://github.com/code-yeongyu/oh-my-openagent/pull/9856), fixes [#9851](https://github.com/code-yeongyu/oh-my-openagent/issues/9851))
 
 **The stale-reflection-lock test leaves no background writer behind when removing its temporary root.** Its teardown closes the memory wiring and awaits facts reconciliation and maintenance before removal, so a late lock publication cannot recreate the directory and make the temp-leak guard blame another test. ([#11225](https://github.com/code-yeongyu/oh-my-openagent/pull/11225))
 
