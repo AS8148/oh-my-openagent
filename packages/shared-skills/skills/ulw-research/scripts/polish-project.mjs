@@ -1,40 +1,44 @@
 // polish-project.mjs - the protected projection of report markup that every polish check compares.
 //
 // project(markup) yields the ordered fact spans {id, html}, the visible text, the masked text (each
-// fact span replaced by SLOT) and the ordered href / data-claim values. Callers pass markup already
-// reduced by html-visible.visibleMarkup, so hidden content never counts as present. Fact spans are
-// the placeholder.mjs FACT_ELEMENT_TAGS elements carrying data-fact (any quoting). Hedge and
+// fact span replaced by SLOT) and the ordered href values. Callers pass markup already reduced by
+// html-markup.markupParts().source, with frozen script/style/template content omitted. Fact spans are the
+// placeholder.mjs FACT_ELEMENT_TAGS elements carrying data-fact (any quoting), found by
+// html-markup.elementSpans (a same-name nested element and a quoted ">" stay inside). Hedge and
 // qualifier terms come from fidelity-lexicon (guardedTerms, lexicalPattern "guard" mode).
 // No IO, no model. Plain Node ESM.
 
 import { decodeEntities } from "./entities.mjs"
 import { guardedTerms, lexicalPattern, QUALIFIER_FORMS } from "./fidelity-lexicon.mjs"
-import { tagAttributes } from "./html-visible.mjs"
+import { elementSpans, markupParts, tagAttributes } from "./html-markup.mjs"
 import { HEDGES } from "./lexicon.mjs"
 import { parseNumeral } from "./numerals.mjs"
 import { FACT_ELEMENT_TAGS } from "./placeholder.mjs"
 import { splitSentences } from "./sentence-split.mjs"
 import { normalizeUnit } from "./units.mjs"
 
-/** The attributes whose values a polish edit must keep, in order. */
-export const POLISH_LINK_ATTRIBUTES = Object.freeze(["href", "data-claim"])
+/** The link attributes polish_link_changed owns; a data-claim id change is a markup (fact-binding) change. */
+export const POLISH_LINK_ATTRIBUTES = Object.freeze(["href"])
 /** The bare digit runs compared outside fact spans when no quantity parses around them. */
 export const POLISH_DIGITS = /\d+(?:[.,]\d+)*/g
 /** Stands in for one fact span in masked text; a private-use char, so no numeral or word matches it. */
 export const SLOT = "\uE000"
-const FACT_SPAN = new RegExp(
-	`<(${FACT_ELEMENT_TAGS.join("|")})\\b[^>]*?\\sdata-fact\\s*=\\s*(?:"([^"]+)"|'([^']+)'|([^\\s"'>]+))[^>]*>[\\s\\S]*?<\\/\\1\\s*>`,
-	"gi",
-)
+const FACT_TAGS = new Set(FACT_ELEMENT_TAGS)
+const isFactElement = (name, attrs) => FACT_TAGS.has(name) && (attrs["data-fact"] ?? "") !== ""
 
-/** Each fact span of the markup as {id, start, end, html}, in order. */
+/** Each fact span of the markup as {id, start, end, html}, in order; an unclosed one runs to the end. */
 export function factSpans(markup) {
-	return [...String(markup).matchAll(FACT_SPAN)].map((m) => ({ id: m[2] ?? m[3] ?? m[4], start: m.index, end: m.index + m[0].length, html: m[0] }))
+	const src = String(markup)
+	return elementSpans(src, isFactElement).map(({ start, end, tag }) => ({ id: tag.attrs["data-fact"], start, end, html: src.slice(start, end) }))
 }
 
-/** Visible text of an HTML fragment: tags become spaces, entities decoded, whitespace collapsed. */
+/**
+ * Visible text of an HTML fragment: the scanner's text slots joined by a space (so a quoted ">"
+ * inside a tag stays markup), entities decoded, whitespace collapsed. One tokenization is shared
+ * with the markup rules; no second tag-stripping regex.
+ */
 export function textOf(html) {
-	return decodeEntities(html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ")
+	return decodeEntities(markupParts(html).text.join(" ")).replace(/\s+/g, " ")
 }
 
 /** The protected projection of (already visible) markup; see the header. */

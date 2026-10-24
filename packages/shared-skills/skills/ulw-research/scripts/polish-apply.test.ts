@@ -36,7 +36,7 @@ describe("applyEdits: hedges and qualifiers", () => {
 
 	test("removing a hedge the row quote lacks is applied", () => {
 		const html = doc(`<p>The span was about ${f(SPAN)}.</p>`)
-		const result = applyEdits(html, [edit(`The span was about ${f(SPAN)}.`, `The span was ${f(SPAN)}.`)], LEDGER)
+		const result = applyEdits(html, [edit("The span was about ", "The span was ")], LEDGER)
 		expect(result.applied).toEqual([0])
 		expect(result.rejected).toEqual([])
 		expect(result.out).toBe(doc(`<p>The span was ${f(SPAN)}.</p>`))
@@ -58,7 +58,7 @@ describe("applyEdits: hedges and qualifiers", () => {
 describe("applyEdits: fact spans and numerals", () => {
 	test("splitting a sentence with its fact spans intact is applied", () => {
 		const html = doc(`<p>The span is ${f(SPAN)} and usage is ${f(USERS)}.</p>`)
-		const result = applyEdits(html, [edit(` and usage is ${f(USERS)}.`, `. Usage is ${f(USERS)}.`)], LEDGER)
+		const result = applyEdits(html, [edit(" and usage is ", ". Usage is ")], LEDGER)
 		expect(result.applied).toEqual([0])
 		expect(result.out).toBe(doc(`<p>The span is ${f(SPAN)}. Usage is ${f(USERS)}.</p>`))
 	})
@@ -109,7 +109,7 @@ describe("applyEdits: links and location", () => {
 		const html = doc('<p data-claim="C1">Results improve [S1].</p>')
 		const result = applyEdits(html, [edit('data-claim="C1"', 'data-claim="C2"')], LEDGER)
 		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
-		expect(result.rejected[0].reason).toContain("data-claim")
+		expect(result.rejected[0].reason).toContain("markup changed")
 	})
 
 	test("a before that is not found is unlocated", () => {
@@ -164,13 +164,12 @@ describe("applyEdits: rendered visibility (review #11152 round 1)", () => {
 		["display:none", `<span style="display: none">${f(SPAN)}</span>`],
 		["visibility:hidden", `<span style="visibility:hidden">${f(SPAN)}</span>`],
 		["font-size:0", `<span style="font-size:0px">${f(SPAN)}</span>`],
-		["aria-hidden", `<span aria-hidden="true">${f(SPAN)}</span>`],
 		["a template", `<template>${f(SPAN)}</template>`],
 		["an unclosed hidden wrapper", `<div hidden>${f(SPAN)}`],
 	])("a fact span wrapped in %s is rejected and leaves the document unchanged", (_label, after) => {
 		const result = hide(after)
 		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
-		expect(result.rejected[0].reason).toContain("fact spans")
+		expect(result.rejected[0].reason).toContain("markup changed")
 		expect(result.out).toBe(html)
 	})
 
@@ -184,7 +183,7 @@ describe("applyEdits: rendered visibility (review #11152 round 1)", () => {
 		const claim = doc("<p>Results may improve [S1].</p>")
 		const result = applyEdits(claim, [edit("Results may improve", "Results <span hidden>may</span> improve")], LEDGER)
 		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
-		expect(result.rejected[0].reason).toContain("may")
+		expect(result.rejected[0].reason).toContain("markup changed")
 	})
 })
 
@@ -207,12 +206,119 @@ describe("applyEdits: the same rules as diffPolish (review #11152 round 1)", () 
 		expect(codes(applyEdits(html, [edit("<tr><td>B</td></tr>", "")], LEDGER).rejected)).toEqual(["polish_edit_rejected"])
 	})
 
-	test("cross-edit interaction: cumulative churn passes each edit and is caught only by diffPolish", () => {
+	test("cumulative churn is caught at the edit that crosses the limit, against the original document", () => {
 		const html = doc("<p>Alpha beta gamma. Delta epsilon zeta. Eta theta iota. Kappa lambda mu.</p>")
 		const edits = [edit("Alpha beta gamma.", "Nu xi omicron."), edit("Delta epsilon zeta.", "Rho sigma tau."), edit("Eta theta iota.", "Phi chi psi.")]
 		const result = applyEdits(html, edits, LEDGER)
-		expect(result.applied).toEqual([0, 1, 2])
-		expect(codes(diffPolish(html, result.out, LEDGER))).toEqual(["polish_text_churn"])
+		expect(result.rejected.length).toBeGreaterThan(0)
+		expect(result.rejected.at(-1)?.reason).toContain("percent of the normalized prose")
+		expect(diffPolish(html, result.out, LEDGER)).toEqual([])
+	})
+})
+
+describe("applyEdits: one baseline with diffPolish (review #11152 round 2, M1)", () => {
+	const TOWER = row("F7", "The tower is 320 m tall.", "320 m", "320", "m")
+	const ledger = { ...LEDGER, rows: [...LEDGER.rows, TOWER] }
+	const html = doc(`<p>The tower is ${f(TOWER)} tall. It may be the tallest.</p>`)
+	const pair = [edit(" tall. It may be", " tall and may be"), edit("and may be the tallest", "and is the tallest")]
+
+	test("each edit of the hedge-stripping pair alone keeps the hedge", () => {
+		expect(applyEdits(html, [pair[0]], ledger).applied).toEqual([0])
+		const merged = applyEdits(html, [pair[0]], ledger).out
+		expect(diffPolish(merged, applyEdits(merged, [pair[1]], ledger).out, ledger)).toEqual([])
+	})
+
+	test("the pair together is refused at the second edit, which strips the source document's hedge", () => {
+		const result = applyEdits(html, pair, ledger)
+		expect(result.applied).toEqual([0])
+		expect(codes(result.rejected)).toEqual(["polish_edit_rejected"])
+		expect(result.rejected[0].reason).toContain("may")
+		expect(diffPolish(html, result.out, ledger)).toEqual([])
+	})
+
+	test("no cross-edit case remains: every applyEdits output is diffPolish-clean against the input", () => {
+		const cases: [string, { before: string; after: string; reason: string }[]][] = [
+			[html, pair],
+			[doc("<p>Alpha beta gamma. Delta epsilon zeta. Eta theta iota. Kappa lambda mu.</p>"), [edit("Alpha beta gamma.", "Nu xi omicron."), edit("Delta epsilon zeta.", "Rho sigma tau."), edit("Eta theta iota.", "Phi chi psi.")]],
+			[doc(`<p>The span is ${f(SPAN)} and usage is ${f(USERS)}.</p>`), [edit(" and usage is", ". Usage is"), edit("The span is", "Usage is"), edit(". Usage is", " and the span is")]],
+		]
+		for (const [input, edits] of cases) expect(diffPolish(input, applyEdits(input, edits, ledger).out, ledger)).toEqual([])
+	})
+})
+
+describe("applyEdits: hidden content keeps its bytes and its class (review #11152 round 2, H1 and M2)", () => {
+	const refused = (html: string, edits: { before: string; after: string; reason: string }[], word: string) => {
+		const result = applyEdits(html, edits, LEDGER)
+		expect(result.applied).toEqual([])
+		expect(result.out).toBe(html)
+		expect(result.rejected.map((item: { reason: string }) => item.reason).join(" | ")).toContain(word)
+	}
+	const flagged = (before: string, after: string) => expect(codes(diffPolish(before, after, LEDGER))).toContain("polish_diff_fail")
+
+	test("probe 1: a number under aria-hidden renders, so editing it is refused and flagged", () => {
+		const html = doc('<p>Growth was <span aria-hidden="true">3.2% in 2024</span> overall.</p>')
+		refused(html, [edit("3.2% in 2024", "9.9% in 2031")], "numerals")
+		flagged(html, html.replace("3.2% in 2024", "9.9% in 2031"))
+	})
+
+	test("probe 2: a number after an unclosed <p hidden> is inside the hidden region, whose bytes may not change", () => {
+		const html = doc("<p hidden>note<div>Revenue was 5 billion.</div>")
+		refused(html, [edit("5 billion", "50 billion")], "numerals")
+		flagged(html, html.replace("5 billion", "50 billion"))
+	})
+
+	test("a legitimately hidden region left byte-identical does not block a visible edit", () => {
+		const html = doc("<p hidden>internal note 42</p><p>Results improve [S1].</p><!-- build 7 -->")
+		const result = applyEdits(html, [edit("Results improve [S1].", "Results clearly improve [S1].")], LEDGER)
+		expect(result.applied).toEqual([0])
+		expect(diffPolish(html, result.out, LEDGER)).toEqual([])
+	})
+
+	const shown = doc(`<p>The span is <span>${f(SPAN)}</span> [S1].</p>`)
+	const changed = f(SPAN).replace(">320 m<", ">321 m<")
+	test("relabelling a visible fact span as hidden while changing its number, in one edit, is refused and flagged", () => {
+		refused(shown, [edit(`<span>${f(SPAN)}</span>`, `<span hidden>${changed}</span>`)], "markup changed")
+		flagged(shown, shown.replace(`<span>${f(SPAN)}</span>`, `<span hidden>${changed}</span>`))
+	})
+
+	test("the two-edit variant (hide, then change) is refused at both edits and flagged", () => {
+		const edits = [edit(`<span>${f(SPAN)}`, `<span style="display:none">${f(SPAN)}`), edit(">320 m<", ">321 m<")]
+		const result = applyEdits(shown, edits, LEDGER)
+		expect(result.applied).toEqual([])
+		expect(result.rejected[0].reason).toContain("markup changed")
+		flagged(shown, shown.replace(`<span>${f(SPAN)}</span>`, `<span style="display:none">${changed}</span>`))
+	})
+
+	test("unhiding a hidden fact span with a changed value is refused and flagged", () => {
+		const hidden = doc(`<p>The span is <span hidden>${f(SPAN)}</span> [S1].</p>`)
+		refused(hidden, [edit(`<span hidden>${f(SPAN)}</span>`, `<span>${changed}</span>`)], "markup changed")
+		flagged(hidden, hidden.replace(`<span hidden>${f(SPAN)}</span>`, `<span>${changed}</span>`))
+	})
+
+	test("a pure change of a fact or claim span's visibility class is flagged in both directions", () => {
+		const claim = doc('<p><span data-claim="C1">Results improve</span> [S1].</p>')
+		const hiddenClaim = claim.replace('<span data-claim="C1">', '<span hidden data-claim="C1">')
+		for (const [before, after] of [[claim, hiddenClaim], [hiddenClaim, claim]]) {
+			expect(diffPolish(before, after, LEDGER).find((d: { code: string }) => d.code === "polish_diff_fail")?.message).toContain("markup changed")
+		}
+	})
+
+	test.each([
+		["color:transparent"],
+		["max-height:0;overflow:hidden"],
+		["position:absolute;left:-9999px"],
+		["clip-path:inset(50%)"],
+		["transform:scale(0)"],
+	])("M2: wrapping a fact span in style=%s changes the markup and is refused and flagged", (style) => {
+		const html = doc(`<p>The span is ${f(SPAN)} [S1].</p>`)
+		refused(html, [edit(f(SPAN), `<span style="${style}">${f(SPAN)}</span>`)], "markup")
+		flagged(html, html.replace(f(SPAN), `<span style="${style}">${f(SPAN)}</span>`))
+	})
+
+	test("M2: inserting a stylesheet is refused and flagged", () => {
+		const html = doc(`<p>The span is ${f(SPAN)} [S1].</p>`)
+		refused(html, [edit("The span is", "<style>.x{display:none}</style>The span is")], "markup")
+		flagged(html, html.replace("The span is", "<style>.x{display:none}</style>The span is"))
 	})
 })
 
