@@ -125,9 +125,10 @@ export function declarationDigest(identity: unknown): string {
 }
 /** The grants lock was lost or reclaimed before the write committed; the write was skipped. */
 export class GrantsLockLostError extends Error {
-	readonly code = "ELOCKLOST";
+	declare readonly code: "ELOCKLOST";
 	constructor(cause: Error) {
 		super("MCP grants lock was lost before the write committed; the write was skipped.", { cause });
+		this.code = "ELOCKLOST";
 		this.name = "GrantsLockLostError";
 	}
 }
