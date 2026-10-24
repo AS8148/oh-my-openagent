@@ -48,6 +48,10 @@ function parseGrant(value: unknown): ToolkitGrant | undefined {
   return { endpoint, tokenFile }
 }
 
+function isPreviewEvent(event: unknown): boolean {
+  return typeof event === "object" && event !== null && "preview" in event && event.preview === true
+}
+
 function callingSessionId(context: unknown): string | undefined {
   if (typeof context !== "object" || context === null || !("sessionManager" in context)) return undefined
   const manager = context.sessionManager
@@ -186,12 +190,14 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
         deferUntilAfterFirstPaint(ctx, "desktop thread toolkit", () =>
           state.startupPending ? discover(sessionId, state) : undefined)
       })
-      // Each real turn retries once after failure, or joins the bounded attempt already running.
-      pi.on("before_agent_start", (_event, eventCtx) => {
+      // Each real turn retries once after failure, or joins the bounded attempt already running. A
+      // prompt-cache preview pass must not start a grant request: only the real turn does (senpi#3994).
+      pi.on("before_agent_start", (event, eventCtx) => {
+        if (isPreviewEvent(event)) return
         const sessionId = callingSessionId(eventCtx)
         const state = sessionId === undefined ? undefined : sessions.get(sessionId)
         if (sessionId !== undefined && state !== undefined) return discover(sessionId, state)
-      })
+      }, { previewSafe: true })
       pi.on("session_shutdown", (_event, eventCtx) => {
         const sessionId = callingSessionId(eventCtx)
         if (sessionId === undefined) return

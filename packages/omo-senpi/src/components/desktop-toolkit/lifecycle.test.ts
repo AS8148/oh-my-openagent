@@ -139,9 +139,9 @@ describe("desktop thread discovery lifecycle", () => {
     const host = await setup({ reply: () => ({ refusal: { reason: "denied" } }) })
     await host.start()
     const registration = host.pi.handlers.find((entry) => entry.event === "before_agent_start")
-    if (registration?.options?.previewSafe) {
-      await registration.handler({ type: "before_agent_start", preview: true }, session("A"))
-    }
+    // A non-preview-safe handler would make senpi skip the prompt-cache prefix build (senpi#3994).
+    expect(registration?.options?.previewSafe).toBe(true)
+    await registration?.handler({ type: "before_agent_start", preview: true }, session("A"))
     expect(host.pi.rpcEvents).toHaveLength(1)
   })
 })
