@@ -1,3 +1,4 @@
+import { createLedgerDeadlineReader } from "./ledger-deadline-reader"
 import { spawn } from "node:child_process"
 import { existsSync, readFileSync } from "@oh-my-opencode/memory-core/fs"
 import { mkdir } from "@oh-my-opencode/memory-core/fs"
@@ -220,12 +221,7 @@ async function runSupervisedChild(input: {
       outcomePath,
       launchPath,
       hasCompleteOutcome,
-      () => {
-        const current = JSON.parse(readFileSync(join(input.runDir, "ledger.json"), "utf8")) as {
-          queued?: boolean; deadlineAt: number
-        }
-        return current.queued === true ? undefined : current.deadlineAt + OUTCOME_PUBLICATION_MARGIN_MS
-      },
+      createLedgerDeadlineReader(input.runDir, OUTCOME_PUBLICATION_MARGIN_MS),
       Date.now,
       outcomeWait.signal,
     ).then((result) => settle({ kind: "outcome", result }))
