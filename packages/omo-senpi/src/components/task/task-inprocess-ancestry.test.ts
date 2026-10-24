@@ -99,7 +99,10 @@ async function runTree(maxDepth: number, hostedParent = false) {
     )
     expect(started.details.status).toBe("running")
     await engine.manager.waitFor(started.details.task_id)
-    return engine.manager.list({ scope: "all" }).map(({ record }) => record)
+    return {
+      records: engine.manager.list({ scope: "all" }).map(({ record }) => record),
+      rootScoped: engine.manager.list({ scope: "parent-session", session_id: "tree-root" }).map(({ record }) => record),
+    }
   } finally {
     const parents = new Set([sessionId, ...engine.manager.list({ scope: "all" }).map(({ record }) => record.parent_session_id)])
     for (const parentSessionId of parents) {
@@ -115,7 +118,7 @@ describe("nested in-process task ancestry (#10732)", () => {
     const offset = hostedParent ? 4 : 0
 
     // when real in-process sessions delegate through their inherited task tools
-    const records = await runTree(offset + 3, hostedParent)
+    const { records } = await runTree(offset + 3, hostedParent)
     const child = records.find((record) => record.category === "child")
     const grandchild = records.find((record) => record.category === "grandchild")
     const greatGrandchild = records.find((record) => record.category === "great-grandchild")
@@ -133,10 +136,20 @@ describe("nested in-process task ancestry (#10732)", () => {
 
   test("refuses a nested spawn at max_depth instead of treating its caller as a root", async () => {
     // given / when a child at the configured limit attempts to delegate
-    const records = await runTree(1)
+    const { records } = await runTree(1)
 
     // then the nested task never launches
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({ category: "child", depth: 1, root_session_id: "tree-root", status: "completed" })
+  }, 30_000)
+
+  test("the root session's own scope covers every nested in-process descendant", async () => {
+    // given a root whose child delegates twice more in-process
+    const { records, rootScoped } = await runTree(3)
+
+    // then the root's parent-session view (footer, /tasks, task_output, task_send) lists the whole tree,
+    // the same as it already did for process-mode descendants
+    expect(rootScoped.map((record) => record.category).sort()).toEqual(["child", "grandchild", "great-grandchild"])
+    expect(rootScoped).toHaveLength(records.length)
   }, 30_000)
 })
