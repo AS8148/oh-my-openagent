@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:8b9824e295d69487dd817315c33a87802b0085bb02e8769565dbc1d3982d5d4c:6169d75a919602e20e768a24432bad9b07ae3234fba2968eb5673b2c430eef54
+// omo-codex-install:2c7eb076afb8d2db8e2bd19d10e0036005b30078353d2adfc45e182b6781461d:0e5f6b96717b09af8d1b076bed1df8eddbd2365a864cafae8eb0788a4ede4c5d
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -21400,6 +21400,11 @@ function unrecognizedKeyIssues(issues) {
 function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+var IGNORED_SECTIONS = new Set([
+  String.fromCharCode(100, 111, 114, 105),
+  String.fromCharCode(103, 97, 116, 101, 119, 97, 121)
+]);
+var HARNESS_BLOCKS = new Set(["[opencode]", "[native]", "[senpi]", "[codex]"]);
 function sanitizeUnsafeKeys(value, path = []) {
   if (Array.isArray(value)) {
     const issues = [];
@@ -21418,6 +21423,9 @@ function sanitizeUnsafeKeys(value, path = []) {
   }
   const sanitized = {};
   for (const [key, entry] of Object.entries(value)) {
+    const isConfigContainer = path.length === 0 || path.length === 1 && HARNESS_BLOCKS.has(path[0]) || path.length === 2 && path[0] === "profiles" || path.length === 3 && path[0] === "profiles" && HARNESS_BLOCKS.has(path[2]);
+    if (isConfigContainer && IGNORED_SECTIONS.has(key))
+      continue;
     if (isUnsafeObjectKey(key)) {
       issues.push({ keys: [key], path });
       continue;

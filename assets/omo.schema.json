@@ -924,13 +924,9 @@
       "properties": {
         "commit_footer": {
           "default": false,
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "string"
-            }
+          "type": [
+            "boolean",
+            "string"
           ]
         },
         "include_co_authored_by": {
@@ -3472,13 +3468,9 @@
           "type": "object",
           "properties": {
             "commit_footer": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string"
-                }
+              "type": [
+                "boolean",
+                "string"
               ]
             },
             "include_co_authored_by": {
@@ -5806,13 +5798,9 @@
           "type": "object",
           "properties": {
             "commit_footer": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string"
-                }
+              "type": [
+                "boolean",
+                "string"
               ]
             },
             "include_co_authored_by": {
@@ -8140,13 +8128,9 @@
           "type": "object",
           "properties": {
             "commit_footer": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string"
-                }
+              "type": [
+                "boolean",
+                "string"
               ]
             },
             "include_co_authored_by": {
@@ -10480,13 +10464,9 @@
             "type": "object",
             "properties": {
               "commit_footer": {
-                "anyOf": [
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "string"
-                  }
+                "type": [
+                  "boolean",
+                  "string"
                 ]
               },
               "include_co_authored_by": {
@@ -12814,13 +12794,9 @@
                 "type": "object",
                 "properties": {
                   "commit_footer": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string"
-                      }
+                    "type": [
+                      "boolean",
+                      "string"
                     ]
                   },
                   "include_co_authored_by": {
@@ -15148,13 +15124,9 @@
                 "type": "object",
                 "properties": {
                   "commit_footer": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string"
-                      }
+                    "type": [
+                      "boolean",
+                      "string"
                     ]
                   },
                   "include_co_authored_by": {
@@ -17482,13 +17454,9 @@
                 "type": "object",
                 "properties": {
                   "commit_footer": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string"
-                      }
+                    "type": [
+                      "boolean",
+                      "string"
                     ]
                   },
                   "include_co_authored_by": {
@@ -28531,13 +28499,9 @@
           "properties": {
             "commit_footer": {
               "default": false,
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string"
-                }
+              "type": [
+                "boolean",
+                "string"
               ]
             },
             "include_co_authored_by": {
