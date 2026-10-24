@@ -7,9 +7,11 @@ import type { IsolationRuntime, IsolationStartedDetails } from "../isolation"
 import type { KernelToolBindingRegistry } from "../kernel-tools/bindings"
 import type { KernelToolGrant } from "../kernel-tools/resolve"
 import type {
+  EffectiveModelRecord,
   ResolvedModelRecord,
   TaskRecord,
   TaskRunStats,
+  LiveRunStats,
   TaskStartFailureKind,
   TaskStartFailureReason,
   TaskStatus,
@@ -19,6 +21,7 @@ import type {
   CancelOutcome,
   DestructionPort,
   InterruptOutcome,
+  RedispatchOutcome,
   SendInput,
   SendOutcome,
 } from "../steering"
@@ -66,10 +69,14 @@ export type ManagedStartSpec = {
   readonly kernelTools?: KernelToolGrant
   readonly extensions?: readonly string[]
   readonly memberEnv?: Readonly<Record<string, string>>
+  // The delegating turn's W3C traceparent, for a process child's own turn spans. Launch-time only:
+  // never persisted on the spawn spec, so a respawned or resumed child starts its own trace.
+  readonly traceparent?: string
 }
 
 export type ManagedRunner = {
   start(spec: ManagedStartSpec): Promise<ManagedChildHandle>
+  settleTeardowns?(): Promise<void>
   // Rebuild a persisted child from its session transcript without replaying its prompt. Optional
   // until the mode adapters grow their resume paths (todo 10); start-only fakes keep compiling.
   resume?(spec: ManagedStartSpec, sessionPath: string): Promise<ManagedChildHandle>
@@ -88,6 +95,8 @@ export type ManagerStartSpec = {
   readonly subagent_type?: string
   readonly execution_mode?: ExecutionMode
   readonly model?: string
+  // `provider/model` the parent session runs at spawn; appended as a category child's last rung (#10750).
+  readonly parent_model?: string
   readonly name?: string
   readonly description?: string
   readonly team_run_id?: string
@@ -153,8 +162,11 @@ export type StartResult =
       readonly resolved_model?: ResolvedModelRecord
       // The model the child ACTUALLY started on, read from the child itself (never the plan) -
       // absent for a queued start that has not launched yet (#9722).
-      readonly effective_model?: ResolvedModelRecord
+      readonly effective_model?: EffectiveModelRecord
       readonly queue_position?: number
+      // The task host has not admitted the child yet; its start outcome arrives on the record (#10042).
+      // run_epoch and resolved_model are then the plan's: a start-time fallback may still move both.
+      readonly starting?: true
       readonly name_warning?: string
       // Where an isolated child is working. The merge outcome is NOT here: it does not exist yet.
       readonly isolation?: IsolationStartedDetails
@@ -212,6 +224,7 @@ export type ResidencyDenied =
 export type ContinueDelivery = "steer" | "followUp" | "revive"
 
 export type ContinueResult =
+  | Extract<SendOutcome, { kind: "uncertain" }>
   | {
       readonly kind: "continued"
       readonly task_id: string
@@ -293,6 +306,9 @@ export type TaskManagerOptions = {
   // capability check). Absent -> `auto` reads as in-process, which is what a wiring without a
   // daemon (tests, a pinned engine without the host surface) must do.
   readonly executionModeGate?: ExecutionModeGate
+  // The parent session's current turn traceparent (raw session id in), read once per launch. Absent or
+  // undefined -> the child carries no inherited trace context.
+  readonly traceparentFor?: (parentSessionId: string) => string | undefined
 }
 
 export type TaskManager = {
@@ -301,12 +317,20 @@ export type TaskManager = {
   readonly concurrency?: TaskConcurrency
   findTaskByChildSession?(sessionId: string): TaskRecord | undefined
   start(spec: ManagerStartSpec): Promise<StartResult>
+  // Settles once the task's in-flight launch settles (a `starting` result keeps launching, #10042).
+  whenLaunched?(taskId: string): Promise<void>
+  /** Bounded wait for in-flight first launches at session shutdown; later admissions are discarded. */
+  settleLaunchesForShutdown?(boundMs: number): Promise<void>
   startOwned(spec: ManagerStartSpec, owner: DagTaskOwner): Promise<OwnedStartResult>
   findOwnedTask(owner: DagTaskOwnerKey): TaskRecord | undefined
   continueTask(taskIdOrName: string, prompt: string, deliverAs?: "steer" | "followUp"): Promise<ContinueResult>
   sendToTask(input: SendInput): Promise<SendOutcome>
   interruptTask(idOrName: string): Promise<InterruptOutcome>
   cancelTask(idOrName: string, reason?: string, options?: CancelOptions): Promise<CancelOutcome>
+  // senpi#3266: one-step re-dispatch of a flagged "resumed, waiting for input" task onto a fresh
+  // live session, replaying its persisted prompt under the same task identity and a new run epoch.
+  // Optional: minimal manager fakes (and the DAG test doubles) never serve a redispatch.
+  redispatchTask?(idOrName: string, callerSessionId?: string): Promise<RedispatchOutcome>
   get(taskId: string): TaskRecord | undefined
   hasPendingSends?(taskId: string): boolean
   hasInFlightSends?(taskId: string): boolean
@@ -321,6 +345,8 @@ export type TaskManager = {
   // in-flight turns/tool-calls/tok-s; the record only carries run_stats once terminal.
   // Optional so downstream structural fakes keep compiling; the concrete manager always implements it.
   runStatsSnapshot?(taskId: string): TaskRunStats | undefined
+  // The same live stats tagged with the run they measure, so a consumer reading records too never counts a run twice.
+  liveRunStats?(taskId: string): LiveRunStats | undefined
   // W1-V F3: prune a live handle (and its per-epoch release/background bookkeeping) so the lifecycle
   // destruction port and eviction path never leave a stale handle behind or grow #live unbounded.
   forget(taskId: string, options: ForgetOptions): void

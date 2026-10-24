@@ -2,6 +2,7 @@ import type { SessionShutdownEvent } from "@code-yeongyu/senpi"
 import { readSessionRole } from "@oh-my-opencode/senpi-task"
 import type { ComponentContext, SenpiExtensionAPI } from "../../extension/types"
 import type { TaskEngine } from "./engine"
+import { ownHostedTaskId } from "./own-task-identity"
 import type { LeadPollerLifecycle } from "./lead-poller-lifecycle"
 import type { ResumptionChannelEmitter } from "./resumption-channel-emitter"
 import type { LiveTaskContext } from "./runtime-context"
@@ -33,6 +34,9 @@ type EventBridgeDeps = {
 // re-observe owned-member liveness, reclaim mailbox reservations, redeliver unnotified completions,
 // await TTL cleanup (its retention predicate keeps anything with an undelivered notification, so
 // cleanup cannot delete what the previous step just queued), then poll owned leads and sync status.
+
+// Below senpi's per-handler session_shutdown budget, leaving room for the suspension that follows.
+const SHUTDOWN_LAUNCH_SETTLE_MS = 5_000
 export function wireEventBridge(
   pi: SenpiExtensionAPI,
   ctx: ComponentContext,
@@ -87,6 +91,13 @@ export function wireEventBridge(
     taskRpc.attach()
   })
 
+  // A retained session outlives its clients: the first reattach fires session_resumed without
+  // another session_start, so the bridge clears the dedupe fingerprint and pushes the full snapshot
+  // for the new client, keeping child subscriptions and their live progress intact (#10016).
+  pi.on("session_resumed", () => {
+    taskRpc.resend()
+  })
+
   pi.on("session_before_switch", (_payload, eventCtx) => {
     taskRpc.detach()
     engine.runtime.captureFrom(asLiveContext(eventCtx))
@@ -106,14 +117,18 @@ export function wireEventBridge(
   })
 
   pi.on("session_shutdown", async (payload, eventCtx) => {
+    const liveContext = asLiveContext(eventCtx)
     unsubscribeTaskSnapshots()
     taskRpc.dispose()
-    engine.runtime.captureFrom(asLiveContext(eventCtx))
+    engine.runtime.captureFrom(liveContext)
     transitions.onShutdown(engine.runtime.sessionId())
     engine.runtime.clearUi()
     statusUi.dispose()
     state.leadPollers.shutdown()
     await state.resumptionChannels.emitShutdown()
+    // A first launch still being admitted gets a bounded chance to land, so suspension parks it like
+    // any resident child; one still unadmitted is parked to relaunch on resume and never outlives the session (#10042).
+    await engine.manager.settleLaunchesForShutdown?.(SHUTDOWN_LAUNCH_SETTLE_MS)
     const shutdownEvent = payload as SessionShutdownEvent
     const parentSessionId = engine.runtime.sessionId()
     const reason = shutdownEvent.reason
@@ -134,7 +149,36 @@ export function wireEventBridge(
       }))
       : new Set([parentSessionId])
     for (const sessionId of parentSessionIds) {
-      await engine.lifecycle.suspendOnSessionShutdown({ parentSessionId: sessionId, reason })
+      const continuing = reason === "new" || reason === "quit"
+        ? engine.manager.list({ scope: "parent-session", session_id: sessionId })
+          .filter(({ record }) => record.killed !== true && (
+            (record.status === "running" && record.runner_kind === "host-session") ||
+            (record.status === "pending" && record.execution_mode === "process" &&
+              engine.settings.process_runner !== "child-process" && engine.settings.resume_children !== false)
+          ))
+        : []
+      const ownTaskId = ownHostedTaskId(pi, engine.stateDir)
+      const summary = await engine.lifecycle.suspendOnSessionShutdown(
+        ownTaskId === undefined ? { parentSessionId: sessionId, reason } : { parentSessionId: sessionId, reason, ownTaskId },
+      )
+      const notify = (notice: string, level: "info" | "warning"): void => {
+        if (liveContext.mode === "print" || liveContext.mode === "json") process.stderr.write(`${notice}\n`)
+        else liveContext.ui?.notify(notice, level)
+      }
+      // A stopped owner's session can never be resumed, so nothing kept running there to collect.
+      if (summary.stopped_owner === undefined) {
+        const count = continuing.filter(({ record }) =>
+          !summary.failures.some((failure) => failure.task_id === record.task_id)
+          && engine.manager.get(record.task_id)?.status !== "cancelled").length
+        if (count > 0) notify(`${count} background task(s) keep running under session ${sessionId}; resume it (omo --resume ${sessionId}) to collect their results`, "info")
+        continue
+      }
+      // Only a child that ever started can still be running; a pending one that failed to tear down never ran.
+      const unstopped = summary.failures.filter((failure) => {
+        const record = engine.manager.get(failure.task_id)
+        return record?.started_at !== undefined && (record.status === "running" || record.status === "cancelled")
+      }).length
+      if (unstopped > 0) notify(`${unstopped} child task(s) of stopped task ${summary.stopped_owner} could not be stopped and may still be running on the task host`, "warning")
     }
   })
 

@@ -14,6 +14,7 @@ import {
   type ConfigMigrationDiscoveryFileSystem,
   type ConfigMigrationPathOperations,
 } from "./config-migration"
+import { doriSectionRename } from "./config-migration/dori-section-rename"
 
 export type OpenCodeStartupMigrationOptions = {
   readonly afterMigrations?: (results: readonly MigrationRunResult[]) => void
@@ -40,6 +41,9 @@ export type OpenCodeStartupMigrationResult = {
   readonly reloadRequired: boolean
   readonly results: readonly MigrationRunResult[]
   readonly skippedConflictCount: number
+  /** Every pre-write copy of an existing target this run kept, including one a resumed journal kept. */
+  readonly targetBackupPaths: readonly string[]
+  readonly resumedTargetBackupPath?: string
 }
 
 function homeDirectory(options: OpenCodeStartupMigrationOptions): string {
@@ -69,6 +73,7 @@ export function runOpenCodeStartupMigration(
       reloadRequired: false,
       results: [],
       skippedConflictCount: 0,
+      targetBackupPaths: [],
     }
   }
 
@@ -86,6 +91,7 @@ export function runOpenCodeStartupMigration(
         ...(options.backupTimestamp === undefined ? {} : { backupTimestamp: options.backupTimestamp }),
         cwd: options.cwd,
         ...(options.discoveryFileSystem === undefined ? {} : { fileSystem: options.discoveryFileSystem }),
+        doriSectionRename,
         environment: options.environment ?? process.env,
         homeDir,
         pathOperations: options.pathOperations ?? posix,
@@ -93,12 +99,18 @@ export function runOpenCodeStartupMigration(
       }),
     })
     const migratedFrom = uniqueSources(batch.results)
+    const targetBackupPaths = [
+      ...(batch.resumedTargetBackupPath === undefined ? [] : [batch.resumedTargetBackupPath]),
+      ...batch.results.flatMap((result) => result.targetBackupPath === undefined ? [] : [result.targetBackupPath]),
+    ]
     return {
       journalResumed: batch.journalResumed,
       migratedFrom,
       reloadRequired: batch.journalResumed || migratedFrom.length > 0,
       results: batch.results,
       skippedConflictCount: skippedConflictCount(batch.results),
+      targetBackupPaths,
+      ...(batch.resumedTargetBackupPath === undefined ? {} : { resumedTargetBackupPath: batch.resumedTargetBackupPath }),
       ...(batch.status === "locked" ? { error: "Configuration migration is already running" } : {}),
     }
   } catch (error) {
@@ -109,6 +121,7 @@ export function runOpenCodeStartupMigration(
       reloadRequired: false,
       results: [],
       skippedConflictCount: 0,
+      targetBackupPaths: [],
     }
   }
 }
