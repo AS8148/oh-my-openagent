@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Protocol-2 account storage has separate credential and pending-revocation namespaces.** Legacy credential writes and deletes cannot overwrite either namespace; the origin key and native storage-error mappings stay shared. This is storage support for the protocol-2 rollout, not enrollment activation. ([omo-service#628](https://github.com/sisyphuslabs/omo-service/issues/628))
+**Protocol-2 account storage has separate credential and pending-revocation namespaces.** Legacy credential writes and deletes cannot overwrite either namespace; the origin key and native storage-error mappings stay shared. This is storage support for the protocol-2 rollout, not enrollment activation. ([#11177](https://github.com/code-yeongyu/oh-my-openagent/pull/11177), refs [omo-service#628](https://github.com/sisyphuslabs/omo-service/issues/628))
 
 ## [5.1.45] - 2026-10-24
 
