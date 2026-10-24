@@ -9,10 +9,12 @@
 // `notice` lock so concurrent sessions bound to the same identity cannot both
 // emit and both advance.
 
+import { randomUUID } from "node:crypto"
 import { mkdir, readFileSync, rename, writeFile } from "../fs/resilient"
 import { join } from "node:path"
 
 import { GitCommandError, type GitMemoryRepo } from "../git"
+import { syncJournalDirectory } from "../journal/fsync"
 import { LockContentionError, createLockRecord, noticeLockPath, withLock } from "../locks"
 import { SOUL_PATHS } from "./paths"
 
@@ -127,8 +129,9 @@ function isWatermark(value: unknown): value is SoulHeadWatermark {
 async function writeWatermark(noticesDir: string, head: string): Promise<void> {
   await mkdir(noticesDir, { recursive: true, mode: 0o700 })
   const target = join(noticesDir, SOUL_NOTICE_WATERMARK_FILENAME)
-  const temporary = `${target}.tmp-${process.pid}`
+  const temporary = `${target}.tmp-${process.pid}-${randomUUID()}`
   const watermark: SoulHeadWatermark = { version: 1, lastNotifiedHead: head }
-  await writeFile(temporary, `${JSON.stringify(watermark)}\n`, { encoding: "utf8", mode: 0o600 })
+  await writeFile(temporary, `${JSON.stringify(watermark)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx", flush: true })
   await rename(temporary, target)
+  await syncJournalDirectory(noticesDir)
 }

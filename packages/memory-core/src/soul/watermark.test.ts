@@ -7,6 +7,7 @@ import { GitMemoryRepo, type GitCommitAuthor } from "../git"
 import { consumeSoulNoticeDelta, SOUL_SCAN_PAGE } from "./watermark"
 import { realpathSync } from "node:fs"
 import { removeTree } from "../../../../test-support/remove-tree"
+import { observeWatermarkPublication, withWatermarkReadFault } from "../concurrency/watermark-publication.test-support"
 
 const AUTHOR: GitCommitAuthor = {
   agentId: "agent-soul-watermark-test",
@@ -60,6 +61,39 @@ async function readWatermark(noticesDir: string): Promise<unknown> {
 const IN_BAND = "Omo-Writer: memory-tool\nOmo-Session: session-1\nOmo-Turn: 3"
 
 describe("consumeSoulNoticeDelta", () => {
+  it("#given staged publication #when the writer pauses after truncation and partial writes #then readers see old or new state and each writer owns a unique temporary", async () => {
+    const { repo, noticesDir, locksDir } = await fixture()
+    await commit(repo, "system/persona.md", "seed\n", "seed")
+    await consumeSoulNoticeDelta(repo, { noticesDir, locksDir })
+    const target = join(noticesDir, "soul-head.json")
+    const temporaries: string[] = []
+    for (const revision of ["first", "second"]) {
+      const head = await commit(repo, "system/persona.md", `${revision}\n`, revision)
+      temporaries.push(await observeWatermarkPublication(target, () =>
+        consumeSoulNoticeDelta(repo, { noticesDir, locksDir }),
+      ))
+      expect(await readWatermark(noticesDir)).toEqual({ version: 1, lastNotifiedHead: head })
+    }
+    expect(new Set(temporaries).size).toBe(2)
+  })
+
+  it.each(["malformed", "invalid-shape", "missing", "unreadable"] as const)(
+    "#given a %s unlocked read #when consumed #then the locked reread still delivers the real soul delta",
+    async (fault) => {
+      const { repo, noticesDir, locksDir } = await fixture()
+      await commit(repo, "system/persona.md", "seed\n", "seed")
+      await consumeSoulNoticeDelta(repo, { noticesDir, locksDir })
+      const head = await commit(repo, "system/persona.md", "reflection\n", "reflection")
+      await withWatermarkReadFault(join(noticesDir, "soul-head.json"), fault, async () => {
+        expect(await consumeSoulNoticeDelta(repo, { noticesDir, locksDir })).toEqual({
+          sha: head, subject: "reflection",
+        })
+      })
+      expect(await readWatermark(noticesDir)).toEqual({ version: 1, lastNotifiedHead: head })
+      expect(await consumeSoulNoticeDelta(repo, { noticesDir, locksDir })).toBeUndefined()
+    },
+  )
+
   it("#given no watermark file #when consumed #then the watermark is established silently at HEAD with no notice", async () => {
     // given
     const { repo, noticesDir, locksDir } = await fixture()
