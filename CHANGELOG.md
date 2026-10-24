@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Held packaging-test directories are recorded without failing cleanup.** The packed memory-sync probe and abandoned-root sweep share one best-effort removal guard, with no retries. Every held root is printed in the test log; Windows diagnostics include the holder's pid, image and parent pid when identified, or the diagnostic failure. Unrelated filesystem errors and unrecorded leaks still fail. ([#11218](https://github.com/code-yeongyu/oh-my-openagent/pull/11218), part of [#11135](https://github.com/code-yeongyu/oh-my-openagent/issues/11135))
+
 **Skill MCP catalogs include every page.** Tools, resources, and prompts follow opaque pagination cursors in order, with a clear error if a server exceeds 100 pages. ([#11204](https://github.com/code-yeongyu/oh-my-openagent/pull/11204))
 
 **`omo update` on Windows survives a package file that another process holds.** When `bun add -g` fails with `EPERM` (`NtSetInformationFile`) because a file of the install is in use, `omo update` retries twice with a short backoff. If the file stays held, it names the file and the omo processes holding it, tells you to quit them and run `omo update` again, and keeps whatever version is installed, reinstalling the previous one only if the failed run left an unreadable install. ([#10090](https://github.com/code-yeongyu/oh-my-openagent/issues/10090), [#11125](https://github.com/code-yeongyu/oh-my-openagent/pull/11125))
