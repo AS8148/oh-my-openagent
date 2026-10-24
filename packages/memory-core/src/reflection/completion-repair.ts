@@ -4,7 +4,11 @@ import { redactSecretLikeMaterial } from "../sync/redact"
 
 const GIT_TIMEOUT_MS = 30_000
 
-/** One memory entry the completion gate refused and removed from the run's commit; never carries the matched value. */
+/**
+ * One memory entry the completion gate refused and removed from the run's commit. `path` is the repository path
+ * itself (the agent chose it, so it can be secret-shaped): redact it before printing. `reason` never carries the
+ * matched value.
+ */
 export interface DroppedEntry {
   readonly path: string
   readonly reason: string
@@ -13,13 +17,26 @@ export interface DroppedEntry {
 /** The squashed commit records what it left out, so a later validation of the same tip still knows. */
 export const DROPPED_TRAILER = "Omo-Completion-Dropped"
 
-/** One line a finalizer can put in the run's detail; paths and reasons are already redacted. */
+/** One line a finalizer can put in the run's detail; every path and reason is redacted here, never printed raw. */
 export function describeDroppedEntries(dropped: readonly DroppedEntry[]): string {
-  return `Dropped ${dropped.length} invalid memory entr${dropped.length === 1 ? "y" : "ies"}: ${dropped.map((entry) => `${entry.path} (${entry.reason})`).join("; ")}`
+  const items = dropped.map((entry) => `${redactSecretLikeMaterial(entry.path)} (${redactSecretLikeMaterial(entry.reason)})`)
+  return `Dropped ${dropped.length} invalid memory entr${dropped.length === 1 ? "y" : "ies"}: ${items.join("; ")}`
 }
 
+/** JSON keeps any path (a ' | ', a newline) intact on read-back; the values are redacted before they are written. */
 const trailerLine = (entry: DroppedEntry): string =>
-  `${DROPPED_TRAILER}: ${redactSecretLikeMaterial(entry.path)} | ${redactSecretLikeMaterial(entry.reason).replace(/[\r\n]+/g, " ")}`
+  `${DROPPED_TRAILER}: ${JSON.stringify({ path: redactSecretLikeMaterial(entry.path), reason: redactSecretLikeMaterial(entry.reason) })}`
+
+function parseTrailerValue(value: string): DroppedEntry | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (typeof parsed !== "object" || parsed === null) return undefined
+    const { path, reason } = parsed as { path?: unknown; reason?: unknown }
+    return typeof path === "string" && typeof reason === "string" ? { path, reason } : undefined
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * The dropped entries a previous squash recorded on `tipSha`, when the branch is exactly that one commit on
@@ -33,18 +50,26 @@ export async function readDroppedTrailers(exec: GitExec, dir: string, baseSha: s
   const entries: DroppedEntry[] = []
   for (const line of body.split("\n")) {
     if (!line.startsWith(`${DROPPED_TRAILER}: `)) continue
-    const value = line.slice(DROPPED_TRAILER.length + 2)
-    const split = value.indexOf(" | ")
-    if (split > 0) entries.push({ path: value.slice(0, split), reason: value.slice(split + 3) })
+    const entry = parseTrailerValue(line.slice(DROPPED_TRAILER.length + 2))
+    if (entry !== undefined) entries.push(entry)
   }
   return entries
 }
 
 type Run = (argv: readonly string[], env?: Readonly<Record<string, string>>) => Promise<{ code: number; stdout: string; stderr: string }>
 
+/**
+ * Every git call here that names a note passes the agent-chosen path as a pathspec. GIT_LITERAL_PATHSPECS makes each
+ * one match only that exact path: without it a name such as `k*.md`, `k[e]ep1.md` or `:!x.md` is a glob or magic
+ * pathspec, and dropping it would delete or revert OTHER notes.
+ */
 function runner(exec: GitExec, dir: string): Run {
   return (argv, env) =>
-    exec.run(argv, { cwd: dir, timeoutMs: GIT_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env } })
+    exec.run(argv, {
+      cwd: dir,
+      timeoutMs: GIT_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_LITERAL_PATHSPECS: "1", ...env },
+    })
 }
 
 async function must(run: Run, argv: readonly string[]): Promise<string> {

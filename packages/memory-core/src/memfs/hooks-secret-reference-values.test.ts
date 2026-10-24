@@ -40,6 +40,9 @@ describe("pre-commit hook: assignments that only reference a credential", () => 
     // a value that only STARTS with a reference token still carries a literal secret
     "password=process.env.X||hunter2real",
     "token={{x}}realsecretvalue",
+    // a literal glued after a balanced reference (#10528 delta review)
+    "token: ${FOO}realsecret",
+    "token: [FILTERED]realsecret",
   ]
   for (const line of credentials) {
     it(`#given ${JSON.stringify(line)} #when committed #then the hook still refuses it`, async () => {

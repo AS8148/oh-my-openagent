@@ -49,9 +49,12 @@ const REFERENCE_TOKEN = [
   "process\\.env\\.[A-Za-z_][A-Za-z0-9_]*",
   "os\\.environ(?:\\.get\\(|\\[)?",
   "env\\.[A-Za-z_][A-Za-z0-9_]*",
-  "\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?",
+  // Balanced or bare, never half: `${FOO}secret` and `[FILTERED]secret` keep the literal and must match.
+  "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}",
+  "\\$[A-Za-z_][A-Za-z0-9_]*",
   "\\{\\{[^}\\n]*\\}\\}",
-  "\\[?(?:redacted|filtered)\\]?",
+  "\\[(?:redacted|filtered)\\]",
+  "(?:redacted|filtered)",
   "(?:bearer|changeme|placeholder|example|none|null|undefined|true|false)",
 ].join("|")
 

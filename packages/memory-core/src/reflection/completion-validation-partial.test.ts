@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { GitMemoryRepo, createNodeGitExec } from "../git"
-import { validateCompletion } from "./completion-validation"
+import { describeDroppedEntries, validateCompletion } from "./completion-validation"
 import { createReflectionWorktree } from "./worktree"
 import { removeTree } from "../../../../test-support/remove-tree"
 
@@ -126,10 +126,66 @@ describe("reflection completion keeps valid notes when one entry fails validatio
     expect(second.dropped?.length).toBe(2)
     expect(second.dropped?.map((entry) => entry.path).sort()).toEqual(["reference/***", "reference/leak.md"])
     const message = await git(worktree.dir, "log", "-1", "--format=%B")
-    expect(message).toContain("Omo-Completion-Dropped: reference/leak.md | secret_like_content")
+    expect(message).toContain('Omo-Completion-Dropped: {"path":"reference/leak.md","reason":"secret_like_content')
     expect(message).not.toContain("hunter2Abrx9")
     expect(message).not.toContain("abc123456")
     expect(message).not.toContain("MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSk")
+  })
+
+  // Each name is also a git pathspec that matches OTHER notes (or, with a leading ':!', every other path).
+  for (const name of ["reference/k*.md", "reference/k?ep1.md", "reference/k[e]ep1.md", ":!reference.md"]) {
+    it(`#given a dropped note named ${JSON.stringify(name)} #when validated #then only that note is dropped and no other note is touched`, async () => {
+      const { worktree } = await fixture({ "reference/keep1.md": GOOD, "reference/keep2.md": GOOD })
+      await commit(worktree.dir, { [name]: `---\ndescription: Leak\n---\n\n${PEM}`, "reference/good.md": GOOD }, "glob name")
+
+      const result = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
+
+      expect(result.status).toBe("valid")
+      if (result.status !== "valid") return
+      expect(result.changedPaths).toEqual(["reference/good.md"])
+      expect(result.dropped?.map((entry) => entry.path)).toEqual([name])
+      expect(await treePaths(worktree.dir)).toEqual(["reference/good.md", "reference/keep1.md", "reference/keep2.md"])
+      expect(await git(worktree.dir, "status", "--porcelain")).toBe("")
+    })
+  }
+
+  it("#given an existing glob-named note that gets a secret #when validated #then another note's valid edit is kept", async () => {
+    const { worktree } = await fixture({ "reference/k?ep*.md": GOOD, "reference/keep1.md": GOOD })
+    const edited = GOOD.replace("body", "edited body")
+    await commit(worktree.dir, { "reference/k?ep*.md": `---\ndescription: Leak\n---\n\n${PEM}`, "reference/keep1.md": edited }, "edit both")
+
+    const result = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
+
+    expect(result.status).toBe("valid")
+    if (result.status !== "valid") return
+    expect(result.changedPaths).toEqual(["reference/keep1.md"])
+    expect(await git(worktree.dir, "show", "HEAD:reference/keep1.md")).toBe(edited.trimEnd())
+  })
+
+  it("#given a secret-shaped file name #when the drop is described #then the note never prints the raw name", async () => {
+    const { worktree } = await fixture()
+    const name = "reference/ghp_Ab3dEf5hJ7kL9mN1pQ3rS5tU7vW9xY1zB3C5.md"
+    await commit(worktree.dir, { [name]: "---\ndescription: Named\n---\n\nclean\n", "reference/good.md": GOOD }, "secret name")
+
+    const result = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
+
+    expect(result.status).toBe("valid")
+    if (result.status !== "valid") return
+    const note = describeDroppedEntries(result.dropped ?? [])
+    expect(note).toContain("Dropped 1 invalid memory entry")
+    expect(note).not.toContain("Ab3dEf5hJ7kL9mN1pQ3rS5tU7vW9xY1zB3C5")
+  })
+
+  it("#given a dropped path containing ' | ' #when validated again #then the trailer reads back the same path", async () => {
+    const { worktree } = await fixture()
+    await commit(worktree.dir, { "reference/a | b.md": `---\ndescription: Leak\n---\n\n${PEM}`, "reference/good.md": GOOD }, "pipe name")
+
+    await validateCompletion(worktree, worktree.baseSha, worktree.exec)
+    const again = await validateCompletion(worktree, worktree.baseSha, worktree.exec)
+
+    expect(again.status).toBe("valid")
+    if (again.status !== "valid") return
+    expect(again.dropped?.map((entry) => entry.path)).toEqual(["reference/a | b.md"])
   })
 
   it("#given every changed note is invalid #when validated #then nothing is committed and the run reports no changes", async () => {

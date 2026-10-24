@@ -28,7 +28,7 @@ import { getPostCommitHookScript } from "../sync/mirror"
 const END = "[],<>})\"]*$"
 const REFERENCE_TOKEN =
   "(process\\.env\\.[A-Za-z_][A-Za-z0-9_]*|os\\.environ(\\.get\\(|\\[)?(\"[A-Za-z0-9_]*\")?[])]*|" +
-  "env\\.[A-Za-z_][A-Za-z0-9_]*|\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?|\\{\\{([^}]*\\}\\})?|\\[?(redacted|filtered)\\]?|" +
+  "env\\.[A-Za-z_][A-Za-z0-9_]*|\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}|\\$[A-Za-z_][A-Za-z0-9_]*|\\{\\{([^}]*\\}\\})?|\\[(redacted|filtered)\\]|(redacted|filtered)|" +
   "(bearer|changeme|placeholder|example|none|null|undefined|true|false))"
 const MATCH_START = "^[^A-Za-z0-9_]?"
 

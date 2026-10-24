@@ -53,8 +53,11 @@ describe("reflection finalization crash recovery", () => {
     expect(warnings[0]?.error).toContain("secret-like content")
     expect(JSON.parse(await readFile(join(item.runDir, "final.json"), "utf8"))).toMatchObject({ outcome: "no_changes" })
     expect((await item.store.readState()).active).toBeUndefined()
+    // git grep exits 1 for "not found"; any other code is a git error, not proof.
     const landed = await createNodeGitExec().run(["grep", "-q", "synthetic-fixture-value", "HEAD"], { cwd: item.worktree.parent.dir, timeoutMs: 30_000 })
-    expect(landed.code).not.toBe(0)
+    expect(landed.code).toBe(1)
+    // The refused run still advances the cursor, so this conversation is not replayed into the same refusal.
+    expect((await item.journal.getState()).reflected_completed_steps).toBe(1)
   })
 
   test("#given a committed oversized description #when the recorded outcome finalizes #then preflight runs before validation and the gate passes", async () => {

@@ -42,6 +42,8 @@ describe("secret scanner: assignments that only reference a credential", () => {
     "token={{x}}realsecretvalue",
     "secret: os.environDEFAULT9xQ",
     "api_key=env.FOO.realtail9xQ",
+    "token: ${FOO}realsecret",
+    "token: [FILTERED]realsecret",
   ]
   for (const text of credentials) {
     it(`#given ${JSON.stringify(text)} #when scanned #then it is still secret-like`, () => {
