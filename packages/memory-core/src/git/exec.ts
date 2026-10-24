@@ -146,7 +146,14 @@ function spawnGitCommand(
 
     child.stdout!.on("data", (chunk: Buffer) => stdout.push(chunk))
     child.stderr!.on("data", (chunk: Buffer) => stderr.push(chunk))
-    if (hasStdin) child.stdin!.end(options.stdin)
+    const stdin = hasStdin ? child.stdin : null
+    if (stdin) {
+      // git may exit before reading all of its stdin (a bad path, a held index.lock); the pending write
+      // then fails with EPIPE on this stream. The exit code already reports the failure, and an
+      // unlistened stream 'error' would crash the process instead (#11129).
+      stdin.on("error", () => {})
+      stdin.end(options.stdin)
+    }
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (settled) return
       settled = true
