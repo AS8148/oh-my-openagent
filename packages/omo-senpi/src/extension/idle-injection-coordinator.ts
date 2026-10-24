@@ -40,6 +40,8 @@ export type FlushScheduler = (flush: () => void) => (() => void) | void
 
 type ReceiptErrors = { readonly threw: boolean; readonly first: unknown; readonly rest: readonly unknown[] }
 
+const NO_RECEIPT_ERRORS: ReceiptErrors = { threw: false, first: undefined, rest: [] }
+
 // Runs one receipt per producer, each in its own try, and returns every error: one producer's throwing receipt
 // must never cost a later producer its receipt, or that producer's completion is never recorded or redelivered.
 // `threw` is set in the catch block, never from the caught value, so a thrown undefined, null, 0 or '' still counts.
@@ -219,8 +221,16 @@ export class IdleInjectionCoordinator {
     if (errors.threw) throw errors.first
   }
 
+  // Each report is isolated: a reporter that throws must not drop the errors after it, replace a delivery error the
+  // caller needs, or become an unhandled rejection on the async path. Its own failure goes to the console.
   #reportReceiptErrors(errors: readonly unknown[]): void {
-    for (const error of errors) this.#onReceiptError?.(error)
+    for (const error of errors) {
+      try {
+        this.#onReceiptError?.(error)
+      } catch (reporterError) {
+        console.error("[omo-senpi] onReceiptError threw while reporting a receipt error", { receiptError: error, reporterError })
+      }
+    }
   }
 
   #reportAllReceiptErrors(errors: ReceiptErrors): void {
@@ -245,7 +255,12 @@ export class IdleInjectionCoordinator {
       this.#reportChildWork()
     }
     // Every producer gets its receipt even when an earlier one throws, and the count settles after all of them.
+    // It happens once per flush: a thenable that calls back and then throws, or calls both callbacks, must not
+    // hand out a second set of receipts or settle the count twice.
+    let settled = false
     const receiptsThenSettle = (receipt: (injection: IdleInjection) => void): ReceiptErrors => {
+      if (settled) return NO_RECEIPT_ERRORS
+      settled = true
       try {
         return runReceipts(ordered, receipt)
       } finally {
