@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The ulw-research proofread lane returns edits that are checked before they land.** The writing lane hands back `polish-edits.json`; `fact polish-apply` applies each edit only when it keeps every number, hedge, qualifier, link, and claim id, `fact polish-diff` backstops hand edits, and `fact pairs --changed-since` sends every sentence polish rewrote back to the meaning readers. ([#11160](https://github.com/code-yeongyu/oh-my-openagent/pull/11160), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009))
+
 **Windows dori sidecar paths pass the extension's path checks.** The omo-senpi tests accept the Windows form of the sidecar path, so the Windows suite no longer fails on a correct path. ([#11111](https://github.com/code-yeongyu/oh-my-openagent/pull/11111), fixes [#11110](https://github.com/code-yeongyu/oh-my-openagent/issues/11110))
 
 **Child-task, workflow and workpool wake sources report kind `children`.** ([#11114](https://github.com/code-yeongyu/oh-my-openagent/pull/11114), part of [#10782](https://github.com/code-yeongyu/oh-my-openagent/issues/10782))

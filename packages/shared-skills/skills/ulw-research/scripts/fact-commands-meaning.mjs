@@ -1,6 +1,7 @@
 // fact-commands-meaning.mjs - `fact pairs` and `fact meaning-check`, the script half of the
 // separate-session meaning verifier. fact pairs writes the (source, report sentence) pairs a
-// reader lane gets and nothing else; it honours the brief's `meaning check` field and writes
+// reader lane gets and nothing else (with --changed-since, only the pairs whose sentence polish
+// rewrote); it honours the brief's `meaning check` field and writes
 // `{ skipped: true }` when it is off. fact meaning-check ingests the readers' verdict files
 // (meaning-check.mjs), writes fidelity-meaning-defects.json, and appends one calibration line per
 // flagged pair to fidelity-calibration.jsonl (header with the promotion criterion on first write;
@@ -14,6 +15,7 @@ import { CliError, parseArgs, readJsonFile, writeJsonAtomic } from "./cli-suppor
 import { markdownAsHtml, readEdition } from "./fact-commands-verify.mjs"
 import { readLedger } from "./fact-ledger.mjs"
 import { validateLedger } from "./fact-ledger-schema.mjs"
+import { pairsChangedSince } from "./fact-commands-polish.mjs"
 import { extractPairs } from "./fact-pairs.mjs"
 import { isLocked, parseFidelityBlock } from "./fidelity-brief.mjs"
 import { ingestVerdicts } from "./meaning-check.mjs"
@@ -70,10 +72,10 @@ function runPairs(args) {
 	const edition = readEdition(report, flags)
 	const claimsPath = flags.claims ?? (session === null ? null : join(session, "claims.json"))
 	const claims = claimsPath !== null && (flags.claims !== undefined || existsSync(claimsPath)) ? readJsonFile(claimsPath) : null
-	const changed = flags["changed-since"] === undefined ? undefined : readJsonFile(flags["changed-since"]).entries
 	const ledger = readLedgerFrom(flags, session)
 	const html = edition.format === "md" ? markdownAsHtml(edition.text, edition.entries, ledger).html : edition.text
-	const pairs = extractPairs(html, ledger, claims, changed)
+	const all = extractPairs(html, ledger, claims)
+	const pairs = flags["changed-since"] === undefined ? all : pairsChangedSince(all, flags["changed-since"], ledger, claims)
 	const counts = { total: pairs.length, force_strong: pairs.filter((pair) => pair.force_strong).length }
 	for (const kind of ["quote", "claim", "translation"]) counts[kind] = pairs.filter((pair) => pair.kind === kind).length
 	const record = { schemaVersion: 1, skipped: false, report: resolve(report), format: edition.format, artifact_sha256: sha256(edition.text), pairs_sha256: sha256(JSON.stringify(pairs)), counts, pairs }
