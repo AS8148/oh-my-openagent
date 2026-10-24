@@ -844,6 +844,70 @@ describe("assembled DAG runtime", () => {
     resumedRuntime.dispose()
   })
 
+  test("#given a paused run recovered by a later adapter #when it completes #then the engine is told exactly once", async () => {
+    // given
+    const cwd = fs.mkdtempSync(join(tmpdir(), "omo-senpi-dag-recovery-mark-"))
+    cleanupRoots.push(cwd)
+    const runId = "dag-adapter-recovery-mark" as DagRunId
+    const sessionId = "session-recovery-mark"
+    await seedPendingRun(cwd, runId, sessionId)
+    const firstPi = new FakeExtensionAPI()
+    const firstEngine = composeTaskEngine({
+      pi: firstPi,
+      omoConfig: loadOmoConfig({ cwd }).config,
+      cwd,
+      sharedParentTools: () => [],
+      runnerFactories: { inProcess: () => new ScriptedRunner(), process: () => new ScriptedRunner() },
+    })
+    firstEngine.runtime.captureFrom({ modelRegistry: createTeamServiceTestModelRegistry(), sessionManager: { getSessionId: () => sessionId } })
+    const firstRuntime = createDagRuntime({ pi: firstPi, engine: firstEngine, logger: logger() })
+
+    // when
+    await pauseForShutdown(firstRuntime)
+    firstRuntime.dispose()
+
+    // then
+    const pausedStore = dagStore(cwd)
+    const paused = pausedStore.readCheckpoint<DagRunRecordV1 & { readonly previousLeaseHolderPid?: number }>(runId)
+    expect(paused?.status).toBe("paused")
+    expect(dagEvents(cwd, runId).at(-1)).toEqual(expect.objectContaining({
+      type: "dag.run.paused",
+      reason: "session_shutdown",
+    }))
+
+    // given a subsequent host process whose predecessor PID is dead
+    if (paused === null) throw new Error("expected paused adapter run")
+    pausedStore.writeCheckpoint(runId, { ...paused, previousLeaseHolderPid: 2_147_483_647 })
+    const resumedRunner = new ScriptedRunner()
+    const completedRuns: string[] = []
+    const resumedPi = Object.assign(new FakeExtensionAPI(), {
+      lifecycle: { markRunCompleted: (run: { readonly runId: string }) => completedRuns.push(run.runId) },
+    })
+    const resumedEngine = composeTaskEngine({
+      pi: resumedPi,
+      omoConfig: loadOmoConfig({ cwd }).config,
+      cwd,
+      sharedParentTools: () => [],
+      runnerFactories: { inProcess: () => resumedRunner, process: () => resumedRunner },
+    })
+    resumedEngine.runtime.captureFrom({ modelRegistry: createTeamServiceTestModelRegistry(), sessionManager: { getSessionId: () => sessionId } })
+    const resumedRuntime = createDagRuntime({ pi: resumedPi, engine: resumedEngine, logger: logger() })
+
+    // when
+    const attached = resumedRuntime.attach()
+    await resumedRunner.whenStarted(1)
+    resumedRunner.handles[0]?.settle("resumed output")
+    await attached
+    const result = await resumedRuntime.wait(runId, sessionId)
+
+    // then
+    expect(result.status).toBe("completed")
+    expect(result.nodes.resume).toEqual(expect.objectContaining({ state: "completed", output: "resumed output" }))
+    expect(dagEvents(cwd, runId).some((event) => event.type === "dag.run.resumed")).toBe(true)
+    expect(completedRuns).toEqual([runId])
+    resumedRuntime.dispose()
+  })
+
   test("#given a paused run and a non-default subscriber ring #when the assembled runtime resumes it #then the overflow is journaled and shipped RPC receives the recovered snapshot", async () => {
     // given - the bridge attaches AFTER recovery (#7316), so recovery-window events are never
     // pushed live; the overflow marker must be durable in the journal for history-paging viewers,
