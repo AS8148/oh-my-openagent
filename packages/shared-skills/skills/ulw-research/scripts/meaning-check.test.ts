@@ -7,8 +7,9 @@ import { DRIFT_KINDS, ingestVerdicts } from "./meaning-check.mjs"
 
 type Verdict = Record<string, unknown>
 type Result = {
-	defects: { code: string; severity: string; integrity: boolean; pair_id: string; drift_kind: string }[]
+	defects: { code: string; severity: string; integrity: boolean; pair_id: string; drift_kind: string; fragment: string; source_fragment: string }[]
 	dropped: { pair_id: string | null; reason: string; model_tier: string | null; file: string }[]
+	unverified: { pair_id: string; reason: string }[]
 	calibrationLines: string[]
 }
 
@@ -147,6 +148,66 @@ describe("ingestVerdicts: calibration log", () => {
 		expect(JSON.parse(lines()[1])).toEqual({ kind: "claim", pair_id: "P2", tiers: ["cheap"], drift_kind: "certainty_added", confirmed: false, disputed: false, reason: null })
 		run(cheap, [], { calibrationPath })
 		expect(lines()).toHaveLength(4)
+	})
+})
+
+describe("ingestVerdicts: coverage", () => {
+	test("#given a pair no reader judged #when ingested #then it is reported as unverified, never as clean", () => {
+		const result = run([base("cheap")], [base("strong")])
+		expect(result.unverified).toEqual([{ pair_id: "P2", reason: "no_verdict" }])
+	})
+
+	test("#given a force_strong pair with only a cheap verdict #when ingested #then unverified says no_strong_verdict", () => {
+		const result = run([base("cheap"), { pair_id: "P2", verdict: "ok", model_tier: "cheap" }])
+		expect(result.unverified).toEqual([
+			{ pair_id: "P1", reason: "no_strong_verdict" },
+			{ pair_id: "P2", reason: "no_strong_verdict" },
+		])
+	})
+
+	test("#given every pair read by both tiers #when ingested #then unverified is empty", () => {
+		const ok = (pair_id: string, tier: string): Verdict => ({ pair_id, verdict: "ok", model_tier: tier })
+		const result = run([ok("P1", "cheap"), ok("P2", "cheap")], [ok("P1", "strong"), ok("P2", "strong")])
+		expect(result.unverified).toEqual([])
+		expect(result.defects).toEqual([])
+	})
+
+	test("#given only dropped verdicts on a pair #when ingested #then the pair counts as unread", () => {
+		const result = run([base("cheap", { fragment: "Europe" })], [base("strong", { fragment: "Europe" })])
+		expect(result.unverified.map((entry) => entry.pair_id)).toEqual(["P1", "P2"])
+	})
+})
+
+describe("ingestVerdicts: the reported fragment", () => {
+	test("#given an earlier other verdict #when the tiers agree on a later kind #then the fragment comes from the agreed verdict", () => {
+		const other = base("cheap", { drift_kind: "other", fragment: "The rollout", source_fragment: "The pilot" })
+		const result = run([other, base("cheap")], [base("strong")])
+		expect(result.defects).toHaveLength(1)
+		expect(result.defects[0]).toMatchObject({ code: "meaning_drift_confirmed", drift_kind: "scope_widened", fragment: "worldwide", source_fragment: "North America" })
+	})
+})
+
+describe("ingestVerdicts: determinism", () => {
+	test("#given the same verdicts twice #when ingested #then both results are byte-for-byte equal", () => {
+		const cheap = [base("cheap"), { pair_id: "P2", verdict: "drift", drift_kind: "certainty_added", fragment: "will grow", source_fragment: "may grow", model_tier: "cheap" }, base("medium")]
+		const strong = [base("strong")]
+		const first = JSON.stringify(run(cheap, strong))
+		const second = JSON.stringify(run(cheap, strong))
+		expect(second).toBe(first)
+	})
+})
+
+describe("ingestVerdicts: unreadable verdict files", () => {
+	test("#given a missing verdict file #when ingested #then a short typed error names the file", () => {
+		const missing = join(dir, "absent.json")
+		expect(() => ingestVerdicts(PAIRS, [missing])).toThrow(TypeError)
+		expect(() => ingestVerdicts(PAIRS, [missing])).toThrow(/absent\.json: cannot read the verdict file/u)
+	})
+
+	test("#given invalid JSON #when ingested #then a short typed error names the file", () => {
+		const path = join(dir, "broken.json")
+		writeFileSync(path, "{ not json")
+		expect(() => ingestVerdicts(PAIRS, [path])).toThrow(/broken\.json: the verdict file is not valid JSON/u)
 	})
 })
 
