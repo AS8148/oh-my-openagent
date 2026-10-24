@@ -4,7 +4,7 @@
 // KIND_RULES (fact-ledger-kinds.mjs), never here.
 // Pure functions with no IO; fact-ledger.mjs owns reading, writing, and row changes. node: builtins only.
 
-import { DECIMAL, isCount, isNonEmpty, isObject, isString, kindRuleErrors, storedErrors } from "./fact-ledger-kinds.mjs"
+import { DECIMAL, isCount, isLegacyDerived, isNonEmpty, isObject, isString, kindRuleErrors, LATER_COLUMNS, storedErrors } from "./fact-ledger-kinds.mjs"
 import { malformed } from "./unit-rules.mjs"
 
 export { DECIMAL, isNonEmpty, isString } from "./fact-ledger-kinds.mjs"
@@ -57,7 +57,7 @@ export const ROW_DEFAULTS = Object.freeze({
 	status: "active",
 })
 /** Fields added after schema version 1 shipped: written on every new row, optional when reading an older ledger. */
-const OPTIONAL_FIELDS = new Set(["context", "precision", "compatibility"])
+const OPTIONAL_FIELDS = new Set(LATER_COLUMNS)
 const REQUIRED = ["fact_id", "kind", "raw", "quote", "extracted_by", "observed_at", "label"]
 export const ROW_FIELDS = Object.freeze([...REQUIRED, ...Object.keys(ROW_DEFAULTS)])
 
@@ -81,7 +81,7 @@ function validateRow(row, index, errors) {
 	check(errors, FACT_KINDS.includes(row.kind), `${at}.kind must be one of ${FACT_KINDS.join(", ")}`)
 	errors.push(...kindRuleErrors(row, at))
 	errors.push(...storedErrors(row).map((e) => `${at}.${e}`))
-	if (["derived", "converted"].includes(row.kind)) {
+	if (["derived", "converted"].includes(row.kind) && !isLegacyDerived(row)) {
 		const problem = malformed(row)
 		if (problem) errors.push(`${at}: ${problem}`)
 	}

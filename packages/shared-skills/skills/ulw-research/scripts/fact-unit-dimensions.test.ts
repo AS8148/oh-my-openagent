@@ -100,13 +100,17 @@ test("dimension 05: public refusal API is total classified and append atomic", (
 	}
 })
 
-test("dimension 06: aliases normalize at input but fail canonical storage checks", () => {
+test("dimension 06: aliases normalize at input; derived rows store canonical units, source aliases read canonical (dimension 31)", () => {
 	const l = book(["1", "3"], ["metre", "m"])
 	expect(l.rows[0].unit).toBe("m")
 	const result = row(l, sum)
 	l.rows[0].unit = "metre"
+	expect(validateLedger(l)).toEqual([])
+	expect(recompute(l, result).ok).toBe(true)
+	const relabeled = { ...result, unit: "metre" }
+	l.rows[l.rows.indexOf(result)] = relabeled
 	expect(validateLedger(l).length).toBeGreaterThan(0)
-	expect(recompute(l, result).ok).toBe(false)
+	expect(recompute(l, relabeled).ok).toBe(false)
 })
 
 test("dimension 07: exact rationals are reduced canonical integer strings", () => {

@@ -1,5 +1,6 @@
 // Public append boundary: dispatch through the operation table, verify transitive trust, append only on success.
 import { leaves, parseExpr } from "./fact-expr.mjs"
+import { readRow } from "./fact-ledger-kinds.mjs"
 import { addRow, nextId, validateLedger } from "./fact-ledger.mjs"
 import { recompute, verifyGraph } from "./fact-recompute.mjs"
 import { canonicalUnit, inputScale, refuse } from "./unit-algebra.mjs"
@@ -42,7 +43,7 @@ export function derive(ledger, spec) {
 		const verified = verifyGraph(ledger, ids, true)
 		if (!verified.ok) return { error: "incompatible_operands", ...verified }
 		const byId = new Map(ledger.rows.map((r) => [r.fact_id, r]))
-		const rows = ids.map((id) => byId.get(id))
+		const rows = ids.map((id) => readRow(byId.get(id)))
 		const context = rule.context(spec)
 		if (Object.hasOwn(spec, "context") && !sameDeclared(spec.context, context)) refuse("supplied context differs from the operation's input fields", undefined, "context", context ?? "explicit null")
 		const shape = rule.shape({ operation: spec.op, operands: ids, formula: spec.formula, context })

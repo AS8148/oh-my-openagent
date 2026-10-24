@@ -66,8 +66,12 @@ Always required, never null: `fact_id`, `kind`, `raw` (string), `quote` (string)
 - All other fields are nullable with the types in `fact-ledger-schema.mjs`.
 
 Exact rational integer strings are canonical: no leading zeros, negative zero, negative denominator,
-or common factors. Unit aliases normalize only at input, with numeric scaling for basis-point factors
-in composites. Stored units are compared exactly, including symbols' case.
+or common factors. Unit aliases normalize at input, with numeric scaling for basis-point factors
+in composites. Derived rows store canonical units, compared exactly, including symbols' case; a source
+row's registered alias is canonicalized when the ledger is read (`unit-rules.md` dimension 31).
+
+A ledger written before `context`, `precision`, and `compatibility` existed still loads: source rows
+read those columns as null, and older derived or converted rows load but are never used as operands.
 
 Derived and converted rows require a matching operation, its closed context, distinct existing operands,
 formula, derived_from, precision, and compatibility. Source rows cannot carry derivation fields.

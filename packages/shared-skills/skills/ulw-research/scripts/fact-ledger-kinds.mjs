@@ -5,7 +5,7 @@
 // Also the value primitives the schema shares. Pure functions with no IO; node: builtins only.
 
 import { isCliEntry } from "./entry-guard.mjs"
-import { canonicalUnit, inputScale } from "./unit-algebra.mjs"
+import { canonicalUnit, inputScale, RuleError } from "./unit-algebra.mjs"
 import { metadataErrors } from "./unit-metadata.mjs"
 import { OPERATION_RULES } from "./unit-rules.mjs"
 
@@ -116,14 +116,42 @@ export function exactComesFromValue(kind) {
 	return KIND_RULES[kind]?.exact === "from_value"
 }
 
+/** Columns added after schema version 1 shipped; a ledger written before them still loads (dimension 31). */
+export const LATER_COLUMNS = Object.freeze(["context", "precision", "compatibility"])
+const DERIVED_KINDS = Object.freeze(["derived", "converted"])
+const PRE_REGISTRY_COLUMNS = KIND_COLUMNS.slice(0, KIND_COLUMNS.indexOf("exact") + 1)
+
+/** A derived or converted row written before the later columns existed: loadable, never an operand. */
+export const isLegacyDerived = (row) => isObject(row) && DERIVED_KINDS.includes(row.kind) && LATER_COLUMNS.every((column) => !Object.hasOwn(row, column))
+
+/** A source unit read through the alias table; unknown, scaled, or unparseable text stays as given. */
+export function sourceUnit(unit) {
+	try {
+		const canonical = canonicalUnit(unit)
+		return isString(canonical) && !inputScale(unit) ? canonical : unit
+	} catch (error) {
+		if (error instanceof RuleError) return unit
+		throw error
+	}
+}
+
+/** A row as derive and recompute read it: source rows get canonical units and null later columns. */
+export function readRow(row) {
+	if (!isObject(row) || !Object.hasOwn(KIND_RULES, row.kind) || DERIVED_KINDS.includes(row.kind)) return row
+	const read = { ...row, unit: sourceUnit(row.unit) }
+	for (const column of LATER_COLUMNS) if (!Object.hasOwn(read, column)) read[column] = null
+	return read
+}
+
 /** @returns {string[]} every per-kind column error of one row; empty for an unknown kind. */
 export function kindRuleErrors(candidate, at) {
 	const rules = KIND_RULES[candidate.kind]
 	if (rules === undefined) return []
 	const errors = []
-	for (const column of KIND_COLUMNS) {
-		const value = candidate[column]
-		const rule = RULES[rules[column]]
+	const legacy = isLegacyDerived(candidate)
+	for (const column of legacy ? PRE_REGISTRY_COLUMNS : KIND_COLUMNS) {
+		const value = candidate[column] === undefined && LATER_COLUMNS.includes(column) ? null : candidate[column]
+		const rule = RULES[legacy && column === "exact" ? "rational_or_null" : rules[column]]
 		if (rule.test(value, candidate)) continue
 		errors.push(`${at}.${column} must be ${rule.says} for a ${candidate.kind} row`)
 		if (rule.detail) errors.push(...rule.detail(value, `${at}.${column}`))
@@ -131,11 +159,14 @@ export function kindRuleErrors(candidate, at) {
 	return errors
 }
 
+/** At-rest rules: derived rows store canonical units; source units are canonicalized on read instead. */
 export function storedErrors(row) {
 	const errors = metadataErrors(row)
-	try {
-		if (canonicalUnit(row.unit) !== row.unit || inputScale(row.unit)) errors.push("unit must be canonical stored text")
-	} catch (error) { errors.push(error.message) }
+	if (DERIVED_KINDS.includes(row.kind) && !isLegacyDerived(row)) {
+		try {
+			if (canonicalUnit(row.unit) !== row.unit || inputScale(row.unit)) errors.push("unit must be canonical stored text")
+		} catch (error) { errors.push(error.message) }
+	}
 	if (!["derived", "converted"].includes(row.kind) && (row.operands?.length || row.derived_from?.length || row.formula !== null || row.factor !== null)) errors.push("source rows carry no derivation fields")
 	return errors
 }

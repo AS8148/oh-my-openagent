@@ -7,7 +7,7 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
-import { DECIMAL, exactComesFromValue, exactFromDecimal, idPrefix, isString } from "./fact-ledger-kinds.mjs"
+import { DECIMAL, exactComesFromValue, exactFromDecimal, idPrefix, isString, readRow } from "./fact-ledger-kinds.mjs"
 import { LEDGER_SCHEMA_VERSION, ROW_DEFAULTS, ROW_FIELDS, transitionError, validateLedger } from "./fact-ledger-schema.mjs"
 import { normalizeInput } from "./unit-algebra.mjs"
 
@@ -25,10 +25,20 @@ function assertValid(ledger) {
 	if (errors.length > 0) throw new CliError(`invalid fact ledger: ${errors.join("; ")}`)
 }
 
+/** The row's fields in ROW_FIELDS order, then any unknown field (which validation reports). */
+function ordered(row) {
+	const out = Object.fromEntries(ROW_FIELDS.filter((key) => Object.hasOwn(row, key)).map((key) => [key, row[key]]))
+	for (const key of Object.keys(row)) if (!ROW_FIELDS.includes(key)) out[key] = row[key]
+	return out
+}
+
+/** Source rows come back with canonical units and null later columns; the file changes on the next write. */
 export function readLedger(dir) {
 	const file = join(dir, LEDGER_FILENAME)
 	if (!existsSync(file)) return emptyLedger()
 	const ledger = readJsonFile(file)
+	assertValid(ledger)
+	ledger.rows = ledger.rows.map((row) => ordered(readRow(row)))
 	assertValid(ledger)
 	return ledger
 }
@@ -69,11 +79,10 @@ export function addRow(ledger, row) {
 	if (exactComesFromValue(filled.kind) && filled.exact === null && isString(filled.value) && DECIMAL.test(filled.value)) {
 		filled.exact = exactFromDecimal(filled.value)
 	}
-	const ordered = Object.fromEntries(ROW_FIELDS.filter((key) => Object.hasOwn(filled, key)).map((key) => [key, filled[key]]))
-	for (const key of Object.keys(filled)) if (!ROW_FIELDS.includes(key)) ordered[key] = filled[key]
-	assertValid({ ...ledger, rows: [...ledger.rows, ordered] })
-	ledger.rows.push(ordered)
-	return ordered
+	const added = ordered(filled)
+	assertValid({ ...ledger, rows: [...ledger.rows, added] })
+	ledger.rows.push(added)
+	return added
 }
 
 /** Build the event from the row's current status and append it only if transitionError allows it. */

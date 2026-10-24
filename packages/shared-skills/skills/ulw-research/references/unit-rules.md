@@ -85,7 +85,7 @@ same-currency denomination scaling (M/B), summing ratios over a common base. Eac
 3. Enforced: stored `precision: { places, sigfigs }` carries operand precision independently of display trailing zeros.
 4. Enforced: scaled aliases normalize at every composite factor and exponent, scaling the input numeral exactly.
 5. Enforced: derive and recompute return classified refusals with `shape`, `expected`, and `detail`; derive never appends on refusal.
-6. Enforced: aliases canonicalize only at input; noncanonical stored operands, results, and conversion targets are refused.
+6. Enforced: aliases canonicalize at input; noncanonical stored results and conversion targets are refused, and a source unit that needs rescaling (a scaled alias) is refused as an operand.
 7. Enforced: stored rationals are reduced integer strings with positive denominators and canonical zero.
 8. Enforced: operation contexts have closed keys and types, including non-percent sums and context-free operations.
 9. Enforced: formula, factor, derived_from, raw, render, metadata, precision, and compatibility are compared on replay.
@@ -110,6 +110,7 @@ same-currency denomination scaling (M/B), summing ratios over a common base. Eac
 28. Enforced: only decimal literals, fact identifiers, binary arithmetic, parentheses, and pct parse; unsupported syntax is refused.
 29. Enforced: rounding is half away from zero; values are plain decimals and display uses canonical units and grouping.
 30. Enforced: seeded factor trees and conversion compositions have expected values computed independently of OPERATION_RULES.
+31. Enforced: a ledger written before `context`, `precision`, and `compatibility` existed still loads and accepts new derivations. On measured, quote, and assumed rows a missing column reads as null, and a registered alias unit is canonicalized on read (unknown or scaled text stays as given); the file changes only on the next write. Derived and converted rows without those columns load, but `recompute` reports shape `legacy derived row` and `derive` refuses them as operands with the same shape until they are regenerated.
 
 ## Trust boundary
 
@@ -124,12 +125,13 @@ rewrite needs an immutable ledger baseline or source provenance outside this ari
   measured, quote, and assumed rows: a `KIND_RULES` column):
   sum stores `{ disjoint, reference }`, convert stores `{ target }`. The sum rationale stays in `rationale`.
   Schema and recomputation both require the operation's context. Context-free rows carry explicit null.
-- Derived rows from older writers must be regenerated to carry precision, compatibility, and complete audit fields.
-  `schemaVersion` remains 1; readers reject incomplete derivation rows rather than guessing lost precision.
+- `schemaVersion` remains 1. A derived or converted row from an older writer (no `context`, `precision`, or
+  `compatibility`) is kept as written and never used as an operand: regenerate it with `derive` to carry precision,
+  compatibility, and complete audit fields. Older source rows need nothing: they are read with null later columns.
 - `reference` is either one text (the caller asserts one shared denominator) or a map from each operand id to its
   denominator; the map passes only when every operand names the same non-empty denominator.
 - `addRow` canonicalizes source units and scales alias numerals, including `100 bp/person` to `1 %p/person`.
-  At rest, aliases are refused without recanonicalization. A declared result unit with a nontrivial alias scale is refused.
+  At rest, source-row aliases are canonicalized on read (dimension 31); derived rows with alias units are refused. A declared result unit with a nontrivial alias scale is refused.
   Scale exponents with absolute value above 10000 are explicitly refused instead of allocating an unbounded numeral.
 - A ratio over `%` or `%p` operands with unequal units is refused (use expr, where `%` enters `*` and `/` as a fraction).
 - convert reads its target from `to`; a declared `unit` is optional and must equal that target.

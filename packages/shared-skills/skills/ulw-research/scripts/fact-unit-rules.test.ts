@@ -125,7 +125,7 @@ const generic = (base: Spec, arity: string[], arityReason = "takes ", missingRea
 	{ name: "noncanonical operand", base, mutate: (row, book) => {
 		const operand = book.rows.find((r) => r.fact_id === (row.operands as string[])[0])
 		if (!operand) throw Error("fixture operand missing")
-		operand.unit = ({ m: "metre", "%": "percent", case: "cases", person: "people", USD: "dollar" } as Record<string, string>)[String(operand.unit)]
+		operand.unit = `${operand.unit}*bp/%p`
 		return row
 	}, reason: "canonical" },
 ]
