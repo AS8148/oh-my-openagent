@@ -1,3 +1,11 @@
+## 2026-10-23 - Report refused starts before teardown (#10402)
+
+First-prompt refusals settle the launch without waiting for child termination and
+disposal. Both RPC runners retain detached cleanup until it finishes, and the
+manager includes that cleanup in its existing shutdown deadline. Failed process
+resumes still await cleanup before permitting a retry against the same session.
+The `started` result with `starting: true` keeps its existing contract.
+
 ## 2026-10-19 - Retry infrastructure-failed DAG nodes before cascading skips (#10605)
 
 The shared DAG scheduler retries an infrastructure-failed node at most twice, with
