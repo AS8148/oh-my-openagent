@@ -11,7 +11,7 @@ import { countDefects, DEFECT_CODES, SEVERITIES } from "./contracts.mjs"
 import { runFactMeaning } from "./fact-commands-meaning.mjs"
 import * as polishCommand from "./fact-commands-polish.mjs"
 import { editionFormatOf, ledgerFrom, sessionOf } from "./fact-commands-verify.mjs"
-import { applyEdits, POLISH_EDIT_FIELDS, validatePolishEdits } from "./polish-apply.mjs"
+import { applyEdits, POLISH_EDIT_FIELDS, POLISH_MARKUP_REASON, validatePolishEdits } from "./polish-apply.mjs"
 
 const { polishDiffFails, runFactPolish } = polishCommand
 const source = (name: string) => readFileSync(join(import.meta.dir, name), "utf8")
@@ -152,5 +152,22 @@ describe("polish-diff counts with contracts and exits on blockers only", () => {
 		const result = run("<p>Throughput grew 3.5 times [S1].</p>", "<p>Throughput grew 35 times [S1].</p>")
 		expect(result.json.counts).toEqual(countDefects(result.json.defects))
 		expect(result.exitCode).toBe(1)
+	})
+})
+
+describe("fact polish-apply prints every rejection reason verbatim", () => {
+	type ApplyRun = { summary: string; exitCode: number; json: { defects: { index: number; code: string; reason: string }[]; data: { rejected: number; rejected_reasons: string[] } } }
+
+	test("#given an edit holding & #when fact polish-apply runs #then the printed line carries polish-apply's own markup reason", () => {
+		const before = "Revenue & profit rose across the year"
+		const editsPath = file("edits-markup-ampersand.json", JSON.stringify([{ before, after: "Revenue and profit rose across the year", reason: "wording" }]))
+		const run = runFactPolish("polish-apply", [reportPath, "--edits", editsPath, "--ledger", ledgerPath, "--brief", BRIEF, "--out", join(dir, "ampersand.html")]) as unknown as ApplyRun
+
+		expect(run.exitCode).toBe(0)
+		expect(run.json.data.rejected).toBe(1)
+		expect(run.json.defects.map((defect) => [defect.index, defect.code, defect.reason])).toEqual([[0, "polish_edit_rejected", POLISH_MARKUP_REASON]])
+		const line = `  rejected edit 0 ("${before}"): ${POLISH_MARKUP_REASON}`
+		expect(run.json.data.rejected_reasons).toEqual([line])
+		expect(run.summary.split("\n")[1]).toBe(line)
 	})
 })

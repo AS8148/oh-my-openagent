@@ -10,7 +10,7 @@
 
 import { decodeEntities } from "./entities.mjs"
 import { guardedTerms, lexicalPattern, QUALIFIER_FORMS } from "./fidelity-lexicon.mjs"
-import { elementSpans, tagAttributes } from "./html-markup.mjs"
+import { elementSpans, markupParts, tagAttributes } from "./html-markup.mjs"
 import { HEDGES } from "./lexicon.mjs"
 import { parseNumeral } from "./numerals.mjs"
 import { FACT_ELEMENT_TAGS } from "./placeholder.mjs"
@@ -32,9 +32,13 @@ export function factSpans(markup) {
 	return elementSpans(src, isFactElement).map(({ start, end, tag }) => ({ id: tag.attrs["data-fact"], start, end, html: src.slice(start, end) }))
 }
 
-/** Visible text of an HTML fragment: tags become spaces, entities decoded, whitespace collapsed. */
+/**
+ * Visible text of an HTML fragment: the scanner's text slots joined by a space (so a quoted ">"
+ * inside a tag stays markup), entities decoded, whitespace collapsed. One tokenization is shared
+ * with the markup rules; no second tag-stripping regex.
+ */
 export function textOf(html) {
-	return decodeEntities(html.replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ")
+	return decodeEntities(markupParts(html).text.join(" ")).replace(/\s+/g, " ")
 }
 
 /** The protected projection of (already visible) markup; see the header. */

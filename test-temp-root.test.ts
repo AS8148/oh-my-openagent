@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -34,12 +34,21 @@ describe("removeAbandonedRunRoots", () => {
       if (!held || !removable) throw new Error("missing abandoned root fixtures")
       const attempted: string[] = []
       const error = Object.assign(new Error(code), { code })
+      const warnings = spyOn(console, "warn").mockImplementation(() => {})
 
-      expect(() => removeAbandonedRunRoots(fixture, (root) => {
-        attempted.push(root)
-        if (root === held) throw error
-        removeTreeSync(root)
-      })).not.toThrow()
+      try {
+        expect(() => removeAbandonedRunRoots(fixture, (root) => {
+          attempted.push(root)
+          if (root === held) throw error
+          removeTreeSync(root)
+        })).not.toThrow()
+        const reports = warnings.mock.calls
+          .filter(([kind]) => kind === "SKIPPED_TEST_TEMP_ROOT")
+          .map(([, record]) => JSON.parse(String(record)))
+        expect(reports).toContainEqual(expect.objectContaining({ root: held, code }))
+      } finally {
+        warnings.mockRestore()
+      }
 
       expect(attempted.sort()).toEqual([held, removable].sort())
       expect(existsSync(held)).toBe(true)

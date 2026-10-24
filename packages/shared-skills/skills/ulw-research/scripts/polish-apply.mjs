@@ -1,5 +1,14 @@
 // polish-apply.mjs - checked, per-edit application of a proofread lane's polish edits.
 //
+// An edit whose before or after holds <, > or & is polish_edit_rejected (POLISH_MARKUP_REASON)
+// before anything else, so no edit can create, alter, close or escape a tag, comment,
+// bogus comment, CDATA section, entity or script, whatever the tokenizer models; a located region
+// that overlaps a character reference or opens one (it starts inside `&name`) is rejected with
+// POLISH_REFERENCE_REASON, so an edit can neither change nor complete an existing reference.
+// Those two guards are the early, actionable refusals; the guarantee itself is the whole-document
+// skeleton comparison (html-markup.skeletonChange) that polish-rules runs in both gates: every
+// markup token and every character reference stays byte-identical, and an accepted edit's span
+// holds no skeleton token, so any difference refuses the edit and reports polish_diff_fail.
 // applyEdits(html, edits, ledger) applies each {before, after, reason} edit in edits-file order,
 // against the output of the edits accepted before it. `before` must occur exactly once (runs of
 // whitespace match any whitespace run) and must not cut through a fact span; otherwise the edit is
@@ -13,6 +22,7 @@
 // validatePolishEdits and POLISH_EDIT_FIELDS are the edit
 // contract every caller (the CLI included) uses. No IO, no model. Plain Node ESM.
 
+import { CHARACTER_REFERENCE } from "./html-markup.mjs"
 import { factSpans } from "./polish-project.mjs"
 import { polishDefects } from "./polish-rules.mjs"
 
@@ -32,6 +42,21 @@ export function validatePolishEdits(edits) {
 		}
 	})
 	return edits
+}
+
+/** Characters an edit's before and after may never contain. */
+export const POLISH_MARKUP_CHARACTERS = /[<>&]/
+/** The actionable rejection reason for an edit holding a markup character. */
+export const POLISH_MARKUP_REASON = "edit contains markup characters (<, >, &): route this section through the full fidelity gates"
+/** The actionable rejection reason for a located region touching a character reference. */
+export const POLISH_REFERENCE_REASON = "edit touches a character reference: route this section through the full fidelity gates"
+
+/** True when [start, end) overlaps a character reference of html or starts inside one. */
+export function touchesReference(html, start, end) {
+	for (const match of String(html).matchAll(CHARACTER_REFERENCE)) {
+		if (match.index < end && match.index + match[0].length > start) return true
+	}
+	return /&[#\w]*$/.test(html.slice(Math.max(0, start - 16), start))
 }
 
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -65,15 +90,20 @@ export function applyEdits(html, edits, ledger) {
 		return [...new Set(messages)]
 	}
 	edits.forEach((edit, index) => {
+		const touches = POLISH_MARKUP_CHARACTERS.test(edit.before) || POLISH_MARKUP_CHARACTERS.test(edit.after)
 		const where = locate(result.out, edit.before)
-		if (where.count !== 1) {
+		if (where.count !== 1 && !touches) {
 			result.unlocated.push({ index, code: "polish_edit_unlocated", reason: `before matches ${where.count} times; it must match exactly once` })
 			return
 		}
-		const cut = cutSpan(result.out, where.start, where.end)
-		const candidate = result.out.slice(0, where.start) + edit.after + result.out.slice(where.end)
-		const reasons = defects(candidate)
-		if (cut !== null) reasons.push(`the edit cuts through fact span ${cut}`)
+		const reasons = touches ? [POLISH_MARKUP_REASON] : []
+		const candidate = where.count === 1 ? result.out.slice(0, where.start) + edit.after + result.out.slice(where.end) : result.out
+		if (where.count === 1) {
+			const cut = cutSpan(result.out, where.start, where.end)
+			if (touchesReference(result.out, where.start, where.end)) reasons.push(POLISH_REFERENCE_REASON)
+			reasons.push(...defects(candidate))
+			if (cut !== null) reasons.push(`the edit cuts through fact span ${cut}`)
+		}
 		if (reasons.length > 0) {
 			result.rejected.push({ index, code: "polish_edit_rejected", reason: reasons.join("; ") })
 			return
