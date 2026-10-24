@@ -1,7 +1,7 @@
 // Local config every memory repository carries. Line endings are pinned because a memory note is
 // stored and checked out byte for byte: Git for Windows defaults to core.autocrlf=true, which turned
 // LF into CRLF on checkout and CRLF into LF on commit (#11109).
-import { readFile, rename, stat, writeFile } from "../fs/resilient"
+import { readFile, rename, rm, stat, writeFile } from "../fs/resilient"
 import { join } from "node:path"
 
 import type { GitExecResult } from "./exec"
@@ -14,7 +14,7 @@ export interface RepoConfigTarget {
 }
 
 export interface RepoGitRunner {
-  result(argv: readonly string[]): Promise<GitExecResult>
+  result(argv: readonly string[], stdin?: string): Promise<GitExecResult>
 }
 
 export async function ensureRepoConfigDefaults(
@@ -27,7 +27,8 @@ export async function ensureRepoConfigDefaults(
   if ((await port.configGet("gc.auto")) === null) await port.configSet("gc.auto", "0")
   // Forced, not defaulted: a memory repository is machine-owned and must keep note bytes exactly.
   // The repair never fails init(); an incomplete repair leaves the key unset so the next open retries.
-  if ((await port.configGet("core.autocrlf")) !== "false" && (await restoreConvertedCheckouts(port.dir, run))) {
+  // The single guard for the whole repair: a rejected git call (spawn error, timeout, abort) counts as incomplete.
+  if ((await port.configGet("core.autocrlf")) !== "false" && (await restoreConvertedCheckouts(port.dir, run).catch(() => false))) {
     await port.configSet("core.autocrlf", "false")
   }
 }
@@ -53,7 +54,10 @@ async function restoreConvertedCheckouts(dir: string, run: RepoGitRunner): Promi
       if (bytes === undefined || !(await matchesIndexBlob(run, path, bytes))) continue
       const { mode } = await stat(target)
       await writeFile(`${target}.omo-eol.tmp`, bytes, { mode })
-      await rename(`${target}.omo-eol.tmp`, target)
+      await rename(`${target}.omo-eol.tmp`, target).catch(async (error: unknown) => {
+        await rm(`${target}.omo-eol.tmp`, { force: true })
+        throw error
+      })
     }
   } catch {
     return false
@@ -73,7 +77,9 @@ async function reindexUnchangedCopies(dir: string, run: RepoGitRunner): Promise<
     if (copy !== undefined && (await matchesIndexBlob(run, path, copy))) unchanged.push(path)
   }
   if (unchanged.length === 0) return true
-  return (await run.result(["-c", "core.autocrlf=false", "update-index", "-q", "--", ...unchanged])).code === 0
+  // Paths go on stdin: a converted Windows repository can list every note, past the command-line limit.
+  const input = unchanged.map((path) => `${path}\0`).join("")
+  return (await run.result(["-c", "core.autocrlf=false", "update-index", "-q", "-z", "--stdin"], input)).code === 0
 }
 
 // Byte comparison: a non-UTF-8 blob does not survive the string round trip, so it never matches.

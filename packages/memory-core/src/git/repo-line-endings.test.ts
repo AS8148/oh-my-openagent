@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { removeTree } from "../../../../test-support/remove-tree"
 import { createNodeGitExec } from "./exec"
 import { GitMemoryRepo } from "./repo"
+import { ensureRepoConfigDefaults } from "./repo-config-defaults"
 
 const AUTHOR = { agentId: "agent", authorName: "Agent" }
 const MIXED = "---\ndescription: mixed endings\n---\n# Note\r\n\r\nBody line.  \r\nlast\n"
@@ -156,6 +157,27 @@ describe("memory repository line endings (#11109)", () => {
 
     expect(await readFile(join(repo.dir, "converted.md"), "utf8")).toBe("alpha\r\nbeta\r\n")
     expect(await readFile(join(repo.dir, "edited.md"), "utf8")).toBe("one\r\ntwo changed\r\n")
+  })
+
+  test("#given a git call in the repair rejects (a Windows command-line limit, a timeout) #when the defaults are ensured #then they resolve and the pin is not recorded", async () => {
+    const { repo } = await convertedRepository(await tempRoot())
+    const config = async (argv: readonly string[]) => exec.run(["config", "--local", ...argv], { cwd: repo.dir, timeoutMs: 30_000 })
+    const target = {
+      dir: repo.dir,
+      agentId: AUTHOR.agentId,
+      configGet: async (key: string) => { const r = await config(["--get", key]); return r.code === 0 ? r.stdout.trim() : null },
+      configSet: async (key: string, value: string) => { await config([key, value]) },
+    }
+    const rejecting = {
+      result: async (argv: readonly string[], stdin?: string) => {
+        if (argv.includes("update-index")) throw Object.assign(new Error("spawn ENAMETOOLONG"), { code: "ENAMETOOLONG" })
+        return exec.run(argv, { cwd: repo.dir, timeoutMs: 30_000, ...(stdin === undefined ? {} : { stdin }) })
+      },
+    }
+
+    await ensureRepoConfigDefaults(target, rejecting, AUTHOR.authorName)
+
+    expect(await git(repo.dir, ["config", "--local", "--get", "core.autocrlf"]).catch(() => "unset")).toBe("unset")
   })
 
   test("#given the repair cannot update the index #when the repository is opened #then init succeeds, the pin is not recorded, and the next open repairs it", async () => {
