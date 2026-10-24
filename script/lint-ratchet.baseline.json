@@ -53,9 +53,6 @@
   "packages/memory-core/src/facts/extraction.ts": {
     "typescript/no-non-null-assertion": 1
   },
-  "packages/memory-core/src/facts/person-routing.ts": {
-    "typescript/no-non-null-assertion": 2
-  },
   "packages/memory-core/src/facts/recovery-reservation-finalization.test.ts": {
     "typescript/no-non-null-assertion": 4
   },

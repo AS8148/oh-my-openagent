@@ -26,6 +26,7 @@ import {
 import { factDisplayText, stripReceiptSuffix } from "./display"
 import type { FactsExtractionRecord, FactsPersonReference } from "./extraction"
 import { readFactsPeopleIndex, type FactsPeopleIndexEntry } from "./person-index"
+import { factsPersonCardPath, renderFactsPersonCard } from "./person-card-target"
 
 export interface FactsPeopleRouting {
   readonly enabled: boolean
@@ -105,8 +106,28 @@ export async function planFactsRouting(
       },
       records: [],
     }
+    const at = index.findIndex((entry) => entry.slug === slug)
+    const entry = index[at]
+    if (entry === undefined) throw new TypeError(`Person target is not indexed: ${slug}`)
+    const knownNames = new Set(entry.names.map(foldAlias))
+    const added = [record.person.name, ...record.person.aliases].filter((name) => {
+      const folded = foldAlias(name)
+      if (knownNames.has(folded)) return false
+      knownNames.add(folded)
+      return true
+    })
+    index[at] = { ...entry, names: [...entry.names, ...added] }
     bucket.records.push(record)
-    observations.set(slug, bucket)
+    observations.set(slug, {
+      ...bucket,
+      target: added.length === 0 ? bucket.target : {
+        ...bucket.target,
+        person: {
+          name: bucket.target.displayName,
+          aliases: [...(bucket.target.person?.aliases ?? []), ...added],
+        },
+      },
+    })
   }
   return { notes, observations }
 }
@@ -115,7 +136,7 @@ export function factsRoutingPaths(plan: FactsRoutingPlan): readonly string[] {
   const paths = [...plan.notes.keys()]
   for (const [slug, bucket] of plan.observations) {
     paths.push(`people/${slug}/observations.md`)
-    if (bucket.target.isNew) paths.push(`people/${slug}/card.md`)
+    if (bucket.target.person !== undefined) paths.push(factsPersonCardPath(slug))
   }
   return paths.sort()
 }
@@ -127,7 +148,9 @@ export async function renderPersonTargets(
 ): Promise<ReadonlyMap<string, string>> {
   const content = new Map<string, string>()
   for (const [slug, bucket] of plan.observations) {
-    if (bucket.target.isNew) content.set(`people/${slug}/card.md`, renderCardSkeleton(bucket.target))
+    if (bucket.target.person !== undefined) {
+      content.set(factsPersonCardPath(slug), await renderFactsPersonCard(repoDir, bucket.target, limits))
+    }
     content.set(
       `people/${slug}/observations.md`,
       await renderExplicitObservations(repoDir, slug, bucket.target.displayName, bucket.records, limits),
@@ -140,15 +163,6 @@ export function normalizeObservationText(text: string): string {
   const collapsed = text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim()
   const uncommented = collapsed.replace(/<!--[\s\S]*?-->\s*$/, "").trim()
   return uncommented.replace(/[\p{P}]+$/u, "").trim()
-}
-
-function renderCardSkeleton(target: FactsPersonTarget): string {
-  if (target.person === undefined) throw new Error(`New person target lacks identity: ${target.slug}`)
-  return renderMemoryFile({
-    description: `Person - ${target.person.name}`,
-    kind: "person",
-    aliases: [...target.person.aliases],
-  }, "")
 }
 
 async function renderExplicitObservations(
@@ -181,7 +195,8 @@ async function renderExplicitObservations(
       explicit.entries.push({ date: record.date, content })
       continue
     }
-    const found = explicit.entries[at]!
+    const found = explicit.entries[at]
+    if (found === undefined) throw new TypeError("Explicit observation index is missing")
     const refreshed = record.receipt === undefined ? found.content : content
     explicit.entries[at] = { ...found, content: refreshed, date: record.date, n: (found.n ?? 1) + 1 }
   }
@@ -211,7 +226,8 @@ function resolvePersonSlug(
   const longest = Math.max(...[...matches.values()].map((match) => match.length))
   const winners = [...matches.entries()].filter(([, match]) => match.length === longest)
   const slugs = winners.map(([slug]) => slug).sort()
-  const chosen = slugs[0]!
+  const chosen = slugs[0]
+  if (chosen === undefined) return undefined
   if (slugs.length > 1) {
     const alias = winners.find(([slug]) => slug === chosen)?.[1].alias ?? ""
     onAliasTie?.({ alias, slugs, chosen })
