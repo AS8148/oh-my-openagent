@@ -36,7 +36,7 @@ export function legacyRollupDir(stateDir: string): string {
 }
 
 /**
- * Removes `<state>/rollups/` without opening a link's target. A `rollups` link is unlinked itself and its target
+ * Removes `<state>/rollups/` without deleting what a link points to. A `rollups` link is unlinked itself and its target
  * is never read. Inside the directory only files and links are removed (`unlink` never follows), at most
  * `limit` per call; subdirectories are left. Before every removal the path is checked again to still be the
  * same directory (device and inode), so a `rollups` swapped for a link mid-pass stops the pass at the next
