@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { rm } from "node:fs/promises"
+import { readFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 
 import { FactsExtractorRunner } from "./facts-runner"
