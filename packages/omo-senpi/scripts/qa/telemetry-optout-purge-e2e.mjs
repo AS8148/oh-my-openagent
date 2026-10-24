@@ -42,6 +42,11 @@ const LANES = {
   "scopeless-optin": { optOutEnv: false, telemetryConfig: true, scope: "none" },
 }
 
+/** The seeded dead owner's window and pending file names, sorted, so a lane's before and after compare exactly. */
+function seedFiles(names) {
+  return names.filter((name) => !name.startsWith("owners") && (name.includes(SEEDED) || name.includes(SEED_PENDING_UUID))).sort()
+}
+
 async function main() {
   const evidenceDir = argValue("--evidence-dir")
   if (evidenceDir === undefined) throw new Error("--evidence-dir is required (resolve it with the senpi-qa skill)")
@@ -67,7 +72,10 @@ async function main() {
       && controlWindow?.properties?.summary_epoch !== SEED_EPOCH,
     controlResendsTheSeedPending: lanes.control.summaries.some((event) => event.uuid === SEED_PENDING_UUID),
     optoutEnvSentNothing: lanes["optout-env"].events.length === 0,
-    optoutEnvLeftNoSummaryFile: lanes["optout-env"].filesAfter.length === 0,
+    // Only the persisted setting purges (lead ruling 2026-10-20/24): an env-only opt-out is this process's own,
+    // so the dead consented owner's seeded window and pending event stay for a consented process to send.
+    optoutEnvLeftTheSeedQueueIntact: seedFiles(lanes["optout-env"].filesBefore).length >= 2
+      && JSON.stringify(seedFiles(lanes["optout-env"].filesAfter)) === JSON.stringify(seedFiles(lanes["optout-env"].filesBefore)),
     optoutConfigSentNoSummary: lanes["optout-config"].summaries.length === 0,
     optoutConfigSentNoSeed: seededSent("optout-config").length === 0,
     optoutConfigLeftNoSeedFile: lanes["optout-config"].filesAfter.every((name) => !name.includes(SEEDED)),

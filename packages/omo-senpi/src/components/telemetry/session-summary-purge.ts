@@ -41,8 +41,10 @@ function sendable(value: unknown, isScopeConsented: (scope: QueuedScope) => bool
   const scope: unknown = Reflect.get(value, "scope")
   if (typeof scope !== "object" || scope === null || Array.isArray(scope)) return false
   const cwd: unknown = Reflect.get(scope, "cwd")
-  if (cwd !== undefined && typeof cwd !== "string") return false
-  return isScopeConsented(cwd === undefined ? {} : { cwd })
+  // A record that names no cwd fails closed, as at send time (isRecordSendable): consent read without a cwd would
+  // be this process's default, not the writer's.
+  if (typeof cwd !== "string" || cwd.length === 0) return false
+  return isScopeConsented({ cwd })
 }
 
 function names(dir: string): string[] {
