@@ -19,6 +19,12 @@ function briefWithFloor(floor: string) {
 	return dir
 }
 
+const floorOf = (text: string) => {
+	const parsed = parseSourceFloor(text)
+	if (parsed === null) throw new Error(`parseSourceFloor(${text}) read no floor`)
+	return parsed
+}
+
 const derivedRefusal = (kind: string) => {
 	const row = { fact_id: "F1", kind, status: "active", source_id: null, operands: [], derived_from: [] }
 	const found = [{ token: "{{F1}}", start: 0, parsed: { id: "F1" } }]
@@ -44,11 +50,11 @@ describe("fidelity-policy registry: copies must not return", () => {
 	})
 
 	test("#given pointed and classes floors #when evaluated #then ids, urls, hosts, and suffixes match and notexample.com does not", () => {
-		const pointed = parseSourceFloor("pointed only: S4, https://a.example/x")!
+		const pointed = floorOf("pointed only: S4, https://a.example/x")
 		expect(sourceInsideFloor(pointed, "S4", { url: null })).toBe(true)
 		expect(sourceInsideFloor(pointed, "S9", { url: "https://a.example/x" })).toBe(true)
 		expect(sourceInsideFloor(pointed, "S9", { url: "https://a.example/y" })).toBe(false)
-		const classes = parseSourceFloor("classes: example.com")!
+		const classes = floorOf("classes: example.com")
 		for (const [url, inside] of [["https://example.com/a", true], ["https://docs.example.com/a", true], ["https://notexample.com/a", false], [null, false]] as const) {
 			expect({ url, inside: sourceInsideFloor(classes, "S1", { url }) }).toEqual({ url, inside })
 		}

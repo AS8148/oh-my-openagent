@@ -445,7 +445,7 @@ describe("meaning verifier under node", () => {
 	})
 })
 
-type PolishJson = { data: { out: string; applied: number; rejected: number; unlocated: number }; defects: { code: string; index: number }[] }
+type PolishJson = { data: { out: string; applied: number; rejected: number; unlocated: number }; defects: { code: string; index: number; reason?: string }[] }
 
 /** A filled session whose first finding names an acquirer and a target around F1. */
 function polishSession() {
@@ -474,6 +474,24 @@ describe("polish wiring under node", () => {
 		expect(polished).toContain("Collected from a single cited public page")
 		expect(polished).toContain("retrieved 2026-10-01")
 		expect(polished).not.toContain("2026-10-02")
+	})
+
+	test("#given an edit that adds an attribute #when polish-apply and polish-diff run #then apply refuses it as markup changed and diff exits 1", () => {
+		const { dir } = polishSession()
+		const html = readFileSync(join(dir, "report.html"), "utf8")
+		const edits = join(dir, "attribute.json")
+		writeFileSync(edits, JSON.stringify([{ before: "<h2>Findings</h2>", after: '<h2 id="findings">Findings</h2>', reason: "anchor" }]))
+		const applied = polishApply(dir, edits)
+		expect(applied.code).toBe(0)
+		expect(applied.json.data).toMatchObject({ applied: 0, rejected: 1, unlocated: 0 })
+		expect(applied.json.defects.map((d) => [d.code, d.index])).toEqual([["polish_edit_rejected", 0]])
+		expect(applied.json.defects[0]?.reason).toContain("markup changed")
+		expect(readFileSync(join(dir, "report.polished.html"), "utf8")).toBe(html)
+		writeFileSync(join(dir, "attribute.html"), html.replace("<h2>Findings</h2>", '<h2 id="findings">Findings</h2>'))
+		const diffed = nodeJson(["fact", "polish-diff", "--before", join(dir, "report.html"), "--after", join(dir, "attribute.html"), "--ledger", join(dir, "fact-ledger.json"), "--session-dir", dir])
+		expect(diffed.code).toBe(1)
+		expect(codesOf(diffed.json)).toContain("polish_diff_fail")
+		expect(JSON.stringify(diffed.json)).toContain("markup changed")
 	})
 
 	test("#given a polished copy edited by hand #when fact polish-diff runs #then it exits 1 with polish_diff_fail", () => {
