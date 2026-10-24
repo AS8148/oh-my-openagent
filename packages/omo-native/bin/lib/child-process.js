@@ -16,6 +16,8 @@ const HANDLED_SIGNALS = [
 // stops waiting on a child that is not going to leave and reports the death it was asked for.
 const DEFAULT_GRACE_MS = 10_000
 
+const STDERR_TAIL_CHARS = 64 * 1024
+
 function graceMs(env) {
   const configured = Number(env.OMO_SIGNAL_GRACE_MS)
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_GRACE_MS
@@ -43,13 +45,23 @@ export function propagateResult(result) {
  * would terminate the child abruptly, so nothing is forwarded and the wait is the whole behavior.
  */
 export function runChild(command, args, options = {}) {
-  const env = options.env ?? process.env
+  const { captureStderr = false, ...spawnOptions } = options
+  const env = spawnOptions.env ?? process.env
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: "inherit",
       windowsHide: true,
-      ...options,
+      ...spawnOptions,
+      // A captured stderr is still shown live; the caller also gets its tail to classify the failure.
+      ...(captureStderr ? { stdio: ["inherit", "inherit", "pipe"] } : {}),
     })
+    let stderr = ""
+    if (captureStderr) {
+      child.stderr.on("data", (chunk) => {
+        process.stderr.write(chunk)
+        stderr = (stderr + chunk.toString()).slice(-STDERR_TAIL_CHARS)
+      })
+    }
 
     let settled = false
     let graceTimer
@@ -98,7 +110,10 @@ export function runChild(command, args, options = {}) {
     child.on("error", (error) => settle(() => reject(error)))
     // A child that died of the forwarded signal needs no special case: `propagateResult` turns a
     // signaled result into this process dying by the same signal, which is exactly right.
-    child.on("exit", (status, signal) => settle(() => resolve({ status, signal })))
+    const finish = (status, signal) => settle(() => resolve(captureStderr ? { status, signal, stderr } : { status, signal }))
+    // `close` waits for the piped stderr to drain, so the captured tail is complete.
+    if (captureStderr) child.on("close", finish)
+    else child.on("exit", finish)
   })
 }
 
