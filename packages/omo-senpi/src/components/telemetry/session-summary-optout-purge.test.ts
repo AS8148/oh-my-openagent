@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { copyFileSync, readdirSync, readFileSync, renameSync } from "node:fs"
 import { join } from "node:path"
 
 import { purgeOptedOutQueue } from "./session-summary-optout-purge"
 import { withRecoveryOps } from "./session-summary-recovery-storage"
 import { createSummaryStorage, OWNER_STALE_MS, summaryDir, type WindowRecord } from "./session-summary-storage"
-import { createTempStateDirs } from "./session-summary.test-support"
+import { purgeUnconsentedQueue } from "./session-summary-purge"
+import { createTempStateDirs, createTestRecorder, summaryTurn } from "./session-summary.test-support"
 
 const LIVE = { pid: 424_242, bootId: "live" }
 const DEAD = { pid: 0x7fff_fff0, bootId: "killed" }
@@ -39,6 +40,42 @@ describe("purgeOptedOutQueue against a live writer", () => {
       // then
       const onDisk = JSON.parse(readFileSync(join(summaryDir(dir), "race.json"), "utf8"))
       expect(onDisk).toMatchObject({ owner: LIVE, scope: { cwd: "/on" } })
+    } finally {
+      dirs.cleanup()
+    }
+  })
+})
+
+describe("the entry purge against a live owner's write in progress", () => {
+  // Lead ruling (2026-10-24): the persisted setting off means the data goes, a live owner's window included. The
+  // owner must survive that: its rename lands on a deleted path, and it carries on with its next turn.
+  test("#given a live owner whose window write sits in its temp file #when an opted-out process's entry purge runs before the rename #then the owner's next turn and shutdown neither throw nor leave a corrupt file", async () => {
+    const dirs = createTempStateDirs()
+    try {
+      const dir = dirs.make()
+      const owner = createTestRecorder({ dir })
+      await owner.summary.recordTurn("race", summaryTurn())
+      const base = summaryDir(dir)
+      const window = readdirSync(base).find((name) => name.endsWith(".json"))
+      if (window === undefined) throw new Error("the owner wrote no window")
+      const path = join(base, window)
+      // The owner's next write: its temp file is complete, the rename has not happened yet.
+      const temp = `${path}.${process.pid}-in-progress.tmp`
+      copyFileSync(path, temp)
+
+      // when
+      purgeUnconsentedQueue(dir, () => false)
+      expect(readdirSync(base).filter((name) => name.endsWith(".json"))).toEqual([])
+      renameSync(temp, path)
+
+      // then
+      await owner.summary.recordTurn("race", summaryTurn())
+      await owner.summary.finish("race", "shutdown")
+      owner.summary.dispose()
+      for (const name of readdirSync(base, { recursive: true, encoding: "utf8" }).filter((entry) => entry.endsWith(".json"))) {
+        expect(() => JSON.parse(readFileSync(join(base, name), "utf8"))).not.toThrow()
+      }
+      expect(owner.diagnostics.filter(({ event }) => event === "telemetry_capture_failed")).toEqual([])
     } finally {
       dirs.cleanup()
     }

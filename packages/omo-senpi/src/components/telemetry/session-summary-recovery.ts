@@ -9,9 +9,11 @@ import { adoptForeignWindow } from "./session-summary-adopt"
 import { withRecoveryOps, type RecoveryStorage } from "./session-summary-recovery-storage"
 import { purgeOptedOutQueue } from "./session-summary-optout-purge"
 import { newSummaryEpoch } from "./session-summary-window"
+import { currentProcessOwner } from "./session-summary-owner"
 import {
   OWNER_STALE_MS,
   SUMMARY_TTL_MS,
+  createSummaryStorage,
   isRecordSendable,
   type Claimed,
   type ConsentScope,
@@ -41,9 +43,21 @@ export const RESENDS_PER_SWEEP = 20
 /** Re-sends of one event back off from one minute, doubling, up to an hour between attempts. */
 export const RESEND_BACKOFF_MS = { first: 60_000, max: 60 * 60_000 } as const
 
-/** The opt-out purge over this process's summary storage, with the recovery-only operations it needs. */
-export function purgeOptedOutStorage(storage: SummaryStorage, isScopeConsented: (scope: ConsentScope) => boolean): void {
-  purgeOptedOutQueue({ storage: withRecoveryOps(storage), isScopeConsented })
+/**
+ * The liveness-aware half of the opt-out purge: dead owners' temps, claims and registry entries, decided by owner
+ * liveness. The storage is built here, so the entry bundle never carries the storage or owner modules.
+ */
+export function purgeOptedOutStorage(input: {
+  readonly stateDir: string
+  readonly isScopeConsented: (scope: ConsentScope) => boolean
+  readonly isPidAlive?: (pid: number) => boolean
+}): void {
+  const storage = createSummaryStorage({
+    stateDir: input.stateDir,
+    owner: currentProcessOwner(),
+    ...(input.isPidAlive === undefined ? {} : { isPidAlive: input.isPidAlive }),
+  })
+  purgeOptedOutQueue({ storage: withRecoveryOps(storage), isScopeConsented: input.isScopeConsented })
 }
 
 export type SummaryRecovery = {

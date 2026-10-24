@@ -19,11 +19,12 @@ import {
 import { createTransportRecorder, withTempAgentDir } from "./telemetry.test-support"
 
 describe("omo-native session_summary opt-out purge", () => {
+  // Only the persisted setting purges (lead ruling 2026-10-20); an env opt-out on top of it changes nothing.
   for (const [label, env] of [
-    ["DO_NOT_TRACK=1", { DO_NOT_TRACK: "1" }],
-    ["OMO_DISABLE_POSTHOG=1", { OMO_DISABLE_POSTHOG: "1" }],
+    ["the persisted setting off", {}],
+    ["the persisted setting off and DO_NOT_TRACK=1", { DO_NOT_TRACK: "1" }],
   ] as const) {
-    test(`#given a killed opted-in process's queue on disk #when an opted-out (${label}) process starts #then no telemetry content is left before any event, and nothing is sent`, async () => {
+    test(`#given a killed opted-in process's queue on disk #when a process opted out by ${label} starts #then no telemetry content is left before any event, and nothing is sent`, async () => {
       await withTempAgentDir(async (agentDir) => {
         writeInventory(agentDir)
         const stateDir = join(agentDir, "omo-senpi", "omo-native")
@@ -33,13 +34,41 @@ describe("omo-native session_summary opt-out purge", () => {
         expect(contentFiles(stateDir).length).toBeGreaterThan(0)
 
         // when: registration only, no session event yet
-        const optedOut = await registerProcess({ agentDir, recorder, env, cwd: "/repo", options: { isConfigEnabled: () => true } })
+        const optedOut = await registerProcess({ agentDir, recorder, env, cwd: "/repo", options: { isConfigEnabled: () => false } })
 
         // then: windows, pending events, claims and the dead owner's registry entry are gone at once
         expect(summaryFiles(stateDir)).toEqual([])
         await optedOut.dispatch("session_start", { type: "session_start", reason: "startup" }, inProject("now", "/repo"))
         await optedOut.dispatch("turn_end", turnEnd(), inProject("now", "/repo"))
         await optedOut.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, inProject("now", "/repo"))
+        expect(recorder.messages.filter(({ event }) => event === "session_summary")).toEqual([])
+      })
+    })
+  }
+
+  // An opt-out set by environment variable belongs to this process alone: a consented session's queue, a dead
+  // owner's claim included, stays for a consented process to send (lead ruling 2026-10-20).
+  for (const [label, env] of [
+    ["DO_NOT_TRACK=1", { DO_NOT_TRACK: "1" }],
+    ["OMO_DISABLE_POSTHOG=1", { OMO_DISABLE_POSTHOG: "1" }],
+  ] as const) {
+    test(`#given a killed opted-in process's queue on disk #when a process opted out only by ${label} starts and quits #then that queue is left intact and nothing is sent`, async () => {
+      await withTempAgentDir(async (agentDir) => {
+        writeInventory(agentDir)
+        const stateDir = join(agentDir, "omo-senpi", "omo-native")
+        const recorder = createTransportRecorder()
+        seedDeadOwnerQueue(stateDir, { sessionHash: "hashed:kept", scope: { cwd: "/repo" } })
+        seedDeadOwnerQueue(stateDir, { sessionHash: "hashed:kept-claimed", scope: { cwd: "/repo" }, claimed: true })
+        const before = contentFiles(stateDir)
+        expect(before.length).toBeGreaterThan(0)
+
+        // when
+        const optedOut = await registerProcess({ agentDir, recorder, env, cwd: "/repo", options: { isConfigEnabled: () => true } })
+        await optedOut.dispatch("session_start", { type: "session_start", reason: "startup" }, inProject("now", "/repo"))
+        await optedOut.dispatch("session_shutdown", { type: "session_shutdown", reason: "quit" }, inProject("now", "/repo"))
+
+        // then
+        expect(contentFiles(stateDir)).toEqual(before)
         expect(recorder.messages.filter(({ event }) => event === "session_summary")).toEqual([])
       })
     })
@@ -56,7 +85,7 @@ describe("omo-native session_summary opt-out purge", () => {
       expect(contentFiles(stateDir).length).toBeGreaterThan(0)
 
       // when
-      await registerProcess({ agentDir, recorder, env: { DO_NOT_TRACK: "1" }, cwd: "/repo", options: { isConfigEnabled: () => true } })
+      await registerProcess({ agentDir, recorder, cwd: "/repo", options: { isConfigEnabled: () => false } })
 
       // then
       expect(summaryFiles(stateDir)).toEqual([])
@@ -141,8 +170,8 @@ describe("omo-native session_summary opt-out purge", () => {
       expect(sentSeqs(recorder, "hashed:cycled")).toHaveLength(1)
       killWithoutShutdown(stateDir)
 
-      // when: an opted-out process starts (its startup purge runs), then an opted-in one resumes the session
-      await registerProcess({ agentDir, recorder, cwd: "/repo", env: { DO_NOT_TRACK: "1" }, options })
+      // when: a process opted out by the persisted setting starts (its startup purge runs), then an opted-in one resumes the session
+      await registerProcess({ agentDir, recorder, cwd: "/repo", options: { ...options, isConfigEnabled: () => false } })
       expect(summaryFiles(stateDir).filter((name) => !name.startsWith("owners/"))).toEqual([])
       const resumed = await registerProcess({ agentDir, recorder, cwd: "/repo", options })
       await resumed.dispatch("session_start", { type: "session_start", reason: "resume" }, inProject("cycled", "/repo"))
