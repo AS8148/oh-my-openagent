@@ -119,6 +119,11 @@ export type TurnTracing = {
 
 export type TelemetryTransport = {
   readonly capture: (message: TelemetryCaptureMessage) => void
+  /**
+   * Sends one event now; resolves only on a 2xx answer and rejects otherwise (the default PostHog transport
+   * rejects with `TelemetryDeliveryError`, whose `permanent` flag says a retry can never succeed).
+   */
+  readonly captureImmediate?: (message: TelemetryCaptureMessage) => Promise<void>
   readonly flush?: () => Promise<void>
   readonly shutdown: () => Promise<void>
   readonly traces?: TurnTracing
