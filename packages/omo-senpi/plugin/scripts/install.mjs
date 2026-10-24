@@ -302,6 +302,7 @@ var REQUIRED_PLUGIN_ARTIFACTS = [
   join4("extensions", "loro_wasm_bg.wasm"),
   join4("extensions", "CaseFolding.txt"),
   join4("extensions", "omo-thread-client.js"),
+  join4("extensions", "omo-telemetry-recovery.js"),
   join4("extensions", "omo-feedback.js"),
   join4("extensions", "omo-claim-receipt.js"),
   join4("extensions", "assets.generated.json"),
