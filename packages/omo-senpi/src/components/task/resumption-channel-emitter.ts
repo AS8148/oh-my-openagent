@@ -22,6 +22,7 @@ type ResumptionChannel = {
 type ResumptionChannelEmitterManager = {
   list(scope: ListScope): readonly ListedTask[]
   wasBackground(taskId: string): boolean
+  readonly workpools?: { ownsTask(taskId: string): boolean }
 }
 
 type OwnedTeamMemberResolver = (
@@ -64,7 +65,8 @@ export function createResumptionChannelEmitter(
     const channels: ResumptionChannel[] = []
     for (const { record } of deps.manager.list({ scope: "parent-session", session_id: sessionId })) {
       if (isTerminal(record.status)) continue
-      const background = deps.manager.wasBackground(record.task_id)
+      // A workpool worker is claimed without a terminal notification, yet it is this session's child work (#10782).
+      const background = deps.manager.wasBackground(record.task_id) || deps.manager.workpools?.ownsTask(record.task_id) === true
       const owned = background
         ? false
         : await resolveOwnedTeamMember(record, sessionId, {
@@ -89,6 +91,8 @@ export function createResumptionChannelEmitter(
     lastIds = idsOf(channels)
     deps.pi.events?.emit(RESUMPTION_CHANNEL_STATE_EVENT, {
       source: RESUMPTION_CHANNEL_SOURCE,
+      // senpi#3864: children's work keeps the parent's lifecycle off "done" until it is delivered.
+      kind: "children",
       activeCount: channels.length,
       items: channels,
       channels,

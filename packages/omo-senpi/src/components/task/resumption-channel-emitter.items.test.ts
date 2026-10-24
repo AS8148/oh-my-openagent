@@ -34,7 +34,7 @@ type Payload = {
   readonly items?: readonly { readonly id: string; readonly description?: string; readonly startedAtMs?: number }[]
 }
 
-function createHarness(records: TaskRecord[]) {
+function createHarness(records: TaskRecord[], poolTaskIds: readonly string[] = []) {
   const emitted: Payload[] = []
   const pi = new FakeExtensionAPI()
   pi.events = { emit: (_name, data) => emitted.push(data as Payload), on: () => () => {} }
@@ -43,6 +43,7 @@ function createHarness(records: TaskRecord[]) {
     manager: {
       list: (_scope: ListScope): readonly ListedTask[] => records.map((record) => ({ record })),
       wasBackground: (taskId: string) => records.find((record) => record.task_id === taskId)?.notify_on_terminal === true,
+      workpools: { ownsTask: (taskId: string) => poolTaskIds.includes(taskId) },
     },
     sessionId: () => SESSION_ID,
     stateDir: { project_dir: "/tmp/omo-resumption-channel-items-test" },
@@ -87,5 +88,20 @@ describe("resumption-channel emitter wake-source items (#10026)", () => {
     expect(harness.emitted).toHaveLength(1)
     expect(harness.emitted[0]?.activeCount).toBe(1)
     expect(harness.emitted[0]?.items?.map((item) => item.id)).toEqual([second.task_id])
+  })
+
+  it("#given a live workpool worker #when the session snapshot is emitted #then it is a children wake-source item (#10782)", async () => {
+    // given a pool worker: claimed with notify_on_terminal false, so it is neither background nor a team member
+    const worker = { ...child("st_00000031", "Pool worker", "2026-10-24T01:00:00.000Z"), notify_on_terminal: false }
+    const harness = createHarness([worker], [worker.task_id])
+
+    // when
+    await harness.emitter.emitSessionStart()
+
+    // then the pool keeps the parent's lifecycle waiting on its children
+    const payload = harness.emitted.at(-1) as Payload & { readonly kind?: string }
+    expect(payload?.kind).toBe("children")
+    expect(payload?.activeCount).toBe(1)
+    expect(payload?.items?.map((item) => item.id)).toEqual([worker.task_id])
   })
 })
