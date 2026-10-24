@@ -41,6 +41,18 @@ function createHarness(
   warnings: string[] = [],
 ) {
   const emitted: Payload[] = []
+  // Every pool store read is counted, whether one task is probed or the whole owned set is read at once.
+  const poolReads = { count: 0 }
+  const workpools = {
+    ownsTask: (taskId: string) => {
+      poolReads.count += 1
+      return ownsTask(taskId)
+    },
+    ownedTaskIds: () => {
+      poolReads.count += 1
+      return new Set(records.map((record) => record.task_id).filter((taskId) => ownsTask(taskId)))
+    },
+  }
   const pi = new FakeExtensionAPI()
   pi.events = { emit: (_name, data) => emitted.push(data as Payload), on: () => () => {} }
   const emitter = createResumptionChannelEmitter({
@@ -48,7 +60,7 @@ function createHarness(
     manager: {
       list: (_scope: ListScope): readonly ListedTask[] => records.map((record) => ({ record })),
       wasBackground: (taskId: string) => records.find((record) => record.task_id === taskId)?.notify_on_terminal === true,
-      workpools: { ownsTask },
+      workpools,
     },
     logger: { warn: (message: string) => warnings.push(message) },
     sessionId: () => SESSION_ID,
@@ -56,7 +68,7 @@ function createHarness(
     settings: {} as OmoTaskSettings,
     isOwnedTeamMember: async () => false,
   })
-  return { emitted, emitter, records }
+  return { emitted, emitter, records, poolReads }
 }
 
 describe("resumption-channel emitter wake-source items (#10026)", () => {
@@ -148,5 +160,18 @@ describe("resumption-channel emitter wake-source items (#10026)", () => {
     const last = harness.emitted.at(-1)
     expect(last?.activeCount).toBe(1)
     expect(last?.items?.map((item) => item.id)).toEqual([worker.task_id])
+  })
+
+  it("#given many foreground records #when the session snapshot is emitted #then the pool store is read once, not once per record (#10782)", async () => {
+    // given five foreground records, each of which needs a pool ownership check
+    const records = [1, 2, 3, 4, 5].map((n) => ({ ...child(`st_0000006${n}`, `Foreground ${n}`, "2026-10-24T04:00:00.000Z"), notify_on_terminal: false }))
+    const harness = createHarness(records, ["st_00000063"])
+
+    // when
+    await harness.emitter.emitSessionStart()
+
+    // then one store read classified every record, and only the pool worker is published
+    expect(harness.poolReads.count).toBe(1)
+    expect(harness.emitted.at(-1)?.items?.map((item) => item.id)).toEqual(["st_00000063"])
   })
 })
