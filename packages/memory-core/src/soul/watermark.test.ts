@@ -74,7 +74,7 @@ describe("consumeSoulNoticeDelta", () => {
     expect(await readWatermark(noticesDir)).toEqual({ version: 1, lastNotifiedHead: head })
   })
 
-  it("#given a watermark behind HEAD with an out-of-band persona commit #when consumed #then exactly one notice is emitted and the watermark advances", async () => {
+  it("#given a watermark behind HEAD with an out-of-band persona commit #when consumed concurrently #then exactly one notice is emitted and the watermark advances", async () => {
     // given
     const { repo, noticesDir, locksDir } = await fixture()
     await commit(repo, "system/persona.md", "seed persona\n", "seed persona")
@@ -88,11 +88,16 @@ describe("consumeSoulNoticeDelta", () => {
     )
 
     // when
-    const notice = await consumeSoulNoticeDelta(repo, { noticesDir, locksDir })
+    const notices = await Promise.all([
+      consumeSoulNoticeDelta(repo, { noticesDir, locksDir }),
+      consumeSoulNoticeDelta(repo, { noticesDir, locksDir }),
+    ])
     const replay = await consumeSoulNoticeDelta(repo, { noticesDir, locksDir })
 
     // then
-    expect(notice).toEqual({ sha: soulSha, subject: "chore(reflection): merge run abc" })
+    expect(notices.filter((notice) => notice !== undefined)).toEqual([
+      { sha: soulSha, subject: "chore(reflection): merge run abc" },
+    ])
     expect(replay).toBeUndefined()
     expect(await readWatermark(noticesDir)).toEqual({ version: 1, lastNotifiedHead: soulSha })
   })

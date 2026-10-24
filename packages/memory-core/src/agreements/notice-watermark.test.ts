@@ -35,17 +35,20 @@ async function fixture() {
 }
 
 describe("needs-human notice watermark (exactly-once contract)", () => {
-  it("#given an item that just crossed the threshold #when consumed twice #then it is announced once", async () => {
+  it("#given an item that just crossed the threshold #when consumed concurrently and again #then it is announced once", async () => {
     // given
     const { repo, options, commitLedger } = await fixture()
     await commitLedger(line(3, "needs-human"))
 
     // when
-    const first = await consumeAgreementsNoticeDelta(repo, options)
+    const concurrent = await Promise.all([
+      consumeAgreementsNoticeDelta(repo, options),
+      consumeAgreementsNoticeDelta(repo, options),
+    ])
     const second = await consumeAgreementsNoticeDelta(repo, options)
 
     // then
-    expect(first.map((item) => item.id)).toEqual(["3f9a1c0b2e"])
+    expect(concurrent.flat().map((item) => item.id)).toEqual(["3f9a1c0b2e"])
     expect(second).toEqual([])
   })
 

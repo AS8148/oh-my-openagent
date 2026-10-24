@@ -5,7 +5,7 @@
 
 import { join } from "node:path"
 
-import { mkdir, readFile, rename, writeFile } from "../fs/resilient"
+import { mkdir, readFileSync, rename, writeFile } from "../fs/resilient"
 import type { GitMemoryRepo } from "../git"
 import { LockContentionError, createLockRecord, noticeLockPath, withLock } from "../locks"
 import { agreementItemsOf, readAgreementsAt } from "./ledger-file"
@@ -28,6 +28,14 @@ export async function consumeAgreementsNoticeDelta(
   repo: GitMemoryRepo,
   options: ConsumeAgreementsNoticeOptions,
 ): Promise<readonly AgreementItem[]> {
+  const head = await repo.head()
+  if (head !== null) {
+    const flagged = agreementItemsOf(await readAgreementsAt(repo, head)).filter((item) => item.status === "needs-human")
+    const announced = readWatermark(options.noticesDir)
+    // No mutation or notice is needed. A differing set, including an acknowledgement,
+    // must still be read again under the lock before consuming or replacing the watermark.
+    if (flagged.length === announced.size && flagged.every((item) => announced.has(item.id))) return []
+  }
   const record = await createLockRecord("agreements notice watermark")
   try {
     return await withLock(
@@ -46,17 +54,17 @@ async function consumeUnderLock(repo: GitMemoryRepo, noticesDir: string): Promis
   const head = await repo.head()
   if (head === null) return []
   const flagged = agreementItemsOf(await readAgreementsAt(repo, head)).filter((item) => item.status === "needs-human")
-  const announced = await readWatermark(noticesDir)
+  const announced = readWatermark(noticesDir)
   const fresh = flagged.filter((item) => !announced.has(item.id))
   const next = flagged.map((item) => item.id).sort()
   if (fresh.length > 0 || next.length !== announced.size) await writeWatermark(noticesDir, next)
   return fresh
 }
 
-async function readWatermark(noticesDir: string): Promise<ReadonlySet<string>> {
+function readWatermark(noticesDir: string): ReadonlySet<string> {
   let parsed: unknown
   try {
-    parsed = JSON.parse(await readFile(join(noticesDir, AGREEMENTS_NOTICE_WATERMARK_FILENAME), "utf8"))
+    parsed = JSON.parse(readFileSync(join(noticesDir, AGREEMENTS_NOTICE_WATERMARK_FILENAME), "utf8"))
   } catch (error) {
     if (error instanceof SyntaxError) return new Set()
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return new Set()
