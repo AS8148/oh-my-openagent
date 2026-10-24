@@ -4,6 +4,12 @@ import { splitSentences } from "./sentence-split.mjs"
 
 type Sentence = { sid: string; start: number; end: number; text: string }
 
+function at(records: Sentence[], index: number): Sentence {
+	const record = records[index]
+	if (record === undefined) throw new Error(`no sentence at index ${index}`)
+	return record
+}
+
 function expectSlices(text: string, records: Sentence[]): void {
 	for (const record of records) expect(text.slice(record.start, record.end)).toBe(record.text)
 }
@@ -22,7 +28,7 @@ describe("splitSentences", () => {
 			"이익은 줄었다.",
 			"다만 회복이 기대된다.",
 		])
-		expect(records[1]!.start).toBe(text.indexOf("비용도"))
+		expect(at(records, 1).start).toBe(text.indexOf("비용도"))
 		expectSlices(text, records)
 	})
 
@@ -39,8 +45,8 @@ describe("splitSentences", () => {
 			"Is it fine?",
 			"Yes.",
 		])
-		expect(records[3]!.start).toBe(text.indexOf("Yes."))
-		expect(records[3]!.end).toBe(text.length)
+		expect(at(records, 3).start).toBe(text.indexOf("Yes."))
+		expect(at(records, 3).end).toBe(text.length)
 		expectSlices(text, records)
 	})
 
@@ -73,9 +79,9 @@ describe("splitSentences", () => {
 		expect(singleRecords.map((r) => r.text)).toEqual([single])
 		expect(pairRecords.map((r) => r.text)).toEqual(['그는 "매출이 늘었다."라고 말했다.', "다음 날 떨어졌다."])
 		expect(pairRecords.map((r) => r.sid)).toEqual(["s1", "s2"])
-		expect(pairRecords[0]!.start).toBe(0)
-		expect(pairRecords[1]!.start).toBe(pair.indexOf("다음 날"))
-		expect(pairRecords[1]!.end).toBe(pair.length)
+		expect(at(pairRecords, 0).start).toBe(0)
+		expect(at(pairRecords, 1).start).toBe(pair.indexOf("다음 날"))
+		expect(at(pairRecords, 1).end).toBe(pair.length)
 		expect(bracketRecords.map((r) => r.text)).toEqual([bracket])
 		expectSlices(pair, pairRecords)
 	})
@@ -89,7 +95,7 @@ describe("splitSentences", () => {
 		const numberedRecords = splitSentences(numbered) as Sentence[]
 		// then
 		expect(answerRecords.map((r) => r.text)).toEqual(["The answer was no.", "Then we left."])
-		expect(answerRecords[1]!.start).toBe(answer.indexOf("Then"))
+		expect(at(answerRecords, 1).start).toBe(answer.indexOf("Then"))
 		expect(numberedRecords.map((r) => r.text)).toEqual(["See No. 5 for details.", "Then stop."])
 		expectSlices(answer, answerRecords)
 		expectSlices(numbered, numberedRecords)
