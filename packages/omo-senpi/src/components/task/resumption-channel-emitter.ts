@@ -22,7 +22,7 @@ type ResumptionChannel = {
 type ResumptionChannelEmitterManager = {
   list(scope: ListScope): readonly ListedTask[]
   wasBackground(taskId: string): boolean
-  readonly workpools?: { ownsTask(taskId: string): boolean }
+  readonly workpools?: { ownedTaskIds(): ReadonlySet<string> }
 }
 
 type OwnedTeamMemberResolver = (
@@ -67,18 +67,23 @@ export function createResumptionChannelEmitter(
     // A workpool worker is claimed without a terminal notification, yet it is this session's child work (#10782).
     // An unreadable pool store must not cost this emission: it is logged once, and every record it can no longer
     // classify stays counted, so a store failure can delay "done" but never announce it while workers run.
+    // The pool store is read once per snapshot, not once per record.
     let poolStoreReadable = true
+    let poolTaskIds: ReadonlySet<string> | undefined
     const ownedByPool = (taskId: string): boolean => {
       if (!poolStoreReadable) return false
-      try {
-        return deps.manager.workpools?.ownsTask(taskId) === true
-      } catch (error) {
-        poolStoreReadable = false
-        deps.logger?.warn("resumption channels: workpool store unreadable, pool workers are not counted this round", {
-          error: error instanceof Error ? error.message : String(error),
-        })
-        return false
+      if (poolTaskIds === undefined) {
+        try {
+          poolTaskIds = deps.manager.workpools?.ownedTaskIds() ?? new Set()
+        } catch (error) {
+          poolStoreReadable = false
+          deps.logger?.warn("resumption channels: workpool store unreadable, unclassified tasks stay counted this round", {
+            error: error instanceof Error ? error.message : String(error),
+          })
+          return false
+        }
       }
+      return poolTaskIds.has(taskId)
     }
     for (const { record } of deps.manager.list({ scope: "parent-session", session_id: sessionId })) {
       if (isTerminal(record.status)) continue
