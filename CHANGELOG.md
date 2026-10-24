@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Memory path-state recovery and commit hooks now keep literal Git lookups working when global glob or case-insensitive pathspec modes are enabled (#11130).
+- Memory path-state recovery and commit hooks now keep literal Git lookups working when global glob or case-insensitive pathspec modes are enabled ([#11130](https://github.com/code-yeongyu/oh-my-openagent/issues/11130), [#11167](https://github.com/code-yeongyu/oh-my-openagent/pull/11167)).
 
 **ulw-research ships a fact ledger, a fidelity state file and a claim index for research reports.** They give each research run a machine-readable record of its facts and verified claims; nothing in the CLI uses them yet. ([#11046](https://github.com/code-yeongyu/oh-my-openagent/pull/11046), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009); batch [#11148](https://github.com/code-yeongyu/oh-my-openagent/pull/11148))
 
