@@ -202,8 +202,13 @@ function runDerive(args) {
 	const op = args.required("op")
 	const sessionDir = sessionDirOf(flags)
 	const ledger = readLedger(sessionDir)
-	const picked = ["to", "unit", "from", "num", "den", "part", "whole", "rationale", "label"].filter((key) => flags[key] !== undefined)
-	const spec = { op, operands: args.positionals, formula: op === "expr" ? args.positionals[0] : undefined, disjoint: flags.disjoint === true, now: nowIso(flags), ...Object.fromEntries(picked.map((key) => [key, flags[key]])) }
+	// The registry refuses any field outside the operation's inputFields, so only the given flags go in; --unit null declares a dimensionless result.
+	const picked = ["to", "from", "num", "den", "part", "whole", "reference", "rationale", "label"].filter((key) => flags[key] !== undefined)
+	const spec = { op, now: nowIso(flags), ...Object.fromEntries(picked.map((key) => [key, flags[key]])) }
+	if (op === "expr") spec.formula = args.positionals[0]
+	else if (args.positionals.length > 0) spec.operands = args.positionals
+	if (flags.disjoint === true) spec.disjoint = true
+	if (flags.unit !== undefined) spec.unit = flags.unit === "null" ? null : flags.unit
 	const result = derive(ledger, spec)
 	if (result.error) return failure("fact derive", result.error, { message: result.detail, ...(result.hint ? { hint: result.hint } : {}) })
 	writeLedger(sessionDir, ledger)
