@@ -99,12 +99,12 @@ function parseAuthorizationServers(metadata: Record<string, unknown>): string[] 
   return servers.filter((server): server is string => typeof server === "string" && server.length > 0)
 }
 
-export async function discoverOAuthServerMetadata(resource: string): Promise<OAuthServerMetadata> {
+export async function discoverOAuthServerMetadata(resource: string, forceRefresh = false): Promise<OAuthServerMetadata> {
   const resourceUrl = parseHttpsUrl(resource, "Resource server URL")
   const resourceKey = resourceUrl.toString()
 
   const cached = discoveryCache.get(resourceKey)
-  if (cached) return cached
+  if (cached && !forceRefresh) return cached
 
   const pending = pendingDiscovery.get(resourceKey)
   if (pending) return pending

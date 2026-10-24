@@ -8,6 +8,7 @@ export type ClientRegistrationRequest = {
 }
 
 export type ClientCredentials = {
+  issuer?: string
   clientId: string
   clientSecret?: string
 }
