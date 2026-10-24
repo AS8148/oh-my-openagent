@@ -20,8 +20,8 @@ const operations: readonly [string, (client: LiveThreadSurface, host: ContractHo
   ["set_model", (client) => Reflect.apply(client.setModel, client, ["rpc-1", "p", "m", "dur-selected"])],
   ["set_thinking_level", (client) => Reflect.apply(client.setThinkingLevel, client, ["rpc-1", "high", "turn", "dur-selected"])],
   ["wake", (client, host) => client.gateway.wake(endpoint(host), ["delivery"])],
-  ["release_session", (client, host) => client.gateway.releaseSession!(endpoint(host), { reason: "takeover" })],
-  ["extension_ui_response", (client, host) => client.gateway.respondUi!(endpoint(host), { ui_request_id: "question", fields: { value: "yes" } })],
+  ["release_session", (client, host) => client.gateway.releaseSession?.(endpoint(host), { reason: "takeover" }) ?? Promise.reject(new Error("gateway.releaseSession is missing"))],
+  ["extension_ui_response", (client, host) => client.gateway.respondUi?.(endpoint(host), { ui_request_id: "question", fields: { value: "yes" } }) ?? Promise.reject(new Error("gateway.respondUi is missing"))],
 ]
 
 /** Runs `exercise` while collecting the omo log lines and our lines written to stderr. */
@@ -50,7 +50,7 @@ describe("thread RPC attachment refusals and release outcomes (wire contract v1.
 
   test("#given a draining host #when release_session attaches #then the release answers its typed host_draining refusal and nothing is mutated", async () => {
     await withContractHost({ auth: true, attachRefusal: "host_draining" }, async (host) => {
-      expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: false, error: "host_draining" })
+      expect(await surface(host).gateway.releaseSession?.(endpoint(host), { reason: "takeover" })).toMatchObject({ success: false, error: "host_draining" })
       expect(host.mutations).toEqual([])
     })
   })
@@ -58,14 +58,14 @@ describe("thread RPC attachment refusals and release outcomes (wire contract v1.
   const vanished = [["unknown_session", { attachRefusal: "unknown_session" }], ["session_not_attached", { attachRefusal: "session_not_attached" }], ["session_identity_mismatch", { durableId: "dur-replacement" }]] as const
   test.each(vanished)("#given an attach refused %s #when release_session runs #then the release answers that code as its refusal", async (code, options) => {
     await withContractHost({ auth: true, ...options }, async (host) => {
-      expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: false, error: code })
+      expect(await surface(host).gateway.releaseSession?.(endpoint(host), { reason: "takeover" })).toMatchObject({ success: false, error: code })
       expect(host.mutations).toEqual([])
     })
   })
 
   test("#given a draining host #when a relayed UI answer attaches #then the session's host_draining refusal is the reply, not a thrown error", async () => {
     await withContractHost({ auth: true, attachRefusal: "host_draining" }, async (host) => {
-      expect(await surface(host).gateway.respondUi!(endpoint(host), { ui_request_id: "question", fields: { value: "yes" } })).toEqual({ delivered: false, error: "host_draining" })
+      expect(await surface(host).gateway.respondUi?.(endpoint(host), { ui_request_id: "question", fields: { value: "yes" } })).toEqual({ delivered: false, error: "host_draining" })
       expect(host.mutations).toEqual([])
     })
   })
@@ -146,7 +146,7 @@ describe("thread RPC attachment refusals and release outcomes (wire contract v1.
   test("#given a release_session that succeeded #when release_attachment answers v1.1 session_not_attached #then the hold counts as released and nothing is logged", async () => {
     await withContractHost({ auth: true }, async (host) => {
       await capturingLogs(async (lines) => {
-        expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: true })
+        expect(await surface(host).gateway.releaseSession?.(endpoint(host), { reason: "takeover" })).toMatchObject({ success: true })
         expect(host.frames.some(({ frame }) => frame.type === "release_attachment")).toBe(true)
         expect(lines.log.filter((line) => line.includes("release_attachment"))).toEqual([])
       })
@@ -156,7 +156,7 @@ describe("thread RPC attachment refusals and release outcomes (wire contract v1.
   test("#given a release_session that succeeded #when an out-of-contract host answers release_attachment unknown_session #then it is still released and nothing is logged", async () => {
     await withContractHost({ auth: true, releasedAttachmentAnswer: "unknown_session" }, async (host) => {
       await capturingLogs(async (lines) => {
-        expect(await surface(host).gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toMatchObject({ success: true })
+        expect(await surface(host).gateway.releaseSession?.(endpoint(host), { reason: "takeover" })).toMatchObject({ success: true })
         expect(host.frames.some(({ frame }) => frame.type === "release_attachment")).toBe(true)
         expect(lines.log.filter((line) => line.includes("release_attachment"))).toEqual([])
       })
@@ -192,7 +192,8 @@ describe("thread RPC connection-local fenced mutations", () => {
     await withContractHost({ auth: true }, async (host) => {
       await run(surface(host), host)
       expect(host.mutations.map((frame) => frame.type)).toEqual([command])
-      const mutation = host.frames.find((entry) => entry.frame.type === command)!
+      const mutation = host.frames.find((entry) => entry.frame.type === command)
+      if (mutation === undefined) throw new Error(`no ${command} frame`)
       expect(host.frames.filter((entry) => entry.connection === mutation.connection).map((entry) => entry.frame.type))
         .toEqual(["get_protocol_info", ...(process.platform === "win32" ? [] : ["authenticate"]), "attach_session", command, "release_attachment"])
       expect(host.frames.find((entry) => entry.frame.type === "attach_session")?.frame)
@@ -223,9 +224,9 @@ describe("thread RPC connection-local fenced mutations", () => {
   test("#given another attached caller #when releasing without force #then the original attached refusal survives", async () => {
     await withContractHost({ otherAttachments: 1 }, async (host) => {
       const client = surface(host)
-      expect(await client.gateway.releaseSession!(endpoint(host), { reason: "takeover" })).toEqual({ success: false, error: "attached" })
+      expect(await client.gateway.releaseSession?.(endpoint(host), { reason: "takeover" })).toEqual({ success: false, error: "attached" })
       expect(host.frames.some((entry) => entry.frame.type === "attach_session")).toBe(true)
-      expect(await client.gateway.releaseSession!(endpoint(host), { reason: "takeover", force: true })).toMatchObject({ success: true })
+      expect(await client.gateway.releaseSession?.(endpoint(host), { reason: "takeover", force: true })).toMatchObject({ success: true })
     })
   })
 
@@ -242,8 +243,9 @@ describe("thread RPC connection-local fenced mutations", () => {
   test("#given a named thread create #when opened #then its name is set on the opening connection", async () => {
     await withContractHost({}, async (host) => {
       expect(await surface(host).openSession({ name: "created" })).toMatchObject({ durableSessionId: "dur-selected" })
-      const opening = host.frames.find((entry) => entry.frame.type === "open_session")!
-      const naming = host.frames.find((entry) => entry.frame.type === "set_session_name")!
+      const opening = host.frames.find((entry) => entry.frame.type === "open_session")
+      const naming = host.frames.find((entry) => entry.frame.type === "set_session_name")
+      if (opening === undefined || naming === undefined) throw new Error("open_session or set_session_name frame missing")
       expect(naming.connection).toBe(opening.connection)
       expect(host.mutations).toMatchObject([{ type: "set_session_name", name: "created" }])
     })

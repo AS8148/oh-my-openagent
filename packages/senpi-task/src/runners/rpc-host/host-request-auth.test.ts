@@ -82,7 +82,8 @@ describe.skipIf(process.platform === "win32")("POSIX raw task host challenge-res
 
   test("#given records belonging to another uid #when warm runs #then ownership is refused", async () => {
     await withContractHost({ auth: true }, async (host) => {
-      const uid = process.getuid!()
+      const uid = process.getuid?.()
+      if (uid === undefined) throw new Error("process.getuid is unavailable on this platform")
       const getuid = spyOn(process, "getuid").mockReturnValue(uid + 1)
       try {
         await expect(warm(host)).rejects.toThrow("unsafe_key_record")
@@ -160,7 +161,7 @@ describe.skipIf(process.platform === "win32")("POSIX raw task host challenge-res
       const child = Bun.spawn([process.execPath, fileURLToPath(new URL("./__fixtures__/ask-host-default-root.ts", import.meta.url)), keyRoot], { env: { ...env, HOME: home }, stdout: "pipe", stderr: "pipe" })
       const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited])
       expect(exitCode).toBe(0)
-      expect(JSON.parse(stdout.trim().split("\n").pop()!)).toEqual({ success: true, frames: ["get_protocol_info", "authenticate", "warm"] })
+      expect(JSON.parse(stdout.trim().split("\n").pop() ?? "")).toEqual({ success: true, frames: ["get_protocol_info", "authenticate", "warm"] })
     } finally {
       rmSync(home, { recursive: true, force: true })
     }
