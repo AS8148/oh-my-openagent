@@ -4,6 +4,7 @@ import { createDagSdkRootProvisioning } from "./dag-sdk-root-provisioning"
 import { isOmoSenpiDisabledByEnv } from "./disable-env"
 import { AGENT_TOOLKIT_SDK_ROOT_ENV, createSdkRootProvisioning } from "./sdk-root-provisioning"
 import { IdleInjectionCoordinator } from "./idle-injection-coordinator"
+import { publishWakeQueueBaselineOnSessionStart, publishWakeQueueChildWork } from "./wake-queue-source"
 import { createFirstPaintScheduler, createStartupDeferral, type StartupWorkScheduler } from "./startup-deferral"
 import { installToolCaptureRegistry } from "./tool-capture-registry"
 import { createPrewarmDiagnostics } from "./prewarm-diagnostics"
@@ -123,6 +124,7 @@ export function composeOmoSenpiExtension(
     // cancellable like every sibling scheduler in this codebase (lead-poller-lifecycle's interval,
     // senpi-task's completion retry): retirement cancels the armed handle instead of leaving a live
     // 200ms timer behind after a `quit` shutdown.
+    const publishChildWork = publishWakeQueueChildWork(pi, logger)
     const idleCoordinator = new IdleInjectionCoordinator(
       (message, options) =>
         pi.sendMessage(message, { triggerTurn: true, deliverAs: options.deliverAs }),
@@ -132,8 +134,10 @@ export function composeOmoSenpiExtension(
           timer.unref?.()
           return () => clearTimeout(timer)
         },
+        onChildWorkChange: publishChildWork,
       },
     )
+    publishWakeQueueBaselineOnSessionStart(pi, () => idleCoordinator.childWorkCount(), publishChildWork)
     // senpi emits session_shutdown on the old runner before it invalidates that generation; retire the
     // shared queue there so a 200ms flush armed before a reload cannot call pi.sendMessage on a stale
     // API and throw out of the timer queue (uncaughtException -> exit 1). Retirement hands every
