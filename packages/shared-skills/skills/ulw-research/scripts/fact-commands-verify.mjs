@@ -6,10 +6,11 @@
 // minors alone exit 0 and are listed. Markdown and LaTeX verification arrive with the md-lite
 // stage; this stage verifies HTML only.
 //
-// fidelityProblems is the barrier: an unresolved fidelity code in the session record (or in a
-// delivered edition's own record) is `fidelity_unresolved`, independent of the repair budget, and
-// in a session with a fact ledger every delivered row needs a verify record whose artifact_sha256
-// equals its source's bytes (`edition_unverified`). node: builtins and sibling imports only.
+// fidelityProblems applies the gate's registry policy independently of the repair budget.
+// HTML/PDF/DOCX need a gate record or an explicitly logged not_run reason, even without a ledger.
+// That logged exemption covers deliveries this harness never gated: once a ledger or a fidelity
+// record exists for the session, the barrier refuses the unverified edition regardless of it.
+// Recorded editions must match their source bytes (`edition_unverified`).
 
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
@@ -18,12 +19,10 @@ import { dirname, join, resolve } from "node:path"
 import { CliError, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
 import { recompute } from "./fact-derive.mjs"
 import { LEDGER_FILENAME, readLedger } from "./fact-ledger.mjs"
-import { checkFidelity } from "./gates-fidelity.mjs"
+import { blocksDelivery, checkFidelity, deliveryBlockReason } from "./gates-fidelity.mjs"
 import { sessionDirOf } from "./source-commands.mjs"
 
 export const FIDELITY_RECORD = "fidelity-defects.json"
-/** Codes that never reach a delivered report, whatever the repair loop decided. */
-export const UNRESOLVED_CODES = Object.freeze(["untraceable_number", "value_mismatch", "unit_mismatch", "quote_not_verbatim", "quote_unbound", "unbound_sentence", "chart_value_untraceable"])
 
 const sha256Of = (content) => createHash("sha256").update(content).digest("hex")
 
@@ -57,7 +56,7 @@ export function runFactVerify(args) {
 	})
 	const counts = { blocker: 0, major: 0, minor: 0, total: result.defects.length }
 	for (const defect of result.defects) counts[defect.severity] += 1
-	const status = counts.blocker + counts.major > 0 ? "fail" : "pass"
+	const status = result.defects.some(blocksDelivery) ? "fail" : "pass"
 	const exitCode = status === "fail" ? 1 : 0
 	const record = { command: "fact verify", status, exitCode, artifact: resolve(report), artifact_sha256: sha256Of(html), defects: result.defects, counts, gatesRun: result.gatesRun }
 	const out = resolve(flags.out ?? join(sessionDir, FIDELITY_RECORD))
@@ -68,10 +67,10 @@ export function runFactVerify(args) {
 function unresolvedIn(record) {
 	const defects = Array.isArray(record) ? record : record?.defects
 	if (!Array.isArray(defects)) throw new CliError("a fidelity record must be a defect array or an object with a defects array")
-	return [...new Set(defects.map((defect) => defect.code).filter((code) => UNRESOLVED_CODES.includes(code)))].sort()
+	return [...new Set(defects.filter(blocksDelivery).map((defect) => defect?.code))].sort()
 }
 
-const unresolved = (format, codes, path) => ({ code: "fidelity_unresolved", format, codes, message: `fidelity_unresolved: ${codes.join(", ")}`, path })
+const unresolved = (format, codes, path) => ({ code: "fidelity_unresolved", format, codes, message: codes.map((code) => deliveryBlockReason({ code })).join("; "), path })
 
 /** Barrier problems for `outcome verify` and `outcome finish`; empty when nothing blocks delivery. */
 export function fidelityProblems(sessionDir, manifest) {
@@ -81,13 +80,21 @@ export function fidelityProblems(sessionDir, manifest) {
 		const codes = unresolvedIn(readJsonFile(sessionRecord))
 		if (codes.length > 0) problems.push(unresolved(null, codes, sessionRecord))
 	}
-	if (!existsSync(join(sessionDir, LEDGER_FILENAME)) && !existsSync(sessionRecord)) return problems
+	const hasFidelity = existsSync(join(sessionDir, LEDGER_FILENAME)) || existsSync(sessionRecord)
+	const lastFidelity = manifest.gateHistory?.findLast((entry) => entry.gate === "fidelity")
+	const exempt = manifest.gates.fidelity === "not_run" && lastFidelity?.status === "not_run" && lastFidelity.reason?.trim()
 	for (const row of manifest.deliverables) {
-		if (row.status !== "delivered" || !row.path) continue
+		if (row.status !== "delivered") continue
+		if (!row.verifiedBy && exempt && !hasFidelity) continue
+		if (!hasFidelity && !row.verifiedBy) {
+			if (["html", "pdf", "docx"].includes(row.format)) problems.push({ code: "edition_unverified", format: row.format, message: `${row.format}: fidelity gate not run`, path: row.path })
+			continue
+		}
+		if (!row.path) continue
 		const subject = row.renderedFrom ?? row.path
 		const unverified = (message) => problems.push({ code: "edition_unverified", format: row.format, message: `${row.format}: ${message}`, path: subject })
 		if (!row.verifiedBy) {
-			unverified(`no verify record; run fact verify on ${subject} and set it with --verified-by`)
+			unverified(`fidelity gate not run; run fact verify on ${subject} and set it with --verified-by`)
 			continue
 		}
 		if (!existsSync(row.verifiedBy)) {
