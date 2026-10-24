@@ -13,9 +13,7 @@ import { dirname, join, resolve } from "node:path"
 
 import { CliError, parseArgs, readJsonFile, writeJsonAtomic } from "./cli-support.mjs"
 import { countDefects } from "./contracts.mjs"
-import { markdownAsHtml, readEdition } from "./fact-commands-verify.mjs"
-import { readLedger } from "./fact-ledger.mjs"
-import { validateLedger } from "./fact-ledger-schema.mjs"
+import { ledgerFrom, markdownAsHtml, readEdition, sessionOf } from "./fact-commands-verify.mjs"
 import { pairsChangedSince } from "./fact-commands-polish.mjs"
 import { extractPairs, PAIR_KINDS } from "./fact-pairs.mjs"
 import { meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
@@ -32,24 +30,9 @@ export const PROMOTION = Object.freeze({ code: "meaning_drift_confirmed", to: "i
 export const meaningStatus = (defects) => (defects.some(blocksDelivery) ? "fail" : "pass")
 
 const sha256 = (text) => createHash("sha256").update(text).digest("hex")
-const sessionOf = (flags) => {
-	const dir = flags["session-dir"] ?? process.env.SESSION_DIR
-	return dir && dir !== true ? resolve(dir) : null
-}
 const inSession = (session, name, flag) => {
 	if (session === null) throw new CliError(`${flag} is required without --session-dir (or SESSION_DIR)`)
 	return join(session, name)
-}
-
-function readLedgerFrom(flags, session) {
-	if (flags.ledger === undefined) {
-		if (session === null) throw new CliError("--ledger is required without --session-dir (or SESSION_DIR)")
-		return readLedger(session)
-	}
-	const ledger = readJsonFile(flags.ledger)
-	const errors = validateLedger(ledger)
-	if (errors.length > 0) throw new CliError(`${flags.ledger} is not a valid fact ledger: ${errors[0]}`)
-	return ledger
 }
 
 function briefState(flags, session) {
@@ -78,7 +61,7 @@ function runPairs(args) {
 	const edition = readEdition(report, flags)
 	const claimsPath = flags.claims ?? (session === null ? null : join(session, "claims.json"))
 	const claims = claimsPath !== null && (flags.claims !== undefined || existsSync(claimsPath)) ? readJsonFile(claimsPath) : null
-	const ledger = readLedgerFrom(flags, session)
+	const ledger = ledgerFrom(flags, session)
 	const html = edition.format === "md" ? markdownAsHtml(edition.text, edition.entries, ledger).html : edition.text
 	const all = extractPairs(html, ledger, claims)
 	const pairs = flags["changed-since"] === undefined ? all : pairsChangedSince(all, flags["changed-since"], ledger, claims)
