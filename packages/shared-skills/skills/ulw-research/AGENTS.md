@@ -32,7 +32,8 @@ ulw-research/
     ├── fact-ledger-schema.mjs       # ledger vocabulary, validateLedger, the status machine (transitionError) shared with the writers
     ├── fact-ledger-kinds.mjs        # KIND_RULES: every per-kind column rule; drives the validator, renders the grammar table (--render-grammar)
     ├── fact-derive.mjs / fact-recompute.mjs   # script-computed derived rows and their tamper detector, both driven by unit-rules.mjs
-    ├── unit-rules.mjs               # OPERATION_RULES: arity, context, guards, result unit, and row shape per operation
+    ├── unit-rules.mjs               # OPERATION_RULES: arity, context, guards, result unit, row shape, and malformed shapes per operation
+    ├── unit-pairs.mjs               # typed operand-unit rules (equal, non-affine, +/- pairs) shared by operations and expr nodes
     ├── unit-algebra.mjs / fact-expr.mjs       # canonical unit text and composites; the expr parser and evaluator
     ├── claims-index.mjs             # claim-graph.md index: the claim table plus the verified-claims digest
     ├── fidelity-state.mjs           # per-sentence failure counts for the fidelity repair loop

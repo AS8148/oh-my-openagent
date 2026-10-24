@@ -4,10 +4,11 @@
 // carry no op-specific unit code. Units are chosen from operand units only; numeric guards may read `exact`.
 
 import { leaves, parseExpr } from "./fact-expr.mjs"
-import { canonicalUnit, inputScale, isAffine, isPercentish, refuse, RuleError, unitOver, unitTimes } from "./unit-algebra.mjs"
+import { canonicalUnit, inputScale, isAffine, isPercentish, refuse, RuleError, unitOver } from "./unit-algebra.mjs"
+import { equalUnits, inferExpr, listed, minusUnit, notAffine, show } from "./unit-pairs.mjs"
 import { convertFactor, dimensionOf } from "./units.mjs"
 
-export { canonicalUnit, isAffine, RuleError }
+export { canonicalUnit, inferExpr, isAffine, RuleError }
 
 const EXPR_HINT = "currencies never convert by table: add a dated rate row and use --op expr"
 const isNonEmpty = (value) => typeof value === "string" && value.trim().length > 0
@@ -15,17 +16,6 @@ const isObject = (value) => value !== null && typeof value === "object" && !Arra
 const toBig = (exact) => ({ num: BigInt(exact.num), den: BigInt(exact.den) })
 const compare = (a, b) => a.num * b.den - b.num * a.den
 const sameDeclared = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null) // null matches only null
-const listed = (rows, units) => rows.map((row, index) => `${row.fact_id} ${units[index] ?? "null"}`).join(", ")
-const show = (unit) => JSON.stringify(unit ?? null)
-
-function equalUnits(rows, units) {
-	if (units.some((unit) => unit !== units[0])) refuse(`unit differs across ${listed(rows, units)}`)
-	return units[0]
-}
-
-function notAffine(op, rows, units) {
-	if (units.some(isAffine)) refuse(`${op} refuses affine (temperature) units: ${listed(rows, units)}`)
-}
 
 function sharedReference(rows, reference) {
 	if (isNonEmpty(reference)) return
@@ -37,53 +27,26 @@ function sharedReference(rows, reference) {
 	refuse("summing % operands needs one shared reference (denominator): pass reference")
 }
 
-/** The typed-pair rule shared by diff and expr `-`: U-U is U; %-% is %p; %-%p is %; %p-%p is %p; %p-% is refused. */
-function minusUnit(a, b, where) {
-	if (a === b) return a === "%" ? "%p" : a
-	if (a === "%" && b === "%p") return "%"
-	refuse(`${where}: ${show(a)} - ${show(b)} is not a typed pair (U-U, %-%, %-%p, %p-%p)`)
-}
-
-function plusUnit(a, b, where) {
-	if (isAffine(a) || isAffine(b)) refuse(`${where}: adding affine (temperature) values has no meaning`)
-	if (a === b && a === "%") refuse(`${where}: adding % values needs disjoint shares of one reference: use --op sum`)
-	if (a === b) return a
-	if ((a === "%" && b === "%p") || (a === "%p" && b === "%")) return "%"
-	refuse(`${where}: ${show(a)} + ${show(b)} has no common unit`)
-}
-
-/** Unit of every node of an expr tree; refuses when a node's unit cannot be inferred. */
-export function inferExpr(ast, unitsById) {
-	const units = new Map()
-	const visit = (node) => {
-		let unit
-		if (node.id) unit = unitsById.get(node.id)
-		else if (node.literal) unit = null
-		else if (node.fn === "pct") {
-			unit = visit(node.arg)
-			if (unit !== null) refuse(`pct() takes a dimensionless value, got ${show(unit)}`)
-			unit = "%"
-		} else {
-			const left = visit(node.left)
-			const right = visit(node.right)
-			if (node.op === "+") unit = plusUnit(left, right, "expr")
-			else if (node.op === "-") unit = minusUnit(left, right, "expr")
-			else {
-				if (isAffine(left) || isAffine(right)) refuse(`expr: ${node.op} on affine (temperature) units has no meaning`)
-				const fraction = (value) => (isPercentish(value) ? null : value)
-				unit = (node.op === "*" ? unitTimes : unitOver)(fraction(left), fraction(right))
-			}
-		}
-		units.set(node, unit)
-		return unit
-	}
-	return { unit: visit(ast), units }
-}
-
 const pair = (a, b) => (spec) => [spec[a], spec[b]]
 const listOf = (spec) => spec.operands
 const needsContext = (row) => (isObject(row.context) ? null : `${row.operation} rows carry a context object, got ${show(row.context)}`)
 const SNAPSHOT = ["population", "snapshot_window"]
+/** Malformed shapes every operation shares; each rule's `malformed` names the shapes the property test must cover. */
+const COMMON = ["operands null", "operands empty", "wrong arity", "missing operand id", "invalid rational", "no operation"]
+const shapes = (...own) => Object.freeze([...COMMON, ...own])
+
+/** A persisted convert target must be stored canonical text: an alias at rest is a relabel, compared exactly. */
+function convertShape(row) {
+	const target = isObject(row.context) ? row.context.target : undefined
+	if (!isNonEmpty(target)) return needsContext(row) ?? "a convert row carries its target in context.target"
+	try {
+		const canonical = canonicalUnit(target)
+		return canonical === target ? null : `context.target ${show(target)} is not canonical unit text (canonical: ${show(canonical)})`
+	} catch (error) {
+		if (error instanceof RuleError) return `context.target ${show(target)} is not unit text: ${error.detail}`
+		throw error
+	}
+}
 
 function exprShape(row) {
 	try {
@@ -106,6 +69,7 @@ export const OPERATION_RULES = Object.freeze({
 		context: (spec) => ({ disjoint: spec.disjoint === true, reference: spec.reference ?? null }),
 		metadata: [...SNAPSHOT, "accounting_basis"],
 		resultUnit(rows, units, context) {
+			notAffine("sum", rows, units)
 			const unit = equalUnits(rows, units)
 			if (unit === "%") {
 				if (context.disjoint !== true) refuse("summing % operands needs disjoint shares: pass disjoint")
@@ -114,7 +78,8 @@ export const OPERATION_RULES = Object.freeze({
 			}
 			return unit
 		},
-		malformed: needsContext,
+		shape: needsContext,
+		malformed: shapes("no context", "% without disjoint", "% without reference", "% without rationale", "unequal units", "affine units"),
 	}),
 	diff: Object.freeze({
 		arity: (n) => n === 2,
@@ -123,6 +88,7 @@ export const OPERATION_RULES = Object.freeze({
 		context: () => null,
 		metadata: [...SNAPSHOT, "accounting_basis"],
 		resultUnit: (rows, units) => minusUnit(units[0], units[1], `diff ${listed(rows, units)}`),
+		malformed: shapes("%p - % pair", "unit - other unit pair", "affine units"),
 	}),
 	growth: Object.freeze({
 		arity: (n) => n === 2,
@@ -139,6 +105,7 @@ export const OPERATION_RULES = Object.freeze({
 			if (toBig(from.exact).num <= 0n) refuse(`growth needs a positive starting value in ${from.fact_id}`)
 			return "%"
 		},
+		malformed: shapes("affine units", "unequal units", "entity mismatch", "one period", "from <= 0"),
 	}),
 	share: Object.freeze({
 		arity: (n) => n === 2,
@@ -154,6 +121,7 @@ export const OPERATION_RULES = Object.freeze({
 			if (part.num < 0n || compare(part, whole) > 0n) refuse(`share needs 0 <= part <= whole: ${rows[0].fact_id} is outside [0, ${rows[1].fact_id}]`)
 			return "%"
 		},
+		malformed: shapes("affine units", "unequal units", "whole <= 0", "part < 0", "part above whole"),
 	}),
 	ratio: Object.freeze({
 		arity: (n) => n === 2,
@@ -168,6 +136,7 @@ export const OPERATION_RULES = Object.freeze({
 			if (units.some(isPercentish)) refuse(`a ratio over % or %p needs equal units: ${listed(rows, units)}; use expr`)
 			return unitOver(units[0], units[1])
 		},
+		malformed: shapes("affine units", "divides by zero"),
 	}),
 	convert: Object.freeze({
 		arity: (n) => n === 1,
@@ -184,7 +153,8 @@ export const OPERATION_RULES = Object.freeze({
 			if (!convertFactor(from, target)) refuse(`${rows[0].fact_id} in ${show(from)} has no table conversion to ${target}`)
 			return target
 		},
-		malformed: (row) => needsContext(row) ?? (isNonEmpty(row.context.target) ? null : "a convert row carries its target in context.target"),
+		shape: convertShape,
+		malformed: shapes("no context", "empty target", "alias target", "no factor to target"),
 	}),
 	expr: Object.freeze({
 		arity: (n) => n >= 1,
@@ -193,7 +163,8 @@ export const OPERATION_RULES = Object.freeze({
 		context: () => null,
 		metadata: [],
 		resultUnit: (rows, units, context, ast) => inferExpr(ast, new Map(rows.map((row, index) => [row.fact_id, units[index]]))).unit,
-		malformed: exprShape,
+		shape: exprShape,
+		malformed: shapes("formula id mismatch", "parse error", "divides by zero", "uninferable unit", "affine sum"),
 	}),
 })
 
@@ -234,5 +205,5 @@ export function malformed(row) {
 	if (!Array.isArray(operands) || operands.length === 0 || !operands.every(isNonEmpty)) return `operands must be a non-empty array of fact ids, got ${show(operands)}`
 	if (!rule.arity(operands.length)) return `${row.operation} takes ${rule.arityText}, got ${operands.length}`
 	if (!isObject(exact) || !/^-?\d+$/.test(String(exact.num)) || !/^[1-9]\d*$/.test(String(exact.den))) return `exact must be { num, den } integer strings, got ${show(exact)}`
-	return rule.malformed?.(row) ?? null
+	return rule.shape?.(row) ?? null
 }

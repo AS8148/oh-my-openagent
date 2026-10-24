@@ -268,6 +268,32 @@ describe("unit rules: the design review's counterexamples", () => {
 		expect(result.detail).toContain("affine")
 	})
 
+	test("temperatures are not summed or differenced as absolute values; ratio refuses them; convert C to F is allowed", () => {
+		const ledger = book()
+		const refused = [
+			{ op: "sum", operands: ["F4", "F5"], unit: "C" },
+			{ op: "diff", operands: ["F5", "F4"], unit: "C" },
+			{ op: "expr", formula: "F4 + F5", unit: "C" },
+			{ op: "expr", formula: "F5 - F4", unit: "C" },
+			{ op: "ratio", num: "F5", den: "F4", unit: null },
+		]
+		for (const spec of refused) {
+			const result = derive(ledger, spec)
+			expect({ spec, error: result.error, detail: result.detail }).toEqual({ spec, error: "incompatible_operands", detail: expect.stringContaining("affine") })
+		}
+		const converted = rowOf(derive(ledger, { op: "convert", operands: ["F4"], to: "F" }))
+		expect(converted).toMatchObject({ value: "77", unit: "F" })
+		expect(recompute(ledger, converted).ok).toBe(true)
+	})
+
+	test("a convert row relabeled to an alias in both unit and context.target is detected", () => {
+		const ledger = book()
+		const row = rowOf(derive(ledger, { op: "convert", operands: ["F10"], to: "km" }))
+		const relabeled = recompute(ledger, { ...row, unit: "kilometre", raw: "0 kilometre (0 m)", render: "0 kilometre (0 m)", context: { target: "kilometre" } })
+		expect(relabeled.ok).toBe(false)
+		expect(relabeled.detail).toContain('context.target "kilometre" is not canonical')
+	})
+
 	test("a share of 200 out of 100 is refused", () => {
 		expect(derive(book(), { op: "share", part: "F6", whole: "F7", unit: "%" }).error).toBe("incompatible_operands")
 	})
