@@ -7,7 +7,7 @@
  * own PR gets one, so a grouped entry still names the PR that made it.
  */
 import { assembleUnreleasedBody } from "./changelog-gate-rules.ts"
-import { blocksOf, linkEntry, scanFences } from "./changelog-notes-markdown.ts"
+import { entriesOf, linkEntry, linkScanned, scanFences } from "./changelog-notes-markdown.ts"
 
 const PULL_URL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
 const OWN_PULL_LINK = new RegExp(`${PULL_URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}/(\\d+)\\)`, "g")
@@ -48,7 +48,7 @@ const linkBullet = (entry: string, pr: number): string => linkEntry(entry, pr, P
 
 /** Every paragraph names the PR that made it (code fences untouched; see changelog-notes-markdown.ts). */
 const linkParagraphs = (text: string, pr: number): string =>
-  blocksOf(text).map((paragraph) => linkBullet(paragraph.trim(), pr)).join("\n\n")
+  entriesOf(text).map((entry) => linkScanned(entry, pr, PULL_URL)).join("\n\n")
 
 /** One notes text from several, in order: their paragraphs first, then one group per section name, first seen first. */
 export function mergeNotes(texts: readonly string[]): string {

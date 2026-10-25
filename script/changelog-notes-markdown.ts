@@ -9,12 +9,15 @@
  */
 
 const OPEN = /^(`{3,}|~{3,})/
-const LIST_MARKER = /^([-*+]|\d{1,9}[.)])( +|$)/
+const LIST_MARKER = /^([-*+]|\d{1,9}[.)])([ \t]+|$)/
 
 export type ScannedLine = { readonly text: string; readonly fenced: boolean }
 
-/** Leading whitespace width, a tab counting as four columns. */
-const indentOf = (line: string): number => [...(/^[ \t]*/.exec(line)?.[0] ?? "")].reduce((width, char) => width + (char === "\t" ? 4 : 1), 0)
+/** The column after `whitespace` written from column `from`: a space moves one column, a tab to the next multiple of 4. */
+const columnsAfter = (from: number, whitespace: string): number => [...whitespace].reduce((column, char) => (char === "\t" ? column + 4 - (column % 4) : column + 1), from)
+
+/** Leading whitespace width, a tab moving to the next multiple of four columns. */
+const indentOf = (line: string): number => columnsAfter(0, /^[ \t]*/.exec(line)?.[0] ?? "")
 
 /** Every line with whether it belongs to a fenced block (the fence lines themselves included). */
 export function scanFences(text: string): ScannedLine[] {
@@ -30,8 +33,9 @@ export function scanFences(text: string): ScannedLine[] {
       const item = items.at(-1) ?? 0
       const listMarker = indent - item <= 3 ? LIST_MARKER.exec(stripped) : null
       if (listMarker !== null) {
-        const gap = listMarker[2]?.length ?? 0
-        items.push(indent + (listMarker[1]?.length ?? 0) + (gap >= 1 && gap <= 4 ? gap : 1))
+        const start = indent + (listMarker[1]?.length ?? 0)
+        const gap = columnsAfter(start, listMarker[2] ?? "") - start
+        items.push(start + (gap >= 1 && gap <= 4 ? gap : 1))
       }
       const candidate = listMarker === null && indent - item <= 3 ? OPEN.exec(stripped)?.[1] : undefined
       const marker = candidate !== undefined && !(candidate[0] === "`" && stripped.slice(candidate.length).includes("`")) ? candidate : undefined
@@ -47,20 +51,42 @@ export function scanFences(text: string): ScannedLine[] {
   return lines
 }
 
-/** Blank-line-separated blocks; a blank line inside a fence does not end a block. */
-export function blocksOf(text: string): string[] {
-  const blocks: string[] = []
-  let current: string[] = []
+const isBlank = (line: ScannedLine): boolean => !line.fenced && line.text.trim() === ""
+const isColumn0ListItem = (line: ScannedLine): boolean => !line.fenced && indentOf(line.text) === 0 && LIST_MARKER.test(line.text)
+
+/**
+ * The paragraph entries of `text`, read from ONE scan of the whole text so a fence keeps its list context (#11253 review
+ * round 3). A blank line ends an entry only when the next line starts a new one at column 0: a paragraph, or a list item
+ * when the entry itself is a list item. A list that continues an intro paragraph, and the fences inside its items, stay in
+ * that paragraph's entry. Leading and trailing blank lines are dropped.
+ */
+export function entriesOf(text: string): ScannedLine[][] {
+  const entries: ScannedLine[][] = []
+  let current: ScannedLine[] = []
+  let blanks: ScannedLine[] = []
   for (const line of scanFences(text)) {
-    if (!line.fenced && line.text.trim() === "") {
-      if (current.length > 0) blocks.push(current.join("\n"))
-      current = []
-    } else {
-      current.push(line.text)
+    if (isBlank(line)) {
+      if (current.length > 0) blanks.push(line)
+      continue
     }
+    const startsColumn0 = !line.fenced && indentOf(line.text) === 0
+    const continuesIntroList = isColumn0ListItem(line) && current.length > 0 && !isColumn0ListItem(current[0] ?? line)
+    if (current.length > 0 && blanks.length > 0 && startsColumn0 && !continuesIntroList) {
+      entries.push(current)
+      current = []
+    } else current.push(...blanks)
+    blanks = []
+    current.push(line)
   }
-  if (current.length > 0) blocks.push(current.join("\n"))
-  return blocks
+  if (current.length > 0) entries.push(current)
+  return entries
+}
+
+/** Already-scanned entry lines with the link added, by the rule linkEntry documents. */
+export function linkScanned(lines: readonly ScannedLine[], pr: number, pullUrl: string): string {
+  if (lines.some((line) => !line.fenced && line.text.includes(`${pullUrl}/${pr})`))) return lines.map((line) => line.text).join("\n")
+  const last = lines.findLastIndex((line) => !line.fenced && line.text.trim() !== "")
+  return lines.map((line, index) => (index === last ? `${line.text.trimEnd()} ([#${pr}](${pullUrl}/${pr}))` : line.text)).join("\n")
 }
 
 /**
@@ -70,9 +96,5 @@ export function blocksOf(text: string): string[] {
  * so code is never touched; an entry that is all code stays as written.
  */
 export function linkEntry(entry: string, pr: number, pullUrl: string): string {
-  const lines = scanFences(entry)
-  if (lines.some((line) => !line.fenced && line.text.includes(`${pullUrl}/${pr})`))) return entry
-  const last = lines.findLastIndex((line) => !line.fenced && line.text.trim() !== "")
-  if (last === -1) return entry
-  return lines.map((line, index) => (index === last ? `${line.text.trimEnd()} ([#${pr}](${pullUrl}/${pr}))` : line.text)).join("\n")
+  return linkScanned(scanFences(entry), pr, pullUrl)
 }

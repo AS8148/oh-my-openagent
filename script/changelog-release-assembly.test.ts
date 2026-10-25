@@ -85,6 +85,7 @@ describe("fences inside every kind of list item", () => {
     ["a paragraph back in the outer item uses that item's column", `- a\n  - b\n    - c\n  para in a\n     ${F}\n     z\n     ${F}`, [false, false, false, false, true, true, true]],
     ["a tab-indented item nested in a - item", `- a\n\t- c\n\t  ${F}\n\t  z\n\t  ${F}`, [false, false, true, true, true]],
     ["a tab at column 0 is indented code, not a list item", `\t- c\n\t  ${F}`, [false, false]],
+    ["a tab after the marker", `1.\tx\n    ${F}\n    a\n    ${F}`, [false, true, true, true]],
     ["outside any list, four spaces is indented code", `    ${F}\ncode`, [false, false]],
   ])("%s", (_name, text, fenced) => {
     expect(scanFences(text).map((line) => line.fenced)).toEqual(fenced)
@@ -98,13 +99,27 @@ describe("fences inside every kind of list item", () => {
     expect(body).not.toContain(`a ${link(50)}`)
   })
 
-  test("a fragment the PR check accepts can always be placed by the release", () => {
-    const content = `### Fixed\n\n* x\n  * y\n    ${F}\n    a\n\n    ${F}\n`
+  // #11253 review round 3 HIGH 1: the PR check runs the release's own assembly, so whatever it accepts the stamp
+  // places, and code inside list items keeps every byte even with a blank line before the fence.
+  test.each([
+    ["a 10. item with a blank line before its fence", `10. Run:\n\n    ${F}sh\n    a\n    ${F}\n`, `    ${F}sh\n    a\n    ${F}`],
+    ["a nested * item with a blank line before its fence", `* x\n  * y\n\n    ${F}\n    a\n    ${F}\n`, `    ${F}\n    a\n    ${F}`],
+    ["an intro paragraph, then a numbered list with fenced steps", `**Steps.** Do this:\n\n1. Install:\n\n   ${F}sh\n   bun add x\n   ${F}\n\n2. Run it.\n`, `   ${F}sh\n   bun add x\n   ${F}`],
+  ])("the PR check accepts %s and the release places it with its code untouched", (_name, preamble, code) => {
     const input = { addedFiles: [], modifiedFiles: [], deletedFiles: [], isRelease: false, existsAtHead: () => true }
-    const verdict = checkPackageLogs({ ...input, fragment: content })
-    if (verdict.pass) expect(() => release(content)).not.toThrow()
-    const preamble = `* x\n  * y\n    ${F}\n    a\n\n    ${F}\n`
-    expect(() => release(preamble)).not.toThrow()
+    expect(checkPackageLogs({ ...input, fragment: preamble }).pass).toBe(true)
+    const body = release(preamble)
+    expect(body).toContain(code)
+    expect(body.split("\n").filter((line) => line.includes(`(${PULL}/50)`)).every((line) => !line.trimStart().startsWith(F))).toBe(true)
+  })
+
+  test("a list that continues an intro paragraph is one entry, linked once at its end", () => {
+    const preamble = `**Steps.** Do this:\n\n1. Install:\n\n   ${F}sh\n   bun add x\n   ${F}\n\n2. Run it.\n`
+    expect(release(preamble)).toBe(`**Steps.** Do this:\n\n1. Install:\n\n   ${F}sh\n   bun add x\n   ${F}\n\n2. Run it. ${link(50)}`)
+  })
+
+  test("paragraphs that each start at column 0 stay separate entries, each linked", () => {
+    expect(release("**A.** one\n\n**B.** two\n")).toBe(`**A.** one ${link(50)}\n\n**B.** two ${link(50)}`)
   })
 })
 
