@@ -11,6 +11,7 @@ import { join, resolve, sep } from "node:path"
 
 import { sha256Of } from "./cli-support.mjs"
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
+import { readCsv } from "./fidelity-csv.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
@@ -71,16 +72,6 @@ const withoutFooter = (node) => proseText({ children: node.children.filter((chil
 /** One row per active value row, as `fact export --csv` writes it. */
 export function exportRows(ledger) {
 	return (ledger?.rows ?? []).filter((row) => row.status === "active" && row.kind !== "quote" && row.value !== null).map((row) => ({ fact_id: row.fact_id, label: row.label, plot_value: row.value, unit: row.unit ?? "" }))
-}
-
-function readCsv(path) {
-	if (!existsSync(path)) return null
-	const lines = readFileSync(path, "utf8").split(/\r?\n/).filter((line) => line.trim() !== "")
-	const cells = (line) => line.split(",").map((cell) => cell.trim().replace(/^"(.*)"$/, "$1"))
-	const head = cells(lines[0] ?? "")
-	const [id, value, unit] = ["fact_id", "plot_value", "unit"].map((name) => head.indexOf(name))
-	if (id < 0 || value < 0 || unit < 0 || lines.length < 2) return null
-	return lines.slice(1).map((line) => cells(line)).map((c) => ({ fact_id: c[id], plot_value: c[value], unit: c[unit] ?? "" }))
 }
 
 const walk = (node) => node.children.filter((child) => child.tag !== "#text").flatMap((child) => [child, ...walk(child)])
@@ -194,12 +185,15 @@ function rowChecks(ctx, ledger, rows, cited, options, flag) {
 		const row = rows.get(id)
 		if (row.fuzzy === true) flag("quote_fuzzy_match", node, `${id} was registered from a similarity match on an OCR-noisy snapshot`)
 		const revision = typeof row.revision === "string" ? row.revision : (row.revision?.id ?? row.revision?.tag ?? null)
-		if (asOf && revision && !asOf.includes(revision)) flag("quote_stale_version", node, `${id} is from revision ${revision}; the brief targets "${asOf}"`)
+		const revisionPattern = revision && new RegExp(`(?<![\\w.-])${revision.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "u")
+		if (asOf && revisionPattern && !revisionPattern.test(asOf)) flag("quote_stale_version", node, `${id} is from revision ${revision}; the brief targets "${asOf}"`)
 		if ((row.kind === "derived" || row.kind === "converted") && options.recompute?.(ledger, row)?.ok === false) flag("value_mismatch", node, `${id} does not recompute from its operands`)
 		const window = row.snapshot_window
 		if (window && typeof window === "object" && window.start && window.end) {
 			const [start, end] = [Date.parse(window.start), Date.parse(window.end)]
-			const outside = (row.operands ?? []).find((op) => !(Date.parse(rows.get(op)?.observed_at) >= start && Date.parse(rows.get(op)?.observed_at) < end))
+			const missing = (row.operands ?? []).filter((op) => !rows.get(op)?.observed_at)
+			for (const op of missing) flag("operand_timestamp_missing", node, `operand ${op} of ${id} has no observed_at timestamp`)
+			const outside = (row.operands ?? []).find((op) => !missing.includes(op) && !(Date.parse(rows.get(op)?.observed_at) >= start && Date.parse(rows.get(op)?.observed_at) < end))
 			if (outside) flag("snapshot_mismatch", node, `operand ${outside} of ${id} was observed outside ${window.start} to ${window.end}`)
 		}
 	}
