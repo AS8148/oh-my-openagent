@@ -8,7 +8,7 @@ import { parseNumeral } from "./numerals.mjs"
 
 export const ELLIPSIS = "\u2026"
 
-const ID = /^([FQ])\d+$/
+const ID = /^([FQ])[1-9]\d*$/
 const LABEL = /^[^\s:{}"]+$/
 const VALUE_MODES = new Set(["value", "unit", "q"])
 const LEAD = /^lead=([1-9]\d*)$/
@@ -130,7 +130,7 @@ export function lead(quote, n) {
 /** The value and unit parts of a row's raw text ("4.2 eok won" -> value "4.2 eok", unit "won"). */
 export function valueParts(row) {
 	const unitText = parseNumeral(row.raw)?.unitRaw ?? row.unit
-	const valueText = unitText && row.raw.endsWith(unitText) ? row.raw.slice(0, -unitText.length).trimEnd() : (row.value ?? row.raw)
+	const valueText = unitText && row.raw.endsWith(unitText) ? row.raw.slice(0, -unitText.length).trimEnd() : row.raw
 	return { valueText, unitText: unitText ?? "" }
 }
 
