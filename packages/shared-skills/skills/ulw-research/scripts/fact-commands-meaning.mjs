@@ -1,24 +1,26 @@
 // fact-commands-meaning.mjs - `fact pairs` and `fact meaning-check`, the script half of the
 // separate-session meaning verifier. fact pairs writes the (source, report sentence) pairs a
-// reader lane gets and nothing else; it honours the brief's `meaning check` field and writes
+// reader lane gets and nothing else (with --changed-since, only the pairs whose sentence polish
+// rewrote); it honours the brief's `meaning check` field and writes
 // `{ skipped: true }` when it is off. fact meaning-check ingests the readers' verdict files
 // (meaning-check.mjs), writes fidelity-meaning-defects.json (a fidelity record bound to the pairs'
 // artifact_sha256 and report, through writeFidelityRecord), and records the run in
 // fidelity-calibration.jsonl: a header with the promotion criterion on first write, then per run
 // one run line plus one line per flagged pair. The run id hashes the inputs only, so a rerun or a
 // --dispute rerun of the same inputs replaces that run's lines in place (disputes carry forward)
-// instead of counting a second run. Neither command calls a model or the network.
+// instead of counting a second run. Both refuse an unlocked brief (fidelity_interview_incomplete) before
+// reading anything else. Neither command calls a model or the network.
 
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
 import { CliError, parseArgs, readJsonFile, sha256Of, writeJsonAtomic, writeTextAtomic } from "./cli-support.mjs"
 import { countDefects } from "./contracts.mjs"
-import { markdownAsHtml, readEdition } from "./fact-commands-verify.mjs"
-import { readLedger } from "./fact-ledger.mjs"
-import { validateLedger } from "./fact-ledger-schema.mjs"
+import { ledgerFrom, markdownAsHtml, readEdition, sessionOf } from "./fact-commands-verify.mjs"
+import { pairsChangedSince } from "./fact-commands-polish.mjs"
 import { extractPairs, PAIR_KINDS } from "./fact-pairs.mjs"
-import { FIDELITY_INCOMPLETE, meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
+import { FIDELITY_INCOMPLETE } from "./fidelity-brief.mjs"
+import { briefPathOf, lockedBrief, meaningCheckEnabled } from "./fidelity-policy.mjs"
 import { MEANING_RECORD, writeFidelityRecord } from "./fidelity-records.mjs"
 import { blocksDelivery } from "./gates-fidelity.mjs"
 import { ingestVerdicts, unverifiedDefects, VERDICT_SCHEMA } from "./meaning-check.mjs"
@@ -31,31 +33,9 @@ export const PROMOTION = Object.freeze({ code: "meaning_drift_confirmed", to: "i
 /** The command status: fail when any defect blocks delivery under the registry policy. */
 export const meaningStatus = (defects) => (defects.some(blocksDelivery) ? "fail" : "pass")
 
-const sessionOf = (flags) => {
-	const dir = flags["session-dir"] ?? process.env.SESSION_DIR
-	return dir && dir !== true ? resolve(dir) : null
-}
 const inSession = (session, name, flag) => {
 	if (session === null) throw new CliError(`${flag} is required without --session-dir (or SESSION_DIR)`)
 	return join(session, name)
-}
-
-function readLedgerFrom(flags, session) {
-	if (flags.ledger === undefined) {
-		if (session === null) throw new CliError("--ledger is required without --session-dir (or SESSION_DIR)")
-		return readLedger(session)
-	}
-	const ledger = readJsonFile(flags.ledger)
-	const errors = validateLedger(ledger)
-	if (errors.length > 0) throw new CliError(`${flags.ledger} is not a valid fact ledger: ${errors[0]}`)
-	return ledger
-}
-
-function briefState(flags, session) {
-	const path = flags.brief ?? inSession(session, "brief.md", "--brief")
-	const lock = requireLockedBrief(path)
-	if (lock.exitCode === 2) throw new CliError(`${path}: malformed ## Fidelity block: ${lock.errors.join("; ")}`)
-	return { path, locked: lock.locked, off: !meaningCheckEnabled(lock.parsed) }
 }
 
 function runPairs(args) {
@@ -64,12 +44,9 @@ function runPairs(args) {
 	if (!report) throw new CliError("usage: fact pairs <report> [--format html|md] [--ledger F] [--claims claims.json] [--changed-since <fill-map.json>] [--brief brief.md] [--out pairs.json]")
 	const session = sessionOf(flags)
 	const out = resolve(flags.out ?? inSession(session, PAIRS_FILE, "--out"))
-	const brief = briefState(flags, session)
-	if (!brief.locked) {
-		const json = { command: "fact pairs", status: "fail", exitCode: 1, error: "fidelity_interview_incomplete", message: `${brief.path} has no locked ## Fidelity block` }
-		return { json, summary: `fact pairs: ${json.message}`, exitCode: 1 }
-	}
-	if (brief.off) {
+	const { parsed, refusal } = lockedBrief("fact pairs", flags)
+	if (refusal) return refusal
+	if (!meaningCheckEnabled(parsed)) {
 		const record = { schemaVersion: 1, skipped: true, reason: "meaning check: off", pairs: [] }
 		writeJsonAtomic(out, record)
 		return { json: { command: "fact pairs", status: "skipped", exitCode: 0, data: { out, ...record } }, summary: "fact pairs: skipped (meaning check: off)", exitCode: 0 }
@@ -77,10 +54,10 @@ function runPairs(args) {
 	const edition = readEdition(report, flags)
 	const claimsPath = flags.claims ?? (session === null ? null : join(session, "claims.json"))
 	const claims = claimsPath !== null && (flags.claims !== undefined || existsSync(claimsPath)) ? readJsonFile(claimsPath) : null
-	const changed = flags["changed-since"] === undefined ? undefined : readJsonFile(flags["changed-since"]).entries
-	const ledger = readLedgerFrom(flags, session)
+	const ledger = ledgerFrom(flags, session)
 	const html = edition.format === "md" ? markdownAsHtml(edition.text, edition.entries, ledger).html : edition.text
-	const pairs = extractPairs(html, ledger, claims, changed)
+	const all = extractPairs(html, ledger, claims)
+	const pairs = flags["changed-since"] === undefined ? all : pairsChangedSince(all, flags["changed-since"], ledger, claims)
 	const counts = { total: pairs.length, force_strong: pairs.filter((pair) => pair.force_strong).length }
 	for (const kind of PAIR_KINDS) counts[kind] = pairs.filter((pair) => pair.kind === kind).length
 	const record = { schemaVersion: 1, skipped: false, report: resolve(report), format: edition.format, artifact_sha256: sha256Of(edition.text), pairs_sha256: sha256Of(JSON.stringify(pairs)), counts, verdict_schema: VERDICT_SCHEMA, pairs }
@@ -140,23 +117,23 @@ function recordCalibration(path, lines, runId, pairsSha) {
 }
 
 /** A `{ skipped: true }` pairs file is accepted only when the locked brief turns the meaning check off. */
-function skippedRefusal(flags, session) {
-	const brief = briefState(flags, session)
-	if (!brief.locked) return { error: FIDELITY_INCOMPLETE, message: `${brief.path} has no locked ## Fidelity block, so a skipped meaning check cannot be accepted` }
-	if (!brief.off) return { error: "meaning_check_required", message: `${flags.pairs} says skipped but ${brief.path} has meaning check on; rerun fact pairs` }
+function skippedRefusal(flags, parsed) {
+	if (meaningCheckEnabled(parsed)) return { error: "meaning_check_required", message: `${flags.pairs} says skipped but ${briefPathOf(flags)} has meaning check on; rerun fact pairs` }
 	return null
 }
 
 function runMeaningCheck(args) {
 	const { flags } = args
-	const usage = "usage: fact meaning-check --pairs pairs.json --verdicts cheap.json [--verdicts strong.json] [--dispute P<n> --reason TEXT] [--run-id ID] [--calibration F] [--out F]"
+	const usage = "usage: fact meaning-check --pairs pairs.json --verdicts cheap.json [--verdicts strong.json] [--dispute P<n> --reason TEXT] [--run-id ID] [--calibration F] [--brief brief.md] [--out F]"
 	if (flags.pairs === undefined || !Array.isArray(flags.verdicts)) throw new CliError(usage)
 	const session = sessionOf(flags)
+	const { parsed, refusal } = lockedBrief("fact meaning-check", flags)
+	if (refusal) return { ...refusal, json: { ...refusal.json, error: FIDELITY_INCOMPLETE } }
 	const pairsText = readFileSync(flags.pairs, "utf8")
 	const pairsDoc = readJsonFile(flags.pairs)
 	if (pairsDoc?.skipped === true) {
-		const refusal = skippedRefusal(flags, session)
-		if (refusal !== null) return { json: { command: "fact meaning-check", status: "fail", exitCode: 1, ...refusal }, summary: `fact meaning-check: ${refusal.message}`, exitCode: 1 }
+		const skipped = skippedRefusal(flags, parsed)
+		if (skipped !== null) return { json: { command: "fact meaning-check", status: "fail", exitCode: 1, ...skipped }, summary: `fact meaning-check: ${skipped.message}`, exitCode: 1 }
 		return { json: { command: "fact meaning-check", status: "skipped", exitCode: 0, defects: [] }, summary: JSON.stringify({ command: "fact meaning-check", status: "skipped" }), exitCode: 0 }
 	}
 	if (typeof pairsDoc?.artifact_sha256 !== "string" || typeof pairsDoc.report !== "string") throw new CliError(`${flags.pairs} names no artifact_sha256 and report, so the meaning record cannot be bound to an edition; rerun fact pairs`)

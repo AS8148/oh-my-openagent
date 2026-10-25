@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:6845c0891661183e212fb8ac917f91fa032a16daa7f9c7ab7f35f20bd6241483:99d2de897e0dfb3e575fc673a9e449299c4c96b8ae79e43f669b68f72713da18
+// omo-codex-install:59bc5768b3b3ef6732c97bec7583a523952e5e1d9fdf5d8e5fb245658043bfca:fadb66139b4d0de34630f6b4bddc87783374d2be2659a207a4bb01c2c2f852d0
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -10123,7 +10123,7 @@ var package_default;
 var init_package = __esm(() => {
   package_default = {
     name: "@oh-my-opencode/omo-codex",
-    version: "5.1.45",
+    version: "5.1.48",
     type: "module",
     private: true,
     description: "Codex harness adapter for oh-my-openagent. Vendored Codex plugin namespace (omo) + TypeScript installer + telemetry.",
@@ -10380,7 +10380,7 @@ function resolveStdio(options) {
   return [options.stdin ?? "ignore", options.stdout ?? "pipe", options.stderr ?? "inherit"];
 }
 function createBunSpawnOptions(options) {
-  return { ...options, windowsHide: true };
+  return { ...options, env: options.env ?? process.env, windowsHide: true };
 }
 function createNodeSpawnOptions(options, platform = process.platform) {
   const nodeOptions = {
@@ -10612,8 +10612,7 @@ function windowsNodeDiscoveryLines() {
     '  for /f "tokens=* delims= " %%N in ("!OMO_NODE_BINARY!") do set "OMO_NODE_BINARY=%%N"',
     `  if "!OMO_NODE_BINARY:~0,1!"=="'" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~1!"`,
     `  if "!OMO_NODE_BINARY:~-1!"=="'" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~0,-1!"`,
-    '  if "!OMO_NODE_BINARY:~0,1!"=="^"" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~1!"',
-    '  if "!OMO_NODE_BINARY:~-1!"=="^"" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~0,-1!"',
+    '  set "OMO_NODE_BINARY=!OMO_NODE_BINARY:"=!"',
     '  if defined OMO_NODE_BINARY if not exist "!OMO_NODE_BINARY!" set "OMO_NODE_BINARY="',
     ")",
     'if not defined OMO_NODE_BINARY where node >nul 2>nul && set "OMO_NODE_BINARY=node"'
