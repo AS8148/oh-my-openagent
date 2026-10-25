@@ -104,7 +104,7 @@ export function createTaskComponent(options: TaskComponentOptions = {}): OmoSenp
       const engine = composeTaskEngine({
         pi,
         omoConfig: loaded.config,
-        readOmoConfig: () => loadConfig({ cwd }).config,
+        loadOmoConfig: () => loadConfig({ cwd }),
         cwd,
         loadSkills,
         sharedParentTools: () => ctx.getCapturedTools?.() ?? [],

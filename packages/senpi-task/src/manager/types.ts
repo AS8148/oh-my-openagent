@@ -136,9 +136,18 @@ export type ResolvedChildPlan = {
   readonly maxDepth?: number
 }
 
+/** An omo.json layer that exists but cannot be used: the spawn fails instead of routing on another config. */
+export type PlanConfigError = {
+  readonly kind: "parse" | "read" | "validation"
+  readonly path: string
+  readonly position?: { readonly line: number; readonly column: number }
+  readonly issue_paths?: readonly string[]
+}
+
 export type PlanResolutionError = {
-  readonly code: "unknown_target" | "model_unavailable" | "category_disabled" | "invalid_target"
+  readonly code: "unknown_target" | "model_unavailable" | "category_disabled" | "invalid_target" | "config_invalid"
   readonly message: string
+  readonly config_error?: PlanConfigError
   readonly availableAgents?: readonly string[]
   readonly availableCategories?: readonly string[]
   // Dead-chain spawn detail: the category whose builtin fallback chain had zero resolvable rungs,

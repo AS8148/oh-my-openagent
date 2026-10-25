@@ -32,7 +32,7 @@ import type { SenpiExtensionAPI } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import type { EngineHostRuntime } from "./host-execution-mode"
 import { createCategoryConfigGenerations, type CategoryConfigGenerations } from "./category-config-generation"
-import { createEnginePlanner } from "./engine-planner"
+import { createEnginePlanner, type SpawnOmoConfig } from "./engine-planner"
 import { createTaskStoreChain } from "./engine-store-chain"
 import type { StoreMutation } from "./store-mutation-observer"
 import { createEngineKernelTools } from "./engine-kernel-tools"
@@ -105,8 +105,8 @@ export interface ComposeTaskEngineDeps {
   readonly childCreationPort?: ChildCreationPort
   readonly pi: SenpiExtensionAPI
   readonly omoConfig: OmoConfig
-  // Read at every spawn plan (category chains); defaults to `omoConfig`. The task component reloads omo.json here.
-  readonly readOmoConfig?: () => OmoConfig
+  // One omo config read per spawn plan (#11355); defaults to the startup snapshot with no diagnostics.
+  readonly loadOmoConfig?: () => SpawnOmoConfig
   readonly cwd: string
   readonly sharedParentTools: () => readonly ToolDefinition[]
   readonly coordinator?: IdleInjectionCoordinator
@@ -234,9 +234,8 @@ export function composeTaskEngine(deps: ComposeTaskEngineDeps): TaskEngine {
   const planner = createEnginePlanner({
     pi: deps.pi,
     runtime,
-    agents,
     settings,
-    readOmoConfig: deps.readOmoConfig ?? (() => deps.omoConfig),
+    loadOmoConfig: deps.loadOmoConfig ?? (() => ({ config: deps.omoConfig, diagnostics: [] })),
     resolveRegistry,
     resolveDefaultRoute,
     generations: categoryConfigGenerations,
