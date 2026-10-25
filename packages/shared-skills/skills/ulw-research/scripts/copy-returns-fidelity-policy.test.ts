@@ -8,6 +8,21 @@ import { KIND_RULES } from "./fact-ledger-kinds.mjs"
 import { FILL_FORMATS } from "./fact-fill.mjs"
 import { meaningCheckEnabled as briefMeaningCheckEnabled } from "./fidelity-brief.mjs"
 import { FIDELITY_VALUE_RULES, meaningCheckEnabled, parseSourceFloor, policyErrors, SOURCE_FLOOR_RULES, sourceInsideFloor } from "./fidelity-policy.mjs"
+
+type PolicyRow = { fact_id: string; kind: string; status: string; source_id: string | null; operands: string[]; derived_from: string[] }
+const policyRow = (fact_id: string, kind: string, source_id: string | null, operands: string[] = []): PolicyRow => ({ fact_id, kind, status: "active", source_id, operands, derived_from: [] })
+
+/** policyErrors over one placeholder per row id under a parsed floor, as code and message pairs. */
+function floorRefusals(rows: PolicyRow[], ids: string[], floor: ReturnType<typeof parseSourceFloor>) {
+	const found = ids.map((id, index) => ({ token: `{{${id}}}`, start: index, parsed: { id } }))
+	const refused = policyErrors(ids.map((id) => `{{${id}}}`).join(""), found, { rows }, tmpdir(), { derivedNone: false, floor })
+	return refused.errors.map((error: { code: string; message: string }) => [error.code, error.message])
+}
+
+const referenceValues = async (field: string) => {
+	const row = (await Bun.file(REFERENCE).text()).split("\n").find((line) => line.startsWith(`| \`${field}\` |`)) ?? ""
+	return [...(row.split("|")[2] ?? "").matchAll(/`([^`]+)`/gu)].map((match) => match[1])
+}
 import { pointedFlag } from "./source-commands.mjs"
 
 const REFERENCE = join(import.meta.dir, "..", "references", "deliverable-phase.md")
@@ -64,7 +79,7 @@ describe("fidelity-policy registry: copies must not return", () => {
 
 	test("#given a brief floor #when pointedFlag reads it #then it agrees with parseSourceFloor for every form", () => {
 		const url = "https://a.example/x"
-		for (const floor of ["pointed only: S4, https://a.example/x", "pointed only: S4", "standard", "primary only", "classes: a.example", "not a floor"]) {
+		for (const floor of ["pointed only: S4, https://a.example/x", "pointed only: S4", "standard", "primary only", "classes: a.example"]) {
 			const dir = briefWithFloor(floor)
 			try {
 				const rule = (() => {
@@ -79,6 +94,42 @@ describe("fidelity-policy registry: copies must not return", () => {
 				rmSync(dir, { recursive: true, force: true })
 			}
 		}
+	})
+
+	test("#given a malformed or pending floor #when pointedFlag reads it #then malformed is a usage error and pending is not pointed", () => {
+		const malformed = briefWithFloor("not a floor")
+		const pending = mkdtempSync(join(tmpdir(), "policy-registry-"))
+		writeFileSync(join(pending, "brief.md"), "## Fidelity\nsource floor: pending (answered_by: pending)\n")
+		try {
+			expect(() => pointedFlag(malformed, "https://a.example/x")).toThrow(/source floor "not a floor"/)
+			expect(pointedFlag(pending, "https://a.example/x")).toBe(false)
+		} finally {
+			for (const dir of [malformed, pending]) rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
+	test("#given derived numbers and fallback values #when read #then only their table values pass, any case, and anything else names field and value", () => {
+		expect(["none", "None", " none "].map((value) => FIDELITY_VALUE_RULES.derivedNone(value))).toEqual([true, true, true])
+		expect(["allowed", "Allowed"].map((value) => FIDELITY_VALUE_RULES.derivedNone(value))).toEqual([false, false])
+		for (const value of ["nope", "no", "n/a", "none.", "measured only"]) expect(() => FIDELITY_VALUE_RULES.derivedNone(value)).toThrow(`derived numbers "${value}" is not allowed, none`)
+		expect(["block-quote", "Omit"].map((value) => FIDELITY_VALUE_RULES.fallback(value))).toEqual(["quote", "omit"])
+		for (const value of ["drop", "omit sentence", "quote"]) expect(() => FIDELITY_VALUE_RULES.fallback(value)).toThrow(`fallback "${value}" is not block-quote, omit`)
+	})
+
+	test("#given the deliverable reference #when its derived numbers and fallback rows are read #then they name exactly the registry tables", async () => {
+		for (const [field, table] of Object.entries(FIDELITY_VALUE_RULES.tables)) expect({ field, values: await referenceValues(field) }).toEqual({ field, values: Object.keys(table) })
+		expect(Object.keys(FIDELITY_VALUE_RULES.tables)).toEqual(["derived numbers", "fallback"])
+	})
+
+	test("#given sourceless rows #when judged under a strict floor and under standard #then strict refuses each, a derived row over one included, and standard refuses none", () => {
+		const rows = [policyRow("F1", "measured", "S1"), policyRow("A1", "assumed", null), policyRow("D1", "derived", null, ["F1", "A1"]), policyRow("D2", "derived", null, ["F9"])]
+		const ids = ["F1", "A1", "D1", "D2"]
+		expect(floorRefusals(rows, ids, floorOf("pointed only: S1"))).toEqual([
+			["source_outside_floor", "A1 rests on no source, outside the source floor"],
+			["source_outside_floor", "D1 rests on no source, outside the source floor"],
+			["source_outside_floor", "D2 rests on no source, outside the source floor"],
+		])
+		expect(floorRefusals(rows, ids, parseSourceFloor("standard"))).toEqual([])
 	})
 
 	test("#given the meaning check value rule #when read through the policy or the brief #then both are the same function", () => {

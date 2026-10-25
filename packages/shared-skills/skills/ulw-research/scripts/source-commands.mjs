@@ -45,16 +45,15 @@ export function snapshotOf(sessionDir, id) {
 	return { meta: JSON.parse(readInput(join(dir, "meta.json"))), text: readInput(join(dir, "text.txt")), html: existsSync(html) ? readInput(html) : null }
 }
 
-/** Whether the brief's source floor lists this source as pointed at (`pointed only: a, b`). */
+/**
+ * Whether the brief's source floor lists this source as pointed at (`pointed only: a, b`). An absent
+ * or pending floor points at nothing; a malformed floor is a usage error (parseSourceFloor's CliError).
+ */
 export function pointedFlag(sessionDir, url) {
 	const brief = join(sessionDir, "brief.md")
 	const floor = existsSync(brief) ? (parseFidelityBlock(readInput(brief)).fields?.["source floor"] ?? "") : ""
-	let rule = null
-	try {
-		rule = parseSourceFloor(floor === "" ? "standard" : floor)
-	} catch {
-		return false
-	}
+	if (floor === "" || floor === "pending") return false
+	const rule = parseSourceFloor(floor)
 	return rule?.kind === "pointed" && rule.list.includes(url)
 }
 

@@ -2,10 +2,11 @@
 //
 // It refuses an unlocked brief (fidelity_interview_incomplete) and applies the locked `## Fidelity`
 // fields: `derived numbers: none` and the source floor refuse rows (derived_not_allowed,
-// source_outside_floor, evaluated at every fill, with the row's outside_floor cached in the ledger),
-// `languages` decides whether a translation after a quote binds to it, and `fallback` picks the
-// block quote or omission for --replace-failed. All or nothing: any error writes no output.
-// node: builtins and sibling imports only.
+// source_outside_floor, evaluated at every fill), `languages` decides whether a translation after a
+// quote binds to it, and `fallback` picks the block quote or omission for --replace-failed. Any
+// error writes no edition, fill map, or state; the one write that survives a refusal is the
+// ledger's cached outside_floor per row (skipped under --view). The fill map records brief_sha256,
+// the locked block fact verify checks it against. node: builtins and sibling imports only.
 
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, extname, resolve } from "node:path"
@@ -14,7 +15,7 @@ import { CliError, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
 import { DEFECT_CODES } from "./contracts.mjs"
 import { FILL_FORMATS, fill } from "./fact-fill.mjs"
 import { readLedger, writeLedger } from "./fact-ledger.mjs"
-import { fillPolicy, lockedBrief, policyErrors } from "./fidelity-policy.mjs"
+import { briefHashOf, fillPolicy, lockedBrief, policyErrors } from "./fidelity-policy.mjs"
 import { readState, writeState } from "./fidelity-state.mjs"
 import { findPlaceholders } from "./placeholder.mjs"
 import { sessionDirOf } from "./source-commands.mjs"
@@ -78,7 +79,8 @@ export function runFactFill(args) {
 	if (state) writeState(sessionDir, state)
 	const artifact = sha256Of(out)
 	const map = `${resolve(flags.out)}.fill-map.json`
-	writeJsonAtomic(map, { schemaVersion: 1, format, artifact: resolve(flags.out), artifact_sha256: artifact, entries })
-	const data = { out: resolve(flags.out), map, artifact_sha256: artifact, occurrences: entries.length, warnings }
+	const brief = briefHashOf(parsed)
+	writeJsonAtomic(map, { schemaVersion: 1, format, artifact: resolve(flags.out), artifact_sha256: artifact, brief_sha256: brief, entries })
+	const data = { out: resolve(flags.out), map, artifact_sha256: artifact, brief_sha256: brief, occurrences: entries.length, warnings }
 	return { json: { command: "fact fill", status: "pass", exitCode: 0, defects: [], data }, summary: `fact fill: wrote ${flags.out} (${entries.length} pointer(s))`, exitCode: 0 }
 }

@@ -3,19 +3,22 @@
 // lockedBrief is the gate the six reader-facing stages (fact fill, verify, pairs, meaning-check,
 // polish-apply, polish-diff) run before reading or writing anything: an unlocked brief returns
 // one fidelity_interview_incomplete defect (exit 1), a malformed block is a usage error (exit 2).
-// fillPolicy reads the fields fact fill consumes, and policyErrors refuses a placeholder whose row
-// the brief forbids: derived_not_allowed (`derived numbers: none` against a derived, converted, or
-// assumed row) and source_outside_floor (the source floor is evaluated live against each source's
-// meta.json at every fill; a row's outside_floor is only the cached result). Collection stages
-// never call this module. node: builtins and sibling imports only.
+// fillPolicy reads the fields fact fill consumes (a value off its table is a usage error, exit 2),
+// and policyErrors refuses a placeholder whose row the brief forbids: derived_not_allowed
+// (`derived numbers: none` against a derived, converted, or assumed row) and source_outside_floor
+// (the source floor is evaluated live against each source's meta.json at every fill and verify;
+// under any floor but `standard` a row resting on no source is refused too; a row's outside_floor
+// is only the cached result). briefHashOf binds the locked block into the fill map, and
+// briefBindingErrors refuses an edition whose map was filled under another brief (brief_changed).
+// Collection stages never call this module. node: builtins and sibling imports only.
 
 import { existsSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
-import { CliError } from "./cli-support.mjs"
+import { CliError, sha256Of } from "./cli-support.mjs"
 import { DEFECT_CODES } from "./contracts.mjs"
 import { KIND_RULES } from "./fact-ledger-kinds.mjs"
-import { meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
+import { FIDELITY_FIELDS, meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
 
 export { meaningCheckEnabled }
 
@@ -28,12 +31,27 @@ for (const kind of DERIVED_KINDS) {
 	if (!Object.hasOwn(KIND_RULES, kind)) throw new Error(`fidelity-policy: ${kind} is not a KIND_RULES kind`)
 }
 
+/** Fields whose only legal values are a closed table: value (any case) -> its reading. */
+const VALUE_TABLES = Object.freeze({
+	"derived numbers": Object.freeze({ allowed: false, none: true }),
+	fallback: Object.freeze({ "block-quote": "quote", omit: "omit" }),
+})
+
+/** The reading of a table value; any other text is a usage error naming the field and the value. */
+function tableValue(field, value) {
+	const table = VALUE_TABLES[field]
+	const key = value.trim().toLowerCase()
+	if (Object.hasOwn(table, key)) return table[key]
+	throw new CliError(`${field} "${value}" is not ${Object.keys(table).join(", ")}`)
+}
+
 /** How each field value the fill stages consume is read; the single owner of those readings. */
 export const FIDELITY_VALUE_RULES = Object.freeze({
+	tables: VALUE_TABLES,
 	derivedKinds: DERIVED_KINDS,
 	derivedRefused: (kind) => DERIVED_KINDS.includes(kind),
-	derivedNone: (value) => /^none$/iu.test(value.trim()),
-	fallback: (value) => (/^omit$/iu.test(value.trim()) ? "omit" : "quote"),
+	derivedNone: (value) => tableValue("derived numbers", value),
+	fallback: (value) => tableValue("fallback", value),
 	translations: (value) => /with translation beside/iu.test(value),
 	meaningCheck: (value) => meaningCheckEnabled({ fields: { "meaning check": value } }),
 })
@@ -106,12 +124,24 @@ export function fillPolicy(parsed) {
 	}
 }
 
-/** Source ids behind a row: its own, or for a derived row its operands' sources. */
+/** Source ids behind a row: its own, or for a derived row its operands' sources; null marks a leaf with no source. */
 function sourcesOf(row, rows, seen = new Set()) {
 	if (seen.has(row.fact_id)) return []
 	seen.add(row.fact_id)
 	if (row.source_id) return [row.source_id]
-	return [...row.operands, ...row.derived_from].flatMap((id) => (rows.has(id) ? sourcesOf(rows.get(id), rows, seen) : []))
+	const inputs = [...(row.operands ?? []), ...(row.derived_from ?? [])]
+	if (inputs.length === 0) return [null]
+	return inputs.flatMap((id) => (rows.has(id) ? sourcesOf(rows.get(id), rows, seen) : [null]))
+}
+
+/** sha256 of the locked `## Fidelity` block normalized: the seven fields in FIDELITY_FIELDS order, `field: value` per line. */
+export const briefHashOf = (parsed) => sha256Of(FIDELITY_FIELDS.map((field) => `${field}: ${parsed.fields[field]}`).join("\n"))
+
+/** brief_changed when a fill map was not written under the current brief (or predates the binding). */
+export function briefBindingErrors(map, mapPath, parsed) {
+	if (map.brief_sha256 === briefHashOf(parsed)) return []
+	const why = typeof map.brief_sha256 === "string" ? "was filled under a different ## Fidelity block" : "records no brief_sha256"
+	return [{ code: "brief_changed", token: null, line: null, message: `${mapPath} ${why}; re-run fact fill under the current brief`, severity: DEFECT_CODES.brief_changed.severity, integrity: DEFECT_CODES.brief_changed.integrity, hint: DEFECT_CODES.brief_changed.hint }]
 }
 
 function metaOf(sessionDir, sourceId, cache) {
@@ -125,8 +155,9 @@ function metaOf(sessionDir, sourceId, cache) {
 const defect = (code, pointer, text, message) => ({ code, token: pointer.token, line: lineOf(text, pointer.start), message, severity: DEFECT_CODES[code].severity, hint: DEFECT_CODES[code].hint })
 
 /**
- * Refusals for the placeholders of one fill source. Sets each referenced sourced row's
- * outside_floor to this evaluation and reports whether any cached value changed.
+ * Refusals for the placeholders of one fill source (or the data-fact elements of one edition at
+ * verify). Sets each referenced row's outside_floor to this evaluation and reports whether any
+ * cached value changed.
  * @param {{ token: string, start: number, parsed: { id?: string } }[]} found findPlaceholders output
  * @returns {{ errors: object[], cacheChanged: boolean }}
  */
@@ -142,11 +173,11 @@ export function policyErrors(text, found, ledger, sessionDir, policy) {
 			errors.push(defect("derived_not_allowed", pointer, text, `${row.fact_id} is ${row.kind}; the brief records derived numbers: none`))
 		}
 		const sources = sourcesOf(row, rows)
-		if (sources.length === 0) continue
-		const outside = policy.floor === null ? [] : sources.filter((id) => !sourceInsideFloor(policy.floor, id, metaOf(sessionDir, id, metas)))
+		const outside = policy.floor === null ? [] : [...new Set(sources.filter((id) => id === null || !sourceInsideFloor(policy.floor, id, metaOf(sessionDir, id, metas))))]
 		if (row.outside_floor !== outside.length > 0) cacheChanged = true
 		row.outside_floor = outside.length > 0
-		if (outside.length > 0) errors.push(defect("source_outside_floor", pointer, text, `${row.fact_id} rests on ${outside.join(", ")}, outside the source floor`))
+		const named = outside.map((id) => id ?? "no source").join(", ")
+		if (outside.length > 0) errors.push(defect("source_outside_floor", pointer, text, `${row.fact_id} rests on ${named}, outside the source floor`))
 	}
 	return { errors, cacheChanged }
 }

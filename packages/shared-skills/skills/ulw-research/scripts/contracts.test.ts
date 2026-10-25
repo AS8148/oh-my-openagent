@@ -67,6 +67,7 @@ const FIDELITY_BLOCKERS = [
 	"fidelity_interview_incomplete",
 	"derived_not_allowed",
 	"source_outside_floor",
+	"brief_changed",
 	"snapshot_hash_mismatch",
 	"chart_value_untraceable",
 	"quote_unbound",

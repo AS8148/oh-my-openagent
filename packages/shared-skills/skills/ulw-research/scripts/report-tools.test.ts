@@ -914,3 +914,85 @@ describe("fidelity brief lock and policy under node", () => {
 		expect(existsSync(join(dir, "fidelity-calibration.jsonl"))).toBe(false)
 	})
 })
+
+describe("fidelity brief values, sourceless rows, and the brief binding under node", () => {
+	test("#given derived numbers or fallback off its table #when fact fill runs #then a usage error names the field and value and nothing is written", () => {
+		// given
+		const { dir, s } = fidelitySession()
+		const twice = nodeJson(["fact", "derive", "--op", "expr", "F1 * 2", "--unit", "m", "--rationale", "two spans", "--label", "two_spans", "--json", ...s]).json.data.row.fact_id
+		// when
+		setField(dir, "derived numbers", "nope")
+		const derived = fillTemplate(dir, `<p>Two spans are {{${twice}:two_spans}} [S4].</p>`)
+		setField(dir, "derived numbers", "allowed")
+		setField(dir, "fallback", "drop")
+		const fallback = fillTemplate(dir, "<p>The span length is {{F1:span_len}} [S4].</p>")
+		// then
+		expect({ code: derived.code, named: derived.stderr.includes('derived numbers "nope"') }).toEqual({ code: 2, named: true })
+		expect({ code: fallback.code, named: fallback.stderr.includes('fallback "drop"') }).toEqual({ code: 2, named: true })
+		expect(existsSync(join(dir, "t.html"))).toBe(false)
+	})
+
+	test("#given an assumed row #when filled under primary only, then standard #then the sourceless row is source_outside_floor, then renders", () => {
+		// given
+		const { dir, s } = fidelitySession()
+		const assumed = nodeJson(["fact", "add", "--assumed", "12", "--unit", "%", "--rationale", "planning share chosen by the requester", "--label", "share_assumed", "--json", ...s]).json.data.row.fact_id
+		const body = `<p>The planning share is {{${assumed}:share_assumed}}.</p>`
+		// when
+		setField(dir, "source floor", "primary only")
+		const refused = fillTemplate(dir, body)
+		setField(dir, "source floor", "standard")
+		const rendered = fillTemplate(dir, body)
+		// then
+		expect([refused.code, codesOf(refused.json)]).toEqual([1, ["source_outside_floor"]])
+		expect(JSON.stringify(refused.json)).toContain("no source")
+		expect(rendered.code).toBe(0)
+	})
+
+	test("#given a derived row whose operand rests on a secondary source #when filled under primary only #then source_outside_floor names that source", () => {
+		// given
+		const { dir, s } = fidelitySession()
+		const { row } = textSource(dir, "S7", "secondary")
+		const twice = nodeJson(["fact", "derive", "--op", "expr", `${row.fact_id} * 2`, "--unit", "m", "--rationale", "two spans", "--label", "two_spans", "--json", ...s]).json.data.row.fact_id
+		setField(dir, "source floor", "primary only")
+		// when
+		const refused = fillTemplate(dir, `<p>Two spans are {{${twice}:two_spans}} [S7].</p>`)
+		// then
+		expect([refused.code, codesOf(refused.json)]).toEqual([1, ["source_outside_floor"]])
+		expect(JSON.stringify(refused.json)).toContain("rests on S7")
+	})
+
+	test("#given an edition filled under standard from a secondary source #when the brief tightens to primary only #then fact verify refuses with and without its fill map", () => {
+		// given
+		const { dir, s } = fidelitySession()
+		const { row } = textSource(dir, "S7", "secondary")
+		const src = readFileSync(join(dir, "report.src.html"), "utf8")
+			.replace("<h2>How", `<p>A review gives the span as {{${row.fact_id}:${row.label}}} [S7].</p>\n<h2>How`)
+			.replace("</ol>", '<li id="s7">[S7] Bridge review, retrieved 2026-10-01.</li></ol>')
+		writeFileSync(join(dir, "report.src.html"), src)
+		const filled = nodeJson(["fact", "fill", join(dir, "report.src.html"), "--out", join(dir, "report.html"), ...s])
+		const map = join(dir, "report.html.fill-map.json")
+		const before = verify(dir, "report.html")
+		// when
+		setField(dir, "source floor", "primary only")
+		const bound = verify(dir, "report.html")
+		const record = JSON.parse(readFileSync(join(dir, "fidelity-defects.json"), "utf8"))
+		const kept = readFileSync(map, "utf8")
+		rmSync(map)
+		const unbound = verify(dir, "report.html")
+		setField(dir, "source floor", "standard")
+		const { brief_sha256: _dropped, ...legacy } = JSON.parse(kept)
+		writeFileSync(map, JSON.stringify(legacy))
+		const unstamped = verify(dir, "report.html")
+		// then
+		expect([filled.code, before.code, codesOf(before.json)]).toEqual([0, 0, []])
+		expect(typeof JSON.parse(kept).brief_sha256).toBe("string")
+		expect(bound.code).toBe(1)
+		expect(codesOf(bound.json)).toContain("brief_changed")
+		expect(codesOf(bound.json)).toContain("source_outside_floor")
+		expect(record.status).toBe("fail")
+		expect(unbound.code).toBe(1)
+		expect(codesOf(unbound.json)).toContain("source_outside_floor")
+		expect(codesOf(unbound.json)).not.toContain("brief_changed")
+		expect([unstamped.code, codesOf(unstamped.json)]).toEqual([1, ["brief_changed"]])
+	})
+})
