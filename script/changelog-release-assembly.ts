@@ -10,6 +10,8 @@ import { assembleUnreleasedBody } from "./changelog-gate-rules.ts"
 import { blocksOf, linkEntry, scanFences } from "./changelog-notes-markdown.ts"
 
 const PULL_URL = "https://github.com/code-yeongyu/oh-my-openagent/pull"
+const OWN_PULL_LINK = new RegExp(`${PULL_URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}/(\\d+)\\)`, "g")
+const FENCE_LINE = /^(`{3,}|~{3,})/
 const SECTION = /^### (.+?)\s*$/
 
 export type Notes = { readonly paragraphs: string; readonly sections: ReadonlyMap<string, readonly string[]> }
@@ -34,6 +36,7 @@ export function parseNotes(text: string): Notes {
     } else if (fenced || line.trim() !== "") {
       const last = current.pop()
       const blankInFence = fenced && line.trim() === ""
+      if (last !== undefined && fenced && FENCE_LINE.test(line)) throw new Error(`a code fence under a ### bullet must start at the bullet's text: indent the fence and its code by two spaces: ${line}`)
       if (last === undefined || (!blankInFence && !/^\s/.test(line))) throw new Error(`text under a ### heading must be a "- " bullet or an indented continuation of one: ${line}`)
       current.push(`${last}\n${line}`)
     }
@@ -75,7 +78,7 @@ export type Assembly = { readonly body: string; readonly duplicates: readonly nu
  * and reported in `duplicates`, never released twice.
  */
 export function assembleRelease(legacy: string, fragments: readonly { readonly pr: number; readonly content: string }[]): Assembly {
-  const covered = new Set([...legacy.matchAll(/\/pull\/(\d+)\)/g)].map((match) => Number(match[1])))
+  const covered = new Set([...legacy.matchAll(OWN_PULL_LINK)].map((match) => Number(match[1])))
   const duplicates = fragments.filter((fragment) => covered.has(fragment.pr)).map((fragment) => fragment.pr)
   const kept = [...fragments].filter((fragment) => !covered.has(fragment.pr)).sort((left, right) => right.pr - left.pr)
   const old = parseNotes(legacy)

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { assembleRelease } from "./changelog-release-assembly.ts"
+import { scanFences } from "./changelog-notes-markdown.ts"
 import { checkPackageLogs } from "./package-log-gate.ts"
 
 // Release contract (#10477 review rounds 2-3): every entry names the PR that made it unless it already links that
@@ -43,5 +44,42 @@ describe("code fences", () => {
     const verdict = checkPackageLogs({ ...input, fragment: `**Thing.** Use it:\n\n${FENCE3}sh\nfoo\n\n**Later.** prose\n` })
     expect(verdict.pass).toBe(false)
     expect(verdict.reason).toContain("never closed")
+  })
+
+  test("a line indented four or more spaces is an indented code line, not a fence", () => {
+    expect(() => scanFences(`    ${FENCE3}\ncode`)).not.toThrow()
+    expect(scanFences(`    ${FENCE3}\ncode`).map((line) => line.fenced)).toEqual([false, false])
+  })
+
+  test("a nested bullet's fence is measured from its own item, so it stays a fence", () => {
+    const content = `### Fixed\n\n- Outer:\n  - Inner:\n    ${FENCE3}sh\n    a\n\n    b\n    ${FENCE3}\n`
+    expect(release(content)).toBe(`### Fixed\n\n- Outer:\n  - Inner: ${link(50)}\n    ${FENCE3}sh\n    a\n\n    b\n    ${FENCE3}`)
+  })
+
+  test("the entry's own link inside a code block does not count as its link", () => {
+    const content = `**X.** see:\n${FENCE3}\n(${PULL}/50)\n${FENCE3}\n`
+    expect(release(content)).toBe(`**X.** see: ${link(50)}\n${FENCE3}\n(${PULL}/50)\n${FENCE3}`)
+  })
+
+  test("a fence at column 0 under a bullet is refused with a message that says to indent it", () => {
+    const input = { addedFiles: [], modifiedFiles: [], deletedFiles: [], isRelease: false, existsAtHead: () => true }
+    const verdict = checkPackageLogs({ ...input, fragment: `### Fixed\n\n- Run this:\n${FENCE3}sh\na\n${FENCE3}\n` })
+    expect(verdict.pass).toBe(false)
+    expect(verdict.reason).toContain("indent the fence")
+  })
+})
+
+describe("legacy duplicates", () => {
+  test("another repository's PR link in the legacy text does not consume our fragment", () => {
+    const legacy = "- Bump ([senpi#123](https://github.com/code-yeongyu/senpi/pull/123))."
+    const result = assembleRelease(legacy, [{ pr: 123, content: "**X.** y\n" }])
+    expect(result.duplicates).toEqual([])
+    expect(result.body).toContain(`**X.** y ${link(123)}`)
+  })
+
+  test("our own PR link in the legacy text still consumes the fragment", () => {
+    const result = assembleRelease(`**X.** y ${link(123)}`, [{ pr: 123, content: "**X.** y\n" }])
+    expect(result.duplicates).toEqual([123])
+    expect(result.body).toBe(`**X.** y ${link(123)}`)
   })
 })

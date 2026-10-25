@@ -2,30 +2,41 @@
  * The one Markdown reading the changelog release uses (#10477 review rounds 2-3): which lines sit inside a code
  * fence, and where an entry's PR link goes. Fences follow CommonMark: a fence opens with three or more ` or ~,
  * and only a line of the same character, at least as long, with nothing after it, closes it. An unclosed fence is
- * an error, so the PR check refuses it before the fragment becomes immutable.
+ * an error, so the PR check refuses it before the fragment becomes immutable. A fence may be indented at most three
+ * spaces past the text column of the list item it sits in (column 0 outside a list); deeper is an indented code line.
  */
 
-const OPEN = /^ {0,3}(`{3,}|~{3,})/
+const OPEN = /^(`{3,}|~{3,})/
+const BULLET = /^( *)- /
 
 export type ScannedLine = { readonly text: string; readonly fenced: boolean }
+
+/** Leading whitespace width, a tab counting as four columns. */
+const indentOf = (line: string): number => [...(/^[ \t]*/.exec(line)?.[0] ?? "")].reduce((width, char) => width + (char === "\t" ? 4 : 1), 0)
 
 /** Every line with whether it belongs to a fenced block (the fence lines themselves included). */
 export function scanFences(text: string): ScannedLine[] {
   const lines: ScannedLine[] = []
-  let open: string | null = null
+  let open: { readonly marker: string; readonly base: number } | null = null
+  let item = 0
   for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
     const stripped = line.replace(/^\s*/, "")
+    const indent = indentOf(line)
     if (open === null) {
-      const marker = OPEN.exec(stripped)?.[1]
-      if (marker !== undefined && !(marker[0] === "`" && stripped.slice(marker.length).includes("`"))) open = marker
-      lines.push({ text: line, fenced: marker !== undefined && open !== null })
+      const bullet = BULLET.exec(line)
+      if (bullet !== null) item = (bullet[1]?.length ?? 0) + 2
+      else if (stripped !== "" && indent < item) item = 0
+      const candidate = bullet === null && indent - item <= 3 ? OPEN.exec(stripped)?.[1] : undefined
+      const marker = candidate !== undefined && !(candidate[0] === "`" && stripped.slice(candidate.length).includes("`")) ? candidate : undefined
+      if (marker !== undefined) open = { marker, base: item }
+      lines.push({ text: line, fenced: marker !== undefined })
     } else {
       lines.push({ text: line, fenced: true })
-      const close = new RegExp(`^\\${open[0]}{${open.length},}\\s*$`)
-      if (close.test(stripped)) open = null
+      const close = new RegExp(`^\\${open.marker[0]}{${open.marker.length},}\\s*$`)
+      if (indent - open.base <= 3 && close.test(stripped)) open = null
     }
   }
-  if (open !== null) throw new Error(`a code fence (${open}) is never closed`)
+  if (open !== null) throw new Error(`a code fence (${open.marker}) is never closed`)
   return lines
 }
 
@@ -52,8 +63,8 @@ export function blocksOf(text: string): string[] {
  * so code is never touched; an entry that is all code stays as written.
  */
 export function linkEntry(entry: string, pr: number, pullUrl: string): string {
-  if (entry.includes(`${pullUrl}/${pr})`)) return entry
   const lines = scanFences(entry)
+  if (lines.some((line) => !line.fenced && line.text.includes(`${pullUrl}/${pr})`))) return entry
   const last = lines.findLastIndex((line) => !line.fenced && line.text.trim() !== "")
   if (last === -1) return entry
   return lines.map((line, index) => (index === last ? `${line.text.trimEnd()} ([#${pr}](${pullUrl}/${pr}))` : line.text)).join("\n")
