@@ -5,6 +5,44 @@ import type { ComponentLogger, SettleObserver } from "./types"
 
 afterEach(() => jest.useRealTimers())
 
+test.each(["observer", "unrelated"] as const)("#given concurrent settles sharing work (%s) #when it rejects #then only a known observer cancellation is absorbed", async (kind) => {
+  const pi = new FakeExtensionAPI()
+  const entered = Promise.withResolvers<SettleObserver | undefined>()
+  const joined = Promise.withResolvers<SettleObserver | undefined>()
+  const shared = Promise.withResolvers<void>()
+  const failure = new DOMException("independent timeout", "TimeoutError")
+  let calls = 0
+  await composeOmoSenpiExtension([{
+    name: "fixture",
+    register(api) {
+      api.on("agent_settled", (_payload, _ctx, observer) => {
+        if (calls++ === 0) {
+          observer?.signal.addEventListener("abort", () => shared.reject(observer.signal.reason), { once: true })
+          entered.resolve(observer)
+        } else joined.resolve(observer)
+        return shared.promise
+      })
+    },
+  }], { logger: { info() {}, warn() {}, error() {} } })(pi)
+  jest.useFakeTimers()
+  const first = pi.dispatch("agent_settled", {}, { sessionManager: { getSessionId: () => "session" } }).catch((error: unknown) => error)
+  await entered.promise
+  jest.advanceTimersByTime(1_000)
+  const second = pi.dispatch("agent_settled", {}, { sessionManager: { getSessionId: () => "session" } }).catch((error: unknown) => error)
+  const joiner = await joined.promise
+  try {
+    if (kind === "observer") jest.advanceTimersByTime(1_000)
+    else shared.reject(failure)
+    const results = await Promise.all([first, second])
+    expect(joiner?.signal.aborted).toBe(false)
+    if (kind === "observer") expect(results.every((result) => !(result instanceof Error))).toBe(true)
+    else expect(results).toEqual([failure, failure])
+  } finally {
+    shared.resolve()
+    await pi.dispatch("session_shutdown", {})
+  }
+})
+
 test("#given a named subscriber that never resolves #when its budget expires #then observation aborts and the next subscriber executes", async () => {
   const pi = new FakeExtensionAPI()
   const entered = Promise.withResolvers<SettleObserver | undefined>()

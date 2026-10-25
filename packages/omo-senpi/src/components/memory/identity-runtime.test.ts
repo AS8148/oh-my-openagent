@@ -17,7 +17,7 @@ const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
 
 describe("memory identity runtime", () => {
-  test("#given overlapping identity observers #when the owning observer cancels #then one pass stops and a later pass retries", async () => {
+  test.each(["manual", "different", "aborted", "shared", "success", "failure"] as const)("#given overlapping identity observers (%s) #when the owner settles #then cancellation belongs to each caller", async (kind) => {
     const root = await mkdtemp(join(tmpdir(), "omo-reconcile-flight-"))
     roots.push(root)
     const identity = createMemoryIdentityContext({
@@ -29,23 +29,30 @@ describe("memory identity runtime", () => {
       resolveModelRegistry: () => undefined,
     })
     const state = await runtime.store.readState()
+    const readState = runtime.store.readState.bind(runtime.store)
     const entered = Promise.withResolvers<void>()
     const release = Promise.withResolvers<typeof state>()
-    const probe = spyOn(runtime.store, "readState").mockImplementation(() => {
+    const probe = spyOn(runtime.store, "readState").mockImplementationOnce(() => {
       entered.resolve()
       return release.promise
-    })
+    }).mockImplementation(readState)
     const controller = new AbortController()
-    const reason = new Error("first observer retired")
+    const joiner = new AbortController()
+    const reason = new DOMException("Settle observer budget exhausted", "TimeoutError")
+    const ownReason = new Error("joining observer retired")
+    const failure = new Error("reservation read failed")
     const first = runtime.reconcile(controller.signal).catch((error: unknown) => error)
-    const second = runtime.reconcile().catch((error: unknown) => error)
+    const second = runtime.reconcile(kind === "manual" ? undefined : kind === "shared" ? controller.signal : joiner.signal).catch((error: unknown) => error)
     try {
       await entered.promise
       expect(probe).toHaveBeenCalledTimes(1)
-      controller.abort(reason)
-      release.resolve(state)
-      expect(await first).toBe(reason)
-      expect(await second).toBe(reason)
+      if (kind === "aborted") joiner.abort(ownReason)
+      if (kind !== "success") controller.abort(reason)
+      if (kind === "failure") release.reject(failure)
+      else release.resolve(state)
+      expect(await first).toBe(kind === "success" ? undefined : kind === "failure" ? failure : reason)
+      expect(await second).toBe(kind === "shared" ? reason : kind === "aborted" ? ownReason : kind === "failure" ? failure : undefined)
+      expect(probe).toHaveBeenCalledTimes(kind === "manual" || kind === "different" ? 3 : kind === "success" ? 2 : 1)
       probe.mockRestore()
       await runtime.reconcile()
     } finally {
@@ -505,4 +512,3 @@ describe("memory identity runtime binds every launch to its own run (#10339)", (
     expect(seen).toEqual([{ conversationIds: ["conversation-a"] }])
   }, 30_000)
 })
-

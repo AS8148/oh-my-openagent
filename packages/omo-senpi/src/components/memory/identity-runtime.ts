@@ -168,7 +168,7 @@ export function createIdentityRuntime(
     return tracked
   }
 
-  let reconciliation: Promise<void> | undefined
+  let reconciliation: { readonly promise: Promise<void>; readonly signal: AbortSignal | undefined } | undefined
   const runtime: MemoryIdentityRuntime = {
     identity,
     store,
@@ -179,17 +179,29 @@ export function createIdentityRuntime(
       while (inFlight.size > 0) await Promise.all([...inFlight])
     },
     async reconcile(signal?: AbortSignal): Promise<void> {
-      signal?.throwIfAborted()
       // One identity-wide pass, including any already-admitted durable transition. Its first
-      // observer owns cancellation; joiners retry on the next settle if that observer retires.
+      // observer owns cancellation; an independent caller retries a foreign abort once.
       // Never clear the flight on timeout alone: a committed transition may still be finishing.
-      reconciliation ??= reconcileReflectionRuns({
-        identity: asMemoryIdentity(identity), reservation: store, launch,
-        deferOnSchedulerContention: true,
-        ...(signal === undefined ? {} : { signal }),
-      }).then(() => undefined).finally(() => { reconciliation = undefined })
-      await reconciliation
-      signal?.throwIfAborted()
+      for (let attempt = 0; ; attempt += 1) {
+        signal?.throwIfAborted()
+        const flight = reconciliation ??= {
+          signal,
+          promise: reconcileReflectionRuns({
+            identity: asMemoryIdentity(identity), reservation: store, launch,
+            deferOnSchedulerContention: true,
+            ...(signal === undefined ? {} : { signal }),
+          }).then(() => undefined).finally(() => { reconciliation = undefined }),
+        }
+        try {
+          await flight.promise
+        } catch (error) {
+          if (signal !== flight.signal) signal?.throwIfAborted()
+          if (attempt !== 0 || flight.signal === signal || !flight.signal?.aborted || error !== flight.signal.reason) throw error
+          continue
+        }
+        signal?.throwIfAborted()
+        return
+      }
     },
   }
   return runtime

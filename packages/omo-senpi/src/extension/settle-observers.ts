@@ -12,15 +12,19 @@ const SETTLE_OBSERVER_BUDGET_MS = 2_000
  */
 export function createSettleObservers(pi: SenpiExtensionAPI, logger: ComponentLogger) {
   const pending = new Map<AbortController, string | undefined>()
+  const cancellations = new WeakSet<DOMException>()
   const retire: Handler = (_event, ctx) => {
     const sessionId = readSessionId(ctx)
     for (const [controller, owner] of pending) {
       if (sessionId === undefined || owner === sessionId) {
-        controller.abort(new DOMException("Settle observer retired", "AbortError"))
+        const reason = new DOMException("Settle observer retired", "AbortError")
+        cancellations.add(reason)
+        controller.abort(reason)
       }
     }
   }
   pi.on("session_shutdown", retire)
+  // On A -> B switches, senpi sends session_shutdown on A before starting B.
   pi.on("session_start", retire)
 
   return {
@@ -48,10 +52,13 @@ export function createSettleObservers(pi: SenpiExtensionAPI, logger: ComponentLo
             component, hook, handlerEvent: "agent_settled", stage: "timeout",
             durationMs: Date.now() - started, sessionId,
           })
-          controller.abort(new DOMException("Settle observer budget exhausted", "TimeoutError"))
+          const reason = new DOMException("Settle observer budget exhausted", "TimeoutError")
+          cancellations.add(reason)
+          controller.abort(reason)
         }, SETTLE_OBSERVER_BUDGET_MS)
+        timer.unref()
         const work = Promise.resolve().then(() => handler(payload, ctx, observer)).catch((error: unknown) => {
-          if (!signal.aborted) throw error
+          if (!signal.aborted && !(error instanceof DOMException && cancellations.has(error))) throw error
           return undefined
         })
         try {
