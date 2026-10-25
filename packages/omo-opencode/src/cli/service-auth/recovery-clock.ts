@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import { loadBunFfi } from "../../shared/bun-ffi-shim"
 
 export interface RecoveryClockReading {
   readonly wallTimeMs: number
@@ -24,7 +25,7 @@ export const readRecoveryClock: RecoveryClock = async () => {
         return { wallTimeMs: Date.now(), continuousTimeMs, bootId }
       }
       case "darwin": {
-        const { dlopen } = await import("bun:ffi")
+        const { dlopen } = await loadBunFfi()
         const library = dlopen("/usr/lib/libSystem.B.dylib", {
           mach_continuous_time: { args: [], returns: "u64" },
           mach_timebase_info: { args: ["buffer"], returns: "int" },
@@ -48,7 +49,7 @@ export const readRecoveryClock: RecoveryClock = async () => {
         }
       }
       case "win32": {
-        const { dlopen } = await import("bun:ffi")
+        const { dlopen } = await loadBunFfi()
         const kernel = dlopen("kernel32.dll", { GetTickCount64: { args: [], returns: "u64" } })
         try {
           const ntdll = dlopen("ntdll.dll", {
