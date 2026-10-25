@@ -995,6 +995,7 @@
     "packages/omo-senpi/src/components/memory/sync-config-error.ts",
     "packages/omo-senpi/src/components/memory/sync-runner.ts",
     "packages/omo-senpi/src/components/memory/sync-runtime.ts",
+    "packages/omo-senpi/src/components/memory/sync-session-deferred.ts",
     "packages/omo-senpi/src/components/memory/sync-status-surface.ts",
     "packages/omo-senpi/src/components/memory/tool-metadata.ts",
     "packages/omo-senpi/src/components/memory/tools.ts",
