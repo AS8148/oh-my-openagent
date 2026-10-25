@@ -24,7 +24,7 @@ function resolveValue(row, parsed, format) {
 	const { valueText, unitText } = valueParts(row)
 	const text = { full: row.raw, value: valueText, unit: unitText, q: qualifiedText(row) }[parsed.mode]
 	if (text === null) return { code: "quote_anchor_unresolved", message: `${row.fact_id} has qualifier ${row.qualifier}, but its quote holds no qualifier beside "${row.raw}"` }
-	return { row, parsed, visible: text, rendered: format === "html" ? renderValueHtml(row, text) : text }
+	return { row, parsed, visible: text, rendered: format === "html" ? renderValueHtml(row, text, parsed.mode) : text }
 }
 
 function resolveQuote(row, parsed, format) {
@@ -147,6 +147,7 @@ function assemble(text, parts, context) {
 		const start = context.out.length
 		if (part.parsed) {
 			const extra = part.selector === undefined ? {} : { selector: part.selector, quote_span: part.quote_span }
+			if (part.parsed.mode === "value") extra.mode = "value"
 			context.fillMap.push({ token: part.token, fact_id: part.row.fact_id, start, end: start + part.rendered.length, rendered: part.rendered, ...extra })
 		} else if (part.rendered !== "") {
 			context.fillMap.push({ token: null, fact_id: part.source.fact_id, replaced: part.key, start, end: start + part.rendered.length, rendered: part.rendered })

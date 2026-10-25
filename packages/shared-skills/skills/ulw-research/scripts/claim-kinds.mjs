@@ -50,9 +50,10 @@ export const CLAIM_KINDS = Object.freeze({
 		note: "The cited row itself must have a locator artifact inside `sources/<source_id>/` whose `meta.json` kind is `command`; another command row in the sentence never counts. Whether it is the right command for the claim is the meaning verifier's call (minor), not this gate's.",
 		unmarked: {
 			code: "verification_claim_unmarked",
-			rule: "a first-person run: we/I (have) ran, run, executed, verified by (not ran out of); by running after we/our in the sentence; \\uC6B0\\uB9AC or \\uC800\\uD76C as the subject word (+ \\uAC00, \\uB294, or \\uD300\\uC774), then \\uC2E4\\uD589\\uD588, \\uC2E4\\uD589\\uD558\\uC5EC, \\uC2E4\\uD589\\uD574, \\uB3CC\\uB838, or \\uB3CC\\uB824 in the clause with no third-party subject between; \\uC9C1\\uC811 with no third-party subject, then \\uC2E4\\uD589 or \\uB3CC\\uB9AC in the clause",
+			rule: "a first-person check: we/I (have) ran, run, executed, verified by, confirmed, validated, checked, observed, or measured as verbs (not ran out of or checked in/out); by running after we/our in the sentence; \\uC6B0\\uB9AC or \\uC800\\uD76C as the subject word (+ \\uAC00, \\uB294, or \\uD300\\uC774), then \\uC2E4\\uD589\\uD588, \\uC2E4\\uD589\\uD558\\uC5EC, \\uC2E4\\uD589\\uD574, \\uB3CC\\uB838, or \\uB3CC\\uB824 in the clause with no third-party subject between; \\uC9C1\\uC811 with no third-party subject, then \\uC2E4\\uD589 or \\uB3CC\\uB9AC in the clause",
 			patterns: [
 				/\b(?:we|I)(?:'ve)?\s+(?:(?:have|had|also|then|first|just|again)\s+)*(?:ran|run|re-?ran|re-?run|executed|verified\s+by)\b(?!\s+out\s+of\b)/i,
+				/\b(?:we|I)(?:'ve)?\s+(?:(?:have|had|also|then|first|just|again)\s+)*(?:confirmed|validated|checked(?!\s+(?:in|out)\b)|observed|measured)\b/i,
 				/\b(?:we|our)\b.*?\bby\s+running\b/i,
 				new RegExp(`${KO_WE_SUBJECT}(?:(?!${KO_SUBJECT})[^\\s,.;!?]+\\s+)*?${KO_WE_RUN}`),
 				new RegExp(`(?:^|[,.;!?])\\s*(?:(?!${KO_SUBJECT})[^\\s,.;!?]+\\s+)*\uC9C1\uC811\\s*(?:[^\\s,.;!?]+\\s*)??${KO_RUN}`),

@@ -156,9 +156,10 @@ export function escapeHtml(text) {
 /** The elements the renderers below emit as fact spans; recognizers build their patterns from this. */
 export const FACT_ELEMENT_TAGS = Object.freeze(["data", "q", "blockquote"])
 
-export function renderValueHtml(row, text) {
+export function renderValueHtml(row, text, mode = "full") {
 	const unit = row.unit === null ? "" : ` data-unit="${escapeHtml(row.unit)}"`
-	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
+	const marker = mode === "value" ? ' data-fact-mode="value"' : ""
+	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit}${marker} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
 }
 
 export function renderQuote(row, selector, text, format) {

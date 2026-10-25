@@ -13,6 +13,7 @@ import { sha256Of } from "./cli-support.mjs"
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
+import { valueUnitProblem } from "./fidelity-value-unit.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
 import { parseNumeral } from "./numerals.mjs"
 import { div, fromDecimal, sub } from "./rational.mjs"
@@ -157,7 +158,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 	}
 	for (const node of ctx.all.filter((cur) => cur.attrs["data-fact"] !== undefined)) {
 		const selector = node.attrs["data-quote-sel"] ?? "full"
-		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : factProblem(row, proseText(node), node.attrs)))
+		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : factProblem(row, proseText(node), node.attrs) ?? valueUnitProblem(ctx, node, row)))
 	}
 	const docText = bare(proseText(ctx.body))
 	for (const entry of fillMap ?? []) {

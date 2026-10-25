@@ -67,7 +67,7 @@ function entryHtml(text, entry, rows) {
 	if (!row) return `<data data-fact="${escapeHtml(entry.fact_id)}">${escapeHtml(body)}</data>`
 	const quoted = row.kind === "quote" ? parseRenderedQuote(body) : null
 	if (quoted) return renderQuote(row, entry.selector ?? "full", quoted.text, "html")
-	return row.kind === "quote" ? null : renderValueHtml(row, body)
+	return row.kind === "quote" ? null : renderValueHtml(row, body, entry.mode)
 }
 
 /** [from, to) of the filled text as HTML, each intact fill-map entry rebuilt as its fill element. */
