@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**OmO Native stops waiting on a stalled turn-end subscriber after two seconds.** Memory recovery remains retryable without treating the cancelled wait as a failed reflection run, and stall diagnostics identify the component and hook instead of only `omo.js`. Thanks to @floweredao for the report. (Part of [#11249](https://github.com/code-yeongyu/oh-my-openagent/issues/11249))
+**OmO Native stops waiting on a stalled turn-end subscriber after two seconds.** Memory recovery remains retryable without treating the cancelled wait as a failed reflection run, and stall diagnostics identify the component and hook instead of only `omo.js`. Thanks to @floweredao for the report. ([#11254](https://github.com/code-yeongyu/oh-my-openagent/pull/11254), Part of [#11249](https://github.com/code-yeongyu/oh-my-openagent/issues/11249))
 
 ## [5.1.46] - 2026-10-24
 
