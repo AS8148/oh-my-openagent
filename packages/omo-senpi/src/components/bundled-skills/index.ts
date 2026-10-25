@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { readDisabledSkills, readDiscoverCwd } from "./contributed-skill"
+import { resolveBundledSkillsOverride } from "./resolve-bundled-skills-override"
 
 export const BUNDLED_SKILLS_COMPONENT_NAME = "bundled-skills"
 
@@ -32,7 +33,7 @@ export function createBundledSkillsComponent(options: BundledSkillsComponentOpti
     name: BUNDLED_SKILLS_COMPONENT_NAME,
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
       pi.on("resources_discover", (payload: unknown) => {
-        const skillsDir = options.skillsDir ?? resolveBundledSkillsDir()
+        const skillsDir = options.skillsDir ?? resolveBundledSkillsDir(import.meta.url, options.env ?? process.env)
         if (skillsDir === undefined) return undefined
         const disabled = readDisabledSkills(readDiscoverCwd(payload) ?? pi.cwd ?? process.cwd(), options.env ?? process.env)
         const skillPaths: string[] = []
@@ -60,7 +61,12 @@ export function createBundledSkillsComponent(options: BundledSkillsComponentOpti
  * extension at plugin/extensions/omo.js the packaged URL resolves to plugin/skills; from this
  * source file it resolves to the same synced directory.
  */
-export function resolveBundledSkillsDir(importerUrl: string = import.meta.url): string | undefined {
+export function resolveBundledSkillsDir(
+  importerUrl: string = import.meta.url,
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  const override = resolveBundledSkillsOverride(env)
+  if (override !== undefined) return override
   const candidates = [
     fileURLToPath(new URL("../skills", importerUrl)),
     fileURLToPath(new URL("../../../plugin/skills", importerUrl)),

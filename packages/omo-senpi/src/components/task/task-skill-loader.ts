@@ -7,6 +7,7 @@ import { resolveOmoGitMasterSettings, type OmoGitMasterSettings } from "@oh-my-o
 import { buildSkillPrepend, createFsSkillLoader, type SkillLoader } from "@oh-my-opencode/senpi-task"
 
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
+import { resolveBundledSkillsOverride } from "../bundled-skills/resolve-bundled-skills-override"
 import { loadSenpiOmoConfig } from "../config-resolution"
 import { carriesAttributionDirective, resolveGitMasterSkillAdditions } from "../git-master/skill-content"
 
@@ -27,9 +28,13 @@ export interface TaskSkillLoaderOptions {
  */
 export function packagedSkillDirs(moduleUrl: string): readonly string[] {
   const moduleDir = dirname(fileURLToPath(moduleUrl))
-  return [
+  const override = resolveBundledSkillsOverride()
+  const bundled = override === undefined ? [
     resolve(moduleDir, "../../../plugin/skills"),
     resolve(moduleDir, "../skills"),
+  ] : [override]
+  return [
+    ...bundled,
     resolve(moduleDir, "../../../plugin/skills-conditional"),
     resolve(moduleDir, "../skills-conditional"),
   ].filter(existsSync)
