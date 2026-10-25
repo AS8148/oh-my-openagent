@@ -69,6 +69,45 @@ describe("code fences", () => {
   })
 })
 
+// #11253 review round 2: a fence's allowed indent is measured from the text column of the list item it sits in,
+// for every CommonMark list marker; leaving a nested item returns to the parent's column, not to column 0.
+describe("fences inside every kind of list item", () => {
+  const F = FENCE3
+  test.each([
+    ["a - item", `- x\n    ${F}\n    a\n    ${F}`, [false, true, true, true]],
+    ["a * item", `* x\n    ${F}\n    a\n    ${F}`, [false, true, true, true]],
+    ["a + item", `+ x\n    ${F}\n    a\n    ${F}`, [false, true, true, true]],
+    ["a 1. item", `1. x\n    ${F}\n    a\n    ${F}`, [false, true, true, true]],
+    ["a 1) item", `1) x\n    ${F}\n    a\n    ${F}`, [false, true, true, true]],
+    ["a 10. item (text at column 4)", `10. x\n       ${F}\n       a\n       ${F}`, [false, true, true, true]],
+    ["too deep for a 1. item is indented code", `1. x\n        ${F}\n        a`, [false, false, false]],
+    ["a nested * item with a blank line in its fence", `* x\n  * y\n    ${F}\n    a\n\n    ${F}`, [false, false, true, true, true, true]],
+    ["a paragraph back in the outer item uses that item's column", `- a\n  - b\n    - c\n  para in a\n     ${F}\n     z\n     ${F}`, [false, false, false, false, true, true, true]],
+    ["a tab-indented item nested in a - item", `- a\n\t- c\n\t  ${F}\n\t  z\n\t  ${F}`, [false, false, true, true, true]],
+    ["a tab at column 0 is indented code, not a list item", `\t- c\n\t  ${F}`, [false, false]],
+    ["outside any list, four spaces is indented code", `    ${F}\ncode`, [false, false]],
+  ])("%s", (_name, text, fenced) => {
+    expect(scanFences(text).map((line) => line.fenced)).toEqual(fenced)
+  })
+
+  test("an ordered list in the paragraphs keeps its fenced code byte-identical and unlinked", () => {
+    const code = `    ${F}sh\n    a\n\n    b\n    ${F}`
+    const body = release(`Steps:\n\n1. Run:\n${code}\n`)
+    expect(body).toContain(code)
+    expect(body).not.toContain(`${F} ${link(50)}`)
+    expect(body).not.toContain(`a ${link(50)}`)
+  })
+
+  test("a fragment the PR check accepts can always be placed by the release", () => {
+    const content = `### Fixed\n\n* x\n  * y\n    ${F}\n    a\n\n    ${F}\n`
+    const input = { addedFiles: [], modifiedFiles: [], deletedFiles: [], isRelease: false, existsAtHead: () => true }
+    const verdict = checkPackageLogs({ ...input, fragment: content })
+    if (verdict.pass) expect(() => release(content)).not.toThrow()
+    const preamble = `* x\n  * y\n    ${F}\n    a\n\n    ${F}\n`
+    expect(() => release(preamble)).not.toThrow()
+  })
+})
+
 describe("legacy duplicates", () => {
   test("another repository's PR link in the legacy text does not consume our fragment", () => {
     const legacy = "- Bump ([senpi#123](https://github.com/code-yeongyu/senpi/pull/123))."

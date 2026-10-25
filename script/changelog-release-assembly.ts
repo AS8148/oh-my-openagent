@@ -36,7 +36,7 @@ export function parseNotes(text: string): Notes {
     } else if (fenced || line.trim() !== "") {
       const last = current.pop()
       const blankInFence = fenced && line.trim() === ""
-      if (last !== undefined && fenced && FENCE_LINE.test(line)) throw new Error(`a code fence under a ### bullet must start at the bullet's text: indent the fence and its code by two spaces: ${line}`)
+      if (last !== undefined && fenced && FENCE_LINE.test(line)) throw new Error(`a code fence under a ### bullet must start at the bullet's text: indent the fence and its code by two spaces, opening and closing lines alike: ${line}`)
       if (last === undefined || (!blankInFence && !/^\s/.test(line))) throw new Error(`text under a ### heading must be a "- " bullet or an indented continuation of one: ${line}`)
       current.push(`${last}\n${line}`)
     }

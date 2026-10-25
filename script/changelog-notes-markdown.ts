@@ -4,10 +4,12 @@
  * and only a line of the same character, at least as long, with nothing after it, closes it. An unclosed fence is
  * an error, so the PR check refuses it before the fragment becomes immutable. A fence may be indented at most three
  * spaces past the text column of the list item it sits in (column 0 outside a list); deeper is an indented code line.
+ * List items follow CommonMark too: a `-`, `*` or `+` bullet or a `1.` / `1)` number, whose text column is the
+ * marker's column plus its width plus the spaces after it (one when there are more than four or none).
  */
 
 const OPEN = /^(`{3,}|~{3,})/
-const BULLET = /^( *)- /
+const LIST_MARKER = /^([-*+]|\d{1,9}[.)])( +|$)/
 
 export type ScannedLine = { readonly text: string; readonly fenced: boolean }
 
@@ -18,15 +20,20 @@ const indentOf = (line: string): number => [...(/^[ \t]*/.exec(line)?.[0] ?? "")
 export function scanFences(text: string): ScannedLine[] {
   const lines: ScannedLine[] = []
   let open: { readonly marker: string; readonly base: number } | null = null
-  let item = 0
+  // Text columns of the list items the current line can belong to, innermost last.
+  const items: number[] = []
   for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
     const stripped = line.replace(/^\s*/, "")
     const indent = indentOf(line)
     if (open === null) {
-      const bullet = BULLET.exec(line)
-      if (bullet !== null) item = (bullet[1]?.length ?? 0) + 2
-      else if (stripped !== "" && indent < item) item = 0
-      const candidate = bullet === null && indent - item <= 3 ? OPEN.exec(stripped)?.[1] : undefined
+      if (stripped !== "") while ((items.at(-1) ?? 0) > indent) items.pop()
+      const item = items.at(-1) ?? 0
+      const listMarker = indent - item <= 3 ? LIST_MARKER.exec(stripped) : null
+      if (listMarker !== null) {
+        const gap = listMarker[2]?.length ?? 0
+        items.push(indent + (listMarker[1]?.length ?? 0) + (gap >= 1 && gap <= 4 ? gap : 1))
+      }
+      const candidate = listMarker === null && indent - item <= 3 ? OPEN.exec(stripped)?.[1] : undefined
       const marker = candidate !== undefined && !(candidate[0] === "`" && stripped.slice(candidate.length).includes("`")) ? candidate : undefined
       if (marker !== undefined) open = { marker, base: item }
       lines.push({ text: line, fenced: marker !== undefined })
