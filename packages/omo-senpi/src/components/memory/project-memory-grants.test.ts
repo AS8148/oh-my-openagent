@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { join, relative, resolve } from "node:path"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { registerMemoryGuard } from "./guard"
@@ -171,7 +171,20 @@ describe("project memory read grants (#10044)", () => {
     expect(isGrantedProjectMemoryRead(setup.own, ghost)).toBe(false)
   })
 
-  test("#given dot-dot after a link out of a granted repo #when the read is checked #then the verdict is about the path.resolve()d path a built-in read opens", async () => {
+  test("#given a granted repo #when resolution fails for a non-missing reason #then no read is granted", async () => {
+    const { setup, foreignRepo } = projectGrantFixture()
+    await grantProjectMemoryRead(setup.own, foreignRepo)
+
+    expect(isGrantedProjectMemoryRead(setup.own, `${setup.foreignFile}/missing.md`)).toBe(false)
+    expect(isGrantedProjectMemoryRead(setup.own, setup.foreignFile, {
+      realpath: (input) => {
+        if (input === setup.foreignFile) throw Object.assign(new Error("permission denied"), { code: "EACCES" })
+        return realpathSync.native(input)
+      },
+    })).toBe(false)
+  })
+
+  test("#given dot-dot after a link out of a granted repo #when raw and built-in reads are checked #then each verdict agrees with its opener", async () => {
     // given
     const { setup, foreignRepo } = projectGrantFixture()
     const outside = join(setup.memoryRoot, "agents", "third", "subdir")
@@ -184,10 +197,23 @@ describe("project memory read grants (#10044)", () => {
 
     // when
     const granted = isGrantedProjectMemoryRead(setup.own, target)
+    const pi = new FakeExtensionAPI()
+    registerMemoryGuard(pi, componentContext(), { getContext: () => setup.own, resolveCwd: () => setup.workspace })
+    const call = (toolName: string, target: string) =>
+      pi.dispatch("tool_call", { type: "tool_call", toolCallId: "raw-read", toolName, input: { path: target } }, {})
 
     // then
     expect(readFileSync(resolve(target), "utf8")).toBe("deploy")
-    expect(granted).toBe(true)
+    expect(readFileSync(target, "utf8")).toBe(process.platform === "win32" ? "deploy" : "third")
+    expect(granted).toBe(process.platform === "win32")
+    expect(isGrantedProjectMemoryRead(setup.own, resolve(target))).toBe(true)
+    expect((await call("read", target)).some((result) => result !== undefined)).toBe(false)
+    for (const raw of [target, relative(setup.workspace, foreignRepo) + "/jump/../reference/deploy.md"]) {
+      const results = await call("vendor_read", raw)
+      expect(results.some((result) => result !== undefined)).toBe(process.platform !== "win32")
+    }
+    expect(isGrantedProjectMemoryRead(setup.own, `${foreignRepo}/jump/../reference/missing.md`)).toBe(process.platform === "win32")
+    expect(isGrantedProjectMemoryRead(setup.own, `${foreignRepo}/jump/../draft/missing.md`)).toBe(process.platform === "win32")
   })
 
   test("#given a granted project repo #when the grants are revoked #then its notes are denied again", async () => {

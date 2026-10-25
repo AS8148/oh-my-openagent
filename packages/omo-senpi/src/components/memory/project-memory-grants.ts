@@ -45,8 +45,7 @@ export function isGrantedProjectMemoryRead(context: MemoryIdentityContext, targe
   const canonicalPath = options.realpath ?? realpathSync.native
   // A note that does not exist yet stays readable (the read reports it missing); only its existing
   // ancestors are resolved, so a symlink on the way is still followed before the comparison.
-  const resolvedTarget = paths.resolve(target)
-  const resolve = (input: string) => input === resolvedTarget ? canonicalAllowingMissing(input, canonicalPath, paths) : canonicalPath(input)
+  const resolve = (input: string) => input === target ? canonicalAllowingMissing(input, canonicalPath, paths) : canonicalPath(input)
   for (const root of roots) {
     try {
       // Roots are stored canonical; a root that now resolves elsewhere was replaced (for example by a
@@ -92,7 +91,7 @@ function isEntry(input: string): boolean {
 }
 
 function isMissingPathError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")
+  return error instanceof Error && "code" in error && error.code === "ENOENT"
 }
 
 async function canonicalAsync(path: string): Promise<string | undefined> {

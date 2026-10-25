@@ -197,4 +197,18 @@ describe("temp-home detection is path-correct on every platform (#10935)", () =>
     mkdirSync(join(root, "inner"))
     expect(automatedRunReason({ HOME: join(root, "inner") }, { tmpdir: () => root, posixTempRoots: [] })).toBe("ephemeral_home")
   })
+
+  it.skipIf(process.platform === "win32")("#given literal dot-dot after a symlink in HOME #then temp detection agrees with the native home", () => {
+    const base = home()
+    const root = join(base, "temp")
+    const outside = join(base, "outside")
+    mkdirSync(join(root, "home"), { recursive: true })
+    mkdirSync(join(outside, "subdir"), { recursive: true })
+    mkdirSync(join(outside, "home"))
+    symlinkSync(join(outside, "subdir"), join(root, "jump"))
+    const rawHome = `${root}/jump/../home`
+
+    expect(automatedRunReason({ HOME: rawHome }, { tmpdir: () => root, posixTempRoots: [] })).toBeUndefined()
+    expect(automatedRunReason({ HOME: join(root, "home") }, { tmpdir: () => root, posixTempRoots: [] })).toBe("ephemeral_home")
+  })
 })
