@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:59bc5768b3b3ef6732c97bec7583a523952e5e1d9fdf5d8e5fb245658043bfca:fadb66139b4d0de34630f6b4bddc87783374d2be2659a207a4bb01c2c2f852d0
+// omo-codex-install:0d3a507fea2555d1a03b0fe7d0234df7a72ce2fb82500dee44320130b0a2d92b:77aa84363c64786d609abeae2c10431fa20f1472b079ffcef0927fb8e7943276
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -10159,7 +10159,7 @@ var init_package = __esm(() => {
       "@oh-my-opencode/utils": "workspace:*"
     },
     devDependencies: {
-      "bun-types": "1.4.3"
+      "bun-types": "1.4.4"
     }
   };
 });
