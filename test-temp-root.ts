@@ -62,6 +62,7 @@ export function removeAbandonedRunRoots(
 }
 
 const osTempDir = tmpdir()
+const tempEnvironment = ["TMPDIR", "TEMP", "TMP"].map((name) => [name, process.env[name]] as const)
 removeAbandonedRunRoots(osTempDir)
 const runRoot = mkdtempSync(join(osTempDir, RUN_ROOT_PREFIX))
 writeFileSync(join(runRoot, OWNER_PID_FILE), String(process.pid))
@@ -113,6 +114,11 @@ function reportKnownLeaks(entries: readonly string[]): void {
 // A recorded held child directory can also keep its containing run root locked.
 // Keep that removal best-effort too; neither record establishes why the handle remains open.
 function removeRunRoot(): void {
+  // A reused test worker must not hand the next child a temp directory this teardown removes.
+  for (const [name, value] of tempEnvironment) {
+    if (value === undefined) delete process.env[name]
+    else process.env[name] = value
+  }
   removeTestRootBestEffort(runRoot)
 }
 

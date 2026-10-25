@@ -16,7 +16,18 @@ export type ReadClassifier = (input: {
 
 export interface BeforeAgentStartHandlerOptions {
   previewSafe?: boolean
+  /** Stable omo subscriber name, retained in bundled settle diagnostics. */
+  hookLabel?: string
 }
+
+export interface SettleObserver {
+  readonly signal: AbortSignal
+  /** Names the current await and refuses to begin another phase after retirement. */
+  phase(label: string): void
+}
+
+/** Figures for one section of senpi's on-demand memory report. */
+export type MemoryReporter = () => Readonly<Record<string, number>>
 
 export interface SenpiExtensionAPI {
   readonly sessionKind?: "interactive" | "worker"
@@ -35,7 +46,7 @@ export interface SenpiExtensionAPI {
   readonly sessionContext?: unknown
   on(
     event: string,
-    handler: (payload: unknown, ctx?: unknown) => unknown | Promise<unknown>,
+    handler: (payload: unknown, ctx?: unknown, observer?: SettleObserver) => unknown | Promise<unknown>,
     options?: BeforeAgentStartHandlerOptions,
   ): void
   rpc?: {
@@ -47,6 +58,11 @@ export interface SenpiExtensionAPI {
     on(name: string, handler: (payload: unknown) => void): () => void
   }
   registerTool(tool: Record<string, unknown>): void
+  /**
+   * Adds figures to senpi's on-demand memory report (`SENPI_MEMORY_REPORT=1`), read only when a report
+   * is taken. Optional: hosts older than the release that added the report do not have it.
+   */
+  registerMemoryReporter?(name: string, reporter: MemoryReporter): void
   registerCommand(name: string, options: Record<string, unknown>): void
   registerFlag(
     name: string,
