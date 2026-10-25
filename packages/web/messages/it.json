@@ -38,6 +38,7 @@
       "getStarted": "Inizia",
       "readManifesto": "Leggi il manifesto",
       "downloadDesktop": "Scarica l'app desktop",
+      "downloadDesktopBeta": "Scarica la beta desktop",
       "installLabel": "Un comando, uno strumento"
     },
     "command": {
