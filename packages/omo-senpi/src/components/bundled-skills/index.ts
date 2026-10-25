@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { readDisabledSkills, readDiscoverCwd } from "./contributed-skill"
-import { resolveBundledSkillsOverride } from "./resolve-bundled-skills-override"
+import {
+  type BundledSkillsOverrideLogger,
+  notifyInvalidBundledSkillsOverride,
+  resolveBundledSkillsOverrideOrFallback,
+} from "./resolve-bundled-skills-override"
 
 export const BUNDLED_SKILLS_COMPONENT_NAME = "bundled-skills"
 
@@ -12,6 +16,12 @@ export interface BundledSkillsComponentOptions {
   readonly env?: Record<string, string | undefined>
   /** Overrides the packaged skills root; tests point it at a fixture. */
   readonly skillsDir?: string
+}
+
+export interface BundledSkillsDirOptions {
+  readonly logger?: BundledSkillsOverrideLogger
+  /** Overrides the packaged skills root that a missing or invalid override falls back to. */
+  readonly packagedDir?: string
 }
 
 /**
@@ -32,10 +42,17 @@ export function createBundledSkillsComponent(options: BundledSkillsComponentOpti
   return {
     name: BUNDLED_SKILLS_COMPONENT_NAME,
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
+      const env = options.env ?? process.env
+      pi.on("session_start", (_payload: unknown, eventCtx: unknown) => {
+        notifyInvalidBundledSkillsOverride(env, ctx.logger, readNotify(eventCtx))
+      })
       pi.on("resources_discover", (payload: unknown) => {
-        const skillsDir = options.skillsDir ?? resolveBundledSkillsDir(import.meta.url, options.env ?? process.env)
+        const skillsDir = resolveBundledSkillsDir(import.meta.url, env, {
+          logger: ctx.logger,
+          ...(options.skillsDir === undefined ? {} : { packagedDir: options.skillsDir }),
+        })
         if (skillsDir === undefined) return undefined
-        const disabled = readDisabledSkills(readDiscoverCwd(payload) ?? pi.cwd ?? process.cwd(), options.env ?? process.env)
+        const disabled = readDisabledSkills(readDiscoverCwd(payload) ?? pi.cwd ?? process.cwd(), env)
         const skillPaths: string[] = []
         const hidden: string[] = []
         for (const name of readdirSync(skillsDir).sort()) {
@@ -57,19 +74,30 @@ export function createBundledSkillsComponent(options: BundledSkillsComponentOpti
 }
 
 /**
- * Packaged plugin skills win; the source-tree copy keeps dev runs working. From the bundled
- * extension at plugin/extensions/omo.js the packaged URL resolves to plugin/skills; from this
- * source file it resolves to the same synced directory.
+ * A valid OMO_BUNDLED_SKILLS_DIR wins; otherwise the packaged plugin skills, then the source-tree
+ * copy that keeps dev runs working. From the bundled extension at plugin/extensions/omo.js the
+ * packaged URL resolves to plugin/skills; from this source file it resolves to the same synced
+ * directory. An invalid override is reported once and falls back to these packaged roots.
  */
 export function resolveBundledSkillsDir(
   importerUrl: string = import.meta.url,
   env: Record<string, string | undefined> = process.env,
+  options: BundledSkillsDirOptions = {},
 ): string | undefined {
-  const override = resolveBundledSkillsOverride(env)
+  const override = resolveBundledSkillsOverrideOrFallback(env, options.logger)
   if (override !== undefined) return override
+  if (options.packagedDir !== undefined) return options.packagedDir
   const candidates = [
     fileURLToPath(new URL("../skills", importerUrl)),
     fileURLToPath(new URL("../../../plugin/skills", importerUrl)),
   ]
   return candidates.find((candidate) => existsSync(candidate))
+}
+
+function readNotify(eventCtx: unknown): ((message: string, type: "error") => void) | undefined {
+  if (typeof eventCtx !== "object" || eventCtx === null) return undefined
+  const ui: unknown = Reflect.get(eventCtx, "ui")
+  if (typeof ui !== "object" || ui === null) return undefined
+  const notify: unknown = Reflect.get(ui, "notify")
+  return typeof notify === "function" ? (message, type) => Reflect.apply(notify, ui, [message, type]) : undefined
 }

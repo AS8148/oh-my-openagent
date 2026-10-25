@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import * as fs from "node:fs"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
@@ -14,7 +14,6 @@ import { createMemoryIdentityContext } from "../memory/context"
 import { createMemorySkillsScopeHandler } from "../memory/skills-scope"
 import { createTaskSkillLoader, packagedSkillDirs } from "../task/task-skill-loader"
 import { createBundledSkillsComponent, resolveBundledSkillsDir } from "./index"
-import { BundledSkillsDirectoryError } from "./resolve-bundled-skills-override"
 
 const variable = "OMO_BUNDLED_SKILLS_DIR"
 const context: ComponentContext = {
@@ -59,20 +58,6 @@ function layout(kind: "source" | "packaged") {
   ] as const
   for (const dir of [...bundled, ...conditional]) mkdirSync(dir, { recursive: true })
   return { url, bundled, conditional }
-}
-
-function expectInvalid(run: () => unknown): void {
-  let caught: unknown
-  try {
-    run()
-  } catch (error) {
-    caught = error
-  }
-  expect(caught).toBeInstanceOf(Error)
-  expect(caught).toBeInstanceOf(BundledSkillsDirectoryError)
-  if (!(caught instanceof Error)) throw new Error("expected a directory configuration error")
-  expect(caught.name).toBe("BundledSkillsDirectoryError")
-  expect(caught.message).toContain(variable)
 }
 
 describe("bundled skill directory override", () => {
@@ -153,9 +138,9 @@ describe("bundled skill directory override", () => {
   })
 
   for (const invalid of ["relative", "missing", "file", "unreadable"] as const) {
-    test(`#given ${invalid} override #when either loader resolves #then a typed error names the variable without fallback`, async () => {
-      const { url } = layout("packaged")
-      const value = invalid === "relative" ? "relative/skills" : join(root, invalid)
+    test(`#given ${invalid} override #when either loader resolves #then the plugin-relative skills are used and one error names the variable`, () => {
+      const { url, bundled, conditional } = layout("packaged")
+      const value = invalid === "relative" ? `relative/${basename(root)}` : join(root, invalid)
       if (invalid === "file") writeFileSync(value, "not a directory")
       if (invalid === "unreadable") mkdirSync(value)
       const accessSync = fs.accessSync
@@ -166,16 +151,13 @@ describe("bundled skill directory override", () => {
         })
         : undefined
       process.env[variable] = value
+      const errors: string[] = []
+      const logger = { error: (message: string) => { errors.push(message) } }
       try {
-        expectInvalid(() => resolveBundledSkillsDir(url))
-        expectInvalid(() => packagedSkillDirs(url))
-        expectInvalid(() => createTaskSkillLoader({ homeDir: root, agentDir: root }))
-        const pi = new FakeExtensionAPI()
-        createBundledSkillsComponent().register(pi, context)
-        await expect(pi.dispatch("resources_discover", { cwd: root })).rejects.toMatchObject({
-          name: "BundledSkillsDirectoryError",
-          message: expect.stringContaining(variable),
-        })
+        expect(resolveBundledSkillsDir(url, process.env, { logger })).toBe(bundled[1])
+        expect(packagedSkillDirs(url, process.env, logger)).toEqual([...bundled, ...conditional])
+        expect(errors).toHaveLength(1)
+        expect(errors[0]).toContain(variable)
       } finally {
         deniedAccess?.mockRestore()
       }
