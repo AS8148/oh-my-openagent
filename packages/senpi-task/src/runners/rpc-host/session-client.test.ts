@@ -26,7 +26,9 @@ describe("HostSessionClient.open", () => {
       engineVersion: "2026.9.18+1758000000.abc1234",
     })
     expect(client.sessionId).toBe("routing-1")
-    expect(host.commands.map((command) => command.type)).toEqual(["get_protocol_info", "open_session"])
+    // The probe is its own connection; since senpi 2026.10.25-1 the engine client authenticates every new
+    // connection with a first get_protocol_info frame (senpi#3815), so the session connection sends one too.
+    expect(host.commands.map((command) => command.type)).toEqual(["get_protocol_info", "get_protocol_info", "open_session"])
     expect(host.sessions()).toEqual([
       {
         routingId: "routing-1",

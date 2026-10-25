@@ -211,7 +211,10 @@ describe("createHostSessionHandle over a daemon session", () => {
     await handle.close()
 
     // then
+    // The probe and the session connection each send get_protocol_info: the engine client authenticates
+    // every new connection with it since senpi 2026.10.25-1 (senpi#3815).
     expect(host.commands.map((command) => command.type)).toEqual([
+      "get_protocol_info",
       "get_protocol_info",
       "open_session",
       "close_session",
