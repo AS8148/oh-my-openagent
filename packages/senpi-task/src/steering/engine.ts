@@ -157,7 +157,13 @@ export function createSteeringEngine(port: SteeringPort): SteeringEngine {
     }
 
     const liveness = handle.liveness?.()
-    if (liveness !== undefined && liveness.state !== "running") return enqueuePending(record, input.message, deliverAs)
+    if (liveness !== undefined && liveness.state !== "running") {
+      if (record.status === "running") return enqueuePending(record, input.message, deliverAs)
+      return {
+        kind: "unresponsive", task_id: record.task_id, retryable: true,
+        reason: `Task ${record.task_id}'s session is unresponsive; nothing was sent. Retry when its host status returns to running.`,
+      }
+    }
 
     // While anything is queued or draining for this child, a new message goes behind it, so a later
     // send never overtakes an earlier one (#9861).

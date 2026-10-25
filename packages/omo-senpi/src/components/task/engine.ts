@@ -249,7 +249,7 @@ export function composeTaskEngine(deps: ComposeTaskEngineDeps): TaskEngine {
   })
   const manager = createTaskManager({
     onChildLiveness: (record, status) => {
-      if (record.parent_session_id === runtime.sessionId()) notifyHostLiveness(deps.pi, deps.coordinator, record, status)
+      if (record.parent_session_id === runtime.sessionId()) notifyHostLiveness(deps.pi, deps.coordinator, record, status, () => runtime.parentState().kind === "streaming")
     },
     onPausedChild: (record, owner, childSeq) => runPause.notePausedChild(record, owner, childSeq),
     admissionBarrier,

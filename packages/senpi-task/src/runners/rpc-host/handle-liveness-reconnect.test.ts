@@ -46,7 +46,7 @@ test("late state and child events cannot undo an overdue session's pending close
   const state = Promise.withResolvers<HostSessionLiveness>()
   const closed = Promise.withResolvers<undefined>()
   const handle = createHostSessionHandle({
-    client: { ...first, getState: () => state.promise, close: () => closed.promise },
+    client: { ...first, getState: () => state.promise, closeConfirmed: () => closed.promise },
     session: FAKE_SESSION, taskId: "st_closing", heartbeatIntervalMs: 10_000,
     now: clock.now, closeGraceMs: 100, openDisposition: "attached",
   })
@@ -63,6 +63,30 @@ test("late state and child events cannot undo an overdue session's pending close
   expect(handle.hasExited()).toBe(true)
   await handle.dispose()
   expect(clock.pending()).toBe(0)
+})
+
+test("a stale missing-session probe cannot confirm a later pending close", async () => {
+  // Given a probe sent before the deadline and a close still lacking authoritative confirmation.
+  clock = fakeClock()
+  const port = fakeSessionPort()
+  const state = Promise.withResolvers<HostSessionLiveness>()
+  const closed = Promise.withResolvers<undefined>()
+  const handle = createHostSessionHandle({
+    client: { ...port, getState: () => state.promise, closeConfirmed: () => closed.promise },
+    session: FAKE_SESSION, taskId: "st_stale_probe", heartbeatIntervalMs: 10_000,
+    now: clock.now, closeGraceMs: 100, openDisposition: "attached",
+  })
+  try {
+    await clock.advance(170_000)
+    // When the old probe finally answers not-found, it is not a post-close observation.
+    state.reject(Object.assign(new Error("unknown_session"), { errorCode: "unknown_session" }))
+    await clock.advance(0)
+    // Then the handle continues waiting for a fresh closure proof.
+    expect(handle.hasExited()).toBe(false)
+    expect(handle.liveness().state).toBe("terminal-pending")
+  } finally {
+    await handle.dispose()
+  }
 })
 
 test("disposing during an unacknowledged abort cancels all liveness timers", async () => {

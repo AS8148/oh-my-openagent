@@ -68,7 +68,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
   const claims = createTurnClaim()
 
   const settleTurn = (settled: RunnerOutcome): void => {
-    if (closingUnresponsive && !confirmedUnresponsiveClose) return
+    if (closingUnresponsive && !confirmedUnresponsiveClose && outcome === undefined) return
     if (turnOutcome !== undefined) return
     turnOutcome = settled
     reachedIdle = true
@@ -150,7 +150,7 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
         return
       }
       confirmedUnresponsiveClose = true
-      settleTurn({ status: "error", failure: { kind: "child-unresponsive", message: "unresponsive, closed: the host acknowledged ending this session" } })
+      settleTurn({ status: "error", failure: { kind: "child-unresponsive", message: "unresponsive, closed: the host confirmed this session is absent" } })
       settleExit({ kind: "killed", facts: { pid: undefined, code: null, signal: null, stderrTail: "unresponsive, closed" } })
     },
   })
@@ -243,9 +243,9 @@ export function createHostSessionHandle(options: HostSessionHandleOptions): Host
     acceptsLifecycleEvent: () => !parked && !detached && outcome === undefined,
     onEvent: (event: Parameters<ChildEventListener>[0]) => { onSessionEvent(event); listeners.emitEvent(event) },
     onExtensionEvent: listeners.extensionEvents.publish,
-    onParked: park,
+    onParked: (event: HostSessionParked) => { if (!closingUnresponsive) park(event) },
     onClosed: (event: { readonly reason: string | undefined }) => {
-      if (closingUnresponsive) return heartbeat.confirmedClosed()
+      if (closingUnresponsive) return
       endSession({ kind: "session_closed", reason: event.reason })
     },
     onReplaced: (event: HostSessionReplaced) => listeners.emitReplaced(identity.followReplace(event)),

@@ -118,7 +118,10 @@ for (const kind of ["stdio", "host"] as const) {
       stateDir: root,
     }, { task_id: record.task_id }, record.parent_session_id)
     expect(output.details).toMatchObject({ kind: "status", snapshot: { status: "error" } })
-    if (kind === "stdio") expect(h.terminated()).toBe(1)
+    if (kind === "stdio") {
+      expect(h.terminated()).toBe(1)
+      expect(store.load(record.task_id)?.error_message).toContain("Action:")
+    }
     else {
       expect(h.port.detaches).toBe(0)
       expect(h.port.closes).toBe(1)

@@ -24,7 +24,7 @@ function stalledSession() {
   const closed = Promise.withResolvers<undefined>()
   let closes = 0
   const handle = createHostSessionHandle({
-    client: { ...port, getState: () => state.promise, close: () => { closes++; return closed.promise } },
+    client: { ...port, getState: () => state.promise, closeConfirmed: () => { closes++; return closed.promise } },
     session: FAKE_SESSION, taskId: "st_00000001", heartbeatIntervalMs: 10_000,
     now: clock.now, closeGraceMs: 100, openDisposition: "attached",
   })
@@ -64,12 +64,12 @@ test("missed state probes keep the original child nonterminal and recover steeri
 test("an overdue session is aborted and closed before reporting terminal", async () => {
   clock = fakeClock()
   const h = stalledSession()
-  // When the bounded unresponsive period expires but close has not acknowledged.
+  // When the bounded unresponsive period expires but host absence is not confirmed.
   await clock.advance(170_000)
   expect(h.port.sent.some(command => command.type === "abort")).toBe(true)
   expect(h.closes()).toBeGreaterThan(0)
   expect(h.handle.hasExited()).toBe(false)
-  // Then only the host acknowledgement authorizes terminal settlement.
+  // Then only the confirmed-close port's authoritative proof permits terminal settlement.
   h.closed.resolve(undefined)
   await clock.advance(0)
   expect(h.handle.hasExited()).toBe(true)
@@ -88,6 +88,26 @@ test("an unreachable host never produces a false crashed completion", async () =
   expect(h.port.detaches).toBe(0)
   await h.handle.dispose()
   expect(clock.pending()).toBe(0)
+})
+
+test("termination releases outcome waiters created before terminal-pending", async () => {
+  // Given an early waiter blocked while an overdue session's closure is unconfirmed.
+  clock = fakeClock()
+  const h = stalledSession()
+  let settled = false
+  const waiting = h.handle.waitForOutcome().then(() => { settled = true })
+  await clock.advance(170_000)
+  expect(settled).toBe(false)
+  // When another deliberate exit ends the handle.
+  const terminated = h.handle.terminate()
+  await clock.advance(0)
+  await clock.advance(100)
+  await terminated
+  // Then that exit releases the existing waiter as well as future waiters.
+  expect(h.handle.hasExited()).toBe(true)
+  expect(settled).toBe(true)
+  await waiting
+  await h.handle.dispose()
 })
 
 test("a live host's definitive missing-session reply ends the handle immediately", async () => {
@@ -117,14 +137,18 @@ test("the parent observes unresponsive then running without a terminal completio
   const manager = createTaskManager(options)
   const started = await manager.start(baseSpec({ execution_mode: "process", run_in_background: true }))
   if (started.kind !== "started") throw new Error("expected started")
-  await clock.advance(45_000)
-  expect(notices).toEqual(["unresponsive"])
-  expect(manager.get(started.task_id)?.status).toBe("running")
-  expect(manager.get(started.task_id)?.host_liveness).toEqual({ state: "unresponsive", since: 40_000 })
-  h.state.resolve({ sessionId: "same-child", isStreaming: true })
-  await clock.advance(0)
-  expect(notices).toEqual(["unresponsive", "running"])
-  expect(manager.get(started.task_id)?.host_liveness).toEqual({ state: "running" })
-  manager.forget(started.task_id, { path: "park" })
-  await h.handle.dispose()
+  try {
+    await clock.advance(70_000)
+    expect(notices).toEqual(["unresponsive"])
+    expect(manager.get(started.task_id)?.status).toBe("running")
+    expect(manager.get(started.task_id)?.host_liveness).toEqual({ state: "unresponsive", since: 40_000 })
+    h.state.resolve({ sessionId: "same-child", isStreaming: true })
+    await clock.advance(0)
+    await clock.advance(30_000)
+    expect(notices).toEqual(["unresponsive", "running"])
+    expect(manager.get(started.task_id)?.host_liveness).toEqual({ state: "running" })
+  } finally {
+    manager.forget(started.task_id, { path: "park" })
+    await h.handle.dispose()
+  }
 })

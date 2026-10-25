@@ -49,3 +49,54 @@ for (const kind of ["stdio", "host"] as const) {
     expect(clock.pending()).toBe(0)
   })
 }
+
+test("streaming host events do not starve probes or durable session identity", async () => {
+  // Given frequent events and a host that can answer its state probe.
+  clock = fakeClock()
+  const port = fakeSessionPort()
+  let probes = 0
+  const handle = createHostSessionHandle({
+    client: { ...port, getState: async () => { probes++; return { sessionId: "durable-active", isStreaming: true } } },
+    session: FAKE_SESSION, taskId: "st_active_probe", heartbeatIntervalMs: 10_000,
+    now: clock.now, closeGraceMs: 100, openDisposition: "attached",
+  })
+  try {
+    // When traffic arrives faster than the probe interval for two minutes.
+    for (let i = 0; i < 24; i++) {
+      await clock.advance(5_000)
+      port.emitEvent(event({ type: "turn_start" }))
+    }
+    // Then probes still refresh the last-seen timestamp and durable identity.
+    expect(probes).toBeGreaterThan(0)
+    expect(handle.lastSeen()).toBe(120_000)
+    expect(handle.sessionId).toBe("durable-active")
+  } finally {
+    await handle.dispose()
+  }
+})
+
+test("a late rejection does not count a previously counted probe silence again", async () => {
+  // Given one pending probe that has already missed two deadlines.
+  clock = fakeClock()
+  const first = Promise.withResolvers<never>()
+  const next = Promise.withResolvers<never>()
+  let probes = 0
+  const port = fakeSessionPort()
+  const handle = createHostSessionHandle({
+    client: { ...port, getState: () => probes++ === 0 ? first.promise : next.promise },
+    session: FAKE_SESSION, taskId: "st_late_rejection", heartbeatIntervalMs: 10_000,
+    now: clock.now, closeGraceMs: 100, openDisposition: "attached",
+  })
+  try {
+    await clock.advance(35_000)
+    // When that same probe finally rejects, its old silence is not a third miss.
+    first.reject(new Error("late state deadline"))
+    await clock.advance(0)
+    expect(handle.liveness().state).toBe("running")
+    // New silence still reaches the unresponsive threshold.
+    await clock.advance(25_000)
+    expect(handle.liveness().state).toBe("unresponsive")
+  } finally {
+    await handle.dispose()
+  }
+})

@@ -1,7 +1,7 @@
 import { log } from "@oh-my-opencode/utils"
 import type { HostSessionFacts, HostSessionPort } from "./handle-port"
 import type { HostSessionReattach, HostSessionReattached } from "./reattach"
-import { HostSessionDetachedError } from "./session-wire"
+import { HostSessionDetachedError, HostSessionUnresponsiveError } from "./session-wire"
 import { armRecoveryBound, withinBound } from "./transport-recovery"
 
 /** Reacquire only this session to close it; never resume a turn or signal its shared host. */
@@ -31,7 +31,10 @@ export function createUnresponsiveClose(input: {
     reconnecting ??= reconnect().finally(() => { reconnecting = undefined })
     await reconnecting
   }
-  const closePort = (port: HostSessionPort) => port.closeConfirmed === undefined ? port.close() : port.closeConfirmed()
+  const closePort = (port: HostSessionPort): Promise<void> => {
+    if (port.closeConfirmed === undefined) return Promise.reject(new HostSessionUnresponsiveError())
+    return port.closeConfirmed()
+  }
   return {
     stop: () => { stopped.resolve(undefined) },
     transportLost: () => { disconnected = true },

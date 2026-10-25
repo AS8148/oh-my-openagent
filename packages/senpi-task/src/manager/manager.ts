@@ -1392,12 +1392,9 @@ class TaskManagerImpl implements TaskManager {
       reopen: () => reopenSelfResumedTurn(this.#selfResumedPorts, taskId, handle),
       onMotion: () => this.#clearAwaitingInput(taskId),
       onLiveness: (status) => {
-        const record = this.#tryLoad(taskId)
-        if (record === null || record.status !== "running") return
-        this.#options.store.appendEvent(taskId, { type: "host_liveness", payload: status })
-        this.#options.onChildLiveness?.(record, status)
         if (status.state === "running") void this.#steering.notifyStarted(taskId)
       },
+      onLivenessNotice: (record, status) => this.#options.onChildLiveness?.(record, status),
       onExtensionEvent: (event) => {
         const record = this.#tryLoad(taskId)
         if (record != null && record.host_pid === this.#hostPid) this.#options.onChildExtensionEvent?.(event, record)

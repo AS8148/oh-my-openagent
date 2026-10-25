@@ -27,6 +27,7 @@ export function startHostHeartbeat(input: HostHeartbeatInput) {
   let stopped = false
   let failures = 0
   let probePending = false
+  let probeMissed = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let deadline: ReturnType<typeof setTimeout> | undefined
   let closeTimer: ReturnType<typeof setTimeout> | undefined
@@ -60,8 +61,8 @@ export function startHostHeartbeat(input: HostHeartbeatInput) {
     timer.unref?.()
   }
   const failed = (error: unknown): void => {
-    if (!active()) return
-    if (isHostSessionMissing(error)) return gone(status.state === "terminal-pending")
+    if (!active() || status.state === "terminal-pending") return
+    if (isHostSessionMissing(error)) return gone(false)
     log("senpi-task host session heartbeat get_state failed", { taskId: input.taskId, error: String(error) })
     failures++
     if (failures === 3 && status.state === "running") {
@@ -78,8 +79,8 @@ export function startHostHeartbeat(input: HostHeartbeatInput) {
   }
   const close = (): void => {
     if (!active()) return
-    // A timed-out close may still acknowledge later. Any successful acknowledgement is sufficient;
-    // failed/late probes cannot undo this stop intent or start another turn.
+    // The close port resolves only after authoritative host absence, never on an ACK or frame.
+    // Old probes cannot undo this stop intent or authorize its completion.
     closeTimer = setTimeout(close, MAX_BACKOFF_MS)
     closeTimer.unref?.()
     void Promise.resolve().then(input.close).then(() => gone(true), error => {
@@ -90,10 +91,12 @@ export function startHostHeartbeat(input: HostHeartbeatInput) {
   const tick = (): void => {
     if (!active() || status.state === "terminal-pending") return
     if (probePending) {
+      probeMissed = true
       failed(new RpcRequestTimeout("get_state", HEARTBEAT_DEADLINE_MS))
       return
     }
     probePending = true
+    probeMissed = false
     schedule(HEARTBEAT_DEADLINE_MS)
     void Promise.resolve().then(input.probe).then(state => {
       if (!active() || status.state === "terminal-pending") return
@@ -102,7 +105,9 @@ export function startHostHeartbeat(input: HostHeartbeatInput) {
       if (status.state !== "running") publish({ state: "running" })
       input.onState(state)
       schedule(input.intervalMs)
-    }, failed).finally(() => { probePending = false })
+    }, error => {
+      if (isHostSessionMissing(error) || !probeMissed) failed(error)
+    }).finally(() => { probePending = false })
   }
   schedule(input.intervalMs)
   return {
@@ -111,11 +116,12 @@ export function startHostHeartbeat(input: HostHeartbeatInput) {
       if (!active() || status.state === "terminal-pending") return
       failures = 0
       clearTimeout(deadline)
-      if (status.state !== "running") publish({ state: "running" })
-      schedule(probePending ? HEARTBEAT_DEADLINE_MS : input.intervalMs)
+      if (status.state !== "running") {
+        publish({ state: "running" })
+        schedule(probePending ? HEARTBEAT_DEADLINE_MS : input.intervalMs)
+      }
     },
     status: () => status,
-    confirmedClosed: () => gone(true),
     subscribe: (listener: (status: HostLivenessStatus) => void) => {
       listeners.add(listener)
       if (status.state !== "running") listener(status)

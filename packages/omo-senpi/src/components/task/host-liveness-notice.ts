@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import type { TaskRecord } from "@oh-my-opencode/senpi-task"
 import { hostLivenessText, type HostLivenessStatus } from "../../../../senpi-task/src/state/host-liveness"
 import type { IdleInjectionCoordinator } from "../../extension/idle-injection-coordinator"
@@ -10,6 +9,7 @@ export function notifyHostLiveness(
   coordinator: IdleInjectionCoordinator | undefined,
   record: TaskRecord,
   status: HostLivenessStatus,
+  isStreaming?: () => boolean,
 ): void {
   const message = {
     customType: "senpi-task.status",
@@ -23,9 +23,10 @@ export function notifyHostLiveness(
   }
   coordinator.enqueue({
     ...message,
-    key: `task-status:${record.task_id}:${randomUUID()}`,
+    key: `task-status:${record.task_id}`,
     source: "task-status",
     runRef: { kind: "task", id: record.task_id },
   })
-  coordinator.flushSoon()
+  if (isStreaming?.() === true) coordinator.scheduleFlush()
+  else coordinator.flushSoon()
 }
