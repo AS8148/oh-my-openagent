@@ -12,12 +12,13 @@ export function waitForTestState<T>(
     let settled = false
     let checking = false
     let pending = false
-    const timeout = setTimeout(() => finish(new Error(`waited ${timeoutMs}ms for ${description}`)), timeoutMs)
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    let unsubscribe: (() => void) | undefined
     const finish = (error?: Error, value?: T) => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
-      unsubscribe()
+      unsubscribe?.()
       if (error !== undefined) reject(error)
       else resolve(value as T)
     }
@@ -44,7 +45,8 @@ export function waitForTestState<T>(
         checking = false
       }
     }
-    const unsubscribe = subscribe(() => { void check() })
+    unsubscribe = subscribe(() => { void check() })
+    timeout = setTimeout(() => finish(new Error(`waited ${timeoutMs}ms for ${description}`)), timeoutMs)
     void check()
   })
 }
@@ -57,7 +59,9 @@ export function waitForFilesystemState<T>(
 ): Promise<T> {
   return waitForTestState((check) => {
     const watcher = watch(directory, check)
-    return () => watcher.close()
+    // The macOS watcher can lose an event immediately after registration.
+    const recheck = setInterval(check, 25)
+    return () => { watcher.close(); clearInterval(recheck) }
   }, probe, timeoutMs, description)
 }
 
