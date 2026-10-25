@@ -33,6 +33,13 @@ export function createMutationNotifyingStore(
       onMutation({ taskId: record.task_id, record })
       edge.settle(record)
     },
+    markSpawnFailed: (record) => {
+      const edge = watch(record.task_id)
+      const failed = backing.markSpawnFailed(record)
+      onMutation({ taskId: record.task_id, record: failed })
+      edge.settle(failed)
+      return failed
+    },
     mutate: (taskId, mutation) => {
       const edge = watch(taskId)
       const result = backing.mutate(taskId, mutation)

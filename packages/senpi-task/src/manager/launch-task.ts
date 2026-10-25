@@ -32,7 +32,7 @@ export type LaunchPorts = {
   readonly creation?: ChildCreationPort
   isShuttingDown(): boolean
   release(context: LaunchContext): void
-  settleWaiters(taskId: string): void
+  settleWaiters(taskId: string, terminal?: TaskRecord): void
   dropPending(taskId: string): void
   advance(context: LaunchContext, error: unknown): LaunchAdvance | undefined
   failure(record: TaskRecord, error: unknown): ReturnType<typeof describeStartFailure>
@@ -65,7 +65,19 @@ async function launchAdmitted(initial: LaunchContext, ports: LaunchPorts): Promi
     ports.release(initial)
     return { ok: false, error: "the session is shutting down" }
   }
-  const start = ports.store.transition(initial.record.task_id, { type: "start", timestamp: new Date(ports.now()).toISOString() })
+  const timestamp = new Date(ports.now()).toISOString()
+  let start: ReturnType<TaskRecordStore["transition"]>
+  try {
+    start = ports.store.transition(initial.record.task_id, { type: "start", timestamp })
+  } catch {
+    // The runner has not been called. A sidecar commits the failure even while the Windows
+    // target refuses both replacement and deletion.
+    const failed = ports.store.markSpawnFailed(initial.record)
+    ports.release(initial)
+    const error = "spawn bookkeeping failed"
+    if (failed !== null) ports.settleWaiters(initial.record.task_id, failed)
+    return { ok: false, error }
+  }
   if (!start.applied) {
     ports.release(initial)
     if (start.record.status === "cancelled") ports.dropPending(initial.record.task_id)

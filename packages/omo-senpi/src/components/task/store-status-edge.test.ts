@@ -50,6 +50,21 @@ function harness(): {
 }
 
 describe("store status-edge observation", () => {
+  test("#given a pending record #when spawn failure is atomically marked twice #then one terminal edge and a disposed mutation reach observers", () => {
+    // given
+    const { store, edges, mutations, seed } = harness()
+    const pending = seed("pending")
+    // when
+    store.markSpawnFailed(pending)
+    store.markSpawnFailed(pending)
+    // then
+    expect(edges).toHaveLength(1)
+    expect(edges[0]?.previousStatus).toBe("pending")
+    expect(edges[0]?.record.status).toBe("error")
+    expect(edges[0]?.record.residency_state).toBe("disposed")
+    expect(mutations).toHaveLength(2)
+  })
+
   test("#given a running record #when a reconciliation writes lost through replace #then exactly one terminal edge fires", () => {
     // given
     const { store, edges, seed } = harness()

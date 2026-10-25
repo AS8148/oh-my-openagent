@@ -1140,7 +1140,13 @@ class TaskManagerImpl implements TaskManager {
       store: this.#options.store, now: this.#now, creation: this.#creation,
       isShuttingDown: () => this.#shutdownStarted,
       release: context => this.#releaseSlot(context.record.task_id, context.model, context.record.notification.run_epoch),
-      settleWaiters: taskId => this.#settleWaiters(taskId),
+      settleWaiters: (taskId, terminal) => {
+        if (terminal !== undefined) {
+          this.#names.release(terminal.parent_session_id, terminal.name ?? taskId)
+          this.#background.delete(taskId)
+        }
+        this.#settleWaiters(taskId, terminal)
+      },
       dropPending: taskId => this.#steering.dropPending(taskId, "cancelled"),
       advance: (context, error) => this.#advanceStartFallback(context, error),
       failure: (record, error) => this.#recordStartFailure(record, error),
@@ -1314,13 +1320,20 @@ class TaskManagerImpl implements TaskManager {
     if (registration.name !== claimed.name) this.#names.release(spec.parent_session_id, registration.name)
     this.#background.delete(claimed.task_id)
     const timestamp = nowIso(this.#now)
-    const started = this.#options.store.transition(claimed.task_id, { type: "start", timestamp })
-    const failed = this.#options.store.transition(claimed.task_id, {
-      type: "fail",
-      timestamp,
-      error_message: input.error_message,
-    })
-    if (!started.applied || !failed.applied) throw new Error("spawn bookkeeping failure transitions were not applied")
+    try {
+      const started = this.#options.store.transition(claimed.task_id, { type: "start", timestamp })
+      const failed = this.#options.store.transition(claimed.task_id, {
+        type: "fail",
+        timestamp,
+        error_message: input.error_message,
+      })
+      if (!started.applied || !failed.applied) throw new Error("spawn bookkeeping failure transitions were not applied")
+    } catch {
+      // A Windows handle may refuse both replacement and deletion. Commit the terminal marker
+      // without touching the held target; every store reader then sees a disposed error record.
+      this.#options.store.markSpawnFailed(claimed)
+      this.#names.release(spec.parent_session_id, registration.name)
+    }
     return {
       kind: "start_failed",
       task_id: claimed.task_id,
