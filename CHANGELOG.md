@@ -23,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **The 10k parked-backlog memory test now fails if it observed no entry reads.** ([#11164](https://github.com/code-yeongyu/oh-my-openagent/pull/11164), part of [#11091](https://github.com/code-yeongyu/oh-my-openagent/issues/11091), thanks @Dante-dan) (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
 
-**OmO Native stops waiting on a stalled turn-end subscriber after two seconds.** Memory recovery remains retryable without treating the cancelled wait as a failed reflection run, and stall diagnostics identify the component and hook instead of only `omo.js`. Thanks to @floweredao for the report. ([#11254](https://github.com/code-yeongyu/oh-my-openagent/pull/11254), Part of [#11249](https://github.com/code-yeongyu/oh-my-openagent/issues/11249))
-
 ## [5.1.46] - 2026-10-24
 
 **OmO Native init-deep committed mode no longer dead-ends.** Committed mode now finishes through its own pull-request handoff instead of pointing at a skill that does not ship with OmO Native, and it reports how to finish by hand when no PR can be opened. Thanks to @HolisticDeveloper for the report and @surlymochan for the fix. ([#11228](https://github.com/code-yeongyu/oh-my-openagent/pull/11228), fixes [#9686](https://github.com/code-yeongyu/oh-my-openagent/issues/9686))
