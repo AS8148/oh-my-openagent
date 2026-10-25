@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **The 10k parked-backlog memory test now fails if it observed no entry reads.** ([#11164](https://github.com/code-yeongyu/oh-my-openagent/pull/11164), part of [#11091](https://github.com/code-yeongyu/oh-my-openagent/issues/11091), thanks @Dante-dan) (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
 
+## [5.1.46] - 2026-10-24
+
 **OmO Native init-deep committed mode no longer dead-ends.** Committed mode now finishes through its own pull-request handoff instead of pointing at a skill that does not ship with OmO Native, and it reports how to finish by hand when no PR can be opened. Thanks to @HolisticDeveloper for the report and @surlymochan for the fix. ([#11228](https://github.com/code-yeongyu/oh-my-openagent/pull/11228), fixes [#9686](https://github.com/code-yeongyu/oh-my-openagent/issues/9686))
 
 **The stale-reflection-lock test leaves no background writer behind when removing its temporary root.** Its teardown closes the memory wiring and awaits facts reconciliation and maintenance before removal, so a late lock publication cannot recreate the directory and make the temp-leak guard blame another test. ([#11225](https://github.com/code-yeongyu/oh-my-openagent/pull/11225))
