@@ -38,6 +38,7 @@
       "getStarted": "はじめる",
       "readManifesto": "マニフェストを読む",
       "downloadDesktop": "デスクトップアプリをダウンロード",
+      "downloadDesktopBeta": "デスクトップ版ベータをダウンロード",
       "installLabel": "コマンドひとつ、ツールひとつ"
     },
     "command": {
