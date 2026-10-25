@@ -24,6 +24,10 @@ const USAGE_LIMIT =
 // A `/model` command hint (senpi's own limit text says "Switch to another provider with /model") names no model.
 const MODEL_SCOPED_LIMIT = /(?<!\/)\bmodels?\b|\bpremium\b|\b(?:opus|sonnet|haiku|fable|mythos)\b/i
 
+// The route does not serve the configured model id. Another rung would answer a request the caller did not
+// make (often on another provider), so this is a configuration error to surface, never a fallback (#11355).
+const MODEL_CONFIG_ERROR = /\bmodel_not_found\b|\bunknown provider for model\b/i
+
 export type UsageLimitScope = "model" | "account"
 
 export function usageLimitScope(message: string): UsageLimitScope | undefined {
@@ -91,6 +95,7 @@ export function chainAfterHop(candidates: RuntimeFallbackCandidates): readonly R
  * spent or signed-out rung, so any other failure walks the category rungs alone.
  */
 export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: string): RuntimeFallbackCandidates {
+  if (MODEL_CONFIG_ERROR.test(failureMessage)) return { remaining: [], skipped: [...(record.fallback_models ?? [])] }
   const unusable = usageLimitScope(failureMessage) !== undefined || isCredentialFailure(failureMessage, modelIdOf(record))
   const all = record.fallback_models ?? []
   const fallbacks = all.filter((model) => unusable || !isParentModelRung(record, model))

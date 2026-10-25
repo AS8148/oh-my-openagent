@@ -92,6 +92,15 @@ describe("runtimeFallbackCandidates", () => {
     expect(candidates).toEqual({ remaining: [ZAI_GLM, GO_M27], skipped: [], limit: "account" })
   })
 
+  test.each([
+    ["a gateway model_not_found", '400 {"code":"model_not_found","message":"unknown provider for model minimax-m3"}'],
+    ["an unknown-provider answer", "400 Bad Request: unknown provider for model minimax-m3"],
+  ])("#given %s on the first rung #when the candidates are computed #then no rung is offered (#11355)", (_label, message) => {
+    const candidates = runtimeFallbackCandidates(record(GO_M3, [GO_M27, ZAI_GLM]), message)
+
+    expect(candidates).toEqual({ remaining: [], skipped: [GO_M27, ZAI_GLM] })
+  })
+
   test("#given a limit that names one model #when the candidates are computed #then the sibling model on the same provider is next", () => {
     const candidates = runtimeFallbackCandidates(record(GO_M3, [GO_M27, ZAI_GLM]), "You've hit your Fable weekly limit \u00b7 resets Oct 2, 9am")
 

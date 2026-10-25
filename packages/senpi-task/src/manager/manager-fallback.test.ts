@@ -151,6 +151,38 @@ describe("TaskManager configured runtime fallback", () => {
     expect(runner.startedSpecs).toHaveLength(1)
   })
 
+  test("#given the configured model is not served by its route #when the child fails with model_not_found #then the task ends in error on that model instead of handing off (#11355)", async () => {
+    // given
+    const runner = new ObservableRunner()
+    const { manager, store } = makeManager({
+      planner: fallbackPlanner(),
+      inProcess: runner,
+    })
+    const initialStart = runner.nextStart()
+    const result = await manager.start(baseSpec({ execution_mode: "in-process" }))
+    if (result.kind !== "started") throw new Error("expected started task")
+    await initialStart
+    const handle = runner.handles.get(result.task_id)
+    if (handle === undefined) throw new Error("expected initial handle")
+    const fallbackStart = runner.nextStart()
+    const terminal = manager.waitFor(result.task_id)
+    const failure = '400 {"code":"model_not_found","message":"unknown provider for model primary-model"}'
+
+    // when
+    handle.settle({ status: "error", failure: { kind: "child-turn-failed", message: failure } })
+
+    // then
+    const outcome = await Promise.race([
+      fallbackStart.then(() => "fallback" as const),
+      terminal.then(() => "terminal" as const),
+    ])
+    expect(outcome).toBe("terminal")
+    expect(runner.startedSpecs).toHaveLength(1)
+    const record = store.load(result.task_id)
+    expect(record).toMatchObject({ status: "error", model: "vendor-a/primary-model" })
+    expect(record?.error_message).toContain(failure)
+  })
+
   test("#given every configured model fails before tools #when the chain exhausts #then attempted models remain in terminal diagnostics", async () => {
     // given
     const runner = new ObservableRunner()
