@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 
 import type { RpcRunnerSpec } from "../types"
 import { rpcChildAncestry } from "../child-ancestry"
+import { engineAcceptsSpawnedBy } from "../engine-spawned-by"
 import { asSenpiThinkingLevel } from "../../senpi/thinking-level"
 import { MEMBER_EXTENSION_BUNDLE_NAME, MEMBER_PROCESS_ENV_NAMES, WORKPOOL_PROCESS_ENV_NAMES } from "../../team/member-extension/identity"
 import {
@@ -12,6 +13,7 @@ import {
   detectCompiledEngine,
   readRunningEngineVersion,
   resolveSenpiLauncher,
+  resolveSenpiLaunchTarget,
 } from "./senpi-launcher"
 
 export {
@@ -32,8 +34,6 @@ export const OMO_SENPI_TASK_DEPTH = "OMO_SENPI_TASK_DEPTH"
 export const OMO_SENPI_TASK_ROOT_SESSION_ID = "OMO_SENPI_TASK_ROOT_SESSION_ID"
 export const OMO_SENPI_TASK_TRACEPARENT = "OMO_SENPI_TASK_TRACEPARENT"
 const RPC_ENTRY_SPECIFIER = "@code-yeongyu/senpi/rpc-entry"
-// The pinned 2026.10.25-2 engine contains senpi#4205 and accepts this CLI flag.
-const PINNED_ENGINE_SUPPORTS_SPAWNED_BY_CLI = true
 
 export type RpcSpawnSpec = RpcRunnerSpec & {
   readonly memberEnv?: Readonly<Record<string, string>>
@@ -47,7 +47,6 @@ export type RpcSpawnDescriptor = {
 }
 
 export type RpcSpawnRuntime = {
-  readonly supportsSpawnedBy?: boolean
   readonly isBunBinary: boolean
   // The running process embeds the engine (a compiled omo or senpi binary), so it IS the child engine.
   readonly isCompiledEngine?: boolean
@@ -58,7 +57,8 @@ export type RpcSpawnRuntime = {
   // Injectable so tests can pin the executable-vs-fallback branch; defaults to resolveSenpiExecutable.
   readonly resolveSenpiExecutable?: (runtime: RpcSpawnRuntime) => string | null
   // Running @code-yeongyu/senpi version used to reject PATH/sibling candidates of a different version.
-  // When omitted or unreadable, the parity check is skipped (candidates are accepted).
+  // When omitted or unreadable, the parity check is skipped (candidates are accepted). It is also the
+  // launched engine's version when the child runs the compiled engine or the rpc-entry fallback.
   readonly engineVersion?: string
   // Optional diagnostics for rejected PATH/sibling candidates. Defaults to a no-op.
   readonly onWarning?: (message: string) => void
@@ -191,9 +191,10 @@ export function buildRpcSpawn(spec: RpcSpawnSpec, runtime?: Partial<RpcSpawnRunt
   const env = profile.env
   const childArgs = buildChildArgs(profile.spec)
   const spawnedBy = rpcChildAncestry(spec)
-  const ancestryArgs = (resolved.supportsSpawnedBy ?? PINNED_ENGINE_SUPPORTS_SPAWNED_BY_CLI) && spawnedBy !== undefined
+  // Only an engine that proves it accepts the flag receives it; an older one may refuse to boot on it.
+  const { launcher, engineVersion } = resolveSenpiLaunchTarget(resolved)
+  const ancestryArgs = engineAcceptsSpawnedBy(engineVersion) && spawnedBy !== undefined
     ? ["--spawned-by", JSON.stringify(spawnedBy)] : []
-  const launcher = resolveSenpiLauncher(resolved)
   if (launcher !== null) {
     return {
       command: launcher.command,

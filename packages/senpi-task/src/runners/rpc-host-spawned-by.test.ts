@@ -15,7 +15,8 @@ afterEach(async () => {
 })
 
 async function fixture() {
-  const host = await harness.fakeHost()
+  // A daemon on the pinned engine, which accepts open_session.spawnedBy (senpi#4205).
+  const host = await harness.fakeHost({ engineVersion: "2026.10.25-2" })
   const rpc = harness.runnerOver(host)
   const managed = createRpcManagedRunner(rpc)
   const f = makeManager({

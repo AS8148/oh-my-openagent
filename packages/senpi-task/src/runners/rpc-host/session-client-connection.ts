@@ -6,6 +6,7 @@ import { loadSenpiBarrel, type SenpiHostProtocolInfo } from "../../lazy/senpi-ba
 import { buildAutoUiResponse, type AutoAnswerableUiRequest } from "../rpc/ui-auto-answer"
 import type { ChildEventListener, RpcEntriesResult, RpcSwitchSessionResult } from "../types"
 import { createChildExtensionEvents } from "../child-extension-events"
+import { engineAcceptsSpawnedBy } from "../engine-spawned-by"
 import { socketAcceptsConnection } from "./busy-host"
 import { HostUnavailableError } from "./daemon"
 import { SESSION_PARKED_CAUSE } from "./exit-mapping"
@@ -110,7 +111,16 @@ export class HostSessionClient {
     // and report that the chain was not applied, so the caller can say so once.
     const profileHonored = identity.capabilities.includes(RETRY_FALLBACK_PROFILE_CAPABILITY)
     const retryFallbackDropped = !profileHonored && input.retryFallback !== undefined
-    const wire = toWireOpen(profileHonored ? input : withoutRetryFallback(input))
+    // No capability names spawnedBy, so the host's engine version decides; an unproven host opens without it.
+    const spawnedByHonored = engineAcceptsSpawnedBy(identity.engineVersion)
+    if (!spawnedByHonored && input.spawnedBy !== undefined) {
+      log("senpi-task host engine does not accept spawnedBy; opening the child without ancestry", {
+        socket: this.socketPath,
+        engineVersion: identity.engineVersion,
+      })
+    }
+    const supported = profileHonored ? input : withoutRetryFallback(input)
+    const wire = toWireOpen(spawnedByHonored ? supported : withoutSpawnedBy(supported))
     const opened = await client.openSession(wire).catch(async (error: unknown) => {
       this.client = undefined
       await client.stop()
@@ -299,5 +309,10 @@ function unreachable(value: never): never {
 
 function withoutRetryFallback(input: HostSessionOpenInput): HostSessionOpenInput {
   const { retryFallback: _retryFallback, ...rest } = input
+  return rest
+}
+
+function withoutSpawnedBy(input: HostSessionOpenInput): HostSessionOpenInput {
+  const { spawnedBy: _spawnedBy, ...rest } = input
   return rest
 }
