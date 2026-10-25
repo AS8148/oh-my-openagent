@@ -751,7 +751,7 @@ describe("fidelity delivery barrier", () => {
 		const matched = await problems()
 		// then
 		expect(missing).toEqual({ exitCode: 1, codes: ["edition_unverified"] })
-		expect(altered).toEqual({ exitCode: 1, codes: ["edition_unverified"] })
+		expect(altered).toEqual({ exitCode: 1, codes: ["edition_unverified", "edition_unverified"] })
 		expect(matched).toEqual({ exitCode: 0, codes: [] })
 	})
 })

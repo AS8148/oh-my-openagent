@@ -16,7 +16,7 @@
 // exemption is the only way a required record may be absent.
 
 import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 import { CliError, readJsonFile, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
 import { LEDGER_FILENAME } from "./fact-ledger.mjs"
@@ -44,8 +44,17 @@ const subjectOf = (row) => row.renderedFrom ?? row.path ?? null
 const perEdition = (sessionDir, delivered) =>
 	delivered.map((row) => ({ path: row.verifiedBy ?? null, declared: row.verifiedBy !== undefined, format: row.format, at: `${row.format}: `, subjects: [subjectOf(row)].filter((subject) => subject !== null) }))
 
-/** One record per session, in the session directory, bound to any delivered edition's bytes. */
-const perSession = (file) => (sessionDir, delivered) => [{ path: join(sessionDir, file), declared: false, format: null, at: "", subjects: delivered.map(subjectOf).filter((subject) => subject !== null) }]
+const sessionTarget = (sessionDir, file) => ({ path: join(sessionDir, file), declared: false, format: null, at: "", subjects: [] })
+
+/** Include every existing session fidelity record, even when no delivered row attaches it. */
+const perEditionAndSession = (sessionDir, delivered) => [
+	...perEdition(sessionDir, delivered),
+	...(existsSync(join(sessionDir, FIDELITY_RECORD)) ? [sessionTarget(sessionDir, FIDELITY_RECORD)] : []),
+]
+
+/** The session meaning record must match every delivered edition's bytes. */
+const perSession = (file) => (sessionDir, delivered) =>
+	delivered.length === 0 ? [sessionTarget(sessionDir, file)] : perEdition(sessionDir, delivered).map((target) => ({ ...target, path: join(sessionDir, file), declared: false }))
 
 /** Every fidelity record the barrier reads, in check order; each column is one rule the barrier applies. */
 export const FIDELITY_RECORDS = Object.freeze([
@@ -53,7 +62,7 @@ export const FIDELITY_RECORDS = Object.freeze([
 		kind: "fidelity",
 		file: FIDELITY_RECORD,
 		step: "fidelity gate",
-		targets: perEdition,
+		targets: perEditionAndSession,
 		requiredWhen: ({ hasFidelity }, target) => hasFidelity || GATED_FORMATS.includes(target.format),
 		remedy: (target) => `run fact verify on ${target.subjects[0] ?? "the edition"} and set it with --verified-by`,
 		bindsTo: "artifact_sha256",
@@ -153,8 +162,9 @@ export function fidelityProblems(sessionDir, manifest) {
 			if (target.subjects.length > 0 && !target.subjects.some((subject) => hashOf(subject) === record[entry.bindsTo])) {
 				refuse(`${entry.kind} record ${target.path} is for a different edition than ${target.subjects.join(", ")}`)
 			}
-			if (counted.has(target.path)) continue
-			counted.add(target.path)
+			const path = resolve(target.path)
+			if (counted.has(path)) continue
+			counted.add(path)
 			const codes = [...new Set(record.defects.filter(entry.blocking).map((defect) => defect.code))].sort()
 			if (codes.length > 0) problems.push(unresolved(target.format, codes, target.path))
 		}
