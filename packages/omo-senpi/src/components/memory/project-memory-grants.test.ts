@@ -160,6 +160,32 @@ describe("project memory read grants (#10044)", () => {
     expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, "draft", "missing.md"))).toBe(true)
   })
 
+  test("#given a granted repo reached through a linked alias #when a nested missing note is read #then the remainder lands under the native repo path", async () => {
+    // given
+    const { setup, foreignRepo } = projectGrantFixture()
+    const alias = join(setup.workspace, "repo-alias")
+    linkDir(foreignRepo, alias)
+    await grantProjectMemoryRead(setup.own, foreignRepo)
+
+    // when / then
+    expect(isGrantedProjectMemoryRead(setup.own, `${alias}/new/dir/note.md`)).toBe(true)
+    expect(isGrantedProjectMemoryRead(setup.own, `${alias}/new/system/note.md`)).toBe(true)
+    expect(isGrantedProjectMemoryRead(setup.own, `${alias}/system/new/note.md`)).toBe(false)
+  })
+
+  test("#given a granted repo #when a missing remainder carries dot, dot-dot, or empty segments #then no read is granted", async () => {
+    // given
+    const { setup, foreignRepo } = projectGrantFixture()
+    writeFileSync(join(foreignRepo, "note.md"), "root note")
+    await grantProjectMemoryRead(setup.own, foreignRepo)
+
+    // when / then
+    expect(isGrantedProjectMemoryRead(setup.own, join(foreignRepo, "note.md"))).toBe(true)
+    const remainders = ["missing/../note.md", "a/./b", "a//b", "new/dir/"]
+    const granted = remainders.map((remainder) => [remainder, isGrantedProjectMemoryRead(setup.own, `${foreignRepo}/${remainder}`)])
+    expect(Object.fromEntries(granted)).toEqual(Object.fromEntries(remainders.map((remainder) => [remainder, false])))
+  })
+
   test("#given a dangling link in a granted repo #when a read names it #then it is not treated as a missing note", async () => {
     // given
     const { setup, foreignRepo } = projectGrantFixture()

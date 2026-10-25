@@ -70,14 +70,28 @@ function samePath(left: string, right: string, paths: typeof path.posix, windows
   return windows ? a.toLowerCase() === b.toLowerCase() : a === b
 }
 
+// The deepest existing ancestor is resolved natively and the missing segments are appended verbatim,
+// never through a lexical join: a `.`, `..` or empty missing segment would make the rebuilt path name
+// another file than the one the opener resolves, so such a remainder is refused. Segments are cut at
+// the last separator, so none of them can hold one.
 function canonicalAllowingMissing(input: string, canonicalPath: (path: string) => string, paths: typeof path.posix): string {
-  try {
-    return canonicalPath(input)
-  } catch (error) {
-    const parent = paths.dirname(input)
-    // A dangling link is an entry, not a missing note: its target could appear outside the repo later.
-    if (!isMissingPathError(error) || parent === input || isEntry(input)) throw error
-    return paths.join(canonicalAllowingMissing(parent, canonicalPath, paths), paths.basename(input))
+  const root = paths.parse(input).root
+  const missing: string[] = []
+  let current = input
+  for (;;) {
+    try {
+      const ancestor = canonicalPath(current)
+      if (missing.length === 0) return ancestor
+      return (ancestor.endsWith(paths.sep) ? ancestor : ancestor + paths.sep) + missing.join(paths.sep)
+    } catch (error) {
+      // A dangling link is an entry, not a missing note: its target could appear outside the repo later.
+      if (!isMissingPathError(error) || current.length <= root.length || isEntry(current)) throw error
+      const cut = paths.sep === "\\" ? Math.max(current.lastIndexOf("/"), current.lastIndexOf("\\")) : current.lastIndexOf("/")
+      const segment = current.slice(cut + 1)
+      if (segment === "" || segment === "." || segment === "..") throw error
+      missing.unshift(segment)
+      current = cut < root.length ? root : current.slice(0, cut)
+    }
   }
 }
 
