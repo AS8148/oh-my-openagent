@@ -87,6 +87,60 @@ describe("memory sync while the keychain waits for approval", () => {
     }
   })
 
+  test("a zero or negative deferredRetryMs is clamped to at least 1 s so the retry cannot tight-loop", async () => {
+    const paths = await identity()
+    let attempts = 0
+    const runner = createSyncRunner({
+      logger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+      resolveSession: async () => {
+        attempts += 1
+        throw new SyncSessionDeferredError("approval pending", undefined)
+      },
+      deferredRetryMs: 0,
+    })
+    jest.useFakeTimers()
+    try {
+      await runner.acquire("agent", paths, { enabled: true })
+      expect(attempts).toBe(1)
+      jest.advanceTimersByTime(999)
+      expect(attempts).toBe(1)
+      jest.advanceTimersByTime(1)
+      await runner.status(paths.repo)
+      expect(attempts).toBe(2)
+    } finally {
+      jest.useRealTimers()
+      await runner.release(paths.repo)
+    }
+  })
+
+  test("at the five-minute cap one 'still waiting' line is logged per 15 minutes", async () => {
+    const paths = await identity()
+    const messages: string[] = []
+    const runner = createSyncRunner({
+      logger: { info: () => undefined, warn: (message) => messages.push(message), error: () => undefined },
+      resolveSession: async () => {
+        throw new SyncSessionDeferredError("approval pending", undefined)
+      },
+    })
+    jest.useFakeTimers()
+    try {
+      await runner.acquire("agent", paths, { enabled: true })
+      for (const delay of [15_000, 30_000, 60_000, 120_000, 240_000]) {
+        jest.advanceTimersByTime(delay)
+        await runner.status(paths.repo)
+      }
+      const stillWaiting = () => messages.filter((line) => line.includes("still waiting")).length
+      for (let pass = 1; pass <= 9; pass += 1) {
+        jest.advanceTimersByTime(300_000)
+        await runner.status(paths.repo)
+        expect(stillWaiting()).toBe(Math.floor(pass / 3))
+      }
+    } finally {
+      jest.useRealTimers()
+      await runner.release(paths.repo)
+    }
+  })
+
   test("#given an unanswered keychain dialog #when the device account is resolved #then it defers with the actionable keychain message instead of hanging or reading as signed out", async () => {
     const { store } = unansweredKeychainStore()
     const outcome = await settled(createCliAccountSource({ api: "http://127.0.0.1:9", store })())

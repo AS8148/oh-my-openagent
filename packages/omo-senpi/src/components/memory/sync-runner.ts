@@ -25,6 +25,8 @@ const CLOSE_WAIT_MS = 10_000
 // Deferred passes join any native read still parked behind the dialog; retries back off to five minutes.
 const DEFERRED_RETRY_MS = 15_000
 const DEFERRED_RETRY_MAX_MS = 300_000
+const DEFERRED_RETRY_MIN_MS = 1_000
+const DEFERRED_STILL_WAITING_MS = 900_000
 
 /** The status of a repo whose sync engine could not be loaded (the packaged sidecar is missing or broken). */
 export const SYNC_UNAVAILABLE = "sync-unavailable"
@@ -237,14 +239,23 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
     paths: MemoryIdentityPaths,
     space: SyncSpaceInputs,
     users: number,
-    retryMs = Math.min(options.deferredRetryMs ?? DEFERRED_RETRY_MS, DEFERRED_RETRY_MAX_MS),
+    retryMs = Math.max(Math.min(options.deferredRetryMs ?? DEFERRED_RETRY_MS, DEFERRED_RETRY_MAX_MS), DEFERRED_RETRY_MIN_MS),
     previousRetryMs = 0,
+    quietMs = 0,
   ): Held => {
     let deferred = false
+    let nextQuietMs = 0
     const ready = start(identity, paths, space, message => {
       deferred = true
       if (retryMs !== previousRetryMs) {
         logger.warn(`memory sync is waiting: ${message} Sync retries on its own.`, { identity, code: SYNC_SESSION_DEFERRED, retryMs })
+        return
+      }
+      // At the cap every pass is silent; one reminder per 15 minutes says the keychain is still unanswered.
+      nextQuietMs = quietMs + retryMs
+      if (nextQuietMs >= DEFERRED_STILL_WAITING_MS) {
+        nextQuietMs = 0
+        logger.warn("memory sync is still waiting for keychain approval.", { identity, code: SYNC_SESSION_DEFERRED, retryMs })
       }
     }).catch((error: unknown) => {
       logger.error("memory sync failed to start", { identity, error: String(error) })
@@ -254,7 +265,7 @@ export function createSyncRunner(options: SyncRunnerOptions): SyncRunner {
     void ready.then(() => {
       if (!deferred) return
       const retry = setTimeout(() => {
-        if (repos.get(paths.repo) === held) repos.set(paths.repo, launch(identity, paths, space, held.users, Math.min(retryMs * 2, DEFERRED_RETRY_MAX_MS), retryMs))
+        if (repos.get(paths.repo) === held) repos.set(paths.repo, launch(identity, paths, space, held.users, Math.min(retryMs * 2, DEFERRED_RETRY_MAX_MS), retryMs, nextQuietMs))
       }, retryMs)
       retry.unref?.()
     })
