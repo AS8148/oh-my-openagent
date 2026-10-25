@@ -5,6 +5,7 @@
 // caller; this module never guesses an id. Pure functions; node: builtins only.
 
 import { parseNumeral } from "./numerals.mjs"
+import { CLAIM_KINDS } from "./claim-kinds.mjs"
 
 export const ELLIPSIS = "\u2026"
 
@@ -45,6 +46,12 @@ function parseAnchors(tail) {
 export function parsePlaceholder(token) {
 	if (!token.startsWith("{{") || !token.endsWith("}}")) return { error: "a placeholder is {{ID:label...}}" }
 	const body = token.slice(2, -2)
+	const marked = Object.entries(CLAIM_KINDS).find(([, entry]) => entry.prefix && body.startsWith(`${entry.prefix}:`))
+	if (marked) {
+		const [claimKind, entry] = marked
+		const parsed = parsePlaceholder(`{{${body.slice(entry.prefix.length + 1)}}}`)
+		return parsed.error || parsed.claimKind ? { error: "a claim prefix must precede one fact or quote pointer" } : { ...parsed, claimKind }
+	}
 	const colon = body.indexOf(":")
 	const id = colon === -1 ? body : body.slice(0, colon)
 	const idMatch = ID.exec(id)
@@ -156,15 +163,17 @@ export function escapeHtml(text) {
 /** The elements the renderers below emit as fact spans; recognizers build their patterns from this. */
 export const FACT_ELEMENT_TAGS = Object.freeze(["data", "q", "blockquote"])
 
-export function renderValueHtml(row, text) {
+export function renderValueHtml(row, text, claimKind = null) {
 	const unit = row.unit === null ? "" : ` data-unit="${escapeHtml(row.unit)}"`
-	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
+	const mark = claimKind === null ? "" : ` data-claim-kind="${escapeHtml(claimKind)}"`
+	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit}${mark} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
 }
 
-export function renderQuote(row, selector, text, format) {
+export function renderQuote(row, selector, text, format, claimKind = null) {
 	const marker = `[${row.source_id}]`
 	if (format === "md") return `"${text}" ${marker}`
-	return `<q data-fact="${row.fact_id}" data-quote-sel="${escapeHtml(selector)}">${escapeHtml(text)}</q> ${marker}`
+	const mark = claimKind === null ? "" : ` data-claim-kind="${escapeHtml(claimKind)}"`
+	return `<q data-fact="${row.fact_id}"${mark} data-quote-sel="${escapeHtml(selector)}">${escapeHtml(text)}</q> ${marker}`
 }
 
 const RENDERED_MD_QUOTE = /^"([\s\S]*)" (\[S\d+\])$/u

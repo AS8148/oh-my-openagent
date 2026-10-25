@@ -12,6 +12,8 @@ import { join, resolve, sep } from "node:path"
 import { sha256Of } from "./cli-support.mjs"
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
+import { originalProblem } from "./fidelity-originals.mjs"
+import { snapshotsReadable } from "./fidelity-snapshot-readability.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
 import { parseNumeral } from "./numerals.mjs"
@@ -45,11 +47,13 @@ function quoteProblem(row, shown, selector) {
 	return bare(shown) === bare(want) ? null : ["quote_not_verbatim", `"${clip(shown)}" is not the ${selector} selection of ${row.fact_id}: "${clip(want)}"`]
 }
 
-function factProblem(row, shown, attrs = {}) {
+function factProblem(row, shown, attrs = {}, rows = new Map()) {
+	const original = originalProblem(row, shown, rows)
+	if (original) return original
 	if (attrs["data-unit"] !== undefined && unitKey(attrs["data-unit"]) !== unitKey(row.unit)) return ["unit_mismatch", `data-unit "${attrs["data-unit"]}" but ${row.fact_id} is in "${row.unit}"`]
 	if (attrs.value !== undefined && !sameValue(attrs.value, row.value)) return ["value_mismatch", `value="${attrs.value}" but ${row.fact_id} is ${row.value}`]
 	const text = normalizeText(shown)
-	const forms = [row.raw, row.render, row.value, row.unit && `${row.value} ${row.unit}`].filter(Boolean).map(normalizeText)
+	const forms = [...(["converted", "derived"].includes(row.kind) ? [] : [row.raw, row.render]), row.value, row.unit && `${row.value} ${row.unit}`].filter(Boolean).map(normalizeText)
 	if (forms.some((form) => text === form || (text.endsWith(` ${form}`) && !/\d/.test(text.slice(0, -form.length))))) return null
 	const parsed = parseNumeral(text)
 	if (!parsed) return unitKey(text) === unitKey(row.unit) ? null : ["value_mismatch", `"${clip(shown)}" shows no value of ${row.fact_id} (${row.value})`]
@@ -153,16 +157,16 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		if (!row) return flag("unresolved_placeholder", node, `${id} names no ledger row`)
 		if (!cited.has(id)) cited.set(id, node)
 		const problem = problemOf(row)
-		if (problem) flag(problem[0], node, problem[1])
+		if (problem) out.push({ ...ctx.defect(problem[0], node, problem[1]), ...(problem[2] ? { part: problem[2] } : {}) })
 	}
 	for (const node of ctx.all.filter((cur) => cur.attrs["data-fact"] !== undefined)) {
 		const selector = node.attrs["data-quote-sel"] ?? "full"
-		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : factProblem(row, proseText(node), node.attrs)))
+		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : factProblem(row, proseText(node), node.attrs, rows)))
 	}
 	const docText = bare(proseText(ctx.body))
 	for (const entry of fillMap ?? []) {
 		check(entry.fact_id, ctx.body, (row) => {
-			const problem = row.kind === "quote" ? quoteProblem(row, entry.rendered, entry.selector ?? "full") : factProblem(row, entry.rendered)
+			const problem = row.kind === "quote" ? quoteProblem(row, entry.rendered, entry.selector ?? "full") : factProblem(row, entry.rendered, {}, rows)
 			if (problem || docText.includes(bare(entry.rendered))) return problem
 			return [row.kind === "quote" ? "quote_not_verbatim" : "value_mismatch", `filled text "${clip(entry.rendered)}" of ${row.fact_id} is no longer in the report`]
 		})
@@ -172,7 +176,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		const groups = new Set(ctx.util.descendants(tr).map((node) => rows.get(node.attrs["data-fact"])?.observation_id).filter(Boolean))
 		if (groups.size > 1) flag("join_integrity_fail", tr, `one table row joins observations ${[...groups].join(", ")}`)
 	}
-	const meta = sourceChecks(ctx, rows, cited, sourcesDir, flag)
+	const meta = snapshotsReadable(ctx, rows, cited, sourcesDir, out) ? sourceChecks(ctx, rows, cited, sourcesDir, flag) : new Map()
 	claimChecks(ctx, rows, (row) => provenance(sourcesDir, meta, row), flag)
 	const charts = chartFigures(ctx)
 	for (const { node, scope } of ctx.elements) {

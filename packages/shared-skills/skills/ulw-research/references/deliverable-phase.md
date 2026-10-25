@@ -169,7 +169,7 @@ Nothing reaches the requester until the gates for its QA tier pass, in this orde
    ```bash
    node "$SKILL_DIR/scripts/report-tools.mjs" fact verify "$SESSION_DIR/report.html" --session-dir "$SESSION_DIR"   # writes fidelity-defects.json
    ```
-   Exit `1` on any blocker or major defect: record `outcome gate fidelity fail`; minors alone exit `0` and are listed. The grammar, the fill step, and the derivations are in section 11; this stage verifies HTML only.
+   Exit `1` on any blocker or major defect: record `outcome gate fidelity fail`; minors alone exit `0` and are listed. This stage verifies HTML and Markdown with its fill map; verify LaTeX through its Markdown source (section 11).
 3. **Layout gates.** Print the probe, evaluate it in the rendered page through the browser skill's owned headless engine, save the returned object as `$SESSION_DIR/boxes.json`, and re-run `check` with `--layout "$SESSION_DIR/boxes.json"`. It adds overflow past the container, clipped text, scroll containers, distorted images, and overlapping siblings.
    ```bash
    node "$SKILL_DIR/scripts/report-tools.mjs" layout-probe --json   # .source is one async expression
