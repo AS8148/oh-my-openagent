@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { existsSync } from "node:fs"
+import { EventEmitter } from "node:events"
+import { existsSync, watch } from "node:fs"
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises"
 import { createServer, type Socket } from "node:net"
 import { tmpdir } from "node:os"
@@ -7,17 +8,17 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { buildIdentityPaths } from "@oh-my-opencode/memory-core"
 import { readRunJson, writeRunJsonAtomic, type RunLaunchManifest, type RunOutcome } from "./run-artifacts"
-import { createTestClock, waitForFilesystemState } from "./supervisor-test-signals"
+import { createTestClock, waitForFilesystemState, waitForTestState } from "./supervisor-test-signals"
 
-const WAIT_MS = 30_000
 const moduleDir = dirname(fileURLToPath(import.meta.url))
 
-export async function slotHarness() {
+export async function slotHarness(testBudgetMs: number) {
   const root = await mkdtemp(join(tmpdir(), "reflection-slots-"))
   const locks = join(root, "runtime", "locks")
   const tickets = join(locks, "reflection-run.tickets")
   await mkdir(tickets, { recursive: true })
   const sockets = new Map<string, Socket>()
+  const events = new EventEmitter()
   const order: string[] = []
   let active = 0
   let peak = 0
@@ -34,6 +35,7 @@ export async function slotHarness() {
       active += 1
       peak = Math.max(peak, active)
       socket.once("close", () => { active -= 1 })
+      events.emit("started")
       if (flowing) socket.end()
     }
     socket.on("data", onData)
@@ -89,7 +91,9 @@ export async function slotHarness() {
     let stderr = ""
     child.stderr?.on("data", (chunk) => { stderr += String(chunk) })
     const exit = new Promise<number | null>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`supervisor ${run.id} exit timeout: ${stderr}`)), WAIT_MS)
+      const timeout = setTimeout(() => reject(new Error(
+        `waited ${testBudgetMs}ms for supervisor ${run.id} close: ${stderr}`,
+      )), testBudgetMs)
       child.once("error", (error) => { clearTimeout(timeout); reject(error) })
       child.once("close", (code) => {
         clearTimeout(timeout)
@@ -101,8 +105,12 @@ export async function slotHarness() {
     return { child, exit }
   }
 
-  const wait = <T>(probe: () => T | undefined | Promise<T | undefined>, description: string) =>
-    waitForFilesystemState(tickets, probe, WAIT_MS, description)
+  const wait = <T>(probe: () => T | undefined | Promise<T | undefined>, description: string, includeTickets = false) =>
+    waitForTestState((check) => {
+      events.on("started", check)
+      const watcher = includeTickets ? watch(tickets, check) : undefined
+      return () => { events.off("started", check); watcher?.close() }
+    }, probe, testBudgetMs, description)
   return {
     root, locks, tickets, sockets, order, makeRun, launch,
     peak: () => peak,
@@ -110,10 +118,10 @@ export async function slotHarness() {
     waitAccounted: (count: number, minimumStarted = 1) => wait(async () =>
       sockets.size >= minimumStarted
       && sockets.size + (await readdir(tickets)).filter((name) => name.endsWith(".ticket")).length === count
-        ? true : undefined, `${count} running or queued supervisors`),
-    waitQueued: (count: number) => wait(async () =>
+        ? true : undefined, `${count} running or queued supervisors`, true),
+    waitQueued: (count: number) => waitForFilesystemState(tickets, async () =>
       (await readdir(tickets)).filter((name) => name.endsWith(".ticket")).length === count
-        ? true : undefined, `${count} queued supervisors`),
+        ? true : undefined, testBudgetMs, `${count} queued supervisors`),
     release: (id: string) => {
       const socket = sockets.get(id)
       if (socket === undefined) throw new Error(`child ${id} did not start`)
@@ -121,7 +129,8 @@ export async function slotHarness() {
     },
     flow: () => { flowing = true; for (const socket of sockets.values()) socket.end() },
     outcome: async (runDir: string) => {
-      await waitForFilesystemState(runDir, () => existsSync(join(runDir, "outcome.json")) ? true : undefined, WAIT_MS, "outcome")
+      await waitForFilesystemState(runDir, () => existsSync(join(runDir, "outcome.json")) ? true : undefined,
+        testBudgetMs, `outcome.json in ${runDir}`)
       return readRunJson<RunOutcome>(join(runDir, "outcome.json"))
     },
     cleanup: async () => {

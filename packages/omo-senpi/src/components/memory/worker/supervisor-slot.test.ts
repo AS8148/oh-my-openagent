@@ -1,4 +1,6 @@
-import { expect, test } from "bun:test"
+import { expect, jest, test } from "bun:test"
+import { once } from "node:events"
+import { connect } from "node:net"
 import { slotHarness } from "./supervisor-slot.test-support"
 import { readRunJson, type RunLaunchManifest } from "./run-artifacts"
 import { join } from "node:path"
@@ -6,8 +8,32 @@ import { advanceTestClock } from "./supervisor-test-signals"
 import type { ReservationRunLedger } from "./reservation-run-ledger"
 import { createLockRecord, LockContentionError, withLock } from "@oh-my-opencode/memory-core"
 
+const TEST_TIMEOUT_MS = 60_000
+
+test("#given a child start after 30 seconds #when it arrives within the test budget #then the harness accepts it", async () => {
+  const harness = await slotHarness(TEST_TIMEOUT_MS)
+  const run = await harness.makeRun("slow-start")
+  let socket: ReturnType<typeof connect> | undefined
+  try {
+    socket = connect(Number(run.manifest.env.REFLECTION_SLOT_TEST_PORT), "127.0.0.1")
+    await once(socket, "connect")
+    jest.useFakeTimers()
+    const started = harness.waitStarted(run.id)
+    void started.catch(() => undefined)
+    await Promise.resolve()
+    jest.advanceTimersByTime(30_001)
+    socket.write(`${run.id}\n`)
+    await started
+    expect(harness.order).toEqual([run.id])
+  } finally {
+    jest.useRealTimers()
+    socket?.destroy()
+    await harness.cleanup()
+  }
+}, TEST_TIMEOUT_MS)
+
 test("five simultaneous identities obey the machine cap and all publish outcomes", async () => {
-  const harness = await slotHarness()
+  const harness = await slotHarness(TEST_TIMEOUT_MS)
   try {
     const runs = await Promise.all(Array.from({ length: 5 }, (_, index) => harness.makeRun(`identity-${index}`)))
     const accounted = harness.waitAccounted(5)
@@ -23,10 +49,10 @@ test("five simultaneous identities obey the machine cap and all publish outcomes
   } finally {
     await harness.cleanup()
   }
-}, 60_000)
+}, TEST_TIMEOUT_MS)
 
 test("a surviving bootstrap retains its slot after the supervisor is killed", async () => {
-  const harness = await slotHarness()
+  const harness = await slotHarness(TEST_TIMEOUT_MS)
   try {
     const first = await harness.makeRun("survivor")
     const started = harness.waitStarted(first.id)
@@ -51,10 +77,10 @@ test("a surviving bootstrap retains its slot after the supervisor is killed", as
   } finally {
     await harness.cleanup()
   }
-}, 60_000)
+}, TEST_TIMEOUT_MS)
 
 test("a configured cap of two admits two children across identities", async () => {
-  const harness = await slotHarness()
+  const harness = await slotHarness(TEST_TIMEOUT_MS)
   try {
     const runs = await Promise.all(Array.from({ length: 5 }, (_, index) => harness.makeRun(`pair-${index}`, 2)))
     const accounted = harness.waitAccounted(5, 2)
@@ -68,10 +94,10 @@ test("a configured cap of two admits two children across identities", async () =
   } finally {
     await harness.cleanup()
   }
-}, 60_000)
+}, TEST_TIMEOUT_MS)
 
 test.each(["SIGTERM", "SIGKILL"] as const)("a queued supervisor killed with %s cannot block its FIFO successor", async (signal) => {
-  const harness = await slotHarness()
+  const harness = await slotHarness(TEST_TIMEOUT_MS)
   try {
     const runs = await Promise.all(["first", "killed", "third"].map((id) => harness.makeRun(id)))
     const [first, killed, third] = runs
@@ -98,10 +124,10 @@ test.each(["SIGTERM", "SIGKILL"] as const)("a queued supervisor killed with %s c
   } finally {
     await harness.cleanup()
   }
-}, 60_000)
+}, TEST_TIMEOUT_MS)
 
 test("waiting beyond the original budget rebases both durable deadlines before the child starts", async () => {
-  const harness = await slotHarness()
+  const harness = await slotHarness(TEST_TIMEOUT_MS)
   try {
     const now = Date.now()
     const first = await harness.makeRun("holder", 1, now)
@@ -132,4 +158,4 @@ test("waiting beyond the original budget rebases both durable deadlines before t
   } finally {
     await harness.cleanup()
   }
-}, 60_000)
+}, TEST_TIMEOUT_MS)
