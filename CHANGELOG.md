@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **The ulw-research proofread lane returns edits that are checked before they land.** The writing lane hands back `polish-edits.json`; `fact polish-apply` applies each edit only when it changes text nodes alone and keeps every number, hedge, qualifier, link, and claim id, `fact polish-diff` backstops hand edits, and `fact pairs --changed-since` sends every sentence polish rewrote back to the meaning readers. ([#11160](https://github.com/code-yeongyu/oh-my-openagent/pull/11160), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009))
 
+- Memory path-state recovery and commit hooks now keep literal Git lookups working when global glob or case-insensitive pathspec modes are enabled ([#11130](https://github.com/code-yeongyu/oh-my-openagent/issues/11130), [#11167](https://github.com/code-yeongyu/oh-my-openagent/pull/11167)). (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
+
+**A user Stop pauses the workflow run it started instead of cancelling it.** DAG nodes, workpool workers and task children hold where they are; a message to the paused run or Resume continues it from where it stopped. ([#10808](https://github.com/code-yeongyu/oh-my-openagent/pull/10808), fixes [#6752](https://github.com/code-yeongyu/oh-my-openagent/issues/6752)) (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
+
+**Concurrent file touches show each project memory nudge once.** Project memory reads reserve the nudge before asynchronous loading, retry failed reads, and discard stale results after compaction or session changes. ([#11165](https://github.com/code-yeongyu/oh-my-openagent/pull/11165), addresses item 1 of [#10927](https://github.com/code-yeongyu/oh-my-openagent/issues/10927)) (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
+
+**A finished workflow run now shows as a finished run.** When a workflow (DAG) run started from a session completes, including one that completes after recovery, the engine records the session's completion as a finished run instead of a plain reply ([#11155](https://github.com/code-yeongyu/oh-my-openagent/pull/11155)). (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
+
+**A finished ulw-execute plan now shows as a finished run.** When this session's own ulw-execute work is marked completed, the engine records the session's completion as a finished run instead of a plain reply. Work finished by an earlier run, abandoned work, and another session's work are not counted ([#11174](https://github.com/code-yeongyu/oh-my-openagent/pull/11174)). (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
+
+**A completed ulw-loop plan now shows as a finished run.** When this session's ulw-loop plan reaches its aggregate completion, the engine records the session's completion as a finished run instead of a plain reply. A plan that was already complete when the session started is not counted ([#11175](https://github.com/code-yeongyu/oh-my-openagent/pull/11175)). (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
+
+**CI exposes the lint ratchet as its own required-free status check.** Pull requests, pushes and merge groups run `Lint ratchet` independently of the heavy-validation typecheck path. ([#11128](https://github.com/code-yeongyu/oh-my-openagent/pull/11128), thanks @Dante-dan) (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
+
+**The 10k parked-backlog memory test now fails if it observed no entry reads.** ([#11164](https://github.com/code-yeongyu/oh-my-openagent/pull/11164), part of [#11091](https://github.com/code-yeongyu/oh-my-openagent/issues/11091), thanks @Dante-dan) (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
+
 ## [5.1.46] - 2026-10-24
 
 **OmO Native init-deep committed mode no longer dead-ends.** Committed mode now finishes through its own pull-request handoff instead of pointing at a skill that does not ship with OmO Native, and it reports how to finish by hand when no PR can be opened. Thanks to @HolisticDeveloper for the report and @surlymochan for the fix. ([#11228](https://github.com/code-yeongyu/oh-my-openagent/pull/11228), fixes [#9686](https://github.com/code-yeongyu/oh-my-openagent/issues/9686))
