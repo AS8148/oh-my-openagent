@@ -339,16 +339,16 @@ describe("omo-senpi task component wiring", () => {
 
   it("#given a wired bridge #when session_start fires repeatedly #then the team mailbox is reconciled on every start", async () => {
     // given
-    const completions = [Promise.withResolvers<void>(), Promise.withResolvers<void>()]
+    const [first, second] = [Promise.withResolvers<void>(), Promise.withResolvers<void>()]
     let completed = 0
-    const { pi, reconcileCalls, leadCalls } = wiredBridge(() => completions[completed++]?.resolve())
+    const { pi, reconcileCalls, leadCalls } = wiredBridge(() => [first, second][completed++]?.resolve())
     const liveCtx = { ui: fakeUi(), mode: "tui", sessionManager: { getSessionId: () => "session-a" } }
 
     // when the session starts twice
     await pi.dispatch("session_start", {}, liveCtx)
-    await completions[0]!.promise
+    await first.promise
     await pi.dispatch("session_start", {}, liveCtx)
-    await completions[1]!.promise
+    await second.promise
 
     // then
     expect(reconcileCalls.count).toBe(2)

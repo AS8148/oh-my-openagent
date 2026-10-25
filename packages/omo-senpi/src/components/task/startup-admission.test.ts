@@ -22,7 +22,7 @@ test("session admission and RPC attachment finish while a host never answers", a
   const lifecycle = createTaskLifecycle({
     ...fixture.deps,
     hostSessionProbe: {
-      ...fixture.deps.hostSessionProbe!,
+      ...fixture.hostSessionProbe,
       daemonAlive: () => { entered.resolve(); return probe.promise },
     },
   })

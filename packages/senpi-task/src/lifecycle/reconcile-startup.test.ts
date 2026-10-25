@@ -20,7 +20,7 @@ for (const change of ["dispose", "new-owner"] as const) {
     const lifecycle = createTaskLifecycle({
       ...fixture.deps,
       hostSessionProbe: {
-        ...fixture.deps.hostSessionProbe!,
+        ...fixture.hostSessionProbe,
         daemonAlive: () => { entered.resolve(); return probe.promise },
       },
     })
@@ -94,7 +94,7 @@ for (const stop of ["dispose", "shutdown"] as const) {
     const lifecycle = createTaskLifecycle({
       ...fixture.deps,
       hostSessionProbe: {
-        ...fixture.deps.hostSessionProbe!,
+        ...fixture.hostSessionProbe,
         daemonAlive: () => { entered.resolve(); return probe.promise },
       },
     })
@@ -137,7 +137,7 @@ test("a hung host does not delay reconciliation on another host", async () => {
   const lifecycle = createTaskLifecycle({
     ...fixture.deps,
     hostSessionProbe: {
-      ...fixture.deps.hostSessionProbe!,
+      ...fixture.hostSessionProbe,
       daemonAlive: (identity) => identity.socket === "/hung.sock" ? hung.promise : Promise.resolve(true),
       sessionLive: async () => false,
     },
@@ -168,7 +168,7 @@ test("a late probe cannot reclaim a newer same-process ownership claim", async (
   const lifecycle = createTaskLifecycle({
     ...fixture.deps,
     hostSessionProbe: {
-      ...fixture.deps.hostSessionProbe!,
+      ...fixture.hostSessionProbe,
       daemonAlive: () => { entered.resolve(); return probe.promise },
     },
   })
