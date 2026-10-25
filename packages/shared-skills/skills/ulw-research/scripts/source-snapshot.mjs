@@ -4,7 +4,7 @@
 // proseText, one table cell per line; head, scripts, styles and code are dropped). writeSnapshot
 // writes <sourcesDir>/<S-id>/ with text.txt (pages joined by a form feed), source.html when html
 // was given, meta.json, sentences.jsonl (sid S<n>:s<k>) and acronyms.json. The sha256 covers
-// text.txt only. Nothing here touches the network: the caller supplies the html or text.
+// raw.bin exactly; text.txt is a reading aid. The caller supplies bytes, html or text.
 // Plain Node ESM, node: builtins and sibling imports only.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -21,7 +21,7 @@ const INLINE = new Set([
 ])
 const SOURCE_ID = /^S[1-9]\d*$/
 const EXTRACTOR = /^(?:tool:source-snapshot@1|model|extractor:[\w.@+-]+)$/
-const KINDS = new Set(["page", "command", "document"])
+const KINDS = new Set(["page", "command", "document", "converted-only"])
 const PROVENANCE = new Set(["primary", "secondary", "unknown"])
 const ACRONYM_AFTER = /\(([A-Z]{2,6})\)/g
 const ACRONYM_BEFORE = /(?<![\p{L}\p{N}])([A-Z]{2,6})\s?\(([A-Z][^()\n]{2,79})\)/gu
@@ -135,12 +135,12 @@ function checkInput(sourceId, input) {
 	if (!SOURCE_ID.test(String(sourceId))) throw new TypeError(`source id must be S<n>, got ${sourceId}`)
 	if (!EXTRACTOR.test(String(input.extractor))) throw new TypeError(`extractor must be tool:source-snapshot@1, model, or extractor:<name>, got ${input.extractor}`)
 	if (typeof (input.url ?? input.path) !== "string") throw new TypeError("writeSnapshot needs a url or a path")
-	if (input.kind !== undefined && !KINDS.has(input.kind)) throw new TypeError(`kind must be page, command, or document, got ${input.kind}`)
+	if (input.kind !== undefined && !KINDS.has(input.kind)) throw new TypeError(`kind must be page, command, document, or converted-only, got ${input.kind}`)
 	if (input.provenance !== undefined && !PROVENANCE.has(input.provenance)) throw new TypeError(`provenance must be primary, secondary, or unknown, got ${input.provenance}`)
 }
 
 /**
- * Write <sourcesDir>/<sourceId>/ for one source; returns { dir, sha256 } with sha256 over text.txt.
+ * Write <sourcesDir>/<sourceId>/ for one source; returns { dir, sha256 } over raw.bin.
  * input: { url | path, text | pages | html, extractor, observed_at?, revision?, kind?, provenance? }.
  * Re-writing the same text is a no-op change; a different text over an existing snapshot throws
  * snapshot_exists, because ledger rows pin the old hash.
@@ -148,13 +148,18 @@ function checkInput(sourceId, input) {
 export function writeSnapshot(sourcesDir, sourceId, input) {
 	checkInput(sourceId, input)
 	const text = snapshotText(input)
-	const sha256 = sha256Of(Buffer.from(text, "utf8"))
+	const raw = Buffer.from(input.raw ?? input.html ?? text)
+	const converted = input.kind === "converted-only"
+	const sha256 = sha256Of(raw)
 	const dir = join(sourcesDir, sourceId)
 	const textPath = join(dir, "text.txt")
-	if (existsSync(textPath) && sha256Of(readFileSync(textPath)) !== sha256) {
-		throw new Error(`snapshot_exists: ${sourceId} already holds a different text.txt`)
+	const rawPath = join(dir, "raw.bin")
+	const pinned = existsSync(rawPath) ? rawPath : textPath
+	if (existsSync(pinned) && sha256Of(readFileSync(pinned)) !== sha256) {
+		throw new Error(`snapshot_exists: ${sourceId} already holds different snapshot bytes`)
 	}
 	mkdirSync(dir, { recursive: true })
+	if (!converted) writeFileSync(rawPath, raw)
 	writeFileSync(textPath, text)
 	if (typeof input.html === "string") writeFileSync(join(dir, "source.html"), input.html)
 	const meta = {

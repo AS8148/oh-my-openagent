@@ -37,12 +37,15 @@ export function sessionDirOf(flags) {
 	return resolve(dir)
 }
 
-/** The snapshot of one source: meta.json, text.txt, and source.html when the source was a page. */
+/** Raw bytes are authoritative; text is available only for explicitly converted-only quotations. */
 export function snapshotOf(sessionDir, id) {
 	const dir = join(sessionDir, "sources", String(id))
 	if (!existsSync(join(dir, "meta.json"))) throw new CliError(`source ${id} has no snapshot; run source snapshot --id ${id} first`)
-	const html = join(dir, "source.html")
-	return { meta: JSON.parse(readInput(join(dir, "meta.json"))), text: readInput(join(dir, "text.txt")), html: existsSync(html) ? readInput(html) : null }
+	const rawPath = join(dir, "raw.bin")
+	const meta = JSON.parse(readInput(join(dir, "meta.json")))
+	const raw = existsSync(rawPath) ? readFileSync(rawPath) : null
+	const text = raw === null ? (existsSync(join(dir, "text.txt")) ? readInput(join(dir, "text.txt")) : "") : raw.toString("utf8")
+	return { meta, raw, text, html: meta.kind === "page" && /^\s*</.test(text) ? text : null }
 }
 
 /**
@@ -74,8 +77,9 @@ async function fetchSource(url) {
 		await response.body?.cancel()
 		throw new CliError(`pdf response: ${url}; extract its text and use --text <file> --extractor NAME@VERSION`)
 	}
-	const body = await response.text()
-	return /html|xml/i.test(type) || /^\s*</.test(body) ? { url, html: body } : { url, text: body }
+	const raw = Buffer.from(await response.arrayBuffer())
+	const body = raw.toString("utf8")
+	return /html|xml/i.test(type) || /^\s*</.test(body) ? { url, raw, html: body } : { url, raw, text: body }
 }
 
 function runCommand(argvJson, cwd) {
@@ -89,10 +93,10 @@ function runCommand(argvJson, cwd) {
 		throw new CliError("--command must be a non-empty JSON array of non-empty strings")
 	}
 	if (!cwd || cwd === true) throw new CliError("--command needs --cwd DIR")
-	const proc = spawnSync(argv[0], argv.slice(1), { cwd: resolve(cwd), encoding: "utf8", shell: false, maxBuffer: 64 * 1024 * 1024 })
+	const proc = spawnSync(argv[0], argv.slice(1), { cwd: resolve(cwd), shell: false, maxBuffer: 64 * 1024 * 1024 })
 	if (proc.error) throw new CliError(`--command could not start: ${proc.error.message}`)
 	const receipt = { argv, cwd: resolve(cwd), exit_status: proc.status, stdout_sha256: sha256Of(proc.stdout), stderr_sha256: sha256Of(proc.stderr) }
-	return { path: `command:${argv.join(" ")}`, text: proc.stdout, kind: "command", receipt }
+	return { path: `command:${argv.join(" ")}`, raw: proc.stdout, text: proc.stdout.toString("utf8"), kind: "command", receipt }
 }
 
 async function acquire(flags) {
@@ -100,8 +104,8 @@ async function acquire(flags) {
 	if (given.length !== 1) throw new CliError(SNAPSHOT_USAGE)
 	if (flags.extractor !== undefined && flags.text === undefined) throw new CliError("--extractor goes with --text only")
 	if (flags.url !== undefined) return { ...(await fetchSource(flags.url)), extractor: TOOL_EXTRACTOR }
-	if (flags.html !== undefined) return { path: resolve(flags.html), html: readInput(flags.html), extractor: "model" }
-	if (flags.text !== undefined) return { path: resolve(flags.text), text: readInput(flags.text), extractor: flags.extractor === undefined ? "model" : `extractor:${flags.extractor}` }
+	if (flags.html !== undefined) return { path: resolve(flags.html), raw: readFileSync(flags.html), html: readInput(flags.html), extractor: "model" }
+	if (flags.text !== undefined) return { path: resolve(flags.text), raw: flags.raw === undefined ? readFileSync(flags.text) : readFileSync(flags.raw), text: readInput(flags.text), extractor: flags.extractor === undefined ? "model" : `extractor:${flags.extractor}` }
 	return { ...runCommand(flags.command, flags.cwd), extractor: TOOL_EXTRACTOR }
 }
 

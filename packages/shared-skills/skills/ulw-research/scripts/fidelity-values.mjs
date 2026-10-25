@@ -7,11 +7,11 @@
 // No model, no network.
 
 import { existsSync, readFileSync } from "node:fs"
-import { join, resolve, sep } from "node:path"
+import { resolve, sep } from "node:path"
 
-import { sha256Of } from "./cli-support.mjs"
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
+import { sourceChecks } from "./fidelity-sources.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
 import { parseNumeral } from "./numerals.mjs"
@@ -212,18 +212,4 @@ function provenance(sourcesDir, meta, row) {
 	const dir = resolve(sourcesDir, row.source_id)
 	const path = resolve(dir, artifact)
 	return path.startsWith(`${dir}${sep}`) && existsSync(path) ? meta.get(row.source_id)?.kind : undefined
-}
-
-function sourceChecks(ctx, rows, cited, sourcesDir, flag) {
-	const ids = new Set([...cited.keys()].map((id) => rows.get(id)?.source_id).filter(Boolean))
-	for (const match of proseText(ctx.body).matchAll(/\[S(\d+)\]/g)) ids.add(`S${match[1]}`)
-	const meta = new Map()
-	for (const id of sourcesDir ? ids : []) {
-		const [metaPath, textPath] = [join(sourcesDir, id, "meta.json"), join(sourcesDir, id, "text.txt")]
-		if (!existsSync(metaPath) || !existsSync(textPath)) continue
-		meta.set(id, JSON.parse(readFileSync(metaPath, "utf8")))
-		const actual = sha256Of(readFileSync(textPath))
-		if (meta.get(id).sha256 !== actual) flag("snapshot_hash_mismatch", ctx.body, `${id}/text.txt changed after its snapshot was pinned`)
-	}
-	return meta
 }

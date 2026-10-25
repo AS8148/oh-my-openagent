@@ -10,6 +10,7 @@
 import { proseText } from "./html-lite.mjs"
 import { QUALIFIERS } from "./lexicon.mjs"
 import { parseNumeral } from "./numerals.mjs"
+import { rawTableLocated } from "./raw-locator.mjs"
 import { indexSentences, snapshotBlocks } from "./source-snapshot.mjs"
 import { findNormalized, normalizeText, tokenize } from "./text-normalize.mjs"
 import { similarity } from "./text-similarity.mjs"
@@ -143,7 +144,7 @@ const cellLabel = (cell) => label(proseText(cell))
 const indexesOf = (labels, wanted) => labels.flatMap((value, index) => (value === wanted ? [index] : []))
 
 /** --table/--row/--col: the table by id, caption, or a header label; row and column by normalized label, never by index. */
-export function locateTable(sourceHtml, { table, row, col, sourceId }) {
+export function locateTable(sourceHtml, { table, row, col, sourceId, raw = false }) {
 	requireSource(sourceId)
 	const { root, text, blocks } = snapshotBlocks(sourceHtml)
 	const key = label(table)
@@ -161,7 +162,8 @@ export function locateTable(sourceHtml, { table, row, col, sourceId }) {
 	const numeral = parseNumeral(holder.text)
 	if (!numeral) return notLocated()
 	const headerUnit = /\(([^()]+)\)\s*$/.exec(cellLabel(headerCells[columns[0]]))
-	return quantityResult(text, sourceId, holder, numeral, { table, row_label: row, col_label: col }, headerUnit ? normalizeUnit(headerUnit[1]) : null)
+	const found = quantityResult(text, sourceId, holder, numeral, { table, row_label: row, col_label: col }, headerUnit ? normalizeUnit(headerUnit[1]) : null)
+	return raw ? rawTableLocated(sourceHtml, cell, found) : found
 }
 
 /** --page/--line: exactly one quantity on that line of that page (pages split on a form feed). */

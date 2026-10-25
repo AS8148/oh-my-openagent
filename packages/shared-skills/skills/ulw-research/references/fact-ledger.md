@@ -8,7 +8,8 @@ Every command is `node "$SKILL_DIR/scripts/report-tools.mjs" <command> --session
 
 | Path | Written by | Holds |
 | --- | --- | --- |
-| `sources/S<n>/text.txt` | `source snapshot` | the extracted text the locators read (one line per block; pages joined by a form feed); `sha256` covers this file |
+| `sources/S<n>/raw.bin` | `source snapshot` | bytes exactly as fetched or captured; `snapshot_sha256` is sha256 of this file |
+| `sources/S<n>/text.txt` | `source snapshot` | optional reading aid (one line per block; pages joined by a form feed), never authoritative for measured rows |
 | `sources/S<n>/source.html` | `source snapshot` (page sources) | the captured page, read by the table locator |
 | `sources/S<n>/meta.json` | `source snapshot` | `source_id`, `url`, `observed_at`, `sha256`, `extractor`, `revision`, `kind`, `provenance` |
 | `sources/S<n>/sentences.jsonl`, `acronyms.json` | `source snapshot` | the sentence index (`S<n>:s<k>`) and the acronym table the fidelity gate reads |
@@ -18,7 +19,7 @@ Every command is `node "$SKILL_DIR/scripts/report-tools.mjs" <command> --session
 | `fidelity-defects.json` | `fact verify` | the verify record: the fidelity envelope (`record_kind: "fidelity"`, `artifact_sha256`, `report`, `written_at`, `defects`) plus `command`, `status`, `exitCode`, `format`, `counts`, `gatesRun` |
 | `fidelity-meaning-defects.json` | `fact meaning-check` | the meaning record: the fidelity envelope (`record_kind: "meaning"`) plus the run fields under Meaning verdicts |
 
-A source directory is immutable. Snapshotting the same id again with the same text is a no-op; different text fails with `snapshot_exists`, because rows pin the snapshot hash.
+A source directory is immutable. Snapshotting the same id with the same raw bytes is a no-op; different bytes fail with `snapshot_exists`, because rows pin the snapshot hash. Fetchers returning Markdown or converted text must retain the original body (`--text <aid> --raw <body>`), or register `--kind converted-only`: measured rows then fail with `snapshot_not_raw`; quote rows alone are allowed with a warning.
 
 ## Row fields
 
@@ -31,7 +32,8 @@ A source directory is immutable. Snapshotting the same id again with the same te
 | `raw`, `quote`, `value_span` | the source's own characters for the value, the whole containing sentence or cell, and where `raw` sits inside `quote` |
 | `qualifier` | a bounding word the source puts on the value: `upper_inclusive` (up to, at most), `lower_inclusive` (at least), `approximate` (about), `near` (nearly), `lower_exclusive` (over, more than), `upper_exclusive` (under, less than) |
 | `source_id`, `snapshot_sha256`, `sentence_id` | the snapshot the row was read from, its hash at that moment, and the sentence id |
-| `locator` | where `quote` sits in `text.txt` (`artifact`, `line`, `page`, `char_start`, `char_end`, and `table`, `row_label`, `col_label` for a table cell), plus the source's `source_kind`, `url`, `host`, and `pointed` (whether the brief's source floor names it) |
+| `locator` | where `quote` sits in `raw.bin`: `char_start/char_end` are half-open UTF-8 byte offsets before normalization, with `unit: "utf8-bytes"`; absent unit identifies a legacy row. Also `line`, `page`, table labels, `source_kind`, `url`, `host`, and `pointed` |
+| `context` | source rows: `{prefix, suffix}`, up to 32 Unicode characters each around the value span (around the whole quote for quote rows), copied before normalization; null on legacy rows |
 | `extracted_by` | the snapshot's extractor: `tool:source-snapshot@1` (fetched or executed by the script), `model` (a capture the browser lane imported; lower trust), or `extractor:<name>@<version>`; `fact-derive` for a derivation |
 | `observed_at`, `valid_at` | when the row was registered, and the period the value describes (`--valid-at`) |
 | `entity`, `population`, `accounting_basis`, `observation_id` | declarations the derivations check (`--entity`, `--population`, `--accounting-basis`, `--observation O<n>`) |
@@ -49,6 +51,8 @@ A source directory is immutable. Snapshotting the same id again with the same te
 | `--match "<words>"` (`fact quote`) | the unique sentence containing the words; the whole sentence is stored, so a later partial quote cannot drop its hedge |
 
 A locator that finds nothing returns `fact_not_located`, more than one candidate `fact_ambiguous`, and nothing is written. Read the printed row and its 60 characters of context on each side before using it; a wrong row is retracted, never edited.
+
+`fact verify` rehashes raw.bin against the source metadata and each referenced row's pin; drift remains `snapshot_hash_mismatch` even if the quote can relocate. Once a re-fetch is explicitly pinned, a stale range is re-anchored by exact quote plus context: exactly one match emits minor `relocated` with old and new byte offsets; zero or multiple matches use existing `quote_not_verbatim`. Verification never rewrites the ledger or silently repins a hash.
 
 ## Meaning verdicts
 

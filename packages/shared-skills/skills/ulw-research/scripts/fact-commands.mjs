@@ -15,6 +15,7 @@ import { addRow, readLedger, retractRow, supersedeRow, writeLedger } from "./fac
 import { locateFind, locateMatch, locatePageLine, locateTable } from "./fact-locate.mjs"
 import { QUALIFIER_FORMS } from "./fidelity-lexicon.mjs"
 import { exportRows } from "./fidelity-values.mjs"
+import { rawLocated } from "./raw-locator.mjs"
 import { pointedFlag, sessionDirOf, snapshotOf } from "./source-commands.mjs"
 
 const CONTEXT = 60
@@ -47,7 +48,7 @@ function locate(flags, snapshot, id, quote) {
 	if (flags.find !== undefined) return locateFind(snapshot.text, { find: flags.find, unitExpected: flags["unit-expected"], sourceId })
 	if (flags.table !== undefined) {
 		if (snapshot.html === null) throw new CliError(`source ${id} has no source.html; --table needs a page snapshot`)
-		return locateTable(snapshot.html, { table: flags.table, row: flags.row, col: flags.col, sourceId })
+		return locateTable(snapshot.html, { table: flags.table, row: flags.row, col: flags.col, sourceId, raw: true })
 	}
 	if (flags.page !== undefined) return locatePageLine(snapshot.text, { page: Number(flags.page), line: Number(flags.line), sourceId })
 	throw new CliError("usage: fact add --source S<n> (--find TEXT | --table T --row R --col C | --page P --line L) --label LABEL")
@@ -77,7 +78,10 @@ function runAdd(args, quote) {
 	if (quote) args.required("match")
 	const sessionDir = sessionDirOf(flags)
 	const snapshot = snapshotOf(sessionDir, id)
-	const found = locate(flags, snapshot, id, quote)
+	const converted = snapshot.meta.kind === "converted-only"
+	if ((!quote || !converted) && (snapshot.raw === null || converted)) return failure(command, "snapshot_not_raw", { message: `${id} requires raw.bin; converted-only sources cannot back measured rows` })
+	const located = locate(flags, snapshot, id, quote)
+	const found = rawLocated(snapshot.text, located)
 	if (found.error === "unit_expected_mismatch") return failure(command, "unit_mismatch", { message: `expected ${found.expected}, found ${found.found}`, candidates: found.candidates })
 	if (found.error) return failure(command, found.error, { message: `no single match in ${id}`, candidates: found.candidates })
 	const { meta } = snapshot
@@ -89,9 +93,10 @@ function runAdd(args, quote) {
 		...(quote ? {} : { value: found.value, unit: found.unit, value_span: found.value_span, qualifier: QUALIFIER_OF.get(found.qualifier) ?? null }),
 		raw: found.raw,
 		quote: found.quote,
+		context: found.context,
 		source_id: id,
 		locator: { ...found.locator, source_kind: meta.kind, url: meta.url, host, pointed: pointedFlag(sessionDir, meta.url) },
-		snapshot_sha256: meta.sha256,
+		snapshot_sha256: sha256Of(snapshot.raw ?? snapshot.text),
 		sentence_id: found.sentence_id ?? null,
 		extracted_by: meta.extractor,
 		observed_at: nowIso(flags),
@@ -104,8 +109,9 @@ function runAdd(args, quote) {
 		fuzzy: found.fuzzy === true,
 	})
 	writeLedger(sessionDir, ledger)
-	const context = contextOf(snapshot.text, row)
-	const json = { command, status: "pass", exitCode: 0, defects: [], data: { row, context } }
+	const context = contextOf(snapshot.text, located)
+	const defects = converted ? [{ code: "quote_fuzzy_match", severity: "minor", integrity: false, message: `${id} is converted-only; the quote is not bound to the original fetched body` }] : []
+	const json = { command, status: "pass", exitCode: 0, defects, data: { row, context } }
 	if (flags.json) return { json, exitCode: 0 }
 	const shown = quote ? row.quote : `${row.raw} (value ${row.value}${row.unit ? `, unit ${row.unit}` : ""})`
 	return { text: `${row.fact_id} ${row.label}: ${shown} [${id} ${row.sentence_id ?? "-"}]\n  ...${context.before}[${context.match}]${context.after}...`, exitCode: 0 }
