@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 import {
   formatMomusReviewArtifact,
@@ -26,7 +26,7 @@ describe("getPlanReviewsDir", () => {
     const reviewsDir = getPlanReviewsDir(directory, ".omo/plans/demo.md")
 
     // then
-    expect(reviewsDir).toBe(join(directory, ".omo", "plans", "demo.reviews"))
+    expect(reviewsDir).toBe(resolve(directory, ".omo", "plans", "demo.reviews"))
   })
 
   test("keeps absolute plan paths rooted at their own location", () => {
@@ -37,7 +37,7 @@ describe("getPlanReviewsDir", () => {
     const reviewsDir = getPlanReviewsDir(directory, "/elsewhere/.omo/plans/demo.md")
 
     // then
-    expect(reviewsDir).toBe("/elsewhere/.omo/plans/demo.reviews")
+    expect(reviewsDir).toBe(resolve("/elsewhere/.omo/plans/demo.reviews"))
   })
 })
 
