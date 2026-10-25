@@ -33,10 +33,13 @@ export function createReattachPort<Port extends HostSessionPort>(input: Reattach
     const { endpoint, spec } = input
     for (const delayMs of input.delaysMs) {
       await input.sleep(delayMs)
+      // No own_host_unreachable notice on an abandoned reattach: the child already parked with its own.
       if (abandoned()) return undefined
       try {
         await admitChildStore(endpoint)
         const socket = await ensureChildEndpoint(endpoint, { socket: lost.socket, recorded: true, attachOnly: false })
+        // The bound may run out while the endpoint is ensured; same reason, same skipped notice.
+        if (abandoned()) return undefined
         const client = input.createClient(socket)
         const opened = await input.open(client, lost.sessionPath)
         return {
