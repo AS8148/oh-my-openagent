@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
-import { isEngineCommand } from "./engine-commands.js"
+import { engineCommandArgs, isEngineCommand } from "./engine-commands.js"
 import { spawnNode } from "./child-process.js"
 import { doctorCoverageLines } from "./category-coverage.js"
 import { runDoctorModels } from "./model-chains.js"
@@ -230,9 +230,9 @@ export async function runLauncher(args = process.argv.slice(2)) {
     })
     return
   }
-  // One-shot engine commands go over unchanged: the engine dispatches them on argv[0] (#9572).
+  // One-shot engine commands go over command-first: the engine dispatches them on argv[0] (#9572).
   if (isEngineCommand(args)) {
-    await spawnSenpi(args, false)
+    await spawnSenpi(engineCommandArgs(args, join(packageRoot, "plugin")), false)
     return
   }
   if (isInteractiveDefault(args)) {
