@@ -40,7 +40,7 @@ import {
 
 const MODE: AgentMode = "primary"
 
-type AtlasRoleSource = "default" | "gpt" | "gemini" | "kimi" | "kimi-k3" | "kimi-k2-7" | "opus-4-7" | "glm"
+type AtlasRoleSource = "default" | "gpt" | "gemini" | "kimi" | "kimi-k3" | "kimi-k3-1" | "kimi-k2-7" | "opus-4-7" | "glm"
 
 class AtlasPromptVariantError extends Error {
   readonly name = "AtlasPromptVariantError"

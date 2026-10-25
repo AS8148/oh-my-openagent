@@ -8,21 +8,19 @@
 // node: builtins and sibling imports only.
 
 import { spawnSync } from "node:child_process"
-import { createHash } from "node:crypto"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import { indexClaims } from "./claims-index.mjs"
-import { CliError, parseArgs, writeJsonAtomic } from "./cli-support.mjs"
+import { CliError, parseArgs, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
 import { parseFidelityBlock } from "./fidelity-brief.mjs"
+import { parseSourceFloor } from "./fidelity-policy.mjs"
 import { writeSnapshot } from "./source-snapshot.mjs"
 
 const FETCH_TIMEOUT_MS = 30_000
 const TOOL_EXTRACTOR = "tool:source-snapshot@1"
 const SNAPSHOT_USAGE =
 	"usage: source snapshot --id S<n> (--url <u> | --html <file> | --text <file> [--extractor NAME@VERSION] | --command '<argv json>' --cwd DIR) [--kind page|command|document] [--provenance primary|secondary] [--revision R] --session-dir D"
-
-const sha256Of = (content) => createHash("sha256").update(content).digest("hex")
 
 function readInput(path) {
 	try {
@@ -47,12 +45,16 @@ export function snapshotOf(sessionDir, id) {
 	return { meta: JSON.parse(readInput(join(dir, "meta.json"))), text: readInput(join(dir, "text.txt")), html: existsSync(html) ? readInput(html) : null }
 }
 
-/** Whether the brief's source floor lists this source as pointed at (`pointed only: a, b`). */
+/**
+ * Whether the brief's source floor lists this source as pointed at (`pointed only: a, b`). An absent
+ * or pending floor points at nothing; a malformed floor is a usage error (parseSourceFloor's CliError).
+ */
 export function pointedFlag(sessionDir, url) {
 	const brief = join(sessionDir, "brief.md")
 	const floor = existsSync(brief) ? (parseFidelityBlock(readInput(brief)).fields?.["source floor"] ?? "") : ""
-	const match = /^pointed only:\s*(.+)$/i.exec(floor.trim())
-	return match ? match[1].split(",").map((entry) => entry.trim()).includes(url) : false
+	if (floor === "" || floor === "pending") return false
+	const rule = parseSourceFloor(floor)
+	return rule?.kind === "pointed" && rule.list.includes(url)
 }
 
 async function fetchSource(url) {

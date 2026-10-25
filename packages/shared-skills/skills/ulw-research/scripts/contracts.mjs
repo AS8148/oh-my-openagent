@@ -6,6 +6,16 @@
 
 export const SCHEMA_VERSION = 1
 
+/** The severity vocabulary in rank order; every DEFECT_CODES entry uses one of these. */
+export const SEVERITIES = Object.freeze(["blocker", "major", "minor"])
+
+/** Defect counts per severity, then total. */
+export function countDefects(defects) {
+	const counts = Object.fromEntries(SEVERITIES.map((severity) => [severity, 0]))
+	for (const defect of defects) counts[defect.severity] += 1
+	return { ...counts, total: defects.length }
+}
+
 function deepFreeze(value) {
 	if (value === null || typeof value !== "object") return value
 	for (const key of Object.keys(value)) deepFreeze(value[key])
@@ -52,6 +62,7 @@ export const DEFECT_CODES = deepFreeze({
 	fidelity_interview_incomplete: { severity: "blocker", integrity: true, hint: "A fidelity field is pending or missing in brief.md; answer the open question or record its default, then rerun." },
 	derived_not_allowed: { severity: "blocker", integrity: true, hint: "The brief allows no derived or assumed numbers; cite a source row directly or change the brief with the requester." },
 	source_outside_floor: { severity: "blocker", integrity: true, hint: "The row's source is outside the source floor the brief records; use a source the brief allows or remove the fact." },
+	brief_changed: { severity: "blocker", integrity: true, hint: "The edition's fill map was not written under the current ## Fidelity block (it changed after fill, or the map predates the binding); re-run fact fill, then fact verify." },
 	snapshot_hash_mismatch: { severity: "blocker", integrity: true, hint: "The source snapshot changed after it was pinned; re-snapshot the source and re-register its rows." },
 	chart_value_untraceable: { severity: "blocker", integrity: true, hint: "A chart value, tick, or data file does not match its ledger-backed data source; re-render the chart from the exported data." },
 	quote_unbound: { severity: "blocker", integrity: true, hint: "A direct quotation has no ledger quote row; register it with fact quote and insert it through its placeholder." },
@@ -66,6 +77,7 @@ export const DEFECT_CODES = deepFreeze({
 	qualifier_dropped: { severity: "major", integrity: false, hint: "The source bounds this value (up to, at least, about); restore the qualifier or use :q." },
 	unbound_sentence: { severity: "major", integrity: false, hint: "Bind the sentence to a fact, a quote, a citation, or a claim-graph node with data-claim." },
 	meaning_drift_confirmed: { severity: "major", integrity: false, hint: "Two independent readers found the same drift; rewrite from the quote or dispute with a reason." },
+	meaning_unverified: { severity: "major", integrity: false, hint: "No meaning reader judged this pair, or no strong reader judged a force_strong pair; run the missing reader on pairs.json and rerun fact meaning-check." },
 	polish_edit_rejected: { severity: "major", integrity: false, hint: "The edit changed a number, a hedge, a qualifier, a link, or a claim id, or contained <, > or &; re-propose the language fix only, narrowed to the words around any entity or tag." },
 	polish_hedging_decreased: { severity: "major", integrity: false, hint: "The polish pass removed qualifiers; restore them." },
 	polish_text_churn: { severity: "major", integrity: false, hint: "More than half the text changed during polish; the pass composed instead of proofreading." },
@@ -88,10 +100,10 @@ export const DEFECT_CODES = deepFreeze({
 export const FIDELITY_CODES = Object.freeze([
 	"unresolved_placeholder", "value_mismatch", "unit_mismatch", "quote_not_verbatim", "claim_status_invalid",
 	"incompatible_operands", "pointer_label_mismatch", "quote_anchor_unresolved", "unit_duplicated", "polish_diff_fail",
-	"fidelity_interview_incomplete", "derived_not_allowed", "source_outside_floor", "snapshot_hash_mismatch",
+	"fidelity_interview_incomplete", "derived_not_allowed", "source_outside_floor", "brief_changed", "snapshot_hash_mismatch",
 	"chart_value_untraceable", "quote_unbound", "edition_unverified", "untraceable_number", "unsupported_verification", "claim_kind_mismatch",
 	"conflicting_readings", "hedge_dropped", "direction_flipped", "causality_added", "qualifier_dropped", "unbound_sentence",
-	"meaning_drift_confirmed", "polish_edit_rejected", "polish_hedging_decreased", "polish_text_churn", "snapshot_mismatch",
+	"meaning_drift_confirmed", "meaning_unverified", "polish_edit_rejected", "polish_hedging_decreased", "polish_text_churn", "snapshot_mismatch",
 	"join_integrity_fail", "quote_stale_version", "quote_fuzzy_match", "name_outside_quote", "verification_claim_unmarked", "scope_widened_warn",
 	"particle_unverified", "fallback_without_entity", "meaning_drift_warn", "polish_edit_unlocated", "polish_link_changed",
 	"polish_name_changed",
@@ -123,16 +135,7 @@ export const GATE_STATUSES = Object.freeze(["pass", "fail", "not_run"])
 export const LINEAGE_MODES = Object.freeze(["inline", "section"])
 export const ANSWERED_BY = Object.freeze(["user", "default", "request", "pending"])
 export const REPAIR_DEFAULTS = Object.freeze({ maxAttempts: 3, plateauLimit: 2, wallClockMs: 15 * 60 * 1000 })
-export const DESIGN_SPEC_SECTIONS = Object.freeze([
-	"Extracted from",
-	"Tokens",
-	"Typography",
-	"Layout",
-	"Structure",
-	"Figures",
-	"Citations",
-	"Open questions",
-])
+export const DESIGN_SPEC_SECTIONS = Object.freeze(["Extracted from", "Tokens", "Typography", "Layout", "Structure", "Figures", "Citations", "Open questions"])
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
 

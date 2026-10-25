@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:8b9824e295d69487dd817315c33a87802b0085bb02e8769565dbc1d3982d5d4c:6169d75a919602e20e768a24432bad9b07ae3234fba2968eb5673b2c430eef54
+// omo-codex-install:59bc5768b3b3ef6732c97bec7583a523952e5e1d9fdf5d8e5fb245658043bfca:fadb66139b4d0de34630f6b4bddc87783374d2be2659a207a4bb01c2c2f852d0
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -453,13 +453,13 @@ var init_event_id = __esm(() => {
 });
 
 // packages/telemetry-core/src/machine-id.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 import os2 from "node:os";
 function getDefaultTelemetryOsProvider() {
   return os2;
 }
 function getTelemetryDistinctId(machineIdPrefix, osProvider = getDefaultTelemetryOsProvider()) {
-  return createHash4("sha256").update(`${machineIdPrefix}${osProvider.hostname()}`).digest("hex");
+  return createHash5("sha256").update(`${machineIdPrefix}${osProvider.hostname()}`).digest("hex");
 }
 var init_machine_id = () => {};
 
@@ -10123,7 +10123,7 @@ var package_default;
 var init_package = __esm(() => {
   package_default = {
     name: "@oh-my-opencode/omo-codex",
-    version: "5.1.45",
+    version: "5.1.48",
     type: "module",
     private: true,
     description: "Codex harness adapter for oh-my-openagent. Vendored Codex plugin namespace (omo) + TypeScript installer + telemetry.",
@@ -10380,7 +10380,7 @@ function resolveStdio(options) {
   return [options.stdin ?? "ignore", options.stdout ?? "pipe", options.stderr ?? "inherit"];
 }
 function createBunSpawnOptions(options) {
-  return { ...options, windowsHide: true };
+  return { ...options, env: options.env ?? process.env, windowsHide: true };
 }
 function createNodeSpawnOptions(options, platform = process.platform) {
   const nodeOptions = {
@@ -10612,8 +10612,7 @@ function windowsNodeDiscoveryLines() {
     '  for /f "tokens=* delims= " %%N in ("!OMO_NODE_BINARY!") do set "OMO_NODE_BINARY=%%N"',
     `  if "!OMO_NODE_BINARY:~0,1!"=="'" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~1!"`,
     `  if "!OMO_NODE_BINARY:~-1!"=="'" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~0,-1!"`,
-    '  if "!OMO_NODE_BINARY:~0,1!"=="^"" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~1!"',
-    '  if "!OMO_NODE_BINARY:~-1!"=="^"" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~0,-1!"',
+    '  set "OMO_NODE_BINARY=!OMO_NODE_BINARY:"=!"',
     '  if defined OMO_NODE_BINARY if not exist "!OMO_NODE_BINARY!" set "OMO_NODE_BINARY="',
     ")",
     'if not defined OMO_NODE_BINARY where node >nul 2>nul && set "OMO_NODE_BINARY=node"'
@@ -20122,9 +20121,6 @@ var OmoFormatOnMutationSchema = OmoFormatOnMutationLayerSchema.extend({
   timeoutMs: number2().int().positive().default(3000)
 }).strict();
 
-// packages/omo-config-core/src/schema/dori.ts
-var OmoDoriSectionSchema = record(string2(), unknown()).describe("Chat-surface dori settings, owned and validated by a separately installed dori package. omo accepts the key and never reads it.");
-
 // packages/omo-config-core/src/schema/provenance.ts
 var OmoProvenanceSettingsSchema = object({
   workspaces: array(object({
@@ -20141,7 +20137,6 @@ var OmoExcludedModelsSchema = array(string2());
 var OmoTypedHarnessConfigSchema = object({
   provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
-  dori: OmoDoriSectionSchema.optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
   git_master: OmoGitMasterSettingsLayerSchema.optional(),
@@ -20160,7 +20155,6 @@ var OmoTypedHarnessConfigSchema = object({
 var OmoConfigProfileSchema = object({
   provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
-  dori: OmoDoriSectionSchema.optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
   git_master: OmoGitMasterSettingsLayerSchema.optional(),
@@ -20183,7 +20177,6 @@ var OmoConfigProfileSchema = object({
 var OmoConfigSchema = object({
   provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationSchema.optional(),
-  dori: OmoDoriSectionSchema.optional(),
   $schema: string2().optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
@@ -20210,7 +20203,6 @@ var OmoConfigSchema = object({
 var OmoConfigLayerSchema = object({
   provenance: OmoProvenanceSettingsSchema.optional(),
   formatOnMutation: OmoFormatOnMutationLayerSchema.optional(),
-  dori: OmoDoriSectionSchema.optional(),
   $schema: string2().optional(),
   categories: OmoCategoriesConfigSchema.optional(),
   agents: OmoAgentsConfigSchema.optional(),
@@ -21234,6 +21226,9 @@ function printParseErrorCode(code) {
   return "<unknown ParseErrorCode>";
 }
 
+// packages/omo-config-core/src/loader/layer-validation.ts
+import { createHash as createHash2 } from "node:crypto";
+
 // packages/omo-config-core/src/loader/merge.ts
 var DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 function isUnsafeObjectKey(key) {
@@ -21407,6 +21402,14 @@ function unrecognizedKeyIssues(issues) {
 function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+var RETIRED_SECTION_DIGESTS = new Set([
+  "447f75a8ebdbdb79a57f0b8cebbfba183820cf54a8119ac01449b30499e5ef0e",
+  "4ea5ee68fea05586106890ded5733820bb77d919cda27bc4b8139b7cd33b8889"
+]);
+function isRetiredSection(key) {
+  return RETIRED_SECTION_DIGESTS.has(createHash2("sha256").update(key.toLowerCase()).digest("hex"));
+}
+var HARNESS_BLOCKS = new Set(["[opencode]", "[native]", "[senpi]", "[codex]"]);
 function sanitizeUnsafeKeys(value, path = []) {
   if (Array.isArray(value)) {
     const issues = [];
@@ -21425,6 +21428,9 @@ function sanitizeUnsafeKeys(value, path = []) {
   }
   const sanitized = {};
   for (const [key, entry] of Object.entries(value)) {
+    const isConfigContainer = path.length === 0 || path.length === 1 && HARNESS_BLOCKS.has(path[0] ?? "") || path.length === 2 && path[0] === "profiles" || path.length === 3 && path[0] === "profiles" && HARNESS_BLOCKS.has(path[2] ?? "");
+    if (isConfigContainer && isRetiredSection(key))
+      continue;
     if (isUnsafeObjectKey(key)) {
       issues.push({ keys: [key], path });
       continue;
@@ -22444,7 +22450,7 @@ function nodeErrorCode2(error) {
 }
 
 // packages/omo-codex/src/install/default-agent-role.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 import { lstat as lstat9, readFile as readFile16, rm as rm10 } from "node:fs/promises";
 import { join as join23 } from "node:path";
 var REGISTRATION = { name: "default", configFile: "./agents/default.toml" };
@@ -22500,7 +22506,7 @@ async function readIfPresent(path) {
   }
 }
 function hash(content) {
-  return createHash2("sha256").update(content).digest("hex");
+  return createHash3("sha256").update(content).digest("hex");
 }
 
 // packages/omo-codex/src/install/link-cached-plugin-agents.ts
@@ -23137,7 +23143,7 @@ function formatUnknownError(error) {
 }
 
 // packages/omo-codex/src/install/lsp-daemon-reaper.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 import { lstat as lstat12, readFile as readFile22, readdir as readdir10, rm as rm12 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join as join28, posix as posix2 } from "node:path";
@@ -23415,7 +23421,7 @@ async function readRegularTrimmedFile(path) {
   return content.length > 0 ? content : null;
 }
 function shortDigest(value) {
-  return createHash3("sha256").update(value).digest("hex").slice(0, 16);
+  return createHash4("sha256").update(value).digest("hex").slice(0, 16);
 }
 async function removeVersionDir(path) {
   await rm12(path, { recursive: true, force: true });
