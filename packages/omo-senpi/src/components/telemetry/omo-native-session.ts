@@ -26,7 +26,6 @@ import { userInfo } from "node:os"
 import { CONFIG_SELECTION_ENV_KEYS, withConfigSelection, type ConfigSelection } from "./session-summary-purge"
 import { getSenpiTelemetryStateDir, recordSenpiDailyActive } from "./index"
 import { createCategoryConfigCapture } from "./omo-native-category-config"
-import { captureProcessCrashes } from "./omo-native-crash"
 import {
   OMO_NATIVE_PROPERTY_ALLOWLISTS,
   OMO_NATIVE_SCHEMA_VERSION,
@@ -132,16 +131,6 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           ...(timezone === undefined ? {} : { timezone }),
           ...(inventory.defaultProvider === undefined ? {} : { default_provider: inventory.defaultProvider }),
           ...(inventory.defaultModel === undefined ? {} : { default_model: inventory.defaultModel }),
-        })
-
-        // Crashes recorded by earlier processes can only be sent by a later one: this one.
-        captureProcessCrashes({
-          captureEvent: client.captureEvent,
-          agentDir: resolveAgentHome({ env }),
-          stateDir: getOmoNativeStateDir(env),
-          osProvider,
-          ...(options.now === undefined ? {} : { now: options.now }),
-          ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
         })
 
         // The category map is only observable where BOTH the config and the live model registry are
