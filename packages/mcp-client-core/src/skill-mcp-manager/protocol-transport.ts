@@ -1,15 +1,22 @@
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
-import type { JSONRPCRequest, RequestId } from "@modelcontextprotocol/sdk/types.js"
-import { SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js"
+import type { JSONRPCError, JSONRPCRequest, RequestId } from "@modelcontextprotocol/sdk/types.js"
+import { InitializeResultSchema, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js"
+import { log } from "../logger"
+import { SKILL_MCP_DISCOVERY_TIMEOUT_MS } from "./timeouts"
 
 const modernVersion = "2026-07-28"
 
-export function createProtocolTransport(transport: Transport): Transport {
-  let era: "probing" | "modern" | "legacy" = "probing"
+export function createProtocolTransport(
+  transport: Transport,
+  client?: Pick<Client, "getServerCapabilities" | "getServerVersion">,
+): Transport {
+  let era: "probing" | "modern" | "legacy" | "failed" = "probing"
   let initialize: JSONRPCRequest | undefined
   let discoveryTimer: ReturnType<typeof setTimeout> | undefined
   let fallbackID: string | undefined
   let fallbackSequence = 0
+  let fallbackError: JSONRPCError["error"] | undefined
   const discoveryID = "skill-mcp-discover"
   const pending = new Map<RequestId, JSONRPCRequest>()
   const rejected = new Map<RequestId, JSONRPCRequest>()
@@ -22,13 +29,15 @@ export function createProtocolTransport(transport: Transport): Transport {
     })
   }
 
-  function failFallback(error: unknown): void {
+  function failFallback(error: unknown, rpcError?: JSONRPCError["error"]): void {
     fallbackID = undefined
-    const message = error instanceof Error ? error.message : String(error)
-    for (const id of rejected.keys()) {
-      bridge.onmessage?.({ jsonrpc: "2.0", id, error: { code: -32000, message } })
+    era = "failed"
+    fallbackError = rpcError ?? { code: -32000, message: error instanceof Error ? error.message : String(error) }
+    for (const id of [...rejected.keys(), ...pending.keys()]) {
+      bridge.onmessage?.({ jsonrpc: "2.0", id, error: fallbackError })
     }
     rejected.clear()
+    pending.clear()
   }
 
   function withMetadata(request: JSONRPCRequest): JSONRPCRequest {
@@ -91,13 +100,29 @@ export function createProtocolTransport(transport: Transport): Transport {
           if (message.id === fallbackID) {
             fallbackID = undefined
             if ("error" in message) {
-              for (const id of rejected.keys()) bridge.onmessage?.({ ...message, id }, extra)
-              rejected.clear()
+              failFallback(new Error(message.error.message), message.error)
             } else {
               const negotiated = message.result.protocolVersion
               if (typeof negotiated !== "string" || !SUPPORTED_PROTOCOL_VERSIONS.includes(negotiated)) {
                 failFallback(new Error(`Server's protocol version is not supported: ${String(negotiated)}`))
                 return
+              }
+              const result = InitializeResultSchema.safeParse(message.result)
+              if (!result.success) {
+                failFallback(new Error("Legacy MCP initialization returned an invalid result."))
+                return
+              }
+              // SDK getters expose the capability/identity objects used by its
+              // local checks. Replace their contents without private SDK fields.
+              const capabilities = client?.getServerCapabilities()
+              const serverInfo = client?.getServerVersion()
+              if (capabilities) {
+                for (const key of Object.keys(capabilities)) Reflect.deleteProperty(capabilities, key)
+                Object.assign(capabilities, result.data.capabilities)
+              }
+              if (serverInfo) {
+                for (const key of Object.keys(serverInfo)) Reflect.deleteProperty(serverInfo, key)
+                Object.assign(serverInfo, result.data.serverInfo)
               }
               era = "legacy"
               transport.setProtocolVersion?.(negotiated)
@@ -151,12 +176,21 @@ export function createProtocolTransport(transport: Transport): Transport {
         initialize = message
         transport.setProtocolVersion?.(modernVersion)
         discoveryTimer = setTimeout(() => {
+          log("[skill-mcp] discovery timed out; falling back to legacy initialization", {
+            timeoutMs: SKILL_MCP_DISCOVERY_TIMEOUT_MS,
+          })
           void useLegacy().catch(failInitialization)
-        }, 5_000)
+        }, SKILL_MCP_DISCOVERY_TIMEOUT_MS)
         try {
           await transport.send(withMetadata({ ...message, id: discoveryID, method: "server/discover", params: {} }), options)
         } catch {
           await useLegacy()
+        }
+        return
+      }
+      if (era === "failed" && fallbackError) {
+        if ("method" in message && "id" in message) {
+          bridge.onmessage?.({ jsonrpc: "2.0", id: message.id, error: fallbackError })
         }
         return
       }

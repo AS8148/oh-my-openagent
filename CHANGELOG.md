@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Skill MCP clients can use MCP 2026-07-28 servers.** Modern servers receive discovery and per-request protocol metadata without an initialization handshake. Input-required operations stop with a clear error because skill MCP does not support elicitation; legacy servers retain their existing initialization negotiation, including unsupported-version fallback. ([#11243](https://github.com/code-yeongyu/oh-my-openagent/pull/11243), part of [#11205](https://github.com/code-yeongyu/oh-my-openagent/issues/11205))
+**Skill MCP clients can use MCP 2026-07-28 servers.** Modern servers receive discovery and per-request protocol metadata without an initialization handshake. Input-required operations stop with a clear error because skill MCP does not support elicitation. Legacy servers receive a discovery probe before their existing initialization negotiation; a timed-out probe logs the fallback, and unsupported-version fallback preserves the legacy server's capabilities and identity. ([#11243](https://github.com/code-yeongyu/oh-my-openagent/pull/11243), part of [#11205](https://github.com/code-yeongyu/oh-my-openagent/issues/11205))
 
 **OmO Native init-deep committed mode no longer dead-ends.** Committed mode now finishes through its own pull-request handoff instead of pointing at a skill that does not ship with OmO Native, and it reports how to finish by hand when no PR can be opened. Thanks to @HolisticDeveloper for the report and @surlymochan for the fix. ([#11228](https://github.com/code-yeongyu/oh-my-openagent/pull/11228), fixes [#9686](https://github.com/code-yeongyu/oh-my-openagent/issues/9686))
 

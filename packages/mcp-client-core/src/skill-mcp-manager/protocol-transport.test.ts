@@ -1,13 +1,15 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, jest, test } from "bun:test"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
 import { createProtocolTransport } from "./protocol-transport"
+import { setMcpClientLoggerForTesting } from "../logger"
 
 const version = "2026-07-28"
 const identity = { name: "skill-mcp-test", version: "1.0.0" }
 
-async function fixture(mode: "modern" | "legacy" | "unsupported" | "input" | "operation-unsupported" | "unknown") {
+async function fixture(mode: "modern" | "legacy" | "unsupported" | "input" | "operation-unsupported" | "unknown" | "fallback-error" | "fallback-version") {
   const sent: JSONRPCMessage[] = []
   const transport: Transport = {
     async start() {},
@@ -20,13 +22,18 @@ async function fixture(mode: "modern" | "legacy" | "unsupported" | "input" | "op
         response = mode === "legacy" || mode === "unsupported"
           ? { jsonrpc: "2.0", id: message.id, error: { code: mode === "legacy" ? -32601 : -32022, message: "unsupported" } }
           : { jsonrpc: "2.0", id: message.id, result: {
-            resultType: "complete", supportedVersions: [version], capabilities: { tools: {}, resources: {}, prompts: {} },
+            resultType: "complete", supportedVersions: [version],
+            capabilities: mode === "operation-unsupported" ? { tools: {} } : { tools: {}, resources: {}, prompts: {} },
           } }
+      } else if (message.method === "initialize" && mode === "fallback-error") {
+        response = { jsonrpc: "2.0", id: message.id, error: { code: -32603, message: "legacy initialization failed" } }
       } else if (message.method === "initialize") {
         response = { jsonrpc: "2.0", id: message.id, result: {
-          protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "legacy", version: "1" },
+          protocolVersion: mode === "fallback-version" ? "unsupported-version" : "2025-03-26",
+          capabilities: mode === "operation-unsupported" ? { tools: {}, resources: {} } : { tools: {} },
+          serverInfo: { name: "legacy", version: "1" },
         } }
-      } else if (mode === "operation-unsupported" && message.params?._meta) {
+      } else if (["operation-unsupported", "fallback-error", "fallback-version"].includes(mode) && message.params?._meta) {
         response = { jsonrpc: "2.0", id: message.id, error: { code: -32022, message: "unsupported" } }
       } else if (mode === "input" || mode === "unknown") {
         response = { jsonrpc: "2.0", id: message.id, result: {
@@ -44,8 +51,8 @@ async function fixture(mode: "modern" | "legacy" | "unsupported" | "input" | "op
       queueMicrotask(() => transport.onmessage?.(response))
     },
   }
-  const client = new Client(identity, { capabilities: {} })
-  await client.connect(createProtocolTransport(transport))
+  const client = new Client(identity, { capabilities: {}, enforceStrictCapabilities: true })
+  await client.connect(createProtocolTransport(transport, client))
   return { client, sent }
 }
 
@@ -110,8 +117,78 @@ describe("skill MCP protocol eras", () => {
       expect(sent.filter((message) => "method" in message).map((message) => message.method)).toEqual([
         "server/discover", "tools/list", "initialize", "notifications/initialized", "tools/list",
       ])
+      expect(client.getServerCapabilities()).toEqual({ tools: {}, resources: {} })
+      expect(client.getServerVersion()).toEqual({ name: "legacy", version: "1" })
+      expect(await client.readResource({ uri: "file:///legacy-only" })).toMatchObject({ contents: [] })
     } finally { await client.close() }
   })
+
+  for (const mode of ["fallback-error", "fallback-version"] as const) {
+    test(`${mode} fails later requests without repeating legacy initialization`, async () => {
+      const { client, sent } = await fixture(mode)
+      try {
+        const error = mode === "fallback-error" ? "legacy initialization failed" : "protocol version is not supported"
+        await expect(client.listTools()).rejects.toThrow(error)
+        await expect(client.listTools()).rejects.toThrow(error)
+        expect(sent.filter((message) => "method" in message && message.method === "initialize")).toHaveLength(1)
+      } finally { await client.close() }
+    })
+  }
+
+  for (const mode of ["silent-legacy", "slow-modern"] as const) {
+    test(`${mode} respects the shared discovery budget`, async () => {
+      jest.useFakeTimers()
+      const logs: { message: string; data: unknown }[] = []
+      setMcpClientLoggerForTesting((message, data) => { logs.push({ message, data }) })
+      const probed = Promise.withResolvers<string | number>()
+      const methods: string[] = []
+      const transport: Transport = {
+        async start() {},
+        async close() { transport.onclose?.() },
+        async send(message) {
+          if (!("method" in message)) return
+          methods.push(message.method)
+          if (!("id" in message)) return
+          if (message.method === "server/discover") probed.resolve(message.id)
+          if (message.method === "initialize") {
+            queueMicrotask(() => transport.onmessage?.({ jsonrpc: "2.0", id: message.id, result: {
+              protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "legacy", version: "1" },
+            } }))
+          }
+        },
+      }
+      const client = new Client(identity, { capabilities: {} })
+      try {
+        const connected = client.connect(createProtocolTransport(transport, client))
+        const discoveryID = await probed.promise
+        const budget = DEFAULT_REQUEST_TIMEOUT_MSEC / 2
+        jest.advanceTimersByTime(budget - 1)
+        expect(methods).toEqual(["server/discover"])
+        if (mode === "silent-legacy") {
+          jest.advanceTimersByTime(1)
+          await connected
+          expect(methods).toEqual(["server/discover", "initialize", "notifications/initialized"])
+          expect(logs).toHaveLength(1)
+          expect(logs[0]?.data).toEqual({ timeoutMs: budget })
+          expect(client.getServerVersion()?.name).toBe("legacy")
+        } else {
+          transport.onmessage?.({ jsonrpc: "2.0", id: discoveryID, result: {
+            supportedVersions: [version], capabilities: { tools: {} },
+            _meta: { "io.modelcontextprotocol/serverInfo": { name: "slow-modern", version: "1" } },
+          } })
+          await connected
+          jest.advanceTimersByTime(budget + 1)
+          expect(methods).toEqual(["server/discover"])
+          expect(logs).toHaveLength(0)
+          expect(client.getServerVersion()?.name).toBe("slow-modern")
+        }
+      } finally {
+        await client.close()
+        setMcpClientLoggerForTesting()
+        jest.useRealTimers()
+      }
+    })
+  }
 
   test("unknown result types fail instead of becoming empty success", async () => {
     const { client } = await fixture("unknown")
