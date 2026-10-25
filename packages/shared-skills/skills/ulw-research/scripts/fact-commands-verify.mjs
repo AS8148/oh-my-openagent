@@ -18,6 +18,7 @@ import { CliError, readJsonFile, sha256Of } from "./cli-support.mjs"
 import { countDefects } from "./contracts.mjs"
 import { recompute } from "./fact-derive.mjs"
 import { readLedger } from "./fact-ledger.mjs"
+import { validateLedger } from "./fact-ledger-schema.mjs"
 import { FIDELITY_RECORD, writeFidelityRecord } from "./fidelity-records.mjs"
 import { blocksDelivery, checkFidelity } from "./gates-fidelity.mjs"
 import { parseMarkdown } from "./md-lite.mjs"
@@ -118,6 +119,24 @@ export function markdownAsHtml(text, entries, ledger) {
 		}
 	}
 	return { html: `${html}${open ? MD_HTML_BLOCK_RULES[open].group[1] : ""}</body></html>\n`, stale: [...stale] }
+}
+
+/** The session dir from --session-dir or SESSION_DIR, or null; a bare flag names no session. */
+export const sessionOf = (flags) => {
+	const dir = flags["session-dir"] ?? process.env.SESSION_DIR
+	return dir && dir !== true ? resolve(dir) : null
+}
+
+/** The ledger from --ledger (validated) or from the session dir; every fact command loads it here. */
+export function ledgerFrom(flags, session = sessionOf(flags)) {
+	if (flags.ledger === undefined) {
+		if (session === null) throw new CliError("--ledger is required without --session-dir (or SESSION_DIR)")
+		return readLedger(session)
+	}
+	const ledger = readJsonFile(flags.ledger)
+	const errors = validateLedger(ledger)
+	if (errors.length > 0) throw new CliError(`${flags.ledger} is not a valid fact ledger: ${errors[0]}`)
+	return ledger
 }
 
 const MARKDOWN_EXTENSION = /\.(md|markdown)$/iu
