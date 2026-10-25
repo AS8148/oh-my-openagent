@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { basename } from "node:path"
+import type { z } from "zod"
 import { credentialSchema, type Credentials, serviceOrigin, SignInError } from "./protocol"
 import { probeSecretServiceLock, type SecretServiceLockProbe } from "./secret-service-lock"
 
@@ -9,15 +10,17 @@ export type SecretApi = {
   readonly set: (key: SecretKey & { readonly value: string }) => Promise<void>
   readonly delete: (key: SecretKey) => Promise<boolean>
 }
-export type CredentialStore = {
-  readonly read: () => Promise<Credentials | null>
-  readonly write: (value: Credentials) => Promise<void>
+export type SealedStore<T> = {
+  readonly read: () => Promise<T | null>
+  readonly write: (value: T) => Promise<void>
   readonly clear: () => Promise<void>
 }
+export type CredentialStore = SealedStore<Credentials>
 
 export class CredentialStoreError extends SignInError {}
 export class KeychainLockedError extends CredentialStoreError {}
 export class SecretServiceUnavailableError extends CredentialStoreError {}
+export class InvalidCredentialState extends SignInError {}
 /** The OS store has not answered a read in time: it is waiting on a person (a keychain approval dialog, #11262). */
 export class KeychainApprovalPendingError extends CredentialStoreError {}
 
@@ -74,13 +77,19 @@ export function createCredentialStore(
     readonly wait?: CredentialReadWait
   } = {},
 ): CredentialStore {
-  const {
-    secrets = typeof Bun === "undefined" ? null : Bun.secrets,
-    platform = process.platform,
-    lockProbe = probeSecretServiceLock,
-    notice = stderrNoticeOncePerProcess,
-    wait = SESSION_READ_WAIT,
-  } = options
+  return createSealedStore(api, "omo-cli", credentialSchema, options.secrets, options.platform, options.lockProbe, options.notice, options.wait)
+}
+
+export function createSealedStore<T>(
+  api: string,
+  namespace: "omo-cli" | "omo-cli-v2" | "omo-cli-revocations-v2",
+  schema: z.ZodType<T>,
+  secrets: SecretApi | null = typeof Bun === "undefined" ? null : Bun.secrets,
+  platform: NodeJS.Platform = process.platform,
+  lockProbe: SecretServiceLockProbe = probeSecretServiceLock,
+  notice: (message: string) => void = stderrNoticeOncePerProcess,
+  wait: CredentialReadWait = SESSION_READ_WAIT,
+): SealedStore<T> {
   if (!secrets) throw new SignInError("OmO sign-in needs Bun 1.4 or newer with OS credential storage. No file fallback is available.")
   const platformName =
     platform === "darwin"
@@ -91,7 +100,7 @@ export function createCredentialStore(
           ? "Windows Credential Manager"
           : null
   if (platformName === null) throw new SignInError("This platform has no supported OS credential store.")
-  const key = { service: "omo-cli", name: credentialId(api) }
+  const key = { service: namespace, name: credentialId(api) }
   const slot = `${key.service}\n${key.name}`
   const readsOf = (api: SecretApi): Map<string, Promise<string | null>> => {
     const known = processReads.get(api)
@@ -117,7 +126,7 @@ export function createCredentialStore(
   }
   const waiting =
     platform === "darwin"
-      ? `macOS Keychain is waiting for your approval: answer the "${basename(process.execPath)} wants to access key omo-cli" dialog ("Always Allow" stops it asking again)`
+      ? `macOS Keychain is waiting for your approval: answer the "${basename(process.execPath)} wants to access key ${namespace}" dialog ("Always Allow" stops it asking again)`
       : `${platformName} has not answered; it may be waiting for your approval or an unlock in a system dialog`
   const answered = async (api: SecretApi): Promise<string | null> => {
     const read = sharedRead(api)
@@ -178,16 +187,16 @@ export function createCredentialStore(
       }
       if (value === null) return null
       try {
-        return credentialSchema.parse(JSON.parse(value))
+        return schema.parse(JSON.parse(value))
       } catch {
-        throw new SignInError("Stored sign-in data is invalid. Run omo logout, then omo login.")
+        throw new InvalidCredentialState("Stored sign-in data is invalid. Run omo logout, then omo login.")
       }
     },
     async write(value) {
       // One OS-store replacement commits the rotating token and its access token together.
       await assertUsable()
       try {
-        await secrets.set({ ...key, value: JSON.stringify(credentialSchema.parse(value)) })
+        await secrets.set({ ...key, value: JSON.stringify(schema.parse(value)) })
       } catch (error) {
         throw unavailable(error)
       }

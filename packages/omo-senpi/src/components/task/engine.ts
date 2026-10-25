@@ -48,6 +48,7 @@ import {
   resolveTaskAgents,
   type TaskRunnerFactories,
 } from "./engine-runners"
+import { registerTaskMemoryReporter } from "./memory-reporter"
 import { createParentNotifier } from "./parent-notifier"
 import { createTaskChildPlanner, type ResolveModelRegistry } from "./planner"
 import type { TeamMemberLivenessNotifier } from "./member-liveness"
@@ -286,6 +287,10 @@ export function composeTaskEngine(deps: ComposeTaskEngineDeps): TaskEngine {
   })
   managerRef = manager
   const runPause = createEngineRunPause({ stateDir: baseStore.stateDir, manager, barrier: admissionBarrier, runtime })
+  registerTaskMemoryReporter(deps.pi, {
+    residentTaskIds: () => manager.residentTaskIds(),
+    residentFigures: () => baseStore.residentFigures(),
+  })
 
   return {
     runPause,

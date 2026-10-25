@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:1d099ec7e89e45d9a749b3119fafbd06726b589bba756c5a72ea56b563a2b9ea:0766ee449be1f634fa5ed2f988eb9b3473567708af6ab5bb8a716ce419ce101f
+// omo-codex-install:338ea1177ea01a22bc129a6906d72152cc4e80181ce2e63367c58bfe7d806d0e:37dc1150105dcb4cae08841de4820d5852c1cab65111c3747f35aa130676829a
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -10380,7 +10380,7 @@ function resolveStdio(options) {
   return [options.stdin ?? "ignore", options.stdout ?? "pipe", options.stderr ?? "inherit"];
 }
 function createBunSpawnOptions(options) {
-  return { ...options, windowsHide: true };
+  return { ...options, env: options.env ?? process.env, windowsHide: true };
 }
 function createNodeSpawnOptions(options, platform = process.platform) {
   const nodeOptions = {
@@ -10612,8 +10612,7 @@ function windowsNodeDiscoveryLines() {
     '  for /f "tokens=* delims= " %%N in ("!OMO_NODE_BINARY!") do set "OMO_NODE_BINARY=%%N"',
     `  if "!OMO_NODE_BINARY:~0,1!"=="'" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~1!"`,
     `  if "!OMO_NODE_BINARY:~-1!"=="'" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~0,-1!"`,
-    '  if "!OMO_NODE_BINARY:~0,1!"=="^"" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~1!"',
-    '  if "!OMO_NODE_BINARY:~-1!"=="^"" set "OMO_NODE_BINARY=!OMO_NODE_BINARY:~0,-1!"',
+    '  set "OMO_NODE_BINARY=!OMO_NODE_BINARY:"=!"',
     '  if defined OMO_NODE_BINARY if not exist "!OMO_NODE_BINARY!" set "OMO_NODE_BINARY="',
     ")",
     'if not defined OMO_NODE_BINARY where node >nul 2>nul && set "OMO_NODE_BINARY=node"'
