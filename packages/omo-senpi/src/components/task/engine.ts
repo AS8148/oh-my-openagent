@@ -31,12 +31,8 @@ import type { IdleInjectionCoordinator } from "../../extension/idle-injection-co
 import type { SenpiExtensionAPI } from "../../extension/types"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import type { EngineHostRuntime } from "./host-execution-mode"
-import {
-  createCategoryConfigGenerations,
-  createGenerationObservingPlanner,
-  type CategoryConfigGenerations,
-} from "./category-config-generation"
-import { createCategoryUnavailableWarningPlanner } from "./category-unavailable-warning"
+import { createCategoryConfigGenerations, type CategoryConfigGenerations } from "./category-config-generation"
+import { createEnginePlanner } from "./engine-planner"
 import { createTaskStoreChain } from "./engine-store-chain"
 import type { StoreMutation } from "./store-mutation-observer"
 import { createEngineKernelTools } from "./engine-kernel-tools"
@@ -50,7 +46,7 @@ import {
 } from "./engine-runners"
 import { registerTaskMemoryReporter } from "./memory-reporter"
 import { createParentNotifier } from "./parent-notifier"
-import { createTaskChildPlanner, type ResolveModelRegistry } from "./planner"
+import type { ResolveModelRegistry } from "./planner"
 import type { TeamMemberLivenessNotifier } from "./member-liveness"
 import { createManagerResidencyRegistry } from "./residency-registry"
 import { TaskRuntimeContext } from "./runtime-context"
@@ -109,6 +105,8 @@ export interface ComposeTaskEngineDeps {
   readonly childCreationPort?: ChildCreationPort
   readonly pi: SenpiExtensionAPI
   readonly omoConfig: OmoConfig
+  // Read at every spawn plan (category chains); defaults to `omoConfig`. The task component reloads omo.json here.
+  readonly readOmoConfig?: () => OmoConfig
   readonly cwd: string
   readonly sharedParentTools: () => readonly ToolDefinition[]
   readonly coordinator?: IdleInjectionCoordinator
@@ -233,18 +231,15 @@ export function composeTaskEngine(deps: ComposeTaskEngineDeps): TaskEngine {
   // default change reaches the next spawn's message.
   const resolveDefaultRoute = () =>
     readSettingsDefaultRoute({ cwd: runtime.cwd(), agentDir: host.agentDir ?? resolveAgentHome({ env: deps.env ?? process.env }) })
-  const basePlanner = createGenerationObservingPlanner({
-    planner: createTaskChildPlanner(deps.omoConfig, agents, resolveRegistry, () => runtime.parentServiceTier(), resolveDefaultRoute),
-    omoConfig: deps.omoConfig,
-    resolveRegistry,
-    generations: categoryConfigGenerations,
-  })
-  const planner = createCategoryUnavailableWarningPlanner({
-    planner: basePlanner,
+  const planner = createEnginePlanner({
     pi: deps.pi,
     runtime,
-    omoConfig: deps.omoConfig,
+    agents,
     settings,
+    readOmoConfig: deps.readOmoConfig ?? (() => deps.omoConfig),
+    resolveRegistry,
+    resolveDefaultRoute,
+    generations: categoryConfigGenerations,
   })
   const manager = createTaskManager({
     onPausedChild: (record, owner, childSeq) => runPause.notePausedChild(record, owner, childSeq),

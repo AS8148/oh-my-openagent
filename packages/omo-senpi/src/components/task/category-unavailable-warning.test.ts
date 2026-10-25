@@ -75,7 +75,7 @@ function setup(options: {
     planner: inner,
     pi,
     runtime,
-    omoConfig: options.omoConfig ?? {},
+    readOmoConfig: () => options.omoConfig ?? {},
     settings: options.settings ?? OmoTaskSettingsSchema.parse({}),
   })
   return { planner, messages, notifies, runtime }

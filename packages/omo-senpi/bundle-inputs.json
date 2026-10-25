@@ -1212,6 +1212,7 @@
     "packages/omo-senpi/src/components/task/engine-host-wiring.ts",
     "packages/omo-senpi/src/components/task/engine-kernel-tools.ts",
     "packages/omo-senpi/src/components/task/engine-liveness.ts",
+    "packages/omo-senpi/src/components/task/engine-planner.ts",
     "packages/omo-senpi/src/components/task/engine-run-pause.ts",
     "packages/omo-senpi/src/components/task/engine-runners.ts",
     "packages/omo-senpi/src/components/task/engine-store-chain.ts",
