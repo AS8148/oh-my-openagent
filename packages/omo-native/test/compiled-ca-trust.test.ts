@@ -254,17 +254,6 @@ request("https://localhost:" + port + "/", (r) => { r.resume(); console.log("ok 
     const [added, system] = (await probe("bun-be-bun", {})).split(" ").map(Number)
     expect(added).toBe(system ?? -1)
   })
-
-  test("#given exited probe PIDs reused by unrelated processes #then teardown does not report those processes as owned", () => {
-    // Simulate the OS answering that the old numeric PIDs now identify live processes. The real
-    // probes above have already closed; their exit evidence must win over a fresh PID-only query.
-    const kill = spyOn(process, "kill").mockReturnValue(true)
-    try {
-      expect(livePids(launched)).toEqual([])
-    } finally {
-      kill.mockRestore()
-    }
-  })
 })
 
 describe("cleanupProbes", () => {
@@ -280,6 +269,35 @@ describe("cleanupProbes", () => {
 })
 
 describe("livePids", () => {
+  test("#given exited probe PIDs reused by unrelated processes #then teardown does not report those processes as owned", async () => {
+    const child = spawn(process.execPath, ["-e", 'process.stdin.once("data", () => process.exit(0)); process.stdin.resume()'], {
+      stdio: ["pipe", "ignore", "ignore"],
+    })
+    const exited = once(child, "exit")
+    const closed = once(child, "close")
+    try {
+      const pid = child.pid ?? -1
+      expect(pid).toBeGreaterThan(0)
+      expect(livePids([child])).toEqual([pid])
+      child.stdin.end("stop")
+      await Promise.all([exited, closed])
+
+      // The OS may now report an unrelated process at this numeric PID. Its live identity must
+      // not overwrite the completion evidence for the child this test actually owned.
+      const reusedPidProcess: ProbeProcess = { pid, exitCode: null, signalCode: null }
+      const kill = spyOn(process, "kill").mockReturnValue(true)
+      try {
+        expect(livePids([reusedPidProcess])).toEqual([pid])
+        expect(livePids([child])).toEqual([])
+      } finally {
+        kill.mockRestore()
+      }
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill()
+      await Promise.all([exited, closed])
+    }
+  })
+
   test("#given a tracked child still running #then the teardown check names it, and after its exit it does not", async () => {
     const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" })
     const pid = child.pid ?? -1
