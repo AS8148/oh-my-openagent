@@ -4,7 +4,9 @@
  * The older scenarios in this directory drive the thread components from source against a senpi
  * SOURCE checkout (`lib/harness.mjs`). These drive the product the way a user runs it:
  *
- * - the engine is the RELEASED senpi from npm (`THREAD_QA_SENPI_VERSION`, default 2026.9.29-5),
+ * - the engine is the RELEASED senpi from npm (`THREAD_QA_SENPI_VERSION`, REQUIRED: the engine under
+ *   test; unset or empty, importing this module exits 2 naming the engine omo pins, before anything
+ *   is installed or created),
  *   installed once into a kit dir (`THREAD_QA_KIT_DIR`, default `/tmp/qa-thread-tools-kit`);
  * - `omo` is this checkout's launcher (`packages/omo-native/bin/omo.js`) over a COPY of this
  *   checkout's built plugin (`packages/omo-senpi/plugin`), so `omo`, `omo --session`, `omo thread`
@@ -31,11 +33,12 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { withTelemetryOptOut } from "../../telemetry-opt-out-env.mjs"
+import { requireEngineVersion } from "./engine-version.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 
 export const OMO_ROOT = resolve(here, "..", "..", "..", "..", "..", "..")
-export const ENGINE_VERSION = process.env.THREAD_QA_SENPI_VERSION ?? "2026.9.29-5"
+export const ENGINE_VERSION = requireEngineVersion()
 export const KIT_DIR = process.env.THREAD_QA_KIT_DIR ?? "/tmp/qa-thread-tools-kit"
 const KIT_DEPENDENCIES = {
   "@code-yeongyu/senpi": ENGINE_VERSION,
