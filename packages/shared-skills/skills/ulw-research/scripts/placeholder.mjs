@@ -153,6 +153,9 @@ export function escapeHtml(text) {
 	return String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 }
 
+/** The elements the renderers below emit as fact spans; recognizers build their patterns from this. */
+export const FACT_ELEMENT_TAGS = Object.freeze(["data", "q", "blockquote"])
+
 export function renderValueHtml(row, text) {
 	const unit = row.unit === null ? "" : ` data-unit="${escapeHtml(row.unit)}"`
 	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
@@ -162,6 +165,14 @@ export function renderQuote(row, selector, text, format) {
 	const marker = `[${row.source_id}]`
 	if (format === "md") return `"${text}" ${marker}`
 	return `<q data-fact="${row.fact_id}" data-quote-sel="${escapeHtml(selector)}">${escapeHtml(text)}</q> ${marker}`
+}
+
+const RENDERED_MD_QUOTE = /^"([\s\S]*)" (\[S\d+\])$/u
+
+/** The quote text and source marker of bytes renderQuote wrote for md, or null for any other layout. */
+export function parseRenderedQuote(body) {
+	const match = RENDERED_MD_QUOTE.exec(body)
+	return match ? { text: match[1], marker: match[2] } : null
 }
 
 /** The attributed block that replaces a twice-failed sentence; entity and valid_at stay outside the quote. */

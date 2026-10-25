@@ -108,12 +108,6 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
     call: "options.captureEvent(\"handoff_hint\")", reason: THROUGH_FAN_IN,
   },
   {
-    file: "omo-native-crash.ts", fn: "captureProcessCrashes",
-    guard: "",
-    route: VIA_SESSION_CLIENT,
-    call: "input.captureEvent(\"process_crashed\")", reason: SESSION_START_PATH,
-  },
-  {
     file: "omo-native-delegation.ts", fn: "createOmoNativeDelegationCapture>subscribe(=>)",
     guard: "",
     route: VIA_FAN_IN,
