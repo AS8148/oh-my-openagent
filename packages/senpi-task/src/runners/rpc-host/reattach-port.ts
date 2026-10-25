@@ -29,10 +29,11 @@ export interface ReattachPortInput<Port extends HostSessionPort> {
  * re-opened, never ensured: if it stays silent the child parks as `own_host_unreachable`.
  */
 export function createReattachPort<Port extends HostSessionPort>(input: ReattachPortInput<Port>): HostSessionReattach {
-  return async (lost: HostSessionFacts): Promise<HostSessionReattached | HostSessionReattachRefused | undefined> => {
+  return async (lost: HostSessionFacts, abandoned = () => false): Promise<HostSessionReattached | HostSessionReattachRefused | undefined> => {
     const { endpoint, spec } = input
     for (const delayMs of input.delaysMs) {
       await input.sleep(delayMs)
+      if (abandoned()) return undefined
       try {
         await admitChildStore(endpoint)
         const socket = await ensureChildEndpoint(endpoint, { socket: lost.socket, recorded: true, attachOnly: false })
