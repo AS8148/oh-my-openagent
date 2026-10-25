@@ -20,6 +20,8 @@ const scratch = () => {
   // A space makes the path differ from its file URL's pathname, as every Windows path does (see changelog-fragments-cli.test.ts).
   const dir = mkdtempSync(join(tmpdir(), "package log commands-"))
   git(dir, "init", "-q", "-b", "dev")
+  // A runner's global core.autocrlf=true (windows-latest) would check files out with CRLF; the expectations are bytes.
+  git(dir, "config", "core.autocrlf", "false")
   cpSync(SCRIPT_DIR, join(dir, "script"), { recursive: true, filter: (p) => !p.includes("node_modules") })
   mkdirSync(join(dir, "packages/omo-senpi"), { recursive: true })
   mkdirSync(join(dir, "changes/unreleased"), { recursive: true })
