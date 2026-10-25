@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The ulw-research proofread lane returns edits that are checked before they land.** The writing lane hands back `polish-edits.json`; `fact polish-apply` applies each edit only when it changes text nodes alone and keeps every number, hedge, qualifier, link, and claim id, `fact polish-diff` backstops hand edits, and `fact pairs --changed-since` sends every sentence polish rewrote back to the meaning readers. ([#11160](https://github.com/code-yeongyu/oh-my-openagent/pull/11160), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009))
+
 ## [5.1.46] - 2026-10-24
 
 **OmO Native init-deep committed mode no longer dead-ends.** Committed mode now finishes through its own pull-request handoff instead of pointing at a skill that does not ship with OmO Native, and it reports how to finish by hand when no PR can be opened. Thanks to @HolisticDeveloper for the report and @surlymochan for the fix. ([#11228](https://github.com/code-yeongyu/oh-my-openagent/pull/11228), fixes [#9686](https://github.com/code-yeongyu/oh-my-openagent/issues/9686))
-
-**The ulw-research proofread lane returns edits that are checked before they land.** The writing lane hands back `polish-edits.json`; `fact polish-apply` applies each edit only when it changes text nodes alone and keeps every number, hedge, qualifier, link, and claim id, `fact polish-diff` backstops hand edits, and `fact pairs --changed-since` sends every sentence polish rewrote back to the meaning readers. ([#11160](https://github.com/code-yeongyu/oh-my-openagent/pull/11160), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009))
 
 **The stale-reflection-lock test leaves no background writer behind when removing its temporary root.** Its teardown closes the memory wiring and awaits facts reconciliation and maintenance before removal, so a late lock publication cannot recreate the directory and make the temp-leak guard blame another test. ([#11225](https://github.com/code-yeongyu/oh-my-openagent/pull/11225))
 
