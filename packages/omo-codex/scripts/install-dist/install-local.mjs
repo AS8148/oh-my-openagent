@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:5a45b72466a0f52e0aed11853f42df6d47418d5f89cd2d231d8da3955da0acae:2b22b84ed19f7f711802a539fb907cbecb23c36d0bd2620f89089806796030a6
+// omo-codex-install:0e8ddd881d149b0ae0d8b4f72d88f4cec9f8d4da84a3f14c9531d77dc327486b:37dc1150105dcb4cae08841de4820d5852c1cab65111c3747f35aa130676829a
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -10380,7 +10380,7 @@ function resolveStdio(options) {
   return [options.stdin ?? "ignore", options.stdout ?? "pipe", options.stderr ?? "inherit"];
 }
 function createBunSpawnOptions(options) {
-  return { ...options, windowsHide: true };
+  return { ...options, env: options.env ?? process.env, windowsHide: true };
 }
 function createNodeSpawnOptions(options, platform = process.platform) {
   const nodeOptions = {
