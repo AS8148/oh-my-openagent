@@ -33,13 +33,19 @@ test.each([null, "/synthetic/senpi"])("standalone ancestry is capability gated f
   }
 })
 
-test("the current pinned engine never receives the unsupported standalone flag", () => {
+test.each([null, "/synthetic/senpi"])("the current pinned engine receives ancestry by default for launcher %s", (executable) => {
   // given the default pinned-engine capability (no test override)
   // when a fresh process descriptor is constructed
   const descriptor = buildRpcSpawn(spec, {
     isBunBinary: false, isCompiledEngine: false, execPath: "/synthetic/bun",
-    parentEnv: {}, resolveSenpiExecutable: () => null, resolveRpcEntry: () => "/synthetic/rpc-entry.js",
+    parentEnv: {}, resolveSenpiExecutable: () => executable, resolveRpcEntry: () => "/synthetic/rpc-entry.js",
   })
-  // then the installed 2026.10.23-1 engine can still start
-  expect(descriptor.args).not.toContain("--spawned-by")
+  // then the pinned engine receives the parent, root, and task identity without a capability override
+  const index = descriptor.args.indexOf("--spawned-by")
+  expect(index).toBeGreaterThanOrEqual(0)
+  const encoded = descriptor.args[index + 1]
+  if (encoded === undefined) throw new Error("ancestry JSON missing")
+  expect(JSON.parse(encoded)).toEqual({
+    parentSessionId: "nested-parent", rootSessionId: "tree-root", taskId: "worker-task",
+  })
 })

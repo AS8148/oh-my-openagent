@@ -32,8 +32,8 @@ export const OMO_SENPI_TASK_DEPTH = "OMO_SENPI_TASK_DEPTH"
 export const OMO_SENPI_TASK_ROOT_SESSION_ID = "OMO_SENPI_TASK_ROOT_SESSION_ID"
 export const OMO_SENPI_TASK_TRACEPARENT = "OMO_SENPI_TASK_TRACEPARENT"
 const RPC_ENTRY_SPECIFIER = "@code-yeongyu/senpi/rpc-entry"
-// Enable only with the engine pin containing senpi#4205; 2026.10.23-1 rejects this CLI flag.
-const PINNED_ENGINE_SUPPORTS_SPAWNED_BY_CLI = false
+// The pinned 2026.10.25-2 engine contains senpi#4205 and accepts this CLI flag.
+const PINNED_ENGINE_SUPPORTS_SPAWNED_BY_CLI = true
 
 export type RpcSpawnSpec = RpcRunnerSpec & {
   readonly memberEnv?: Readonly<Record<string, string>>
