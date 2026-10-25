@@ -78,7 +78,7 @@ export function createCliAccountSource(options: {
     try {
       // A host runs under a TUI: the CLI's keyring-fallback notice must not write over it, and the fallback is
       // the same libsecret path the CLI uses (#10658 review).
-      store = options.store ?? createCredentialStore(api, undefined, undefined, undefined, quietNotice)
+      store = options.store ?? createCredentialStore(api, { notice: quietNotice })
       credentials = await store.read()
     } catch (error) {
       if (error instanceof KeychainApprovalPendingError) throw error

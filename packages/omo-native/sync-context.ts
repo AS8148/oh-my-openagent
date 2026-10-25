@@ -29,7 +29,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 
 export async function signedInSyncContext(options: SyncContextOptions): Promise<SyncContext> {
   const api = serviceOrigin(options.env.OMO_SERVICE_API_URL ?? "https://api.omo.dev")
-  const store = options.store ?? createCredentialStore(api, undefined, undefined, undefined, undefined, INTERACTIVE_READ_WAIT)
+  const store = options.store ?? createCredentialStore(api, { wait: INTERACTIVE_READ_WAIT })
   const credentials = await store.read()
   if (credentials === null) throw new SignInError("Not signed in. Run omo login first.")
   const session = createSession({ api, store })

@@ -41,16 +41,8 @@ export const INTERACTIVE_READ_WAIT: CredentialReadWait = {
 
 // One OS read per credential per process: a read the OS has not answered is shared by every later caller, so an open
 // dialog holds one parked native read and one prompt, never one more per sync request, even after deadlines expire.
-// A read that settles after every caller gave up (the person approved late) answers the next caller instead of a new
-// native read, which could prompt again. It is served for 30 s at most: another process may rotate the refresh token
-// after that, and a stale one would end the session as reused.
-const LATE_ANSWER_MS = 30_000
-type InFlightRead = { readonly read: Promise<string | null>; waiters: number }
-type ProcessReads = {
-  readonly pending: Map<string, InFlightRead>
-  readonly late: Map<string, { readonly value: string | null; readonly at: number }>
-}
-const processReads = new WeakMap<SecretApi, ProcessReads>()
+// Settled answers are never cached: another process can rotate the single-use token before the next read.
+const processReads = new WeakMap<SecretApi, Map<string, Promise<string | null>>>()
 
 // The OS store refused because it is locked and may not ask the person (macOS errSecInteractionNotAllowed,
 // a locked libsecret keyring). Callers must surface this as its own outcome, never as a prompt.
@@ -74,12 +66,21 @@ export function credentialId(api: string): string {
 
 export function createCredentialStore(
   api: string,
-  secrets: SecretApi | null = typeof Bun === "undefined" ? null : Bun.secrets,
-  platform: NodeJS.Platform = process.platform,
-  lockProbe: SecretServiceLockProbe = probeSecretServiceLock,
-  notice: (message: string) => void = stderrNoticeOncePerProcess,
-  wait: CredentialReadWait = SESSION_READ_WAIT,
+  options: {
+    readonly secrets?: SecretApi | null
+    readonly platform?: NodeJS.Platform
+    readonly lockProbe?: SecretServiceLockProbe
+    readonly notice?: (message: string) => void
+    readonly wait?: CredentialReadWait
+  } = {},
 ): CredentialStore {
+  const {
+    secrets = typeof Bun === "undefined" ? null : Bun.secrets,
+    platform = process.platform,
+    lockProbe = probeSecretServiceLock,
+    notice = stderrNoticeOncePerProcess,
+    wait = SESSION_READ_WAIT,
+  } = options
   if (!secrets) throw new SignInError("OmO sign-in needs Bun 1.4 or newer with OS credential storage. No file fallback is available.")
   const platformName =
     platform === "darwin"
@@ -92,48 +93,34 @@ export function createCredentialStore(
   if (platformName === null) throw new SignInError("This platform has no supported OS credential store.")
   const key = { service: "omo-cli", name: credentialId(api) }
   const slot = `${key.service}\n${key.name}`
-  const readsOf = (api: SecretApi): ProcessReads => {
+  const readsOf = (api: SecretApi): Map<string, Promise<string | null>> => {
     const known = processReads.get(api)
     if (known !== undefined) return known
-    const created: ProcessReads = { pending: new Map(), late: new Map() }
+    const created = new Map<string, Promise<string | null>>()
     processReads.set(api, created)
     return created
   }
   const forget = (api: SecretApi) => {
-    const reads = readsOf(api)
-    reads.pending.delete(slot)
-    reads.late.delete(slot)
+    readsOf(api).delete(slot)
   }
-  const sharedRead = (api: SecretApi): InFlightRead => {
+  const sharedRead = (api: SecretApi): Promise<string | null> => {
     const reads = readsOf(api)
-    const late = reads.late.get(slot)
-    reads.late.delete(slot)
-    if (late !== undefined && Date.now() - late.at <= LATE_ANSWER_MS) return { read: Promise.resolve(late.value), waiters: 0 }
-    const pending = reads.pending.get(slot)
+    const pending = reads.get(slot)
     if (pending !== undefined) return pending
     const read = Promise.resolve().then(() => api.get(key))
-    const inFlight: InFlightRead = { read, waiters: 0 }
     const done = () => {
-      if (reads.pending.get(slot) === inFlight) reads.pending.delete(slot)
+      if (reads.get(slot) === read) reads.delete(slot)
     }
-    read.then(
-      value => {
-        done()
-        if (inFlight.waiters === 0) reads.late.set(slot, { value, at: Date.now() })
-      },
-      done,
-    )
-    reads.pending.set(slot, inFlight)
-    return inFlight
+    read.then(done, done)
+    reads.set(slot, read)
+    return read
   }
   const waiting =
     platform === "darwin"
       ? `macOS Keychain is waiting for your approval: answer the "${basename(process.execPath)} wants to access key omo-cli" dialog ("Always Allow" stops it asking again)`
       : `${platformName} has not answered; it may be waiting for your approval or an unlock in a system dialog`
   const answered = async (api: SecretApi): Promise<string | null> => {
-    const inFlight = sharedRead(api)
-    const { read } = inFlight
-    inFlight.waiters += 1
+    const read = sharedRead(api)
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       if (wait.kind === "interactive") {
@@ -148,7 +135,6 @@ export function createCredentialStore(
       })
       return await Promise.race([read, expired])
     } finally {
-      inFlight.waiters -= 1
       clearTimeout(timer)
     }
   }

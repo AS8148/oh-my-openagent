@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -8,6 +8,7 @@ import { createCredentialStore, quietNotice } from "@oh-my-opencode/omo-opencode
 
 import { readMemoryStatusSegments } from "../status"
 import { createSyncRunner } from "../sync-runner"
+import { SyncSessionDeferredError } from "../sync-session-deferred"
 import { createCliAccountSource } from "./account-source"
 import { createDeviceSessionResolver } from "./resolver"
 
@@ -28,14 +29,7 @@ async function identity() {
 // The keychain approval dialog nobody has answered (#11262): the OS read never settles.
 function unansweredKeychainStore() {
   let gets = 0
-  const store = createCredentialStore(
-    "http://127.0.0.1:9",
-    { get: () => { gets += 1; return new Promise<string | null>(() => undefined) }, set: async () => undefined, delete: async () => true },
-    "darwin",
-    async () => "unlocked",
-    quietNotice,
-    { kind: "bounded", deadlineMs: 50 },
-  )
+  const store = createCredentialStore("http://127.0.0.1:9", { secrets: { get: () => { gets += 1; return new Promise<string | null>(() => undefined) }, set: async () => undefined, delete: async () => true }, platform: "darwin", lockProbe: async () => "unlocked", notice: quietNotice, wait: { kind: "bounded", deadlineMs: 50 } })
   return { store, gets: () => gets }
 }
 
@@ -59,6 +53,40 @@ const noRuntime = async () => {
 }
 
 describe("memory sync while the keychain waits for approval", () => {
+  test("deferred retries back off to five minutes and warn once per escalation", async () => {
+    const paths = await identity()
+    let attempts = 0
+    const warnings: unknown[] = []
+    const runner = createSyncRunner({
+      logger: { info: () => undefined, warn: (_message, detail) => warnings.push(detail), error: () => undefined },
+      resolveSession: async () => {
+        attempts += 1
+        throw new SyncSessionDeferredError("approval pending", undefined)
+      },
+    })
+    jest.useFakeTimers()
+    try {
+      await runner.acquire("agent", paths, { enabled: true })
+      expect(attempts).toBe(1)
+      for (const delay of [15_000, 30_000, 60_000, 120_000, 240_000, 300_000, 300_000]) {
+        const before = attempts
+        jest.advanceTimersByTime(delay - 1)
+        expect(attempts).toBe(before)
+        jest.advanceTimersByTime(1)
+        await runner.status(paths.repo)
+        expect(attempts).toBe(before + 1)
+      }
+      expect(warnings).toHaveLength(6)
+      expect(warnings).toMatchObject([15_000, 30_000, 60_000, 120_000, 240_000, 300_000].map(retryMs => ({ retryMs })))
+      await runner.release(paths.repo)
+      jest.advanceTimersByTime(300_000)
+      expect(attempts).toBe(8)
+    } finally {
+      jest.useRealTimers()
+      await runner.release(paths.repo)
+    }
+  })
+
   test("#given an unanswered keychain dialog #when the device account is resolved #then it defers with the actionable keychain message instead of hanging or reading as signed out", async () => {
     const { store } = unansweredKeychainStore()
     const outcome = await settled(createCliAccountSource({ api: "http://127.0.0.1:9", store })())

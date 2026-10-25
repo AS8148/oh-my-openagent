@@ -179,7 +179,7 @@ export async function runAccountCommand(args: readonly string[]): Promise<void> 
     {
       api,
       get store() {
-        store ??= createCredentialStore(api, undefined, undefined, undefined, undefined, INTERACTIVE_READ_WAIT)
+        store ??= createCredentialStore(api, { wait: INTERACTIVE_READ_WAIT })
         return store
       },
       pinDir: () => syncPinDir(resolveMemoryRoot(process.env, process.cwd())),

@@ -60,7 +60,7 @@ async function run(action: "login" | "logout" | "whoami", options: Options): Pro
   process.once("SIGTERM", cancel)
   try {
     const api = serviceOrigin(options.api ?? process.env.OMO_SERVICE_API_URL ?? "https://api.omo.dev")
-    const store = createCredentialStore(api, undefined, undefined, undefined, undefined, INTERACTIVE_READ_WAIT)
+    const store = createCredentialStore(api, { wait: INTERACTIVE_READ_WAIT })
     const session = createSession({ api, store, signal: controller.signal })
     if (action === "logout") {
       const revoked = await session.logout()
