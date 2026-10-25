@@ -1,5 +1,6 @@
 // fact-commands.mjs - the `fact` subcommands of report-tools: add, quote, retract, export, fill,
-// derive, verify (fact-commands-verify.mjs), pairs and meaning-check (fact-commands-meaning.mjs). Every value reaches the ledger from a source
+// derive, verify (fact-commands-verify.mjs), pairs and meaning-check (fact-commands-meaning.mjs), polish-apply and
+// polish-diff (fact-commands-polish.mjs). Every value reaches the ledger from a source
 // snapshot through a deterministic locator or from a declared derivation; nothing here accepts a
 // typed value. add and quote print the row with 60 chars of source context on each side (JSON
 // with --json). Exit 0 ok, 1 semantic failure (fact_not_located, fill errors, a refused
@@ -217,6 +218,7 @@ function runDerive(args) {
 export async function runFact(argv) {
 	const [sub, ...rest] = argv
 	if (sub === "pairs" || sub === "meaning-check") return (await import("./fact-commands-meaning.mjs")).runFactMeaning(sub, rest)
+	if (sub === "polish-apply" || sub === "polish-diff") return (await import("./fact-commands-polish.mjs")).runFactPolish(sub, rest)
 	const args = parseArgs(rest, { booleans: BOOLEANS })
 	switch (sub) {
 		case "add":
@@ -234,6 +236,6 @@ export async function runFact(argv) {
 		case "verify":
 			return (await import("./fact-commands-verify.mjs")).runFactVerify(args)
 		default:
-			throw new CliError("usage: fact <add|quote|retract|export|fill|verify|derive|pairs|meaning-check> ...")
+			throw new CliError("usage: fact <add|quote|retract|export|fill|verify|derive|pairs|meaning-check|polish-apply|polish-diff> ...")
 	}
 }

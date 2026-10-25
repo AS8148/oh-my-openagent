@@ -1,6 +1,7 @@
 // fact-commands-meaning.mjs - `fact pairs` and `fact meaning-check`, the script half of the
 // separate-session meaning verifier. fact pairs writes the (source, report sentence) pairs a
-// reader lane gets and nothing else; it honours the brief's `meaning check` field and writes
+// reader lane gets and nothing else (with --changed-since, only the pairs whose sentence polish
+// rewrote); it honours the brief's `meaning check` field and writes
 // `{ skipped: true }` when it is off. fact meaning-check ingests the readers' verdict files
 // (meaning-check.mjs), writes fidelity-meaning-defects.json (a fidelity record bound to the pairs'
 // artifact_sha256 and report, through writeFidelityRecord), and records the run in
@@ -14,9 +15,8 @@ import { dirname, join, resolve } from "node:path"
 
 import { CliError, parseArgs, readJsonFile, sha256Of, writeJsonAtomic, writeTextAtomic } from "./cli-support.mjs"
 import { countDefects } from "./contracts.mjs"
-import { markdownAsHtml, readEdition } from "./fact-commands-verify.mjs"
-import { readLedger } from "./fact-ledger.mjs"
-import { validateLedger } from "./fact-ledger-schema.mjs"
+import { ledgerFrom, markdownAsHtml, readEdition, sessionOf } from "./fact-commands-verify.mjs"
+import { pairsChangedSince } from "./fact-commands-polish.mjs"
 import { extractPairs, PAIR_KINDS } from "./fact-pairs.mjs"
 import { FIDELITY_INCOMPLETE, meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
 import { MEANING_RECORD, writeFidelityRecord } from "./fidelity-records.mjs"
@@ -31,24 +31,9 @@ export const PROMOTION = Object.freeze({ code: "meaning_drift_confirmed", to: "i
 /** The command status: fail when any defect blocks delivery under the registry policy. */
 export const meaningStatus = (defects) => (defects.some(blocksDelivery) ? "fail" : "pass")
 
-const sessionOf = (flags) => {
-	const dir = flags["session-dir"] ?? process.env.SESSION_DIR
-	return dir && dir !== true ? resolve(dir) : null
-}
 const inSession = (session, name, flag) => {
 	if (session === null) throw new CliError(`${flag} is required without --session-dir (or SESSION_DIR)`)
 	return join(session, name)
-}
-
-function readLedgerFrom(flags, session) {
-	if (flags.ledger === undefined) {
-		if (session === null) throw new CliError("--ledger is required without --session-dir (or SESSION_DIR)")
-		return readLedger(session)
-	}
-	const ledger = readJsonFile(flags.ledger)
-	const errors = validateLedger(ledger)
-	if (errors.length > 0) throw new CliError(`${flags.ledger} is not a valid fact ledger: ${errors[0]}`)
-	return ledger
 }
 
 function briefState(flags, session) {
@@ -77,10 +62,10 @@ function runPairs(args) {
 	const edition = readEdition(report, flags)
 	const claimsPath = flags.claims ?? (session === null ? null : join(session, "claims.json"))
 	const claims = claimsPath !== null && (flags.claims !== undefined || existsSync(claimsPath)) ? readJsonFile(claimsPath) : null
-	const changed = flags["changed-since"] === undefined ? undefined : readJsonFile(flags["changed-since"]).entries
-	const ledger = readLedgerFrom(flags, session)
+	const ledger = ledgerFrom(flags, session)
 	const html = edition.format === "md" ? markdownAsHtml(edition.text, edition.entries, ledger).html : edition.text
-	const pairs = extractPairs(html, ledger, claims, changed)
+	const all = extractPairs(html, ledger, claims)
+	const pairs = flags["changed-since"] === undefined ? all : pairsChangedSince(all, flags["changed-since"], ledger, claims)
 	const counts = { total: pairs.length, force_strong: pairs.filter((pair) => pair.force_strong).length }
 	for (const kind of PAIR_KINDS) counts[kind] = pairs.filter((pair) => pair.kind === kind).length
 	const record = { schemaVersion: 1, skipped: false, report: resolve(report), format: edition.format, artifact_sha256: sha256Of(edition.text), pairs_sha256: sha256Of(JSON.stringify(pairs)), counts, verdict_schema: VERDICT_SCHEMA, pairs }
