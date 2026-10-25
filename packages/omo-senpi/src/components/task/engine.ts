@@ -140,8 +140,6 @@ export function composeTaskEngine(deps: ComposeTaskEngineDeps): TaskEngine {
   const admissionBarrier = deps.admissionBarrier ?? new AdmissionBarrier()
   const settings: OmoTaskSettings = deps.omoConfig.task ?? OmoTaskSettingsSchema.parse({})
   const ancestry = readSessionAncestry(deps.pi, deps.env ?? process.env)
-  const resolveAncestry: ResolveAncestry = (sessionId) =>
-    ancestry === undefined ? undefined : { depth: ancestry.depth, rootSessionId: ancestry.rootSessionId ?? sessionId }
   const runtime = new TaskRuntimeContext(deps.cwd)
   const loadSkills = deps.loadSkills ?? createFsSkillLoader()
   const stateDir = {
@@ -291,6 +289,15 @@ export function composeTaskEngine(deps: ComposeTaskEngineDeps): TaskEngine {
     residentTaskIds: () => manager.residentTaskIds(),
     residentFigures: () => baseStore.residentFigures(),
   })
+
+  const resolveAncestry: ResolveAncestry = (sessionId) => {
+    // In-process children share our tool closures, but call them as their own sessions.
+    const caller = manager.findTaskByChildSession?.(sessionId)
+    if (caller?.execution_mode === "in-process") {
+      return { depth: caller.depth, rootSessionId: caller.root_session_id }
+    }
+    return ancestry === undefined ? undefined : { depth: ancestry.depth, rootSessionId: ancestry.rootSessionId ?? sessionId }
+  }
 
   return {
     runPause,

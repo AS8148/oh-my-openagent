@@ -16,6 +16,14 @@ export type ReadClassifier = (input: {
 
 export interface BeforeAgentStartHandlerOptions {
   previewSafe?: boolean
+  /** Stable omo subscriber name, retained in bundled settle diagnostics. */
+  hookLabel?: string
+}
+
+export interface SettleObserver {
+  readonly signal: AbortSignal
+  /** Names the current await and refuses to begin another phase after retirement. */
+  phase(label: string): void
 }
 
 /** Figures for one section of senpi's on-demand memory report. */
@@ -38,7 +46,7 @@ export interface SenpiExtensionAPI {
   readonly sessionContext?: unknown
   on(
     event: string,
-    handler: (payload: unknown, ctx?: unknown) => unknown | Promise<unknown>,
+    handler: (payload: unknown, ctx?: unknown, observer?: SettleObserver) => unknown | Promise<unknown>,
     options?: BeforeAgentStartHandlerOptions,
   ): void
   rpc?: {
