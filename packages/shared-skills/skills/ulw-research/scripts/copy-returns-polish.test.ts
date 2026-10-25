@@ -78,7 +78,7 @@ describe("the polish edit contract is polish-apply's", () => {
 					return "refused"
 				}
 			})()
-			const cli = outcome(() => runFactPolish("polish-apply", [reportPath, "--edits", editsPath, "--ledger", ledgerPath, "--out", join(dir, "out.html")]))
+			const cli = outcome(() => runFactPolish("polish-apply", [reportPath, "--edits", editsPath, "--ledger", ledgerPath, "--brief", BRIEF, "--out", join(dir, "out.html")]))
 			expect(cli === "ok" ? "ok" : "refused").toBe(direct)
 			if (cli !== "ok") expect(cli).toContain(editsPath)
 		})
@@ -87,7 +87,7 @@ describe("the polish edit contract is polish-apply's", () => {
 
 describe("the ledger loader is one shared helper", () => {
 	const pairs = (extra: string[]) => () => runFactMeaning("pairs", [reportPath, "--brief", BRIEF, "--out", join(dir, "pairs.json"), ...extra])
-	const diff = (extra: string[]) => () => runFactPolish("polish-diff", ["--before", reportPath, "--after", reportPath, ...extra])
+	const diff = (extra: string[]) => () => runFactPolish("polish-diff", ["--before", reportPath, "--after", reportPath, "--brief", BRIEF, ...extra])
 
 	test("#given the command modules #when read #then neither defines its own ledger loader or session resolver", () => {
 		expect(polishCommand.ledgerFrom).toBe(ledgerFrom)
@@ -122,7 +122,7 @@ describe("the edition format comes from verify's grammar", () => {
 		expect(source("fact-commands-polish.mjs")).not.toMatch(/md\|markdown/u)
 		for (const name of ["r.md", "R.MD", "r.markdown", "R.Markdown", "r.html", "r.HTML"]) {
 			const path = file(name, readFileSync(reportPath, "utf8"))
-			const result = outcome(() => runFactPolish("polish-apply", [path, "--edits", editsPath, "--ledger", ledgerPath, "--out", join(dir, "out.html")]))
+			const result = outcome(() => runFactPolish("polish-apply", [path, "--edits", editsPath, "--ledger", ledgerPath, "--brief", BRIEF, "--out", join(dir, "out.html")]))
 			expect(result.includes("takes the filled HTML edition"), name).toBe(editionFormatOf(path, undefined) === "md")
 		}
 	})
@@ -130,7 +130,7 @@ describe("the edition format comes from verify's grammar", () => {
 
 describe("polish-diff counts with contracts and exits on blockers only", () => {
 	type DiffRun = { exitCode: number; json: { counts: Record<string, number>; defects: { severity: string }[] } }
-	const run = (before: string, after: string) => runFactPolish("polish-diff", ["--before", file("b.html", doc(before)), "--after", file("a.html", doc(after)), "--ledger", ledgerPath]) as unknown as DiffRun
+	const run = (before: string, after: string) => runFactPolish("polish-diff", ["--before", file("b.html", doc(before)), "--after", file("a.html", doc(after)), "--ledger", ledgerPath, "--brief", BRIEF]) as unknown as DiffRun
 
 	test("#given every registry code #when polishDiffFails classifies it #then only registry blockers fail", () => {
 		for (const [code, entry] of Object.entries(DEFECT_CODES) as [string, { severity: string }][]) expect(polishDiffFails([{ code, severity: "minor" }]), code).toBe(entry.severity === "blocker")
@@ -161,7 +161,7 @@ describe("fact polish-apply prints every rejection reason verbatim", () => {
 	test("#given an edit holding & #when fact polish-apply runs #then the printed line carries polish-apply's own markup reason", () => {
 		const before = "Revenue & profit rose across the year"
 		const editsPath = file("edits-markup-ampersand.json", JSON.stringify([{ before, after: "Revenue and profit rose across the year", reason: "wording" }]))
-		const run = runFactPolish("polish-apply", [reportPath, "--edits", editsPath, "--ledger", ledgerPath, "--out", join(dir, "ampersand.html")]) as unknown as ApplyRun
+		const run = runFactPolish("polish-apply", [reportPath, "--edits", editsPath, "--ledger", ledgerPath, "--brief", BRIEF, "--out", join(dir, "ampersand.html")]) as unknown as ApplyRun
 
 		expect(run.exitCode).toBe(0)
 		expect(run.json.data.rejected).toBe(1)
@@ -203,7 +203,7 @@ describe("polish-apply writes atomically and honours --format", () => {
 
 	test("#given --format md on an .html report #when polish-apply runs #then it refuses the Markdown edition", () => {
 		const editsPath = file("edits-format.json", "[]")
-		const result = outcome(() => runFactPolish("polish-apply", [reportPath, "--edits", editsPath, "--ledger", ledgerPath, "--out", join(dir, "fmt.html"), "--format", "md"]))
+		const result = outcome(() => runFactPolish("polish-apply", [reportPath, "--edits", editsPath, "--ledger", ledgerPath, "--brief", BRIEF, "--out", join(dir, "fmt.html"), "--format", "md"]))
 		expect(result).toContain("takes the filled HTML edition")
 	})
 })
