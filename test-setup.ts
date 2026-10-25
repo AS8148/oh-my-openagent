@@ -15,7 +15,7 @@ import { ensureVendoredLspDaemonBuilt } from "./script/ensure-vendored-lsp-daemo
 import { installEnvironmentIntegrityCheck } from "./test-support/environment-integrity"
 import { installPostHogTestGuard } from "./test-support/posthog-test-guard"
 import { installHermeticHome } from "./test-hermetic-home"
-import { DEFAULT_TEST_TIMEOUT_MS, resetTestDeadline } from "./test-support/test-deadline"
+import { resetTestDeadline } from "./test-support/test-deadline"
 
 // Installer/doctor integration tests need the vendored lsp-daemon dist that CI builds
 // out-of-band before `bun test`; mirror that here so fresh clones/worktrees pass too.
@@ -38,7 +38,7 @@ await Promise.all([loadPiTui(), loadSenpiBarrel()])
 // --timeout explicitly: the Windows wrapper injects 30000 for every job it launches, and the POSIX
 // multi-file invocations in ci.yml carry 20000. Keep those three numbers in step. Local single-file
 // runs get this value; a file that needs more still sets its own budget.
-setDefaultTimeout(DEFAULT_TEST_TIMEOUT_MS)
+setDefaultTimeout(process.platform === "win32" ? 30_000 : 20_000)
 
 // Skill/agent/command discovery reads the developer's real HOME, and the engine's agent dir falls
 // back to os.homedir(). Both point at one per-process temp home; see test-hermetic-home.ts.

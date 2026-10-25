@@ -175,7 +175,7 @@ describe("task start against a busy host (#10042)", () => {
   })
 
   for (const elapsedMs of [2_500, 11_000]) {
-    test(`#given a cold launch held for ${elapsedMs}ms #when whenLaunched settles within the test budget #then the child completes`, async () => {
+    test(`#given a gated cold launch #when its guard clock advances ${elapsedMs}ms within the test budget #then the child completes`, async () => {
       // given - the runner gate is the launch seam; no real machine or socket timing is needed.
       const held = new BusyHostRunner()
       const h = makeManager({ inProcess: held })
@@ -191,10 +191,12 @@ describe("task start against a busy host (#10042)", () => {
       }, setTimeout))
       const settled = launchSettled(h.manager, started, 15_000)
       schedule.mockRestore()
-      clock.mockRestore()
       const observed = settled.then(value => ({ value }), (error: unknown) => ({ error }))
       try {
         // when - advance only the fixture's guard clock, with the real launch still gated.
+        clock.mockReturnValue(elapsedMs)
+        expect(timers).toHaveLength(1)
+        expect(timers[0]?.delay).toBeGreaterThan(elapsedMs)
         for (const timer of timers) if (timer.delay <= elapsedMs) timer.fire()
         held.release.resolve(undefined)
         expect(await observed).toEqual({ value: "running" })
@@ -207,8 +209,11 @@ describe("task start against a busy host (#10042)", () => {
         handle.settle({ status: "completed", finalResponse: "COLD DONE" })
         expect((await bounded(completed)).final_response).toBe("COLD DONE")
       } finally {
+        clock.mockRestore()
+        resetTestDeadline()
         held.release.resolve(undefined)
         await h.manager.whenLaunched?.(started.task_id)
+        await observed
       }
     }, 15_000)
   }
@@ -231,12 +236,12 @@ describe("task start against a busy host (#10042)", () => {
     const settled = launchSettled(h.manager, started, 15_000)
     schedule.mockRestore()
     clock.mockRestore()
+    const failed = settled.then(
+      () => undefined,
+      (error: unknown) => error,
+    )
     // when / then - fire the circuit breaker without waiting on wall-clock scheduling.
     try {
-      const failed = settled.then(
-        () => { throw new Error("an unresolved launch was reported settled") },
-        (error: unknown) => error,
-      )
       expect(timers).toHaveLength(1)
       expect(delays).toEqual([0])
       timers[0]?.()
@@ -245,10 +250,12 @@ describe("task start against a busy host (#10042)", () => {
       if (!(failure instanceof Error)) throw new Error("the deadline did not report an Error")
       expect(failure.message).toContain("whenLaunched")
       expect(failure.message).toContain(started.task_id)
+      expect(failure.message).toContain("15000 ms test budget")
       expect(h.manager.getResidentHandle(started.task_id)).toBeUndefined()
     } finally {
       held.release.resolve(undefined)
       await h.manager.whenLaunched?.(started.task_id)
+      await failed
     }
   }, 15_000)
 
