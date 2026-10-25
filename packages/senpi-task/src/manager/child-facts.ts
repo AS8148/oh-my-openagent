@@ -7,6 +7,7 @@ import type { ManagedChildHandle } from "./child-handle"
 import { subscribeEffectiveModel } from "./observed-model"
 import { observeParentModelFallback, type FailedTurn } from "./parent-model-fallback"
 import { subscribeTranscriptLog } from "./transcript-log"
+import type { HostLivenessStatus } from "../runners/rpc-host/handle-heartbeat"
 
 const MOTION_EVENTS: ReadonlySet<string> = new Set(["agent_start", "turn_start", "tool_execution_start"])
 
@@ -24,6 +25,7 @@ export function subscribeChildFacts(input: {
   // flag stamped before it no longer holds (senpi#3266).
   readonly onMotion?: () => void
   readonly onExtensionEvent: (event: ChildExtensionEvent) => void
+  readonly onLiveness: (status: HostLivenessStatus) => void
 }): () => void {
   const { handle, taskId, now, runStats } = input
   const transcript = subscribeTranscriptLog(handle, input.store, taskId)
@@ -55,6 +57,7 @@ export function subscribeChildFacts(input: {
     input.store.appendEvent(taskId, { type: notice.kind === "idle_queued" ? "idle_queued" : "host_turn_reconciled", payload: notice })
   })
   const extension = handle.subscribeExtensionEvents?.(input.onExtensionEvent)
+  const liveness = handle.onLiveness?.(input.onLiveness)
   const resumed = handle.onSelfResumed?.(() => {
     // The resumed turn is the run the reopen is about to start (buildRevived's nextRunEpoch).
     const fresh = input.store.load(taskId)
@@ -68,6 +71,7 @@ export function subscribeChildFacts(input: {
     stats()
     reconciled?.()
     extension?.()
+    liveness?.()
     resumed?.()
   }
 }

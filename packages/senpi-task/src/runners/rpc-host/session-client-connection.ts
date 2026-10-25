@@ -23,6 +23,7 @@ import {
 } from "./session-transport"
 import {
   HostSessionDetachedError,
+  isHostSessionMissing,
   isAgentSessionEvent,
   isRoutedTo,
   parseControlRecord,
@@ -199,6 +200,26 @@ export class HostSessionClient {
     } finally {
       await client.stop()
     }
+  }
+
+  /** Unlike best-effort disposal, failure leaves the route owned for another close attempt. */
+  async closeConfirmed(): Promise<void> {
+    const client = this.connected("close_session")
+    const routingId = this.routingId
+    if (routingId === undefined) throw new HostSessionDetachedError("close_session")
+    try {
+      await client.closeSession(routingId)
+    } catch (error) {
+      // A lost close acknowledgement can leave this attachment gone. A fresh host listing,
+      // not that attachment error alone, proves the session is actually absent.
+      if (!isHostSessionMissing(error) || client.listSessions === undefined) throw error
+      const sessions = await client.listSessions({ include_workers: true })
+      if (sessions.some(session => session.sessionId === routingId)) throw error
+    }
+    this.extensionEvents.clear()
+    this.client = undefined
+    this.routingId = undefined
+    await client.stop()
   }
 
   /** Drop the connection and leave the session running on the daemon (retained, attachments 0). */
