@@ -13,6 +13,7 @@ import { join, resolve } from "node:path"
 
 import { indexClaims } from "./claims-index.mjs"
 import { CliError, parseArgs, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
+import { runConversionProbe } from "./conversion-probe.mjs"
 import { parseFidelityBlock } from "./fidelity-brief.mjs"
 import { parseSourceFloor } from "./fidelity-policy.mjs"
 import { writeSnapshot } from "./source-snapshot.mjs"
@@ -107,6 +108,7 @@ async function acquire(flags) {
 
 export async function runSource(argv) {
 	const [sub, ...rest] = argv
+	if (sub === "probe-conversion") return runConversionProbe(rest)
 	if (sub !== "snapshot") throw new CliError(SNAPSHOT_USAGE)
 	const args = parseArgs(rest)
 	const id = args.required("id")

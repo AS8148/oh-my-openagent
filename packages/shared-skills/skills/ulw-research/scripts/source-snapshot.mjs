@@ -11,6 +11,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { sha256Of } from "./cli-support.mjs"
+import { probeConversion } from "./conversion-probe.mjs"
+import { writeFidelityRecord } from "./fidelity-records.mjs"
 import { parseHtml, PROSE_TAGS, proseText } from "./html-lite.mjs"
 import { splitSentences } from "./sentence-split.mjs"
 
@@ -168,6 +170,13 @@ export function writeSnapshot(sourcesDir, sourceId, input) {
 		provenance: input.provenance ?? "unknown",
 	}
 	writeFileSync(join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`)
+	if (typeof input.html === "string") {
+		const { altered, ...counts } = probeConversion(input.html, text)
+		writeFidelityRecord(join(dir, "conversion.json"), "source_conversion", {
+			artifact_sha256: sha256Of(input.html), report: join(dir, "source.html"), defects: [],
+			conversion_altered_numbers: altered, ...counts,
+		}, new Date(meta.observed_at))
+	}
 	const sentences = indexSentences(text, sourceId)
 	writeFileSync(join(dir, "sentences.jsonl"), sentences.map((row) => `${JSON.stringify(row)}\n`).join(""))
 	const acronyms = { schemaVersion: 1, source_id: sourceId, snapshot_sha256: sha256, entries: findAcronyms(text, sentences) }
