@@ -3,7 +3,7 @@ import { leaves, parseExpr } from "./fact-expr.mjs"
 import { readRow } from "./fact-ledger-kinds.mjs"
 import { addRow, nextId, validateLedger } from "./fact-ledger.mjs"
 import { recompute, verifyGraph } from "./fact-recompute.mjs"
-import { canonicalUnit, inputScale, refuse } from "./unit-algebra.mjs"
+import { canonicalUnit, inputScale, refuse, RuleError } from "./unit-algebra.mjs"
 import { refusal } from "./unit-errors.mjs"
 import { object, sameDeclared } from "./unit-metadata.mjs"
 import { display, renderValue, resultPrecision, toText } from "./unit-precision.mjs"
@@ -52,15 +52,17 @@ export function derive(ledger, spec) {
 		const declared = declaredUnit(spec, rule)
 		if (declared !== expected) refuse(unitMismatch(spec.op, rows, declared, expected), undefined, "result_unit", { unit: expected })
 		const result = compute(spec.op, rows, expected, ast, context, spec.formula)
+		if (typeof spec.now !== "string") refuse("derive needs a caller-supplied now timestamp", undefined, "missing_now", "an ISO timestamp in spec.now")
 		const row = addRow(ledger, {
 			kind: rule.kind, unit: expected, quote: "", extracted_by: "fact-derive",
-			observed_at: spec.now ?? new Date().toISOString(),
+			observed_at: spec.now,
 			label: spec.label ?? `${spec.op}-${nextId(ledger, rule.kind).toLowerCase()}`,
 			...result, operation: spec.op, operands: ids, derived_from: ids,
 			rationale: spec.rationale ?? null, context,
 		})
 		return { row, compatibility: rule.compatibility }
 	} catch (error) {
+		if (!(error instanceof RuleError)) throw error
 		return { error: "incompatible_operands", ...refusal(error) }
 	}
 }
