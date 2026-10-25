@@ -1,10 +1,10 @@
 // outcome.mjs - the per-run outcome manifest (`outcome.json`) and the closing briefing. Manifest functions are pure (they return a new manifest).
 // The briefing reads only the manifest, the sources-ledger text, and an injected `now`. node: builtins only.
-
 import * as nodeFs from "node:fs"
 import { basename, dirname, join } from "node:path"
 
 import { DELIVERABLE_FORMATS, DELIVERABLE_STATUSES, GATE_NAMES, GATE_STATUSES, LANES, MANIFEST_CODES, normalizeManifest, SCHEMA_VERSION, validateOutcomeManifest } from "./contracts.mjs"
+import { sessionStartMetadata } from "./outcome-start.mjs"
 
 export const MANIFEST_FILENAME = "outcome.json"
 const MISSING = MANIFEST_CODES[0]
@@ -33,15 +33,19 @@ function assertOneOf(code, label, value, allowed) {
 
 const clone = (manifest) => structuredClone(manifest)
 const isMissing = (error) => error?.code === "ENOENT" || error?.code === "ENOTDIR"
-
 function stamp(now) {
 	return (now ?? new Date()).toISOString()
 }
-
-/** Local wall-clock start time from a `YYYYMMDD-HHMMSS` session dir basename. */
+/** Recorded run start, with the legacy local timestamp basename as fallback. */
 export function parseSessionStart(sessionDir) {
+	const metadata = sessionStartMetadata(sessionDir)
+	if (metadata) {
+		const date = new Date(metadata.value)
+		if (typeof metadata.value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(metadata.value) || Number.isNaN(date.getTime())) throw new OutcomeError("invalid_session_dir", `invalid run timestamp in ${metadata.location}`)
+		return date
+	}
 	const match = SESSION_STAMP.exec(basename(sessionDir))
-	if (!match) throw new OutcomeError("invalid_session_dir", `session dir basename must be YYYYMMDD-HHMMSS: ${sessionDir}`)
+	if (!match) throw new OutcomeError("invalid_session_dir", `missing run timestamp: outcome.json.startedAt or terminal-state.json.started_at; no YYYYMMDD-HHMMSS fallback: ${sessionDir}`)
 	const [y, mo, d, h, mi, s] = match.slice(1).map(Number)
 	const date = new Date(y, mo - 1, d, h, mi, s)
 	if (date.getMonth() !== mo - 1 || date.getDate() !== d || date.getHours() !== h) {
@@ -74,9 +78,7 @@ export function initManifest({ sessionDir, promised, lane, interview = null, now
 	}
 }
 
-/**
- * Set one format's row; every other row is kept as is. An unpromised format gets a new
- * row with promised=false. The row's detail fields are replaced by the ones given.
+/** Set one format's row, keeping other rows. New formats have promised=false.
  * @param {{ path?: string, reason?: string, pages?: number, bytes?: number, now?: Date }} [detail]
  */
 export function setDeliverable(manifest, format, status, detail = {}) {
@@ -143,9 +145,7 @@ export function verifyManifest(manifest, fs = nodeFs) {
 	return { ok: problems.length === 0, problems }
 }
 
-/**
- * none = missing or empty file; partial = `STATUS: draft` in the first 5 lines, or the
- * manifest (given, else a sibling outcome.json) still has a pending row; else complete.
+/** Missing/empty = none; draft marker or pending manifest = partial; else complete.
  * @returns {"none"|"partial"|"complete"}
  */
 export function deliverableState(deliverablePath, manifestOrNull) {

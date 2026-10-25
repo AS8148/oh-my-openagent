@@ -8,6 +8,7 @@
 
 import * as nodeFs from "node:fs"
 
+import { unmarkedKinds } from "./claim-kinds.mjs"
 import { DEFECT_CODES, LINEAGE_MODES } from "./contracts.mjs"
 import { customProperties } from "./css-lite.mjs"
 import { figureGates } from "./gates-figures.mjs"
@@ -63,6 +64,24 @@ function isCitationAnchor(node) {
 /** A citation marker in the element's prose or a citation anchor below it. */
 function hasCitation(node) {
 	return CITATION_MARKER.test(proseText(node)) || descendants(node).some(isCitationAnchor)
+}
+
+/** A bibliography entry, not a claim sentence merely placed under a Sources heading. */
+export function isCitationLine(node) {
+	const text = proseText(node).trim()
+	if (!text || unmarkedKinds(text).length || /\b(?:we|I)\s+(?:confirmed|found|observed|measured)\b/i.test(text)) return false
+	if (/^\[(?:S\d+|Source\s*\d+|\^\d+)\]/i.test(text)) return true
+	const links = [node, ...descendants(node)].filter((child) => child.tag === "a" && /^https?:\/\//i.test(child.attrs.href ?? ""))
+	if (links.length === 1 && text === proseText(links[0]).trim()) return true
+	const title = text.replace(/https?:\/\/\S+/gi, "").trim()
+	const urlOnly = /^https?:\/\/\S+$/i.test(text)
+	if (urlOnly) return true
+	return node.tag === "li" && (links.length > 0 || /https?:\/\//i.test(text)) && !/[.!?](?:\s|$)/.test(title)
+}
+
+function proseScope(scope, owner) {
+	if (scope.section?.kind !== "sources" || !owner || /^h[1-6]$/.test(owner.tag) || isCitationLine(owner)) return scope
+	return { ...scope, section: { ...scope.section, kind: null } }
 }
 
 function toRegExp(pattern) {
@@ -181,7 +200,10 @@ export function checkStatic(doc, options = {}) {
 			continue
 		}
 		gatesRun.push(...gate.codes)
-		defects.push(...gate.run(ctx))
+		const context = gate.codes.includes("unsourced_number")
+			? { ...ctx, elements: ctx.elements.map(({ node, scope }) => ({ node, scope: proseScope(scope, node) })) }
+			: ctx
+		defects.push(...gate.run(context))
 	}
 	return { defects, gatesRun, gatesSkipped }
 }

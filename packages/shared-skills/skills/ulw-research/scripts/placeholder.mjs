@@ -1,5 +1,6 @@
 // placeholder.mjs - the fact pointer grammar of the fill step and its render helpers.
 // Value pointers: {{F12:label}}, {{F12:label:value}}, {{F12:label:unit}}, {{F12:label:q}}.
+// Derived claim pointer: {{D:F12:label}} (full value, marked data-claim-kind="derived").
 // Quote pointers: {{Q7:label}}, {{Q7:label:lead=18}}, {{Q7:label:from="x":to="y"}} (anchors are
 // JSON strings, so they may hold a colon or an escaped quote). Labels are compared exactly by the
 // caller; this module never guesses an id. Pure functions; node: builtins only.
@@ -45,6 +46,10 @@ function parseAnchors(tail) {
 export function parsePlaceholder(token) {
 	if (!token.startsWith("{{") || !token.endsWith("}}")) return { error: "a placeholder is {{ID:label...}}" }
 	const body = token.slice(2, -2)
+	if (body.startsWith("D:")) {
+		const derived = /^D:(F\d+):([^\s:{}"]+)$/.exec(body)
+		return derived ? { id: derived[1], kind: "F", label: derived[2], mode: "full", claimKind: "derived" } : { error: "a derived placeholder is {{D:F<n>:label}}" }
+	}
 	const colon = body.indexOf(":")
 	const id = colon === -1 ? body : body.slice(0, colon)
 	const idMatch = ID.exec(id)
@@ -156,9 +161,10 @@ export function escapeHtml(text) {
 /** The elements the renderers below emit as fact spans; recognizers build their patterns from this. */
 export const FACT_ELEMENT_TAGS = Object.freeze(["data", "q", "blockquote"])
 
-export function renderValueHtml(row, text) {
+export function renderValueHtml(row, text, claimKind = null) {
 	const unit = row.unit === null ? "" : ` data-unit="${escapeHtml(row.unit)}"`
-	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
+	const mark = claimKind === null ? "" : ` data-claim-kind="${escapeHtml(claimKind)}"`
+	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit}${mark} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
 }
 
 export function renderQuote(row, selector, text, format) {
