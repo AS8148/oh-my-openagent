@@ -9,6 +9,7 @@ import { createTaskLifecycle } from "../lifecycle"
 import { hostLifecycleDeps } from "../lifecycle/__fixtures__/host-session-fakes"
 import { isRevivalCandidate } from "../lifecycle/revival-selection"
 import { FakeRunner, baseSpec, cleanupProjects, launchSettled, makeManager, settings } from "./__fixtures__/manager-fakes"
+import { resetTestDeadline } from "../../../../test-support/test-deadline"
 
 afterEach(cleanupProjects)
 
@@ -173,33 +174,44 @@ describe("task start against a busy host (#10042)", () => {
     expect(h.manager.getResidentHandle(started.task_id)).toBeDefined()
   })
 
-  test("#given a cold launch taking longer than 2s #when the subscribed launch settles #then the fixture admits it and the child completes", async () => {
-    // given - the runner gate is the launch seam; no real machine or socket timing is needed.
-    const held = new BusyHostRunner()
-    const h = makeManager({ inProcess: held })
-    const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
-    if (started.kind !== "started") throw new Error("fixture did not start")
-    expect(started.starting).toBe(true)
-    const settled = launchSettled(h.manager, started)
+  for (const elapsedMs of [2_500, 11_000]) {
+    test(`#given a cold launch held for ${elapsedMs}ms #when whenLaunched settles within the test budget #then the child completes`, async () => {
+      // given - the runner gate is the launch seam; no real machine or socket timing is needed.
+      const held = new BusyHostRunner()
+      const h = makeManager({ inProcess: held })
+      const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
+      if (started.kind !== "started") throw new Error("fixture did not start")
+      expect(started.starting).toBe(true)
+      const clock = spyOn(performance, "now").mockReturnValue(0)
+      resetTestDeadline()
+      const timers: Array<{ fire: () => void; delay: number }> = []
+      const schedule = spyOn(globalThis, "setTimeout").mockImplementation(Object.assign((fire: () => void, delay?: number) => {
+        timers.push({ fire: () => fire(), delay: delay ?? 0 })
+        return 0 as unknown as ReturnType<typeof setTimeout>
+      }, setTimeout))
+      const settled = launchSettled(h.manager, started, 15_000)
+      schedule.mockRestore()
+      clock.mockRestore()
+      const observed = settled.then(value => ({ value }), (error: unknown) => ({ error }))
+      try {
+        // when - advance only the fixture's guard clock, with the real launch still gated.
+        for (const timer of timers) if (timer.delay <= elapsedMs) timer.fire()
+        held.release.resolve(undefined)
+        expect(await observed).toEqual({ value: "running" })
 
-    // when - time is the behavior under test: inject a cold admission beyond the old 2s deadline.
-    const delayedAdmission = setTimeout(() => held.release.resolve(undefined), 2_500)
-    try {
-      expect(await settled).toBe("running")
-
-      // then - settlement means a tracked resident, not just a start report.
-      expect(h.manager.getResidentHandle(started.task_id)).toBeDefined()
-      const handle = held.handles.get(started.task_id)
-      if (handle === undefined) throw new Error("admitted child has no handle")
-      const completed = h.manager.waitFor(started.task_id)
-      handle.settle({ status: "completed", finalResponse: "COLD DONE" })
-      expect((await bounded(completed)).final_response).toBe("COLD DONE")
-    } finally {
-      clearTimeout(delayedAdmission)
-      held.release.resolve(undefined)
-      await h.manager.whenLaunched?.(started.task_id)
-    }
-  }, 15_000)
+        // then - settlement means a tracked resident, not just a start report.
+        expect(h.manager.getResidentHandle(started.task_id)).toBeDefined()
+        const handle = held.handles.get(started.task_id)
+        if (handle === undefined) throw new Error("admitted child has no handle")
+        const completed = h.manager.waitFor(started.task_id)
+        handle.settle({ status: "completed", finalResponse: "COLD DONE" })
+        expect((await bounded(completed)).final_response).toBe("COLD DONE")
+      } finally {
+        held.release.resolve(undefined)
+        await h.manager.whenLaunched?.(started.task_id)
+      }
+    }, 15_000)
+  }
 
   test("#given a launch that never settles #when its fixture deadline expires #then it fails within the bound naming the task and budget", async () => {
     // given
@@ -208,15 +220,31 @@ describe("task start against a busy host (#10042)", () => {
     const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
     if (started.kind !== "started") throw new Error("fixture did not start")
 
-    // when / then - the 15s test watchdog independently catches a missing 10s fixture deadline.
+    const timers: Array<() => void> = []
+    const delays: number[] = []
+    const clock = spyOn(performance, "now").mockReturnValue(performance.now() + 14_000)
+    const schedule = spyOn(globalThis, "setTimeout").mockImplementation(Object.assign((fire: () => void, delay?: number) => {
+      timers.push(() => fire())
+      delays.push(delay ?? 0)
+      return 0 as unknown as ReturnType<typeof setTimeout>
+    }, setTimeout))
+    const settled = launchSettled(h.manager, started, 15_000)
+    schedule.mockRestore()
+    clock.mockRestore()
+    // when / then - fire the circuit breaker without waiting on wall-clock scheduling.
     try {
-      const failure = await launchSettled(h.manager, started).then(
+      const failed = settled.then(
         () => { throw new Error("an unresolved launch was reported settled") },
         (error: unknown) => error,
       )
+      expect(timers).toHaveLength(1)
+      expect(delays).toEqual([0])
+      timers[0]?.()
+      const failure = await failed
       expect(failure).toBeInstanceOf(Error)
       if (!(failure instanceof Error)) throw new Error("the deadline did not report an Error")
-      expect(failure.message).toBe(`launch settlement bound breached for ${started.task_id} (10000 ms)`)
+      expect(failure.message).toContain("whenLaunched")
+      expect(failure.message).toContain(started.task_id)
       expect(h.manager.getResidentHandle(started.task_id)).toBeUndefined()
     } finally {
       held.release.resolve(undefined)
