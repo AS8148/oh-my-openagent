@@ -202,7 +202,11 @@ export function makeManager(options: {
  * `start` reports a launch slower than its report window as still starting, so a test that uses the
  * child's session or emits records to it right after `start` must wait here first.
  */
-const LAUNCH_SETTLEMENT_BOUND_MS = 2_000
+// #11247: Windows jobs 120992684913 and 121090150801 exceeded 2s before launch settled
+// (whole-test failure times 4576.96ms and 2701.52ms, not eventual launch measurements).
+// Twice the larger observed envelope is 9153.92ms: round up to the 10s host-event budget
+// already used by rpc-host-task-status.test.ts and rpc-host/__fixtures__/cancel-lane.ts.
+const LAUNCH_SETTLEMENT_BOUND_MS = 10_000
 
 type LaunchObserver = { whenLaunched?(taskId: string): Promise<void>; get?: TaskManager["get"] }
 
@@ -212,10 +216,13 @@ export async function launchSettled(manager: LaunchObserver, input: string | Sta
   if (typeof input !== "string" && (input.kind !== "started" || input.starting !== true)) return input.kind
   if (manager.whenLaunched === undefined) throw new Error("the manager exposes no whenLaunched")
   const taskId = typeof input === "string" ? input : input.task_id
+  // This is the manager's latched in-flight promise, not a next-event listener: even a launch
+  // that settled before `start` returned cannot be missed. Subscribe before arming the deadline.
+  const launched = manager.whenLaunched(taskId)
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     await Promise.race([
-      manager.whenLaunched(taskId),
+      launched,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(
           `launch settlement bound breached for ${taskId} (${LAUNCH_SETTLEMENT_BOUND_MS} ms)`,

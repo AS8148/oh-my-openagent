@@ -8,7 +8,7 @@ import { FakeRegistry, readEvents } from "../lifecycle/__fixtures__/lifecycle-fa
 import { createTaskLifecycle } from "../lifecycle"
 import { hostLifecycleDeps } from "../lifecycle/__fixtures__/host-session-fakes"
 import { isRevivalCandidate } from "../lifecycle/revival-selection"
-import { FakeRunner, baseSpec, cleanupProjects, makeManager, settings } from "./__fixtures__/manager-fakes"
+import { FakeRunner, baseSpec, cleanupProjects, launchSettled, makeManager, settings } from "./__fixtures__/manager-fakes"
 
 afterEach(cleanupProjects)
 
@@ -172,6 +172,57 @@ describe("task start against a busy host (#10042)", () => {
     expect(launched).toBe(true)
     expect(h.manager.getResidentHandle(started.task_id)).toBeDefined()
   })
+
+  test("#given a cold launch taking longer than 2s #when the subscribed launch settles #then the fixture admits it and the child completes", async () => {
+    // given - the runner gate is the launch seam; no real machine or socket timing is needed.
+    const held = new BusyHostRunner()
+    const h = makeManager({ inProcess: held })
+    const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
+    if (started.kind !== "started") throw new Error("fixture did not start")
+    expect(started.starting).toBe(true)
+    const settled = launchSettled(h.manager, started)
+
+    // when - time is the behavior under test: inject a cold admission beyond the old 2s deadline.
+    const delayedAdmission = setTimeout(() => held.release.resolve(undefined), 2_500)
+    try {
+      expect(await settled).toBe("running")
+
+      // then - settlement means a tracked resident, not just a start report.
+      expect(h.manager.getResidentHandle(started.task_id)).toBeDefined()
+      const handle = held.handles.get(started.task_id)
+      if (handle === undefined) throw new Error("admitted child has no handle")
+      const completed = h.manager.waitFor(started.task_id)
+      handle.settle({ status: "completed", finalResponse: "COLD DONE" })
+      expect((await bounded(completed)).final_response).toBe("COLD DONE")
+    } finally {
+      clearTimeout(delayedAdmission)
+      held.release.resolve(undefined)
+      await h.manager.whenLaunched?.(started.task_id)
+    }
+  }, 15_000)
+
+  test("#given a launch that never settles #when its fixture deadline expires #then it fails within the bound naming the task and budget", async () => {
+    // given
+    const held = new BusyHostRunner()
+    const h = makeManager({ inProcess: held })
+    const started = await bounded(h.manager.start(baseSpec({ run_in_background: true })))
+    if (started.kind !== "started") throw new Error("fixture did not start")
+
+    // when / then - the 15s test watchdog independently catches a missing 10s fixture deadline.
+    try {
+      const failure = await launchSettled(h.manager, started).then(
+        () => { throw new Error("an unresolved launch was reported settled") },
+        (error: unknown) => error,
+      )
+      expect(failure).toBeInstanceOf(Error)
+      if (!(failure instanceof Error)) throw new Error("the deadline did not report an Error")
+      expect(failure.message).toBe(`launch settlement bound breached for ${started.task_id} (10000 ms)`)
+      expect(h.manager.getResidentHandle(started.task_id)).toBeUndefined()
+    } finally {
+      held.release.resolve(undefined)
+      await h.manager.whenLaunched?.(started.task_id)
+    }
+  }, 15_000)
 
   test("#given a start still waiting on the host #when the parent steers it #then the message is queued and delivered once the child is admitted", async () => {
     // given
