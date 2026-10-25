@@ -97,6 +97,28 @@ function extractAgentDir(eventCtx: unknown): string | undefined {
   return isRecord(eventCtx) && typeof eventCtx["agentDir"] === "string" ? eventCtx["agentDir"] : undefined
 }
 
+// senpi's ExtensionContext.ui, whose notify the desktop shows as a timeline row; a host without one
+// keeps the log line only.
+function extractNotify(eventCtx: unknown): ((message: string, level: "info" | "warning") => void) | undefined {
+  if (!isRecord(eventCtx)) return undefined
+  const ui = eventCtx["ui"]
+  if (!isRecord(ui)) return undefined
+  const notify: unknown = ui["notify"]
+  if (typeof notify !== "function") return undefined
+  return (message, level) => {
+    Reflect.apply(notify, ui, [message, level])
+  }
+}
+
+// A profile outcome is for the person running the session, never for the model: senpi hands every
+// custom message to the model as user text in the next request, and one sent while the first prompt
+// streams is delivered as a steer that costs a request of its own. The outcome is kept as a session
+// entry, which no request carries; as startup bookkeeping it leaves no file behind for a session that
+// never gets a conversation.
+function recordOutcome(pi: SenpiExtensionAPI, customType: string, content: string, details?: Record<string, unknown>): void {
+  pi.appendEntry?.(customType, details === undefined ? { content } : { content, details }, { startupBookkeeping: true })
+}
+
 // Only a fresh session may receive the profile: a resume/fork carries its own model history, a
 // reload keeps the running session, and a `--model` flag or scoped model is explicit user state.
 // A session_start without any provenance is treated as explicit too: senpi omits the field on a
@@ -257,16 +279,19 @@ export function createModelProfileComponent(options: ModelProfileComponentOption
           const customType = resolution.kind === "unknown" ? MODEL_PROFILE_UNKNOWN_TYPE : MODEL_PROFILE_UNAVAILABLE_TYPE
           const details =
             resolution.kind === "unavailable" && failures.length > 0
-              ? { details: { profile: resolution.profile.id, ...authFailedDetails(failures) } }
-              : {}
-          pi.sendMessage({ customType, content, display: true, ...details })
+              ? { profile: resolution.profile.id, ...authFailedDetails(failures) }
+              : undefined
+          recordOutcome(pi, customType, content, details)
+          // The notice names the step the user can take. The unset default falling back to the session's
+          // own model is quiet detail; a profile the user chose, or a stored login that failed, warns.
+          extractNotify(eventCtx)?.(content, explicit === undefined && failures.length === 0 ? "info" : "warning")
           ctx.logger.warn(content)
           return
         }
 
         if (model === undefined) {
           const message = `OmO Native: model profile "${resolution.profile.id}" resolved ${resolution.provider}/${resolution.modelId} but the registry no longer lists it`
-          pi.sendMessage({ customType: MODEL_PROFILE_UNAVAILABLE_TYPE, content: message, display: true })
+          recordOutcome(pi, MODEL_PROFILE_UNAVAILABLE_TYPE, message)
           ctx.logger.warn(message)
           return
         }
@@ -274,17 +299,12 @@ export function createModelProfileComponent(options: ModelProfileComponentOption
         const thinkingLevel = asSenpiThinkingLevel(resolution.reasoning)
         if (thinkingLevel !== undefined) api.setSessionThinkingLevel?.(thinkingLevel)
         const selectedModel = `${resolution.provider}/${resolution.modelId}`
-        pi.sendMessage({
-          customType: MODEL_PROFILE_APPLIED_TYPE,
-          content,
-          display: true,
-          details: {
-            profile: resolution.profile.id,
-            model: selectedModel,
-            skipped: [...resolution.skipped],
-            ...(resolution.reasoning !== undefined ? { reasoning: resolution.reasoning } : {}),
-            ...authFailedDetails(failures),
-          },
+        recordOutcome(pi, MODEL_PROFILE_APPLIED_TYPE, content, {
+          profile: resolution.profile.id,
+          model: selectedModel,
+          skipped: [...resolution.skipped],
+          ...(resolution.reasoning !== undefined ? { reasoning: resolution.reasoning } : {}),
+          ...authFailedDetails(failures),
         })
         ctx.logger.info(content, { profile: resolution.profile.id, model: selectedModel })
       })

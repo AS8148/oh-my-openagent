@@ -208,9 +208,11 @@ function runScenario(name, scenario, args, senpiBin) {
     const assistantMessages = entries
       .filter((entry) => entry.type === "message" && entry.message?.role === "assistant")
       .map((entry) => ({ provider: entry.message.provider, model: entry.message.model }))
+    // The component records its outcome as a session entry; a profile notice in the conversation would
+    // reach the model as user text.
     const profileNotices = entries
-      .filter((entry) => entry.type === "custom_message" && PROFILE_TYPES.includes(entry.customType))
-      .map((entry) => ({ customType: entry.customType, content: entry.content, details: entry.details ?? null }))
+      .filter((entry) => entry.type === "custom" && PROFILE_TYPES.includes(entry.customType))
+      .map((entry) => ({ customType: entry.customType, content: entry.data?.content ?? "", details: entry.data?.details ?? null }))
     const lastAssistant = assistantMessages.at(-1) ?? null
 
     const checks = {
@@ -225,12 +227,14 @@ function runScenario(name, scenario, args, senpiBin) {
         scenario.expect.notice === null
           ? profileNotices.length === 0
           : profileNotices.length === 1 && profileNotices[0].customType === scenario.expect.notice,
+      notice_not_in_conversation: entries.every((entry) => !(entry.type === "custom_message" && PROFILE_TYPES.includes(entry.customType))),
     }
     checks.memory_root_in_sandbox = isInside(sandbox.root, resolveMemoryRoot(spawnEnv(sandbox, sessionDir, scenario), sandbox.cwd))
     checks.real_memory_root_unseen = runs.every((each) => !mentionsPath(`${each.stdout ?? ""}\n${each.stderr ?? ""}`, realMemoryRoot))
     const provider = scenario.expect.provider ?? "omo-mock"
     const engine = observeEngineThinking(entries, loadStreamCaptures(sandbox.cwd))
     checks.stream_model = engine.captures.some((capture) => capture.model === scenario.expect.model)
+    checks.notice_not_in_request = engine.captures.length > 0 && engine.captures.every((capture) => capture.profileNoticeInRequest === false)
     if (scenario.expect.notice === APPLIED_TYPE) {
       const applied = profileNotices[0]
       checks.notice_names_model = applied?.content.includes(`selected ${provider}/${scenario.expect.model}`) === true

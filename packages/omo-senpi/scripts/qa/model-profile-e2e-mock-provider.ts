@@ -96,6 +96,14 @@ function lastConfigurationUpdateEffort(context: unknown): string | null {
   return typeof effort === "string" ? effort : null
 }
 
+// Every model-profile notice starts with this prefix; the request a provider receives must carry none.
+function carriesProfileNotice(context: unknown): boolean {
+  if (typeof context !== "object" || context === null) return false
+  const messages = Reflect.get(context, "messages")
+  if (!Array.isArray(messages)) return false
+  return messages.some((message) => /OmO Native: model[ _]profile/.test(JSON.stringify(Reflect.get(Object(message), "content") ?? "")))
+}
+
 function appendCapture(record: Record<string, unknown>): void {
   appendFileSync(join(process.cwd(), CAPTURES_FILE), `${JSON.stringify(record)}\n`)
 }
@@ -111,6 +119,7 @@ function wrapStreamSimple(providerId: string, original: StreamSimple): StreamSim
         readThinking(model) ??
         null,
       configurationUpdateEffort: lastConfigurationUpdateEffort(context),
+      profileNoticeInRequest: carriesProfileNotice(context),
       thinkingSelection:
         typeof options === "object" && options !== null ? Reflect.get(options, "thinkingSelection") ?? null : null,
       modelThinkingLevelMap:

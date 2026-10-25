@@ -9,12 +9,14 @@ import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { composeOmoSenpiExtension } from "../../extension/compose"
 import type { ComponentContext } from "../../extension/types"
+import { convertToLlm } from "../../senpi-test-runtime"
 import {
   createModelProfileComponent,
   MODEL_PROFILE_APPLIED_TYPE,
   MODEL_PROFILE_UNAVAILABLE_TYPE,
   MODEL_PROFILE_UNKNOWN_TYPE,
 } from "./index"
+import { ProfileExtensionAPI, recordedOutcome } from "./profile-outcome.test-support"
 import { testTempDir } from "../../../test-support/temp-dir"
 
 type FakeModel = { readonly provider: string; readonly id: string }
@@ -107,6 +109,8 @@ function context(logs: string[]): ComponentContext {
   }
 }
 
+type Notice = { readonly message: string; readonly type: string | undefined }
+
 function harness(
   config: OmoConfig,
   models: readonly FakeModel[] = [FABLE, OPUS, KIMI],
@@ -114,8 +118,9 @@ function harness(
   credentials?: Record<string, FakeCredential>,
   runtimeKeyProviders?: readonly string[],
 ) {
-  const pi = new FakeExtensionAPI()
+  const pi = new ProfileExtensionAPI()
   const logs: string[] = []
+  const notices: Notice[] = []
   const agentDir = testTempDir("omo-model-profile-")
   createModelProfileComponent({
     loadConfig: () => ({ config, diagnostics: [], layers: [], sources: [] }),
@@ -126,16 +131,32 @@ function harness(
     agentDir,
     modelRegistry: registry(models, auth, credentials, runtimeKeyProviders),
     sessionManager: { getSessionId: () => sessionId },
+    ui: { notify: (message: string, type?: string) => void notices.push({ message, type }) },
   })
   const start = (payload: Record<string, unknown>, sessionId?: string, mode?: string) =>
     pi.dispatch("session_start", { type: "session_start", ...payload }, eventCtx(sessionId, mode))
-  return { pi, logs, agentDir, start }
+  return { pi, logs, notices, agentDir, start }
 }
 
 const STARTUP = { reason: "startup", initialModelProvenance: "settings" }
 
-function appliedContent(pi: FakeExtensionAPI): string {
-  const content = pi.messages[0]?.message["content"]
+// What senpi sends the provider for the session's first prompt: the conversation the component left,
+// then the prompt, through the engine's own converter, which gives the model every custom message as
+// user text.
+function firstRequest(pi: FakeExtensionAPI, prompt: string): unknown[] {
+  const conversation = pi.messages.map(({ message }) => ({
+    role: "custom" as const,
+    customType: String(message["customType"]),
+    content: typeof message["content"] === "string" ? message["content"] : "",
+    display: message["display"] === true,
+    details: message["details"],
+    timestamp: 0,
+  }))
+  return convertToLlm([...conversation, { role: "user", content: prompt, timestamp: 1 }])
+}
+
+function appliedContent(pi: ProfileExtensionAPI): string {
+  const content = recordedOutcome(pi)?.["content"]
   return typeof content === "string" ? content : ""
 }
 
@@ -148,25 +169,25 @@ describe("createModelProfileComponent", () => {
 
       expect(pi.sessionModels).toEqual([])
       expect(pi.sessionThinkingLevels).toEqual([])
-      expect(pi.messages).toHaveLength(0)
+      expect(pi.entries).toHaveLength(0)
     }
   })
 
   test("#given model_profile unset #when the session starts #then Daily · Normal is applied", async () => {
-    const { pi, start } = harness({})
+    const { pi, notices, start } = harness({})
 
     await start(STARTUP)
 
     expect(pi.sessionModels).toEqual([OPUS])
     expect(pi.sessionThinkingLevels).toEqual(["medium"])
-    expect(pi.messages).toHaveLength(1)
-    expect(pi.messages[0]?.message).toMatchObject({
+    expect(pi.entries).toHaveLength(1)
+    expect(recordedOutcome(pi)).toMatchObject({
       customType: MODEL_PROFILE_APPLIED_TYPE,
-      display: true,
       details: { profile: "daily-normal", model: "anthropic/claude-opus-5-5", reasoning: "medium", skipped: [] },
     })
     expect(appliedContent(pi)).toContain('"daily-normal" (Daily · Normal)')
     expect(appliedContent(pi)).toContain("anthropic/claude-opus-5-5 medium")
+    expect(notices).toEqual([])
   })
 
   test("#given a blank model_profile #when the session starts #then Daily · Normal is applied", async () => {
@@ -176,7 +197,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([OPUS])
     expect(pi.sessionThinkingLevels).toEqual(["medium"])
-    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE, details: { profile: "daily-normal" } })
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE, details: { profile: "daily-normal" } })
   })
 
   test("#given unset and Opus only through a gateway aggregator #when the session starts #then the gateway is skipped and kimi max is applied", async () => {
@@ -186,7 +207,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([CODING_KIMI])
     expect(pi.sessionThinkingLevels).toEqual(["max"])
-    expect(pi.messages[0]?.message).toMatchObject({
+    expect(recordedOutcome(pi)).toMatchObject({
       details: { profile: "daily-normal", model: "kimi-coding/kimi-k3", reasoning: "max" },
     })
   })
@@ -207,7 +228,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([GLM])
     expect(pi.sessionThinkingLevels).toEqual(["max"])
-    expect(pi.messages[0]?.message).toMatchObject({
+    expect(recordedOutcome(pi)).toMatchObject({
       details: { profile: "daily-normal", model: "zai/glm-5.3", reasoning: "max" },
     })
   })
@@ -219,7 +240,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([SOL_61])
     expect(pi.sessionThinkingLevels).toEqual(["medium"])
-    expect(pi.messages[0]?.message).toMatchObject({
+    expect(recordedOutcome(pi)).toMatchObject({
       details: { profile: "geeky-normal", model: "chatgpt-subscription/gpt-6.1-sol", reasoning: "medium" },
     })
   })
@@ -232,11 +253,11 @@ describe("createModelProfileComponent", () => {
     await start(STARTUP, "session-2")
 
     expect(pi.sessionModels).toEqual([GLM, GLM])
-    expect(pi.messages.map((entry) => entry.message["customType"])).toEqual([
+    expect(pi.entries.map((entry) => entry.customType)).toEqual([
       MODEL_PROFILE_APPLIED_TYPE,
       MODEL_PROFILE_APPLIED_TYPE,
     ])
-    expect(pi.messages[0]?.message).toMatchObject({ details: { profile: "daily-normal", model: "zai/glm-5.3" } })
+    expect(recordedOutcome(pi)).toMatchObject({ details: { profile: "daily-normal", model: "zai/glm-5.3" } })
     expect(logs.filter((line) => line.includes('model_profile "recommended" is retired'))).toHaveLength(1)
   })
 
@@ -249,7 +270,7 @@ describe("createModelProfileComponent", () => {
     await start(STARTUP)
 
     expect(pi.sessionModels).toEqual([GLM])
-    expect(pi.messages[0]?.message).toMatchObject({ details: { profile: "recommended", model: "zai/glm-5.3" } })
+    expect(recordedOutcome(pi)).toMatchObject({ details: { profile: "recommended", model: "zai/glm-5.3" } })
     expect(logs.some((line) => line.includes("is retired"))).toBe(false)
   })
 
@@ -260,7 +281,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([GLM])
     expect(pi.sessionThinkingLevels).toEqual(["max"])
-    expect(pi.messages[0]?.message).toMatchObject({
+    expect(recordedOutcome(pi)).toMatchObject({
       details: { profile: "daily-normal", model: "zai/glm-5.3", reasoning: "max" },
     })
   })
@@ -279,8 +300,8 @@ describe("createModelProfileComponent", () => {
     await start(STARTUP)
 
     expect(pi.sessionModels).toEqual([])
-    expect(pi.messages).toHaveLength(1)
-    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_UNAVAILABLE_TYPE, display: true })
+    expect(pi.entries).toHaveLength(1)
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_UNAVAILABLE_TYPE })
   })
 
   test("#given daily-normal with only the third rung #when the session starts #then kimi max is applied and skipped rungs are named", async () => {
@@ -290,10 +311,9 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([KIMI])
     expect(pi.sessionThinkingLevels).toEqual(["max"])
-    expect(pi.messages).toHaveLength(1)
-    expect(pi.messages[0]?.message).toMatchObject({
+    expect(pi.entries).toHaveLength(1)
+    expect(recordedOutcome(pi)).toMatchObject({
       customType: MODEL_PROFILE_APPLIED_TYPE,
-      display: true,
       details: {
         profile: "daily-normal",
         model: "moonshotai/kimi-k3",
@@ -375,22 +395,23 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([OPUS])
     expect(pi.sessionThinkingLevels).toEqual([])
-    expect(pi.messages).toHaveLength(1)
-    expect(pi.messages[0]?.message).toMatchObject({
+    expect(pi.entries).toHaveLength(1)
+    expect(recordedOutcome(pi)).toMatchObject({
       customType: MODEL_PROFILE_APPLIED_TYPE,
       content: 'OmO Native: model profile "anthropic/claude-opus-5-5" selected anthropic/claude-opus-5-5; mid-session fallback follows senpi\'s retry chains',
     })
   })
 
   test("#given a lane with no available rung #when the session starts #then no model call and an unavailable notice that names the registry", async () => {
-    const { pi, start } = harness({ model_profile: "daily-normal" }, [UNRELATED])
+    const { pi, notices, start } = harness({ model_profile: "daily-normal" }, [UNRELATED])
 
     await start(STARTUP)
 
     expect(pi.sessionModels).toEqual([])
     expect(pi.sessionThinkingLevels).toEqual([])
-    expect(pi.messages).toHaveLength(1)
-    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_UNAVAILABLE_TYPE, display: true })
+    expect(pi.entries).toHaveLength(1)
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_UNAVAILABLE_TYPE })
+    expect(notices).toEqual([{ message: appliedContent(pi), type: "warning" }])
     expect(appliedContent(pi)).toContain('"daily-normal" (Daily · Normal)')
     expect(appliedContent(pi)).toContain("model registry")
     expect(appliedContent(pi)).toContain("anthropic-subscription/claude-opus-5-5")
@@ -398,17 +419,58 @@ describe("createModelProfileComponent", () => {
     expect(appliedContent(pi).toLowerCase()).not.toContain("connected")
   })
 
+  // A profile outcome reaching the conversation reached the model ahead of the user's first prompt,
+  // and one sent while that prompt streamed was delivered as a steer that cost a request of its own.
+  test("#given any profile outcome #when the first prompt goes out #then the provider request carries the prompt alone", async () => {
+    const outcomes: readonly (readonly [OmoConfig, readonly FakeModel[]])[] = [
+      [{}, [UNRELATED]],
+      [{ model_profile: "daily-normal" }, [UNRELATED]],
+      [{ model_profile: "turbo" }, [OPUS]],
+      [{}, [OPUS]],
+    ]
+    for (const [config, models] of outcomes) {
+      const { pi, start } = harness(config, models)
+
+      await start(STARTUP)
+
+      expect(firstRequest(pi, "hello")).toEqual([{ role: "user", content: "hello", timestamp: 1 }])
+      expect(pi.userMessages).toEqual([])
+    }
+  })
+
+  test("#given only an unrelated custom model and no profile chosen #when a desktop session starts #then the fallback reaches the user as a quiet notice with the next step", async () => {
+    const { notices, start } = harness({}, [UNRELATED])
+
+    await start(STARTUP)
+
+    expect(notices.map(({ type }) => type)).toEqual(["info"])
+    expect(notices[0]?.message).toContain('"daily-normal" (Daily · Normal) has no available model')
+    expect(notices[0]?.message).toContain("Provider authentication settings")
+  })
+
+  test("#given a chosen profile that no available model serves #when the session starts #then the user is warned with the step that host offers", async () => {
+    for (const [mode, step] of [["rpc", "Provider authentication settings"], ["print", "/login"]] as const) {
+      const { notices, start } = harness({ model_profile: "daily-normal" }, [UNRELATED])
+
+      await start(STARTUP, `session-${mode}`, mode)
+
+      expect(notices.map(({ type }) => type)).toEqual(["warning"])
+      expect(notices[0]?.message).toContain(step)
+    }
+  })
+
   test("#given an unknown profile name #when the session starts #then the resolver's diagnostic is emitted and nothing is applied", async () => {
-    const { pi, start } = harness({ model_profile: "turbo" })
+    const { pi, notices, start } = harness({ model_profile: "turbo" })
 
     await start(STARTUP)
 
     expect(pi.sessionModels).toEqual([])
-    expect(pi.messages).toHaveLength(1)
-    expect(pi.messages[0]?.message).toMatchObject({
+    expect(pi.entries).toHaveLength(1)
+    expect(recordedOutcome(pi)).toMatchObject({
       customType: MODEL_PROFILE_UNKNOWN_TYPE,
       content: 'OmO Native: model_profile "turbo" is not defined; known profiles: daily-heavy, daily-normal, geeky-heavy, geeky-normal',
     })
+    expect(notices).toEqual([{ message: appliedContent(pi), type: "warning" }])
   })
 
   test("#given retired capable or deep-work ids #when the session starts #then they are unknown", async () => {
@@ -417,7 +479,7 @@ describe("createModelProfileComponent", () => {
     await start(STARTUP)
 
     expect(pi.sessionModels).toEqual([])
-    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_UNKNOWN_TYPE })
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_UNKNOWN_TYPE })
     expect(appliedContent(pi)).toContain('model_profile "capable" is not defined')
     expect(appliedContent(pi)).toContain("daily-normal")
     expect(appliedContent(pi)).not.toContain("capable,")
@@ -467,7 +529,7 @@ describe("createModelProfileComponent", () => {
     await start({ reason: "reload" })
 
     expect(pi.sessionModels).toEqual([])
-    expect(pi.messages).toEqual([])
+    expect(pi.entries).toEqual([])
   })
 
   test("#given a --model flag or a scoped model #when session_start fires #then the profile yields to it", async () => {
@@ -477,7 +539,7 @@ describe("createModelProfileComponent", () => {
     await start({ reason: "new", initialModelProvenance: "scoped" })
 
     expect(pi.sessionModels).toEqual([])
-    expect(pi.messages).toEqual([])
+    expect(pi.entries).toEqual([])
   })
 
   test("#given a session_start that carries no provenance (senpi omits it on a --model run) #when it fires #then the profile does not touch the model", async () => {
@@ -486,7 +548,7 @@ describe("createModelProfileComponent", () => {
     await start({ reason: "startup" })
 
     expect(pi.sessionModels).toEqual([])
-    expect(pi.messages).toEqual([])
+    expect(pi.entries).toEqual([])
   })
 
   test("#given two session_start events for one session id #when both fire #then the model is applied once", async () => {
@@ -496,7 +558,7 @@ describe("createModelProfileComponent", () => {
     await start({ reason: "new", initialModelProvenance: "settings" }, "session-1")
 
     expect(pi.sessionModels).toEqual([OPUS])
-    expect(pi.messages).toHaveLength(1)
+    expect(pi.entries).toHaveLength(1)
   })
 
   test("#given a new session id after startup #when session_start fires again #then the profile applies to the new session too", async () => {
@@ -517,15 +579,15 @@ describe("createModelProfileComponent", () => {
     expect(pi.sessionModels).toEqual([GLM])
     expect(pi.sessionThinkingLevels).toEqual(["max"])
     expect(probe.calls).toEqual(["anthropic", "zai", "zai/glm-5.3"])
-    expect(pi.messages).toHaveLength(1)
-    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE })
-    const details = pi.messages[0]?.message["details"] as Record<string, unknown>
+    expect(pi.entries).toHaveLength(1)
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE })
+    const details = recordedOutcome(pi)?.["details"] as Record<string, unknown>
     expect(details).toMatchObject({ profile: "daily-normal", model: "zai/glm-5.3", reasoning: "max" })
     expect(details["authFailed"]).toEqual([{ provider: "anthropic", model: "claude-opus-5-5", reason: "refresh" }])
     expect(appliedContent(pi)).toContain("re-authenticate anthropic in Provider authentication settings")
     expect(appliedContent(pi)).not.toContain("/login")
     expect(appliedContent(pi)).not.toContain(PRIVATE_MARKER)
-    expect(JSON.stringify(pi.messages[0]?.message)).not.toContain(PRIVATE_MARKER)
+    expect(JSON.stringify(pi.entries[0])).not.toContain(PRIVATE_MARKER)
     expect(logs.some((line) => line.startsWith("warn:") && line.includes("skipped anthropic/claude-opus-5-5"))).toBe(true)
     expect(logs.some((line) => line.includes(PRIVATE_MARKER))).toBe(false)
   })
@@ -549,7 +611,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([GLM])
     expect(probe.calls).toEqual(["anthropic", "moonshotai", "zai", "zai/glm-5.3"])
-    expect(pi.messages[0]?.message["details"]).toMatchObject({
+    expect(recordedOutcome(pi)?.["details"]).toMatchObject({
       model: "zai/glm-5.3",
       authFailed: [
         { provider: "anthropic", model: "claude-opus-5-5", reason: "refresh" },
@@ -569,9 +631,9 @@ describe("createModelProfileComponent", () => {
     expect(pi.sessionModels).toEqual([])
     expect(pi.sessionThinkingLevels).toEqual([])
     expect(probe.calls).toEqual(["anthropic", "moonshotai"])
-    expect(pi.messages).toHaveLength(1)
-    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_UNAVAILABLE_TYPE })
-    expect(pi.messages[0]?.message["details"]).toEqual({
+    expect(pi.entries).toHaveLength(1)
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_UNAVAILABLE_TYPE })
+    expect(recordedOutcome(pi)?.["details"]).toEqual({
       profile: "daily-normal",
       authFailed: [
         { provider: "anthropic", model: "claude-opus-5-5", reason: "refresh" },
@@ -592,7 +654,7 @@ describe("createModelProfileComponent", () => {
     expect(pi.sessionModels).toEqual([GLM])
     expect(pi.sessionThinkingLevels).toEqual(["max"])
     expect(probe.calls).toEqual(["anthropic", "anthropic/claude-opus-5-5", "zai", "zai/glm-5.3"])
-    expect(pi.messages[0]?.message["details"]).toMatchObject({
+    expect(recordedOutcome(pi)?.["details"]).toMatchObject({
       model: "zai/glm-5.3",
       authFailed: [{ provider: "anthropic", model: "claude-opus-5-5", reason: "request" }],
     })
@@ -612,7 +674,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([OPUS])
     expect(probe.calls).toEqual(["anthropic@expired", "anthropic@healthy", "anthropic/claude-opus-5-5@healthy"])
-    expect(pi.messages[0]?.message["details"]).not.toHaveProperty("authFailed")
+    expect(recordedOutcome(pi)?.["details"]).not.toHaveProperty("authFailed")
   })
 
   test("#given a credential pool pinned to an account whose refresh is rejected #when the session starts #then only the pinned slot is probed and the provider is skipped", async () => {
@@ -625,7 +687,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([GLM])
     expect(probe.calls).toEqual(["anthropic@expired", "zai", "zai/glm-5.3"])
-    expect(pi.messages[0]?.message["details"]).toMatchObject({
+    expect(recordedOutcome(pi)?.["details"]).toMatchObject({
       authFailed: [{ provider: "anthropic", model: "claude-opus-5-5", reason: "refresh" }],
     })
   })
@@ -641,7 +703,7 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([GLM])
     expect(probe.calls).toEqual(["anthropic", "zai", "zai/glm-5.3"])
-    expect(pi.messages[0]?.message["details"]).toMatchObject({
+    expect(recordedOutcome(pi)?.["details"]).toMatchObject({
       authFailed: [{ provider: "anthropic", model: "claude-opus-5-5", reason: "refresh" }],
     })
   })
@@ -683,8 +745,8 @@ describe("createModelProfileComponent", () => {
 
     expect(pi.sessionModels).toEqual([FABLE])
     expect(probe.calls).toEqual(["anthropic", "anthropic/claude-fable-5-1"])
-    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE })
-    expect(pi.messages[0]?.message["details"]).not.toHaveProperty("authFailed")
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE })
+    expect(recordedOutcome(pi)?.["details"]).not.toHaveProperty("authFailed")
   })
 
   test("#given a literal provider/model pin with failing credentials #when the session starts #then the pin is applied unprobed", async () => {
@@ -703,7 +765,7 @@ describe("createModelProfileComponent", () => {
     await start(STARTUP)
 
     expect(pi.sessionModels).toEqual([OPUS])
-    expect(pi.messages[0]?.message["details"]).not.toHaveProperty("authFailed")
+    expect(recordedOutcome(pi)?.["details"]).not.toHaveProperty("authFailed")
   })
 
   test("#given GLM-only registry and unset profile #when the session starts #then glm max is applied", async () => {
@@ -736,7 +798,7 @@ describe("model profile diagnostics through the composed default logger", () => 
       spyOn(console, name as "info" | "log" | "error" | "warn").mockImplementation(() => {}),
     )
     try {
-      const pi = new FakeExtensionAPI()
+      const pi = new ProfileExtensionAPI()
       const probe = authProbe({ dead: ["anthropic"], broken: ["zai/glm-5.3"] })
       const config: OmoConfig = {
         model_profile: "qa",
@@ -772,7 +834,7 @@ describe("model profile diagnostics through the composed default logger", () => 
     expect(lines.some((line) => line.includes("skipped anthropic/claude-opus-5-5") && line.includes("refresh"))).toBe(true)
     expect(lines.some((line) => line.includes("skipped zai/glm-5.3") && line.includes("request"))).toBe(true)
     expect(lines.some((line) => line.includes(PRIVATE_MARKER))).toBe(false)
-    expect(JSON.stringify(pi.messages)).not.toContain(PRIVATE_MARKER)
+    expect(JSON.stringify(pi.entries)).not.toContain(PRIVATE_MARKER)
   })
 
   test("#given OMO_DEBUG=1 #when the composed default logger reports the skipped candidates #then the detail line is present and still redacted", async () => {
