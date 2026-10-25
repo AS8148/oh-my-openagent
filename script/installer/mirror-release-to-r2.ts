@@ -11,25 +11,13 @@ import { join } from "node:path"
 import { parseArgs } from "node:util"
 import { mirrorChannel } from "./mirror-channel"
 import { betasToPrune, MirrorPlanError, parseSha256Sums, planMirrorAssets, VERSION_PATTERN } from "./mirror-plan"
+import { withRetry } from "./mirror-retry"
 import { putVerified, type R2Credentials } from "./r2-signed-put"
 import { createR2Store, type R2Store } from "./r2-store"
 
 const REPO = "code-yeongyu/oh-my-openagent"
 const CHANNELS = new Set(["latest", "beta", "none"])
 const UPLOAD_CONCURRENCY = 3
-const ATTEMPTS = 3
-
-async function withRetry<T>(what: string, action: () => Promise<T>): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await action()
-    } catch (error) {
-      if (attempt >= ATTEMPTS || error instanceof MirrorPlanError) throw error
-      console.log(`[mirror] ${what} failed (attempt ${attempt}/${ATTEMPTS}): ${String(error).split("\n")[0]}; retrying`)
-      await Bun.sleep(attempt * 5_000)
-    }
-  }
-}
 
 // Metadata comes from the REST API (token when present, anonymous when the token is rate limited);
 // bytes come from the public release download URLs, which the REST rate limit does not cover.
