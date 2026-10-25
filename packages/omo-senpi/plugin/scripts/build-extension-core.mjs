@@ -58,11 +58,6 @@ const supervisorOutputPath = process.env.OMO_SENPI_PLUGIN_OUTPUT === undefined ?
 export const GATEWAY_STORE_WORKER_NAME = "gateway-store-worker.mjs"
 const gatewayStoreWorkerEntryPath = join(packageRoot, "src", "components", "thread", "gateway", "store-worker.ts")
 const gatewayStoreWorkerOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", GATEWAY_STORE_WORKER_NAME)
-// The gateway_rules store extension's ops module is imported by the store worker through a file
-// URL, so it ships as its own entry beside omo.js; the gateway component resolves this name.
-export const GATEWAY_RULES_EXTENSION_NAME = "gateway-rules-extension.mjs"
-const gatewayRulesExtensionEntryPath = join(packageRoot, "src", "components", "gateway", "store-extension", "index.ts")
-const gatewayRulesExtensionOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", GATEWAY_RULES_EXTENSION_NAME)
 const toolkitSdkEntryPath = join(packageRoot, "src", "extension", "agent-toolkit-sdk.ts")
 const toolkitSdkOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "agent-toolkit-sdk", "sdk.js")
 // The `omo thread` CLI and connector scripts import this SDK without an agent session; it points
@@ -85,7 +80,6 @@ const deviceAccountEntryPath = join(packageRoot, "src", "components", "memory", 
 const memoryCommandsEntryPath = join(packageRoot, "src", "components", "memory", "commands", "runtime.ts")
 const sessionHistoryEntryPath = join(packageRoot, "src", "components", "onboarding", "session-history", "runtime.ts")
 const recallStoreEntryPath = join(packageRoot, "src", "components", "memory", "recall-store-runtime.ts")
-const doriMigrationEntryPath = join(packageRoot, "src", "components", "config-startup", "dori-migration-runtime.ts")
 const telemetryPosthogEntryPath = join(packageRoot, "src", "components", "telemetry", "posthog-runtime.ts")
 // The sync engine sidecar carries the Loro runtime; its wasm is emitted beside it under this fixed name
 // (the engine's loader reads it relative to its own module), so omo.js never pulls Loro in.
@@ -116,7 +110,6 @@ const deviceAccountOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? plug
 const memoryCommandsOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-commands.js")
 const sessionHistoryOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-session-history.js")
 const recallStoreOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-recall-store.js")
-const doriMigrationOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-dori-migration.js")
 const telemetryPosthogOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-posthog.js")
 const memorySyncOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-sync.js")
 const threadClientOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-thread-client.js")
@@ -129,11 +122,6 @@ export const COMPUTER_PRELUDE_ASSET_NAME = "assets.generated.json"
 const computerPreludeAssetSource = join(repoRoot, "packages", "senpi-desktop-prelude", "src", "assets.generated.json")
 const rollbackRuntimeEntryPath = join(packageRoot, "src", "extension", "rollback-migrate-runtime.ts")
 const rollbackRuntimeOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "rollback-migrate.js")
-// The dori toolkit layers: loaded by URL only while the `dori` section is on, so the SDK and omo.js carry none of them.
-const doriLayerEntryPath = join(packageRoot, "src", "components", "ulw-loop", "sdk", "dori", "layer2.ts")
-const doriLayerOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "dori", "layer2.js")
-const doriReplayEntryPath = join(packageRoot, "src", "components", "thread", "tools", "dori-replay.ts")
-const doriReplayOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "runtime", "dori", "replay.js")
 const builtinModuleNames = builtinModules.filter((moduleName) => !moduleName.startsWith("_")).sort()
 const externalSpecifiers = [
   "#omo-task-runtime",
@@ -145,7 +133,6 @@ const externalSpecifiers = [
   "#omo-memory-commands-runtime",
   "#omo-session-history-runtime",
   "#omo-recall-store-runtime",
-  "#omo-dori-migration-runtime",
   "#omo-telemetry-posthog-runtime",
   "#omo-memory-sync-runtime",
   "#omo-thread-client-runtime",
@@ -185,8 +172,6 @@ export const extensionBuildPaths = {
   sidePanelRuntimeOutputPath,
   onboardingScanRuntimeOutputPath,
   rollbackRuntimeOutputPath,
-  doriLayerOutputPath,
-  doriReplayOutputPath,
   computerUseOutputPath,
   memoryDoctorOutputPath,
   memoryMemfsOutputPath,
@@ -195,7 +180,6 @@ export const extensionBuildPaths = {
   memoryCommandsOutputPath,
   sessionHistoryOutputPath,
   recallStoreOutputPath,
-  doriMigrationOutputPath,
   telemetryPosthogOutputPath,
   memorySyncOutputPath,
   threadClientOutputPath,
@@ -203,7 +187,6 @@ export const extensionBuildPaths = {
   feedbackOutputPath,
   claimReceiptOutputPath,
   gatewayStoreWorkerOutputPath,
-  gatewayRulesExtensionOutputPath,
 }
 
 // An explicit path wins; with only `outputPath` set, every sidecar lands beside it.
@@ -222,8 +205,6 @@ export function resolveOutputs(options) {
     toolkitSdkOutput: sibling(options.toolkitSdkOutputPath, toolkitSdkOutputPath, join("runtime", "agent-toolkit-sdk", "sdk.js")),
     threadSdkOutput: sibling(options.threadSdkOutputPath, threadSdkOutputPath, THREAD_SDK_RELATIVE_PATH),
     rollbackRuntimeOutput: sibling(options.rollbackRuntimeOutputPath, rollbackRuntimeOutputPath, join("runtime", "rollback-migrate.js")),
-    doriLayerOutput: sibling(options.doriLayerOutputPath, doriLayerOutputPath, join("runtime", "dori", "layer2.js")),
-    doriReplayOutput: sibling(options.doriReplayOutputPath, doriReplayOutputPath, join("runtime", "dori", "replay.js")),
     memoryDoctorOutput: sibling(options.memoryDoctorOutputPath, memoryDoctorOutputPath, "omo-memory-doctor.js"),
     memoryMemfsOutput: sibling(options.memoryMemfsOutputPath, memoryMemfsOutputPath, "omo-memory-memfs.js"),
     memoryPalaceOutput: sibling(options.memoryPalaceOutputPath, memoryPalaceOutputPath, "omo-memory-palace.js"),
@@ -231,7 +212,6 @@ export function resolveOutputs(options) {
     memoryCommandsOutput: sibling(options.memoryCommandsOutputPath, memoryCommandsOutputPath, "omo-memory-commands.js"),
     sessionHistoryOutput: sibling(options.sessionHistoryOutputPath, sessionHistoryOutputPath, "omo-session-history.js"),
     recallStoreOutput: sibling(options.recallStoreOutputPath, recallStoreOutputPath, "omo-recall-store.js"),
-    doriMigrationOutput: sibling(options.doriMigrationOutputPath, doriMigrationOutputPath, "omo-dori-migration.js"),
     telemetryPosthogOutput: sibling(options.telemetryPosthogOutputPath, telemetryPosthogOutputPath, "omo-telemetry-posthog.js"),
     memorySyncOutput: sibling(options.memorySyncOutputPath, memorySyncOutputPath, "omo-memory-sync.js"),
     threadClientOutput: sibling(options.threadClientOutputPath, threadClientOutputPath, "omo-thread-client.js"),
@@ -240,7 +220,6 @@ export function resolveOutputs(options) {
     claimReceiptOutput: sibling(options.claimReceiptOutputPath, claimReceiptOutputPath, "omo-claim-receipt.js"),
     computerUseOutput: sibling(options.computerUseOutputPath, computerUseOutputPath, "omo-computer-use.js"),
     gatewayStoreWorkerOutput: sibling(options.gatewayStoreWorkerOutputPath, gatewayStoreWorkerOutputPath, GATEWAY_STORE_WORKER_NAME),
-    gatewayRulesExtensionOutput: sibling(options.gatewayRulesExtensionOutputPath, gatewayRulesExtensionOutputPath, GATEWAY_RULES_EXTENSION_NAME),
   }
 }
 
@@ -264,8 +243,6 @@ export async function buildExtension(options = {}) {
     toolkitSdkOutput,
     threadSdkOutput,
     rollbackRuntimeOutput,
-    doriLayerOutput,
-    doriReplayOutput,
     computerUseOutput,
     memoryDoctorOutput,
     memoryMemfsOutput,
@@ -274,7 +251,6 @@ export async function buildExtension(options = {}) {
     memoryCommandsOutput,
     sessionHistoryOutput,
     recallStoreOutput,
-    doriMigrationOutput,
     telemetryPosthogOutput,
     memorySyncOutput,
     threadClientOutput,
@@ -282,7 +258,6 @@ export async function buildExtension(options = {}) {
     feedbackOutput,
     claimReceiptOutput,
     gatewayStoreWorkerOutput,
-    gatewayRulesExtensionOutput,
   } = resolveOutputs(options)
   const toolkitSdkInputs = await buildEntry(toolkitSdkEntryPath, toolkitSdkOutput, buildDefines, sdkExternalSpecifiers)
   const mainInputs = await buildEntry(entryPath, output, buildDefines)
@@ -293,8 +268,6 @@ export async function buildExtension(options = {}) {
   const sidePanelRuntimeInputs = await buildEntry(sidePanelRuntimeEntryPath, sidePanelRuntimeOutput, buildDefines)
   const onboardingScanRuntimeInputs = await buildEntry(onboardingScanRuntimeEntryPath, onboardingScanRuntimeOutput, buildDefines)
   const rollbackRuntimeInputs = await buildEntry(rollbackRuntimeEntryPath, rollbackRuntimeOutput, buildDefines, sdkExternalSpecifiers)
-  const doriLayerInputs = await buildEntry(doriLayerEntryPath, doriLayerOutput, buildDefines, sdkExternalSpecifiers)
-  const doriReplayInputs = await buildEntry(doriReplayEntryPath, doriReplayOutput, buildDefines, sdkExternalSpecifiers)
   const memoryDoctorInputs = await buildEntry(memoryDoctorEntryPath, memoryDoctorOutput, buildDefines)
   const memoryMemfsInputs = await buildEntry(memoryMemfsEntryPath, memoryMemfsOutput, buildDefines)
   const memoryPalaceInputs = await buildEntry(memoryPalaceEntryPath, memoryPalaceOutput, buildDefines)
@@ -302,7 +275,6 @@ export async function buildExtension(options = {}) {
   const memoryCommandsInputs = await buildEntry(memoryCommandsEntryPath, memoryCommandsOutput, buildDefines)
   const sessionHistoryInputs = await buildEntry(sessionHistoryEntryPath, sessionHistoryOutput, buildDefines)
   const recallStoreInputs = await buildEntry(recallStoreEntryPath, recallStoreOutput, buildDefines)
-  const doriMigrationInputs = await buildEntry(doriMigrationEntryPath, doriMigrationOutput, buildDefines)
   const telemetryPosthogInputs = await buildEntry(telemetryPosthogEntryPath, telemetryPosthogOutput, buildDefines)
   const memorySyncInputs = await buildEntry(memorySyncEntryPath, memorySyncOutput, buildDefines, externalSpecifiers, { assets: true })
   const threadClientInputs = await buildEntry(threadClientEntryPath, threadClientOutput, buildDefines)
@@ -311,7 +283,6 @@ export async function buildExtension(options = {}) {
   const claimReceiptInputs = await buildEntry(claimReceiptEntryPath, claimReceiptOutput, buildDefines)
   const computerUseInputs = await buildEntry(computerUseEntryPath, computerUseOutput, buildDefines)
   const gatewayStoreWorkerInputs = await buildEntry(gatewayStoreWorkerEntryPath, gatewayStoreWorkerOutput, buildDefines, sdkExternalSpecifiers)
-  const gatewayRulesExtensionInputs = await buildEntry(gatewayRulesExtensionEntryPath, gatewayRulesExtensionOutput, buildDefines)
   const threadSdkInputs = await buildEntry(threadSdkEntryPath, threadSdkOutput, buildDefines, sdkExternalSpecifiers)
   // Bundling inlines assets.ts but its markdown is read from disk at runtime next to the bundle,
   // so the persona and the computer-use prelude are staged into the directory the loader runs from.
@@ -329,8 +300,6 @@ export async function buildExtension(options = {}) {
     onboardingScanRuntimeInputs,
     toolkitSdkInputs,
     rollbackRuntimeInputs,
-    doriLayerInputs,
-    doriReplayInputs,
     computerUseInputs,
     memoryDoctorInputs,
     memoryMemfsInputs,
@@ -339,7 +308,6 @@ export async function buildExtension(options = {}) {
     memoryCommandsInputs,
     sessionHistoryInputs,
     recallStoreInputs,
-    doriMigrationInputs,
     telemetryPosthogInputs,
     memorySyncInputs,
     threadClientInputs,
@@ -347,7 +315,6 @@ export async function buildExtension(options = {}) {
     feedbackInputs,
     claimReceiptInputs,
     gatewayStoreWorkerInputs,
-    gatewayRulesExtensionInputs,
     threadSdkInputs,
   }
 }
