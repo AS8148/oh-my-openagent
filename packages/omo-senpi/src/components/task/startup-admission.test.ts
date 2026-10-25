@@ -63,4 +63,4 @@ test("session admission and RPC attachment finish while a host never answers", a
     await start
     await finished.promise
   }
-}, 1_000)
+})

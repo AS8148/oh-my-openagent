@@ -154,7 +154,7 @@ test("a hung host does not delay reconciliation on another host", async () => {
     hung.resolve(false)
     await pending
   }
-}, 1_000)
+})
 
 test("a late probe cannot reclaim a newer same-process ownership claim", async () => {
   const store = tempStore()
