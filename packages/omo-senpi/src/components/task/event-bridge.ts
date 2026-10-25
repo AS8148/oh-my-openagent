@@ -30,12 +30,8 @@ type EventBridgeDeps = {
   readonly taskRpc?: TaskRpcBridgeDeps
 }
 
-// Session start runs the durable recovery chain in strict order: flush/drop buffered completions
-// BEFORE reconcile (revived children must not double-deliver buffered terminals), revive/reattach
-// the resumed session's children (undefined session id still runs the legacy crash-orphan sweep),
-// re-observe owned-member liveness, reclaim mailbox reservations, redeliver unnotified completions,
-// await TTL cleanup (its retention predicate keeps anything with an undelivered notification, so
-// cleanup cannot delete what the previous step just queued), then poll owned leads and sync status.
+// Admission restores local pause/transition state and attaches RPC without waiting on a host.
+// Durable recovery keeps its ordering in the background; switching or shutdown retires its tail.
 
 // Below senpi's per-handler session_shutdown budget, leaving room for the suspension that follows.
 const SHUTDOWN_LAUNCH_SETTLE_MS = 5_000
@@ -49,6 +45,7 @@ export function wireEventBridge(
   deps: EventBridgeDeps = {},
 ): void {
   const guidanceGuard = createOncePerSessionGuard()
+  let startup: AbortController | undefined
   const runPause = state.runPause ?? engine.runPause?.bridge
   wireDagVerificationContext(pi, engine.runtime)
   const taskRpc = wireTaskRpcBridge(pi, engine, deps.taskRpc)
@@ -69,10 +66,27 @@ export function wireEventBridge(
     // A child session that has not reported its own id yet has nothing to reconcile: its records
     // belong to the parent. The role comes from the session (shared daemon), else from the env.
     if (readSessionRole(pi) !== undefined && sessionId === undefined) return
+    startup?.abort()
+    const controller = new AbortController()
+    startup = controller
+    const active = () => !controller.signal.aborted
     if (sessionId !== undefined) await runPause?.restore(sessionId)
+    if (!active()) return
     transitions.onSessionStart(sessionId)
-    const reconciliation = await engine.lifecycle.reconcileOnSessionStart(sessionId)
+    void recoverSession(sessionId, controller.signal).catch((error: unknown) => {
+      ctx.logger.warn("omo-senpi task session recovery failed", { error: String(error) })
+    })
+    if (sessionId !== undefined) engine.manager.workpools?.attach({ sessionId })
+    statusUi.scheduleSync()
+    taskRpc.attach()
+  })
+
+  async function recoverSession(sessionId: string | undefined, signal: AbortSignal): Promise<void> {
+    const active = () => !signal.aborted
+    const reconciliation = await engine.lifecycle.reconcileOnSessionStart(sessionId, signal)
+    if (!active()) return
     if (sessionId !== undefined) await runPause?.reconciled(sessionId)
+    if (!active()) return
     const livenessRecords = new Map<string, ReturnType<typeof engine.manager.get>>()
     for (const outcome of reconciliation.outcomes) {
       const record = engine.manager.get(outcome.task_id)
@@ -88,21 +102,25 @@ export function wireEventBridge(
     }
     for (const record of livenessRecords.values()) {
       if (record !== undefined) await engine.notifyOwnedMemberLiveness(record)
+      if (!active()) return
     }
     await state.resumptionChannels.emitSessionStart()
+    if (!active()) return
     await reconcileTeamMailboxBestEffort(ctx, state)
+    if (!active()) return
     if (sessionId !== undefined) {
       engine.notifier.reconcileUnnotifiedNotifications({ sessionId, parentState: engine.runtime.parentState() })
     }
     const cleanup = await engine.lifecycle.cleanupExpiredRecords()
+    if (!active()) return
     if (cleanup.deleted.length > 0) {
       ctx.logger.info("senpi-task ttl cleanup", { deleted: cleanup.deleted.length, retained: cleanup.retained.length })
     }
     await tickLeadPollersBestEffort(ctx, state)
-    if (sessionId !== undefined) engine.manager.workpools?.attach({ sessionId })
+    if (!active()) return
     statusUi.scheduleSync()
-    taskRpc.attach()
-  })
+    taskRpc.sync()
+  }
 
   // A retained session outlives its clients: the first reattach fires session_resumed without
   // another session_start, so the bridge clears the dedupe fingerprint and pushes the full snapshot
@@ -112,6 +130,7 @@ export function wireEventBridge(
   })
 
   pi.on("session_before_switch", (_payload, eventCtx) => {
+    startup?.abort()
     taskRpc.detach()
     engine.runtime.captureFrom(asLiveContext(eventCtx))
     transitions.onBeforeSwitch(engine.runtime.sessionId())
@@ -130,6 +149,7 @@ export function wireEventBridge(
   })
 
   pi.on("session_shutdown", async (payload, eventCtx) => {
+    startup?.abort()
     const liveContext = asLiveContext(eventCtx)
     unsubscribeTaskSnapshots()
     taskRpc.dispose()
