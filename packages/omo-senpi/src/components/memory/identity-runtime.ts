@@ -51,7 +51,7 @@ export interface MemoryIdentityRuntime {
   readonly reservationPort: ReflectionReservationPort
   readonly runner: SenpiSubprocessRunner
   launch(run: ReservedRun): Promise<void>
-  reconcile(): Promise<void>
+  reconcile(signal?: AbortSignal): Promise<void>
   /** Resolves once every launch started in this process has returned (a detached child may still be running). */
   settled(): Promise<void>
 }
@@ -168,6 +168,7 @@ export function createIdentityRuntime(
     return tracked
   }
 
+  let reconciliation: Promise<void> | undefined
   const runtime: MemoryIdentityRuntime = {
     identity,
     store,
@@ -177,13 +178,18 @@ export function createIdentityRuntime(
     async settled(): Promise<void> {
       while (inFlight.size > 0) await Promise.all([...inFlight])
     },
-    async reconcile(): Promise<void> {
-      await reconcileReflectionRuns({
-        identity: asMemoryIdentity(identity),
-        reservation: store,
-        launch,
+    async reconcile(signal?: AbortSignal): Promise<void> {
+      signal?.throwIfAborted()
+      // One identity-wide pass, including any already-admitted durable transition. Its first
+      // observer owns cancellation; joiners retry on the next settle if that observer retires.
+      // Never clear the flight on timeout alone: a committed transition may still be finishing.
+      reconciliation ??= reconcileReflectionRuns({
+        identity: asMemoryIdentity(identity), reservation: store, launch,
         deferOnSchedulerContention: true,
-      })
+        ...(signal === undefined ? {} : { signal }),
+      }).then(() => undefined).finally(() => { reconciliation = undefined })
+      await reconciliation
+      signal?.throwIfAborted()
     },
   }
   return runtime

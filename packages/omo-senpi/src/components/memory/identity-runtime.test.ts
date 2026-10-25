@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { existsSync, realpathSync, statSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -17,6 +17,44 @@ const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
 
 describe("memory identity runtime", () => {
+  test("#given overlapping identity observers #when the owning observer cancels #then one pass stops and a later pass retries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "omo-reconcile-flight-"))
+    roots.push(root)
+    const identity = createMemoryIdentityContext({
+      identity: "agent-test", identityPaths: buildIdentityPaths(root, "agent-test"),
+      binding: { identity: "agent-test", repoPathHash: "hash", boundAt: 1 },
+    })
+    const runtime = createIdentityRuntime(identity, {
+      loadConfig: () => loadedMemoryConfig(memorySettings()), cwd: () => root,
+      resolveModelRegistry: () => undefined,
+    })
+    const state = await runtime.store.readState()
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<typeof state>()
+    const probe = spyOn(runtime.store, "readState").mockImplementation(() => {
+      entered.resolve()
+      return release.promise
+    })
+    const controller = new AbortController()
+    const reason = new Error("first observer retired")
+    const first = runtime.reconcile(controller.signal).catch((error: unknown) => error)
+    const second = runtime.reconcile().catch((error: unknown) => error)
+    try {
+      await entered.promise
+      expect(probe).toHaveBeenCalledTimes(1)
+      controller.abort(reason)
+      release.resolve(state)
+      expect(await first).toBe(reason)
+      expect(await second).toBe(reason)
+      probe.mockRestore()
+      await runtime.reconcile()
+    } finally {
+      release.resolve(state)
+      await Promise.all([first, second])
+      probe.mockRestore()
+    }
+  })
+
   test.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
     "#given an unresolved reflection child command #when the real lazy sandbox is constructed #then the unsandboxed escape reaches the injected logger",
     async () => {
