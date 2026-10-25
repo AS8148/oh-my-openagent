@@ -154,6 +154,7 @@ describe("attached-browser failures stop the attempt on every platform", () => {
         recovery: { command: "bsk daemon start" },
       })
       expect(summary.daemon.error).toBe(message)
+      expect(summary.nextStep).toBe(summary.remedy)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

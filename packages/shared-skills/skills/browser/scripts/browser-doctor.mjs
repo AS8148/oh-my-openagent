@@ -45,7 +45,7 @@ const summary = {
   registeredElsewhere: report.identification.registeredElsewhere,
   browsersDetected: report.browsers.map((browser) => ({ id: browser.id, userDataDir: browser.userDataDir, extensionRegistered: browser.extensionRegistered })),
   browsersConnected: report.browsersConnected.map((browser) => ({ instanceId: browser.instance_id, name: browser.browser_name, version: browser.browser_version })),
-  nextStep: report.nextStep,
+  nextStep: failure?.message ?? report.nextStep,
   remedy: REMEDIES[state],
 }
 
