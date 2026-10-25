@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**The ulw-research proofread lane returns edits that are checked before they land.** The writing lane hands back `polish-edits.json`; `fact polish-apply` applies each edit only when it changes text nodes alone and keeps every number, hedge, qualifier, link, and claim id, `fact polish-diff` backstops hand edits, and `fact pairs --changed-since` sends every sentence polish rewrote back to the meaning readers. ([#11160](https://github.com/code-yeongyu/oh-my-openagent/pull/11160), part of [#11009](https://github.com/code-yeongyu/oh-my-openagent/issues/11009))
-
 - Memory path-state recovery and commit hooks now keep literal Git lookups working when global glob or case-insensitive pathspec modes are enabled ([#11130](https://github.com/code-yeongyu/oh-my-openagent/issues/11130), [#11167](https://github.com/code-yeongyu/oh-my-openagent/pull/11167)). (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
 
 **A user Stop pauses the workflow run it started instead of cancelling it.** DAG nodes, workpool workers and task children hold where they are; a message to the paused run or Resume continues it from where it stopped. ([#10808](https://github.com/code-yeongyu/oh-my-openagent/pull/10808), fixes [#6752](https://github.com/code-yeongyu/oh-my-openagent/issues/6752)) (batch [#11187](https://github.com/code-yeongyu/oh-my-openagent/pull/11187))
