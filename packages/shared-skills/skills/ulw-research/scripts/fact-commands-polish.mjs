@@ -71,7 +71,10 @@ function runPolishApply(args) {
 		throw new CliError(`${flags.edits} must be an array of {${Object.keys(POLISH_EDIT_FIELDS).join(", ")}} objects: ${error.message}`)
 	}
 	const result = applyEdits(html, edits, ledgerFrom(flags))
+	const mapPath = flags["fill-map"] ?? `${report}.fill-map.json`
+	const map = existsSync(mapPath) ? readJsonFile(mapPath) : null
 	writeTextAtomic(flags.out, result.out)
+	if (map) writeJsonAtomic(`${resolve(flags.out)}.fill-map.json`, { ...map, artifact: resolve(flags.out), artifact_sha256: sha256Of(result.out) })
 	const defects = [...result.rejected, ...result.unlocated].sort((a, b) => a.index - b.index).map(withSeverity)
 	const counts = { applied: result.applied.length, rejected: result.rejected.length, unlocated: result.unlocated.length }
 	const data = { out: resolve(flags.out), ...counts, applied_indexes: result.applied, input_sha256: sha256Of(html), edits_sha256: sha256Of(editsText), out_sha256: sha256Of(result.out) }

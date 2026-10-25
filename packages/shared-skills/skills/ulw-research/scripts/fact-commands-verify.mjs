@@ -186,7 +186,7 @@ export function runFactVerify(args) {
 	const checked = projected?.html ?? edition.text
 	const pointers = [...checked.matchAll(/\bdata-fact="([^"]+)"/gu)].map((match) => ({ token: match[0], start: match.index, parsed: { id: match[1] } }))
 	const mapPath = flags["fill-map"] ?? `${report}.fill-map.json`
-	const bound = existsSync(mapPath) ? briefBindingErrors(readJsonFile(mapPath), mapPath, parsed) : []
+	const bound = briefBindingErrors(existsSync(mapPath) ? readJsonFile(mapPath) : {}, mapPath, parsed)
 	const defects = [...bound, ...policyErrors(checked, pointers, ledger, sessionDir, policy).errors, ...result.defects]
 	const counts = countDefects(defects)
 	const status = defects.some(blocksDelivery) ? "fail" : "pass"
