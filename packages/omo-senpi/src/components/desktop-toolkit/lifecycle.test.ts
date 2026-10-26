@@ -52,15 +52,18 @@ describe("desktop thread discovery lifecycle", () => {
     })
   }
 
-  it("#given persistent refusal #when turns start #then each turn makes at most one bounded attempt", async () => {
+  it("#given persistent refusal #when many turns start #then retries back off to turns 1, 3 and 7 and then stop", async () => {
     const host = await setup({ reply: () => ({ refusal: { reason: "denied" } }) })
     await host.start()
-    for (let turn = 1; turn <= 3; turn++) {
-      const settled = host.failures(turn + 1)
+    const attemptsAfterTurn: number[] = []
+    for (let turn = 1; turn <= 12; turn++) {
+      const before = host.pi.rpcEvents.length
       await host.turn()
-      await settled
-      expect(host.pi.rpcEvents).toHaveLength(turn + 1)
+      if (host.pi.rpcEvents.length > before) await host.failures(host.pi.rpcEvents.length)
+      attemptsAfterTurn.push(host.pi.rpcEvents.length)
     }
+    expect(attemptsAfterTurn).toEqual([2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4])
+    expect(host.failureCount()).toBe(4)
   })
 
   it("#given an app that never answers #when later turns start #then they retry in the background without waiting for the timeout", async () => {
@@ -73,6 +76,9 @@ describe("desktop thread discovery lifecycle", () => {
     expect(host.failureCount()).toBe(1)
     const settled = host.failures(2)
     await settled
+    // The second failure backs off one extra turn before the next background retry.
+    await host.turn()
+    expect(host.pi.rpcEvents).toHaveLength(2)
     await host.turn()
     expect(host.pi.rpcEvents).toHaveLength(3)
     expect(host.failureCount()).toBe(2)

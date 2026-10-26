@@ -6,6 +6,9 @@ import { DESKTOP_TOOLKIT_TOOL_NAME, TOOLKIT_REQUEST_EVENT, TOOLKIT_GRANT_RPC, TO
 import { callThreadTool, listThreadTools } from "./thread-tools"
 
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 15_000
+// Turns to wait after the 1st, 2nd and 3rd failed attempt before the next background retry. After the 4th failure the
+// session stops asking: an app that never offers the grant costs at most three retries, not one request per turn forever.
+const RETRY_GAPS_IN_TURNS: readonly number[] = [1, 2, 4]
 
 const PARAMETERS = {
   type: "object",
@@ -24,6 +27,8 @@ interface SessionDiscovery {
   running?: Promise<void>
   // Set after a failed attempt: later turns retry in the background instead of waiting on an app that may never answer.
   failed: boolean
+  failures: number
+  turnsSinceFailure: number
 }
 
 function reply(details: Settled) {
@@ -53,7 +58,16 @@ function parseGrant(value: unknown): ToolkitGrant | undefined {
 // A failed attempt is over before it is reported, so the next turn starts a fresh retry instead of joining it.
 function failAttempt(state: SessionDiscovery): void {
   state.failed = true
+  state.failures += 1
+  state.turnsSinceFailure = 0
   state.running = undefined
+}
+
+/** Counts this turn and reports whether the capped backoff allows a background retry on it. */
+function retryDue(state: SessionDiscovery): boolean {
+  state.turnsSinceFailure += 1
+  const gap = RETRY_GAPS_IN_TURNS[state.failures - 1]
+  return gap !== undefined && state.turnsSinceFailure >= gap
 }
 
 function isPreviewEvent(event: unknown): boolean {
@@ -160,6 +174,7 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
             ctx.logger.info("desktop thread toolkit skipped tool", { reason }))
           if (signal.aborted) return
           state.failed = false
+          state.failures = 0
           grants.set(sessionId, settled.grant)
           for (const tool of tools) {
             const name = `desktop_${tool.name}`
@@ -200,13 +215,14 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
           return
         }
         if (sessions.has(sessionId)) return
-        const state: SessionDiscovery = { controller: new AbortController(), startupPending: true, failed: false }
+        const state: SessionDiscovery = { controller: new AbortController(), startupPending: true, failed: false, failures: 0, turnsSinceFailure: 0 }
         sessions.set(sessionId, state)
         deferUntilAfterFirstPaint(ctx, "desktop thread toolkit", () =>
           state.startupPending ? discover(sessionId, state) : undefined)
       })
-      // The first real turn joins the bounded startup attempt. After a failure each turn starts one retry in the
-      // background without waiting, so an app that never answers cannot hold every prompt for the timeout.
+      // The first real turn joins the bounded startup attempt. After a failure, retries run in the background without
+      // waiting, on the turns RETRY_GAPS_IN_TURNS allows, so an app that never answers cannot hold any prompt for the
+      // timeout and is not asked on every turn forever.
       // A prompt-cache preview pass must not start a grant request: only the real turn does (senpi#3994).
       pi.on("before_agent_start", (event, eventCtx) => {
         if (isPreviewEvent(event)) return
@@ -214,7 +230,7 @@ export function createDesktopToolkitRuntime(options: { readonly timeoutMs?: numb
         const state = sessionId === undefined ? undefined : sessions.get(sessionId)
         if (sessionId === undefined || state === undefined) return
         if (!state.failed) return discover(sessionId, state)
-        void discover(sessionId, state)
+        if (state.running === undefined && retryDue(state)) void discover(sessionId, state)
       }, { previewSafe: true })
       pi.on("session_shutdown", (_event, eventCtx) => {
         const sessionId = callingSessionId(eventCtx)
