@@ -5,7 +5,7 @@ import { dirname, join } from "node:path"
 import { buildPaneAuthEnvironmentArgs, buildTmuxAttachCommand } from "./pane-command"
 import { createPaneAuthDirectory } from "../pane-auth"
 
-test("pane argv carries only a private one-use file and the pane consumes the password without argv exposure", async () => {
+test.skipIf(process.platform === "win32")("pane argv carries only a private one-use file and the pane consumes the password without argv exposure", async () => {
   const savedPassword = process.env.OPENCODE_SERVER_PASSWORD
   const password = ["pane", "'", "$()", "\n", "credential", "\n"].join("")
   const sandbox = mkdtempSync(join(tmpdir(), "pane-auth-"))

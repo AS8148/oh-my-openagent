@@ -90,8 +90,10 @@ describe("createServerConnection", () => {
         .find((arg) => arg.startsWith("OPENCODE_SERVER_PASSWORD_FILE="))?.slice("OPENCODE_SERVER_PASSWORD_FILE=".length)
       expect(passwordFile !== undefined).toBe(true)
       if (!passwordFile) throw new Error("missing private password file")
-      expect(statSync(passwordFile).mode & 0o777).toBe(0o600)
-      expect(statSync(dirname(passwordFile)).mode & 0o777).toBe(0o700)
+      if (process.platform !== "win32") {
+        expect(statSync(passwordFile).mode & 0o777).toBe(0o600)
+        expect(statSync(dirname(passwordFile)).mode & 0o777).toBe(0o700)
+      }
       result.cleanup()
       expect(existsSync(passwordFile)).toBe(false)
       expect(existsSync(dirname(passwordFile))).toBe(false)

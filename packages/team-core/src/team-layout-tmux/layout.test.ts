@@ -253,6 +253,7 @@ describe("team-layout-tmux", () => {
       expect(commands.some((args) => args.some((arg) => arg.includes(fixturePassword)))).toBe(false)
       expect(splitWindow?.some((arg) => arg.startsWith("OPENCODE_SERVER_PASSWORD_FILE="))).toBe(true)
       expect(splitWindow).toContain(`OPENCODE_SERVER_USERNAME=${fixtureUsername}`)
+      if (process.platform === "win32") return // POSIX shell and mode checks require Unix.
       const file = splitWindow?.find((arg) => arg.startsWith("OPENCODE_SERVER_PASSWORD_FILE="))?.slice("OPENCODE_SERVER_PASSWORD_FILE=".length)
       if (!file) throw new Error("missing team pane password file")
       expect(statSync(file).mode & 0o777).toBe(0o600)
