@@ -40,12 +40,15 @@ on:
         default: none
         options: [none, head, recreate]
       version:
-        description: "recreate only: the X.Y.Z[-pre] version to write into the channel; it must already be fully mirrored"
+        description: "recreate only: the X.Y.Z[-pre] version to write into the channel; it must already be fully mirrored and fit the channel (prerelease on beta, stable on latest)"
         type: string
         default: ""
 
+# One group per channel for every run that moves or maintains channels/<channel> (a publish-triggered or manual mirror
+# that moves it, and head/recreate), so a recreate never interleaves with a mirror writing the same key. A mirror that
+# moves no channel (channel none or dry run) keeps its per-tag group.
 concurrency:
-  group: ${{ (inputs.op == 'head' || inputs.op == 'recreate') && format('installer-channel-{0}', inputs.channel) || format('installer-mirror-{0}', inputs.tag) }}
+  group: ${{ ((inputs.op == 'head' || inputs.op == 'recreate') || (inputs.channel != 'none' && !inputs.dry_run)) && format('installer-channel-{0}', inputs.channel) || format('installer-mirror-{0}', inputs.tag) }}
   cancel-in-progress: false
 
 permissions:
@@ -144,3 +147,16 @@ jobs:
           args=(--op "$OP" --channel "$CHANNEL")
           if [ "$OP" = "recreate" ]; then args+=(--version "$VERSION"); fi
           bun script/installer/channel-maintenance.ts "${args[@]}"
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        env:
+          JOB_SUMMARY_TITLE: Installer channel ${{ inputs.op }} (${{ inputs.channel }})
+          JOB_SUMMARY_STATUS: ${{ job.status }}
+          JOB_SUMMARY_DETAILS: |
+            - head: prints the status, every response header and the body of a signed HEAD and GET of channels/<channel>, credentials redacted.
+            - recreate: refuses a version that does not fit the channel or is not fully mirrored, then deletes channels/<channel>, writes the version as a new object and reads it back.
+            - Each request runs once; nothing is retried or restored.
+          JOB_SUMMARY_NEXT: Read the step log. If a recreate failed after its delete, get.omo.dev falls back to the npm dist-tag until you rerun recreate or a mirror moves the channel.
+        run: GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" bash .github/scripts/write-job-summary.sh

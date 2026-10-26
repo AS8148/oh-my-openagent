@@ -4,7 +4,7 @@
 // and writes it again as a new object, for a key R2 refuses to overwrite. Each request runs once: a failed DELETE
 // or create is reported and exits 1, leaving any restore to a person (get.omo.dev falls back to npm meanwhile).
 import { parseArgs } from "node:util"
-import { MirrorPlanError, VERSION_PATTERN } from "./mirror-plan"
+import { isPrerelease, MirrorPlanError, VERSION_PATTERN } from "./mirror-plan"
 import { credentialRedactor, deleteObject, putVerified, type R2Credentials, signedRequest } from "./r2-signed-put"
 
 const OPS = ["head", "recreate"] as const
@@ -54,11 +54,14 @@ export async function inspectChannel(credentials: R2Credentials, channel: Channe
 
 export async function recreateChannel(credentials: R2Credentials, channel: Channel, version: string, log: (line: string) => void): Promise<void> {
   const key = `channels/${channel}`
+  // publish.yml's rule: a prerelease ships on beta, a stable release on latest.
+  const expected: Channel = isPrerelease(version) ? "beta" : "latest"
+  if (channel !== expected) throw new MirrorPlanError(`${version} belongs on channels/${expected}, not ${key}`)
   const marker = `releases/v${version}/.complete`
   const mirrored = await signedRequest(credentials, "HEAD", marker)
   if (mirrored.status !== 200) throw new MirrorPlanError(`${marker} -> HTTP ${mirrored.status}; point ${key} only at a fully mirrored version`)
   const before = await signedRequest(credentials, "GET", key)
-  log(`${key} before: HTTP ${before.status} ${JSON.stringify(before.ok ? await before.text() : "")}`)
+  log(`${key} before: HTTP ${before.status} ${JSON.stringify(credentialRedactor(credentials)(before.ok ? await before.text() : ""))}`)
 
   await deleteObject(credentials, key)
   log(`deleted ${key}`)

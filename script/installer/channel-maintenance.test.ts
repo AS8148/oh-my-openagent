@@ -87,19 +87,25 @@ describe("inspectChannel", () => {
 })
 
 describe("recreateChannel", () => {
-  test("deletes the pointer, writes the version once and verifies the read-back", async () => {
+  test("deletes the pointer, writes the version once and verifies the read-back, logging the old body without credentials", async () => {
     // given
     const fetch = recordFetch([
       { status: 200 },
-      { status: 200, body: "5.1.48\n" },
+      { status: 200, body: `5.1.48\n${credentials.secretAccessKey}` },
       { status: 204 },
       { status: 200 },
       { status: 200, body: "5.1.49\n" },
     ])
+    const lines: string[] = []
     try {
       // when
-      await recreateChannel(credentials, "latest", "5.1.49", () => {})
+      await recreateChannel(credentials, "latest", "5.1.49", (line) => lines.push(line))
       // then
+      const output = lines.join("\n")
+      expect(output).toContain("channels/latest before: HTTP 200")
+      expect(output).toContain("5.1.48")
+      expect(output).toContain("<redacted>")
+      expect(output).not.toContain(credentials.secretAccessKey)
       const sent = requests(fetch)
       expect(sent.map((request) => [request.method, request.url])).toEqual([
         ["HEAD", `${base}/releases/v5.1.49/.complete`],
@@ -112,6 +118,20 @@ describe("recreateChannel", () => {
       if (!(put?.body instanceof Blob)) throw new Error("expected a fixed-length PUT body")
       expect(await put.body.text()).toBe("5.1.49\n")
       expect(put.headers.get("content-type")).toBe("text/plain")
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  // Same rule as publish.yml's omo-ai metadata step: a prerelease ships on beta, a stable release on latest.
+  test.each([
+    { channel: "latest", version: "5.2.0-beta.1" },
+    { channel: "beta", version: "5.1.49" },
+  ] as const)("refuses $version for channels/$channel before any request", async ({ channel, version }) => {
+    const fetch = recordFetch([])
+    try {
+      await expect(recreateChannel(credentials, channel, version, () => {})).rejects.toThrow(`not channels/${channel}`)
+      expect(fetch.mock.calls).toHaveLength(0)
     } finally {
       fetch.mockRestore()
     }
