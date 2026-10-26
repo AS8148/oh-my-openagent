@@ -52,6 +52,24 @@ async function report(dir: string, placeholders: string[], extra: string[] = [])
 	return fact(dir, "verify", join(dir, "report.html"), ...extra)
 }
 
+/** A legacy text.txt snapshot S1 (no raw.bin, no byte locator) holding "<text>" with row F1, filled and verified clean. */
+async function legacySession(text = "Span is 320 m.") {
+	const dir = session()
+	const sources = join(dir, "sources/S1")
+	mkdirSync(sources, { recursive: true })
+	writeLegacy(sources, text)
+	const ledger = readLedger(dir)
+	addRow(ledger, { kind: "measured", value: "320", unit: "m", value_span: [8, 11], raw: "320", quote: text, source_id: "S1", locator: { artifact: "S1/text.txt", line: 1, char_start: 0, char_end: 14 }, snapshot_sha256: sha256Of(text), sentence_id: "S1:s1", extracted_by: "model", observed_at: "2026-01-01T00:00:00.000Z", label: "span" })
+	writeLedger(dir, ledger)
+	expect((await report(dir, ["{{F1}}"])).exitCode).toBe(0)
+	return dir
+}
+
+function writeLegacy(sources: string, text: string) {
+	writeFileSync(join(sources, "text.txt"), text)
+	writeFileSync(join(sources, "meta.json"), JSON.stringify({ source_id: "S1", url: "https://example.invalid/", observed_at: "2026-01-01T00:00:00.000Z", sha256: sha256Of(text), extractor: "model", revision: null, kind: "page", provenance: "unknown" }))
+}
+
 const reverify = (dir: string, ...extra: string[]) => fact(dir, "verify", join(dir, "report.html"), ...extra)
 const blockers = (json: { defects: Defect[] }) => json.defects.filter((defect) => defect.code === "snapshot_hash_mismatch")
 
@@ -109,12 +127,24 @@ describe("converted text is never a raw snapshot", () => {
 	})
 })
 
+// chmod 000 does not stop the owner reading a file on Windows (no POSIX mode bits), so there the same
+// fail-closed condition is produced the way an unreadable path occurs on win32: raw.bin is replaced by
+// a directory, and reading it fails (EISDIR). Both paths must make verify exit 1 with the cause.
+const unreadableOn = (platform: string) => (dir: string) => {
+	const raw = join(dir, "sources/S1/raw.bin")
+	if (platform !== "win32") return chmodSync(raw, 0o000)
+	unlinkSync(raw)
+	mkdirSync(raw)
+}
+const unreadable = unreadableOn(process.platform)
+const UNREADABLE_CAUSE = process.platform === "win32" ? "raw.bin is not a readable file" : "raw.bin is unreadable (EACCES)"
+
 describe("fact verify fails closed when a cited snapshot cannot be read", () => {
 	const cases: [string, (dir: string) => void, string[], string][] = [
 		["the sources dir is removed", (dir) => rmSync(join(dir, "sources"), { recursive: true }), [], "meta.json is missing"],
 		["meta.json is removed", (dir) => unlinkSync(join(dir, "sources/S1/meta.json")), [], "meta.json is missing"],
 		["--sources names a missing dir", () => {}, ["--sources", "/nonexistent/sources"], "meta.json is missing"],
-		["raw.bin is unreadable", (dir) => chmodSync(join(dir, "sources/S1/raw.bin"), 0o000), [], "raw.bin is unreadable (EACCES)"],
+		["raw.bin is unreadable", unreadable, [], UNREADABLE_CAUSE],
 	]
 	for (const [name, damage, extra, cause] of cases) {
 		test(`#given ${name} #when verified #then every cited row gets the blocker with the cause and a record is written`, async () => {
@@ -128,6 +158,14 @@ describe("fact verify fails closed when a cited snapshot cannot be read", () => 
 		})
 	}
 
+	test("#given the win32 emulation of an unreadable raw.bin on any platform #when verified #then every cited row gets the blocker", async () => {
+		const dir = await pageSession()
+		unreadableOn("win32")(dir)
+		const result = await reverify(dir)
+		expect(result.exitCode).toBe(1)
+		expect(blockers(result.json).map((defect) => defect.message)).toEqual([expect.stringContaining("raw.bin is not a readable file"), expect.stringContaining("raw.bin is not a readable file")])
+	})
+
 	test("#given one of two sources unreadable #when verified #then only its rows are flagged and the healthy row stays clean", async () => {
 		const dir = await pageSession()
 		expect((await snapshot(dir, "S2", "--html", file(dir, "two.html", "<p>The side deck spans 210 m.</p>"))).exitCode).toBe(0)
@@ -139,17 +177,8 @@ describe("fact verify fails closed when a cited snapshot cannot be read", () => 
 	})
 
 	test("#given a legacy text.txt row whose text.txt is deleted #when verified #then it blocks", async () => {
-		const dir = session()
-		const text = "Span is 320 m."
-		const meta = { source_id: "S1", url: "https://example.invalid/", observed_at: "2026-01-01T00:00:00.000Z", sha256: sha256Of(text), extractor: "model", revision: null, kind: "page", provenance: "unknown" }
+		const dir = await legacySession()
 		const sources = join(dir, "sources/S1")
-		mkdirSync(sources, { recursive: true })
-		writeFileSync(join(sources, "text.txt"), text)
-		writeFileSync(join(sources, "meta.json"), JSON.stringify(meta))
-		const ledger = readLedger(dir)
-		addRow(ledger, { kind: "measured", value: "320", unit: "m", value_span: [8, 11], raw: "320", quote: text, source_id: "S1", locator: { artifact: "S1/text.txt", line: 1, char_start: 0, char_end: 14 }, snapshot_sha256: sha256Of(text), sentence_id: "S1:s1", extracted_by: "model", observed_at: "2026-01-01T00:00:00.000Z", label: "span" })
-		writeLedger(dir, ledger)
-		expect((await report(dir, ["{{F1}}"])).exitCode).toBe(0)
 		unlinkSync(join(sources, "text.txt"))
 		expect(blockers((await reverify(dir)).json)[0]?.message).toContain("text.txt is missing")
 	})
@@ -192,5 +221,23 @@ describe("source refresh is the one explicit repin", () => {
 		expect(refreshed.exitCode).toBe(1)
 		expect(refreshed.json.defects.map((defect: Defect) => defect.code)).toEqual(["quote_not_verbatim", "quote_not_verbatim"])
 		expect(blockers((await reverify(dir)).json).length).toBe(2)
+	})
+
+	test("#given a legacy row whose source is refreshed to a page that no longer says it #when refresh then verify run #then both exit 1 naming F1", async () => {
+		const dir = await legacySession()
+		const refreshed = await run(["source", "refresh", "S1", "--html", file(dir, "page999.html", "<p>Span is 999 m.</p>"), "--session-dir", dir])
+		expect(refreshed.exitCode).toBe(1)
+		expect(refreshed.json.data.rows).toEqual([{ fact_id: "F1", status: "legacy_not_reanchored" }])
+		const result = await reverify(dir)
+		expect(result.exitCode).toBe(1)
+		expect(blockers(result.json).map((defect) => [defect.message.split(":")[0], defect.message.includes("no longer the legacy text.txt snapshot")])).toEqual([["F1", true]])
+	})
+
+	test("#given a legacy row whose legacy snapshot is replaced by another consistent one #when verified #then the pin mismatch blocks F1", async () => {
+		const dir = await legacySession()
+		writeLegacy(join(dir, "sources/S1"), "Span is 999 m.")
+		const result = await reverify(dir)
+		expect(result.exitCode).toBe(1)
+		expect(blockers(result.json).map((defect) => defect.message)).toEqual([expect.stringMatching(/^F1: snapshot S1 holds \w+ but the legacy row pins \w+/)])
 	})
 })

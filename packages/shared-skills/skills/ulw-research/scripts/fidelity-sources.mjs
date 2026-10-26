@@ -22,8 +22,12 @@ function rowChecks(snap, id, referenced, cited, flag) {
 	const converted = snap.view.mode === "converted"
 	for (const row of referenced) {
 		const node = cited.get(row.fact_id)
-		// No locator unit marks a legacy text.txt row: its snapshot hash was checked above.
-		if (row.locator?.unit === undefined) continue
+		// No locator unit marks a legacy text.txt row: it holds only on the legacy snapshot it pins.
+		if (row.locator?.unit === undefined) {
+			if (snap.view.mode !== "legacy") blocked(flag, cited, row, id, `is no longer the legacy text.txt snapshot the row was located on (now ${snap.view.mode}); add the row again from the new snapshot`)
+			else if (row.snapshot_sha256 !== snap.sha256) blocked(flag, cited, row, id, `holds ${short(snap.sha256)} but the legacy row pins ${short(row.snapshot_sha256)}`)
+			continue
+		}
 		if (snap.view.mode === "legacy") {
 			blocked(flag, cited, row, id, "raw.bin is missing (the row is byte-located)")
 			continue

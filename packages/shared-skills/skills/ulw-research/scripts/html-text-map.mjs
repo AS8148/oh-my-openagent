@@ -4,7 +4,8 @@
 // (prose blocks and table cells; whitespace collapsed, entities decoded) and text unit k came from
 // html.slice(starts[k], ends[k]). Only text nodes are read: attribute values, CSS, scripts, and
 // anything a reader never sees (head, script, style, svg, noscript, template, code-like elements,
-// the hidden attribute, aria-hidden="true", display:none, visibility:hidden, and their descendants)
+// the hidden attribute, aria-hidden="true", display:none, visibility:hidden inline or by a <style> rule
+// on a simple selector (.class, #id, tag), and their descendants)
 // contribute nothing, so a locator over `text` can never land in markup. A synthetic separator
 // (collapsed break, line feed) maps to an empty range at the previous character's end.
 // Plain Node ESM, sibling imports only.
@@ -20,11 +21,29 @@ const INLINE = new Set([
 const HIDDEN_STYLE = /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse))\s*(?:!important\s*)?(?:;|$)/i
 const SPACE = /\s/
 
-/** Whether a reader never sees the element or anything inside it. */
-export function hiddenElement(node) {
+/** Simple selectors (.class, #id, tag) that <style> blocks hide; compound or nested selectors are not read. */
+export function hidingRules(root) {
+	const rules = new Set()
+	const visit = (node) => {
+		if (node.tag === "style") {
+			for (const [, selectors, body] of String(node.raw ?? "").matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+				if (!HIDDEN_STYLE.test(body.trim())) continue
+				for (const selector of selectors.split(",").map((part) => part.trim())) if (/^(?:[.#][\w-]+|[a-z][a-z0-9]*)$/i.test(selector)) rules.add(selector.toLowerCase())
+			}
+		}
+		for (const child of node.children ?? []) visit(child)
+	}
+	visit(root)
+	return rules
+}
+
+/** Whether a reader never sees the element or anything inside it (rules: hidingRules of its document). */
+export function hiddenElement(node, rules = new Set()) {
 	if (SKIP.has(node.tag)) return true
 	const attrs = node.attrs ?? {}
-	return attrs.hidden !== undefined || String(attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true" || HIDDEN_STYLE.test(attrs.style ?? "")
+	if (attrs.hidden !== undefined || String(attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true" || HIDDEN_STYLE.test(attrs.style ?? "")) return true
+	const names = [node.tag, attrs.id && `#${attrs.id}`, ...String(attrs.class ?? "").split(/\s+/).filter(Boolean).map((name) => `.${name}`)]
+	return names.some((name) => name && rules.has(name.toLowerCase()))
 }
 
 function newLine() {
@@ -72,13 +91,13 @@ function putText(line, src, from, to) {
 	}
 }
 
-function putProse(line, src, node) {
+function putProse(line, src, node, rules) {
 	for (const child of node.children) {
 		if (child.tag === "#text") putText(line, src, child.source_start, child.source_end)
-		else if (!hiddenElement(child)) {
+		else if (!hiddenElement(child, rules)) {
 			const breaks = PROSE_BREAKS.has(child.tag)
 			if (breaks) softBreak(line)
-			putProse(line, src, child)
+			putProse(line, src, child, rules)
 			if (breaks) softBreak(line)
 		}
 	}
@@ -88,6 +107,7 @@ function putProse(line, src, node) {
 export function extractHtml(html) {
 	const src = String(html)
 	const root = parseHtml(src)
+	const rules = hidingRules(root)
 	const lines = []
 	let line = newLine()
 	const flush = (node) => {
@@ -97,12 +117,12 @@ export function extractHtml(html) {
 	const walk = (node) => {
 		for (const child of node.children) {
 			if (child.tag === "#text") putText(line, src, child.source_start, child.source_end)
-			else if (hiddenElement(child)) continue
+			else if (hiddenElement(child, rules)) continue
 			else if (child.tag === "br") flush(node)
 			else if (INLINE.has(child.tag)) walk(child)
 			else if (PROSE_TAGS.has(child.tag)) {
 				flush(node)
-				putProse(line, src, child)
+				putProse(line, src, child, rules)
 				flush(child)
 			} else {
 				flush(node)

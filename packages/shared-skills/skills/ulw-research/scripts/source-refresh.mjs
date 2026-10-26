@@ -6,7 +6,8 @@
 // snapshot_sha256 and keeps its old locator, so `fact verify` then reports minor `relocated` with
 // the old and new byte offsets; a row whose quote is gone keeps its old pin, is reported as
 // quote_not_verbatim here, and stays a snapshot_hash_mismatch blocker until it is retracted or
-// re-added. Exit 0 when every row re-anchored, 1 otherwise. node: builtins and sibling imports only.
+// re-added. A legacy text.txt row on the source (no byte locator) cannot be re-anchored: it is
+// listed as legacy_not_reanchored and stays a blocker. Exit 0 when every row re-anchored, 1 otherwise. node: builtins and sibling imports only.
 
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -53,7 +54,13 @@ export async function runRefresh(argv) {
 	const rows = []
 	const defects = []
 	for (const row of ledger.rows) {
-		if (row.source_id !== id || row.status !== "active" || row.locator?.unit !== "bytes") continue
+		if (row.source_id !== id || row.status !== "active") continue
+		if (row.locator?.unit === undefined) {
+			rows.push({ fact_id: row.fact_id, status: "legacy_not_reanchored" })
+			defects.push(defect("snapshot_hash_mismatch", `${row.fact_id}: a legacy text.txt row has no byte locator to re-anchor on refreshed ${id}; add it again from the new snapshot or retract it`))
+			continue
+		}
+		if (row.locator.unit !== "bytes") continue
 		const anchor = row.locator.artifact === after.view.artifact ? reanchor(after.view, row) : null
 		const span = `${row.locator.char_start}:${row.locator.char_end}`
 		if (!anchor) {
@@ -66,10 +73,10 @@ export async function runRefresh(argv) {
 		if (anchor.relocated) defects.push(defect("relocated", `${row.fact_id}: ${span} -> ${anchor.start}:${anchor.end} (bytes of ${id}/${after.view.artifact})`))
 	}
 	writeLedger(sessionDir, ledger)
-	const failed = rows.filter((row) => row.status === "not_found").length
+	const failed = rows.filter((row) => row.status === "not_found" || row.status === "legacy_not_reanchored").length
 	const exitCode = failed > 0 ? 1 : 0
 	const data = { source_id: id, previous_sha256: before.sha256, snapshot_sha256: after.sha256, text_source: after.view.mode, rows }
 	const json = { command: "source refresh", status: exitCode === 0 ? "pass" : "fail", exitCode, defects, data }
 	const moved = rows.filter((row) => row.status === "relocated").length
-	return { json, summary: `source refresh: ${id} ${before.sha256.slice(0, 12)} -> ${after.sha256.slice(0, 12)}; ${rows.length - failed} row(s) re-anchored (${moved} relocated), ${failed} not found`, exitCode }
+	return { json, summary: `source refresh: ${id} ${before.sha256.slice(0, 12)} -> ${after.sha256.slice(0, 12)}; ${rows.length - failed} row(s) re-anchored (${moved} relocated), ${failed} not re-anchored`, exitCode }
 }
