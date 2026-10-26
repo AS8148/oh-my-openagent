@@ -290,8 +290,10 @@ export function createModelProfileComponent(options: ModelProfileComponentOption
         }
 
         if (model === undefined) {
-          const message = `OmO Native: model profile "${resolution.profile.id}" resolved ${resolution.provider}/${resolution.modelId} but the registry no longer lists it`
+          const message = `OmO Native: model profile "${resolution.profile.id}" resolved ${resolution.provider}/${resolution.modelId} but the registry no longer lists it; the session keeps its current model. Choose another model for this profile in Settings`
           recordOutcome(pi, MODEL_PROFILE_UNAVAILABLE_TYPE, message)
+          // The user can act on it (pick another model), so it reaches them, not only the log (#11365 review).
+          extractNotify(eventCtx)?.(message, "warning")
           ctx.logger.warn(message)
           return
         }
@@ -306,6 +308,8 @@ export function createModelProfileComponent(options: ModelProfileComponentOption
           ...(resolution.reasoning !== undefined ? { reasoning: resolution.reasoning } : {}),
           ...authFailedDetails(failures),
         })
+        // A stored login that failed is the one step the user can take: it reaches them (#11365 review).
+        if (failures.length > 0) extractNotify(eventCtx)?.(content, "warning")
         ctx.logger.info(content, { profile: resolution.profile.id, model: selectedModel })
       })
     },

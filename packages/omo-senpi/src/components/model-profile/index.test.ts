@@ -44,10 +44,14 @@ function registry(
   getAuth?: FakeGetAuth,
   credentials: Record<string, FakeCredential> = {},
   runtimeKeyProviders: readonly string[] = [],
+  droppedFromFind: readonly string[] = [],
 ) {
   return {
     getAvailable: () => [...models],
-    find: (provider: string, id: string) => models.find((model) => model.provider === provider && model.id === id),
+    find: (provider: string, id: string) =>
+      droppedFromFind.includes(`${provider}/${id}`)
+        ? undefined
+        : models.find((model) => model.provider === provider && model.id === id),
     ...(getAuth === undefined ? {} : { modelRuntime: { getAuth } }),
     authStorage: { get: (provider: string) => credentials[provider] },
     getProviderAuthStatus: (provider: string) =>
@@ -117,6 +121,7 @@ function harness(
   auth?: FakeGetAuth,
   credentials?: Record<string, FakeCredential>,
   runtimeKeyProviders?: readonly string[],
+  droppedFromFind?: readonly string[],
 ) {
   const pi = new ProfileExtensionAPI()
   const logs: string[] = []
@@ -129,7 +134,7 @@ function harness(
     mode,
     cwd: "/project",
     agentDir,
-    modelRegistry: registry(models, auth, credentials, runtimeKeyProviders),
+    modelRegistry: registry(models, auth, credentials, runtimeKeyProviders, droppedFromFind),
     sessionManager: { getSessionId: () => sessionId },
     ui: { notify: (message: string, type?: string) => void notices.push({ message, type }) },
   })
@@ -572,7 +577,8 @@ describe("createModelProfileComponent", () => {
 
   test("#given unset and a stored Anthropic login whose refresh is rejected #when a desktop session starts #then the next rung with working credentials is applied and the notice points at provider settings", async () => {
     const probe = authProbe({ dead: ["anthropic"] })
-    const { pi, logs, start } = harness({}, [OPUS, FABLE, GLM], probe.getAuth)
+    const harnessed = harness({}, [OPUS, FABLE, GLM], probe.getAuth)
+    const { pi, logs, start } = harnessed
 
     await start(STARTUP)
 
@@ -590,6 +596,25 @@ describe("createModelProfileComponent", () => {
     expect(JSON.stringify(pi.entries[0])).not.toContain(PRIVATE_MARKER)
     expect(logs.some((line) => line.startsWith("warn:") && line.includes("skipped anthropic/claude-opus-5-5"))).toBe(true)
     expect(logs.some((line) => line.includes(PRIVATE_MARKER))).toBe(false)
+    // The user can act on the failed login, so it reaches them, not only the log (#11365 review).
+    const { notices } = harnessed
+    expect(notices).toEqual([{ message: appliedContent(pi), type: "warning" }])
+  })
+
+  test("#given a resolved model the registry no longer finds #when the session starts #then the user is warned with the next step (#11365 review)", async () => {
+    // The resolver saw the model as available, but the registry lookup that sets it returns nothing.
+    const { pi, notices, start } = harness({}, [OPUS, FABLE, KIMI], undefined, undefined, undefined, [
+      "anthropic/claude-opus-5-5",
+      "anthropic-subscription/claude-opus-5-5",
+    ])
+
+    await start(STARTUP)
+
+    expect(pi.sessionModels).toEqual([])
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_UNAVAILABLE_TYPE })
+    expect(notices.map(({ type }) => type)).toEqual(["warning"])
+    expect(notices[0]?.message).toContain("no longer lists")
+    expect(notices[0]?.message).toContain("Settings")
   })
 
   test("#given a rejected refresh #when a headless session starts #then the notice names the interactive login instead of a desktop setting", async () => {
