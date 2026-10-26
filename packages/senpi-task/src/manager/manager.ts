@@ -416,7 +416,11 @@ class TaskManagerImpl implements TaskManager {
   // execAttempt-scoped fingerprint, and task ids sort by creation, so the newest claim is the live
   // one. The superseded record keeps its dag owner marker (spawn-time launcher stripping reads it).
   findOwnedTask(owner: DagTaskOwnerKey): TaskRecord | undefined {
-    return this.#options.store.list().records.findLast((record) =>
+    return this.findOwnedTasks(owner).at(-1)
+  }
+
+  findOwnedTasks(owner: DagTaskOwnerKey): readonly TaskRecord[] {
+    return this.#options.store.list().records.filter((record) =>
       record.owner?.kind === owner.kind &&
       record.owner.runId === owner.runId &&
       record.owner.nodeId === owner.nodeId,

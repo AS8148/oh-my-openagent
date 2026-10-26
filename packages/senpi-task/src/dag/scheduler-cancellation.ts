@@ -1,5 +1,7 @@
 import { dagRunCancelledEvent } from "./events"
-import { countNodes, errorMessage, failNode, isLiveTask, liveOwnedTask, transition, TERMINAL_NODE_STATES, type SchedulerContext } from "./scheduler-context"
+import type { TaskRecord } from "../state"
+import { countNodes, errorMessage, failNode, isLiveTask, liveOwnedTasks, nodeById, transition, TERMINAL_NODE_STATES, type SchedulerContext } from "./scheduler-context"
+import { owner } from "./scheduler-start"
 import { disposePromotionWatch } from "./scheduler-task-attachment"
 import type { DagNodeId, DagRunId } from "./types"
 import type { DagRunRecordV1 } from "./manager"
@@ -26,8 +28,7 @@ async function performCancellation(context: SchedulerContext, reason?: string): 
     // its own is no longer attached but still works in the node's worktree (#11381).
     const taskIds = new Set(context.attachedTaskIds.values())
     for (const node of context.journal.snapshot().nodes) {
-      const owned = liveOwnedTask(context, node.id)
-      if (owned !== undefined) taskIds.add(owned.task_id)
+      for (const owned of liveOwnedTasks(context, node.id)) taskIds.add(owned.task_id)
     }
     const cancellationResults = await Promise.allSettled([...taskIds].map((taskId) =>
       context.taskManager.cancelTask(taskId, reason, { abort: "skip" }),
@@ -53,14 +54,29 @@ async function performCancellation(context: SchedulerContext, reason?: string): 
 
 type SupersededChild = { readonly nodeId: DagNodeId; readonly taskId: string; readonly execAttempt: number }
 
-/** Live children of an earlier attempt of a node still to be admitted (an amend or a retry bumped its execAttempt). */
+/**
+ * Live children of an earlier attempt of any node (an amend or a retry bumped its execAttempt), the
+ * newest record or not: an older attempt's child can resume after the next attempt's task exists.
+ */
 export function supersededChildren(context: SchedulerContext): readonly SupersededChild[] {
   return context.journal.snapshot().nodes.flatMap((node) => {
-    if (node.state !== "pending" && node.state !== "blocked") return []
-    const task = liveOwnedTask(context, node.id)
     const execAttempt = node.execAttempt ?? 0
-    return task === undefined || (task.owner?.execAttempt ?? 0) === execAttempt ? [] : [{ nodeId: node.id, taskId: task.task_id, execAttempt }]
+    if (execAttempt === 0) return []
+    const live = liveOwnedTasks(context, node.id)
+    if (live.length === 0) return []
+    const current = owner(context, node.id).fingerprint
+    return live
+      .filter((task) => createdForEarlierAttempt(task, execAttempt, current))
+      .map((task) => ({ nodeId: node.id, taskId: task.task_id, execAttempt }))
   })
+}
+
+function createdForEarlierAttempt(task: TaskRecord, execAttempt: number, currentFingerprint: string): boolean {
+  const created = task.owner?.execAttempt
+  // A record written before #11381 carries no execAttempt; its fingerprint (execAttempt-scoped)
+  // still says whether it is the current attempt's task, so only a different one reads as attempt 0.
+  if (created === undefined) return task.owner?.fingerprint !== currentFingerprint
+  return created < execAttempt
 }
 
 /**
@@ -83,6 +99,9 @@ export async function disposeSupersededChildren(context: SchedulerContext, stale
   stale.forEach(({ nodeId, taskId }, index) => {
     const task = context.taskManager.get(taskId)
     if (!isLiveTask(task)) return
+    // Only a node still to be admitted can fail closed; an already settled or attached node keeps its state.
+    const state = nodeById(context.journal.snapshot(), nodeId).state
+    if (state !== "pending" && state !== "blocked") return
     const result = results[index]
     const cause = result?.status === "rejected" ? `: ${errorMessage(result.reason)}` : ""
     failNode(context, nodeId, "stale_attempt_alive", `task ${taskId} of a superseded attempt is still ${task?.status} and could not be stopped${cause}`)
