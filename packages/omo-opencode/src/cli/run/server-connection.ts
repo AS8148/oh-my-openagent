@@ -100,21 +100,38 @@ async function startServer<TClient>(
     throw error
   }
   const { client, server } = started
+  // Each step runs even when an earlier one throws, so a failing close never leaves the generated
+  // password in this process's environment; the first error is rethrown once all steps ran.
+  const releaseServer = (): void => {
+    let firstError: unknown
+    let failed = false
+    for (const step of [() => server.close(), restorePassword]) {
+      try {
+        step()
+      } catch (error) {
+        if (!failed) {
+          failed = true
+          firstError = error
+        }
+      }
+    }
+    if (failed) throw firstError
+  }
 
   try {
     deps.injectServerAuthIntoClient(client)
   } catch (error) {
-    server.close()
-    restorePassword()
+    try {
+      releaseServer()
+    } catch {
+      // The injection failure is the error the caller needs; release already ran every step.
+    }
     throw error
   }
   console.log(pc.dim("Server listening at"), pc.cyan(server.url))
   return {
     client,
-    cleanup: () => {
-      server.close()
-      restorePassword()
-    },
+    cleanup: releaseServer,
   }
 }
 

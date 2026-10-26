@@ -101,6 +101,22 @@ describe("createServerConnection", () => {
       expect(process.env.OPENCODE_SERVER_PASSWORD).toBeUndefined()
     })
 
+    it("#when closing the server throws during cleanup #then the generated password is still restored and the close error is rethrown", async () => {
+      // given
+      const result = await createServerConnection({ signal: new AbortController().signal })
+      expect(process.env.OPENCODE_SERVER_PASSWORD).toBeDefined()
+      mockServerClose.mockImplementationOnce(() => {
+        throw new Error("close failed")
+      })
+
+      // when
+      const cleanup = () => result.cleanup()
+
+      // then
+      expect(cleanup).toThrow("close failed")
+      expect(process.env.OPENCODE_SERVER_PASSWORD).toBeUndefined()
+    })
+
     it("#when the own server fails to start and omo attaches instead #then no generated password is left behind", async () => {
       // given
       mockIsPortAvailable.mockImplementationOnce(() => Promise.resolve(true)).mockImplementationOnce(() => Promise.resolve(false))
