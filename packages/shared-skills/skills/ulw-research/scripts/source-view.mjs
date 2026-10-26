@@ -19,12 +19,13 @@ import { decodeRaw } from "./raw-decode.mjs"
 
 export const TEXT_SOURCES = Object.freeze(["html", "decoded", "declared", "converted"])
 
-/** Read one snapshot file; the error names the file and the cause (ENOENT, EACCES, ...). */
+/** Read one snapshot file; the error names the file and the cause (missing, EACCES, ...). */
 export function readPart(dir, name, encoding) {
 	try {
 		return readFileSync(join(dir, name), encoding)
 	} catch (error) {
-		throw Object.assign(new Error(`${name}: ${error.code ?? error.message}`), { code: error.code, part: name })
+		const cause = error.code === "ENOENT" ? "is missing" : error.code === "EISDIR" ? "is not a readable file" : `is unreadable (${error.code ?? error.message})`
+		throw Object.assign(new Error(`${name} ${cause}`), { code: error.code, part: name })
 	}
 }
 
@@ -66,9 +67,9 @@ export function readSnapshot(dir) {
 	try {
 		meta = JSON.parse(readPart(dir, "meta.json", "utf8"))
 	} catch (error) {
-		throw error.part ? error : new Error(`meta.json: ${error.message}`)
+		throw error.part ? error : new Error("meta.json is not valid JSON")
 	}
-	if (meta === null || typeof meta !== "object" || typeof meta.sha256 !== "string") throw new Error("meta.json: invalid snapshot metadata (no sha256)")
+	if (meta === null || typeof meta !== "object" || typeof meta.sha256 !== "string") throw new Error("has invalid snapshot metadata (meta.json has no sha256)")
 	let raw = null
 	if (meta.text_source === undefined) {
 		try {
@@ -82,7 +83,7 @@ export function readSnapshot(dir) {
 	const textBody = ["declared", "converted", "legacy"].includes(mode) ? readPart(dir, "text.txt") : null
 	const sha256 = sha256Of(raw ?? textBody)
 	const drift = []
-	if (sha256 !== meta.sha256) drift.push(`${raw ? "raw.bin" : "text.txt"} changed after its snapshot was pinned`)
-	if (mode === "declared" && sha256Of(textBody) !== meta.text_sha256) drift.push("text.txt (the declared extraction) changed after it was pinned")
+	if (sha256 !== meta.sha256) drift.push(`hash mismatch: ${raw ? "raw.bin" : "text.txt"} changed after its snapshot was pinned`)
+	if (mode === "declared" && sha256Of(textBody) !== meta.text_sha256) drift.push("hash mismatch: text.txt (the declared extraction) changed after it was pinned")
 	return { meta, raw, sha256, drift, view: buildView(mode, { raw, textBody, charset: meta.charset ?? null }) }
 }

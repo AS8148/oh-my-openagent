@@ -44,7 +44,7 @@ describe("raw snapshot contract", () => {
 		const dir = session("Span is 320 m.")
 		const raw = join(dir, "sources/S1/raw.bin")
 		try { unlinkSync(raw) } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error }
-		await expect(add(dir)).rejects.toThrow("raw.bin: ENOENT")
+		await expect(add(dir)).rejects.toThrow("raw.bin is missing")
 	})
 
 	test("raw bytes determine hash and UTF-8 locator offsets before normalization", async () => {

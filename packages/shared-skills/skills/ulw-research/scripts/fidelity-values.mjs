@@ -145,7 +145,7 @@ function chartProblem(ctx, fig, labels, ledger) {
  */
 export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 	const out = []
-	const flag = (code, node, message) => out.push(ctx.defect(code, node, message))
+	const flag = (code, node, message, extra = {}) => out.push({ ...ctx.defect(code, node, message), ...extra })
 	const rows = new Map((ledger?.rows ?? []).map((row) => [row.fact_id, row]))
 	const cited = new Map()
 	const check = (id, node, problemOf) => {

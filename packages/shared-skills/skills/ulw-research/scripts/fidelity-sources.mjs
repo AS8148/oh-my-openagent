@@ -1,6 +1,7 @@
 // Source integrity and raw quote anchoring, shared by the fidelity value checks. Fails closed:
-// a cited source-backed row whose sources dir, meta.json, raw.bin, or text.txt cannot be read
-// gets snapshot_hash_mismatch naming the cause; healthy sources keep their metadata and checks.
+// a cited source-backed row whose sources dir, meta.json, raw.bin, or text.txt cannot be read, or
+// whose snapshot no longer matches its pin, gets snapshot_hash_mismatch (with fact_id) naming the
+// cause; healthy sources keep their metadata and checks. flag is (code, node, message, extra).
 import { join } from "node:path"
 
 import { proseText } from "./html-lite.mjs"
@@ -10,9 +11,11 @@ import { readSnapshot } from "./source-view.mjs"
 const short = (hash) => String(hash ?? "none").slice(0, 12)
 
 function snapshotOf(sourcesDir, id) {
-	if (!sourcesDir) throw new Error("no sources directory")
+	if (!sourcesDir) throw new Error("has no sources directory")
 	return readSnapshot(join(sourcesDir, id))
 }
+
+const blocked = (flag, cited, row, id, cause) => flag("snapshot_hash_mismatch", cited.get(row.fact_id), `${row.fact_id}: snapshot ${id} ${cause}`, { fact_id: row.fact_id })
 
 /** One source's checks for the rows that cite it; byte-located rows are re-anchored on the view. */
 function rowChecks(snap, id, referenced, cited, flag) {
@@ -25,7 +28,7 @@ function rowChecks(snap, id, referenced, cited, flag) {
 			continue
 		}
 		if (row.snapshot_sha256 !== snap.sha256) {
-			flag("snapshot_hash_mismatch", node, `${row.fact_id} pins ${short(row.snapshot_sha256)} but ${id} holds ${short(snap.sha256)}; run source refresh ${id} to re-anchor`)
+			blocked(flag, cited, row, id, `holds ${short(snap.sha256)} but the row pins ${short(row.snapshot_sha256)}; run source refresh ${id} to re-anchor`)
 			continue
 		}
 		const anchor = row.locator.artifact === snap.view.artifact ? reanchor(snap.view, row) : null
@@ -51,12 +54,13 @@ export function sourceChecks(ctx, rows, cited, sourcesDir, flag) {
 			snap = snapshotOf(sourcesDir, id)
 		} catch (error) {
 			// A source only named in prose ([S<n>]) backs no row: an absent snapshot is not a finding.
-			for (const row of backing) flag("snapshot_hash_mismatch", cited.get(row.fact_id), `${row.fact_id}: snapshot ${id} cannot be read (${error.message})`)
+			for (const row of backing) blocked(flag, cited, row, id, error.message)
 			continue
 		}
 		meta.set(id, snap.meta)
-		for (const message of snap.drift) flag("snapshot_hash_mismatch", ctx.body, `${id}/${message}`)
 		if (snap.drift.length === 0) rowChecks(snap, id, backing, cited, flag)
+		else if (backing.length === 0) flag("snapshot_hash_mismatch", ctx.body, `snapshot ${id} ${snap.drift.join("; ")}`)
+		else for (const row of backing) blocked(flag, cited, row, id, snap.drift.join("; "))
 	}
 	return meta
 }

@@ -111,10 +111,10 @@ describe("converted text is never a raw snapshot", () => {
 
 describe("fact verify fails closed when a cited snapshot cannot be read", () => {
 	const cases: [string, (dir: string) => void, string[], string][] = [
-		["the sources dir is removed", (dir) => rmSync(join(dir, "sources"), { recursive: true }), [], "meta.json: ENOENT"],
-		["meta.json is removed", (dir) => unlinkSync(join(dir, "sources/S1/meta.json")), [], "meta.json: ENOENT"],
-		["--sources names a missing dir", () => {}, ["--sources", "/nonexistent/sources"], "meta.json: ENOENT"],
-		["raw.bin is unreadable", (dir) => chmodSync(join(dir, "sources/S1/raw.bin"), 0o000), [], "raw.bin: EACCES"],
+		["the sources dir is removed", (dir) => rmSync(join(dir, "sources"), { recursive: true }), [], "meta.json is missing"],
+		["meta.json is removed", (dir) => unlinkSync(join(dir, "sources/S1/meta.json")), [], "meta.json is missing"],
+		["--sources names a missing dir", () => {}, ["--sources", "/nonexistent/sources"], "meta.json is missing"],
+		["raw.bin is unreadable", (dir) => chmodSync(join(dir, "sources/S1/raw.bin"), 0o000), [], "raw.bin is unreadable (EACCES)"],
 	]
 	for (const [name, damage, extra, cause] of cases) {
 		test(`#given ${name} #when verified #then every cited row gets the blocker with the cause and a record is written`, async () => {
@@ -151,7 +151,7 @@ describe("fact verify fails closed when a cited snapshot cannot be read", () => 
 		writeLedger(dir, ledger)
 		expect((await report(dir, ["{{F1}}"])).exitCode).toBe(0)
 		unlinkSync(join(sources, "text.txt"))
-		expect(blockers((await reverify(dir)).json)[0]?.message).toContain("text.txt: ENOENT")
+		expect(blockers((await reverify(dir)).json)[0]?.message).toContain("text.txt is missing")
 	})
 
 	test("#given a converted-only quote whose text.txt is deleted #when verified #then it blocks", async () => {
@@ -161,7 +161,7 @@ describe("fact verify fails closed when a cited snapshot cannot be read", () => 
 		const clean = await report(dir, ["{{Q1}}"])
 		expect([clean.exitCode, clean.json.defects.map((defect: Defect) => defect.code)]).toEqual([0, ["quote_converted_only"]])
 		unlinkSync(join(dir, "sources/S1/text.txt"))
-		expect(blockers((await reverify(dir)).json)[0]?.message).toContain("text.txt: ENOENT")
+		expect(blockers((await reverify(dir)).json)[0]?.message).toContain("text.txt is missing")
 	})
 })
 
