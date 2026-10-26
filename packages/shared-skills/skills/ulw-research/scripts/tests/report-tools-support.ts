@@ -15,6 +15,9 @@ const SCRIPT = join(join(import.meta.dir, ".."), "report-tools.mjs")
 
 const FIXTURES = join(join(import.meta.dir, ".."), "tests", "fixtures")
 
+/** The caller-owned observation time every CLI derive passes (derive never reads the clock). */
+const NOW = "2026-10-23T08:00:00Z"
+
 
 function sessionDir() {
 	const root = mkdtempSync(join(tmpdir(), "report-tools-cli-"))
@@ -69,7 +72,7 @@ function fidelitySession() {
 	const snap = nodeJson(["source", "snapshot", "--id", "S4", "--html", join(FIDELITY, "sources", "S4.html"), ...s])
 	const add = nodeJson(["fact", "add", "--source", "S4", "--find", "Span length", "--label", "span_len", "--json", ...s])
 	const quote = nodeJson(["fact", "quote", "--source", "S4", "--match", "no earlier than 2027", "--label", "completion", "--json", ...s])
-	const derive = nodeJson(["fact", "derive", "--op", "convert", "F1", "--to", "mm", "--label", "span_mm", "--json", ...s])
+	const derive = nodeJson(["fact", "derive", "--op", "convert", "F1", "--to", "mm", "--label", "span_mm", "--now", NOW, "--json", ...s])
 	const mm = derive.json.data?.row?.fact_id
 	const source = [
 		'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Bridge</title></head><body><h1>Bridge</h1>',
@@ -176,4 +179,4 @@ function textSource(dir: string, id: string, provenance?: string) {
 
 
 const ledgerRow = (dir: string, id: string) => JSON.parse(readFileSync(join(dir, "fact-ledger.json"), "utf8")).rows.find((r: { fact_id: string }) => r.fact_id === id)
-export { SCRIPT, FIXTURES, sessionDir, nodeWithoutBun, defectsFile, FIDELITY, sha256, CliRow, CliJson, nodeJson, fidelitySession, verify, codesOf, Pair, pairedSession, verdicts, calibrationRows, runLines, PolishJson, polishSession, polishApply, setField, fillTemplate, textSource, ledgerRow }
+export { SCRIPT, FIXTURES, NOW, sessionDir, nodeWithoutBun, defectsFile, FIDELITY, sha256, CliRow, CliJson, nodeJson, fidelitySession, verify, codesOf, Pair, pairedSession, verdicts, calibrationRows, runLines, PolishJson, polishSession, polishApply, setField, fillTemplate, textSource, ledgerRow }

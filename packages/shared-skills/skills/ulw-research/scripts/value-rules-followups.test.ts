@@ -42,7 +42,7 @@ test("negative decimal zero agrees with exact zero in dimension 32", () => {
 
 test("derive without caller time refuses without appending", () => {
 	const ledger = book()
-	expect(derive(ledger, { op: "diff", operands: ["F1", "F2"], unit: "m" })).toMatchObject({ error: "incompatible_operands", shape: "missing_now" })
+	expect(derive(ledger, { op: "diff", operands: ["F1", "F2"], unit: "m" })).toMatchObject({ error: "missing_now", shape: "missing_now" })
 	expect(ledger.rows).toHaveLength(2)
 })
 

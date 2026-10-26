@@ -29,7 +29,11 @@ function declaredUnit(spec, rule) {
 	return canonicalUnit(declared)
 }
 
+/** Refused before any work, under its own code: time is the caller's (spec.now), never the clock. */
+const MISSING_NOW = Object.freeze({ error: "missing_now", shape: "missing_now", expected: "an ISO timestamp in spec.now", detail: "derive needs a caller-supplied now timestamp" })
+
 export function derive(ledger, spec) {
+	if (object(spec) && typeof spec.now !== "string") return { ...MISSING_NOW }
 	try {
 		if (!object(spec)) refuse("spec must be an object")
 		const errors = validateLedger(ledger)
@@ -52,7 +56,6 @@ export function derive(ledger, spec) {
 		const declared = declaredUnit(spec, rule)
 		if (declared !== expected) refuse(unitMismatch(spec.op, rows, declared, expected), undefined, "result_unit", { unit: expected })
 		const result = compute(spec.op, rows, expected, ast, context, spec.formula)
-		if (typeof spec.now !== "string") refuse("derive needs a caller-supplied now timestamp", undefined, "missing_now", "an ISO timestamp in spec.now")
 		const row = addRow(ledger, {
 			kind: rule.kind, unit: expected, quote: "", extracted_by: "fact-derive",
 			observed_at: spec.now,

@@ -9,7 +9,7 @@ import { PAIR_KINDS } from "./fact-pairs.mjs"
 import { VERDICT_SCHEMA } from "./meaning-check.mjs"
 import { POLISH_MARKUP_REASON } from "./polish-apply.mjs"
 import { COMMANDS, run } from "./report-tools.mjs"
-import { SCRIPT, FIXTURES, sessionDir, nodeWithoutBun, defectsFile, FIDELITY, sha256, CliRow, CliJson, nodeJson, fidelitySession, verify, codesOf, Pair, pairedSession, verdicts, calibrationRows, runLines, PolishJson, polishSession, polishApply, setField, fillTemplate, textSource, ledgerRow } from "./tests/report-tools-support"
+import { SCRIPT, FIXTURES, NOW, sessionDir, nodeWithoutBun, defectsFile, FIDELITY, sha256, CliRow, CliJson, nodeJson, fidelitySession, verify, codesOf, Pair, pairedSession, verdicts, calibrationRows, runLines, PolishJson, polishSession, polishApply, setField, fillTemplate, textSource, ledgerRow } from "./tests/report-tools-support"
 
 
 
@@ -40,7 +40,7 @@ describe("fidelity brief lock and policy under node", () => {
 	test("#given derived numbers none #when a derived or a converted placeholder is filled #then derived_not_allowed, and allowed renders both", () => {
 		// given
 		const { dir, s, mm } = fidelitySession()
-		const expr = nodeJson(["fact", "derive", "--op", "expr", "F1 * 2", "--unit", "m", "--rationale", "two spans", "--label", "two_spans", "--json", ...s])
+		const expr = nodeJson(["fact", "derive", "--op", "expr", "F1 * 2", "--unit", "m", "--rationale", "two spans", "--label", "two_spans", "--now", NOW, "--json", ...s])
 		const twice = expr.json.data.row.fact_id
 		setField(dir, "derived numbers", "none")
 		// when
@@ -152,7 +152,7 @@ describe("fidelity brief values, sourceless rows, and the brief binding under no
 	test("#given derived numbers or fallback off its table #when fact fill runs #then a usage error names the field and value and nothing is written", () => {
 		// given
 		const { dir, s } = fidelitySession()
-		const twice = nodeJson(["fact", "derive", "--op", "expr", "F1 * 2", "--unit", "m", "--rationale", "two spans", "--label", "two_spans", "--json", ...s]).json.data.row.fact_id
+		const twice = nodeJson(["fact", "derive", "--op", "expr", "F1 * 2", "--unit", "m", "--rationale", "two spans", "--label", "two_spans", "--now", NOW, "--json", ...s]).json.data.row.fact_id
 		// when
 		setField(dir, "derived numbers", "nope")
 		const derived = fillTemplate(dir, `<p>Two spans are {{${twice}:two_spans}} [S4].</p>`)
@@ -185,7 +185,7 @@ describe("fidelity brief values, sourceless rows, and the brief binding under no
 		// given
 		const { dir, s } = fidelitySession()
 		const { row } = textSource(dir, "S7", "secondary")
-		const twice = nodeJson(["fact", "derive", "--op", "expr", `${row.fact_id} * 2`, "--unit", "m", "--rationale", "two spans", "--label", "two_spans", "--json", ...s]).json.data.row.fact_id
+		const twice = nodeJson(["fact", "derive", "--op", "expr", `${row.fact_id} * 2`, "--unit", "m", "--rationale", "two spans", "--label", "two_spans", "--now", NOW, "--json", ...s]).json.data.row.fact_id
 		setField(dir, "source floor", "primary only")
 		// when
 		const refused = fillTemplate(dir, `<p>Two spans are {{${twice}:two_spans}} [S7].</p>`)

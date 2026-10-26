@@ -94,6 +94,7 @@ const FIDELITY_MAJORS = [
 	"polish_text_churn",
 	"snapshot_mismatch",
 	"operand_timestamp_missing",
+	"operand_missing",
 	"join_integrity_fail",
 	"quote_stale_version",
 ]

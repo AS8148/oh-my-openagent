@@ -181,19 +181,23 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 function rowChecks(ctx, ledger, rows, cited, options, flag) {
 	// An as-of of "latest ..." or "... per snapshot" names no fixed revision, so quote_stale_version is skipped.
 	const asOf = options.asOf && !/^latest\b|per snapshot/i.test(options.asOf) ? options.asOf : null
+	// A sentence-final period ("release v1.2.") is punctuation, not part of the revision token.
+	const target = asOf?.replace(/\.(?=\s|$)/gu, "")
 	for (const [id, node] of cited) {
 		const row = rows.get(id)
 		if (row.fuzzy === true) flag("quote_fuzzy_match", node, `${id} was registered from a similarity match on an OCR-noisy snapshot`)
 		const revision = typeof row.revision === "string" ? row.revision : (row.revision?.id ?? row.revision?.tag ?? null)
 		const revisionPattern = revision && new RegExp(`(?<![\\w.-])${revision.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "u")
-		if (asOf && revisionPattern && !revisionPattern.test(asOf)) flag("quote_stale_version", node, `${id} is from revision ${revision}; the brief targets "${asOf}"`)
+		if (asOf && revisionPattern && !revisionPattern.test(target)) flag("quote_stale_version", node, `${id} is from revision ${revision}; the brief targets "${asOf}"`)
 		if ((row.kind === "derived" || row.kind === "converted") && options.recompute?.(ledger, row)?.ok === false) flag("value_mismatch", node, `${id} does not recompute from its operands`)
 		const window = row.snapshot_window
 		if (window && typeof window === "object" && window.start && window.end) {
 			const [start, end] = [Date.parse(window.start), Date.parse(window.end)]
-			const missing = (row.operands ?? []).filter((op) => !rows.get(op)?.observed_at)
+			const [absent, present] = [(row.operands ?? []).filter((op) => !rows.has(op)), (row.operands ?? []).filter((op) => rows.has(op))]
+			for (const op of absent) flag("operand_missing", node, `operand ${op} of ${id} is not in the fact ledger`)
+			const missing = present.filter((op) => !rows.get(op).observed_at)
 			for (const op of missing) flag("operand_timestamp_missing", node, `operand ${op} of ${id} has no observed_at timestamp`)
-			const outside = (row.operands ?? []).find((op) => !missing.includes(op) && !(Date.parse(rows.get(op)?.observed_at) >= start && Date.parse(rows.get(op)?.observed_at) < end))
+			const outside = present.find((op) => !missing.includes(op) && !(Date.parse(rows.get(op).observed_at) >= start && Date.parse(rows.get(op).observed_at) < end))
 			if (outside) flag("snapshot_mismatch", node, `operand ${outside} of ${id} was observed outside ${window.start} to ${window.end}`)
 		}
 	}
