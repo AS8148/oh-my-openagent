@@ -61,10 +61,23 @@ const fixtures = [
   { id: "c4s", text: pem(x) + rootPem, expected: dropped("ordinary-block-unparseable", 0, true) },
   { id: "c4t", text: rootPem + pem(x), expected: dropped("ordinary-block-unparseable", 1, true) },
   { id: "c5", text: rootPem + "plain trailing text\n", expected: kept },
-  { id: "c6", text: rootPem + "-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n", expected: dropped("pem-read-error") },
+  { id: "c6", text: rootPem + "-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n", expected: dropped("pem-noncanonical", 1, true) },
   { id: "c7", text: rootPem + pem(hex("3000"), "TRUSTED CERTIFICATE"), expected: dropped("aux-block-unverified", 1, true) },
   { id: "c8", text: rootPem + pem(hex("3000"), "SOMETHING ELSE"), expected: kept },
-  { id: "c9", text: rootPem + "-----BEGIN CERTIFICATE-----\nMAA=\n", expected: dropped("pem-read-error") },
+  { id: "c9", text: rootPem + "-----BEGIN CERTIFICATE-----\nMAA=\n", expected: dropped("pem-noncanonical", 1, true) },
+  { id: "body253", text: `-----BEGIN CERTIFICATE-----\n${rootDer.toString("base64").match(/.{1,253}/g)?.join("\n")}\n-----END CERTIFICATE-----\n`, expected: dropped("pem-noncanonical", 0, true) },
+  { id: "spaces253", text: rootPem.replace(/(\n[A-Za-z0-9+/=]+\n)/, `$1${" ".repeat(253)}`), expected: dropped("pem-noncanonical", 0, true) },
+  { id: "hidden-begin", text: rootPem + `${"a".repeat(253)}-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n`, expected: dropped("pem-noncanonical", 1, true) },
+  { id: "empty-label", text: rootPem + "-----BEGIN -----\n!!!!\n-----END -----\n", expected: dropped("pem-noncanonical", 1, true) },
+  { id: "long-label", text: rootPem + pem(hex("3000"), "A".repeat(201)), expected: dropped("pem-noncanonical", 1, true) },
+  { id: "mid-cr", text: rootPem + "plain\rtext\n", expected: dropped("pem-noncanonical", 1, true) },
+  { id: "form-feed", text: rootPem + "plain\ftext\n", expected: dropped("pem-noncanonical", 1, true) },
+  { id: "high-byte", text: rootPem + "plain\u00fftext\n", expected: dropped("pem-noncanonical", 1, true) },
+  { id: "lowercase-label", text: rootPem + pem(hex("3000"), "other"), expected: dropped("pem-noncanonical", 1, true) },
+  { id: "crlf", text: rootPem.replaceAll("\n", "\r\n"), expected: kept },
+  { id: "bad-padding", text: rootPem + pem(hex("3000"), "OTHER").replace("MAA=", "MAA"), expected: dropped("pem-read-error") },
+  { id: "blank-body", text: rootPem.replace("\n", "\n\n"), expected: dropped("pem-noncanonical", 0, true) },
+  { id: "mismatched-end", text: rootPem + "-----BEGIN OTHER-----\nMAA=\n-----END WRONG-----\n", expected: dropped("pem-noncanonical", 1, true) },
 ]
 
 describe("OpenSSL default-file whole-file transaction", () => {
@@ -101,6 +114,11 @@ const subjectCases = [
   ["invalid UTF8String", indexedSubject(name(der(12, hex("c080"))))],
   ["invalid BMPString", indexedSubject(name(der(30, hex("d800"))))],
   ["invalid UniversalString", indexedSubject(name(der(28, hex("00110000"))))],
+  ["UTF8String U+FFFF", indexedSubject(name(der(12, hex("efbfbf"))))],
+  ["BMPString U+FFFE", indexedSubject(name(der(30, hex("fffe"))))],
+  ["UniversalString U+FDD0", indexedSubject(name(der(28, hex("0000fdd0"))))],
+  ["UTF8String plane-one noncharacter", indexedSubject(name(der(12, hex("f09fbfbe"))))],
+  ["UniversalString plane-sixteen noncharacter", indexedSubject(name(der(28, hex("0010ffff"))))],
   ["empty RDN", indexedSubject(seq(der(0x31)))],
   ["two attribute values", indexedSubject(seq(der(0x31, seq(oid("550403"), der(12, hex("61")), der(12, hex("62"))))))],
   ["universal tag zero", indexedSubject(name(hex("0000")))],
@@ -117,7 +135,8 @@ test.each(subjectCases)("rejects the file as not indexable when given %s", (_nam
   expect(result).toEqual(dropped("ordinary-block-not-indexable"))
 })
 
-test.each(["CERTIFICATE", "X509 CERTIFICATE", "TRUSTED CERTIFICATE", "X509 CRL"])(
+const headerLabels = ["CERTIFICATE", "X509 CERTIFICATE", "TRUSTED CERTIFICATE", "X509 CRL"] as const
+test.each(headerLabels)(
   "rejects recognized headers when the block is %s", (type) => {
     // Given / When: PEM decoding succeeds but a recognized block has headers.
     const text = pem(rootDer, type).replace("-----\n", "-----\nComment: synthetic\n\n")
@@ -126,30 +145,32 @@ test.each(["CERTIFICATE", "X509 CERTIFICATE", "TRUSTED CERTIFICATE", "X509 CRL"]
     expect(result).toEqual(dropped("recognized-block-has-headers", 0))
   },
 )
-test.each([
-  ["unknown bad base64", "-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n", "pem-read-error", false],
-  ["malformed headers", "-----BEGIN OTHER-----\nComment: synthetic\nMAA=\n-----END OTHER-----\n", "pem-read-error", false],
+const malformedCases = [
+  ["unknown bad base64", "-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n", "pem-noncanonical", true],
+  ["malformed headers", "-----BEGIN OTHER-----\nComment: synthetic\nMAA=\n-----END OTHER-----\n", "pem-noncanonical", true],
   ["invalid CRL", pem(hex("3000"), "X509 CRL"), "aux-block-unverified", true],
-] as const)("drops the whole file when given %s", (_name, text, cause, narrowing) => {
+] as const
+test.each(malformedCases)("drops the whole file when given %s", (_name, text, cause, narrowing) => {
   // Given / When: an error after a valid root, including in an otherwise skipped type.
   const result = readDefaultFileCandidates(rootPem + text, () => false)
   // Then: decoded unknown blocks alone may be skipped.
   expect(result).toEqual(dropped(cause, 1, narrowing))
 })
-test.each([
+const whitespaceCases = [
   ["blank-separated base64 header", "-----BEGIN CERTIFICATE-----\nMAA=\n\nMAA=\n-----END CERTIFICATE-----\n", "recognized-block-has-headers"],
-  ["non-ASCII trailing whitespace", "-----BEGIN CERTIFICATE-----\nMAA=\u00a0\n-----END CERTIFICATE-----\n", "pem-read-error"],
-] as const)("does not broaden PEM decoding when given %s", (_name, text, cause) => {
+  ["non-ASCII trailing whitespace", "-----BEGIN CERTIFICATE-----\nMAA=\u00a0\n-----END CERTIFICATE-----\n", "pem-noncanonical"],
+] as const
+test.each(whitespaceCases)("does not broaden PEM decoding when given %s", (_name, text, cause) => {
   // Given / When: framing that a whitespace-normalizing PEM regex would silently salvage.
   const result = readDefaultFileCandidates(rootPem + text, () => false)
   // Then: preserve PEM_read_bio's ASCII and header boundaries.
-  expect(result).toEqual(dropped(cause))
+  expect(result).toEqual(dropped(cause, 1, cause === "pem-noncanonical"))
 })
 test("finishes PEM reading before indexing when a bad DER block precedes bad PEM", () => {
   // Given / When: the loader cannot finish its PEM transaction.
   const result = readDefaultFileCandidates(short + "-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n", () => false)
   // Then: report the PEM failure, not a lazy-set check that Bun never reaches.
-  expect(result).toEqual(dropped("pem-read-error"))
+  expect(result).toEqual(dropped("pem-noncanonical", 1, true))
 })
 test.each([["R", rootDer, true], ["c4", c4, false], ["X", x, false]] as const)(
   "agrees with the lazy-parser fixture when crypto parses %s", (_name, bytes, parses) => {
@@ -194,14 +215,22 @@ test.skipIf(process.platform === "win32")("never imports R beyond real Bun's acc
     });
   `
   const outcomes = new Map<string, readonly string[]>()
+  const narrowings: string[] = []
   try {
     // When: each fixture gets its own Bun process and all five requests share its lazy set.
-    for (const fixture of [...fixtures.filter(({ id }) => ["c0", "c1", "c4", "c4s", "c4t", "c5"].includes(id)),
+    for (const fixture of [...fixtures,
+      ...headerLabels.map((label) => ({ id: `headers-${label}`, text: rootPem + pem(rootDer, label).replace("-----\n", "-----\nComment: synthetic\n\n") })),
+      ...[...malformedCases, ...whitespaceCases].map(([id, text]) => ({ id, text: rootPem + text })),
+      ...subjectCases.map(([id, bytes]) => ({ id, text: rootPem + pem(bytes) })),
+      { id: "unknown-before-root", text: pem(hex("3000"), "OTHER") + pem(rootDer, "X509 CERTIFICATE") },
+      { id: "bad-der-before-pem", text: short + "-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n" },
+      { id: "no-block-text", text: "only text\n" },
       { id: "empty", text: "", expected: { kind: "kept" } }]) {
       const file = join(dir, `${fixture.id}.pem`)
       writeFileSync(file, fixture.text)
+      const home = mkdtempSync(join(dir, "oracle-home-"))
       const child = Bun.spawn([process.execPath, "-e", client, url], {
-        env: { PATH: process.env.PATH, HOME: process.env.HOME, SSL_CERT_FILE: file, SSL_CERT_DIR: emptyDir },
+        env: { PATH: process.env.PATH, HOME: home, SSL_CERT_FILE: file, SSL_CERT_DIR: emptyDir },
         stdout: "pipe", stderr: "pipe", timeout: 30_000,
       })
       const [status, stdout, stderr] = await Promise.all([
@@ -219,7 +248,9 @@ test.skipIf(process.platform === "win32")("never imports R beyond real Bun's acc
         case "kept":
           if (imported.certificates.length > 0) expect(requests).toEqual(["1", "1", "1", "1", "1"])
           break
-        case "dropped": break
+        case "dropped":
+          if (requests.every((value) => value === "1")) narrowings.push(fixture.id)
+          break
         default: { const unreachable: never = imported; throw unreachable }
       }
     }
@@ -227,6 +258,8 @@ test.skipIf(process.platform === "win32")("never imports R beyond real Bun's acc
     expect(outcomes.get("c0")).toEqual(["1", "1", "1", "1", "1"])
     expect(outcomes.get("c1")).toEqual(["0", "0", "0", "0", "0"])
     expect(["c4s", "c4t"].some((id) => outcomes.get(id)?.every((value) => value === "0"))).toBe(true)
+    console.log(`oracle narrowings: ${narrowings.join(", ")}`)
+    expect(narrowings).toEqual(["c4", "c4t", "long-label", "mid-cr", "form-feed", "high-byte", "lowercase-label", "blank-body"])
   } finally {
     const closed = once(server, "close", { signal: AbortSignal.timeout(10_000) })
     server.closeAllConnections()
