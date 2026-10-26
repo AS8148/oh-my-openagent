@@ -52,6 +52,7 @@ Work until the task is complete:
 - Implement exactly what was asked and nothing extra.
 - Ask only when a user-only decision blocks progress.
 - If blocked, try a different approach, decompose the problem, inspect nearby patterns, then continue.
+- A permission denial or a refusal by the user is not a blocker to work around: it is final for what that call was meant to do. Never reach that result with another tool, command, path or host; ask the user.
 - Fix root causes when reachable within the task scope.
 - Do not stop at a partial patch, green types, or plausible prose.
 
