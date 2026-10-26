@@ -8,12 +8,15 @@ import type { SenpiConfigDiagnostic } from "../config-resolution"
 import { createGenerationObservingPlanner, type CategoryConfigGenerations } from "./category-config-generation"
 import { createCategoryUnavailableWarner } from "./category-unavailable-warning"
 import { createTaskChildPlanner, type ResolveDefaultRoute, type ResolveModelRegistry } from "./planner"
+import { catalogNames, isRoutingPath, routingIssues } from "./routing-config-check"
 import type { TaskRuntimeContext } from "./runtime-context"
 
 /** One read of the effective omo config: the merged config and what the loader found wrong with each layer. */
 export type SpawnOmoConfig = {
   readonly config: OmoConfig
   readonly diagnostics: readonly SenpiConfigDiagnostic[]
+  // Each layer as the loader kept it, with its file. Absent for the startup snapshot.
+  readonly layers?: readonly { readonly config: unknown; readonly source: { readonly path: string } }[]
 }
 
 export type EnginePlannerInput = {
@@ -26,24 +29,53 @@ export type EnginePlannerInput = {
   readonly generations: CategoryConfigGenerations
 }
 
-// A model catalog cycle leaves model references unresolvable, so it blocks routing like an invalid value.
-const BLOCKING_KINDS: ReadonlySet<string> = new Set(["parse", "read", "validation", "model_catalog_cycle"])
+// A layer that cannot be parsed or read, and a model catalog cycle, leave routing undefined, so they always block.
+// A validation error or a dropped leaf blocks only when it is in a routing field; anything else (task settings,
+// memory, ...) is dropped and warned about by the loader, exactly as before (#11355).
+function blocksRouting(diagnostic: SenpiConfigDiagnostic): boolean {
+  if (diagnostic.kind === "parse" || diagnostic.kind === "read" || diagnostic.kind === "model_catalog_cycle") return true
+  if (diagnostic.kind !== "validation" && diagnostic.kind !== "invalid-value") return false
+  const paths = diagnostic.issuePaths ?? []
+  return paths.length === 0 || paths.some(isRoutingPath)
+}
 
-function displayPath(path: string, home = homedir()): string {
-  return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path
+/** The path with the home directory shown as `~`, on POSIX and Windows separators alike. */
+export function displayConfigPath(path: string, home = homedir()): string {
+  if (path === home) return "~"
+  return path.startsWith(`${home}/`) || path.startsWith(`${home}\\`) ? `~${path.slice(home.length)}` : path
 }
 
 function configError(diagnostic: SenpiConfigDiagnostic): PlanConfigError {
   const position = "position" in diagnostic ? diagnostic.position : undefined
+  // A catalog cycle is found after the layers merge, so it names model references, not a file.
+  if (diagnostic.kind === "model_catalog_cycle") {
+    return { kind: "catalog", ...(diagnostic.issuePaths === undefined ? {} : { issue_paths: diagnostic.issuePaths }) }
+  }
   return {
     kind: diagnostic.kind === "parse" || diagnostic.kind === "read" ? diagnostic.kind : "validation",
-    path: displayPath(diagnostic.path),
+    path: displayConfigPath(diagnostic.path),
     ...(position === undefined ? {} : { position }),
     ...(diagnostic.issuePaths === undefined ? {} : { issue_paths: diagnostic.issuePaths }),
   }
 }
 
+function spawnConfigError(loaded: SpawnOmoConfig): PlanConfigError | undefined {
+  const blocking = loaded.diagnostics.find(blocksRouting)
+  if (blocking !== undefined) return configError(blocking)
+  const layers = loaded.layers ?? []
+  const names = catalogNames(layers.map((layer) => layer.config))
+  for (const layer of layers) {
+    const issues = routingIssues(layer.config, names)
+    if (issues.length > 0) return { kind: "validation", path: displayConfigPath(layer.source.path), issue_paths: issues }
+  }
+  return undefined
+}
+
 function configErrorMessage(error: PlanConfigError): string {
+  if (error.kind === "catalog") {
+    const at = error.issue_paths !== undefined && error.issue_paths.length > 0 ? ` at ${error.issue_paths.join(", ")}` : ""
+    return `omo model catalog has a reference cycle${at}. No task was started; fix the model references and spawn again (the task never runs on another config).`
+  }
   const where = error.position !== undefined
     ? `${error.path}:${error.position.line}:${error.position.column}`
     : error.issue_paths !== undefined && error.issue_paths.length > 0
@@ -65,10 +97,9 @@ export function createEnginePlanner(input: EnginePlannerInput): ChildPlanner {
   const warn = createCategoryUnavailableWarner({ pi, runtime, settings })
   return (spec): PlanResolution => {
     const loaded = loadOmoConfig()
-    const blocking = loaded.diagnostics.find((diagnostic) => BLOCKING_KINDS.has(diagnostic.kind))
-    if (blocking !== undefined) {
-      const error = configError(blocking)
-      return { kind: "error", error: { code: "config_invalid", message: configErrorMessage(error), config_error: error } }
+    const configFailure = spawnConfigError(loaded)
+    if (configFailure !== undefined) {
+      return { kind: "error", error: { code: "config_invalid", message: configErrorMessage(configFailure), config_error: configFailure } }
     }
     const omoConfig = loaded.config
     const resolution = createGenerationObservingPlanner({
