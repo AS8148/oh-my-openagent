@@ -1,54 +1,56 @@
 import { normalizeLegacyModelFields } from "@oh-my-opencode/omo-config-core"
 
-// The omo config fields that decide which model a Senpi child runs on: category and agent entries (model, models and
-// fallback chains, reasoning selectors), the excluded models, and the model catalog. A spawn re-checks them on every
-// layer it reads (#11355), because the loader keeps a layer with a bad leaf by dropping that leaf, and a dropped
-// routing leaf silently routes the child on another layer or the defaults.
+// The omo config locations that can decide which model a Senpi child runs on, validated in one pass at every spawn
+// (#11355), in every layer the loader read (the user layer and each project layer). The loader keeps a layer with a bad
+// leaf by dropping that leaf, and a dropped routing leaf silently routes the child on another layer or the defaults.
 //
-// Only the scopes the Senpi view merges route a Senpi child, in the loader's order (resolution.ts): the base layer,
-// its Senpi harness blocks (legacy `[senpi]`, then canonical `[native]`), the ACTIVE profile, and that profile's
-// Senpi harness blocks. Another harness's block (`[codex]`, `[opencode]`) or an inactive profile never routes one.
+// Locations, in each layer:
+//   - the base scope, then its Senpi harness blocks `[senpi]` and `[native]`;
+//   - every profile `profiles.<name>` (active or not, so a typo fails before the day the profile is selected), then
+//     that profile's `[senpi]` and `[native]` blocks.
+// In each location: `categories.<name>` and `agents.<name>` entries (`model`, `models`, `fallback_models`, and the
+// reasoning selectors) and `exclude_models`. Another harness's block (`[codex]`, `[opencode]`) never routes a Senpi child.
 const SENPI_HARNESS_BLOCKS = ["[senpi]", "[native]"] as const
-const ROUTING_FIELDS = String.raw`(?:categories|agents|exclude_models|models)(?:\.|$)`
-const HARNESS_PREFIX = String.raw`(?:\[(?:senpi|native)\]\.)?`
+const ROUTING_PATH = /^(?:profiles\.[^.]+\.)?(?:\[(?:senpi|native)\]\.)?(?:categories|agents|exclude_models|models)(?:\.|$)/
 // "provider/model", or a model catalog name that resolves to one.
 const MODEL_REF = /^[^\s/]+\/\S+$/
 const SELECTOR_FIELDS = ["variant", "reasoningEffort", "provider"] as const
 const CHAIN_FIELDS = ["models", "fallback_models"] as const
+const ENTRY_GROUPS = ["categories", "agents"] as const
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+/** One place routing fields live, with the path prefix its fields are reported under and the profile it belongs to. */
+export type RoutingLocation = {
+  readonly prefix: string
+  readonly profile?: string
+  readonly scope: Record<string, unknown>
 }
 
-/** Whether a loader issue path is a field that routes a Senpi child under the active profile. */
-export function isRoutingPath(issuePath: string, profile?: string): boolean {
-  const profilePrefix = profile === undefined ? "" : String.raw`(?:profiles\.${escapeRegExp(profile)}\.)?`
-  return new RegExp(`^${profilePrefix}${HARNESS_PREFIX}${ROUTING_FIELDS}`).test(issuePath)
+/** Whether a loader issue path is a routing field in any location above. */
+export function isRoutingPath(issuePath: string): boolean {
+  return ROUTING_PATH.test(issuePath)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-/** The scopes of one layer that the Senpi view merges, each with the path prefix a field in it is reported under. */
-function senpiScopes(layer: unknown, profile: string | undefined): readonly (readonly [prefix: string, scope: Record<string, unknown>])[] {
+/** Every routing location of one layer, in the order listed above. */
+export function routingLocations(layer: unknown): readonly RoutingLocation[] {
   if (!isRecord(layer)) return []
-  const scopes: (readonly [string, Record<string, unknown>])[] = [["", layer]]
-  const withBlocks = (prefix: string, scope: Record<string, unknown>) => {
+  const locations: RoutingLocation[] = []
+  const add = (prefix: string, scope: Record<string, unknown>, profile?: string) => {
+    locations.push({ prefix, scope, ...(profile === undefined ? {} : { profile }) })
     for (const block of SENPI_HARNESS_BLOCKS) {
       const value = scope[block]
-      if (isRecord(value)) scopes.push([`${prefix}${block}.`, value])
+      if (isRecord(value)) locations.push({ prefix: `${prefix}${block}.`, scope: value, ...(profile === undefined ? {} : { profile }) })
     }
   }
-  withBlocks("", layer)
+  add("", layer)
   const profiles = layer["profiles"]
-  const active = profile !== undefined && isRecord(profiles) ? profiles[profile] : undefined
-  if (isRecord(active)) {
-    const prefix = `profiles.${profile}.`
-    scopes.push([prefix, active])
-    withBlocks(prefix, active)
+  if (isRecord(profiles)) {
+    for (const [name, profile] of Object.entries(profiles)) if (isRecord(profile)) add(`profiles.${name}.`, profile, name)
   }
-  return scopes
+  return locations
 }
 
 // The loader reads the legacy reasoning suffixes ("model (high)", "model high") as "model:high"; check the same form.
@@ -57,83 +59,109 @@ function canonicalModel(value: string): string {
   return typeof normalized === "string" ? normalized : value
 }
 
-function checkSelectors(entry: Record<string, unknown>, at: string, issues: string[]): void {
-  for (const key of SELECTOR_FIELDS) if (key in entry && typeof entry[key] !== "string") issues.push(`${at}.${key}`)
+type Check = {
+  readonly issues: string[]
+  readonly isModelRef: (value: unknown) => boolean
 }
 
-function checkChain(value: unknown, at: string, issues: string[], isModelRef: (value: unknown) => boolean, allowsSingle: boolean): void {
+function checkSelectors(entry: Record<string, unknown>, at: string, check: Check): void {
+  for (const key of SELECTOR_FIELDS) {
+    if (key in entry && (typeof entry[key] !== "string" || entry[key] === "")) check.issues.push(`${at}.${key}`)
+  }
+}
+
+function checkChain(value: unknown, at: string, check: Check, allowsSingle: boolean): void {
   if (allowsSingle && typeof value === "string") {
-    if (!isModelRef(value)) issues.push(at)
+    if (!check.isModelRef(value)) check.issues.push(at)
     return
   }
-  if (!Array.isArray(value)) {
-    issues.push(at)
+  // An empty chain names no model at all, so the child would route on whatever the other layers leave.
+  if (!Array.isArray(value) || value.length === 0) {
+    check.issues.push(at)
     return
   }
   value.forEach((item: unknown, index) => {
     const itemAt = `${at}.${index}`
     if (typeof item === "string") {
-      if (!isModelRef(item)) issues.push(itemAt)
+      if (!check.isModelRef(item)) check.issues.push(itemAt)
       return
     }
-    if (!isRecord(item) || !isModelRef(item["model"])) {
-      issues.push(itemAt)
+    if (!isRecord(item) || !check.isModelRef(item["model"])) {
+      check.issues.push(itemAt)
       return
     }
-    checkSelectors(item, itemAt, issues)
+    checkSelectors(item, itemAt, check)
   })
 }
 
-function checkEntry(entry: unknown, at: string, issues: string[], isModelRef: (value: unknown) => boolean): void {
+function checkEntry(entry: unknown, at: string, check: Check): void {
   if (!isRecord(entry)) {
-    issues.push(at)
+    check.issues.push(at)
     return
   }
-  if ("model" in entry && !isModelRef(entry["model"])) issues.push(`${at}.model`)
-  for (const key of CHAIN_FIELDS) if (key in entry) checkChain(entry[key], `${at}.${key}`, issues, isModelRef, key === "fallback_models")
-  checkSelectors(entry, at, issues)
+  if ("model" in entry && !check.isModelRef(entry["model"])) check.issues.push(`${at}.model`)
+  for (const key of CHAIN_FIELDS) if (key in entry) checkChain(entry[key], `${at}.${key}`, check, key === "fallback_models")
+  checkSelectors(entry, at, check)
 }
 
-function checkEntries(value: unknown, root: string, issues: string[], isModelRef: (value: unknown) => boolean): void {
-  if (value === undefined) return
-  if (!isRecord(value)) {
-    issues.push(root)
-    return
+function checkLocation(location: RoutingLocation, check: Check): void {
+  for (const group of ENTRY_GROUPS) {
+    const entries = location.scope[group]
+    const at = `${location.prefix}${group}`
+    if (entries === undefined) continue
+    if (!isRecord(entries)) {
+      check.issues.push(at)
+      continue
+    }
+    for (const [name, entry] of Object.entries(entries)) checkEntry(entry, `${at}.${name}`, check)
   }
-  for (const [name, entry] of Object.entries(value)) checkEntry(entry, `${root}.${name}`, issues, isModelRef)
+  const excluded = location.scope["exclude_models"]
+  if (excluded === undefined) return
+  if (!Array.isArray(excluded) || excluded.some((item: unknown) => typeof item !== "string" || item === "")) {
+    check.issues.push(`${location.prefix}exclude_models`)
+  }
+}
+
+function catalogKeys(scope: Record<string, unknown>): readonly string[] {
+  const catalog = scope["models"]
+  return isRecord(catalog) ? Object.keys(catalog) : []
 }
 
 /**
- * The routing-field paths one layer gets wrong, as written, in every scope the Senpi view merges: wrong types, null,
- * and model ids that are neither "provider/model" (legacy reasoning suffixes included) nor a catalog name.
+ * Every routing-field path the layers get wrong, as written: a wrong type, null, an empty value, or a model id that is
+ * neither "provider/model" (legacy reasoning suffixes included) nor a catalog name the location can resolve. A base
+ * location resolves the catalog the merged view resolves plus every base scope's `models`; a profile location also
+ * resolves its own profile's `models`.
  */
-export function routingIssues(layer: unknown, catalogNames: ReadonlySet<string>, profile?: string): readonly string[] {
-  const issues: string[] = []
-  const isModelRef = (value: unknown): boolean => {
-    if (typeof value !== "string") return false
-    if (catalogNames.has(value)) return true
-    const canonical = canonicalModel(value)
-    return MODEL_REF.test(canonical) || catalogNames.has(canonical.split(":")[0] ?? canonical)
-  }
-  for (const [prefix, scope] of senpiScopes(layer, profile)) {
-    checkEntries(scope["categories"], `${prefix}categories`, issues, isModelRef)
-    checkEntries(scope["agents"], `${prefix}agents`, issues, isModelRef)
-    const excluded = scope["exclude_models"]
-    if (excluded !== undefined && (!Array.isArray(excluded) || excluded.some((item: unknown) => typeof item !== "string"))) {
-      issues.push(`${prefix}exclude_models`)
+export function routingIssues(
+  layers: readonly { readonly config: unknown }[],
+  resolvedCatalog: unknown,
+): readonly { readonly layer: number; readonly issues: readonly string[] }[] {
+  const locations = layers.map((layer) => routingLocations(layer.config))
+  const baseNames = new Set<string>(isRecord(resolvedCatalog) ? Object.keys(resolvedCatalog) : [])
+  const profileNames = new Map<string, Set<string>>()
+  for (const location of locations.flat()) {
+    if (location.profile === undefined) {
+      for (const name of catalogKeys(location.scope)) baseNames.add(name)
+      continue
     }
+    const names = profileNames.get(location.profile) ?? new Set<string>()
+    for (const name of catalogKeys(location.scope)) names.add(name)
+    profileNames.set(location.profile, names)
   }
-  return issues
-}
-
-/** Model catalog names the Senpi view can resolve: the resolved catalog plus every Senpi scope's `models` in any layer. */
-export function catalogNames(layers: readonly unknown[], resolvedCatalog: unknown, profile?: string): ReadonlySet<string> {
-  const names = new Set<string>(isRecord(resolvedCatalog) ? Object.keys(resolvedCatalog) : [])
-  for (const layer of layers) {
-    for (const [, scope] of senpiScopes(layer, profile)) {
-      const catalog = scope["models"]
-      if (isRecord(catalog)) for (const name of Object.keys(catalog)) names.add(name)
+  return locations.map((layerLocations, layer) => {
+    const issues: string[] = []
+    for (const location of layerLocations) {
+      const own = location.profile === undefined ? undefined : profileNames.get(location.profile)
+      const known = (name: string) => baseNames.has(name) || own?.has(name) === true
+      const isModelRef = (value: unknown): boolean => {
+        if (typeof value !== "string" || value === "") return false
+        if (known(value)) return true
+        const canonical = canonicalModel(value)
+        return MODEL_REF.test(canonical) || known(canonical.split(":")[0] ?? canonical)
+      }
+      checkLocation(location, { issues, isModelRef })
     }
-  }
-  return names
+    return { layer, issues }
+  })
 }

@@ -56,7 +56,8 @@ function idleHandle(spec: ManagedStartSpec): ManagedChildHandle {
   }
 }
 
-function composeCapturing(cwd: string, launched: string[], env: NodeJS.ProcessEnv = {}): TaskEngine {
+function composeCapturing(cwd: string, launched: string[], overrides: NodeJS.ProcessEnv = {}): TaskEngine {
+  const env = { ...process.env, ...overrides }
   const capture: ManagedRunner = {
     start: (spec) => {
       launched.push(String(spec.model))
@@ -191,38 +192,87 @@ describe("task engine routing fields are checked at every spawn (#11355)", () =>
 })
 
 const BASE = { categories: { quick: { model: "acme/model-a" } } }
-const IN_PROFILE: readonly (readonly [label: string, config: Record<string, unknown>, issuePath: string])[] = [
-  ["a numeric model in the active profile", { ...BASE, profiles: { p: { categories: { quick: { model: 42 } } } } }, "profiles.p.categories.quick.model"],
-  ["a model id with no provider in the active profile", { ...BASE, profiles: { p: { categories: { quick: { model: "model-a" } } } } }, "profiles.p.categories.quick.model"],
-  ["a numeric model in the active profile's [native] block", { ...BASE, profiles: { p: { "[native]": { categories: { quick: { model: 42 } } } } } }, "profiles.p.[native].categories.quick.model"],
-  ["a model id with no provider in [native]", { ...BASE, "[native]": { categories: { quick: { model: "model-a" } } } }, "[native].categories.quick.model"],
+
+// Every routing location, in the project layer and in the user layer: [path to the entry object, field].
+const LOCATIONS: readonly (readonly [label: string, path: readonly string[], field: "model" | "models" | "exclude_models"])[] = [
+  ["base category", ["categories", "writing"], "model"],
+  ["base category chain", ["categories", "writing"], "models"],
+  ["base agent", ["agents", "scout"], "model"],
+  ["base exclude_models", [], "exclude_models"],
+  ["[native] category", ["[native]", "categories", "writing"], "model"],
+  ["[senpi] agent", ["[senpi]", "agents", "scout"], "model"],
+  ["active profile category", ["profiles", "p", "categories", "writing"], "model"],
+  ["active profile [native] agent", ["profiles", "p", "[native]", "agents", "scout"], "model"],
+  ["inactive profile category", ["profiles", "q", "categories", "writing"], "model"],
+  ["inactive profile [native] category chain", ["profiles", "q", "[native]", "categories", "writing"], "models"],
 ]
+const VALUES: Readonly<Record<"model" | "models" | "exclude_models", readonly (readonly [kind: string, value: unknown])[]>> = {
+  model: [["wrong type", 42], ["unknown model shape", "model-a"], ["null", null], ["empty", ""]],
+  models: [["wrong type", "acme/model-a"], ["unknown model shape", ["model-a"]], ["null", null], ["empty", []]],
+  exclude_models: [["wrong type", "acme/model-b"], ["unknown model shape", [7]], ["null", null], ["empty", [""]]],
+}
+
+function withValue(path: readonly string[], field: string, value: unknown): Record<string, unknown> {
+  const config: Record<string, unknown> = structuredClone(BASE)
+  let node = config
+  for (const key of path) {
+    const next = node[key]
+    node[key] = typeof next === "object" && next !== null ? next : {}
+    node = node[key] as Record<string, unknown>
+  }
+  node[field] = value
+  return config
+}
+
+const MATRIX = (["project", "user"] as const).flatMap((layer) =>
+  LOCATIONS.flatMap(([label, path, field]) =>
+    VALUES[field].map(([kind, value]) => ({
+      name: `${kind} at the ${label} in the ${layer} layer`,
+      layer,
+      config: withValue(path, field, value),
+      issuePath: [...path, field].join("."),
+      // The loader folds the legacy [senpi] block into [native] (with its own deprecation warning), so either spelling names the field.
+      issuePaths: [[...path, field].join("."), [...path, field].join(".").replace("[senpi]", "[native]")],
+    })),
+  ),
+)
+
+function writeUserOmoJson(home: string, config: Record<string, unknown>): void {
+  mkdirSync(join(home, ".omo"), { recursive: true })
+  writeFileSync(join(home, ".omo", "omo.jsonc"), `${JSON.stringify(config)}\n`)
+}
+
 // Configs that must keep spawning: the legacy reasoning suffixes the loader still reads, catalog names a Senpi scope
-// defines, another harness's block, and a profile that is not active.
+// defines, another harness's block, and a requested profile that does not exist (the loader keeps the base config).
 const STILL_SPAWNS: readonly (readonly [label: string, config: Record<string, unknown>, launched: string])[] = [
   ["the legacy 'model (high)' suffix", { categories: { quick: { model: "acme/model-a (high)" } } }, "acme/model-a"],
   ["the legacy 'model high' suffix", { categories: { quick: { model: "acme/model-a high" } } }, "acme/model-a"],
   ["a catalog name defined in [native]", { "[native]": { models: { fast: { model: "acme-b/model-b" } } }, categories: { quick: { model: "fast" } } }, "acme-b/model-b"],
   ["a catalog name defined in the active profile", { profiles: { p: { models: { fast: { model: "acme-b/model-b" } }, categories: { quick: { model: "fast" } } } } }, "acme-b/model-b"],
   ["a bad field in the [codex] block", { ...BASE, "[codex]": { agents: { explorer: { model: 5 } } } }, "acme/model-a"],
-  ["a bad field in a profile that is not active", { ...BASE, profiles: { q: { categories: { quick: { model: 42 } } } } }, "acme/model-a"],
 ]
 
-describe("task engine routing fields across the Senpi view's scopes (#11355)", () => {
-  test.each(IN_PROFILE)("#given %s with that profile active #when a child is planned #then the spawn fails at that field and no child launches", async (_label, config, issuePath) => {
+describe("task engine routing locations (#11355)", () => {
+  test.each(MATRIX.map((row) => [row.name, row] as const))("#given %s next to valid keys #when a child is planned with profile p active #then the spawn fails at that field and no child launches", async (_name, row) => {
     // given
     const cwd = tempProject()
-    writeOmoJson(cwd, `${JSON.stringify(config)}\n`)
+    const home = tempProject()
+    if (row.layer === "user") {
+      writeUserOmoJson(home, row.config)
+      writeOmoJson(cwd, `${JSON.stringify(BASE)}\n`)
+    } else {
+      writeOmoJson(cwd, `${JSON.stringify(row.config)}\n`)
+    }
     const launched: string[] = []
-    const engine = composeCapturing(cwd, launched, { OMO_PROFILE: "p" })
+    const engine = composeCapturing(cwd, launched, { HOME: home, OMO_PROFILE: "p" })
 
     // when
     const result = await spawnQuick(engine)
 
     // then
-    if (result.kind !== "plan_unresolved") throw new Error(`expected a config error at ${issuePath}, got ${result.kind} on ${launched.join(",")}`)
+    if (result.kind !== "plan_unresolved") throw new Error(`expected a config error at ${row.issuePath}, got ${result.kind} on ${launched.join(",")}`)
     expect(result.error.code).toBe("config_invalid")
-    expect(result.error.message).toContain(issuePath)
+    expect(row.issuePaths.some((path) => result.error.message.includes(path))).toBe(true)
     expect(launched).toEqual([])
   })
 
@@ -231,7 +281,7 @@ describe("task engine routing fields across the Senpi view's scopes (#11355)", (
     const cwd = tempProject()
     writeOmoJson(cwd, `${JSON.stringify(config)}\n`)
     const launched: string[] = []
-    const engine = composeCapturing(cwd, launched, { OMO_PROFILE: "p" })
+    const engine = composeCapturing(cwd, launched, { HOME: tempProject(), OMO_PROFILE: "p" })
 
     // when
     const result = await spawnQuick(engine)
@@ -239,6 +289,21 @@ describe("task engine routing fields across the Senpi view's scopes (#11355)", (
     // then
     if (result.kind !== "started") throw new Error(`expected a spawn, got ${result.kind}: ${result.kind === "plan_unresolved" ? result.error.message : ""}`)
     expect(launched).toEqual([model])
+  })
+
+  test("#given a requested profile that does not exist #when a child is planned #then it spawns on the base config as before", async () => {
+    // given
+    const cwd = tempProject()
+    writeOmoJson(cwd, `${JSON.stringify(BASE)}\n`)
+    const launched: string[] = []
+    const engine = composeCapturing(cwd, launched, { HOME: tempProject(), OMO_PROFILE: "missing" })
+
+    // when
+    const result = await spawnQuick(engine)
+
+    // then
+    expect(result.kind).toBe("started")
+    expect(launched).toEqual(["acme/model-a"])
   })
 })
 
