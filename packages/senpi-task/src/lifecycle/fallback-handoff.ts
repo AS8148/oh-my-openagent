@@ -38,7 +38,7 @@ export type FallbackRung = {
  * launch that never happens never leaves the record naming a model nothing ran on.
  */
 export function handOffToNextRung(record: TaskRecord, rung: FallbackRung): TaskRecord {
-  const { pid: closingPid, runner_kind: _closedRunner, host_session: closingSession, provisional_exit: _exit, ...rest } = record
+  const { pid: closingPid, runner_kind: _closedRunner, host_session: closingSession, provisional_exit: _exit, model_failure: _consumed, ...rest } = record
   const runEpoch = nextRunEpoch(record)
   const closing = {
     ...(closingPid === undefined ? {} : { pid: closingPid }),

@@ -17,8 +17,14 @@ export function modelFailure(event: ManagedChildEvent, record: TaskRecord): Mode
   const diagnostic = Reflect.get(message, "providerDiagnostic")
   const details = typeof diagnostic === "object" && diagnostic !== null ? diagnostic : undefined
   const category = details === undefined ? undefined : stringField(details, "category")
-  const limit = usageLimitScope(reason) ?? (category === "quota" || category === "rate_limit" ? "account" : undefined)
-  const resetsAt = details === undefined ? undefined : stringField(details, "resetsAt")
+  const limit = usageLimitScope(reason) ?? (category === "quota" ? "account" : undefined)
+  // senpi-ai 2026.10.25-2 (the pinned engine) emits epoch milliseconds, not ISO text.
+  // Older engines have no structured reset; never infer an instant from their prose.
+  const reset = details === undefined ? undefined : Reflect.get(details, "resetsAt")
+  const resetsAt = (category === "quota" || category === "rate_limit")
+    && typeof reset === "number" && Number.isInteger(reset)
+    && reset > 946_684_800_000 && reset < 4_102_444_800_000
+    ? new Date(reset).toISOString() : undefined
   const provider = stringField(message, "provider")
   const model = stringField(message, "model")
   return {
@@ -31,7 +37,8 @@ export function modelFailure(event: ManagedChildEvent, record: TaskRecord): Mode
 
 export function runtimeFallbackNotice(record: TaskRecord, reason: string, limit?: "model" | "account",
   from = record.effective_model?.display ?? record.resolved_model?.display ?? record.model): ModelFallbackRecord {
-  const failure = record.model_failure?.from === from ? record.model_failure : undefined
+  const failure = record.model_failure?.from === from && record.model_failure.reason === reason
+    ? record.model_failure : undefined
   return {
     from,
     reason,

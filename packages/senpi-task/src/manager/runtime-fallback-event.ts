@@ -54,8 +54,14 @@ export function applyModelEvent(
     case "message_end": {
       const record = resolved.load(taskId)
       if (record == null) return
+      const message = event.message
+      if (typeof message !== "object" || message === null || Reflect.get(message, "role") !== "assistant") return
       const failure = modelFailure(event, record)
       if (failure !== undefined) resolved.replace({ ...record, model_failure: failure })
+      else if (record.model_failure !== undefined) {
+        const { model_failure: _cleared, ...rest } = record
+        resolved.replace(rest)
+      }
       return
     }
     case "retry_fallback_applied":
@@ -88,10 +94,13 @@ function applyFallbackApplied(
   const limit = readEventString(event, "limit")
   const from = readEventString(event, "from")
   const origin = from === undefined ? undefined : parseModelSelector(from, resolvedModel.source)?.display ?? from
-  const notice = runtimeFallbackNotice(record, readEventString(event, "reason") ?? "provider error",
+  const failure = record.model_failure?.from === (origin ?? record.effective_model?.display ?? record.model)
+    ? record.model_failure : undefined
+  const notice = runtimeFallbackNotice(record, failure?.reason ?? readEventString(event, "reason") ?? "provider error",
     limit === "model" || limit === "account" ? limit : undefined, origin)
+  const { model_failure: _consumed, ...rest } = record
   store.replace({
-    ...record,
+    ...rest,
     model: resolvedModel.display,
     resolved_model: resolvedModel,
     effective_model: toEffectiveRecord(resolvedModel, "fallback"),

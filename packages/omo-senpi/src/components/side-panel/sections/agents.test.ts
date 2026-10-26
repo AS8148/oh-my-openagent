@@ -29,7 +29,7 @@ describe("buildAgentRows", () => {
     const card = texts(buildAgentCardRows(projected, 0)).join("\n")
     for (const rendered of [rows, card]) {
       expect(rendered).toContain("openai/actual")
-      expect(rendered).toContain("fell back from anthropic/limited: limit, resets 2026-10-21T00:00:00Z")
+      expect(rendered).toContain("fell back from anthropic/limited: quota; resets 2026-10-21T00:00:00Z")
     }
   })
   test("#given no children #when built #then the section stays empty", () => {

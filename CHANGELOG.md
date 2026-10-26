@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Each delegated child shows the model it actually used and why it fell back.** Task status, `/tasks`, and the Agents side panel name the actual provider and model. A child that moves off a limited provider says where it fell back from and shows the provider's reset time when available. Categories keep their own model choices. ([#10720](https://github.com/code-yeongyu/oh-my-openagent/pull/10720))
-
 ## [5.1.48] - 2026-10-25
 
 **OmO Native stops waiting on a stalled turn-end subscriber after two seconds.** Memory recovery remains retryable without treating the cancelled wait as a failed reflection run, and stall diagnostics identify the component and hook instead of only `omo.js`. Thanks to @floweredao for the report. ([#11254](https://github.com/code-yeongyu/oh-my-openagent/pull/11254), Part of [#11249](https://github.com/code-yeongyu/oh-my-openagent/issues/11249)) ([#11280](https://github.com/code-yeongyu/oh-my-openagent/pull/11280))

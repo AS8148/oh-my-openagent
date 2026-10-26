@@ -14,7 +14,7 @@ describe("effective model surfaces (F12)", () => {
     })
     const row = formatTaskRow(record)
     expect(row).toContain("openai/actual")
-    expect(row).toContain("fell back from anthropic/limited: limit, resets 2026-10-21T00:00:00Z")
+    expect(row).toContain("fell back from anthropic/limited: weekly limit; resets 2026-10-21T00:00:00Z")
   })
   it("#given a child switched by an operator #when /tasks renders #then the row names the live model with the operator mark", () => {
     const record = taskRecord({

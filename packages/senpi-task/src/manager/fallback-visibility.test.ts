@@ -6,11 +6,12 @@ import { taskOutputModelText } from "../tools/output/renderers"
 import { parseTaskRecord } from "../store/record-parse"
 import { applyModelEvent } from "./runtime-fallback-event"
 import type { TaskRecord } from "../state"
+import pinnedFailure from "./__fixtures__/usage-limit-pinned-engine.json"
 
 describe("child fallback provenance", () => {
   test.each([
     { reason: "transient", expected: "fell back from vendor/primary: transient" },
-    { reason: "billing", limit: "model", expected: "fell back from vendor/primary: limit" },
+    { reason: "billing", limit: "model", expected: "fell back from vendor/primary: billing" },
   ])("fallback without a reset reports only observed facts: $reason", ({ reason, limit, expected }) => {
     let record = makeRecord({ model: "vendor/primary" })
     const store = { load: () => record, replace: (next: TaskRecord) => { record = next } }
@@ -24,23 +25,19 @@ describe("child fallback provenance", () => {
     let record: TaskRecord = makeRecord({
       task_id: "st_1234abcd",
       status: "running",
-      model: "anthropic/limited",
-      resolved_model: { provider: "anthropic", model_id: "limited", display: "anthropic/limited", source: "category" },
+      model: "chatgpt-subscription/gpt-6-astra",
+      resolved_model: { provider: "chatgpt-subscription", model_id: "gpt-6-astra", display: "chatgpt-subscription/gpt-6-astra", source: "category" },
     })
     const store = { load: () => record, replace: (next: TaskRecord) => { record = next } }
     // when
     applyModelEvent(store, record.task_id, {
       type: "message_end",
-      message: {
-        role: "assistant", stopReason: "error", provider: "anthropic", model: "limited",
-        errorMessage: "Weekly limit exhausted",
-        providerDiagnostic: { category: "quota", resetsAt: "2026-10-21T00:00:00Z" },
-      },
+      message: pinnedFailure,
     })
     const switched = { type: "model_changed", model: { provider: "openai", id: "actual" }, source: "fallback" }
     applyModelEvent(store, record.task_id, switched)
     const fallback = {
-      type: "retry_fallback_applied", from: "anthropic/limited", to: "openai/actual",
+      type: "retry_fallback_applied", from: "chatgpt-subscription/gpt-6-astra", to: "openai/actual",
       reason: "billing", limit: "account",
     }
     applyModelEvent(store, record.task_id, fallback)
@@ -49,9 +46,10 @@ describe("child fallback provenance", () => {
     // then
     expect(persisted).toMatchObject({
       effective_model: { provider: "openai", model_id: "actual" },
-      model_fallback: { from: "anthropic/limited", reason: "Weekly limit exhausted", limit: "account", resets_at: "2026-10-21T00:00:00Z" },
+      model_fallback: { from: "chatgpt-subscription/gpt-6-astra", reason: pinnedFailure.errorMessage, limit: "account", resets_at: "2026-10-27T00:00:00.000Z" },
     })
     expect(taskOutputModelText(snapshot)).toContain("openai/actual")
-    expect(taskOutputModelText(snapshot)).toContain("fell back from anthropic/limited: limit, resets 2026-10-21T00:00:00Z")
+    expect(taskOutputModelText(snapshot)).toContain(pinnedFailure.errorMessage)
+    expect(taskOutputModelText(snapshot)).toContain("resets 2026-10-27T00:00:00.000Z")
   })
 })

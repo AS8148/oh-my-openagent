@@ -10,8 +10,6 @@ export type ModelFallbackRecord = {
 
 export function formatModelFallback(fallback: ModelFallbackRecord | undefined): string | undefined {
   if (fallback === undefined) return undefined
-  const reason = fallback.limit === undefined
-    ? fallback.reason
-    : `limit${fallback.resets_at === undefined ? "" : `, resets ${fallback.resets_at}`}`
+  const reason = `${fallback.reason}${fallback.resets_at === undefined ? "" : `; resets ${fallback.resets_at}`}`
   return normalizeRendererText(`fell back from ${fallback.from}: ${reason}`)
 }
