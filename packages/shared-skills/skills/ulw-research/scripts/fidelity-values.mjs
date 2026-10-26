@@ -12,8 +12,8 @@ import { join, resolve, sep } from "node:path"
 import { sha256Of } from "./cli-support.mjs"
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
-import { originalProblem } from "./fidelity-originals.mjs"
-import { snapshotsReadable } from "./fidelity-snapshot-readability.mjs"
+import { convertedHalfFits, originalProblem } from "./fidelity-originals.mjs"
+import { unreadableSnapshots } from "./fidelity-snapshot-readability.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
 import { parseNumeral } from "./numerals.mjs"
@@ -52,6 +52,7 @@ function factProblem(row, shown, attrs = {}, rows = new Map()) {
 	if (original) return original
 	if (attrs["data-unit"] !== undefined && unitKey(attrs["data-unit"]) !== unitKey(row.unit)) return ["unit_mismatch", `data-unit "${attrs["data-unit"]}" but ${row.fact_id} is in "${row.unit}"`]
 	if (attrs.value !== undefined && !sameValue(attrs.value, row.value)) return ["value_mismatch", `value="${attrs.value}" but ${row.fact_id} is ${row.value}`]
+	if (convertedHalfFits(row, shown)) return null
 	const text = normalizeText(shown)
 	const forms = [...(["converted", "derived"].includes(row.kind) ? [] : [row.raw, row.render]), row.value, row.unit && `${row.value} ${row.unit}`].filter(Boolean).map(normalizeText)
 	if (forms.some((form) => text === form || (text.endsWith(` ${form}`) && !/\d/.test(text.slice(0, -form.length))))) return null
@@ -176,7 +177,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		const groups = new Set(ctx.util.descendants(tr).map((node) => rows.get(node.attrs["data-fact"])?.observation_id).filter(Boolean))
 		if (groups.size > 1) flag("join_integrity_fail", tr, `one table row joins observations ${[...groups].join(", ")}`)
 	}
-	const meta = snapshotsReadable(ctx, rows, cited, sourcesDir, out) ? sourceChecks(ctx, rows, cited, sourcesDir, flag) : new Map()
+	const meta = sourceChecks(ctx, rows, cited, sourcesDir, flag, unreadableSnapshots(ctx, rows, cited, sourcesDir, out))
 	claimChecks(ctx, rows, (row) => provenance(sourcesDir, meta, row), flag)
 	const charts = chartFigures(ctx)
 	for (const { node, scope } of ctx.elements) {
@@ -218,11 +219,12 @@ function provenance(sourcesDir, meta, row) {
 	return path.startsWith(`${dir}${sep}`) && existsSync(path) ? meta.get(row.source_id)?.kind : undefined
 }
 
-function sourceChecks(ctx, rows, cited, sourcesDir, flag) {
+function sourceChecks(ctx, rows, cited, sourcesDir, flag, unreadable = new Set()) {
 	const ids = new Set([...cited.keys()].map((id) => rows.get(id)?.source_id).filter(Boolean))
 	for (const match of proseText(ctx.body).matchAll(/\[S(\d+)\]/g)) ids.add(`S${match[1]}`)
 	const meta = new Map()
 	for (const id of sourcesDir ? ids : []) {
+		if (unreadable.has(id)) continue
 		const [metaPath, textPath] = [join(sourcesDir, id, "meta.json"), join(sourcesDir, id, "text.txt")]
 		if (!existsSync(metaPath) || !existsSync(textPath)) continue
 		meta.set(id, JSON.parse(readFileSync(metaPath, "utf8")))

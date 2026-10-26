@@ -1,5 +1,6 @@
 // placeholder.mjs - the fact pointer grammar of the fill step and its render helpers.
 // Value pointers: {{F12:label}}, {{F12:label:value}}, {{F12:label:unit}}, {{F12:label:q}}.
+// Claim prefixes from CLAIM_KINDS (V, D, A) precede any one pointer: {{D:F12:label:value}}, {{V:Q7:label:lead=18}}.
 // Quote pointers: {{Q7:label}}, {{Q7:label:lead=18}}, {{Q7:label:from="x":to="y"}} (anchors are
 // JSON strings, so they may hold a colon or an escaped quote). Labels are compared exactly by the
 // caller; this module never guesses an id. Pure functions; node: builtins only.
@@ -163,10 +164,12 @@ export function escapeHtml(text) {
 /** The elements the renderers below emit as fact spans; recognizers build their patterns from this. */
 export const FACT_ELEMENT_TAGS = Object.freeze(["data", "q", "blockquote"])
 
-export function renderValueHtml(row, text, claimKind = null) {
+/** `mode` "value" marks a bare value whose unit verify checks beside it; `claimKind` is the claim mark. */
+export function renderValueHtml(row, text, { mode = "full", claimKind = null } = {}) {
 	const unit = row.unit === null ? "" : ` data-unit="${escapeHtml(row.unit)}"`
+	const marker = mode === "value" ? ' data-fact-mode="value"' : ""
 	const mark = claimKind === null ? "" : ` data-claim-kind="${escapeHtml(claimKind)}"`
-	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit}${mark} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
+	return `<data class="fact" value="${escapeHtml(row.value)}" data-fact="${row.fact_id}"${unit}${marker}${mark} data-lineage="${LINEAGE[row.kind]}">${escapeHtml(text)}</data>`
 }
 
 export function renderQuote(row, selector, text, format, claimKind = null) {
