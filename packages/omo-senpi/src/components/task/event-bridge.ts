@@ -79,6 +79,9 @@ export function wireEventBridge(
     // A child session that has not reported its own id yet has nothing to reconcile: its records
     // belong to the parent. The role comes from the session (shared daemon), else from the env.
     if (readSessionRole(pi) !== undefined && sessionId === undefined) {
+      // Nothing to reconcile here, but an earlier start's reconcile must not keep running alongside it.
+      startup?.abort()
+      startup = undefined
       reconciledGate = Promise.resolve(true)
       return
     }
@@ -88,12 +91,19 @@ export function wireEventBridge(
     const active = () => !controller.signal.aborted
     const reconciled = Promise.withResolvers<boolean>()
     reconciledGate = reconciled.promise
-    if (sessionId !== undefined) await runPause?.restore(sessionId)
-    if (!active()) {
-      reconciled.resolve(false)
-      return
+    try {
+      if (sessionId !== undefined) await runPause?.restore(sessionId)
+      if (!active()) {
+        reconciled.resolve(false)
+        return
+      }
+      transitions.onSessionStart(sessionId)
+    } catch (error) {
+      // A failed restore or transition still settles the gate, so DAG and workpool attach are never
+      // stranded behind it; they proceed as they would without the reconcile (#11335 delta review).
+      reconciled.resolve(active())
+      throw error
     }
-    transitions.onSessionStart(sessionId)
     recovered = recoverSession(sessionId, controller.signal, () => reconciled.resolve(active())).catch((error: unknown) => {
       ctx.logger.warn("omo-senpi task session recovery failed", { error: String(error) })
       // A failed reconcile must not strand DAG recovery or the workpools: they proceed as before.

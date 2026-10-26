@@ -149,3 +149,35 @@ test("workpool attach waits for the session-start reconcile", async () => {
   expect(await bridge.afterSessionStartReconcile()).toBe(true)
   expect(workpoolAttaches).toEqual(["parent-2"])
 })
+
+test("a session start whose pause restore throws still settles the reconcile gate (#11335 delta review)", async () => {
+  const store = tempStore()
+  const pi = new FakeExtensionAPI()
+  pi.rpc = { emit: (name, data) => { pi.rpcEvents.push({ name, data }) } }
+  const cwd = store.stateDir
+  const engine = composeTaskEngine({ pi, cwd, omoConfig: loadOmoConfig({ cwd }).config, sharedParentTools: () => [] })
+  try {
+    const bridge = wireEventBridge(pi, {
+      logger: { info() {}, warn() {}, error() {} }, config: { getFlag: () => false }, getCapturedTools: () => [],
+    }, engine, { scheduleSync() {}, syncNow() {}, observeRecord() {}, dispose() {} },
+    createSessionTransitionBridge({ runtime: engine.runtime, notifier: engine.notifier }), {
+      reconcileTeamMailbox: async () => {},
+      leadPollers: { tick: async () => {}, shutdown() {} },
+      resumptionChannels: { emitSessionStart: async () => {}, emitShutdown: async () => {} },
+      runPause: {
+        restore: async () => { throw new Error("invalid pause registry") },
+        reconciled: async () => {},
+        changed: async () => {},
+      } as unknown as NonNullable<Parameters<typeof wireEventBridge>[5]["runPause"]>,
+    })
+    const start = pi.dispatch("session_start", {}, { sessionManager: { getSessionId: () => "parent-3" } })
+    await start.catch(() => undefined)
+    const settled = await Promise.race([
+      bridge.afterSessionStartReconcile().then(() => "settled"),
+      new Promise<string>((resolve) => setImmediate(() => resolve("pending"))),
+    ])
+    expect(settled).toBe("settled")
+  } finally {
+    engine.lifecycle.dispose?.()
+  }
+})
