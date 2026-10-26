@@ -46,10 +46,10 @@ const rootPem = pem(rootDer)
 const c4 = hex("30123010a0030201020201013000300030003000")
 const x = seq(seq(...rootPrefix))
 const short = pem(hex("3000"))
-const kept = { kind: "kept", certificates: [{ der: rootDer, index: 0 }], auxDropped: 0 } as const
+const kept = { kind: "kept", certificates: [{ der: rootDer, index: 0 }] } as const
 type Dropped = Extract<ReturnType<typeof readDefaultFileCandidates>, { readonly kind: "dropped" }>
-const dropped = (cause: Dropped["cause"], blockIndex = 1): Dropped => ({
-  kind: "dropped", cause, blockIndex, narrowing: cause === "ordinary-block-unparseable",
+const dropped = (cause: Dropped["cause"], blockIndex = 1, narrowing = false): Dropped => ({
+  kind: "dropped", cause, blockIndex, narrowing,
 })
 const fixtures = [
   { id: "c0", text: rootPem, expected: kept },
@@ -57,12 +57,12 @@ const fixtures = [
   { id: "c1b", text: short + rootPem, expected: dropped("ordinary-block-not-indexable", 0) },
   { id: "c2", text: rootPem + pem(Buffer.concat([rootDer, hex("00")])), expected: dropped("ordinary-block-not-indexable") },
   { id: "c3", text: rootPem + pem(hex("30143012a00302010202010130003000300030023100")), expected: dropped("ordinary-block-not-indexable") },
-  { id: "c4", text: rootPem + pem(c4), expected: dropped("ordinary-block-unparseable") },
-  { id: "c4s", text: pem(x) + rootPem, expected: dropped("ordinary-block-unparseable", 0) },
-  { id: "c4t", text: rootPem + pem(x), expected: dropped("ordinary-block-unparseable") },
+  { id: "c4", text: rootPem + pem(c4), expected: dropped("ordinary-block-unparseable", 1, true) },
+  { id: "c4s", text: pem(x) + rootPem, expected: dropped("ordinary-block-unparseable", 0, true) },
+  { id: "c4t", text: rootPem + pem(x), expected: dropped("ordinary-block-unparseable", 1, true) },
   { id: "c5", text: rootPem + "plain trailing text\n", expected: kept },
   { id: "c6", text: rootPem + "-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n", expected: dropped("pem-read-error") },
-  { id: "c7", text: rootPem + pem(hex("3000"), "TRUSTED CERTIFICATE"), expected: dropped("aux-block-undecodable") },
+  { id: "c7", text: rootPem + pem(hex("3000"), "TRUSTED CERTIFICATE"), expected: dropped("aux-block-unverified", 1, true) },
   { id: "c8", text: rootPem + pem(hex("3000"), "SOMETHING ELSE"), expected: kept },
   { id: "c9", text: rootPem + "-----BEGIN CERTIFICATE-----\nMAA=\n", expected: dropped("pem-read-error") },
 ]
@@ -79,14 +79,14 @@ describe("OpenSSL default-file whole-file transaction", () => {
     // Given / When: an input containing no PEM blocks.
     const result = readDefaultFileCandidates(text, () => false)
     // Then: absence is not malformed.
-    expect(result).toEqual({ kind: "kept", certificates: [], auxDropped: 0 })
+    expect(result).toEqual({ kind: "kept", certificates: [] })
   })
   test("excludes bundled bytes before indexing when the callback identifies them", () => {
     // Given: the only ordinary block is identified as bundled.
     // When: even non-indexable bytes match the caller's bundled identity.
     const result = readDefaultFileCandidates(short, (bytes) => bytes.equals(hex("3000")))
     // Then: the block never enters the lazy-set mirror.
-    expect(result).toEqual({ kind: "kept", certificates: [], auxDropped: 0 })
+    expect(result).toEqual({ kind: "kept", certificates: [] })
   })
   test("preserves block indices when unknown decoded blocks precede a root", () => {
     // Given / When: a skipped block precedes an ordinary legacy-label certificate.
@@ -127,14 +127,14 @@ test.each(["CERTIFICATE", "X509 CERTIFICATE", "TRUSTED CERTIFICATE", "X509 CRL"]
   },
 )
 test.each([
-  ["unknown bad base64", "-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n", "pem-read-error"],
-  ["malformed headers", "-----BEGIN OTHER-----\nComment: synthetic\nMAA=\n-----END OTHER-----\n", "pem-read-error"],
-  ["invalid CRL", pem(hex("3000"), "X509 CRL"), "aux-block-undecodable"],
-] as const)("drops the whole file when given %s", (_name, text, cause) => {
+  ["unknown bad base64", "-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n", "pem-read-error", false],
+  ["malformed headers", "-----BEGIN OTHER-----\nComment: synthetic\nMAA=\n-----END OTHER-----\n", "pem-read-error", false],
+  ["invalid CRL", pem(hex("3000"), "X509 CRL"), "aux-block-unverified", true],
+] as const)("drops the whole file when given %s", (_name, text, cause, narrowing) => {
   // Given / When: an error after a valid root, including in an otherwise skipped type.
   const result = readDefaultFileCandidates(rootPem + text, () => false)
   // Then: decoded unknown blocks alone may be skipped.
-  expect(result).toEqual(dropped(cause))
+  expect(result).toEqual(dropped(cause, 1, narrowing))
 })
 test.each([
   ["blank-separated base64 header", "-----BEGIN CERTIFICATE-----\nMAA=\n\nMAA=\n-----END CERTIFICATE-----\n", "recognized-block-has-headers"],

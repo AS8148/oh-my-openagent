@@ -1,10 +1,10 @@
 import { X509Certificate } from "node:crypto"
 
 type Candidate = { readonly der: Buffer; readonly index: number }
-type DropCause = "pem-read-error" | "recognized-block-has-headers" | "aux-block-undecodable"
+type DropCause = "pem-read-error" | "recognized-block-has-headers" | "aux-block-unverified"
   | "ordinary-block-not-indexable" | "ordinary-block-unparseable"
 type DefaultFileCandidates =
-  | { readonly kind: "kept"; readonly certificates: readonly Candidate[]; readonly auxDropped: number }
+  | { readonly kind: "kept"; readonly certificates: readonly Candidate[] }
   | { readonly kind: "dropped"; readonly cause: DropCause; readonly blockIndex: number; readonly narrowing: boolean }
 type Element = { readonly tag: number; readonly bytes: Buffer }
 
@@ -125,7 +125,8 @@ export function readDefaultFileCandidates(
   const certificates: Candidate[] = []
   let blockIndex = 0
   const drop = (cause: DropCause, index = blockIndex): DefaultFileCandidates => ({
-    kind: "dropped", cause, blockIndex: index, narrowing: cause === "ordinary-block-unparseable",
+    kind: "dropped", cause, blockIndex: index,
+    narrowing: cause === "ordinary-block-unparseable" || cause === "aux-block-unverified",
   })
   for (let line = 0; line < lines.length; line++) {
     const begin = /^-----BEGIN (.+)-----[ \t]*$/.exec(lines[line] ?? "")
@@ -159,9 +160,9 @@ export function readDefaultFileCandidates(
       case "TRUSTED CERTIFICATE":
       case "X509 CRL":
         if (headers) return drop("recognized-block-has-headers")
-        // Bun/node:crypto exposes no exact d2i_X509_AUX or d2i_X509_CRL decoder. Until it does,
-        // conservatively drop the file, even for valid auxiliary blocks. Never grant from them.
-        return drop("aux-block-undecodable")
+        // No exact d2i_X509_AUX / d2i_X509_CRL decoder is exposed, so a decodable block (which Bun keeps the
+        // file for) cannot be told from cause (c). Drop the file and mark it a narrowing; never grant from it.
+        return drop("aux-block-unverified")
       default: break // Open PEM labels: skip only after their complete PEM decode succeeded.
     }
     blockIndex++
@@ -178,5 +179,5 @@ export function readDefaultFileCandidates(
       return drop("ordinary-block-unparseable", index)
     }
   }
-  return { kind: "kept", certificates, auxDropped: 0 }
+  return { kind: "kept", certificates }
 }
