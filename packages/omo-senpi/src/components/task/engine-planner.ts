@@ -15,8 +15,9 @@ import type { TaskRuntimeContext } from "./runtime-context"
 export type SpawnOmoConfig = {
   readonly config: OmoConfig
   readonly diagnostics: readonly SenpiConfigDiagnostic[]
-  // Each layer as the loader kept it, with its file. Absent for the startup snapshot.
+  // Each layer as the loader kept it, with its file, and the profile the view resolved. Absent for the startup snapshot.
   readonly layers?: readonly { readonly config: unknown; readonly source: { readonly path: string } }[]
+  readonly profile?: string
 }
 
 export type EnginePlannerInput = {
@@ -32,11 +33,11 @@ export type EnginePlannerInput = {
 // A layer that cannot be parsed or read, and a model catalog cycle, leave routing undefined, so they always block.
 // A validation error or a dropped leaf blocks only when it is in a routing field; anything else (task settings,
 // memory, ...) is dropped and warned about by the loader, exactly as before (#11355).
-function blocksRouting(diagnostic: SenpiConfigDiagnostic): boolean {
+function blocksRouting(diagnostic: SenpiConfigDiagnostic, profile: string | undefined): boolean {
   if (diagnostic.kind === "parse" || diagnostic.kind === "read" || diagnostic.kind === "model_catalog_cycle") return true
   if (diagnostic.kind !== "validation" && diagnostic.kind !== "invalid-value") return false
   const paths = diagnostic.issuePaths ?? []
-  return paths.length === 0 || paths.some(isRoutingPath)
+  return paths.length === 0 || paths.some((path) => isRoutingPath(path, profile))
 }
 
 /** The path with the home directory shown as `~`, on POSIX and Windows separators alike. */
@@ -59,13 +60,23 @@ function configError(diagnostic: SenpiConfigDiagnostic): PlanConfigError {
   }
 }
 
+// The profile this session asked for. When the loader dropped every value of it (each one invalid), it reports the
+// profile as missing and routes on the base config, so the requested name is read from that diagnostic: the dropped
+// values still belong to the profile the user activated.
+function requestedProfile(loaded: SpawnOmoConfig): string | undefined {
+  if (loaded.profile !== undefined) return loaded.profile
+  const missing = loaded.diagnostics.find((diagnostic) => diagnostic.kind === "profile")
+  return missing?.path.startsWith("profiles.") === true ? missing.path.slice("profiles.".length) : undefined
+}
+
 function spawnConfigError(loaded: SpawnOmoConfig): PlanConfigError | undefined {
-  const blocking = loaded.diagnostics.find(blocksRouting)
+  const profile = requestedProfile(loaded)
+  const blocking = loaded.diagnostics.find((diagnostic) => blocksRouting(diagnostic, profile))
   if (blocking !== undefined) return configError(blocking)
   const layers = loaded.layers ?? []
-  const names = catalogNames(layers.map((layer) => layer.config))
+  const names = catalogNames(layers.map((layer) => layer.config), loaded.config.models, profile)
   for (const layer of layers) {
-    const issues = routingIssues(layer.config, names)
+    const issues = routingIssues(layer.config, names, profile)
     if (issues.length > 0) return { kind: "validation", path: displayConfigPath(layer.source.path), issue_paths: issues }
   }
   return undefined
