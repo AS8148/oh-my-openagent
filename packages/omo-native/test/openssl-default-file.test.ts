@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:https"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import { readDefaultFileCandidates } from "../openssl-default-file"
 
 // A private PKI per run, independent of all machine trust stores and fixed fixtures.
@@ -46,6 +47,8 @@ const rootPem = pem(rootDer)
 const c4 = hex("30123010a0030201020201013000300030003000")
 const x = seq(seq(...rootPrefix))
 const short = pem(hex("3000"))
+// The importer takes raw file bytes; fixtures are written to disk with the same UTF-8 encoding.
+const read = (text: string, isBundledRoot: (der: Buffer) => boolean) => readDefaultFileCandidates(Buffer.from(text, "utf8"), isBundledRoot)
 const kept = { kind: "kept", certificates: [{ der: rootDer, index: 0 }] } as const
 type Dropped = Extract<ReturnType<typeof readDefaultFileCandidates>, { readonly kind: "dropped" }>
 const dropped = (cause: Dropped["cause"], blockIndex = 1, narrowing = false): Dropped => ({
@@ -77,6 +80,8 @@ const fixtures = [
   { id: "crlf", text: rootPem.replaceAll("\n", "\r\n"), expected: kept },
   { id: "bad-padding", text: rootPem + pem(hex("3000"), "OTHER").replace("MAA=", "MAA"), expected: dropped("pem-read-error") },
   { id: "blank-body", text: rootPem.replace("\n", "\n\n"), expected: dropped("pem-noncanonical", 0, true) },
+  { id: "bom", text: `\uFEFF${rootPem}`, expected: dropped("pem-noncanonical", 0, true) },
+  { id: "space-only-header-line", text: rootPem.replace(/^(-----BEGIN CERTIFICATE-----\n)([A-Za-z0-9+/=]+\n)/, "$1   \n$2\n"), expected: dropped("pem-noncanonical", 0, true) },
   { id: "mismatched-end", text: rootPem + "-----BEGIN OTHER-----\nMAA=\n-----END WRONG-----\n", expected: dropped("pem-noncanonical", 1, true) },
 ]
 
@@ -84,26 +89,26 @@ describe("OpenSSL default-file whole-file transaction", () => {
   test.each(fixtures)("returns the exact candidate transaction when given $id", ({ text, expected }) => {
     // Given: a design fixture with no bundled copy of R.
     // When: the complete file is selected.
-    const result = readDefaultFileCandidates(text, () => false)
+    const result = read(text, () => false)
     // Then: no valid prefix or sibling survives a whole-file failure.
     expect(result).toEqual(expected)
   })
   test.each(["", "only text\n"])("keeps an empty set when given no blocks: %s", (text) => {
     // Given / When: an input containing no PEM blocks.
-    const result = readDefaultFileCandidates(text, () => false)
+    const result = read(text, () => false)
     // Then: absence is not malformed.
     expect(result).toEqual({ kind: "kept", certificates: [] })
   })
   test("excludes bundled bytes before indexing when the callback identifies them", () => {
     // Given: the only ordinary block is identified as bundled.
     // When: even non-indexable bytes match the caller's bundled identity.
-    const result = readDefaultFileCandidates(short, (bytes) => bytes.equals(hex("3000")))
+    const result = read(short, (bytes) => bytes.equals(hex("3000")))
     // Then: the block never enters the lazy-set mirror.
     expect(result).toEqual({ kind: "kept", certificates: [] })
   })
   test("preserves block indices when unknown decoded blocks precede a root", () => {
     // Given / When: a skipped block precedes an ordinary legacy-label certificate.
-    const result = readDefaultFileCandidates(pem(hex("3000"), "OTHER") + pem(rootDer, "X509 CERTIFICATE"), () => false)
+    const result = read(pem(hex("3000"), "OTHER") + pem(rootDer, "X509 CERTIFICATE"), () => false)
     // Then: index is the file block index, not candidate position.
     expect(result).toEqual({ ...kept, certificates: [{ der: rootDer, index: 1 }] })
   })
@@ -130,7 +135,7 @@ const subjectCases = [
 test.each(subjectCases)("rejects the file as not indexable when given %s", (_name, bytes) => {
   // Given: a structurally invalid ordinary block after a good root.
   // When: the subject mirror reads the file.
-  const result = readDefaultFileCandidates(rootPem + pem(bytes), () => false)
+  const result = read(rootPem + pem(bytes), () => false)
   // Then: even full-parse failures must first be classified by indexability.
   expect(result).toEqual(dropped("ordinary-block-not-indexable"))
 })
@@ -140,7 +145,7 @@ test.each(headerLabels)(
   "rejects recognized headers when the block is %s", (type) => {
     // Given / When: PEM decoding succeeds but a recognized block has headers.
     const text = pem(rootDer, type).replace("-----\n", "-----\nComment: synthetic\n\n")
-    const result = readDefaultFileCandidates(text, () => false)
+    const result = read(text, () => false)
     // Then: headers invalidate the file independently of DER.
     expect(result).toEqual(dropped("recognized-block-has-headers", 0))
   },
@@ -152,7 +157,7 @@ const malformedCases = [
 ] as const
 test.each(malformedCases)("drops the whole file when given %s", (_name, text, cause, narrowing) => {
   // Given / When: an error after a valid root, including in an otherwise skipped type.
-  const result = readDefaultFileCandidates(rootPem + text, () => false)
+  const result = read(rootPem + text, () => false)
   // Then: decoded unknown blocks alone may be skipped.
   expect(result).toEqual(dropped(cause, 1, narrowing))
 })
@@ -162,13 +167,13 @@ const whitespaceCases = [
 ] as const
 test.each(whitespaceCases)("does not broaden PEM decoding when given %s", (_name, text, cause) => {
   // Given / When: framing that a whitespace-normalizing PEM regex would silently salvage.
-  const result = readDefaultFileCandidates(rootPem + text, () => false)
+  const result = read(rootPem + text, () => false)
   // Then: preserve PEM_read_bio's ASCII and header boundaries.
   expect(result).toEqual(dropped(cause, 1, cause === "pem-noncanonical"))
 })
 test("finishes PEM reading before indexing when a bad DER block precedes bad PEM", () => {
   // Given / When: the loader cannot finish its PEM transaction.
-  const result = readDefaultFileCandidates(short + "-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n", () => false)
+  const result = read(short + "-----BEGIN OTHER-----\n!!!!\n-----END OTHER-----\n", () => false)
   // Then: report the PEM failure, not a lazy-set check that Bun never reaches.
   expect(result).toEqual(dropped("pem-noncanonical", 1, true))
 })
@@ -227,7 +232,7 @@ test.skipIf(process.platform === "win32")("never imports R beyond real Bun's acc
       { id: "no-block-text", text: "only text\n" },
       { id: "empty", text: "", expected: { kind: "kept" } }]) {
       const file = join(dir, `${fixture.id}.pem`)
-      writeFileSync(file, fixture.text)
+      writeFileSync(file, Buffer.from(fixture.text, "utf8"))
       const home = mkdtempSync(join(dir, "oracle-home-"))
       const child = Bun.spawn([process.execPath, "-e", client, url], {
         env: { PATH: process.env.PATH, HOME: home, SSL_CERT_FILE: file, SSL_CERT_DIR: emptyDir },
@@ -243,7 +248,7 @@ test.skipIf(process.platform === "win32")("never imports R beyond real Bun's acc
       outcomes.set(fixture.id, requests)
       console.log(`oracle ${fixture.id}: ${requests.join("")}`)
       // Then: every importer candidate must be accepted by every lookup in the real oracle.
-      const imported = readDefaultFileCandidates(fixture.text, () => false)
+      const imported = read(fixture.text, () => false)
       switch (imported.kind) {
         case "kept":
           if (imported.certificates.length > 0) expect(requests).toEqual(["1", "1", "1", "1", "1"])
@@ -257,9 +262,12 @@ test.skipIf(process.platform === "win32")("never imports R beyond real Bun's acc
     expect(outcomes.get("empty")).toEqual(["0", "0", "0", "0", "0"])
     expect(outcomes.get("c0")).toEqual(["1", "1", "1", "1", "1"])
     expect(outcomes.get("c1")).toEqual(["0", "0", "0", "0", "0"])
-    expect(["c4s", "c4t"].some((id) => outcomes.get(id)?.every((value) => value === "0"))).toBe(true)
+    // Equal canonical subjects have no sort tie-breaker: exactly one permutation exposes R, never assumed which.
+    const exposed = ["c4s", "c4t"].filter((id) => outcomes.get(id)?.every((value) => value === "1"))
+    expect(exposed).toHaveLength(1)
     console.log(`oracle narrowings: ${narrowings.join(", ")}`)
-    expect(narrowings).toEqual(["c4", "c4t", "long-label", "mid-cr", "form-feed", "high-byte", "lowercase-label", "blank-body"])
+    expect([...narrowings].sort()).toEqual(["c4", ...exposed, "long-label", "mid-cr", "form-feed", "high-byte",
+      "lowercase-label", "blank-body", "space-only-header-line"].sort())
   } finally {
     const closed = once(server, "close", { signal: AbortSignal.timeout(10_000) })
     server.closeAllConnections()
@@ -267,3 +275,14 @@ test.skipIf(process.platform === "win32")("never imports R beyond real Bun's acc
     await closed
   }
 }, 240_000)
+
+test.skipIf(Bun.which("node") === null)("refuses to run outside Bun when loaded by Node", async () => {
+  // Given: Node's OpenSSL parser, which cause (e) must never rely on.
+  const module = pathToFileURL(join(import.meta.dir, "..", "openssl-default-file.ts")).href
+  const script = `import(${JSON.stringify(module)}).then((m) => { try { m.readDefaultFileCandidates(new Uint8Array(), () => false); console.log("returned") } catch (error) { console.log(error.name) } })`
+  // When: the module runs under node.
+  const child = Bun.spawn(["node", "-e", script], { env: { PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe", timeout: 30_000 })
+  const [status, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()])
+  // Then: it throws the typed guard instead of selecting anything.
+  expect({ status, stdout: stdout.trim() }).toEqual({ status: 0, stdout: "BunRequiredError" })
+})

@@ -17,7 +17,8 @@ class BunRequiredError extends Error {
 // A cursor is deliberately mutable: each read consumes exactly one definite, minimal TLV.
 class DerReader {
   private offset = 0
-  constructor(private readonly bytes: Buffer) {}
+  private readonly bytes: Buffer
+  constructor(bytes: Buffer) { this.bytes = bytes }
   get remaining(): number { return this.bytes.length - this.offset }
   private byte(): number {
     const value = this.bytes[this.offset++]
@@ -129,12 +130,14 @@ function isIndexable(der: Buffer): boolean {
  * (d) mirror-only rejections cannot be distinguished at runtime; their flag is still false.
  */
 export function readDefaultFileCandidates(
-  text: string,
+  bytes: Uint8Array,
   isBundledRoot: (der: Buffer) => boolean,
 ): DefaultFileCandidates {
   // Cause (e) is sound only when node:crypto uses Bun's BoringSSL, never Node's OpenSSL.
   if (process.versions.bun === undefined) throw new BunRequiredError()
-  const lines = text.split("\n").map((line) => line.replace(/\r$/, ""))
+  // Bun's loader reads raw bytes; latin1 maps each byte to one character, so a BOM or any non-ASCII byte
+  // reaches the canonical gate instead of being stripped by a text decoder.
+  const lines = Buffer.from(bytes).toString("latin1").split("\n").map((line) => line.replace(/\r$/, ""))
   const certificates: Candidate[] = []
   let blockIndex = 0
   const drop = (cause: DropCause, index = blockIndex): DefaultFileCandidates => ({
@@ -163,7 +166,9 @@ export function readDefaultFileCandidates(
     } else if (boundary?.[1] === "END" && boundary[2] === label) {
       label = undefined
       blockIndex++
-    } else if (current.includes("-----") || (line > headerEnd && !/^[A-Za-z0-9+/=]+$/.test(current))) {
+    } else if (current.includes("-----") || /^ +$/.test(current)
+      || (line > headerEnd && !/^[A-Za-z0-9+/=]+$/.test(current))) {
+      // A space-only line is a blank line to PEM_read_bio's right-strip but not to the header split below.
       return drop("pem-noncanonical")
     }
   }
