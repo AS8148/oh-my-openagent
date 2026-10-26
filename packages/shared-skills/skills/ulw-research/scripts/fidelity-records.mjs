@@ -15,7 +15,7 @@
 // fidelity record exists, the barrier refuses the unverified edition regardless of it, and the same
 // exemption is the only way a required record may be absent.
 
-import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs"
 import { join } from "node:path"
 
 import { CliError, readJsonFile, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
@@ -42,6 +42,7 @@ function meaningRequired({ sessionDir }) {
 }
 
 const subjectOf = (row) => row.renderedFrom ?? row.path ?? null
+const hashOf = (path) => (existsSync(path) ? sha256Of(readFileSync(path)) : null)
 
 /** One record per delivered edition: the file its row names with --verified-by, bound to that edition's bytes. */
 const perEdition = (sessionDir, delivered) =>
@@ -55,21 +56,34 @@ const perEditionAndSession = (sessionDir, delivered) => [
 	...(existsSync(join(sessionDir, FIDELITY_RECORD)) ? [sessionTarget(sessionDir, FIDELITY_RECORD)] : []),
 ]
 
+/** Edition meaning records on disk (fidelity-meaning-defects.<format>.json), in name order. */
+const EDITION_MEANING = /^fidelity-meaning-defects\.[^.]+\.json$/u
+
+/** The artifact_sha256 a meaning record claims; an unreadable record matches no bytes (its own row still reads and refuses it). */
+function claimedHash(path) {
+	try {
+		return readJsonFile(path)?.artifact_sha256 ?? null
+	} catch {
+		return null
+	}
+}
+
 /**
  * One meaning record per delivered edition, bound to that edition's bytes: its own
- * fidelity-meaning-defects.<format>.json, else the own record of a row rendered from the same source
- * (a PDF of the html edition), else the legacy session record. When none exists the target is the
- * edition's own name, so the refusal names the file to write.
+ * fidelity-meaning-defects.<format>.json, else any edition record whose artifact_sha256 equals this
+ * edition's current bytes (a byte-identical copy, or a PDF of the html edition), else the legacy
+ * session record. When none exists the target is the edition's own name, so the refusal names the
+ * file to write.
  */
 function perEditionMeaning(sessionDir, delivered) {
 	if (delivered.length === 0) return [sessionTarget(sessionDir, MEANING_RECORD)]
-	const own = (row) => join(sessionDir, meaningRecordName(row.format))
-	return perEdition(sessionDir, delivered).map((target, index) => {
-		const row = delivered[index]
-		const subject = subjectOf(row)
-		const siblings = delivered.filter((other) => other !== row && subject !== null && subjectOf(other) === subject)
-		const candidates = [row, ...siblings].map(own)
-		return { ...target, declared: false, path: [...candidates, join(sessionDir, MEANING_RECORD)].find((path) => existsSync(path)) ?? candidates[0] }
+	const records = readdirSync(sessionDir).filter((name) => EDITION_MEANING.test(name)).sort().map((name) => join(sessionDir, name))
+	const legacy = join(sessionDir, MEANING_RECORD)
+	return perEdition(sessionDir, delivered).map((target) => {
+		const own = join(sessionDir, meaningRecordName(target.format))
+		const bytes = target.subjects.length > 0 ? hashOf(target.subjects[0]) : null
+		const sameBytes = bytes === null ? undefined : records.find((path) => claimedHash(path) === bytes)
+		return { ...target, declared: false, path: existsSync(own) ? own : (sameBytes ?? (existsSync(legacy) ? legacy : own)) }
 	})
 }
 
@@ -150,7 +164,6 @@ export function readFidelityRecord(path, kind) {
 }
 
 const unresolved = (format, codes, path) => ({ code: "fidelity_unresolved", format, codes, message: codes.map((code) => deliveryBlockReason({ code })).join("; "), path })
-const hashOf = (path) => (existsSync(path) ? sha256Of(readFileSync(path)) : null)
 
 /** Barrier problems for `outcome verify` and `outcome finish`; empty when nothing blocks delivery. */
 export function fidelityProblems(sessionDir, manifest) {

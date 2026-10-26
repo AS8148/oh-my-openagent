@@ -124,3 +124,16 @@ test("#given a pdf rendered from the html source #when only the html edition has
 	await session.invoke(["set", "pdf", "delivered", "--path", pdf, "--rendered-from", session.path, "--verified-by", session.record])
 	expect((await session.outcomes()).map((result) => result.exitCode)).toEqual([0, 0])
 })
+
+test("#given html and a byte-identical md copy at another path #when only the html edition has a meaning record #then the md binds to it by bytes and delivery passes", async () => {
+	const session = await fullyRecorded()
+	const second = await secondEdition(session, "md", readFileSync(session.path, "utf8"))
+	expect(await second.problems()).toEqual([])
+	expect((await session.outcomes()).map((result) => result.exitCode)).toEqual([0, 0])
+})
+
+test("#given a clean own record and a legacy record confirming drift on the same bytes #when verified #then the newer own record replaces the verdict", async () => {
+	const session = await fullyRecorded()
+	writeFidelityRecord(join(session.dir, MEANING_RECORD), "meaning", { artifact_sha256: sha256Of(readFileSync(session.path)), report: session.path, defects: [{ code: "meaning_drift_confirmed", severity: "major", message: "drift" }] })
+	expect((await session.outcomes()).map((result) => result.exitCode)).toEqual([0, 0])
+})
