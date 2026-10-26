@@ -42,6 +42,28 @@ function createFixture(options: { readonly monitorLive: boolean }) {
 }
 
 describe("a usage-limit error settles within one confirmation interval (omo#9711)", () => {
+  test.each([
+    { type: "auto_retry_start", delayMs: 45_000 },
+    { type: "agent_end", delayMs: 45_000 },
+  ])("an announced delayed retry retains its full backoff and completes: %p", (delayEvent) => {
+    const fixture = createFixture({ monitorLive: false })
+    fixture.settlement.observe({ ...agentEnd(ACCOUNT_LIMIT, true) as object, ...(delayEvent.type === "agent_end" ? delayEvent : {}) } as never)
+    if (delayEvent.type !== "agent_end") fixture.settlement.observe(delayEvent as never)
+    expect(fixture.scheduler.nextDelay()).toBe(55_000)
+    expect(fixture.settled).toEqual([])
+    fixture.settlement.observe({ type: "agent_start" } as never)
+    fixture.settlement.observe(completedEnd() as never)
+    fixture.settlement.observe({ type: "agent_idle" } as never)
+    expect(fixture.settled).toEqual([{ status: "completed", finalResponse: "done" }])
+    expect(fixture.scheduler.pending()).toBe(0)
+  })
+
+  test("a usage limit with Retry-After seconds honors the stated delay", () => {
+    const fixture = createFixture({ monitorLive: false })
+    fixture.settlement.observe(agentEnd(`${ACCOUNT_LIMIT} Retry-After: 45`, true) as never)
+    expect(fixture.scheduler.nextDelay()).toBe(55_000)
+  })
+
   test.each([false, true])("#given a terminal usage-limit end (monitor live: %p) #when the confirmation fires #then the turn settles failed with the provider's reason", async (monitorLive) => {
     // given
     const fixture = createFixture({ monitorLive })

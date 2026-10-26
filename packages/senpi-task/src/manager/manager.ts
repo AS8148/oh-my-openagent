@@ -22,8 +22,10 @@ import { discardManagedHandle, releaseOnDispose, releaseSupersededHandle, type M
 import { TaskConcurrency } from "./concurrency"
 import { failOwnedRun, launchRunOf, ownsRun } from "./launch-fence"
 import { chainAfterHop, runtimeFallbackCandidates } from "./credential-failure"
-import { createUsageLimitMemory, LIMIT_PROBE_TIMEOUT_MS, routeAroundSpentLimits } from "./usage-limit-memory"
+import { createUsageLimitMemory, LIMIT_PROBE_TIMEOUT_MS, routeAroundSpentLimits, type UsageLimitMemory } from "./usage-limit-memory"
 import { boundedProbeOutcome } from "./usage-limit-probe"
+import { prepareLimitRevival } from "./usage-limit-revival"
+import { createProbeRequestSignal } from "../runners/probe-request"
 import { createWorkpoolAdmission } from "./workpool-admission"
 import { withResidentStart } from "./resident-start"
 import { createWorkpoolEngine, type WorkpoolEngine } from "../workpool/engine"
@@ -120,6 +122,7 @@ type RpcRespawnRunner = {
 
 type TaskManagerImplOptions = TaskManagerOptions & {
   readonly rpcRespawnRunner?: RpcRespawnRunner
+  readonly usageLimits?: UsageLimitMemory
 }
 
 type ReattachingTaskManager = TaskManager & TaskPauseMethods & {
@@ -186,7 +189,7 @@ class TaskManagerImpl implements TaskManager {
   readonly #cleanupOwners = new Map<string, ManagedChildHandle>()
   readonly #nativeFallbackExhaustions = new WeakSet<ManagedChildHandle>()
   readonly #failedTurns = new WeakMap<ManagedChildHandle, FailedTurn>()
-  readonly #limits = createUsageLimitMemory(() => this.#now())
+  readonly #limits: UsageLimitMemory
   // Callers can subscribe before a queued task owns a handle. Each entry is attached exactly once
   // when #launch promotes it, and its returned cleanup owns both pending and live subscriptions.
   readonly #childSubscribers = new Map<string, Map<ManagedChildListener, () => void>>()
@@ -220,6 +223,7 @@ class TaskManagerImpl implements TaskManager {
   constructor(inputOptions: TaskManagerImplOptions) {
     const options = { ...inputOptions, admissionBarrier: inputOptions.admissionBarrier ?? new AdmissionBarrier() }
     this.#options = options
+    this.#limits = options.usageLimits ?? createUsageLimitMemory(() => this.#now())
     this.#barrier = options.admissionBarrier
     this.#startAdmissions = createStartAdmissions(options.admissionBarrier, options.onHeldAdmission, options.now ?? Date.now)
     try {
@@ -283,6 +287,13 @@ class TaskManagerImpl implements TaskManager {
         return removed
       },
       reserveForRevive: (taskId) => this.#reserveForRevive(taskId),
+      prepareRevival: (record, handle) => prepareLimitRevival(record, handle, {
+        limits: this.#limits, store: options.store,
+        close: () => (options.destruction ?? NOOP_DESTRUCTION).destroyResidentTask(record.task_id, "fallback_handoff"),
+        forget: () => this.forget(record.task_id, { path: "evict" }),
+        respawn: (fresh, path) => this.respawn(fresh, path),
+        reattach: (fresh, child) => this.reattach(fresh, child),
+      }),
       reserveForDetachedRevive: (record) => this.#reserveForDetachedRevive(record),
       destruction: options.destruction ?? NOOP_DESTRUCTION,
       runStatsSnapshot: (taskId) => this.#runStats.get(taskId)?.snapshot(this.#now()),
@@ -536,6 +547,7 @@ class TaskManagerImpl implements TaskManager {
     if ("spent" in avoided) {
       return this.#failSpawn({
         claimed, registration, spec, executionMode, lease,
+        failure_kind: "usage_limit",
         error_message: `${avoided.spent}\nEvery model in this task's fallback chain is behind a usage limit an earlier task already hit, so it was not started. Retry once the limit resets, or point this category at another provider or model in omo.json.`,
       })
     }
@@ -972,6 +984,16 @@ class TaskManagerImpl implements TaskManager {
   }
 
   respawn(record: TaskRecord, resumeSessionPath?: string, credential?: ResumeCredential, options?: { readonly paused?: boolean }): Promise<RespawnResult> {
+    const routed = routeAroundSpentLimits(record, this.#limits)
+    if ("spent" in routed) return Promise.resolve({ ok: false, disposition: "retryable", code: "usage_limit", reason: routed.spent })
+    if (routed.plan !== record) {
+      const updated = this.#options.store.mutate(record.task_id, fresh =>
+        fresh.host_pid === record.host_pid && fresh.notification.run_epoch === record.notification.run_epoch
+          ? { ...fresh, model: routed.plan.model, resolved_model: routed.plan.resolved_model, fallback_models: routed.plan.fallback_models }
+          : fresh)
+      if (updated === null || updated.model !== routed.plan.model) return Promise.resolve({ ok: false, disposition: "retryable", code: "respawn_failed", reason: "task changed before limit routing" })
+      record = updated
+    }
     return admitRespawn(this.#barrier, record, credential, checkLaunch => respawnWithWorkpool({
       record,
       ...(options?.paused === true ? { paused: true } : {}),
@@ -1219,7 +1241,8 @@ class TaskManagerImpl implements TaskManager {
     const record = this.#tryLoad(context.record.task_id)
     // A stop (or another owner) that landed while this start was refusing must end the walk here.
     if (!this.#ownsLaunch(context, record)) return { kind: "stale" }
-    const nextModel = record.fallback_models?.[0]
+    const remainingModels = (record.fallback_models ?? []).filter(model => !this.#limits.familySpent(model.provider, model.model_id))
+    const nextModel = remainingModels[0]
     if (nextModel === undefined) return undefined
 
     this.#releaseSlot(record.task_id, context.model, record.notification.run_epoch)
@@ -1229,7 +1252,7 @@ class TaskManagerImpl implements TaskManager {
       ...record,
       model: nextModel.display,
       resolved_model: nextModel,
-      fallback_models: record.fallback_models?.slice(1) ?? [],
+      fallback_models: remainingModels.slice(1),
       fallback_attempts: [
         ...(record.fallback_attempts ?? (record.resolved_model === undefined ? [] : [record.resolved_model])),
         nextModel,
@@ -1334,6 +1357,7 @@ class TaskManagerImpl implements TaskManager {
       type: "fail",
       timestamp,
       error_message: input.error_message,
+      ...(input.failure_kind === "usage_limit" ? { failure_kind: input.failure_kind } : {}),
     })
     if (!started.applied || !failed.applied) throw new Error("spawn bookkeeping failure transitions were not applied")
     return {
@@ -1428,6 +1452,7 @@ class TaskManagerImpl implements TaskManager {
       || (
         input.outcome.failure.kind !== "child-turn-failed"
         && input.outcome.failure.kind !== "child-prompt-failed"
+        && input.outcome.failure.kind !== "child-unresponsive"
       )
       || (input.runStats?.tool_calls ?? 0) > 0
     ) {
@@ -1436,12 +1461,9 @@ class TaskManagerImpl implements TaskManager {
 
     const record = this.#tryLoad(input.taskId)
     const route = record?.resolved_model
-    if (route !== undefined) this.#limits.settle(input.taskId, route.provider, route.model_id, input.outcome.failure.message)
+    if (route !== undefined) this.#limits.settle(input.taskId, route.provider, route.model_id, input.outcome.failure.message, input.outcome.failure.kind === "child-unresponsive")
     const candidates = record == null ? undefined : runtimeFallbackCandidates(record, input.outcome.failure.message, this.#limits)
     const nextModel = candidates?.remaining[0]
-    if (candidates?.limit === "ambiguous" && nextModel?.provider === route?.provider && route !== undefined) {
-      this.#limits.beginProbe(input.taskId, route.provider, input.outcome.failure.message)
-    }
     const live = this.#live.get(input.taskId)
     const fallbackExhausted = record !== null
       && candidates !== undefined
@@ -1576,6 +1598,9 @@ class TaskManagerImpl implements TaskManager {
       fallbackModels: remainingModels,
     })
     const launch = (): void => {
+      if (candidates.limit === "ambiguous" && nextModel.provider === route?.provider) {
+        this.#limits.beginProbe(input.taskId, nextModel.provider, failureMessage)
+      }
       void this.#launchRuntimeFallback({
         record: nextRecord,
         managedSpec: nextSpec,
@@ -1708,16 +1733,26 @@ class TaskManagerImpl implements TaskManager {
     // Checked before anything starts: a cancel, an interrupt or another owner that moved the task while
     // this launch waited (for the old rung's close, or for capacity) must not get a child started.
     if (!this.#ownsLaunch(context, this.#tryLoad(context.record.task_id))) {
+      this.#limits.endProbe(context.record.task_id)
       this.#releaseSlot(context.record.task_id, context.model, context.record.notification.run_epoch)
       failOwnedRun(this.#options.store, launchRunOf(context.record), nowIso(this.#now), { errorMessage: "Runtime fallback launch aborted before the child could start." })
       this.#settleWaiters(context.record.task_id)
       return
     }
 
+    const request = createProbeRequestSignal(this.#now)
+    const probing = this.#limits.probeOf(context.record.task_id) !== undefined
     let handle: ManagedChildHandle
     try {
-      handle = await context.runner.start(context.managedSpec)
+      handle = await context.runner.start(probing
+        ? { ...context.managedSpec, onProviderRequest: request.started, probeProviderRequest: true }
+        : context.managedSpec)
     } catch (error) {
+      const route = context.record.resolved_model
+      if (route !== undefined && this.#limits.probeOf(context.record.task_id) !== undefined) {
+        this.#limits.settle(context.record.task_id, route.provider, route.model_id,
+          describeStartFailure(error).errorMessage, true)
+      }
       const advanced = this.#advanceStartFallback(context, error)
       if (advanced !== undefined) {
         if (advanced.kind === "retry") void this.#launchRuntimeFallback(advanced.context)
@@ -1761,6 +1796,8 @@ class TaskManagerImpl implements TaskManager {
       turnId: `usage-limit-probe-${context.record.notification.run_epoch}`,
       outcome: boundedProbeOutcome({
         handle, probe, model: context.model,
+        subscribeRequest: request.subscribe,
+        now: this.#now,
         timeoutMs: this.#options.limitProbeTimeoutMs ?? LIMIT_PROBE_TIMEOUT_MS,
         onAnswered: () => this.#limits.endProbe(taskId),
       }),

@@ -9,6 +9,7 @@ import { loadSenpiBarrel } from "../../lazy/senpi-barrel"
 import { InProcessRunner } from "../../runners/in-process"
 import { createInProcessManagedRunner } from "../runner"
 import type { ManagedRunner } from "../types"
+import type { ManagedChildHandle } from "../child-handle"
 
 export const CLAUDE = "pm-claude"
 export const GPT = "pm-gpt"
@@ -34,7 +35,7 @@ export type ParentModelWorld = {
   readonly calls: ProviderCall[]
   toolRuns(): number
   runner(): ManagedRunner
-  dispose(): void
+  dispose(): Promise<void>
 }
 
 const MODELS: Readonly<Record<string, readonly string[]>> = {
@@ -59,6 +60,7 @@ export async function createParentModelWorld(scripts: Readonly<Record<string, re
   const modelRegistry = new ModelRegistry(modelRuntime)
   const remaining = new Map(Object.entries(scripts).map(([model, steps]) => [model, [...steps]]))
   const calls: ProviderCall[] = []
+  const handles = new Set<ManagedChildHandle>()
   let toolRuns = 0
 
   for (const [provider, ids] of Object.entries(MODELS)) {
@@ -67,7 +69,14 @@ export async function createParentModelWorld(scripts: Readonly<Record<string, re
       baseUrl: `file://${provider}`,
       apiKey: "test-key",
       models: ids.map(testModel),
-      streamSimple(model: { readonly id: string }, context: { readonly messages: readonly { readonly role: string }[] }) {
+      async streamSimple(
+        model: { readonly id: string },
+        context: { readonly messages: readonly { readonly role: string }[] },
+        options: { readonly onPayload?: (payload: unknown) => unknown },
+      ) {
+        // Real providers call this hook immediately before sending their request. The synthetic
+        // provider has no HTTP payload, but must preserve that boundary for request-time budgets.
+        await options.onPayload?.({ model: model.id })
         const key = `${provider}/${model.id}`
         calls.push({ model: key, toolResults: context.messages.filter((message) => message.role === "toolResult").length })
         const step = remaining.get(key)?.shift() ?? "complete"
@@ -91,12 +100,25 @@ export async function createParentModelWorld(scripts: Readonly<Record<string, re
     settingsPath,
     calls,
     toolRuns: () => toolRuns,
-    runner: () => createInProcessManagedRunner(new InProcessRunner({ sharedParentTools: [countTool] }), (spec) => {
-      const [provider, id] = (spec.model ?? "").split("/")
-      const model = provider === undefined || id === undefined ? undefined : modelRegistry.find(provider, id)
-      return { agentDir, projectTrusted: false, modelRegistry, modelRuntime, ...(model === undefined ? {} : { model }) }
-    }),
-    dispose: () => rmSync(root, { recursive: true, force: true }),
+    runner: () => {
+      const runner = createInProcessManagedRunner(new InProcessRunner({ sharedParentTools: [countTool] }), (spec) => {
+        const [provider, id] = (spec.model ?? "").split("/")
+        const model = provider === undefined || id === undefined ? undefined : modelRegistry.find(provider, id)
+        return { agentDir, projectTrusted: false, modelRegistry, modelRuntime, ...(model === undefined ? {} : { model }) }
+      })
+      return { ...runner, start: async spec => {
+        const handle = await runner.start(spec)
+        handles.add(handle)
+        return handle
+      } }
+    },
+    dispose: async () => {
+      try {
+        await Promise.all([...handles].map(async handle => { await handle.abort(); await handle.dispose() }))
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
   }
 }
 

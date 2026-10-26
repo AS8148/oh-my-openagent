@@ -27,8 +27,8 @@ const chain = (...fallbacks: readonly string[]): ResolvedChildPlan => ({
 type TaskManager = ReturnType<typeof createTaskManager>
 
 let world: ParentModelWorld | undefined
-afterEach(() => {
-  world?.dispose()
+afterEach(async () => {
+  await world?.dispose()
   world = undefined
   cleanupProjects()
 })

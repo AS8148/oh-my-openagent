@@ -93,10 +93,12 @@ export function chainAfterHop(candidates: RuntimeFallbackCandidates): readonly R
   return [...candidates.remaining.slice(1), ...(candidates.retained ?? [])]
 }
 
-/** The rung before the failed one ran on `provider` too: the walk already hopped within that provider. */
-function previousRungOnProvider(record: TaskRecord, provider: string): boolean {
+/** A same-provider hop proves scope only when the previous rung itself hit a usage limit. */
+function previousRungOnProvider(record: TaskRecord, provider: string, limits?: UsageLimitMemory): boolean {
   const attempts = record.fallback_attempts ?? []
-  return attempts.length > 1 && attempts[attempts.length - 2]?.provider === provider
+  const previous = attempts[attempts.length - 2]
+  return limits?.probeOf(record.task_id)?.provider === provider
+    || (previous?.provider === provider && limits?.familySpent(provider, previous.model_id) === true)
 }
 
 /**
@@ -126,7 +128,7 @@ export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: st
     return { remaining: fallbacks, skipped: known, ...(retained.length === 0 ? {} : { retained }) }
   }
   if (limit === "model" || provider === undefined) return { remaining: fallbacks, skipped: known, ...(limit === undefined ? {} : { limit }) }
-  if (limit === "ambiguous" && !accountSpent && !previousRungOnProvider(record, provider)) return { remaining: fallbacks, skipped: known, limit }
+  if (limit === "ambiguous" && !accountSpent && !previousRungOnProvider(record, provider, limits)) return { remaining: fallbacks, skipped: known, limit }
   return {
     remaining: fallbacks.filter((model) => model.provider !== provider),
     skipped: [...known, ...fallbacks.filter((model) => model.provider === provider)],

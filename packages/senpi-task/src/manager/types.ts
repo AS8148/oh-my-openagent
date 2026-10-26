@@ -31,6 +31,8 @@ export type { ExecutionMode, ExecutionModeGate } from "./execution-mode"
 // The unified spec both runner adapters accept. A superset: the rpc adapter uses the subset it
 // needs (task_id, cwd, state_dir, prompt); the in-process adapter also consumes model/tools/agent.
 export type ManagedStartSpec = {
+  readonly onProviderRequest?: () => void
+  readonly probeProviderRequest?: boolean
   readonly admission?: StartAdmission
   readonly taskId: string
   readonly cwd: string

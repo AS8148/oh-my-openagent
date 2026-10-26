@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { createTaskRecord, type ResolvedModelRecord } from "../state"
 import { runtimeFallbackCandidates } from "./credential-failure"
-import { createUsageLimitMemory, LIMIT_MEMORY_DEFAULT_MS } from "./usage-limit-memory"
+import { createUsageLimitMemory, LIMIT_MEMORY_DEFAULT_MS, LIMIT_PROBE_FAILURE_MEMORY_MS } from "./usage-limit-memory"
 
 const WEEKLY = (reset?: string): string =>
   `{"type":"error","error":{"type":"rate_limit_error","message":"Weekly usage limit reached.${reset === undefined ? "" : ` Resets at ${reset}.`}"}}`
@@ -16,6 +16,33 @@ function clock() {
 const rung = (provider: string, modelId: string): ResolvedModelRecord => ({ source: "category", provider, model_id: modelId, display: `${provider}/${modelId}` })
 
 describe("createUsageLimitMemory (#11383)", () => {
+  test("an expired stated reset never creates a new memory window", () => {
+    const memory = createUsageLimitMemory(clock().now)
+    memory.settle("expired", "anthropic", "opus", "Account usage limit reached. Resets at 2026-10-26T04:00:00Z")
+    expect(memory.accountSpent("anthropic")).toBe(false)
+  })
+
+  test.each(["500: upstream overloaded", "socket hang up", "request timed out"])("a failed probe has exactly thirty minutes of routing memory: %s", (message) => {
+    expect(LIMIT_PROBE_FAILURE_MEMORY_MS).toBe(30 * 60_000)
+    const time = clock()
+    const memory = createUsageLimitMemory(time.now)
+    memory.beginProbe("failed", "anthropic", WEEKLY("2026-10-29T04:27:07Z"))
+    memory.settle("failed", "anthropic", "opus", message)
+    time.at(T0 + 30 * 60_000 - 1)
+    expect(memory.accountSpent("anthropic")).toBe(true)
+    time.at(T0 + 30 * 60_000)
+    expect(memory.accountSpent("anthropic")).toBe(false)
+  })
+
+  test("a synthetic timeout does not inherit the original limit reset embedded in its message", () => {
+    const time = clock()
+    const memory = createUsageLimitMemory(time.now)
+    memory.beginProbe("timeout", "anthropic", WEEKLY("2026-10-29T04:27:07Z"))
+    memory.settle("timeout", "anthropic", "opus", WEEKLY("2026-10-29T04:27:07Z"), true)
+    time.at(T0 + LIMIT_PROBE_FAILURE_MEMORY_MS)
+    expect(memory.accountSpent("anthropic")).toBe(false)
+  })
+
   test("#given a probe rung that hits the limit too #when the stated reset passes #then the account is spent until exactly that reset", () => {
     // given
     const time = clock()

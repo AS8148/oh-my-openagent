@@ -5,6 +5,8 @@ import { usageLimitScope } from "./credential-failure"
 export const LIMIT_MEMORY_DEFAULT_MS = 60 * 60_000
 /** How long the one same-provider probe rung may stay silent before its provider counts as spent. */
 export const LIMIT_PROBE_TIMEOUT_MS = 60_000
+/** Routing evidence from a silent or otherwise failed probe expires quickly, not at the original reset. */
+export const LIMIT_PROBE_FAILURE_MEMORY_MS = 30 * 60_000
 
 const RESETS_AT = /\bresets?\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:?\d{2})?)/i
 const FAMILY = /opus|sonnet|haiku|fable|mythos/i
@@ -27,7 +29,7 @@ export type UsageLimitMemory = {
   readonly accountSpent: (provider: string) => boolean
   readonly familySpent: (provider: string, modelId: string) => boolean
   readonly spentReason: (provider: string, modelId: string) => string | undefined
-  readonly settle: (taskId: string, provider: string, modelId: string, message: string) => void
+  readonly settle: (taskId: string, provider: string, modelId: string, message: string, probeTimedOut?: boolean) => void
   readonly beginProbe: (taskId: string, provider: string, message: string) => void
   readonly probeOf: (taskId: string) => UsageLimitProbe | undefined
   readonly endProbe: (taskId: string) => void
@@ -38,7 +40,7 @@ export function createUsageLimitMemory(now: () => number): UsageLimitMemory {
   const probes = new Map<string, UsageLimitProbe>()
   const until = (message: string): number => {
     const reset = Date.parse(RESETS_AT.exec(message)?.[1] ?? "")
-    return Number.isFinite(reset) && reset > now() ? reset : now() + LIMIT_MEMORY_DEFAULT_MS
+    return Number.isFinite(reset) ? reset : now() + LIMIT_MEMORY_DEFAULT_MS
   }
   const live = (key: string): string | undefined => {
     const entry = spent.get(key)
@@ -50,12 +52,15 @@ export function createUsageLimitMemory(now: () => number): UsageLimitMemory {
     accountSpent: (provider) => live(provider) !== undefined,
     familySpent: (provider, modelId) => spentReason(provider, modelId) !== undefined,
     spentReason,
-    settle: (taskId, provider, modelId, message) => {
+    settle: (taskId, provider, modelId, message, probeTimedOut = false) => {
       const probe = probes.get(taskId)
       probes.delete(taskId)
       const scope = usageLimitScope(message)
       if (probe?.provider === provider) {
-        spent.set(provider, { until: RESETS_AT.test(message) ? until(message) : probe.until, message })
+        spent.set(provider, {
+          until: scope !== undefined && !probeTimedOut ? until(message) : now() + LIMIT_PROBE_FAILURE_MEMORY_MS,
+          message,
+        })
       } else if (scope === "account") {
         spent.set(provider, { until: until(message), message })
       } else if (scope !== undefined) {

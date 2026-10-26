@@ -24,8 +24,8 @@ const claudeOnly: ResolvedChildPlan = {
 }
 
 let world: ParentModelWorld | undefined
-afterEach(() => {
-  world?.dispose()
+afterEach(async () => {
+  await world?.dispose()
   world = undefined
   cleanupProjects()
 })

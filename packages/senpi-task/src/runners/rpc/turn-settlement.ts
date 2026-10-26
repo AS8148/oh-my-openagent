@@ -3,6 +3,7 @@ import type { AgentSessionEvent } from "@code-yeongyu/senpi"
 import { usageLimitScope } from "../../manager/credential-failure"
 import type { RunnerOutcome } from "../in-process/child-handle"
 import { agentEndOutcome } from "./turn-outcome"
+import { retryDelayMs } from "./retry-delay"
 
 type AgentEndEvent = Extract<AgentSessionEvent, { readonly type: "agent_end" }>
 
@@ -91,9 +92,8 @@ export function sessionIsIdle(state: {
 }
 
 // omo#9711: a usage limit stays spent until a reset hours away, so neither a wake source nor an announced engine
-// retry can make progress on it. A held usage-limit error settles at its first confirmation, one settleConfirmMs
-// (the handle's heartbeat interval, 10 s by default) after the end, whatever wake sources are live: long enough for
-// an engine fallback hop or a continuation to emit its agent_start, short against the reset.
+// retry can make progress on it. Give an announced retry its stated backoff plus one confirmation interval
+// to emit agent_start, then settle the limit even when unrelated wake sources remain live.
 const isUsageLimit = (outcome: RunnerOutcome): boolean =>
   outcome.status === "error" && usageLimitScope(outcome.failure.message) !== undefined
 
@@ -104,6 +104,7 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
   // A usage-limit end was already seen since the last non-limit end: a later terminal usage-limit end means a wake,
   // a steer or the engine's own retry re-hit the spent limit, so it settles at once instead of waiting again.
   let limitSeen = false
+  let retryWaitMs = 0
   const scheduleConfirmation = input.scheduleConfirmation ?? defaultConfirmationScheduler
   const maxUnreadableProbes = input.maxUnreadableProbes ?? 3
   const endOutcome = (event: AgentEndEvent): RunnerOutcome =>
@@ -175,7 +176,7 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
     if (held === undefined || held.status !== "error") return
     if (input.probe === undefined || input.settleConfirmMs === undefined) return
     if (confirmation !== undefined) return
-    confirmation = scheduleConfirmation(confirmHeld, input.settleConfirmMs)
+    confirmation = scheduleConfirmation(confirmHeld, input.settleConfirmMs + retryWaitMs)
   }
 
   const clearConfirmation = (): void => {
@@ -190,6 +191,14 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
         case "agent_start":
           clearConfirmation()
           held = undefined
+          retryWaitMs = 0
+          return
+        case "auto_retry_start":
+          if (held !== undefined && isUsageLimit(held)) {
+            retryWaitMs = retryDelayMs(event, event.errorMessage)
+            clearConfirmation()
+            rearm()
+          }
           return
         case "agent_end": {
           const outcome = endOutcome(event)
@@ -200,6 +209,8 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
             if (!spent) return
             held = outcome
             limitSeen = true
+            retryWaitMs = retryDelayMs(event, outcome.status === "error" ? outcome.failure.message : "")
+            clearConfirmation()
             rearm()
             return
           }
@@ -217,6 +228,7 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
             return
           }
           limitSeen = spent
+          retryWaitMs = 0
           held = outcome
           unreadableProbes = 0
           if (outcome.status === "error") rearm()

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { createTaskRecord, type ResolvedModelRecord, type TaskRecord } from "../state"
 import { isCredentialFailure, runtimeFallbackCandidates, terminalFailureMessage } from "./credential-failure"
+import { createUsageLimitMemory } from "./usage-limit-memory"
 
 function rung(provider: string, modelId: string): ResolvedModelRecord {
   return { source: "category", provider, model_id: modelId, display: `${provider}/${modelId}` }
@@ -59,6 +60,15 @@ describe("isCredentialFailure", () => {
 })
 
 describe("runtimeFallbackCandidates", () => {
+  test("a non-limit failure on A1 leaves A3 available to probe A2's ambiguous limit", () => {
+    const third = rung("opencode-go", "third")
+    const failed = { ...record(GO_M27, [third, ZAI_GLM]), fallback_attempts: [GO_M3, GO_M27] }
+    const memory = createUsageLimitMemory(Date.now)
+    memory.settle(failed.task_id, GO_M3.provider, GO_M3.model_id, "500: upstream overloaded")
+    expect(runtimeFallbackCandidates(failed, "Weekly usage limit reached", memory)).toEqual({
+      remaining: [third, ZAI_GLM], skipped: [], limit: "ambiguous",
+    })
+  })
   test("#given a model-scoped 403 on the first rung #when the candidates are computed #then the sibling model on the same provider stays", () => {
     const candidates = runtimeFallbackCandidates(record(GO_M3, [GO_M27, ZAI_GLM]), "403: This model is not enabled for your project.")
 
@@ -107,8 +117,10 @@ describe("runtimeFallbackCandidates", () => {
   test.each(AMBIGUOUS_LIMITS)("#given the same-provider rung tried after a limit hits an ambiguous limit too (%s) #when the candidates are computed #then the provider counts as spent and its other rungs are skipped", (_label, message) => {
     const GO_M25 = rung("opencode-go", "minimax-m2.5")
     const probed: TaskRecord = { ...record(GO_M27, [GO_M25, ZAI_GLM]), fallback_attempts: [GO_M3, GO_M27] }
+    const memory = createUsageLimitMemory(Date.now)
+    memory.beginProbe(probed.task_id, GO_M3.provider, message)
 
-    expect(runtimeFallbackCandidates(probed, message)).toEqual({ remaining: [ZAI_GLM], skipped: [GO_M25], limit: "account" })
+    expect(runtimeFallbackCandidates(probed, message, memory)).toEqual({ remaining: [ZAI_GLM], skipped: [GO_M25], limit: "account" })
   })
 
   test("#given a limit that names one model #when the candidates are computed #then the sibling model on the same provider is next", () => {
