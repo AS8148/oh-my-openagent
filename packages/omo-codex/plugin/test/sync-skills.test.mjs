@@ -146,9 +146,9 @@ test("#given shared skill source tests #when aggregate Codex skills are synced #
 		for (const file of await listSkillFiles(join(aggregateSkillsRoot, skillName))) {
 			const normalized = file.replaceAll("\\", "/");
 			const segments = normalized.split("/");
-			const hasPythonTestDir = segments.indexOf("tests", 1) !== -1;
+			const hasNestedTestDir = segments.slice(1, -1).some((segment) => /^(?:tests?|__tests__|.+_test)$/.test(segment));
 			const isSourceMetadata = normalized === ".gitignore" || normalized === ".npmignore" || normalized === "pyrightconfig.json";
-			if (normalized.endsWith(".test.ts") || hasPythonTestDir || segments.includes("__pycache__") || normalized.endsWith(".pyc") || isSourceMetadata) {
+			if (normalized.endsWith(".test.ts") || hasNestedTestDir || segments.includes("__pycache__") || normalized.endsWith(".pyc") || isSourceMetadata) {
 				forbiddenFiles.push(`${skillName}/${normalized}`);
 			}
 		}
