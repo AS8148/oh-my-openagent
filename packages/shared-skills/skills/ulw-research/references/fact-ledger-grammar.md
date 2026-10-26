@@ -62,9 +62,10 @@ Always required, never null: `fact_id`, `kind`, `raw` (string), `quote` (string)
   derive (plan todo 9): a converted value's rational comes from the original and the factor,
   not from the rounded `value`, so `addRow` never computes it from `value`.
 - `locator` is `{ artifact, char_start <= char_end, unit?, page?, line?, table?, row_label?,
-  col_label? }`: `char_start/char_end` are half-open UTF-8 byte offsets into raw.bin before
-  normalization; new rows write `unit: "utf8-bytes"`. No unit marks a legacy text locator.
-- Source `snapshot_sha256` binds raw.bin exactly. Source `context` is `{prefix, suffix}`, each
+  col_label? }`: `char_start/char_end` are a half-open byte range of `artifact` (raw.bin, or
+  text.txt for a declared or converted extraction) in its own encoding; new rows write
+  `unit: "bytes"`. No unit marks a legacy text locator.
+- Source `snapshot_sha256` binds the pinned body exactly (raw.bin; text.txt for converted-only). Source `context` is `{prefix, suffix}`, each
   at most 32 Unicode characters copied around the value span, or the whole quote for Q rows.
 - All other fields are nullable with the types in `fact-ledger-schema.mjs`.
 

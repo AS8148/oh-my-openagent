@@ -92,6 +92,7 @@ const FIDELITY_MAJORS = [
 const FIDELITY_MINORS = [
 	"quote_fuzzy_match",
 	"relocated",
+	"quote_converted_only",
 	"name_outside_quote",
 	"verification_claim_unmarked",
 	"scope_widened_warn",

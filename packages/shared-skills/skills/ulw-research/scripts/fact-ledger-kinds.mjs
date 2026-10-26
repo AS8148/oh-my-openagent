@@ -46,7 +46,7 @@ export function locatorErrors(locator, at) {
 	const errors = []
 	if (!isObject(locator)) return errors
 	if (!isNonEmpty(locator.artifact)) errors.push(`${at}.artifact must be a non-empty string`)
-	if (locator.unit !== undefined && locator.unit !== "utf8-bytes") errors.push(`${at}.unit must be utf8-bytes`)
+	if (locator.unit !== undefined && locator.unit !== "bytes") errors.push(`${at}.unit must be bytes`)
 	if (!(isCount(locator.char_start) && isCount(locator.char_end) && locator.char_start <= locator.char_end)) errors.push(`${at}.char_start/char_end must be integers with start <= end`)
 	for (const key of ["page", "line"]) {
 		if (locator[key] !== undefined && !(Number.isInteger(locator[key]) && locator[key] >= 1)) errors.push(`${at}.${key} must be an integer >= 1`)

@@ -1,9 +1,11 @@
-// source-commands.mjs - the `source snapshot` and `claims index` subcommands of report-tools.
-// A source dir is immutable: the same id with identical text is a no-op, different text fails
-// (exit 1, snapshot_exists), because ledger rows pin the old hash. `--url` fetches with plain
-// fetch (30 s timeout, no browser) and records extractor tool:source-snapshot@1; `--html` and
-// `--text` import a browser-lane capture and record extractor model (lower trust), or the named
-// extractor for `--text --extractor NAME@VERSION`; `--command` runs an argv without a shell and
+// source-commands.mjs - the `source snapshot`, `source refresh` and `claims index` subcommands of
+// report-tools. A source dir is immutable: the same id with identical bytes is a no-op, different
+// bytes fail (exit 1, snapshot_exists), because ledger rows pin the old hash; `source refresh`
+// (source-refresh.mjs) is the one explicit repin. `--url` fetches with plain fetch (30 s timeout,
+// no browser) and records extractor tool:source-snapshot@1; `--html` imports a browser-lane page
+// capture and `--raw` alone a saved file's bytes (extractor model). `--text` alone registers a converted-only source (no raw bytes:
+// quotes only); `--raw <bytes> --text <extraction> --extractor NAME@VERSION` keeps the original
+// bytes and declares the text their extraction. `--command` runs an argv without a shell and
 // snapshots its stdout, with the argv, cwd, exit status, and output hashes in command.json.
 // node: builtins and sibling imports only.
 
@@ -15,12 +17,14 @@ import { indexClaims } from "./claims-index.mjs"
 import { CliError, parseArgs, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
 import { parseFidelityBlock } from "./fidelity-brief.mjs"
 import { parseSourceFloor } from "./fidelity-policy.mjs"
+import { encodingOf, headerCharset } from "./raw-decode.mjs"
 import { writeSnapshot } from "./source-snapshot.mjs"
+import { readSnapshot } from "./source-view.mjs"
 
 const FETCH_TIMEOUT_MS = 30_000
 const TOOL_EXTRACTOR = "tool:source-snapshot@1"
-const SNAPSHOT_USAGE =
-	"usage: source snapshot --id S<n> (--url <u> | --html <file> | --text <file> [--extractor NAME@VERSION] | --command '<argv json>' --cwd DIR) [--kind page|command|document] [--provenance primary|secondary] [--revision R] --session-dir D"
+export const SNAPSHOT_USAGE =
+	"usage: source snapshot --id S<n> (--url <u> | --html <file> | --raw <file> [--text <file> --extractor NAME@VERSION] | --text <file> (converted-only) | --command '<argv json>' --cwd DIR) [--charset NAME] [--kind page|command|document|converted-only] [--provenance primary|secondary] [--revision R] --session-dir D"
 
 function readInput(path) {
 	try {
@@ -37,15 +41,15 @@ export function sessionDirOf(flags) {
 	return resolve(dir)
 }
 
-/** Raw bytes are authoritative; text is available only for explicitly converted-only quotations. */
+/** The snapshot as source-view.mjs reads it ({ meta, raw, sha256, drift, view }); unreadable is a usage error. */
 export function snapshotOf(sessionDir, id) {
 	const dir = join(sessionDir, "sources", String(id))
 	if (!existsSync(join(dir, "meta.json"))) throw new CliError(`source ${id} has no snapshot; run source snapshot --id ${id} first`)
-	const rawPath = join(dir, "raw.bin")
-	const meta = JSON.parse(readInput(join(dir, "meta.json")))
-	const raw = existsSync(rawPath) ? readFileSync(rawPath) : null
-	const text = raw === null ? (existsSync(join(dir, "text.txt")) ? readInput(join(dir, "text.txt")) : "") : raw.toString("utf8")
-	return { meta, raw, text, html: meta.kind === "page" && /^\s*</.test(text) ? text : null }
+	try {
+		return readSnapshot(dir)
+	} catch (error) {
+		throw new CliError(`source ${id}: ${error.message}`)
+	}
 }
 
 /**
@@ -75,11 +79,10 @@ async function fetchSource(url) {
 	const type = response.headers.get("content-type") ?? ""
 	if (/pdf/i.test(type)) {
 		await response.body?.cancel()
-		throw new CliError(`pdf response: ${url}; extract its text and use --text <file> --extractor NAME@VERSION`)
+		throw new CliError(`pdf response: ${url}; save the bytes and use --raw <file.pdf> --text <extracted.txt> --extractor NAME@VERSION`)
 	}
 	const raw = Buffer.from(await response.arrayBuffer())
-	const body = raw.toString("utf8")
-	return /html|xml/i.test(type) || /^\s*</.test(body) ? { url, raw, html: body } : { url, raw, text: body }
+	return { url, raw, charset: headerCharset(type), markup: /html|xml/i.test(type) || /^\s*</.test(raw.subarray(0, 1024).toString("latin1")) }
 }
 
 function runCommand(argvJson, cwd) {
@@ -96,21 +99,40 @@ function runCommand(argvJson, cwd) {
 	const proc = spawnSync(argv[0], argv.slice(1), { cwd: resolve(cwd), shell: false, maxBuffer: 64 * 1024 * 1024 })
 	if (proc.error) throw new CliError(`--command could not start: ${proc.error.message}`)
 	const receipt = { argv, cwd: resolve(cwd), exit_status: proc.status, stdout_sha256: sha256Of(proc.stdout), stderr_sha256: sha256Of(proc.stderr) }
-	return { path: `command:${argv.join(" ")}`, raw: proc.stdout, text: proc.stdout.toString("utf8"), kind: "command", receipt }
+	return { path: `command:${argv.join(" ")}`, raw: proc.stdout, kind: "command", receipt }
 }
 
-async function acquire(flags) {
+function readBytes(path) {
+	try {
+		return readFileSync(path)
+	} catch (error) {
+		throw new CliError(`cannot read ${path}: ${error.code ?? error.message}`)
+	}
+}
+
+/** The snapshot input the flags describe; shared by `source snapshot` and `source refresh`. */
+export async function acquire(flags) {
 	const given = ["url", "html", "text", "command"].filter((name) => flags[name] !== undefined)
-	if (given.length !== 1) throw new CliError(SNAPSHOT_USAGE)
+	if (flags.raw !== undefined && given.some((name) => name !== "text")) throw new CliError("--raw goes alone or with --text (--url, --html and --command already keep the raw bytes)")
+	if (given.length + (flags.raw !== undefined && flags.text === undefined ? 1 : 0) !== 1) throw new CliError(SNAPSHOT_USAGE)
 	if (flags.extractor !== undefined && flags.text === undefined) throw new CliError("--extractor goes with --text only")
-	if (flags.url !== undefined) return { ...(await fetchSource(flags.url)), extractor: TOOL_EXTRACTOR }
-	if (flags.html !== undefined) return { path: resolve(flags.html), raw: readFileSync(flags.html), html: readInput(flags.html), extractor: "model" }
-	if (flags.text !== undefined) return { path: resolve(flags.text), raw: flags.raw === undefined ? readFileSync(flags.text) : readFileSync(flags.raw), text: readInput(flags.text), extractor: flags.extractor === undefined ? "model" : `extractor:${flags.extractor}` }
+	if (flags.charset !== undefined && encodingOf(flags.charset) === null) throw new CliError(`--charset ${flags.charset} is not a known encoding`)
+	const charset = flags.charset === undefined ? {} : { charset: encodingOf(flags.charset) }
+	if (flags.url !== undefined) return { ...(await fetchSource(flags.url)), ...charset, extractor: TOOL_EXTRACTOR }
+	if (flags.html !== undefined) return { path: resolve(flags.html), raw: readBytes(flags.html), markup: true, ...charset, extractor: "model" }
+	if (flags.raw !== undefined && flags.text === undefined) return { path: resolve(flags.raw), raw: readBytes(flags.raw), ...charset, extractor: "model" }
+	if (flags.text !== undefined) {
+		const extractor = flags.extractor === undefined ? "model" : `extractor:${flags.extractor}`
+		if (flags.raw !== undefined) return { path: resolve(flags.raw), raw: readBytes(flags.raw), text: readInput(flags.text), ...charset, extractor }
+		if (flags.kind !== undefined && flags.kind !== "converted-only") throw new CliError("--text without --raw registers a converted-only source; pass --raw <original bytes> to keep a measurable snapshot")
+		return { path: resolve(flags.text), text: readInput(flags.text), kind: "converted-only", extractor }
+	}
 	return { ...runCommand(flags.command, flags.cwd), extractor: TOOL_EXTRACTOR }
 }
 
 export async function runSource(argv) {
 	const [sub, ...rest] = argv
+	if (sub === "refresh") return (await import("./source-refresh.mjs")).runRefresh(rest)
 	if (sub !== "snapshot") throw new CliError(SNAPSHOT_USAGE)
 	const args = parseArgs(rest)
 	const id = args.required("id")
@@ -131,8 +153,8 @@ export async function runSource(argv) {
 	}
 	if (receipt) writeFileSync(join(written.dir, "command.json"), `${JSON.stringify(receipt, null, 2)}\n`)
 	const meta = JSON.parse(readFileSync(join(written.dir, "meta.json"), "utf8"))
-	const data = { source_id: id, directory: written.dir, snapshot_sha256: written.sha256, extractor: meta.extractor, kind: meta.kind, provenance: meta.provenance }
-	return { json: { command: "source snapshot", status: "pass", exitCode: 0, data }, summary: `source snapshot: ${id} ${written.sha256.slice(0, 12)} (${meta.extractor})`, exitCode: 0 }
+	const data = { source_id: id, directory: written.dir, snapshot_sha256: written.sha256, extractor: meta.extractor, kind: meta.kind, provenance: meta.provenance, text_source: meta.text_source }
+	return { json: { command: "source snapshot", status: "pass", exitCode: 0, data }, summary: `source snapshot: ${id} ${written.sha256.slice(0, 12)} (${meta.extractor}, ${meta.text_source})`, exitCode: 0 }
 }
 
 export function runClaims(argv) {

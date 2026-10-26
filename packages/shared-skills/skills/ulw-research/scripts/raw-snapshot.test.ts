@@ -44,9 +44,7 @@ describe("raw snapshot contract", () => {
 		const dir = session("Span is 320 m.")
 		const raw = join(dir, "sources/S1/raw.bin")
 		try { unlinkSync(raw) } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error }
-		const result = await add(dir)
-		expect(result.exitCode).toBe(1)
-		expect(result.json.error).toBe("snapshot_not_raw")
+		await expect(add(dir)).rejects.toThrow("raw.bin: ENOENT")
 	})
 
 	test("raw bytes determine hash and UTF-8 locator offsets before normalization", async () => {
@@ -58,7 +56,7 @@ describe("raw snapshot contract", () => {
 		const row = result.json.data.row
 		expect(row.value).toBe("320")
 		expect(row.snapshot_sha256).toBe(sha256Of(Buffer.from(text)))
-		expect(row.locator).toMatchObject({ unit: "utf8-bytes", artifact: "raw.bin", char_start: 4, char_end: Buffer.byteLength(text) })
+		expect(row.locator).toMatchObject({ unit: "bytes", artifact: "raw.bin", char_start: 4, char_end: Buffer.byteLength(text) })
 		expect(row.context).toEqual({ prefix: "\u00e9.\nSpan is ", suffix: "." })
 	})
 
@@ -122,9 +120,10 @@ describe("raw snapshot contract", () => {
 		const row = result.json.data.row
 		expect(row.value).toBe("320")
 		expect(row.unit).toBe("m")
-		expect(Buffer.from(html).subarray(row.locator.char_start, row.locator.char_end).toString()).toBe(row.quote)
+		expect(row.quote).toBe("320 m")
+		expect(Buffer.from(html).subarray(row.locator.char_start, row.locator.char_end).toString()).toBe("320</b> m")
 		expect(row.quote.slice(...row.value_span)).toBe(row.raw)
-		expect(row.context.prefix.endsWith('title="9">')).toBe(true)
+		expect(row.context.prefix).not.toContain("title")
 	})
 
 	test("converted-only sources refuse measured facts but allow warned quotations", async () => {
@@ -132,7 +131,7 @@ describe("raw snapshot contract", () => {
 		expect((await add(dir)).json.error).toBe("snapshot_not_raw")
 		const result = await run(["fact", "quote", "--session-dir", dir, "--source", "S1", "--match", "Span is 320 m.", "--json"])
 		expect(result.exitCode).toBe(0)
-		expect(result.json.defects).toContainEqual(expect.objectContaining({ code: "quote_fuzzy_match" }))
+		expect(result.json.defects).toContainEqual(expect.objectContaining({ code: "quote_converted_only" }))
 		expect(result.json.data.row.context).toEqual({ prefix: "", suffix: "" })
 	})
 })

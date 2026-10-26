@@ -1,16 +1,17 @@
-// fact-locate.mjs - deterministic fact locators over a source snapshot.
+// fact-locate.mjs - deterministic fact locators over a source snapshot's locator text.
 //
 // Each locator returns { value, unit, raw, quote, value_span, sentence_id, qualifier, locator } or
 // { error: "fact_not_located" | "fact_ambiguous", candidates }; it never guesses. `quote` is the
-// whole containing sentence, cell, or line of text.txt, `value_span` is [start, end] inside
-// `quote` with quote.slice(...value_span) === raw, and locator.char_start/char_end place `quote`
-// in text.txt. Every call takes `sourceId` (S<n>) so sentence ids match sentences.jsonl.
+// whole containing sentence, cell, or line of the view text (source-view.mjs: the visible text
+// nodes of a page, never markup), `value_span` is [start, end] inside `quote` with
+// quote.slice(...value_span) === raw, and locator.char_start/char_end place `quote` in that text;
+// raw-locator.mjs turns them into bytes. Every call takes `sourceId` (S<n>) so sentence ids match
+// sentences.jsonl, which indexes the same text.
 // Plain Node ESM, sibling imports only; no network, no OCR.
 
 import { proseText } from "./html-lite.mjs"
 import { QUALIFIERS } from "./lexicon.mjs"
 import { parseNumeral } from "./numerals.mjs"
-import { rawTableLocated } from "./raw-locator.mjs"
 import { indexSentences, snapshotBlocks } from "./source-snapshot.mjs"
 import { findNormalized, normalizeText, tokenize } from "./text-normalize.mjs"
 import { similarity } from "./text-similarity.mjs"
@@ -143,10 +144,13 @@ function tablesOf(root) {
 const cellLabel = (cell) => label(proseText(cell))
 const indexesOf = (labels, wanted) => labels.flatMap((value, index) => (value === wanted ? [index] : []))
 
-/** --table/--row/--col: the table by id, caption, or a header label; row and column by normalized label, never by index. */
-export function locateTable(sourceHtml, { table, row, col, sourceId, raw = false }) {
+/**
+ * --table/--row/--col: the table by id, caption, or a header label; row and column by normalized label,
+ * never by index. `source` is page html or an extracted view ({ root, text, blocks }) of one.
+ */
+export function locateTable(source, { table, row, col, sourceId }) {
 	requireSource(sourceId)
-	const { root, text, blocks } = snapshotBlocks(sourceHtml)
+	const { root, text, blocks } = typeof source === "string" ? snapshotBlocks(source) : source
 	const key = label(table)
 	const tables = tablesOf(root).filter((entry) => entry.table.attrs.id === table || entry.caption === key || (entry.header && cellsOf(entry.header).map(cellLabel).includes(key)))
 	if (tables.length !== 1) return tables.length === 0 ? notLocated() : ambiguous(tables.map((entry) => ({ table: entry.table.attrs.id ?? entry.caption })))
@@ -162,8 +166,7 @@ export function locateTable(sourceHtml, { table, row, col, sourceId, raw = false
 	const numeral = parseNumeral(holder.text)
 	if (!numeral) return notLocated()
 	const headerUnit = /\(([^()]+)\)\s*$/.exec(cellLabel(headerCells[columns[0]]))
-	const found = quantityResult(text, sourceId, holder, numeral, { table, row_label: row, col_label: col }, headerUnit ? normalizeUnit(headerUnit[1]) : null)
-	return raw ? rawTableLocated(sourceHtml, cell, found) : found
+	return quantityResult(text, sourceId, holder, numeral, { table, row_label: row, col_label: col }, headerUnit ? normalizeUnit(headerUnit[1]) : null)
 }
 
 /** --page/--line: exactly one quantity on that line of that page (pages split on a form feed). */

@@ -59,6 +59,8 @@ describe("writeSnapshot", () => {
 			revision: null,
 			kind: "page",
 			provenance: "unknown",
+			text_source: "html",
+			charset: "utf-8",
 		})
 	})
 

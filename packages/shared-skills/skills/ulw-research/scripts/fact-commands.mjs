@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 import { CliError, parseArgs, sha256Of } from "./cli-support.mjs"
+import { DEFECT_CODES } from "./contracts.mjs"
 import { derive } from "./fact-derive.mjs"
 import { addRow, readLedger, retractRow, supersedeRow, writeLedger } from "./fact-ledger.mjs"
 import { locateFind, locateMatch, locatePageLine, locateTable } from "./fact-locate.mjs"
@@ -42,15 +43,16 @@ function failure(command, error, detail) {
 	return { json, summary: `${command}: ${error}${detail.message ? ` (${detail.message})` : ""}`, exitCode: 1 }
 }
 
-function locate(flags, snapshot, id, quote) {
+/** Every locator reads the view text (visible text nodes for a page), never raw markup. */
+function locate(flags, view, id, quote) {
 	const sourceId = id
-	if (quote) return locateMatch(snapshot.text, { match: flags.match, sourceId })
-	if (flags.find !== undefined) return locateFind(snapshot.text, { find: flags.find, unitExpected: flags["unit-expected"], sourceId })
+	if (quote) return locateMatch(view.text, { match: flags.match, sourceId })
+	if (flags.find !== undefined) return locateFind(view.text, { find: flags.find, unitExpected: flags["unit-expected"], sourceId })
 	if (flags.table !== undefined) {
-		if (snapshot.html === null) throw new CliError(`source ${id} has no source.html; --table needs a page snapshot`)
-		return locateTable(snapshot.html, { table: flags.table, row: flags.row, col: flags.col, sourceId, raw: true })
+		if (view.root === null) throw new CliError(`source ${id} is not an HTML page snapshot; --table needs one`)
+		return locateTable(view, { table: flags.table, row: flags.row, col: flags.col, sourceId })
 	}
-	if (flags.page !== undefined) return locatePageLine(snapshot.text, { page: Number(flags.page), line: Number(flags.line), sourceId })
+	if (flags.page !== undefined) return locatePageLine(view.text, { page: Number(flags.page), line: Number(flags.line), sourceId })
 	throw new CliError("usage: fact add --source S<n> (--find TEXT | --table T --row R --col C | --page P --line L) --label LABEL")
 }
 
@@ -77,14 +79,15 @@ function runAdd(args, quote) {
 	const id = args.required("source")
 	if (quote) args.required("match")
 	const sessionDir = sessionDirOf(flags)
-	const snapshot = snapshotOf(sessionDir, id)
-	const converted = snapshot.meta.kind === "converted-only"
-	if ((!quote || !converted) && (snapshot.raw === null || converted)) return failure(command, "snapshot_not_raw", { message: `${id} requires raw.bin; converted-only sources cannot back measured rows` })
-	const located = locate(flags, snapshot, id, quote)
-	const found = rawLocated(snapshot.text, located)
+	const { meta, view, sha256, drift } = snapshotOf(sessionDir, id)
+	const converted = view.mode === "converted"
+	if (drift.length > 0) return failure(command, "snapshot_hash_mismatch", { message: `${id}: ${drift.join("; ")}` })
+	if (view.mode === "legacy") return failure(command, "snapshot_not_raw", { message: `${id} is a legacy text.txt snapshot without raw.bin; snapshot the source again under a new id` })
+	if (converted && !quote) return failure(command, "snapshot_not_raw", { message: `${id} is converted-only (no raw bytes); measured rows need source snapshot --raw <original> --text <extraction>` })
+	const located = locate(flags, view, id, quote)
+	const found = rawLocated(view, located)
 	if (found.error === "unit_expected_mismatch") return failure(command, "unit_mismatch", { message: `expected ${found.expected}, found ${found.found}`, candidates: found.candidates })
 	if (found.error) return failure(command, found.error, { message: `no single match in ${id}`, candidates: found.candidates })
-	const { meta } = snapshot
 	const host = URL.canParse(meta.url) ? new URL(meta.url).hostname : null
 	const labelSource = flags.find ?? flags.match ?? (flags.table !== undefined ? `${flags.row}_${flags.col}` : `p${flags.page}_l${flags.line}`)
 	const ledger = readLedger(sessionDir)
@@ -96,7 +99,7 @@ function runAdd(args, quote) {
 		context: found.context,
 		source_id: id,
 		locator: { ...found.locator, source_kind: meta.kind, url: meta.url, host, pointed: pointedFlag(sessionDir, meta.url) },
-		snapshot_sha256: sha256Of(snapshot.raw ?? snapshot.text),
+		snapshot_sha256: sha256,
 		sentence_id: found.sentence_id ?? null,
 		extracted_by: meta.extractor,
 		observed_at: nowIso(flags),
@@ -109,12 +112,14 @@ function runAdd(args, quote) {
 		fuzzy: found.fuzzy === true,
 	})
 	writeLedger(sessionDir, ledger)
-	const context = contextOf(snapshot.text, located)
-	const defects = converted ? [{ code: "quote_fuzzy_match", severity: "minor", integrity: false, message: `${id} is converted-only; the quote is not bound to the original fetched body` }] : []
+	const context = contextOf(view.text, located)
+	const { severity, integrity } = DEFECT_CODES.quote_converted_only
+	const defects = converted ? [{ code: "quote_converted_only", severity, integrity, message: `${id} is converted-only; the quote is not bound to the original fetched bytes` }] : []
 	const json = { command, status: "pass", exitCode: 0, defects, data: { row, context } }
 	if (flags.json) return { json, exitCode: 0 }
 	const shown = quote ? row.quote : `${row.raw} (value ${row.value}${row.unit ? `, unit ${row.unit}` : ""})`
-	return { text: `${row.fact_id} ${row.label}: ${shown} [${id} ${row.sentence_id ?? "-"}]\n  ...${context.before}[${context.match}]${context.after}...`, exitCode: 0 }
+	const warnings = defects.map((defect) => `\n  warning ${defect.code}: ${defect.message}`).join("")
+	return { text: `${row.fact_id} ${row.label}: ${shown} [${id} ${row.sentence_id ?? "-"}]\n  ...${context.before}[${context.match}]${context.after}...${warnings}`, exitCode: 0 }
 }
 
 function runRetract(args) {

@@ -140,7 +140,7 @@ function chartProblem(ctx, fig, labels, ledger) {
  * @param {object} ctx buildContext(...) from gates-static.mjs
  * @param {{ rows: object[] }} ledger
  * @param {{ fact_id: string, rendered: string, selector?: string }[] | null} fillMap Markdown fill map, or null
- * @param {string | null} sourcesDir directory of <S-id>/{text.txt, meta.json} snapshots
+ * @param {string | null} sourcesDir directory of <S-id>/ snapshots (source-view.mjs reads them)
  * @param {{ recompute?: (ledger: object, row: object) => { ok: boolean }, asOf?: string | null }} options
  */
 export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
