@@ -10,10 +10,12 @@
 // text; or a citation tag's digits. There is no word list: any other numeral makes the sentence a
 // claim. A digit run glued to letters is a name, not a numeral (a hash, #12, GPT-4, v2.3.1, Q3, FY27),
 // unless the letters are a unit, multiplier, or currency of units.mjs / numerals.mjs (50M, 10k, 3x,
-// 2.5GB, 320m, 12%, 40percent). A heading is not a prose sentence. Pure.
+// 2.5GB, 320m, 12%, 40percent, x3). A unit, multiplier, or percent on the right is checked before the
+// letters on the left, so a word glued in front of a measure does not make it a name. A dotted version
+// is a name, a European digit grouping (1.234.567) a numeral. A heading is not a prose sentence. Pure.
 // Korean markers are \u escapes.
 
-import { UNIT } from "./numerals.mjs"
+import { DOT_GROUPED, UNIT } from "./numerals.mjs"
 import { dimensionOf, normalizeUnit } from "./units.mjs"
 
 const SKIP = new Set(["script", "style", "template"])
@@ -57,6 +59,8 @@ const NUMERAL = /\d+(?:[.,]\d+)*/g
 const UNIT_WORD = new RegExp(`^${UNIT}$`, "iu")
 const UNIT_LEAD = new RegExp(`^${UNIT}`, "iu")
 const LETTERS_AFTER = /^(?:[A-Za-z]+|[\uAC00-\uD7A3]+|\p{L}+)/u
+const SYMBOL_AFTER = /^(?:%|\u2030|\u00D7)/
+const GROUPED = new RegExp(`^${DOT_GROUPED}$`)
 
 /** Letters that make a glued digit run a quantity; a Korean run may carry a particle after its unit. */
 function isUnit(letters) {
@@ -65,22 +69,30 @@ function isUnit(letters) {
 	for (let size = letters.length; size > 0; size--) if (normalizeUnit(letters.slice(0, size))) return true
 	return false
 }
+/** A multiplier written before its number ("x3", "x1.5"): a standalone x, never a label ("w1:x02") or a leading zero. */
+const isMultiplierBefore = (before, left, run) => dimensionOf(left) === "multiple" && /(?:^|[\s(])\p{L}+$/u.test(before) && !/^0\d/.test(run)
 const isCurrency = (letters) => /^currency:/.test(dimensionOf(letters) ?? dimensionOf(letters.toUpperCase()) ?? "")
 
 /**
- * The digit run [start, end) is part of a name: a dotted version ("0.30.14", which numerals.mjs never
- * reads as a value), a run after # or inside a word (letters on its left that are not a currency:
- * "W3C", "eb2b", "Q3", "FY27"; or glued on the left through - . _ /: "GPT-4", "H.15"), or a run whose
- * right-hand letters are not a unit, multiplier, or currency ("3D", "21st", "10-Q", "1H25").
+ * The digit run [start, end) is part of a name: a dotted version ("0.30.14", not the grouping
+ * "1.234.567"), a run after # or inside a word (letters on its left that are not a currency or a
+ * standalone multiplier x: "W3C", "eb2b", "Q3", "FY27"; or glued on the left through - . _ /: "GPT-4", "H.15"),
+ * or a run whose right-hand letters are not a unit, multiplier, or currency ("3D", "21st", "10-Q",
+ * "1H25"). A unit, multiplier, or percent on the right makes the run a numeral first, whatever is
+ * glued on its left ("revenue40%", "about300 people" written solid), unless Latin letters sit on both
+ * sides, which is an identifier ("W3C", "eb2b").
  */
 function isName(text, start, end) {
-	if (/^\d+(?:\.\d+){2,}$/.test(text.slice(start, end))) return true
+	const run = text.slice(start, end)
+	if (/^\d+(?:\.\d+){2,}$/.test(run) && !GROUPED.test(run)) return true
 	const before = text.slice(0, start)
-	const left = /\p{L}+$/u.exec(before)?.[0]
-	if (left) return !isCurrency(left)
 	const rest = text.slice(end)
+	const left = /\p{L}+$/u.exec(before)?.[0]
 	const right = LETTERS_AFTER.exec(rest)?.[0]
-	if (right) return /^\d/.test(rest.slice(right.length)) || !isUnit(right)
+	const measure = right ? !/^\d/.test(rest.slice(right.length)) && isUnit(right) : SYMBOL_AFTER.test(rest)
+	if (measure && !(right && /[A-Za-z]$/.test(before))) return false
+	if (left) return !isCurrency(left) && !(!right && isMultiplierBefore(before, left, run))
+	if (right) return true
 	if (before.endsWith("#") || /\p{L}/u.test(/([\p{L}\p{N}]+)[-._/]$/u.exec(before)?.[1] ?? "")) return true
 	const joined = /^-(\p{L}[\p{L}\p{N}]*)/u.exec(rest)?.[1]
 	return joined !== undefined && !isUnit(joined)

@@ -50,6 +50,26 @@ const DAY_COUNTS = [
 	"<p>\uC2DC\uBC94 \uC6B4\uC601\uC740 30\uC77C \uB3D9\uC548 \uC9C4\uD589\uB410\uB2E4.</p>",
 ]
 
+// Round 5: a unit, multiplier, or percent on the right keeps a digit run a numeral even with letters
+// glued on its left (a Korean particle after the unit allowed), a multiplier glued on the left (x3) is a
+// numeral, mn / pct / yr(s) / mo are units, and a European digit grouping is a numeral (EN and KO).
+const GLUED_MEASURES = [
+	"<p>\uB9E4\uCD9C40% \uC99D\uAC00.</p>",
+	"<li>\uC804\uB144\uB300\uBE4430%, https://example.com/yoy</li>",
+	"<p>\uC57D300\uBA85\uC774 \uCC38\uC5EC\uD588\uB2E4.</p>",
+	"<p>Model B is x3 faster.</p>",
+	"<p>\uC18D\uB3C4\uB294 x3 \uBE68\uB790\uB2E4.</p>",
+	"<li>Churn rate40%, https://example.com/churn</li>",
+	"<p>Grew 5mn users.</p>",
+	"<p>Up 40pct.</p>",
+	"<p>5yrs of data.</p>",
+	"<li>Retention 18mo, https://example.com/retention</li>",
+	"<li>\uC5F0\uAC04 \uC131\uC7A5 40pct, https://example.com/growth</li>",
+	"<p>1.234.567 users signed up.</p>",
+	"<p>\uAC00\uC785\uC790\uB294 1.234.567\uBA85\uC774\uB2E4.</p>",
+	"<li>Annual report (10-K), https://example.com/filing</li>",
+]
+
 // Decision 25: under Sources a sentence is checked unless every numeral in it is a citation-field number.
 // Receipt cases from review rounds 1-3, EN and KO (Korean as \u escapes).
 const MUST_FLAG = [
@@ -81,6 +101,7 @@ const MUST_FLAG = [
 	"<p>We ran the check and it reported 42%.</p>",
 	...GUARD,
 	...DAY_COUNTS,
+	...GLUED_MEASURES,
 ]
 
 // Round-4 ruling, must-pass: a digit run glued to letters that are not a unit is a name (commit hashes,
@@ -103,6 +124,10 @@ const NAMES = [
 	"<li>Survey archive 2019-2023, 2019~2023, 2019\u20132023, https://example.com/archive</li>",
 	"<li>2025\u20132026\uB144 \uADFC\uC6D4\uBB3C \uC790\uB8CC, 2019~2023\uB144, https://example.com/basis</li>",
 	"<p>2019\u20132023\uB144 \uD1B5\uACC4\uB97C 1\uCC28 \uC790\uB8CC\uB85C \uD655\uBCF4\uD558\uC9C0 \uBABB\uD588\uB2E4.</p>",
+	"<li>Build abc123, GPT-4, v2.3.1, #1234, Q3-2024 cohort, 0.30.14, https://example.com/build</li>",
+	"<li>\uBE4C\uB4DC abc123, GPT-4, v2.3.1, #1234, Q3-2024 \uCF54\uD638\uD2B8, 0.30.14, https://example.com/build</li>",
+	"<li>\uC81C3\uC790 \uC81C\uACF5 \uC790\uB8CC, https://example.com/third</li>",
+	"<li>Survey notes [w1:x02], https://example.com/survey</li>",
 ]
 
 const MUST_PASS = [
