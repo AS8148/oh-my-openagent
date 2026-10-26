@@ -100,6 +100,16 @@ export function transition(
   context.journal.append(dagNodeTransitionedEvent({ nodeId, from, to, reason }))
 }
 
+/** The node's newest owned task while it can still do work, whether or not this controller attached it. */
+export function liveOwnedTask(context: SchedulerContext, nodeId: DagNodeId): TaskRecord | undefined {
+  const task = context.taskManager.findOwnedTask({ kind: "dag", runId: context.journal.snapshot().runId, nodeId })
+  return task !== undefined && isLiveTask(task) ? task : undefined
+}
+
+export function isLiveTask(task: TaskRecord | null | undefined): boolean {
+  return task?.status === "pending" || task?.status === "running" || task?.status === "paused"
+}
+
 export function failNode(context: SchedulerContext, nodeId: DagNodeId, code: DagNodeErrorCode, message: string): void {
   context.pendingErrors.set(nodeId, nodeError(nodeId, code, message, context.now))
   transition(context, nodeId, "failed", { kind: "failed" })

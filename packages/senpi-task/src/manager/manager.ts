@@ -431,8 +431,10 @@ class TaskManagerImpl implements TaskManager {
       // ownership moves to the fresh task. Only a LIVE task with a different fingerprint is a
       // genuine conflict between two callers over one running child.
       if (isTerminalRecord(record)) return undefined
+      // A live task of an EARLIER execAttempt (an amend or retry replaced it) is never the new
+      // attempt's task (#11381); only a same-attempt duplicate is adoptable (#7412).
       return {
-        kind: "owner_conflict",
+        kind: (record.owner?.execAttempt ?? 0) === (owner.execAttempt ?? 0) ? "owner_conflict" : "owner_superseded",
         task_id: record.task_id,
         existing_fingerprint: record.owner?.fingerprint ?? "",
         requested_fingerprint: owner.fingerprint,

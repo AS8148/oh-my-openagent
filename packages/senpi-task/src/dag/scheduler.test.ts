@@ -455,6 +455,7 @@ function schedulerFixture(
   executionMode?: Omit<DagExecutionModeSources, "route">,
   subscriberRing?: number,
   nodeSpawnPolicy?: DagNodeSpawnPolicy,
+  prepareRecord: (record: DagRunRecordV1) => DagRunRecordV1 = (record) => record,
 ) {
   const baseStore = createDagFileStore({ project_dir: tempProject() })
   let runLockDepth = 0
@@ -479,7 +480,7 @@ function schedulerFixture(
       })
     },
   }
-  const initialRecord = recordFor(input)
+  const initialRecord = prepareRecord(recordFor(input))
   store.writeCheckpoint(runId, initialRecord)
   let eventTime = Date.parse("2026-08-14T00:00:02.000Z")
   const scheduler = createDagScheduler({
@@ -525,6 +526,55 @@ describe("DAG scheduler owner conflict adoption", () => {
       expect.objectContaining({ nodeId: "A", taskId: "task-1" }),
       expect.objectContaining({ nodeId: "B", taskId: "task-2" }),
     ])
+  })
+})
+
+describe("#11381 children of finished or superseded node attempts", () => {
+  test("#given a completed node whose child resumed on its own #when the run is cancelled #then that child is cancelled too", async () => {
+    // given
+    const manager = new FakeTaskManager({ autoComplete: false })
+    const { scheduler } = schedulerFixture(definition([node("A"), node("B", ["A"])]), manager)
+    const running = scheduler.run()
+    await within(manager.whenStarted("A"))
+    manager.complete("A")
+    await within(manager.whenStarted("B"))
+    const taskA = manager.findOwnedTask({ kind: "dag", runId, nodeId: "A" as DagNodeId })?.task_id
+    if (taskA === undefined) throw new Error("node A owns no task")
+    manager.rearm(taskA)
+
+    // when
+    await scheduler.cancel(runId, "re-route stuck children")
+    const record = await running
+
+    // then
+    expect([...manager.cancellations].sort()).toEqual(["A", "B"])
+    expect(manager.get(taskA)?.status).toBe("cancelled")
+    expect(record.nodes.find((entry) => entry.id === "A")?.state).toBe("completed")
+    expect(record.status).toBe("cancelled")
+  })
+
+  test("#given a pending node whose live child belongs to an older attempt #when that child cannot be stopped #then the node fails stale_attempt_alive and the child is never adopted", async () => {
+    // given
+    const manager = new FakeTaskManager({ autoComplete: false, rejectCancelNodeIds: ["A"] })
+    const stale = manager.seed("A", "running")
+    const { scheduler, events } = schedulerFixture(
+      definition([node("A"), node("B", ["A"])]),
+      manager,
+      undefined,
+      undefined,
+      undefined,
+      (record) => ({ ...record, nodes: record.nodes.map((entry) => entry.id === "A" ? { ...entry, execAttempt: 1 } : entry) }),
+    )
+
+    // when
+    const record = await scheduler.run()
+
+    // then
+    expect(manager.cancellations).toEqual(["A"])
+    expect(manager.attempts).toEqual([])
+    expect(record.nodes.find((entry) => entry.id === "A")).toMatchObject({ state: "failed", error: { code: "stale_attempt_alive" } })
+    expect(record.nodes.find((entry) => entry.id === "B")?.state).toBe("skipped")
+    expect(events().some((event) => event.type === "dag.node.task-attached" && event.taskId === stale.task_id)).toBe(false)
   })
 })
 

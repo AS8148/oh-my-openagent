@@ -171,6 +171,10 @@ function startFailure(result: Exclude<OwnedStartResult, { readonly kind: "starte
       return { code: "start_failed", message: result.error_message }
     case "owner_conflict":
       return { code: "start_failed", message: `DAG task owner conflicts with existing task ${result.task_id}` }
+    case "owner_superseded":
+      // Run start disposes superseded children; a live one here could not be stopped. Fail closed
+      // with a retryable code rather than attach it or start a second child beside it (#11381).
+      return { code: "stale_attempt_alive", message: `task ${result.task_id} of a superseded attempt is still live` }
     default:
       return assertNever(result)
   }
