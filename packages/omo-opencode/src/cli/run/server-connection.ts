@@ -1,4 +1,5 @@
 import { createOpencode as createOpencodeSdk, createOpencodeClient as createOpencodeClientSdk } from "@opencode-ai/sdk"
+import { randomBytes } from "node:crypto"
 import pc from "picocolors"
 import type { ServerConnection } from "./types"
 import { injectServerAuthIntoClient } from "../../shared/opencode-server-auth"
@@ -74,13 +75,41 @@ async function startServer<TClient>(
   deps: ServerConnectionDeps<TClient>,
 ): Promise<{ client: TClient, cleanup: () => void }> {
   const { signal, port } = options
-  const { client, server } = await deps.withWorkingOpencodePath(() =>
-    deps.createOpencode({ signal, port, hostname: "127.0.0.1" }),
-  )
+  // Without a password the spawned server accepts any local caller, including a web page on another
+  // localhost port or a DNS-rebound name (its origin check allows both). A per-run random password,
+  // inherited by the spawned server through process.env, closes that (omo#11367). A user-set value
+  // is never replaced.
+  const previousPassword = process.env.OPENCODE_SERVER_PASSWORD
+  const generated = previousPassword === undefined || previousPassword === ""
+  if (generated) {
+    process.env.OPENCODE_SERVER_PASSWORD = randomBytes(32).toString("base64url")
+  }
+  const restorePassword = (): void => {
+    if (!generated) return
+    if (previousPassword === undefined) delete process.env.OPENCODE_SERVER_PASSWORD
+    else process.env.OPENCODE_SERVER_PASSWORD = previousPassword
+  }
+
+  let started: OpencodeServer<TClient>
+  try {
+    started = await deps.withWorkingOpencodePath(() =>
+      deps.createOpencode({ signal, port, hostname: "127.0.0.1" }),
+    )
+  } catch (error) {
+    restorePassword()
+    throw error
+  }
+  const { client, server } = started
 
   deps.injectServerAuthIntoClient(client)
   console.log(pc.dim("Server listening at"), pc.cyan(server.url))
-  return { client, cleanup: () => server.close() }
+  return {
+    client,
+    cleanup: () => {
+      server.close()
+      restorePassword()
+    },
+  }
 }
 
 export async function createServerConnectionWithDeps<TClient>(
