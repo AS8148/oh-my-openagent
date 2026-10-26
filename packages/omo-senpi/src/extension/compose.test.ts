@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it, jest, spyOn } from "bun:test"
+import { join } from "node:path"
 
 import { FakeExtensionAPI } from "../../test-support/fake-extension-api"
 import { composeOmoSenpiExtension } from "./compose"
@@ -26,8 +27,14 @@ class ReloadingFakeExtensionAPI extends FakeExtensionAPI {
   }
 }
 
+const pythonCacheEnv = { PYTHONDONTWRITEBYTECODE: process.env.PYTHONDONTWRITEBYTECODE, PYTHONPYCACHEPREFIX: process.env.PYTHONPYCACHEPREFIX }
+
 afterEach(() => {
   jest.useRealTimers()
+  for (const [name, value] of Object.entries(pythonCacheEnv)) {
+    if (value === undefined) delete process.env[name]
+    else process.env[name] = value
+  }
 })
 
 function createRecordingLogger(): ComponentLogger & { entries: Array<{ level: string; message: string; details?: unknown }> } {
@@ -133,24 +140,30 @@ describe("composeOmoSenpiExtension", () => {
     expect(pi.tools).toEqual([])
   })
 
-  it("#given the host environment #when composed #then agent-run Python skips bytecode unless the user chose a value (#11373)", async () => {
+  it("#given no user Python cache setting #when composed #then shell children get an OmO bytecode cache prefix (#11373)", async () => {
     // given
-    const previous = process.env.PYTHONDONTWRITEBYTECODE
-    try {
-      for (const [initial, expected] of [[undefined, "1"], ["", ""]] as const) {
-        if (initial === undefined) delete process.env.PYTHONDONTWRITEBYTECODE
-        else process.env.PYTHONDONTWRITEBYTECODE = initial
+    delete process.env.PYTHONDONTWRITEBYTECODE
+    delete process.env.PYTHONPYCACHEPREFIX
 
-        // when
-        await composeOmoSenpiExtension([])(new FakeExtensionAPI())
+    // when
+    await composeOmoSenpiExtension([])(new FakeExtensionAPI())
 
-        // then
-        expect(process.env.PYTHONDONTWRITEBYTECODE).toBe(expected)
-      }
-    } finally {
-      if (previous === undefined) delete process.env.PYTHONDONTWRITEBYTECODE
-      else process.env.PYTHONDONTWRITEBYTECODE = previous
-    }
+    // then
+    expect(process.env.PYTHONPYCACHEPREFIX).toEndWith(join("omo", "pycache"))
+    expect(process.env.PYTHONDONTWRITEBYTECODE).toBeUndefined()
+  })
+
+  it("#given the user chose a Python cache setting #when composed #then neither variable is touched (#11373)", async () => {
+    // given
+    delete process.env.PYTHONDONTWRITEBYTECODE
+    process.env.PYTHONPYCACHEPREFIX = ""
+
+    // when
+    await composeOmoSenpiExtension([])(new FakeExtensionAPI())
+
+    // then
+    expect(process.env.PYTHONPYCACHEPREFIX).toBe("")
+    expect(process.env.PYTHONDONTWRITEBYTECODE).toBeUndefined()
   })
 
   it("#given a component throws #when composed #then logs the error and registers later components", async () => {

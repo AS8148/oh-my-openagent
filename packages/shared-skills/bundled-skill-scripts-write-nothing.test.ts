@@ -13,7 +13,9 @@ import { createSkillSourceCopyFilter } from "./skill-source-filter.mjs"
 // directory, which would hide the defect. Script entries run WITHOUT -B (an agent may drop the flag),
 // so each must set sys.dont_write_bytecode itself; `python -m` entries run with -B as documented,
 // because the interpreter compiles the package before any of its code can set the flag. Test
-// modules are not skill entries and are left out.
+// modules are not skill entries and are left out. Only entries that load sibling code can write
+// bytecode, so those are the ones run, and each must exit 0: a script that stops before its sibling
+// import (an old interpreter, a crash) would otherwise pass without proving anything.
 
 const skillsRoot = join(import.meta.dir, "skills")
 const python = process.platform === "win32" ? "python" : "python3"
@@ -69,6 +71,16 @@ function moduleEntry(path: string, tree: Map<string, string>, root: string): Pyt
   return { cwd: dir, argv: ["-B", "-m", parts.join("."), "--help"] }
 }
 
+function loadsSiblingCode(path: string, tree: Map<string, string>, root: string): boolean {
+  const dir = relative(root, dirname(path)).split(sep).join("/")
+  const source = readFileSync(path, "utf8")
+  for (const match of source.matchAll(/^\s*(?:from|import)\s+(\w+)|run_module\(\s*["'](\w+)/gm)) {
+    const name = match[1] ?? match[2] ?? ""
+    if (tree.has(`${dir}/${name}.py`) || tree.has(`${dir}/${name}/__init__.py`)) return true
+  }
+  return false
+}
+
 function pythonEntries(root: string): PythonEntry[] {
   const tree = listTree(root)
   const found: PythonEntry[] = []
@@ -77,12 +89,19 @@ function pythonEntries(root: string): PythonEntry[] {
     const path = join(root, key)
     if (!/__name__\s*==\s*["']__main__["']/.test(readFileSync(path, "utf8")) && basename(path) !== "__main__.py") continue
     const skillDir = join(root, key.split("/")[0] ?? "")
-    found.push(moduleEntry(path, tree, root) ?? { cwd: skillDir, argv: [relative(skillDir, path), "--help"] })
+    const asModule = moduleEntry(path, tree, root)
+    if (asModule) found.push(asModule)
+    else if (loadsSiblingCode(path, tree, root)) found.push({ cwd: skillDir, argv: [relative(skillDir, path), "--help"] })
   }
   return found
 }
 
 describe("bundled skill scripts", () => {
+  test("#given the test interpreter #when checked #then it meets the bundled scripts' Python 3.11 floor", async () => {
+    const child = Bun.spawn([python, "-c", "import sys; print(sys.version_info >= (3, 11))"], { stdout: "pipe", stderr: "ignore" })
+    expect((await new Response(child.stdout).text()).trim()).toBe("True")
+  })
+
   test("#given the shipped skills tree #when every bundled Python entry runs #then the tree stays byte-identical", async () => {
     // given
     const before = listTree(shippedRoot)
@@ -90,14 +109,16 @@ describe("bundled skill scripts", () => {
     expect(entries.map((entry) => entry.argv.join(" "))).toContain("scripts/find-agent-sessions.py --help")
 
     // when
-    await Promise.all(
+    const exits = await Promise.all(
       entries.map(async (entry) => {
-        const child = Bun.spawn([python, ...entry.argv], { cwd: entry.cwd, env: pythonEnv, stdout: "ignore", stderr: "ignore", timeout: 30_000 })
-        await child.exited
+        const child = Bun.spawn([python, ...entry.argv], { cwd: entry.cwd, env: pythonEnv, stdout: "ignore", stderr: "pipe", timeout: 30_000 })
+        const [stderr, code] = await Promise.all([new Response(child.stderr).text(), child.exited])
+        return { entry: entry.argv.join(" "), code, stderr: code === 0 ? "" : stderr.slice(-400) }
       }),
     )
 
     // then
+    expect(exits.filter((result) => result.code !== 0)).toEqual([])
     expect(changedSince(before)).toEqual([])
   }, 120_000)
 

@@ -11,6 +11,7 @@ import { installToolCaptureRegistry } from "./tool-capture-registry"
 import { createPrewarmDiagnostics } from "./prewarm-diagnostics"
 import type { ComponentContext, ComponentLogger, OmoSenpiComponent, SenpiExtensionAPI } from "./types"
 import { releaseHerdrAgentHint } from "./herdr-agent-hint"
+import { applyPythonCacheDefault } from "./python-cache-env"
 
 export interface ComposeOmoSenpiExtensionOptions {
   logger?: ComponentLogger
@@ -83,8 +84,7 @@ export function composeOmoSenpiExtension(
 
   return async (pi: unknown): Promise<void> => {
     releaseHerdrAgentHint()
-    // Shell children inherit process.env: a bundled skill's Python must not write __pycache__ into a signed app (#11373).
-    process.env.PYTHONDONTWRITEBYTECODE ??= "1"
+    applyPythonCacheDefault()
     // Publish the dag eval sdk directory so JavaScript cells can import it from OMO_DAG_SDK_ROOT.
     provisionDagSdkRoot()
     provisionAgentToolkitSdkRoot()

@@ -146,8 +146,8 @@ def cache_bin_dir() -> Path:
     if override:
         return Path(override).expanduser()
     if os.name == "nt":
-        return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "omo-ast-grep" / "bin"
-    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "omo-ast-grep" / "bin"
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "omo-ast-grep" / "bin"
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "omo-ast-grep" / "bin"
 
 
 def cached_binary() -> Optional[Path]:

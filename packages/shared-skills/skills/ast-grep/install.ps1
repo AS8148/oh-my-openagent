@@ -45,7 +45,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$CacheBinDir = if ($env:OMO_AST_GREP_BIN_DIR) { $env:OMO_AST_GREP_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "omo-ast-grep\bin" }
+$CacheRoot = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" }
+$CacheBinDir = if ($env:OMO_AST_GREP_BIN_DIR) { $env:OMO_AST_GREP_BIN_DIR } else { Join-Path $CacheRoot "omo-ast-grep\bin" }
 
 function Log([string]$msg) {
     if (-not $Quiet) {
