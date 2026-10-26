@@ -245,7 +245,7 @@ describe("omo-senpi task component wiring", () => {
     const wireDagLifecycle = Reflect.get(taskComponentModule, "wireDagLifecycle")
     expect(typeof wireDagLifecycle).toBe("function")
     if (typeof wireDagLifecycle !== "function") return
-    wireDagLifecycle(pi, {
+    const wired = wireDagLifecycle(pi, {
       attach: async () => { order.push("dag-resume") },
       detach: () => { order.push("dag-detach") },
       pauseForShutdown: async () => { order.push("dag-pause") },
@@ -253,10 +253,12 @@ describe("omo-senpi task component wiring", () => {
     }, () => {
       pi.on("session_start", () => { order.push("task-reconcile") })
       pi.on("session_shutdown", () => { order.push("task-suspend") })
+      return { afterSessionStartReconcile: () => Promise.resolve(true) }
     })
 
     // when
     await pi.dispatch("session_start", {})
+    await wired.lastAttach()
     await pi.dispatch("session_before_switch", { reason: "resume" })
     expect(order).toEqual(["task-reconcile", "dag-resume"])
     await pi.dispatch("session_shutdown", {})

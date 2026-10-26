@@ -35,6 +35,14 @@ type EventBridgeDeps = {
 
 // Below senpi's per-handler session_shutdown budget, leaving room for the suspension that follows.
 const SHUTDOWN_LAUNCH_SETTLE_MS = 5_000
+/** What the task event bridge hands to the components that must run after its reconcile. */
+export interface EventBridge {
+  /** Settles when the latest session start's task reconcile finished; false when a newer start superseded it. */
+  readonly afterSessionStartReconcile: () => Promise<boolean>
+  /** Settles when the latest session start's whole recovery chain (reconcile, liveness, mailbox, cleanup) ended. */
+  readonly sessionStartRecovered: () => Promise<void>
+}
+
 export function wireEventBridge(
   pi: SenpiExtensionAPI,
   ctx: ComponentContext,
@@ -43,9 +51,14 @@ export function wireEventBridge(
   transitions: SessionTransitionBridge,
   state: EventBridgeState,
   deps: EventBridgeDeps = {},
-): void {
+): EventBridge {
   const guidanceGuard = createOncePerSessionGuard()
   let startup: AbortController | undefined
+  // DAG recovery and workpool reconciliation run after the session-start task reconcile
+  // (dag/recovery.ts: "a revivable child already carries a handle here"). Admission does not wait
+  // for it; those consumers wait on this ONE gate. It settles false when a newer start superseded it.
+  let reconciledGate: Promise<boolean> = Promise.resolve(true)
+  let recovered: Promise<void> = Promise.resolve()
   const runPause = state.runPause ?? engine.runPause?.bridge
   wireDagVerificationContext(pi, engine.runtime)
   const taskRpc = wireTaskRpcBridge(pi, engine, deps.taskRpc)
@@ -65,27 +78,44 @@ export function wireEventBridge(
     const sessionId = engine.runtime.sessionId()
     // A child session that has not reported its own id yet has nothing to reconcile: its records
     // belong to the parent. The role comes from the session (shared daemon), else from the env.
-    if (readSessionRole(pi) !== undefined && sessionId === undefined) return
+    if (readSessionRole(pi) !== undefined && sessionId === undefined) {
+      reconciledGate = Promise.resolve(true)
+      return
+    }
     startup?.abort()
     const controller = new AbortController()
     startup = controller
     const active = () => !controller.signal.aborted
+    const reconciled = Promise.withResolvers<boolean>()
+    reconciledGate = reconciled.promise
     if (sessionId !== undefined) await runPause?.restore(sessionId)
-    if (!active()) return
+    if (!active()) {
+      reconciled.resolve(false)
+      return
+    }
     transitions.onSessionStart(sessionId)
-    void recoverSession(sessionId, controller.signal).catch((error: unknown) => {
+    recovered = recoverSession(sessionId, controller.signal, () => reconciled.resolve(active())).catch((error: unknown) => {
       ctx.logger.warn("omo-senpi task session recovery failed", { error: String(error) })
+      // A failed reconcile must not strand DAG recovery or the workpools: they proceed as before.
+      reconciled.resolve(active())
     })
-    if (sessionId !== undefined) engine.manager.workpools?.attach({ sessionId })
+    void reconciled.promise.then((current) => {
+      if (current && sessionId !== undefined) engine.manager.workpools?.attach({ sessionId })
+    })
     statusUi.scheduleSync()
     taskRpc.attach()
   })
 
-  async function recoverSession(sessionId: string | undefined, signal: AbortSignal): Promise<void> {
+  async function recoverSession(
+    sessionId: string | undefined,
+    signal: AbortSignal,
+    onReconciled: () => void,
+  ): Promise<void> {
     const active = () => !signal.aborted
     const reconciliation = await engine.lifecycle.reconcileOnSessionStart(sessionId, signal)
-    if (!active()) return
+    if (!active()) return onReconciled()
     if (sessionId !== undefined) await runPause?.reconciled(sessionId)
+    onReconciled()
     if (!active()) return
     const livenessRecords = new Map<string, ReturnType<typeof engine.manager.get>>()
     for (const outcome of reconciliation.outcomes) {
@@ -242,6 +272,7 @@ export function wireEventBridge(
     )
     return undefined
   }, { previewSafe: true })
+  return { afterSessionStartReconcile: () => reconciledGate, sessionStartRecovered: () => recovered }
 }
 
 async function reconcileTeamMailboxBestEffort(ctx: ComponentContext, state: EventBridgeState): Promise<void> {
