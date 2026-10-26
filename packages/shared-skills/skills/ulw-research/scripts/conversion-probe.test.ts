@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { numberKey } from "./conversion-probe.mjs"
 import { readFidelityRecord } from "./fidelity-records.mjs"
 import { writeSnapshot } from "./source-snapshot.mjs"
 
@@ -158,4 +159,60 @@ test("#given HTML snapshot conversion #when written #then source warnings use th
 	expect(record.report).toBe(join(dir, "source.html"))
 	expect(record.written_at).toBe("2026-10-25T00:00:00.000Z")
 	expect(record.defects).toEqual([])
+})
+
+describe("attribute digits cover only a number inside Markdown link or image syntax", () => {
+	const GLUED = "<p>Output reached 10<sup>9</sup> kWh</p>"
+	const BOOK = '<p><a href="https://books.example/b?id=x&amp;pg=PA109">book</a></p>'
+
+	test("#given an href page number 109 #when the prose shows a glued 10<sup>9</sup> #then 109 is altered in flat and Markdown output", () => {
+		expect(probe(`${GLUED}${BOOK}`, "Output reached 109 kWh\n\nbook").json.altered).toEqual(["109"])
+		expect(probe(`${GLUED}${BOOK}`, "Output reached 109 kWh\n\n[book](https://books.example/b?id=x&pg=PA109)").json.altered).toEqual(["109"])
+	})
+
+	test("#given #ref1..#ref45 links #when 4<sup>2</sup> is glued into 42 #then 42 is altered", () => {
+		const links = Array.from({ length: 45 }, (_, k) => `<a href="#ref${k + 1}">note</a>`).join(" ")
+		const markdown = Array.from({ length: 45 }, (_, k) => `[note](#ref${k + 1})`).join(" ")
+		expect(probe(`<p>Area grew 4<sup>2</sup> times.</p><p>${links}</p>`, `Area grew 42 times.\n\n${markdown}`).json.altered).toEqual(["42"])
+	})
+
+	test("#given an image named chart-109.png #when the built-in snapshot writes the page #then 109 is altered", () => {
+		const { dir } = writeSnapshot(join(sandbox(), "sources"), "S1", { path: "g.html", html: `${GLUED}<p><img src="chart-109.png"></p>`, extractor: "model", observed_at: "2026-10-25T00:00:00Z" })
+		expect(readFidelityRecord(join(dir, "conversion.json"), "source_conversion").conversion_altered_numbers).toEqual(["109"])
+	})
+})
+
+describe("cell, row, list-item and line breaks never group digits", () => {
+	for (const [raw, converted] of [
+		["<table><tr><td>3</td><td>250</td><td>100</td></tr></table>", "| 3 | 250 | 100 |"],
+		["<table><tr><td>12</td><td>345</td></tr></table>", "| 12 | 345 |"],
+		["<ul><li>3</li><li>250</li></ul>", "- 3\n- 250"],
+		["<p>3</p><p>250</p>", "3\n250"],
+	]) {
+		test(`#given ${JSON.stringify(raw)} #when converted to ${JSON.stringify(converted)} #then nothing is altered or lost`, () => {
+			expect(probe(raw, converted)).toMatchObject({ exitCode: 0, json: { altered: [], lost: [] } })
+		})
+	}
+
+	test("#given 1 234 567 inside one cell #when converted to a Markdown row #then it stays one grouped number", () => {
+		expect(probe("<table><tr><td>1 234 567</td><td>8</td></tr></table>", "| 1 234 567 | 8 |")).toEqual({ exitCode: 0, json: { altered: [], lost: [], raw_count: 2, converted_count: 2 } })
+	})
+})
+
+describe("a period group needs an unambiguous shape; a dropped minus is altered", () => {
+	test("#given 1.234 and 1,234 #when keyed #then they differ, and 1.234.567 still groups", () => {
+		expect(numberKey("1.234")).not.toBe(numberKey("1,234"))
+		expect(numberKey("1.234.567")).toBe(numberKey("1,234,567"))
+		expect(numberKey("1.234,5")).toBe(numberKey("1,234.5"))
+	})
+
+	test("#given a glued 12.34<sup>5</sup> beside a real 12,345 #when flattened #then the glued 12.345 is the altered token", () => {
+		expect(probe("<p>12.34<sup>5</sup> and 12,345</p>", "12.345 and 12,345").json.altered).toEqual(["12.345"])
+	})
+
+	test("#given a minus touching Hangul or an en dash minus #when the sign is dropped #then the unsigned number is altered", () => {
+		expect(probe("\uAC10\uC18C\uC728-3.5%", "\uAC10\uC18C\uC728 3.5%").json.altered).toEqual(["3.5"])
+		expect(probe("fell \u20135%", "fell 5%").json.altered).toEqual(["5"])
+		expect(probe("cite_note-7 and 2019\u20132023", "cite_note-7 and 2019-2023").json.altered).toEqual([])
+	})
 })

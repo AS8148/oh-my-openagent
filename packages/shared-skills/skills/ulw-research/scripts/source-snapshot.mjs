@@ -7,7 +7,7 @@
 // text.txt only. Nothing here touches the network: the caller supplies the html or text.
 // Plain Node ESM, node: builtins and sibling imports only.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { sha256Of } from "./cli-support.mjs"
@@ -146,16 +146,18 @@ function checkInput(sourceId, input) {
  * Write <sourcesDir>/<sourceId>/ for one source; returns { dir, sha256 } with sha256 over text.txt.
  * input: { url | path, text | pages | html, extractor, observed_at?, revision?, kind?, provenance? }.
  * Re-writing the same text is a no-op change; a different text over an existing snapshot throws
- * snapshot_exists, because ledger rows pin the old hash.
+ * snapshot_exists, because ledger rows pin the old hash, unless `replace` (the caller has checked that
+ * no active row pins it); a replacement drops the old capture's source.html, conversion.json and command.json.
  */
-export function writeSnapshot(sourcesDir, sourceId, input) {
+export function writeSnapshot(sourcesDir, sourceId, input, { replace = false } = {}) {
 	checkInput(sourceId, input)
 	const text = snapshotText(input)
 	const sha256 = sha256Of(Buffer.from(text, "utf8"))
 	const dir = join(sourcesDir, sourceId)
 	const textPath = join(dir, "text.txt")
 	if (existsSync(textPath) && sha256Of(readFileSync(textPath)) !== sha256) {
-		throw new Error(`snapshot_exists: ${sourceId} already holds a different text.txt`)
+		if (!replace) throw new Error(`snapshot_exists: ${sourceId} already holds a different text.txt`)
+		for (const name of ["source.html", "conversion.json", "command.json"]) rmSync(join(dir, name), { force: true })
 	}
 	mkdirSync(dir, { recursive: true })
 	writeFileSync(textPath, text)
@@ -173,7 +175,7 @@ export function writeSnapshot(sourcesDir, sourceId, input) {
 	writeFileSync(join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`)
 	let altered = null
 	if (typeof input.html === "string") {
-		const { altered: changed, ...counts } = probeConversion(input.html, text)
+		const { altered: changed, ...counts } = probeConversion(input.html, text, { attributes: false })
 		altered = changed
 		writeFidelityRecord(join(dir, "conversion.json"), "source_conversion", {
 			artifact_sha256: sha256Of(input.html), report: join(dir, "source.html"), defects: [],
