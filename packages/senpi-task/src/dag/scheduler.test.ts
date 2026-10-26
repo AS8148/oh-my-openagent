@@ -113,6 +113,7 @@ function recordFor(input: DagDefinition): DagRunRecordV1 {
 type StartFailureKind = "plan_unresolved" | "depth_denied" | "start_failed"
 
 type FakeOptions = {
+  readonly startGate?: (nodeId: string) => Promise<void>
   readonly residencyLimit?: number
   readonly autoComplete?: boolean
   readonly startFailureNodeIds?: readonly string[]
@@ -183,13 +184,14 @@ class FakeTaskManager implements TaskManager {
     return signal.promise
   }
 
-  complete(nodeId: string, status: TaskStatus = "completed"): void {
+  complete(nodeId: string, status: TaskStatus = "completed", failureKind?: TaskRecord["failure_kind"]): void {
     const task = [...this.#tasks.values()].find((entry) => entry.record.owner?.nodeId === nodeId)
     if (task === undefined) throw new Error(`unknown fake task for ${nodeId}`)
     if (task.record.status === "pending" || task.record.status === "running") this.#residents -= 1
     task.record = {
       ...task.record,
       status,
+      ...(failureKind === undefined ? {} : { failure_kind: failureKind }),
       updated_at: "2026-08-14T00:00:01.000Z",
       ...(status === "completed"
         ? {
@@ -204,6 +206,7 @@ class FakeTaskManager implements TaskManager {
 
   async startOwned(spec: ManagerStartSpec, owner: DagTaskOwner): Promise<OwnedStartResult> {
     const nodeId = owner.nodeId as string
+    await this.#options.startGate?.(nodeId)
     this.attempts.push(nodeId)
     this.owners.push(owner)
     if (this.#options.rejectStartNodeIds?.includes(nodeId) === true) throw new Error(`start rejected ${nodeId}`)
@@ -373,6 +376,13 @@ class FakeTaskManager implements TaskManager {
   selfResume(nodeId: string): void {
     const taskId = this.#taskByNode(nodeId).record.task_id
     this.rearm(taskId)
+    const task = this.#taskByNode(nodeId)
+    const epoch = task.record.notification.run_epoch + 1
+    task.record = {
+      ...task.record,
+      notification: { ...task.record.notification, run_epoch: epoch },
+      resumed_run_epoch: epoch,
+    }
     this.#residents += 1
     for (const listener of [...(this.#selfResumedListeners.get(taskId) ?? [])]) listener()
   }
@@ -479,6 +489,7 @@ function schedulerFixture(
   executionMode?: Omit<DagExecutionModeSources, "route">,
   subscriberRing?: number,
   nodeSpawnPolicy?: DagNodeSpawnPolicy,
+  scheduleRetry?: DagSchedulerOptions["scheduleRetry"],
 ) {
   const baseStore = createDagFileStore({ project_dir: tempProject() })
   let runLockDepth = 0
@@ -513,6 +524,7 @@ function schedulerFixture(
     ...(executionMode === undefined ? {} : { executionMode }),
     ...(subscriberRing === undefined ? {} : { subscriberRing }),
     ...(nodeSpawnPolicy === undefined ? {} : { nodeSpawnPolicy }),
+    ...(scheduleRetry === undefined ? {} : { scheduleRetry }),
     now: () => eventTime++,
   })
   const events = (): readonly DagRunEvent[] => store.readEvents(runId, 0, { limit: 100 }).events
@@ -678,6 +690,73 @@ describe("DAG scheduler execution mode dispatch", () => {
 })
 
 describe("DAG scheduler self-resumed node child (omo#10487)", () => {
+  test("#given a terminal wait resolved during admission #when the child resumes before the fold #then its resumed failure is folded instead of the stale completion", async () => {
+    const admissionEntered = deferred<void>()
+    const releaseAdmission = deferred<void>()
+    const manager = new FakeTaskManager({
+      autoComplete: false,
+      startGate: async (nodeId) => {
+        if (nodeId !== "B") return
+        admissionEntered.resolve()
+        await releaseAdmission.promise
+      },
+    })
+    const { scheduler, events } = schedulerFixture(
+      definition([node("A"), node("D"), node("B", ["D"])]), manager,
+    )
+    const running = scheduler.run()
+    await within(manager.whenStarted("A"))
+    await within(manager.whenStarted("D"))
+    manager.complete("D")
+    await within(admissionEntered.promise)
+    // A is attached, but the scheduler is awaiting B's admission rather than folding A.
+    manager.complete("A")
+    manager.selfResume("A")
+    manager.complete("A", "error")
+    releaseAdmission.resolve()
+    await within(manager.whenStarted("B"))
+    manager.complete("B")
+    const result = await within(running, 5_000)
+
+    expect(result.nodes.find((entry) => entry.id === "A")?.state).toBe("failed")
+    expect(result.status).toBe("failed")
+    expect(events().filter((event) =>
+      event.type === "dag.node.transitioned" && event.nodeId === "A" && event.to === "completed",
+    )).toHaveLength(0)
+    expect(manager.selfResumedListenerCount()).toBe(0)
+  })
+
+  test("#given a resumed child has an infrastructure failure #when its outcome folds #then it fails without retrying or un-skipping dependents", async () => {
+    const manager = new FakeTaskManager({ autoComplete: false })
+    const { scheduler, events } = schedulerFixture(
+      definition([node("A"), node("D"), node("B", ["A"]), node("E", ["B"]), node("C", ["A", "D"])]),
+      manager, undefined, undefined, undefined,
+      () => { throw new Error("a resumed outcome must not schedule an infrastructure retry") },
+    )
+    const running = scheduler.run()
+    await within(manager.whenStarted("A"))
+    await within(manager.whenStarted("D"))
+    manager.complete("A")
+    await within(manager.whenStarted("B"))
+    manager.complete("B")
+    // E's admission proves B's completed output has already been consumed too.
+    await within(manager.whenStarted("E"))
+    manager.complete("E")
+    manager.selfResume("A")
+    manager.complete("A", "error", "host_unavailable")
+    manager.complete("D")
+    const result = await within(running, 5_000)
+
+    expect(result.status).toBe("failed")
+    expect(result.nodes.map((entry) => `${entry.id}:${entry.state}`)).toEqual([
+      "A:failed", "D:completed", "B:completed", "E:completed", "C:skipped",
+    ])
+    expect(manager.starts.filter((id) => id === "A")).toHaveLength(1)
+    expect(events().filter((event) => event.type === "dag.node.retried")).toHaveLength(0)
+    expect(result.diagnostics.filter((entry) => entry.kind === "node_flag").map((entry) => String(entry.nodeId))).toEqual(["B", "E"])
+    expect(manager.selfResumedListenerCount()).toBe(0)
+  })
+
   test("#given a completed node whose child resumes on its own #when the resumed run fails #then the node is re-opened and fails, and the run summary counts it", async () => {
     // given - A completes and its dependent B is admitted on that completion.
     const manager = new FakeTaskManager({ autoComplete: false })
@@ -709,6 +788,9 @@ describe("DAG scheduler self-resumed node child (omo#10487)", () => {
       event.type === "dag.node.transitioned" && event.nodeId === "A" && event.from === "completed" && event.to === "running" && event.reason.kind === "resumed",
     )).toBe(true)
     expect(manager.selfResumedListenerCount()).toBe(0)
+    expect(result.diagnostics.filter((entry) => entry.kind === "node_flag")).toEqual([
+      expect.objectContaining({ kind: "node_flag", nodeId: "B" }),
+    ])
   })
 
   test("#given a re-opened node a dependent still waits on #when the resumed run fails #then the dependent is never admitted and is skipped", async () => {
