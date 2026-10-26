@@ -132,8 +132,55 @@ test("#given html and a byte-identical md copy at another path #when only the ht
 	expect((await session.outcomes()).map((result) => result.exitCode)).toEqual([0, 0])
 })
 
-test("#given a clean own record and a legacy record confirming drift on the same bytes #when verified #then the newer own record replaces the verdict", async () => {
+// Reader runs on the same bytes are ordered by their records' written_at, never by file name.
+const EARLIER = new Date("2026-01-01T10:00:00.000Z")
+const LATER = new Date("2026-01-01T11:00:00.000Z")
+const DRIFT = [{ code: "meaning_drift_confirmed", severity: "major", message: "drift" }]
+
+/** Write a meaning record for the delivered html bytes at an explicit time. */
+const meaningAt = (session: Recorded, path: string, at: Date, defects: Record<string, unknown>[] = []) =>
+	writeFidelityRecord(path, "meaning", { artifact_sha256: sha256Of(readFileSync(session.path)), report: session.path, defects }, at)
+
+/** Deliver a pdf rendered from the html source; it has no meaning record of its own. */
+const deliverPdf = async (session: Recorded) => {
+	const pdf = join(session.dir, "report.pdf")
+	writeFileSync(pdf, "%PDF-1.7 rendered")
+	await session.invoke(["set", "pdf", "delivered", "--path", pdf, "--rendered-from", session.path, "--verified-by", session.record])
+}
+
+test("#given a clean own record written after a legacy record confirming drift on the same bytes #when verified and finished #then the newer clean run passes", async () => {
 	const session = await fullyRecorded()
-	writeFidelityRecord(join(session.dir, MEANING_RECORD), "meaning", { artifact_sha256: sha256Of(readFileSync(session.path)), report: session.path, defects: [{ code: "meaning_drift_confirmed", severity: "major", message: "drift" }] })
+	meaningAt(session, join(session.dir, MEANING_RECORD), EARLIER, DRIFT)
+	meaningAt(session, session.recordPath.meaning, LATER)
+	expect((await session.outcomes()).map((result) => result.exitCode)).toEqual([0, 0])
+})
+
+test("#given a legacy record confirming drift written after a clean own record on the same bytes #when verified and finished #then the newer drift refuses", async () => {
+	const session = await fullyRecorded()
+	meaningAt(session, session.recordPath.meaning, EARLIER)
+	meaningAt(session, join(session.dir, MEANING_RECORD), LATER, DRIFT)
+	await expectRefused(session, { code: "fidelity_unresolved", codes: ["meaning_drift_confirmed"], path: join(session.dir, MEANING_RECORD) })
+})
+
+test("#given a clean own record and a legacy drift record written at the same time on the same bytes #when verified and finished #then the more severe verdict refuses", async () => {
+	const session = await fullyRecorded()
+	meaningAt(session, session.recordPath.meaning, LATER)
+	meaningAt(session, join(session.dir, MEANING_RECORD), LATER, DRIFT)
+	await expectRefused(session, { code: "fidelity_unresolved", codes: ["meaning_drift_confirmed"], path: join(session.dir, MEANING_RECORD) })
+})
+
+test("#given two edition records for the same bytes, the alphabetically-first clean and older #when a pdf of those bytes is verified and finished #then the newer drift refuses", async () => {
+	const session = await fullyRecorded()
+	await deliverPdf(session)
+	meaningAt(session, meaningFile(session.dir, "html"), EARLIER)
+	meaningAt(session, meaningFile(session.dir, "post"), LATER, DRIFT)
+	await expectRefused(session, { code: "fidelity_unresolved", codes: ["meaning_drift_confirmed"], path: meaningFile(session.dir, "post") })
+})
+
+test("#given two edition records for the same bytes, the alphabetically-first confirming drift and older #when verified and finished #then the newer clean run passes", async () => {
+	const session = await fullyRecorded()
+	await deliverPdf(session)
+	meaningAt(session, meaningFile(session.dir, "html"), EARLIER, DRIFT)
+	meaningAt(session, meaningFile(session.dir, "post"), LATER)
 	expect((await session.outcomes()).map((result) => result.exitCode)).toEqual([0, 0])
 })

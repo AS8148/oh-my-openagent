@@ -24,7 +24,7 @@ import { meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
 import { blocksDelivery, deliveryBlockReason } from "./gates-fidelity.mjs"
 
 export const FIDELITY_RECORD = "fidelity-defects.json"
-/** The legacy session meaning record: accepted for an edition that has no record of its own. */
+/** The legacy session meaning record: a candidate for every edition whose bytes it claims, like any edition record (newest run wins). */
 export const MEANING_RECORD = "fidelity-meaning-defects.json"
 /** The meaning record of one delivered edition, named by its outcome format (`fact meaning-check --edition`). */
 export const meaningRecordName = (format) => `fidelity-meaning-defects.${format}.json`
@@ -56,34 +56,51 @@ const perEditionAndSession = (sessionDir, delivered) => [
 	...(existsSync(join(sessionDir, FIDELITY_RECORD)) ? [sessionTarget(sessionDir, FIDELITY_RECORD)] : []),
 ]
 
-/** Edition meaning records on disk (fidelity-meaning-defects.<format>.json), in name order. */
+/** Edition meaning records on disk (fidelity-meaning-defects.<format>.json). */
 const EDITION_MEANING = /^fidelity-meaning-defects\.[^.]+\.json$/u
 
-/** The artifact_sha256 a meaning record claims; an unreadable record matches no bytes (its own row still reads and refuses it). */
-function claimedHash(path) {
+/** Verdict severity for equal times: a confirmed drift, then any other blocking defect (unverified), then clean. */
+const severityOf = (defects) =>
+	defects.some((defect) => defect?.code === "meaning_drift_confirmed") ? 2 : defects.some((defect) => typeof defect?.code === "string" && blocksDelivery(defect)) ? 1 : 0
+
+/**
+ * What selection reads from a meaning record: the bytes it claims, when it was written, how severe it is.
+ * An unreadable record matches no bytes (its own row still reads and refuses it); a record with no
+ * readable written_at sorts newest, so the barrier reads it and refuses it as malformed.
+ */
+function claimOf(path) {
+	let record
 	try {
-		return readJsonFile(path)?.artifact_sha256 ?? null
+		record = readJsonFile(path)
 	} catch {
 		return null
 	}
+	const at = Date.parse(record?.written_at)
+	return { path, hash: record?.artifact_sha256 ?? null, at: Number.isNaN(at) ? Infinity : at, severity: severityOf(Array.isArray(record?.defects) ? record.defects : []) }
 }
 
+/** Newest written_at first; on equal times the more severe verdict first. File names never decide. */
+const newestFirst = (a, b) => (a.at === b.at ? b.severity - a.severity : b.at > a.at ? 1 : -1)
+
 /**
- * One meaning record per delivered edition, bound to that edition's bytes: its own
- * fidelity-meaning-defects.<format>.json, else any edition record whose artifact_sha256 equals this
- * edition's current bytes (a byte-identical copy, or a PDF of the html edition), else the legacy
- * session record. When none exists the target is the edition's own name, so the refusal names the
- * file to write.
+ * One meaning record per delivered edition, bound to that edition's bytes. Every record whose
+ * artifact_sha256 equals the edition's current bytes (a PDF counts its --rendered-from bytes) is a
+ * candidate: its own fidelity-meaning-defects.<format>.json, another edition's record (a
+ * byte-identical copy, or the html edition a PDF renders), and the legacy session record. The
+ * newest reader run wins; on equal times the more severe verdict wins. When no record claims these
+ * bytes the target is its own record (refused as for a different edition), else the legacy record,
+ * else its own name, so the refusal names the file to write (meaning gate not run).
  */
 function perEditionMeaning(sessionDir, delivered) {
 	if (delivered.length === 0) return [sessionTarget(sessionDir, MEANING_RECORD)]
-	const records = readdirSync(sessionDir).filter((name) => EDITION_MEANING.test(name)).sort().map((name) => join(sessionDir, name))
 	const legacy = join(sessionDir, MEANING_RECORD)
+	const editions = readdirSync(sessionDir).filter((name) => EDITION_MEANING.test(name)).map((name) => join(sessionDir, name))
+	const claims = [...editions, ...(existsSync(legacy) ? [legacy] : [])].map(claimOf).filter((claim) => claim !== null)
 	return perEdition(sessionDir, delivered).map((target) => {
 		const own = join(sessionDir, meaningRecordName(target.format))
 		const bytes = target.subjects.length > 0 ? hashOf(target.subjects[0]) : null
-		const sameBytes = bytes === null ? undefined : records.find((path) => claimedHash(path) === bytes)
-		return { ...target, declared: false, path: existsSync(own) ? own : (sameBytes ?? (existsSync(legacy) ? legacy : own)) }
+		const [newest] = bytes === null ? [] : claims.filter((claim) => claim.hash === bytes).sort(newestFirst)
+		return { ...target, declared: false, path: newest?.path ?? (existsSync(own) ? own : existsSync(legacy) ? legacy : own) }
 	})
 }
 
