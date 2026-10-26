@@ -22,7 +22,12 @@ function rowChecks(snap, id, referenced, cited, flag) {
 	const converted = snap.view.mode === "converted"
 	for (const row of referenced) {
 		const node = cited.get(row.fact_id)
-		if (row.locator?.unit !== "bytes") continue
+		// No locator unit marks a legacy text.txt row: its snapshot hash was checked above.
+		if (row.locator?.unit === undefined) continue
+		if (snap.view.mode === "legacy") {
+			blocked(flag, cited, row, id, "raw.bin is missing (the row is byte-located)")
+			continue
+		}
 		if (converted && row.kind !== "quote") {
 			flag("snapshot_not_raw", node, `${row.fact_id} cannot measure converted-only source ${id}`)
 			continue

@@ -154,6 +154,12 @@ describe("fact verify fails closed when a cited snapshot cannot be read", () => 
 		expect(blockers((await reverify(dir)).json)[0]?.message).toContain("text.txt is missing")
 	})
 
+	test("#given a byte-located row whose raw.bin is deleted #when verified #then it blocks naming raw.bin", async () => {
+		const dir = await pageSession()
+		unlinkSync(join(dir, "sources/S1/raw.bin"))
+		expect(blockers((await reverify(dir)).json).map((defect) => defect.message)).toEqual([expect.stringContaining("raw.bin is missing"), expect.stringContaining("raw.bin is missing")])
+	})
+
 	test("#given a converted-only quote whose text.txt is deleted #when verified #then it blocks", async () => {
 		const dir = session()
 		await snapshot(dir, "S1", "--text", file(dir, "aid.txt", "The span is 320 m."))
