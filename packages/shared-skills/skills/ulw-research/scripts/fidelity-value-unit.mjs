@@ -5,11 +5,14 @@
 import { cellsOf, rowsOf } from "./fact-locate.mjs"
 import { unitKey } from "./fidelity-binding.mjs"
 import { proseText } from "./html-lite.mjs"
+import { NUMBER_SOURCE } from "./number-grammar.mjs"
 import { dimensionOf, normalizeUnit, spacedAliasUnit } from "./units.mjs"
 
 // Korean particles a unit may carry (eun/neun, i/ga, eul/reul, ui, e, eseo, ege, euro/ro, wa/gwa, do, man,
 // kkaji, buteo, boda, ssik, in, ida/yeotda/ieotda, imyeo, igo), longest first.
 const PARTICLES = ["\uC774\uC5C8\uB2E4", "\uC600\uB2E4", "\uC774\uB2E4", "\uC774\uBA70", "\uC774\uACE0", "\uC73C\uB85C", "\uC5D0\uC11C", "\uC5D0\uAC8C", "\uAE4C\uC9C0", "\uBD80\uD130", "\uBCF4\uB2E4", "\uC740", "\uB294", "\uC774", "\uAC00", "\uC744", "\uB97C", "\uC758", "\uC5D0", "\uB85C", "\uC640", "\uACFC", "\uB3C4", "\uB9CC", "\uC529", "\uC778"]
+/** The displayed value, read with the one grouped-number grammar; text around it is sign and unit. */
+const NUMBER = new RegExp(NUMBER_SOURCE, "u")
 const SIGNS = ["US$", "$", "\u20AC", "\u20A9", "\u00A3", "\u00A5"]
 
 const withoutParticle = (word) => {
@@ -84,8 +87,9 @@ export function valueUnitProblem(ctx, node, row) {
 	const at = siblings.indexOf(node)
 	const shown = proseText(node)
 	const [prev, next] = [siblings[at - 1], siblings[at + 1]]
-	const sign = signBefore(`${prev?.tag === "#text" ? prev.text : ""}${shown.replace(/\d[\s\S]*$/u, "")}`)
-	const following = `${shown.replace(/^[\s\S]*\d/u, "")}${next?.tag === "#text" ? next.text : ""}`
+	const number = NUMBER.exec(shown)
+	const sign = signBefore(`${prev?.tag === "#text" ? prev.text : ""}${number ? shown.slice(0, number.index) : ""}`)
+	const following = `${number ? shown.slice(number.index + number[0].length) : ""}${next?.tag === "#text" ? next.text : ""}`
 	const after = unitAfter(following, row) ?? (unitElementAfter(siblings, at, row) ? { token: row.unit } : null)
 	const found = [["preceded by", sign && { ...sign, sign: true }], ["followed by", after], ["headed with", headerUnit(ctx, node)]].filter(([, unit]) => unit)
 	if (found.length === 0) return ["unit_unbound", `${row.fact_id} has unit "${row.unit}" but no recognizable unit right after its value, before it as a currency sign, or in its column header`]
