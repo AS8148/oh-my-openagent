@@ -237,6 +237,77 @@ const SIGN_MARKUP: Row[] = [
 	{ form: "titled link target digits are link syntax", raw: '<p><a href="/r/7" title="Fig (4)">pic</a></p>', converted: '[pic](/r/7 "Fig (4)")', altered: [], lost: [] },
 ]
 
+// Raw inline HTML a converter leaves inside its Markdown (pandoc's gfm writer keeps <sup>, <sub>,
+// sized <img>, <span> and <br>): read with the html-lite tag reader, a sup, sub or break tag is a
+// boundary as on the raw side (`opaque`: every dash after it is a sign), any other tag or comment
+// is dropped with its attributes, like a Markdown closer or opener.
+const HTML_SHAPES: Shape[] = [
+	{ form: "<sup>", html: (c) => `<sup>${c}</sup>`, md: (c) => `<sup>${c}</sup>`, opaque: true },
+	{ form: "<sub>", html: (c) => `<sub>${c}</sub>`, md: (c) => `<sub>${c}</sub>`, opaque: true },
+	{ form: "<br> after the text", html: (c) => `${c}<br>`, md: (c) => `${c}<br>`, opaque: true },
+	{ form: "<br /> after the text", html: (c) => `${c}<br>`, md: (c) => `${c}<br />`, opaque: true },
+	{ form: "<span>", html: (c) => `<span>${c}</span>`, md: (c) => `<span>${c}</span>` },
+	{ form: '<span class="x">', html: (c) => `<span class="x">${c}</span>`, md: (c) => `<span class="x">${c}</span>` },
+	{ form: "<em> written for <i>", html: (c) => `<i>${c}</i>`, md: (c) => `<em>${c}</em>` },
+	{ form: '<a href="/wiki/1990">', html: (c) => `<a href="/wiki/1990">${c}</a>`, md: (c) => `<a href="/wiki/1990">${c}</a>` },
+	{ form: '<a href title="Fig (4)">', html: (c) => `<a href="/c" title="Fig (4)">${c}</a>`, md: (c) => `<a href="/c" title="Fig (4)">${c}</a>` },
+	{ form: '<img width="320"> after the text', html: (c) => `${c}<img src="i.png" width="320">`, md: (c) => `${c}<img src="i.png" width="320">` },
+	{ form: "<img src=a2019.png /> after the text", html: (c) => `${c}<img src="a2019.png" alt="x">`, md: (c) => `${c}<img src=a2019.png alt=x />` },
+	{ form: "<!-- comment 7 --> after the text", html: (c) => `${c}<!-- comment 7 -->`, md: (c) => `${c}<!-- comment 7 -->` },
+	{ form: "**<span>**", html: (c) => `<b><span>${c}</span></b>`, md: (c) => `**<span>${c}</span>**` },
+	{ form: "<span>[link](url)</span>", html: (c) => `<span><a href="/c">${c}</a></span>`, md: (c) => `<span>[${c}](/c)</span>` },
+]
+const RAW_HTML: Row[] = [
+	...closerRows(HTML_SHAPES),
+	{ form: "reviewer r6: pandoc 10<sup>-5</sup>", raw: "<p>10<sup>-5</sup> m</p>", converted: "10<sup>-5</sup> m", altered: [], lost: [] },
+	{ form: "reviewer r6: pandoc 10<sup>U+2212 5</sup>", raw: "<p>10<sup>\u22125</sup> m</p>", converted: "10<sup>\u22125</sup> m", altered: [], lost: [] },
+	{ form: "reviewer r6: pandoc 10<sup>9</sup>", raw: "<p>Output reached 10<sup>9</sup> kWh</p>", converted: "Output reached 10<sup>9</sup> kWh", altered: [], lost: [] },
+	{ form: "reviewer r6: <span>a</span>-5", raw: "<p><span>a</span>-5</p>", converted: "<span>a</span>-5", altered: [], lost: [] },
+	{ form: 'reviewer r6: <img src="a2019.png">', raw: '<p><img src="a2019.png"></p>', converted: '<img src="a2019.png">', altered: [], lost: [] },
+	{ form: "reviewer r6: <img src=x width=320> before a number", raw: "<p><img src=x width=320> 5 apples</p>", converted: "<img src=x width=320> 5 apples", altered: [], lost: [] },
+	{ form: "KO <img width=320> before a number", raw: "<p><img src=x width=320> \uC0AC\uACFC 5\uAC1C</p>", converted: "<img src=x width=320> \uC0AC\uACFC 5\uAC1C", altered: [], lost: [] },
+	{ form: "reviewer r6: 2019<sup>a</sup>-2023", raw: "<p>2019<sup>a</sup>-2023</p>", converted: "2019<sup>a</sup>-2023", altered: [], lost: [] },
+	{ form: "KO 3,234<sup>1</sup>\uC5B5 kept as raw HTML", raw: "<p>\uB9E4\uCD9C 3,234<sup>1</sup>\uC5B5 \uC6D0</p>", converted: "\uB9E4\uCD9C 3,234<sup>1</sup>\uC5B5 \uC6D0", altered: [], lost: [] },
+	{ form: "a superscript the converter flattened is still altered", raw: "<p>10<sup>-5</sup> m</p>", converted: "10-5 m", altered: ["5"], lost: ["-5"] },
+	{ form: "a glued footnote is still altered next to raw HTML", raw: "<p>4.2<sup>2</sup> <span>bn</span></p>", converted: "4.22 <span>bn</span>", altered: ["4.22"], lost: ["4.2", "2"] },
+	{ form: "an img width written into prose is still altered", raw: "<p><img src=x width=320> 5</p>", converted: "320 5", altered: ["320"], lost: [] },
+	{ form: "an autolink is not a tag", raw: '<p><a href="https://x.example/2024">https://x.example/2024</a></p>', converted: "<https://x.example/2024>", altered: [], lost: [] },
+	{ form: "an escaped \\< is text, not a tag", raw: "<p>a&lt;b&gt;7</p>", converted: "a\\<b>7", altered: [], lost: [] },
+	{ form: "a < with no tag end stays text", raw: "<p>a &lt;sup 5</p>", converted: "a <sup 5", altered: [], lost: [] },
+	{ form: "a tag never spans a blank line", raw: "<p>a &lt;span</p><p>5 x&gt;</p>", converted: "a <span\n\n5 x>", altered: [], lost: [] },
+]
+
+// A reference definition's title may sit alone on the next line (CommonMark): its digits are link
+// syntax there too. Only the title is read across the line break; text after it makes it prose.
+const REF_TITLES: Row[] = [
+	...[['"Fig 2019"', "double quotes"], ["'Fig 2019'", "single quotes"], ["(Fig 2019)", "parentheses"]].flatMap(([title, form]) => [
+		{ form: `title in ${form} on the next line, indented`, raw: '<p><a href="/x" title="Fig 2019">fig</a></p>', converted: `[fig][1]\n\n[1]: /x\n  ${title}`, altered: [], lost: [] },
+		{ form: `title in ${form} on the next line, not indented`, raw: '<p><a href="/x" title="Fig 2019">fig</a></p>', converted: `[fig][1]\n\n[1]: /x\n${title}\n`, altered: [], lost: [] },
+	]),
+	{ form: "KO title on the next line", raw: '<p><a href="/x" title="\uADF8\uB9BC 2019">\uADF8\uB9BC</a></p>', converted: '[\uADF8\uB9BC][1]\n\n[1]: /x\n  "\uADF8\uB9BC 2019"', altered: [], lost: [] },
+	{ form: "two definitions, the first with its title on the next line", raw: '<p><a href="/x" title="Fig 2019">a</a> <a href="/y/7">b</a></p>', converted: '[a][1] [b][2]\n\n[1]: /x\n  "Fig 2019"\n[2]: /y/7', altered: [], lost: [] },
+	{ form: "a quoted line with text after it is prose, not a title", raw: '<p><a href="/x" title="Fig 2019">fig</a></p>', converted: '[fig][1]\n\n[1]: /x\n"Fig 2019" was cited', altered: ["2019"], lost: [] },
+	{ form: "a next-line title digit the source does not hold is altered", raw: '<p><a href="/x" title="Fig">fig</a></p>', converted: '[fig][1]\n\n[1]: /x\n  "Fig 2019"', altered: ["2019"], lost: [] },
+]
+
+// Declared out of scope (references/fact-ledger.md): constructs outside the CommonMark inline grammar,
+// the html-lite tag set and the named-entity table. Each row ASSERTS the safe-direction report, so
+// the boundary is tested: the numbers are altered and `source snapshot --replace` recovers.
+const OUT_OF_SCOPE: Row[] = [
+	{ form: "custom converter syntax: a Hugo figure shortcode", raw: '<figure><img src="chart-2019.png" width="640"></figure>', converted: '{{< figure src="chart-2019.png" width="640" >}}', altered: ["2019", "640"], lost: [] },
+	{ form: "custom converter syntax: pandoc image attributes {width=640}", raw: '<p><img src="i.png" alt="x" width="640"></p>', converted: "![x](i.png){width=640}", altered: ["640"], lost: [] },
+	{ form: "LaTeX: \\frac{3}{4} for a vulgar fraction", raw: "<p>\u00BE of sites</p>", converted: "$\\frac{3}{4}$ of sites", altered: ["3", "4"], lost: [] },
+	{ form: "KO LaTeX: \\frac{3}{4}", raw: "<p>\uC0AC\uC774\uD2B8\uC758 \u00BE</p>", converted: "\uC0AC\uC774\uD2B8\uC758 $\\frac{3}{4}$", altered: ["3", "4"], lost: [] },
+	{ form: "MathJax: \\sqrt[3]{8} for a cube root", raw: "<p>\u221B8</p>", converted: "\\(\\sqrt[3]{8}\\)", altered: ["3"], lost: [] },
+	{ form: "non-CommonMark table: AsciiDoc cols", raw: "<table><tr><td>A</td><td>B</td></tr></table>", converted: '[cols="1,3"]\n|===\n| A | B\n|===', altered: ["1,3"], lost: [] },
+	{ form: "non-CommonMark table: a colspan cell repeated per column", raw: '<table><tr><td colspan="2">5</td></tr></table>', converted: "| 5 | 5 |", altered: ["5"], lost: [] },
+	{ form: "footnote extension beyond pandoc's: a numbered back-reference title", raw: '<p>Margin 12%<sup><a href="#fn-a">a</a></sup></p><p id="fn-a">Filing.</p>', converted: 'Margin 12%[^a]\n\n[^a]: Filing. [\u21A9](#fnref-a "Jump back to footnote 2 in the text")', altered: ["2"], lost: [] },
+	{ form: "reference definition with its destination on the next line", raw: '<p><a href="/x/2019">fig</a></p>', converted: "[fig][1]\n\n[1]:\n  /x/2019", altered: ["2019"], lost: [] },
+	{ form: "an unescaped & whose text spells a reference (turndown)", raw: "<p>Type &amp;minus;5 to negate</p>", converted: "Type &minus;5 to negate", altered: ["\u22125"], lost: ["5"] },
+	{ form: "a legacy reference without its semicolon (&nbsp)", raw: "<p>1&nbsp234 567</p>", converted: "1\u00A0234 567", altered: ["1 234 567"], lost: ["1", "234 567"] },
+	{ form: "a numeric reference padded past 6 hex digits", raw: "<p>&#x00002212;5</p>", converted: "\u22125", altered: ["\u22125"], lost: ["00002212", "5"] },
+]
+
 // Named character references whose decoded character the probe reads as a sign or a separator (or
 // as markup), decoded on the raw side as a converter decodes them: each in a sign position and a
 // separator position, EN and KO, kept as the decoded character, plus the sign position with the
@@ -259,6 +330,12 @@ const ENTITY_ROWS: Row[] = ENTITIES.flatMap(([name, ch]) => {
 		{ form: `KO &${name}; as a separator`, raw: `<p>\uC778\uAD6C 1${e}234${e}567\uBA85</p>`, converted: `\uC778\uAD6C 1${ch}234${ch}567\uBA85`, altered: [], lost: [] },
 		{ form: `&${name}; in a sign position, dropped`, raw: `<p>fell ${e}5 pts</p>`, converted: "fell 5 pts", altered: SIGN_CHARS.has(ch) ? ["5"] : [], lost: SIGN_CHARS.has(ch) ? [`${ch}5`] : [] },
 		{ form: `KO &${name}; in a sign position, dropped`, raw: `<p>\uAC10\uC18C${e}3%</p>`, converted: "\uAC10\uC18C3%", altered: SIGN_CHARS.has(ch) ? ["3"] : [], lost: SIGN_CHARS.has(ch) ? [`${ch}3`] : [] },
+		{ form: `&${name}; kept as the reference in a sign position`, raw: `<p>fell ${e}5 pts</p>`, converted: `fell ${e}5 pts`, altered: [], lost: [] },
+		{ form: `KO &${name}; kept as the reference in a sign position`, raw: `<p>\uAC10\uC18C${e}3%</p>`, converted: `\uAC10\uC18C${e}3%`, altered: [], lost: [] },
+		{ form: `&${name}; kept as the reference as a separator`, raw: `<p>1${e}234${e}567 people</p>`, converted: `1${e}234${e}567 people`, altered: [], lost: [] },
+		{ form: `KO &${name}; kept as the reference as a separator`, raw: `<p>\uC778\uAD6C 1${e}234${e}567\uBA85</p>`, converted: `\uC778\uAD6C 1${e}234${e}567\uBA85`, altered: [], lost: [] },
+		{ form: `&${name}; in a verbatim plain-text copy (sign position)`, raw: `fell ${e}5 pts`, converted: `fell ${e}5 pts`, altered: [], lost: [] },
+		{ form: `&${name}; in a verbatim plain-text copy (separator)`, raw: `1${e}234${e}567 people`, converted: `1${e}234${e}567 people`, altered: [], lost: [] },
 	]
 })
 ENTITY_ROWS.push(
@@ -266,6 +343,10 @@ ENTITY_ROWS.push(
 	{ form: "reviewer r5: &thinsp; groups in a text with no tags", raw: "1&thinsp;234&thinsp;567", converted: "1\u2009234\u2009567", altered: [], lost: [] },
 	{ form: "reviewer r5: &nbsp;&minus; in a paragraph", raw: "<p>x&nbsp;&minus;3.5%</p>", converted: "x\u00A0\u22123.5%", altered: [], lost: [] },
 	{ form: "an unterminated reference in a text with no tags stays literal", raw: "a < b &amp c 5", converted: "a < b &amp c 5", altered: [], lost: [] },
+	{ form: "reviewer r6: 'Rate &minus;5 and 1&thinsp;234' copied verbatim", raw: "Rate &minus;5 and 1&thinsp;234", converted: "Rate &minus;5 and 1&thinsp;234", altered: [], lost: [] },
+	{ form: "KO verbatim copy with &minus; and &thinsp;", raw: "\uC99D\uAC10 &minus;5%, \uC778\uAD6C 1&thinsp;234\uBA85", converted: "\uC99D\uAC10 &minus;5%, \uC778\uAD6C 1&thinsp;234\uBA85", altered: [], lost: [] },
+	{ form: "a sign the converted side spells as another reference is still dropped", raw: "<p>fell &minus;5 pts</p>", converted: "fell &nbsp;5 pts", altered: ["5"], lost: ["\u22125"] },
+	{ form: "a separator spelled as a reference on the converted side still joins two numbers", raw: "<p>12</p><p>345</p>", converted: "12&thinsp;345", altered: ["12 345"], lost: ["12", "345"] },
 )
 
 describe("conversion probe classes (one row per form, EN and KO)", () => {
@@ -273,5 +354,8 @@ describe("conversion probe classes (one row per form, EN and KO)", () => {
 	test.each(rows(SIGNS))("signs and separators around numbers: %s", (_form, row) => check(row))
 	test.each(rows(GROUPING))("grouping boundaries: %s", (_form, row) => check(row))
 	test.each(rows(SIGN_MARKUP))("sign context through Markdown markup: %s", (_form, row) => check(row))
-	test.each(rows(ENTITY_ROWS))("named character references on the raw side: %s", (_form, row) => check(row))
+	test.each(rows(ENTITY_ROWS))("named character references on both sides: %s", (_form, row) => check(row))
+	test.each(rows(RAW_HTML))("raw inline HTML in the converted Markdown: %s", (_form, row) => check(row))
+	test.each(rows(REF_TITLES))("reference definition titles on the next line: %s", (_form, row) => check(row))
+	test.each(rows(OUT_OF_SCOPE))("declared out of scope (reported as altered): %s", (_form, row) => check(row))
 })

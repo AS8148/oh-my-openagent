@@ -10,10 +10,15 @@
 // parenthesised link and image targets, reference endings, backslash-escaped closers) is skipped to
 // the first character it closes ("**2019**-2023" and '[1990](/wiki/1990 "1990")-2000' are ranges), and
 // an opener run between the sign and its digits ("-**5**") keeps the sign. A raw-side character
-// reference (`&minus;`, `&thinsp;`) is decoded first, as a converter decodes it. Digits a converter
+// reference (`&minus;`, `&thinsp;`) is decoded on BOTH sides with the one entities.mjs table, so a
+// verbatim copy probes clean. Raw inline HTML a converter leaves in the Markdown (pandoc's gfm writer
+// emits `<sup>`, `<sub>`, `<img ... width=320>`, `<span>`, `<br>`) is read with the html-lite tag
+// reader: sup, sub and break tags are boundaries, as on the raw side, and any other tag or comment is
+// dropped with its attributes, so it is a closer or opener like Markdown markup. Digits a converter
 // writes out from a link target, an image source, alt text, or a title cover a converted number only
 // inside Markdown link or image syntax (`](...)` with any title and balanced parentheses,
-// `![...](...)`, `<https://...>`, `[ref]: url "title"`), never in prose; a footnote
+// `![...](...)`, `<https://...>`, `[ref]: url "title"` with the title on the same or the next line),
+// never in prose; a footnote
 // definition's text ("[^1]: ...") is prose. Converter syntax is not a number: a line-start list marker
 // ("1. ", "2) ", "(3) ", indented or after "> ") is exempt only while the source has an <ol> item with
 // that number and the markers so far do not outnumber the <ol> items (so lazy "1. 1. 1." numbering
@@ -22,13 +27,15 @@
 // otherwise each is a candidate. A converter's hard wrap may split a space-grouped number over one line
 // break; the two halves read as one number only when the raw side holds that number and not both
 // halves, so raw "12 345 and 12 and 345" wrapped inside "12 345" reports both halves (it fails safe).
-// The built-in snapshot writes no attribute text, syntax or wraps, so it gets none of these allowances.
+// The built-in snapshot writes no attribute text, syntax, wraps or tags, and its text is already
+// decoded, so it gets none of these allowances. Constructs outside this grammar are declared out of
+// scope in references/fact-ledger.md: they report as altered (the safe direction).
 
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { CliError } from "./cli-support.mjs"
-import { decodeEntities, parseHtml, PROSE_BREAKS } from "./html-lite.mjs"
+import { decodeEntities, parseHtml, PROSE_BREAKS, readTag } from "./html-lite.mjs"
 import { escapedAt, inlineLinkSpans, stripClosers } from "./markdown-closers.mjs"
 import { NUMBER_SOURCE, plainDecimal } from "./number-grammar.mjs"
 
@@ -46,7 +53,13 @@ const REF_USE = /\]\[(\d+)\]/gu
 const REF_DEF = /(?:^|\u0001)(?: ?>)* ?\[(\d+)\]:/gu
 const NOTE_USE = /\[\^(\d+)\](?!:)/gu
 const NOTE_DEF = /(?:^|\u0001)(?: ?>)* ?\[\^(\d+)\]:/gu
-const LINK_SYNTAX = /!\[[^\]\u0001]*\](?:\([^)\u0001]*\))?|\]\([^)\u0001]*\)|<https?:\/\/[^>\s\u0001]+>|(?:^|\u0001) ?\[(?!\^)[^\]\u0001]+\]: ?[^\s\u0001]*(?: (?:"[^"\u0001]*"|'[^'\u0001]*'|\([^)\u0001]*\)))?/gu
+const TITLE = `(?:"[^"\u0001]*"|'[^'\u0001]*'|\\([^)\u0001]*\\))`
+/** A reference definition's title may sit alone on the next line (only whitespace after it). */
+const REF_DEFINITION = `(?:^|\u0001) ?\\[(?!\\^)[^\\]\u0001]+\\]: ?[^\\s\u0001]*(?: ${TITLE}| ?\u0001 ?${TITLE}(?= ?(?:\u0001|$)))?`
+const LINK_SYNTAX = new RegExp(`!\\[[^\\]\u0001]*\\](?:\\([^)\u0001]*\\))?|\\]\\([^)\u0001]*\\)|<https?:\\/\\/[^>\\s\u0001]+>|${REF_DEFINITION}`, "gu")
+const TAG_NAME = /^[a-z][a-z0-9-]*$/u
+/** What a tag leaves in the numeric text on either side: sup, sub and every break join no neighbour. */
+const edgeOf = (tag) => (tag === "sup" || tag === "sub" || PROSE_BREAKS.has(tag) ? BOUNDARY : "")
 
 /** Prose text, attribute text and <ol> item numbers of an HTML document; a non-HTML document is prose only. */
 function numericText(source, html) {
@@ -61,7 +74,7 @@ function numericText(source, html) {
 			const start = /^\s*\d+\s*$/u.test(node.attrs.start ?? "") ? Number(node.attrs.start) : 1
 			node.children.filter((child) => child.tag === "li").forEach((_, index) => listed.push(String(start + index)))
 		}
-		const edge = node.tag === "sup" || node.tag === "sub" || PROSE_BREAKS.has(node.tag) ? BOUNDARY : ""
+		const edge = edgeOf(node.tag)
 		chunks.push(edge)
 		if (node.tag === "time" && node.attrs.datetime !== undefined) chunks.push(`${BOUNDARY}${node.attrs.datetime}${BOUNDARY}`)
 		for (const child of node.children) walk(child)
@@ -69,6 +82,23 @@ function numericText(source, html) {
 	}
 	walk(parseHtml(source))
 	return { prose: chunks.join(""), carried: carried.join(BOUNDARY), listed }
+}
+
+/** Raw inline HTML in converted Markdown: sup, sub and break tags become boundaries, other tags and comments go. */
+function inlineHtml(text) {
+	let out = ""
+	let kept = 0
+	for (let lt = text.indexOf("<"); lt !== -1; lt = text.indexOf("<", Math.max(lt + 1, kept))) {
+		const comment = text.startsWith("<!--", lt)
+		const name = lt + (text[lt + 1] === "/" ? 2 : 1)
+		if (escapedAt(text, lt) || (!comment && !/[a-z]/iu.test(text[name] ?? ""))) continue
+		const tag = comment ? null : readTag(text, name)
+		const end = comment ? text.indexOf("-->", lt + 4) + 3 : tag.end
+		if (end <= lt || (tag && !(TAG_NAME.test(tag.name) && text[end - 1] === ">")) || /\n[ \t\r]*\n/u.test(text.slice(lt, end))) continue
+		out += text.slice(kept, lt) + (tag ? edgeOf(tag.name) : "")
+		kept = end
+	}
+	return out + text.slice(kept)
 }
 
 /**
@@ -171,7 +201,8 @@ function uncovered(tokens, counts) {
 }
 
 /**
- * Preserve token spelling in diagnostics; only the raw side is ever read as HTML. `attributes: false`
+ * Preserve token spelling in diagnostics; the raw side is read as HTML, the converted side as Markdown
+ * with raw inline tags, both decoded with one entity table. `attributes: false`
  * (the built-in snapshot) gives attribute digits no cover, converter syntax no exemption and no wrap rejoin. An exempt
  * marker or label is not a converted number at all: it neither covers a raw number nor counts as altered.
  */
@@ -180,7 +211,7 @@ export function probeConversion(raw, converted, { attributes = true } = {}) {
 	const before = tokensOf(source.prose)
 	const listed = new Set(source.listed)
 	let items = attributes ? source.listed.length : 0
-	const syntax = tokensOf(converted, { links: attributes })
+	const syntax = tokensOf(attributes ? decodeEntities(inlineHtml(converted)) : converted, { links: attributes })
 		.filter((token) => !(attributes && token.label) && !(token.marker && listed.has(token.key) && items-- > 0))
 	const after = attributes ? joinWrapped(syntax, countOf(before)) : syntax
 	const counts = countOf(before)
