@@ -41,7 +41,16 @@ const INLINE = new Set(["a", "abbr", "b", "bdi", "cite", "code", "data", "dfn", 
 const FRACTION = /^\uBD84\uC758\s?\d/u
 const scaleOf = (unit) => /-(e\d+)$/.exec(unit ?? "")?.[1] ?? null
 
-/** The unit written right after the value: the row's own unit (even across words), a spaced alias, or the next word. */
+/** English words stay apart: letter-only words join only as a spaced alias ("percentage points"), so "m in" is m, then in. */
+const LETTERS = /^[A-Za-z]+$/u
+/** The unit the words spell together: a spaced alias, or (with a symbol or Hangul in them) the words joined ("% p", "\uD37C\uC13C\uD2B8 \uD3EC\uC778\uD2B8"). */
+function unitOfWords(words) {
+	if (words.length === 1) return unitOf(words[0])
+	const spaced = stemsOf(words.at(-1)).map((last) => spacedAliasUnit([...words.slice(0, -1), last].join(" "))).find(Boolean)
+	return spaced ?? (words.every((word) => LETTERS.test(word)) ? null : unitOf(words.join("")))
+}
+
+/** The unit written right after the value: the longest known unit its first words spell ("% \uD3EC\uC778\uD2B8" is %p, not %), else the next word. */
 function unitAfter(text, row) {
 	const lead = text.replace(/^[\s\u00A0]+/u, "")
 	if (FRACTION.test(lead)) return null
@@ -50,16 +59,14 @@ function unitAfter(text, row) {
 	const clause = lead.split(/[,.;:!?()[\]"]/u)[0]
 	const words = clause.split(/[\s\u00A0]+/u).filter(Boolean).slice(0, 3)
 	if (words.length === 0) return null
-	for (let n = words.length; n > 0; n--) {
-		const unit = unitOf(words.slice(0, n).join(""))
-		if (unit && unitKey(unit) === unitKey(row.unit)) return { token: unit }
-	}
 	for (let n = words.length; n > 1; n--) {
-		const unit = stemsOf(words[n - 1]).map((last) => spacedAliasUnit([...words.slice(0, n - 1), last].join(" "))).find(Boolean)
+		const unit = unitOfWords(words.slice(0, n))
 		if (unit) return { token: unit }
 	}
 	const first = unitOf(words[0])
-	if (!first || ordinary(stemOf(words[0]))) return null
+	if (!first) return null
+	// An ordinary word ("pounds", "won awards") counts only as the row's unit or beside a sign or header of its kind (boundUnits).
+	if (unitKey(first) !== unitKey(row.unit) && ordinary(stemOf(words[0]))) return { token: first, ordinary: true }
 	const currency = words[1] ? unitOf(words[1]) : null
 	if (dimensionOf(first) === "scale" && dimensionOf(currency)?.startsWith("currency:")) return { token: `${currency} ${words[0]}`, dimension: dimensionOf(currency), scale: first }
 	return { token: first }
@@ -137,8 +144,12 @@ function boundUnits(node, row) {
 	const number = NUMBER.exec(shown)
 	const sign = signBefore(`${prev?.tag === "#text" ? prev.text : ""}${number ? shown.slice(0, number.index) : ""}`)
 	// The element's own text is the row's render: a scale word in it ("3,234\uC5B5", "12 million") is part of the value.
-	const after = unitAfter(textAfter(node), row) ?? (unitElementAfter(siblings, at, row) ? { token: row.unit } : null)
-	return [["preceded by", sign && { ...sign, sign: true }], ["followed by", after], ["headed with", headerUnit(node)]].filter(([, unit]) => unit)
+	const read = unitAfter(textAfter(node), row) ?? (unitElementAfter(siblings, at, row) ? { token: row.unit } : null)
+	const before = sign && { ...sign, sign: true }
+	const header = headerUnit(node)
+	const kind = (unit) => dimensionOf(unit.token)?.split(":")[0]
+	const after = read?.ordinary && ![before, header].some((unit) => unit && kind(unit) === kind(read)) ? null : read
+	return [["preceded by", before], ["followed by", after], ["headed with", header]].filter(([, unit]) => unit)
 }
 
 /** Each data-fact element's own fill-map entry: fill writes one element per entry, so ids pair up in document order. */

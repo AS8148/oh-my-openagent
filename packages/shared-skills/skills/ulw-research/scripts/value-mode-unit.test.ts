@@ -53,6 +53,18 @@ describe("value-mode unit binding through fact fill and verify", () => {
 		})
 	}
 
+	// A longer unit that starts with the row's unit (% -> %p): read whole, spaced or glued, EN and KO (peosenteu pointeu).
+	for (const to of ["% \uD3EC\uC778\uD2B8", " \uD37C\uC13C\uD2B8 \uD3EC\uC778\uD2B8", " percent points", " % p", " %p", "%\uD3EC\uC778\uD2B8", "\uD37C\uC13C\uD2B8\uD3EC\uC778\uD2B8"]) {
+		test(`#given {{F3:rate_yoy:value}}% #when hand-edited to ${JSON.stringify(to)} #then the longer unit is read and unit_mismatch blocks`, async () => {
+			const { verify, edit } = await filled(prose("{{F3:rate_yoy:value}}", "%"))
+			expect(codes(await verify())).toEqual([])
+			edit("</data>%", `</data>${to}`)
+			const edited = await verify()
+			expect(codes(edited)).toContain("unit_mismatch")
+			expect(edited.exitCode).toBe(1)
+		})
+	}
+
 	test("#given no following unit #when verified #then unit_unbound is a minor warning", async () => {
 		const result = await (await filled(prose("{{F1:span_len:value}}", " long"))).verify()
 		expect(result.exitCode).toBe(0)

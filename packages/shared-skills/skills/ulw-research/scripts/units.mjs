@@ -30,7 +30,7 @@ const TABLE = [
 	["F", "temperature", "5/9", "open", ["\u00B0F", "\u2109", "fahrenheit", "\uD654\uC528"], "-160/9"], // do
 	["%", "percent", "1", "open", ["percent", "\uD37C\uC13C\uD2B8", "\uD504\uB85C"]], // peosenteu
 	["\u2030", "percent", "0.1", "l", ["permille", "\uD37C\uBC00"]], // peomil
-	["%p", "percentage-point", "1", "open", ["pp", "%pt", "percentage point", "percentage points", "\uD37C\uC13C\uD2B8\uD3EC\uC778\uD2B8", "%\uD3EC\uC778\uD2B8"]],
+	["%p", "percentage-point", "1", "open", ["pp", "%pt", "percentage point", "percentage points", "percent point", "percent points", "% point", "% points", "\uD37C\uC13C\uD2B8\uD3EC\uC778\uD2B8", "%\uD3EC\uC778\uD2B8"]],
 	["x", "multiple", "1", "open", ["\u00D7", "times", "\uBC30"]], // bae
 	["e3", "scale", "1000", "closed", ["k", "thousand", "\uCC9C"]], // cheon
 	["e4", "scale", "10000", "closed", ["\uB9CC"]], // man
