@@ -30,7 +30,7 @@ const SUMMARY_SEND = "sends a pending session_summary only while the component's
 
 export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
   {
-    file: "otlp.ts", fn: "createSenpiOtlpTransport",
+    file: "otlp-runtime.ts", fn: "createSenpiOtlpTransport",
     guard: "unless(ingestKey.length === 0 || !isOtlpEvent(message.event))",
     call: 'createOtlpTelemetryTransport({ productEnvPrefix: "OMO_SENPI", ingestKey, spoolRoot, spool)',
     reason: "the core constructor checks every environment opt-out and this same consent callback before loading a sender or creating spool files",
@@ -50,7 +50,7 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
     reason: "preserves the existing PostHog path for admitted client captures; its fetch uses the same send-time consent",
   },
   {
-    file: "otlp.ts", fn: "createSenpiOtlpTransport>capture",
+    file: "otlp-runtime.ts", fn: "createSenpiOtlpTransport>capture",
     guard: "if(isOtlpEvent(value.event))",
     route: VIA_SESSION_CLIENT,
     call: "transport.capture(value)",
