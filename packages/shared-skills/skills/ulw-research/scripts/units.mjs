@@ -59,6 +59,8 @@ const ENTRIES = new Map()
 const EXACT = new Map()
 /** Case-insensitive keys: multi-letter ASCII aliases only, so m/M and B/b never collide. */
 const WORD = new Map()
+/** Aliases written with their own spacing ("percentage points"), by lower-case text. */
+const SPACED = new Map()
 for (const [token, dimension, factor, reading, aliases, offset] of TABLE) {
 	const entry = Object.freeze({ token, dimension, factor: parse(factor), offset: parse(offset ?? "0"), reading })
 	ENTRIES.set(token, entry)
@@ -66,6 +68,7 @@ for (const [token, dimension, factor, reading, aliases, offset] of TABLE) {
 		const key = squash(alias)
 		EXACT.set(key, entry)
 		if (alias !== token && key.length > 2 && /^[a-z]+$/.test(key) && !WORD.has(key.toLowerCase())) WORD.set(key.toLowerCase(), entry)
+		if (/\s/.test(alias)) SPACED.set(alias.toLowerCase(), entry)
 	}
 }
 
@@ -79,6 +82,11 @@ function entryOf(raw) {
 /** Canonical token for a raw unit, or null when the unit is not in the table. */
 export function normalizeUnit(raw) {
 	return entryOf(raw)?.token ?? null
+}
+
+/** Canonical token for a multi-word unit written with its alias's own spacing, or null (never a squashed join). */
+export function spacedAliasUnit(raw) {
+	return SPACED.get(String(raw).trim().replace(/\s+/g, " ").toLowerCase())?.token ?? null
 }
 
 /** Dimension of a unit ("length", "currency:KRW", ...), or null. */

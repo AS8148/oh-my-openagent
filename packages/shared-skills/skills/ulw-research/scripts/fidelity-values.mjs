@@ -158,7 +158,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 	}
 	for (const node of ctx.all.filter((cur) => cur.attrs["data-fact"] !== undefined)) {
 		const selector = node.attrs["data-quote-sel"] ?? "full"
-		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : factProblem(row, proseText(node), node.attrs) ?? valueUnitProblem(ctx, node, row)))
+		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : factProblem(row, proseText(node), node.attrs)))
 	}
 	const docText = bare(proseText(ctx.body))
 	for (const entry of fillMap ?? []) {
@@ -169,6 +169,11 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		})
 	}
 	rowChecks(ctx, ledger, rows, cited, options, flag)
+	for (const node of ctx.all.filter((cur) => cur.attrs["data-fact-mode"] === "value")) {
+		const row = rows.get(node.attrs["data-fact"])
+		const problem = row && row.kind !== "quote" && !factProblem(row, proseText(node), node.attrs) && valueUnitProblem(ctx, node, row)
+		if (problem) flag(problem[0], node, problem[1])
+	}
 	for (const tr of ctx.all.filter((node) => node.tag === "tr" && node.attrs["data-row-kind"] !== "comparison")) {
 		const groups = new Set(ctx.util.descendants(tr).map((node) => rows.get(node.attrs["data-fact"])?.observation_id).filter(Boolean))
 		if (groups.size > 1) flag("join_integrity_fail", tr, `one table row joins observations ${[...groups].join(", ")}`)

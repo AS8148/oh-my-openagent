@@ -20,6 +20,7 @@ import { parseHtml } from "./html-lite.mjs"
 
 /** Every code this gate can raise. */
 export const FIDELITY_GATE_CODES = Object.freeze([
+	"unit_unbound",
 	"fidelity_interview_incomplete", "unresolved_placeholder", "value_mismatch", "unit_mismatch", "quote_not_verbatim",
 	"quote_unbound", "claim_status_invalid", "snapshot_hash_mismatch", "chart_value_untraceable", "untraceable_number",
 	"unsupported_verification", "conflicting_readings", "hedge_dropped", "direction_flipped", "causality_added",
