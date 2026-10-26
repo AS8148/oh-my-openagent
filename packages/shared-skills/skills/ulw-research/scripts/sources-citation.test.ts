@@ -34,6 +34,22 @@ const GUARD = [
 	"<li>Market data, USD5bn in 2025, https://example.com/fx</li>",
 ]
 
+// Round-4 date ruling: a month/day is a date (a citation field), a day count is not.
+const DATES = [
+	"<li>Fed minutes 2026-09-16 (released 10/26), https://example.com/minutes</li>",
+	"<li>Press release, Oct 26, https://example.com/press</li>",
+	"<li>Press release, October 26, 2026, https://example.com/press</li>",
+	"<li>\uC5F0\uC900 \uC758\uC0AC\uB85D (10/26 \uACF5\uAC1C), https://example.com/minutes</li>",
+	"<li>\uBCF4\uB3C4\uC790\uB8CC 10\uC6D4 26\uC77C, https://example.com/press</li>",
+	"<li>\uBCF4\uB3C4\uC790\uB8CC 2026. 10. 26., https://example.com/press</li>",
+]
+const DAY_COUNTS = [
+	"<li>Trial period 30 days, https://example.com/trial</li>",
+	"<p>The pilot ran for 30 days.</p>",
+	"<li>\uC2DC\uBC94 \uC6B4\uC601 30\uC77C\uAC04, https://example.com/trial</li>",
+	"<p>\uC2DC\uBC94 \uC6B4\uC601\uC740 30\uC77C \uB3D9\uC548 \uC9C4\uD589\uB410\uB2E4.</p>",
+]
+
 // Decision 25: under Sources a sentence is checked unless every numeral in it is a citation-field number.
 // Receipt cases from review rounds 1-3, EN and KO (Korean as \u escapes).
 const MUST_FLAG = [
@@ -64,6 +80,7 @@ const MUST_FLAG = [
 	"<p>\uC9C1\uC6D0 \uC218\uB294 1,250\uBA85\uC774\uB2E4.</p>",
 	"<p>We ran the check and it reported 42%.</p>",
 	...GUARD,
+	...DAY_COUNTS,
 ]
 
 // Round-4 ruling, must-pass: a digit run glued to letters that are not a unit is a name (commit hashes,
@@ -108,6 +125,7 @@ const MUST_PASS = [
 	"<h3>2024</h3>",
 	"<p>Publication cutoff and access date: October 25, 2026. Every linked source was read directly.</p>",
 	...NAMES,
+	...DATES,
 ]
 
 describe("under Sources, a sentence with a numeral that is not a citation field is checked", () => {

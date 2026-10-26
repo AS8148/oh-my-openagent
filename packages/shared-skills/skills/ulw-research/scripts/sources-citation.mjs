@@ -3,8 +3,9 @@
 // Under a Sources heading an element is split at <br>/block breaks and at sentence ends, and every
 // sentence holding a numeral is checked exactly as under any other heading, unless EVERY numeral in
 // it is a citation-field number. That is decided by the number's type and position only: a year
-// (1900-2099) or a full date; a page, volume, issue, number, or edition marker; a number inside a
-// URL, DOI, arXiv id, ISBN or ISSN; a number inside a quoted title ("...", \u201C...\u201D, \u300C...\u300D,
+// (1900-2099), a full date, or a month/day (10/26, Oct 26, 2026. 10. 26.; a day count is not one);
+// a page, volume, issue, number, or edition marker; a number inside a URL, DOI, arXiv id, ISBN or
+// ISSN; a number inside a quoted title ("...", \u201C...\u201D, \u300C...\u300D,
 // \u300E...\u300F, <cite>) or an <i>/<em> title directly before a URL or a date; a number inside link
 // text; or a citation tag's digits. There is no word list: any other numeral makes the sentence a
 // claim. A digit run glued to letters is a name, not a numeral (a hash, #12, GPT-4, v2.3.1, Q3, FY27),
@@ -43,6 +44,8 @@ const TYPED = [
 	new RegExp(`${YEAR}[-./]\\d{1,2}(?:[-./]\\d{1,2})?|\\d{1,2}[-./]\\d{1,2}[-./]${YEAR}`, "g"),
 	new RegExp(`\\b${MONTH}\\s+\\d{1,2}(?:st|nd|rd|th)?\\b(?:,?\\s+${YEAR})?|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH}`, "gi"),
 	/\d{1,2}\s*\uC6D4(?:\s*\d{1,2}\s*\uC77C)?/g,
+	new RegExp(`${YEAR}\\.\\s+\\d{1,2}\\.\\s+\\d{1,2}\\.?`, "g"),
+	/(?<![\d/.,])(?:1[0-2]|0?[1-9])\/(?:3[01]|[12]\d|0?[1-9])(?![\d/]|[.,]\d)/g,
 	new RegExp(`(?<![\\d.,])${YEAR}(?:\\s*[-\\u2013~]\\s*${YEAR})?(?![\\d]|[.,]\\d)`, "g"),
 	/\b(?:pp?|pg|pages?)\.?\s*\d+(?:\s*[-\u2013]\s*\d+)?/gi,
 	/\b(?:vols?|nos?|iss|ed)\.\s*\d+(?:\s*[-\u2013/]\s*\d+)*/gi,
