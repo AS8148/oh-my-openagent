@@ -5,12 +5,15 @@
 // Cyrillic letter, digit or underscore touches it (an en dash before a digit is a minus too), and a
 // "-" or U+2212 counts after ONE such letter ("\u0394\u22125") or after an exponent ("1e-5"); a run of
 // two or more ("cite_note-7", "AB-12", "UTF-8", "2019-2023") is an identifier or range and carries no
-// negative. Markdown markup a converter writes beside a sign never decides it: a closer run before it
-// (`**`, `*`, `_`, `~~`, backticks, `)`, `]`, `>`, `](url)`, `][ref]`, a whole `![alt](src)`) is skipped
-// to the first character it closes ("**2019**-2023" is a range), and an opener run between the sign
-// and its digits ("-**5**") keeps the sign. Digits a converter writes out from a link target, an image
-// source, alt text, or a title cover a converted number only inside Markdown link or image syntax
-// (`](...)`, `![...](...)`, `<https://...>`, `[ref]: url "title"`), never in prose; a footnote
+// negative. Markdown markup a converter writes beside a sign never decides it: the closer run before it
+// (read with the CommonMark inline grammar in markdown-closers.mjs: emphasis, code, strike, titled and
+// parenthesised link and image targets, reference endings, backslash-escaped closers) is skipped to
+// the first character it closes ("**2019**-2023" and '[1990](/wiki/1990 "1990")-2000' are ranges), and
+// an opener run between the sign and its digits ("-**5**") keeps the sign. A raw-side character
+// reference (`&minus;`, `&thinsp;`) is decoded first, as a converter decodes it. Digits a converter
+// writes out from a link target, an image source, alt text, or a title cover a converted number only
+// inside Markdown link or image syntax (`](...)` with any title and balanced parentheses,
+// `![...](...)`, `<https://...>`, `[ref]: url "title"`), never in prose; a footnote
 // definition's text ("[^1]: ...") is prose. Converter syntax is not a number: a line-start list marker
 // ("1. ", "2) ", "(3) ", indented or after "> ") is exempt only while the source has an <ol> item with
 // that number and the markers so far do not outnumber the <ol> items (so lazy "1. 1. 1." numbering
@@ -25,7 +28,8 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { CliError } from "./cli-support.mjs"
-import { parseHtml, PROSE_BREAKS } from "./html-lite.mjs"
+import { decodeEntities, parseHtml, PROSE_BREAKS } from "./html-lite.mjs"
+import { escapedAt, inlineLinkSpans, stripClosers } from "./markdown-closers.mjs"
 import { NUMBER_SOURCE, plainDecimal } from "./number-grammar.mjs"
 
 const LETTER = "\\p{Script=Latin}\\p{Script=Greek}\\p{Script=Cyrillic}"
@@ -34,8 +38,6 @@ const ALPHA = new RegExp(`[${LETTER}]`, "u")
 const EXPONENT = new RegExp(`(?<![${LETTER}\\p{N}_.,])\\d+(?:[.,]\\d+)?[eE]$`, "u")
 /** A dash, then any Markdown opener run, then a number; signed() decides whether the dash is a minus. */
 const NUMBERS = new RegExp(`(?:([-\\u2212\\u2013])([*_~\`[]*))?(${NUMBER_SOURCE})`, "gu")
-/** The Markdown closer run ending a text: a whole image, a link or reference ending, emphasis, code, strike. */
-const CLOSERS = /(?:!\[[^\]\u0001]*\]\([^()\s\u0001]*\)|\]\([^()\s\u0001]*\)|\]\[[^\]\u0001]*\]|[*_~`)\]>])+$/u
 /** Sup, sub, datetime chunks and every break join no neighbour: neither a digit, a separator, nor whitespace. */
 const BOUNDARY = "\u0001"
 const CARRIED = ["href", "src", "alt", "title"]
@@ -48,7 +50,7 @@ const LINK_SYNTAX = /!\[[^\]\u0001]*\](?:\([^)\u0001]*\))?|\]\([^)\u0001]*\)|<ht
 
 /** Prose text, attribute text and <ol> item numbers of an HTML document; a non-HTML document is prose only. */
 function numericText(source, html) {
-	if (!html) return { prose: source, carried: "", listed: [] }
+	if (!html) return { prose: decodeEntities(source), carried: "", listed: [] }
 	const chunks = []
 	const carried = []
 	const listed = []
@@ -84,9 +86,9 @@ function referenceLabels(flat) {
 	return new Set([...paired, ...notes].map((match) => match.index + match[0].search(/\d/u)))
 }
 
-/** Whether the dash at `at` is a minus: Markdown closers before it are skipped, as is an opener run before a lone letter. */
+/** Whether the dash at `at` is a minus: Markdown closers (and a backslash escaping the dash) before it are skipped, as is an opener run before a lone letter. */
 function signed(flat, at, dash) {
-	const before = flat.slice(Math.max(0, at - 512), at).replace(CLOSERS, "")
+	const before = stripClosers(flat.slice(Math.max(0, at - 512), escapedAt(flat, at) ? at - 1 : at))
 	const last = before.at(-1) ?? ""
 	if (!WORD.test(last)) return true
 	if (dash === "\u2013") return false
@@ -101,7 +103,7 @@ function signed(flat, at, dash) {
  */
 function tokensOf(text, { links = false } = {}) {
 	const flat = text.replace(/\r\n?|\n|\f/gu, BOUNDARY).replace(/\s+/gu, " ")
-	const spans = links ? [...flat.matchAll(LINK_SYNTAX)].map((match) => [match.index, match.index + match[0].length]) : []
+	const spans = links ? [...[...flat.matchAll(LINK_SYNTAX)].map((match) => [match.index, match.index + match[0].length]), ...inlineLinkSpans(flat)] : []
 	const markers = new Set([...flat.matchAll(LIST_MARKER)].map((match) => match.index + match[0].search(/\d/u)))
 	const labels = referenceLabels(flat)
 	let previousEnd = 0

@@ -151,7 +151,8 @@ const GROUPING: Row[] = [
 
 // Markdown markup a converter writes beside a sign must not change how the sign reads: the text the
 // markup closes (or opens) decides, as it does in the raw HTML. One row per markup x dash x context.
-const MARKUP: { form: string; html: (c: string) => string; md: (c: string) => string }[] = [
+type Shape = { form: string; html: (c: string) => string; md: (c: string) => string; opaque?: boolean }
+const MARKUP: Shape[] = [
 	{ form: "**", html: (c) => `<b>${c}</b>`, md: (c) => `**${c}**` },
 	{ form: "*", html: (c) => `<i>${c}</i>`, md: (c) => `*${c}*` },
 	{ form: "_", html: (c) => `<em>${c}</em>`, md: (c) => `_${c}_` },
@@ -165,18 +166,49 @@ const MARKUP: { form: string; html: (c: string) => string; md: (c: string) => st
 ]
 const DASHES = [["hyphen", "-"], ["en dash", "\u2013"], ["U+2212", "\u2212"]] as const
 const CLOSED = [
-	{ form: "a digit", text: "2019", after: "2023", signed: (_dash: string) => false },
-	{ form: "a Latin word", text: "COVID", after: "19", signed: (_dash: string) => false },
-	{ form: "one Latin letter", text: "x", after: "5", signed: (dash: string) => dash !== "\u2013" },
-	{ form: "KO Hangul", text: "\uAC10\uC18C", after: "3", signed: (_dash: string) => true },
+	{ form: "a digit", text: "2019", gap: "", after: "2023", signed: (_dash: string) => false },
+	{ form: "a Latin word", text: "COVID", gap: "", after: "19", signed: (_dash: string) => false },
+	{ form: "one Latin letter", text: "x", gap: "", after: "5", signed: (dash: string) => dash !== "\u2013" },
+	{ form: "KO Hangul", text: "\uAC10\uC18C", gap: "", after: "3", signed: (_dash: string) => true },
+	{ form: "a space", text: "fell", gap: " ", after: "5", signed: (_dash: string) => true },
 ]
+// Every closer shape a CommonMark converter writes after text: inline links and images with a
+// "title", 'title' or (title), a target with balanced parentheses or in <...>, collapsed and full
+// reference forms, a linked image, and backslash escapes. An escaped closer is skipped like the raw
+// character it stands for; an escaped opener (`opaque`) is a real character, so every dash after it is a sign.
+const IMG = '<img src="i.png" alt="x"'
+const CLOSER_SHAPES: Shape[] = [
+	{ form: '[](url "title")', html: (c) => `<a href="/c" title="t">${c}</a>`, md: (c) => `[${c}](/c "t")` },
+	{ form: "[](url 'title')", html: (c) => `<a href="/c" title="t">${c}</a>`, md: (c) => `[${c}](/c 't')` },
+	{ form: "[](url (title))", html: (c) => `<a href="/c" title="t">${c}</a>`, md: (c) => `[${c}](/c (t))` },
+	{ form: '[](url "title with \\" and )")', html: (c) => `<a href="/c" title='a " )'>${c}</a>`, md: (c) => `[${c}](/c "a \\" )")` },
+	{ form: "[](url_(x))", html: (c) => `<a href="/F_(x)">${c}</a>`, md: (c) => `[${c}](/F_(x))` },
+	{ form: '[](url_(x) "title")', html: (c) => `<a href="/F_(x)" title="t">${c}</a>`, md: (c) => `[${c}](/F_(x) "t")` },
+	{ form: "[](<url with a space>)", html: (c) => `<a href="/a b">${c}</a>`, md: (c) => `[${c}](</a b>)` },
+	{ form: "[][] collapsed", html: (c) => `<a href="/c">${c}</a>`, md: (c) => `[${c}][]` },
+	{ form: '[**text**](url "title")', html: (c) => `<a href="/c" title="t"><b>${c}</b></a>`, md: (c) => `[**${c}**](/c "t")` },
+	{ form: '**[text](url "title")**', html: (c) => `<b><a href="/c" title="t">${c}</a></b>`, md: (c) => `**[${c}](/c "t")**` },
+	{ form: "![](src)", html: (c) => `${c}${IMG}>`, md: (c) => `${c}![x](i.png)` },
+	{ form: '![](src "title")', html: (c) => `${c}${IMG} title="t">`, md: (c) => `${c}![x](i.png "t")` },
+	{ form: "![](src 'title')", html: (c) => `${c}${IMG} title="t">`, md: (c) => `${c}![x](i.png 't')` },
+	{ form: "![](a_(b).png)", html: (c) => `${c}<img src="a_(b).png" alt="x">`, md: (c) => `${c}![x](a_(b).png)` },
+	{ form: '![](a_(b).png "title")', html: (c) => `${c}<img src="a_(b).png" alt="x" title="t">`, md: (c) => `${c}![x](a_(b).png "t")` },
+	{ form: "![](<src with a space>)", html: (c) => `${c}<img src="a b.png" alt="x">`, md: (c) => `${c}![x](<a b.png>)` },
+	{ form: "![][ref]", html: (c) => `${c}${IMG}>`, md: (c) => `${c}![x][i]` },
+	{ form: "[![](src)](url)", html: (c) => `${c}<a href="/p">${IMG}></a>`, md: (c) => `${c}[![x](i.png)](/p)` },
+	{ form: "**![](src)**", html: (c) => `${c}<b>${IMG}></b>`, md: (c) => `${c}**![x](i.png)**` },
+	...["*", "_", "]", ")", "~", "`"].map((x): Shape => ({ form: `escaped \\${x}`, html: (c) => `${c}${x}`, md: (c) => `${c}\\${x}` })),
+	...["[", "("].map((x): Shape => ({ form: `escaped \\${x} (an opener)`, html: (c) => `${c}${x}`, md: (c) => `${c}\\${x}`, opaque: true })),
+]
+const closerRows = (shapes: Shape[]): Row[] => shapes.flatMap((m) => DASHES.flatMap(([dash, d]) => CLOSED.flatMap((c) => {
+	const raw = `<p>${m.html(c.text)}${c.gap}${d}${c.after}</p>`
+	const kept: Row = { form: `${m.form} closing ${c.form}, then a ${dash}`, raw, converted: `${m.md(c.text)}${c.gap}${d}${c.after}`, altered: [], lost: [] }
+	if (!(m.opaque || c.signed(d))) return [kept]
+	return [kept, { form: `${m.form} closing ${c.form}, ${dash} dropped`, raw, converted: `${m.md(c.text)}${c.gap}${c.after}`, altered: [c.after], lost: [`${d}${c.after}`] }]
+})))
 const SIGN_MARKUP: Row[] = [
-	...MARKUP.flatMap((m) => DASHES.flatMap(([dash, d]) => CLOSED.flatMap((c) => {
-		const raw = `<p>${m.html(c.text)}${d}${c.after}</p>`
-		const kept: Row = { form: `${m.form} closing ${c.form}, then a ${dash}`, raw, converted: `${m.md(c.text)}${d}${c.after}`, altered: [], lost: [] }
-		if (!c.signed(d)) return [kept]
-		return [kept, { form: `${m.form} closing ${c.form}, ${dash} dropped`, raw, converted: `${m.md(c.text)}${c.after}`, altered: [c.after], lost: [`${d}${c.after}`] }]
-	}))),
+	...closerRows(MARKUP),
+	...closerRows(CLOSER_SHAPES),
 	...MARKUP.flatMap((m) => [
 		...DASHES.flatMap(([dash, d]) => [
 			{ form: `${m.form} around a ${dash} number after a space`, raw: `<p>fell ${m.html(`${d}5`)}</p>`, converted: `fell ${m.md(`${d}5`)}`, altered: [], lost: [] },
@@ -193,11 +225,53 @@ const SIGN_MARKUP: Row[] = [
 	{ form: "autolink closer before one letter's minus", raw: '<p><a href="https://x.example/a">https://x.example/a</a>\u22125</p>', converted: "<https://x.example/a>-5", altered: [], lost: [] },
 	{ form: "identifier kept through markup: **cite_note**-7", raw: "<p><b>cite_note</b>-7</p>", converted: "**cite_note**-7", altered: [], lost: [] },
 	{ form: "two letters split by markup stay an identifier", raw: "<p>a<b>b</b>\u22125</p>", converted: "a**b**-5", altered: [], lost: [] },
+	{ form: "reviewer r5: titled link before an en dash range", raw: 'From <a href="/wiki/1990" title="1990">1990</a>\u20132000', converted: 'From [1990](/wiki/1990 "1990")\u20132000', altered: [], lost: [] },
+	{ form: "reviewer r5: titled link before a hyphen range", raw: 'From <a href="/wiki/1990" title="1990">1990</a>-2000', converted: 'From [1990](/wiki/1990 "1990")-2000', altered: [], lost: [] },
+	{ form: "reviewer r5: titled link on a word", raw: '<p><a href="/x" title="t">ab</a>-5</p>', converted: '[ab](/x "t")-5', altered: [], lost: [] },
+	{ form: "reviewer r5: titled image after a word", raw: '<p>ab<img alt="x" title="t" src="i.png">-5</p>', converted: 'ab![x](i.png "t")-5', altered: [], lost: [] },
+	{ form: "reviewer r5: image target with parentheses after a space", raw: '<p>fell <img src="a_(b).png" alt="x">-5</p>', converted: "fell ![x](a_(b).png)-5", altered: [], lost: [] },
+	{ form: "reviewer r5: escaped brackets", raw: "x[3]-5", converted: "x\\[3\\]-5", altered: [], lost: [] },
+	{ form: "reviewer r5: escaped asterisk", raw: "foo*-5", converted: "foo\\*-5", altered: [], lost: [] },
+	{ form: "reviewer r5: escaped underscore", raw: "ab_-5", converted: "ab\\_-5", altered: [], lost: [] },
+	{ form: "link target digits after balanced parentheses are link syntax", raw: '<p><a href="/wiki/File_(2019)_v9.png">pic</a></p>', converted: "[pic](/wiki/File_(2019)_v9.png)", altered: [], lost: [] },
+	{ form: "titled link target digits are link syntax", raw: '<p><a href="/r/7" title="Fig (4)">pic</a></p>', converted: '[pic](/r/7 "Fig (4)")', altered: [], lost: [] },
 ]
+
+// Named character references whose decoded character the probe reads as a sign or a separator (or
+// as markup), decoded on the raw side as a converter decodes them: each in a sign position and a
+// separator position, EN and KO, kept as the decoded character, plus the sign position with the
+// character dropped (a sign is lost; any other character changes nothing).
+const ENTITIES: [string, string][] = [
+	["minus", "\u2212"], ["ndash", "\u2013"], ["mdash", "\u2014"], ["hyphen", "\u2010"], ["dash", "\u2010"],
+	["thinsp", "\u2009"], ["ThinSpace", "\u2009"], ["numsp", "\u2007"], ["puncsp", "\u2008"], ["hairsp", "\u200A"],
+	["VeryThinSpace", "\u200A"], ["ensp", "\u2002"], ["emsp", "\u2003"], ["emsp13", "\u2004"], ["emsp14", "\u2005"],
+	["MediumSpace", "\u205F"], ["nbsp", "\u00A0"], ["NonBreakingSpace", "\u00A0"], ["comma", ","], ["period", "."],
+	["plus", "+"], ["lowbar", "_"], ["ast", "*"], ["midast", "*"], ["grave", "`"], ["DiacriticalGrave", "`"],
+	["lpar", "("], ["rpar", ")"], ["lsqb", "["], ["lbrack", "["], ["rsqb", "]"], ["rbrack", "]"],
+]
+const SIGN_CHARS = new Set(["\u2212", "\u2013"])
+const ENTITY_ROWS: Row[] = ENTITIES.flatMap(([name, ch]) => {
+	const e = `&${name};`
+	return [
+		{ form: `&${name}; in a sign position`, raw: `<p>fell ${e}5 pts</p>`, converted: `fell ${ch}5 pts`, altered: [], lost: [] },
+		{ form: `KO &${name}; in a sign position`, raw: `<p>\uAC10\uC18C${e}3%</p>`, converted: `\uAC10\uC18C${ch}3%`, altered: [], lost: [] },
+		{ form: `&${name}; as a separator`, raw: `<p>1${e}234${e}567 people</p>`, converted: `1${ch}234${ch}567 people`, altered: [], lost: [] },
+		{ form: `KO &${name}; as a separator`, raw: `<p>\uC778\uAD6C 1${e}234${e}567\uBA85</p>`, converted: `\uC778\uAD6C 1${ch}234${ch}567\uBA85`, altered: [], lost: [] },
+		{ form: `&${name}; in a sign position, dropped`, raw: `<p>fell ${e}5 pts</p>`, converted: "fell 5 pts", altered: SIGN_CHARS.has(ch) ? ["5"] : [], lost: SIGN_CHARS.has(ch) ? [`${ch}5`] : [] },
+		{ form: `KO &${name}; in a sign position, dropped`, raw: `<p>\uAC10\uC18C${e}3%</p>`, converted: "\uAC10\uC18C3%", altered: SIGN_CHARS.has(ch) ? ["3"] : [], lost: SIGN_CHARS.has(ch) ? [`${ch}3`] : [] },
+	]
+})
+ENTITY_ROWS.push(
+	{ form: "reviewer r5: &nbsp;&minus; in a text with no tags", raw: "x&nbsp;&minus;3.5%", converted: "x \u22123.5%", altered: [], lost: [] },
+	{ form: "reviewer r5: &thinsp; groups in a text with no tags", raw: "1&thinsp;234&thinsp;567", converted: "1\u2009234\u2009567", altered: [], lost: [] },
+	{ form: "reviewer r5: &nbsp;&minus; in a paragraph", raw: "<p>x&nbsp;&minus;3.5%</p>", converted: "x\u00A0\u22123.5%", altered: [], lost: [] },
+	{ form: "an unterminated reference in a text with no tags stays literal", raw: "a < b &amp c 5", converted: "a < b &amp c 5", altered: [], lost: [] },
+)
 
 describe("conversion probe classes (one row per form, EN and KO)", () => {
 	test.each(rows(CONVERTER_DIGITS))("converter-emitted digits: %s", (_form, row) => check(row))
 	test.each(rows(SIGNS))("signs and separators around numbers: %s", (_form, row) => check(row))
 	test.each(rows(GROUPING))("grouping boundaries: %s", (_form, row) => check(row))
 	test.each(rows(SIGN_MARKUP))("sign context through Markdown markup: %s", (_form, row) => check(row))
+	test.each(rows(ENTITY_ROWS))("named character references on the raw side: %s", (_form, row) => check(row))
 })
