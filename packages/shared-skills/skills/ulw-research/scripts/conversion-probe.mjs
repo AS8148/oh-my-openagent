@@ -5,15 +5,21 @@
 // Cyrillic letter, digit or underscore touches it (an en dash before a digit is a minus too), and a
 // "-" or U+2212 counts after ONE such letter ("\u0394\u22125") or after an exponent ("1e-5"); a run of
 // two or more ("cite_note-7", "AB-12", "UTF-8", "2019-2023") is an identifier or range and carries no
-// negative. Digits a converter writes out from a link target, an image source, alt text, or a title
-// cover a converted number only inside Markdown link or image syntax (`](...)`, `![...](...)`,
-// `<https://...>`, `[ref]: url`), never in prose. Converter syntax is not a number: a line-start list
-// marker ("1. ", "2) ", "(3) ", indented or after "> ") is exempt only while the source has an <ol>
-// item with that number (start= honoured, one item per marker), and a numeric reference label
-// ("[x][1]" with its "[1]: url") only while both halves are present; otherwise each is a candidate.
-// A converter's hard wrap may split a space-grouped number over one line break; the two halves read
-// as one number only when the raw side holds that number and not both halves. The built-in snapshot
-// writes no attribute text, syntax or wraps, so it gets none of these allowances.
+// negative. Markdown markup a converter writes beside a sign never decides it: a closer run before it
+// (`**`, `*`, `_`, `~~`, backticks, `)`, `]`, `>`, `](url)`, `][ref]`, a whole `![alt](src)`) is skipped
+// to the first character it closes ("**2019**-2023" is a range), and an opener run between the sign
+// and its digits ("-**5**") keeps the sign. Digits a converter writes out from a link target, an image
+// source, alt text, or a title cover a converted number only inside Markdown link or image syntax
+// (`](...)`, `![...](...)`, `<https://...>`, `[ref]: url "title"`), never in prose; a footnote
+// definition's text ("[^1]: ...") is prose. Converter syntax is not a number: a line-start list marker
+// ("1. ", "2) ", "(3) ", indented or after "> ") is exempt only while the source has an <ol> item with
+// that number and the markers so far do not outnumber the <ol> items (so lazy "1. 1. 1." numbering
+// over three items passes), a numeric reference label ("[x][1]" with its "[1]: url") only while both
+// halves are present, and a footnote definition label ("[^1]:") only while its "[^1]" is used;
+// otherwise each is a candidate. A converter's hard wrap may split a space-grouped number over one line
+// break; the two halves read as one number only when the raw side holds that number and not both
+// halves, so raw "12 345 and 12 and 345" wrapped inside "12 345" reports both halves (it fails safe).
+// The built-in snapshot writes no attribute text, syntax or wraps, so it gets none of these allowances.
 
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -23,15 +29,22 @@ import { parseHtml, PROSE_BREAKS } from "./html-lite.mjs"
 import { NUMBER_SOURCE, plainDecimal } from "./number-grammar.mjs"
 
 const LETTER = "\\p{Script=Latin}\\p{Script=Greek}\\p{Script=Cyrillic}"
-const SIGN = `(?<![${LETTER}\\p{N}_])[-\\u2212\\u2013]|(?<=(?<![${LETTER}\\p{N}_])[${LETTER}])[-\\u2212]|(?<=(?<![${LETTER}\\p{N}_.,])\\d+(?:[.,]\\d+)?[eE])[-\\u2212]`
-const NUMBERS = new RegExp(`(${SIGN})?(${NUMBER_SOURCE})`, "gu")
+const WORD = new RegExp(`[${LETTER}\\p{N}_]`, "u")
+const ALPHA = new RegExp(`[${LETTER}]`, "u")
+const EXPONENT = new RegExp(`(?<![${LETTER}\\p{N}_.,])\\d+(?:[.,]\\d+)?[eE]$`, "u")
+/** A dash, then any Markdown opener run, then a number; signed() decides whether the dash is a minus. */
+const NUMBERS = new RegExp(`(?:([-\\u2212\\u2013])([*_~\`[]*))?(${NUMBER_SOURCE})`, "gu")
+/** The Markdown closer run ending a text: a whole image, a link or reference ending, emphasis, code, strike. */
+const CLOSERS = /(?:!\[[^\]\u0001]*\]\([^()\s\u0001]*\)|\]\([^()\s\u0001]*\)|\]\[[^\]\u0001]*\]|[*_~`)\]>])+$/u
 /** Sup, sub, datetime chunks and every break join no neighbour: neither a digit, a separator, nor whitespace. */
 const BOUNDARY = "\u0001"
 const CARRIED = ["href", "src", "alt", "title"]
 const LIST_MARKER = /(?:^|\u0001)(?: ?>)* ?(?:\d+[.)]|\(\d+\)) /gu
 const REF_USE = /\]\[(\d+)\]/gu
 const REF_DEF = /(?:^|\u0001)(?: ?>)* ?\[(\d+)\]:/gu
-const LINK_SYNTAX = /!\[[^\]\u0001]*\](?:\([^)\u0001]*\))?|\]\([^)\u0001]*\)|<https?:\/\/[^>\s\u0001]+>|(?:^|\u0001) ?\[[^\]\u0001]+\]:[^\u0001]*/gu
+const NOTE_USE = /\[\^(\d+)\](?!:)/gu
+const NOTE_DEF = /(?:^|\u0001)(?: ?>)* ?\[\^(\d+)\]:/gu
+const LINK_SYNTAX = /!\[[^\]\u0001]*\](?:\([^)\u0001]*\))?|\]\([^)\u0001]*\)|<https?:\/\/[^>\s\u0001]+>|(?:^|\u0001) ?\[(?!\^)[^\]\u0001]+\]: ?[^\s\u0001]*(?: (?:"[^"\u0001]*"|'[^'\u0001]*'|\([^)\u0001]*\)))?/gu
 
 /** Prose text, attribute text and <ol> item numbers of an HTML document; a non-HTML document is prose only. */
 function numericText(source, html) {
@@ -56,14 +69,29 @@ function numericText(source, html) {
 	return { prose: chunks.join(""), carried: carried.join(BOUNDARY), listed }
 }
 
-/** Start offsets of numeric reference labels whose use ("][1]") and definition ("[1]:") are both present. */
+/**
+ * Start offsets of numeric reference labels whose use ("][1]") and definition ("[1]:") are both present,
+ * and of footnote definition labels ("[^1]:") whose "[^1]" is used (the use itself mirrors the source).
+ */
 function referenceLabels(flat) {
 	const uses = [...flat.matchAll(REF_USE)]
 	const defs = [...flat.matchAll(REF_DEF)]
 	const used = new Set(uses.map((match) => match[1]))
 	const defined = new Set(defs.map((match) => match[1]))
 	const paired = [...uses.filter((match) => defined.has(match[1])), ...defs.filter((match) => used.has(match[1]))]
-	return new Set(paired.map((match) => match.index + match[0].lastIndexOf("[") + 1))
+	const noted = new Set([...flat.matchAll(NOTE_USE)].map((match) => match[1]))
+	const notes = [...flat.matchAll(NOTE_DEF)].filter((match) => noted.has(match[1]))
+	return new Set([...paired, ...notes].map((match) => match.index + match[0].search(/\d/u)))
+}
+
+/** Whether the dash at `at` is a minus: Markdown closers before it are skipped, as is an opener run before a lone letter. */
+function signed(flat, at, dash) {
+	const before = flat.slice(Math.max(0, at - 512), at).replace(CLOSERS, "")
+	const last = before.at(-1) ?? ""
+	if (!WORD.test(last)) return true
+	if (dash === "\u2013") return false
+	if (EXPONENT.test(before)) return true
+	return ALPHA.test(last) && !WORD.test(before.slice(0, -1).replace(/[*_~`[]+$/u, "").at(-1) ?? "")
 }
 
 /**
@@ -78,16 +106,18 @@ function tokensOf(text, { links = false } = {}) {
 	const labels = referenceLabels(flat)
 	let previousEnd = 0
 	return [...flat.matchAll(NUMBERS)].map((match, n) => {
-		const gap = flat.slice(previousEnd, match.index)
+		const sign = match[1] !== undefined && signed(flat, match.index, match[1])
+		const at = sign ? match.index : match.index + match[0].length - match[3].length
+		const gap = flat.slice(previousEnd, at)
 		previousEnd = match.index + match[0].length
 		return {
 			n,
 			gap,
-			text: match[0],
-			key: `${match[1] ? "-" : ""}${plainDecimal(match[2])}`,
-			linked: spans.some(([start, end]) => match.index >= start && match.index < end),
-			marker: markers.has(match.index),
-			label: labels.has(match.index),
+			text: sign ? match[0] : match[3],
+			key: `${sign ? "-" : ""}${plainDecimal(match[3])}`,
+			linked: spans.some(([start, end]) => at >= start && at < end),
+			marker: markers.has(at),
+			label: labels.has(at),
 		}
 	})
 }
@@ -146,9 +176,10 @@ function uncovered(tokens, counts) {
 export function probeConversion(raw, converted, { attributes = true } = {}) {
 	const source = numericText(raw, /<[a-z!/]/i.test(raw))
 	const before = tokensOf(source.prose)
-	const items = countOf(attributes ? source.listed.map((key) => ({ key })) : [])
+	const listed = new Set(source.listed)
+	let items = attributes ? source.listed.length : 0
 	const syntax = tokensOf(converted, { links: attributes })
-		.filter((token) => !(attributes && token.label) && (!token.marker || uncovered([token], items).length > 0))
+		.filter((token) => !(attributes && token.label) && !(token.marker && listed.has(token.key) && items-- > 0))
 	const after = attributes ? joinWrapped(syntax, countOf(before)) : syntax
 	const counts = countOf(before)
 	const extra = new Set(uncovered(after.filter((token) => !token.linked), counts))

@@ -48,6 +48,10 @@ const CONVERTER_DIGITS: Row[] = [
 	{ form: "ul source written as '1. '", raw: "<ul><li>Alpha</li></ul>", converted: "1. Alpha", altered: ["1"], lost: [] },
 	{ form: "KO bare '1. ' with no ol", raw: "<p>\uB9E4\uCD9C \uC99D\uAC00</p>", converted: "1. \uB9E4\uCD9C \uC99D\uAC00", altered: ["1"], lost: [] },
 	{ form: "more markers than ol items", raw: "<ol><li>Alpha</li></ol>", converted: "1. Alpha\n2. Beta", altered: ["2"], lost: [] },
+	{ form: "lazy numbering '1. 1. 1.' over a three-item ol", raw: "<ol><li>a</li><li>b</li><li>c</li></ol>", converted: "1. a\n1. b\n1. c", altered: [], lost: [] },
+	{ form: "lazy numbering at start=3", raw: '<ol start="3"><li>x</li><li>y</li></ol>', converted: "3. x\n3. y", altered: [], lost: [] },
+	{ form: "KO lazy numbering", raw: "<ol><li>\uB9E4\uCD9C</li><li>\uBE44\uC6A9</li></ol>", converted: "1. \uB9E4\uCD9C\n1. \uBE44\uC6A9", altered: [], lost: [] },
+	{ form: "lazy numbering with more markers than ol items", raw: "<ol><li>a</li><li>b</li></ol>", converted: "1. a\n1. b\n1. c", altered: ["1"], lost: [] },
 	{ form: "built-in path: no marker exemption", raw: "<ol><li>Alpha</li></ol>", converted: "1. Alpha", altered: ["1"], lost: [], attributes: false },
 	{ form: "inline link target digits", raw: '<p><a href="https://example.com/2024/03/report-4">Report</a></p>', converted: "[Report](https://example.com/2024/03/report-4)", altered: [], lost: [] },
 	{ form: "image src, alt and title digits", raw: '<p><img src="chart-640x480.png" alt="Chart 2023" title="Fig 4"></p>', converted: '![Chart 2023](chart-640x480.png "Fig 4")', altered: [], lost: [] },
@@ -55,6 +59,10 @@ const CONVERTER_DIGITS: Row[] = [
 	{ form: "reference-style links with numeric labels", raw: '<p><a href="https://example.com/r/7">report</a> and <a href="https://example.com/r/9">data</a></p>', converted: "[report][1] and [data][2]\n\n[1]: https://example.com/r/7\n[2]: https://example.com/r/9", altered: [], lost: [] },
 	{ form: "KO reference-style link", raw: '<p><a href="https://example.kr/b/2024">\uBCF4\uACE0\uC11C</a></p>', converted: "[\uBCF4\uACE0\uC11C][1]\n\n[1]: https://example.kr/b/2024", altered: [], lost: [] },
 	{ form: "reference label with no definition", raw: "<p>report</p>", converted: "[report][1]", altered: ["1"], lost: [] },
+	{ form: "reference definition with a title", raw: '<p><a href="https://example.com/r/7" title="Fig 4">report</a></p>', converted: '[report][1]\n\n[1]: https://example.com/r/7 "Fig 4"', altered: [], lost: [] },
+	{ form: "footnote definition text is prose, not link syntax", raw: '<p>Margin<sup><a href="#note">1</a></sup> per <a href="https://s.example/4.22">source</a>.</p><ol><li id="note">Rate 4.2<sup>2</sup>.</li></ol>', converted: "Margin[^1] per source.\n\n[^1]: Rate 4.22.", altered: ["4.22"], lost: ["4.2", "2"] },
+	{ form: "KO footnote definition text is prose", raw: '<p>\uB9E4\uCD9C<sup><a href="#n">1</a></sup> <a href="https://s.example/3,234">\uCD9C\uCC98</a></p><ol><li id="n">\uB9E4\uCD9C 3,23<sup>4</sup>\uC5B5 \uC6D0</li></ol>', converted: "\uB9E4\uCD9C[^1] \uCD9C\uCC98\n\n[^1]: \uB9E4\uCD9C 3,234\uC5B5 \uC6D0", altered: ["3,234"], lost: ["3,23", "4"] },
+	{ form: "footnote definition with no use keeps its label a candidate", raw: "<p>Filing.</p>", converted: "[^1]: Filing.", altered: ["1"], lost: [] },
 	{ form: "attribute digit written into prose", raw: '<p><a href="/p/42">page</a></p>', converted: "page 42", altered: ["42"], lost: [] },
 	{ form: "built-in path: attribute digit in link syntax", raw: '<p><a href="/p/42">page</a></p>', converted: "[page](/p/42)", altered: ["42"], lost: [], attributes: false },
 	{ form: "href page number beside a glued footnote", raw: '<p>Output reached 10<sup>9</sup> kWh</p><p><a href="https://b.example/b?pg=PA109">book</a></p>', converted: "Output reached 109 kWh\n\n[book](https://b.example/b?pg=PA109)", altered: ["109"], lost: ["10", "9"] },
@@ -131,6 +139,7 @@ const GROUPING: Row[] = [
 	{ form: "converter hard wrap inside a space group", raw: "<p>Population 1 234 567 people</p>", converted: "Population 1 234\n567 people", altered: [], lost: [] },
 	{ form: "KO hard wrap inside a space group", raw: "<p>\uC778\uAD6C 1 234 567\uBA85</p>", converted: "\uC778\uAD6C 1 234\n567\uBA85", altered: [], lost: [] },
 	{ form: "hard wrap between two separate numbers", raw: "<p>in 2023 500 sites</p>", converted: "in 2023\n500 sites", altered: [], lost: [] },
+	{ form: "a wrap is not rejoined when the raw side holds both halves too", raw: "<p>12 345 and 12 and 345</p>", converted: "12\n345 and 12 and 345", altered: ["12", "345"], lost: ["12 345"] },
 	{ form: "a blank line never rejoins a group", raw: "<p>Population 1 234 567 people</p>", converted: "Population 1 234\n\n567 people", altered: ["1 234", "567"], lost: ["1 234 567"] },
 	{ form: "footnote glued onto a space group", raw: "<p>1 234<sup>5</sup></p>", converted: "1 2345", altered: ["1", "2345"], lost: ["1 234", "5"] },
 	{ form: "built-in path: td | td | td", raw: "<table><tr><td>3</td><td>250</td><td>100</td></tr></table>", converted: BUILTIN, altered: [], lost: [] },
@@ -140,8 +149,55 @@ const GROUPING: Row[] = [
 	{ form: "built-in path: KO space group in a cell", raw: "<table><tr><td>1 234 567\uC6D0</td><td>8</td></tr></table>", converted: BUILTIN, altered: [], lost: [] },
 ]
 
+// Markdown markup a converter writes beside a sign must not change how the sign reads: the text the
+// markup closes (or opens) decides, as it does in the raw HTML. One row per markup x dash x context.
+const MARKUP: { form: string; html: (c: string) => string; md: (c: string) => string }[] = [
+	{ form: "**", html: (c) => `<b>${c}</b>`, md: (c) => `**${c}**` },
+	{ form: "*", html: (c) => `<i>${c}</i>`, md: (c) => `*${c}*` },
+	{ form: "_", html: (c) => `<em>${c}</em>`, md: (c) => `_${c}_` },
+	{ form: "__", html: (c) => `<strong>${c}</strong>`, md: (c) => `__${c}__` },
+	{ form: "~~", html: (c) => `<del>${c}</del>`, md: (c) => `~~${c}~~` },
+	{ form: "`", html: (c) => `<code>${c}</code>`, md: (c) => `\`${c}\`` },
+	{ form: "``", html: (c) => `<code>${c}</code>`, md: (c) => `\`\`${c}\`\`` },
+	{ form: "[](url)", html: (c) => `<a href="/c">${c}</a>`, md: (c) => `[${c}](/c)` },
+	{ form: "[][ref]", html: (c) => `<a href="/c">${c}</a>`, md: (c) => `[${c}][c]` },
+	{ form: "[] shortcut", html: (c) => `<a href="/c">${c}</a>`, md: (c) => `[${c}]` },
+]
+const DASHES = [["hyphen", "-"], ["en dash", "\u2013"], ["U+2212", "\u2212"]] as const
+const CLOSED = [
+	{ form: "a digit", text: "2019", after: "2023", signed: (_dash: string) => false },
+	{ form: "a Latin word", text: "COVID", after: "19", signed: (_dash: string) => false },
+	{ form: "one Latin letter", text: "x", after: "5", signed: (dash: string) => dash !== "\u2013" },
+	{ form: "KO Hangul", text: "\uAC10\uC18C", after: "3", signed: (_dash: string) => true },
+]
+const SIGN_MARKUP: Row[] = [
+	...MARKUP.flatMap((m) => DASHES.flatMap(([dash, d]) => CLOSED.flatMap((c) => {
+		const raw = `<p>${m.html(c.text)}${d}${c.after}</p>`
+		const kept: Row = { form: `${m.form} closing ${c.form}, then a ${dash}`, raw, converted: `${m.md(c.text)}${d}${c.after}`, altered: [], lost: [] }
+		if (!c.signed(d)) return [kept]
+		return [kept, { form: `${m.form} closing ${c.form}, ${dash} dropped`, raw, converted: `${m.md(c.text)}${c.after}`, altered: [c.after], lost: [`${d}${c.after}`] }]
+	}))),
+	...MARKUP.flatMap((m) => [
+		...DASHES.flatMap(([dash, d]) => [
+			{ form: `${m.form} around a ${dash} number after a space`, raw: `<p>fell ${m.html(`${d}5`)}</p>`, converted: `fell ${m.md(`${d}5`)}`, altered: [], lost: [] },
+			{ form: `${m.form} around a ${dash} number at line start`, raw: `<p>${m.html(`${d}5`)} pts</p>`, converted: `${m.md(`${d}5`)} pts`, altered: [], lost: [] },
+			{ form: `${m.form} opened between a ${dash} and its digits`, raw: `<p>fell ${d}${m.html("5")}</p>`, converted: `fell ${d}${m.md("5")}`, altered: [], lost: [] },
+		]),
+		{ form: `${m.form} around a number whose U+2212 was dropped`, raw: `<p>fell ${m.html("\u22125")}</p>`, converted: `fell ${m.md("5")}`, altered: ["5"], lost: ["\u22125"] },
+	]),
+	{ form: "reviewer: **2019**-2023", raw: "<p><b>2019</b>-2023</p>", converted: "**2019**-2023", altered: [], lost: [] },
+	{ form: "reviewer: *UTF*-8", raw: "<p><i>UTF</i>-8</p>", converted: "*UTF*-8", altered: [], lost: [] },
+	{ form: "reviewer: `v1`-2", raw: "<p><code>v1</code>-2</p>", converted: "`v1`-2", altered: [], lost: [] },
+	{ form: "image before a minus: the alt text is not the context", raw: '<p>Q <img src="i.png" alt="chart">\u22125</p>', converted: "Q ![chart](i.png)-5", altered: [], lost: [] },
+	{ form: "KO image before a minus", raw: '<p>\uC99D\uAC10 <img src="i.png" alt="\uADF8\uB9BC">\u22122.1%</p>', converted: "\uC99D\uAC10 ![\uADF8\uB9BC](i.png)-2.1%", altered: [], lost: [] },
+	{ form: "autolink closer before one letter's minus", raw: '<p><a href="https://x.example/a">https://x.example/a</a>\u22125</p>', converted: "<https://x.example/a>-5", altered: [], lost: [] },
+	{ form: "identifier kept through markup: **cite_note**-7", raw: "<p><b>cite_note</b>-7</p>", converted: "**cite_note**-7", altered: [], lost: [] },
+	{ form: "two letters split by markup stay an identifier", raw: "<p>a<b>b</b>\u22125</p>", converted: "a**b**-5", altered: [], lost: [] },
+]
+
 describe("conversion probe classes (one row per form, EN and KO)", () => {
 	test.each(rows(CONVERTER_DIGITS))("converter-emitted digits: %s", (_form, row) => check(row))
 	test.each(rows(SIGNS))("signs and separators around numbers: %s", (_form, row) => check(row))
 	test.each(rows(GROUPING))("grouping boundaries: %s", (_form, row) => check(row))
+	test.each(rows(SIGN_MARKUP))("sign context through Markdown markup: %s", (_form, row) => check(row))
 })
