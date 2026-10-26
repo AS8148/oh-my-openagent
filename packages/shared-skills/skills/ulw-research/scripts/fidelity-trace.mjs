@@ -68,7 +68,7 @@ function traceFills(owners, fillMap, fits, locate = plainSite) {
 		if (!rendered) continue
 		for (let i = index, at = from; i < texts.length; i += 1, at = 0) {
 			let hit = locate(entry, texts[i], at)
-			const glued = ([start, end]) => /\d/.test(texts[i][start - 1] ?? "") || /\d/.test(texts[i][end] ?? "")
+			const glued = ([start, end]) => (/^\d/.test(rendered) && /\d/.test(texts[i][start - 1] ?? "")) || (/\d$/.test(rendered) && /\d/.test(texts[i][end] ?? ""))
 			while (hit && (glued(hit) || !fits(entry, texts[i].slice(hit[0])))) hit = locate(entry, texts[i], hit[0] + 1)
 			if (!hit) continue
 			texts[i] = `${texts[i].slice(0, hit[0])}${TRACED}${texts[i].slice(hit[1])}`

@@ -67,6 +67,15 @@ describe("an unreadable snapshot blocks only the rows it backs", () => {
 		expect(a?.message).not.toBe(b?.message)
 	})
 
+	test("#given an edited snapshot behind a row and one named only in prose #when verified #then both carry one wording of the cause", () => {
+		const dir = sourcesCopy()
+		for (const id of ["S4", "S5"]) writeFileSync(join(dir, id, "text.txt"), `${readFileSync(join(dir, id, "text.txt"), "utf8")}edited`)
+		const defects = blocked(check(`${data("F1", "up to 320 m")}<p>The suite ran [S5].</p>`, BASE, dir))
+		const cause = (id: string) => defects.find((d) => d.message.includes(`snapshot ${id} `))?.message.split(`snapshot ${id} `)[1]
+		expect(defects).toHaveLength(2)
+		expect(cause("S5")).toBe(cause("S4") as string)
+	})
+
 	test("#given source-free assumptions and intact snapshots #when verified #then nothing is blocked", () => {
 		expect(check(data("F2", "1,237"))).toEqual([])
 		const assumed = { ...BASE.rows.find((r) => r.fact_id === "F8"), fact_id: "F8", kind: "assumed", raw: "15%", value: "15", unit: "%", derived_from: [] }

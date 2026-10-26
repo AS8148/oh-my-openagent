@@ -15,7 +15,7 @@ function read(dir, file) {
 }
 
 /** Why the snapshot behind `row` cannot be trusted, or null when it reads and matches its pinned hash. */
-function snapshotCause(sourcesDir, row) {
+export function snapshotCause(sourcesDir, row) {
 	if (!sourcesDir) return "has no sources directory"
 	const dir = join(sourcesDir, row.source_id)
 	try {

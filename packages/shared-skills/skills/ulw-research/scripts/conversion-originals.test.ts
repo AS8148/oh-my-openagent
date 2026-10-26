@@ -220,3 +220,74 @@ describe("conversion originals: the bracket grammar class", () => {
 		expect(got).toEqual(want)
 	})
 })
+
+/**
+ * What can follow a converted element: each shape is written in the report template right after
+ * the fill site of a real fact derive convert row and resolved by fact fill, so every untampered
+ * row is a report exactly as the tools write it. A following group is another original only when
+ * it is a bare numeral with a unit of the operand's dimension that is not a filled element.
+ */
+describe("conversion originals: what can follow a converted element", () => {
+	const [CLEAN, ORIGINAL, UNTRACED] = ["clean", "original", "untraceable_number"]
+	const BRACKETS = [["(", ")"], ["\uFF08", "\uFF09"], ["[", "]"], ["\uFF3B", "\uFF3D"], ["\u3010", "\u3011"], ["\u300C", "\u300D"], ["\u3014", "\u3015"], ["\u300E", "\u300F"], ["\u300A", "\u300B"]]
+	const SEPARATORS = ["-", "\u2013", "\u2014", "/"]
+	const ROWS: { shape: string; after: string; expected: string }[] = [
+		{ shape: "nothing (element at the end of the cell or line)", after: "", expected: CLEAN },
+		...BRACKETS.flatMap(([o, c]) => [
+			{ shape: `${o}${c} second placeholder in prose`, after: ` ${o}{{F2:f2}} longer${c}`, expected: CLEAN },
+			{ shape: `${o}${c} second placeholder alone`, after: ` ${o}{{F1:f1}}${c}`, expected: CLEAN },
+			{ shape: `${o}${c} bare numeral, wrong`, after: ` ${o}999 m${c}`, expected: ORIGINAL },
+			{ shape: `${o}${c} bare numeral, right, other unit of the dimension`, after: ` ${o}0.32 km${c}`, expected: ORIGINAL },
+		]),
+		...SEPARATORS.flatMap((s) => [
+			{ shape: `${s} then a filled element`, after: ` ${s} {{F1:f1}}`, expected: CLEAN },
+			{ shape: `${s} then a bare numeral`, after: ` ${s} 999 m`, expected: ORIGINAL },
+			{ shape: `${s} then prose with a count`, after: ` ${s} 12 sites`, expected: UNTRACED },
+		]),
+		{ shape: "prose with a filled percent", after: " ({{F2:f2}} longer)", expected: CLEAN },
+		{ shape: "prose with a literal percent", after: " (12 % longer)", expected: UNTRACED },
+		{ shape: "a bare unitless number (footnote)", after: " (7)", expected: UNTRACED },
+		{ shape: "a year", after: " (2024)", expected: UNTRACED },
+		{ shape: "two consecutive elements", after: " {{F1:f1}}", expected: CLEAN },
+		{ shape: "two consecutive elements, glued", after: "{{F2:f2}}", expected: CLEAN },
+		{ shape: "prose without digits", after: " (approx.)", expected: CLEAN },
+	]
+	const SENTENCE = { en: ["The span is ", "."], ko: ["\uAD50\uB7C9 \uAE38\uC774\uB294 ", "\uC774\uB2E4."] }
+	type Render = { format: "html" | "md"; doc: (body: string, around: string[]) => string; stale?: true }
+	const RENDERS: Record<string, Render> = {
+		"html paragraph": { format: "html", doc: (b, [x, y]) => `<h2>Findings</h2><p>${x}${b}${y}</p>` },
+		"html table cell": { format: "html", doc: (b) => `<h2>Findings</h2><table><tr><th>span</th><td>${b}</td></tr></table>` },
+		"md paragraph": { format: "md", doc: (b, [x, y]) => `## Findings\n\n${x}${b}${y}\n` },
+		"md table cell": { format: "md", doc: (b) => `## Findings\n\n| item | value |\n| --- | --- |\n| span | ${b} |\n` },
+		"md paragraph, edited before the site (stale fill map)": { format: "md", doc: (b, [x, y]) => `## Findings\n\n${x}${b}${y}\n`, stale: true },
+	}
+
+	/** derive -> fill -> verify as fact verify wires it: "original" when a defect is on part original, else the defect codes or clean. */
+	function verdict(after: string, render: Render, lang: "en" | "ko") {
+		const ledger = emptyLedger() as Ledger
+		for (const [id, value, unit] of [["F1", "320", "m"], ["F2", "12", "%"]]) addRow(ledger, measured(id, value, unit, { source_id: "S4" }))
+		const row = (derive(ledger, { op: "convert", operands: ["F1"], to: "mm", label: "span_mm" }) as { row: Row }).row
+		const filled = fill(render.doc(`{{${row.fact_id}:span_mm}}${after}`, SENTENCE[lang]), ledger, { format: render.format }) as { out: string | null; fillMap: Parameters<typeof markdownAsHtml>[1] }
+		if (filled.out === null) return "fill failed"
+		const report = render.stale ? filled.out.replace("## Findings", "## Findings, revised after the review") : filled.out
+		const projected = render.format === "md" ? markdownAsHtml(report, filled.fillMap, ledger) : null
+		if (render.stale && projected?.stale.length === 0) return "fill map not stale"
+		const defects = valueChecks(buildContext(parseHtml(projected?.html ?? report), {}), ledger, projected?.stale ?? null, join(FIX, "sources")) as { code: string; part?: string }[]
+		if (defects.some((d) => d.part === "original")) return ORIGINAL
+		return defects.length === 0 ? CLEAN : [...new Set(defects.map((d) => d.code))].sort().join(",")
+	}
+
+	test(`#given ${ROWS.length} shapes x ${Object.keys(RENDERS).length} renders x EN and KO after a filled convert row #when verified #then each verdict is the row's expected`, () => {
+		const got: string[] = []
+		const want: string[] = []
+		for (const { shape, after, expected } of ROWS) {
+			for (const [name, render] of Object.entries(RENDERS)) {
+				for (const lang of ["en", "ko"] as const) {
+					got.push(`${shape} | ${name} | ${lang} | ${verdict(after, render, lang)}`)
+					want.push(`${shape} | ${name} | ${lang} | ${expected}`)
+				}
+			}
+		}
+		expect(got).toEqual(want)
+	})
+})

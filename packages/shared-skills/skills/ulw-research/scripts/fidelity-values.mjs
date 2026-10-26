@@ -9,11 +9,10 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join, resolve, sep } from "node:path"
 
-import { sha256Of } from "./cli-support.mjs"
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
-import { convertedHalfFits, isDerivedRow, opensOriginal, originalProblem, renderLocator, staleRender } from "./fidelity-originals.mjs"
-import { unreadableSnapshots } from "./fidelity-snapshot-readability.mjs"
+import { convertedHalfFits, followsOriginal, isDerivedRow, originalProblem, renderLocator, staleRender, textAfter } from "./fidelity-originals.mjs"
+import { snapshotCause, unreadableSnapshots } from "./fidelity-snapshot-readability.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
 import { parseNumeral } from "./numerals.mjs"
@@ -153,6 +152,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 	const flag = (code, node, message) => out.push(ctx.defect(code, node, message))
 	const rows = new Map((ledger?.rows ?? []).map((row) => [row.fact_id, row]))
 	const cited = new Map()
+	const fills = (fillMap ?? []).map((entry) => entry.rendered)
 	const check = (id, node, problemOf) => {
 		const row = rows.get(id)
 		if (!row) return flag("unresolved_placeholder", node, `${id} names no ledger row`)
@@ -162,15 +162,14 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 	}
 	for (const node of ctx.all.filter((cur) => cur.attrs["data-fact"] !== undefined)) {
 		const selector = node.attrs["data-quote-sel"] ?? "full"
-		const after = () => proseText({ children: node.parent?.children.slice(node.parent.children.indexOf(node) + 1) ?? [] })
-		const glued = (row) => isDerivedRow(row) && node.attrs["data-fact-mode"] !== "value" && opensOriginal(after()) ? ["value_mismatch", `another original follows ${row.fact_id}: "${clip(after())}"`, "original"] : null
+		const glued = (row) => isDerivedRow(row) && node.attrs["data-fact-mode"] !== "value" && followsOriginal(row, rows, fills)(textAfter(node)) ? ["value_mismatch", `another original follows ${row.fact_id}: "${clip(textAfter(node))}"`, "original"] : null
 		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : (factProblem(row, proseText(node), node.attrs, rows) ?? glued(row))))
 	}
 	const docText = bare(proseText(ctx.body))
 	for (const entry of fillMap ?? []) {
 		check(entry.fact_id, ctx.body, (row) => {
 			const problem = row.kind === "quote" ? quoteProblem(row, entry.rendered, entry.selector ?? "full") : factProblem(row, entry.rendered, { "data-fact-mode": entry.mode }, rows)
-			const stale = isDerivedRow(row) ? staleRender(row, entry.rendered, proseText(ctx.body)) : docText.includes(bare(entry.rendered)) ? null : "gone"
+			const stale = isDerivedRow(row) ? staleRender(row, entry.rendered, proseText(ctx.body), followsOriginal(row, rows, fills)) : docText.includes(bare(entry.rendered)) ? null : "gone"
 			if (problem || stale === null) return problem
 			return [row.kind === "quote" ? "quote_not_verbatim" : "value_mismatch", `filled text "${clip(entry.rendered)}" of ${row.fact_id} is no longer in the report${stale === "original" ? " (its original was edited)" : ""}`, ...(stale === "original" ? ["original"] : [])]
 		})
@@ -187,7 +186,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		const kind = ctx.kindOf(scope)
 		if ((node.tag === "q" || node.tag === "blockquote") && node.attrs["data-fact"] === undefined && kind !== "sources" && kind !== "toc") flag("quote_unbound", node, `<${node.tag}> with no Q row: "${clip(proseText(node))}"`)
 	}
-	traceChecks(ctx, charts, fillMap, flag, fillSiteFits(rows), renderLocator(rows))
+	traceChecks(ctx, charts, fillMap, flag, fillSiteFits(rows), renderLocator(rows, fillMap))
 	for (const [fig, labels] of charts) {
 		const problem = chartProblem(ctx, fig, labels, ledger)
 		if (problem) flag("chart_value_untraceable", fig, problem)
@@ -234,9 +233,8 @@ function sourceChecks(ctx, rows, cited, sourcesDir, flag, unreadable = new Set()
 		// A source named only in prose backs no row: its absence is not a finding, and an edit of its text still is.
 		if (!backed.has(id) && (!existsSync(metaPath) || !existsSync(textPath))) continue
 		meta.set(id, JSON.parse(readFileSync(metaPath, "utf8")))
-		if (backed.has(id)) continue
-		const actual = sha256Of(readFileSync(textPath))
-		if (meta.get(id).sha256 !== actual) flag("snapshot_hash_mismatch", ctx.body, `${id}/text.txt changed after its snapshot was pinned`)
+		const cause = backed.has(id) ? null : snapshotCause(sourcesDir, { source_id: id })
+		if (cause) flag("snapshot_hash_mismatch", ctx.body, `snapshot ${id} ${cause}`)
 	}
 	return meta
 }

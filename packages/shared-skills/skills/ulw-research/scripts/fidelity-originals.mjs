@@ -1,8 +1,10 @@
 // Check displayed conversion originals against their operands, not the mutable render field.
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
+import { proseText } from "./html-lite.mjs"
 import { parseNumeral } from "./numerals.mjs"
 import { normalizeText } from "./text-normalize.mjs"
 import { display } from "./unit-precision.mjs"
+import { dimensionOf } from "./units.mjs"
 
 const DERIVED = new Set(["converted", "derived"])
 /**
@@ -64,17 +66,54 @@ export function originalProblem(row, shown, rows, valueMode = false) {
 	return strayNumber(row, half)
 }
 
+/** Stands for a filled element or another fill-map value in the text after a fill site. */
+const FILLED = "\uFFFC"
+/** After a fill site the grammar also reads the brackets an element never carries as originals. */
+const FOLLOW = [...PAIRS, ["\u300E", "\u300F"], ["\u300A", "\u300B"], ["\u3008", "\u3009"], ["\u27E8", "\u27E9"]]
+const dimension = (unit) => dimensionOf(String(unit).replace(/-e\d+$/u, "")) ?? unitKey(unit)
+
+/** What the text after a fill site opens: a bracket group's content, or the clause after a separator (`open`); else null. */
+function openedGroup(text) {
+	const rest = folded(text).trimStart()
+	const pair = FOLLOW.find(([open]) => rest.startsWith(open))
+	const close = pair ? rest.indexOf(pair[1], 1) : -1
+	if (pair) return { group: rest.slice(1, close === -1 ? undefined : close).trim(), open: false }
+	return /^[-\u2013\u2014/]/u.test(rest) ? { group: rest.slice(1).split(/[,;:!?)\]]|\.(?!\d)/u)[0].trim(), open: true } : null
+}
+
+/**
+ * Whether the text right after a fill site of `row` opens another original: a bracket group or a
+ * separator clause that is exactly a numeral with a unit of the row's or an operand's dimension (a
+ * separator clause may end in a glued particle, as Korean writes "- 999 m\uC774\uB2E4").
+ * A filled element, a fill-map value (`fills`), a placeholder, a unitless number (a year, a
+ * footnote) and prose with digits are not originals; untraceable_number still reads a stray number.
+ */
+export const followsOriginal = (row, rows, fills = []) => (text) => {
+	if (!DERIVED.has(row?.kind)) return false
+	const after = [...fills].filter(Boolean).sort((a, b) => b.length - a.length).reduce((cur, fill) => cur.split(fill).join(FILLED), String(text))
+	const { group, open } = openedGroup(after) ?? { group: "" }
+	if (!group || group.includes(FILLED) || group.includes("{{")) return false
+	const units = [row.unit, ...(row.derived_from ?? []).map((id) => rows.get(id)?.unit)].filter(Boolean)
+	return [group, ...(open ? [group.replace(/[\uAC00-\uD7A3]+$/u, "").trim()] : [])].some((body) => {
+		const read = parseNumeral(body, 0)
+		return Boolean(read?.unitRaw) && read.span[0] === 0 && read.span[1] === body.length && units.some((unit) => dimension(unit) === dimension(read.unitRaw))
+	})
+}
+
+/** The prose after `node` in its parent, each filled element (data-fact) read as one FILLED mark. */
+export const textAfter = (node) => {
+	const siblings = node.parent?.children.slice(node.parent.children.indexOf(node) + 1) ?? []
+	return proseText({ children: siblings.map((child) => (child.attrs?.["data-fact"] === undefined ? child : { tag: "#text", text: FILLED })) })
+}
+
 const SPACE = "[\\s\\u3000]"
 const DIGIT = "[0-9\\uFF10-\\uFF19]"
 /** Each character with the fullwidth form NFKC folds onto it. */
 const wide = (chars) => [...chars].map((ch) => ch + (/[!-~]/.test(ch) ? String.fromCharCode(ch.charCodeAt(0) + 0xfee0) : "")).join("")
 const [WIDE_OPEN, WIDE_CLOSE] = [inClass(wide(OPEN)), inClass(wide(CLOSE))]
-const GLUED = `${SPACE}*(?:[${WIDE_OPEN}]${SPACE}*${DIGIT}|[-\\u2013\\u2014]${SPACE}*${DIGIT})`
-/** Text right after a fill site that opens another original ("(999 m)", "- 999 m"): the site is not alone. */
-export const opensOriginal = (text) => new RegExp(`^${GLUED}`, "u").test(String(text))
 
 /** A pattern reading `rendered` modulo the bracket grammar: NFKC fullwidth forms, bracket style, spacing around brackets. */
-function renderPattern(rendered, alone) {
+function renderPattern(rendered) {
 	const text = folded(rendered).trim()
 	let body = ""
 	for (let at = 0; at < text.length; at += 1) {
@@ -85,36 +124,38 @@ function renderPattern(rendered, alone) {
 		else if (CLOSE.includes(ch)) body += `${SPACE}*([${WIDE_CLOSE}])`
 		else body += `[${inClass(wide(ch))}]`
 	}
-	const after = alone ? `(?!${GLUED})` : ""
-	return new RegExp(`(?<!${DIGIT})${body}(?!${DIGIT})${after}`, "gu")
+	// A digit may not run into a render's leading or trailing digit ("1,320 m" holds no "320 m"); a bracket ends the render.
+	return new RegExp(`${/^\d/.test(text) ? `(?<!${DIGIT})` : ""}${body}${/\d$/.test(text) ? `(?!${DIGIT})` : ""}`, "gu")
 }
 
 const pairIndex = (ch, side) => [...side].findIndex((open) => open === folded(ch))
-/** [start, end) of `rendered` in `text` from `from` under the bracket grammar, with no further original glued after it; or null. */
-export function findRender(text, rendered, from = 0, alone = true) {
-	const pattern = renderPattern(rendered, alone)
+/** [start, end) of `rendered` in `text` from `from` under the bracket grammar, not followed by another original (`follows`); or null. */
+export function findRender(text, rendered, from = 0, follows = () => false) {
+	const pattern = renderPattern(rendered)
 	pattern.lastIndex = from
 	for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
 		const marks = match.slice(1)
 		const paired = marks.every((mark, i) => i % 2 === 1 || pairIndex(mark, OPEN) === pairIndex(marks[i + 1] ?? "", CLOSE))
-		if (paired) return [match.index, match.index + match[0].length]
+		const end = match.index + match[0].length
+		if (paired && !follows(text.slice(end))) return [match.index, end]
 		pattern.lastIndex = match.index + 1
 	}
 	return null
 }
 
 /** Where a stale fill-map entry's text sits: derived and converted renders are read under the bracket grammar. */
-export const renderLocator = (rows) => (entry, text, from) => {
-	if (DERIVED.has(rows.get(entry.fact_id)?.kind)) return findRender(text, entry.rendered, from)
+export const renderLocator = (rows, fillMap) => (entry, text, from) => {
+	const row = rows.get(entry.fact_id)
+	if (DERIVED.has(row?.kind)) return findRender(text, entry.rendered, from, followsOriginal(row, rows, (fillMap ?? []).map((other) => other.rendered)))
 	const hit = text.indexOf(entry.rendered, from)
 	return hit === -1 ? null : [hit, hit + entry.rendered.length]
 }
 
 /** Null when a stale derived render is still in the report; "original" when only its converted half is; "gone" otherwise. */
-export function staleRender(row, rendered, text) {
-	if (findRender(text, rendered) !== null) return null
+export function staleRender(row, rendered, text, follows) {
+	if (findRender(text, rendered, 0, follows) !== null) return null
 	const half = folded(rendered).replace(GROUP, "").trim()
-	return half !== "" && /\d/.test(half) && findRender(text, half, 0, false) !== null ? "original" : "gone"
+	return half !== "" && /\d/.test(half) && findRender(text, half) !== null ? "original" : "gone"
 }
 
 export const isDerivedRow = (row) => DERIVED.has(row?.kind)
