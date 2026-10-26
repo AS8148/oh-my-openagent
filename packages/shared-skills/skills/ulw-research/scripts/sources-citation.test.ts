@@ -5,7 +5,8 @@ import { join } from "node:path"
 import { valueChecks } from "./fidelity-values.mjs"
 import { buildContext, checkStatic } from "./gates-static.mjs"
 import { parseHtml } from "./html-lite.mjs"
-import { isClaimSegment, sourcesClaims } from "./sources-citation.mjs"
+import { isClaimSegment, numeralKinds, sourcesClaims } from "./sources-citation.mjs"
+import { type ClassRow, GLUED_LETTER_ROWS, SHAPE_ROWS } from "./tests/numeral-classes"
 
 const FIX = join(import.meta.dir, "tests", "fixtures")
 const EMPTY = { schemaVersion: 1, rows: [], events: [] }
@@ -209,4 +210,27 @@ describe("mutation: no word list, verb list, or title heuristic decides a Source
 			expect(MUST_FLAG.filter((body) => !mutant(body)).length).toBeGreaterThan(0)
 		})
 	}
+})
+
+// Lead order (round 5): one table-driven test per class. Each row names the class of every digit run,
+// and the gates must agree at the real boundary: an element under Sources is checked exactly when a
+// run is a numeral.
+function misread(rows: ClassRow[]) {
+	return rows.flatMap(({ input, expected }) => {
+		const kinds = numeralKinds(input).map(({ kind }: { kind: string }) => kind)
+		const want = Array.isArray(expected) ? expected : kinds.map(() => expected)
+		const flagged = underSources(`<p>${input}</p>`).includes("untraceable_number")
+		const ok = kinds.length === want.length && kinds.every((kind: string, at: number) => kind === want[at]) && flagged === want.includes("numeral")
+		return ok ? [] : [{ input, expected, kinds, flagged }]
+	})
+}
+
+describe("numeral classes under Sources, one row per form (EN + KO)", () => {
+	test(`#given ${GLUED_LETTER_ROWS.length} glued-letter forms (every unit, multiplier, percent, and currency token on the right and left, Hangul and Latin words, Korean particles) #when classified #then each reads as its row says`, () => {
+		expect(misread(GLUED_LETTER_ROWS)).toEqual([])
+	})
+
+	test(`#given ${SHAPE_ROWS.length} date, version, and code shapes (slashed, dotted, dashed, ranges, groupings, filing codes, citation markers) #when classified #then each reads as its row says`, () => {
+		expect(misread(SHAPE_ROWS)).toEqual([])
+	})
 })

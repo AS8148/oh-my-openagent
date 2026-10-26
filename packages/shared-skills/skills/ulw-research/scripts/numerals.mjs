@@ -67,10 +67,12 @@ const QUALIFIER_AFTER = /^\s?(\uC774\uC0C1|\uC774\uD558|\uBBF8\uB9CC|\uCD08\uACF
 /** "1,237" -> "1237"; a malformed group ("1,23") keeps only the leading plain number. */
 function cleanDigits(raw) {
 	if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(raw)) return { digits: raw.replace(/,/g, ""), length: raw.length }
-	if (new RegExp(`^${DOT_GROUPED}$`).test(raw)) return { digits: raw.replace(/\./g, ""), length: raw.length }
 	const plain = /^\d+(?:\.\d+)?/.exec(raw)[0]
 	return { digits: plain, length: plain.length }
 }
+
+/** A numeral's digits, reading a European period grouping ("1.234.567") as one integer. */
+const digitsOf = (raw) => (new RegExp(`^${DOT_GROUPED}$`).test(raw) ? { digits: raw.replace(/\./g, ""), length: raw.length } : cleanDigits(raw))
 
 /** The bare-year and four-digit-date patterns: a numeral they cover can still be a value. */
 const YEAR_SHAPED = new Set([NOT_CLAIMS[0], NOT_CLAIMS[12]])
@@ -98,7 +100,7 @@ function findStart(text, from, ranges) {
 	let digit = null
 	for (const match of text.slice(from).matchAll(new RegExp(NUM, "gu"))) {
 		const at = from + match.index
-		const candidate = { at, ...cleanDigits(match[0]) }
+		const candidate = { at, ...digitsOf(match[0]) }
 		const end = at + candidate.length
 		const cover = covering(at)
 		const lifted = cover.every(([s, e, yearShaped]) => yearShaped && s === at && e <= end)

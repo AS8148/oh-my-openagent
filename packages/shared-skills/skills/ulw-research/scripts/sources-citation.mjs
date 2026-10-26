@@ -12,7 +12,9 @@
 // unless the letters are a unit, multiplier, or currency of units.mjs / numerals.mjs (50M, 10k, 3x,
 // 2.5GB, 320m, 12%, 40percent, x3). A unit, multiplier, or percent on the right is checked before the
 // letters on the left, so a word glued in front of a measure does not make it a name. A dotted version
-// is a name, a European digit grouping (1.234.567) a numeral. A heading is not a prose sentence. Pure.
+// is a name, a European digit grouping (1.234.567) a numeral; a Korean ordinal (the je prefix, the
+// jjae suffix) is a name and a Korean quarter a date. numeralKinds names the class of every digit run
+// (citation-field, date, name, numeral); only a numeral is checked. A heading is not a prose sentence. Pure.
 // Korean markers are \u escapes.
 
 import { DOT_GROUPED, UNIT } from "./numerals.mjs"
@@ -41,25 +43,34 @@ const CONTAINERS = [
 	new RegExp(`${CITE_OPEN}[^${CITE_CLOSE}]*${CITE_CLOSE}`, "g"),
 	new RegExp(`${A_OPEN}[^${A_CLOSE}]*${A_CLOSE}`, "g"),
 ]
-/** Citation-field numbers by type: dates, years, page, volume, issue, number, and edition markers. */
-const TYPED = [
+/** Date fields: full dates, month/day, a Korean quarter, dotted dates (with spaces, or DD.MM.YY), years and year ranges. */
+const DATES = [
 	new RegExp(`${YEAR}[-./]\\d{1,2}(?:[-./]\\d{1,2})?|\\d{1,2}[-./]\\d{1,2}[-./]${YEAR}`, "g"),
 	new RegExp(`\\b${MONTH}\\s+\\d{1,2}(?:st|nd|rd|th)?\\b(?:,?\\s+${YEAR})?|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH}`, "gi"),
-	/\d{1,2}\s*\uC6D4(?:\s*\d{1,2}\s*\uC77C)?/g,
+	/\d{1,2}\s*\uC6D4(?:\s*\d{1,2}\s*\uC77C)?|(?<!\d)[1-4]\s*\uBD84\uAE30/g,
 	new RegExp(`${YEAR}\\.\\s+\\d{1,2}\\.\\s+\\d{1,2}\\.?`, "g"),
 	/(?<![\d/.,])(?:1[0-2]|0?[1-9])\/(?:3[01]|[12]\d|0?[1-9])(?![\d/]|[.,]\d)/g,
+	/(?<![\d.])\d{2}\.\d{2}\.\d{2}(?!\d|\.\d)/g,
 	new RegExp(`(?<![\\d.,])${YEAR}(?:\\s*[-\\u2013~]\\s*${YEAR})?(?![\\d]|[.,]\\d)`, "g"),
+]
+/** Marker fields: page, volume, issue, number, and edition markers. */
+const MARKERS = [
 	/\b(?:pp?|pg|pages?)\.?\s*\d+(?:\s*[-\u2013]\s*\d+)?/gi,
 	/\b(?:vols?|nos?|iss|ed)\.\s*\d+(?:\s*[-\u2013/]\s*\d+)*/gi,
 	/\b(?:Vol|Volume|No|Issue|Number|volume|issue)\s+\d+(?:\s*[-\u2013/]\s*\d+)*/g,
 	/\b\d+(?:st|nd|rd|th)\s+(?:ed\.|edition)|\bedition\s+\d+/gi,
 	/\uC81C?\s*\d+(?:\s*[-\u2013~]\s*\d+)?\s*(?:\uCABD|\uBA74|\uAD8C|\uD638|\uD310)/g,
 ]
+const TYPED = [...DATES, ...MARKERS]
 const NUMERAL = /\d+(?:[.,]\d+)*/g
 const UNIT_WORD = new RegExp(`^${UNIT}$`, "iu")
 const UNIT_LEAD = new RegExp(`^${UNIT}`, "iu")
 const LETTERS_AFTER = /^(?:[A-Za-z]+|[\uAC00-\uD7A3]+|\p{L}+)/u
-const SYMBOL_AFTER = /^(?:%|\u2030|\u00D7)/
+/** A unit or currency symbol right after the digits (numerals.mjs SYMBOL_UNIT plus the currency signs). */
+const SYMBOL_AFTER = /^(?:%|\u2030|\u00D7|\u00B0[CF]|\u2103|\u2109|[$\u20AC\u00A3\u00A5\u20A9])/
+/** Korean ordinals: the prefix je ("je 3 hoe") and a counter followed by jjae ("3 beon jjae"). */
+const KO_ORDINAL_BEFORE = /(?:^|[^\p{L}])\uC81C$/u
+const KO_ORDINAL_AFTER = /^[\uAC00-\uD7A3]?\uC9F8/
 const GROUPED = new RegExp(`^${DOT_GROUPED}$`)
 
 /** Letters that make a glued digit run a quantity; a Korean run may carry a particle after its unit. */
@@ -87,10 +98,11 @@ function isName(text, start, end) {
 	if (/^\d+(?:\.\d+){2,}$/.test(run) && !GROUPED.test(run)) return true
 	const before = text.slice(0, start)
 	const rest = text.slice(end)
-	const left = /\p{L}+$/u.exec(before)?.[0]
+	if (KO_ORDINAL_BEFORE.test(before) || KO_ORDINAL_AFTER.test(rest)) return true
+	const left = /(?<![A-Za-z])[A-Za-z]+$/.exec(before)?.[0] ?? /\p{L}+$/u.exec(before)?.[0]
 	const right = LETTERS_AFTER.exec(rest)?.[0]
 	const measure = right ? !/^\d/.test(rest.slice(right.length)) && isUnit(right) : SYMBOL_AFTER.test(rest)
-	if (measure && !(right && /[A-Za-z]$/.test(before))) return false
+	if (measure && !(right && /^[A-Za-z]/.test(right) && /[A-Za-z]$/.test(before))) return false
 	if (left) return !isCurrency(left) && !(!right && isMultiplierBefore(before, left, run))
 	if (right) return true
 	if (before.endsWith("#") || /\p{L}/u.test(/([\p{L}\p{N}]+)[-._/]$/u.exec(before)?.[1] ?? "")) return true
@@ -132,11 +144,9 @@ function containerSpans(text) {
 	return spans
 }
 
-function fieldSpans(text) {
-	const spans = containerSpans(text)
-	for (const re of TYPED) for (const match of text.matchAll(re)) spans.push([match.index, match.index + match[0].length])
-	return spans
-}
+const typedSpans = (text, list) => list.flatMap((re) => [...text.matchAll(re)].map((match) => [match.index, match.index + match[0].length]))
+
+const fieldSpans = (text) => [...containerSpans(text), ...typedSpans(text, TYPED)]
 
 const inside = (spans, start, end) => spans.some(([s, e]) => start >= s && end <= e)
 
@@ -155,15 +165,18 @@ function sentences(line) {
 	return out.map((text) => text.replace(/\s+/g, " ").trim()).filter(Boolean)
 }
 
-/** The sentence holds a numeral that is not a citation-field number, so the gates check it. */
-export function isClaimSegment(text) {
-	const spans = fieldSpans(text)
-	for (const match of text.matchAll(NUMERAL)) {
-		const end = match.index + match[0].length
-		if (!inside(spans, match.index, end) && !isName(text, match.index, end)) return true
-	}
-	return false
+/** Each digit run of `text` with its class: "citation-field" (a container or a marker), "date", "name", or "numeral". */
+export function numeralKinds(text) {
+	const [containers, markers, dates] = [containerSpans(text), typedSpans(text, MARKERS), typedSpans(text, DATES)]
+	return [...text.matchAll(NUMERAL)].map((match) => {
+		const [start, end] = [match.index, match.index + match[0].length]
+		const kind = inside(containers, start, end) || inside(markers, start, end) ? "citation-field" : inside(dates, start, end) ? "date" : isName(text, start, end) ? "name" : "numeral"
+		return { text: match[0], kind }
+	})
 }
+
+/** The sentence holds a numeral that is not a citation-field number, so the gates check it. */
+export const isClaimSegment = (text) => numeralKinds(text).some(({ kind }) => kind === "numeral")
 
 /** A checked sentence as the gates read it: container fields (URL, DOI, title, tag) removed, every other number kept. */
 function plain(text) {
