@@ -15,8 +15,8 @@
 // fidelity record exists, the barrier refuses the unverified edition regardless of it, and the same
 // exemption is the only way a required record may be absent.
 
-import { existsSync, readFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { join } from "node:path"
 
 import { CliError, readJsonFile, sha256Of, writeJsonAtomic } from "./cli-support.mjs"
 import { LEDGER_FILENAME } from "./fact-ledger.mjs"
@@ -24,7 +24,10 @@ import { meaningCheckEnabled, requireLockedBrief } from "./fidelity-brief.mjs"
 import { blocksDelivery, deliveryBlockReason } from "./gates-fidelity.mjs"
 
 export const FIDELITY_RECORD = "fidelity-defects.json"
+/** The legacy session meaning record: accepted for an edition that has no record of its own. */
 export const MEANING_RECORD = "fidelity-meaning-defects.json"
+/** The meaning record of one delivered edition, named by its outcome format (`fact meaning-check --edition`). */
+export const meaningRecordName = (format) => `fidelity-meaning-defects.${format}.json`
 
 /** The fields every fidelity record carries, whatever its kind. */
 export const RECORD_ENVELOPE = Object.freeze(["record_kind", "artifact_sha256", "report", "written_at", "defects"])
@@ -52,9 +55,23 @@ const perEditionAndSession = (sessionDir, delivered) => [
 	...(existsSync(join(sessionDir, FIDELITY_RECORD)) ? [sessionTarget(sessionDir, FIDELITY_RECORD)] : []),
 ]
 
-/** The session meaning record must match every delivered edition's bytes. */
-const perSession = (file) => (sessionDir, delivered) =>
-	delivered.length === 0 ? [sessionTarget(sessionDir, file)] : perEdition(sessionDir, delivered).map((target) => ({ ...target, path: join(sessionDir, file), declared: false }))
+/**
+ * One meaning record per delivered edition, bound to that edition's bytes: its own
+ * fidelity-meaning-defects.<format>.json, else the own record of a row rendered from the same source
+ * (a PDF of the html edition), else the legacy session record. When none exists the target is the
+ * edition's own name, so the refusal names the file to write.
+ */
+function perEditionMeaning(sessionDir, delivered) {
+	if (delivered.length === 0) return [sessionTarget(sessionDir, MEANING_RECORD)]
+	const own = (row) => join(sessionDir, meaningRecordName(row.format))
+	return perEdition(sessionDir, delivered).map((target, index) => {
+		const row = delivered[index]
+		const subject = subjectOf(row)
+		const siblings = delivered.filter((other) => other !== row && subject !== null && subjectOf(other) === subject)
+		const candidates = [row, ...siblings].map(own)
+		return { ...target, declared: false, path: [...candidates, join(sessionDir, MEANING_RECORD)].find((path) => existsSync(path)) ?? candidates[0] }
+	})
+}
 
 /** Every fidelity record the barrier reads, in check order; each column is one rule the barrier applies. */
 export const FIDELITY_RECORDS = Object.freeze([
@@ -73,9 +90,9 @@ export const FIDELITY_RECORDS = Object.freeze([
 		kind: "meaning",
 		file: MEANING_RECORD,
 		step: "meaning gate",
-		targets: perSession(MEANING_RECORD),
+		targets: perEditionMeaning,
 		requiredWhen: meaningRequired,
-		remedy: () => "run fact pairs and fact meaning-check before delivery",
+		remedy: (target) => `run fact pairs and fact meaning-check --edition ${target.format} on ${target.subjects[0] ?? "the edition"} before delivery`,
 		bindsTo: "artifact_sha256",
 		blocking: blocksDelivery,
 		payload: Object.freeze(["command", "status", "exitCode", "run_id", "pairs_sha256", "counts", "dropped", "unverified", "calibration_path", "calibration_written", "calibration_replaced", "promotion_eligibility"]),
@@ -138,14 +155,16 @@ const hashOf = (path) => (existsSync(path) ? sha256Of(readFileSync(path)) : null
 /** Barrier problems for `outcome verify` and `outcome finish`; empty when nothing blocks delivery. */
 export function fidelityProblems(sessionDir, manifest) {
 	const delivered = manifest.deliverables.filter((row) => row.status === "delivered")
-	const hasFidelity = existsSync(join(sessionDir, LEDGER_FILENAME)) || FIDELITY_RECORDS.some((entry) => existsSync(join(sessionDir, entry.file)))
+	const targets = FIDELITY_RECORDS.map((entry) => [entry, entry.targets(sessionDir, delivered)])
+	// Any session record a row did not name (a session fidelity record, a meaning record) is fidelity evidence.
+	const hasFidelity = existsSync(join(sessionDir, LEDGER_FILENAME)) || targets.some(([, list]) => list.some((target) => !target.declared && target.path !== null && existsSync(target.path)))
 	const lastFidelity = manifest.gateHistory?.findLast((entry) => entry.gate === "fidelity")
 	const exempt = !hasFidelity && manifest.gates.fidelity === "not_run" && lastFidelity?.status === "not_run" && Boolean(lastFidelity.reason?.trim())
 	const context = { sessionDir, hasFidelity }
 	const problems = []
 	const counted = new Set()
-	for (const entry of FIDELITY_RECORDS) {
-		for (const target of entry.targets(sessionDir, delivered)) {
+	for (const [entry, list] of targets) {
+		for (const target of list) {
 			const refuse = (message, path = target.path) => problems.push({ code: "edition_unverified", format: target.format, message: `${target.at}${message}`, path })
 			if (target.path === null || !existsSync(target.path)) {
 				if (target.declared) refuse(`${entry.kind} record ${target.path} is missing`)
@@ -160,9 +179,9 @@ export function fidelityProblems(sessionDir, manifest) {
 				continue
 			}
 			if (target.subjects.length > 0 && !target.subjects.some((subject) => hashOf(subject) === record[entry.bindsTo])) {
-				refuse(`${entry.kind} record ${target.path} is for a different edition than ${target.subjects.join(", ")}`)
+				refuse(`${entry.kind} record ${target.path} is for a different edition than ${target.subjects.join(", ")}; ${entry.remedy(target)}`)
 			}
-			const path = resolve(target.path)
+			const path = realpathSync.native(target.path)
 			if (counted.has(path)) continue
 			counted.add(path)
 			const codes = [...new Set(record.defects.filter(entry.blocking).map((defect) => defect.code))].sort()
