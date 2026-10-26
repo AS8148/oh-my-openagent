@@ -38,6 +38,7 @@
       "getStarted": "Loslegen",
       "readManifesto": "Manifest lesen",
       "downloadDesktop": "Desktop-App herunterladen",
+      "downloadDesktopBeta": "Desktop-Beta herunterladen",
       "installLabel": "Ein Befehl, ein Tool"
     },
     "command": {
