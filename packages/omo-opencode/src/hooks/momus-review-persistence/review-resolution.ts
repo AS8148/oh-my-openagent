@@ -18,7 +18,11 @@ export interface SessionReviewContext {
 }
 
 const VERDICT_PATTERN = /\*\*\[(OKAY|REJECT)\]\*\*/
-const PLAN_PATH_PATTERN = /(?:\.omo|\.sisyphus)\/plans\/[^\s"'`)\]]+?\.md/g
+// Anchored to a token boundary so a plan path is captured whole: an absolute
+// path keeps its leading directories instead of being reduced to the current
+// project's `.omo/plans/...` suffix, and a match cannot start mid-word.
+const PLAN_PATH_PATTERN =
+  /(?:^|[\s"'`(\[=:])([^\s"'`)\]]*?(?:\.omo|\.sisyphus)\/plans\/[^\s"'`)\]]+?\.md)/gm
 
 export function parseMomusVerdict(outputText: string): MomusReviewVerdict | null {
   const match = VERDICT_PATTERN.exec(outputText)
@@ -29,7 +33,7 @@ export function parseMomusVerdict(outputText: string): MomusReviewVerdict | null
 }
 
 export function extractSinglePlanPath(promptText: string): string | null {
-  const matches = promptText.match(PLAN_PATH_PATTERN) ?? []
+  const matches = [...promptText.matchAll(PLAN_PATH_PATTERN)].map((match) => match[1])
   const unique = [...new Set(matches)]
   return unique.length === 1 ? unique[0] : null
 }

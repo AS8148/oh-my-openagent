@@ -12,7 +12,6 @@ import {
 } from "./review-resolution"
 
 const TASK_TOOLS = new Set(["task", "Task", "task_tool", "call_omo_agent"])
-const BACKGROUND_OUTPUT_TOOL = "background_output"
 const MAX_TRACKED_CALLS = 500
 
 interface ToolExecuteInput {
@@ -32,7 +31,7 @@ export function createMomusReviewPersistenceHook(ctx: PluginInput) {
   const callStartedAt = new Map<string, number>()
 
   const toolExecuteBefore = async (input: ToolExecuteInput, _output: { args: Record<string, unknown> }) => {
-    if (!TASK_TOOLS.has(input.tool) && input.tool !== BACKGROUND_OUTPUT_TOOL) {
+    if (!TASK_TOOLS.has(input.tool)) {
       return
     }
     if (callStartedAt.size >= MAX_TRACKED_CALLS) {
@@ -46,9 +45,7 @@ export function createMomusReviewPersistenceHook(ctx: PluginInput) {
     callStartedAt.delete(`${input.sessionID}:${input.callID}`)
 
     try {
-      const isTaskSurface = TASK_TOOLS.has(input.tool)
-      const isBackgroundSurface = input.tool === BACKGROUND_OUTPUT_TOOL
-      if (!isTaskSurface && !isBackgroundSurface) {
+      if (!TASK_TOOLS.has(input.tool)) {
         return
       }
 
@@ -65,7 +62,7 @@ export function createMomusReviewPersistenceHook(ctx: PluginInput) {
       let promptText = metadata.prompt
       let model = metadata.model
       let sessionDurationMs: number | undefined
-      if (metadata.sessionId && (!promptText || !model || isBackgroundSurface)) {
+      if (metadata.sessionId && (!promptText || !model)) {
         const sessionContext = await resolveSessionReviewContext(ctx.client, metadata.sessionId)
         promptText ??= sessionContext.promptText
         model ??= sessionContext.model
@@ -90,7 +87,7 @@ export function createMomusReviewPersistenceHook(ctx: PluginInput) {
         planHash = hashPlanContent(readFileSync(planFilePath, "utf-8"))
       }
 
-      const measuredDurationMs = isTaskSurface && startedAt !== undefined ? Date.now() - startedAt : undefined
+      const measuredDurationMs = startedAt !== undefined ? Date.now() - startedAt : undefined
 
       const writtenPath = writeMomusReviewArtifact(ctx.directory, planPath, {
         verdict,

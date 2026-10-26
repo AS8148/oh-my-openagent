@@ -6,6 +6,7 @@ import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 
 import { createMomusReviewPersistenceHook } from "./hook"
+import { extractSinglePlanPath } from "./review-resolution"
 
 const OKAY_OUTPUT = "**[OKAY]**\n\n**Summary**: All references check out."
 const REJECT_OUTPUT = "**[REJECT]**\n\n**Summary**: One reference is missing.\n\n**Blocking Issues**:\n1. `.omo/plans/demo.md:12` cites a file that does not exist."
@@ -153,7 +154,7 @@ describe("createMomusReviewPersistenceHook", () => {
     }
   })
 
-  test("persists background Momus verdicts fetched through background_output", async () => {
+  test("does not persist verdicts fetched through background_output", async () => {
     // given
     const directory = createProject()
     const messages = [
@@ -176,13 +177,77 @@ describe("createMomusReviewPersistenceHook", () => {
       )
 
       // then
-      expect(listReviews(directory)).toEqual(["001-okay.md"])
-      const content = readFileSync(join(directory, ".omo", "plans", "demo.reviews", "001-okay.md"), "utf-8")
-      expect(content).toContain("Model: openai/gpt-5.5")
-      expect(content).toContain("Duration: 60.0s")
+      expect(listReviews(directory)).toEqual([])
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
+  })
+
+  test("persists only one artifact when the same reviewer session completes twice", async () => {
+    // given
+    const directory = createProject()
+    const hook = createMomusReviewPersistenceHook(createCtx(directory))
+    const metadata = {
+      agent: "momus",
+      prompt: ".omo/plans/demo.md",
+      model: { providerID: "anthropic", modelID: "claude-opus-4-6" },
+      sessionId: "ses_child",
+    }
+
+    try {
+      // when
+      await hook["tool.execute.after"](
+        { tool: "task", sessionID: "ses_parent", callID: "call_1" },
+        { title: "Review plan", output: OKAY_OUTPUT, metadata },
+      )
+      await hook["tool.execute.after"](
+        { tool: "task", sessionID: "ses_parent", callID: "call_2" },
+        { title: "Review plan", output: OKAY_OUTPUT, metadata },
+      )
+
+      // then
+      expect(listReviews(directory)).toEqual(["001-okay.md"])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("does not persist a verdict for an absolute plan path from another project", async () => {
+    // given
+    const directory = createProject()
+    const otherProject = createProject()
+    const hook = createMomusReviewPersistenceHook(createCtx(directory))
+    const otherPlanPath = join(otherProject, ".omo", "plans", "demo.md")
+
+    try {
+      // when
+      await hook["tool.execute.after"](
+        { tool: "task", sessionID: "ses_parent", callID: "call_1" },
+        {
+          title: "Review plan",
+          output: OKAY_OUTPUT,
+          metadata: { agent: "momus", prompt: `Review the plan at ${otherPlanPath}`, sessionId: "ses_child" },
+        },
+      )
+
+      // then
+      expect(listReviews(directory)).toEqual([])
+      expect(existsSync(join(otherProject, ".omo", "plans", "demo.reviews"))).toBe(false)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+      rmSync(otherProject, { recursive: true, force: true })
+    }
+  })
+
+  test("keeps an absolute plan path whole instead of reducing it to the local plans suffix", () => {
+    // given
+    const prompt = "Review the plan at /other/repo/.omo/plans/demo.md"
+
+    // when
+    const planPath = extractSinglePlanPath(prompt)
+
+    // then
+    expect(planPath).toBe("/other/repo/.omo/plans/demo.md")
   })
 
   test("leaves the tool output untouched", async () => {
