@@ -102,8 +102,8 @@ describe("page sources locate on visible text nodes only", () => {
 
 	test("#given elements hidden by <style> rules on a class, an id, or a tag #when --find runs #then they are not located", async () => {
 		const dir = session()
-		const style = "<style>.d-none, .sr-only { display: none } #gone{visibility:hidden} aside{color:red;display:none} div p.keep{display:none}</style>"
-		const body = '<p class="lead d-none">Class length is 999 m.</p><p id="gone">Id length is 998 m.</p><aside>Tag length is 997 m.</aside><p class="keep">Kept length is 410 m.</p>'
+		const style = "<style>.d-none, .sr-only { display: none } #gone{visibility:hidden} footer{color:red;display:none} div p.keep{display:none}</style>"
+		const body = '<p class="lead d-none">Class length is 999 m.</p><p id="gone">Id length is 998 m.</p><footer>Tag length is 997 m.</footer><p class="keep">Kept length is 410 m.</p>'
 		await snapshotPage(dir, `<html><head>${style}</head><body>${body}</body></html>`)
 		for (const anchor of ["Class length is", "Id length is", "Tag length is"]) expect([anchor, (await find(dir, anchor)).json.error]).toEqual([anchor, "fact_not_located"])
 		expect((await find(dir, "Kept length is")).json.data.row.value).toBe("410")
