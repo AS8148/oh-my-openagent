@@ -2,10 +2,15 @@ import { afterEach, expect, test } from "bun:test"
 import { readdirSync, renameSync } from "node:fs"
 import { join } from "node:path"
 
+import { configureSharedSubunitLogger } from "@oh-my-opencode/utils"
+
 import { createTaskRecordStore } from "../store"
+import type { TaskRecordStore } from "../store"
+import { runTaskOutput } from "../tools/output/output"
 import { baseSpec, cleanupProjects, FakeRunner, makeManager, settings, tempProject } from "./__fixtures__/manager-fakes"
 
 afterEach(cleanupProjects)
+afterEach(() => configureSharedSubunitLogger(undefined))
 
 test.each(["bookkeeping", "start"] as const)(
   "#given a permanently held %s record rename #when spawning #then failure is terminal and capacity is reusable",
@@ -16,12 +21,16 @@ test.each(["bookkeeping", "start"] as const)(
     let blocked = true
     let elapsed = 0
     const runner = new FakeRunner()
+    const logs: string[] = []
+    configureSharedSubunitLogger((message, data) => logs.push(`${message} ${JSON.stringify(data)}`))
     const durableStore = createTaskRecordStore({ project_dir: project }, {
       platform: "win32",
       rename: (from, to) => {
         attempts += 1
         if (blocked && String(to).endsWith(".json") && (stage === "bookkeeping" || attempts > 1)) {
-          throw Object.assign(new Error("synthetic held record"), { code: "EPERM" })
+          throw Object.assign(new Error("EPERM: rename '/Users/private-owner/state/held.json'"), {
+            code: "EPERM", errno: -4048, path: "/Users/private-owner/state/held.json",
+          })
         }
         renameSync(from, to)
       },
@@ -44,6 +53,17 @@ test.each(["bookkeeping", "start"] as const)(
     expect(failed.error_message).not.toBe("")
     expect(store.load(failed.task_id)?.status).toBe("error")
     expect(store.load(failed.task_id)?.residency_state).toBe("disposed")
+    const output = await runTaskOutput({ manager, stateDir: store.stateDir }, { task_id: failed.task_id }, "parent-1")
+    const rendered = JSON.stringify(output)
+    expect(rendered).toContain("EPERM")
+    expect(rendered).toContain("-4048")
+    expect(rendered).toContain("held.json")
+    expect(rendered).not.toContain("/Users/private-owner")
+    const failures = logs.filter(line => line.includes("spawn") && line.includes("EPERM"))
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toContain("-4048")
+    expect(failures[0]).toContain("held.json")
+    expect(failures[0]).not.toContain("/Users/private-owner")
     expect(createTaskRecordStore({ project_dir: project }).list().records.every(record => record.status !== "pending")).toBe(true)
     expect(runner.handles.size).toBe(0)
     expect(manager.residentTaskIds()).toEqual([])
@@ -58,6 +78,68 @@ test.each(["bookkeeping", "start"] as const)(
     await manager.waitFor(next.task_id)
   },
 )
+
+test.each(["launch", "refusal"] as const)(
+  "#given an unexpected %s transition invariant #when spawning #then task_output and one log preserve its distinct cause",
+  async (stage) => {
+    // given
+    const inner = createTaskRecordStore({ project_dir: tempProject() })
+    const logs: string[] = []
+    configureSharedSubunitLogger((message, data) => logs.push(`${message} ${JSON.stringify(data)}`))
+    let claimedId = ""
+    const store: TaskRecordStore = {
+      ...inner,
+      save(record) { claimedId = record.task_id; inner.save(record) },
+      replace(record) {
+        if (stage === "refusal") throw new Error("initial persistence fault")
+        inner.replace(record)
+      },
+      transition(taskId, transition) {
+        if (stage === "launch") throw new Error("spawn bookkeeping failure transitions were not applied")
+        return { ...inner.transition(taskId, transition), applied: false }
+      },
+    }
+    const { manager, inProcess } = makeManager({ store })
+    // when
+    await manager.start(baseSpec({ name: "invariant" }))
+    // then
+    const output = await runTaskOutput({ manager, stateDir: store.stateDir }, { task_id: claimedId }, "parent-1")
+    expect(JSON.stringify(output)).toContain("transitions were not applied")
+    expect(JSON.stringify(output)).toContain("unexpected")
+    expect(inProcess.startedSpecs).toEqual([])
+    const failures = logs.filter(line => line.includes("transitions were not applied"))
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toContain("unexpected")
+  },
+)
+
+test("#given a newer live child #when an old launch failure is fenced out #then its name remains reserved", async () => {
+  // given
+  const inner = createTaskRecordStore({ project_dir: tempProject() })
+  let intercept = true
+  const store: TaskRecordStore = {
+    ...inner,
+    transition(taskId, transition) {
+      if (intercept && transition.type === "start") {
+        intercept = false
+        inner.mutate(taskId, record => ({ ...record, status: "running", child_session_id: "newer-child" }))
+        throw Object.assign(new Error("obsolete write failed"), { code: "EPERM" })
+      }
+      return inner.transition(taskId, transition)
+    },
+  }
+  const { manager } = makeManager({ store })
+  // when
+  const obsolete = await manager.start(baseSpec({ name: "live" }))
+  const next = await manager.start(baseSpec({ name: "live" }))
+  // then
+  expect(obsolete.kind).toBe("start_failed")
+  if (obsolete.kind !== "start_failed") throw new Error("expected obsolete failure")
+  expect(store.load(obsolete.task_id)?.status).toBe("running")
+  expect(next.kind).toBe("started")
+  if (next.kind !== "started") throw new Error("expected next task")
+  expect(next.name).toBe("live-2")
+})
 
 test("#given a queued child with a permanent start-write refusal #when capacity frees #then its existing waiter receives terminal failure", async () => {
   // given

@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { createTaskRecord } from "../state"
 import { createTaskRecordStore } from "./record-store"
+import { TaskRecordWriteError } from "./record-error"
 
 const roots: string[] = []
 afterEach(() => {
@@ -62,8 +63,13 @@ test.each(["EPERM", "EBUSY", "EACCES"])(
   (code) => {
     // given
     const { store, record, refusal, elapsed } = fixture("win32", code, Infinity)
-    // when / then
-    expect(() => store.replace({ ...record, name: "unwritten" })).toThrow(refusal)
+    // when
+    let caught: unknown
+    try { store.replace({ ...record, name: "unwritten" }) } catch (error) { caught = error }
+    // then
+    expect(caught).toBeInstanceOf(TaskRecordWriteError)
+    if (!(caught instanceof TaskRecordWriteError)) throw new Error("expected exhausted Windows write")
+    expect(caught.cause).toBe(refusal)
     expect(elapsed()).toBeGreaterThanOrEqual(1_000)
     expect(elapsed()).toBeLessThanOrEqual(2_000)
     expect(store.load(record.task_id)?.name).toBe(record.name)
@@ -114,4 +120,14 @@ test("#given a task claimed by another owner #when an obsolete spawn fails #then
   // then
   expect(current?.status).toBe("pending")
   expect(existsSync(join(store.stateDir, "tasks", `${record.task_id}.json.spawn-failed`))).toBe(false)
+})
+
+test("#given a failed start write #when reading the audit #then no unapplied start event is published", () => {
+  // given
+  const { store, record } = fixture("win32", "EPERM", Infinity)
+  // when
+  expect(() => store.transition(record.task_id, { type: "start", timestamp: "2026-10-25T00:00:00.000Z" })).toThrow()
+  // then
+  expect(store.load(record.task_id)?.status).toBe("pending")
+  expect(existsSync(join(store.stateDir, "logs", `${record.task_id}.jsonl`))).toBe(false)
 })

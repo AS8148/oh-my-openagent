@@ -128,12 +128,13 @@ it("#given a held pending task file #when spawn failure is marked twice #then on
     parentState: () => ({ kind: "idle" }), wasBackground: () => true, currentSessionId: () => "parent-session",
   })
   // when
-  store.markSpawnFailed(record)
+  store.markSpawnFailed(record, "EPERM errno=-4048 file=held.json")
   store.markSpawnFailed(record)
   // then
   expect(notifications).toBe(1)
   expect(messages).toHaveLength(1)
   expect(messages[0]?.details[0]?.status).toBe("error")
+  expect(backing.load(record.task_id)?.error_message).toBe("EPERM errno=-4048 file=held.json")
   expect(backing.load(record.task_id)?.notification.notified_epoch).toBe(record.notification.run_epoch)
 })
 

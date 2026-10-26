@@ -1,16 +1,20 @@
 import { randomBytes } from "node:crypto"
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { basename, dirname } from "node:path"
+
+import { log } from "@oh-my-opencode/utils/logger"
 
 import { parseTaskId } from "../state"
 import type { TaskId, TaskRecord } from "../state"
 import { toStorableTaskRecord } from "./storable-record"
+import { describeRecordError, TaskRecordWriteError } from "./record-error"
 
 export type WriteRecordMode = "create" | "replace"
 
 export type RecordWriteDeps = {
   readonly rename?: typeof renameSync
   readonly sleep?: (ms: number) => void
+  readonly remove?: typeof rmSync
 }
 
 // Windows may refuse the rename with a sharing violation while Defender, an indexer, or another
@@ -55,21 +59,30 @@ export function writeRecord(path: string, record: TaskRecord, mode: WriteRecordM
 export function atomicReplace(path: string, payload: string, platform: NodeJS.Platform = process.platform, deps: RecordWriteDeps = {}): void {
   mkdirSync(dirname(path), { recursive: true })
   // pid + random segment: two writers in one process (or a pid reused across a crash) never share
-  // a temp name, and the finally leaves nothing behind when the rename is refused.
+  // a temp name. Cleanup retries a held tmp without masking the write error.
   const tmpPath = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`
   try {
     writeFileSync(tmpPath, payload, "utf8")
-    renameWithWindowsRetry(tmpPath, path, platform, deps)
+    try {
+      withWindowsRetry(() => (deps.rename ?? renameSync)(tmpPath, path), platform, deps)
+    } catch (error) {
+      if (platform === "win32" && isTransientWindowsError(error)) throw new TaskRecordWriteError(error)
+      throw error
+    }
   } finally {
-    rmSync(tmpPath, { force: true })
+    try {
+      withWindowsRetry(() => (deps.remove ?? rmSync)(tmpPath, { force: true }), platform, deps)
+    } catch (error) {
+      // Cleanup must never replace the write's cause. A held tmp is ignored by every reader.
+      log("senpi-task temporary record cleanup failed", { file: basename(tmpPath), error: describeRecordError(error) })
+    }
   }
 }
 
-function renameWithWindowsRetry(from: string, to: string, platform: NodeJS.Platform, deps: RecordWriteDeps): void {
-  const rename = deps.rename ?? renameSync
+function withWindowsRetry(operation: () => void, platform: NodeJS.Platform, deps: RecordWriteDeps): void {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      rename(from, to)
+      operation()
       return
     } catch (error) {
       const delay = WINDOWS_RENAME_DELAYS_MS[attempt]

@@ -65,9 +65,9 @@ export function createObservingStore(backing: TaskRecordStore, shared?: StoreObs
       backing.save(record)
       observeWrite(before, backing.load(record.task_id))
     },
-    markSpawnFailed: (record) => {
+    markSpawnFailed: (record, errorMessage) => {
       const before = backing.load(record.task_id)
-      const result = backing.markSpawnFailed(record)
+      const result = backing.markSpawnFailed(record, errorMessage)
       observeWrite(before, backing.load(record.task_id))
       return result
     },

@@ -40,9 +40,9 @@ export function createCompletionObservingStore(backing: TaskRecordStore, deps: C
     stateDir: backing.stateDir,
     save: (record) => backing.save(record),
     replace: (record) => backing.replace(record),
-    markSpawnFailed: (record) => {
+    markSpawnFailed: (record, errorMessage) => {
       const before = backing.load(record.task_id)
-      const failed = backing.markSpawnFailed(record)
+      const failed = backing.markSpawnFailed(record, errorMessage)
       if (before !== null && !TERMINAL_STATUSES.has(before.status)
         && failed?.status === "error" && failed.parent_session_id === deps.currentSessionId?.()) {
         deps.notifier.notifyTerminal({

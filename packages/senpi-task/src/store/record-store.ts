@@ -36,6 +36,7 @@ export type TaskRecordStoreOptions = RecordWriteDeps & {
 }
 
 type CacheEntry = {
+  readonly selectedPath: string
   readonly record: TaskRecord
   readonly mtimeMs: number
   readonly size: number
@@ -50,10 +51,11 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
 
   function cacheSet(path: string): void {
     const warnings: string[] = []
-    const record = readRecord(path, warnings)
+    const selectedPath = recordWritePath(path)
+    const record = readSelectedRecord(selectedPath, warnings)
     if (record === null) return
-    const stat = statSync(path)
-    cache.set(path, { record, mtimeMs: stat.mtimeMs, size: stat.size, warnings })
+    const stat = statSync(selectedPath)
+    cache.set(path, { selectedPath, record, mtimeMs: stat.mtimeMs, size: stat.size, warnings })
   }
 
   return {
@@ -72,7 +74,7 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
         cacheSet(path)
       })
     },
-    markSpawnFailed(record) {
+    markSpawnFailed(record, errorMessage = "spawn bookkeeping failed") {
       const path = taskPath(stateDir, parseTaskId(record.task_id))
       return withTaskRecordLock(path, () => {
         const fresh = readRecord(path)
@@ -82,7 +84,7 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
         if (fresh.child_session_id !== undefined || fresh.host_session !== undefined || fresh.pid !== undefined) return fresh
         const timestamp = new Date().toISOString()
         const failed: TaskRecord = {
-          ...fresh, status: "error", residency_state: "disposed", error_message: "spawn bookkeeping failed",
+          ...fresh, status: "error", residency_state: "disposed", error_message: errorMessage,
           terminal_at: timestamp, updated_at: timestamp,
         }
         // The held target is never replaced or unlinked. Publish the complete terminal record at
@@ -120,8 +122,8 @@ export function createTaskRecordStore(config: StateDirConfig, options: TaskRecor
         const record = readRecord(path)
         if (record === null) throw new Error(`Task record not found: ${taskId}`)
         const result = transitionTaskRecord(record, transition)
-        appendTaskEvent(stateDir, parsedTaskId, { type: result.audit.type, payload: result.audit }, appendFds)
         if (result.applied) writeRecord(recordWritePath(path), result.record, "replace", platform, options)
+        appendTaskEvent(stateDir, parsedTaskId, { type: result.audit.type, payload: result.audit }, appendFds)
         cacheSet(path)
         return result
       })
@@ -252,9 +254,10 @@ function readDirectoryNames(directory: string): string[] {
 }
 
 function readCached(path: string, cache: Map<string, CacheEntry>): TaskRecord | null {
+  const selectedPath = recordWritePath(path)
   let stat: Stats
   try {
-    stat = statSync(path)
+    stat = statSync(selectedPath)
   } catch (error) {
     if (isEnoent(error)) {
       cache.delete(path)
@@ -264,19 +267,23 @@ function readCached(path: string, cache: Map<string, CacheEntry>): TaskRecord | 
   }
 
   const hit = cache.get(path)
-  if (hit !== undefined && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size && !existsSync(spawnFailurePath(path))) {
+  if (hit !== undefined && hit.selectedPath === selectedPath && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {
     return hit.record
   }
 
   const warnings: string[] = []
-  const record = readRecord(path, warnings)
-  if (record !== null) cache.set(path, { record, mtimeMs: stat.mtimeMs, size: stat.size, warnings })
+  const record = readSelectedRecord(selectedPath, warnings)
+  if (record !== null) cache.set(path, { selectedPath, record, mtimeMs: stat.mtimeMs, size: stat.size, warnings })
   return record
 }
 
 function readRecord(path: string, warnings: string[] = []): TaskRecord | null {
+  return readSelectedRecord(recordWritePath(path), warnings)
+}
+
+function readSelectedRecord(path: string, warnings: string[] = []): TaskRecord | null {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(recordWritePath(path), "utf8"))
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
     return parseTaskRecord(parsed, path, warnings)
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return null

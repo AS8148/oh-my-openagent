@@ -5,6 +5,8 @@ import type { ManagedChildHandle } from "./child-handle"
 import type { describeStartFailure } from "./start-failure"
 import { isAdmissionHeld, type HeldStart } from "./start-admission"
 import type { ManagedRunner, ManagedStartSpec, StartResult } from "./types"
+import { recordSpawnFailure, spawnFailureMessage } from "./spawn-failure"
+import { isTerminalRecord } from "./manager-helpers"
 
 export type LaunchContext = {
   readonly record: TaskRecord
@@ -69,13 +71,13 @@ async function launchAdmitted(initial: LaunchContext, ports: LaunchPorts): Promi
   let start: ReturnType<TaskRecordStore["transition"]>
   try {
     start = ports.store.transition(initial.record.task_id, { type: "start", timestamp })
-  } catch {
+  } catch (cause) {
     // The runner has not been called. A sidecar commits the failure even while the Windows
     // target refuses both replacement and deletion.
-    const failed = ports.store.markSpawnFailed(initial.record)
+    const failed = recordSpawnFailure(ports.store, initial.record, cause)
     ports.release(initial)
-    const error = "spawn bookkeeping failed"
-    if (failed !== null) ports.settleWaiters(initial.record.task_id, failed)
+    const error = spawnFailureMessage(cause)
+    if (failed !== null && isTerminalRecord(failed)) ports.settleWaiters(initial.record.task_id, failed)
     return { ok: false, error }
   }
   if (!start.applied) {

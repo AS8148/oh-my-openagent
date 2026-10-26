@@ -55,13 +55,14 @@ describe("store status-edge observation", () => {
     const { store, edges, mutations, seed } = harness()
     const pending = seed("pending")
     // when
-    store.markSpawnFailed(pending)
+    store.markSpawnFailed(pending, "EPERM errno=-4048 file=held.json")
     store.markSpawnFailed(pending)
     // then
     expect(edges).toHaveLength(1)
     expect(edges[0]?.previousStatus).toBe("pending")
     expect(edges[0]?.record.status).toBe("error")
     expect(edges[0]?.record.residency_state).toBe("disposed")
+    expect(edges[0]?.record.error_message).toBe("EPERM errno=-4048 file=held.json")
     expect(mutations).toHaveLength(2)
   })
 
