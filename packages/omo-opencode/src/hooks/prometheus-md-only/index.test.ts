@@ -267,6 +267,22 @@ describe("prometheus-md-only", () => {
         }
       })
 
+      test("#when patch headers use CRLF line endings or leading whitespace #then they are still checked", async () => {
+        // given: opencode trims each header line, so these forms still write the named file
+        const hook = createPrometheusMdOnlyHook(createMockPluginInput())
+        const input = { tool: "apply_patch", sessionID: TEST_SESSION_ID, callID: "call-1" }
+
+        for (const patchText of [
+          ["*** Begin Patch", "*** Add File: src/evil.ts", "+x", "*** End Patch"].join("\r\n"),
+          patch("   *** Add File: src/evil.ts", "+x"),
+        ]) {
+          // when / then
+          await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+            "File operations restricted to .omo/*.md plan files only",
+          )
+        }
+      })
+
       test("#when apply_patch carries no readable patch body #then it is blocked", async () => {
         // given
         const hook = createPrometheusMdOnlyHook(createMockPluginInput())
