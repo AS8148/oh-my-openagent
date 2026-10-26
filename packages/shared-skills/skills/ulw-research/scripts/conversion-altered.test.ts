@@ -66,6 +66,15 @@ describe("the conversion probe result is consumed", () => {
 	})
 })
 
+test("#given a genuine 4.22 beside a glued 4.2<sup>2</sup> #when fact add --find locates the genuine one #then the refusal names the --replace recovery", async () => {
+	const dir = session()
+	await snapshot(dir, "<p>USD 4.2<sup>2</sup> billion in revenue.</p><p>Margin was 4.22 points.</p>")
+	const result = (await run(["fact", "add", "--source", "S1", "--find", "Margin was", "--label", "margin", "--session-dir", dir, "--json"])) as { exitCode: number; json: Json & { message?: string } }
+	expect(result.exitCode).toBe(1)
+	expect(result.json.error).toBe("conversion_altered_number")
+	expect(result.json.message).toContain("source snapshot --id S1 --text <verified.txt> --replace")
+})
+
 describe("the documented recovery: source snapshot --replace with a verified text", () => {
 	const s = (dir: string) => ["--session-dir", dir]
 
