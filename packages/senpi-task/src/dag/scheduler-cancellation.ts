@@ -1,7 +1,7 @@
 import { dagRunCancelledEvent } from "./events"
 import type { TaskRecord } from "../state"
 import { countNodes, errorMessage, failNode, isLiveTask, liveOwnedTasks, nodeById, transition, TERMINAL_NODE_STATES, type SchedulerContext } from "./scheduler-context"
-import { owner } from "./scheduler-start"
+import { dagFingerprint, ownerFingerprintInput } from "./fingerprint"
 import { disposePromotionWatch } from "./scheduler-task-attachment"
 import type { DagNodeId, DagRunId } from "./types"
 import type { DagRunRecordV1 } from "./manager"
@@ -59,24 +59,32 @@ type SupersededChild = { readonly nodeId: DagNodeId; readonly taskId: string; re
  * newest record or not: an older attempt's child can resume after the next attempt's task exists.
  */
 export function supersededChildren(context: SchedulerContext): readonly SupersededChild[] {
-  return context.journal.snapshot().nodes.flatMap((node) => {
+  const record = context.journal.snapshot()
+  return record.nodes.flatMap((node) => {
     const execAttempt = node.execAttempt ?? 0
     if (execAttempt === 0) return []
     const live = liveOwnedTasks(context, node.id)
     if (live.length === 0) return []
-    const current = owner(context, node.id).fingerprint
     return live
-      .filter((task) => createdForEarlierAttempt(task, execAttempt, current))
+      .filter((task) => createdForEarlierAttempt(task, execAttempt, record))
       .map((task) => ({ nodeId: node.id, taskId: task.task_id, execAttempt }))
   })
 }
 
-function createdForEarlierAttempt(task: TaskRecord, execAttempt: number, currentFingerprint: string): boolean {
+function createdForEarlierAttempt(task: TaskRecord, execAttempt: number, record: DagRunRecordV1): boolean {
   const created = task.owner?.execAttempt
-  // A record written before #11381 carries no execAttempt; its fingerprint (execAttempt-scoped)
-  // still says whether it is the current attempt's task, so only a different one reads as attempt 0.
-  if (created === undefined) return task.owner?.fingerprint !== currentFingerprint
-  return created < execAttempt
+  if (created !== undefined) return created < execAttempt
+  // An unrelated amend changes the run fingerprint without bumping this node's attempt. Legacy
+  // records need positive evidence of an older attempt, not a mismatch with today's definition.
+  const definitions = new Set([record.definitionFingerprint, ...(record.amendHistory ?? []).map((amend) => amend.previousFingerprint)])
+  for (const definitionFingerprint of definitions) {
+    for (let attempt = 0; attempt < execAttempt; attempt += 1) {
+      if (task.owner?.fingerprint === dagFingerprint(ownerFingerprintInput({
+        definitionFingerprint, nodeId: task.owner.nodeId, execAttempt: attempt,
+      }))) return true
+    }
+  }
+  return false
 }
 
 /**

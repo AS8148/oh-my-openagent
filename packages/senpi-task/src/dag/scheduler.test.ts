@@ -185,6 +185,11 @@ class FakeTaskManager implements TaskManager {
   complete(nodeId: string, status: TaskStatus = "completed"): void {
     const task = [...this.#tasks.values()].find((entry) => entry.record.owner?.nodeId === nodeId)
     if (task === undefined) throw new Error(`unknown fake task for ${nodeId}`)
+    this.#complete(task, status)
+  }
+
+  #complete(task: MutableTask, status: TaskStatus): void {
+    const nodeId = String(task.record.owner?.nodeId)
     if (task.record.status === "pending" || task.record.status === "running") this.#residents -= 1
     task.record = {
       ...task.record,
@@ -319,7 +324,7 @@ class FakeTaskManager implements TaskManager {
   }
 
   findOwnedTask(owner: Pick<DagTaskOwner, "kind" | "runId" | "nodeId">): TaskRecord | undefined {
-    return this.findOwnedTasks(owner)[0]
+    return this.findOwnedTasks(owner).at(-1)
   }
 
   findOwnedTasks(owner: Pick<DagTaskOwner, "kind" | "runId" | "nodeId">): readonly TaskRecord[] {
@@ -335,7 +340,7 @@ class FakeTaskManager implements TaskManager {
 
   // Seeds a task record the scheduler can resolve without ever having admitted the node, so send
   // and retry refusals can be exercised against a settled run.
-  seed(nodeId: string, status: TaskStatus, taskId = `task-${nodeId}`, fingerprint = `fingerprint-${nodeId}`): TaskRecord {
+  seed(nodeId: string, status: TaskStatus, taskId = `task-${nodeId}`, fingerprint = `fingerprint-${nodeId}`, execAttempt?: number): TaskRecord {
     const completion = deferred<TaskRecord>()
     const record: TaskRecord = {
       task_id: taskId,
@@ -347,7 +352,7 @@ class FakeTaskManager implements TaskManager {
       execution_mode: "in-process",
       model: "fake-model",
       notify_on_terminal: true,
-      owner: { kind: "dag", runId, nodeId: nodeId as DagNodeId, fingerprint },
+      owner: { kind: "dag", runId, nodeId: nodeId as DagNodeId, fingerprint, ...(execAttempt === undefined ? {} : { execAttempt }) },
       status,
       residency_state: "resident",
       created_at: "2026-08-14T00:00:00.000Z",
@@ -410,7 +415,7 @@ class FakeTaskManager implements TaskManager {
     const cancelError = this.#options.cancelErrors?.[nodeId]
     if (cancelError !== undefined) throw cancelError
     const previousStatus = task.record.status
-    this.complete(nodeId, "cancelled")
+    this.#complete(task, "cancelled")
     return { kind: "cancelled", task_id: taskId, previous_status: previousStatus }
   }
   list(): readonly [] { return [] }
@@ -533,6 +538,93 @@ describe("DAG scheduler owner conflict adoption", () => {
 })
 
 describe("#11381 children of finished or superseded node attempts", () => {
+  test("#given two stale live children at attempts zero and one #when the node is at attempt two #then both exact task records are cancelled", async () => {
+    const manager = new FakeTaskManager({ autoComplete: false })
+    manager.seed("A", "running", "task-A-0", "attempt-zero", 0)
+    manager.seed("A", "running", "task-A-1", "attempt-one", 1)
+    expect(manager.findOwnedTask({ kind: "dag", runId, nodeId: "A" as DagNodeId })?.task_id).toBe("task-A-1")
+    const { scheduler } = schedulerFixture(
+      definition([node("A")]), manager, undefined, undefined, undefined,
+      (record) => ({
+        ...record,
+        nodes: record.nodes.map((entry) => ({ ...entry, execAttempt: 2, state: "completed" as const })),
+      }),
+    )
+    expect((await scheduler.run()).status).toBe("completed")
+    expect(manager.cancellations).toEqual(["A", "A"])
+    expect(manager.get("task-A-0")?.status).toBe("cancelled")
+    expect(manager.get("task-A-1")?.status).toBe("cancelled")
+  })
+
+  test("#given a legacy attempt-one child from a previous definition #when the node is at attempt two after amend #then positive historical evidence cancels it", async () => {
+    const manager = new FakeTaskManager({ autoComplete: false })
+    manager.seed("A", "running", "task-A", dagFingerprint(ownerFingerprintInput({
+      definitionFingerprint: "previous-definition",
+      nodeId: "A" as DagNodeId,
+      execAttempt: 1,
+    })))
+    const { scheduler } = schedulerFixture(
+      definition([node("A")]), manager, undefined, undefined, undefined,
+      (record) => ({
+        ...record,
+        amendHistory: [{
+          at: "2026-08-14T00:00:01.000Z",
+          previousFingerprint: "previous-definition",
+          fingerprint: record.definitionFingerprint,
+          changedNodeIds: ["A" as DagNodeId],
+          addedNodeIds: [],
+          invalidatedNodeIds: ["A" as DagNodeId],
+        }],
+        nodes: record.nodes.map((entry) => ({ ...entry, execAttempt: 2, state: "completed" as const })),
+      }),
+    )
+    expect((await scheduler.run()).status).toBe("completed")
+    expect(manager.cancellations).toEqual(["A"])
+    expect(manager.get("task-A")?.status).toBe("cancelled")
+  })
+
+  test("#given a pre-11381 retry with a live legacy child #when an unrelated amend changes the run fingerprint #then the current child is not cancelled", async () => {
+    const manager = new FakeTaskManager({ autoComplete: false })
+    const { scheduler } = schedulerFixture(
+      definition([node("A"), node("B")]), manager, undefined, undefined, undefined,
+      (record) => {
+        manager.seed("A", "running", "task-A", dagFingerprint(ownerFingerprintInput({
+          definitionFingerprint: record.definitionFingerprint,
+          nodeId: "A" as DagNodeId,
+          execAttempt: 1,
+        })))
+        return {
+          ...record,
+          definitionFingerprint: "amended-definition",
+          amendHistory: [{
+            at: "2026-08-14T00:00:01.000Z",
+            previousFingerprint: record.definitionFingerprint,
+            fingerprint: "amended-definition",
+            changedNodeIds: ["B" as DagNodeId],
+            addedNodeIds: [],
+            invalidatedNodeIds: ["B" as DagNodeId],
+          }],
+          nodes: record.nodes.map((entry) => entry.id === "A"
+            ? { ...entry, execAttempt: 1 }
+            : { ...entry, state: "completed" as const }),
+        }
+      },
+    )
+    const attached = new Promise<void>((resolve) => {
+      const unsubscribe = scheduler.subscribe((event) => {
+        if (event.type !== "dag.node.task-attached" || event.nodeId !== "A") return
+        unsubscribe()
+        resolve()
+      })
+    })
+    const running = scheduler.run()
+    await within(attached)
+    expect(manager.cancellations).toEqual([])
+    expect(manager.get("task-A")?.status).toBe("running")
+    manager.complete("A")
+    expect((await running).status).toBe("completed")
+  })
+
   test("#given a completed node whose child resumed on its own #when the run is cancelled #then that child is cancelled too", async () => {
     // given
     const manager = new FakeTaskManager({ autoComplete: false })
@@ -559,7 +651,10 @@ describe("#11381 children of finished or superseded node attempts", () => {
   test("#given a pending node whose live child belongs to an older attempt #when that child cannot be stopped #then the node fails stale_attempt_alive and the child is never adopted", async () => {
     // given
     const manager = new FakeTaskManager({ autoComplete: false, rejectCancelNodeIds: ["A"] })
-    const stale = manager.seed("A", "running")
+    const stale = manager.seed("A", "running", "task-A", dagFingerprint(ownerFingerprintInput({
+      definitionFingerprint: "definition-fingerprint",
+      nodeId: "A" as DagNodeId,
+    })))
     const { scheduler, events } = schedulerFixture(
       definition([node("A"), node("B", ["A"])]),
       manager,
