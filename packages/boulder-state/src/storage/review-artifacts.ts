@@ -1,6 +1,16 @@
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs"
-import { isAbsolute, join, resolve } from "node:path"
+import {
+  closeSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 export type MomusReviewVerdict = "okay" | "reject"
 
@@ -15,9 +25,10 @@ export interface MomusReviewArtifactInput {
 }
 
 const REVIEW_FILE_PATTERN = /^(\d+)-/
+const MAX_SEQUENCE_ATTEMPTS = 1000
 
 function resolvePlanFilePath(directory: string, planPath: string): string {
-  return isAbsolute(planPath) ? resolve(planPath) : resolve(directory, planPath)
+  return resolve(directory, planPath)
 }
 
 export function getPlanReviewsDir(directory: string, planPath: string): string {
@@ -60,6 +71,70 @@ export function formatMomusReviewArtifact(input: {
   return lines.join("\n")
 }
 
+function isInsideDirectory(root: string, candidate: string): boolean {
+  const relativePath = relative(root, candidate)
+  return (
+    relativePath === "" ||
+    (relativePath !== ".." && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath))
+  )
+}
+
+function realpathWithMissingTail(path: string): string {
+  let current = path
+  const missingTail: string[] = []
+  for (;;) {
+    try {
+      const real = realpathSync(current)
+      return missingTail.length === 0 ? real : join(real, ...missingTail)
+    } catch {
+      const parent = dirname(current)
+      if (parent === current) {
+        return resolve(path)
+      }
+      missingTail.unshift(basename(current))
+      current = parent
+    }
+  }
+}
+
+interface ContainedPlan {
+  plansRoot: string
+  reviewsDir: string
+}
+
+function resolveContainedPlan(directory: string, planPath: string): ContainedPlan | null {
+  const plansRoot = resolve(directory, ".omo", "plans")
+  const planFilePath = resolvePlanFilePath(directory, planPath)
+  if (!isInsideDirectory(plansRoot, planFilePath)) {
+    return null
+  }
+  const realPlansRoot = realpathWithMissingTail(plansRoot)
+  const realPlanFilePath = realpathWithMissingTail(planFilePath)
+  if (!isInsideDirectory(realPlansRoot, realPlanFilePath)) {
+    return null
+  }
+  return { plansRoot, reviewsDir: getPlanReviewsDir(directory, planPath) }
+}
+
+function findArtifactBySessionId(reviewsDir: string, sessionId: string): string | null {
+  const sessionLine = `- Reviewer session: ${sessionId}`
+  for (const entry of readdirSync(reviewsDir)) {
+    if (!REVIEW_FILE_PATTERN.test(entry)) {
+      continue
+    }
+    let content: string
+    try {
+      content = readFileSync(join(reviewsDir, entry), "utf-8")
+    } catch {
+      continue
+    }
+    if (content.includes(sessionLine)) {
+      return join(reviewsDir, entry)
+    }
+  }
+  return null
+}
+
 function nextReviewSequence(reviewsDir: string): number {
   if (!existsSync(reviewsDir)) {
     return 1
@@ -77,22 +152,66 @@ function nextReviewSequence(reviewsDir: string): number {
   return max + 1
 }
 
+function hasErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: unknown }).code === code
+  )
+}
+
+function artifactFileFlags(): number {
+  const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0
+  return constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow
+}
+
+function createArtifactFile(reviewsDir: string, planPath: string, artifact: MomusReviewArtifactInput): string {
+  let sequence = nextReviewSequence(reviewsDir)
+  for (let attempt = 0; attempt < MAX_SEQUENCE_ATTEMPTS; attempt += 1) {
+    const fileName = `${String(sequence).padStart(3, "0")}-${artifact.verdict}.md`
+    const filePath = join(reviewsDir, fileName)
+    let fd: number
+    try {
+      fd = openSync(filePath, artifactFileFlags())
+    } catch (error) {
+      if (hasErrorCode(error, "EEXIST") || hasErrorCode(error, "ELOOP")) {
+        sequence += 1
+        continue
+      }
+      throw error
+    }
+    try {
+      writeFileSync(fd, formatMomusReviewArtifact({ sequence, planPath, artifact }), "utf-8")
+      return filePath
+    } finally {
+      closeSync(fd)
+    }
+  }
+  throw new Error(`Could not allocate a review artifact sequence in ${reviewsDir}`)
+}
+
 export function writeMomusReviewArtifact(
   directory: string,
   planPath: string,
   artifact: MomusReviewArtifactInput,
 ): string | null {
-  try {
-    const reviewsDir = getPlanReviewsDir(directory, planPath)
-    if (!existsSync(reviewsDir)) {
-      mkdirSync(reviewsDir, { recursive: true })
-    }
-    const sequence = nextReviewSequence(reviewsDir)
-    const fileName = `${String(sequence).padStart(3, "0")}-${artifact.verdict}.md`
-    const filePath = join(reviewsDir, fileName)
-    writeFileSync(filePath, formatMomusReviewArtifact({ sequence, planPath, artifact }), "utf-8")
-    return filePath
-  } catch {
+  const contained = resolveContainedPlan(directory, planPath)
+  if (!contained) {
     return null
   }
+  const { plansRoot, reviewsDir } = contained
+  if (!existsSync(reviewsDir)) {
+    mkdirSync(reviewsDir, { recursive: true })
+  }
+  if (!isInsideDirectory(realpathSync(plansRoot), realpathSync(reviewsDir))) {
+    return null
+  }
+  if (artifact.sessionId) {
+    const existing = findArtifactBySessionId(reviewsDir, artifact.sessionId)
+    if (existing) {
+      return existing
+    }
+  }
+  return createArtifactFile(reviewsDir, planPath, artifact)
 }
