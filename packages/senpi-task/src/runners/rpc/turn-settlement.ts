@@ -1,5 +1,6 @@
 import type { AgentSessionEvent } from "@code-yeongyu/senpi"
 
+import { usageLimitScope } from "../../manager/credential-failure"
 import type { RunnerOutcome } from "../in-process/child-handle"
 import { agentEndOutcome } from "./turn-outcome"
 
@@ -89,10 +90,20 @@ export function sessionIsIdle(state: {
   )
 }
 
+// omo#9711: a usage limit stays spent until a reset hours away, so neither a wake source nor an announced engine
+// retry can make progress on it. A held usage-limit error settles at its first confirmation, one settleConfirmMs
+// (the handle's heartbeat interval, 10 s by default) after the end, whatever wake sources are live: long enough for
+// an engine fallback hop or a continuation to emit its agent_start, short against the reset.
+const isUsageLimit = (outcome: RunnerOutcome): boolean =>
+  outcome.status === "error" && usageLimitScope(outcome.failure.message) !== undefined
+
 export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement {
   let held: RunnerOutcome | undefined
   let confirmation: SettlementTimerHandle | undefined
   let unreadableProbes = 0
+  // A usage-limit end was already seen since the last non-limit end: a later terminal usage-limit end means a wake,
+  // a steer or the engine's own retry re-hit the spent limit, so it settles at once instead of waiting again.
+  let limitSeen = false
   const scheduleConfirmation = input.scheduleConfirmation ?? defaultConfirmationScheduler
   const maxUnreadableProbes = input.maxUnreadableProbes ?? 3
   const endOutcome = (event: AgentEndEvent): RunnerOutcome =>
@@ -102,18 +113,32 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
   // preferred edge, but a session that never emits it (and never starts a continuation) would
   // otherwise leave waitForOutcome pending forever. The confirmation re-checks the session's own
   // state instead of trusting the wait: only a truly idle session with no session-scoped wake
-  // settles the held error.
+  // settles the held error. A live wake source defers it but never drops it: the confirmation
+  // re-arms until the source ends. A usage-limit error settles at once (see isUsageLimit).
   const confirmHeld = (): void => {
     confirmation = undefined
     const outcome = held
     if (outcome === undefined || outcome.status !== "error") return
-    if (input.wakeSourcesLive?.() === true) return
+    if (isUsageLimit(outcome)) {
+      if (input.disposed?.() === true) return
+      held = undefined
+      input.settle(outcome)
+      return
+    }
+    if (input.wakeSourcesLive?.() === true) {
+      rearm()
+      return
+    }
     const probe = input.probe
     if (probe === undefined) return
     void Promise.resolve()
       .then(probe)
       .then((state) => {
-        if (held !== outcome || input.disposed?.() === true || input.wakeSourcesLive?.() === true) return
+        if (held !== outcome || input.disposed?.() === true) return
+        if (input.wakeSourcesLive?.() === true) {
+          rearm()
+          return
+        }
         if (state === undefined) {
           unreadableProbes += 1
           if (unreadableProbes >= maxUnreadableProbes) {
@@ -136,7 +161,11 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
         // A rejected probe proves nothing about idleness; the error text is already known. But a
         // rejection caused by teardown (detach raced the flight), or one landing after a wake
         // source came live, must not turn a cancelled or still-owned turn into a failure.
-        if (held !== outcome || input.disposed?.() === true || input.wakeSourcesLive?.() === true) return
+        if (held !== outcome || input.disposed?.() === true) return
+        if (input.wakeSourcesLive?.() === true) {
+          rearm()
+          return
+        }
         held = undefined
         input.settle(outcome)
       })
@@ -163,8 +192,17 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
           held = undefined
           return
         case "agent_end": {
-          if (event.willRetry !== false) return
           const outcome = endOutcome(event)
+          const spent = isUsageLimit(outcome)
+          if (event.willRetry !== false) {
+            // On a spent account the engine can announce a retry it never starts (omo#9711): no agent_start and no
+            // terminal end follow, so the announced end is held like a terminal one and the bound settles it.
+            if (!spent) return
+            held = outcome
+            limitSeen = true
+            rearm()
+            return
+          }
           // A replaced session runs nothing more for this child: its interrupt is final at once.
           if (outcome.status === "cancelled" || outcome.status === "interrupted") {
             clearConfirmation()
@@ -172,6 +210,13 @@ export function createTurnSettlement(input: TurnSettlementInput): TurnSettlement
             input.settle(outcome)
             return
           }
+          if (spent && limitSeen) {
+            clearConfirmation()
+            held = undefined
+            input.settle(outcome)
+            return
+          }
+          limitSeen = spent
           held = outcome
           unreadableProbes = 0
           if (outcome.status === "error") rearm()

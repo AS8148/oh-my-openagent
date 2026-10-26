@@ -17,18 +17,25 @@ const ACCOUNT_SCOPED_403 = /account|credential|token|api[ _-]?key|organization|s
 const MODEL_SCOPED = /\bmodels?\b/i
 
 // A spent usage, quota or billing limit. Scoped to one model when the text names a model, a model family
-// or premium models (a Fable-only weekly cap, Copilot premium requests); otherwise the whole account is
-// spent, so its other rungs fail the same way and go last.
+// or premium models (a Fable-only weekly cap, Copilot premium requests); account-wide only when the text
+// proves it (money, the provider naming the account or organization, a session window every model shares);
+// any other limit is ambiguous: a weekly limit that names no family may still bind one family (#11383).
 const USAGE_LIMIT =
   /quota|usage[_ ]limit|\bhit\s+your\b[^.]*\blimit\b|\b(?:session|weekly|monthly|daily|hourly|\d+[- ]hour)\s+limit\b|limit\s+exhausted|insufficient[_ ](?:quota|credits?|balance)|credit[_ ]balance|credits?[_ ]required|billing|blocking_limit/i
 // A `/model` command hint (senpi's own limit text says "Switch to another provider with /model") names no model.
 const MODEL_SCOPED_LIMIT = /(?<!\/)\bmodels?\b|\bpremium\b|\b(?:opus|sonnet|haiku|fable|mythos)\b/i
+const ACCOUNT_SCOPED_LIMIT =
+  /insufficient[_ ](?:quota|credits?|balance)|credit[_ ]balance|credits?[_ ]required|billing|\bsession\s+limit\b|\baccount\b|\borgani[sz]ation\b/i
+// senpi writes "The <provider> account usage limit has been reached" for EVERY limit whose body names no model, so
+// that wording proves nothing about scope.
+const ENGINE_ACCOUNT_REWRITE = /\baccount usage limit has been reached\b/i
 
-export type UsageLimitScope = "model" | "account"
+export type UsageLimitScope = "model" | "account" | "ambiguous"
 
 export function usageLimitScope(message: string): UsageLimitScope | undefined {
   if (!USAGE_LIMIT.test(message)) return undefined
-  return MODEL_SCOPED_LIMIT.test(message) ? "model" : "account"
+  if (MODEL_SCOPED_LIMIT.test(message)) return "model"
+  return ACCOUNT_SCOPED_LIMIT.test(message.replace(ENGINE_ACCOUNT_REWRITE, "")) ? "account" : "ambiguous"
 }
 
 export function isCredentialFailure(message: string, modelId?: string): boolean {
@@ -85,10 +92,18 @@ export function chainAfterHop(candidates: RuntimeFallbackCandidates): readonly R
   return [...candidates.remaining.slice(1), ...(candidates.retained ?? [])]
 }
 
+/** The rung before the failed one ran on `provider` too: the walk already hopped within that provider. */
+function previousRungOnProvider(record: TaskRecord, provider: string): boolean {
+  const attempts = record.fallback_attempts ?? []
+  return attempts.length > 1 && attempts[attempts.length - 2]?.provider === provider
+}
+
 /**
- * The fallback list to walk after a failed turn: a dead credential drops the failed provider's rungs, an
- * account-wide usage limit moves them last. The parent session's model (#10750) is only a remedy for a
- * spent or signed-out rung, so any other failure walks the category rungs alone.
+ * The fallback list to walk after a failed turn: a dead credential or an account-wide usage limit drops the
+ * failed provider's rungs (#9711). An ambiguous limit walks in list order, so the next rung on the same provider
+ * is tried once; when that rung hits a limit too, the provider counts as spent and its other rungs drop (#11383).
+ * The parent session's model (#10750) is only a remedy for a spent or signed-out rung, so any other failure walks
+ * the category rungs alone.
  */
 export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: string): RuntimeFallbackCandidates {
   const unusable = usageLimitScope(failureMessage) !== undefined || isCredentialFailure(failureMessage, modelIdOf(record))
@@ -107,13 +122,10 @@ export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: st
     return { remaining: fallbacks, skipped: [], ...(retained.length === 0 ? {} : { retained }) }
   }
   if (limit === "model" || provider === undefined) return { remaining: fallbacks, skipped: [], limit }
-  const spentParent = fallbacks.filter((model) => model.provider === provider && isParentModelRung(record, model))
+  if (limit === "ambiguous" && !previousRungOnProvider(record, provider)) return { remaining: fallbacks, skipped: [], limit }
   return {
-    remaining: [
-      ...fallbacks.filter((model) => model.provider !== provider),
-      ...fallbacks.filter((model) => model.provider === provider && !spentParent.includes(model)),
-    ],
-    skipped: spentParent,
-    limit,
+    remaining: fallbacks.filter((model) => model.provider !== provider),
+    skipped: fallbacks.filter((model) => model.provider === provider),
+    limit: "account",
   }
 }
