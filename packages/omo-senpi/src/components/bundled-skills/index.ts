@@ -20,7 +20,7 @@ export interface BundledSkillsComponentOptions {
 
 export interface BundledSkillsDirOptions {
   readonly logger?: BundledSkillsOverrideLogger
-  /** Overrides the packaged skills root that a missing or invalid override falls back to. */
+  /** Explicit skills root; it wins over OMO_BUNDLED_SKILLS_DIR (an invalid override is still reported). */
   readonly packagedDir?: string
 }
 
@@ -74,8 +74,8 @@ export function createBundledSkillsComponent(options: BundledSkillsComponentOpti
 }
 
 /**
- * A valid OMO_BUNDLED_SKILLS_DIR wins; otherwise the packaged plugin skills, then the source-tree
- * copy that keeps dev runs working. From the bundled extension at plugin/extensions/omo.js the
+ * An explicit `packagedDir` wins; then a valid OMO_BUNDLED_SKILLS_DIR; otherwise the packaged
+ * plugin skills, then the source-tree copy that keeps dev runs working. From the bundled extension at plugin/extensions/omo.js the
  * packaged URL resolves to plugin/skills; from this source file it resolves to the same synced
  * directory. An invalid override is reported once and falls back to these packaged roots.
  */
@@ -85,8 +85,8 @@ export function resolveBundledSkillsDir(
   options: BundledSkillsDirOptions = {},
 ): string | undefined {
   const override = resolveBundledSkillsOverrideOrFallback(env, options.logger)
-  if (override !== undefined) return override
   if (options.packagedDir !== undefined) return options.packagedDir
+  if (override !== undefined) return override
   const candidates = [
     fileURLToPath(new URL("../skills", importerUrl)),
     fileURLToPath(new URL("../../../plugin/skills", importerUrl)),
