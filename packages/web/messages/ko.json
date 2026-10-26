@@ -38,6 +38,7 @@
       "getStarted": "시작하기",
       "readManifesto": "매니페스토 읽기",
       "downloadDesktop": "데스크톱 앱 다운로드",
+      "downloadDesktopBeta": "데스크톱 베타 다운로드",
       "installLabel": "명령 하나, 도구 하나"
     },
     "command": {
