@@ -459,6 +459,7 @@
     "packages/omo-codex/src/install/codex-cache-local-dependencies.ts",
     "packages/omo-codex/src/install/codex-cache-mcp-manifest.ts",
     "packages/omo-codex/src/install/codex-cache-paths.ts",
+    "packages/omo-codex/src/install/codex-cache-payload.ts",
     "packages/omo-codex/src/install/codex-cache-prune.ts",
     "packages/omo-codex/src/install/codex-cache-runtime-wrapper.ts",
     "packages/omo-codex/src/install/codex-cache.ts",
