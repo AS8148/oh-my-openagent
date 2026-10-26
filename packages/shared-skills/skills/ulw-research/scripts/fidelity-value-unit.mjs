@@ -1,11 +1,13 @@
 // Value-mode units live outside the fact element. The documented form is the value then its unit,
 // with or without a space, a Korean particle allowed after it ({{F1:span:value}} m, {{F3:rate:value}}%,
 // {{F21:rev:value}}\uC5B5 \uC6D0\uC73C\uB85C); a currency sign right before the value; the :unit element
-// right after it; or the same visual column's table header. Unknown words are advisory, never guessed units.
+// right after it; or the same visual column's table header. Unknown words are advisory, never guessed units,
+// unless fill recorded a bound unit for the value: then losing it is a unit edit.
 import { cellsOf, rowsOf } from "./fact-locate.mjs"
 import { unitKey } from "./fidelity-binding.mjs"
-import { proseText } from "./html-lite.mjs"
+import { parseHtml, proseText } from "./html-lite.mjs"
 import { NUMBER_SOURCE } from "./number-grammar.mjs"
+import { QUALIFIERS_AFTER } from "./numerals.mjs"
 import { dimensionOf, normalizeUnit, spacedAliasUnit } from "./units.mjs"
 
 // Korean particles a unit may carry (eun/neun, i/ga, eul/reul, ui, e, eseo, ege, euro/ro, wa/gwa, do, man,
@@ -15,16 +17,37 @@ const PARTICLES = ["\uC774\uC5C8\uB2E4", "\uC600\uB2E4", "\uC774\uB2E4", "\uC774
 const NUMBER = new RegExp(NUMBER_SOURCE, "u")
 const SIGNS = ["US$", "$", "\u20AC", "\u20A9", "\u00A3", "\u00A5"]
 
-const withoutParticle = (word) => {
-	const particle = PARTICLES.find((p) => word.endsWith(p) && word.length > p.length)
-	return particle ? word.slice(0, -particle.length) : word
+const withoutSuffix = (word, suffixes) => {
+	const suffix = suffixes.find((cur) => word.endsWith(cur) && word.length > cur.length)
+	return suffix ? word.slice(0, -suffix.length) : word
 }
-const unitOf = (word) => normalizeUnit(word) ?? normalizeUnit(withoutParticle(word))
+const withoutParticle = (word) => withoutSuffix(word, PARTICLES)
+/** Words written after a value that bound or soften it (the numeral qualifiers, jeongdo, garyang, jjeum, gwaban). */
+const QUALIFIER_WORDS = [...QUALIFIERS_AFTER, "\uC815\uB3C4", "\uAC00\uB7C9", "\uCBE4", "\uACFC\uBC18"]
+/** A unit, with a particle and/or a qualifier glued on ("m\uC774\uC0C1\uC758"); a whole qualifier word is never a unit (chogwa is not cho + gwa). */
+const stemsOf = (word) => {
+	const bare = withoutParticle(word)
+	return QUALIFIER_WORDS.includes(word) ? [] : [word, bare, withoutSuffix(word, QUALIFIER_WORDS), withoutSuffix(bare, QUALIFIER_WORDS)].filter((stem) => !QUALIFIER_WORDS.includes(stem))
+}
+const stemOf = (word) => stemsOf(word).find((stem) => normalizeUnit(stem)) ?? null
+const unitOf = (word) => normalizeUnit(stemOf(word))
+/** Unit aliases that are also ordinary English words ("won awards", "second place"): read only as the row's own unit. */
+const ORDINARY_WORDS = new Set(["won", "second", "pound", "pounds"])
+/** An ordinary word, or an all-caps acronym that only matches a unit case-insensitively ("SEC filings", "WON"). */
+const ordinary = (word) => ORDINARY_WORDS.has(word.toLowerCase()) || (/^[A-Z]{3,}$/.test(word) && normalizeUnit(word) !== word)
+/** Inline elements the text after a value is read through; any other element, or another fact, ends it. */
+const INLINE = new Set(["a", "abbr", "b", "bdi", "cite", "code", "data", "dfn", "em", "i", "ins", "kbd", "mark", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var"])
+/** "3 bun-ui 1" is the fraction one third, not 3 minutes. */
+const FRACTION = /^\uBD84\uC758\s?\d/u
 const scaleOf = (unit) => /-(e\d+)$/.exec(unit ?? "")?.[1] ?? null
 
 /** The unit written right after the value: the row's own unit (even across words), a spaced alias, or the next word. */
 function unitAfter(text, row) {
-	const clause = text.replace(/^[\s\u00A0]+/u, "").split(/[,.;:!?()[\]"]/u)[0]
+	const lead = text.replace(/^[\s\u00A0]+/u, "")
+	if (FRACTION.test(lead)) return null
+	const bracketed = /^\(([^()]{1,40})\)/u.exec(lead)
+	if (bracketed) return unitAfter(bracketed[1], row)
+	const clause = lead.split(/[,.;:!?()[\]"]/u)[0]
 	const words = clause.split(/[\s\u00A0]+/u).filter(Boolean).slice(0, 3)
 	if (words.length === 0) return null
 	for (let n = words.length; n > 0; n--) {
@@ -32,12 +55,11 @@ function unitAfter(text, row) {
 		if (unit && unitKey(unit) === unitKey(row.unit)) return { token: unit }
 	}
 	for (let n = words.length; n > 1; n--) {
-		const spaced = [...words.slice(0, n - 1), withoutParticle(words[n - 1])].join(" ")
-		const unit = spacedAliasUnit(spaced)
+		const unit = stemsOf(words[n - 1]).map((last) => spacedAliasUnit([...words.slice(0, n - 1), last].join(" "))).find(Boolean)
 		if (unit) return { token: unit }
 	}
 	const first = unitOf(words[0])
-	if (!first) return null
+	if (!first || ordinary(stemOf(words[0]))) return null
 	const currency = words[1] ? unitOf(words[1]) : null
 	if (dimensionOf(first) === "scale" && dimensionOf(currency)?.startsWith("currency:")) return { token: `${currency} ${words[0]}`, dimension: dimensionOf(currency), scale: first }
 	return { token: first }
@@ -57,13 +79,20 @@ function agrees(found, row) {
 	return unitKey(found.token) === unitKey(row.unit)
 }
 
+const closest = (node, test) => {
+	for (let cur = node.parent; cur; cur = cur.parent) if (test(cur)) return cur
+	return null
+}
+/** All text under a node, code included: a unit may be set in code ("320 <code>ms</code>"). */
+const plainText = (node) => (node.tag === "#text" ? node.text : node.children.map(plainText).join(""))
+
 /** A column-header row: a thead row or a row made only of th cells. A th first in a body row is a row header. */
 const isHeaderRow = (row) => row.parent?.tag === "thead" || (cellsOf(row).length > 0 && cellsOf(row).every((cur) => cur.tag === "th"))
 
 /** The header of the cell's visual column; nothing binds in a table with a rowspan or without a header row. */
-function headerUnit(ctx, node) {
-	const cell = ctx.util.closest(node, (cur) => cur.tag === "td")
-	const table = cell && ctx.util.closest(cell, (cur) => cur.tag === "table")
+function headerUnit(node) {
+	const cell = closest(node, (cur) => cur.tag === "td")
+	const table = cell && closest(cell, (cur) => cur.tag === "table")
 	if (!table || cell.attrs.colspan || cell.attrs.rowspan) return null
 	const rows = rowsOf(table)
 	if (rows.some((row) => row.children.some((cur) => cur.attrs?.rowspan && cur.attrs.rowspan !== "1"))) return null
@@ -83,19 +112,65 @@ function unitElementAfter(siblings, at, row) {
 	return next?.attrs?.["data-fact"] === row.fact_id && unitKey(proseText(next)) === unitKey(row.unit)
 }
 
-/** A mode marker written by fill distinguishes value-only output from full/unit modes. */
-export function valueUnitProblem(ctx, node, row) {
-	if (node.attrs["data-fact-mode"] !== "value" || !unitKey(row.unit)) return null
+/** The text after the element within its block, read through inline wrappers and line breaks ("320 <b>m</b>", "<b>320</b> m", "320<br>m"). */
+function textAfter(node) {
+	let text = ""
+	for (let cur = node; text.length < 80; ) {
+		const next = cur.parent?.children[cur.parent.children.indexOf(cur) + 1]
+		if (next === undefined) {
+			if (!INLINE.has(cur.parent?.tag) || cur.parent.attrs["data-fact"] !== undefined) break
+			cur = cur.parent
+		} else if (next.tag === "#text" || next.tag === "br" || (INLINE.has(next.tag) && next.attrs["data-fact"] === undefined)) {
+			text += next.tag === "br" ? "\n" : plainText(next)
+			cur = next
+		} else break
+	}
+	return text
+}
+
+/** Every unit bound to a value-mode element: a currency sign before it, the unit after it (or its :unit element), its column header. */
+function boundUnits(node, row) {
 	const siblings = node.parent.children
 	const at = siblings.indexOf(node)
+	const prev = siblings[at - 1]
 	const shown = proseText(node)
-	const [prev, next] = [siblings[at - 1], siblings[at + 1]]
 	const number = NUMBER.exec(shown)
 	const sign = signBefore(`${prev?.tag === "#text" ? prev.text : ""}${number ? shown.slice(0, number.index) : ""}`)
 	// The element's own text is the row's render: a scale word in it ("3,234\uC5B5", "12 million") is part of the value.
-	const following = next?.tag === "#text" ? next.text : ""
-	const after = unitAfter(following, row) ?? (unitElementAfter(siblings, at, row) ? { token: row.unit } : null)
-	const found = [["preceded by", sign && { ...sign, sign: true }], ["followed by", after], ["headed with", headerUnit(ctx, node)]].filter(([, unit]) => unit)
+	const after = unitAfter(textAfter(node), row) ?? (unitElementAfter(siblings, at, row) ? { token: row.unit } : null)
+	return [["preceded by", sign && { ...sign, sign: true }], ["followed by", after], ["headed with", headerUnit(node)]].filter(([, unit]) => unit)
+}
+
+/** Each data-fact element's own fill-map entry: fill writes one element per entry, so ids pair up in document order. */
+export function fillEntriesByNode(nodes, entries) {
+	const queues = new Map()
+	for (const entry of entries ?? []) if (entry.replaced === undefined && entry.translates === undefined) queues.set(entry.fact_id, [...(queues.get(entry.fact_id) ?? []), entry])
+	return new Map(nodes.filter((node) => node.attrs["data-replaced"] === undefined).flatMap((node) => {
+		const entry = queues.get(node.attrs["data-fact"])?.shift()
+		return entry ? [[node, entry]] : []
+	}))
+}
+
+/** Fill's record of the unit bound to each value-mode pointer (unit_bound), read off the filled edition (HTML, or the Markdown projection). */
+export function withBoundUnits(html, entries, rows) {
+	const all = (node) => [node, ...node.children.flatMap(all)]
+	const filled = fillEntriesByNode(all(parseHtml(html)).filter((node) => node.attrs?.["data-fact"] !== undefined), entries)
+	const units = new Map([...filled].flatMap(([node, entry]) => {
+		const row = rows.get(entry.fact_id)
+		const unit = entry.mode === "value" && row && unitKey(row.unit) ? boundUnits(node, row)[0]?.[1].token : null
+		return unit ? [[entry, unit]] : []
+	}))
+	return entries.map((entry) => (units.has(entry) ? { ...entry, unit_bound: units.get(entry) } : entry))
+}
+
+/**
+ * Value mode comes from fill: the element's data-fact-mode, or its fill-map entry when the edition has one
+ * (so deleting the attribute changes nothing). `entry.unit_bound` is the unit fill saw bound to the value.
+ */
+export function valueUnitProblem(node, row, entry = null) {
+	if ((entry?.mode !== "value" && node.attrs["data-fact-mode"] !== "value") || !unitKey(row.unit)) return null
+	const found = boundUnits(node, row)
+	if (found.length === 0 && entry?.unit_bound) return ["unit_mismatch", `value-mode ${row.fact_id} had the unit "${entry.unit_bound}" when filled, but no recognizable unit is bound to it now; its row is in "${row.unit}"`]
 	if (found.length === 0) return ["unit_unbound", `${row.fact_id} has unit "${row.unit}" but no recognizable unit right after its value, before it as a currency sign, or in its column header`]
 	const wrong = found.find(([, unit]) => !agrees(unit, row))
 	return wrong ? ["unit_mismatch", `value-mode ${row.fact_id} is ${wrong[0]} "${wrong[1].token}", but its row is in "${row.unit}"`] : null
