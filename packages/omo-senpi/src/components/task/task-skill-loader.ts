@@ -7,10 +7,7 @@ import { resolveOmoGitMasterSettings, type OmoGitMasterSettings } from "@oh-my-o
 import { buildSkillPrepend, createFsSkillLoader, type SkillLoader } from "@oh-my-opencode/senpi-task"
 
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
-import {
-  type BundledSkillsOverrideLogger,
-  resolveBundledSkillsOverrideOrFallback,
-} from "../bundled-skills/resolve-bundled-skills-override"
+import { type BundledSkillsOverrideLogger, resolveBundledSkillsOverride } from "../bundled-skills"
 import { loadSenpiOmoConfig } from "../config-resolution"
 import { carriesAttributionDirective, resolveGitMasterSkillAdditions } from "../git-master/skill-content"
 
@@ -37,7 +34,7 @@ export function packagedSkillDirs(
   logger?: BundledSkillsOverrideLogger,
 ): readonly string[] {
   const moduleDir = dirname(fileURLToPath(moduleUrl))
-  const override = resolveBundledSkillsOverrideOrFallback(env, logger)
+  const override = resolveBundledSkillsOverride(env, logger)
   const bundled = override === undefined ? [
     resolve(moduleDir, "../../../plugin/skills"),
     resolve(moduleDir, "../skills"),

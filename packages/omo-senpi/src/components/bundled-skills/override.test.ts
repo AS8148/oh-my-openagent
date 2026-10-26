@@ -92,13 +92,11 @@ describe("bundled skill directory override", () => {
   }
 
   test("#given explicit skills dir and valid shared override #when resolving #then the explicit dir wins", async () => {
-    const { url } = layout("packaged")
     const shared = join(root, "shared")
     const explicit = join(root, "explicit")
     skill(shared, "shared-skill")
     const file = skill(explicit, "explicit-skill")
     const env = { HOME: root, [variable]: shared }
-    expect(resolveBundledSkillsDir(url, env, { packagedDir: explicit })).toBe(explicit)
     const pi = new FakeExtensionAPI()
     createBundledSkillsComponent({ env, skillsDir: explicit }).register(pi, context)
     expect(await pi.dispatch("resources_discover", { cwd: root })).toEqual([{ skillPaths: [file] }])

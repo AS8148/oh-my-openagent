@@ -38,12 +38,7 @@ export function createSkillCommandsComponent(options: SkillCommandsComponentOpti
   return {
     name: SKILL_COMMANDS_COMPONENT_NAME,
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
-      const bundledSkillNames = readBundledSkillNames(
-        resolveBundledSkillsDir(undefined, options.env ?? process.env, {
-          logger: ctx.logger,
-          ...(options.skillsDir === undefined ? {} : { packagedDir: options.skillsDir }),
-        }),
-      )
+      const bundledSkillNames = readBundledSkillNames(options.skillsDir ?? resolveBundledSkillsDir(undefined, options.env, ctx))
       if (bundledSkillNames.size === 0) {
         ctx.logger.debug?.("no bundled skills found; bare skill commands disabled", { component: SKILL_COMMANDS_COMPONENT_NAME })
         return

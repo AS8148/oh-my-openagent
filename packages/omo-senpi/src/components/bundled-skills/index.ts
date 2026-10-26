@@ -1,14 +1,9 @@
-import { existsSync, readdirSync } from "node:fs"
-import { join } from "node:path"
+import { accessSync, existsSync, readdirSync } from "node:fs"
+import { isAbsolute, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { readDisabledSkills, readDiscoverCwd } from "./contributed-skill"
-import {
-  type BundledSkillsOverrideLogger,
-  notifyInvalidBundledSkillsOverride,
-  resolveBundledSkillsOverrideOrFallback,
-} from "./resolve-bundled-skills-override"
 
 export const BUNDLED_SKILLS_COMPONENT_NAME = "bundled-skills"
 
@@ -18,11 +13,15 @@ export interface BundledSkillsComponentOptions {
   readonly skillsDir?: string
 }
 
+export interface BundledSkillsOverrideLogger {
+  error(message: string): void
+}
+
 export interface BundledSkillsDirOptions {
   readonly logger?: BundledSkillsOverrideLogger
-  /** Explicit skills root; it wins over OMO_BUNDLED_SKILLS_DIR (an invalid override is still reported). */
-  readonly packagedDir?: string
 }
+
+type NoticeUi = { readonly notify?: (message: string, type: "error") => void }
 
 /**
  * Contributes the plugin's bundled skills through `resources_discover`, minus `disabled_skills`.
@@ -44,13 +43,10 @@ export function createBundledSkillsComponent(options: BundledSkillsComponentOpti
     register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
       const env = options.env ?? process.env
       pi.on("session_start", (_payload: unknown, eventCtx: unknown) => {
-        notifyInvalidBundledSkillsOverride(env, ctx.logger, readNotify(eventCtx))
+        resolveBundledSkillsOverride(env, ctx.logger, (eventCtx as { readonly ui?: NoticeUi } | undefined)?.ui)
       })
       pi.on("resources_discover", (payload: unknown) => {
-        const skillsDir = resolveBundledSkillsDir(import.meta.url, env, {
-          logger: ctx.logger,
-          ...(options.skillsDir === undefined ? {} : { packagedDir: options.skillsDir }),
-        })
+        const skillsDir = options.skillsDir ?? resolveBundledSkillsDir(undefined, env, ctx)
         if (skillsDir === undefined) return undefined
         const disabled = readDisabledSkills(readDiscoverCwd(payload) ?? pi.cwd ?? process.cwd(), env)
         const skillPaths: string[] = []
@@ -74,8 +70,8 @@ export function createBundledSkillsComponent(options: BundledSkillsComponentOpti
 }
 
 /**
- * An explicit `packagedDir` wins; then a valid OMO_BUNDLED_SKILLS_DIR; otherwise the packaged
- * plugin skills, then the source-tree copy that keeps dev runs working. From the bundled extension at plugin/extensions/omo.js the
+ * A valid OMO_BUNDLED_SKILLS_DIR wins (callers put an explicit `skillsDir` ahead of this); otherwise
+ * the packaged plugin skills, then the source-tree copy that keeps dev runs working. From the bundled extension at plugin/extensions/omo.js the
  * packaged URL resolves to plugin/skills; from this source file it resolves to the same synced
  * directory. An invalid override is reported once and falls back to these packaged roots.
  */
@@ -84,20 +80,40 @@ export function resolveBundledSkillsDir(
   env: Record<string, string | undefined> = process.env,
   options: BundledSkillsDirOptions = {},
 ): string | undefined {
-  const override = resolveBundledSkillsOverrideOrFallback(env, options.logger)
-  if (options.packagedDir !== undefined) return options.packagedDir
-  if (override !== undefined) return override
-  const candidates = [
+  return resolveBundledSkillsOverride(env, options.logger) ?? [
     fileURLToPath(new URL("../skills", importerUrl)),
     fileURLToPath(new URL("../../../plugin/skills", importerUrl)),
-  ]
-  return candidates.find((candidate) => existsSync(candidate))
+  ].find((candidate) => existsSync(candidate))
 }
 
-function readNotify(eventCtx: unknown): ((message: string, type: "error") => void) | undefined {
-  if (typeof eventCtx !== "object" || eventCtx === null) return undefined
-  const ui: unknown = Reflect.get(eventCtx, "ui")
-  if (typeof ui !== "object" || ui === null) return undefined
-  const notify: unknown = Reflect.get(ui, "notify")
-  return typeof notify === "function" ? (message, type) => Reflect.apply(notify, ui, [message, type]) : undefined
+/**
+ * A valid OMO_BUNDLED_SKILLS_DIR (an absolute, readable, listable directory), or undefined when it
+ * is absent, empty or invalid. Every bundled-skill consumer calls this, so an invalid value is
+ * logged once per process and shown once through `ui` when given; the callers then fall back to the
+ * plugin's own skills. The ledger lives on globalThis because omo.js and omo-task.js each bundle
+ * this module.
+ */
+export function resolveBundledSkillsOverride(
+  env: Record<string, string | undefined>,
+  logger: BundledSkillsOverrideLogger = console,
+  ui?: NoticeUi,
+): string | undefined {
+  const value = env["OMO_BUNDLED_SKILLS_DIR"]
+  if (!value) return undefined
+  let problem: string | undefined = "relative"
+  if (isAbsolute(value)) {
+    try {
+      accessSync(value, 5) // R_OK | X_OK
+      readdirSync(value) // ENOTDIR for a file
+      return value
+    } catch (error) {
+      problem = (error as NodeJS.ErrnoException).code
+    }
+  }
+  const message = `OMO_BUNDLED_SKILLS_DIR=${value} ignored (${problem}); needs a readable absolute dir`
+  const seen = ((globalThis as Record<symbol, unknown>)[Symbol.for("omo.skillsDir")] ??= new Set<string>()) as Set<string>
+  const once = (key: string) => seen.size < seen.add(key + message).size
+  if (once("log")) logger.error(message)
+  if (ui?.notify && once("ui")) ui.notify(message, "error")
+  return undefined
 }
