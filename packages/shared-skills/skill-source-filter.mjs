@@ -38,7 +38,7 @@ export function createSkillSourceCopyFilter(sourceRoot, options = {}) {
 		if (segments.some((segment) => ignoredDirNames.has(segment))) return false;
 		if (ignoredFileNames.has(name)) return false;
 		if (sourceTestFilePattern.test(name) || name.endsWith(".pyc")) return false;
-		const scriptsIndex = segments.lastIndexOf("scripts");
-		return scriptsIndex === -1 || segments[scriptsIndex + 1] !== "tests";
+		// A nested tests dir (scripts/tests, engine/tests) is source-only; only a skill's top-level tests/ ships.
+		return segments.indexOf("tests", 1) === -1;
 	};
 }
