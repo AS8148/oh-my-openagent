@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
-import { lexiconChecks } from "./fidelity-lexicon.mjs"
+import { guardedTerms, isKoreanTerm, lexicalPattern, lexiconChecks, QUALIFIER_FORMS } from "./fidelity-lexicon.mjs"
+import { HEDGES, QUALIFIERS } from "./lexicon.mjs"
 
 type Pair = { pair_id: string; quote: string; sentence: string; span?: [number, number] | null; qualifier?: string | null; acronyms?: Record<string, string> }
 type Finding = { pair_id: string; code: string; message: string }
@@ -84,5 +85,33 @@ describe("names and routing", () => {
 		})
 		expect(codes(result)).toEqual([])
 		expect(result.forceStrong).toEqual(["P1"])
+	})
+})
+
+describe("shared lexical owners used by polish (duplication sweep)", () => {
+	const hits = (text: string, term: string, mode: string) => [...text.matchAll(lexicalPattern(term, mode))].length
+
+	test("guardedTerms is the union of HEDGES, QUALIFIERS and every QUALIFIER_FORMS form", () => {
+		const union = new Set([...HEDGES, ...QUALIFIERS, ...Object.values(QUALIFIER_FORMS).flat()])
+		expect(new Set(guardedTerms())).toEqual(union)
+		expect(guardedTerms().length).toBe(union.size)
+	})
+
+	test("isKoreanTerm detects Hangul", () => {
+		expect(isKoreanTerm("\uC57D")).toBe(true)
+		expect(isKoreanTerm("about")).toBe(false)
+	})
+
+	test("guard mode: single Latin words inflect, multiword terms do not, Korean matches as a substring", () => {
+		expect(hits("it was estimatedly so", "estimated", "guard")).toBe(1)
+		expect(hits("more thanks", "more than", "guard")).toBe(0)
+		expect(hits("more than", "more than", "guard")).toBe(1)
+		expect(hits("\uC608\uC57D", "\uC57D", "guard")).toBe(1)
+	})
+
+	test("stem mode keeps its own rules: multiword terms inflect and a one-syllable Korean term needs a boundary", () => {
+		expect(hits("more thanks", "more than", "stem")).toBe(1)
+		expect(hits("\uC608\uC57D", "\uC57D", "stem")).toBe(0)
+		expect(hits("\uC57D 3", "\uC57D", "stem")).toBe(1)
 	})
 })

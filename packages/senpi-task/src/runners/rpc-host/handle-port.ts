@@ -14,6 +14,8 @@ import type { TransportRecoveryOptions } from "./transport-recovery"
 import type { CatalogModelIdentity } from "../pinned-model-equivalence"
 import type { TaskRecord } from "../../state"
 import type { HostTurnReconciliation, InputEffectStatus, ReconciledTurnNotice } from "./reconcile-turn"
+import type { TaskParentWire } from "../task-parent-control"
+import type { HostLivenessStatus } from "./handle-heartbeat"
 
 /**
  * What a child handle needs FROM a daemon session and what it exposes TO the manager. The seam is
@@ -39,6 +41,8 @@ export interface HostSessionPort {
   readonly socketPath: string
   readonly transportGone: Promise<unknown>
   send(command: HostSessionCommand): Promise<void>
+  // The run hold commands over this connection; absent on ports that cannot carry them.
+  taskParentWire?(): TaskParentWire
   getState(): Promise<HostSessionLiveness>
   onEvent(listener: ChildEventListener): () => void
   onExtensionEvent?(listener: ChildExtensionListener): () => void
@@ -49,6 +53,8 @@ export interface HostSessionPort {
   getEntries(since?: string): Promise<RpcEntriesResult>
   switchSession(sessionPath: string): Promise<RpcSwitchSessionResult>
   close(): Promise<void>
+  /** Retain the route after a rejected close so a liveness stop can retry confirmation. */
+  closeConfirmed?(): Promise<void>
   detach(): Promise<void>
 }
 
@@ -90,6 +96,8 @@ export type HostSessionHandleOptions = {
 }
 
 export type HostSessionChildHandle = RpcChildHandle & {
+  liveness(): HostLivenessStatus
+  onLiveness(listener: (status: HostLivenessStatus) => void): () => void
   readonly kind: "host-session"
   /** False once the session was parked, closed, lost or deliberately left behind. */
   readonly attached: boolean
