@@ -2,9 +2,11 @@
 export type EnhancedKeyUsage =
   | { readonly kind: "unrestricted" | "none" | "error" }
   | { readonly kind: "oids"; readonly oids: readonly string[] }
+/** A certificate named by both identities, so a Disallowed-CTL SHA-1 also reaches non-candidate chain members. */
+export type CertificateId = { readonly sha256: string; readonly sha1: string }
 export type TrustChain = {
-  readonly anchor: string | null
-  readonly path: readonly string[]
+  readonly anchor: CertificateId | null
+  readonly path: readonly CertificateId[]
   readonly explicitDistrust: boolean
 }
 export type TrustCertificate = {
@@ -16,7 +18,9 @@ export type TrustCertificate = {
   readonly eku: EnhancedKeyUsage
   readonly chain?: TrustChain
 }
-type WindowsLocation = "CURRENT_USER" | "LOCAL_MACHINE" | "CURRENT_USER_GROUP_POLICY" | "LOCAL_MACHINE_GROUP_POLICY" | "LOCAL_MACHINE_ENTERPRISE" | "CURRENT_SERVICE" | "SERVICE_SID" | "USER_SID"
+export type WindowsLocation =
+  | "CURRENT_USER" | "LOCAL_MACHINE" | "CURRENT_USER_GROUP_POLICY" | "LOCAL_MACHINE_GROUP_POLICY"
+  | "LOCAL_MACHINE_ENTERPRISE" | "CURRENT_SERVICE" | "SERVICE_SID" | "USER_SID"
 export type WindowsCertificate = TrustCertificate & {
   readonly store: "ROOT" | "CA" | "TrustedPeople"
   readonly location: WindowsLocation
@@ -30,17 +34,23 @@ export type MacTrustSetting = {
   readonly allowedErrors: readonly number[]
   readonly result: "TrustRoot" | "TrustAsRoot" | "Deny" | "Unspecified" | null
 }
-type MacCertificate = TrustCertificate & {
+export type MacCertificate = TrustCertificate & {
   readonly source: "trust-settings" | "keychain" | "openssl-default-file" | "openssl-default-dir"
   /** null means absent; [] is Apple's unrestricted self-signed-root grant. */
   readonly settings: Readonly<Record<"user" | "admin" | "system", readonly MacTrustSetting[] | null>>
 }
 export type EngineTrustFacts = { readonly complete: boolean } & (
-  | { readonly os: "windows"; readonly certificates: readonly WindowsCertificate[]; readonly disallowed: readonly { readonly sha256: string; readonly sha1: string; readonly location: WindowsLocation; readonly physicalStore: string }[]; readonly ctlSha1: readonly string[]; readonly bundledRoots: readonly string[] }
+  | {
+    readonly os: "windows"
+    readonly certificates: readonly WindowsCertificate[]
+    readonly disallowed: readonly (CertificateId & { readonly location: WindowsLocation; readonly physicalStore: string })[]
+    readonly ctlSha1: readonly string[]
+    readonly bundledRoots: readonly CertificateId[]
+  }
   | { readonly os: "macos"; readonly certificates: readonly MacCertificate[] }
   | { readonly os: "linux"; readonly certificates: readonly TrustCertificate[] }
 )
-type Diagnostic = "negative-sources-incomplete" | "macos-policy-unreadable" | "scoped-deny-applied-globally" | "lower-priority-deny-applied"
+export type Diagnostic = "negative-sources-incomplete" | "macos-policy-unreadable" | "scoped-deny-applied-globally" | "lower-priority-deny-applied"
 export type EngineTrustSelection = {
   readonly status: "selected" | "failed"
   readonly S: readonly string[]
@@ -87,7 +97,7 @@ export function selectEngineTrust(facts: EngineTrustFacts): EngineTrustSelection
       for (const cert of facts.certificates) {
         if (thumbprints.has(cert.sha1)) blocked.add(cert.sha256)
       }
-      for (const root of facts.bundledRoots) anchors.add(root)
+      for (const root of facts.bundledRoots) anchors.add(root.sha256)
       break
     case "macos":
       for (const cert of facts.certificates) {
@@ -117,10 +127,14 @@ export function selectEngineTrust(facts: EngineTrustFacts): EngineTrustSelection
     default: unreachable(facts)
   }
   if (!facts.complete) {
-    return { status: "failed", S: [], I: [], D: { sha256: [...denied].sort(), sha1: [...thumbprints].sort() }, diagnostics: ["negative-sources-incomplete"] }
+    return {
+      status: "failed", S: [], I: [], D: { sha256: [...denied].sort(), sha1: [...thumbprints].sort() },
+      diagnostics: ["negative-sources-incomplete"],
+    }
   }
   for (const identity of denied) blocked.add(identity)
-  const eligible = (cert: TrustCertificate): boolean => !blocked.has(cert.sha256) && !thumbprints.has(cert.sha1) && serverAuth(cert.eku)
+  const isDenied = (id: CertificateId): boolean => blocked.has(id.sha256) || thumbprints.has(id.sha1)
+  const eligible = (cert: TrustCertificate): boolean => !isDenied(cert) && serverAuth(cert.eku)
   switch (facts.os) {
     case "windows":
       for (const cert of facts.certificates) {
@@ -146,7 +160,7 @@ export function selectEngineTrust(facts: EngineTrustFacts): EngineTrustSelection
       break
     case "macos":
       for (const cert of facts.certificates) {
-        if (!cert.ca || blocked.has(cert.sha256)) continue
+        if (blocked.has(cert.sha256)) continue
         switch (cert.source) {
           case "trust-settings":
             for (const domain of domains) {
@@ -177,10 +191,10 @@ export function selectEngineTrust(facts: EngineTrustFacts): EngineTrustSelection
             }
             break
           case "openssl-default-file": case "openssl-default-dir":
-            if (cert.selfSigned && eligible(cert)) S.add(cert.sha256)
-            else if (!cert.selfSigned && eligible(cert)) intermediates.push(cert)
+            if (cert.ca && cert.selfSigned && eligible(cert)) S.add(cert.sha256)
+            else if (cert.ca && !cert.selfSigned && eligible(cert)) intermediates.push(cert)
             break
-          case "keychain": if (eligible(cert)) intermediates.push(cert); break
+          case "keychain": if (cert.ca && eligible(cert)) intermediates.push(cert); break
           default: unreachable(cert.source)
         }
       }
@@ -193,9 +207,12 @@ export function selectEngineTrust(facts: EngineTrustFacts): EngineTrustSelection
   for (const root of S) anchors.add(root)
   for (const cert of intermediates) {
     const chain = cert.chain
-    if (chain && chain.anchor !== null && anchors.has(chain.anchor) && !blocked.has(chain.anchor)
-      && !chain.explicitDistrust && !blocked.has(cert.sha256) && !chain.path.some(member => blocked.has(member))
+    if (chain && chain.anchor !== null && anchors.has(chain.anchor.sha256) && !isDenied(chain.anchor)
+      && !chain.explicitDistrust && !isDenied(cert) && !chain.path.some(isDenied)
       && serverAuth(cert.eku) && !S.has(cert.sha256)) I.add(cert.sha256)
   }
-  return { status: "selected", S: [...S].sort(), I: [...I].sort(), D: { sha256: [...denied].sort(), sha1: [...thumbprints].sort() }, diagnostics: [...diagnostics].sort() }
+  return {
+    status: "selected", S: [...S].sort(), I: [...I].sort(),
+    D: { sha256: [...denied].sort(), sha1: [...thumbprints].sort() }, diagnostics: [...diagnostics].sort(),
+  }
 }

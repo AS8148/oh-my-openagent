@@ -6,6 +6,11 @@ const R = "1111111111111111111111111111111111111111111111111111111111111111"
 const X = "2222222222222222222222222222222222222222222222222222222222222222"
 const Q = "3333333333333333333333333333333333333333333333333333333333333333"
 const H = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const HX = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const HQ = "cccccccccccccccccccccccccccccccccccccccc"
+const idR = { sha256: R, sha1: H } as const
+const idX = { sha256: X, sha1: HX } as const
+const idQ = { sha256: Q, sha1: HQ } as const
 const SSL = "1.2.840.113635.100.1.3"
 const server = { kind: "oids", oids: ["1.3.6.1.5.5.7.3.1"] } as const
 const unrestricted = { kind: "unrestricted" } as const
@@ -13,7 +18,7 @@ const cert: TrustCertificate = { sha256: R, sha1: H, selfSigned: true, ca: true,
 const root: WindowsCertificate = { ...cert, store: "ROOT", location: "LOCAL_MACHINE", physicalStore: "Default" }
 const grant: MacTrustSetting = { policy: null, application: false, policyString: null, keyUsage: null, allowedErrors: [], result: "TrustRoot" }
 const macCert = { ...cert, source: "trust-settings", settings: { user: [grant], admin: null, system: null } } as const
-const chain = { anchor: R, path: [X, R], explicitDistrust: false } as const
+const chain = { anchor: idR, path: [idX, idR], explicitDistrust: false } as const
 const mac = { os: "macos", complete: true, certificates: [macCert] } as const
 const win = { os: "windows", complete: true, certificates: [root], disallowed: [], ctlSha1: [], bundledRoots: [] } as const
 
@@ -24,6 +29,7 @@ const cases: Case[] = [
   { name: "no settings", facts: { ...mac, certificates: [{ ...macCert, settings: { user: null, admin: null, system: null } }] }, S: [] },
   { name: "missing result defaults to TrustRoot", facts: { ...mac, certificates: [{ ...macCert, settings: { user: [{ ...grant, result: null }], admin: null, system: null } }] }, S: [R] },
   { name: "issued TrustRoot", facts: { ...mac, certificates: [{ ...macCert, selfSigned: false }] }, S: [] },
+  { name: "self-signed non-CA TrustRoot", facts: { ...mac, certificates: [{ ...macCert, ca: false }] }, S: [R] },
   { name: "issued empty settings", facts: { ...mac, certificates: [{ ...macCert, selfSigned: false, settings: { user: [], admin: null, system: null } }] }, S: [] },
   { name: "issued TrustAsRoot", facts: { ...mac, certificates: [{ ...macCert, selfSigned: false, settings: { user: [{ ...grant, result: "TrustAsRoot" }], admin: null, system: null } }] }, S: [R] },
   { name: "self-signed TrustAsRoot", facts: { ...mac, certificates: [{ ...macCert, settings: { user: [{ ...grant, result: "TrustAsRoot" }], admin: null, system: null } }] }, S: [R] },
@@ -87,7 +93,7 @@ for (const store of ["CA", "ROOT", "TrustedPeople"] as const) {
 }
 for (const [name, changes] of [
   ["own EKU excludes server", { eku: { kind: "none" } }], ["not a CA", { ca: false }],
-  ["no verdict", { chain: undefined }], ["outside selected anchors", { chain: { ...chain, anchor: Q } }],
+  ["no verdict", { chain: undefined }], ["outside selected anchors", { chain: { ...chain, anchor: idQ } }],
   ["explicit distrust", { chain: { ...chain, explicitDistrust: true } }],
 ] as const) {
   cases.push(
@@ -96,7 +102,7 @@ for (const [name, changes] of [
   )
 }
 for (const [name, verdict] of [
-  ["inside S", chain], ["outside S", { ...chain, anchor: Q }], ["no anchor", { ...chain, anchor: null }],
+  ["inside S", chain], ["outside S", { ...chain, anchor: idQ }], ["no anchor", { ...chain, anchor: null }],
   ["explicit distrust", { ...chain, explicitDistrust: true }],
 ] as const) {
   const I = name === "inside S" ? [X] : []
@@ -112,12 +118,15 @@ for (const source of ["openssl-default-file", "openssl-default-dir"] as const) {
   )
 }
 cases.push(
-  { name: "Windows intermediate bundled anchor", facts: { ...win, certificates: [{ ...root, sha256: X, selfSigned: false, store: "CA", chain }], bundledRoots: [R] }, S: [], I: [X] },
-  { name: "Windows denied bundled anchor", facts: { ...win, certificates: [{ ...root, sha256: X, selfSigned: false, store: "CA", chain }], bundledRoots: [R], disallowed: [{ sha256: R, sha1: H, location: "CURRENT_USER", physicalStore: "Default" }] }, S: [], D: [R] },
-  { name: "Windows denied path", facts: { ...win, certificates: [root, { ...root, sha256: X, sha1: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", selfSigned: false, store: "CA", chain: { ...chain, path: [X, Q, R] } }], disallowed: [{ sha256: Q, sha1: "cccccccccccccccccccccccccccccccccccccccc", location: "LOCAL_MACHINE", physicalStore: "Default" }] }, S: [R], D: [Q] },
-  { name: "Windows denied intermediate", facts: { ...win, certificates: [root, { ...root, sha256: X, selfSigned: false, store: "CA", chain }], disallowed: [{ sha256: X, sha1: H, location: "LOCAL_MACHINE", physicalStore: "Default" }] }, S: [R], D: [X] },
-  { name: "Windows CTL denied path member", facts: { ...win, certificates: [{ ...root, sha1: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }, { ...root, sha256: X, sha1: "cccccccccccccccccccccccccccccccccccccccc", selfSigned: false, store: "CA", chain: { ...chain, path: [X, Q, R] } }, { ...root, sha256: Q, store: "CA" }], ctlSha1: [H] }, S: [R], sha1: [H] },
-  { name: "macOS denied path", facts: { ...mac, certificates: [macCert, { ...macCert, sha256: X, selfSigned: false, source: "keychain", settings: { user: null, admin: null, system: null }, chain: { ...chain, path: [X, Q, R] } }, { ...macCert, sha256: Q, settings: { user: [{ ...grant, result: "Deny" }], admin: null, system: null } }] }, S: [R], D: [Q] },
+  { name: "Windows intermediate bundled anchor", facts: { ...win, certificates: [{ ...root, ...idX, selfSigned: false, store: "CA", chain }], bundledRoots: [idR] }, S: [], I: [X] },
+  { name: "Windows denied bundled anchor", facts: { ...win, certificates: [{ ...root, ...idX, selfSigned: false, store: "CA", chain }], bundledRoots: [idR], disallowed: [{ ...idR, location: "CURRENT_USER", physicalStore: "Default" }] }, S: [], D: [R] },
+  { name: "Windows denied bundled anchor outside the reported path", facts: { ...win, certificates: [{ ...root, ...idX, selfSigned: false, store: "CA", chain: { ...chain, path: [idX] } }], bundledRoots: [idR], disallowed: [{ ...idR, location: "CURRENT_USER", physicalStore: "Default" }] }, S: [], D: [R] },
+  { name: "Windows CTL denied bundled-only anchor", facts: { ...win, certificates: [{ ...root, ...idX, selfSigned: false, store: "CA", chain }], bundledRoots: [idR], ctlSha1: [H] }, S: [], sha1: [H] },
+  { name: "Windows CTL denied non-candidate path member", facts: { ...win, certificates: [root, { ...root, ...idX, selfSigned: false, store: "CA", chain: { ...chain, path: [idX, idQ, idR] } }], ctlSha1: [HQ] }, S: [R], sha1: [HQ] },
+  { name: "Windows denied path", facts: { ...win, certificates: [root, { ...root, ...idX, selfSigned: false, store: "CA", chain: { ...chain, path: [idX, idQ, idR] } }], disallowed: [{ ...idQ, location: "LOCAL_MACHINE", physicalStore: "Default" }] }, S: [R], D: [Q] },
+  { name: "Windows denied intermediate", facts: { ...win, certificates: [root, { ...root, ...idX, selfSigned: false, store: "CA", chain }], disallowed: [{ ...idX, location: "LOCAL_MACHINE", physicalStore: "Default" }] }, S: [R], D: [X] },
+  { name: "Windows CTL denied path member", facts: { ...win, certificates: [{ ...root, sha1: HX }, { ...root, ...idX, sha1: HQ, selfSigned: false, store: "CA", chain: { ...chain, path: [{ sha256: X, sha1: HQ }, { sha256: Q, sha1: H }, { sha256: R, sha1: HX }] } }, { ...root, sha256: Q, store: "CA" }], ctlSha1: [H] }, S: [R], sha1: [H] },
+  { name: "macOS denied path", facts: { ...mac, certificates: [macCert, { ...macCert, sha256: X, selfSigned: false, source: "keychain", settings: { user: null, admin: null, system: null }, chain: { ...chain, path: [idX, idQ, idR] } }, { ...macCert, sha256: Q, settings: { user: [{ ...grant, result: "Deny" }], admin: null, system: null } }] }, S: [R], D: [Q] },
   { name: "unrelated policy Deny", facts: { ...mac, certificates: [{ ...macCert, settings: { user: [{ ...grant, result: "Deny", policy: { oid: "1.2.3", role: null, nameConstrained: false } }, grant], admin: null, system: null } }] }, S: [R] },
 )
 for (const facts of [mac, win, { os: "linux", complete: true, certificates: [cert] }] as const) {
