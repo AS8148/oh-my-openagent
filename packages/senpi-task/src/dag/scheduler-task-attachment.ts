@@ -189,9 +189,8 @@ function foldTaskOutcome(context: SchedulerContext, nodeId: DagNodeId, task: Tas
 
 function flagConsumedDependents(context: SchedulerContext, nodeId: DagNodeId, invalidatedBy = nodeId): void {
   const { nodes, diagnostics } = context.journal.snapshot()
-  const flagged = new Set(diagnostics
-    .filter((entry) => entry.kind === "node_flag" && entry.invalidatedBy !== undefined)
-    .map((entry) => entry.nodeId))
+  const flagged = new Set(diagnostics.flatMap((entry) =>
+    entry.kind === "node_flag" && entry.invalidatedBy !== undefined ? [entry.nodeId] : []))
   const invalidated = new Set([nodeId])
   for (const dependencyId of invalidated) {
     for (const node of nodes) {
