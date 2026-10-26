@@ -101,7 +101,13 @@ async function startServer<TClient>(
   }
   const { client, server } = started
 
-  deps.injectServerAuthIntoClient(client)
+  try {
+    deps.injectServerAuthIntoClient(client)
+  } catch (error) {
+    server.close()
+    restorePassword()
+    throw error
+  }
   console.log(pc.dim("Server listening at"), pc.cyan(server.url))
   return {
     client,

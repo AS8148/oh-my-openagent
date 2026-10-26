@@ -86,6 +86,21 @@ describe("createServerConnection", () => {
       result.cleanup()
     })
 
+    it("#when injecting auth into the client throws #then the server is closed and no generated password is left behind", async () => {
+      // given
+      mockInjectServerAuthIntoClient.mockImplementationOnce(() => {
+        throw new Error("incompatible client")
+      })
+
+      // when
+      const attempt = createServerConnection({ signal: new AbortController().signal })
+
+      // then
+      await expect(attempt).rejects.toThrow("incompatible client")
+      expect(mockServerClose).toHaveBeenCalledTimes(1)
+      expect(process.env.OPENCODE_SERVER_PASSWORD).toBeUndefined()
+    })
+
     it("#when the own server fails to start and omo attaches instead #then no generated password is left behind", async () => {
       // given
       mockIsPortAvailable.mockImplementationOnce(() => Promise.resolve(true)).mockImplementationOnce(() => Promise.resolve(false))
