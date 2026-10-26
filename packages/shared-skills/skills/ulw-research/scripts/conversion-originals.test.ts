@@ -234,22 +234,22 @@ describe("conversion originals: what can follow a converted element", () => {
 	const ROWS: { shape: string; after: string; expected: string }[] = [
 		{ shape: "nothing (element at the end of the cell or line)", after: "", expected: CLEAN },
 		...BRACKETS.flatMap(([o, c]) => [
-			{ shape: `${o}${c} second placeholder in prose`, after: ` ${o}{{F2:f2}} longer${c}`, expected: CLEAN },
-			{ shape: `${o}${c} second placeholder alone`, after: ` ${o}{{F1:f1}}${c}`, expected: CLEAN },
+			{ shape: `${o}${c} second placeholder in prose`, after: ` ${o}{{F3:rate_yoy}} longer${c}`, expected: CLEAN },
+			{ shape: `${o}${c} second placeholder alone`, after: ` ${o}{{F1:span_len}}${c}`, expected: CLEAN },
 			{ shape: `${o}${c} bare numeral, wrong`, after: ` ${o}999 m${c}`, expected: ORIGINAL },
 			{ shape: `${o}${c} bare numeral, right, other unit of the dimension`, after: ` ${o}0.32 km${c}`, expected: ORIGINAL },
 		]),
 		...SEPARATORS.flatMap((s) => [
-			{ shape: `${s} then a filled element`, after: ` ${s} {{F1:f1}}`, expected: CLEAN },
+			{ shape: `${s} then a filled element`, after: ` ${s} {{F1:span_len}}`, expected: CLEAN },
 			{ shape: `${s} then a bare numeral`, after: ` ${s} 999 m`, expected: ORIGINAL },
 			{ shape: `${s} then prose with a count`, after: ` ${s} 12 sites`, expected: UNTRACED },
 		]),
-		{ shape: "prose with a filled percent", after: " ({{F2:f2}} longer)", expected: CLEAN },
+		{ shape: "prose with a filled percent", after: " ({{F3:rate_yoy}} longer)", expected: CLEAN },
 		{ shape: "prose with a literal percent", after: " (12 % longer)", expected: UNTRACED },
 		{ shape: "a bare unitless number (footnote)", after: " (7)", expected: UNTRACED },
 		{ shape: "a year", after: " (2024)", expected: UNTRACED },
-		{ shape: "two consecutive elements", after: " {{F1:f1}}", expected: CLEAN },
-		{ shape: "two consecutive elements, glued", after: "{{F2:f2}}", expected: CLEAN },
+		{ shape: "two consecutive elements", after: " {{F1:span_len}}", expected: CLEAN },
+		{ shape: "two consecutive elements, glued", after: "{{F3:rate_yoy}}", expected: CLEAN },
 		{ shape: "prose without digits", after: " (approx.)", expected: CLEAN },
 	]
 	const SENTENCE = { en: ["The span is ", "."], ko: ["\uAD50\uB7C9 \uAE38\uC774\uB294 ", "\uC774\uB2E4."] }
@@ -265,7 +265,8 @@ describe("conversion originals: what can follow a converted element", () => {
 	/** derive -> fill -> verify as fact verify wires it: "original" when a defect is on part original, else the defect codes or clean. */
 	function verdict(after: string, render: Render, lang: "en" | "ko") {
 		const ledger = emptyLedger() as Ledger
-		for (const [id, value, unit] of [["F1", "320", "m"], ["F2", "12", "%"]]) addRow(ledger, measured(id, value, unit, { source_id: "S4" }))
+		// The fixture's own source rows: each pins S4 and quotes its sentence, as fact add writes them.
+		for (const id of ["F1", "F3"]) addRow(ledger, structuredClone(rowOf(BASE, id)))
 		const row = (derive(ledger, { op: "convert", operands: ["F1"], to: "mm", label: "span_mm" }) as { row: Row }).row
 		const filled = fill(render.doc(`{{${row.fact_id}:span_mm}}${after}`, SENTENCE[lang]), ledger, { format: render.format }) as { out: string | null; fillMap: Parameters<typeof markdownAsHtml>[1] }
 		if (filled.out === null) return "fill failed"
