@@ -12,6 +12,7 @@ import { createTaskRecordStore } from "../../../../senpi-task/src/store"
 import { createTaskManager } from "../../../../senpi-task/src/manager/manager"
 import { baseSpec, categoryPlanner, FakeRunner, settings } from "../../../../senpi-task/src/manager/__fixtures__/manager-fakes"
 import { EngineRunPauseBridge, isRunHoldChange } from "./run-pause-bridge"
+import type { LiveTaskContext } from "./runtime-context"
 
 test("#given quit and reopening the same stopped native session #when the person sends the next message #then a failed child restore does not keep task admission held", async () => {
   const root = mkdtempSync(join(tmpdir(), "run-pause-human-"))
@@ -73,12 +74,12 @@ test("#given quit and reopening the same stopped native session #when the person
         name: "pause-proof",
         register(pi) {
           pi.on("session_start", async (_event, ctx) => {
-            view = ctx.getPauseState?.()
+            view = (ctx as LiveTaskContext).getPauseState?.()
             await bridge.restore(parent)
             await bridge.reconciled(parent)
           })
           pi.on("session_hold_changed", async (event, ctx) => {
-            view = ctx.getPauseState?.()
+            view = (ctx as LiveTaskContext).getPauseState?.()
             if (!isRunHoldChange(event)) return
             try { await bridge.changed(parent, event) }
             finally { if (event.change === "resumed") resumeSettled.resolve() }
@@ -124,7 +125,7 @@ test("#given quit and reopening the same stopped native session #when the person
       admissionBarrier: second.barrier, planner: categoryPlanner(), config: settings(),
       runners: { "in-process": runner, process: runner },
     })
-    const input = baseSpec({ parent_session_id: second.parent, root_session_id: second.parent, notify_on_terminal: false })
+    const input = baseSpec({ parent_session_id: second.parent, root_session_id: second.parent })
     expect(await manager.start(input)).toMatchObject({ kind: "held" })
     // A real person prompt releases the engine's restored Stop. No synthetic hold event or Resume command.
     await second.session.prompt("Continue working.")

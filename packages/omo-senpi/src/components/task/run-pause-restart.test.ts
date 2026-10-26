@@ -140,7 +140,7 @@ test("#given an acknowledged Stop persisted by the previous host #when human Res
     cwd: root, store: createTaskRecordStore({ project_dir: root, task: { state_dir: join(root, "task-records") } }), admissionBarrier: second.barrier,
     planner: categoryPlanner(), config: settings(), runners: { "in-process": runner, process: runner },
   })
-  const input = baseSpec({ parent_session_id: PARENT, root_session_id: PARENT, notify_on_terminal: false })
+  const input = baseSpec({ parent_session_id: PARENT, root_session_id: PARENT })
   await second.restart()
   expect(await manager.start(input)).toMatchObject({ kind: "held" })
   second.setState(released(7))
