@@ -40,9 +40,11 @@ describe("createSkillSourceCopyFilter", () => {
     expect(shouldCopy(join(root, "scripts", "helper.ts"))).toBe(true)
   })
 
-  test("#given scripts/tests #when filtered #then that subtree is skipped but a top-level tests dir is kept", () => {
+  test("#given a nested tests dir #when filtered #then that subtree is skipped but a top-level tests dir is kept", () => {
     const shouldCopy = createSkillSourceCopyFilter(root)
     expect(shouldCopy(join(root, "scripts", "tests", "case.py"))).toBe(false)
+    expect(shouldCopy(join(root, "engine", "tests"))).toBe(false)
+    expect(shouldCopy(join(root, "engine", "tests", "fixtures", "page.html"))).toBe(false)
     expect(shouldCopy(join(root, "tests", "fixture.md"))).toBe(true)
   })
 
