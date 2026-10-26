@@ -79,7 +79,7 @@ function createdForEarlierAttempt(task: TaskRecord, execAttempt: number, record:
   const definitions = new Set([record.definitionFingerprint, ...(record.amendHistory ?? []).map((amend) => amend.previousFingerprint)])
   for (const definitionFingerprint of definitions) {
     for (let attempt = 0; attempt < execAttempt; attempt += 1) {
-      if (task.owner?.fingerprint === dagFingerprint(ownerFingerprintInput({
+      if (task.owner !== undefined && task.owner.fingerprint === dagFingerprint(ownerFingerprintInput({
         definitionFingerprint, nodeId: task.owner.nodeId, execAttempt: attempt,
       }))) return true
     }
