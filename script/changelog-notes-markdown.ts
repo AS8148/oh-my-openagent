@@ -11,7 +11,8 @@
 const OPEN = /^(`{3,}|~{3,})/
 const LIST_MARKER = /^([-*+]|\d{1,9}[.)])([ \t]+|$)/
 
-export type ScannedLine = { readonly text: string; readonly fenced: boolean }
+/** `indentedCode`: an indented code block line (4+ columns past its container, after a blank line); never linked. */
+export type ScannedLine = { readonly text: string; readonly fenced: boolean; readonly indentedCode: boolean }
 
 /** The column after `whitespace` written from column `from`: a space moves one column, a tab to the next multiple of 4. */
 const columnsAfter = (from: number, whitespace: string): number => [...whitespace].reduce((column, char) => (char === "\t" ? column + 4 - (column % 4) : column + 1), from)
@@ -25,6 +26,8 @@ export function scanFences(text: string): ScannedLine[] {
   let open: { readonly marker: string; readonly base: number } | null = null
   // Text columns of the list items the current line can belong to, innermost last.
   const items: number[] = []
+  // Whether the previous line was blank or indented code: only then can a line start or continue an indented code block.
+  let codeMayStart: boolean = true
   for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
     const stripped = line.replace(/^\s*/, "")
     const indent = indentOf(line)
@@ -40,9 +43,12 @@ export function scanFences(text: string): ScannedLine[] {
       const candidate = listMarker === null && indent - item <= 3 ? OPEN.exec(stripped)?.[1] : undefined
       const marker = candidate !== undefined && !(candidate[0] === "`" && stripped.slice(candidate.length).includes("`")) ? candidate : undefined
       if (marker !== undefined) open = { marker, base: item }
-      lines.push({ text: line, fenced: marker !== undefined })
+      const indentedCode: boolean = marker === undefined && listMarker === null && stripped !== "" && codeMayStart && indent - item >= 4
+      lines.push({ text: line, fenced: marker !== undefined, indentedCode })
+      codeMayStart = stripped === "" || indentedCode
     } else {
-      lines.push({ text: line, fenced: true })
+      lines.push({ text: line, fenced: true, indentedCode: false })
+      codeMayStart = false
       const close = new RegExp(`^\\${open.marker[0]}{${open.marker.length},}\\s*$`)
       if (indent - open.base <= 3 && close.test(stripped)) open = null
     }
@@ -84,8 +90,9 @@ export function entriesOf(text: string): ScannedLine[][] {
 
 /** Already-scanned entry lines with the link added, by the rule linkEntry documents. */
 export function linkScanned(lines: readonly ScannedLine[], pr: number, pullUrl: string): string {
-  if (lines.some((line) => !line.fenced && line.text.includes(`${pullUrl}/${pr})`))) return lines.map((line) => line.text).join("\n")
-  const last = lines.findLastIndex((line) => !line.fenced && line.text.trim() !== "")
+  const prose = (line: ScannedLine): boolean => !line.fenced && !line.indentedCode
+  if (lines.some((line) => prose(line) && line.text.includes(`${pullUrl}/${pr})`))) return lines.map((line) => line.text).join("\n")
+  const last = lines.findLastIndex((line) => prose(line) && line.text.trim() !== "")
   return lines.map((line, index) => (index === last ? `${line.text.trimEnd()} ([#${pr}](${pullUrl}/${pr}))` : line.text)).join("\n")
 }
 

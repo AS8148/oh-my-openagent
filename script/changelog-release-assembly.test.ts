@@ -123,6 +123,20 @@ describe("fences inside every kind of list item", () => {
   })
 })
 
+// #11253 review round 4 LOW 1: an indented code block (4+ columns past its container, after a blank line) is code; the
+// PR link never lands inside it.
+describe("indented code blocks are never linked", () => {
+  test.each([
+    ["a paragraph, then indented code, then a paragraph", "**A.** one\n\n    code\n\n**B.** two\n", `**A.** one ${link(50)}\n\n    code\n\n**B.** two ${link(50)}`],
+    ["a paragraph followed by indented code", "**A.** one\n\n    code\n", `**A.** one ${link(50)}\n\n    code`],
+    ["indented code inside a list item", "**A.** steps:\n\n- a\n\n      code\n", `**A.** steps:\n\n- a ${link(50)}\n\n      code`],
+    ["an entry that is all indented code stays as written", "    code\n", "    code"],
+    ["a lazy continuation line is paragraph text, not code", "**A.** one\n    more\n", `**A.** one\n    more ${link(50)}`],
+  ])("%s", (_name, content, expected) => {
+    expect(release(content)).toBe(expected)
+  })
+})
+
 describe("legacy duplicates", () => {
   test("another repository's PR link in the legacy text does not consume our fragment", () => {
     const legacy = "- Bump ([senpi#123](https://github.com/code-yeongyu/senpi/pull/123))."

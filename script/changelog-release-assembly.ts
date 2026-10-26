@@ -41,7 +41,8 @@ export function parseNotes(text: string): Notes {
       current.push(`${last}\n${line}`)
     }
   }
-  return { paragraphs: paragraphs.join("\n").trim(), sections }
+  // Drop surrounding blank lines but keep the first line's indentation: 4+ leading spaces make it indented code.
+  return { paragraphs: paragraphs.join("\n").replace(/^(?:[ \t]*\n)+/, "").trimEnd(), sections }
 }
 
 const linkBullet = (entry: string, pr: number): string => linkEntry(entry, pr, PULL_URL)
