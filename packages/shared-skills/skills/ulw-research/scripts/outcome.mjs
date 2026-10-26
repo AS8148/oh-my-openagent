@@ -4,11 +4,10 @@ import * as nodeFs from "node:fs"
 import { basename, dirname, join } from "node:path"
 
 import { DELIVERABLE_FORMATS, DELIVERABLE_STATUSES, GATE_NAMES, GATE_STATUSES, LANES, MANIFEST_CODES, normalizeManifest, SCHEMA_VERSION, validateOutcomeManifest } from "./contracts.mjs"
-import { sessionStartMetadata } from "./outcome-start.mjs"
+import { runStart } from "./outcome-start.mjs"
 
 export const MANIFEST_FILENAME = "outcome.json"
 const MISSING = MANIFEST_CODES[0]
-const SESSION_STAMP = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/
 const SOURCE_LINE = /^\[(S|Source )\d+\]/
 const URL_PATTERN = /https?:\/\/[^\s)<>\]"'`]+/g
 const DRAFT_MARKER = "STATUS: draft"
@@ -36,27 +35,17 @@ const isMissing = (error) => error?.code === "ENOENT" || error?.code === "ENOTDI
 function stamp(now) {
 	return (now ?? new Date()).toISOString()
 }
-/** Recorded run start, with the legacy local timestamp basename as fallback. */
-export function parseSessionStart(sessionDir) {
-	const metadata = sessionStartMetadata(sessionDir)
-	if (metadata) {
-		const date = new Date(metadata.value)
-		if (typeof metadata.value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(metadata.value) || Number.isNaN(date.getTime())) throw new OutcomeError("invalid_session_dir", `invalid run timestamp in ${metadata.location}`)
-		return date
+/** The run clock outcome init records (outcome-start.mjs owns the contract). */
+export function parseSessionStart(sessionDir, { startedAt, now } = {}) {
+	const fail = (message) => {
+		throw new OutcomeError("invalid_session_dir", message)
 	}
-	const match = SESSION_STAMP.exec(basename(sessionDir))
-	if (!match) throw new OutcomeError("invalid_session_dir", `missing run timestamp: outcome.json.startedAt or terminal-state.json.started_at; no YYYYMMDD-HHMMSS fallback: ${sessionDir}`)
-	const [y, mo, d, h, mi, s] = match.slice(1).map(Number)
-	const date = new Date(y, mo - 1, d, h, mi, s)
-	if (date.getMonth() !== mo - 1 || date.getDate() !== d || date.getHours() !== h) {
-		throw new OutcomeError("invalid_session_dir", `session dir basename is not a real local time: ${sessionDir}`)
-	}
-	return date
+	return runStart({ sessionDir, startedAt, now, validManifest: (data) => validateOutcomeManifest(normalizeManifest(data)).ok, fail })
 }
 
-/** @param {{ sessionDir: string, promised: string[], lane: string|null, interview?: object|null, now?: Date }} input */
-export function initManifest({ sessionDir, promised, lane, interview = null, now }) {
-	const startedAt = parseSessionStart(sessionDir).toISOString()
+/** @param {{ sessionDir: string, promised: string[], lane: string|null, interview?: object|null, now?: Date, startedAt?: string }} input */
+export function initManifest({ sessionDir, promised, lane, interview = null, now, startedAt: recorded }) {
+	const startedAt = parseSessionStart(sessionDir, { startedAt: recorded, now }).toISOString()
 	if (lane !== null && lane !== undefined) assertOneOf("unknown_lane", "lane", lane, LANES)
 	const formats = [...new Set(promised)]
 	for (const format of formats) assertOneOf("unknown_format", "deliverable format", format, DELIVERABLE_FORMATS)

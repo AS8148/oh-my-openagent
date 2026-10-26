@@ -8,13 +8,13 @@
 
 import * as nodeFs from "node:fs"
 
-import { unmarkedKinds } from "./claim-kinds.mjs"
 import { DEFECT_CODES, LINEAGE_MODES } from "./contracts.mjs"
 import { customProperties } from "./css-lite.mjs"
 import { figureGates } from "./gates-figures.mjs"
 import { structureGates } from "./gates-structure.mjs"
 import { textGates } from "./gates-text.mjs"
 import { PROSE_TAGS, proseText, selectorPath } from "./html-lite.mjs"
+import { sourcesClaims } from "./sources-citation.mjs"
 
 const CITATION_MARKER = /\[S\d+\]|\[Source\s*\d+\]|\[\uCD9C\uCC98[^\]]*\]|\[\^\d+\]/i
 const ANCHOR_HREF = /^#(?:s|src|source|ref|fn)/i
@@ -66,21 +66,8 @@ function hasCitation(node) {
 	return CITATION_MARKER.test(proseText(node)) || descendants(node).some(isCitationAnchor)
 }
 
-/** A bibliography entry, not a claim sentence merely placed under a Sources heading. */
-export function isCitationLine(node) {
-	const text = proseText(node).trim()
-	if (!text || unmarkedKinds(text).length || /\b(?:we|I)\s+(?:confirmed|found|observed|measured)\b/i.test(text)) return false
-	if (/^\[(?:S\d+|Source\s*\d+|\^\d+)\]/i.test(text)) return true
-	const links = [node, ...descendants(node)].filter((child) => child.tag === "a" && /^https?:\/\//i.test(child.attrs.href ?? ""))
-	if (links.length === 1 && text === proseText(links[0]).trim()) return true
-	const title = text.replace(/https?:\/\/\S+/gi, "").trim()
-	const urlOnly = /^https?:\/\/\S+$/i.test(text)
-	if (urlOnly) return true
-	return node.tag === "li" && (links.length > 0 || /https?:\/\//i.test(text)) && !/[.!?](?:\s|$)/.test(title)
-}
-
 function proseScope(scope, owner) {
-	if (scope.section?.kind !== "sources" || !owner || /^h[1-6]$/.test(owner.tag) || isCitationLine(owner)) return scope
+	if (scope.section?.kind !== "sources" || !owner || sourcesClaims(owner).length === 0) return scope
 	return { ...scope, section: { ...scope.section, kind: null } }
 }
 
