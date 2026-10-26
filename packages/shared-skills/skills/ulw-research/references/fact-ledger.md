@@ -20,7 +20,7 @@ Every command is `node "$SKILL_DIR/scripts/report-tools.mjs" <command> --session
 
 A source directory is immutable. Snapshotting the same id again with the same text is a no-op; different text fails with `snapshot_exists`, because rows pin the snapshot hash.
 
-When a converted text is produced, run `source probe-conversion <raw-file> <converted-file>`: a non-empty `altered` list means use the raw snapshot for every number, while `lost` is a warning only. HTML snapshotting runs this probe automatically and writes `sources/S<n>/conversion.json` through `writeFidelityRecord`, with the `source_conversion` envelope and `conversion_altered_numbers`, `lost`, `raw_count`, and `converted_count`. This collection warning does not itself block delivery.
+HTML snapshotting (`--html`, `--url`) probes its own conversion and writes `sources/S<n>/conversion.json` through `writeFidelityRecord` (the `source_conversion` envelope with `conversion_altered_numbers`, `lost`, `raw_count`, `converted_count`); `source snapshot` prints the altered list. `fact add` and `fact quote` refuse a located value, or a number in its sentence, that the list names (`conversion_altered_number`, no row written): re-snapshot a verified text of the source with `--text` and add from it. Numbers are compared with one grouped-number grammar (a 1-3 digit lead, 3-digit groups with one separator type, no digit after the last group). `source probe-conversion <raw-file> <converted-file>` runs the same probe on your own conversion; `lost` is a warning only.
 
 ## Row fields
 

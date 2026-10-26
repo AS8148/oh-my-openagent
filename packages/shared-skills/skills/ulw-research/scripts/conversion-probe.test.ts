@@ -36,18 +36,19 @@ describe("source probe-conversion", () => {
 		const result = probe(FIXTURE, FLATTENED)
 		expect(result.exitCode).toBe(1)
 		// Stripping the adjacent table tags also joins Total's 2 to the first cell.
-		expect(result.json.altered).toEqual([...ALTERED, "212,345"])
+		// The flatten glues Total's 2 onto 12,345 and 12,345 onto 15,678: "212,34515,678".
+		expect(result.json.altered).toEqual([...ALTERED, "212,34515", "678"])
 		expect(result.json.lost).toContain("2026")
 		expect(result.json.lost).not.toContain("99.9")
 		expect(result.json.altered).not.toContain("99.9")
 	})
 
-	test("#given raw bytes #when compared to themselves #then identity passes without alterations", () => {
-		const result = probe(FIXTURE, FIXTURE)
+	test("#given a plain text #when compared to itself #then identity passes without alterations", () => {
+		const text = "USD 4.2 billion; 1,234.5 units; 1 234 567 people; -3.5 and 2019-2023."
+		const result = probe(text, text)
 		expect(result.exitCode).toBe(0)
 		expect(result.json.altered).toEqual([])
 		expect(result.json.lost).toEqual([])
-		expect(result.json.raw_count).toBeGreaterThan(0)
 		expect(result.json.converted_count).toBe(result.json.raw_count)
 	})
 
@@ -65,7 +66,7 @@ describe("source probe-conversion", () => {
 		const result = probe('<time datetime="2026-10-01T09:00:00Z">1 Oct</time>', "1 Oct")
 		expect(result.exitCode).toBe(0)
 		expect(result.json.altered).toEqual([])
-		expect(result.json.lost).toEqual(["2026", "-10", "-01", "09", "00", "00"])
+		expect(result.json.lost).toEqual(["2026", "10", "01", "09", "00", "00"])
 	})
 
 	test("#given repeated signed decimals #when one count increases #then multiset subtraction preserves the excess", () => {
@@ -81,6 +82,69 @@ describe("source probe-conversion", () => {
 		expect(result.json.altered).toEqual([])
 		expect(result.json.lost).toEqual(["99.9"])
 	})
+})
+
+describe("one grouped-number grammar: a digit glued after the last group is an alteration", () => {
+	test("#given a footnote glued onto a grouped number #when probed #then it is altered", () => {
+		expect(probe("$1,234<sup>5</sup> million", "$1,2345 million").json.altered).toEqual(["1,2345"])
+		expect(probe("<table><tr><td>12,345<sup>1</sup></td></tr></table>", "12,3451").json.altered).toEqual(["12,3451"])
+	})
+
+	test("#given the same cell through the built-in snapshot #when written #then conversion.json lists it", () => {
+		const { dir } = writeSnapshot(join(sandbox(), "sources"), "S1", { path: "t.html", html: "<table><tr><td>12,345<sup>1</sup></td></tr></table>", extractor: "model", observed_at: "2026-10-25T00:00:00Z" })
+		expect(readFidelityRecord(join(dir, "conversion.json"), "source_conversion").conversion_altered_numbers).toEqual(["12,3451"])
+	})
+})
+
+describe("Markdown-shaped converter output reports only real artifacts", () => {
+	const RAW = [
+		"<p>Revenue was 4.2<sup>2</sup> billion.<sup><a href=\"#cite_note-7\">[7]</a></sup></p>",
+		"<p><a href=\"https://example.com/2024/03/report-4\">Report</a> covers q4-2023.</p>",
+		"<p><img src=\"chart-640x480.png\" alt=\"Chart 2023\" title=\"Fig 4\"></p>",
+		"<table><tr><td>12,345<sup>1</sup></td><td>1&#8201;234&#8201;567</td></tr></table>",
+		"<p>From 2019\u20132023 the index fell \u22123.5 points.</p>",
+	].join("\n")
+	const MARKDOWN = [
+		"Revenue was 4.22 billion.[[7]](#cite_note-7)",
+		"",
+		"[Report](https://example.com/2024/03/report-4) covers q4-2023.",
+		"",
+		"![Chart 2023](chart-640x480.png \"Fig 4\")",
+		"",
+		"| 12,3451 | 1\u2009234\u2009567 |",
+		"",
+		"From 2019-2023 the index fell -3.5 points.",
+	].join("\n")
+
+	test("#given markdownify-shaped text #when probed #then altered is exactly 4.22 and 12,3451", () => {
+		expect(probe(RAW, MARKDOWN).json.altered).toEqual(["4.22", "12,3451"])
+	})
+
+	test("#given the same page through the built-in snapshot #when written #then only the real artifacts are altered", () => {
+		const { dir } = writeSnapshot(join(sandbox(), "sources"), "S1", { path: "m.html", html: RAW, extractor: "model", observed_at: "2026-10-25T00:00:00Z" })
+		expect(readFidelityRecord(join(dir, "conversion.json"), "source_conversion").conversion_altered_numbers).toEqual(["4.22", "12,3451"])
+	})
+
+	test("#given a converted text that looks like a tag #when probed #then it is never parsed as HTML", () => {
+		expect(probe("<p>if a&lt;b then revenue was 4.2<sup>2</sup> billion</p>", "if a<b then revenue was 4.22 billion").json.altered).toEqual(["4.22"])
+	})
+})
+
+describe("whitespace and separators match the snapshot side", () => {
+	for (const [raw, converted] of [
+		["<p>1&#8201;234&#8201;567</p>", "1 234 567"],
+		["<p>1&#8199;234</p>", "1 234"],
+		["<table><tr><td>2,500<br>300</td></tr></table>", "2,500 300"],
+		["<ul><li><p>in 2023</p><p>500 sites</p></li></ul>", "in 2023 500 sites"],
+		["<p>1,250\n300</p>", "1,250 300"],
+		["<p><span>1</span>\n<span>234</span></p>", "1 234"],
+	]) {
+		test(`#given ${JSON.stringify(raw)} #when converted to ${JSON.stringify(converted)} #then nothing is altered`, () => {
+			const result = probe(raw, converted)
+			expect(result.json.altered).toEqual([])
+			expect(result.exitCode).toBe(0)
+		})
+	}
 })
 
 test("#given HTML snapshot conversion #when written #then source warnings use the fidelity envelope", () => {

@@ -257,6 +257,7 @@ Invoke every command as `node "$SKILL_DIR/scripts/report-tools.mjs" <command>`. 
 | `format-extract <reference>` | `--out <design-spec.md>` (required), `--from-url` | never (an unsupported reference exits `2`) |
 | `--help` | `--json` | never |
 | `source snapshot` | `--id S<n>` (required), one of `--url <u>`, `--html <file>`, `--text <file>` (with optional `--extractor NAME@VERSION`), `--command '<argv json>' --cwd <dir>`; `--kind page\|command\|document`, `--provenance primary\|secondary` (default `unknown`, read by `source floor: primary only`), `--revision <r>`, `--session-dir <dir>` | the id already holds different content (`snapshot_exists`) |
+| `source probe-conversion` | `<raw-file> <converted-file>` (positional) | the converted text holds a number the raw text does not (`altered`, exit `1`) |
 | `fact add` | `--source S<n>` with `--find <text>` (`--unit-expected <unit>`), or `--table <id> --row <label> --col <label>`, or `--page N --line N`; `--label`, `--entity`, `--valid-at`, `--population`, `--accounting-basis`, `--observation O<n>`, `--json`, `--session-dir <dir>`. Or `--assumed <value> --unit <unit> --rationale <text> --label <label>` | `fact_not_located`, `fact_ambiguous`, `unit_mismatch` (no row written) |
 | `fact quote` | `--source S<n> --match <text>` (required), `--label`, `--json`, `--session-dir <dir>` | `fact_not_located`, `fact_ambiguous` |
 | `fact retract <id>` | `--reason <text>` (required), `--replacement <id>`, `--session-dir <dir>` | never (an illegal transition exits `2`) |

@@ -21,7 +21,7 @@ import { writeSnapshot } from "./source-snapshot.mjs"
 const FETCH_TIMEOUT_MS = 30_000
 const TOOL_EXTRACTOR = "tool:source-snapshot@1"
 const SNAPSHOT_USAGE =
-	"usage: source snapshot --id S<n> (--url <u> | --html <file> | --text <file> [--extractor NAME@VERSION] | --command '<argv json>' --cwd DIR) [--kind page|command|document] [--provenance primary|secondary] [--revision R] --session-dir D"
+	"usage: source probe-conversion <raw-file> <converted-file> | source snapshot --id S<n> (--url <u> | --html <file> | --text <file> [--extractor NAME@VERSION] | --command '<argv json>' --cwd DIR) [--kind page|command|document] [--provenance primary|secondary] [--revision R] --session-dir D"
 
 function readInput(path) {
 	try {
@@ -43,7 +43,9 @@ export function snapshotOf(sessionDir, id) {
 	const dir = join(sessionDir, "sources", String(id))
 	if (!existsSync(join(dir, "meta.json"))) throw new CliError(`source ${id} has no snapshot; run source snapshot --id ${id} first`)
 	const html = join(dir, "source.html")
-	return { meta: JSON.parse(readInput(join(dir, "meta.json"))), text: readInput(join(dir, "text.txt")), html: existsSync(html) ? readInput(html) : null }
+	const probe = join(dir, "conversion.json")
+	const altered = existsSync(probe) ? (JSON.parse(readInput(probe)).conversion_altered_numbers ?? []) : []
+	return { meta: JSON.parse(readInput(join(dir, "meta.json"))), text: readInput(join(dir, "text.txt")), html: existsSync(html) ? readInput(html) : null, altered }
 }
 
 /**
@@ -129,8 +131,9 @@ export async function runSource(argv) {
 	}
 	if (receipt) writeFileSync(join(written.dir, "command.json"), `${JSON.stringify(receipt, null, 2)}\n`)
 	const meta = JSON.parse(readFileSync(join(written.dir, "meta.json"), "utf8"))
-	const data = { source_id: id, directory: written.dir, snapshot_sha256: written.sha256, extractor: meta.extractor, kind: meta.kind, provenance: meta.provenance }
-	return { json: { command: "source snapshot", status: "pass", exitCode: 0, data }, summary: `source snapshot: ${id} ${written.sha256.slice(0, 12)} (${meta.extractor})`, exitCode: 0 }
+	const data = { source_id: id, directory: written.dir, snapshot_sha256: written.sha256, extractor: meta.extractor, kind: meta.kind, provenance: meta.provenance, ...(written.altered ? { conversion_altered_numbers: written.altered } : {}) }
+	const probe = written.altered ? `; conversion ${written.altered.length} altered${written.altered.length ? ` (${written.altered.join(", ")}): fact add refuses those numbers` : ""}` : ""
+	return { json: { command: "source snapshot", status: "pass", exitCode: 0, data }, summary: `source snapshot: ${id} ${written.sha256.slice(0, 12)} (${meta.extractor})${probe}`, exitCode: 0 }
 }
 
 export function runClaims(argv) {

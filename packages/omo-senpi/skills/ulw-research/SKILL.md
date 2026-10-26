@@ -75,14 +75,13 @@ Saturation is not just more searching; it is a knowledge-production protocol. Th
 
 Observation candidates, claim candidates, and EXPAND leads travel back from members and lanes as message text (except a mass-research dag node's handoff file). You write the instrumentation artifacts, link candidates into the intent diff and claim graph, and record where each observation entered the synthesis. A conclusion is not ready for final materials until its expected truth/reality diff is closed or marked unknown, its claim node exists, and its independent-observation convergence status is supported or explicitly excepted.
 
-
 ## Research phases
 
 Read [research setup](references/research-setup.md) in full before Phase 0 and follow its phases in order.
 
 Read [collection](references/collection.md) in full before the saturation wave and follow its phases in order.
 
-When a converted text is produced, run `node "$SKILL_DIR/scripts/report-tools.mjs" source probe-conversion <raw-file> <converted-file>`. A non-empty `altered` list means use the raw snapshot for every number; `lost` is a warning only.
+`source snapshot --html` and `--url` probe their own conversion and print the numbers it altered (a footnote digit glued onto a value, a merged table cell); `fact add` then refuses those numbers with `conversion_altered_number`, so re-snapshot a verified text of that source with `--text` and add the fact from it. When you convert a document yourself, run `node "$SKILL_DIR/scripts/report-tools.mjs" source probe-conversion <raw-file> <converted-file>` and re-snapshot with `--text` before adding any number it lists as `altered`; `lost` is a warning only.
 
 ### X / social collection
 

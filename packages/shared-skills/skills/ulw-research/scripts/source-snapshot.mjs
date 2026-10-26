@@ -139,6 +139,7 @@ function checkInput(sourceId, input) {
 	if (typeof (input.url ?? input.path) !== "string") throw new TypeError("writeSnapshot needs a url or a path")
 	if (input.kind !== undefined && !KINDS.has(input.kind)) throw new TypeError(`kind must be page, command, or document, got ${input.kind}`)
 	if (input.provenance !== undefined && !PROVENANCE.has(input.provenance)) throw new TypeError(`provenance must be primary, secondary, or unknown, got ${input.provenance}`)
+	if (input.observed_at !== undefined && (typeof input.observed_at !== "string" || Number.isNaN(new Date(input.observed_at).getTime()))) throw new TypeError(`observed_at must be an ISO timestamp, got ${input.observed_at}`)
 }
 
 /**
@@ -170,16 +171,18 @@ export function writeSnapshot(sourcesDir, sourceId, input) {
 		provenance: input.provenance ?? "unknown",
 	}
 	writeFileSync(join(dir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`)
+	let altered = null
 	if (typeof input.html === "string") {
-		const { altered, ...counts } = probeConversion(input.html, text)
+		const { altered: changed, ...counts } = probeConversion(input.html, text)
+		altered = changed
 		writeFidelityRecord(join(dir, "conversion.json"), "source_conversion", {
 			artifact_sha256: sha256Of(input.html), report: join(dir, "source.html"), defects: [],
-			conversion_altered_numbers: altered, ...counts,
+			conversion_altered_numbers: changed, ...counts,
 		}, new Date(meta.observed_at))
 	}
 	const sentences = indexSentences(text, sourceId)
 	writeFileSync(join(dir, "sentences.jsonl"), sentences.map((row) => `${JSON.stringify(row)}\n`).join(""))
 	const acronyms = { schemaVersion: 1, source_id: sourceId, snapshot_sha256: sha256, entries: findAcronyms(text, sentences) }
 	writeFileSync(join(dir, "acronyms.json"), `${JSON.stringify(acronyms, null, 2)}\n`)
-	return { dir, sha256 }
+	return { dir, sha256, altered }
 }
