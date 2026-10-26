@@ -26,7 +26,6 @@ export function attachStarted(
   } else if (result.status === "running") {
     transition(context, nodeId, "running", result.reused ? { kind: "resumed" } : { kind: "started" })
   }
-  context.attachedTaskIds.set(nodeId, result.task_id)
   attachTaskSettlement(context, nodeId, result.task_id)
 }
 
@@ -58,6 +57,14 @@ export function disposePromotionWatch(context: SchedulerContext, nodeId: DagNode
 }
 
 export function attachTaskSettlement(context: SchedulerContext, nodeId: DagNodeId, taskId: string): AttachedTask {
+  context.attachedTaskIds.set(nodeId, taskId)
+  const snapshot = context.journal.snapshot()
+  const node = nodeById(snapshot, nodeId)
+  for (const diagnostic of snapshot.diagnostics) {
+    if (diagnostic.kind === "node_flag" && diagnostic.invalidatedBy !== undefined && node.dependsOn.includes(diagnostic.nodeId)) {
+      flagConsumedDependents(context, diagnostic.nodeId, diagnostic.invalidatedBy)
+    }
+  }
   // Subscribe before waitFor can resolve: admission can yield while the completed child resumes.
   watchSelfResume(context, nodeId, taskId)
   const folded = deferredSignal()
@@ -81,7 +88,6 @@ export async function watchRevivedInScheduler(
   nodeId: DagNodeId,
   taskId: string,
 ): Promise<void> {
-  context.attachedTaskIds.set(nodeId, taskId)
   const task = attachTaskSettlement(context, nodeId, taskId)
   await task.folded
 }
@@ -147,7 +153,6 @@ function watchSelfResume(context: SchedulerContext, nodeId: DagNodeId, taskId: s
     if (node.state !== "completed") return
     disposeSelfResumeWatch(context, nodeId)
     transition(context, nodeId, "running", { kind: "resumed" })
-    context.attachedTaskIds.set(nodeId, taskId)
     attachTaskSettlement(context, nodeId, taskId)
   })
   if (unsubscribe !== undefined) context.selfResumeWatches.set(nodeId, unsubscribe)
@@ -182,20 +187,25 @@ function foldTaskOutcome(context: SchedulerContext, nodeId: DagNodeId, task: Tas
   if (!selfResumed) context.infrastructureRetries.retry(nodeId, task)
 }
 
-function flagConsumedDependents(context: SchedulerContext, nodeId: DagNodeId): void {
-  const nodes = context.journal.snapshot().nodes
+function flagConsumedDependents(context: SchedulerContext, nodeId: DagNodeId, invalidatedBy = nodeId): void {
+  const { nodes, diagnostics } = context.journal.snapshot()
+  const flagged = new Set(diagnostics
+    .filter((entry) => entry.kind === "node_flag" && entry.invalidatedBy !== undefined)
+    .map((entry) => entry.nodeId))
   const invalidated = new Set([nodeId])
   for (const dependencyId of invalidated) {
     for (const node of nodes) {
       if (invalidated.has(node.id) || !node.dependsOn.includes(dependencyId)) continue
       if (node.state === "pending" || node.state === "blocked" || node.state === "skipped") continue
       invalidated.add(node.id)
+      if (flagged.has(node.id)) continue
       context.journal.append({
         type: "dag.diagnostic.added",
         diagnostic: {
           kind: "node_flag",
           nodeId: node.id,
-          message: `input from ${nodeId} was invalidated by its resumed failure; this node keeps its earlier outcome`,
+          invalidatedBy,
+          message: `input from ${invalidatedBy} was invalidated by its resumed failure; this node retains its own outcome`,
           at: new Date(context.now()).toISOString(),
         },
       })

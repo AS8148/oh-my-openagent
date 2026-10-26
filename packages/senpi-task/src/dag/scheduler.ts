@@ -168,7 +168,6 @@ export function createDagScheduler(options: DagSchedulerOptions): DagScheduler {
     if (status === "completed" || status === "failed" || status === "cancelled") unsubscribeCommits()
   })
   for (const [nodeId, taskId] of options.preAttachedTasks ?? []) {
-    context.attachedTaskIds.set(nodeId, taskId)
     attachTaskSettlement(context, nodeId, taskId)
   }
 

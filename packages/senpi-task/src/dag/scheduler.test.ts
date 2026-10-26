@@ -690,6 +690,101 @@ describe("DAG scheduler execution mode dispatch", () => {
 })
 
 describe("DAG scheduler self-resumed node child (omo#10487)", () => {
+  test("#given a child resumes before the fold #when the run cancels after reattachment #then the resumed child is cancelled too", async () => {
+    const admissionEntered = deferred<void>()
+    const releaseAdmission = deferred<void>()
+    const reattached = deferred<void>()
+    let aWaits = 0
+    const manager = new class extends FakeTaskManager {
+      override waitFor(taskId: string): Promise<TaskRecord> {
+        const result = super.waitFor(taskId)
+        if (this.get(taskId)?.name === "A" && ++aWaits === 2) reattached.resolve()
+        return result
+      }
+    }({
+      autoComplete: false,
+      startGate: async (nodeId) => {
+        if (nodeId !== "B") return
+        admissionEntered.resolve()
+        await releaseAdmission.promise
+      },
+    })
+    const { scheduler } = schedulerFixture(
+      definition([node("A"), node("D"), node("B", ["D"])]), manager,
+    )
+    const running = scheduler.run()
+    await within(manager.whenStarted("A"))
+    await within(manager.whenStarted("D"))
+    manager.complete("D")
+    await within(admissionEntered.promise)
+
+    manager.complete("A")
+    manager.selfResume("A")
+    releaseAdmission.resolve()
+    await within(reattached.promise)
+    await within(scheduler.cancel(runId))
+    const result = await within(running, 5_000)
+
+    expect(result.status).toBe("cancelled")
+    expect(result.nodes.find((entry) => entry.id === "A")?.state).toBe("cancelled")
+    expect(manager.cancellations).toContain("A")
+    expect(manager.findOwnedTask({ kind: "dag", runId, nodeId: "A" as DagNodeId })?.status).toBe("cancelled")
+    expect(manager.selfResumedListenerCount()).toBe(0)
+  })
+
+  for (const state of ["pending", "blocked"] as const) {
+    test(`#given ${state} descendants of a flagged node #when admitted later #then invalidation propagates once through each generation`, async () => {
+      const manager = new FakeTaskManager({ autoComplete: false })
+      const store = createDagFileStore({ project_dir: tempProject() })
+      const initial = recordFor(definition([
+        node("A"), node("D"), node("B", ["A"]), node("C", ["B", "D"]),
+        node("E", ["C"]), node("skipped", ["A", "D"]), node("independent", ["D"]),
+      ]))
+      const initialRecord = {
+        ...initial,
+        nodes: initial.nodes.map((entry) => entry.id === "C" || entry.id === "E" ? { ...entry, state } : entry),
+        diagnostics: [
+          { kind: "node_flag" as const, nodeId: "D" as DagNodeId, message: "unrelated diagnostic", at: initial.createdAt },
+        ],
+      }
+      store.writeCheckpoint(runId, initialRecord)
+      const scheduler = createDagScheduler({ store, taskManager: manager, initialRecord })
+      const aFailed = deferred<void>()
+      scheduler.subscribe((event) => {
+        if (event.type === "dag.node.transitioned" && event.nodeId === "A" && event.to === "failed") aFailed.resolve()
+      })
+      const flags = () => scheduler.snapshot().diagnostics
+        .filter((entry) => entry.kind === "node_flag").map((entry) => String(entry.nodeId))
+      const running = scheduler.run()
+      await within(manager.whenStarted("A"))
+      await within(manager.whenStarted("D"))
+      manager.complete("A")
+      await within(manager.whenStarted("B"))
+      manager.selfResume("A")
+      manager.complete("A", "error")
+      await within(aFailed.promise)
+      expect(flags()).toEqual(["D", "B"])
+      expect(scheduler.snapshot().nodes.find((entry) => entry.id === "C")?.state).toBe(state)
+
+      manager.complete("B")
+      manager.complete("D")
+      await within(manager.whenStarted("C"))
+      await within(manager.whenStarted("independent"))
+      manager.complete("C")
+      manager.complete("independent")
+      await within(manager.whenStarted("E"))
+      manager.complete("E")
+      const result = await within(running, 5_000)
+
+      expect(result.status).toBe("failed")
+      expect(result.nodes.find((entry) => entry.id === "skipped")?.state).toBe("skipped")
+      expect(flags()).toEqual(["D", "B", "C", "E"])
+      expect(result.diagnostics.filter((entry) => entry.kind === "node_flag" && entry.invalidatedBy !== undefined))
+        .toEqual(["B", "C", "E"].map((nodeId) => expect.objectContaining({ nodeId, invalidatedBy: "A" })))
+      expect(manager.starts).not.toContain("skipped")
+    })
+  }
+
   test("#given a terminal wait resolved during admission #when the child resumes before the fold #then its resumed failure is folded instead of the stale completion", async () => {
     const admissionEntered = deferred<void>()
     const releaseAdmission = deferred<void>()
