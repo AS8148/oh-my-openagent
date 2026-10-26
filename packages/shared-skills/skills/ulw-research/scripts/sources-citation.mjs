@@ -1,66 +1,91 @@
 // sources-citation.mjs - the one Sources predicate shared by the static, trace, and claim gates.
 //
-// Under a Sources heading an element is split at <br>/block breaks and at sentence ends. A segment
-// is decided by the TYPE of its numbers and the SHAPE of its line, not by a verb list. Citation
-// fields are removed first: URLs, DOIs, arXiv ids, citation tags, quoted titles ("...", \u201C...\u201D,
-// \u300C...\u300D), and a title segment that sits between a citation lead and a URL or date. What is
-// left is a claim when it holds a MEASURE number (percent, a currency symbol or code, a magnitude
-// word, a unit or Korean counter, or a non-year decimal), a first-person cue from CLAIM_KINDS, or a
-// claim verb next to a non-year number. Years, dates, pages, volume and issue numbers stay exempt.
-// Pure; sibling imports only. Korean phrases are \u escapes.
-
-import { unmarkedKinds } from "./claim-kinds.mjs"
+// Under a Sources heading an element is split at <br>/block breaks and at sentence ends, and every
+// sentence holding a numeral is checked exactly as under any other heading, unless EVERY numeral in
+// it is a citation-field number. That is decided by the number's type and position only: a year
+// (1900-2099) or a full date; a page, volume, issue, number, or edition marker; a number inside a
+// URL, DOI, arXiv id, ISBN or ISSN; a number inside a quoted title ("...", \u201C...\u201D, \u300C...\u300D,
+// \u300E...\u300F, <cite>) or an <i>/<em> title directly before a URL or a date; or a citation tag's
+// digits. There is no word list: any other numeral makes the sentence a claim. Pure; no imports.
+// Korean markers are \u escapes.
 
 const SKIP = new Set(["script", "style", "template"])
 const BREAK = new Set(["br", "p", "li", "div", "tr", "dd", "dt"])
 // Abbreviations whose period never ends a citation sentence: pp., p., vol., no., ed., eds., et al., J. (initials).
 const NOT_END = /(?:\b(?:pp?|vol|vols|no|nos|ed|eds|al|ch|sec|fig|vs|e\.g|i\.e|[A-Z])\.)$/i
-// Claim verbs: an extra trigger beside a non-year number, never the only test.
-const EN_PREDICATE = /\b(?:rose|rises|risen|fell|falls|fallen|grew|grows|grown|increased|decreased|declined|dropped|doubled|tripled|halved|reached|says|said|stated|reported|showed|found|estimated|according\s+to)\b/i
-// jeungga-haet, gamso-haet, sangseung-haet, harak-haet, neul-eot, jul-eot, dal-haet, chaji-haet, seongjang-haet, balk-hyeot, ttareumyeon.
-const KO_PREDICATE = /\uC99D\uAC00\uD588|\uAC10\uC18C\uD588|\uC0C1\uC2B9\uD588|\uD558\uB77D\uD588|\uB298\uC5C8|\uC904\uC5C8|\uB2EC\uD588|\uCC28\uC9C0\uD588|\uC131\uC7A5\uD588|\uBC1D\uD614|\uB530\uB974\uBA74/
-/** Citation fields: URLs, DOIs, arXiv ids, citation tags, quoted titles. */
-const FIELDS = [/https?:\/\/\S+/gi, /\b10\.\d{4,9}\/\S+/g, /\b\d{4}\.\d{4,5}(?:v\d+)?\b/g, /\[(?:S|Source\s*)?\^?\d+\]/gi, /"[^"]*"/g, /\u201C[^\u201D]*\u201D/g, /\u300C[^\u300D]*\u300D/g]
-const DATE = /\b(?:19|20)\d{2}(?:[-./]\d{1,2}(?:[-./]\d{1,2})?)?\b/
-// Korean: percent (peosenteu), currency won/dollar/euro/yen, counters myeong/geon/gae/bae, scales cheon/man/eok/jo.
-const MEASURE = [
-	/\d\s?(?:%|\u2030|\uD37C\uC13C\uD2B8)/,
-	/[$\u20AC\u00A3\u00A5\u20A9]\s?\d/,
-	/\b(?:USD|KRW|EUR|JPY|GBP|CNY)\s?\d|\d\s?(?:USD|KRW|EUR|JPY|GBP|CNY|dollars?|won|euros?|yen)\b/i,
-	/\d\s?(?:thousand|million|billion|trillion|bn)\b|\d(?:k|K|M|B)\b/,
-	/\d\s?(?:\uC6D0|\uB2EC\uB7EC|\uC720\uB85C|\uC5D4|\uBA85|\uAC74|\uAC1C(?!\uC6D4)|\uBC30|[\uCC9C\uB9CC\uC5B5\uC870](?!\s?[\uB144\uC6D4]))/,
-	/\d\s?(?:km|kg|mm|cm|ms|kWh|MWh|GWh|KB|MB|GB|TB|meters?|metres?|kilometers?|tons?|tonnes?|hours?|minutes?|seconds?|days?|users?|people|employees|customers?)\b/,
-	/(?<![\d.,])(?!(?:19|20)\d{2}\.)\d+\.\d+(?![\d.])/,
+const FACT = "\u0000"
+const LINK = "\u0002"
+const [CITE_OPEN, CITE_CLOSE, EM_OPEN, EM_CLOSE] = ["\u0003", "\u0004", "\u0005", "\u0006"]
+const MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\b\\.?"
+const YEAR = "(?:19|20)\\d{2}"
+const URL = `(?:https?://|www\\.)[^\\s<>"${LINK}]+?(?=[.,;:)\\]]?(?:\\s|$))`
+/** A date at the start of a string: ISO/dotted/slashed, month-name, or Korean nyeon-wol-il. */
+const DATE_AHEAD = new RegExp(`^(?:${YEAR}[-./]\\d{1,2}(?:[-./]\\d{1,2})?|\\d{1,2}[-./]\\d{1,2}[-./]${YEAR}|${MONTH}\\s+\\d{1,2},?\\s+${YEAR}|\\d{1,2}\\s+${MONTH}\\s+${YEAR}|${MONTH}\\s+${YEAR}|${YEAR}\\s*\\uB144|${YEAR}\\b)`, "i")
+/** Citation-field spans, by type and position. */
+const FIELDS = [
+	new RegExp(URL, "gi"),
+	/\b(?:doi:\s*)?10\.\d{4,9}\/[^\s<>"]+/gi,
+	/\b(?:arXiv:\s*)?\d{4}\.\d{4,5}(?:v\d+)?\b/gi,
+	/\bIS[BS]N(?:-1[03])?:?\s*[\dXx][\dXx\s-]{6,16}[\dXx]/g,
+	/\[(?:S|Source\s*)?\^?\d+\]/gi,
+	/"[^"]*"|\u201C[^\u201D]*\u201D|\u300C[^\u300D]*\u300D|\u300E[^\u300F]*\u300F/g,
+	new RegExp(`${CITE_OPEN}[^${CITE_CLOSE}]*${CITE_CLOSE}`, "g"),
+	new RegExp(`${YEAR}[-./]\\d{1,2}(?:[-./]\\d{1,2})?|\\d{1,2}[-./]\\d{1,2}[-./]${YEAR}`, "g"),
+	new RegExp(`\\b${MONTH}\\s+\\d{1,2}(?:st|nd|rd|th)?\\b(?:,?\\s+${YEAR})?|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH}`, "gi"),
+	/\d{1,2}\s*\uC6D4(?:\s*\d{1,2}\s*\uC77C)?/g,
+	new RegExp(`(?<![\\d.,])${YEAR}(?:\\s*[-\\u2013~]\\s*${YEAR})?(?![\\d]|[.,]\\d)`, "g"),
+	/\b(?:pp?|pg|pages?)\.?\s*\d+(?:\s*[-\u2013]\s*\d+)?/gi,
+	/\b(?:vols?|nos?|iss|ed)\.\s*\d+(?:\s*[-\u2013/]\s*\d+)*/gi,
+	/\b(?:Vol|Volume|No|Issue|Number|volume|issue)\s+\d+(?:\s*[-\u2013/]\s*\d+)*/g,
+	/\b\d+(?:st|nd|rd|th)\s+(?:ed\.|edition)|\bedition\s+\d+/gi,
+	/\uC81C?\s*\d+(?:\s*[-\u2013~]\s*\d+)?\s*(?:\uCABD|\uBA74|\uAD8C|\uD638|\uD310)/g,
 ]
+const NUMERAL = /\d+(?:[.,]\d+)*/g
 
 /** A fact element is bound by its ledger row, not traced here; it reads as one opaque token. */
 const isFact = (node) => node.attrs?.["data-fact"] !== undefined || node.attrs?.["data-translates"] !== undefined || node.tag === "q" || node.tag === "blockquote"
-const FACT_TOKEN = "\u0000"
-/** A link's text is its title, a citation field; the line keeps a marker that it carries a URL. */
-const LINK_TOKEN = "\u0002"
 
 function lines(node, out = [""]) {
 	for (const child of node.children ?? []) {
 		if (child.tag === "#text") out[out.length - 1] += child.text
 		else if (SKIP.has(child.tag)) continue
-		else if (isFact(child)) out[out.length - 1] += ` ${FACT_TOKEN} `
-		else if (child.tag === "a" && /^https?:\/\//i.test(child.attrs?.href ?? "")) out[out.length - 1] += ` ${LINK_TOKEN} `
-		else {
+		else if (isFact(child)) out[out.length - 1] += ` ${FACT} `
+		else if (child.tag === "cite" || child.tag === "i" || child.tag === "em") {
+			const [open, close] = child.tag === "cite" ? [CITE_OPEN, CITE_CLOSE] : [EM_OPEN, EM_CLOSE]
+			out[out.length - 1] += open
+			lines(child, out)
+			out[out.length - 1] += close
+		} else {
 			if (BREAK.has(child.tag)) out.push("")
 			lines(child, out)
+			if (child.tag === "a" && /^https?:\/\//i.test(child.attrs?.href ?? "")) out[out.length - 1] += ` ${LINK} `
 			if (BREAK.has(child.tag)) out.push("")
 		}
 	}
 	return out
 }
 
-/** Sentences of one line; a period after an abbreviation, an initial, or inside a number never ends one. */
+/** Spans [start, end) of the citation fields in `text`; an <i>/<em> run is a title only right before a URL, a link, or a date. */
+function fieldSpans(text) {
+	const spans = []
+	for (const re of FIELDS) for (const match of text.matchAll(re)) spans.push([match.index, match.index + match[0].length])
+	for (const match of text.matchAll(new RegExp(`${EM_OPEN}[^${EM_CLOSE}]*${EM_CLOSE}`, "g"))) {
+		const after = text.slice(match.index + match[0].length).replace(/^[\s,.:;()\u2013-]*/, "")
+		if (after.startsWith(LINK) || /^(?:https?:\/\/|www\.)/i.test(after) || DATE_AHEAD.test(after)) spans.push([match.index, match.index + match[0].length])
+	}
+	return spans
+}
+
+const inside = (spans, start, end) => spans.some(([s, e]) => start >= s && end <= e)
+
+/** Sentences of one line; a period after an abbreviation, an initial, or inside a field never ends one. */
 function sentences(line) {
+	const spans = fieldSpans(line)
 	const out = []
 	let start = 0
 	for (const match of line.matchAll(/[.!?](?=\s+\S|$)/g)) {
 		const end = match.index + 1
-		if (NOT_END.test(line.slice(start, end))) continue
+		if (NOT_END.test(line.slice(start, end)) || inside(spans, match.index, end)) continue
 		out.push(line.slice(start, end))
 		start = end
 	}
@@ -68,32 +93,22 @@ function sentences(line) {
 	return out.map((text) => text.replace(/\s+/g, " ").trim()).filter(Boolean)
 }
 
-const stripFields = (text) => FIELDS.reduce((rest, re) => rest.replace(re, " "), text)
-const onlyCitation = (text) => new RegExp(`https?://|${LINK_TOKEN}|\\b(?:accessed|retrieved)\\b`, "i").test(text) || (DATE.test(text) && !/\d/.test(stripFields(text).replace(new RegExp(DATE.source, "g"), " ")))
-
-/** A segment reads as a claim, not a citation field. A tagged entry carrying a URL ("[S4] Title $5B: https://...") is a reference line. */
+/** The sentence holds a numeral that is not a citation-field number, so the gates check it. */
 export function isClaimSegment(text) {
-	if (unmarkedKinds(text).length > 0) return true
-	if (/^\s*\[(?:S|Source\s*)?\^?\d+\]/i.test(text) && new RegExp(`https?://|${LINK_TOKEN}`, "i").test(text)) return false
-	const rest = stripFields(text)
-	if (MEASURE.some((re) => re.test(rest))) return true
-	const nonYear = rest.replace(new RegExp(DATE.source, "g"), " ").replace(/\b(?:pp?|vol|no|issue|ch|sec)\.?\s*\d+(?:\s*[-\u2013/]\s*\d+)?/gi, " ")
-	return /\d/.test(nonYear) && (EN_PREDICATE.test(rest) || KO_PREDICATE.test(rest))
+	const spans = fieldSpans(text)
+	for (const match of text.matchAll(NUMERAL)) if (!inside(spans, match.index, match.index + match[0].length)) return true
+	return false
 }
 
-/** Claim segments of one line; a title between a citation lead and a URL or date is a citation field. */
-function lineClaims(line) {
-	const segments = sentences(line)
-	return segments.filter((segment, at) => !(at > 0 && at + 1 < segments.length && onlyCitation(segments[at + 1])) && isClaimSegment(segment)).map(stripFields)
-}
+const plain = (text) => text.replace(/[\u0002-\u0006]/g, " ").replace(/\s+/g, " ").trim()
+const lineClaims = (line) => sentences(line).filter(isClaimSegment).map(plain)
 
-/** The claim segments of an element under Sources ([] for a reference entry, a heading, or a citation cell). */
+/** The checked sentences of an element under Sources ([] when every numeral is a citation field). */
 export function sourcesClaims(node) {
-	if (/^h[1-6]$/.test(node.tag)) return []
 	return lines(node).flatMap(lineClaims)
 }
 
-/** The claim segments of loose text (a text node owned by a container element rather than a prose element). */
+/** The checked sentences of loose text (a text node owned by a container element rather than a prose element). */
 export function textClaims(text) {
 	return lines({ children: [{ tag: "#text", text }] }).flatMap(lineClaims)
 }
