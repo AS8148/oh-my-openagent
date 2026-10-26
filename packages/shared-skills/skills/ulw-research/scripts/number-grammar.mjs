@@ -1,6 +1,8 @@
 // number-grammar.mjs - the one grouped-number grammar. A grouped number is a 1-3 digit leading
 // group, then one or more 3-digit groups joined by ONE separator type, with no digit right after the
-// last group, then an optional decimal part. "12,3451" is therefore not "12,345" plus "1". Shared by
+// last group, then an optional decimal part. "12,3451" is therefore not "12,345" plus "1". A period
+// groups only when the reading is unambiguous: two or more period groups ("1.234.567") or one group
+// before a decimal comma ("1.234,5"); a lone "1.234" is a decimal, as numerals.mjs reads it. Shared by
 // numerals.mjs (comma grouping), the conversion probe (every separator), the value-mode unit check,
 // and the converted-half display check. Pure; no imports.
 
@@ -12,7 +14,9 @@ const decimalAfter = (sep) => (sep === "," ? "\\." : sep === "." ? "," : "[.,]")
 
 /** Regex source of one grouped number using any of `separators` (one type per number); no flags needed. */
 export function groupedNumberSource(separators = GROUP_SEPARATORS) {
-	const one = (sep) => `\\d{1,3}(?:${literal(sep)}\\d{3}(?!\\d))+(?:${decimalAfter(sep)}\\d+)?`
+	const one = (sep) => sep === "."
+		? "\\d{1,3}(?:(?:\\.\\d{3}(?!\\d)){2,}(?:,\\d+)?|\\.\\d{3}(?!\\d),\\d+)"
+		: `\\d{1,3}(?:${literal(sep)}\\d{3}(?!\\d))+(?:${decimalAfter(sep)}\\d+)?`
 	return `(?<!\\d)(?:${separators.map(one).join("|")})`
 }
 
