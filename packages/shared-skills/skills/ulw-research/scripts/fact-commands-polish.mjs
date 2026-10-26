@@ -6,7 +6,8 @@
 // rejected (major) or unlocated (minor) edit leaves its region unchanged and is listed with its
 // index and reason so the orchestrator can re-send it; every rejection reason is printed verbatim, one
 // line per rejected edit (index and the first 60 characters of its before), in the summary and in
-// data.rejected_reasons. It exits 0 whenever it wrote the output.
+// data.rejected_reasons. It exits 0 whenever it wrote the output; json.applied is false when
+// any edit was rejected or unlocated, independently of data.applied's accepted-edit count.
 // polish-apply never rewrites a fill map: it checks that the edition's map (fillMapOf) records the
 // input's bytes, refusing otherwise, and writes `<out>.polished.fill-map.json` beside the output
 // (artifact = the polished file, its hash, and polishedFrom = the fill map's path and sha256).
@@ -87,7 +88,7 @@ function runPolishApply(args) {
 	const data = { out: resolve(flags.out), ...counts, applied_indexes: result.applied, input_sha256: sha256Of(html), edits_sha256: sha256Of(editsText), out_sha256: sha256Of(result.out) }
 	const rejected_reasons = result.rejected.map((entry) => rejectionLine(entry, edits[entry.index]))
 	const summary = [`fact polish-apply: ${counts.applied} applied, ${counts.rejected} rejected, ${counts.unlocated} unlocated of ${edits.length} edit(s)`, ...rejected_reasons].join("\n")
-	return { json: { command: "fact polish-apply", status: "pass", exitCode: 0, defects, data: { ...data, rejected_reasons } }, summary, exitCode: 0 }
+	return { json: { command: "fact polish-apply", status: "pass", exitCode: 0, applied: counts.rejected === 0 && counts.unlocated === 0, defects, data: { ...data, rejected_reasons } }, summary, exitCode: 0 }
 }
 
 function runPolishDiff(args) {
