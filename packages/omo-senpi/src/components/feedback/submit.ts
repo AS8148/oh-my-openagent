@@ -19,12 +19,54 @@ export interface ReportClient {
 
 export type ReportTransport = (url: string, init: RequestInit) => Promise<Response>
 
+/**
+ * The service's closed error-code list (`ERROR_CODES` in the service contract's errors.ts), each with the refusal it
+ * means for a report. `unavailable` is never one of them: it is a send that got no answer from the service.
+ */
+const SERVICE_REFUSALS = {
+  secret_detected: "secret-detected",
+  rate_limited: "rate-limited",
+  unauthorized: "sign-in-required",
+  forbidden: "sign-in-required",
+  reauth_required: "sign-in-required",
+  device_revoked: "sign-in-required",
+  writer_floor_mismatch: "sign-in-required",
+  account_deleted: "sign-in-required",
+  anonymous_closed: "sign-in-required",
+  invalid_request: "service-rejected",
+  not_found: "service-rejected",
+  method_not_allowed: "service-rejected",
+  conflict: "service-rejected",
+  stale_base: "service-rejected",
+  quota_exceeded: "service-rejected",
+  entitlement_required: "service-rejected",
+  client_update_required: "service-rejected",
+  update_required: "service-rejected",
+  client_upgrade_required: "service-rejected",
+  unsupported_version: "service-rejected",
+  export_expired: "service-rejected",
+  step_up_required: "service-rejected",
+  access_not_open: "service-rejected",
+  not_available: "service-unavailable",
+  not_configured: "service-unavailable",
+  service_upgrade_required: "service-unavailable",
+  internal: "service-unavailable",
+} as const satisfies Record<string, "secret-detected" | "rate-limited" | "sign-in-required" | "service-rejected" | "service-unavailable">
+
+export type ServiceErrorCode = keyof typeof SERVICE_REFUSALS
+
 export type SubmitResult =
   | { readonly kind: "sent"; readonly reportId: string }
   | { readonly kind: "saved"; readonly path: string }
   | { readonly kind: "already-sent" }
   | { readonly kind: "refused"; readonly reason: "secret-detected" | "too-large" | "rate-limited" | "sign-in-required" | "unavailable" }
-  | { readonly kind: "refused"; readonly reason: "service-rejected"; readonly code: string; readonly requestId?: string }
+  | {
+      readonly kind: "refused"
+      readonly reason: "service-rejected" | "service-unavailable"
+      /** `unknown` when the answer carried no code the contract knows (a proxy's page, or a newer service). */
+      readonly code: ServiceErrorCode | "unknown"
+      readonly requestId?: string
+    }
 
 export interface SubmitOptions {
   readonly draft: FeedbackDraft
@@ -88,17 +130,18 @@ const rememberDeleteToken = (stateDir: string, entry: SentEntry): void => {
 }
 
 const refusalFor = (status: number, code: unknown, requestId: unknown, redact: UploadRedactor): SubmitResult => {
+  const request = typeof requestId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(requestId) && redact(requestId).count === 0 ? { requestId } : {}
+  if (typeof code === "string" && Object.hasOwn(SERVICE_REFUSALS, code)) {
+    const known = code as ServiceErrorCode
+    const reason = SERVICE_REFUSALS[known]
+    return reason === "service-rejected" || reason === "service-unavailable"
+      ? { kind: "refused", reason, code: known, ...request }
+      : { kind: "refused", reason }
+  }
   if (status === 401 || status === 403) return { kind: "refused", reason: "sign-in-required" }
-  if (code === "secret_detected") return { kind: "refused", reason: "secret-detected" }
   if (status === 413) return { kind: "refused", reason: "too-large" }
   if (status === 429) return { kind: "refused", reason: "rate-limited" }
-  if (status === 400 || status === 426) return {
-    kind: "refused",
-    reason: "service-rejected",
-    code: code === "invalid_request" || code === "client_update_required" ? code : "unknown",
-    ...(typeof requestId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(requestId) && redact(requestId).count === 0 ? { requestId } : {}),
-  }
-  return { kind: "refused", reason: "unavailable" }
+  return { kind: "refused", reason: status >= 500 ? "service-unavailable" : "service-rejected", code: "unknown", ...request }
 }
 
 /**

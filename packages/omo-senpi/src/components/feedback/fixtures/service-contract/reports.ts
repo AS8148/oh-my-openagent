@@ -86,7 +86,11 @@ export type CreateReportRequest = {
   /** The client redactor's version; one older than the service's minimum is refused (426). */
   readonly redactorVersion: string;
   readonly client: ReportClient;
-  /** The telemetry install hash and session hash, sent only with telemetry consent. */
+  /**
+   * The telemetry install hash and session hash, sent only with telemetry consent. The service keeps
+   * the install hash only with a signed-out report; a signed-in one drops it, so it never sits next
+   * to an account (#487).
+   */
   readonly installHash?: string;
   readonly sessionHash?: string;
   readonly title: string;

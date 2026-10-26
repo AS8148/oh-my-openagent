@@ -17,7 +17,7 @@ async function cliAccessToken(api: string, env: Readonly<Record<string, string |
   if (feedbackUploadsDisabled(env)) return null
   let credentials: CredentialStore
   try {
-    credentials = store ?? createCredentialStore(api, undefined, undefined, undefined, quietNotice)
+    credentials = store ?? createCredentialStore(api, { notice: quietNotice })
     if (await credentials.read() === null) return null
   } catch (error) {
     if (error instanceof SignInError) return null
@@ -203,7 +203,7 @@ export function createFeedbackCore(config: FeedbackCoreConfig): FeedbackCore {
       ...(stored.sessionHash === undefined ? {} : { sessionHash: stored.sessionHash }),
       ...(typeof idempotencyKey === "string" ? { idempotencyKey } : {}),
     })
-    if (result.kind === "refused" && result.reason === "service-rejected") config.logger?.warn("feedback.report_rejected", { code: result.code, requestId: result.requestId })
+    if (result.kind === "refused" && (result.reason === "service-rejected" || result.reason === "service-unavailable")) config.logger?.warn("feedback.report_rejected", { code: result.code, requestId: result.requestId })
     if (result.kind !== "refused" || result.reason === "secret-detected" || result.reason === "too-large") drafts.delete(stored.draft.draftId)
     return result
   }
@@ -288,9 +288,11 @@ export function resultMessage(result: SubmitResult): string {
     case "already-sent":
       return "Your earlier report already reached the OmO team, so it was not sent again."
     case "refused":
-      if (result.reason === "service-rejected") {
+      if (result.reason === "service-rejected" || result.reason === "service-unavailable") {
         const request = result.requestId === undefined ? "" : ` Request ID: ${result.requestId}.`
-        return `The report was rejected by the service (${result.code}).${request} Update OmO and try again.`
+        return result.reason === "service-rejected"
+          ? `The report was rejected by the service (${result.code}).${request} Update OmO and try again.`
+          : `The OmO service could not take the report right now (${result.code}).${request} Try again later.`
       }
       return {
         "sign-in-required": "Sign in to send a report: run omo login",

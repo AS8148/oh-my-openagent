@@ -327,7 +327,7 @@ describe("feedback component", () => {
     const first = await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: draft.draftId, description: "x" })
     const second = await handlers.get(FEEDBACK_SUBMIT_RPC_METHOD)?.({ draftId: draft.draftId, description: "x" })
 
-    expect(first).toEqual({ kind: "refused", reason: "unavailable" })
+    expect(first).toEqual({ kind: "refused", reason: "service-unavailable", code: "unknown" })
     expect(second).toEqual({ kind: "sent", reportId: "rpt_retry" })
   })
 
