@@ -40,7 +40,9 @@ test("OTLP uses the runtime ingest key and base endpoint and emits pinned protob
     expect(posted).toHaveLength(1)
     expect(posted[0]?.key).toBe("runtime-test-key")
     expect(posted[0]?.url).toBe(`${server.url.origin}/v1/logs`)
-    const records = await inspectOtlpRequest("logs", posted[0]!.body)
+    const first = posted[0]
+    if (first === undefined) throw new Error("expected one OTLP request, none was posted")
+    const records = await inspectOtlpRequest("logs", first.body)
     expect(records.logs).toHaveLength(1)
     expect(records.logs[0]).toMatchObject({
       eventName: "omo.turn_completed",

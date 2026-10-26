@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
@@ -30,7 +33,7 @@ try {
   const { createSenpiTelemetryTransportFactory, createSenpiOtlpTransport } = await import("./src/components/telemetry/otlp.ts")
   const env = {
     OMO_TELEMETRY_INGEST_KEY: ${JSON.stringify(mode === "no-key" ? "" : "synthetic-test-key")},
-    OMO_CODING_AGENT_DIR: process.env.TMPDIR, OMO_TELEMETRY_ENDPOINT: "http://127.0.0.1",
+    OMO_CODING_AGENT_DIR: process.env.HOME, OMO_TELEMETRY_ENDPOINT: "http://127.0.0.1",
   }
   const input = { env, consent: () => true, diagnostics: value => diagnostics.push(value.event) }
   const transport = createSenpiTelemetryTransportFactory(input)("synthetic-posthog-key", {
@@ -50,15 +53,26 @@ try {
 } catch (value) { error = String(value) }
 console.log(JSON.stringify({ resolved, captured, diagnostics, error }))
 `
-    const child = Bun.spawn([process.execPath, "--eval", probe], {
-      cwd: packageRoot,
-      env: { PATH: process.env.PATH, HOME: process.env.TMPDIR, TMPDIR: process.env.TMPDIR, OMO_TELEMETRY_INGEST_KEY: "" },
-      stdout: "pipe", stderr: "pipe", timeout: 30_000,
-    })
-    const stdout = new Response(child.stdout).text()
-    const stderr = new Response(child.stderr).text()
-    expect(await child.exited, await stderr).toBe(0)
-    const result = JSON.parse(await stdout)
+    // The child's HOME and agent dir live in a private directory removed below: a macOS child process
+    // creates ~/Library under HOME, which must never land in the shared hermetic temp root (#9766).
+    const home = mkdtempSync(join(tmpdir(), "omo-otlp-sidecar-"))
+    let exitCode: number
+    let stdout: string
+    let stderr: string
+    try {
+      const child = Bun.spawn([process.execPath, "--eval", probe], {
+        cwd: packageRoot,
+        env: { PATH: process.env.PATH, HOME: home, TMPDIR: process.env.TMPDIR, OMO_TELEMETRY_INGEST_KEY: "" },
+        stdout: "pipe", stderr: "pipe", timeout: 30_000,
+      })
+      ;[exitCode, stdout, stderr] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      ])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+    expect(exitCode, stderr).toBe(0)
+    const result = JSON.parse(stdout)
     expect(result.error).toBeUndefined()
     expect(result.resolved).toBe(mode === "missing-chunk" ? 1 : 0)
     expect(result.captured).toEqual(mode === "unused" ? [] : ["daily_active"])

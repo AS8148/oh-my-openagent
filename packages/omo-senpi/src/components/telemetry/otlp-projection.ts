@@ -368,7 +368,8 @@ export const projectOtlpEvent: OtlpWireProjection = (event, properties) => {
     }
     const provider = properties["provider"]
     if (typeof provider === "string" && Object.hasOwn(PROVIDER_VALUES, provider)) {
-      attributes["gen_ai.provider.name"] = PROVIDER_VALUES[provider]!
+      const providerName = PROVIDER_VALUES[provider]
+      if (providerName !== undefined) attributes["gen_ai.provider.name"] = providerName
     }
   }
   return attributes
