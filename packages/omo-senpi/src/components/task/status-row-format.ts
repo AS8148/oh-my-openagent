@@ -1,4 +1,5 @@
 import {
+  activeParentModelFallback,
   buildLiveStatsTokens,
   recoveryPresentation,
   excerptRendererText,
@@ -65,6 +66,7 @@ function recordStatusTarget(record: TaskRecord): string {
     modelFallback: record.model_fallback,
     model: record.model,
     fallbackCount: record.fallback_attempts?.length,
+    parentModelFallback: activeParentModelFallback(record),
   }) ?? "task"
 }
 

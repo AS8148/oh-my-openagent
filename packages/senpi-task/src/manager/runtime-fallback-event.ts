@@ -1,6 +1,7 @@
 import type { EffectiveModelRecord, EffectiveModelSource, ResolvedModelRecord, TaskRecord } from "../state"
 import { type ManagedChildEvent } from "./child-handle"
 import { modelFailure, runtimeFallbackNotice } from "./model-fallback-facts"
+import { isParentModelRung } from "./parent-model-rung"
 
 export type ModelEventStore = {
   readonly load?: (taskId: string) => TaskRecord | null | undefined
@@ -117,12 +118,19 @@ function applyFallbackReverted(
   if (restored === undefined) return
   const { model_fallback: _reverted, model_failure: _failure, ...rest } = record
   store.replace({
-    ...rest,
+    ...withoutStaleParentFallback(rest, restored),
     model: restored.display,
     resolved_model: restored,
     effective_model: toEffectiveRecord(restored, "fallback-revert"),
     updated_at: new Date().toISOString(),
   })
+}
+
+// The "ran on the parent session's model" note holds only while the child is on that model (#10750).
+function withoutStaleParentFallback(record: TaskRecord, now: Pick<ResolvedModelRecord, "provider" | "model_id">): TaskRecord {
+  if (record.parent_model_fallback === undefined || isParentModelRung(record, now)) return record
+  const { parent_model_fallback: _stale, ...rest } = record
+  return rest
 }
 
 function applyModelChanged(
@@ -143,7 +151,7 @@ function applyModelChanged(
   const previous = record.effective_model
   const sameRoute = previous?.provider === model.provider && previous?.model_id === model.id
   store.replace({
-    ...record,
+    ...withoutStaleParentFallback(record, { provider: model.provider, model_id: model.id }),
     effective_model: {
       provider: model.provider,
       model_id: model.id,
