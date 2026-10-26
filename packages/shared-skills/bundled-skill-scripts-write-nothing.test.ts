@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, dirname, join, relative, sep } from "node:path"
+import { basename, dirname, join, relative, win32 } from "node:path"
 import { materializeFrontendRefs } from "./scripts/materialize-frontend-refs.mjs"
 import { createSkillSourceCopyFilter } from "./skill-source-filter.mjs"
 
@@ -39,12 +39,12 @@ function changedSince(before: Map<string, string>): string[] {
   return [...new Set([...before.keys(), ...after.keys()])].filter((key) => before.get(key) !== after.get(key)).sort()
 }
 
-function listTree(root: string): Map<string, string> {
+function listTree(root: string, relativePath = relative): Map<string, string> {
   const entries = new Map<string, string>()
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)
-      const key = relative(root, path).split(sep).join("/")
+      const key = relativePath(root, path).replaceAll("\\", "/")
       if (entry.isDirectory()) {
         entries.set(`${key}/`, "dir")
         walk(path)
@@ -59,10 +59,10 @@ function listTree(root: string): Map<string, string> {
 
 type PythonEntry = { cwd: string; argv: string[] }
 
-function moduleEntry(path: string, tree: Map<string, string>, root: string): PythonEntry | undefined {
+function moduleEntry(path: string, tree: Map<string, string>, root: string, relativePath: typeof relative): PythonEntry | undefined {
   const parts = [basename(path, ".py")]
   let dir = dirname(path)
-  while (tree.has(relative(root, join(dir, "__init__.py")).split(sep).join("/"))) {
+  while (tree.has(relativePath(root, join(dir, "__init__.py")).replaceAll("\\", "/"))) {
     parts.unshift(basename(dir))
     dir = dirname(dir)
   }
@@ -71,8 +71,8 @@ function moduleEntry(path: string, tree: Map<string, string>, root: string): Pyt
   return { cwd: dir, argv: ["-B", "-m", parts.join("."), "--help"] }
 }
 
-function loadsSiblingCode(path: string, tree: Map<string, string>, root: string): boolean {
-  const dir = relative(root, dirname(path)).split(sep).join("/")
+function loadsSiblingCode(path: string, tree: Map<string, string>, root: string, relativePath: typeof relative): boolean {
+  const dir = relativePath(root, dirname(path)).replaceAll("\\", "/")
   const source = readFileSync(path, "utf8")
   for (const match of source.matchAll(/^\s*(?:from|import)\s+(\w+)|run_module\(\s*["'](\w+)/gm)) {
     const name = match[1] ?? match[2] ?? ""
@@ -81,22 +81,51 @@ function loadsSiblingCode(path: string, tree: Map<string, string>, root: string)
   return false
 }
 
-function pythonEntries(root: string): PythonEntry[] {
-  const tree = listTree(root)
+function pythonEntries(root: string, relativePath = relative): PythonEntry[] {
+  const tree = listTree(root, relativePath)
   const found: PythonEntry[] = []
   for (const [key] of tree) {
     if (!key.endsWith(".py") || key.split("/").includes("tests")) continue
     const path = join(root, key)
     if (!/__name__\s*==\s*["']__main__["']/.test(readFileSync(path, "utf8")) && basename(path) !== "__main__.py") continue
     const skillDir = join(root, key.split("/")[0] ?? "")
-    const asModule = moduleEntry(path, tree, root)
+    const asModule = moduleEntry(path, tree, root, relativePath)
     if (asModule) found.push(asModule)
-    else if (loadsSiblingCode(path, tree, root)) found.push({ cwd: skillDir, argv: [relative(skillDir, path), "--help"] })
+    else if (loadsSiblingCode(path, tree, root, relativePath)) found.push({ cwd: skillDir, argv: [relativePath(skillDir, path).replaceAll("\\", "/"), "--help"] })
   }
   return found
 }
 
 describe("bundled skill scripts", () => {
+  test("#given Windows relative paths #when building script entries #then every recorded path uses forward slashes", () => {
+    // given
+    const root = join(workRoot, "entry fixtures")
+    const scripts = join(root, "fixture", "scripts")
+    const pkg = join(root, "fixture", "pkg")
+    mkdirSync(scripts, { recursive: true })
+    mkdirSync(pkg, { recursive: true })
+    writeFileSync(join(scripts, "helper.py"), "")
+    writeFileSync(join(scripts, "entry.py"), 'import helper\nif __name__ == "__main__": pass\n')
+    writeFileSync(join(scripts, "entry.sh"), "")
+    writeFileSync(join(scripts, "entry.mjs"), "")
+    writeFileSync(join(pkg, "__init__.py"), "")
+    writeFileSync(join(pkg, "__main__.py"), "")
+
+    // when
+    const tree = listTree(root, win32.relative)
+    const entries = pythonEntries(root, win32.relative)
+
+    // then
+    expect([...tree.keys()].sort()).toEqual([
+      "fixture/", "fixture/pkg/", "fixture/pkg/__init__.py", "fixture/pkg/__main__.py",
+      "fixture/scripts/", "fixture/scripts/entry.mjs", "fixture/scripts/entry.py", "fixture/scripts/entry.sh", "fixture/scripts/helper.py",
+    ])
+    expect(entries.sort((left, right) => left.argv.join(" ").localeCompare(right.argv.join(" ")))).toEqual([
+      { cwd: join(root, "fixture"), argv: ["-B", "-m", "pkg", "--help"] },
+      { cwd: join(root, "fixture"), argv: ["scripts/entry.py", "--help"] },
+    ])
+  })
+
   test("#given the test interpreter #when checked #then it meets the bundled scripts' Python 3.11 floor", async () => {
     const child = Bun.spawn([python, "-c", "import sys; print(sys.version_info >= (3, 11))"], { stdout: "pipe", stderr: "ignore" })
     expect((await new Response(child.stdout).text()).trim()).toBe("True")
