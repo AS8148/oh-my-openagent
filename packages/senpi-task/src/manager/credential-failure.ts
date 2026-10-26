@@ -1,5 +1,6 @@
 import type { ResolvedModelRecord, TaskRecord } from "../state"
 import { isParentModelRung } from "./parent-model-rung"
+import type { UsageLimitMemory } from "./usage-limit-memory"
 
 // A provider answer that no other model on the SAME provider can fix: the stored credential is
 // rejected (401, an invalid key, a lapsed subscription) or can no longer be refreshed. Every
@@ -105,27 +106,30 @@ function previousRungOnProvider(record: TaskRecord, provider: string): boolean {
  * The parent session's model (#10750) is only a remedy for a spent or signed-out rung, so any other failure walks
  * the category rungs alone.
  */
-export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: string): RuntimeFallbackCandidates {
+export function runtimeFallbackCandidates(record: TaskRecord, failureMessage: string, limits?: UsageLimitMemory): RuntimeFallbackCandidates {
   const unusable = usageLimitScope(failureMessage) !== undefined || isCredentialFailure(failureMessage, modelIdOf(record))
   const all = record.fallback_models ?? []
-  const fallbacks = all.filter((model) => unusable || !isParentModelRung(record, model))
+  // A rung whose account or family limit is already known spent is never re-probed (#11383).
+  const known = all.filter((model) => limits?.familySpent(model.provider, model.model_id) === true)
+  const fallbacks = all.filter((model) => !known.includes(model) && (unusable || !isParentModelRung(record, model)))
   const provider = providerOf(record)
   if (provider !== undefined && isCredentialFailure(failureMessage, modelIdOf(record))) {
     return {
       remaining: fallbacks.filter((model) => model.provider !== provider),
-      skipped: fallbacks.filter((model) => model.provider === provider),
+      skipped: [...known, ...fallbacks.filter((model) => model.provider === provider)],
     }
   }
   const limit = usageLimitScope(failureMessage)
-  if (limit === undefined) {
-    const retained = all.filter((model) => isParentModelRung(record, model))
-    return { remaining: fallbacks, skipped: [], ...(retained.length === 0 ? {} : { retained }) }
+  const accountSpent = provider !== undefined && limits?.accountSpent(provider) === true
+  if (limit === undefined && !accountSpent) {
+    const retained = all.filter((model) => !known.includes(model) && isParentModelRung(record, model))
+    return { remaining: fallbacks, skipped: known, ...(retained.length === 0 ? {} : { retained }) }
   }
-  if (limit === "model" || provider === undefined) return { remaining: fallbacks, skipped: [], limit }
-  if (limit === "ambiguous" && !previousRungOnProvider(record, provider)) return { remaining: fallbacks, skipped: [], limit }
+  if (limit === "model" || provider === undefined) return { remaining: fallbacks, skipped: known, ...(limit === undefined ? {} : { limit }) }
+  if (limit === "ambiguous" && !accountSpent && !previousRungOnProvider(record, provider)) return { remaining: fallbacks, skipped: known, limit }
   return {
     remaining: fallbacks.filter((model) => model.provider !== provider),
-    skipped: fallbacks.filter((model) => model.provider === provider),
+    skipped: [...known, ...fallbacks.filter((model) => model.provider === provider)],
     limit: "account",
   }
 }

@@ -19,7 +19,10 @@ export const QUOTA_ERROR =
   `403: {"message":"You've reached your usage limit for this billing cycle. Your limit resets 3:20am.",` +
   `"type":"access_terminated_error"}`
 
-export type Step = "quota" | "complete" | { readonly tool: string } | { readonly partialTool: string }
+// A limit whose wording names neither a model family nor the account (#11383).
+export const WEEKLY_LIMIT_ERROR = '{"type":"error","error":{"type":"rate_limit_error","message":"Weekly usage limit reached. Resets at 2099-10-29T04:27:07Z."}}'
+
+export type Step = "quota" | "weekly" | "complete" | "silent" | { readonly tool: string } | { readonly partialTool: string }
 
 export type ProviderCall = {
   readonly model: string
@@ -120,6 +123,9 @@ function answer(provider: string, model: string, step: Step) {
   }
   const toolCall = (name: string) => ({ type: "toolCall" as const, id: `call-${name}`, name, arguments: {} })
   if (step === "quota") return stream([], { ...base, content: [], stopReason: "error" as const, errorMessage: QUOTA_ERROR })
+  if (step === "weekly") return stream([], { ...base, content: [], stopReason: "error" as const, errorMessage: WEEKLY_LIMIT_ERROR })
+  // The provider accepted the call and never answers.
+  if (step === "silent") return { result: () => new Promise<never>(() => {}), [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }) }
   if (step === "complete") {
     return stream([], { ...base, content: [{ type: "text" as const, text: `${provider}/${model} completed` }], stopReason: "stop" as const })
   }

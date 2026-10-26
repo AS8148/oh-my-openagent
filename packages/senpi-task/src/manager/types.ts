@@ -292,6 +292,8 @@ export type TaskManagerOptions = {
   readonly config: OmoTaskSettings
   readonly cwd: string
   readonly now?: () => number
+  // How long the one same-provider rung an ambiguous usage limit hops onto may stay silent (#11383); default 60 s.
+  readonly limitProbeTimeoutMs?: number
   readonly scheduleExitConfirmation?: ExitConfirmationSchedule
   // Injected by lifecycle (todo 12). Steering-driven cancel delegates destruction here; defaults to
   // a no-op so the manager stays usable before lifecycle wiring lands.

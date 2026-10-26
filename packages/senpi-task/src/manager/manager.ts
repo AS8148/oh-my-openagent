@@ -22,6 +22,8 @@ import { discardManagedHandle, releaseOnDispose, releaseSupersededHandle, type M
 import { TaskConcurrency } from "./concurrency"
 import { failOwnedRun, launchRunOf, ownsRun } from "./launch-fence"
 import { chainAfterHop, runtimeFallbackCandidates } from "./credential-failure"
+import { createUsageLimitMemory, LIMIT_PROBE_TIMEOUT_MS, routeAroundSpentLimits } from "./usage-limit-memory"
+import { boundedProbeOutcome } from "./usage-limit-probe"
 import { createWorkpoolAdmission } from "./workpool-admission"
 import { withResidentStart } from "./resident-start"
 import { createWorkpoolEngine, type WorkpoolEngine } from "../workpool/engine"
@@ -184,6 +186,7 @@ class TaskManagerImpl implements TaskManager {
   readonly #cleanupOwners = new Map<string, ManagedChildHandle>()
   readonly #nativeFallbackExhaustions = new WeakSet<ManagedChildHandle>()
   readonly #failedTurns = new WeakMap<ManagedChildHandle, FailedTurn>()
+  readonly #limits = createUsageLimitMemory(() => this.#now())
   // Callers can subscribe before a queued task owns a handle. Each entry is attached exactly once
   // when #launch promotes it, and its returned cleanup owns both pending and live subscriptions.
   readonly #childSubscribers = new Map<string, Map<ManagedChildListener, () => void>>()
@@ -528,8 +531,15 @@ class TaskManagerImpl implements TaskManager {
     spec.admission?.bind(claimed.task_id)
     const admission = admitSpill(plan, this.#concurrency, claimed.task_id, claimed.notification.run_epoch)
     const routed = withParentModelRung(admission.plan, spec)
-    const effectivePlan = routed.plan
     const lease = admission.lease
+    const avoided = routeAroundSpentLimits(routed.plan, this.#limits)
+    if ("spent" in avoided) {
+      return this.#failSpawn({
+        claimed, registration, spec, executionMode, lease,
+        error_message: `${avoided.spent}\nEvery model in this task's fallback chain is behind a usage limit an earlier task already hit, so it was not started. Retry once the limit resets, or point this category at another provider or model in omo.json.`,
+      })
+    }
+    const effectivePlan = avoided.plan
     let finalRecord: TaskRecord
     let managedSpec: ManagedStartSpec
     let isolation: PreparedIsolation | undefined
@@ -1425,8 +1435,13 @@ class TaskManagerImpl implements TaskManager {
     }
 
     const record = this.#tryLoad(input.taskId)
-    const candidates = record == null ? undefined : runtimeFallbackCandidates(record, input.outcome.failure.message)
+    const route = record?.resolved_model
+    if (route !== undefined) this.#limits.settle(input.taskId, route.provider, route.model_id, input.outcome.failure.message)
+    const candidates = record == null ? undefined : runtimeFallbackCandidates(record, input.outcome.failure.message, this.#limits)
     const nextModel = candidates?.remaining[0]
+    if (candidates?.limit === "ambiguous" && nextModel?.provider === route?.provider && route !== undefined) {
+      this.#limits.beginProbe(input.taskId, route.provider, input.outcome.failure.message)
+    }
     const live = this.#live.get(input.taskId)
     const fallbackExhausted = record !== null
       && candidates !== undefined
@@ -1740,12 +1755,16 @@ class TaskManagerImpl implements TaskManager {
     this.#attachChildSubscribers(context.record.task_id, handle)
     this.#recordSpawnFacts(context.record.task_id, handle)
     void this.#isolation.stamp(context.record.task_id, handle)
-    this.#outcome.trackOutcome(
-      context.record.task_id,
-      handle,
-      context.model,
-      context.record.notification.run_epoch,
-    )
+    const taskId = context.record.task_id
+    const probe = this.#limits.probeOf(taskId)
+    this.#outcome.trackOutcome(taskId, handle, context.model, context.record.notification.run_epoch, probe === undefined ? undefined : {
+      turnId: `usage-limit-probe-${context.record.notification.run_epoch}`,
+      outcome: boundedProbeOutcome({
+        handle, probe, model: context.model,
+        timeoutMs: this.#options.limitProbeTimeoutMs ?? LIMIT_PROBE_TIMEOUT_MS,
+        onAnswered: () => this.#limits.endProbe(taskId),
+      }),
+    })
   }
 
   // A revived child is running again and SHOULD occupy a slot; re-acquire it and re-arm outcome

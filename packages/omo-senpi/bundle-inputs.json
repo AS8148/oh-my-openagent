@@ -1715,6 +1715,8 @@
     "packages/senpi-task/src/manager/start-failure.ts",
     "packages/senpi-task/src/manager/task-sequence.ts",
     "packages/senpi-task/src/manager/transcript-log.ts",
+    "packages/senpi-task/src/manager/usage-limit-memory.ts",
+    "packages/senpi-task/src/manager/usage-limit-probe.ts",
     "packages/senpi-task/src/manager/workpool-admission.ts",
     "packages/senpi-task/src/manager/workpool-process-launch.ts",
     "packages/senpi-task/src/manager/workpool-respawn.ts",
