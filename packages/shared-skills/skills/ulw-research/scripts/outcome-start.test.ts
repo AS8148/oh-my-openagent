@@ -79,6 +79,14 @@ describe("a recorded run clock is validated, never trusted raw", () => {
 		})
 	}
 
+	test("#given a valid manifest copied from another session into an unstamped dir #when init runs #then its clock is not reused", () => {
+		const dir = directory()
+		writeFileSync(join(dir, "outcome.json"), JSON.stringify({ ...sampleManifest(), sessionDir: "/elsewhere/E", startedAt: "2020-01-01T00:00:00.000Z" }))
+		const result = init(dir)
+		expect(result.status).toBe(1)
+		expect(result.stderr).toMatch(/--started-at/)
+	})
+
 	test("#given a corrupt terminal-state.json #when init runs #then the error names the file", () => {
 		const dir = directory("20261025-120000")
 		writeFileSync(join(dir, "terminal-state.json"), "{")

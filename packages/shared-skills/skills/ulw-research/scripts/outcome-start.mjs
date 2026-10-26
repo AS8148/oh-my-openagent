@@ -5,7 +5,7 @@
 // ISO time with Z or an offset, not after `now`, and within a day of a stamped dir name; otherwise
 // init refuses instead of falling back. Never the interview's as-of date. No clock reads.
 import { readFileSync } from "node:fs"
-import { basename, join } from "node:path"
+import { basename, join, resolve } from "node:path"
 
 const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/
 const SESSION_STAMP = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/
@@ -57,7 +57,7 @@ export function runStart({ sessionDir, startedAt, now, validManifest, fail }) {
 	}
 	if (startedAt !== undefined) return check(startedAt, "--started-at")
 	const manifest = readJson(sessionDir, "outcome.json")
-	if (manifest?.data && validManifest(manifest.data)) return check(manifest.data.startedAt, "outcome.json.startedAt")
+	if (manifest?.data && validManifest(manifest.data) && resolve(String(manifest.data.sessionDir)) === resolve(sessionDir)) return check(manifest.data.startedAt, "outcome.json.startedAt")
 	const terminal = readJson(sessionDir, "terminal-state.json")
 	if (terminal?.corrupt) fail(terminal.corrupt)
 	if (terminal?.data?.started_at !== undefined) return check(terminal.data.started_at, "terminal-state.json.started_at")
