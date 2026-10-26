@@ -30,6 +30,8 @@ const cases: Case[] = [
   { name: "missing result defaults to TrustRoot", facts: { ...mac, certificates: [{ ...macCert, settings: { user: [{ ...grant, result: null }], admin: null, system: null } }] }, S: [R] },
   { name: "issued TrustRoot", facts: { ...mac, certificates: [{ ...macCert, selfSigned: false }] }, S: [] },
   { name: "self-signed non-CA TrustRoot", facts: { ...mac, certificates: [{ ...macCert, ca: false }] }, S: [R] },
+  // Design 4.5 puts no CA flag on TrustAsRoot; in Bun's store a non-self-signed certificate only builds chains (M3).
+  { name: "issued non-CA TrustAsRoot", facts: { ...mac, certificates: [{ ...macCert, selfSigned: false, ca: false, settings: { user: [{ ...grant, result: "TrustAsRoot" }], admin: null, system: null } }] }, S: [R] },
   { name: "issued empty settings", facts: { ...mac, certificates: [{ ...macCert, selfSigned: false, settings: { user: [], admin: null, system: null } }] }, S: [] },
   { name: "issued TrustAsRoot", facts: { ...mac, certificates: [{ ...macCert, selfSigned: false, settings: { user: [{ ...grant, result: "TrustAsRoot" }], admin: null, system: null } }] }, S: [R] },
   { name: "self-signed TrustAsRoot", facts: { ...mac, certificates: [{ ...macCert, settings: { user: [{ ...grant, result: "TrustAsRoot" }], admin: null, system: null } }] }, S: [R] },
@@ -114,6 +116,7 @@ for (const source of ["openssl-default-file", "openssl-default-dir"] as const) {
     { name: `${source} own EKU`, facts: { ...mac, certificates: [{ ...macCert, source, eku: { kind: "none" } }] }, S: [] },
     { name: `${source} non-CA`, facts: { ...mac, certificates: [{ ...macCert, source, ca: false }] }, S: [] },
     { name: `${source} issued intermediate`, facts: { ...mac, certificates: [macCert, { ...macCert, source, sha256: X, selfSigned: false, chain }] }, S: [R], I: [X] },
+    { name: `${source} issued non-CA is not an intermediate`, facts: { ...mac, certificates: [macCert, { ...macCert, source, sha256: X, selfSigned: false, ca: false, chain }] }, S: [R] },
     { name: `${source} denied copy`, facts: { ...mac, certificates: [{ ...macCert, settings: { user: [{ ...grant, result: "Deny" }], admin: null, system: null } }, { ...macCert, source }] }, S: [], D: [R] },
   )
 }
@@ -122,6 +125,7 @@ cases.push(
   { name: "Windows denied bundled anchor", facts: { ...win, certificates: [{ ...root, ...idX, selfSigned: false, store: "CA", chain }], bundledRoots: [idR], disallowed: [{ ...idR, location: "CURRENT_USER", physicalStore: "Default" }] }, S: [], D: [R] },
   { name: "Windows denied bundled anchor outside the reported path", facts: { ...win, certificates: [{ ...root, ...idX, selfSigned: false, store: "CA", chain: { ...chain, path: [idX] } }], bundledRoots: [idR], disallowed: [{ ...idR, location: "CURRENT_USER", physicalStore: "Default" }] }, S: [], D: [R] },
   { name: "Windows CTL denied bundled-only anchor", facts: { ...win, certificates: [{ ...root, ...idX, selfSigned: false, store: "CA", chain }], bundledRoots: [idR], ctlSha1: [H] }, S: [], sha1: [H] },
+  { name: "Windows CTL denied bundled-only anchor outside the reported path", facts: { ...win, certificates: [{ ...root, ...idX, selfSigned: false, store: "CA", chain: { ...chain, path: [idX] } }], bundledRoots: [idR], ctlSha1: [H] }, S: [], sha1: [H] },
   { name: "Windows CTL denied non-candidate path member", facts: { ...win, certificates: [root, { ...root, ...idX, selfSigned: false, store: "CA", chain: { ...chain, path: [idX, idQ, idR] } }], ctlSha1: [HQ] }, S: [R], sha1: [HQ] },
   { name: "Windows denied path", facts: { ...win, certificates: [root, { ...root, ...idX, selfSigned: false, store: "CA", chain: { ...chain, path: [idX, idQ, idR] } }], disallowed: [{ ...idQ, location: "LOCAL_MACHINE", physicalStore: "Default" }] }, S: [R], D: [Q] },
   { name: "Windows denied intermediate", facts: { ...win, certificates: [root, { ...root, ...idX, selfSigned: false, store: "CA", chain }], disallowed: [{ ...idX, location: "LOCAL_MACHINE", physicalStore: "Default" }] }, S: [R], D: [X] },
