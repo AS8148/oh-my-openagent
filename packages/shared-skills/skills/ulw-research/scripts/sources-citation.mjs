@@ -5,10 +5,15 @@
 // it is a citation-field number. That is decided by the number's type and position only: a year
 // (1900-2099) or a full date; a page, volume, issue, number, or edition marker; a number inside a
 // URL, DOI, arXiv id, ISBN or ISSN; a number inside a quoted title ("...", \u201C...\u201D, \u300C...\u300D,
-// \u300E...\u300F, <cite>) or an <i>/<em> title directly before a URL or a date; or a citation tag's
-// digits. There is no word list: any other numeral makes the sentence a claim. A heading is not a
-// prose sentence. Pure; no imports.
+// \u300E...\u300F, <cite>) or an <i>/<em> title directly before a URL or a date; a number inside link
+// text; or a citation tag's digits. There is no word list: any other numeral makes the sentence a
+// claim. A digit run glued to letters is a name, not a numeral (a hash, #12, GPT-4, v2.3.1, Q3, FY27),
+// unless the letters are a unit, multiplier, or currency of units.mjs / numerals.mjs (50M, 10k, 3x,
+// 2.5GB, 320m, 12%, 40percent). A heading is not a prose sentence. Pure.
 // Korean markers are \u escapes.
+
+import { UNIT } from "./numerals.mjs"
+import { dimensionOf, normalizeUnit } from "./units.mjs"
 
 const SKIP = new Set(["script", "style", "template"])
 const BREAK = new Set(["br", "p", "li", "div", "tr", "dd", "dt"])
@@ -16,10 +21,10 @@ const BREAK = new Set(["br", "p", "li", "div", "tr", "dd", "dt"])
 const NOT_END = /(?:\b(?:pp?|vol|vols|no|nos|ed|eds|al|ch|sec|fig|vs|e\.g|i\.e|[A-Z])\.)$/i
 const FACT = "\u0000"
 const LINK = "\u0002"
-const [CITE_OPEN, CITE_CLOSE, EM_OPEN, EM_CLOSE] = ["\u0003", "\u0004", "\u0005", "\u0006"]
+const [CITE_OPEN, CITE_CLOSE, EM_OPEN, EM_CLOSE, A_OPEN, A_CLOSE] = ["\u0003", "\u0004", "\u0005", "\u0006", "\u0007", "\u0008"]
 const MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\b\\.?"
 const YEAR = "(?:19|20)\\d{2}"
-const URL = `(?:https?://|www\\.)[^\\s<>"${LINK}]+?(?=[.,;:)\\]]?(?:\\s|$))`
+const URL = `(?:https?://|www\\.)[^\\s<>"${LINK}${A_CLOSE}]+?(?=[.,;:)\\]]?(?:\\s|$))`
 /** A date at the start of a string: ISO/dotted/slashed, month-name, or Korean nyeon-wol-il. */
 const DATE_AHEAD = new RegExp(`^(?:${YEAR}[-./]\\d{1,2}(?:[-./]\\d{1,2})?|\\d{1,2}[-./]\\d{1,2}[-./]${YEAR}|${MONTH}\\s+\\d{1,2},?\\s+${YEAR}|\\d{1,2}\\s+${MONTH}\\s+${YEAR}|${MONTH}\\s+${YEAR}|${YEAR}\\s*\\uB144|${YEAR}\\b)`, "i")
 /** Citation fields a number can sit INSIDE (a checked sentence is traced without them, so a title is never a quotation). */
@@ -31,6 +36,7 @@ const CONTAINERS = [
 	/\[(?:S|Source\s*)?\^?\d+\]/gi,
 	/"[^"]*"|\u201C[^\u201D]*\u201D|\u300C[^\u300D]*\u300D|\u300E[^\u300F]*\u300F/g,
 	new RegExp(`${CITE_OPEN}[^${CITE_CLOSE}]*${CITE_CLOSE}`, "g"),
+	new RegExp(`${A_OPEN}[^${A_CLOSE}]*${A_CLOSE}`, "g"),
 ]
 /** Citation-field numbers by type: dates, years, page, volume, issue, number, and edition markers. */
 const TYPED = [
@@ -45,6 +51,37 @@ const TYPED = [
 	/\uC81C?\s*\d+(?:\s*[-\u2013~]\s*\d+)?\s*(?:\uCABD|\uBA74|\uAD8C|\uD638|\uD310)/g,
 ]
 const NUMERAL = /\d+(?:[.,]\d+)*/g
+const UNIT_WORD = new RegExp(`^${UNIT}$`, "iu")
+const UNIT_LEAD = new RegExp(`^${UNIT}`, "iu")
+const LETTERS_AFTER = /^(?:[A-Za-z]+|[\uAC00-\uD7A3]+|\p{L}+)/u
+
+/** Letters that make a glued digit run a quantity; a Korean run may carry a particle after its unit. */
+function isUnit(letters) {
+	if (!/^[\uAC00-\uD7A3]/.test(letters)) return UNIT_WORD.test(letters) || normalizeUnit(letters) !== null || normalizeUnit(letters.toLowerCase()) !== null
+	if (UNIT_LEAD.test(letters)) return true
+	for (let size = letters.length; size > 0; size--) if (normalizeUnit(letters.slice(0, size))) return true
+	return false
+}
+const isCurrency = (letters) => /^currency:/.test(dimensionOf(letters) ?? dimensionOf(letters.toUpperCase()) ?? "")
+
+/**
+ * The digit run [start, end) is part of a name: a dotted version ("0.30.14", which numerals.mjs never
+ * reads as a value), a run after # or inside a word (letters on its left that are not a currency:
+ * "W3C", "eb2b", "Q3", "FY27"; or glued on the left through - . _ /: "GPT-4", "H.15"), or a run whose
+ * right-hand letters are not a unit, multiplier, or currency ("3D", "21st", "10-Q", "1H25").
+ */
+function isName(text, start, end) {
+	if (/^\d+(?:\.\d+){2,}$/.test(text.slice(start, end))) return true
+	const before = text.slice(0, start)
+	const left = /\p{L}+$/u.exec(before)?.[0]
+	if (left) return !isCurrency(left)
+	const rest = text.slice(end)
+	const right = LETTERS_AFTER.exec(rest)?.[0]
+	if (right) return /^\d/.test(rest.slice(right.length)) || !isUnit(right)
+	if (before.endsWith("#") || /\p{L}/u.test(/([\p{L}\p{N}]+)[-._/]$/u.exec(before)?.[1] ?? "")) return true
+	const joined = /^-(\p{L}[\p{L}\p{N}]*)/u.exec(rest)?.[1]
+	return joined !== undefined && !isUnit(joined)
+}
 
 /** A fact element is bound by its ledger row, not traced here; it reads as one opaque token. */
 const isFact = (node) => node.attrs?.["data-fact"] !== undefined || node.attrs?.["data-translates"] !== undefined || node.tag === "q" || node.tag === "blockquote"
@@ -54,15 +91,15 @@ function lines(node, out = [""]) {
 		if (child.tag === "#text") out[out.length - 1] += child.text
 		else if (SKIP.has(child.tag)) continue
 		else if (isFact(child)) out[out.length - 1] += ` ${FACT} `
-		else if (child.tag === "cite" || child.tag === "i" || child.tag === "em") {
-			const [open, close] = child.tag === "cite" ? [CITE_OPEN, CITE_CLOSE] : [EM_OPEN, EM_CLOSE]
+		else if (child.tag === "cite" || child.tag === "i" || child.tag === "em" || child.tag === "a") {
+			const [open, close] = child.tag === "cite" ? [CITE_OPEN, CITE_CLOSE] : child.tag === "a" ? [A_OPEN, A_CLOSE] : [EM_OPEN, EM_CLOSE]
 			out[out.length - 1] += open
 			lines(child, out)
 			out[out.length - 1] += close
+			if (child.tag === "a" && /^https?:\/\//i.test(child.attrs?.href ?? "")) out[out.length - 1] += ` ${LINK} `
 		} else {
 			if (BREAK.has(child.tag)) out.push("")
 			lines(child, out)
-			if (child.tag === "a" && /^https?:\/\//i.test(child.attrs?.href ?? "")) out[out.length - 1] += ` ${LINK} `
 			if (BREAK.has(child.tag)) out.push("")
 		}
 	}
@@ -75,7 +112,7 @@ function containerSpans(text) {
 	for (const re of CONTAINERS) for (const match of text.matchAll(re)) spans.push([match.index, match.index + match[0].length])
 	for (const match of text.matchAll(new RegExp(`${EM_OPEN}[^${EM_CLOSE}]*${EM_CLOSE}`, "g"))) {
 		const after = text.slice(match.index + match[0].length).replace(/^[\s,.:;()\u2013-]*/, "")
-		if (after.startsWith(LINK) || /^(?:https?:\/\/|www\.)/i.test(after) || DATE_AHEAD.test(after)) spans.push([match.index, match.index + match[0].length])
+		if (after.startsWith(LINK) || after.startsWith(A_OPEN) || /^(?:https?:\/\/|www\.)/i.test(after) || DATE_AHEAD.test(after)) spans.push([match.index, match.index + match[0].length])
 	}
 	return spans
 }
@@ -106,7 +143,10 @@ function sentences(line) {
 /** The sentence holds a numeral that is not a citation-field number, so the gates check it. */
 export function isClaimSegment(text) {
 	const spans = fieldSpans(text)
-	for (const match of text.matchAll(NUMERAL)) if (!inside(spans, match.index, match.index + match[0].length)) return true
+	for (const match of text.matchAll(NUMERAL)) {
+		const end = match.index + match[0].length
+		if (!inside(spans, match.index, end) && !isName(text, match.index, end)) return true
+	}
 	return false
 }
 
@@ -119,7 +159,7 @@ function plain(text) {
 		out += `${text.slice(at, Math.max(at, start))} `
 		at = end
 	}
-	return `${out}${text.slice(at)}`.replace(/[\u0002-\u0006]/g, " ").replace(/\s+/g, " ").trim()
+	return `${out}${text.slice(at)}`.replace(/[\u0002-\u0008]/g, " ").replace(/\s+/g, " ").trim()
 }
 const lineClaims = (line) => sentences(line).filter(isClaimSegment).map(plain)
 

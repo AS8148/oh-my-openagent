@@ -19,6 +19,21 @@ function gated(html: string) {
 }
 const underSources = (body: string) => gated(`<h2>Official sources</h2>${body}`)
 
+// Round-4 ruling, guard: a digit run glued to a unit, multiplier, or currency stays a numeral, in a
+// reference-shaped line (EN, KO) and in a Korean sentence where a particle follows the unit.
+const QUANTITIES = ["50M", "10k", "3x", "5.4T", "12%", "2.5GB", "10ms", "320m", "40percent"]
+const GUARD = [
+	...QUANTITIES.flatMap((q) => [
+		`<li>Annual filing ${q}, https://example.com/filing</li>`,
+		`<li>\uC5F0\uAC04 \uACF5\uC2DC ${q}, https://example.com/filing</li>`,
+		`<p>\uADDC\uBAA8\uB294 ${q}\uB85C \uC9D1\uACC4\uB410\uB2E4.</p>`,
+	]),
+	"<li>Q3 revenue 12%, https://example.com/q3</li>",
+	"<li>Q3 \uB9E4\uCD9C 12%, https://example.com/q3</li>",
+	"<li>3\uBD84\uAE30 \uB9E4\uCD9C 12%, https://example.com/q3</li>",
+	"<li>Market data, USD5bn in 2025, https://example.com/fx</li>",
+]
+
 // Decision 25: under Sources a sentence is checked unless every numeral in it is a citation-field number.
 // Receipt cases from review rounds 1-3, EN and KO (Korean as \u escapes).
 const MUST_FLAG = [
@@ -44,11 +59,33 @@ const MUST_FLAG = [
 	"<p>[S19] Treasury buyback $94B 2026-10-08: https://example.com/2026/10/08/buybacks</p>",
 	"<li>Llama 3.1 model card, Meta, https://example.com/llama</li>",
 	"<li>Survey 2025, wave 2, https://example.com/survey</li>",
-	'<li><a href="https://example.com/notice">Spin-off notice (2025-12-02, \uACF5\uB3D9\uCC3D\uC5C5\uC790 20\uBA85 \uC11C\uBA85)</a></li>',
 	"<p>\uC810\uC720\uC728\uC740 42%\uC774\uB2E4.</p>",
 	"<p>\uB9E4\uCD9C\uC740 2025\uB144 40% \uB298\uC5B4 5\uC870\uC6D0\uC744 \uAE30\uB85D\uD588\uB2E4.</p>",
 	"<p>\uC9C1\uC6D0 \uC218\uB294 1,250\uBA85\uC774\uB2E4.</p>",
 	"<p>We ran the check and it reported 42%.</p>",
+	...GUARD,
+]
+
+// Round-4 ruling, must-pass: a digit run glued to letters that are not a unit is a name (commit hashes,
+// #issue numbers, identifiers, quarter and filing codes); link text is a citation field; a year range is a date.
+const NAMES = [
+	"<li>letta-code @ a75f4d93ef / @ 701f2a53678, https://example.com/letta</li>",
+	"<li>\uACE0\uC815 \uCEE4\uBC0B 22c5684b983e, 424B4, https://example.com/repo</li>",
+	"<li>oh-my-openagent PR #6674\u2013#7906, https://example.com/prs</li>",
+	"<li>\uC774\uC288 #11302 \uB17C\uC758, https://example.com/issue</li>",
+	"<li>GPT-4 system card v2.3.1 (abc123), https://example.com/gpt</li>",
+	"<li>GPT-4 \uC2DC\uC2A4\uD15C \uCE74\uB4DC v2.3.1 (abc123), https://example.com/gpt</li>",
+	"<li>Cohort table Q3-2024, filing 2024-Q3-F1, Oracle Q1 FY27 (10-Q), S-1, https://example.com/cohort</li>",
+	"<li>\uCF54\uD638\uD2B8 Q3-2024 \uACF5\uC2DC 2024-Q3-F1, YC W26, H1 2026, https://example.com/cohort</li>",
+	"<li>FRED DGS10/DGS30, KOSPI200, Base44, CC0, 3D icons, https://example.com/data</li>",
+	"<li>github.com/letta-ai/letta-code @ a75f4d93ef(0.30.14); W3C PROV-DM; https://example.com/letta</li>",
+	"<li>\uC778\uC6A9 \uADDC\uC57D: \uACBD\uB85C:\uD589@b2105213234ab0c9762c7871611bf336dfb0eb2b (3.1.1), https://example.com/sha</li>",
+	"<li>\uC5F0\uC900 \uC790\uB8CC (2\uCC28 \uBCF4\uB3C4), https://example.com/fed</li>",
+	'<li><a href="https://example.com/hn">HN thread (90 points, 37 comments)</a></li>',
+	'<li><a href="https://example.com/notice">Spin-off notice (2025-12-02, \uACF5\uB3D9\uCC3D\uC5C5\uC790 20\uBA85 \uC11C\uBA85)</a></li>',
+	"<li>Survey archive 2019-2023, 2019~2023, 2019\u20132023, https://example.com/archive</li>",
+	"<li>2025\u20132026\uB144 \uADFC\uC6D4\uBB3C \uC790\uB8CC, 2019~2023\uB144, https://example.com/basis</li>",
+	"<p>2019\u20132023\uB144 \uD1B5\uACC4\uB97C 1\uCC28 \uC790\uB8CC\uB85C \uD655\uBCF4\uD558\uC9C0 \uBABB\uD588\uB2E4.</p>",
 ]
 
 const MUST_PASS = [
@@ -70,6 +107,7 @@ const MUST_PASS = [
 	'<li>Annual report 2024, <a href="https://example.com/report">source</a></li>',
 	"<h3>2024</h3>",
 	"<p>Publication cutoff and access date: October 25, 2026. Every linked source was read directly.</p>",
+	...NAMES,
 ]
 
 describe("under Sources, a sentence with a numeral that is not a citation field is checked", () => {
@@ -110,6 +148,7 @@ const pieces = (body: string) =>
 const MUTANTS: Record<string, (body: string) => boolean> = {
 	"a measure-word allow-list": (body) => pieces(body).some((s) => isClaimSegment(s) && OLD_MEASURE.some((re) => re.test(s))),
 	"a claim-verb trigger": (body) => pieces(body).some((s) => isClaimSegment(s) && OLD_VERBS.test(s)),
+	"a name rule that ignores units": (body) => pieces(body).some((s) => isClaimSegment(s.replace(/\p{L}+\d[\d.,]*|\d[\d.,]*\p{L}+/gu, " "))),
 	"the middle-segment title heuristic": (body) => {
 		const all = pieces(body)
 		return all.some((s, at) => !(at > 0 && at + 1 < all.length && citationOnly(all[at + 1])) && isClaimSegment(s))
