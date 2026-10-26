@@ -22,12 +22,26 @@ function patchedPaths(args: Record<string, unknown>): string[] | undefined {
   const patch = [args.patchText, args.input, args.patch].find((value): value is string => typeof value === "string")
   if (patch === undefined) return undefined
   const paths: string[] = []
-  for (const line of patch.trim().split("\n")) {
+  const lines = patch.trim().split("\n")
+  let inUpdateBody = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // Only an unindented "***" ends executor Update chunks; leading spaces are context.
+    if (inUpdateBody && !line.startsWith("***")) continue
+    inUpdateBody = false
     const header = PATCH_PATH_HEADERS.find((prefix) => line.startsWith(prefix))
     if (header !== undefined) {
       const path = line.slice(header.length).trim()
       if (!path) return undefined
       paths.push(path)
+      if (header === "*** Update File:") {
+        inUpdateBody = true
+        if (lines[i + 1]?.startsWith("*** Move to:")) {
+          const destination = lines[++i].slice("*** Move to:".length).trim()
+          if (!destination) return undefined
+          paths.push(destination)
+        }
+      }
     } else if (
       line.trimStart().startsWith("***") &&
       !["*** Begin Patch", "*** End Patch", "*** End of File"].includes(line.trim())

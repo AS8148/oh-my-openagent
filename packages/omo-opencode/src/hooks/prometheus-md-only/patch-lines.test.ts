@@ -30,6 +30,61 @@ beforeEach(() => setSessionAgent(sessionID, "prometheus"))
 afterEach(() => clearSessionAgent(sessionID))
 
 describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
+  for (const context of ["***", "***important***", "*** Add File:src/example.ts"]) {
+    for (const move of [false, true]) {
+      test(`Update context ${JSON.stringify(context)}, move=${move}, remains allowed`, async () => {
+        const patchText = patch(
+          "*** Update File:.omo/plans/a.md",
+          ...(move ? [`*** Move to:${allowed}`] : []),
+          "@@",
+          ` ${context}`,
+          "-before",
+          "+after",
+        )
+        const { hunks } = parsePatch(patchText)
+        expect(hunks).toHaveLength(1)
+        expect(hunks[0]).toMatchObject({
+          type: "update",
+          path: ".omo/plans/a.md",
+          move_path: move ? allowed : undefined,
+          chunks: [{ old_lines: [context, "before"], new_lines: [context, "after"] }],
+        })
+
+        await expect(hook["tool.execute.before"](input, { args: { patchText } })).resolves.toBeUndefined()
+      })
+    }
+  }
+
+  for (const operation of operations) {
+    test(`Update context does not hide a following outside ${operation.name} header`, async () => {
+      const patchText = patch(
+        `*** Update File:${allowed}`, "@@", " ***", "-before", "+after",
+        ...operation.lines(outside),
+      )
+      const { hunks } = parsePatch(patchText)
+      expect(hunks).toHaveLength(2)
+      expect(hunks[1]).toMatchObject(
+        operation.name === "Move to"
+          ? { type: "update", path: source, move_path: outside }
+          : { type: operation.name.toLowerCase(), path: outside },
+      )
+
+      await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+        "File operations restricted to .omo/*.md plan files only",
+      )
+    })
+  }
+
+  for (const header of ["*** Rename File:src/outside.ts", "*** Add File:"]) {
+    test(`Update context still rejects malformed directive ${JSON.stringify(header)}`, async () => {
+      const patchText = patch(`*** Update File:${allowed}`, "@@", " ***", "-before", "+after", header)
+
+      await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+        "File operations restricted to .omo/*.md plan files only",
+      )
+    })
+  }
+
   for (const operation of operations) {
     for (const terminator of terminators) {
       for (const mixed of [false, true]) {
