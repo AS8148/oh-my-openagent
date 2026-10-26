@@ -11,6 +11,8 @@ import {
   deviceListSchema,
   jsonRequest,
   parseReply,
+  refusalGuidance,
+  refusalMessage,
   requestApi,
   RequestFailure,
   serviceOrigin,
@@ -73,7 +75,7 @@ export function createSession(options: { readonly api: string; readonly store: C
         throw new SessionEnded(
           error.code === "reauth_required"
             ? `This session was ended because its refresh token was reused. ${signInHint("again")}`
-            : `Your OmO sign-in ended. ${signInHint("again")}`,
+            : refusalMessage(refusalGuidance(error.code, error.status)),
           DEVICE_REVOKING_REFUSALS.has(error.code),
           error.code,
         )

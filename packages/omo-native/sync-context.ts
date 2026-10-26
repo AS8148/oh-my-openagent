@@ -5,7 +5,7 @@ import { syncPinDir } from "../memory-core/src/sync/pin-dir"
 
 import { signInHint } from "../omo-opencode/src/cli/service-auth/accounts-gate"
 import { type CredentialStore, createCredentialStore, INTERACTIVE_READ_WAIT } from "../omo-opencode/src/cli/service-auth/keystore"
-import { refusalGuidance, refusalMessage, serviceOrigin, SignInError } from "../omo-opencode/src/cli/service-auth/protocol"
+import { ApiRefusal, serviceOrigin, SignInError } from "../omo-opencode/src/cli/service-auth/protocol"
 import { createSession } from "../omo-opencode/src/cli/service-auth/session"
 
 export interface SyncContext {
@@ -37,7 +37,11 @@ export async function signedInSyncContext(options: SyncContextOptions): Promise<
   const token = () => session.accessToken()
   const doFetch = options.fetch ?? fetch
   const me = await doFetch(`${api}/v1/me`, { headers: { authorization: `Bearer ${await token()}` } })
-  if (!me.ok) throw new SignInError(refusalMessage(refusalGuidance(me.status === 403 ? "unauthorized" : "unknown", me.status)))
+  if (!me.ok) {
+    const body: unknown = await me.json().catch(() => null)
+    const code = isRecord(body) && isRecord(body["error"]) ? body["error"]["code"] : undefined
+    throw new ApiRefusal(typeof code === "string" ? code : "unknown", me.status)
+  }
   const body: unknown = await me.json()
   const account = isRecord(body) && isRecord(body["account"]) ? body["account"]["id"] : undefined
   if (typeof account !== "string" || account === "") throw new SignInError("The service named no account for this sign-in.")
