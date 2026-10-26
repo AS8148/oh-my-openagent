@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { spawnSync } from "node:child_process"
 import * as fs from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { readLinuxBundle, selectLinuxBundle } from "../linux-trust-bundle"
@@ -28,15 +28,29 @@ describe("selectLinuxBundle", () => {
   test.each(["debian", "ubuntu", "alpine", "arch", "fedora", "rhel", "centos", "suse", "opensuse", "sles"])(
     "#given derivative ID_LIKE %s #when selecting #then uses the recognized family",
     (token) => {
-      const path = ["fedora", "rhel", "centos"].includes(token)
-        ? "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+      const [family, path] = ["fedora", "rhel", "centos"].includes(token)
+        ? (["fedora", "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"] as const)
         : ["suse", "opensuse", "sles"].includes(token)
-          ? "/etc/ssl/ca-bundle.pem"
-          : "/etc/ssl/certs/ca-certificates.crt"
+          ? (["suse", "/etc/ssl/ca-bundle.pem"] as const)
+          : (["debian", "/etc/ssl/certs/ca-certificates.crt"] as const)
       const result = selectLinuxBundle(`ID=derivative\nID_LIKE="unrecognized ${token}"`, null, () => true)
-      expect(result.path).toBe(path)
+      expect(result).toEqual({ kind: "known", family, path })
     },
   )
+
+  test("#given opensuse-* only as an ID_LIKE token #when selecting #then it is not a SUSE match", () => {
+    expect(selectLinuxBundle("ID=other\nID_LIKE=opensuse-leap", null, (path) => path === "/etc/ssl/cert.pem"))
+      .toEqual({ kind: "unknown", family: "unknown", path: "/etc/ssl/cert.pem" })
+  })
+
+  test.each([
+    ["an escaped backslash ends the line", "ID=x\\\\\nID_LIKE=fedora"],
+    ["an odd trailing backslash continues the line", "ID=fed\\\nora"],
+    ["trailing whitespace after the value", "ID=fedora \t"],
+  ])("#given %s #when selecting #then parses like systemd", (_case, release) => {
+    expect(selectLinuxBundle(release, null, () => true))
+      .toEqual({ kind: "known", family: "fedora", path: "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" })
+  })
 
   test("#given ID and conflicting ID_LIKE #when selecting #then ID wins", () => {
     const result = selectLinuxBundle("ID=fedora\nID_LIKE=debian", null, () => true)
@@ -114,6 +128,7 @@ const metadata: LinuxBundleStat = { size: 3, mtimeMs: 1, ino: 2, dev: 3, isFile:
 function fixture(options: {
   readonly before?: LinuxBundleStat
   readonly after?: LinuxBundleStat
+  readonly held?: LinuxBundleStat
   readonly bytes?: Uint8Array
   readonly unreadable?: boolean
 }) {
@@ -137,6 +152,7 @@ function fixture(options: {
           offset += length
           return { bytesRead: length }
         },
+        async stat() { return options.held ?? options.before ?? metadata },
         async close() { closed = true },
       }
     },
@@ -160,10 +176,21 @@ describe("readLinuxBundle", () => {
     expect(fake.opened()).toBe(false)
   })
 
-  test("#given growth beyond cap after stat #when reading #then bounds actual bytes", async () => {
+  test("#given growth beyond the stat size #when reading #then reads one byte past it and rejects", async () => {
     const fake = fixture({ bytes: new Uint8Array(8 * 1024 * 1024 + 2) })
-    expect(await readLinuxBundle("/bundle", fake.io)).toEqual({ kind: "linux-bundle-too-large", path: "/bundle" })
-    expect(fake.consumed()).toBe(8 * 1024 * 1024 + 1)
+    expect(await readLinuxBundle("/bundle", fake.io)).toEqual({ kind: "linux-bundle-replaced", path: "/bundle" })
+    expect(fake.consumed()).toBe(metadata.size + 1)
+    expect(fake.closed()).toBe(true)
+  })
+
+  test("#given fewer bytes than the unchanged stats report #when reading #then rejects", async () => {
+    const fake = fixture({ bytes: new Uint8Array([1, 2]) })
+    expect(await readLinuxBundle("/bundle", fake.io)).toEqual({ kind: "linux-bundle-replaced", path: "/bundle" })
+  })
+
+  test("#given a different object opened between matching path stats #when reading #then rejects", async () => {
+    const fake = fixture({ held: { ...metadata, ino: metadata.ino + 1 } })
+    expect(await readLinuxBundle("/bundle", fake.io)).toEqual({ kind: "linux-bundle-replaced", path: "/bundle" })
     expect(fake.closed()).toBe(true)
   })
 
@@ -195,10 +222,9 @@ describe("readLinuxBundle", () => {
     expect(fake.opened()).toBe(false)
   })
 
-  test("#given normal symlink in mktemp directory #when reading #then follows target bytes", async () => {
-    const created = spawnSync("mktemp", ["-d"], { encoding: "utf8" })
-    expect(created.status).toBe(0)
-    const dir = created.stdout.trim()
+  // Linux-only module; Windows symlinks need a privilege CI runners do not grant.
+  test.skipIf(process.platform === "win32")("#given normal symlink in a temp directory #when reading #then follows target bytes", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "linux-trust-bundle-"))
     try {
       const target = join(dir, "bundle.pem")
       const link = join(dir, "selected.pem")

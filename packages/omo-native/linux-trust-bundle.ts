@@ -44,8 +44,15 @@ export function selectLinuxBundle(
   let id = ""
   let idLike = ""
   const text = osRelease ?? fallbackOsRelease ?? ""
-  for (const line of text.replace(/\\\r?\n/g, "").split(/\r?\n/)) {
-    const assignment = /^(ID|ID_LIKE)=(?:'([^']*)'|"((?:\\.|[^"\\])*)"|((?:\\.|[^\s"'\\])*))$/.exec(line)
+  // A line continues only when it ends in an odd number of backslashes; an escaped backslash ends the line.
+  const lines: string[] = []
+  for (const raw of text.split(/\r?\n/)) {
+    const previous = lines.at(-1)
+    if (previous !== undefined && /(?:^|[^\\])(?:\\\\)*\\$/.test(previous)) lines[lines.length - 1] = previous.slice(0, -1) + raw
+    else lines.push(raw)
+  }
+  for (const line of lines) {
+    const assignment = /^(ID|ID_LIKE)=(?:'([^']*)'|"((?:\\.|[^"\\])*)"|((?:\\.|[^\s"'\\])*))[ \t]*$/.exec(line)
     if (!assignment) continue
     const value = assignment[2] ?? (assignment[3] !== undefined
       ? assignment[3].replace(/\\([$`"\\])/g, "$1")
@@ -83,6 +90,8 @@ export interface LinuxBundleFs {
   stat(path: string): Promise<LinuxBundleStat>
   open(path: string, flags: "r"): Promise<{
     read(buffer: Uint8Array): Promise<{ readonly bytesRead: number }>
+    /** The opened object's own metadata, so a swap between the path stats and the open is detected. */
+    stat(): Promise<LinuxBundleStat>
     close(): Promise<void>
   }>
 }
@@ -102,8 +111,8 @@ export async function readLinuxBundle(path: string, fs: LinuxBundleFs): Promise<
     if (before.size > cap) return { kind: "linux-bundle-too-large", path }
     const handle = await fs.open(path, "r")
     try {
-      // One extra byte detects growth beyond the cap without an unbounded readFile.
-      const bytes = new Uint8Array(cap + 1)
+      // One byte past the stat size detects growth; the size is already within the cap.
+      const bytes = new Uint8Array(before.size + 1)
       let length = 0
       while (length < bytes.length) {
         const { bytesRead } = await handle.read(bytes.subarray(length))
@@ -111,9 +120,11 @@ export async function readLinuxBundle(path: string, fs: LinuxBundleFs): Promise<
         length += bytesRead
       }
       if (length > cap) return { kind: "linux-bundle-too-large", path }
+      const held = await handle.stat()
       const after = await fs.stat(path)
-      if (!after.isFile() || before.size !== after.size || before.mtimeMs !== after.mtimeMs
-        || before.ino !== after.ino || before.dev !== after.dev || length !== after.size) {
+      const same = (a: LinuxBundleStat, b: LinuxBundleStat): boolean =>
+        a.isFile() && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ino === b.ino && a.dev === b.dev
+      if (!same(held, before) || !same(after, before) || length !== before.size) {
         return { kind: "linux-bundle-replaced", path }
       }
       return { kind: "success", path, bytes: bytes.slice(0, length) }
