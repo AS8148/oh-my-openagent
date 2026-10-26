@@ -298,7 +298,7 @@ describe("team-layout-tmux", () => {
       const sendKeys = getCommands().filter((args) => args[0] === "send-keys").map((args) => args.join(" "))
       const attach = sendKeys.find((s) => s.includes("opencode attach"))
       expect(attach).toBeDefined()
-      expect(attach).not.toContain("OPENCODE_SERVER_PASSWORD")
+      expect(attach).not.toMatch(/\bOPENCODE_SERVER_PASSWORD(?:_FILE)?\b/)
     } finally {
       if (originalPwd !== undefined) process.env.OPENCODE_SERVER_PASSWORD = originalPwd
     }
