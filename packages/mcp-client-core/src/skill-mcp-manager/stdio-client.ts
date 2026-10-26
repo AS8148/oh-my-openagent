@@ -28,6 +28,7 @@ const defaultStdioClientDependencies: StdioClientDependencies = {
   createClient: (clientInfo, options) => new Client(clientInfo, options),
   createTransport: (options, client) => createProtocolTransport(
     new StdioClientTransport(options), client instanceof Client ? client : undefined,
+    `stdio:${JSON.stringify([options.command, options.args ?? [], options.cwd ?? ""])}`,
   ),
 }
 

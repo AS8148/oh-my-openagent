@@ -31,7 +31,7 @@ const defaultHttpClientDependencies: HttpClientDependencies = {
   createTransport: (url, options, client) => createProtocolTransport(new StreamableHTTPClientTransport(url, {
     ...options,
     fetch: protocolHttpFetch,
-  }), client instanceof Client ? client : undefined),
+  }), client instanceof Client ? client : undefined, `http:${url.toString()}`),
   log,
 }
 

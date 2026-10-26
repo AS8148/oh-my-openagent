@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
-import { createProtocolTransport } from "./protocol-transport"
+import { createProtocolTransport, forgetSkillMcpEraMemoryForTesting } from "./protocol-transport"
 import { setMcpClientLoggerForTesting } from "../logger"
 
 const version = "2026-07-28"
@@ -189,6 +189,129 @@ describe("skill MCP protocol eras", () => {
       }
     })
   }
+
+  describe("per-server era memory", () => {
+    function legacyServer(initializeError = false) {
+      const methods: string[] = []
+      const probed = Promise.withResolvers<void>()
+      const first = Promise.withResolvers<string>()
+      const transport: Transport = {
+        async start() {},
+        async close() { transport.onclose?.() },
+        async send(message) {
+          if (!("method" in message)) return
+          if (methods.length === 0) first.resolve(message.method)
+          methods.push(message.method)
+          if (!("id" in message)) return
+          if (message.method === "server/discover") probed.resolve()
+          if (message.method === "initialize") {
+            queueMicrotask(() => transport.onmessage?.(initializeError
+              ? { jsonrpc: "2.0", id: message.id, error: { code: -32603, message: "legacy initialization failed" } }
+              : { jsonrpc: "2.0", id: message.id, result: {
+                protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "legacy", version: "1" },
+              } }))
+          }
+        },
+      }
+      return { transport, methods, probed: probed.promise, first: first.promise }
+    }
+
+    async function connectSilentLegacy(key: string) {
+      const server = legacyServer()
+      const client = new Client(identity, { capabilities: {} })
+      const connected = client.connect(createProtocolTransport(server.transport, client, key))
+      await server.probed
+      jest.advanceTimersByTime(DEFAULT_REQUEST_TIMEOUT_MSEC / 2)
+      await connected
+      await client.close()
+      return server.methods
+    }
+
+    test("a server that fell back to legacy skips discovery on its next connect", async () => {
+      jest.useFakeTimers()
+      forgetSkillMcpEraMemoryForTesting()
+      try {
+        expect(await connectSilentLegacy("server-a")).toEqual(["server/discover", "initialize", "notifications/initialized"])
+        const again = legacyServer()
+        const client = new Client(identity, { capabilities: {} })
+        const connected = client.connect(createProtocolTransport(again.transport, client, "server-a"))
+        expect(await again.first).toBe("initialize")
+        await connected
+        expect(again.methods).toEqual(["initialize", "notifications/initialized"])
+        expect(client.getServerVersion()?.name).toBe("legacy")
+        await client.close()
+        const other = legacyServer()
+        const otherClient = new Client(identity, { capabilities: {} })
+        const otherConnected = otherClient.connect(createProtocolTransport(other.transport, otherClient, "server-b"))
+        await other.probed
+        expect(other.methods).toEqual(["server/discover"])
+        jest.advanceTimersByTime(DEFAULT_REQUEST_TIMEOUT_MSEC / 2)
+        await otherConnected
+        await otherClient.close()
+      } finally {
+        forgetSkillMcpEraMemoryForTesting()
+        jest.useRealTimers()
+      }
+    })
+
+    test("a failed remembered legacy initialize forgets the era so the next connect probes again", async () => {
+      jest.useFakeTimers()
+      forgetSkillMcpEraMemoryForTesting()
+      try {
+        await connectSilentLegacy("server-c")
+        const failing = legacyServer(true)
+        const client = new Client(identity, { capabilities: {} })
+        const connected = client.connect(createProtocolTransport(failing.transport, client, "server-c"))
+        expect(await failing.first).toBe("initialize")
+        await expect(connected).rejects.toThrow("legacy initialization failed")
+        expect(failing.methods).toEqual(["initialize"])
+        await client.close()
+        expect(await connectSilentLegacy("server-c")).toEqual(["server/discover", "initialize", "notifications/initialized"])
+      } finally {
+        forgetSkillMcpEraMemoryForTesting()
+        jest.useRealTimers()
+      }
+    })
+  })
+
+  test("a discovery send that fails after the budget does not send initialize twice", async () => {
+    jest.useFakeTimers()
+    try {
+      const methods: string[] = []
+      const discovery = Promise.withResolvers<void>()
+      const probed = Promise.withResolvers<void>()
+      const transport: Transport = {
+        async start() {},
+        async close() { transport.onclose?.() },
+        async send(message) {
+          if (!("method" in message)) return
+          methods.push(message.method)
+          if (!("id" in message)) return
+          if (message.method === "server/discover") {
+            probed.resolve()
+            return discovery.promise
+          }
+          if (message.method === "initialize") {
+            queueMicrotask(() => transport.onmessage?.({ jsonrpc: "2.0", id: message.id, result: {
+              protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "legacy", version: "1" },
+            } }))
+          }
+        },
+      }
+      const client = new Client(identity, { capabilities: {} })
+      const connected = client.connect(createProtocolTransport(transport, client))
+      await probed.promise
+      jest.advanceTimersByTime(DEFAULT_REQUEST_TIMEOUT_MSEC / 2)
+      await connected
+      discovery.reject(new Error("fetch failed late"))
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(methods.filter((method) => method === "initialize")).toHaveLength(1)
+      await client.close()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
 
   test("unknown result types fail instead of becoming empty success", async () => {
     const { client } = await fixture("unknown")

@@ -7,9 +7,18 @@ import { SKILL_MCP_DISCOVERY_TIMEOUT_MS } from "./timeouts"
 
 const modernVersion = "2026-07-28"
 
+// Servers that needed legacy initialization in this process. Only their first
+// connect pays the discovery budget; a failed legacy initialize forgets them.
+const legacyServers = new Set<string>()
+
+export function forgetSkillMcpEraMemoryForTesting(): void {
+  legacyServers.clear()
+}
+
 export function createProtocolTransport(
   transport: Transport,
   client?: Pick<Client, "getServerCapabilities" | "getServerVersion">,
+  eraKey?: string,
 ): Transport {
   let era: "probing" | "modern" | "legacy" | "failed" = "probing"
   let initialize: JSONRPCRequest | undefined
@@ -59,6 +68,7 @@ export function createProtocolTransport(
     if (!initialize) throw new Error("MCP initialization request is missing")
     clearTimeout(discoveryTimer)
     era = "legacy"
+    if (eraKey) legacyServers.add(eraKey)
     transport.setProtocolVersion?.(String(initialize.params?.protocolVersion))
     await transport.send(initialize)
   }
@@ -76,6 +86,9 @@ export function createProtocolTransport(
       transport.onerror = (error) => bridge.onerror?.(error)
       transport.onmessage = (message, extra) => {
         if (initialize && "id" in message && message.id !== undefined && !("method" in message)) {
+          if (message.id === initialize.id && era === "legacy" && "error" in message && eraKey) {
+            legacyServers.delete(eraKey)
+          }
           if (message.id === discoveryID) {
             if (era !== "probing") return
             clearTimeout(discoveryTimer)
@@ -125,6 +138,7 @@ export function createProtocolTransport(
                 Object.assign(serverInfo, result.data.serverInfo)
               }
               era = "legacy"
+              if (eraKey) legacyServers.add(eraKey)
               transport.setProtocolVersion?.(negotiated)
               void (async () => {
                 await transport.send({ jsonrpc: "2.0", method: "notifications/initialized" })
@@ -174,6 +188,10 @@ export function createProtocolTransport(
     async send(message, options) {
       if ("method" in message && message.method === "initialize" && "id" in message && !initialize) {
         initialize = message
+        if (eraKey && legacyServers.has(eraKey)) {
+          await useLegacy()
+          return
+        }
         transport.setProtocolVersion?.(modernVersion)
         discoveryTimer = setTimeout(() => {
           log("[skill-mcp] discovery timed out; falling back to legacy initialization", {
@@ -184,6 +202,9 @@ export function createProtocolTransport(
         try {
           await transport.send(withMetadata({ ...message, id: discoveryID, method: "server/discover", params: {} }), options)
         } catch {
+          // The budget may already have fallen back; a late failure must not
+          // send initialize a second time.
+          if (era !== "probing") return
           await useLegacy()
         }
         return
