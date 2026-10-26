@@ -100,6 +100,29 @@ describe("feedback component", () => {
     expect(sent[0]).not.toContain("synthetic-access-token")
   })
 
+  test.each(["expired", "uncertain"] as const)("#given a stored sign-in that is %s #when /bug sends #then the report goes anonymously with a warning and no refresh is attempted", async (state) => {
+    const refreshes: string[] = []
+    using intake = Bun.serve({ port: 0, fetch: (request) => {
+      refreshes.push(new URL(request.url).pathname)
+      return Response.json({ error: { code: "rate_limited", message: "synthetic", retryable: true, requestId: "req_refresh" } }, { status: 429 })
+    } })
+    const { pi, api, component, requests, store } = host({ withRedactor: true, extraEnv: { OMO_SERVICE_API_URL: `http://127.0.0.1:${intake.port}` } })
+    const credentials = state === "expired"
+      ? { ...grant, ...privateKeys, accessTokenExpiresAt: "2000-01-01T00:00:00.000Z" }
+      : { ...grant, ...privateKeys, refreshState: "uncertain" as const }
+    await store.write(credentials)
+    await component.register(api, { logger: console, config: { getFlag: () => undefined } })
+    const levels: (string | undefined)[] = []
+    const ctx = { ...sessionCtx, ui: { input: async () => undefined, select: async () => "Send report", notify: (_message: string, level?: string) => levels.push(level) } }
+    const command = pi.commands.find((entry) => entry.name === "bug")
+    await (command?.options.handler as (args: string, ctx: unknown) => Promise<void>)("it broke", ctx)
+    expect(requests).toHaveLength(1)
+    expect(new Headers(requests[0]?.headers).has("authorization")).toBe(false)
+    expect(levels).toEqual(["warning", "info"])
+    expect(refreshes).toEqual([])
+    expect(await store.read()).toEqual(credentials)
+  })
+
   test.each([401, 403, "network"] as const)("#given a %s failure #when /bug sends #then authentication and network actions stay distinct", async (failure) => {
     const { pi, api, component } = host({ withRedactor: true, response: async () => {
       if (failure === "network") throw new Error("connection refused")

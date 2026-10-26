@@ -3,7 +3,7 @@
 // command and RPC shells; collection, draft building, the draft store, the upload and the TUI command flow live here.
 
 import { randomUUID } from "node:crypto"
-import { createCredentialStore, type CredentialStore, createSession, quietNotice, SignInError } from "@oh-my-opencode/omo-opencode/service-auth"
+import { createCredentialStore, type CredentialStore, quietNotice, SignInError } from "@oh-my-opencode/omo-opencode/service-auth"
 import type { ComponentLogger } from "../../extension/types"
 
 import { collectHostSections, type HostSessionView } from "./collect-host"
@@ -13,18 +13,23 @@ import { feedbackUploadsDisabled, submitReport, type ReportClient, type ReportTr
 const DRAFT_TTL_MS = 30 * 60 * 1000
 const MAX_DRAFTS = 8
 
-async function cliAccessToken(api: string, env: Readonly<Record<string, string | undefined>>, store?: CredentialStore): Promise<string | null> {
-  if (feedbackUploadsDisabled(env)) return null
-  let credentials: CredentialStore
+const SIGNED_OUT_SEND = "Your OmO sign-in could not be used, so this report is sent without your account."
+
+/**
+ * The stored access token while it is still valid, else null (an anonymous send). It never refreshes: a refresh
+ * spends the single-use refresh token, and a report is worth more than its attribution. `fellBack` is a stored
+ * sign-in that could not be used.
+ */
+async function cliAccessToken(api: string, env: Readonly<Record<string, string | undefined>>, store?: CredentialStore): Promise<{ readonly token: string | null; readonly fellBack: boolean }> {
+  if (feedbackUploadsDisabled(env)) return { token: null, fellBack: false }
   try {
-    credentials = store ?? createCredentialStore(api, { notice: quietNotice })
-    if (await credentials.read() === null) return null
+    const current = await (store ?? createCredentialStore(api, { notice: quietNotice })).read()
+    if (current === null) return { token: null, fellBack: false }
+    const valid = current.refreshState !== "uncertain" && Date.parse(current.accessTokenExpiresAt) > Date.now() + 30_000
+    return valid ? { token: current.accessToken, fellBack: false } : { token: null, fellBack: true }
   } catch (error) {
-    if (error instanceof SignInError) return null
-    throw error
+    return { token: null, fellBack: !(error instanceof SignInError) }
   }
-  const home = env.HOME ?? env.USERPROFILE
-  return createSession({ api, store: credentials, ...(home === undefined ? {} : { home }) }).accessToken()
 }
 
 export interface FeedbackSessionLike {
@@ -248,14 +253,9 @@ export async function runFeedbackCommand({ kind, args, ui, env, credentialStore,
     if (choice !== "Send report") return
     break
   }
-  let accessToken: string | null
-  try {
-    accessToken = await cliAccessToken(env.OMO_SERVICE_API_URL ?? "https://api.omo.dev", env, credentialStore)
-  } catch (error) {
-    ui.notify(error instanceof Error ? error.message : String(error), "error")
-    return
-  }
-  const result = await submit({ draftId: prepared.draftId, kind, description, accessToken })
+  const { token, fellBack } = await cliAccessToken(env.OMO_SERVICE_API_URL ?? "https://api.omo.dev", env, credentialStore)
+  if (fellBack) ui.notify(SIGNED_OUT_SEND, "warning")
+  const result = await submit({ draftId: prepared.draftId, kind, description, accessToken: token })
   ui.notify(resultMessage(result), result.kind === "refused" ? "error" : "info")
 }
 
