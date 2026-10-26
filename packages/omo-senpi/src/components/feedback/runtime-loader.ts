@@ -26,5 +26,5 @@ export const loadFeedbackRuntime: FeedbackRuntimeLoader = createFeedbackRuntimeL
 
 export function feedbackRuntimeLoadFailure(error: unknown): string {
   const cause = error instanceof Error ? error.message : String(error)
-  return `Feedback is unavailable: the feedback runtime (${FEEDBACK_RUNTIME_ARTIFACT}) failed to load: ${cause}. Part of this omo install is missing; ${reinstallStep()}, then start a new session.`
+  return `Feedback is unavailable: the feedback runtime (${FEEDBACK_RUNTIME_ARTIFACT}) failed to load: ${cause}. Part of this omo installation is missing; ${reinstallStep()}, then start a new session.`
 }

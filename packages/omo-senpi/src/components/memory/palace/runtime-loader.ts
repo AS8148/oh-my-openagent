@@ -27,5 +27,5 @@ export const loadPalaceRuntime: PalaceRuntimeLoader = createPalaceRuntimeLoader(
 
 export function palaceRuntimeLoadFailure(command: "palace" | "people", error: unknown): string {
   const cause = error instanceof Error ? error.message : String(error)
-  return `/${command} is unavailable: the memory palace runtime (${PALACE_RUNTIME_ARTIFACT}) failed to load: ${cause}. Part of this omo install is missing; ${reinstallStep()}, then start a new session.`
+  return `/${command} is unavailable: the memory palace runtime (${PALACE_RUNTIME_ARTIFACT}) failed to load: ${cause}. Part of this omo installation is missing; ${reinstallStep()}, then start a new session.`
 }

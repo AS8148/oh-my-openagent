@@ -40,7 +40,7 @@ export type ComputerUnavailableReason = "unsupported_host" | "host_api_missing" 
 
 export const COMPUTER_UNAVAILABLE_MESSAGE = {
   unsupported_host: "Computer use isn't supported on this system.",
-  host_api_missing: "This omo version can't run computer use. Update omo, then start a new session.",
+  host_api_missing: "This omo release can't run computer use. Run `omo update`, then start a new session.",
   disabled: "Computer use is off. Set computer.enabled in omo.json, then start a new session.",
   invalid_settings: "Computer use is off: its settings in omo.json are invalid. Fix them, then start a new session.",
 } as const satisfies Record<ComputerUnavailableReason, string>

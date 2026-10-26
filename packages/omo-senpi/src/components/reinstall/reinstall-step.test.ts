@@ -5,8 +5,8 @@ import { reinstallStep } from "./reinstall-step"
 // Contract: omo-native's launcher sets OMO_REINSTALL_COMMAND (engine-environment.js, pinned by launcher.test.ts);
 // the plugin names exactly that command, and nothing when another launch left it unset.
 describe("reinstallStep", () => {
-  test("#given the launcher's OMO_REINSTALL_COMMAND #then the step carries that exact command", () => {
-    expect(reinstallStep({ OMO_REINSTALL_COMMAND: "bun add -g omo-ai@beta" }).endsWith(": bun add -g omo-ai@beta")).toBe(true)
+  test.each(["bun add -g omo-ai@beta", "bun add -g omo-ai", "npm i -g omo-ai@beta", "npm i -g omo-ai"])("#given the launcher's command %s #then the step carries that exact command", (command) => {
+    expect(reinstallStep({ OMO_REINSTALL_COMMAND: command }).split(": ")[1]).toBe(command)
   })
 
   test("#given no or a blank OMO_REINSTALL_COMMAND #then no command is named", () => {

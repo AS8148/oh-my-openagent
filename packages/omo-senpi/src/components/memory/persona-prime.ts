@@ -40,7 +40,7 @@ export function primeMemoryPersonaAssets(input: {
     input.logger?.warn("omo-senpi memory boot asset unavailable", {
       asset: target.asset,
       error: error instanceof Error ? error.message : String(error),
-      hint: `part of this omo install is missing; ${reinstallStep()}, then start a new session`,
+      hint: `part of this omo installation is missing; ${reinstallStep()}, then start a new session`,
     })
   }
   const pending: Promise<void>[] = []

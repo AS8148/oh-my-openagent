@@ -219,7 +219,9 @@ describe("computer-use component", () => {
     // then
     expect(pi.tools).toEqual([])
     expect(log.warnings.some((message) => message.includes("computer-use skipped"))).toBe(true)
-    expect(await runCommand(pi, "on")).toEqual([COMPUTER_UNAVAILABLE_MESSAGE.host_api_missing])
+    const notices = await runCommand(pi, "on")
+    expect(notices).toEqual([COMPUTER_UNAVAILABLE_MESSAGE.host_api_missing])
+    expect(notices[0]?.match(/`([^`]+)`/)?.[1]).toBe("omo update")
   })
 
   test("#given an invalid computer block #when registered #then it warns and registers nothing", async () => {
