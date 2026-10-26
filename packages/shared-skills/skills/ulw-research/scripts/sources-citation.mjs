@@ -6,7 +6,8 @@
 // (1900-2099) or a full date; a page, volume, issue, number, or edition marker; a number inside a
 // URL, DOI, arXiv id, ISBN or ISSN; a number inside a quoted title ("...", \u201C...\u201D, \u300C...\u300D,
 // \u300E...\u300F, <cite>) or an <i>/<em> title directly before a URL or a date; or a citation tag's
-// digits. There is no word list: any other numeral makes the sentence a claim. Pure; no imports.
+// digits. There is no word list: any other numeral makes the sentence a claim. A heading is not a
+// prose sentence. Pure; no imports.
 // Korean markers are \u escapes.
 
 const SKIP = new Set(["script", "style", "template"])
@@ -21,8 +22,8 @@ const YEAR = "(?:19|20)\\d{2}"
 const URL = `(?:https?://|www\\.)[^\\s<>"${LINK}]+?(?=[.,;:)\\]]?(?:\\s|$))`
 /** A date at the start of a string: ISO/dotted/slashed, month-name, or Korean nyeon-wol-il. */
 const DATE_AHEAD = new RegExp(`^(?:${YEAR}[-./]\\d{1,2}(?:[-./]\\d{1,2})?|\\d{1,2}[-./]\\d{1,2}[-./]${YEAR}|${MONTH}\\s+\\d{1,2},?\\s+${YEAR}|\\d{1,2}\\s+${MONTH}\\s+${YEAR}|${MONTH}\\s+${YEAR}|${YEAR}\\s*\\uB144|${YEAR}\\b)`, "i")
-/** Citation-field spans, by type and position. */
-const FIELDS = [
+/** Citation fields a number can sit INSIDE (a checked sentence is traced without them, so a title is never a quotation). */
+const CONTAINERS = [
 	new RegExp(URL, "gi"),
 	/\b(?:doi:\s*)?10\.\d{4,9}\/[^\s<>"]+/gi,
 	/\b(?:arXiv:\s*)?\d{4}\.\d{4,5}(?:v\d+)?\b/gi,
@@ -30,6 +31,9 @@ const FIELDS = [
 	/\[(?:S|Source\s*)?\^?\d+\]/gi,
 	/"[^"]*"|\u201C[^\u201D]*\u201D|\u300C[^\u300D]*\u300D|\u300E[^\u300F]*\u300F/g,
 	new RegExp(`${CITE_OPEN}[^${CITE_CLOSE}]*${CITE_CLOSE}`, "g"),
+]
+/** Citation-field numbers by type: dates, years, page, volume, issue, number, and edition markers. */
+const TYPED = [
 	new RegExp(`${YEAR}[-./]\\d{1,2}(?:[-./]\\d{1,2})?|\\d{1,2}[-./]\\d{1,2}[-./]${YEAR}`, "g"),
 	new RegExp(`\\b${MONTH}\\s+\\d{1,2}(?:st|nd|rd|th)?\\b(?:,?\\s+${YEAR})?|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH}`, "gi"),
 	/\d{1,2}\s*\uC6D4(?:\s*\d{1,2}\s*\uC77C)?/g,
@@ -66,13 +70,19 @@ function lines(node, out = [""]) {
 }
 
 /** Spans [start, end) of the citation fields in `text`; an <i>/<em> run is a title only right before a URL, a link, or a date. */
-function fieldSpans(text) {
+function containerSpans(text) {
 	const spans = []
-	for (const re of FIELDS) for (const match of text.matchAll(re)) spans.push([match.index, match.index + match[0].length])
+	for (const re of CONTAINERS) for (const match of text.matchAll(re)) spans.push([match.index, match.index + match[0].length])
 	for (const match of text.matchAll(new RegExp(`${EM_OPEN}[^${EM_CLOSE}]*${EM_CLOSE}`, "g"))) {
 		const after = text.slice(match.index + match[0].length).replace(/^[\s,.:;()\u2013-]*/, "")
 		if (after.startsWith(LINK) || /^(?:https?:\/\/|www\.)/i.test(after) || DATE_AHEAD.test(after)) spans.push([match.index, match.index + match[0].length])
 	}
+	return spans
+}
+
+function fieldSpans(text) {
+	const spans = containerSpans(text)
+	for (const re of TYPED) for (const match of text.matchAll(re)) spans.push([match.index, match.index + match[0].length])
 	return spans
 }
 
@@ -100,11 +110,22 @@ export function isClaimSegment(text) {
 	return false
 }
 
-const plain = (text) => text.replace(/[\u0002-\u0006]/g, " ").replace(/\s+/g, " ").trim()
+/** A checked sentence as the gates read it: container fields (URL, DOI, title, tag) removed, every other number kept. */
+function plain(text) {
+	let out = ""
+	let at = 0
+	for (const [start, end] of containerSpans(text).sort((a, b) => a[0] - b[0])) {
+		if (end <= at) continue
+		out += `${text.slice(at, Math.max(at, start))} `
+		at = end
+	}
+	return `${out}${text.slice(at)}`.replace(/[\u0002-\u0006]/g, " ").replace(/\s+/g, " ").trim()
+}
 const lineClaims = (line) => sentences(line).filter(isClaimSegment).map(plain)
 
 /** The checked sentences of an element under Sources ([] when every numeral is a citation field). */
 export function sourcesClaims(node) {
+	if (/^h[1-6]$/.test(node.tag)) return []
 	return lines(node).flatMap(lineClaims)
 }
 
