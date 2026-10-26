@@ -62,7 +62,7 @@ describe("the converted half of a derived or converted row is display(value, uni
 })
 
 describe("conversion originals bind both halves", () => {
-	for (const [shown, code] of [["320,000 mm (320 mm)", "unit_mismatch"], ["320,000 mm (999 m)", "value_mismatch"]]) {
+	for (const [shown, code] of [["320,000 mm (320 mm)", "unit_mismatch"], ["320,000 mm (999 m)", "value_mismatch"], ["320,000 mm (three m)", "value_mismatch"], ["320,000 mm (\uFF19\uFF19\uFF19 m)", "value_mismatch"], ["320,000 mm (m)", "value_mismatch"]]) {
 		test(`#given an edited original ${shown} #when verified #then ${code} on part original`, () => {
 			expect(check(data("F8", shown))).toContainEqual(expect.objectContaining({ code, part: "original" }))
 			expect(checkFidelity(data("F8", shown), { ledger: BASE, brief: BRIEF }).defects).toContainEqual(expect.objectContaining({ code, part: "original" }))

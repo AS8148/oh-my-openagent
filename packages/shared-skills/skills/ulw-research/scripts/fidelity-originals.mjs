@@ -1,14 +1,14 @@
 // Check displayed conversion originals against their operands, not the mutable render field.
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
-import { NUMBER_SOURCE } from "./number-grammar.mjs"
 import { parseNumeral } from "./numerals.mjs"
 import { normalizeText } from "./text-normalize.mjs"
 import { display } from "./unit-precision.mjs"
+import { normalizeUnit } from "./units.mjs"
 
 const DERIVED = new Set(["converted", "derived"])
-/** An original is a bracket holding a number in the one grouped-number grammar; "(approx.)" is prose. */
-const NUMBER = new RegExp(NUMBER_SOURCE, "u")
-const bracketed = (shown) => [...String(shown).matchAll(/\(([^()]*)\)/g)].filter((match) => NUMBER.test(match[1]))
+/** An original is a bracket verify reads as a quantity: parseNumeral finds one, it holds a digit after NFKC, or it is a bare unit; "(approx.)" is prose. */
+const isOriginal = (text) => parseNumeral(text) !== null || /\d/.test(text.normalize("NFKC")) || (text.trim() !== "" && normalizeUnit(text.trim()) !== null)
+const bracketed = (shown) => [...String(shown).matchAll(/\(([^()]*)\)/g)].filter((match) => isOriginal(match[1]))
 
 /** The converted half (the text outside numeric originals) equals display(row.value, row.unit), rebuilt from the row. */
 export function convertedHalfFits(row, shown) {

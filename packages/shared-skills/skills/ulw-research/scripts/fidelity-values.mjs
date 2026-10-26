@@ -220,14 +220,18 @@ function provenance(sourcesDir, meta, row) {
 }
 
 function sourceChecks(ctx, rows, cited, sourcesDir, flag, unreadable = new Set()) {
-	const ids = new Set([...cited.keys()].map((id) => rows.get(id)?.source_id).filter(Boolean))
+	const backed = new Set([...cited.keys()].map((id) => rows.get(id)?.source_id).filter(Boolean))
+	const ids = new Set(backed)
 	for (const match of proseText(ctx.body).matchAll(/\[S(\d+)\]/g)) ids.add(`S${match[1]}`)
 	const meta = new Map()
 	for (const id of sourcesDir ? ids : []) {
 		if (unreadable.has(id)) continue
 		const [metaPath, textPath] = [join(sourcesDir, id, "meta.json"), join(sourcesDir, id, "text.txt")]
-		if (!existsSync(metaPath) || !existsSync(textPath)) continue
+		// A row-backed source passed the preflight (readable, hash pinned), the only gate for it: only its metadata is read here.
+		// A source named only in prose backs no row: its absence is not a finding, and an edit of its text still is.
+		if (!backed.has(id) && (!existsSync(metaPath) || !existsSync(textPath))) continue
 		meta.set(id, JSON.parse(readFileSync(metaPath, "utf8")))
+		if (backed.has(id)) continue
 		const actual = sha256Of(readFileSync(textPath))
 		if (meta.get(id).sha256 !== actual) flag("snapshot_hash_mismatch", ctx.body, `${id}/text.txt changed after its snapshot was pinned`)
 	}
