@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import type { PluginInput } from "@opencode-ai/plugin"
+import { createOpencodeClient } from "@opencode-ai/sdk"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
 import { createPrometheusMdOnlyHook } from "./hook"
 import { parsePatch } from "./fixtures/opencode-patch-parser"
@@ -8,7 +10,18 @@ const source = ".omo/plans/source.md"
 const allowed = ".omo/plans/allowed.md"
 const outside = "src/outside.ts"
 const patch = (...lines: string[]) => ["*** Begin Patch", ...lines, "*** End Patch"].join("\n")
-const hook = createPrometheusMdOnlyHook({ directory: "/tmp/test", client: {} } as never)
+const pluginInput: PluginInput = {
+  client: createOpencodeClient({
+    fetch: async () => { throw new Error("Unexpected SDK request in patch-lines test") },
+  }),
+  project: { id: "patch-lines", worktree: "/tmp/test", time: { created: 0 } },
+  directory: "/tmp/test",
+  worktree: "/tmp/test",
+  experimental_workspace: { register: () => {} },
+  serverUrl: new URL("http://localhost"),
+  $: Bun.$,
+}
+const hook = createPrometheusMdOnlyHook(pluginInput)
 const input = { tool: "apply_patch", sessionID, callID: "patch-lines" }
 
 const operations = [
@@ -96,7 +109,8 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
           )
           const hunks = parsePatch(patchText).hunks
           expect(hunks).toHaveLength(mixed ? 2 : 1)
-          const target = hunks.at(-1)!
+          const target = hunks.at(-1)
+          if (target === undefined) throw new Error("Expected a parsed target hunk")
           if (operation.name === "Move to") {
             expect(target).toMatchObject({ type: "update", path: source, move_path: outside })
           } else {
