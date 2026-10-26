@@ -260,7 +260,10 @@ export async function buildExtension(options = {}) {
     gatewayStoreWorkerOutput,
   } = resolveOutputs(options)
   const toolkitSdkInputs = await buildEntry(toolkitSdkEntryPath, toolkitSdkOutput, buildDefines, sdkExternalSpecifiers)
-  const mainInputs = await buildEntry(entryPath, output, buildDefines)
+  const mainInputs = await buildEntry(entryPath, output, {
+    ...buildDefines,
+    OMO_TELEMETRY_INGEST_KEY: process.env.OMO_TELEMETRY_INGEST_KEY ?? "",
+  })
   const taskInputs = await buildEntry(taskEntryPath, taskOutput, buildDefines)
   const memberInputs = await buildEntry(memberEntryPath, memberOutput, buildDefines)
   const supervisorInputs = await buildEntry(supervisorEntryPath, supervisorOutput, buildDefines)
