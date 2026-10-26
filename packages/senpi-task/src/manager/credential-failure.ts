@@ -27,12 +27,12 @@ const MODEL_SCOPED_LIMIT = /(?<!\/)\bmodels?\b|\bpremium\b|\b(?:opus|sonnet|haik
 
 // The route does not serve the configured model id. Another rung would answer a request the caller did not
 // make (often on another provider), so this is a configuration error to surface, never a fallback (#11355).
-// The same shapes as senpi's matcher (senpi#4283): the OpenAI-compatible `model_not_found` code, a gateway's
-// "unknown provider for model", Anthropic's not_found_error whose message names the model ("model: <id>"; any
+// The same shapes as senpi's matcher (senpi#4283): the OpenAI-compatible `model_not_found` code and OpenAI's
+// "The model `<id>` does not exist" prose, a gateway's "unknown provider for model", Anthropic's not_found_error whose message names the model ("model: <id>"; any
 // other not_found_error is not one), and Google's "models/<id> is not found". It wins over every other class,
 // a 401 in the same answer included.
 const MODEL_CONFIG_ERROR =
-  /\bmodel_not_found\b|\bunknown provider for model\b|\bnot_found_error\b[^}]{0,120}?\bmodel:\s*[\w.:/-]|\bmodels\/[\w.:-]+ is not found\b/i
+  /\bmodel_not_found\b|\bunknown provider for model\b|\bthe model\s+[`'"]?[\w.:/-]+[`'"]?\s+does not exist\b|\bnot_found_error\b[^}]{0,120}?\bmodel:\s*[\w.:/-]|\bmodels\/[\w.:-]+ is not found\b/i
 
 export function isModelConfigError(message: string): boolean {
   return MODEL_CONFIG_ERROR.test(message)
@@ -73,20 +73,21 @@ function modelIdOf(record: TaskRecord): string | undefined {
  * over), so a single-model lane such as deep-high never ends on a bare provider error.
  */
 export function terminalFailureMessage(record: TaskRecord | null | undefined, providerMessage: string): string {
+  // Classified on the raw provider text, like the fallback writers; only the redacted text is returned.
   const failureMessage = redactSecretText(providerMessage)
   const provider = record == null ? undefined : providerOf(record)
   if (provider === undefined || record == null) return failureMessage
-  if (isModelConfigError(failureMessage)) {
+  if (isModelConfigError(providerMessage)) {
     const model = record.resolved_model === undefined ? record.model : `${provider}/${record.resolved_model.model_id}`
     const key = record.category === undefined ? "its model" : `categories.${record.category}`
     return `${failureMessage}\n${model} is not served by its route; fix ${key} in omo.json.`
   }
-  if (isCredentialFailure(failureMessage, modelIdOf(record))) {
+  if (isCredentialFailure(providerMessage, modelIdOf(record))) {
     return `${failureMessage}\nCredentials for ${provider} were rejected; re-authenticate ${provider} (Provider authentication settings on the desktop, /login ${provider} in an interactive session) or re-add its API key, or pin this category to another provider in omo.json.`
   }
-  if (usageLimitScope(failureMessage) === undefined) return failureMessage
+  if (usageLimitScope(providerMessage) === undefined) return failureMessage
   const model = record.resolved_model === undefined ? record.model : `${provider}/${record.resolved_model.model_id}`
-  const exhausted = runtimeFallbackCandidates(record, failureMessage).remaining.length === 0
+  const exhausted = runtimeFallbackCandidates(record, providerMessage).remaining.length === 0
     ? " No other model in its fallback chain could take over."
     : ""
   return `${failureMessage}\n${model} reached its usage limit, so this task stopped.${exhausted} Retry once the limit resets, or point this category at another provider or model in omo.json.`

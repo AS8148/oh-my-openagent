@@ -94,4 +94,42 @@ describe("provider error text never reaches the task store raw (#11355)", () => 
       }
     })
   }
+
+  // The child-observed hop: the child's own engine falls back onto the parent's model (observeParentModelFallback
+  // writes parent_model_fallback.detail), then reports an exhausted chain whose last_error reaches the event log.
+  for (const cell of SECRET_CELLS) {
+    test(`#given ${cell.name} in a failed turn the child itself falls back from #when the chain is exhausted #then no record field or log holds the secret`, async () => {
+      // given
+      const runner = new ObservableRunner()
+      const { manager, store } = makeManager({ planner: planner(), inProcess: runner })
+      const initialStart = runner.nextStart()
+      const result = await manager.start(baseSpec({ execution_mode: "in-process", category: "quick", parent_model: PARENT }))
+      if (result.kind !== "started") throw new Error("expected started task")
+      await initialStart
+      const handle = runner.handles.get(result.task_id)
+      if (handle === undefined) throw new Error("expected initial handle")
+      await handle.waitForSubscription()
+      const limit = `${cell.text} \u00b7 You've hit your session limit`
+      const applied = { type: "retry_fallback_applied", from: "vendor-a/primary-model", to: PARENT, chainKey: "vendor-a/primary-model", reason: "billing" } as const
+      const exhausted = { type: "retry_fallback_exhausted", chainKey: "vendor-a/primary-model", lastError: `503 overloaded ${cell.text}` } as const
+      const terminal = manager.waitFor(result.task_id)
+
+      // when
+      handle.emit(failedTurn(limit))
+      handle.emit(applied)
+      handle.emit(exhausted)
+      handle.settle({ status: "error", failure: { kind: "child-turn-failed", message: `503 overloaded ${cell.text}` } })
+      const record = await terminal
+
+      // then
+      expect(record.parent_model_fallback).toMatchObject({ reason: "usage_limit" })
+      expect(record.parent_model_fallback?.detail).toContain("[REDACTED]")
+      const events = readFileSync(join(store.stateDir, "logs", `${result.task_id}.jsonl`), "utf8")
+      expect(events).toContain('"type":"retry_fallback_exhausted"')
+      const sinks = { record: JSON.stringify(store.load(result.task_id)), state: filesText(store.stateDir) }
+      for (const [sink, text] of Object.entries(sinks)) {
+        expect({ sink, leaked: text.includes(cell.secret) }).toEqual({ sink, leaked: false })
+      }
+    })
+  }
 })
