@@ -4,7 +4,8 @@
 // it ("cite_note-7" and "2019-2023" carry no negative). Digits a converter writes out from a link
 // target, an image source, alt text, or a title may appear in the converted text, but are never lost.
 
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 
 import { CliError } from "./cli-support.mjs"
 import { parseHtml, PROSE_BREAKS } from "./html-lite.mjs"
@@ -41,8 +42,10 @@ function tokensOf(text) {
 /** The comparison key of one number token, so other tools can match a converted number against a probe record. */
 export const numberKey = (token) => tokensOf(String(token))[0]?.key ?? null
 
-/** The numbers in `texts` that the snapshot's conversion probe recorded as altered (conversion.json). */
-export function alteredIn(altered, texts) {
+/** The numbers in `texts` that the source's conversion probe recorded as altered (sources/<id>/conversion.json). */
+export function alteredIn(sourceDir, texts) {
+	const record = join(sourceDir, "conversion.json")
+	const altered = existsSync(record) ? (JSON.parse(readFileSync(record, "utf8")).conversion_altered_numbers ?? []) : []
 	const keys = new Set(altered.map(numberKey))
 	return texts.flatMap((text) => tokensOf(String(text ?? ""))).filter((token) => keys.has(token.key)).map((token) => token.text)
 }

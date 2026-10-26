@@ -43,9 +43,7 @@ export function snapshotOf(sessionDir, id) {
 	const dir = join(sessionDir, "sources", String(id))
 	if (!existsSync(join(dir, "meta.json"))) throw new CliError(`source ${id} has no snapshot; run source snapshot --id ${id} first`)
 	const html = join(dir, "source.html")
-	const probe = join(dir, "conversion.json")
-	const altered = existsSync(probe) ? (JSON.parse(readInput(probe)).conversion_altered_numbers ?? []) : []
-	return { meta: JSON.parse(readInput(join(dir, "meta.json"))), text: readInput(join(dir, "text.txt")), html: existsSync(html) ? readInput(html) : null, altered }
+	return { meta: JSON.parse(readInput(join(dir, "meta.json"))), text: readInput(join(dir, "text.txt")), html: existsSync(html) ? readInput(html) : null }
 }
 
 /**

@@ -82,7 +82,7 @@ function runAdd(args, quote) {
 	const found = locate(flags, snapshot, id, quote)
 	if (found.error === "unit_expected_mismatch") return failure(command, "unit_mismatch", { message: `expected ${found.expected}, found ${found.found}`, candidates: found.candidates })
 	if (found.error) return failure(command, found.error, { message: `no single match in ${id}`, candidates: found.candidates })
-	const altered = alteredIn(snapshot.altered, [found.raw, found.quote])
+	const altered = alteredIn(join(sessionDir, "sources", id), [found.raw, found.quote])
 	if (altered.length > 0) return failure(command, "conversion_altered_number", { message: `${id}'s conversion altered ${[...new Set(altered)].join(", ")} (sources/${id}/conversion.json); the converted text cannot back this number`, tokens: altered, hint: DEFECT_CODES.conversion_altered_number.hint })
 	const { meta } = snapshot
 	const host = URL.canParse(meta.url) ? new URL(meta.url).hostname : null
