@@ -45,6 +45,7 @@ ulw-research/
     ├── fidelity-records.mjs         # FIDELITY_RECORDS table + the delivery barrier of outcome verify/finish (fidelity_unresolved, edition_unverified)
     ├── source-commands.mjs          # `source snapshot`, `claims index`, snapshot readers; `source refresh` is source-refresh.mjs
     ├── source-view.mjs / raw-decode.mjs / html-text-map.mjs   # the one snapshot reading: locator text, charset decode, byte map, visible-text extraction
+    ├── css-hiding.mjs               # whether inline styles and the page's <style> rules hide an element from every reader (cascade, conditional at-rules)
     ├── *.test.ts                    # co-located bun tests, one per module (unshipped)
     └── tests/fixtures/              # good/bad reports, boxes.json, reference docs (unshipped)
 ```

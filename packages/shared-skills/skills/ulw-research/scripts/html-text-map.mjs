@@ -4,12 +4,12 @@
 // (prose blocks and table cells; whitespace collapsed, entities decoded) and text unit k came from
 // html.slice(starts[k], ends[k]). Only text nodes are read: attribute values, CSS, scripts, and
 // anything a reader never sees (head, script, style, svg, noscript, template, code-like elements,
-// the hidden attribute, aria-hidden="true", display:none, visibility:hidden inline or by a <style> rule
-// on a simple selector (.class, #id, tag), and their descendants)
+// aria-hidden="true" and their descendants, and what the page's CSS hides: css-hiding.mjs)
 // contribute nothing, so a locator over `text` can never land in markup. A synthetic separator
 // (collapsed break, line feed) maps to an empty range at the previous character's end.
 // Plain Node ESM, sibling imports only.
 
+import { cssVisibility } from "./css-hiding.mjs"
 import { decodeOne } from "./entities.mjs"
 import { parseHtml, PROSE_BREAKS, PROSE_TAGS } from "./html-lite.mjs"
 
@@ -18,32 +18,12 @@ const INLINE = new Set([
 	"a", "abbr", "b", "bdi", "bdo", "cite", "data", "del", "dfn", "em", "font", "i", "ins", "label", "mark", "q", "s",
 	"small", "span", "strong", "sub", "sup", "time", "u", "var",
 ])
-const HIDDEN_STYLE = /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse))\s*(?:!important\s*)?(?:;|$)/i
 const SPACE = /\s/
 
-/** Simple selectors (.class, #id, tag) that <style> blocks hide; compound or nested selectors are not read. */
-export function hidingRules(root) {
-	const rules = new Set()
-	const visit = (node) => {
-		if (node.tag === "style") {
-			for (const [, selectors, body] of String(node.raw ?? "").matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-				if (!HIDDEN_STYLE.test(body.trim())) continue
-				for (const selector of selectors.split(",").map((part) => part.trim())) if (/^(?:[.#][\w-]+|[a-z][a-z0-9]*)$/i.test(selector)) rules.add(selector.toLowerCase())
-			}
-		}
-		for (const child of node.children ?? []) visit(child)
-	}
-	visit(root)
-	return rules
-}
-
-/** Whether a reader never sees the element or anything inside it (rules: hidingRules of its document). */
-export function hiddenElement(node, rules = new Set()) {
-	if (SKIP.has(node.tag)) return true
-	const attrs = node.attrs ?? {}
-	if (attrs.hidden !== undefined || String(attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true" || HIDDEN_STYLE.test(attrs.style ?? "")) return true
-	const names = [node.tag, attrs.id && `#${attrs.id}`, ...String(attrs.class ?? "").split(/\s+/).filter(Boolean).map((name) => `.${name}`)]
-	return names.some((name) => name && rules.has(name.toLowerCase()))
+/** null when a reader never sees the element or anything inside it, else whether its own text shows (css: cssVisibility). */
+function shownState(node, css, parentShown) {
+	if (SKIP.has(node.tag) || String(node.attrs?.["aria-hidden"] ?? "").trim().toLowerCase() === "true") return null
+	return css(node, parentShown)
 }
 
 function newLine() {
@@ -91,15 +71,18 @@ function putText(line, src, from, to) {
 	}
 }
 
-function putProse(line, src, node, rules) {
+function putProse(line, src, node, css, shown) {
 	for (const child of node.children) {
-		if (child.tag === "#text") putText(line, src, child.source_start, child.source_end)
-		else if (!hiddenElement(child, rules)) {
-			const breaks = PROSE_BREAKS.has(child.tag)
-			if (breaks) softBreak(line)
-			putProse(line, src, child, rules)
-			if (breaks) softBreak(line)
+		if (child.tag === "#text") {
+			if (shown) putText(line, src, child.source_start, child.source_end)
+			continue
 		}
+		const state = shownState(child, css, shown)
+		if (state === null) continue
+		const breaks = PROSE_BREAKS.has(child.tag)
+		if (breaks) softBreak(line)
+		putProse(line, src, child, css, state)
+		if (breaks) softBreak(line)
 	}
 }
 
@@ -107,31 +90,35 @@ function putProse(line, src, node, rules) {
 export function extractHtml(html) {
 	const src = String(html)
 	const root = parseHtml(src)
-	const rules = hidingRules(root)
+	const css = cssVisibility(root)
 	const lines = []
 	let line = newLine()
 	const flush = (node) => {
 		if (line.text !== "") lines.push({ ...line, node })
 		line = newLine()
 	}
-	const walk = (node) => {
+	const walk = (node, shown) => {
 		for (const child of node.children) {
-			if (child.tag === "#text") putText(line, src, child.source_start, child.source_end)
-			else if (hiddenElement(child, rules)) continue
-			else if (child.tag === "br") flush(node)
-			else if (INLINE.has(child.tag)) walk(child)
+			if (child.tag === "#text") {
+				if (shown) putText(line, src, child.source_start, child.source_end)
+				continue
+			}
+			const state = shownState(child, css, shown)
+			if (state === null) continue
+			if (child.tag === "br") flush(node)
+			else if (INLINE.has(child.tag)) walk(child, state)
 			else if (PROSE_TAGS.has(child.tag)) {
 				flush(node)
-				putProse(line, src, child, rules)
+				putProse(line, src, child, css, state)
 				flush(child)
 			} else {
 				flush(node)
-				walk(child)
+				walk(child, state)
 				flush(child)
 			}
 		}
 	}
-	walk(root)
+	walk(root, true)
 	flush(root)
 	const blocks = []
 	const starts = []

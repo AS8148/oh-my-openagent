@@ -109,6 +109,18 @@ describe("page sources locate on visible text nodes only", () => {
 		expect((await find(dir, "Kept length is")).json.data.row.value).toBe("410")
 	})
 
+	test("#given rules inside @media (a responsive or a print copy) #when --find runs #then the text is located, and an unconditional rule still hides", async () => {
+		const dir = session()
+		const style = "<style>@media (max-width:600px){.desk{display:none}} @media print{.screen{display:none}} .d-none{display:none}</style>"
+		const body = '<p class="desk">Desktop length is 410 m.</p><p class="screen">Screen length is 411 m.</p><p class="d-none">Mobile length is 412 m.</p>'
+		await snapshotPage(dir, `<html><head>${style}</head><body>${body}</body></html>`)
+		const desktop = await find(dir, "Desktop length is")
+		expect(desktop.exitCode).toBe(0)
+		expect(desktop.json.data.row.value).toBe("410")
+		expect((await find(dir, "Screen length is")).json.data.row.value).toBe("411")
+		expect((await find(dir, "Mobile length is")).json.error).toBe("fact_not_located")
+	})
+
 	test("#given a quote across inline markup #when fact quote --match runs #then the quotation is that sentence, indexed like sentences.jsonl", async () => {
 		const dir = session()
 		await snapshotPage(dir, "<!doctype html><html><head><script>var x = 1;</script></head><body><p>Construction opens <em>no earlier</em> than 2027. Funding is pending.</p></body></html>")
