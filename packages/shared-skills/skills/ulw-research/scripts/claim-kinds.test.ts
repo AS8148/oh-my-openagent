@@ -164,6 +164,12 @@ describe("unmarked phrases", () => {
 		"We confirmed that the recorded span is up to 320 m.",
 		"We measured 42 ms.",
 		"저희는 측정값 320 m를 검증했다",
+		"We measured a latency of 40 ms, as this report shows.",
+		"We verified the value on page 3.",
+		"We checked the totals, which the filing also lists.",
+		"우리는 결과를 확인하였다",
+		"우리는 실행 결과를 검증하였다",
+		"우리는 지연 시간 40 ms를 측정했고, 보고서도 같은 값을 적었다",
 	]
 	const quiet = [
 		"The tests showed a 12 % drop.",
@@ -189,6 +195,8 @@ describe("unmarked phrases", () => {
 		"The authors confirmed that the value was measured.",
 		"우리는 보고서의 수치를 확인했다",
 		"우리는 일정을 확인했다",
+		"우리는 공시 자료의 수치를 확인하였다",
+		"We measured the latency in the published report.",
 	]
 	for (const text of fires) test(`#given "${text}" #then verified`, () => expect(unmarkedKinds(text)).toEqual(["verified"]))
 	for (const text of quiet) test(`#given "${text}" #then nothing`, () => expect(unmarkedKinds(text)).toEqual([]))

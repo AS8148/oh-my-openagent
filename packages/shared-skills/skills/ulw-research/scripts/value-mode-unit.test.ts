@@ -128,6 +128,9 @@ describe("value-mode units in tables bind by visual column", () => {
 		["a colspan earlier in the row", table("<tr><th>Bridge</th><th>Deck (km)</th><th>Span (m)</th></tr>", '<tr><td colspan="2">Bridge A</td><td>{{F1:span_len:value}}</td></tr>'), null],
 		["a rowspan from above", table("<tr><th>Bridge</th><th>Span (m)</th><th>Deck (km)</th></tr>", '<tr><td rowspan="2">A</td><td>x</td><td>y</td></tr><tr><td>{{F1:span_len:value}}</td><td>{{F24:deck_len:value}}</td></tr>'), "unit_unbound"],
 		["a headerless key/value table", "<h2>Findings</h2><table><tr><td>Deck</td><td>{{F24:deck_len}}</td></tr><tr><td>Span</td><td>{{F1:span_len:value}}</td></tr></table>", "unit_unbound"],
+		["a key/value table with row headers and a matching suffix", "<h2>Findings</h2><table><tr><th>Deck</th><td>{{F24:deck_len}}</td></tr><tr><th>Span</th><td>{{F1:span_len:value}} m</td></tr></table>", null],
+		["a body row header under a matching column header", table("<tr><th>Part</th><th>Length (m)</th></tr>", '<tr><th scope="row">Span</th><td>{{F1:span_len:value}}</td></tr>'), null],
+		["a body row header under a wrong column header", table("<tr><th>Part</th><th>Length (mm)</th></tr>", '<tr><th scope="row">Span</th><td>{{F1:span_len:value}}</td></tr>'), "unit_mismatch"],
 	] as const) {
 		test(`#given ${name} #when verified #then ${code ?? "it binds cleanly"}`, async () => {
 			const result = await (await filled(html)).verify()
@@ -135,6 +138,54 @@ describe("value-mode units in tables bind by visual column", () => {
 			else expect(codes(result)).toContain(code)
 			expect(result.exitCode).toBe(code === "unit_mismatch" ? 1 : 0)
 			if (code !== "unit_mismatch") expect(codes(result)).not.toContain("unit_mismatch")
+		})
+	}
+})
+
+// Rows as `fact add --find` writes them: the scale word stays in the value's render ("3,234\uC5B5", "12 million").
+const PAGE = "<html><body><p>\uB9E4\uCD9C\uC740 3,234\uC5B5 \uC6D0\uC774\uB2E4.</p><p>Revenue reached 12 million dollars.</p><p>The main span is 320 m long.</p></body></html>"
+
+async function located(pointers: string) {
+	const dir = mkdtempSync(join(tmpdir(), "value-mode-find-"))
+	onTestFinished(() => rmSync(dir, { recursive: true, force: true }))
+	copyFileSync(join(FIX, "fidelity-brief-locked.md"), join(dir, "brief.md"))
+	writeFileSync(join(dir, "page.html"), PAGE)
+	expect((await run(["source", "snapshot", "--id", "S1", "--html", join(dir, "page.html"), "--session-dir", dir])).exitCode).toBe(0)
+	const rows: Row[] = []
+	for (const [find, label] of [["\uB9E4\uCD9C\uC740", "won"], ["Revenue reached", "rev"], ["main span is", "sp"]]) {
+		const added = (await run(["fact", "add", "--source", "S1", "--find", find, "--label", label, "--session-dir", dir, "--json"])) as { exitCode: number; json: { data: { row: Row } } }
+		expect(added.exitCode).toBe(0)
+		rows.push(added.json.data.row)
+	}
+	writeFileSync(join(dir, "report.src.html"), `<h2>Findings</h2><p>The source states ${pointers} [S1].</p>`)
+	expect((await run(["fact", "fill", join(dir, "report.src.html"), "--out", join(dir, "report.html"), "--session-dir", dir])).exitCode).toBe(0)
+	const verify = async () => (await run(["fact", "verify", join(dir, "report.html"), "--session-dir", dir])) as VerifyResult
+	const edit = (from: string, to: string) => writeFileSync(join(dir, "report.html"), readFileSync(join(dir, "report.html"), "utf8").replace(from, to))
+	return { rows, verify, edit }
+}
+
+describe("value-mode facts whose render carries a scale word", () => {
+	test("#given rows from fact add --find #when located #then the scale is folded into an unscaled unit", async () => {
+		const { rows } = await located("{{F1:won}}")
+		expect(rows.map((row) => [row.value, row.unit])).toEqual([["323400000000", "KRW"], ["12000000", "USD"], ["320", "m"]])
+	})
+
+	for (const pointers of ["{{F1:won:value}} \uC6D0", "{{F1:won:value}}{{F1:won:unit}}", "{{F2:rev:value}} dollars", "{{F2:rev:value}} {{F2:rev:unit}}"]) {
+		test(`#given ${JSON.stringify(pointers)} right after fill #when verified #then the scale word is part of the value, not a unit`, async () => {
+			const result = await (await located(pointers)).verify()
+			expect(codes(result)).toEqual([])
+			expect(result.exitCode).toBe(0)
+		})
+	}
+
+	for (const [pointers, from, to] of [["{{F3:sp:value}}m", "</data>m", "</data>mm"], ["{{F1:won:value}} \uC6D0", "</data> \uC6D0", "</data> \uB2EC\uB7EC"]]) {
+		test(`#given ${JSON.stringify(pointers)} #when the unit outside the element is hand-edited #then unit_mismatch still blocks`, async () => {
+			const { verify, edit } = await located(pointers)
+			expect(codes(await verify())).toEqual([])
+			edit(from, to)
+			const edited = await verify()
+			expect(codes(edited)).toContain("unit_mismatch")
+			expect(edited.exitCode).toBe(1)
 		})
 	}
 })

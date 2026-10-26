@@ -57,14 +57,17 @@ function agrees(found, row) {
 	return unitKey(found.token) === unitKey(row.unit)
 }
 
-/** The header of the cell's visual column; nothing binds in a table with a rowspan or without a th row. */
+/** A column-header row: a thead row or a row made only of th cells. A th first in a body row is a row header. */
+const isHeaderRow = (row) => row.parent?.tag === "thead" || (cellsOf(row).length > 0 && cellsOf(row).every((cur) => cur.tag === "th"))
+
+/** The header of the cell's visual column; nothing binds in a table with a rowspan or without a header row. */
 function headerUnit(ctx, node) {
 	const cell = ctx.util.closest(node, (cur) => cur.tag === "td")
 	const table = cell && ctx.util.closest(cell, (cur) => cur.tag === "table")
 	if (!table || cell.attrs.colspan || cell.attrs.rowspan) return null
 	const rows = rowsOf(table)
 	if (rows.some((row) => row.children.some((cur) => cur.attrs?.rowspan && cur.attrs.rowspan !== "1"))) return null
-	const header = rows.find((row) => row.children.some((cur) => cur.tag === "th"))
+	const header = rows.find(isHeaderRow)
 	if (!header || header === cell.parent) return null
 	const head = cellsOf(header)[cellsOf(cell.parent).indexOf(cell)]
 	if (!head) return null
@@ -89,7 +92,8 @@ export function valueUnitProblem(ctx, node, row) {
 	const [prev, next] = [siblings[at - 1], siblings[at + 1]]
 	const number = NUMBER.exec(shown)
 	const sign = signBefore(`${prev?.tag === "#text" ? prev.text : ""}${number ? shown.slice(0, number.index) : ""}`)
-	const following = `${number ? shown.slice(number.index + number[0].length) : ""}${next?.tag === "#text" ? next.text : ""}`
+	// The element's own text is the row's render: a scale word in it ("3,234\uC5B5", "12 million") is part of the value.
+	const following = next?.tag === "#text" ? next.text : ""
 	const after = unitAfter(following, row) ?? (unitElementAfter(siblings, at, row) ? { token: row.unit } : null)
 	const found = [["preceded by", sign && { ...sign, sign: true }], ["followed by", after], ["headed with", headerUnit(ctx, node)]].filter(([, unit]) => unit)
 	if (found.length === 0) return ["unit_unbound", `${row.fact_id} has unit "${row.unit}" but no recognizable unit right after its value, before it as a currency sign, or in its column header`]
