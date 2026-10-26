@@ -12,7 +12,7 @@ import { join, resolve, sep } from "node:path"
 import { sha256Of } from "./cli-support.mjs"
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
-import { convertedHalfFits, originalProblem } from "./fidelity-originals.mjs"
+import { convertedHalfFits, isDerivedRow, opensOriginal, originalProblem, renderLocator, staleRender } from "./fidelity-originals.mjs"
 import { unreadableSnapshots } from "./fidelity-snapshot-readability.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
@@ -48,7 +48,7 @@ function quoteProblem(row, shown, selector) {
 }
 
 function factProblem(row, shown, attrs = {}, rows = new Map()) {
-	const original = originalProblem(row, shown, rows)
+	const original = originalProblem(row, shown, rows, attrs["data-fact-mode"] === "value")
 	if (original) return original
 	if (attrs["data-unit"] !== undefined && unitKey(attrs["data-unit"]) !== unitKey(row.unit)) return ["unit_mismatch", `data-unit "${attrs["data-unit"]}" but ${row.fact_id} is in "${row.unit}"`]
 	if (attrs.value !== undefined && !sameValue(attrs.value, row.value)) return ["value_mismatch", `value="${attrs.value}" but ${row.fact_id} is ${row.value}`]
@@ -162,14 +162,17 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 	}
 	for (const node of ctx.all.filter((cur) => cur.attrs["data-fact"] !== undefined)) {
 		const selector = node.attrs["data-quote-sel"] ?? "full"
-		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : factProblem(row, proseText(node), node.attrs, rows)))
+		const after = () => proseText({ children: node.parent?.children.slice(node.parent.children.indexOf(node) + 1) ?? [] })
+		const glued = (row) => isDerivedRow(row) && node.attrs["data-fact-mode"] !== "value" && opensOriginal(after()) ? ["value_mismatch", `another original follows ${row.fact_id}: "${clip(after())}"`, "original"] : null
+		check(node.attrs["data-fact"], node, (row) => (row.kind === "quote" ? quoteProblem(row, withoutFooter(node), selector) : (factProblem(row, proseText(node), node.attrs, rows) ?? glued(row))))
 	}
 	const docText = bare(proseText(ctx.body))
 	for (const entry of fillMap ?? []) {
 		check(entry.fact_id, ctx.body, (row) => {
-			const problem = row.kind === "quote" ? quoteProblem(row, entry.rendered, entry.selector ?? "full") : factProblem(row, entry.rendered, {}, rows)
-			if (problem || docText.includes(bare(entry.rendered))) return problem
-			return [row.kind === "quote" ? "quote_not_verbatim" : "value_mismatch", `filled text "${clip(entry.rendered)}" of ${row.fact_id} is no longer in the report`]
+			const problem = row.kind === "quote" ? quoteProblem(row, entry.rendered, entry.selector ?? "full") : factProblem(row, entry.rendered, { "data-fact-mode": entry.mode }, rows)
+			const stale = isDerivedRow(row) ? staleRender(row, entry.rendered, proseText(ctx.body)) : docText.includes(bare(entry.rendered)) ? null : "gone"
+			if (problem || stale === null) return problem
+			return [row.kind === "quote" ? "quote_not_verbatim" : "value_mismatch", `filled text "${clip(entry.rendered)}" of ${row.fact_id} is no longer in the report${stale === "original" ? " (its original was edited)" : ""}`, ...(stale === "original" ? ["original"] : [])]
 		})
 	}
 	rowChecks(ctx, ledger, rows, cited, options, flag)
@@ -184,7 +187,7 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		const kind = ctx.kindOf(scope)
 		if ((node.tag === "q" || node.tag === "blockquote") && node.attrs["data-fact"] === undefined && kind !== "sources" && kind !== "toc") flag("quote_unbound", node, `<${node.tag}> with no Q row: "${clip(proseText(node))}"`)
 	}
-	traceChecks(ctx, charts, fillMap, flag, fillSiteFits(rows))
+	traceChecks(ctx, charts, fillMap, flag, fillSiteFits(rows), renderLocator(rows))
 	for (const [fig, labels] of charts) {
 		const problem = chartProblem(ctx, fig, labels, ledger)
 		if (problem) flag("chart_value_untraceable", fig, problem)
