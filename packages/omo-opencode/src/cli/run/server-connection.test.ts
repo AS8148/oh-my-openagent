@@ -1,4 +1,7 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test"
+import { existsSync, statSync } from "node:fs"
+import { dirname } from "node:path"
+import { buildPaneAuthEnvironmentArgs } from "../../../../tmux-core/src/tmux-utils/pane-command"
 import { createServerConnectionWithDeps, type ServerConnectionDeps, type ServerConnectionOptions } from "./server-connection"
 
 const originalConsole = globalThis.console
@@ -82,15 +85,28 @@ describe("createServerConnection", () => {
 
       // then
       expect(passwordAtSpawn?.length ?? 0).toBeGreaterThanOrEqual(32)
-      expect(passwordAtInject).toBe(passwordAtSpawn)
+      expect(passwordAtInject === passwordAtSpawn).toBe(true)
+      const passwordFile = buildPaneAuthEnvironmentArgs()
+        .find((arg) => arg.startsWith("OPENCODE_SERVER_PASSWORD_FILE="))?.slice("OPENCODE_SERVER_PASSWORD_FILE=".length)
+      expect(passwordFile !== undefined).toBe(true)
+      if (!passwordFile) throw new Error("missing private password file")
+      expect(statSync(passwordFile).mode & 0o777).toBe(0o600)
+      expect(statSync(dirname(passwordFile)).mode & 0o777).toBe(0o700)
       result.cleanup()
+      expect(existsSync(passwordFile)).toBe(false)
+      expect(existsSync(dirname(passwordFile))).toBe(false)
+      expect(process.env.OPENCODE_SERVER_PASSWORD_FILE).toBeUndefined()
     })
 
     it("#when injecting auth into the client throws #then the server is closed and no generated password is left behind", async () => {
       // given
+      let passwordFile: string | undefined
       mockInjectServerAuthIntoClient.mockImplementationOnce(() => {
+        passwordFile = buildPaneAuthEnvironmentArgs()
+          .find((arg) => arg.startsWith("OPENCODE_SERVER_PASSWORD_FILE="))?.slice("OPENCODE_SERVER_PASSWORD_FILE=".length)
         throw new Error("incompatible client")
       })
+      mockServerClose.mockImplementationOnce(() => { throw new Error("close also failed") })
 
       // when
       const attempt = createServerConnection({ signal: new AbortController().signal })
@@ -99,11 +115,16 @@ describe("createServerConnection", () => {
       await expect(attempt).rejects.toThrow("incompatible client")
       expect(mockServerClose).toHaveBeenCalledTimes(1)
       expect(process.env.OPENCODE_SERVER_PASSWORD).toBeUndefined()
+      expect(passwordFile !== undefined).toBe(true)
+      if (!passwordFile) throw new Error("missing pending password file")
+      expect(existsSync(dirname(passwordFile))).toBe(false)
     })
 
     it("#when closing the server throws during cleanup #then the generated password is still restored and the close error is rethrown", async () => {
       // given
       const result = await createServerConnection({ signal: new AbortController().signal })
+      const passwordFile = buildPaneAuthEnvironmentArgs()
+        .find((arg) => arg.startsWith("OPENCODE_SERVER_PASSWORD_FILE="))?.slice("OPENCODE_SERVER_PASSWORD_FILE=".length)
       expect(process.env.OPENCODE_SERVER_PASSWORD).toBeDefined()
       mockServerClose.mockImplementationOnce(() => {
         throw new Error("close failed")
@@ -115,6 +136,9 @@ describe("createServerConnection", () => {
       // then
       expect(cleanup).toThrow("close failed")
       expect(process.env.OPENCODE_SERVER_PASSWORD).toBeUndefined()
+      expect(passwordFile !== undefined).toBe(true)
+      if (!passwordFile) throw new Error("missing pending password file")
+      expect(existsSync(dirname(passwordFile))).toBe(false)
     })
 
     it("#when the own server fails to start and omo attaches instead #then no generated password is left behind", async () => {

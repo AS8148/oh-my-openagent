@@ -1,5 +1,6 @@
 import { createOpencode as createOpencodeSdk, createOpencodeClient as createOpencodeClientSdk } from "@opencode-ai/sdk"
 import { randomBytes } from "node:crypto"
+import { createPaneAuthDirectory } from "@oh-my-opencode/tmux-core"
 import pc from "picocolors"
 import type { ServerConnection } from "./types"
 import { injectServerAuthIntoClient } from "../../shared/opencode-server-auth"
@@ -91,31 +92,39 @@ async function startServer<TClient>(
   }
 
   let started: OpencodeServer<TClient>
+  let cleanupAuthDirectory: (() => void) | undefined
   try {
+    cleanupAuthDirectory = createPaneAuthDirectory()
     started = await deps.withWorkingOpencodePath(() =>
       deps.createOpencode({ signal, port, hostname: "127.0.0.1" }),
     )
   } catch (error) {
-    restorePassword()
+    try {
+      cleanupAuthDirectory?.()
+    } catch {
+      // Preserve the startup error even if removing the channel also fails.
+    } finally {
+      restorePassword()
+    }
     throw error
   }
   const { client, server } = started
-  // Each step runs even when an earlier one throws, so a failing close never leaves the generated
-  // password in this process's environment; the first error is rethrown once all steps ran.
   const releaseServer = (): void => {
-    let firstError: unknown
     let failed = false
-    for (const step of [() => server.close(), restorePassword]) {
+    try {
+      server.close()
+    } catch (error) {
+      failed = true
+      throw error
+    } finally {
       try {
-        step()
+        cleanupAuthDirectory?.()
       } catch (error) {
-        if (!failed) {
-          failed = true
-          firstError = error
-        }
+        if (!failed) throw error
+      } finally {
+        restorePassword()
       }
     }
-    if (failed) throw firstError
   }
 
   try {
