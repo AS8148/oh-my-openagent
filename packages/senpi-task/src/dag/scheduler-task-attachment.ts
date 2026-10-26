@@ -108,11 +108,46 @@ export async function settleOne(context: SchedulerContext, residencyReleased?: P
       failNode(context, settled.nodeId, "task_error", errorMessage(settled.error))
     } else {
       foldTaskOutcome(context, settled.nodeId, settled.record)
+      if (settled.record.status === "completed") watchSelfResume(context, settled.nodeId, settled.record.task_id)
     }
   } finally {
     task?.resolveFolded()
   }
   return true
+}
+
+// omo#10487: a child whose turn completed can reopen itself (its background job or monitor wakes
+// it). The node then follows the task: it goes back to running and folds the resumed run's outcome
+// through the normal settle loop, so a resumed run that fails turns the node failed and the run
+// summary counts it. Dependents admitted on the earlier completion keep their own outcome;
+// dependents not yet admitted wait for the node again (or are skipped if it fails). Only a
+// completed node is re-opened, and only while this scheduler runs: a terminal run is settled
+// evidence (#7412), and the task's own resumed-turn notification still reaches the parent.
+function watchSelfResume(context: SchedulerContext, nodeId: DagNodeId, taskId: string): void {
+  disposeSelfResumeWatch(context, nodeId)
+  const unsubscribe = context.taskManager.subscribeSelfResumed?.(taskId, () => {
+    if (context.suspended || context.cancellationStarted || context.attachedTasks.has(nodeId)) return
+    const record = context.journal.snapshot()
+    if (record.status !== "running") return
+    const node = nodeById(record, nodeId)
+    if (node.state !== "completed" || node.taskId !== taskId) return
+    disposeSelfResumeWatch(context, nodeId)
+    transition(context, nodeId, "running", { kind: "resumed" })
+    context.attachedTaskIds.set(nodeId, taskId)
+    attachTaskSettlement(context, nodeId, taskId)
+  })
+  if (unsubscribe !== undefined) context.selfResumeWatches.set(nodeId, unsubscribe)
+}
+
+function disposeSelfResumeWatch(context: SchedulerContext, nodeId: DagNodeId): void {
+  const dispose = context.selfResumeWatches.get(nodeId)
+  if (dispose === undefined) return
+  context.selfResumeWatches.delete(nodeId)
+  dispose()
+}
+
+export function disposeSelfResumeWatches(context: SchedulerContext): void {
+  for (const nodeId of [...context.selfResumeWatches.keys()]) disposeSelfResumeWatch(context, nodeId)
 }
 
 function foldTaskOutcome(context: SchedulerContext, nodeId: DagNodeId, task: TaskRecord): void {

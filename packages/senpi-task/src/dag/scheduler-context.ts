@@ -82,6 +82,9 @@ export type SchedulerContext = {
   // waitFor resolves only at terminal, so this watch is the only signal that folds the task
   // engine's later queue promotion into a scheduled -> running node transition.
   readonly promotionWatches: Map<DagNodeId, () => void>
+  // omo#10487: per completed node, a watch for its child reopening itself (task_self_resumed) so
+  // the resumed run's outcome folds onto the node instead of being dropped; disposed at run end.
+  readonly selfResumeWatches: Map<DagNodeId, () => void>
 }
 
 export function nodeById(record: DagRunRecordV1, nodeId: DagNodeId): DagNode {
