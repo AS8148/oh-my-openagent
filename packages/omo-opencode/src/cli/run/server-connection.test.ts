@@ -53,6 +53,77 @@ describe("createServerConnection", () => {
     globalThis.console = originalConsole
   })
 
+  describe("#given no OPENCODE_SERVER_PASSWORD (omo#11367)", () => {
+    const savedPassword = process.env.OPENCODE_SERVER_PASSWORD
+
+    beforeEach(() => {
+      delete process.env.OPENCODE_SERVER_PASSWORD
+    })
+
+    afterEach(() => {
+      if (savedPassword === undefined) delete process.env.OPENCODE_SERVER_PASSWORD
+      else process.env.OPENCODE_SERVER_PASSWORD = savedPassword
+    })
+
+    it("#when omo run starts its own server #then the server is started with a generated password the client also uses", async () => {
+      // given
+      let passwordAtSpawn: string | undefined
+      mockCreateOpencode.mockImplementationOnce(() => {
+        passwordAtSpawn = process.env.OPENCODE_SERVER_PASSWORD
+        return Promise.resolve({ client: { session: {} }, server: { url: "http://127.0.0.1:4096", close: mockServerClose } })
+      })
+      let passwordAtInject: string | undefined
+      mockInjectServerAuthIntoClient.mockImplementationOnce(() => {
+        passwordAtInject = process.env.OPENCODE_SERVER_PASSWORD
+      })
+
+      // when
+      const result = await createServerConnection({ signal: new AbortController().signal })
+
+      // then
+      expect(passwordAtSpawn?.length ?? 0).toBeGreaterThanOrEqual(32)
+      expect(passwordAtInject).toBe(passwordAtSpawn)
+      result.cleanup()
+    })
+
+    it("#when the own server fails to start and omo attaches instead #then no generated password is left behind", async () => {
+      // given
+      mockIsPortAvailable.mockImplementationOnce(() => Promise.resolve(true)).mockImplementationOnce(() => Promise.resolve(false))
+      mockCreateOpencode.mockImplementationOnce(() => Promise.reject(new Error("Failed to start server on port 4100")))
+
+      // when
+      const result = await createServerConnection({ port: 4100, signal: new AbortController().signal })
+
+      // then
+      expect(mockCreateOpencodeClient).toHaveBeenCalledWith({ baseUrl: "http://127.0.0.1:4100" })
+      expect(process.env.OPENCODE_SERVER_PASSWORD).toBeUndefined()
+      result.cleanup()
+    })
+  })
+
+  it("#given a user-set OPENCODE_SERVER_PASSWORD #when omo run starts its own server #then that password is kept (omo#11367)", async () => {
+    // given
+    const savedPassword = process.env.OPENCODE_SERVER_PASSWORD
+    process.env.OPENCODE_SERVER_PASSWORD = "user-chosen"
+    let passwordAtSpawn: string | undefined
+    mockCreateOpencode.mockImplementationOnce(() => {
+      passwordAtSpawn = process.env.OPENCODE_SERVER_PASSWORD
+      return Promise.resolve({ client: { session: {} }, server: { url: "http://127.0.0.1:4096", close: mockServerClose } })
+    })
+
+    try {
+      // when
+      const result = await createServerConnection({ signal: new AbortController().signal })
+
+      // then
+      expect(passwordAtSpawn).toBe("user-chosen")
+      result.cleanup()
+    } finally {
+      if (savedPassword === undefined) delete process.env.OPENCODE_SERVER_PASSWORD
+      else process.env.OPENCODE_SERVER_PASSWORD = savedPassword
+    }
+  })
+
   it("attach mode injects auth only for loopback URLs", async () => {
     // given
     const signal = new AbortController().signal
