@@ -131,6 +131,8 @@ describe("indented code blocks are never linked", () => {
     ["a paragraph followed by indented code", "**A.** one\n\n    code\n", `**A.** one ${link(50)}\n\n    code`],
     ["indented code inside a list item", "**A.** steps:\n\n- a\n\n      code\n", `**A.** steps:\n\n- a ${link(50)}\n\n      code`],
     ["an entry that is all indented code stays as written", "    code\n", "    code"],
+    ["indented code right after a closing fence", `**A.** one\n\n${FENCE3}\nx\n${FENCE3}\n    code\n`, `**A.** one ${link(50)}\n\n${FENCE3}\nx\n${FENCE3}\n    code`],
+    ["indented code after a blank line after a closing fence", `**A.** one\n\n${FENCE3}\nx\n${FENCE3}\n\n    code\n`, `**A.** one ${link(50)}\n\n${FENCE3}\nx\n${FENCE3}\n\n    code`],
     ["a lazy continuation line is paragraph text, not code", "**A.** one\n    more\n", `**A.** one\n    more ${link(50)}`],
   ])("%s", (_name, content, expected) => {
     expect(release(content)).toBe(expected)

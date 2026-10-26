@@ -48,9 +48,11 @@ export function scanFences(text: string): ScannedLine[] {
       codeMayStart = stripped === "" || indentedCode
     } else {
       lines.push({ text: line, fenced: true, indentedCode: false })
-      codeMayStart = false
       const close = new RegExp(`^\\${open.marker[0]}{${open.marker.length},}\\s*$`)
-      if (indent - open.base <= 3 && close.test(stripped)) open = null
+      const closes = indent - open.base <= 3 && close.test(stripped)
+      if (closes) open = null
+      // A closed fence is not a paragraph, so a 4-space line right after it starts indented code (CommonMark).
+      codeMayStart = closes
     }
   }
   if (open !== null) throw new Error(`a code fence (${open.marker}) is never closed`)
