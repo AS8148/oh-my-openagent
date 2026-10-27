@@ -68,6 +68,35 @@ describe("createMomusReviewPersistenceHook", () => {
     }
   })
 
+  test("persists only the verdict block when the result carries reasoning before it", async () => {
+    // given
+    const directory = createProject()
+    const hook = createMomusReviewPersistenceHook(createCtx(directory))
+    const outputWithReasoning = `Let me verify each cited reference one by one before deciding.\nThe file on line 12 needs a closer look.\n\n${OKAY_OUTPUT}`
+
+    try {
+      // when
+      await hook["tool.execute.after"](
+        { tool: "task", sessionID: "ses_parent", callID: "call_1" },
+        {
+          title: "Review plan",
+          output: outputWithReasoning,
+          metadata: { agent: "momus", prompt: ".omo/plans/demo.md", sessionId: "ses_child" },
+        },
+      )
+
+      // then
+      expect(listReviews(directory)).toEqual(["001-okay.md"])
+      const content = readFileSync(join(directory, ".omo", "plans", "demo.reviews", "001-okay.md"), "utf-8")
+      expect(content).toContain("**[OKAY]**")
+      expect(content).toContain("**Summary**: All references check out.")
+      expect(content).not.toContain("Let me verify each cited reference")
+      expect(content).not.toContain("needs a closer look")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   test("numbers a later REJECT review after the earlier one", async () => {
     // given
     const directory = createProject()

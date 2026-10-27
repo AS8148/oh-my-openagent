@@ -2,9 +2,10 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import { existsSync, readFileSync } from "node:fs"
 import { isAbsolute, join } from "node:path"
 
-import { hashPlanContent, writeMomusReviewArtifact } from "../../features/boulder-state"
+import { hashPlanContent, isContainedPlanPath, writeMomusReviewArtifact } from "../../features/boulder-state"
 import { log } from "../../shared"
 import {
+  extractMomusVerdictBlock,
   extractSinglePlanPath,
   parseMomusVerdict,
   readReviewMetadata,
@@ -81,6 +82,14 @@ export function createMomusReviewPersistenceHook(ctx: PluginInput) {
         return
       }
 
+      if (!isContainedPlanPath(ctx.directory, planPath)) {
+        log("[momus-review-persistence] Skipped: plan path is outside the project plans directory", {
+          sessionID: input.sessionID,
+          callID: input.callID,
+        })
+        return
+      }
+
       const planFilePath = isAbsolute(planPath) ? planPath : join(ctx.directory, planPath)
       let planHash: string | undefined
       if (existsSync(planFilePath)) {
@@ -96,7 +105,7 @@ export function createMomusReviewPersistenceHook(ctx: PluginInput) {
         planHash,
         durationMs: sessionDurationMs ?? measuredDurationMs,
         sessionId: metadata.sessionId,
-        reviewerOutput: output.output,
+        reviewerOutput: extractMomusVerdictBlock(output.output) ?? output.output,
       })
       if (writtenPath) {
         log("[momus-review-persistence] Persisted Momus review artifact", { path: writtenPath, verdict })

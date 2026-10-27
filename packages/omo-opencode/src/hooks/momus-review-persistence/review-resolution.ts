@@ -32,6 +32,14 @@ export function parseMomusVerdict(outputText: string): MomusReviewVerdict | null
   return match[1] === "OKAY" ? "okay" : "reject"
 }
 
+export function extractMomusVerdictBlock(outputText: string): string | null {
+  const match = VERDICT_PATTERN.exec(outputText)
+  if (!match) {
+    return null
+  }
+  return outputText.slice(match.index)
+}
+
 export function extractSinglePlanPath(promptText: string): string | null {
   const matches = [...promptText.matchAll(PLAN_PATH_PATTERN)].map((match) => match[1])
   const unique = [...new Set(matches)]
