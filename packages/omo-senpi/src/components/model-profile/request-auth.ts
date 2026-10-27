@@ -15,6 +15,11 @@
  *   - model scope (`request`): the provider credential resolved but this model's request
  *     configuration did not, so only that candidate is skipped and its siblings stay eligible.
  *
+ * A refresh that failed transiently (senpi's `OAuthRefreshUnavailableError`: connection refused,
+ * timeout, 408/429/5xx) says nothing about the sign-in, and the first turn retries it, so it never
+ * skips a candidate: skipping would move the whole session to the next provider (for a GPT rung,
+ * the metered `openai` API lane) for its lifetime.
+ *
  * Limits: whether a rotating pool actually fails over on the first turn depends on how senpi's pool
  * classifier reads the rejection (a 401/unauthorized/invalid-key answer fails over; a plain
  * `invalid_grant` body does not), and a slot the pool sidecar has blocked still counts here.
@@ -85,10 +90,26 @@ function errorKind(error: unknown): string {
 }
 
 function providerFailureReason(error: unknown): AuthFailureReason {
-  // senpi maps every OAuth refresh failure (rejected token, network error, exchange timeout) onto
-  // `ModelsError` code "oauth"; the message is not inspected, so a transient failure is reported
-  // with the same neutral guidance as a rejected one.
+  // senpi maps every OAuth refresh failure onto `ModelsError` code "oauth"; a transient one never
+  // reaches here (see `isRefreshUnavailable`), so this is a refused refresh.
   return error instanceof Error && (error as Error & { code?: unknown }).code === "oauth" ? "refresh" : "credentials"
+}
+
+// senpi marks its transient refresh failure with this global symbol (not `instanceof`, because the
+// host and this bundle can load different copies of the class) and may wrap it, so the cause chain
+// is walked the way senpi's own `isOAuthRefreshUnavailableError` walks it.
+const REFRESH_UNAVAILABLE = Symbol.for("senpi.oauthRefreshUnavailable")
+const MAX_CAUSE_LINKS = 16
+
+function isRefreshUnavailable(error: unknown): boolean {
+  const seen = new Set<unknown>()
+  let current = error
+  while (isRecord(current) && !seen.has(current) && seen.size < MAX_CAUSE_LINKS) {
+    seen.add(current)
+    if (Reflect.get(current, REFRESH_UNAVAILABLE) === true) return true
+    current = Reflect.get(current, "cause")
+  }
+  return false
 }
 
 /**
@@ -116,6 +137,7 @@ export async function probeRequestAuth(
 
   let resolvedSlot: string | undefined
   let resolved = false
+  let unavailable = false
   let lastError: unknown
   for (const slot of candidates) {
     try {
@@ -127,8 +149,11 @@ export async function probeRequestAuth(
       break
     } catch (error) {
       lastError = error
+      if (isRefreshUnavailable(error)) unavailable = true
     }
   }
+  // A slot whose refresh is only temporarily unavailable may serve the first turn after its retry.
+  if (!resolved && unavailable) return undefined
   if (!resolved) {
     return { provider, model: modelId, reason: providerFailureReason(lastError), errorKind: errorKind(lastError), error: lastError }
   }
@@ -136,6 +161,7 @@ export async function probeRequestAuth(
   try {
     await runtime.getAuth(model, resolvedSlot === undefined ? {} : { slotName: resolvedSlot })
   } catch (error) {
+    if (isRefreshUnavailable(error)) return undefined
     return { provider, model: modelId, reason: "request", errorKind: errorKind(error), error }
   }
   return undefined

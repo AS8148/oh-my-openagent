@@ -4,6 +4,7 @@ import { describe, expect, spyOn, test } from "bun:test"
 import { existsSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { OAuthRefreshUnavailableError } from "@earendil-works/pi-ai/utils/oauth-refresh-error"
 import type { OmoConfig } from "@oh-my-opencode/omo-config-core"
 
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
@@ -29,6 +30,7 @@ const SOL_61: FakeModel = { provider: "chatgpt-subscription", id: "gpt-6.1-sol" 
 const SOL_61_FAST: FakeModel = { provider: "chatgpt-subscription", id: "gpt-6.1-sol-fast" }
 const SOL_FAST: FakeModel = { provider: "chatgpt-subscription", id: "gpt-6-sol-fast" }
 const ASTRA: FakeModel = { provider: "chatgpt-subscription", id: "gpt-6-astra" }
+const API_ASTRA: FakeModel = { provider: "openai", id: "gpt-6-astra" }
 const UNRELATED: FakeModel = { provider: "example", id: "nothing-in-any-chain" }
 const SUBSCRIPTION_OPUS: FakeModel = { provider: "anthropic-subscription", id: "claude-opus-5-5" }
 const GATEWAY_OPUS: FakeModel = { provider: "opengateway", id: "anthropic/claude-opus-5-5" }
@@ -73,10 +75,18 @@ function requestConfigurationFailed(model: FakeModel): Error {
   return new Error(`Failed to resolve model "${model.provider}/${model.id}" header x-token from shell command: echo ${PRIVATE_MARKER} ${SHORT_SECRET}`)
 }
 
+// senpi's own error for a refresh that failed transiently (connection refused, timeout, 408/429/5xx):
+// the real class, so the probe is tested against the marker senpi actually sets.
+function refreshUnavailable(provider: string): Error {
+  return new OAuthRefreshUnavailableError(provider, Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" }))
+}
+
 type ProbeFailures = {
   readonly dead?: readonly string[]
   readonly deadSlots?: readonly string[]
   readonly broken?: readonly string[]
+  /** Provider ids or `provider/model` selectors whose probe throws `throws(provider)`. */
+  readonly custom?: { readonly targets: readonly string[]; readonly throws: (provider: string) => unknown }
 }
 
 // `ModelRuntime.getAuth` as senpi implements it: a provider string resolves that credential (one
@@ -91,10 +101,12 @@ function authProbe(failures: ProbeFailures = {}) {
     if (typeof target === "string") {
       calls.push(`${target}${slot}`)
       if (failures.dead?.includes(target) || failures.deadSlots?.includes(`${target}${slot}`)) throw refreshRejected(target)
+      if (failures.custom?.targets.includes(target)) throw failures.custom.throws(target)
       return { auth: { apiKey: "resolved" } }
     }
     calls.push(`${target.provider}/${target.id}${slot}`)
     if (failures.broken?.includes(`${target.provider}/${target.id}`)) throw requestConfigurationFailed(target)
+    if (failures.custom?.targets.includes(`${target.provider}/${target.id}`)) throw failures.custom.throws(target.provider)
     return { auth: { apiKey: "resolved" } }
   }
   return { getAuth, calls }
@@ -600,6 +612,49 @@ describe("createModelProfileComponent", () => {
     expect(appliedContent(pi)).not.toContain("re-authenticate")
     expect(appliedContent(pi)).not.toContain(PRIVATE_MARKER)
     expect(logs.some((line) => line.includes(PRIVATE_MARKER))).toBe(false)
+  })
+
+  // A refresh that failed transiently says nothing about the sign-in: the first turn retries it, so
+  // the subscription lane must keep the rung. Only a refused refresh moves the rung to the next
+  // provider (here the metered OpenAI API lane).
+  test.each([
+    {
+      kind: "a transient refresh failure on the provider probe",
+      custom: { targets: ["chatgpt-subscription"], throws: refreshUnavailable },
+      applied: ASTRA,
+      authFailed: undefined,
+    },
+    {
+      kind: "a transient refresh failure carried on the cause of a wrapping error",
+      custom: {
+        targets: ["chatgpt-subscription"],
+        throws: (provider: string) => new Error("credential operation failed", { cause: refreshUnavailable(provider) }),
+      },
+      applied: ASTRA,
+      authFailed: undefined,
+    },
+    {
+      kind: "a transient refresh failure on the model probe",
+      custom: { targets: ["chatgpt-subscription/gpt-6-astra"], throws: refreshUnavailable },
+      applied: ASTRA,
+      authFailed: undefined,
+    },
+    {
+      kind: "a refused refresh",
+      custom: { targets: ["chatgpt-subscription"], throws: refreshRejected },
+      applied: API_ASTRA,
+      authFailed: [{ provider: "chatgpt-subscription", model: "gpt-6-astra", reason: "refresh" }],
+    },
+  ])("#given geeky-normal with the subscription and the OpenAI API lane and $kind #when the session starts #then the expected lane serves GPT-6 Astra", async ({ custom, applied, authFailed }) => {
+    const probe = authProbe({ custom })
+    const { pi, start } = harness({ model_profile: "geeky-normal" }, [ASTRA, API_ASTRA], probe.getAuth)
+
+    await start(STARTUP)
+
+    expect(pi.sessionModels).toEqual([applied])
+    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE })
+    const details = pi.messages[0]?.message["details"] as Record<string, unknown>
+    expect(details["authFailed"]).toEqual(authFailed)
   })
 
   test("#given a credential pool whose flat account is expired but a sibling account resolves #when the session starts #then the provider stays eligible through the healthy slot", async () => {
