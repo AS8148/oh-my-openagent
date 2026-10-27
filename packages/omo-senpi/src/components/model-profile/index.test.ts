@@ -771,8 +771,8 @@ describe("createModelProfileComponent", () => {
     await start(STARTUP)
 
     expect(pi.sessionModels).toEqual([applied])
-    expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE })
-    const details = pi.messages[0]?.message["details"] as Record<string, unknown>
+    expect(recordedOutcome(pi)).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE })
+    const details = recordedOutcome(pi)?.["details"] as Record<string, unknown>
     expect(details["authFailed"]).toEqual(authFailed)
   })
 
