@@ -12,8 +12,8 @@
   "ignore": ["packages/shared-skills/upstreams/**"],
   // Unused exports already present at origin dev 4686e425b5, named per symbol. knip has no per-symbol ignore and a file-wide
   // ignoreIssues "exports" entry would also hide a new unused export in that file, so script/knip-preexisting-exports.ts
-  // drops exactly these names and every other export of these files stays checked. script/knip-coverage.test.ts fails if a
-  // row is no longer reported.
+  // (shared byte for byte with omo-relay-daemon, sha256-pinned by script/knip-coverage.test.ts) drops exactly these names, and
+  // every other export of these files stays checked. script/knip-coverage.test.ts fails if a row is no longer reported.
   "preprocessor": "./script/knip-preexisting-exports.ts",
   "preprocessorOptions": {
     "preExistingExports": {
