@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:7a225a15bf5b52abe494c71eb6ff547d63e87cecfbce995848c6e3d595efe115:42f3723b384006ea7f9cdbf96f2b0ca8ced4119534c95595ee64fbe2da25a63e
+// omo-codex-install:0b4300065bd1c2308c51d6b0ef2a13ff47dce19a2c3ae51ca5797906e45cec7d:6ff202003b121891543f235c9c84c47b4f0616cbed48c6d414ca28304a8d1c8c
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -13073,7 +13073,8 @@ var LATEST_MODEL_BY_FAMILY = {
   gptLunaFast: "gpt-6-luna-fast",
   glm: "glm-5.3",
   glmFlash: "glm-5.3-flash",
-  kimi: "kimi-k3",
+  kimi: "kimi-k3.1-pro",
+  kimiK3: "kimi-k3",
   geminiPro: "gemini-4-argon"
 };
 
@@ -19906,6 +19907,17 @@ var OmoModelCatalogEntryLayerInputSchema = OmoModelCatalogEntryInputSchema.parti
 var OmoModelCatalogEntryLayerSchema = preprocess((value) => isRecord5(value) ? normalizeLegacyModelFields(value) : value, OmoModelCatalogEntryLayerInputSchema);
 var OmoModelCatalogLayerSchema = record(string2(), OmoModelCatalogEntryLayerSchema);
 
+// packages/omo-config-core/src/schema/model-pad.ts
+var OmoModelPadLabelsSchema = object({
+  daily: string2().optional(),
+  geeky: string2().optional(),
+  normal: string2().optional(),
+  heavy: string2().optional()
+}).strict();
+var OmoModelPadSchema = object({
+  labels: OmoModelPadLabelsSchema.optional()
+}).strict();
+
 // packages/omo-config-core/src/schema/model-profile.ts
 function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -20203,6 +20215,7 @@ var OmoTypedHarnessConfigSchema = object({
   models: OmoModelCatalogLayerSchema.optional(),
   model_profiles: OmoModelProfilesLayerSchema.optional(),
   model_profile: string2().optional(),
+  model_pad: OmoModelPadSchema.optional(),
   memory: OmoMemorySettingsLayerSchema.optional(),
   telemetry: OmoTelemetrySettingsLayerSchema.optional(),
   side_panel: OmoSidePanelSettingsLayerSchema.optional(),
@@ -20221,6 +20234,7 @@ var OmoConfigProfileSchema = object({
   models: OmoModelCatalogLayerSchema.optional(),
   model_profiles: OmoModelProfilesLayerSchema.optional(),
   model_profile: string2().optional(),
+  model_pad: OmoModelPadSchema.optional(),
   memory: OmoMemorySettingsLayerSchema.optional(),
   telemetry: OmoTelemetrySettingsLayerSchema.optional(),
   side_panel: OmoSidePanelSettingsLayerSchema.optional(),
@@ -20244,6 +20258,7 @@ var OmoConfigSchema = object({
   models: OmoModelCatalogSchema.optional(),
   model_profiles: OmoModelProfilesSchema.optional(),
   model_profile: string2().optional(),
+  model_pad: OmoModelPadSchema.optional(),
   memory: OmoMemorySettingsSchema.optional(),
   telemetry: OmoTelemetrySettingsSchema.optional(),
   side_panel: OmoSidePanelSettingsSchema.optional(),
@@ -20270,6 +20285,7 @@ var OmoConfigLayerSchema = object({
   models: OmoModelCatalogLayerSchema.optional(),
   model_profiles: OmoModelProfilesLayerSchema.optional(),
   model_profile: string2().optional(),
+  model_pad: OmoModelPadSchema.optional(),
   memory: OmoMemorySettingsLayerSchema.optional(),
   telemetry: OmoTelemetrySettingsLayerSchema.optional(),
   side_panel: OmoSidePanelSettingsLayerSchema.optional(),
