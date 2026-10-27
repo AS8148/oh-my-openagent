@@ -168,11 +168,21 @@ fn a_killed_engine_leaves_the_helper_to_release_what_it_held() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("the engine stand-in starts");
+    // libtest prints `test engine_stand_in ... ` without a newline before the
+    // stand-in runs, so the marker is found anywhere in a line.
     let stdout = BufReader::new(engine.stdout.take().expect("stdout"));
-    let helper: libc::pid_t = stdout
-        .lines()
-        .find_map(|line| line.ok()?.strip_prefix("HELPER ")?.parse().ok())
-        .expect("the stand-in started a helper");
+    let (found, started) = mpsc::channel();
+    thread::spawn(move || {
+        let pid = stdout
+            .lines()
+            .find_map(|line| line.ok()?.rsplit_once("HELPER ")?.1.trim().parse::<libc::pid_t>().ok());
+        found.send(pid).expect("the test waits");
+    });
+    let Ok(Some(helper)) = started.recv_timeout(HANG_GUARD) else {
+        engine.kill().expect("the stand-in is stopped");
+        engine.wait().expect("reaped");
+        panic!("the stand-in never started a helper");
+    };
     // SAFETY: getsid only reads the session of a live pid.
     assert_eq!(unsafe { libc::getsid(helper) }, helper, "the helper leads its own session");
     // When: its session gets a hangup and a terminate, then the engine dies.
