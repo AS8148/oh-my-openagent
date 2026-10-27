@@ -49,3 +49,18 @@ test("#given a stdio child that refuses the read #when it is read #then the answ
   expect(refused).toBeUndefined()
   await expect(readStdioAdmissions({ send: async () => { throw new Error("pipe closed") } }, ["ps-0"])).rejects.toThrow("pipe closed")
 })
+
+test("#given a stdio child that refuses the read for another reason #when it is read #then the read fails, so nothing is sent", async () => {
+  await expect(readStdioAdmissions({
+    send: async () => ({ type: "response", command: "get_pending_inputs", success: false, error: "session is closing" }) as unknown as RpcResponse,
+  }, ["ps-0"])).rejects.toThrow("session is closing")
+})
+
+test("#given an answer that leaves an asked id out #when it is read #then the read fails instead of reading it as not admitted", async () => {
+  await expect(readHostAdmissions({
+    getPendingInputs: async () => ({
+      lifetimeId: "l-1", throughCursor: 1, inputs: [],
+      outcomes: [{ clientMessageId: "ps-0", status: "admitted" as const }],
+    }) as never,
+  }, ["ps-0", "ps-1"])).rejects.toThrow("left out 1 id")
+})

@@ -1,21 +1,3 @@
-## 2026-10-26 - A queued steer reaches the child under its own id; a lost acknowledgment is read before any resend (desktop #2838 step 4)
-
-`drainPending` sends each `pending_steering` entry with `{ clientMessageId: entry.id }`, and every handle
-layer (`ManagedChildHandle` and both adapters, the in-process handle, both RPC runners, `input-delivery`)
-passes that identity to the engine; `input-effects` sends a caller's own id as it is and mints one only when
-none is given. A drain repeated after a lost acknowledgment or a parent restart therefore replays the same id
-on the child instead of delivering a second copy.
-
-An unacknowledged input is resolved through the child's `get_pending_inputs` read (senpi#3549) before
-anything is sent again: `admitted` settles it, `not_admitted` resends the same id, a failed read keeps it
-uncertain. An earlier run's uncertain input is still never sent into a later run, but it now fails as
-`superseded_by_new_run` only when the read says it was not admitted; admitted settles it and a failed read
-keeps it uncertain. The run an uncertain input was sent in is stored on it (`run_epoch`), since a queue
-entry's id carries no epoch. A child that cannot answer the read keeps the previous same-id resend.
-
-Not in this change: TTL/terminal retention of queued entries (T45/T46) and the engine's custody receipt on
-`steer`/`prompt` answers (senpi#4383).
-
 ## 2026-10-23 - Report refused starts before teardown (#10402)
 
 First-prompt refusals settle the launch without waiting for child termination and
