@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { generateKeyPairSync, sign, X509Certificate } from "node:crypto"
 import { once } from "node:events"
 import { mkdtemp, mkdir, open, readdir, rm, symlink, writeFile } from "node:fs/promises"
@@ -37,6 +37,8 @@ async function makeRoot(cn: string): Promise<Root> {
   return { cert, leaf: leafCert, key: leaf.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), hash: current, old, fingerprint: new X509Certificate(cert).fingerprint256 }
 }
 
+// Fixtures need symlinks and the openssl CLI, and the oracle relies on Bun reading SSL_CERT_DIR.
+describe.skipIf(process.platform === "win32")("OpenSSL hash-directory selection", () => {
 let base = ""
 const roots = new Map<string, Root>()
 const servers: Server[] = []
@@ -127,9 +129,9 @@ for(const port of process.argv.slice(1)){await new Promise((resolve,reject)=>{
  socket.once("error",e=>{clearTimeout(timer);console.log(e.code);socket.destroy();resolve()});
  raw.connect(Number(port),"127.0.0.1");
 })}`
-  const child = Bun.spawn(["timeout", "-k", "2", "20", process.execPath, "-e", script, ...history.map((id) => String(ports.get(id)))], {
+  const child = Bun.spawn([process.execPath, "-e", script, ...history.map((id) => String(ports.get(id)))], {
     env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: join(base, "home"), SSL_CERT_FILE: join(base, "empty.pem"), SSL_CERT_DIR: join(base, fixture) },
-    stdout: "pipe", stderr: "pipe",
+    stdout: "pipe", stderr: "pipe", timeout: 20_000,
   })
   const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   expect({ exit, stderr }).toEqual({ exit: 0, stderr: "" })
@@ -204,6 +206,8 @@ test.each([
   ["directory", "openssl-default-dir-not-regular"], ["dangling", undefined], ["oversize", "openssl-default-dir-cap"],
   ["framing", "openssl-default-dir-malformed"], ["headers", "openssl-default-dir-malformed"], ["trailing-der", "openssl-default-dir-malformed"],
 ] as const)("ends the walk when the opened object has %s", async (kind, code) => {
+  // A trailer after the certificate DER is read as AUX by d2i_X509_AUX, so it also excludes the certificate.
+  const codes = kind === "trailing-der" ? ["openssl-default-aux-dropped", "openssl-default-dir-malformed"] as const : code === undefined ? [] : [code]
   // Given an unreadable/noncanonical first file and a valid successor; when selected; then the successor is unreachable.
   const directory = await mkdtemp(join(base, "edge-"))
   const path = join(directory, `${get("R0").hash}.0`)
@@ -213,8 +217,20 @@ test.each([
   await writeFile(join(directory, `${get("R0").hash}.1`), get("R0").cert)
   const result = await selectOpenSslHashDirectory(io(directory))
   expect(result.candidates).toEqual([])
-  expect(result.diagnostics).toEqual(code === undefined ? [] : [{ path: `${get("R0").hash}.0`, code, narrowing: true }])
+  expect(result.diagnostics).toEqual(codes.map((entry) => ({ path: `${get("R0").hash}.0`, code: entry, narrowing: true })))
   expect(await oracle(directory.slice(base.length + 1), ["R0"])).toEqual([reject])
+})
+test("excludes a certificate whose CERTIFICATE-labelled block carries an AUX trailer", async () => {
+  // Given X with an AUX trailer in its own hash file, and a plain copy of X after Y in Y's file.
+  const directory = await mkdtemp(join(base, "aux-label-"))
+  const x = new X509Certificate(get("R0").cert).raw
+  await writeFile(join(directory, `${get("R0").hash}.0`), pem(Buffer.concat([x, hex("3000")])))
+  await writeFile(join(directory, `${get("R1").hash}.0`), get("R1").cert + get("R0").cert)
+  // When the directory is selected.
+  const result = await selectOpenSslHashDirectory(io(directory))
+  // Then the trailer's restriction carries to every copy of X, under any certificate label.
+  expect(result.candidates.map((cert) => cert.fingerprint256)).toEqual([get("R1").fingerprint])
+  expect(result.excludedFingerprints).toEqual([get("R0").fingerprint])
 })
 test("records the suffix cap when every prior file loads", async () => {
   // Given a repeating regular certificate source; when its walk reaches 4096; then stop with a visible narrowing.
@@ -253,4 +269,5 @@ test("records the total byte cap when individually small files exceed the genera
   expect(result.candidates.map((cert) => cert.fingerprint256)).toEqual([get("R0").fingerprint])
   expect(result.diagnostics).toEqual([{ path: `${get("R0").hash}.1`, code: "openssl-default-dir-cap", narrowing: true }])
   expect(await oracle(directory.slice(base.length + 1), ["R0", "R1"])).toEqual(["OK", "OK"])
+})
 })

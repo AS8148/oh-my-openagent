@@ -69,10 +69,10 @@ function parseFile(bytes: Uint8Array) {
       case "X509 CERTIFICATE":
       case "TRUSTED CERTIFICATE": {
         let certificate: X509Certificate
+        // d2i_X509_AUX reads an AUX trailer after the certificate under every certificate label, so
+        // identify the certificate itself; a plain copy elsewhere must not shed the trailer's restrictions.
         let certificateDer = decoded
-        if (label === "TRUSTED CERTIFICATE" && decoded[0] === 0x30) {
-          // Identify the certificate even when the canonical gate drops its AUX
-          // trailer, so a plain copy elsewhere cannot shed auxiliary restrictions.
+        if (decoded[0] === 0x30) {
           const length = decoded[1]
           if (length !== undefined && length < 0x80) certificateDer = decoded.subarray(0, 2 + length)
           else if (length !== undefined && length > 0x80 && length <= 0x84 && decoded.length >= 2 + length - 0x80) {
@@ -87,13 +87,14 @@ function parseFile(bytes: Uint8Array) {
           if (!(error instanceof Error)) throw error
           return { certificates, excluded, auxiliary, loaded: false, malformed: true }
         }
-        if (label === "TRUSTED CERTIFICATE") {
+        const hasTrailer = !certificate.raw.equals(decoded)
+        if (label === "TRUSTED CERTIFICATE" || (hasTrailer && certificate.raw.equals(certificateDer))) {
           auxiliary = true
           excluded.push(certificate.fingerprint256)
         }
         // AUX trailers need a separate decoder. Drop rather than continue past an
         // invalid AUX that could make Bun stop before the next suffix.
-        if (!certificate.raw.equals(decoded)) {
+        if (hasTrailer) {
           return { certificates, excluded, auxiliary, loaded: false, malformed: true }
         }
         count++
