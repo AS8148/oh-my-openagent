@@ -28,7 +28,7 @@ function isInside(path: string, root: string): boolean {
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
 }
 
-/** Check the same absolute path the executor uses, including existing symlink destinations. */
+/** Check normalized executors and executors that pass an absolute path through unchanged. */
 export function isAllowedFile(filePath: string, workspaceRoot: string): boolean {
   try {
     const resolved = resolve(workspaceRoot, filePath)
@@ -37,10 +37,15 @@ export function isAllowedFile(filePath: string, workspaceRoot: string): boolean 
 
     // Anchor to the real project root, not a potentially redirected `.omo` directory.
     const allowedRoot = resolve(realpathSync.native(workspaceRoot), ".omo")
-    const destination = canonicalDestination(resolved)
-    return isInside(destination, allowedRoot) && ALLOWED_EXTENSIONS.some(
-      ext => resolved.toLowerCase().endsWith(ext) && destination.toLowerCase().endsWith(ext),
-    )
+    // write/edit may open an absolute path verbatim; patch executors normalize it.
+    // Check both: collapsing `link/..` before native realpath can hide a redirect.
+    const paths = isAbsolute(filePath) && filePath !== resolved ? [resolved, filePath] : [resolved]
+    return paths.every(path => {
+      const destination = canonicalDestination(path)
+      return isInside(destination, allowedRoot) && ALLOWED_EXTENSIONS.some(
+        ext => path.toLowerCase().endsWith(ext) && destination.toLowerCase().endsWith(ext),
+      )
+    })
   } catch {
     // Includes dangling links, loops, non-directory ancestors and inaccessible paths.
     return false

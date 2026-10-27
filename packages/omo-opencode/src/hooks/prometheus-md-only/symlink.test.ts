@@ -100,6 +100,22 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
       allowed: false,
     },
     {
+      name: "raw absolute symlink then parent traversal",
+      target: ".omo/redirect/../plan.md",
+      link: ".omo/redirect",
+      destination: "../src/deep",
+      absolute: true,
+      allowed: false,
+    },
+    {
+      name: "raw absolute traversal with missing parents",
+      target: ".omo/redirect/../new/deep/plan.md",
+      link: ".omo/redirect",
+      destination: "../src/deep",
+      absolute: true,
+      allowed: false,
+    },
+    {
       name: "dangling ancestor",
       target: ".omo/redirect/new/plan.md",
       link: ".omo/redirect",
@@ -149,6 +165,9 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
         if (scenario.destination === "app.ts") {
           writeFileSync(join(root, ".omo/app.ts"), "code")
         }
+        if (scenario.destination === "../src/deep") {
+          mkdirSync(join(root, "src/deep"))
+        }
         if (scenario.link && scenario.destination) {
           symlinkSync(
             scenario.destination,
@@ -160,7 +179,7 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
         const hook = createPrometheusMdOnlyHook({ directory: root, client: {} } as never)
         const result = hook["tool.execute.before"](
           { tool: call.tool, sessionID, callID: `call-${index}` },
-          { args: call.args(scenario.target) },
+          { args: call.args("absolute" in scenario && scenario.absolute ? `${root}/${scenario.target}` : scenario.target) },
         )
         if (scenario.allowed) {
           await expect(result).resolves.toBeUndefined()
