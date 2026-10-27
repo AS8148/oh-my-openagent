@@ -3,7 +3,7 @@ import {
   createConsentGatedFetch,
   createEventTelemetryClient,
 } from "@oh-my-opencode/telemetry-core/injected"
-import { createLazyPostHogTransportFactory } from "./lazy-posthog"
+import { createSenpiTelemetryTransportFactory } from "./otlp"
 import type {
   EventTelemetryClient,
   TelemetryCaptureMessage,
@@ -109,7 +109,9 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
     },
   }
   const transportFactory = sharedTransportFactory(
-    options.transportFactory ?? createLazyPostHogTransportFactory({
+    options.transportFactory ?? createSenpiTelemetryTransportFactory({
+      env,
+      consent: () => state.isSendAllowed?.() === true,
       diagnostics: options.diagnostics,
       source: "omo-native-component",
     }),

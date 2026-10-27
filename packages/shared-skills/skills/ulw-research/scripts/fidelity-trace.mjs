@@ -16,7 +16,9 @@
 // accounts for stays in the scan; an entry whose text is gone strips nothing. A derived or
 // converted entry is located under the bracket grammar of fidelity-originals.mjs (renderLocator).
 
+import { PROSE_TAGS } from "./html-lite.mjs"
 import { NOT_CLAIMS } from "./numerals.mjs"
+import { sourcesClaims, textClaims } from "./sources-citation.mjs"
 
 /** Structural numerals: versions, figure/table/section references, times (NOT_CLAIMS 7-11), pages, citations, placeholders. */
 export const STRUCTURAL = [...NOT_CLAIMS.slice(7, 12), /\b(?:p|pp|page|pages)\.?\s*\d+(?:\s*[-\u2013]\s*\d+)?/gi, /\[(?:S|Source\s*)\d+\]|\[\^\d+\]/gi, /\{\{[^}]*\}\}/g]
@@ -30,7 +32,12 @@ function ownerTexts(ctx, charts) {
 	const owners = new Map()
 	for (const entry of ctx.texts) {
 		const kind = ctx.kindOf(entry.scope)
-		if (kind === "sources" || kind === "toc") continue
+		if (kind === "toc") continue
+		if (kind === "sources") {
+			if (!PROSE_TAGS.has(entry.owner.tag)) owners.set(entry.owner, `${owners.get(entry.owner) ?? ""} ${textClaims(entry.node.text).join(" ")}`)
+			else if (!owners.has(entry.owner)) owners.set(entry.owner, sourcesClaims(entry.owner).join(" "))
+			continue
+		}
 		if (charts.has(ctx.util.closest(entry.node, (cur) => cur.tag === "figure"))) continue
 		const hidden = ctx.util.closest(entry.node, (cur) => cur.attrs["data-fact"] !== undefined || cur.attrs["data-translates"] !== undefined || cur.tag === "q" || cur.tag === "blockquote")
 		owners.set(entry.owner, (owners.get(entry.owner) ?? "") + (hidden ? ` ${TRACED} ` : entry.node.text))
