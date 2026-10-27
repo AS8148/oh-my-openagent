@@ -4,7 +4,7 @@ import { renderExternalProjection, renderExternalProjectionStats } from "./exter
 import { NAME_LEGEND } from "./external-projection-names"
 
 const AWS_KEY_SHAPED = ["AKIA", "ABCDEFGHIJKLMNOP"].join("")
-const IDS = ["Y2Gw9vTZ9pnH2K5a", "87U3F2ZseCw7bLMz", "wcjyAab9yeccko3U"]
+const IDS = ["Y2Gw9vTZ9pnH2K5a", "87U3F2ZseCw7bLMz", "2Fc9uTN3x7DPCCxs"]
 const labels = (paths: readonly string[]): string[] => groupDirectories(paths, undefined).map((group) => group.label)
 
 describe("groupDirectories directory classes", () => {
@@ -32,7 +32,7 @@ describe("groupDirectories directory classes", () => {
     {
       name: "an id-named sibling with a directory below it",
       paths: [...IDS.map((id) => `jobs/${id}/MEMORY.md`), `jobs/${IDS[0]}/runs/log.md`],
-      expected: ["jobs/87U3F2ZseCw7bLMz/", "jobs/wcjyAab9yeccko3U/", "jobs/Y2Gw9vTZ9pnH2K5a/", "jobs/Y2Gw9vTZ9pnH2K5a/runs/"],
+      expected: ["jobs/2Fc9uTN3x7DPCCxs/", "jobs/87U3F2ZseCw7bLMz/", "jobs/Y2Gw9vTZ9pnH2K5a/", "jobs/Y2Gw9vTZ9pnH2K5a/runs/"],
     },
     {
       name: "a sibling whose name is masked",

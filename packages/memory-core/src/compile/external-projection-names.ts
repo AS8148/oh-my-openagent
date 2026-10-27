@@ -16,7 +16,10 @@ export interface ProjectionItem {
   readonly time: number
 }
 
-/** How a listed entry maps back to its file; the block opens with it. */
+/** How a listed name maps back to its file; the block opens with it when nothing is folded or grouped. */
+export const NAME_NOTE = "Names drop \".md\" (a quoted name is exact)."
+
+/** How a listed entry maps back to its file; the block opens with it when a line folds or groups names. */
 export const NAME_LEGEND =
   "Names drop \".md\" (a quoted name is exact); {a, b}-20261027 is a-20261027 and b-20261027; "
   + "\"x … y (N files)\" and <id> stand for similar names: read the directory to list them."
@@ -35,11 +38,21 @@ const MIN_HEX_FLIPS = 4
 const MIXED_CASE_TOKEN = /^(?=.*[a-z])(?=.*[A-Z])[A-Za-z0-9]{12,}$/
 const WORDS = /[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+/g
 const VOWEL = /[aeiouy]/i
-// Noise marks per character: random base62 scores about 0.45, the most word-like real names stay under 0.34.
-const LONE_ID_NOISE = 0.35
-// A family member still needs this many marks, so a word-built name (ProjectPlan, readUInt16BE) never joins one.
-const MIN_MEMBER_MARKS = 3
-const MIN_FAMILY = 3
+// The most frequent English letter pairs; the words of a random token are mostly made of other pairs.
+const COMMON_PAIRS: ReadonlySet<string> = new Set((
+  "th he in er an re on at en nd ti es or te of ed is it al ar st to nt ng se ha as ou io le ve co "
+  + "me de hi ri ro ic ne ea ra ce li ch ll be ma si om ur ca el ta la ns di fo ho pe ec pr no ct us "
+  + "ac ot il tr ly nc et ut ss so rs un lo wa ge ie wh ee wi em ad ol rt po we na ul ni ts mo ow pa "
+  + "im mi ai sh ir su id os iv ia am fi ci vi pl ig tu ev ld ry mp fe bl ab gh ty op wo sa ay ex ke "
+  + "fr oo av ag if ap gr od bo sp rd do uc bu ei ov by rm ep tt oc fa ef cu rn sc gi da yo cr cl du "
+  + "ga qu ue ff ba ey ls va um pp ua up lu go ht ru ug ds lt pi rc rr eg au ck ew mu br bi pt ak pu "
+  + "ui rg ib tl ny ki rk ys ob mm fu ph og ms ye ud mb ip ub oi rl gu dr hr cc tw ft wn nu af hu nn "
+  + "eo vo rv nf xp gn sm fl iz ok nl my gl aw sy oa"
+).split(" "))
+// Each bar is met by most random base62 tokens; the most id-like of 13,995 real identifiers misses one by 0.05 or more.
+const MIN_NOISE = 0.25
+const MIN_RARE_PAIRS = 0.3
+const MIN_WORD_DENSITY = 0.4
 const MIN_RUN = 3
 const ID = "<id>"
 const naturally = (a: string, b: string): number => a.localeCompare(b, "en", { numeric: true })
@@ -49,24 +62,11 @@ const newestFirst = (a: ProjectionItem, b: ProjectionItem): number => {
 }
 
 /**
- * The names in `names` that are unmistakably machine ids; when unsure a name is shown, since the name is the hint.
- * An id is a UUID, a hex digest of 16+ characters, or a mixed-case base62 token of 12+ characters with no readable
- * words: alone when its noise reaches `LONE_ID_NOISE`, or in a family of at least three same-length tokens that each
- * carry `MIN_MEMBER_MARKS` noise marks and whose median reaches `LONE_ID_NOISE` (a directory of 16-character routine ids).
+ * The names in `names` that are unmistakably machine ids, each judged on its own: a sibling never pulls a name in.
+ * When unsure a name is shown, since the name is the hint.
  */
 export function generatedIds(names: readonly string[]): ReadonlySet<string> {
-  const ids = new Set(names.filter((name) => UUID.test(name) || isHexDigest(name) || noise(name) >= LONE_ID_NOISE))
-  const byLength = new Map<number, string[]>()
-  for (const name of names) {
-    if (noiseMarks(name) < MIN_MEMBER_MARKS) continue
-    const family = byLength.get(name.length)
-    if (family) family.push(name)
-    else byLength.set(name.length, [name])
-  }
-  for (const family of byLength.values()) {
-    if (family.length >= MIN_FAMILY && median(family.map(noise)) >= LONE_ID_NOISE) family.forEach((name) => ids.add(name))
-  }
-  return ids
+  return new Set(names.filter((name) => UUID.test(name) || isHexDigest(name) || readsAsRandom(name)))
 }
 
 function isHexDigest(name: string): boolean {
@@ -79,25 +79,30 @@ function isHexDigest(name: string): boolean {
 }
 
 /**
- * Marks of a mixed-case base62 token that a readable name lacks, from its camel-case words: a lone letter, a one- or
- * two-digit chunk, or a word with no vowel (two marks from four letters up). Any other name has none.
+ * A mixed-case base62 token of 12+ characters that reads as random by all three measures of its camel-case words:
+ * noise marks (a lone letter, a one- or two-digit chunk, a word with no vowel: two marks from four letters up) per
+ * character, the share of uncommon letter pairs inside words, and words per character.
  */
-function noiseMarks(name: string): number {
-  if (!MIXED_CASE_TOKEN.test(name)) return 0
+function readsAsRandom(name: string): boolean {
+  if (!MIXED_CASE_TOKEN.test(name)) return false
+  const words = name.match(WORDS) ?? []
   let marks = 0
-  for (const word of name.match(WORDS) ?? []) {
-    if (/^\d+$/.test(word)) marks += word.length <= 2 ? 1 : 0
-    else if (word.length === 1) marks += 1
+  let pairs = 0
+  let rare = 0
+  for (const word of words) {
+    if (/^\d+$/.test(word)) {
+      marks += word.length <= 2 ? 1 : 0
+      continue
+    }
+    if (word.length === 1) marks += 1
     else if (!VOWEL.test(word)) marks += word.length >= 4 ? 2 : 1
+    const lower = word.toLowerCase()
+    for (let index = 1; index < lower.length; index++) {
+      pairs++
+      if (!COMMON_PAIRS.has(lower.slice(index - 1, index + 1))) rare++
+    }
   }
-  return marks
-}
-
-const noise = (name: string): number => noiseMarks(name) / name.length
-
-function median(values: readonly number[]): number {
-  const sorted = [...values].sort((a, b) => a - b)
-  return sorted[Math.floor((sorted.length - 1) / 2)] ?? 0
+  return marks / name.length >= MIN_NOISE && pairs > 0 && rare / pairs >= MIN_RARE_PAIRS && words.length / name.length >= MIN_WORD_DENSITY
 }
 
 /** `a.md` lists as `a`; any other file keeps its exact name in quotes. Secret-like text is masked first. */

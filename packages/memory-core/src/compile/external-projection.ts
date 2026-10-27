@@ -1,5 +1,5 @@
 import { groupDirectories } from "./external-projection-dirs"
-import { NAME_LEGEND, directoryItems, type ProjectionItem } from "./external-projection-names"
+import { NAME_LEGEND, NAME_NOTE, directoryItems, type ProjectionItem } from "./external-projection-names"
 
 const MEMORY_DIR = "$MEMORY_DIR"
 const OPEN = "<external_projection>"
@@ -45,7 +45,7 @@ interface DirectoryListing {
 
 interface Layout {
   readonly rootBare: boolean
-  /** Some line folds or groups names, so the block opens with the legend that maps them back. */
+  /** Some line folds or groups names, so the block opens with the full legend instead of the short note. */
   readonly legend: boolean
   readonly directories: readonly DirectoryListing[]
   readonly allowances: readonly number[]
@@ -111,8 +111,8 @@ function fitToBudget(directories: readonly DirectoryListing[], allowances: numbe
   }
   const start = [...allowances]
   const lines = directories.map((_, index) => lineBytes(index))
-  const fixedLines = 2 + (legend ? 1 : 0) + (rootBare ? 1 : 0)
-  const fixedBytes = Buffer.byteLength(OPEN) + (legend ? Buffer.byteLength(NAME_LEGEND) : 0) + Buffer.byteLength(CLOSE) + (rootBare ? Buffer.byteLength(`${MEMORY_DIR}/`) : 0)
+  const fixedLines = 3 + (rootBare ? 1 : 0)
+  const fixedBytes = Buffer.byteLength(OPEN) + Buffer.byteLength(legend ? NAME_LEGEND : NAME_NOTE) + Buffer.byteLength(CLOSE) + (rootBare ? Buffer.byteLength(`${MEMORY_DIR}/`) : 0)
   let total = fixedBytes + lines.reduce((sum, size) => sum + size, 0) + (fixedLines + directories.length - 1)
   while (total > maxBytes) {
     let widest = -1
@@ -139,7 +139,7 @@ function fitToBudget(directories: readonly DirectoryListing[], allowances: numbe
 }
 
 function render({ rootBare, legend, directories, allowances }: Layout): string {
-  const lines = legend ? [OPEN, NAME_LEGEND] : [OPEN]
+  const lines = [OPEN, legend ? NAME_LEGEND : NAME_NOTE]
   if (rootBare) lines.push(`${MEMORY_DIR}/`)
   directories.forEach((directory, index) => {
     const allowance = allowances[index] ?? directory.items.length

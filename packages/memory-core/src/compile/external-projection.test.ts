@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { NAME_NOTE } from "./external-projection-names"
 import { renderExternalProjection, renderExternalProjectionStats } from "./index"
 
 const at = (entries: Record<string, number>): ReadonlyMap<string, number> => new Map(Object.entries(entries))
@@ -23,7 +24,7 @@ describe("renderExternalProjection limits", () => {
       "ARCHIVE.md", "reference/zeta.md", "reference/Alpha.md", "reference/project/b.md", "reference/project/a.md",
       "people/한글/card.md", "notes/n.md", "reference/AKIAABCDEFGHIJKLMNOP.md",
     ]
-    const unbounded = `<external_projection>\n$MEMORY_DIR/: ARCHIVE\nnotes/: n\npeople/한글/: card\nreference/: ***, Alpha, zeta\nreference/project/: a, b\n</external_projection>`
+    const unbounded = `<external_projection>\n${NAME_NOTE}\n$MEMORY_DIR/: ARCHIVE\nnotes/: n\npeople/한글/: card\nreference/: ***, Alpha, zeta\nreference/project/: a, b\n</external_projection>`
 
     // when
     const disabled = renderExternalProjection(paths, {
@@ -111,6 +112,7 @@ describe("renderExternalProjection limits", () => {
     ]
     const smallest = [
       "<external_projection>",
+      NAME_NOTE,
       "$MEMORY_DIR/",
       "A/: a, b, c, d, e, f",
       "B/: (+2 more; read $MEMORY_DIR/B/ to list)",
@@ -163,6 +165,7 @@ describe("renderExternalProjection limits", () => {
     // then
     expect(text).toBe([
       "<external_projection>",
+      NAME_NOTE,
       "$MEMORY_DIR/: (+1 more; read $MEMORY_DIR/ to list)",
       "a/: (+8 more; read $MEMORY_DIR/a/ to list)",
       "b/: (+1 more; read $MEMORY_DIR/b/ to list)",

@@ -110,9 +110,9 @@ describe("generatedIds", () => {
     { name: "a UUID", names: ["0b6e3c1a-2d4f-4e8a-9b1c-3d5e7f9a1b2c"], ids: ["0b6e3c1a-2d4f-4e8a-9b1c-3d5e7f9a1b2c"] },
     { name: "a hex digest of 16 or more characters", names: ["4bea7ccd8f2e19a0", "4bea7ccd", "deadbeefcafe2026"], ids: ["4bea7ccd8f2e19a0"] },
     {
-      name: "a family of three same-length random tokens, one too word-like to fold alone",
+      name: "same-length random tokens, each judged on its own so a word-like one is never pulled in",
       names: ["Y2Gw9vTZ9pnH2K5a", "87U3F2ZseCw7bLMz", "wcjyAab9yeccko3U", "design-notes"],
-      ids: ["Y2Gw9vTZ9pnH2K5a", "87U3F2ZseCw7bLMz", "wcjyAab9yeccko3U"],
+      ids: ["Y2Gw9vTZ9pnH2K5a", "87U3F2ZseCw7bLMz"],
     },
     { name: "two word-like random tokens are not a family", names: ["wcjyAab9yeccko3U", "XpTHKRroIBYxc5em"], ids: [] },
     { name: "words ending in digits", names: ["project2024", "iPhone15Pro", "OAuth2Client", "1password"], ids: [] },
