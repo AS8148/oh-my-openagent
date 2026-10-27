@@ -447,6 +447,8 @@
       "packages/omo-config-core/src/schema/team.ts": ["OmoTeamCategoryMemberSchema", "OmoTeamSubagentMemberSchema", "OmoTeamMemberSchema", "OmoTeamSpecSchema", "OmoTeamSpecLayerSchema"],
       // pre-existing at origin dev 4686e425b5: unused export(s) AGENT_DIR_ENV_NAMES, ADOPTED_STATE_FILES, defaultAgentDir
       "packages/omo-native/bin/lib/agent-dir.js": ["AGENT_DIR_ENV_NAMES", "ADOPTED_STATE_FILES", "defaultAgentDir"],
+      // added on dev by #11445 after the baseline: the declaration of the sibling generated .js, which every importer resolves to
+      "packages/omo-native/bin/lib/brand-logo.generated.d.ts": ["OMO_BRAND_LOGO"],
       // pre-existing at origin dev 4686e425b5: unused export(s) BUN_MIN_VERSION, resolveBunGuard, findNodeBinary
       "packages/omo-native/bin/lib/bun-runtime.js": ["BUN_MIN_VERSION", "resolveBunGuard", "findNodeBinary"],
       // pre-existing at origin dev 4686e425b5: unused export(s) claudeCodeVersionFloor
@@ -2044,6 +2046,7 @@
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
         "script/build-binaries.ts",
+        "script/build-brand-logo.ts",
         "script/build-cli-node.ts",
         "script/build-codex-install.ts",
         "script/build-model-capabilities.ts",
@@ -3442,6 +3445,8 @@
         "src/hooks/runtime-fallback/test-timeout-clock.test-support.ts",
         "src/tools/skill/zauc-mocks-skill-tools/test-support.ts",
         "test/fixtures/config-migration/opencode-side-effect-import.ts",
+        // Test fixtures run as their own process by path (`bun run <dir>/fixtures/<name>.ts`), so nothing imports them.
+        "src/hooks/prometheus-md-only/fixtures/*.ts",
       ],
       "ignoreFiles": [
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
