@@ -7,13 +7,15 @@
 // No model, no network.
 
 import { existsSync, readFileSync } from "node:fs"
-import { join, resolve, sep } from "node:path"
+import { resolve, sep } from "node:path"
 
 import { sameValue, unitKey } from "./fidelity-binding.mjs"
 import { claimChecks } from "./fidelity-claims.mjs"
+import { sourceChecks } from "./fidelity-sources.mjs"
 import { convertedHalfFits, followsOriginal, isDerivedRow, originalProblem, renderLocator, staleRender, textAfter } from "./fidelity-originals.mjs"
 import { snapshotCause, unreadableSnapshots } from "./fidelity-snapshot-readability.mjs"
 import { STRUCTURAL, clip, traceChecks } from "./fidelity-trace.mjs"
+import { fillEntriesByNode, valueUnitProblem } from "./fidelity-value-unit.mjs"
 import { parseHtml, proseText } from "./html-lite.mjs"
 import { parseNumeral } from "./numerals.mjs"
 import { div, fromDecimal, sub } from "./rational.mjs"
@@ -144,12 +146,12 @@ function chartProblem(ctx, fig, labels, ledger) {
  * @param {object} ctx buildContext(...) from gates-static.mjs
  * @param {{ rows: object[] }} ledger
  * @param {{ fact_id: string, rendered: string, selector?: string }[] | null} fillMap Markdown fill map, or null
- * @param {string | null} sourcesDir directory of <S-id>/{text.txt, meta.json} snapshots
+ * @param {string | null} sourcesDir directory of <S-id>/ snapshots (source-view.mjs reads them)
  * @param {{ recompute?: (ledger: object, row: object) => { ok: boolean }, asOf?: string | null }} options
  */
 export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 	const out = []
-	const flag = (code, node, message) => out.push(ctx.defect(code, node, message))
+	const flag = (code, node, message, extra = {}) => out.push({ ...ctx.defect(code, node, message), ...extra })
 	const rows = new Map((ledger?.rows ?? []).map((row) => [row.fact_id, row]))
 	const cited = new Map()
 	const fills = (fillMap ?? []).map((entry) => entry.rendered)
@@ -175,6 +177,14 @@ export function valueChecks(ctx, ledger, fillMap, sourcesDir, options = {}) {
 		})
 	}
 	rowChecks(ctx, ledger, rows, cited, options, flag)
+	// options.fillEntries: the edition's fill-map entries whose element is in the checked HTML (value mode, fill's unit_bound).
+	const facts = ctx.all.filter((cur) => cur.attrs["data-fact"] !== undefined)
+	const entries = fillEntriesByNode(facts, options.fillEntries)
+	for (const node of facts) {
+		const row = rows.get(node.attrs["data-fact"])
+		const problem = row && row.kind !== "quote" && !factProblem(row, proseText(node), node.attrs) && valueUnitProblem(node, row, entries.get(node))
+		if (problem) flag(problem[0], node, problem[1])
+	}
 	for (const tr of ctx.all.filter((node) => node.tag === "tr" && node.attrs["data-row-kind"] !== "comparison")) {
 		const groups = new Set(ctx.util.descendants(tr).map((node) => rows.get(node.attrs["data-fact"])?.observation_id).filter(Boolean))
 		if (groups.size > 1) flag("join_integrity_fail", tr, `one table row joins observations ${[...groups].join(", ")}`)
@@ -219,22 +229,4 @@ function provenance(sourcesDir, meta, row) {
 	const dir = resolve(sourcesDir, row.source_id)
 	const path = resolve(dir, artifact)
 	return path.startsWith(`${dir}${sep}`) && existsSync(path) ? meta.get(row.source_id)?.kind : undefined
-}
-
-function sourceChecks(ctx, rows, cited, sourcesDir, flag, unreadable = new Set()) {
-	const backed = new Set([...cited.keys()].map((id) => rows.get(id)?.source_id).filter(Boolean))
-	const ids = new Set(backed)
-	for (const match of proseText(ctx.body).matchAll(/\[S(\d+)\]/g)) ids.add(`S${match[1]}`)
-	const meta = new Map()
-	for (const id of sourcesDir ? ids : []) {
-		if (unreadable.has(id)) continue
-		const [metaPath, textPath] = [join(sourcesDir, id, "meta.json"), join(sourcesDir, id, "text.txt")]
-		// A row-backed source passed the preflight (readable, hash pinned), the only gate for it: only its metadata is read here.
-		// A source named only in prose backs no row: its absence is not a finding, and an edit of its text still is.
-		if (!backed.has(id) && (!existsSync(metaPath) || !existsSync(textPath))) continue
-		meta.set(id, JSON.parse(readFileSync(metaPath, "utf8")))
-		const cause = backed.has(id) ? null : snapshotCause(sourcesDir, { source_id: id })
-		if (cause) flag("snapshot_hash_mismatch", ctx.body, `snapshot ${id} ${cause}`)
-	}
-	return meta
 }
