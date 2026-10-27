@@ -618,16 +618,22 @@ repository, and grants are revoked when the session shuts down.
 #### Memory file list in the prompt
 
 Every turn the compiled memory block ends with `<external_projection>`, one line per directory
-naming the memory files outside `system/`. Two limits keep it small on a large corpus. Each
-directory lists its most recently committed files first (ties by name). Names that do not fit are
-counted as `(+N more; read $MEMORY_DIR/<dir>/ to list)`, and every directory keeps its line.
+naming the memory files outside `system/`, most recently committed first (ties by name). Names drop
+`.md` (other files stay quoted and exact), and markdown names sharing a `-YYYYMMDD` suffix are
+grouped as `{a, b}-YYYYMMDD`. Names that carry no hint fold into one entry: runs of at least three
+names that differ only by a date, month chunk, clock time or part (`2026-06-p1 … 2026-10-p11 (91
+files)`), generated-id names (`<id> (N files)`), sibling directories named by generated ids
+(`jobs/<id>/ (72 dirs)`), and sibling directories holding the same file names
+(`people/{ann, bob, cy}/`). A legend line at the top says how an entry maps back to its file.
+Names that do not fit a limit are counted as `(+N more; read $MEMORY_DIR/<dir>/ to list)`, and
+every directory keeps its line.
 
 | Option                                 | Default | Description                                                                   |
 | -------------------------------------- | ------- | ----------------------------------------------------------------------------- |
-| `projection.max_entries_per_directory` | `40`    | Names listed per directory, newest first                                       |
-| `projection.max_bytes`                 | `24576` | Byte budget for the whole list; the largest directory gives up names first     |
+| `projection.max_entries_per_directory` | `0`     | Entries listed per directory, newest first; `0` lists every entry              |
+| `projection.max_bytes`                 | `40960` | Byte budget for the whole list; the largest directory gives up entries first   |
 
-`0` disables a limit; both at `0` list every name in name order, as before. A budget smaller
+`0` disables a limit; both at `0` list every entry in name order. A budget smaller
 than one line per directory cannot be met: the list then shows only the directory lines with
 their counts, and `/doctor` reports the overflow. Both keys can be set per harness, per profile
 and per agent under `agents.<name>.projection`. `/doctor` prints a `projection` line with the
