@@ -97,6 +97,8 @@ describe("isCredentialFailure", () => {
     ["an xAI device login that timed out (oauth/xai)", "xAI device code expired"],
     ["an expired MCP server session (mcp/health)", "MCP server docs session expired; reinitialize retry also expired; run /mcp reconnect docs"],
     ["an expired MCP authorization code (mcp/auth/oauth)", "MCP server docs authorization code was rejected or expired; restart with /mcp auth-start docs."],
+    ["a tool server whose access token was rejected (MCP-style)", "MCP server docs access token was rejected"],
+    ["a requirement scoped to one model", "Authentication is required for this model"],
     ["an expired prompt cache (handoff-hint)", "This session is 180k tokens and its cache has expired."],
     ["the subscription login migration notice (auth-storage)", 'The Anthropic Claude subscription login in auth.json was not moved to Anthropic Subscription because a newer login exists. It was left unchanged; sign in again with /login and choose "Anthropic Subscription (Claude Pro/Max)".'],
   ])("#given an expiry or sign-in text that is not a model credential failure (%s) #when classified #then it is not a credential failure", (_label, message) => {
@@ -210,6 +212,7 @@ describe("terminalFailureMessage", () => {
   test("#given a missing credential #when the terminal message is built #then it says none was found instead of rejected", () => {
     const message = terminalFailureMessage(record(GO_M3, []), "No API key found for opencode-go.")
 
+    expect(message).toContain("No credentials for opencode-go were found")
     expect(message).toContain("/login opencode-go")
     expect(message).not.toContain("were rejected")
   })

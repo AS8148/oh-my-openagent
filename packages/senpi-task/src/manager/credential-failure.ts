@@ -7,7 +7,7 @@ import { isParentModelRung } from "./parent-model-rung"
 // remaining rung on that provider would fail the same way, so runtime fallback moves on to another
 // provider.
 const CREDENTIAL_REJECTED =
-  /\b401\b|unauthori[sz]ed|invalid_grant|oauth refresh failed|subscription is required|invalid api key|incorrect api key|authentication (?:failed|error)|\btoken was rejected\b|\bsession expired\b[^.]*\.\s*run\s+\W?\/login\b/i
+  /\b401\b|unauthori[sz]ed|invalid_grant|oauth refresh failed|subscription is required|invalid api key|incorrect api key|authentication (?:failed|error)|\bthe account's oauth token was rejected\b|\bsession expired\b[^.]*\.\s*run\s+\W?\/login\b/i
 // No credential at all for the provider (#10806): senpi refuses the request before it is sent ("No API key
 // found for openai.", "No API key for provider: openai") or a login-only lane says it has no account or token
 // ("no accounts: run /login cursor-cli-oauth", "Cursor access token is required"). The provider is signed out,
@@ -15,7 +15,10 @@ const CREDENTIAL_REJECTED =
 // guidance that is not about a missing credential ("No model selected", a Copilot 421 endpoint refresh, a
 // third-party billing note, a model-scoped 403).
 const CREDENTIAL_MISSING =
-  /\bno api key (?:found |provided )?for\b|\bnot logged in\b|\bno (?:[\w-]+ ){0,3}accounts?(?: configured\b|:)|\b(?:access token|authentication) is required\b|\bno [\w-]+ access token\b|authentication[_ ](?:failed|required)/i
+  /\bno api key (?:found |provided )?for\b|\bnot logged in\b|\bno (?:[\w-]+ ){0,3}accounts?(?: configured\b|:)|\bno [\w-]+ access token\b|authentication[_ ](?:failed|required)/i
+// "Cursor access token is required", "Radius authentication is required": a signed-out provider, unless the text
+// scopes the requirement to a model ("Authentication is required for this model"), which a sibling may not share.
+const CREDENTIAL_REQUIRED = /\b(?:access token|authentication) is required\b/i
 // A 403 is ambiguous: a provider also answers it for ONE model the key may not use (tier, region,
 // preview access, an organization that must be verified for that model), which a sibling model on
 // the same provider does not share. A 403 counts as a credential rejection only when it names the
@@ -40,8 +43,12 @@ export function usageLimitScope(message: string): UsageLimitScope | undefined {
   return MODEL_SCOPED_LIMIT.test(message) ? "model" : "account"
 }
 
+function isMissingCredential(message: string): boolean {
+  return CREDENTIAL_MISSING.test(message) || (CREDENTIAL_REQUIRED.test(message) && !MODEL_SCOPED.test(message))
+}
+
 export function isCredentialFailure(message: string, modelId?: string): boolean {
-  if (CREDENTIAL_REJECTED.test(message) || CREDENTIAL_MISSING.test(message)) return true
+  if (CREDENTIAL_REJECTED.test(message) || isMissingCredential(message)) return true
   if (!FORBIDDEN.test(message) || !ACCOUNT_SCOPED_403.test(message)) return false
   if (MODEL_SCOPED.test(message)) return false
   return modelId === undefined || !message.toLowerCase().includes(modelId.toLowerCase())
@@ -71,7 +78,7 @@ export function terminalFailureMessage(record: TaskRecord | null | undefined, fa
   const provider = record == null ? undefined : providerOf(record)
   if (provider === undefined || record == null) return failureMessage
   if (isCredentialFailure(failureMessage, modelIdOf(record))) {
-    const missing = !CREDENTIAL_REJECTED.test(failureMessage) && CREDENTIAL_MISSING.test(failureMessage)
+    const missing = !CREDENTIAL_REJECTED.test(failureMessage) && isMissingCredential(failureMessage)
     const cause = missing
       ? `No credentials for ${provider} were found; sign in to ${provider} (Provider authentication settings on the desktop, /login ${provider} in an interactive session) or add its API key`
       : `Credentials for ${provider} were rejected; re-authenticate ${provider} (Provider authentication settings on the desktop, /login ${provider} in an interactive session) or re-add its API key`
