@@ -40,7 +40,7 @@ describe.skipIf(process.platform !== "win32" || targetDirectory === undefined)("
   beforeAll(async () => {
     base = await mkdtemp(join(tmpdir(), "omo-windows-trust-helper-"))
     const issued = await issueCertificates(base, [
-      { name: "B", subject: "/CN=omo windows helper bundled root", days: 30, extensions: "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign" },
+      { name: "B", subject: "/CN=Example Trust Test windows helper bundled root", days: 30, extensions: "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign" },
     ])
     bundled = new Uint8Array(issued.get("B") ?? [])
   })

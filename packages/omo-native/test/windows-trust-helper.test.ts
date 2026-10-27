@@ -23,10 +23,10 @@ const N = { der: new Uint8Array() }
 beforeAll(async () => {
   base = await mkdtemp(join(tmpdir(), "omo-windows-trust-helper-"))
   const issued = await issueCertificates(base, [
-    { name: "R", subject: "/CN=omo windows decoder R", days: 30, extensions: CA },
-    { name: "X", subject: "/CN=omo windows decoder X", issuer: "R", days: 30, extensions: `${CA}\nextendedKeyUsage=serverAuth` },
-    { name: "Q", subject: "/CN=omo windows decoder Q", days: 30, extensions: CA },
-    { name: "N", subject: "/CN=omo windows decoder N", days: 30, extensions: CA },
+    { name: "R", subject: "/CN=Example Trust Test windows decoder R", days: 30, extensions: CA },
+    { name: "X", subject: "/CN=Example Trust Test windows decoder X", issuer: "R", days: 30, extensions: `${CA}\nextendedKeyUsage=serverAuth` },
+    { name: "Q", subject: "/CN=Example Trust Test windows decoder Q", days: 30, extensions: CA },
+    { name: "N", subject: "/CN=Example Trust Test windows decoder N", days: 30, extensions: CA },
   ])
   for (const [name, target] of [["R", R], ["X", X], ["Q", Q], ["N", N]] as const) target.der = new Uint8Array(issued.get(name) ?? [])
 })

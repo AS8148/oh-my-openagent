@@ -96,7 +96,7 @@ impl Pki {
     fn root(&self, name: &str, section: &str) -> Cert {
         let config = self.path("openssl.cnf");
         let (key, pem, serial) = (self.path(&format!("{name}.key")), self.path(&format!("{name}.pem")), self.next_serial());
-        let subject = format!("/CN=omo synthetic {name}");
+        let subject = format!("/CN=Example Trust Test synthetic {name}");
         self.openssl(&[
             "req", "-config", &config, "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
             "-subj", &subject, "-days", "30", "-extensions", section, "-set_serial", &serial, "-keyout", &key, "-out", &pem,
@@ -117,7 +117,7 @@ impl Pki {
             self.path(&format!("{name}.csr")),
             self.next_serial(),
         );
-        let subject = format!("/CN=omo synthetic {name}");
+        let subject = format!("/CN=Example Trust Test synthetic {name}");
         self.openssl(&[
             "req", "-config", &config, "-new", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
             "-subj", &subject, "-keyout", &key, "-out", &csr,
