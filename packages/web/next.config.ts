@@ -15,6 +15,11 @@ const nextConfig: NextConfig = {
   // One build id per commit, so /_next/static/<id>/ always names one set of bytes (lib/build-id.mjs). Next's
   // deploymentId is not set: with it, every build shares one constant build id.
   generateBuildId: () => resolveBuildId(process.env),
+  // The root layouts live under app/[locale] and app/design (so <html lang> follows the route); an unmatched URL
+  // gets app/global-not-found.tsx, which renders its own document.
+  experimental: {
+    globalNotFound: true,
+  },
   turbopack: {
     root: __dirname,
   },
