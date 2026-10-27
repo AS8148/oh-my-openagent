@@ -148,7 +148,7 @@ All primitives live in `components/ui/*` (existing shadcn shells re-tokened) or 
 - Left: OmO mark (24px SVG from `.github/assets/omo-icon-light.svg` re-exported to `public/brand/omo-mark.svg`) + wordmark `OmO` (Geist 500 15px, -0.02em). The brand is `OmO` on every surface (nav, footer, titles, OG, JSON-LD); the old long-form name is never rendered.
 - Center/right: links `Features · Docs · Manifesto` in `--text-mid` mono 12px uppercase 0.12em; hover → `--text-hi` with a 1px underline growing `scaleX(0→1)` 320ms.
 - Right: GitHub chip (mono `★ 68.8k` live count, `--ink-1` fill, `--line` border) and primary button `Install` (sm size).
-- Mobile: hamburger 44×44; sheet `--ink-3` with `--line` top rule; items 44px tall. Escape closes the open sheet; focus returns to the toggle only when it was inside the sheet (or on the toggle), never pulled from elsewhere.
+- Mobile: hamburger 44×44; sheet `--ink-3` with `--line` top rule; items 44px tall.
 - States: default, scrolled, open (mobile), link hover/focus-visible (2px `--accent-32` outline offset 2px), active route (underline visible at scaleX(1), `--text-hi`).
 
 ### Button (`components/ui/button.tsx`)
@@ -285,6 +285,7 @@ Grain is not used (omp.sh's canvas grain and factory's texture PNG would fight t
 - Contrast: `--text-hi` on `--ink-0` 17.8:1, `--text-mid` 11.5:1, `--text-lo` 5.9:1 (AA for 11px+ mono uppercase is met because eyebrows are ≥ 11px 500 with tracking; body never uses `--text-faint`), `--accent` on `--ink-0` 11.4:1, primary button `#09090b` on `--accent` 11.4:1.
 - Focus-visible ring on every interactive element (2px `--accent-32`, offset 2px); the canvas wrapper is focusable with arrow-key orbit and is `aria-hidden` for AT while the poster `<img alt>` describes the scene.
 - Touch targets ≥ 44px on mobile (nav items, COPY cell, bento cells are ≥ 44px tall).
+- Escape closes the open mobile nav sheet; focus returns to the toggle only when it was inside the sheet (or on the toggle), never pulled from elsewhere. Icon-only controls carry a `Tooltip` (§5), never `title=`.
 - Reduced motion honored everywhere (§6). Reduced data (`navigator.connection.saveData`) and low memory skip the 3D chunk (§9).
 - Reel and docs main announce as scroll regions (`role="region"` + `aria-label`, `tabindex=0`).
 - Personas: terminal power user (keyboard-first, copyable commands, dense reference), mobile evaluator (no horizontal overflow on `/`, `/manifesto`, `/docs` at 375), CJK reader (heading tracking reset, keep-all), motion-sensitive user (poster hero, static terminal).
