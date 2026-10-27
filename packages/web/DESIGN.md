@@ -216,7 +216,7 @@ All primitives live in `components/ui/*` (existing shadcn shells re-tokened) or 
 
 ### DocsShell (`components/docs/docs-shell.tsx`)
 
-- `fixed-sidenav-shell` as in §4; sidebar: search input (Chip-styled, focus ring), section list with active item marked by a 2px `--accent` left rule; main: prose with `--line` ruled H2s, code blocks `--code-bg` with `overflow-x: auto`.
+- `fixed-sidenav-shell` as in §4; sidebar: search input (`--input` edge at 3.8:1, a visually hidden label, focus ring) above a section list in a `<nav>` with its own name, section list with active item marked by a 2px `--accent` left rule; main: prose with `--line` ruled H2s, code blocks `--code-bg` with `overflow-x: auto`.
 
 ### Footer (`components/footer.tsx`)
 
