@@ -1,4 +1,5 @@
-import { redactSecretLikeMaterial } from "../sync/redact"
+import { groupDirectories } from "./external-projection-dirs"
+import { NAME_LEGEND, directoryItems, type ProjectionItem } from "./external-projection-names"
 
 const MEMORY_DIR = "$MEMORY_DIR"
 const OPEN = "<external_projection>"
@@ -31,15 +32,15 @@ export interface ExternalProjectionStats {
 }
 
 export const DEFAULT_EXTERNAL_PROJECTION_LIMITS: ExternalProjectionLimits = {
-  maxEntriesPerDirectory: 40,
-  maxBytes: 24_576,
+  maxEntriesPerDirectory: 0,
+  maxBytes: 40_960,
 }
 
 interface DirectoryListing {
   readonly label: string
   readonly pointer: string
-  readonly names: readonly string[]
-  readonly nameBytes: readonly number[]
+  readonly items: readonly ProjectionItem[]
+  readonly itemBytes: readonly number[]
 }
 
 interface Layout {
@@ -58,8 +59,8 @@ export function renderExternalProjectionStats(
 ): ExternalProjectionStats {
   const fitted = layout(paths, input)
   const bytes = Buffer.byteLength(render(fitted))
-  const total = fitted.directories.reduce((sum, directory) => sum + directory.names.length, 0)
-  const shown = fitted.allowances.reduce((sum, allowance) => sum + allowance, 0)
+  const total = fitted.directories.reduce((sum, directory) => sum + files(directory.items), 0)
+  const shown = fitted.directories.reduce((sum, directory, index) => sum + files(directory.items.slice(0, fitted.allowances[index] ?? 0)), 0)
   const { maxBytes } = input.limits
   return {
     shown,
@@ -74,44 +75,20 @@ export function renderExternalProjectionStats(
 function layout(paths: readonly string[], input: ExternalProjectionInput | undefined): Layout {
   const limits = input?.limits ?? { maxEntriesPerDirectory: 0, maxBytes: 0 }
   const bounded = limits.maxEntriesPerDirectory > 0 || limits.maxBytes > 0
-  const byDirectory = new Map<string, Array<{ readonly name: string; readonly path: string }>>()
-  for (const path of paths) {
-    const parts = path.split("/").filter(Boolean)
-    const name = parts.pop()
-    if (name === undefined) continue
-    const directory = parts.length > 0 ? `${parts.join("/")}/` : ""
-    const entries = byDirectory.get(directory)
-    if (entries) entries.push({ name, path })
-    else byDirectory.set(directory, [{ name, path }])
-  }
-  const keys = [...byDirectory.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b))
-  if (byDirectory.has("")) keys.unshift("")
-  const directories = keys.map((directory): DirectoryListing => {
-    const entries = [...(byDirectory.get(directory) ?? [])]
-    const times = input?.times
-    entries.sort((a, b) => {
-      if (bounded && times !== undefined) {
-        const delta = (times.get(b.path) ?? Number.NEGATIVE_INFINITY) - (times.get(a.path) ?? Number.NEGATIVE_INFINITY)
-        if (delta !== 0 && !Number.isNaN(delta)) return delta
-      }
-      return a.name.localeCompare(b.name)
-    })
-    const names = entries.map((entry) => redactSecretLikeMaterial(entry.name))
-    const parts = directory.split("/").filter(Boolean)
-    const safe = directory === "" ? "" : `${parts.map(redactSecretLikeMaterial).join("/")}/`
-    const readable = parts.slice(0, firstRedacted(parts))
-    return {
-      label: directory === "" ? `${MEMORY_DIR}/` : safe,
-      pointer: `${MEMORY_DIR}/${readable.length === 0 ? "" : `${readable.join("/")}/`}`,
-      names,
-      nameBytes: names.map((name) => Buffer.byteLength(name)),
-    }
+  const groups = groupDirectories(paths, bounded ? input?.times : undefined)
+  const directories = groups.map((group): DirectoryListing => {
+    const items = directoryItems(group.files)
+    return { label: group.label, pointer: group.pointer, items, itemBytes: items.map((item) => Buffer.byteLength(item.text)) }
   })
   const cap = limits.maxEntriesPerDirectory
-  const allowances = directories.map((directory) => cap > 0 ? Math.min(cap, directory.names.length) : directory.names.length)
-  const rootBare = !byDirectory.has("")
+  const allowances = directories.map((directory) => cap > 0 ? Math.min(cap, directory.items.length) : directory.items.length)
+  const rootBare = !groups.some((group) => group.label === `${MEMORY_DIR}/`)
   if (limits.maxBytes > 0) fitToBudget(directories, allowances, limits.maxBytes, rootBare)
   return { rootBare, directories, allowances }
+}
+
+function files(items: readonly ProjectionItem[]): number {
+  return items.reduce((sum, item) => sum + item.files, 0)
 }
 
 /**
@@ -124,15 +101,15 @@ function fitToBudget(directories: readonly DirectoryListing[], allowances: numbe
     const directory = directories[index]
     if (directory === undefined) return 0
     let size = Buffer.byteLength(`${directory.label}: `)
-    for (let shown = 0; shown < allowance; shown++) size += (directory.nameBytes[shown] ?? 0) + (shown > 0 ? 2 : 0)
-    const omitted = directory.names.length - allowance
+    for (let shown = 0; shown < allowance; shown++) size += (directory.itemBytes[shown] ?? 0) + (shown > 0 ? 2 : 0)
+    const omitted = files(directory.items.slice(allowance))
     if (omitted > 0) size += (allowance > 0 ? 1 : 0) + Buffer.byteLength(marker(omitted, directory.pointer))
     return size
   }
   const start = [...allowances]
   const lines = directories.map((_, index) => lineBytes(index))
-  const fixedLines = 2 + (rootBare ? 1 : 0)
-  const fixedBytes = Buffer.byteLength(OPEN) + Buffer.byteLength(CLOSE) + (rootBare ? Buffer.byteLength(`${MEMORY_DIR}/`) : 0)
+  const fixedLines = 3 + (rootBare ? 1 : 0)
+  const fixedBytes = Buffer.byteLength(OPEN) + Buffer.byteLength(NAME_LEGEND) + Buffer.byteLength(CLOSE) + (rootBare ? Buffer.byteLength(`${MEMORY_DIR}/`) : 0)
   let total = fixedBytes + lines.reduce((sum, size) => sum + size, 0) + (fixedLines + directories.length - 1)
   while (total > maxBytes) {
     let widest = -1
@@ -159,22 +136,17 @@ function fitToBudget(directories: readonly DirectoryListing[], allowances: numbe
 }
 
 function render({ rootBare, directories, allowances }: Layout): string {
-  const lines = [OPEN]
+  const lines = [OPEN, NAME_LEGEND]
   if (rootBare) lines.push(`${MEMORY_DIR}/`)
   directories.forEach((directory, index) => {
-    const allowance = allowances[index] ?? directory.names.length
-    const shown = directory.names.slice(0, allowance).join(", ")
-    const omitted = directory.names.length - allowance
+    const allowance = allowances[index] ?? directory.items.length
+    const shown = directory.items.slice(0, allowance).map((item) => item.text).join(", ")
+    const omitted = files(directory.items.slice(allowance))
     const suffix = omitted > 0 ? `${shown ? " " : ""}${marker(omitted, directory.pointer)}` : ""
     lines.push(`${directory.label}: ${shown}${suffix}`)
   })
   lines.push(CLOSE)
   return lines.join("\n")
-}
-
-function firstRedacted(parts: readonly string[]): number {
-  const index = parts.findIndex((part) => redactSecretLikeMaterial(part) !== part)
-  return index === -1 ? parts.length : index
 }
 
 function marker(omitted: number, pointer: string): string {

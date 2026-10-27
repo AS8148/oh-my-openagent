@@ -14,7 +14,7 @@ export const MEMORY_TEMPLATE_STRUCTURE_VERSION = "senpi-memory-v2"
  * Bump with ANY change to the bytes `compileMemoryBlockAtRevision` produces for the same inputs: persisted blocks
  * are keyed by it and by the caller's `build`, and a block compiled by older code must never be served.
  */
-export const MEMORY_BLOCK_COMPILER_VERSION = 1
+export const MEMORY_BLOCK_COMPILER_VERSION = 2
 
 export function hashMemoryTemplate(template: string): string {
   return createHash("sha256")
