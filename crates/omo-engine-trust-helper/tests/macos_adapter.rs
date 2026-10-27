@@ -42,6 +42,17 @@ keyUsage=critical,digitalSignature,keyCertSign,cRLSign
 [ca_intermediate_sign_only]
 basicConstraints=critical,CA:TRUE,pathlen:0
 keyUsage=critical,keyCertSign,cRLSign
+[server_intermediate_sign_only]
+basicConstraints=critical,CA:TRUE,pathlen:0
+keyUsage=critical,keyCertSign,cRLSign
+extendedKeyUsage=serverAuth
+[server_intermediate_any_eku]
+basicConstraints=critical,CA:TRUE,pathlen:0
+keyUsage=critical,digitalSignature,keyCertSign,cRLSign
+extendedKeyUsage=anyExtendedKeyUsage
+[server_intermediate_no_ku]
+basicConstraints=critical,CA:TRUE,pathlen:0
+extendedKeyUsage=serverAuth
 ";
 
 fn openssl(dir: &Path, args: &[&str]) -> Vec<u8> {
@@ -313,6 +324,15 @@ fn custom_anchor_validity_and_eku_measurement() {
         ("server_eku_1825", "server_intermediate", 1825),
         ("sign_only_ku_365", "ca_intermediate_sign_only", 365),
         ("sign_only_ku_1825", "ca_intermediate_sign_only", 1825),
+        ("server_eku_365", "server_intermediate", 365),
+        ("server_eku_825", "server_intermediate", 825),
+        (
+            "server_eku_sign_only_ku_365",
+            "server_intermediate_sign_only",
+            365,
+        ),
+        ("server_eku_no_ku_365", "server_intermediate_no_ku", 365),
+        ("any_eku_365", "server_intermediate_any_eku", 365),
     ] {
         let intermediate = fixtures.issue(name, Some("root"), section, days);
         println!("MEASURE {name}: {}", ssl_failure(&intermediate, &root));

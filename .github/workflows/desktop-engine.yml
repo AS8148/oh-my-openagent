@@ -85,7 +85,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       # TEMPORARY (omo#10762 design 4.4 item 4 amendment): measures why the named custom-anchor test
-      # fails, and runs the later helper steps once, before the failing Rust tests stop the job.
+      # fails, and runs the later helper step once, before the failing Rust tests stop the job.
       - name: Engine trust measurements (macOS, temporary)
         if: runner.os == 'macOS'
         continue-on-error: true
@@ -94,15 +94,9 @@ jobs:
           OMO_ENGINE_TRUST_HELPER_TARGET_DIR: ${{ github.workspace }}/target/debug
         run: |
           cargo test -p omo-engine-trust-helper --test macos_adapter --locked -- --ignored --nocapture custom_anchor_validity_and_eku_measurement || echo "measurement exited $?"
-          cargo test -p omo-engine-trust-helper --test macos_d2_measurement --locked --no-run
-          bin=$(find target/debug/deps -maxdepth 1 -type f -perm -u+x -name 'macos_d2_measurement-*' | head -n 1)
-          echo "D2 as root"
-          sudo "$bin" --ignored --nocapture || echo "D2 root exited $?"
           bun install --frozen-lockfile --ignore-scripts
           cargo build -p omo-engine-trust-helper --bins --examples --locked
           bun test packages/omo-native/test/macos-trust-helper.macos.test.ts || echo "bun macOS test exited $?"
-          echo "D2 as the runner user"
-          "$bin" --ignored --nocapture || echo "D2 runner user exited $?"
 
       - name: Rust tests
         run: cargo test --workspace --locked
@@ -136,21 +130,6 @@ jobs:
         run: |
           cargo build -p omo-engine-trust-helper --bins --examples --locked
           bun test packages/omo-native/test/macos-trust-helper.macos.test.ts
-
-      # omo#10762 D2 measurement (lead ruling A). It changes real trust settings, so it runs only on the
-      # disposable macOS runner and removes every setting it adds. It reports a result and never gates:
-      # a run that needs a UI prompt stops at the step timeout.
-      - name: Engine trust D2 measurement (macOS, disposable runner)
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        timeout-minutes: 5
-        run: |
-          cargo test -p omo-engine-trust-helper --test macos_d2_measurement --locked --no-run
-          bin=$(find target/debug/deps -maxdepth 1 -type f -perm -u+x -name 'macos_d2_measurement-*' | head -n 1)
-          echo "D2 as root"
-          sudo "$bin" --ignored --nocapture
-          echo "D2 as the runner user"
-          "$bin" --ignored --nocapture
 
       # The runner is disposable, so the live clipboard round-trip may overwrite its clipboard.
       - name: System clipboard round-trip
