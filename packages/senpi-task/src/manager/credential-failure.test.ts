@@ -60,8 +60,22 @@ describe("isCredentialFailure", () => {
     ["a missing Cursor access token", "Cursor access token is required; run /login cursor"],
     ["a missing Radius login", "Radius authentication is required; start Pi and run /login radius, then retry"],
     ["a signed-out Claude Code SDK", "Not logged in \u00b7 Please run /login"],
+    ["a missing GitLab Duo token (custom provider example)", "No GitLab access token. Run /login gitlab-duo or set GITLAB_TOKEN"],
+    ["a rejected Claude subscription token (anthropic-subscription guidance)", "The account's OAuth token was rejected. Re-run /login anthropic-subscription to refresh it, or remove the account with /claude-account remove <name>."],
   ])("#given a missing credential from %s #when classified #then it is a credential failure", (_label, message) => {
     expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(true)
+  })
+
+  // senpi names /login in guidance that is not about a missing or rejected credential; a /login hint alone
+  // must not sign the provider out.
+  test.each([
+    ["a GitHub Copilot 421 endpoint refresh (github-copilot-errors)", "GitHub Copilot sent this account to a different API host (HTTP 421 Misdirected Request): Business and Enterprise accounts are served from their own host, which senpi reads from the Copilot token. Run /login github-copilot so senpi stores the account's endpoint, and report it with the GitHub request id if it persists."],
+    ["a GitHub Copilot model-scoped 403 (github-copilot-errors)", "GitHub Copilot refused the request (HTTP 403). Copilot checks access per model and per client; if a fresh /login github-copilot does not help, report it with the GitHub request id."],
+    ["the subscription usage poller's stale-auth status (usage-accounts)", "auth stale - run /login"],
+    ["Anthropic third-party billing (provider-failure-description)", 'Anthropic billed this request to your extra usage instead of your Claude plan limits, because a Claude subscription used directly through the Anthropic API counts as a third-party app. Run /login and choose "Anthropic Subscription (Claude Pro/Max)" so requests run through Claude Code and use your plan limits, add extra usage at https://claude.ai/settings/usage, or switch to another model with /model.'],
+    ["the goal stop on a model-scoped 403 (continuation-recovery)", "Goal continuation blocked: provider rejected the request: HTTP 403 access denied for github-copilot/gpt-6-luna-fast.\nRetrying would get the same rejection, so the goal stopped instead of retrying.\nRun /login github-copilot to refresh the account, or check that gpt-6-luna-fast is enabled for your Copilot plan, and check any proxy or gateway in front of it. Then send any message to resume."],
+  ])("#given /login guidance that is not about a missing credential (%s) #when classified #then it is not a credential failure", (_label, message) => {
+    expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(false)
   })
 
   test.each([
@@ -166,6 +180,13 @@ describe("terminalFailureMessage", () => {
     expect(message).toContain("Provider authentication settings")
     expect(message).toContain("/login opencode-go")
     expect(message).toContain("omo.json")
+  })
+
+  test("#given a missing credential #when the terminal message is built #then it says none was found instead of rejected", () => {
+    const message = terminalFailureMessage(record(GO_M3, []), "No API key found for opencode-go.")
+
+    expect(message).toContain("/login opencode-go")
+    expect(message).not.toContain("were rejected")
   })
 
   test("#given a single-model lane whose only model hits an account usage limit #when the terminal message is built #then it says the chain is exhausted and how to recover", () => {

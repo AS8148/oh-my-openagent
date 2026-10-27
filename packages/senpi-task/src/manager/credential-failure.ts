@@ -6,13 +6,15 @@ import { isParentModelRung } from "./parent-model-rung"
 // remaining rung on that provider would fail the same way, so runtime fallback moves on to another
 // provider.
 const CREDENTIAL_REJECTED =
-  /\b401\b|unauthori[sz]ed|invalid_grant|oauth refresh failed|subscription is required|invalid api key|incorrect api key|authentication (?:failed|error)/i
+  /\b401\b|unauthori[sz]ed|invalid_grant|oauth refresh failed|subscription is required|invalid api key|incorrect api key|authentication (?:failed|error)|\btoken was rejected\b/i
 // No credential at all for the provider (#10806): senpi refuses the request before it is sent ("No API key
-// found for openai.", "No API key for provider: openai") or a login-only lane has no account and names the
-// /login that would fix it. The provider is signed out, so its sibling models fail the same way. "Use /login"
-// alone is not enough: senpi's "No model selected" text carries it and names no provider.
+// found for openai.", "No API key for provider: openai") or a login-only lane says it has no account or token
+// ("no accounts: run /login cursor-cli-oauth", "Cursor access token is required"). The provider is signed out,
+// so its sibling models fail the same way. A "/login" hint alone is not enough: senpi also names /login in
+// guidance that is not about a missing credential ("No model selected", a Copilot 421 endpoint refresh, a
+// third-party billing note, a model-scoped 403).
 const CREDENTIAL_MISSING =
-  /\bno api key (?:found |provided )?for\b|\bnot logged in\b|\brun \/login\b|authentication[_ ](?:failed|required)/i
+  /\bno api key (?:found |provided )?for\b|\bnot logged in\b|\bno (?:[\w-]+ ){0,3}accounts?(?: configured\b|:)|\b(?:access token|authentication) is required\b|\bno [\w-]+ access token\b|authentication[_ ](?:failed|required)/i
 // A 403 is ambiguous: a provider also answers it for ONE model the key may not use (tier, region,
 // preview access, an organization that must be verified for that model), which a sibling model on
 // the same provider does not share. A 403 counts as a credential rejection only when it names the
@@ -68,7 +70,11 @@ export function terminalFailureMessage(record: TaskRecord | null | undefined, fa
   const provider = record == null ? undefined : providerOf(record)
   if (provider === undefined || record == null) return failureMessage
   if (isCredentialFailure(failureMessage, modelIdOf(record))) {
-    return `${failureMessage}\nCredentials for ${provider} were rejected; re-authenticate ${provider} (Provider authentication settings on the desktop, /login ${provider} in an interactive session) or re-add its API key, or pin this category to another provider in omo.json.`
+    const missing = !CREDENTIAL_REJECTED.test(failureMessage) && CREDENTIAL_MISSING.test(failureMessage)
+    const cause = missing
+      ? `No credentials for ${provider} were found; sign in to ${provider} (Provider authentication settings on the desktop, /login ${provider} in an interactive session) or add its API key`
+      : `Credentials for ${provider} were rejected; re-authenticate ${provider} (Provider authentication settings on the desktop, /login ${provider} in an interactive session) or re-add its API key`
+    return `${failureMessage}\n${cause}, or pin this category to another provider in omo.json.`
   }
   if (usageLimitScope(failureMessage) === undefined) return failureMessage
   const model = record.resolved_model === undefined ? record.model : `${provider}/${record.resolved_model.model_id}`
