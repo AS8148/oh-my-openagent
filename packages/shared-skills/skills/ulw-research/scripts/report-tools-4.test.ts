@@ -14,8 +14,12 @@ import { SCRIPT, FIXTURES, sessionDir, nodeWithoutBun, defectsFile, FIDELITY, sh
 
 
 describe("fidelity delivery barrier", () => {
-	/** The locked brief has meaning check on, so a deliverable session also carries a clean meaning record. */
-	const meaningRan = (dir: string) => writeFidelityRecord(join(dir, "fidelity-meaning-defects.json"), "meaning", { artifact_sha256: sha256(join(dir, "report.html")), report: join(dir, "report.html"), defects: [] })
+	/**
+	 * The locked brief has meaning check on, so a deliverable session also carries a clean meaning record:
+	 * one edition's (fidelity-meaning-defects.<format>.json), or without a format the legacy session record.
+	 */
+	const meaningRan = (dir: string, report = "report.html", format?: string) =>
+		writeFidelityRecord(join(dir, format === undefined ? "fidelity-meaning-defects.json" : `fidelity-meaning-defects.${format}.json`), "meaning", { artifact_sha256: sha256(join(dir, report)), report: join(dir, report), defects: [] })
 
 	async function deliveredSession(codes: string[]) {
 		const { dir, s } = fidelitySession()
@@ -91,10 +95,19 @@ describe("fidelity delivery barrier", () => {
 	test("#given a clean main report and an inline edition #when the edition lacks or mismatches its verify record #then edition_unverified, and its own record passes", async () => {
 		// given
 		const { dir, s } = fidelitySession()
+		// a stylesheet and an image, so the inline edition's bytes differ from report.html
+		writeFileSync(join(dir, "report.css"), "body { margin: 0 auto; max-width: 42rem; }")
+		writeFileSync(join(dir, "report.src.html"), readFileSync(join(dir, "report.src.html"), "utf8").replace("</title>", '</title><link rel="stylesheet" href="report.css">').replace("<h2>Findings</h2>", '<h2>Findings</h2>\n<img src="assets/bridge.png" alt="The bridge from the south bank">'))
 		nodeJson(["fact", "fill", join(dir, "report.src.html"), "--out", join(dir, "report.html"), ...s])
 		expect(verify(dir, "report.html").code).toBe(0)
 		meaningRan(dir)
 		expect(nodeJson(["fact", "fill", join(dir, "report.src.html"), "--inline", "--out", join(dir, "report.inline.html"), ...s]).code).toBe(0)
+		const inline = readFileSync(join(dir, "report.inline.html"), "utf8")
+		expect(inline).toContain("<style>body { margin: 0 auto; max-width: 42rem; }</style>")
+		expect(inline).toContain(`src="${join(dir, "assets", "bridge.png")}"`)
+		expect(sha256(join(dir, "report.inline.html"))).not.toBe(sha256(join(dir, "report.html")))
+		// html keeps the legacy session meaning record; the byte-different inline edition needs its own
+		meaningRan(dir, "report.inline.html", "pdf")
 		await run(["outcome", "init", "--session-dir", dir, "--promised", "html,pdf"])
 		await run(["outcome", "set", "html", "delivered", "--path", join(dir, "report.html"), "--verified-by", join(dir, "fidelity-defects.json"), "--session-dir", dir])
 		const problems = async () => {
@@ -106,7 +119,6 @@ describe("fidelity delivery barrier", () => {
 		const missing = await problems()
 		// when: a record for different bytes
 		expect(verify(dir, "report.inline.html", ["--out", join(dir, "fidelity-inline.json")]).code).toBe(0)
-		const inline = readFileSync(join(dir, "report.inline.html"), "utf8")
 		writeFileSync(join(dir, "report.inline.html"), inline.replace("320,000 mm", "330,000 mm"))
 		await run(["outcome", "set", "pdf", "delivered", "--path", join(dir, "report.inline.html"), "--verified-by", join(dir, "fidelity-inline.json"), "--session-dir", dir])
 		const altered = await problems()
@@ -114,8 +126,10 @@ describe("fidelity delivery barrier", () => {
 		writeFileSync(join(dir, "report.inline.html"), inline)
 		const matched = await problems()
 		// then
-		expect(missing).toEqual({ exitCode: 1, codes: ["edition_unverified"] })
-		expect(altered).toEqual({ exitCode: 1, codes: ["edition_unverified"] })
-		expect(matched).toEqual({ exitCode: 0, codes: [] })
+		expect({ missing, altered, matched }).toEqual({
+			missing: { exitCode: 1, codes: ["edition_unverified"] },
+			altered: { exitCode: 1, codes: ["edition_unverified", "edition_unverified"] },
+			matched: { exitCode: 0, codes: [] },
+		})
 	})
 })

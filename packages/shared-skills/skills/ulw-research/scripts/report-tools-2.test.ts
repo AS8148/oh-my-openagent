@@ -135,6 +135,18 @@ describe("meaning verifier under node", () => {
 		expect(calibrationRows(dir)[0]).toMatchObject({ pair_id: "P2", disputed: true, reason: "the operator states it" })
 	})
 
+	test("#given --edition md #when meaning-check runs #then it writes that edition's record, and an unknown edition refuses", () => {
+		const { dir, s } = pairedSession()
+		const clean = [{ pair_id: "P1", verdict: "ok" }, { pair_id: "P2", verdict: "ok" }]
+		const files = ["--verdicts", verdicts(dir, "cheap.json", "cheap", clean), "--verdicts", verdicts(dir, "strong.json", "strong", clean)]
+		const checked = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), ...files, "--edition", "md", ...s])
+		const unknown = nodeJson(["fact", "meaning-check", "--pairs", join(dir, "pairs.json"), ...files, "--edition", "epub", ...s])
+		expect(checked.code).toBe(0)
+		expect(JSON.parse(readFileSync(join(dir, "fidelity-meaning-defects.md.json"), "utf8"))).toMatchObject({ record_kind: "meaning", artifact_sha256: sha256(join(dir, "report.html")) })
+		expect(existsSync(join(dir, "fidelity-meaning-defects.json"))).toBe(false)
+		expect(unknown.code).toBe(2)
+	})
+
 	test("#given a dropped verdict and an unread pair #when meaning-check runs #then both pairs are meaning_unverified and it exits 1", () => {
 		const { dir, s } = pairedSession()
 		const cheap = verdicts(dir, "cheap.json", "cheap", [{ pair_id: "P2", verdict: "drift", drift_kind: "hedge_dropped", fragment: "certainly by 2027", source_fragment: "we estimate" }])

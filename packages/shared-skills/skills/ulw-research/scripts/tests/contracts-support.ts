@@ -93,10 +93,10 @@ const FIDELITY_MAJORS = [
 	"polish_hedging_decreased",
 	"polish_text_churn",
 	"snapshot_mismatch",
-	"operand_timestamp_missing",
-	"operand_missing",
 	"join_integrity_fail",
 	"quote_stale_version",
+	"operand_timestamp_missing",
+	"operand_missing",
 ]
 
 const FIDELITY_MINORS = [
