@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { withLock } from "@oh-my-opencode/team-core/team-state-store/locks"
+import { signInHint } from "./accounts-gate"
 import { credentialId, type CredentialStore, CredentialStoreError } from "./keystore"
 import {
   ApiRefusal,
@@ -10,6 +11,8 @@ import {
   deviceListSchema,
   jsonRequest,
   parseReply,
+  refusalGuidance,
+  refusalMessage,
   requestApi,
   RequestFailure,
   serviceOrigin,
@@ -53,7 +56,7 @@ export function createSession(options: { readonly api: string; readonly store: C
   const request = (path: string, init: RequestInit) => requestApi(api, path, init, signal)
   const uncertain = () =>
     new SignInError(
-      "The refresh outcome is unknown. Saved credentials and keys were retained, but this refresh token will not be sent again. Retry sign-in with omo login.",
+      `The refresh outcome is unknown. Saved credentials and keys were retained, but this refresh token will not be sent again. ${signInHint("again")}`,
       true,
     )
   async function refreshedAccess(current: Credentials): Promise<string> {
@@ -71,8 +74,8 @@ export function createSession(options: { readonly api: string; readonly store: C
         await store.clear()
         throw new SessionEnded(
           error.code === "reauth_required"
-            ? "This session was ended because its refresh token was reused. Sign in again with omo login."
-            : "Sign in again with omo login.",
+            ? `This session was ended because its refresh token was reused. ${signInHint("again")}`
+            : refusalMessage(refusalGuidance(error.code, error.status)),
           DEVICE_REVOKING_REFUSALS.has(error.code),
           error.code,
         )
@@ -121,7 +124,7 @@ export function createSession(options: { readonly api: string; readonly store: C
     async accessToken(): Promise<string> {
       return locked(async () => {
         const current = await store.read()
-        if (current === null) throw new SignInError("Not signed in. Run omo login.")
+        if (current === null) throw new SignInError(`Not signed in. ${signInHint("first")}`)
         return refreshedAccess(current)
       })
     },
