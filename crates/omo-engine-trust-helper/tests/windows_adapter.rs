@@ -8,12 +8,13 @@ use std::process::Command;
 
 use omo_engine_trust_helper::document::{Chain, Identity, Outcome};
 use omo_engine_trust_helper::windows::{
-    collect, decode_disallowed_ctl, effective_eku, CertStore, CollectError, Context, CtlRead, PhysicalRead, SystemStores,
+    collect, decode_disallowed_ctl, effective_eku, CertStore, CollectError, Context, CtlRead, PhysicalRead, System, SystemStores,
 };
 use omo_engine_trust_helper::windows_document::{CtlOutcome, Eku, Location, SourceStore};
 use windows_sys::Win32::Security::Cryptography::{
-    CertSetCertificateContextProperty, CryptEncodeObjectEx, CERT_DISALLOWED_FILETIME_PROP_ID, CERT_ENHKEY_USAGE_PROP_ID,
-    CRYPT_INTEGER_BLOB, CTL_USAGE, X509_ASN_ENCODING, X509_ENHANCED_KEY_USAGE,
+    CertCreateCTLContext, CertFreeCTLContext, CertSetCertificateContextProperty, CryptEncodeObjectEx,
+    CERT_DISALLOWED_FILETIME_PROP_ID, CERT_ENHKEY_USAGE_PROP_ID, CRYPT_INTEGER_BLOB, CTL_USAGE, PKCS_7_ASN_ENCODING,
+    X509_ASN_ENCODING, X509_ENHANCED_KEY_USAGE,
 };
 
 const SERVER_AUTH: &str = "1.3.6.1.5.5.7.3.1";
@@ -270,6 +271,15 @@ impl MemoryStores {
         (self, contexts)
     }
 
+    fn with_der(mut self, store: SourceStore, location: Location, certificates: &[&[u8]]) -> Self {
+        let memory = CertStore::memory().unwrap();
+        for der in certificates {
+            memory.add_encoded(der).unwrap();
+        }
+        self.stores.insert((store, location), Ok(memory));
+        self
+    }
+
     fn failing(mut self, store: SourceStore, location: Location, outcome: Outcome) -> Self {
         // A representative Win32 error per outcome; the adapter reports it unchanged.
         let status = match outcome {
@@ -503,4 +513,51 @@ fn store_outcomes_stay_distinct_and_unreadable_negatives_fail_closed() {
 fn a_bundled_root_that_is_not_a_certificate_is_refused() {
     let mut stores = MemoryStores::default();
     assert_eq!(collect(&mut stores, &[&[0x30, 0x00]]).err(), Some(CollectError::BundledRoot));
+}
+
+/// Two long-standing certificates from Microsoft's public disallowedcert.sst; source URL and SHA-256 in
+/// tests/fixtures/disallowedcert-sst/README.md. They are only hashed, never trusted.
+const ENFORCED_LICENSING_PCA: &[u8] = include_bytes!("fixtures/disallowedcert-sst/microsoft-enforced-licensing-intermediate-pca.der");
+const DARKMATTER_ASSURED_CA: &[u8] = include_bytes!("fixtures/disallowedcert-sst/darkmatter-assured-ca.der");
+
+/// The CTL's sequence number as big-endian hex, so a list change can be told apart from a matcher bug.
+fn ctl_sequence_number(ctl: &[u8]) -> String {
+    unsafe {
+        let context = CertCreateCTLContext(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, ctl.as_ptr(), ctl.len() as u32);
+        if context.is_null() {
+            return "undecodable".into();
+        }
+        let number = &(*(*context).pCtlInfo).SequenceNumber;
+        let text = if number.cbData == 0 {
+            "none".into()
+        } else {
+            std::slice::from_raw_parts(number.pbData, number.cbData as usize).iter().rev().map(|byte| format!("{byte:02x}")).collect()
+        };
+        CertFreeCTLContext(context);
+        text
+    }
+}
+
+// Design 4.2 item 2 proof obligation (9.2): the runner's real Disallowed CTL, read from the registry, names one public
+// certificate of each disallowedHash form (16 bytes: MD5 of the public key octets; 48 bytes: SHA-384 of the
+// TBSCertificate), and a synthetic control certificate matches nothing.
+#[test]
+fn the_runner_disallowed_ctl_names_public_disallowed_certificates_of_both_forms() {
+    let CtlRead::Bytes(real) = System.disallowed_ctl() else { panic!("the runner has no readable DisallowedCertEncodedCtl registry value") };
+    let sequence = ctl_sequence_number(&real);
+    println!("runner Disallowed CTL: {} bytes, sequence number {sequence}", real.len());
+    let pki = Pki::new();
+    let control = pki.root("ctl-control", "root");
+    let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(real)), ..MemoryStores::default() }
+        .with_der(SourceStore::Ca, Location::LocalMachine, &[DARKMATTER_ASSURED_CA])
+        .with_der(SourceStore::Root, Location::CurrentUser, &[&control.der]);
+
+    let output = collect(&mut stores, &[ENFORCED_LICENSING_PCA]).unwrap();
+    let fixtures = vec!["2a83e9020591a55fc6ddad3fb102794c52b24e70".to_owned(), "9feb091e053d1c453c789e8e9c446d31cb177ed9".to_owned()];
+    assert_eq!(
+        (output.ctl, output.complete, output.ctl_sha1),
+        (CtlOutcome::Read, true, fixtures),
+        "runner Disallowed CTL sequence number {sequence}; control SHA-1 {}",
+        pki.identity(&control).sha1
+    );
 }
