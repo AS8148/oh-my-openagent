@@ -68,3 +68,31 @@ test("OTLP spans allow only the pinned turn attributes", () => {
     ],
   })
 })
+
+// Collector pin 13c6e61b (omo-senpi.json): omo.model_id on omo.turn_completed is a REQUIRED enum of the
+// pinned model vocabulary, which lists custom. The client vocabulary can run ahead of the pin, and the
+// collector rejects the whole record for an unlisted value (invalid_enum), so such a value must leave as custom.
+import { ALL_KNOWN_MODEL_IDS } from "./model-vocabulary"
+const PIN_MODEL_IDS = new Set(["claude-fable-5", "claude-fable-5-1", "claude-haiku-4-5", "claude-haiku-5-5", "claude-opus-4-6", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "custom", "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "gemini-3.1-pro", "gemini-3.6-flash", "gemini-4-argon", "glm-5.2", "glm-5.3", "glm-5.3-flash", "gpt-5.6-luna-fast", "gpt-5.6-sol", "gpt-5.6-sol-fast", "gpt-5.6-terra", "gpt-6-astra", "gpt-6-luna", "gpt-6-luna-fast", "gpt-6-sol", "gpt-6-sol-fast", "gpt-6.1-sol", "gpt-6.1-sol-fast", "grok-4.20-0309-non-reasoning", "grok-4.6", "grok-4.7", "k3", "kimi-for-coding-highspeed", "kimi-k3", "mimo-v2.5-pro", "mimo-v2.6-flash", "mimo-v2.6-pro", "minimax-m2.7", "minimax-m3", "qwen3.6-flash", "qwen3.7-plus", "qwen3.8-max-preview"])
+
+test("#given a client model id the collector pin does not list #when turn_completed is projected #then every model key carries a pinned value", () => {
+  const models = [...ALL_KNOWN_MODEL_IDS, "claude-fable-5-5", "custom"]
+  for (const model of models) {
+    const projected = projectOtlpEvent("turn_completed", {
+      provider: "anthropic", model_id: model, request_model_id: model, response_model_id: model,
+      input_tokens: 100, output_tokens: 20, cost_1e4: 1, session_role: "root",
+    })
+    for (const key of ["omo.model_id", "gen_ai.request.model", "gen_ai.response.model"]) {
+      const value = projected[key]
+      expect(typeof value === "string" && PIN_MODEL_IDS.has(value), `${key}=${String(value)} for ${model}`).toBe(true)
+    }
+  }
+  expect(projectOtlpEvent("turn_completed", { model_id: "claude-fable-5-5" })["omo.model_id"]).toBe("custom")
+  expect(projectOtlpEvent("turn_completed", { model_id: "claude-opus-5-5" })["omo.model_id"]).toBe("claude-opus-5-5")
+})
+
+test("#given an unpinned model id on another event #when it is projected #then it leaves as custom", () => {
+  expect(projectOtlpEvent("session_started", { default_model: "claude-fable-5-5" })["omo.default_model"]).toBe("custom")
+  expect(projectOtlpEvent("category_config", { cat_quick: "claude-fable-5-5" })["omo.cat_quick"]).toBe("custom")
+  expect(projectOtlpEvent("kibitzer_summary", { model_top: "claude-fable-5-5" })["omo.model_top"]).toBe("custom")
+})
