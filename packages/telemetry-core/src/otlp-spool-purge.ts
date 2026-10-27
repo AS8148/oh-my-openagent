@@ -2,14 +2,15 @@ import { lstatSync, readdirSync, realpathSync, rmdirSync, type Stats, unlinkSync
 import { isAbsolute, join, relative } from "node:path"
 
 import { isPidAlive } from "./otlp-pid-alive"
-import { isSpoolFileName, parseSpoolName, QUARANTINE_DIR } from "./otlp-spool-names"
+import { isSpoolFileName, ownersDir, parseSpoolName, QUARANTINE_DIR } from "./otlp-spool-names"
 import type { TelemetryDiagnosticInput, TelemetrySpoolEntryKind } from "./types"
 import type { CreateOtlpTelemetryTransportInput } from "./otlp-transport-types"
 
 /**
  * Startup cleanup for a lazy adapter whose caller decided the persisted setting is off. The spool is shared by
- * every process of the product, so it is left alone while any writer is alive (an active WAL file of a running
- * pid, or an unexpired send claim): that consented session sweeps its own spool when its consent ends.
+ * every process of the product, so it is left alone while any writer is alive (a writer's owner marker or active
+ * WAL file with a running pid, or an unexpired send claim): an idle writer whose batches are all sealed still holds
+ * its marker, and that consented session sweeps its own spool when its consent ends.
  */
 export function purgeIdleOtlpSpool(
   input: Pick<CreateOtlpTelemetryTransportInput, "diagnostics" | "source" | "spoolDir" | "spoolRoot" | "isPidAlive" | "nowMs">,
@@ -22,11 +23,23 @@ export function purgeIdleOtlpSpool(
   } catch {
     return
   }
-  const live = names.some((name) => {
+  const owners = ownersDir(input.spoolDir)
+  const live = [...names, ...listNames(owners)].some((name) => {
     const entry = parseSpoolName(name)
-    return (entry.kind === "active" && alive(entry.pid)) || (entry.kind === "sending" && entry.leaseExpiresMs > now)
+    return ((entry.kind === "active" || entry.kind === "owner") && alive(entry.pid))
+      || (entry.kind === "sending" && entry.leaseExpiresMs > now)
   })
-  if (!live) purgeOnOptOut(input)
+  if (live) return
+  purgeOnOptOut(input)
+  purgeOnOptOut({ ...input, spoolDir: owners })
+}
+
+function listNames(dir: string): string[] {
+  try {
+    return readdirSync(dir)
+  } catch {
+    return []
+  }
 }
 
 export function purgeOnOptOut(input: Pick<CreateOtlpTelemetryTransportInput, "diagnostics" | "source" | "spoolDir" | "spoolRoot">): void {

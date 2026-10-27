@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { inspectOtlpRequest } from "@oh-my-opencode/telemetry-core/otlp"
@@ -33,12 +33,21 @@ async function startOptedOut(root: string, env: Record<string, string>, persiste
   return pi
 }
 
-for (const [label, optOut, persisted, writerAlive, kept] of [
-  ["persisted opt-out while a consented writer is alive", {}, false, true, true],
-  ["DO_NOT_TRACK while a consented writer is alive", { DO_NOT_TRACK: "1" }, true, true, true],
-  ["SDK disabled while a consented writer is alive", { OTEL_SDK_DISABLED: "true" }, true, true, true],
-  ["DO_NOT_TRACK with no live writer", { DO_NOT_TRACK: "1" }, true, false, true],
-  ["persisted opt-out with no live writer", {}, false, false, false],
+// Stages a seal exactly as the writer does it: the WAL file moves to a batch name and no active file remains.
+function sealActiveFiles(spoolDir: string): void {
+  for (const name of readdirSync(spoolDir).filter(entry => entry.startsWith("active-logs-"))) {
+    renameSync(join(spoolDir, name), join(spoolDir, "batch-logs-0190a5b0-0000-7000-8000-000000000000.otlp"))
+  }
+}
+
+for (const [label, optOut, persisted, writerAlive, kept, sealed] of [
+  ["persisted opt-out while a consented writer is alive", {}, false, true, true, false],
+  ["DO_NOT_TRACK while a consented writer is alive", { DO_NOT_TRACK: "1" }, true, true, true, false],
+  ["SDK disabled while a consented writer is alive", { OTEL_SDK_DISABLED: "true" }, true, true, true, false],
+  ["DO_NOT_TRACK with no live writer", { DO_NOT_TRACK: "1" }, true, false, true, false],
+  ["persisted opt-out with no live writer", {}, false, false, false, false],
+  ["persisted opt-out while a live writer has only sealed batches", {}, false, true, true, true],
+  ["persisted opt-out after a dead writer sealed its batches", {}, false, false, false, true],
 ] as const) {
   test(`OTLP startup spool purge with ${label} ${kept ? "keeps" : "removes"} the spool`, async () => {
     const root = mkdtempSync(join(tmpdir(), "omo-otlp-startup-purge-"))
@@ -49,7 +58,9 @@ for (const [label, optOut, persisted, writerAlive, kept] of [
       expect(transport).not.toBeNull()
       transport?.capture(message)
       const spoolDir = join(root, "omo-senpi", "otlp")
+      if (sealed) sealActiveFiles(spoolDir)
       const before = readdirSync(spoolDir).sort()
+      if (sealed) expect(before.some(name => name.startsWith("active-"))).toBe(false)
       expect(before.length).toBeGreaterThan(0)
       const pi = await startOptedOut(root, { ...env, ...optOut }, persisted, writerAlive ? undefined : () => false)
       // The purge runs inside the awaited startup purge; a late sweep would also land before the sidecar import settles.
@@ -63,6 +74,29 @@ for (const [label, optOut, persisted, writerAlive, kept] of [
     }
   })
 }
+
+test("OTLP startup spool purge goes through the injected recovery loader", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omo-otlp-purge-seam-"))
+  try {
+    mkdirSync(join(root, "omo-senpi", "otlp"), { recursive: true })
+    const real = await import("#omo-telemetry-recovery-runtime")
+    const calls: unknown[] = []
+    const pi = new FakeExtensionAPI()
+    let purged: Promise<void> = Promise.resolve()
+    createOmoNativeTelemetryComponent({
+      env: { OMO_CODING_AGENT_DIR: root, OMO_TELEMETRY_ALLOW_AUTOMATION: "1" },
+      stateDir: join(root, "omo-senpi", "omo-native"),
+      isConfigEnabled: () => false,
+      loadRecovery: async () => ({ ...real, purgeSenpiOtlpSpoolOnOptOut: input => { calls.push(input) } }),
+      onOptOutPurge: purge => { purged = purge },
+    }).register(pi, { config: pi, logger: createSilentLogger() })
+    await purged
+    expect(calls).toHaveLength(1)
+    await pi.dispatch("session_shutdown", {})
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test("OTLP uses the runtime ingest key and base endpoint and emits pinned protobuf records", async () => {
   const root = mkdtempSync(join(tmpdir(), "omo-dual-send-"))

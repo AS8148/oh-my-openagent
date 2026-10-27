@@ -159,8 +159,8 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
         // The shared OTLP spool (beside stateDir) follows the same rule and is skipped while any writer is alive.
         // No spool on disk means nothing to judge: the opted-out start loads no sidecar.
         if (!persistedOptOut || !existsSync(join(stateDir, "..", "otlp"))) return queue
-        const spool = import("#omo-telemetry-recovery-runtime")
-          .then(sidecar => sidecar.purgeSenpiOtlpSpoolOnOptOut({ env, isPidAlive: options.isPidAlive, diagnostics: options.diagnostics }))
+        const spool = load()
+          .then(sidecar => sidecar.purgeSenpiOtlpSpoolOnOptOut?.({ env, isPidAlive: options.isPidAlive, diagnostics: options.diagnostics }))
           .catch((error: unknown) => options.diagnostics?.({ event: "telemetry_spool_sweep_failed", source: "otlp", error }))
         return Promise.all([queue, spool]).then(() => undefined)
       }
