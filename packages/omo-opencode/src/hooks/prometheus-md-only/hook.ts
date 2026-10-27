@@ -11,8 +11,11 @@ const TASK_TOOLS = ["task", "call_omo_agent"]
 
 export interface PrometheusExecutionArguments {
   readonly original: Record<string, unknown>
-  approved?: Record<string, string>
+  approved?: Record<string, unknown>
 }
+
+// Every argument that selects or changes what a write, edit or patch touches; absent ones are recorded too.
+const TARGET_FIELDS = ["filePath", "file_path", "path", "file", "rename", "delete", "patchText", "input", "patch"]
 
 // Mirror OpenCode's LF splitting and prefix/slice/trim semantics, not JS regex line terminators:
 // https://github.com/anomalyco/opencode/blob/32f278b48f1a495611165d8a9f1ace0b512933e2/packages/opencode/src/patch/index.ts#L66-L96
@@ -197,7 +200,7 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       if (Object.entries(replacements).some(([field, value]) => retainedArgs[field] !== value)) {
         throw deny("(tool arguments did not reach execution)")
       }
-      if (execution) execution.approved = replacements
+      if (execution) execution.approved = Object.fromEntries(TARGET_FIELDS.map(field => [field, retainedArgs[field]]))
       if (isPatchTool) return
       const filePath = targets?.[0]?.path ?? ""
 

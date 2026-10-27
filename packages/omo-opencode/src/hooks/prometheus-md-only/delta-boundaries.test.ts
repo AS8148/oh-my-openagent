@@ -1,12 +1,11 @@
 /// <reference types="bun-types" />
 
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
-import * as logger from "../../shared/logger"
 import { createPrometheusMdOnlyHook } from "./hook"
 import { resolveAllowedFile } from "./path-policy"
 import { parsePatch } from "./fixtures/opencode-patch-parser"
@@ -137,11 +136,11 @@ describe("planner delta serialization and physical boundaries", () => {
   }
 
   describe("every denial is logged with its specific reason", () => {
-    const denials: { name: string; tool: string; args: () => Record<string, unknown>; reason: string; setup?: () => void }[] = [
+    const denials: { name: string; tool: string; args: Record<string, unknown>; frozen?: boolean; reason: string; setup?: () => void }[] = [
       {
         name: "content write through a link leaving .omo",
         tool: "write",
-        args: () => ({ filePath: ".omo/out.md" }),
+        args: { filePath: ".omo/out.md" },
         reason: ".omo/out.md",
         setup: () => {
           mkdirSync(join(root, "src"))
@@ -151,7 +150,7 @@ describe("planner delta serialization and physical boundaries", () => {
       {
         name: "delete of a link leaving .omo",
         tool: "edit",
-        args: () => ({ filePath: ".omo/out.md", delete: true, edits: [] }),
+        args: { filePath: ".omo/out.md", delete: true, edits: [] },
         reason: ".omo/out.md",
         setup: () => {
           mkdirSync(join(root, "src"))
@@ -162,19 +161,20 @@ describe("planner delta serialization and physical boundaries", () => {
       {
         name: "patch whose executable targets differ from the authorized ones",
         tool: "apply_patch",
-        args: () => ({ patchText: "*** Begin Patch\n*** Add File:.omo/new.md\n+ORIGINAL\n*** End Patch\n*** Delete File:.omo/ignored.md" }),
+        args: { patchText: "*** Begin Patch\n*** Add File:.omo/new.md\n+ORIGINAL\n*** End Patch\n*** Delete File:.omo/ignored.md" },
         reason: "(patch target round trip)",
       },
       {
         name: "rewrite that cannot reach frozen host arguments",
         tool: "write",
-        args: () => Object.freeze({ filePath: ".omo\\new.md" }),
+        args: { filePath: ".omo\\new.md" },
+        frozen: true,
         reason: "(tool arguments did not reach execution)",
       },
       {
         name: "unrecognized file argument",
         tool: "write",
-        args: () => ({ content: "x" }),
+        args: { content: "x" },
         reason: "(unrecognized file argument)",
       },
     ]
@@ -182,15 +182,19 @@ describe("planner delta serialization and physical boundaries", () => {
       test(denial.name, async () => {
         mkdirSync(join(root, ".omo"))
         denial.setup?.()
-        const logged: unknown[][] = []
-        const spy = spyOn(logger, "log").mockImplementation((...entry: unknown[]) => { logged.push(entry) })
-        try {
-          await expect(invoke(denial.tool, denial.args())).rejects.toThrow(`Attempted to modify: ${denial.reason}.`)
-        } finally {
-          spy.mockRestore()
-        }
-        expect(logged.filter(([message]) => String(message).includes("Blocked")).map(([, data]) =>
-          (data as { filePath?: string }).filePath)).toEqual([denial.reason])
+        const logDir = join(fixture, "log")
+        mkdirSync(logDir)
+        const child = Bun.spawn([
+          process.execPath, "run", join(import.meta.dir, "fixtures/denial-log.ts"),
+          denial.tool, JSON.stringify(denial.args), ...(denial.frozen ? ["frozen"] : []),
+        ], { cwd: root, stdout: "pipe", stderr: "pipe", env: { ...process.env, TMPDIR: logDir } })
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+        ])
+        expect(code, stderr).toBe(0)
+        const result = JSON.parse(stdout) as { error?: string; blocked: string[] }
+        expect(result.error).toContain(`Attempted to modify: ${denial.reason}.`)
+        expect(result.blocked).toEqual([denial.reason])
       })
     }
   })

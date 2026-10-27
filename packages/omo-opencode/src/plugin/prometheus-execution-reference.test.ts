@@ -47,7 +47,7 @@ for (const frozen of [false, true]) {
     })
     const run = compose({ tool: "write", sessionID, callID: "composed" }, output)
     if (frozen) {
-      await expect(run).rejects.toThrow()
+      await expect(run).rejects.toThrow("detached host execution arguments")
       expect(original.filePath).toBe(".omo\\escape.md")
     } else {
       await run
@@ -70,5 +70,27 @@ test("a later hook cannot replace an approved destination", async () => {
   })
   await expect(handler({ tool: "write", sessionID, callID: "late" }, {
     args: { filePath: ".omo/plan.md" },
-  })).rejects.toThrow()
+  })).rejects.toThrow("no longer match the host execution reference")
 })
+
+for (const [name, addition] of [
+  ["adds a rename", { rename: "../outside.md" }],
+  ["sets delete", { delete: true }],
+  ["adds a second path field", { path: "../outside.md" }],
+] as const) {
+  test(`a later hook that ${name} after approval is rejected`, async () => {
+    const ctx = { directory: root, client: {} } as never
+    const handler = createToolExecuteBeforeHandler({
+      ctx,
+      hooks: {
+        prometheusMdOnly: createPrometheusMdOnlyHook(ctx),
+        atlasHook: { "tool.execute.before": async (_input: unknown, output: { args: Record<string, unknown> }) => {
+          Object.assign(output.args, addition)
+        } },
+      } as never,
+    })
+    await expect(handler({ tool: "edit", sessionID, callID: "late-target" }, {
+      args: { filePath: ".omo/plan.md", edits: [] },
+    })).rejects.toThrow("no longer match the host execution reference")
+  })
+}
