@@ -9,19 +9,27 @@ const INKS = ["--ink-0", "--ink-1", "--ink-2", "--ink-3"] as const
 // [group-|peer-][in-|has-|data-]focus[-visible|-within][/name], covering Tailwind v4 compound variants.
 const FOCUS_VARIANT =
   /^(?:(?:group|peer)-)?(?:(?:in|has|data)-)?focus(?:-visible|-within)?(?:\/[\w-]+)?$/
+const FOCUS_DATA_VARIANT =
+  /^(?:(?:group|peer)-)?data-\[focus(?:-visible|-within)?(?:=[^\]]*)?\](?:\/[\w-]+)?$/
 // `_` is Tailwind's space inside arbitrary selectors, so it ends the pseudo-class like `]` or `)`.
 const FOCUS_IN_ARBITRARY_SELECTOR = /:focus(?:-visible|-within)?(?![a-zA-Z0-9-])/
-const OUTLINE_UTILITY = /^-?outline(?:-|$)|^\[outline(?:-[a-z]+)?:/
+const OUTLINE_UTILITY = /^-?outline(?:-|$)|^-?\[outline(?:-[a-z]+)?:/
 
-/** Splits on `separator` only outside `[...]`, so arbitrary selectors and values stay whole. */
-function splitOutsideBrackets(text: string, separator: RegExp): readonly string[] {
+const CLOSER: Record<string, string> = { "[": "]", "(": ")" }
+
+/**
+ * Splits on `separator` only outside the given brackets. Variant chains also guard `(...)` (Tailwind v4's
+ * `outline-(length:--w)` shorthand); whole lines guard only `[...]` so a call like `cn(...)` still splits.
+ */
+function splitOutsideBrackets(text: string, separator: RegExp, openers: string): readonly string[] {
+  const closers = Array.from(openers, (opener) => CLOSER[opener])
   const parts: string[] = []
   let depth = 0
   let start = 0
   for (let index = 0; index < text.length; index++) {
     const char = text[index] ?? ""
-    if (char === "[") depth++
-    else if (char === "]" && depth > 0) depth--
+    if (openers.includes(char)) depth++
+    else if (closers.includes(char) && depth > 0) depth--
     else if (depth === 0 && separator.test(char)) {
       parts.push(text.slice(start, index))
       start = index + 1
@@ -34,20 +42,21 @@ function splitOutsideBrackets(text: string, separator: RegExp): readonly string[
 function isFocusVariant(variant: string): boolean {
   return (
     FOCUS_VARIANT.test(variant) ||
+    FOCUS_DATA_VARIANT.test(variant) ||
     (variant.includes("[") && FOCUS_IN_ARBITRARY_SELECTOR.test(variant))
   )
 }
 
 /** A class token that puts an outline utility behind any focus-state variant, in any position or form. */
 function isHandRolledFocusOutline(token: string): boolean {
-  const parts = splitOutsideBrackets(token, /:/)
+  const parts = splitOutsideBrackets(token, /:/, "[(")
   if (parts.length < 2) return false
   const utility = (parts.at(-1) ?? "").replace(/^!|!$/g, "")
   return OUTLINE_UTILITY.test(utility) && parts.slice(0, -1).some(isFocusVariant)
 }
 
 function hasHandRolledFocusOutline(line: string): boolean {
-  return splitOutsideBrackets(line, /[\s"'`,{}]/).some(isHandRolledFocusOutline)
+  return splitOutsideBrackets(line, /[\s"'`,{}]/, "[").some(isHandRolledFocusOutline)
 }
 
 function sourceFiles(directory: string): readonly string[] {
@@ -141,6 +150,13 @@ describe("focus ring recipe, the DESIGN.md §8 one-recipe architecture contract"
     ["[&:focus-visible]:[outline:none]"],
     ["[&[data-x='y']:focus]:outline-2"],
     [`className="px-2 [&[data-state='open']:focus-visible]:outline-2"`],
+    ["focus:outline-(length:--w)"],
+    ["focus-visible:outline-(color:--c)"],
+    ["focus:outline-(--c)"],
+    ["data-[focus]:outline-2"],
+    ["data-[focus=true]:outline-2"],
+    ["group-data-[focus-visible]:outline-2"],
+    ["focus:-[outline-offset:2px]"],
   ])(
     "#given the hand-rolled focus outline %s #when scanned #then the guard catches it",
     (source) => {
@@ -165,6 +181,8 @@ describe("focus ring recipe, the DESIGN.md §8 one-recipe architecture contract"
     ["has-checked:outline-2"],
     ["data-active:outline-2"],
     ["[&:focusable]:outline-2"],
+    ["data-[state=open]:outline-2"],
+    ["data-[focused-item]:outline-2"],
   ])("#given the non-violation %s #when scanned #then the guard leaves it alone", (source) => {
     expect(hasHandRolledFocusOutline(source)).toBe(false)
   })
