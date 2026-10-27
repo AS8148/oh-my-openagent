@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -23,10 +23,12 @@ describe("model capabilities cache with an unchanged catalog", () => {
   })
 
   afterEach(() => {
+    setSystemTime()
     rmSync(cacheDir, { recursive: true, force: true })
   })
 
   test("a second fetch of the same catalog does not rewrite the cache file", async () => {
+    setSystemTime(new Date("2026-01-01T00:00:00.000Z"))
     const file = join(cacheDir, "model-capabilities.json")
     const first = await createModelCapabilitiesCacheStore(() => cacheDir).refreshModelCapabilitiesCache({
       fetchImpl: respond(catalog(1000)),
@@ -34,7 +36,7 @@ describe("model capabilities cache with an unchanged catalog", () => {
     const written = readFileSync(file, "utf8")
     expect(JSON.parse(written).generatedAt).toBe(first.generatedAt)
 
-    await new Promise((resolve) => setTimeout(resolve, 15))
+    setSystemTime(new Date("2026-01-01T00:00:01.000Z"))
     // A new store stands for another plugin instance or the next process.
     const store = createModelCapabilitiesCacheStore(() => cacheDir)
     const second = await store.refreshModelCapabilitiesCache({ fetchImpl: respond(catalog(1000)) })
