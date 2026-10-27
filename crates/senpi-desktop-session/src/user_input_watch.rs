@@ -9,8 +9,9 @@ use crate::worker::Worker;
 
 impl Worker {
     /// Starts the watch once per backend and publishes the capabilities that
-    /// report it. Foreground arming (a takeover or a live human grant) calls
-    /// this too, before anything is sent.
+    /// report it. Its only caller today is the request dispatch. Foreground
+    /// arming (a takeover, or a live human grant) does not call it yet: the
+    /// #11465 plan's todo 27 adds that caller, before anything is sent.
     pub(crate) fn watch_user_input(&mut self) {
         if self.watching_user_input {
             return;

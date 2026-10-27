@@ -98,6 +98,45 @@ fn a_full_record_keeps_the_newest_presses_and_counts_the_ones_it_let_go() {
 }
 
 #[test]
+fn without_accessibility_trust_no_tap_is_created_the_watch_is_off_and_it_is_never_retried() {
+    // Given
+    let mut watch = UserInputWatch::default();
+    // When
+    watch.start_with(
+        || false,
+        |_| panic!("a tap was created without Accessibility trust"),
+    );
+    // Then
+    assert_eq!(watch.state(), InterventionWatch::Off);
+    assert_eq!(watch.take(), UserPresses::default());
+    // When: later requests start it again.
+    for _ in 0..3 {
+        watch.start_with(
+            || panic!("trust was asked again"),
+            |_| panic!("a tap was created on a later request"),
+        );
+    }
+    // Then
+    assert_eq!(watch.state(), InterventionWatch::Off);
+}
+
+#[test]
+fn a_trusted_watch_whose_tap_macos_refuses_is_off_and_never_retried() {
+    let mut watch = UserInputWatch::default();
+    let mut taps = 0;
+    watch.start_with(
+        || true,
+        |_| {
+            taps += 1;
+            None
+        },
+    );
+    watch.start_with(|| true, |_| panic!("the refused tap was retried"));
+    assert_eq!(taps, 1);
+    assert_eq!(watch.state(), InterventionWatch::Off);
+}
+
+#[test]
 fn a_watch_that_never_started_reports_not_started_and_has_nothing_to_read() {
     let watch = UserInputWatch::default();
     assert_eq!(watch.state(), InterventionWatch::NotStarted);

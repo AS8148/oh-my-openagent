@@ -155,8 +155,9 @@ impl UserInputLog {
 }
 
 /// The backend's watch: started on demand, stopped when dropped (session
-/// close or a new backend). A refused tap stays off: nothing is watched and
-/// background input is not held back for it (D6).
+/// close or a new backend). Without Accessibility trust, or when macOS
+/// refuses the tap, it stays off for this backend: nothing is watched,
+/// background input is not held back for it (D6), and it is not retried.
 #[derive(Default)]
 pub(crate) struct UserInputWatch(Watch);
 
@@ -174,11 +175,26 @@ enum Watch {
 impl UserInputWatch {
     /// Starts the tap once; later calls keep whatever the first one got.
     pub(crate) fn start(&mut self) {
+        self.start_with(crate::ax::is_trusted, tap::Monitor::start);
+    }
+
+    /// A key-listening tap created without Accessibility trust can raise a
+    /// new macOS privacy prompt, so trust is checked first without prompting,
+    /// as the stop-chord tap does.
+    fn start_with(
+        &mut self,
+        trusted: impl FnOnce() -> bool,
+        tap: impl FnOnce(Arc<UserInputLog>) -> Option<tap::Monitor>,
+    ) {
         if !matches!(self.0, Watch::NotStarted) {
             return;
         }
+        if !trusted() {
+            self.0 = Watch::Off;
+            return;
+        }
         let log = Arc::new(UserInputLog::default());
-        self.0 = match tap::Monitor::start(Arc::clone(&log)) {
+        self.0 = match tap(Arc::clone(&log)) {
             Some(monitor) => Watch::On {
                 log,
                 _monitor: monitor,

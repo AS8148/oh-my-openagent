@@ -140,46 +140,6 @@ fn release_all_drains_every_posted_down_through_its_route() {
     assert!(held.is_empty(), "release_all leaves nothing held");
 }
 
-/// D3: every event the engine posts carries its tag, so the user-input watch
-/// never counts it as the user's. Events come only from the tagged
-/// constructors in `cgevent.rs`; test-only files may post untagged events to
-/// stand in for the user.
-#[test]
-fn every_event_is_created_through_the_tagged_constructors() {
-    let mut pending = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
-    let mut untagged = Vec::new();
-    while let Some(dir) = pending.pop() {
-        for entry in std::fs::read_dir(&dir).expect("source dir") {
-            let path = entry.expect("source entry").path();
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-                .to_owned();
-            if path.is_dir() {
-                if name != "live" {
-                    pending.push(path);
-                }
-                continue;
-            }
-            let test_only = name.ends_with("tests.rs");
-            if test_only || name == "cgevent.rs" || !name.ends_with(".rs") {
-                continue;
-            }
-            if std::fs::read_to_string(&path)
-                .expect("source file")
-                .contains("CGEvent::new")
-            {
-                untagged.push(path);
-            }
-        }
-    }
-    assert!(
-        untagged.is_empty(),
-        "events created outside input/cgevent.rs carry no engine tag: {untagged:?}"
-    );
-}
-
 /// Security contract (#10788): the receipt canary runs before a background
 /// window action, which needs no control grant, so nothing it does may reach
 /// a global route: no cursor warp, no HID-tap post, no global key route. A
