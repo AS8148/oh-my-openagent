@@ -62,6 +62,9 @@ Some tells regenerate by default, so they are kept out of the first draft rather
 - **Lint before visual QA.** Run `bun $SKILL_DIR/scripts/perfection/check-draft-guard.ts <changed files or dirs>` on every stylesheet, component, and HTML file you wrote, including a report or figure you will print, screenshot, or render to an image. It reads CSS/SCSS/Less, HTML, JSX/TSX, Vue, Svelte, Astro, Tailwind classes (including `@apply` and `cva`/`cn` strings), inline styles, and styled-components, and flags the stripes above plus promotional filler copy, emoji used as icons, hype badges, and hard-coded vanity numbers in stat tiles. Exit 1 means a tell is in the draft: remove it, do not argue with the finding.
 - **No decorative badge without a state behind it.** A pill, chip, or tag appears only when it carries a value that can change: a status, a count, a category the user filters by. "New", "Pro", or "AI-powered" on a static heading is decoration.
 - **No stat tile without a decision behind it.** A number earns a tile when someone acts on it; four tiles above a table that already holds the numbers are filler.
+- **No invented proof.** Testimonials, quotes, customer logos, ratings, user counts, and prices come from the project or stay out. A section that needs proof the project does not have is cut, or ships as an empty slot labelled for the owner to fill; a "sample" testimonial is still a fabricated one.
+- **No prop decoration.** A device tilted for effect, a floating reassurance card, decorative coordinates, sparkles, and ornaments that say nothing about the product are the generated version of "premium". A product preview shows a real state of the product, with its text readable at the rendered size.
+- **No repeated formula.** A treatment that carries one heading (a serif line with an italic accent phrase, a gradient word, an eyebrow-headline-subtitle stack) becomes a template when every section repeats it; so does one image reused across sections. Use each once, where it means something.
 - **No subtitle under every heading.** A heading explains itself; a one-line description under each one is the generated rhythm. Keep a subtitle only where the heading alone would be misread.
 - **One fact, one place.** A conclusion banner and a callout that restates it, a summary card and a table row with the same figure, a label repeated as its placeholder: keep one.
 - **No promotional copy.** Interface copy states what a thing is or does. "Seamlessly", "effortlessly", "smart", "powerful", "at a glance", "supercharge", and their Korean counterparts ("한눈에", "손쉽게", "스마트한", "효율적으로", "간편하게") are marketing, not interface: rewrite as the plain fact or delete.
@@ -72,7 +75,7 @@ After the draft renders and the lint exits 0, walk every element on the screen a
 
 ## 4. Verify
 
-Done is the `/visual-qa` gate, not your own glance. It owns the visual checks; this skill keeps build rules. Hand it the brief (B7 checks the primary action and priorities), the `Layout:` line (A12), the required-content list (Pass A), and, for a changed surface, the `before` set so it runs Before/after mode and the pair shows what improved. Its review loop is bounded (its Step 4 sets the budget): defects earn another round, and taste findings are recorded and stop it. A concrete reference runs reference-fidelity mode. Pass design-system decisions, evidence, and unresolved debt into `/review-work` for significant work.
+Done is the `/visual-qa` gate, not your own glance. It owns the visual checks; this skill keeps build rules. Hand it the brief (B7 checks the primary action and priorities), the `Layout:` line (A12), the required-content list (Pass A), and, for a changed surface, the `before` set so it runs Before/after mode and the pair shows what improved. Its review loop is bounded (its Step 4 sets the budget): defects earn another round, and taste findings are recorded and stop it. A concrete reference runs reference-fidelity mode. Fix passes are scoped: after the first build, each fix names one change and the regions it owns (a token fix may own every region) and leaves everything else untouched, because a whole-page "make it better" pass breaks what was already right. Pass design-system decisions, evidence, and unresolved debt into `/review-work` for significant work.
 
 ## The reference library (`references/`)
 
@@ -101,12 +104,12 @@ Layer B: when the user names a brand or site ("Linear-style", "like Stripe's lan
 uv run $SKILL_DIR/scripts/perfection/lighthouse-audit.py https://localhost:3000
 ```
 
-`ui-ux-db/`: `README.md` documents the search CLI and the master-plus-overrides persistence pattern. Run it from the ruleset directory so it finds `data/`:
+`ui-ux-db/`: `README.md` documents the search CLI and the master-plus-overrides persistence pattern. The CLI finds `data/` next to itself, so run it from the user's project directory: `--persist` writes `design-system/` into the current directory, and the skill directory can sit inside a signed app bundle that must never change. Keep `-B` for the same reason:
 
 ```bash
-python3 $SKILL_DIR/references/ui-ux-db/scripts/search.py "<query>" --design-system -p "Project"   # design-system generation
-python3 $SKILL_DIR/references/ui-ux-db/scripts/search.py "<query>" --domain <domain>             # product style typography color landing chart ux react web prompt
-python3 $SKILL_DIR/references/ui-ux-db/scripts/search.py "<query>" --stack <stack>               # html-tailwind react nextjs vue svelte astro swiftui react-native flutter shadcn jetpack-compose
+python3 -B $SKILL_DIR/references/ui-ux-db/scripts/search.py "<query>" --design-system -p "Project"   # design-system generation
+python3 -B $SKILL_DIR/references/ui-ux-db/scripts/search.py "<query>" --domain <domain>             # product style typography color landing chart ux react web prompt
+python3 -B $SKILL_DIR/references/ui-ux-db/scripts/search.py "<query>" --stack <stack>               # html-tailwind react nextjs vue svelte astro swiftui react-native flutter shadcn jetpack-compose
 ```
 
 `designpowers/`: `README.md` routes the pinned `Owl-Listener/designpowers` corpus (personas, accessibility and cognitive constraints, critique, debt, handoff, synthetic user testing, motion, role prompts) into `DESIGN.md` first, then into the implementation contract. It replaces nothing: not this skill, `/visual-qa`, `/ulw-plan`, `/ulw-execute`, or `/review-work`.

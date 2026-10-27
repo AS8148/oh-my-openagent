@@ -81,6 +81,7 @@ const memoryCommandsEntryPath = join(packageRoot, "src", "components", "memory",
 const sessionHistoryEntryPath = join(packageRoot, "src", "components", "onboarding", "session-history", "runtime.ts")
 const recallStoreEntryPath = join(packageRoot, "src", "components", "memory", "recall-store-runtime.ts")
 const telemetryPosthogEntryPath = join(packageRoot, "src", "components", "telemetry", "posthog-runtime.ts")
+const telemetryOtlpEntryPath = join(packageRoot, "src", "components", "telemetry", "otlp-runtime.ts")
 // The sync engine sidecar carries the Loro runtime; its wasm is emitted beside it under this fixed name
 // (the engine's loader reads it relative to its own module), so omo.js never pulls Loro in.
 const memorySyncEntryPath = join(packageRoot, "src", "components", "memory", "sync-runtime.ts")
@@ -112,6 +113,7 @@ const memoryCommandsOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? plu
 const sessionHistoryOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-session-history.js")
 const recallStoreOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-recall-store.js")
 const telemetryPosthogOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-posthog.js")
+const telemetryOtlpOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-otlp.js")
 const memorySyncOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-memory-sync.js")
 const threadClientOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-thread-client.js")
 const telemetryRecoveryOutputPath = join(process.env.OMO_SENPI_PLUGIN_OUTPUT ?? pluginRoot, "extensions", "omo-telemetry-recovery.js")
@@ -137,6 +139,7 @@ const externalSpecifiers = [
   "#omo-session-history-runtime",
   "#omo-recall-store-runtime",
   "#omo-telemetry-posthog-runtime",
+  "#omo-telemetry-otlp-runtime",
   "#omo-memory-sync-runtime",
   "#omo-thread-client-runtime",
   "#omo-telemetry-recovery-runtime",
@@ -184,6 +187,7 @@ export const extensionBuildPaths = {
   sessionHistoryOutputPath,
   recallStoreOutputPath,
   telemetryPosthogOutputPath,
+  telemetryOtlpOutputPath,
   memorySyncOutputPath,
   threadClientOutputPath,
   telemetryRecoveryOutputPath,
@@ -217,6 +221,7 @@ export function resolveOutputs(options) {
     sessionHistoryOutput: sibling(options.sessionHistoryOutputPath, sessionHistoryOutputPath, "omo-session-history.js"),
     recallStoreOutput: sibling(options.recallStoreOutputPath, recallStoreOutputPath, "omo-recall-store.js"),
     telemetryPosthogOutput: sibling(options.telemetryPosthogOutputPath, telemetryPosthogOutputPath, "omo-telemetry-posthog.js"),
+    telemetryOtlpOutput: sibling(options.telemetryOtlpOutputPath, telemetryOtlpOutputPath, "omo-telemetry-otlp.js"),
     memorySyncOutput: sibling(options.memorySyncOutputPath, memorySyncOutputPath, "omo-memory-sync.js"),
     threadClientOutput: sibling(options.threadClientOutputPath, threadClientOutputPath, "omo-thread-client.js"),
     telemetryRecoveryOutput: sibling(options.telemetryRecoveryOutputPath, telemetryRecoveryOutputPath, "omo-telemetry-recovery.js"),
@@ -257,6 +262,7 @@ export async function buildExtension(options = {}) {
     sessionHistoryOutput,
     recallStoreOutput,
     telemetryPosthogOutput,
+    telemetryOtlpOutput,
     memorySyncOutput,
     threadClientOutput,
     telemetryRecoveryOutput,
@@ -266,7 +272,10 @@ export async function buildExtension(options = {}) {
     gatewayStoreWorkerOutput,
   } = resolveOutputs(options)
   const toolkitSdkInputs = await buildEntry(toolkitSdkEntryPath, toolkitSdkOutput, buildDefines, sdkExternalSpecifiers)
-  const mainInputs = await buildEntry(entryPath, output, buildDefines)
+  const mainInputs = await buildEntry(entryPath, output, {
+    ...buildDefines,
+    OMO_TELEMETRY_INGEST_KEY: process.env.OMO_TELEMETRY_INGEST_KEY ?? "",
+  })
   const taskInputs = await buildEntry(taskEntryPath, taskOutput, buildDefines)
   const memberInputs = await buildEntry(memberEntryPath, memberOutput, buildDefines)
   const supervisorInputs = await buildEntry(supervisorEntryPath, supervisorOutput, buildDefines)
@@ -282,6 +291,7 @@ export async function buildExtension(options = {}) {
   const sessionHistoryInputs = await buildEntry(sessionHistoryEntryPath, sessionHistoryOutput, buildDefines)
   const recallStoreInputs = await buildEntry(recallStoreEntryPath, recallStoreOutput, buildDefines)
   const telemetryPosthogInputs = await buildEntry(telemetryPosthogEntryPath, telemetryPosthogOutput, buildDefines)
+  const telemetryOtlpInputs = await buildEntry(telemetryOtlpEntryPath, telemetryOtlpOutput, buildDefines)
   const memorySyncInputs = await buildEntry(memorySyncEntryPath, memorySyncOutput, buildDefines, externalSpecifiers, { assets: true })
   const threadClientInputs = await buildEntry(threadClientEntryPath, threadClientOutput, buildDefines)
   const telemetryRecoveryInputs = await buildEntry(telemetryRecoveryEntryPath, telemetryRecoveryOutput, buildDefines)
@@ -316,6 +326,7 @@ export async function buildExtension(options = {}) {
     sessionHistoryInputs,
     recallStoreInputs,
     telemetryPosthogInputs,
+    telemetryOtlpInputs,
     memorySyncInputs,
     threadClientInputs,
     telemetryRecoveryInputs,

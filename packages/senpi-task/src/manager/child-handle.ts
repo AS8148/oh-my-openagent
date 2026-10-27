@@ -8,6 +8,8 @@ import type { ChildExtensionListener } from "../runners/child-extension-events"
 import { HOST_TURN_RESUMED_EVENT } from "./host-turn-resumed"
 import type { EffectiveModel } from "../runners/pinned-model-equivalence"
 import type { ReconciledTurnNotice } from "../runners/rpc-host/reconcile-turn"
+import type { NativeRunPause } from "../pause/native-child-pause"
+import type { HostLivenessStatus } from "../runners/rpc-host/handle-heartbeat"
 
 export type { RunnerOutcome } from "../runners/in-process/child-handle"
 
@@ -32,8 +34,12 @@ export type ManagedChildListener = (event: ManagedChildEvent) => void
 // handle surfaces are normalized here: a promise-returning dispose, an optional pid/sessionId, and a
 // single waitForOutcome() that yields the unified RunnerOutcome for either runner.
 export type ManagedChildHandle = {
+  liveness?(): HostLivenessStatus
+  onLiveness?(listener: (status: HostLivenessStatus) => void): () => void
   reconcileInputs?(): Promise<void>
   readonly task_id: string
+  // The child engine's run hold controls; absent when that engine has none (senpi#3811).
+  readonly runPause?: NativeRunPause
   // Which runner owns this child. `pid` cannot answer that: a daemon session has no pid either.
   // Absent only on handles built before the field shipped (they are in-process by construction).
   readonly kind?: "in-process" | "rpc" | "host-session"
@@ -95,6 +101,7 @@ export function adaptInProcessHandle(handle: InProcessChildHandle): ManagedChild
     kind: "in-process",
     sessionId: handle.sessionId,
     pid: undefined,
+    ...(handle.runPause === undefined ? {} : { runPause: handle.runPause }),
     effectiveModel: () => handle.effectiveModel(),
     steer: (text) => handle.steer(text),
     followUp: (text) => handle.followUp(text),
@@ -116,6 +123,7 @@ export function adaptRpcHandle(handle: RpcChildHandle): ManagedChildHandle {
     task_id: handle.task_id,
     kind: "kind" in handle && handle.kind === "host-session" ? "host-session" : "rpc",
     ...(handle.reconcileInputs === undefined ? {} : { reconcileInputs: handle.reconcileInputs }),
+    ...(handle.runPause === undefined ? {} : { runPause: handle.runPause }),
     ...(hostSession === undefined ? {} : { hostSession }),
     get sessionId() {
       return handle.sessionId
@@ -128,6 +136,8 @@ export function adaptRpcHandle(handle: RpcChildHandle): ManagedChildHandle {
     ...(isHostSessionHandle(handle)
       ? {
           onParked: (listener) => handle.onParked(listener),
+          liveness: () => handle.liveness(),
+          onLiveness: (listener) => handle.onLiveness(listener),
           onReplaced: (listener) => handle.onReplaced(listener),
           onDurableSessionId: (listener) => handle.onDurableSessionId(listener),
           transportRecovering: () => handle.transportRecovering(),
