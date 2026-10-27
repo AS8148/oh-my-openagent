@@ -39,20 +39,6 @@ extendedKeyUsage=clientAuth
 [ca_intermediate]
 basicConstraints=critical,CA:TRUE,pathlen:0
 keyUsage=critical,digitalSignature,keyCertSign,cRLSign
-[ca_intermediate_sign_only]
-basicConstraints=critical,CA:TRUE,pathlen:0
-keyUsage=critical,keyCertSign,cRLSign
-[server_intermediate_sign_only]
-basicConstraints=critical,CA:TRUE,pathlen:0
-keyUsage=critical,keyCertSign,cRLSign
-extendedKeyUsage=serverAuth
-[server_intermediate_any_eku]
-basicConstraints=critical,CA:TRUE,pathlen:0
-keyUsage=critical,digitalSignature,keyCertSign,cRLSign
-extendedKeyUsage=anyExtendedKeyUsage
-[server_intermediate_no_ku]
-basicConstraints=critical,CA:TRUE,pathlen:0
-extendedKeyUsage=serverAuth
 ";
 
 fn openssl(dir: &Path, args: &[&str]) -> Vec<u8> {
@@ -197,25 +183,8 @@ fn project(entries: &[(&str, &CFType)]) -> Result<Setting, Unreadable> {
     project_trust_settings_dictionary(dictionary(entries).as_opaque())
 }
 
-fn basic_x509_accepts(certificate: &SecCertificate, anchor: &SecCertificate) -> bool {
-    let policy = unsafe { SecPolicy::new_basic_x509() };
-    let mut trust: *mut SecTrust = ptr::null_mut();
-    let status = unsafe {
-        SecTrust::create_with_certificates(certificate, Some(&policy), NonNull::from(&mut trust))
-    };
-    assert_eq!(status, 0, "SecTrustCreateWithCertificates");
-    let trust = unsafe { CFRetained::from_raw(NonNull::new(trust).expect("a trust object")) };
-    let anchors = CFArray::from_objects(&[anchor]);
-    unsafe {
-        assert_eq!(trust.set_anchor_certificates(Some(anchors.as_opaque())), 0);
-        assert_eq!(trust.set_anchor_certificates_only(true), 0);
-        assert_eq!(trust.set_network_fetch_allowed(false), 0);
-        trust.evaluate_with_error(ptr::null_mut())
-    }
-}
-
-/// The production evaluation's configuration, returning the OS's own error text for a failure message.
-fn ssl_failure(certificate: &SecCertificate, anchor: &SecCertificate) -> String {
+/// The strict SSL server policy under the helper's anchor configuration; the OS error code when it rejects.
+fn strict_ssl_error(certificate: &SecCertificate, anchor: &SecCertificate) -> Option<isize> {
     let policy = unsafe { SecPolicy::new_ssl(true, None) };
     let mut trust: *mut SecTrust = ptr::null_mut();
     let status = unsafe {
@@ -231,38 +200,32 @@ fn ssl_failure(certificate: &SecCertificate, anchor: &SecCertificate) -> String 
         assert_eq!(trust.set_network_fetch_allowed(false), 0);
         trust.evaluate_with_error(&mut error)
     };
-    match NonNull::new(error).map(|error| unsafe { CFRetained::from_raw(error) }) {
-        _ if trusted => "trusted".to_owned(),
-        Some(error) => format!(
-            "code {}: {}",
-            error.code(),
-            error
-                .description()
-                .map(|text| text.to_string())
-                .unwrap_or_default()
-        ),
-        None => "untrusted without an error".to_owned(),
+    let error = NonNull::new(error).map(|error| unsafe { CFRetained::from_raw(error) });
+    if trusted {
+        None
+    } else {
+        Some(error.map_or(0, |error| error.code()))
     }
 }
 
+/// Design revision 12 (option C): the chain step is BasicX509 and leaves EKU to the policy module, so a
+/// client-auth-only CA certificate or leaf still reports its anchored chain; the policy excludes it.
 #[test]
-fn ssl_policy_rejects_client_auth_only_certificates_that_basic_x509_accepts() {
+fn basic_x509_chain_step_reports_the_chain_whatever_the_eku() {
     let fixtures = Fixtures::new();
     let root = fixtures.issue("root", None, "root", 3650);
+    let root_id = identity(&certificate_der(&root));
     for (name, section) in [
         ("client_intermediate", "client_intermediate"),
         ("client_leaf", "client_leaf"),
     ] {
         let certificate = fixtures.issue(name, Some("root"), section, 365);
-        // The fixture discriminates: the policy the helper must never use accepts it.
-        assert!(
-            basic_x509_accepts(&certificate, &root),
-            "{name}: BasicX509 control"
-        );
         let chain = evaluate_intermediate(&certificate, std::slice::from_ref(&root));
+        assert_eq!(chain.anchor, Some(root_id.clone()), "{name}");
         assert_eq!(
-            chain.anchor, None,
-            "{name}: the SSL server policy must reject it"
+            chain.path,
+            vec![identity(&certificate_der(&certificate)), root_id.clone()],
+            "{name}"
         );
         assert!(!chain.explicit_distrust, "{name}");
     }
@@ -288,55 +251,33 @@ fn server_auth_intermediate_chains_to_its_custom_anchor() {
     assert!(!chain.explicit_distrust);
 }
 
-/// Design 4.4 item 4: Apple's checks for system-anchored server leaves (Certificate Transparency, the
-/// leaf validity maximum) must not reject a CA certificate under custom anchors only. If this fails, the
-/// design needs an amendment; the helper must not switch policy.
+/// Regression record of the OS behaviour that measured design 4.4 item 4's assumption false (revision 12):
+/// under custom anchors only, the strict SSL server policy rejects a CA certificate valid for more than
+/// 825 days (-67901, "not standards compliant") and one without a serverAuth EKU (-67609, "not permitted
+/// for this usage"). The helper therefore uses the BasicX509 chain step; if Apple relaxes this, the test
+/// says so.
 #[test]
 fn custom_anchor_intermediate_is_ssl_eligible() {
     let fixtures = Fixtures::new();
     let root = fixtures.issue("root", None, "root", 3650);
-    let intermediate = fixtures.issue("ca_intermediate", Some("root"), "ca_intermediate", 1825);
-    let chain = evaluate_intermediate(&intermediate, std::slice::from_ref(&root));
-    assert_eq!(
-        chain.anchor,
-        Some(identity(&certificate_der(&root))),
-        "five-year intermediate without SCTs: {}",
-        ssl_failure(&intermediate, &root)
+    let five_years = fixtures.issue("ca_intermediate", Some("root"), "ca_intermediate", 1825);
+    let one_year = fixtures.issue(
+        "ca_intermediate_short",
+        Some("root"),
+        "ca_intermediate",
+        365,
     );
-}
-
-/// Measurement for the design 4.4 item 4 amendment: which property of a custom-anchored CA certificate
-/// makes the SSL server policy reject it. Prints only; run explicitly with `--ignored --nocapture`.
-#[test]
-#[ignore = "measurement for the design amendment; prints and asserts nothing"]
-fn custom_anchor_validity_and_eku_measurement() {
-    let fixtures = Fixtures::new();
-    let root = fixtures.issue("root", None, "root", 3650);
-    for (name, section, days) in [
-        ("no_eku_365", "ca_intermediate", 365),
-        ("no_eku_398", "ca_intermediate", 398),
-        ("no_eku_399", "ca_intermediate", 399),
-        ("no_eku_825", "ca_intermediate", 825),
-        ("no_eku_826", "ca_intermediate", 826),
-        ("no_eku_1825", "ca_intermediate", 1825),
-        ("server_eku_398", "server_intermediate", 398),
-        ("server_eku_826", "server_intermediate", 826),
-        ("server_eku_1825", "server_intermediate", 1825),
-        ("sign_only_ku_365", "ca_intermediate_sign_only", 365),
-        ("sign_only_ku_1825", "ca_intermediate_sign_only", 1825),
-        ("server_eku_365", "server_intermediate", 365),
-        ("server_eku_825", "server_intermediate", 825),
-        (
-            "server_eku_sign_only_ku_365",
-            "server_intermediate_sign_only",
-            365,
-        ),
-        ("server_eku_no_ku_365", "server_intermediate_no_ku", 365),
-        ("any_eku_365", "server_intermediate_any_eku", 365),
-    ] {
-        let intermediate = fixtures.issue(name, Some("root"), section, days);
-        println!("MEASURE {name}: {}", ssl_failure(&intermediate, &root));
-    }
+    let server = fixtures.issue(
+        "server_intermediate",
+        Some("root"),
+        "server_intermediate",
+        825,
+    );
+    assert_eq!(strict_ssl_error(&five_years, &root), Some(-67901));
+    assert_eq!(strict_ssl_error(&one_year, &root), Some(-67609));
+    assert_eq!(strict_ssl_error(&server, &root), None);
+    let chain = evaluate_intermediate(&five_years, std::slice::from_ref(&root));
+    assert_eq!(chain.anchor, Some(identity(&certificate_der(&root))));
 }
 
 #[test]

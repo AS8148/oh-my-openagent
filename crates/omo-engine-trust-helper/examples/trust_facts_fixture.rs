@@ -23,7 +23,7 @@ mod fixture {
     use objc2_core_foundation::{CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType};
     use objc2_security::{SecCertificate, SecPolicy};
     use omo_engine_trust_helper::document::{
-        emit, Certificate, CertificateSource, Document, DomainSettings, Outcome, Source,
+        emit, Certificate, CertificateSource, Document, DomainSettings, Outcome, Setting, Source,
         SourceName, EXIT_UNSUPPORTED, SCHEMA,
     };
     use omo_engine_trust_helper::macos::{
@@ -91,7 +91,8 @@ mod fixture {
         }])
     }
 
-    fn intermediate(root: &str, intermediate: &str) -> Document {
+    /// `root_deny`: the root carries a user-domain Deny (projected from a real dictionary) instead of a grant.
+    fn intermediate(root: &str, intermediate: &str, root_deny: bool) -> Document {
         let root = certificate(root);
         let intermediate = certificate(intermediate);
         let chain = evaluate_intermediate(&intermediate, std::slice::from_ref(&root));
@@ -100,7 +101,7 @@ mod fixture {
                 der: certificate_der(&root),
                 source: CertificateSource::TrustSettings,
                 settings: DomainSettings {
-                    user: Some(vec![]),
+                    user: Some(if root_deny { vec![deny()] } else { vec![] }),
                     admin: None,
                     system: None,
                 },
@@ -115,12 +116,21 @@ mod fixture {
         ])
     }
 
+    fn deny() -> Setting {
+        let result = CFNumber::new_i32(3);
+        let key = CFString::from_static_str("kSecTrustSettingsResult");
+        let dictionary = CFDictionary::<CFString, CFType>::from_slices(&[&key], &[&result]);
+        project_trust_settings_dictionary(dictionary.as_opaque())
+            .expect("in-memory dictionary projects")
+    }
+
     pub fn run() -> i32 {
         let args: Vec<String> = std::env::args().skip(1).collect();
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         match args.as_slice() {
             ["role", case, root] => emit(&role(case, root)),
-            ["intermediate", root, leaf] => emit(&intermediate(root, leaf)),
+            ["intermediate", root, leaf] => emit(&intermediate(root, leaf, false)),
+            ["intermediate", root, leaf, "root-deny"] => emit(&intermediate(root, leaf, true)),
             _ => EXIT_UNSUPPORTED,
         }
     }

@@ -84,20 +84,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      # TEMPORARY (omo#10762 design 4.4 item 4 amendment): measures why the named custom-anchor test
-      # fails, and runs the later helper step once, before the failing Rust tests stop the job.
-      - name: Engine trust measurements (macOS, temporary)
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        timeout-minutes: 15
-        env:
-          OMO_ENGINE_TRUST_HELPER_TARGET_DIR: ${{ github.workspace }}/target/debug
-        run: |
-          cargo test -p omo-engine-trust-helper --test macos_adapter --locked -- --ignored --nocapture custom_anchor_validity_and_eku_measurement || echo "measurement exited $?"
-          bun install --frozen-lockfile --ignore-scripts
-          cargo build -p omo-engine-trust-helper --bins --examples --locked
-          bun test packages/omo-native/test/macos-trust-helper.macos.test.ts || echo "bun macOS test exited $?"
-
       - name: Rust tests
         run: cargo test --workspace --locked
 

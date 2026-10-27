@@ -34,8 +34,9 @@ describe.skipIf(process.platform !== "darwin" || targetDirectory === undefined)(
     base = await mkdtemp(join(tmpdir(), "omo-macos-trust-helper-"))
     certificates = await issueCertificates(join(base, "certificates"), [
       { name: "root", subject: "/CN=omo helper root", days: 3650, extensions: "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign" },
-      // A five-year CA certificate without SCTs (design 4.4 item 4).
-      { name: "intermediate", subject: "/CN=omo helper intermediate", issuer: "root", days: 1825, extensions: "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,digitalSignature,keyCertSign,cRLSign" },
+      // Ten years, no EKU, no SCTs: the strict SSL policy rejects it (-67901), the BasicX509 chain step does not.
+      { name: "long-no-eku", subject: "/CN=omo helper long no-EKU intermediate", issuer: "root", days: 3650, extensions: "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign" },
+      { name: "client-only", subject: "/CN=omo helper client-auth intermediate", issuer: "root", days: 365, extensions: "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\nextendedKeyUsage=clientAuth" },
     ])
   })
   afterAll(async () => {
@@ -63,12 +64,28 @@ describe.skipIf(process.platform !== "darwin" || targetDirectory === undefined)(
     expect(deny.selection).toEqual({ status: "selected", S: [], I: [], D: { sha256: [root], sha1: [] }, diagnostics: ["scoped-deny-applied-globally"] })
   })
 
-  test("custom-anchor-intermediate-is-ssl-eligible", async () => {
-    const document = await fixture("intermediate", path("root"), path("intermediate"))
-    const root = { sha256: sha256("root"), sha1: sha1("root") }
-    const intermediate = { sha256: sha256("intermediate"), sha1: sha1("intermediate") }
-    expect(document.facts.certificates[1]).toMatchObject({ ...intermediate, selfSigned: false, ca: true, chain: { anchor: root, path: [intermediate, root], explicitDistrust: false } })
-    expect(selectEngineTrust(document.facts)).toEqual({ status: "selected", S: [root.sha256], I: [intermediate.sha256], D: { sha256: [], sha1: [] }, diagnostics: [] })
+  const id = (name: string) => ({ sha256: sha256(name), sha1: sha1(name) })
+  const none = { sha256: [], sha1: [] }
+
+  // Design revision 12 (option C), 9.3: BasicX509 chain step in the helper, EKU rule and Deny-on-path in the policy.
+  test("macos-intermediate-long-validity-no-eku-included", async () => {
+    const document = await fixture("intermediate", path("root"), path("long-no-eku"))
+    expect(document.facts.certificates[1]).toMatchObject({ ...id("long-no-eku"), selfSigned: false, ca: true, eku: { kind: "unrestricted" }, chain: { anchor: id("root"), path: [id("long-no-eku"), id("root")], explicitDistrust: false } })
+    expect(selectEngineTrust(document.facts)).toEqual({ status: "selected", S: [sha256("root")], I: [sha256("long-no-eku")], D: none, diagnostics: [] })
+  })
+
+  test("macos-intermediate-client-auth-only-excluded", async () => {
+    const document = await fixture("intermediate", path("root"), path("client-only"))
+    // The chain is anchored; only the EKU rule keeps it out of I.
+    expect(document.facts.certificates[1]).toMatchObject({ eku: { kind: "oids", oids: ["1.3.6.1.5.5.7.3.2"] }, chain: { anchor: id("root"), path: [id("client-only"), id("root")] } })
+    expect(selectEngineTrust(document.facts)).toEqual({ status: "selected", S: [sha256("root")], I: [], D: none, diagnostics: [] })
+  })
+
+  test("macos-intermediate-path-deny-excluded", async () => {
+    const document = await fixture("intermediate", path("root"), path("long-no-eku"), "root-deny")
+    expect(document.facts.certificates[0]?.settings.user).toMatchObject([{ policy: null, result: "Deny" }])
+    expect(document.facts.certificates[1]).toMatchObject({ chain: { anchor: id("root"), path: [id("long-no-eku"), id("root")] } })
+    expect(selectEngineTrust(document.facts)).toEqual({ status: "selected", S: [], I: [], D: { sha256: [sha256("root")], sha1: [] }, diagnostics: [] })
   })
 
   // Reads the runner's real stores; asserts the contract only, never which certificates they hold.
