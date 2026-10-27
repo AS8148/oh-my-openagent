@@ -148,7 +148,7 @@ All primitives live in `components/ui/*` (existing shadcn shells re-tokened) or 
 - Left: OmO mark (24px SVG from `.github/assets/omo-icon-light.svg` re-exported to `public/brand/omo-mark.svg`) + wordmark `OmO` (Geist 500 15px, -0.02em). The brand is `OmO` on every surface (nav, footer, titles, OG, JSON-LD); the old long-form name is never rendered.
 - Center/right: links `Features · Docs · Manifesto` in `--text-mid` mono 12px uppercase 0.12em; hover → `--text-hi` with a 1px underline growing `scaleX(0→1)` 320ms.
 - Right: GitHub chip (mono `★ 68.8k` live count, `--ink-1` fill, `--line` border) and primary button `Install` (sm size).
-- Mobile: hamburger 44×44; sheet `--ink-3` with `--line` top rule; items 44px tall.
+- Mobile: hamburger 44×44; sheet `--ink-3` with `--line` top rule; items 44px tall. Escape closes the open sheet; focus returns to the toggle only when it was inside the sheet (or on the toggle), never pulled from elsewhere.
 - States: default, scrolled, open (mobile), link hover/focus-visible (2px `--accent-32` outline offset 2px), active route (underline visible at scaleX(1), `--text-hi`).
 
 ### Button (`components/ui/button.tsx`)
@@ -208,6 +208,12 @@ All primitives live in `components/ui/*` (existing shadcn shells re-tokened) or 
 ### Reel (`components/ledger/reel.tsx`)
 
 - `display: grid; grid-auto-flow: column; grid-auto-columns: minmax(280px, 34%); overflow-x: auto; scroll-snap-type: x mandatory;` the reel owns the scroll; edge fade masks 32px; keyboard: cells are focusable, arrow keys scroll by one cell. Used by Reviews.
+
+### Tooltip (`components/ui/tooltip.tsx`)
+
+- shadcn anatomy: one focusable trigger (Radix `Slot`, gains `aria-describedby`) and a `role="tooltip"` label, mono Meta text on `--ink-3` with a `--line` border. Every icon-only control carries one; `title=` is never used.
+- Shows on hover and on focus; WCAG 1.4.13: hoverable (an 8px transparent bridge between trigger and label keeps it open while the pointer crosses), persistent, and dismissed by Escape until both pointer and focus leave.
+- `side` is `left` (default) or `top`. No portal: the label renders inside the trigger's container, so pick the side that stays inside a clipping ancestor.
 
 ### Chip (`components/ui/badge.tsx` → `Chip`)
 

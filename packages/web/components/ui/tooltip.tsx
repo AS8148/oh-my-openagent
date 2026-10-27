@@ -7,9 +7,11 @@ import { cn } from "@/lib/utils"
 
 type TooltipSide = "left" | "top"
 
+// Padding, not margin: the gap between trigger and label belongs to the tooltip, so the pointer can
+// cross it without leaving the wrapper (WCAG 1.4.13 hoverable).
 const SIDE_CLASS: Record<TooltipSide, string> = {
-  left: "top-1/2 right-full mr-2 -translate-y-1/2",
-  top: "bottom-full left-1/2 mb-2 -translate-x-1/2",
+  left: "top-1/2 right-full pr-2 -translate-y-1/2",
+  top: "bottom-full left-1/2 pb-2 -translate-x-1/2",
 }
 
 export interface TooltipProps {
@@ -66,12 +68,11 @@ export function Tooltip({ label, side = "left", children }: TooltipProps): JSX.E
         role="tooltip"
         data-state={open ? "open" : "closed"}
         hidden={!open}
-        className={cn(
-          "border-line bg-ink-3 text-text-hi pointer-events-auto absolute z-20 border px-2 py-1 font-mono text-xs whitespace-nowrap",
-          SIDE_CLASS[side],
-        )}
+        className={cn("pointer-events-auto absolute z-20", SIDE_CLASS[side])}
       >
-        {label}
+        <span className="border-line bg-ink-3 text-text-hi block border px-2 py-1 font-mono text-xs whitespace-nowrap">
+          {label}
+        </span>
       </span>
     </span>
   )

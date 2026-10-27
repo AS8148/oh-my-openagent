@@ -56,12 +56,16 @@ export function NavHeader({ stars }: NavHeaderProps): JSX.Element {
   const scrolled = useScrolled(SCROLL_THRESHOLD)
   const [isOpen, setIsOpen] = useState(false)
   const menuToggleRef = useRef<HTMLButtonElement | null>(null)
+  const sheetRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!isOpen) return
     const closeOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return
+      const focus = document.activeElement
+      const focusWasInSheet =
+        focus === menuToggleRef.current || (focus !== null && sheetRef.current?.contains(focus))
       setIsOpen(false)
-      menuToggleRef.current?.focus()
+      if (focusWasInSheet) menuToggleRef.current?.focus()
     }
     document.addEventListener("keydown", closeOnEscape)
     return () => document.removeEventListener("keydown", closeOnEscape)
@@ -142,6 +146,7 @@ export function NavHeader({ stars }: NavHeaderProps): JSX.Element {
 
       <div
         id="mobile-nav"
+        ref={sheetRef}
         aria-hidden={!isOpen}
         className={cn(
           "bg-ink-3 ease-standard grid transition-[grid-template-rows] duration-[var(--dur-micro)] md:hidden",
