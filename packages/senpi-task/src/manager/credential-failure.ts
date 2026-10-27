@@ -15,10 +15,12 @@ const CREDENTIAL_REJECTED =
 // guidance that is not about a missing credential ("No model selected", a Copilot 421 endpoint refresh, a
 // third-party billing note, a model-scoped 403).
 const CREDENTIAL_MISSING =
-  /\bno api key (?:found |provided )?for\b|\bnot logged in\b|\bno (?:[\w-]+ ){0,3}accounts?(?: configured\b|:)|\bno [\w-]+ access token\b|authentication[_ ](?:failed|required)/i
-// "Cursor access token is required", "Radius authentication is required": a signed-out provider, unless the text
-// scopes the requirement to a model ("Authentication is required for this model"), which a sibling may not share.
-const CREDENTIAL_REQUIRED = /\b(?:access token|authentication) is required\b/i
+  /\bno api key (?:found |provided )?for\b|\bnot logged in\b|\bno (?:[\w-]+ ){0,3}accounts?(?: configured\b|:)|\bno [\w-]+ access token\b|authentication[_ ]failed/i
+// "Cursor access token is required", "Radius authentication is required", "authentication_required": a signed-out
+// provider, unless the text scopes the requirement to a model ("Authentication required for this model", or the
+// failed model's id), which a sibling may not share. The absence phrasings above stay provider-wide even when they
+// name a model: a key or an account belongs to the provider.
+const CREDENTIAL_REQUIRED = /\b(?:access token|authentication) is required\b|authentication[_ ]required/i
 // A 403 is ambiguous: a provider also answers it for ONE model the key may not use (tier, region,
 // preview access, an organization that must be verified for that model), which a sibling model on
 // the same provider does not share. A 403 counts as a credential rejection only when it names the
@@ -43,15 +45,18 @@ export function usageLimitScope(message: string): UsageLimitScope | undefined {
   return MODEL_SCOPED_LIMIT.test(message) ? "model" : "account"
 }
 
-function isMissingCredential(message: string): boolean {
-  return CREDENTIAL_MISSING.test(message) || (CREDENTIAL_REQUIRED.test(message) && !MODEL_SCOPED.test(message))
+function namesModel(message: string, modelId?: string): boolean {
+  return MODEL_SCOPED.test(message) || (modelId !== undefined && message.toLowerCase().includes(modelId.toLowerCase()))
+}
+
+function isMissingCredential(message: string, modelId?: string): boolean {
+  return CREDENTIAL_MISSING.test(message) || (CREDENTIAL_REQUIRED.test(message) && !namesModel(message, modelId))
 }
 
 export function isCredentialFailure(message: string, modelId?: string): boolean {
-  if (CREDENTIAL_REJECTED.test(message) || isMissingCredential(message)) return true
+  if (CREDENTIAL_REJECTED.test(message) || isMissingCredential(message, modelId)) return true
   if (!FORBIDDEN.test(message) || !ACCOUNT_SCOPED_403.test(message)) return false
-  if (MODEL_SCOPED.test(message)) return false
-  return modelId === undefined || !message.toLowerCase().includes(modelId.toLowerCase())
+  return !namesModel(message, modelId)
 }
 
 function providerOf(record: TaskRecord): string | undefined {
@@ -78,7 +83,7 @@ export function terminalFailureMessage(record: TaskRecord | null | undefined, fa
   const provider = record == null ? undefined : providerOf(record)
   if (provider === undefined || record == null) return failureMessage
   if (isCredentialFailure(failureMessage, modelIdOf(record))) {
-    const missing = !CREDENTIAL_REJECTED.test(failureMessage) && isMissingCredential(failureMessage)
+    const missing = !CREDENTIAL_REJECTED.test(failureMessage) && isMissingCredential(failureMessage, modelIdOf(record))
     const cause = missing
       ? `No credentials for ${provider} were found; sign in to ${provider} (Provider authentication settings on the desktop, /login ${provider} in an interactive session) or add its API key`
       : `Credentials for ${provider} were rejected; re-authenticate ${provider} (Provider authentication settings on the desktop, /login ${provider} in an interactive session) or re-add its API key`

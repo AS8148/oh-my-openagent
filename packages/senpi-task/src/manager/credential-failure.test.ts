@@ -60,6 +60,9 @@ describe("isCredentialFailure", () => {
     ["a missing Cursor access token", "Cursor access token is required; run /login cursor"],
     ["a missing Radius login", "Radius authentication is required; start Pi and run /login radius, then retry"],
     ["a signed-out Claude Code SDK", "Not logged in \u00b7 Please run /login"],
+    ["a Radius relay with no login (radius-relay)", "Radius authentication is required"],
+    ["a bare authentication requirement naming no model", "Authentication required. Run /login openai"],
+    ["a coded authentication requirement naming no model", "authentication_required: sign in to openai"],
     ["a missing GitLab Duo token (custom provider example)", "No GitLab access token. Run /login gitlab-duo or set GITLAB_TOKEN"],
     ["a rejected Claude subscription token (anthropic-subscription guidance)", "The account's OAuth token was rejected. Re-run /login anthropic-subscription to refresh it, or remove the account with /claude-account remove <name>."],
   ])("#given a missing credential from %s #when classified #then it is a credential failure", (_label, message) => {
@@ -88,6 +91,21 @@ describe("isCredentialFailure", () => {
     expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(false)
   })
 
+  // A sign-in requirement that names a model (by the word or by the failed model's id) may hold for that model
+  // alone, so the provider's other models stay: one row per requirement phrasing.
+  test.each([
+    ["access token is required, for a model", "Access token is required for this model"],
+    ["authentication is required, for a model", "Authentication is required for this model"],
+    ["authentication required, for a model", "Authentication required for this model"],
+    ["authentication_required, for a model", "authentication_required: this model needs a separate sign-in"],
+    ["access token is required, naming the model id", "Access token is required for gpt-6-luna-fast"],
+    ["authentication is required, naming the model id", "Authentication is required for gpt-6-luna-fast"],
+    ["authentication required, naming the model id", "Authentication required for gpt-6-luna-fast"],
+    ["authentication_required, naming the model id", "authentication_required: gpt-6-luna-fast needs a separate sign-in"],
+  ])("#given a sign-in requirement scoped to one model (%s) #when classified #then it is not a credential failure", (_label, message) => {
+    expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(false)
+  })
+
   // Other senpi texts that say "expired" or "sign in again" without a model request's credential having
   // expired: a device-login flow timing out, an MCP server session, a prompt cache, a one-time migration notice.
   test.each([
@@ -98,7 +116,6 @@ describe("isCredentialFailure", () => {
     ["an expired MCP server session (mcp/health)", "MCP server docs session expired; reinitialize retry also expired; run /mcp reconnect docs"],
     ["an expired MCP authorization code (mcp/auth/oauth)", "MCP server docs authorization code was rejected or expired; restart with /mcp auth-start docs."],
     ["a tool server whose access token was rejected (MCP-style)", "MCP server docs access token was rejected"],
-    ["a requirement scoped to one model", "Authentication is required for this model"],
     ["an expired prompt cache (handoff-hint)", "This session is 180k tokens and its cache has expired."],
     ["the subscription login migration notice (auth-storage)", 'The Anthropic Claude subscription login in auth.json was not moved to Anthropic Subscription because a newer login exists. It was left unchanged; sign in again with /login and choose "Anthropic Subscription (Claude Pro/Max)".'],
   ])("#given an expiry or sign-in text that is not a model credential failure (%s) #when classified #then it is not a credential failure", (_label, message) => {
