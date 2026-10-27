@@ -99,7 +99,7 @@ export function createTaskComponent(options: TaskComponentOptions = {}): OmoSenp
 
       const cwd = options.resolveCwd?.() ?? sessionCwd(pi)
       const loaded = loadConfig({ cwd })
-      const loadSkills = options.loadSkills ?? createTaskSkillLoader()
+      const loadSkills = options.loadSkills ?? createTaskSkillLoader({ logger: ctx.logger })
 
       const engine = composeTaskEngine({
         pi,
