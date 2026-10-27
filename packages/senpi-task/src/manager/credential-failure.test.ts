@@ -46,7 +46,26 @@ describe("isCredentialFailure", () => {
     expect(isCredentialFailure(message, "minimax-m3")).toBe(false)
   })
 
+  // Every wording senpi emits when a provider has no credential at request time (#10806). The provider is
+  // signed out, so its sibling models fail the same way.
   test.each([
+    ["the session's request-time check (auth-guidance formatNoApiKeyFoundMessage)", "No API key found for openai.\n\nUse /login to log into a provider via OAuth or API key. See:\n  ~/docs/providers.md"],
+    ["the same check for an unknown provider", "No API key found for the selected model.\n\nUse /login to log into a provider via OAuth or API key."],
+    ["the registry's request auth (model-registry getApiKeyAndHeaders)", 'No API key found for "openai"'],
+    ["a provider adapter (ai api/*)", "No API key for provider: openai"],
+    ["the pi-messages adapter", 'No API key provided for provider "openai"'],
+    ["a model switch onto a keyless provider", "No API key for openai/gpt-6-luna-fast"],
+    ["an empty Claude subscription pool", "authentication_failed: No Anthropic Subscription accounts configured for the managed lane; run /login anthropic-subscription or set CLAUDE_CODE_OAUTH_TOKEN"],
+    ["an empty Cursor CLI account pool", "no accounts: run /login cursor-cli-oauth"],
+    ["a missing Cursor access token", "Cursor access token is required; run /login cursor"],
+    ["a missing Radius login", "Radius authentication is required; start Pi and run /login radius, then retry"],
+    ["a signed-out Claude Code SDK", "Not logged in \u00b7 Please run /login"],
+  ])("#given a missing credential from %s #when classified #then it is a credential failure", (_label, message) => {
+    expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(true)
+  })
+
+  test.each([
+    ["no model selected at all, which names no provider", "No model selected.\n\nUse /login to log into a provider via OAuth or API key.\n\nThen use /model to select a model."],
     ["a model-scoped 403", '403: {"error":{"message":"This model is not enabled for your project. Contact support to request access."}}'],
     ["a bare forbidden", "403 Forbidden"],
     ["a region-gated model", "403: gpt-6-astra is not available in your region"],
@@ -73,6 +92,17 @@ describe("runtimeFallbackCandidates", () => {
 
     expect(runtimeFallbackCandidates(failed, message)).toEqual({ remaining: [GO_M27, ZAI_GLM], skipped: [] })
     expect(terminalFailureMessage(record(GO_M3, []), message)).toBe(message)
+  })
+
+  test("#given senpi's missing-key text on an API-key rung and a parent on the subscription #when the candidates are computed #then the other API-key rung is skipped and the parent's model is next (#10806)", () => {
+    const selected = rung("openai", "gpt-6-luna-fast")
+    const sibling = rung("openai", "another")
+    const parent = rung("chatgpt-subscription", "gpt-6-luna-fast")
+    const failed: TaskRecord = { ...record(selected, [sibling, parent]), parent_model: parent.display }
+
+    const candidates = runtimeFallbackCandidates(failed, "No API key found for openai.")
+
+    expect(candidates).toEqual({ remaining: [parent], skipped: [sibling] })
   })
 
   test("#given a credential rejection on the first rung #when the candidates are computed #then every rung on that provider is skipped", () => {
