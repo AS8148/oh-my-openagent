@@ -14,6 +14,11 @@ declare const process: {
 // `REJECTED_REFRESH_TOKEN` is refused by the (offline) exchange the way a revoked login is, any other
 // token renews. No network, no real identity endpoint.
 export const REJECTED_REFRESH_TOKEN = "rejected-refresh"
+// The first exchange of `FLAKY_REFRESH_TOKEN` fails at the transport (ECONNREFUSED, which senpi
+// classifies as a transient refresh failure); every later exchange in the same process renews, the
+// way a brief token-endpoint outage at session start ends before the first turn.
+export const FLAKY_REFRESH_TOKEN = "flaky-refresh"
+const flakyExchanges = new Set<string>()
 
 type FixtureOAuthCredentials = { refresh: string; access: string; expires: number; [key: string]: unknown }
 
@@ -26,6 +31,10 @@ function fixtureOAuth(providerId: string) {
     async refreshToken(credentials: FixtureOAuthCredentials): Promise<FixtureOAuthCredentials> {
       if (credentials.refresh === REJECTED_REFRESH_TOKEN) {
         throw new Error(`Token exchange rejected for ${providerId}: 401 unauthorized; body={"error":"invalid_grant"}`)
+      }
+      if (credentials.refresh === FLAKY_REFRESH_TOKEN && !flakyExchanges.has(providerId)) {
+        flakyExchanges.add(providerId)
+        throw Object.assign(new Error(`connect to the ${providerId} token endpoint failed`), { code: "ECONNREFUSED" })
       }
       return { ...credentials, access: `${providerId}-renewed-access`, expires: Date.now() + 60 * 60 * 1000 }
     },
