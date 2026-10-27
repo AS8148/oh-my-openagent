@@ -16,6 +16,7 @@ mod overlay;
 mod responsible;
 mod input;
 mod skylight;
+mod spaces;
 mod stop_path;
 
 pub use ax::{is_trusted, MacAx};
