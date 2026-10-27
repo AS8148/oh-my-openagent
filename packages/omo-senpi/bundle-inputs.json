@@ -573,6 +573,7 @@
     "packages/omo-config-core/src/schema/memory-agreements.ts",
     "packages/omo-config-core/src/schema/memory.ts",
     "packages/omo-config-core/src/schema/model-catalog.ts",
+    "packages/omo-config-core/src/schema/model-pad.ts",
     "packages/omo-config-core/src/schema/model-profile.ts",
     "packages/omo-config-core/src/schema/model-ref.ts",
     "packages/omo-config-core/src/schema/provenance.ts",
