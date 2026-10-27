@@ -215,7 +215,7 @@ New debt is recorded here at the moment it is accepted — never silently.
 
 ## 9. Ideal State & Gap Ledger (after grounding)
 
-- Brand surfaces carried forward: [surface → what it contributes]; departures and why: [one line each]
+- The project's own existing surfaces carried forward (or "none"): [surface → what it contributes]; departures and why: [one line each]
 - Sources read in full: [source → URL, reader count]
 - Personas and journey steps: [persona → steps]
 - Ideal state: [one checkable line per journey step]

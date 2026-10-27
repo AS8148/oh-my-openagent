@@ -1,12 +1,12 @@
 # Grounding: brand surfaces, guideline source, ideal state, gap ledger
 
-Run this before the brief for a new screen or flow, a redesign ("this looks bad", "make it better", "rework the design system"), and any design-system creation or rework. It replaces taste guesses with a written bar: what the product already is, what a good interface does for its users, and every place the product falls short. A small change skips the run and reads the ledger in `DESIGN.md` section 9 when one exists.
+Run this before the brief for a new screen or flow, a redesign ("this looks bad", "make it better", "rework the design system"), and any design-system creation or rework. It replaces taste guesses with a written bar: what the target project already is, what a good interface does for its users, and every place the product falls short. A small change skips the run and reads the ledger in `DESIGN.md` section 9 when one exists.
 
 The output is `DESIGN.md` section 9 (`design-system-architecture.md` gives the template), or the change description when the project has no `DESIGN.md`. Steps 1-2 are independent: run them in parallel.
 
-## 1. Brand surfaces
+## 1. The project's own surfaces
 
-List every surface the product already ships: each app, the marketing site, docs, the logo, a mascot or illustration set. Capture each through `/visual-qa` and extract its colour, type, shape, density, and illustration language. The new design continues that language. Each departure gets one line in `DESIGN.md` section 1 naming what the user gains from it. Without that line, the design reads as a different product, however good it looks. "Make it better" means fine-tuning the existing system, not replacing it, unless the user asks for a replacement.
+List the surfaces the target project itself already ships, if any: its other screens, apps, site, docs, logo, and illustration set. A greenfield project with none records "none" and skips this step; never pull in surfaces from outside the project. Capture each through `/visual-qa` and extract its colour, type, shape, density, and illustration language. The new design continues that language. Each departure gets one line in `DESIGN.md` section 1 naming what the user gains from it. Without that line, the design reads as a different product, however good it looks. "Make it better" means fine-tuning the existing system, not replacing it, unless the user asks for a replacement.
 
 ## 2. Guideline source, read in full
 
