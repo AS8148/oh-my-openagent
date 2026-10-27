@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { existsSync, statSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -178,5 +178,17 @@ describe("omo-senpi bundle size budget", () => {
     // A trip here means the bundle grew past budget: split, lazy-load, or trim a dependency.
     // Never raise this ceiling to the failing value.
     expect(bytes).toBeLessThanOrEqual(BUDGET_BYTES)
+  })
+})
+
+describe("omo-senpi bundle size budget has one source", () => {
+  it("#given the two omo.js size checks #when their limits are read #then both come from bundle-budget.json", () => {
+    // One number from one source (lead ruling, batch #20): the build-extension check must not carry its own byte literal.
+    const buildTest = readFileSync(join(packageRoot, "plugin", "scripts", "build-extension.test.mjs"), "utf8")
+    const mainCap = buildTest.match(/expect\(Buffer\.byteLength\(main\)\)\.toBeLessThanOrEqual\(([^)]*)\)/)
+    expect(mainCap, "build-extension.test.mjs must cap the main entry").not.toBeNull()
+    expect(mainCap?.[1]).toBe("bundleBudget.omoJsBytes")
+    expect(buildTest).toContain('from "../../bundle-budget.json"')
+    expect(readFileSync(join(packageRoot, "src", "bundle-size.test.ts"), "utf8")).toContain('from "../bundle-budget.json"')
   })
 })
