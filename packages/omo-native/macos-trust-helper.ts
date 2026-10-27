@@ -111,13 +111,19 @@ function setting(value: Json | undefined, path: string): MacTrustSetting {
   }
 }
 
-function chain(value: Json | undefined, path: string): TrustChain {
+/**
+ * The policy applies the EKU rule only to path members, so a chain must describe its own certificate:
+ * a non-empty path starts at `own`, and an anchor is the path's last member.
+ */
+function chain(value: Json | undefined, path: string, own: { readonly sha256: string; readonly sha1: string }): TrustChain {
   const record = object(value, path, ["anchor", "path", "explicitDistrust"])
-  return {
-    anchor: nullable(record.anchor, (raw) => identity(raw, `${path}.anchor`)),
-    path: array(record.path, `${path}.path`).map((raw, index) => identity(raw, `${path}.path[${index}]`)),
-    explicitDistrust: boolean(record.explicitDistrust, `${path}.explicitDistrust`),
-  }
+  const anchor = nullable(record.anchor, (raw) => identity(raw, `${path}.anchor`))
+  const members = array(record.path, `${path}.path`).map((raw, index) => identity(raw, `${path}.path[${index}]`))
+  const same = (a: { readonly sha256: string; readonly sha1: string } | undefined, b: { readonly sha256: string; readonly sha1: string }) =>
+    a !== undefined && a.sha256 === b.sha256 && a.sha1 === b.sha1
+  if (members.length > 0 && !same(members[0], own)) throw new Malformed("invalid-value", `${path}.path[0]`)
+  if (anchor !== null && !same(members.at(-1), anchor)) throw new Malformed("invalid-value", `${path}.anchor`)
+  return { anchor, path: members, explicitDistrust: boolean(record.explicitDistrust, `${path}.explicitDistrust`) }
 }
 
 /** Facts Bun's own BoringSSL parser derives; the engine trusts nothing it cannot parse exactly. */
@@ -179,7 +185,7 @@ function decodeDocument(root: Json): MacTrustHelperDocument {
     const facts = parsed(bytes, `${at}.der`)
     if (der.has(facts.sha256)) throw new Malformed("duplicate-certificate", `${at}.der`)
     der.set(facts.sha256, new Uint8Array(bytes))
-    return source === "keychain" ? { ...facts, source, settings, chain: chain(entry.chain, `${at}.chain`) } : { ...facts, source, settings }
+    return source === "keychain" ? { ...facts, source, settings, chain: chain(entry.chain, `${at}.chain`, facts) } : { ...facts, source, settings }
   })
   // The importer owns completeness: every trust-settings domain carries Deny facts (design 4.5).
   const negativesRead = sources.every((source) => source.name === "keychain-search-list" || source.outcome === "read" || source.outcome === "absent")

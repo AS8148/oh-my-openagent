@@ -118,7 +118,8 @@ pub enum SettingResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Chain {
-    /// The anchor the SSL-policy evaluation reached, or `None` when it did not succeed.
+    /// The anchor the BasicX509 chain step reached (design revision 12), or `None` when it did not succeed.
+    /// The EKU rule is the policy module's, applied to every member of `path`.
     pub anchor: Option<Identity>,
     /// The chain the evaluation built, leaf first.
     pub path: Vec<Identity>,

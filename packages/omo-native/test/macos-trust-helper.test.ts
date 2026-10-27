@@ -207,6 +207,10 @@ describe("decodeMacTrustHelperOutput", () => {
       [(() => { const value = document(); delete (value.certificates[1] as { chain?: unknown }).chain; return value })(), "$.certificates[1].chain"],
       [certificateAt(1, { chain: { anchor: badId, path: [], explicitDistrust: false } }), "$.certificates[1].chain.anchor.sha256"],
       [certificateAt(1, { chain: { anchor: null, path: [{ sha256: id("root").sha256, sha1: "00" }], explicitDistrust: false } }), "$.certificates[1].chain.path[0].sha1"],
+      // A chain must describe its own certificate: the policy applies the EKU rule only to path members.
+      [certificateAt(1, { chain: { anchor: null, path: [id("root")], explicitDistrust: false } }), "$.certificates[1].chain.path[0]"],
+      [certificateAt(1, { chain: { anchor: id("root"), path: [id("intermediate")], explicitDistrust: false } }), "$.certificates[1].chain.anchor"],
+      [certificateAt(1, { chain: { anchor: id("root"), path: [], explicitDistrust: false } }), "$.certificates[1].chain.anchor"],
       [setting({ result: "Allow" }), "$.certificates[0].settings.user[0].result"],
       [setting({ policy: { oid: SSL, role: "admin", nameConstrained: false } }), "$.certificates[0].settings.user[0].policy.role"],
       [setting({ policy: { oid: "not-an-oid", role: null, nameConstrained: false } }), "$.certificates[0].settings.user[0].policy.oid"],
@@ -217,6 +221,14 @@ describe("decodeMacTrustHelperOutput", () => {
       [setting({ keyUsage: 2 ** 32 }), "$.certificates[0].settings.user[0].keyUsage"],
     ]
     for (const [value, path] of cases) expect(malformed(value)).toEqual({ check: "invalid-value", path })
+  })
+
+  test("accepts an unanchored chain that is empty or starts at its own certificate", () => {
+    for (const path of [[], [id("intermediate")]]) {
+      const value = document()
+      Object.assign(value.certificates[1] ?? {}, { chain: { anchor: null, path, explicitDistrust: false } })
+      expect(decode(value).kind).toBe("decoded")
+    }
   })
 
   test("accepts every documented policy projection", () => {

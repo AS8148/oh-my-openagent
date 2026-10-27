@@ -81,7 +81,9 @@ describe.skipIf(process.platform !== "darwin" || targetDirectory === undefined)(
     expect(selectEngineTrust(document.facts)).toEqual({ status: "selected", S: [sha256("root")], I: [], D: none, diagnostics: [] })
   })
 
-  test("macos-intermediate-path-deny-excluded", async () => {
+  // Without a keychain the OS reports only [intermediate, anchor], so on real objects the Deny sits on the
+  // anchor. A Deny on a non-anchor path member is owned by the policy table case "macOS denied path".
+  test("macos-intermediate-anchor-deny-excluded", async () => {
     const document = await fixture("intermediate", path("root"), path("long-no-eku"), "root-deny")
     expect(document.facts.certificates[0]?.settings.user).toMatchObject([{ policy: null, result: "Deny" }])
     expect(document.facts.certificates[1]).toMatchObject({ chain: { anchor: id("root"), path: [id("long-no-eku"), id("root")] } })

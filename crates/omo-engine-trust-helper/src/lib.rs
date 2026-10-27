@@ -1,4 +1,4 @@
-//! Native fact helper for the engine CA importer (omo#10762, design revision 10, sections 4.1, 4.4 and 6.2).
+//! Native fact helper for the engine CA importer (omo#10762, design revision 12, sections 4.1, 4.4 and 6.2).
 //!
 //! The helper reads macOS Security.framework in its own killable process and writes one bounded JSON
 //! document of facts to stdout. It makes no trust decision: `packages/omo-native/macos-trust-helper.ts`
