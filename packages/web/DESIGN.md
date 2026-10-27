@@ -44,6 +44,7 @@ An operations ledger read at night. The whole site is one framed sheet of ink ru
 | Line / strong | `--line-strong` | `rgba(255,255,255,0.12)` | Focused cell, active tab underline base                                                                               |
 | Line          | `--line`        | `rgba(255,255,255,0.08)` | Frame, rows, dividers (the default hairline)                                                                          |
 | Line / faint  | `--line-faint`  | `rgba(255,255,255,0.04)` | Dot grid, quiet cell separators                                                                                       |
+| Line / input  | `--line-input`  | `rgba(255,255,255,0.40)` | Form control edge (`--input`), 3.8:1 on every ink: the WCAG 1.4.11 floor for an input boundary                        |
 | Accent        | `--accent`      | `#00d4ff`                | Prompt glyph, live wires, active state, links on hover, primary CTA fill                                              |
 | Accent / hot  | `--accent-hot`  | `#e6fdff`                | White-hot node core, cursor block, verified flash                                                                     |
 | Accent / dim  | `--accent-dim`  | `#0ea5c4`                | Primary CTA hover fill, edge idle color in the 3D scene                                                               |
@@ -221,7 +222,7 @@ All primitives live in `components/ui/*` (existing shadcn shells re-tokened) or 
 
 ### DocsShell (`components/docs/docs-shell.tsx`)
 
-- `fixed-sidenav-shell` as in §4; sidebar: search input (Chip-styled, focus ring), section list with active item marked by a 2px `--accent` left rule; main: prose with `--line` ruled H2s, code blocks `--code-bg` with `overflow-x: auto`.
+- `fixed-sidenav-shell` as in §4; sidebar: search input (`--input` edge at 3.8:1, a visually hidden label, focus ring) above a section list in a `<nav>` with its own name, section list with active item marked by a 2px `--accent` left rule; main: prose with `--line` ruled H2s, code blocks `--code-bg` with `overflow-x: auto`.
 
 ### Footer (`components/footer.tsx`)
 
