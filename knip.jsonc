@@ -917,6 +917,8 @@
       "packages/omo-opencode/src/tools/delegate-task/index.ts": ["resolveCategoryConfig", "buildSystemContent", "buildTaskPrompt"],
       // pre-existing at origin dev 4686e425b5: unused export(s) isTaskCallableAgentMode
       "packages/omo-opencode/src/tools/delegate-task/subagent-discovery.ts": ["isTaskCallableAgentMode"],
+      // added on dev after the last merge (origin dev 4e6328d8df): unused export(s) isDefiniteSessionNotFound
+      "packages/omo-opencode/src/tools/delegate-task/sync-session-existence.ts": ["isDefiniteSessionNotFound"],
       // pre-existing at origin dev 4686e425b5: unused export(s) resolveCategoryConfig
       "packages/omo-opencode/src/tools/delegate-task/tools.ts": ["resolveCategoryConfig"],
       // pre-existing at origin dev 4686e425b5: unused export(s) DEFAULT_CONTEXT
@@ -1723,12 +1725,18 @@
       "packages/shared-skills/skills/ulw-research/scripts/polish-apply.mjs": ["numeralKeys", "SLOT", "termCounts", "POLISH_MARKUP_CHARACTERS", "touchesReference"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SLOT
       "packages/shared-skills/skills/ulw-research/scripts/polish-project.mjs": ["SLOT"],
+      // added on dev after the last merge (origin dev 4e6328d8df): unused export(s) detectEncoding
+      "packages/shared-skills/skills/ulw-research/scripts/raw-decode.mjs": ["detectEncoding"],
+      // added on dev after the last merge (origin dev 4e6328d8df): unused export(s) quoteContext
+      "packages/shared-skills/skills/ulw-research/scripts/raw-locator.mjs": ["quoteContext"],
       // pre-existing at origin dev 4686e425b5: unused export(s) measureOf, signatureOf
       "packages/shared-skills/skills/ulw-research/scripts/repair-tracker.mjs": ["measureOf", "signatureOf"],
       // pre-existing at origin dev 4686e425b5: unused export(s) main
       "packages/shared-skills/skills/ulw-research/scripts/report-tools.mjs": ["main"],
       // pre-existing at origin dev 4686e425b5: unused export(s) findAcronyms
       "packages/shared-skills/skills/ulw-research/scripts/source-snapshot.mjs": ["findAcronyms"],
+      // added on dev after the last merge (origin dev 4e6328d8df): unused export(s) TEXT_SOURCES, readPart, textSourceOf
+      "packages/shared-skills/skills/ulw-research/scripts/source-view.mjs": ["TEXT_SOURCES", "readPart", "textSourceOf"],
       // pre-existing at origin dev 4686e425b5: unused export(s) METADATA
       "packages/shared-skills/skills/ulw-research/scripts/unit-metadata.mjs": ["METADATA"],
       // pre-existing at origin dev 4686e425b5: unused export(s) plusUnit
