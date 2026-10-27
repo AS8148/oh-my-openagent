@@ -4,7 +4,7 @@
 #![cfg(target_os = "macos")]
 
 use objc2_core_foundation::{
-    CFArray, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType,
+    CFArray, CFData, CFDictionary, CFError, CFNumber, CFRetained, CFString, CFType,
 };
 use objc2_security::{SecCertificate, SecPolicy, SecTrust};
 use omo_engine_trust_helper::document::{Policy, Role, Setting, SettingResult};
@@ -39,6 +39,9 @@ extendedKeyUsage=clientAuth
 [ca_intermediate]
 basicConstraints=critical,CA:TRUE,pathlen:0
 keyUsage=critical,digitalSignature,keyCertSign,cRLSign
+[ca_intermediate_sign_only]
+basicConstraints=critical,CA:TRUE,pathlen:0
+keyUsage=critical,keyCertSign,cRLSign
 ";
 
 fn openssl(dir: &Path, args: &[&str]) -> Vec<u8> {
@@ -200,6 +203,37 @@ fn basic_x509_accepts(certificate: &SecCertificate, anchor: &SecCertificate) -> 
     }
 }
 
+/// The production evaluation's configuration, returning the OS's own error text for a failure message.
+fn ssl_failure(certificate: &SecCertificate, anchor: &SecCertificate) -> String {
+    let policy = unsafe { SecPolicy::new_ssl(true, None) };
+    let mut trust: *mut SecTrust = ptr::null_mut();
+    let status = unsafe {
+        SecTrust::create_with_certificates(certificate, Some(&policy), NonNull::from(&mut trust))
+    };
+    assert_eq!(status, 0, "SecTrustCreateWithCertificates");
+    let trust = unsafe { CFRetained::from_raw(NonNull::new(trust).expect("a trust object")) };
+    let anchors = CFArray::from_objects(&[anchor]);
+    let mut error: *mut CFError = ptr::null_mut();
+    let trusted = unsafe {
+        assert_eq!(trust.set_anchor_certificates(Some(anchors.as_opaque())), 0);
+        assert_eq!(trust.set_anchor_certificates_only(true), 0);
+        assert_eq!(trust.set_network_fetch_allowed(false), 0);
+        trust.evaluate_with_error(&mut error)
+    };
+    match NonNull::new(error).map(|error| unsafe { CFRetained::from_raw(error) }) {
+        _ if trusted => "trusted".to_owned(),
+        Some(error) => format!(
+            "code {}: {}",
+            error.code(),
+            error
+                .description()
+                .map(|text| text.to_string())
+                .unwrap_or_default()
+        ),
+        None => "untrusted without an error".to_owned(),
+    }
+}
+
 #[test]
 fn ssl_policy_rejects_client_auth_only_certificates_that_basic_x509_accepts() {
     let fixtures = Fixtures::new();
@@ -255,8 +289,34 @@ fn custom_anchor_intermediate_is_ssl_eligible() {
     assert_eq!(
         chain.anchor,
         Some(identity(&certificate_der(&root))),
-        "five-year intermediate without SCTs"
+        "five-year intermediate without SCTs: {}",
+        ssl_failure(&intermediate, &root)
     );
+}
+
+/// Measurement for the design 4.4 item 4 amendment: which property of a custom-anchored CA certificate
+/// makes the SSL server policy reject it. Prints only; run explicitly with `--ignored --nocapture`.
+#[test]
+#[ignore = "measurement for the design amendment; prints and asserts nothing"]
+fn custom_anchor_validity_and_eku_measurement() {
+    let fixtures = Fixtures::new();
+    let root = fixtures.issue("root", None, "root", 3650);
+    for (name, section, days) in [
+        ("no_eku_365", "ca_intermediate", 365),
+        ("no_eku_398", "ca_intermediate", 398),
+        ("no_eku_399", "ca_intermediate", 399),
+        ("no_eku_825", "ca_intermediate", 825),
+        ("no_eku_826", "ca_intermediate", 826),
+        ("no_eku_1825", "ca_intermediate", 1825),
+        ("server_eku_398", "server_intermediate", 398),
+        ("server_eku_826", "server_intermediate", 826),
+        ("server_eku_1825", "server_intermediate", 1825),
+        ("sign_only_ku_365", "ca_intermediate_sign_only", 365),
+        ("sign_only_ku_1825", "ca_intermediate_sign_only", 1825),
+    ] {
+        let intermediate = fixtures.issue(name, Some("root"), section, days);
+        println!("MEASURE {name}: {}", ssl_failure(&intermediate, &root));
+    }
 }
 
 #[test]
