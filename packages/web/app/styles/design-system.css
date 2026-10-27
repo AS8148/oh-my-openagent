@@ -27,6 +27,7 @@
   --color-line-strong: var(--line-strong);
   --color-line: var(--line);
   --color-line-faint: var(--line-faint);
+  --color-line-input: var(--line-input);
 
   --color-accent: var(--accent);
   --color-accent-hot: var(--accent-hot);
@@ -161,6 +162,8 @@
     --line-strong: rgba(255, 255, 255, 0.12);
     --line: rgba(255, 255, 255, 0.08);
     --line-faint: rgba(255, 255, 255, 0.04);
+    /* Form control boundary: 3:1 or better on every ink (WCAG 1.4.11, lib/input-boundary.test.ts). */
+    --line-input: rgba(255, 255, 255, 0.4);
 
     /* §2 Accent — cyan means live */
     --accent: #00d4ff;
@@ -264,7 +267,7 @@
     --destructive: var(--status-err);
     --destructive-foreground: var(--text-hi);
     --border: var(--line);
-    --input: var(--line-strong);
+    --input: var(--line-input);
     --ring: var(--accent);
     --focus-ring-width: 2px;
     --focus-ring-offset: 2px;
