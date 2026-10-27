@@ -1,16 +1,32 @@
 import { lstatSync, readdirSync, realpathSync, rmdirSync, type Stats, unlinkSync } from "node:fs"
 import { isAbsolute, join, relative } from "node:path"
 
-import { isSpoolFileName, QUARANTINE_DIR } from "./otlp-spool-names"
+import { isPidAlive } from "./otlp-pid-alive"
+import { isSpoolFileName, parseSpoolName, QUARANTINE_DIR } from "./otlp-spool-names"
 import type { TelemetryDiagnosticInput, TelemetrySpoolEntryKind } from "./types"
 import type { CreateOtlpTelemetryTransportInput } from "./otlp-transport-types"
-import { isOtlpTransportAllowed } from "./otlp-gate"
 
-/** Startup cleanup for lazy adapters: never imports the sender or creates a spool. */
-export function purgeOtlpSpoolOnOptOut(
-  input: Pick<CreateOtlpTelemetryTransportInput, "env" | "productEnvPrefix" | "consent" | "diagnostics" | "source" | "spoolDir" | "spoolRoot">,
+/**
+ * Startup cleanup for a lazy adapter whose caller decided the persisted setting is off. The spool is shared by
+ * every process of the product, so it is left alone while any writer is alive (an active WAL file of a running
+ * pid, or an unexpired send claim): that consented session sweeps its own spool when its consent ends.
+ */
+export function purgeIdleOtlpSpool(
+  input: Pick<CreateOtlpTelemetryTransportInput, "diagnostics" | "source" | "spoolDir" | "spoolRoot" | "isPidAlive" | "nowMs">,
 ): void {
-  if (!isOtlpTransportAllowed(input)) purgeOnOptOut(input)
+  const alive = input.isPidAlive ?? isPidAlive
+  const now = (input.nowMs ?? Date.now)()
+  let names: string[]
+  try {
+    names = readdirSync(input.spoolDir)
+  } catch {
+    return
+  }
+  const live = names.some((name) => {
+    const entry = parseSpoolName(name)
+    return (entry.kind === "active" && alive(entry.pid)) || (entry.kind === "sending" && entry.leaseExpiresMs > now)
+  })
+  if (!live) purgeOnOptOut(input)
 }
 
 export function purgeOnOptOut(input: Pick<CreateOtlpTelemetryTransportInput, "diagnostics" | "source" | "spoolDir" | "spoolRoot">): void {

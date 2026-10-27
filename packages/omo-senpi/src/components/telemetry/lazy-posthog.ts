@@ -10,6 +10,8 @@ type PostHogRuntime = { readonly createDefaultPostHogTransport: TelemetryTranspo
 type LazyPostHogOptions = {
   readonly load?: () => Promise<PostHogRuntime>
   readonly loadOtlp?: (message: TelemetryCaptureMessage) => Promise<TelemetryTransport | null>
+  /** Events the OTLP side can carry; others never start a load, so a null load is a final refusal. */
+  readonly isOtlpEvent?: (event: string) => boolean
   readonly consent?: () => boolean
   readonly timeoutMs?: number
   readonly diagnostics?: (input: TelemetryDiagnosticInput) => void
@@ -177,7 +179,7 @@ function withOtlpTransport(posthog: TelemetryTransport, input: LazyPostHogOption
     try { target?.capture(message) } catch (error) { report(error) }
   }
   const captureOtlp = (message: TelemetryCaptureMessage): void => {
-    if (closed || !allowed()) return
+    if (closed || input.isOtlpEvent?.(message.event) === false || !allowed()) return
     if (target !== undefined) return forward(message)
     if (now() < retryAt) return
     if (queued.length === MAX_PENDING_CAPTURES) queued.shift()
@@ -190,12 +192,14 @@ function withOtlpTransport(posthog: TelemetryTransport, input: LazyPostHogOption
         await value?.shutdown()
         return undefined
       }
+      // Null is the adapter's settled refusal (no key, unsupported OS): refuse once instead of every minute.
+      if (value === null) retryAt = Infinity
       target = value ?? undefined
       for (const pending of queued.splice(0)) forward(pending)
       return target
     }).catch((error: unknown) => { report(error); return undefined }), undefined, input.timeoutMs ?? 500).then(value => {
       if (value === undefined) {
-        retryAt = now() + IMPORT_BACKOFF_MS
+        retryAt = Math.max(retryAt, now() + IMPORT_BACKOFF_MS)
         attempt++
       }
       queued.length = 0

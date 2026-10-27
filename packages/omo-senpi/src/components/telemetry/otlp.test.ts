@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readdirSync, rmSync, watch, type FSWatcher } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { inspectOtlpRequest } from "@oh-my-opencode/telemetry-core/otlp"
-import { createSenpiOtlpTransport, createSenpiTelemetryTransportFactory } from "./otlp"
+import { createSenpiOtlpTransport } from "./otlp"
 import { createOmoNativeTelemetryComponent } from "./omo-native-component"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createSilentLogger } from "./telemetry.test-support"
@@ -17,63 +17,52 @@ const message = {
   },
 }
 
-for (const [label, optOut, consent] of [
-  ["consent withdrawn", {}, false],
-  ["DO_NOT_TRACK", { DO_NOT_TRACK: "1" }, true],
-  ["product opted out", { OMO_SENPI_DISABLE_POSTHOG: "1" }, true],
-  ["SDK disabled", { OTEL_SDK_DISABLED: "true" }, true],
+// A live consented session spools into the machine-wide directory; this opted-out start must only judge
+// that spool by the persisted setting, and never sweep it while a writer is alive.
+async function startOptedOut(root: string, env: Record<string, string>, persisted: boolean, isPidAlive?: (pid: number) => boolean) {
+  const pi = new FakeExtensionAPI()
+  let purged: Promise<void> = Promise.resolve()
+  createOmoNativeTelemetryComponent({
+    env: { ...env, OMO_TELEMETRY_INGEST_KEY: "", OMO_TELEMETRY_ALLOW_AUTOMATION: "1" },
+    stateDir: join(root, "omo-senpi", "omo-native"),
+    isConfigEnabled: () => persisted,
+    ...(isPidAlive === undefined ? {} : { isPidAlive }),
+    onOptOutPurge: purge => { purged = purge },
+  }).register(pi, { config: pi, logger: createSilentLogger() })
+  await purged
+  return pi
+}
+
+for (const [label, optOut, persisted, writerAlive, kept] of [
+  ["persisted opt-out while a consented writer is alive", {}, false, true, true],
+  ["DO_NOT_TRACK while a consented writer is alive", { DO_NOT_TRACK: "1" }, true, true, true],
+  ["SDK disabled while a consented writer is alive", { OTEL_SDK_DISABLED: "true" }, true, true, true],
+  ["DO_NOT_TRACK with no live writer", { DO_NOT_TRACK: "1" }, true, false, true],
+  ["persisted opt-out with no live writer", {}, false, false, false],
 ] as const) {
-  test(`OTLP factory purges a consented spool on startup with ${label}`, async () => {
+  test(`OTLP startup spool purge with ${label} ${kept ? "keeps" : "removes"} the spool`, async () => {
     const root = mkdtempSync(join(tmpdir(), "omo-otlp-startup-purge-"))
     let allowed = true
-    const env = {
-      OMO_CODING_AGENT_DIR: root, OMO_TELEMETRY_INGEST_KEY: "test-key",
-      OMO_TELEMETRY_ENDPOINT: "http://127.0.0.1:1",
-    }
+    const env = { OMO_CODING_AGENT_DIR: root, OMO_TELEMETRY_INGEST_KEY: "test-key", OMO_TELEMETRY_ENDPOINT: "http://127.0.0.1:1" }
     const transport = await createSenpiOtlpTransport({ env, consent: () => allowed }, message)
-    let watcher: FSWatcher | undefined
     try {
       expect(transport).not.toBeNull()
       transport?.capture(message)
       const spoolDir = join(root, "omo-senpi", "otlp")
-      expect(readdirSync(spoolDir).length).toBeGreaterThan(0)
-      const removed = Promise.withResolvers<undefined>()
-      watcher = watch(spoolDir, () => { if (!existsSync(spoolDir)) removed.resolve(undefined) })
-      const pi = new FakeExtensionAPI()
-      const component = createOmoNativeTelemetryComponent({
-        env: { ...env, ...optOut, OMO_TELEMETRY_INGEST_KEY: "", OMO_TELEMETRY_ALLOW_AUTOMATION: "1" },
-        isConfigEnabled: () => consent,
-      })
-      // A factory cannot judge consent before the component initializes its send gate.
-      expect(existsSync(spoolDir)).toBe(true)
-      await component.register(pi, { config: pi, logger: createSilentLogger() })
-      await removed.promise
-      expect(existsSync(spoolDir)).toBe(false)
+      const before = readdirSync(spoolDir).sort()
+      expect(before.length).toBeGreaterThan(0)
+      const pi = await startOptedOut(root, { ...env, ...optOut }, persisted, writerAlive ? undefined : () => false)
+      // The purge runs inside the awaited startup purge; a late sweep would also land before the sidecar import settles.
+      await import("#omo-telemetry-recovery-runtime")
+      expect(existsSync(spoolDir) ? readdirSync(spoolDir).sort() : []).toEqual(kept ? before : [])
       await pi.dispatch("session_shutdown", {})
     } finally {
-      watcher?.close()
       allowed = false
       await transport?.shutdown()
       rmSync(root, { recursive: true, force: true })
     }
   })
 }
-
-test("OTLP factory preserves a consented spool when no opt-out applies", async () => {
-  const root = mkdtempSync(join(tmpdir(), "omo-otlp-consented-start-"))
-  let allowed = true
-  const env = { OMO_CODING_AGENT_DIR: root, OMO_TELEMETRY_INGEST_KEY: "test-key", OMO_TELEMETRY_ENDPOINT: "http://127.0.0.1:1" }
-  const transport = await createSenpiOtlpTransport({ env, consent: () => allowed }, message)
-  try {
-    transport?.capture(message)
-    createSenpiTelemetryTransportFactory({ env, consent: () => true })
-    expect(readdirSync(join(root, "omo-senpi", "otlp")).length).toBeGreaterThan(0)
-  } finally {
-    allowed = false
-    await transport?.shutdown()
-    rmSync(root, { recursive: true, force: true })
-  }
-})
 
 test("OTLP uses the runtime ingest key and base endpoint and emits pinned protobuf records", async () => {
   const root = mkdtempSync(join(tmpdir(), "omo-dual-send-"))

@@ -1,4 +1,6 @@
 import type { TurnEndEvent } from "@code-yeongyu/senpi"
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import {
   createConsentGatedFetch,
   createEventTelemetryClient,
@@ -143,14 +145,25 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       // consented sessions queued.
       const isQueueScopeConsented = (scope: ConsentScope): boolean =>
         isOmoNativeTelemetryConfigEnabled(consentOptions, scope.cwd === undefined ? {} : { cwd: scope.cwd }, env, options.accountHomeDir, scope.config)
-      const purgeQueue = () => startOptOutPurge({
-        stateDir,
-        isScopeConsented: isQueueScopeConsented,
-        persistedOptOut: !isQueueScopeConsented(consentCwd === undefined ? { config: configSelectionOf(env) } : { cwd: consentCwd, config: configSelectionOf(env) }),
-        load: options.loadRecovery ?? (() => import("#omo-telemetry-recovery-runtime")),
-        ...(options.isPidAlive === undefined ? {} : { isPidAlive: options.isPidAlive }),
-        ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
-      })
+      const purgeQueue = (): Promise<void> => {
+        const persistedOptOut = !isQueueScopeConsented(consentCwd === undefined ? { config: configSelectionOf(env) } : { cwd: consentCwd, config: configSelectionOf(env) })
+        const load = options.loadRecovery ?? (() => import("#omo-telemetry-recovery-runtime"))
+        const queue = startOptOutPurge({
+          stateDir,
+          isScopeConsented: isQueueScopeConsented,
+          persistedOptOut,
+          load,
+          ...(options.isPidAlive === undefined ? {} : { isPidAlive: options.isPidAlive }),
+          ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
+        })
+        // The shared OTLP spool (beside stateDir) follows the same rule and is skipped while any writer is alive.
+        // No spool on disk means nothing to judge: the opted-out start loads no sidecar.
+        if (!persistedOptOut || !existsSync(join(stateDir, "..", "otlp"))) return queue
+        const spool = import("#omo-telemetry-recovery-runtime")
+          .then(sidecar => sidecar.purgeSenpiOtlpSpoolOnOptOut({ env, isPidAlive: options.isPidAlive, diagnostics: options.diagnostics }))
+          .catch((error: unknown) => options.diagnostics?.({ event: "telemetry_spool_sweep_failed", source: "otlp", error }))
+        return Promise.all([queue, spool]).then(() => undefined)
+      }
       const startupPurge = consentedAtRegistration ? undefined : purgeQueue()
       if (startupPurge !== undefined) options.onOptOutPurge?.(startupPurge)
       let cached = { cwd: consentCwd, at: consentNow(), value: consentedAtRegistration }

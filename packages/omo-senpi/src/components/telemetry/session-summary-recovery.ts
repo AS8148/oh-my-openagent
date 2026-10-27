@@ -1,7 +1,7 @@
 import { statSync } from "node:fs"
 import { join } from "node:path"
 import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
-import { purgeOtlpSpoolOnOptOut } from "@oh-my-opencode/telemetry-core/otlp-opt-out"
+import { purgeIdleOtlpSpool } from "@oh-my-opencode/telemetry-core/otlp-opt-out"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import type { TransportInput } from "./otlp"
 
@@ -36,11 +36,17 @@ export { createImmediateSender } from "@oh-my-opencode/telemetry-core/immediate-
 export { createSessionSummaryRecorder } from "./omo-native-session-summary"
 export { createSummaryStorage } from "./session-summary-storage"
 export { currentProcessOwner } from "./session-summary-owner"
-// Startup privacy cleanup shares this existing lightweight sidecar, never the OTLP exporter.
-export function purgeSenpiOtlpSpoolOnOptOut(input: TransportInput): void {
+// The persisted-opt-out half of the OTLP cleanup: this lightweight sidecar, never the OTLP exporter.
+export function purgeSenpiOtlpSpoolOnOptOut(input: {
+  readonly env: TransportInput["env"]
+  readonly diagnostics?: TransportInput["diagnostics"] | undefined
+  readonly isPidAlive?: ((pid: number) => boolean) | undefined
+}): void {
   const spoolRoot = resolveAgentHome({ env: input.env })
-  purgeOtlpSpoolOnOptOut({
-    ...input, productEnvPrefix: "OMO_SENPI", spoolRoot, spoolDir: join(spoolRoot, "omo-senpi", "otlp"),
+  purgeIdleOtlpSpool({
+    spoolRoot, spoolDir: join(spoolRoot, "omo-senpi", "otlp"),
+    ...(input.diagnostics === undefined ? {} : { diagnostics: input.diagnostics }),
+    ...(input.isPidAlive === undefined ? {} : { isPidAlive: input.isPidAlive }),
   })
 }
 

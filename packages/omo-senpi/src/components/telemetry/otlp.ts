@@ -18,14 +18,9 @@ export type TransportInput = {
 let runtime: Promise<typeof import("#omo-telemetry-otlp-runtime")> | undefined
 
 export function createSenpiTelemetryTransportFactory(input: TransportInput): TelemetryTransportFactory {
-  void import("#omo-telemetry-recovery-runtime").then(module => module.purgeSenpiOtlpSpoolOnOptOut(input)).catch((error: unknown) => {
-    input.diagnostics?.({
-      event: "telemetry_spool_sweep_failed", source: input.source ?? "omo-telemetry",
-      error, errorKind: error instanceof Error ? "error" : "non_error",
-    })
-  })
   return createLazyPostHogTransportFactory({
     ...input,
+    isOtlpEvent,
     loadOtlp: resolveIngestKey(input.env).length === 0 ? undefined : message => createSenpiOtlpTransport(input, message),
   })
 }

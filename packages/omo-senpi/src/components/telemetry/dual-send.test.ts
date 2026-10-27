@@ -139,7 +139,7 @@ test("dual-send does not initialize either unused transport on exit", async () =
   expect(loads).toBe(0)
 })
 
-for (const failure of ["null", "reject", "timeout"] as const) {
+for (const failure of ["reject", "timeout"] as const) {
   test(`dual-send retries OTLP ${failure} after a 60 second backoff`, async () => {
     let now = 0
     let loads = 0
@@ -151,7 +151,7 @@ for (const failure of ["null", "reject", "timeout"] as const) {
         loads++
         if (loads > 1) return recorder(otlp)
         if (failure === "reject") throw new Error("transient startup failure")
-        return failure === "null" ? null : late.promise
+        return late.promise
       },
       now: () => now,
       timeoutMs: 10,
@@ -180,6 +180,28 @@ for (const failure of ["null", "reject", "timeout"] as const) {
     }
   })
 }
+
+test("dual-send refuses OTLP once after a null load and never loads for unmapped events", async () => {
+  let now = 0
+  let loads = 0
+  const transport = createLazyPostHogTransportFactory({
+    load: async () => ({ createDefaultPostHogTransport: () => recorder([]) }),
+    loadOtlp: async () => { loads++; return null },
+    isOtlpEvent: event => event === message.event,
+    now: () => now,
+  })("key", options)
+  transport.capture({ ...message, event: "omo_senpi_daily_active" })
+  await transport.flush?.()
+  expect(loads).toBe(0)
+  transport.capture(message)
+  await transport.flush?.()
+  expect(loads).toBe(1)
+  now = 3_600_000
+  transport.capture(message)
+  await transport.flush?.()
+  expect(loads).toBe(1)
+  await transport.shutdown()
+})
 
 for (const method of ["flush", "captureImmediate"] as const) {
   test(`dual-send preserves a slow PostHog ${method} acknowledgement past OTLP bounds`, async () => {
