@@ -9,8 +9,17 @@ import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-s
 import { createPrometheusMdOnlyHook } from "./hook"
 import { resolveAllowedFile } from "./path-policy"
 import { invokeBefore } from "./fixtures/invoke-before"
+import { resolveFileWritePath } from "../../shared/resolve-file-write-path"
 
 const win32 = process.platform === "win32"
+
+function attempt(compute: () => string | undefined): string | undefined {
+  try {
+    return compute()
+  } catch (error) {
+    return `error:${error instanceof Error && "code" in error ? String(error.code) : String(error)}`
+  }
+}
 
 function shortSpelling(directory: string): string | undefined {
   if (!win32) return undefined
@@ -168,8 +177,8 @@ describe("Windows path identity: every alias form resolves to the executor's phy
       build: (project) => {
         planningWithLinks(project, "dir")
         const short = shortSpelling(project)
-        expect(short).toBeDefined()
-        expect(short!.toLowerCase()).not.toBe(realpathSync.native(project).toLowerCase())
+        if (short === undefined) throw new Error("the probe found 8.3 names but the project directory has none")
+        expect(short.toLowerCase()).not.toBe(realpathSync.native(project).toLowerCase())
         return {
           workspace: short,
           spelling: `${short}\\.omo\\plans\\x.md`,
@@ -238,6 +247,15 @@ describe("Windows path identity: every alias form resolves to the executor's phy
     test.skipIf(form.skip)(`${form.name}: the guard returns the physical path and denies the escape`, async () => {
       const layout = form.build(project)
       const workspace = layout.workspace ?? project
+      console.log(`PATH_IDENTITY_FORM ${JSON.stringify({
+        form: form.name,
+        workspace,
+        realWorkspace: attempt(() => realpathSync.native(workspace)),
+        realPlanning: attempt(() => realpathSync.native(join(workspace, ".omo"))),
+        walked: attempt(() => resolveFileWritePath(layout.spelling, workspace)),
+        decided: attempt(() => resolveAllowedFile(layout.spelling, workspace)),
+        expected: layout.expected,
+      })}`)
       expect(resolveAllowedFile(layout.spelling, workspace)).toBe(layout.expected)
       const args = { filePath: layout.spelling }
       if (layout.expected === undefined) {
