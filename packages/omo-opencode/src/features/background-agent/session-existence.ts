@@ -24,12 +24,8 @@ function extractErrorStatus(error: unknown): number | undefined {
   return typeof error.status === "number" ? error.status : undefined
 }
 
-export function isSessionNotFoundError(error: unknown): boolean {
+function isSessionNotFoundError(error: unknown): boolean {
   if (extractErrorStatus(error) === 404) {
-    return true
-  }
-
-  if (typeof error === "object" && error !== null && "name" in error && error.name === "NotFoundError") {
     return true
   }
 

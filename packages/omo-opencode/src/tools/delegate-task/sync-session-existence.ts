@@ -1,17 +1,23 @@
-import { isSessionNotFoundError } from "../../features/background-agent/session-existence"
 import type { OpencodeClient } from "./types"
 
 type SessionLookupResult = { data?: unknown; error?: unknown }
 
-// Only a definitive not-found answer counts: a transport blip or an unknown error must not
-// end a live task, so those read as "still exists" and the normal poll bounds apply.
+// Only a definite not-found (HTTP 404 or the SDK's NotFoundError body) counts as deleted:
+// a transport blip, a 5xx or any other error must not end a live task, so those read as
+// "still exists" and the normal poll bounds apply.
+export function isDefiniteSessionNotFound(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false
+  if ("status" in error && error.status === 404) return true
+  return "name" in error && error.name === "NotFoundError"
+}
+
 export async function isSyncSessionDeleted(client: OpencodeClient, sessionID: string): Promise<boolean> {
   if (typeof client.session?.get !== "function") return false
   try {
     const response: SessionLookupResult = await client.session.get({ path: { id: sessionID } })
-    return response.error !== undefined && response.error !== null && isSessionNotFoundError(response.error)
+    return isDefiniteSessionNotFound(response.error)
   } catch (error) {
-    return isSessionNotFoundError(error)
+    return isDefiniteSessionNotFound(error)
   }
 }
 

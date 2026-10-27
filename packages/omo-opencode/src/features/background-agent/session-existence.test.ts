@@ -41,23 +41,3 @@ describe("verifySessionExists", () => {
     expect(result).toBe("unknown")
   })
 })
-
-describe("checkSessionExistence for the SDK not-found shape", () => {
-  test("#given session.get answers with the SDK NotFoundError body #when checking #then the session is missing", async () => {
-    // given
-    const client = unsafeTestValue<OpencodeClient>({
-      session: {
-        get: mock(async () => ({
-          data: undefined,
-          error: { name: "NotFoundError", data: { message: "Session not found: session-123" } },
-        })),
-      },
-    })
-
-    // when
-    const result = await checkSessionExistence(client, "session-123")
-
-    // then
-    expect(result).toBe("missing")
-  })
-})
