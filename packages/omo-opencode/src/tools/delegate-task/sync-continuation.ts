@@ -17,6 +17,7 @@ import { getTaskID } from "./task-id"
 import { resolveMetadataModel } from "./resolve-metadata-model"
 import { log } from "../../shared/logger"
 import { cancelSyncSessionDeletion, scheduleSyncSessionDeletion } from "./sync-session-cleanup"
+import { formatDeletedSyncSessionError, isSyncSessionDeleted } from "./sync-session-existence"
 
 type ResumeModel = { providerID: string; modelID: string }
 
@@ -107,6 +108,10 @@ export async function executeSyncContinuation(
   const continuationID = getTaskID(args)
   if (!continuationID) {
     throw new Error("task_id is required to continue a sync task")
+  }
+  if (await isSyncSessionDeleted(client, continuationID)) {
+    log("[task] Refusing to continue deleted sync session", { sessionID: continuationID })
+    return formatDeletedSyncSessionError(continuationID)
   }
   cancelSyncSessionDeletion(continuationID)
   const detachFromManager = executorCtx.manager?.attachSyncContinuation?.(continuationID)
