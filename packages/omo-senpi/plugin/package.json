@@ -6,6 +6,7 @@
   "type": "module",
   "imports": {
     "#omo-telemetry-posthog-runtime": "./extensions/omo-telemetry-posthog.js",
+    "#omo-telemetry-otlp-runtime": "./extensions/omo-telemetry-otlp.js",
     "#omo-task-runtime": "./extensions/omo-task.js",
     "#omo-computer-use-runtime": "./extensions/omo-computer-use.js",
     "#omo-memory-doctor-runtime": "./extensions/omo-memory-doctor.js",
