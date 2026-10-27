@@ -1,0 +1,33 @@
+# Grounding: brand surfaces, guideline source, ideal state, gap ledger
+
+Run this before the brief for a new screen or flow, a redesign ("this looks bad", "make it better", "rework the design system"), and any design-system creation or rework. It replaces taste guesses with a written bar: what the product already is, what a good interface does for its users, and every place the product falls short. A small change skips the run and reads the ledger in `DESIGN.md` section 9 when one exists.
+
+The output is `DESIGN.md` section 9 (`design-system-architecture.md` gives the template), or the change description when the project has no `DESIGN.md`. Steps 1-2 are independent: run them in parallel.
+
+## 1. Brand surfaces
+
+List every surface the product already ships: each app, the marketing site, docs, the logo, a mascot or illustration set. Capture each through `/visual-qa` and extract its colour, type, shape, density, and illustration language. The new design continues that language. Each departure gets one line in `DESIGN.md` section 1 naming what the user gains from it. Without that line, the design reads as a different product, however good it looks. "Make it better" means fine-tuning the existing system, not replacing it, unless the user asks for a replacement.
+
+## 2. Guideline source, read in full
+
+Pick the authoritative sources for the platform and the domain: the platform's guidelines (Apple Human Interface Guidelines, Material 3, Fluent 2), WCAG 2.2, and the project's own `DESIGN.md`. Read every page. If a source is too large for one context (the Apple HIG runs to hundreds of pages), split it across parallel readers with `/mass-ulw`, or with parallel subagents where it is unavailable. Each reader returns the principles from its pages with their URLs. A skimmed or sampled source counts as unread.
+
+## 3. Universal principles
+
+Drop the platform idioms: named materials, system icon sets, platform control chrome, and vendor elevation and motion names. Keep what holds for any interface: hierarchy, feedback, consistency, error prevention and recovery, input effort, density, legibility, and accessibility. Tie each principle to a persona and a journey step. Name who uses the product and what they are trying to get done. Then name the step where the principle decides the experience: first visit, daily use, recovery from an error, or a return after time away.
+
+## 4. Ideal state
+
+For each journey step, write what the product does at its best: what the user sees first, the one action, the feedback after it, and the way back from a mistake. Write it so a reviewer can check it on a screenshot: "the run's status and its one next action are the first thing on the screen" is checkable; "clean and intuitive" is not.
+
+## 5. Gap ledger
+
+Explore the product as it is: explore agents across the UI code, plus `/visual-qa` captures of every screen and state at 390 and 1440 in both themes. List every difference from the ideal state. Do not rank the small ones away. Add every draft-guard violation (`check-draft-guard.ts` output plus the unlinted tells in `SKILL.md`'s draft guard) and every WCAG 2.2 AA failure from `SKILL.md` Verify. One row per gap:
+
+| ID | Screen / state | Gap | Principle or rule broken | Evidence | Fix | Proof | Status |
+|---|---|---|---|---|---|---|---|
+| G1 | Settings / save | Save button widens from 96 to 128 px when its spinner appears | State-stable controls | `before/settings-save-loading.png` | Spinner overlays the hidden label in a fixed-width slot | Width probe equal across idle/loading/done; `/visual-qa` before/after pair | open |
+
+## 6. Close the ledger
+
+Fix in scoped passes (`SKILL.md` Verify). A row closes only with its before/after pair and the `/visual-qa` item or probe that proves the fix. In a PR, the pairs go in the body. On a long run, report progress as closed/total ledger rows.
