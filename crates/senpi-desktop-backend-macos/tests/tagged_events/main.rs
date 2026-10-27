@@ -19,6 +19,14 @@ fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// `a/b.rs` on every platform (Windows joins with `\\`).
+fn slash_path(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn found(source: &str) -> Vec<&'static str> {
     bypasses(&tokens(source))
 }
@@ -113,7 +121,7 @@ fn only_modules_declared_under_cfg_test_are_test_code_whatever_their_name() {
         .iter()
         .map(|module| {
             (
-                module.path.display().to_string(),
+                slash_path(&module.path),
                 (module.test, bypasses(&module.production_tokens)),
             )
         })
@@ -166,7 +174,7 @@ fn no_production_source_creates_an_untagged_event() {
         .flat_map(|module| {
             bypasses(&module.production_tokens)
                 .into_iter()
-                .map(|form| format!("{}: {form}", module.path.display()))
+                .map(|form| format!("{}: {form}", slash_path(&module.path)))
         })
         .collect();
     assert!(
