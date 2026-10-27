@@ -10,7 +10,9 @@ import { fileURLToPath } from "node:url"
 // change: delete this test in the PR that wires the key, after both fixes have shipped.
 
 const REPOSITORY_ROOT = fileURLToPath(new URL("..", import.meta.url))
-const BUILD_DIRS = [".github/workflows", ".github/actions", "script"]
+const BUILD_DIRS = [".github", "script"]
+const BUILD_DEFINE_FILE = "packages/omo-senpi/plugin/scripts/build-extension-core.mjs"
+const EMPTY_DEFAULT_DEFINE = `${"OMO_TELEMETRY_INGEST_KEY"}: process.env.OMO_TELEMETRY_INGEST_KEY ?? "",`
 const KEY = "OMO_TELEMETRY_INGEST_KEY"
 const SELF = "script/telemetry-ingest-key-gate.test.ts"
 
@@ -47,5 +49,11 @@ describe("telemetry ingest key gate", () => {
       }
     }
     expect(offenders).toEqual([])
+  })
+
+  test("#given the plugin build define #then its only source is the environment, with an empty default", async () => {
+    const text = await readFile(join(REPOSITORY_ROOT, BUILD_DEFINE_FILE), "utf8")
+    const keyLines = text.split("\n").filter((line) => line.includes(KEY)).map((line) => line.trim())
+    expect(keyLines).toEqual([EMPTY_DEFAULT_DEFINE])
   })
 })
