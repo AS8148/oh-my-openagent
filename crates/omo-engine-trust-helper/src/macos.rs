@@ -274,8 +274,10 @@ fn read_keychain() -> StoreRead {
     }
 }
 
-/// The OS SSL-server verdict for one intermediate candidate under the root candidates only (design 4.4
-/// item 3): `SecPolicyCreateSSL(true, NULL)`, custom anchors only, no network fetch. Never BasicX509.
+/// The chain step for one intermediate candidate under the root candidates only (design 4.4 item 3,
+/// revision 12 option C): `SecPolicyCreateBasicX509()`, custom anchors only, no network fetch. Under
+/// custom anchors the strict SSL server policy rejects CA certificates valid for more than 825 days or
+/// without a serverAuth EKU (measured), so the EKU rule is applied by the policy module instead.
 pub fn evaluate_intermediate(
     certificate: &SecCertificate,
     anchors: &[CFRetained<SecCertificate>],
@@ -285,7 +287,7 @@ pub fn evaluate_intermediate(
         path: Vec::new(),
         explicit_distrust: false,
     };
-    let policy = unsafe { SecPolicy::new_ssl(true, None) };
+    let policy = unsafe { SecPolicy::new_basic_x509() };
     let mut trust: *mut SecTrust = ptr::null_mut();
     let status = unsafe {
         SecTrust::create_with_certificates(certificate, Some(&policy), NonNull::from(&mut trust))
