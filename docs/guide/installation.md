@@ -601,7 +601,7 @@ When OpenCode Zen is the best available provider, common examples:
 | **plan-consultant**   | `opencode/claude-fable-5-1` (max)                    |
 | **plan-reviewer**     | `opencode/gpt-6-astra` (high)                        |
 | **deep** (category)   | `opencode/gpt-6-astra` (high)                        |
-| main agent (session)  | `opencode/claude-opus-5-5` or `opencode-go/kimi-k3`    |
+| main agent (session)  | `opencode/claude-opus-5-5` or `opencode-go/kimi-k3.1-pro` |
 
 Run the installer with `--opencode-zen=yes` and select "Yes" for OpenCode Zen at the prompt. If your OpenCode environment prompts for provider authentication, follow the OpenCode provider flow for `opencode/` models.
 
@@ -619,7 +619,8 @@ Not all models behave the same way. Understanding "similar" families helps you m
 | **Claude Sonnet 5.5**    | anthropic, github-copilot, opencode | The `unspecified-low` category default (medium).                                            |
 | **Claude Sonnet 5**      | anthropic, github-copilot, opencode | Faster, cheaper. Good balance.                                                              |
 | **Claude Haiku 5.5**     | anthropic, github-copilot           | Fast and cheap. Good for quick tasks.                                                       |
-| **Kimi K3**              | opencode-go, kimi-for-coding, moonshotai, opencode | Top recommended Kimi for the main agent when thinking-token cost is acceptable.              |
+| **Kimi K3.1 Pro**        | opencode-go, kimi-for-coding, moonshotai, moonshotai-cn | Top recommended Kimi for the main agent when thinking-token cost is acceptable. 1M context. |
+| **Kimi K3**              | opencode, bailian-coding-plan, firmware, ollama-cloud, aihubmix | Previous Kimi, kept on the providers that do not serve K3.1 Pro yet.                       |
 | **Kimi K2.7**            | opencode-go (manual choice)         | Restrained Kimi fallback for Claude-like orchestration paths.                               |
 | **Kimi K3 Free**       | opencode                            | Free-tier Kimi. Rate-limited but functional.                                                |
 | **GLM 5.2**              | zai-coding-plan, opencode-go, opencode, bailian-coding-plan | Claude-like behavior. Current OpenCode Go / Z.ai fallback entry.                            |
@@ -669,7 +670,7 @@ Not all models behave the same way. Understanding "similar" families helps you m
 
 | Agent               | Role                                       | Default Chain                                                          |
 | ------------------- | ------------------------------------------ | ---------------------------------------------------------------------- |
-| **plan-consultant** | Pre-planning gap analysis for `/ulw-plan`  | anthropic\|github-copilot\|opencode/claude-fable-5-1 (max) → anthropic\|github-copilot\|opencode/claude-opus-5-5 (max) → opencode-go\|kimi-for-coding\|moonshotai\|opencode/kimi-k3 (max) |
+| **plan-consultant** | Pre-planning gap analysis for `/ulw-plan`  | anthropic\|github-copilot\|opencode/claude-fable-5-1 (max) → anthropic\|github-copilot\|opencode/claude-opus-5-5 (max) → opencode-go\|kimi-for-coding\|moonshotai/kimi-k3.1-pro (max) → opencode/kimi-k3 (max) |
 | **plan-reviewer**   | High-accuracy plan review gate             | openai\|chatgpt-subscription/gpt-6-astra (xhigh) → github-copilot/gpt-6-astra (high) → openai\|chatgpt-subscription\|opencode/gpt-6-astra (high) → anthropic\|github-copilot\|opencode/claude-opus-5-5 (max) → … (full chain in source) |
 | **explore**         | Fast codebase grep                         | kimi-coding\|kimi-for-coding/kimi-for-coding-highspeed (off) → openai\|chatgpt-subscription/gpt-6-luna-fast (low) → anthropic\|github-copilot/claude-haiku-5-5 (medium) → deepseek/deepseek-flash (max) → opencode-go\|bailian-coding-plan/qwen3.7-plus → opencode-go/minimax-m2.7 |
 | **librarian**       | Docs/code search                           | (same chain as `explore`)                                              |
