@@ -10,9 +10,9 @@ import { languageTag } from "@/i18n/config"
 import { routing } from "@/i18n/routing"
 
 export const revalidate = 3600
-// The locale segment is a closed set: any other first segment (an unmatched /api or asset path) is an unmatched URL
-// and gets app/global-not-found.tsx, not a layout-less error page.
-export const dynamicParams = false
+// No `dynamicParams = false` here: on this root segment it would close every route below it, and on Cloudflare
+// (empty incremental cache) each cache miss would 404. Unknown locales still 404 through notFound() below, which
+// renders app/global-not-found.tsx.
 export const viewport = siteViewport
 
 export function generateMetadata(): Promise<Metadata> {

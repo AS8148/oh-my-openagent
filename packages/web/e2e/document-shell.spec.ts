@@ -1,4 +1,10 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { expect, test } from "@playwright/test"
+
+type PrerenderManifest = {
+  readonly dynamicRoutes: Record<string, { readonly fallback: string | null | false }>
+}
 
 const ROUTES = [
   ["/", "en"],
@@ -79,4 +85,53 @@ test.describe("Document shell", () => {
     // then
     expect(obscured).toEqual([])
   })
+
+  // On the Cloudflare Worker the incremental cache starts empty, so every request is a cache miss. A route
+  // built with `fallback: false` (a `dynamicParams = false` anywhere above it) answers that miss with a 404.
+  test("the build leaves every locale route open to on-demand rendering", () => {
+    // given
+    const manifest = JSON.parse(
+      readFileSync(join(process.cwd(), ".next/prerender-manifest.json"), "utf8"),
+    ) as PrerenderManifest
+
+    // when
+    const localeRoutes = Object.entries(manifest.dynamicRoutes).filter(([route]) =>
+      route.startsWith("/[locale]"),
+    )
+
+    // then
+    expect(localeRoutes.length).toBeGreaterThan(0)
+    expect(
+      localeRoutes.filter(([, entry]) => entry.fallback === false).map(([route]) => route),
+    ).toEqual([])
+  })
+
+  // The proxy rewrites unprefixed paths into the default locale, so both land on the localized 404.
+  for (const [route, lang, skipName, title] of [
+    ["/no-such-page", "en", "Skip to content", "This page could not be found."],
+    ["/ko/no-such-page", "ko", "본문으로 건너뛰기", "페이지를 찾을 수 없습니다."],
+  ] as const) {
+    test(`${route} is a ${lang} 404 whose first Tab reaches the skip link`, async ({ page }) => {
+      // given / when
+      const response = await page.goto(route)
+
+      // then
+      expect(response?.status()).toBe(404)
+      await expect(page.locator("html")).toHaveAttribute("lang", lang)
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(title)
+
+      // when
+      await page.locator("body").focus()
+      await page.keyboard.press("Tab")
+
+      // then
+      await expect(page.getByRole("link", { name: skipName })).toBeFocused()
+
+      // when
+      await page.keyboard.press("Enter")
+
+      // then
+      await expect(page.locator("main#main-content")).toBeFocused()
+    })
+  }
 })
