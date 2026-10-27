@@ -3,6 +3,7 @@ import { appendFile, cp, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFil
 import { tmpdir } from "node:os"
 import { dirname, join, parse } from "node:path"
 import { fileURLToPath } from "node:url"
+import bundleBudget from "../../bundle-budget.json" with { type: "json" }
 
 import { PERSONA_ASSET_FILES } from "@oh-my-opencode/memory-core/personas"
 
@@ -438,7 +439,7 @@ describe("checkExtensionCurrent", () => {
     // old 1_419_425 + 4_096 cap); this branch 1,423,766 B after the persisted-opt-out spool purge (node 24, bun 1.4.4,
     // linux x64). Base reset to the measurement with the standing 4,096 B headroom; bundle-size.test.ts's 1,425,000 B
     // budget stays the binding package ceiling.
-    expect(Buffer.byteLength(main)).toBeLessThanOrEqual(1_423_766 + 4_096)
+    expect(Buffer.byteLength(main)).toBeLessThanOrEqual(bundleBudget.omoJsBytes)
     expect(await readFile(telemetryOtlpOutputPath, "utf8")).not.toContain("#omo-telemetry-otlp-runtime")
   })
 
