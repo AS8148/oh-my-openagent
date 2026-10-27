@@ -146,6 +146,7 @@ export async function runLauncher(args = process.argv.slice(2)) {
   if (command === "thread") {
     process.exitCode = await runThreadCommand(args.slice(1), {
       engine: { run: engineHostCall },
+      reinstall: `Reinstall omo with: ${updateTarget().command}, then retry.`,
       pluginRoot: join(packageRoot, "plugin"),
       agentDir: canonicalAgentDir(),
       env: process.env,
@@ -185,13 +186,12 @@ export async function runLauncher(args = process.argv.slice(2)) {
       process.exitCode = await runDoctorModels(args.slice(2), { agentDir: canonicalAgentDir() })
       return
     }
-    const [categoryCoverage, computerUse, configDiagnostics, dori, reflectionLock] = args[1] === "--reap"
-      ? [[], [], [], [], []]
+    const [categoryCoverage, computerUse, configDiagnostics, reflectionLock] = args[1] === "--reap"
+      ? [[], [], [], []]
       : await Promise.all([
           doctorCoverageLines({ agentDir: canonicalAgentDir() }),
           doctorComputerUseLines(),
           doctorConfigLines(),
-          import("./dori.js").then((hook) => hook.doriDoctorLines()),
           reflectionLockReport(),
         ])
     runDoctor(await detectHarnesses(), args.slice(1), {
@@ -199,15 +199,8 @@ export async function runLauncher(args = process.argv.slice(2)) {
       categoryCoverage,
       computerUse,
       configDiagnostics,
-      dori,
       reflectionLock,
     })
-    return
-  }
-  if (command === "dori" || command === "gateway") {
-    if (command === "gateway") process.stderr.write("omo gateway is deprecated; use omo dori instead\n")
-    const { runDoriCommand } = await import("./dori.js")
-    process.exitCode = await runDoriCommand(args.slice(1))
     return
   }
   if (command === "setup") {

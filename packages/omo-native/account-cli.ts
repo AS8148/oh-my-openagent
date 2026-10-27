@@ -5,17 +5,19 @@ import {
   createCredentialStore,
   type CredentialStore,
   CredentialStoreError,
+  INTERACTIVE_READ_WAIT,
   KeychainLockedError,
   SecretServiceUnavailableError,
 } from "../omo-opencode/src/cli/service-auth/keystore"
 import { type Credentials, credentialSchema, serviceOrigin, SignInError } from "../omo-opencode/src/cli/service-auth/protocol"
-import { createSession, SessionEnded } from "../omo-opencode/src/cli/service-auth/session"
+import { createSession, type Session, SessionEnded } from "../omo-opencode/src/cli/service-auth/session"
 import { RecoveryExhausted, RecoveryPending } from "../omo-opencode/src/cli/service-auth/owned-refresh"
 
 // `omo account` lets the desktop share this machine's one OS-keychain credential with `omo login`
 // (one sync device per machine). It is a machine interface: one JSON line on stdout, secrets only on
 // stdin and stdout, and the exit code carries the outcome.
 // Exit 9 reports native storage failures/timeouts as {"error":"store-unavailable"} without another read.
+// Exit 10 is exit 4 after an explicit `omo logout` (its marker, #11434): 4 alone may be a store that read empty.
 export const ACCOUNT_EXIT = {
   ok: 0,
   failed: 1,
@@ -27,6 +29,7 @@ export const ACCOUNT_EXIT = {
   keychainLocked: 7,
   keychainUnavailable: 8,
   storeUnavailable: 9,
+  loggedOut: 10,
 } as const
 
 export interface AccountCommandDependencies {
@@ -44,6 +47,16 @@ const deviceOf = (credentials: Credentials) => ({ id: credentials.device.id, nam
 const reply = (dependencies: AccountCommandDependencies, value: unknown, code: number = ACCOUNT_EXIT.ok): number => {
   dependencies.output(JSON.stringify(value))
   return code
+}
+
+const sessionOf = (dependencies: AccountCommandDependencies): Session =>
+  createSession({ api: dependencies.api, store: dependencies.store, ...(dependencies.home === undefined ? {} : { home: dependencies.home }) })
+
+async function signedOut(dependencies: AccountCommandDependencies, session: Session): Promise<number> {
+  const marker = await session.signedOutMarker()
+  return marker === null
+    ? reply(dependencies, { signedIn: false }, ACCOUNT_EXIT.signedOut)
+    : reply(dependencies, { signedIn: false, signedOut: marker }, ACCOUNT_EXIT.loggedOut)
 }
 
 const parseInput = (text: string): Credentials | null => {
@@ -65,7 +78,7 @@ async function adopt(dependencies: AccountCommandDependencies, replace: boolean)
     dependencies.error("omo account adopt: stdin is not a valid credential")
     return ACCOUNT_EXIT.invalid
   }
-  const session = createSession({ api: dependencies.api, store: dependencies.store, ...(dependencies.home === undefined ? {} : { home: dependencies.home }) })
+  const session = sessionOf(dependencies)
   return session.update(async current => {
     if (current !== null && current.device.id !== incoming.device.id && !replace) {
       return reply(dependencies, { conflict: { device: deviceOf(current) } }, ACCOUNT_EXIT.conflict)
@@ -76,15 +89,16 @@ async function adopt(dependencies: AccountCommandDependencies, replace: boolean)
       current.refreshState !== "uncertain" &&
       Date.parse(current.accessTokenExpiresAt) > Date.parse(incoming.accessTokenExpiresAt)
     if (!keepCurrent) await dependencies.store.write(incoming)
+    await session.clearSignedOutMarker()
     return reply(dependencies, { adopted: true, device: deviceOf(incoming) })
   })
 }
 
 async function token(dependencies: AccountCommandDependencies): Promise<number> {
-  const session = createSession({ api: dependencies.api, store: dependencies.store, ...(dependencies.home === undefined ? {} : { home: dependencies.home }) })
+  const session = sessionOf(dependencies)
   try {
     const current = await session.accessSnapshot()
-    if (current === null) return reply(dependencies, { signedIn: false }, ACCOUNT_EXIT.signedOut)
+    if (current === null) return signedOut(dependencies, session)
     return reply(dependencies, {
       accessToken: current.accessToken, accessTokenExpiresAt: current.accessTokenExpiresAt,
       device: deviceOf(current), ...(current.owner === undefined ? {} : { owner: current.owner }),
@@ -98,7 +112,7 @@ async function token(dependencies: AccountCommandDependencies): Promise<number> 
     dependencies.error(error instanceof Error ? error.message : "omo account token: the refresh failed")
     // The refusal code tells the desktop why the sign-in ended (desktop#3522); the message never leaves stderr.
     // Any other error with the item gone means another process signed out (forget/logout) meanwhile.
-    if (after === null) return reply(dependencies, { signedIn: false }, ACCOUNT_EXIT.signedOut)
+    if (after === null) return signedOut(dependencies, session)
     if (after.refreshState === "uncertain") return reply(dependencies, { ended: { code: "refresh_recovery_expired" } }, ACCOUNT_EXIT.ended)
     return ACCOUNT_EXIT.failed
   }
@@ -124,9 +138,10 @@ async function runVerb(dependencies: AccountCommandDependencies, args: readonly 
         return ACCOUNT_EXIT.invalid
       }
       const sync = account === undefined ? {} : { sync: await syncStateOf(dependencies.pinDir(), account) }
+      const marker = current === null ? await sessionOf(dependencies).signedOutMarker() : null
       return reply(
         dependencies,
-        current === null ? { signedIn: false, ...sync } : { signedIn: true, device: deviceOf(current), refreshState: current.refreshState ?? "ok", ...sync },
+        current === null ? { signedIn: false, ...(marker === null ? {} : { signedOut: marker }), ...sync } : { signedIn: true, device: deviceOf(current), refreshState: current.refreshState ?? "ok", ...sync },
       )
     }
     case "adopt":
@@ -135,14 +150,10 @@ async function runVerb(dependencies: AccountCommandDependencies, args: readonly 
       return token(dependencies)
     case "export": {
       const current = await dependencies.store.read()
-      return current === null ? reply(dependencies, { signedIn: false }, ACCOUNT_EXIT.signedOut) : reply(dependencies, current)
+      return current === null ? signedOut(dependencies, sessionOf(dependencies)) : reply(dependencies, current)
     }
     case "forget": {
-      const session = createSession({
-        api: dependencies.api,
-        store: dependencies.store,
-        ...(dependencies.home === undefined ? {} : { home: dependencies.home }),
-      })
+      const session = sessionOf(dependencies)
       await session.update(async () => dependencies.store.clear())
       return reply(dependencies, { forgotten: true })
     }
@@ -181,7 +192,7 @@ export async function runAccountCommand(args: readonly string[]): Promise<void> 
     {
       api,
       get store() {
-        store ??= createCredentialStore(api)
+        store ??= createCredentialStore(api, { wait: INTERACTIVE_READ_WAIT })
         return store
       },
       pinDir: () => syncPinDir(resolveMemoryRoot(process.env, process.cwd())),

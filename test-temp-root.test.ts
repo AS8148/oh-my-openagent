@@ -1,9 +1,44 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { removeTreeSync } from "./test-support/remove-tree"
 import { removeAbandonedRunRoots } from "./test-temp-root"
+
+describe("test temp root teardown", () => {
+  test("#given a removed run root #when another child starts #then temp variables point to the original live directories", () => {
+    const script = `
+      import { existsSync } from "node:fs";
+      const names = ["TMPDIR", "TEMP", "TMP"];
+      const previous = names.map(name => process.env[name]);
+      const { runTestTempRootTeardown } = await import(${JSON.stringify(join(import.meta.dir, "test-temp-root.ts"))});
+      const root = process.env.TEMP;
+      runTestTempRootTeardown();
+      if (existsSync(root)) throw new Error("run root was not removed");
+      const child = Bun.spawnSync([process.execPath, "-e", ${JSON.stringify(`
+        const fs = require("node:fs");
+        if (!fs.existsSync(process.env.TEMP ?? process.env.TMP ?? "")) {
+          console.error("bash.exe: warning: could not find /tmp, please create!");
+          process.exit(1);
+        }
+      `)}], { env: process.env, stdout: "pipe", stderr: "pipe" });
+      if (child.exitCode !== 0) throw new Error(child.stderr.toString());
+      if (names.some((name, index) => process.env[name] !== previous[index])) {
+        throw new Error("temp environment was not restored exactly");
+      }
+    `
+    const result = spawnSync(process.execPath, ["-e", script], {
+      cwd: import.meta.dir,
+      env: process.env,
+      encoding: "utf8",
+      timeout: 20_000,
+    })
+    expect(result.error).toBeUndefined()
+    expect(result.stderr).toBe("")
+    expect(result.status).toBe(0)
+  })
+})
 
 describe("removeAbandonedRunRoots", () => {
   const fixtures: string[] = []
@@ -34,12 +69,21 @@ describe("removeAbandonedRunRoots", () => {
       if (!held || !removable) throw new Error("missing abandoned root fixtures")
       const attempted: string[] = []
       const error = Object.assign(new Error(code), { code })
+      const warnings = spyOn(console, "warn").mockImplementation(() => {})
 
-      expect(() => removeAbandonedRunRoots(fixture, (root) => {
-        attempted.push(root)
-        if (root === held) throw error
-        removeTreeSync(root)
-      })).not.toThrow()
+      try {
+        expect(() => removeAbandonedRunRoots(fixture, (root) => {
+          attempted.push(root)
+          if (root === held) throw error
+          removeTreeSync(root)
+        })).not.toThrow()
+        const reports = warnings.mock.calls
+          .filter(([kind]) => kind === "SKIPPED_TEST_TEMP_ROOT")
+          .map(([, record]) => JSON.parse(String(record)))
+        expect(reports).toContainEqual(expect.objectContaining({ root: held, code }))
+      } finally {
+        warnings.mockRestore()
+      }
 
       expect(attempted.sort()).toEqual([held, removable].sort())
       expect(existsSync(held)).toBe(true)
