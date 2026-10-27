@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import type { GitMemoryRepo } from "../git"
 import type { CompiledBlockStore } from "./block-persist"
 import { compileMemoryBlockWithReads, type CompileMemoryBlockOptions, type MemoryExpiry } from "./compile"
-import { decodeStoredBlock, encodeStoredBlock, expirySlot } from "./expiry-slot"
+import { expirySlot } from "./expiry-slot"
 import { DEFAULT_EXTERNAL_PROJECTION_LIMITS } from "./external-projection"
 
 export const MEMORY_TEMPLATE_STRUCTURE_VERSION = "senpi-memory-v2"
@@ -154,8 +154,7 @@ export class MemoryBlockCache {
   ): Promise<CompiledMemoryBlock> {
     const store = this.options.store === undefined ? undefined : await this.storeWithin(repo.dir)
     const key = this.persistKey(revision, name)
-    const text = store === undefined ? undefined : await store.get(key)
-    const stored = text === undefined ? undefined : decodeStoredBlock(text)
+    const stored = store === undefined ? undefined : await store.getBlock(key)
     if (stored !== undefined && stored.slot === expirySlot(stored.expiries, asOfMs)) {
       return { block: stored.block, expiries: stored.expiries }
     }
@@ -164,7 +163,7 @@ export class MemoryBlockCache {
     try {
       const { block, degraded, expiries } = await computed
       if (degraded.length > 0) this.options.onDegraded?.({ dir: repo.dir, revision, reasons: degraded })
-      else store?.put(key, encodeStoredBlock({ block, expiries, slot: expirySlot(expiries, asOfMs) }))
+      else store?.putBlock(key, { block, expiries, slot: expirySlot(expiries, asOfMs) })
       return { block, expiries }
     } finally {
       this.computing.delete(computed)

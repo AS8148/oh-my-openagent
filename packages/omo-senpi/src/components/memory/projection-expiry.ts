@@ -5,23 +5,20 @@
 
 import type { MemoryExpiry } from "@oh-my-opencode/memory-core"
 
-export const MEMORY_EXPIRED_METADATA_TOKEN = "Memory expired after this session's prompt was pinned"
+export const MEMORY_EXPIRED_METADATA_TOKEN = "Expired since this prompt was pinned"
 const MAX_LISTED_PATHS = 20
 
-/** Expiries that were live at the pin, passed by `nowMs`, and not yet announced, oldest first. */
+/** Expiries that were live at the pin, passed by `nowMs`, and not yet announced. */
 export function newlyExpired(
   expiries: readonly MemoryExpiry[],
   window: { readonly pinnedAtMs: number; readonly noticedThroughMs: number; readonly nowMs: number },
 ): MemoryExpiry[] {
   const after = Math.max(window.pinnedAtMs, window.noticedThroughMs)
-  return expiries
-    .filter((expiry) => expiry.expiresAtMs > after && expiry.expiresAtMs <= window.nowMs)
-    .sort((a, b) => a.expiresAtMs - b.expiresAtMs || a.path.localeCompare(b.path))
+  return expiries.filter((expiry) => expiry.expiresAtMs > after && expiry.expiresAtMs <= window.nowMs)
 }
 
 export function renderExpiredLine(expired: readonly MemoryExpiry[]): string {
-  const shown = expired.slice(0, MAX_LISTED_PATHS).map((expiry) => `${expiry.path} (${new Date(expiry.expiresAtMs).toISOString()})`)
-  const hidden = expired.length - shown.length
-  const listed = [...shown, ...(hidden > 0 ? [`${hidden} more`] : [])].join(", ")
-  return `- ${MEMORY_EXPIRED_METADATA_TOKEN}: ${listed}. The prompt keeps the pinned copy until the next repin; treat what these blocks say as no longer true.`
+  const hidden = expired.length - MAX_LISTED_PATHS
+  const listed = expired.slice(0, MAX_LISTED_PATHS).map((expiry) => expiry.path).join(", ")
+  return `- ${MEMORY_EXPIRED_METADATA_TOKEN} (no longer true): ${listed}${hidden > 0 ? `, ${hidden} more` : ""}.`
 }

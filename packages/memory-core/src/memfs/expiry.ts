@@ -12,14 +12,11 @@
 import { decodeScalarSource } from "./frontmatter-scalar"
 import type { MemoryFrontmatter } from "./frontmatter"
 
-export const MEMORY_EXPIRES_KEY = "expires"
-
-const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
-const INSTANT_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})$/
+const EXPIRY_RE = /^(\d{4}-\d{2}-\d{2})(?:T([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?$/
 
 /** The instant (epoch ms) the file stops being projected, or `undefined` when it declares no readable expiry. */
 export function memoryExpiresAtMs(frontmatter: MemoryFrontmatter): number | undefined {
-  const raw = frontmatter.extra?.[MEMORY_EXPIRES_KEY]
+  const raw = frontmatter.extra?.expires
   return raw === undefined ? undefined : parseExpiryInstant(decodeScalarSource(raw.trim()))
 }
 
@@ -29,37 +26,12 @@ export function isMemoryExpired(expiresAtMs: number | undefined, asOfMs: number)
 }
 
 export function parseExpiryInstant(value: string): number | undefined {
-  const date = DATE_RE.exec(value)
-  if (date !== null) return utcInstant(Number(date[1]), Number(date[2]), Number(date[3]), 0, 0, 0, 0, 0)
-  const instant = INSTANT_RE.exec(value)
-  if (instant === null) return undefined
-  const [, year, month, day, hour, minute, second, fraction, zone] = instant
-  const offsetMinutes = zone === undefined || zone === "Z" ? 0 : zoneOffsetMinutes(zone)
-  if (offsetMinutes === undefined) return undefined
-  const ms = fraction === undefined ? 0 : Math.floor(Number(`0.${fraction}`) * 1000)
-  return utcInstant(Number(year), Number(month), Number(day), Number(hour), Number(minute), Number(second ?? "0"), ms, offsetMinutes)
-}
-
-function zoneOffsetMinutes(zone: string): number | undefined {
-  const hours = Number(zone.slice(1, 3))
-  const minutes = Number(zone.slice(4, 6))
-  if (hours > 23 || minutes > 59) return undefined
-  return (zone.startsWith("-") ? -1 : 1) * (hours * 60 + minutes)
-}
-
-function utcInstant(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  second: number,
-  ms: number,
-  offsetMinutes: number,
-): number | undefined {
-  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return undefined
-  const local = Date.UTC(year, month - 1, day, hour, minute, second, ms)
-  const check = new Date(local)
-  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return undefined
-  return local - offsetMinutes * 60_000
+  const match = EXPIRY_RE.exec(value)
+  const date = match?.[1]
+  if (date === undefined) return undefined
+  // Date.parse rolls an impossible day over (Feb 30 -> Mar 2) on some engines, so the date must read back unchanged.
+  const day = Date.parse(`${date}T00:00Z`)
+  if (Number.isNaN(day) || new Date(day).toISOString().slice(0, 10) !== date) return undefined
+  const ms = match?.[2] === undefined ? day : Date.parse(value)
+  return Number.isNaN(ms) ? undefined : ms
 }
