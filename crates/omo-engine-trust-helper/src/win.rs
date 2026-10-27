@@ -1,29 +1,72 @@
-//! Crypt32 facts (design 4.2): the adapter API with no behaviour yet. The adapter tests define it.
+//! Crypt32 facts (design 4.2). Stores are opened read-only and existing-only under the helper's identity;
+//! system-store enumeration sits behind `SystemStores` so the adapter tests run on in-memory stores.
 
-use windows_sys::Win32::Security::Cryptography::{
-    CertAddEncodedCertificateToStore, CertCloseStore, CertFreeCertificateContext, CertOpenStore, CERT_CONTEXT,
-    CERT_STORE_ADD_USE_EXISTING, CERT_STORE_CREATE_NEW_FLAG, CERT_STORE_PROV_MEMORY, HCERTSTORE, X509_ASN_ENCODING,
+use std::ffi::{c_void, CStr};
+use std::ptr::{null, null_mut};
+
+use windows_sys::core::{w, BOOL, PCWSTR, PSTR, PWSTR};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GetLastError, LocalFree, SetLastError, CRYPT_E_NOT_FOUND, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND,
+    ERROR_MORE_DATA, ERROR_NO_MORE_FILES, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, E_ACCESSDENIED, HANDLE, HLOCAL,
+};
+use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+use windows_sys::Win32::Security::Cryptography::*;
+use windows_sys::Win32::Security::{
+    CheckTokenMembership, CreateWellKnownSid, GetTokenInformation, TokenUser, WinServiceSid, TOKEN_QUERY, TOKEN_USER,
+};
+use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_BINARY};
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+use crate::output::{
+    base64, hex, negatives_complete, CertificateFact, Chain, CtlOutcome, DisallowedFact, Eku, HelperOutput, Identity,
+    Location, SourceOutcome, SourceReport, SourceStore,
 };
 
-use crate::output::{CtlOutcome, Eku, HelperOutput, Identity, Location, SourceOutcome, SourceStore};
+const ENCODING: u32 = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
+/// The Disallowed CTL is tens of kilobytes; anything near this bound is not a CTL Windows wrote.
+const CTL_LIMIT: u32 = 8 * 1024 * 1024;
+const SHA1_SUBJECT_ALGORITHM: &CStr = c"1.3.14.3.2.26";
 
+/// An open certificate store handle.
 pub struct CertStore(HCERTSTORE);
 
 impl CertStore {
     pub fn memory() -> Result<CertStore, u32> {
-        let handle = unsafe { CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, std::ptr::null()) };
+        let handle = unsafe { CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, null()) };
         if handle.is_null() {
-            return Err(0);
+            return Err(unsafe { GetLastError() });
         }
         Ok(CertStore(handle))
     }
 
+    /// Adds DER to the store and returns the store's own context, so properties set on it stay in the store.
     pub fn add_encoded(&self, der: &[u8]) -> Option<Context> {
-        let mut added: *mut CERT_CONTEXT = std::ptr::null_mut();
+        let length = u32::try_from(der.len()).ok()?;
+        let mut added: *mut CERT_CONTEXT = null_mut();
         let ok = unsafe {
-            CertAddEncodedCertificateToStore(self.0, X509_ASN_ENCODING, der.as_ptr(), der.len() as u32, CERT_STORE_ADD_USE_EXISTING, &mut added)
+            CertAddEncodedCertificateToStore(self.0, X509_ASN_ENCODING, der.as_ptr(), length, CERT_STORE_ADD_USE_EXISTING, &mut added)
         };
         (ok != 0 && !added.is_null()).then(|| Context(added))
+    }
+
+    /// Copies a context with its properties (EKU and root-program properties included).
+    fn add_context(&self, context: &Context) -> bool {
+        unsafe { CertAddCertificateContextToStore(self.0, context.0, CERT_STORE_ADD_USE_EXISTING, null_mut()) != 0 }
+    }
+
+    /// Every certificate, or `None` when enumeration ends with anything but the normal end.
+    fn certificates(&self) -> Option<Vec<Context>> {
+        let mut out = Vec::new();
+        let mut previous: *const CERT_CONTEXT = null();
+        loop {
+            let next = unsafe { CertEnumCertificatesInStore(self.0, previous) };
+            if next.is_null() {
+                let error = unsafe { GetLastError() };
+                return (error == CRYPT_E_NOT_FOUND as u32 || error == ERROR_NO_MORE_FILES).then_some(out);
+            }
+            out.push(Context(unsafe { CertDuplicateCertificateContext(next) }));
+            previous = next;
+        }
     }
 }
 
@@ -33,6 +76,7 @@ impl Drop for CertStore {
     }
 }
 
+/// An owned certificate context reference.
 pub struct Context(*const CERT_CONTEXT);
 
 impl Context {
@@ -40,8 +84,17 @@ impl Context {
         self.0
     }
 
+    fn der(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts((*self.0).pbCertEncoded, (*self.0).cbCertEncoded as usize) }
+    }
+
+    fn info(&self) -> &CERT_INFO {
+        unsafe { &*(*self.0).pCertInfo }
+    }
+
+    /// DER SHA-256 and SHA-1, hashed by Crypt32.
     pub fn identity(&self) -> Option<Identity> {
-        None
+        identity_of(self.der())
     }
 }
 
@@ -51,17 +104,132 @@ impl Drop for Context {
     }
 }
 
-pub fn effective_eku(_context: &Context) -> Eku {
-    Eku::Error
+fn digest(algorithm: PCWSTR, bytes: &[u8], size: usize) -> Option<String> {
+    let mut out = vec![0u8; size];
+    let mut length = size as u32;
+    let ok = unsafe {
+        CryptHashCertificate2(algorithm, 0, null(), bytes.as_ptr(), u32::try_from(bytes.len()).ok()?, out.as_mut_ptr(), &mut length)
+    };
+    (ok != 0 && length as usize == size).then(|| hex(&out))
 }
 
-pub fn decode_disallowed_ctl(_bytes: &[u8]) -> Result<Vec<String>, CtlOutcome> {
-    Err(CtlOutcome::Undecodable)
+fn identity_of(der: &[u8]) -> Option<Identity> {
+    Some(Identity { sha256: digest(w!("SHA256"), der, 32)?, sha1: digest(w!("SHA1"), der, 20)? })
 }
 
+/// Effective EKU through `CertGetEnhancedKeyUsage(context, 0, ...)` (design 4.2 item 4).
+pub fn effective_eku(context: &Context) -> Eku {
+    let mut size = 0u32;
+    if unsafe { CertGetEnhancedKeyUsage(context.0, 0, null_mut(), &mut size) } == 0 || size == 0 {
+        return Eku::Error;
+    }
+    // CTL_USAGE holds pointers, so the buffer is pointer aligned.
+    let mut buffer = vec![0usize; (size as usize).div_ceil(std::mem::size_of::<usize>())];
+    unsafe { SetLastError(ERROR_SUCCESS) };
+    let ok = unsafe { CertGetEnhancedKeyUsage(context.0, 0, buffer.as_mut_ptr().cast(), &mut size) };
+    let error = unsafe { GetLastError() };
+    if ok == 0 {
+        return Eku::Error;
+    }
+    let usage = unsafe { &*buffer.as_ptr().cast::<CTL_USAGE>() };
+    if usage.cUsageIdentifier == 0 {
+        return match error {
+            error if error == CRYPT_E_NOT_FOUND as u32 => Eku::Unrestricted,
+            ERROR_SUCCESS => Eku::NoUsage,
+            _ => Eku::Error,
+        };
+    }
+    let identifiers = unsafe { std::slice::from_raw_parts(usage.rgpszUsageIdentifier, usage.cUsageIdentifier as usize) };
+    let mut oids = Vec::with_capacity(identifiers.len());
+    for identifier in identifiers {
+        match unsafe { CStr::from_ptr(identifier.cast_const().cast()) }.to_str() {
+            Ok(oid) if is_oid(oid) => oids.push(oid.to_owned()),
+            _ => return Eku::Error,
+        }
+    }
+    Eku::Oids { oids }
+}
+
+fn is_oid(text: &str) -> bool {
+    let arcs: Vec<&str> = text.split('.').collect();
+    arcs.len() >= 2
+        && matches!(arcs[0], "0" | "1" | "2")
+        && arcs.iter().all(|arc| !arc.is_empty() && arc.bytes().all(|byte| byte.is_ascii_digit()) && (arc.len() == 1 || !arc.starts_with('0')))
+}
+
+/// Issuer equals subject and the certificate's own key verifies its signature.
+fn is_self_signed(context: &Context) -> bool {
+    let info = context.info();
+    unsafe {
+        CertCompareCertificateName(X509_ASN_ENCODING, &info.Subject, &info.Issuer) != 0
+            && CryptVerifyCertificateSignatureEx(
+                0,
+                X509_ASN_ENCODING,
+                CRYPT_VERIFY_CERT_SIGN_SUBJECT_CERT,
+                context.0.cast(),
+                CRYPT_VERIFY_CERT_SIGN_ISSUER_CERT,
+                context.0.cast(),
+                0,
+                null_mut(),
+            ) != 0
+    }
+}
+
+/// Basic constraints with cA set; an absent or undecodable extension is not a CA.
+fn is_ca(context: &Context) -> bool {
+    let info = context.info();
+    let extension = unsafe { CertFindExtension(szOID_BASIC_CONSTRAINTS2, info.cExtension, info.rgExtension) };
+    if extension.is_null() {
+        return false;
+    }
+    let value = unsafe { &(*extension).Value };
+    let mut decoded = CERT_BASIC_CONSTRAINTS2_INFO { fCA: 0, fPathLenConstraint: 0, dwPathLenConstraint: 0 };
+    let mut size = std::mem::size_of::<CERT_BASIC_CONSTRAINTS2_INFO>() as u32;
+    let ok = unsafe {
+        CryptDecodeObjectEx(X509_ASN_ENCODING, X509_BASIC_CONSTRAINTS2, value.pbData, value.cbData, 0, null(), (&mut decoded as *mut CERT_BASIC_CONSTRAINTS2_INFO).cast(), &mut size)
+    };
+    ok != 0 && decoded.fCA != 0
+}
+
+/// Decodes the Disallowed CTL with `CertCreateCTLContext`. The signature is not verified: the CTL can only
+/// remove trust. Only the certificate SHA-1 subject algorithm is implemented (design 4.2 item 2).
+pub fn decode_disallowed_ctl(bytes: &[u8]) -> Result<Vec<String>, CtlOutcome> {
+    let length = u32::try_from(bytes.len()).map_err(|_| CtlOutcome::Undecodable)?;
+    let ctl = unsafe { CertCreateCTLContext(ENCODING, bytes.as_ptr(), length) };
+    if ctl.is_null() {
+        return Err(CtlOutcome::Undecodable);
+    }
+    let result = (|| {
+        let info = unsafe { (*ctl).pCtlInfo.as_ref() }.ok_or(CtlOutcome::Undecodable)?;
+        let algorithm = info.SubjectAlgorithm.pszObjId;
+        if algorithm.is_null() || unsafe { CStr::from_ptr(algorithm.cast_const().cast()) } != SHA1_SUBJECT_ALGORITHM {
+            return Err(CtlOutcome::UnsupportedSubjectAlgorithm);
+        }
+        let entries: &[CTL_ENTRY] = if info.cCTLEntry == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(info.rgCTLEntry, info.cCTLEntry as usize) }
+        };
+        entries
+            .iter()
+            .map(|entry| {
+                let subject = &entry.SubjectIdentifier;
+                if subject.cbData != 20 || subject.pbData.is_null() {
+                    return Err(CtlOutcome::Undecodable);
+                }
+                Ok(hex(unsafe { std::slice::from_raw_parts(subject.pbData, 20) }))
+            })
+            .collect()
+    })();
+    unsafe { CertFreeCTLContext(ctl) };
+    result
+}
+
+/// One physical store of a system store, or the outcome for a system store that could not be listed.
 pub struct PhysicalRead {
     pub physical_store: Option<String>,
     pub outcome: SourceOutcome,
+    /// Present only when `outcome` is `Read`; enumeration can still fail.
     pub store: Option<CertStore>,
 }
 
@@ -71,34 +239,379 @@ pub enum CtlRead {
     Bytes(Vec<u8>),
 }
 
+/// The injected system-store interface (design 9.2).
 pub trait SystemStores {
     fn read(&mut self, store: SourceStore, location: Location) -> Vec<PhysicalRead>;
     fn disallowed_ctl(&mut self) -> CtlRead;
+    /// Every `Disallowed` location applicable to this process's identity.
     fn disallowed_locations(&mut self) -> Vec<Location>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CollectError {
+    /// A `B` entry Crypt32 cannot parse as a certificate.
     BundledRoot,
     Internal,
 }
 
-pub fn collect<S: SystemStores>(_stores: &mut S, _bundled: &[&[u8]]) -> Result<HelperOutput, CollectError> {
-    Err(CollectError::Internal)
+struct Candidate {
+    context: Context,
+    store: SourceStore,
+    location: Location,
+    physical_store: String,
 }
 
+fn read_store<S: SystemStores>(
+    stores: &mut S,
+    store: SourceStore,
+    location: Location,
+    sources: &mut Vec<SourceReport>,
+) -> Vec<(Context, String)> {
+    let mut out = Vec::new();
+    for read in stores.read(store, location) {
+        let mut outcome = read.outcome;
+        if let (SourceOutcome::Read, Some(handle)) = (outcome, &read.store) {
+            match handle.certificates() {
+                Some(contexts) => {
+                    let name = read.physical_store.clone().unwrap_or_default();
+                    out.extend(contexts.into_iter().map(|context| (context, name.clone())));
+                }
+                None => outcome = SourceOutcome::EnumerationFailed,
+            }
+        }
+        sources.push(SourceReport { store, location, physical_store: read.physical_store, outcome });
+    }
+    out
+}
+
+/// Collects every fact of design 4.1 for Windows. `bundled` is Bun's `B`, one DER certificate per entry.
+pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<HelperOutput, CollectError> {
+    let roots = CertStore::memory().map_err(|_| CollectError::Internal)?;
+    let others = CertStore::memory().map_err(|_| CollectError::Internal)?;
+    let mut bundled_roots = Vec::with_capacity(bundled.len());
+    for der in bundled {
+        let context = roots.add_encoded(der).ok_or(CollectError::BundledRoot)?;
+        bundled_roots.push(context.identity().ok_or(CollectError::Internal)?);
+    }
+
+    let mut sources = Vec::new();
+    let mut candidates = Vec::new();
+    let positive = [
+        (SourceStore::Root, &Location::BUN[..]),
+        (SourceStore::Ca, &Location::BUN[..]),
+        (SourceStore::TrustedPeople, &Location::MACHINE[..]),
+    ];
+    for (store, locations) in positive {
+        for &location in locations {
+            for (context, physical_store) in read_store(stores, store, location, &mut sources) {
+                candidates.push(Candidate { context, store, location, physical_store });
+            }
+        }
+    }
+    let mut disallowed = Vec::new();
+    for location in stores.disallowed_locations() {
+        for (context, physical_store) in read_store(stores, SourceStore::Disallowed, location, &mut sources) {
+            disallowed.push(DisallowedFact { der: base64(context.der()), location, physical_store });
+        }
+    }
+    let (ctl, ctl_sha1) = match stores.disallowed_ctl() {
+        CtlRead::Absent => (CtlOutcome::Absent, Vec::new()),
+        CtlRead::Unreadable => (CtlOutcome::Unreadable, Vec::new()),
+        CtlRead::Bytes(bytes) => match decode_disallowed_ctl(&bytes) {
+            Ok(thumbprints) => (CtlOutcome::Read, thumbprints),
+            Err(outcome) => (outcome, Vec::new()),
+        },
+    };
+
+    // Root candidates plus B are the exclusive anchors; every positive candidate can help build a path.
+    for candidate in &candidates {
+        let added = if candidate.store == SourceStore::Root { roots.add_context(&candidate.context) } else { true };
+        if !added || !others.add_context(&candidate.context) {
+            return Err(CollectError::Internal);
+        }
+    }
+    let engine = ChainEngine::exclusive(&roots).ok_or(CollectError::Internal)?;
+
+    let certificates = candidates
+        .iter()
+        .map(|candidate| {
+            let self_signed = is_self_signed(&candidate.context);
+            let ca = is_ca(&candidate.context);
+            let intermediate = match candidate.store {
+                SourceStore::Ca => true,
+                SourceStore::Root => !self_signed,
+                SourceStore::TrustedPeople => !self_signed && ca,
+                SourceStore::Disallowed => false,
+            };
+            CertificateFact {
+                der: base64(candidate.context.der()),
+                store: candidate.store,
+                location: candidate.location,
+                physical_store: candidate.physical_store.clone(),
+                self_signed,
+                ca,
+                eku: effective_eku(&candidate.context),
+                chain: if intermediate { engine.verify(&candidate.context, &others) } else { None },
+            }
+        })
+        .collect();
+
+    Ok(HelperOutput {
+        version: 1,
+        os: "windows",
+        complete: negatives_complete(&sources, ctl),
+        sources,
+        ctl,
+        certificates,
+        disallowed,
+        ctl_sha1,
+        bundled_roots,
+    })
+}
+
+struct ChainEngine(HCERTCHAINENGINE);
+
+impl ChainEngine {
+    /// `hExclusiveRoot` holds the anchors; URL retrieval is cache-only (design 4.2 item 5).
+    fn exclusive(roots: &CertStore) -> Option<ChainEngine> {
+        let mut config: CERT_CHAIN_ENGINE_CONFIG = unsafe { std::mem::zeroed() };
+        config.cbSize = std::mem::size_of::<CERT_CHAIN_ENGINE_CONFIG>() as u32;
+        config.hExclusiveRoot = roots.0;
+        config.dwFlags = CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL;
+        let mut engine: HCERTCHAINENGINE = null_mut();
+        (unsafe { CertCreateCertificateChainEngine(&config, &mut engine) } != 0).then_some(ChainEngine(engine))
+    }
+
+    /// The SSL-policy verdict for server authentication with no server name, ignoring revocation-unknown.
+    fn verify(&self, context: &Context, others: &CertStore) -> Option<Chain> {
+        let mut server_auth = *b"1.3.6.1.5.5.7.3.1\0";
+        let mut usages: [PSTR; 1] = [server_auth.as_mut_ptr()];
+        let mut para: CERT_CHAIN_PARA = unsafe { std::mem::zeroed() };
+        para.cbSize = std::mem::size_of::<CERT_CHAIN_PARA>() as u32;
+        para.RequestedUsage = CERT_USAGE_MATCH {
+            dwType: USAGE_MATCH_TYPE_AND,
+            Usage: CTL_USAGE { cUsageIdentifier: 1, rgpszUsageIdentifier: usages.as_mut_ptr() },
+        };
+        let flags = CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL | CERT_CHAIN_DISABLE_AUTH_ROOT_AUTO_UPDATE;
+        let mut chain: *mut CERT_CHAIN_CONTEXT = null_mut();
+        if unsafe { CertGetCertificateChain(self.0, context.0, null(), others.0, &para, flags, null(), &mut chain) } == 0
+            || chain.is_null()
+        {
+            return None;
+        }
+        let result = (|| {
+            let summary = unsafe { &*chain };
+            let explicit_distrust = summary.TrustStatus.dwErrorStatus & CERT_TRUST_IS_EXPLICIT_DISTRUST != 0;
+            if summary.cChain == 0 {
+                return None;
+            }
+            let simple = unsafe { &**summary.rgpChain };
+            let elements = unsafe { std::slice::from_raw_parts(simple.rgpElement, simple.cElement as usize) };
+            let path = elements
+                .iter()
+                .map(|element| {
+                    let certificate = unsafe { &*(**element).pCertContext };
+                    identity_of(unsafe { std::slice::from_raw_parts(certificate.pbCertEncoded, certificate.cbCertEncoded as usize) })
+                })
+                .collect::<Option<Vec<Identity>>>()?;
+            let mut https: HTTPSPolicyCallbackData = unsafe { std::mem::zeroed() };
+            https.Anonymous.cbStruct = std::mem::size_of::<HTTPSPolicyCallbackData>() as u32;
+            https.dwAuthType = AUTHTYPE_SERVER;
+            let policy = CERT_CHAIN_POLICY_PARA {
+                cbSize: std::mem::size_of::<CERT_CHAIN_POLICY_PARA>() as u32,
+                dwFlags: CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS,
+                pvExtraPolicyPara: (&mut https as *mut HTTPSPolicyCallbackData).cast(),
+            };
+            let mut status: CERT_CHAIN_POLICY_STATUS = unsafe { std::mem::zeroed() };
+            status.cbSize = std::mem::size_of::<CERT_CHAIN_POLICY_STATUS>() as u32;
+            let passed = unsafe { CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain, &policy, &mut status) } != 0
+                && status.dwError == 0
+                && !explicit_distrust;
+            let anchor = if passed { path.last().cloned() } else { None };
+            Some(Chain { anchor, path, explicit_distrust })
+        })();
+        unsafe { CertFreeCertificateChain(chain) };
+        result
+    }
+}
+
+impl Drop for ChainEngine {
+    fn drop(&mut self) {
+        unsafe { CertFreeCertificateChainEngine(self.0) };
+    }
+}
+
+/// The real system stores, read under the helper's own identity.
 pub struct System;
 
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn outcome_of(error: u32) -> SourceOutcome {
+    const HRESULT_FILE_NOT_FOUND: u32 = 0x8007_0002;
+    const HRESULT_PATH_NOT_FOUND: u32 = 0x8007_0003;
+    match error {
+        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND | HRESULT_FILE_NOT_FOUND | HRESULT_PATH_NOT_FOUND => SourceOutcome::Absent,
+        ERROR_ACCESS_DENIED => SourceOutcome::AccessDenied,
+        error if error == E_ACCESSDENIED as u32 => SourceOutcome::AccessDenied,
+        _ => SourceOutcome::EnumerationFailed,
+    }
+}
+
+impl System {
+    /// The registry location flag and the system store name, with the alias prefix where one applies.
+    fn system_store(store: SourceStore, location: Location) -> Option<(u32, String)> {
+        let name = match store {
+            SourceStore::Root => "ROOT",
+            SourceStore::Ca => "CA",
+            SourceStore::TrustedPeople => "TrustedPeople",
+            SourceStore::Disallowed => "Disallowed",
+        };
+        let shift = |id: u32| id << CERT_SYSTEM_STORE_LOCATION_SHIFT;
+        Some(match location {
+            Location::CurrentUser => (shift(CERT_SYSTEM_STORE_CURRENT_USER_ID), name.to_owned()),
+            Location::LocalMachine => (shift(CERT_SYSTEM_STORE_LOCAL_MACHINE_ID), name.to_owned()),
+            Location::CurrentUserGroupPolicy => (shift(CERT_SYSTEM_STORE_CURRENT_USER_GROUP_POLICY_ID), name.to_owned()),
+            Location::LocalMachineGroupPolicy => (shift(CERT_SYSTEM_STORE_LOCAL_MACHINE_GROUP_POLICY_ID), name.to_owned()),
+            Location::LocalMachineEnterprise => (shift(CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE_ID), name.to_owned()),
+            Location::CurrentService => (shift(CERT_SYSTEM_STORE_CURRENT_SERVICE_ID), name.to_owned()),
+            Location::UserSid => (shift(CERT_SYSTEM_STORE_USERS_ID), format!("{}\\{name}", user_sid()?)),
+            // The current service's alias names the same registry key as CURRENT_SERVICE, which is read instead.
+            Location::ServiceSid => return None,
+        })
+    }
+}
+
+unsafe extern "system" fn on_physical_store(
+    _system_store: *const c_void,
+    _flags: u32,
+    name: PCWSTR,
+    info: *const CERT_PHYSICAL_STORE_INFO,
+    _reserved: *const c_void,
+    found: *mut c_void,
+) -> BOOL {
+    let found = unsafe { &mut *found.cast::<Vec<(String, bool)>>() };
+    let length = (0..).take_while(|&index| unsafe { *name.add(index) } != 0).count();
+    let name = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(name, length) });
+    let disabled = !info.is_null() && unsafe { (*info).dwFlags } & CERT_PHYSICAL_STORE_OPEN_DISABLE_FLAG != 0;
+    found.push((name, disabled));
+    1
+}
+
 impl SystemStores for System {
-    fn read(&mut self, _store: SourceStore, _location: Location) -> Vec<PhysicalRead> {
-        Vec::new()
+    fn read(&mut self, store: SourceStore, location: Location) -> Vec<PhysicalRead> {
+        let failed = |outcome| vec![PhysicalRead { physical_store: None, outcome, store: None }];
+        let Some((flags, name)) = Self::system_store(store, location) else {
+            return failed(SourceOutcome::EnumerationFailed);
+        };
+        let open = |provider, name: &[u16]| unsafe {
+            CertOpenStore(provider, 0, 0, flags | CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_READONLY_FLAG, name.as_ptr().cast())
+        };
+        // The system store itself first: absent, denied and failed are distinct before any physical store.
+        let system = open(CERT_STORE_PROV_SYSTEM_W, &wide(&name));
+        if system.is_null() {
+            return failed(outcome_of(unsafe { GetLastError() }));
+        }
+        drop(CertStore(system));
+        let mut physical: Vec<(String, bool)> = Vec::new();
+        let listed = unsafe {
+            CertEnumPhysicalStore(wide(&name).as_ptr().cast(), flags, (&mut physical as *mut Vec<(String, bool)>).cast(), Some(on_physical_store))
+        };
+        if listed == 0 {
+            return failed(outcome_of(unsafe { GetLastError() }));
+        }
+        physical
+            .into_iter()
+            .map(|(physical_name, disabled)| {
+                if disabled {
+                    return PhysicalRead { physical_store: Some(physical_name), outcome: SourceOutcome::Disabled, store: None };
+                }
+                let handle = open(CERT_STORE_PROV_PHYSICAL_W, &wide(&format!("{name}\\{physical_name}")));
+                if handle.is_null() {
+                    let outcome = outcome_of(unsafe { GetLastError() });
+                    return PhysicalRead { physical_store: Some(physical_name), outcome, store: None };
+                }
+                PhysicalRead { physical_store: Some(physical_name), outcome: SourceOutcome::Read, store: Some(CertStore(handle)) }
+            })
+            .collect()
     }
 
     fn disallowed_ctl(&mut self) -> CtlRead {
+        let key = w!("SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\AutoUpdate");
+        let value = w!("DisallowedCertEncodedCtl");
+        // The value can grow between the size query and the read; retry a bounded number of times.
+        for _ in 0..3 {
+            let mut size = 0u32;
+            match unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, key, value, RRF_RT_REG_BINARY, null_mut(), null_mut(), &mut size) } {
+                ERROR_SUCCESS => {}
+                ERROR_FILE_NOT_FOUND => return CtlRead::Absent,
+                _ => return CtlRead::Unreadable,
+            }
+            if size > CTL_LIMIT {
+                return CtlRead::Unreadable;
+            }
+            let mut bytes = vec![0u8; size as usize];
+            match unsafe { RegGetValueW(HKEY_LOCAL_MACHINE, key, value, RRF_RT_REG_BINARY, null_mut(), bytes.as_mut_ptr().cast(), &mut size) } {
+                ERROR_SUCCESS => {
+                    bytes.truncate(size as usize);
+                    return CtlRead::Bytes(bytes);
+                }
+                ERROR_MORE_DATA => continue,
+                ERROR_FILE_NOT_FOUND => return CtlRead::Absent,
+                _ => return CtlRead::Unreadable,
+            }
+        }
         CtlRead::Unreadable
     }
 
     fn disallowed_locations(&mut self) -> Vec<Location> {
-        Vec::new()
+        let mut locations = Location::BUN.to_vec();
+        locations.push(Location::UserSid);
+        // When membership cannot be determined the store is read anyway; a failed open then fails closed.
+        if is_service() != Some(false) {
+            locations.push(Location::CurrentService);
+        }
+        locations
+    }
+}
+
+/// The process user's SID string, for the user-SID alias of its own stores.
+fn user_sid() -> Option<String> {
+    unsafe {
+        let mut token: HANDLE = null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return None;
+        }
+        let mut size = 0u32;
+        GetTokenInformation(token, TokenUser, null_mut(), 0, &mut size);
+        let mut buffer = vec![0usize; (size as usize).div_ceil(std::mem::size_of::<usize>())];
+        let ok = GetTokenInformation(token, TokenUser, buffer.as_mut_ptr().cast(), size, &mut size);
+        CloseHandle(token);
+        if ok == 0 {
+            return None;
+        }
+        let user = &*buffer.as_ptr().cast::<TOKEN_USER>();
+        let mut text: PWSTR = null_mut();
+        if ConvertSidToStringSidW(user.User.Sid, &mut text) == 0 {
+            return None;
+        }
+        let length = (0..).take_while(|&index| *text.add(index) != 0).count();
+        let sid = String::from_utf16(std::slice::from_raw_parts(text, length)).ok();
+        LocalFree(text as HLOCAL);
+        sid
+    }
+}
+
+/// Whether the process runs as a service, so the current-service store applies (design 4.2 item 2).
+fn is_service() -> Option<bool> {
+    unsafe {
+        let mut sid = [0u8; 68];
+        let mut size = sid.len() as u32;
+        if CreateWellKnownSid(WinServiceSid, null_mut(), sid.as_mut_ptr().cast(), &mut size) == 0 {
+            return None;
+        }
+        let mut member: BOOL = 0;
+        (CheckTokenMembership(null_mut(), sid.as_mut_ptr().cast(), &mut member) != 0).then_some(member != 0)
     }
 }
