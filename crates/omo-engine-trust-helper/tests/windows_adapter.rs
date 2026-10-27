@@ -129,6 +129,22 @@ impl Pki {
         self.load(name)
     }
 
+    /// MD5 of the subjectPublicKey BIT STRING contents after the unused-bits byte, computed by OpenSSL.
+    fn public_key_md5(&self, cert: &Cert) -> Vec<u8> {
+        let spki = self.openssl(&["x509", "-in", cert.pem.to_str().unwrap(), "-noout", "-pubkey"]);
+        let serial = self.next_serial();
+        let (pem, der, key) = (self.path(&format!("spki-{serial}.pem")), self.path(&format!("spki-{serial}.der")), self.path(&format!("key-{serial}.bin")));
+        std::fs::write(&pem, spki).unwrap();
+        self.openssl(&["pkey", "-pubin", "-in", &pem, "-outform", "DER", "-out", &der]);
+        let spki = std::fs::read(&der).unwrap();
+        let (outer, _) = header(&spki);
+        let (algorithm_header, algorithm_length) = header(&spki[outer..]);
+        let bits = &spki[outer + algorithm_header + algorithm_length..];
+        let (bits_header, bits_length) = header(bits);
+        std::fs::write(&key, &bits[bits_header + 1..bits_header + bits_length]).unwrap();
+        self.openssl(&["dgst", "-md5", "-binary", &key])
+    }
+
     /// The digest of the certificate's TBSCertificate, computed by OpenSSL, independent of Crypt32.
     fn to_be_signed_digest(&self, cert: &Cert, digest: &str) -> Vec<u8> {
         let serial = self.next_serial();
@@ -339,31 +355,34 @@ fn a_synthetic_signed_disallowed_ctl_decodes_to_sha1_subjects() {
 
 const DISALLOWED_HASH: &str = "1.3.6.1.4.1.311.10.11.15";
 
-// The runner's real Disallowed CTL declares szOID_DISALLOWED_HASH, which wincrypt.h defines as
-// szOID_CERT_SIGNATURE_HASH_PROP_ID: an entry is the certificate's CERT_SIGNATURE_HASH_PROP_ID, the digest of
-// its TBSCertificate under its own signature algorithm (CryptHashToBeSigned). The entries here come from OpenSSL.
+// The runner's real Disallowed CTL declares szOID_DISALLOWED_HASH (wincrypt.h: szOID_CERT_SIGNATURE_HASH_PROP_ID).
+// Measured against Microsoft's published disallowedcert.sst, its entries are of two kinds: the certificate's
+// CERT_SIGNATURE_HASH_PROP_ID, the digest of its TBSCertificate under its own signature algorithm, and the
+// MD5 of its subject public key (CERT_SUBJECT_PUBLIC_KEY_MD5_HASH_PROP_ID). The entries here come from OpenSSL.
 #[test]
-fn a_disallowed_hash_ctl_names_certificates_by_the_digest_of_their_to_be_signed_part() {
+fn a_disallowed_hash_ctl_names_certificates_by_signature_hash_or_public_key_md5() {
     let pki = Pki::new();
     let signer = pki.root("dh-signer", "signer");
     let r = pki.root("dh-R", "root");
     let x = pki.issued_with("dh-X", &r, "intermediate", "-sha384");
     let kept = pki.root("dh-kept", "root");
     let b = pki.root("dh-B", "root");
+    let k = pki.root("dh-K", "root");
     let entries = [
         pki.to_be_signed_digest(&r, "-sha256"),
         pki.to_be_signed_digest(&x, "-sha384"),
         pki.to_be_signed_digest(&b, "-sha256"),
+        pki.public_key_md5(&k),
         vec![0x5a; 20],
     ];
     let entries: Vec<&[u8]> = entries.iter().map(Vec::as_slice).collect();
     let ctl = pki.sign_ctl(&ctl_content(&entries, DISALLOWED_HASH), &signer);
-    let (stores, _) = MemoryStores::default().with(SourceStore::Root, Location::LocalMachine, &[&r, &kept]);
+    let (stores, _) = MemoryStores::default().with(SourceStore::Root, Location::LocalMachine, &[&r, &kept, &k]);
     let (stores, _) = stores.with(SourceStore::Ca, Location::CurrentUser, &[&x]);
     let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..stores };
 
     let output = collect(&mut stores, &[&b.der]).unwrap();
-    let mut matched = vec![pki.identity(&r).sha1, pki.identity(&x).sha1, pki.identity(&b).sha1];
+    let mut matched = vec![pki.identity(&r).sha1, pki.identity(&x).sha1, pki.identity(&b).sha1, pki.identity(&k).sha1];
     matched.sort();
     assert_eq!((output.ctl, output.complete, output.ctl_sha1), (CtlOutcome::Read, true, matched));
 }

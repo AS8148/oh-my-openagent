@@ -32,7 +32,11 @@ fn main() {
         *lengths.entry(id.len()).or_insert(0) += 1;
         set.insert(id.to_vec());
     }
-    println!("probe ctl-oid={oid} entries={} entry-lengths={lengths:?}", entries.len());
+    let mut file_hash = [0u8; 32];
+    let mut file_hash_size = 32u32;
+    unsafe { CryptHashCertificate2(w!("SHA256"), 0, null(), bytes.as_ptr(), bytes.len() as u32, file_hash.as_mut_ptr(), &mut file_hash_size) };
+    let file_hash: String = file_hash.iter().map(|byte| format!("{byte:02x}")).collect();
+    println!("probe ctl-oid={oid} entries={} entry-lengths={lengths:?} bytes={} sha256={file_hash}", entries.len(), bytes.len());
 
     let (mut total, mut sha1, mut signature_hash, mut found) = (0, 0, 0, 0);
     let mut hash_lengths = BTreeMap::new();
