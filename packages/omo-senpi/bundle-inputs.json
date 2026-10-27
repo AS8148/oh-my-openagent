@@ -587,6 +587,7 @@
     "packages/omo-config-core/tsconfig.json",
     "packages/omo-native/bin/lib/agent-dir.js",
     "packages/omo-native/bin/lib/auth-store.js",
+    "packages/omo-native/bin/lib/brand-logo.generated.js",
     "packages/omo-native/bin/lib/engine-dependency.js",
     "packages/omo-native/bin/lib/engine-models.js",
     "packages/omo-native/bin/lib/jsonc-edit.js",
