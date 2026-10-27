@@ -22,10 +22,22 @@ import type { SyncRunner } from "./sync-runner"
 import { rmSyncEfaultTolerant } from "./teardown.test-support"
 
 const roots: string[] = []
-let heldReferences = 0
-afterEach(() => {
-  for (; heldReferences > 0; heldReferences -= 1) memoryModuleSupervisor.release()
+const started: Array<{ readonly pi: MemoryFakeExtensionAPI; readonly ctx: ReturnType<typeof componentContext> }> = []
+// session_start leaves work running past its dispatch: afterBind is not awaited (session-binding.ts) and its
+// bind-time facts reconcile is detached (facts-wiring.ts fire("reconcile")). That work recreates
+// <OMO_MEMORY_HOME>/agents/<id>/runtime/locks after a removal (#9766). session_shutdown is the component's own
+// settle signal for it: the drain awaits the detached reconcile (FactsExtractorRunner.cancelActive) and the
+// status and maintenance settles, each raced against the drain budget, and releases the supervisor reference
+// the bind took. index.test.ts and wiring.test.ts close their sessions the same way. A step that outlived the
+// budget keeps running detached, so it fails the test instead of passing on timing.
+afterEach(async () => {
+  const overBudget: unknown[] = []
+  for (const { pi, ctx } of started.splice(0)) {
+    await pi.dispatch("session_shutdown", {}, sessionContext())
+    overBudget.push(...ctx.logs.filter((entry) => entry.message === "memory shutdown drain hit its budget"))
+  }
   for (const root of roots.splice(0)) rmSyncEfaultTolerant(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  expect(overBudget).toEqual([])
 })
 
 function tempDir(prefix: string): string {
@@ -72,15 +84,14 @@ function harness(options: { readonly agent?: string; readonly now?: number } = {
       throw new Error("bind-only characterization does not create an identity runtime")
     },
   }).register(pi, ctx)
+  started.push({ pi, ctx })
   const identityFor = (cwd: string) => resolveMemoryIdentity(settings.agent, cwd, env)
   const workspace = (): string => join(tempDir("omo-x8c-ws-"), "project")
-  return { pi, ctx, env, hostCwd, syncCalls, identityFor, workspace }
+  return { pi, ctx, hostCwd, syncCalls, identityFor, workspace }
 }
 
 function supervisorDelta(before: number): number {
-  const delta = memoryModuleSupervisor.refCount - before
-  heldReferences = Math.max(heldReferences, delta)
-  return delta
+  return memoryModuleSupervisor.refCount - before
 }
 
 describe("X8c memory binding at session_start (characterization)", () => {
