@@ -64,7 +64,8 @@ const compileEntry = join(repoRoot, "packages", "omo-native", "compile-entry.ts"
  * Raised to 200 MiB for 5.1.50: 5.1.49's linux-x64 binary measured 200,001,712 bytes (5.1.48:
  * 181,217,248) and 5.1.49 was not published. Bun 1.4.4's runtime accounts for +18,325,712 bytes of that
  * (an empty `bun build --compile --target=bun-linux-x64`: 90,798,048 bytes on 1.4.3, 109,123,760 on
- * 1.4.4; v5.1.48 rebuilt with 1.4.4 already measures 199,542,960); the embedded payload added +49,434.
+ * 1.4.4; v5.1.48 rebuilt with 1.4.4 already measures 199,542,960); the compiled JS graph added +409,318
+ * and the embedded payload +49,434, which together make up the +18,784,464.
  * `reportBinaryHeadroom` warns well before the next crossing.
  */
 export const MAX_BINARY_BYTES = 200 * 1024 * 1024
