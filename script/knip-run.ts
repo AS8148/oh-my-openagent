@@ -1,10 +1,18 @@
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, posix } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import { Glob } from "bun";
 
-export const REPO_ROOT = realpathSync(join(import.meta.dir, ".."));
+// realpathSync.native: the JS realpathSync keeps Windows 8.3 short names (C:\Users\RUNNER~1), while knip's resolver
+// returns the long form for files it reaches through imports, so the two forms of one root would not match.
+export const REPO_ROOT = realpathSync.native(join(import.meta.dir, ".."));
+
+// One path form on every platform: POSIX separators, relative to `root` when `path` is absolute.
+export const toRepoPath = (root: string, path: string): string => {
+  const style = /^[A-Za-z]:[\\/]/.test(path) || path.includes("\\") ? win32 : posix;
+  return (style.isAbsolute(path) ? style.relative(root, path) : path).split(win32.sep).join(posix.sep);
+};
 
 export const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -46,9 +54,10 @@ export const packageDirs = async (): Promise<string[]> => {
 };
 
 // A temp copy of the files knip can see, with each package's node_modules linked. The caller removes it.
-// realpath: on macOS tmpdir() and /tmp are symlinks into /private, and knip misses probes under the link.
+// realpath: on macOS tmpdir() and /tmp are symlinks into /private, and on Windows tmpdir() can be an 8.3 short
+// name (C:\Users\RUNNER~1); knip misses probes under either form, so the copy root is the native realpath.
 export const copyRepo = async (): Promise<string> => {
-  const copy = realpathSync(mkdtempSync(join(tmpdir(), "knip-probe-")));
+  const copy = realpathSync.native(mkdtempSync(join(tmpdir(), "knip-probe-")));
   for (const file of repoFiles()) {
     const src = join(REPO_ROOT, file);
     if (!existsSync(src) || lstatSync(src).isDirectory()) continue;
@@ -63,7 +72,8 @@ export const copyRepo = async (): Promise<string> => {
   return copy;
 };
 
-export const unusedExports = (stdout: string, stderr: string): Set<string> => {
+// Keys are `<repo-relative POSIX path>#<export name>`; a reported path outside `cwd` is an error, never a silent miss.
+export const unusedExports = (cwd: string, stdout: string, stderr: string): Set<string> => {
   const start = stdout.indexOf("{");
   if (start < 0) throw new Error(`knip printed no JSON report:\n${stderr.slice(0, 4000)}`);
   const report: unknown = JSON.parse(stdout.slice(start));
@@ -71,8 +81,11 @@ export const unusedExports = (stdout: string, stderr: string): Set<string> => {
   const unused = new Set<string>();
   for (const issue of issues) {
     if (!isObject(issue) || typeof issue["file"] !== "string" || !Array.isArray(issue["exports"])) continue;
+    const file = toRepoPath(cwd, issue["file"]);
+    if (file.startsWith("../") || posix.isAbsolute(file) || win32.isAbsolute(file))
+      throw new Error(`knip reported ${issue["file"]}, outside its cwd ${cwd}`);
     for (const item of issue["exports"])
-      if (isObject(item) && typeof item["name"] === "string") unused.add(`${issue["file"]}#${item["name"]}`);
+      if (isObject(item) && typeof item["name"] === "string") unused.add(`${file}#${item["name"]}`);
   }
   return unused;
 };

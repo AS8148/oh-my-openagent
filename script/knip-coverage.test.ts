@@ -72,7 +72,7 @@ describe("knip coverage never shrinks", () => {
 
       const checked = async (args: string[]): Promise<string[]> => {
         const { stdout, stderr } = await runKnip(copy, [...args, "--reporter", "json"]);
-        const unused = unusedExports(stdout, stderr);
+        const unused = unusedExports(copy, stdout, stderr);
         return files.filter((file, n) => unused.has(`${file}#zzCov_${n}`));
       };
       const base = await checked(["--config", "knip.coverage-baseline.json"]);
@@ -99,7 +99,7 @@ describe("knip coverage never shrinks", () => {
       scratch.push(copy);
       await Bun.write(join(copy, "knip.no-preprocessor.json"), JSON.stringify(config));
       const { stdout, stderr } = await runKnip(copy, ["--config", "knip.no-preprocessor.json", "--reporter", "json"]);
-      const unused = unusedExports(stdout, stderr);
+      const unused = unusedExports(copy, stdout, stderr);
       expect(rows.filter((row) => !unused.has(row))).toEqual([]);
     },
     KNIP_TIMEOUT_MS,

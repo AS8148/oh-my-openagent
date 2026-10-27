@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { appendFileSync, rmSync, statSync } from "node:fs";
-import { join, posix, relative, sep } from "node:path";
+import { join, posix } from "node:path";
 import { Glob } from "bun";
-import { copyRepo, isObject, packageDirs, REPO_ROOT, repoFiles, runKnip, unusedExports } from "./knip-run.ts";
+import { copyRepo, isObject, packageDirs, REPO_ROOT, repoFiles, runKnip, toRepoPath, unusedExports } from "./knip-run.ts";
 
 // Every knip entry must have its exports checked (includeEntryExports), so an unused export added to
 // an entry fails `knip:check`.
@@ -32,7 +32,7 @@ const knipEntries = (): Promise<string[]> => {
       const paths = /paths: \[([\s\S]*?)\]/.exec(section)?.[1] ?? "";
       for (const [, path] of paths.matchAll(/'([^']+)'/g)) {
         if (path === undefined || !SOURCE_EXT.test(path)) continue;
-        const rel = relative(REPO_ROOT, path).split(sep).join("/");
+        const rel = toRepoPath(REPO_ROOT, path);
         if (visible.has(rel)) entries.add(rel);
       }
     }
@@ -129,7 +129,7 @@ describe("knip export-checks every entry", () => {
 
       // The exact CI knip.jsonc: per-symbol pre-existing rows cannot hide a new probe name.
       const { stdout, stderr } = await runKnip(copy, ["--reporter", "json"]);
-      const unused = unusedExports(stdout, stderr);
+      const unused = unusedExports(copy, stdout, stderr);
       const missed = probes.filter((probe) => !unused.has(`${probe.file}#${probe.name}`)).map((probe) => probe.file);
       const forced: unknown = await Bun.file(FORCED_UNCHECKED_FILE).json();
       const forcedFiles = new Set(isObject(forced) && Array.isArray(forced["files"]) ? forced["files"] : []);
