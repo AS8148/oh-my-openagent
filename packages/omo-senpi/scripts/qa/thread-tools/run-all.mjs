@@ -27,13 +27,14 @@ import { fileURLToPath } from "node:url"
 
 import { withTelemetryOptOut } from "../telemetry-opt-out-env.mjs"
 import { requireEngineVersion } from "./lib/engine-version.mjs"
+import { QA_TMP_ROOT } from "./lib/qa-tmp.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const omoRoot = resolve(here, "..", "..", "..", "..", "..")
 // The legacy checkouts have no portable default location; the legacy suite is SKIPPED until both are set.
 const senpiRoot = process.env.THREAD_QA_SENPI_ROOT
 const desktopRoot = process.env.THREAD_QA_DESKTOP_ROOT
-const kitDir = process.env.THREAD_QA_KIT_DIR ?? "/tmp/qa-thread-tools-kit"
+const kitDir = process.env.THREAD_QA_KIT_DIR ?? join(QA_TMP_ROOT, "qa-thread-tools-kit")
 
 const gateway = [
   ["tui-to-tui", "tui-to-tui.mjs"],
