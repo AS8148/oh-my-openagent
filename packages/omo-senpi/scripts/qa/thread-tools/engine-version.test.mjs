@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { withTelemetryOptOut } from "../telemetry-opt-out-env.mjs"
+import { QA_TMP_ROOT } from "./lib/qa-tmp.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const omoSenpiManifest = resolve(here, "..", "..", "..", "package.json")
@@ -33,9 +34,9 @@ function runEntry(args, engineVersion) {
   const env = withTelemetryOptOut({ ...process.env, THREAD_QA_KIT_DIR: join(blocker, "kit") })
   delete env.THREAD_QA_SENPI_VERSION
   if (engineVersion !== undefined) env.THREAD_QA_SENPI_VERSION = engineVersion
-  const scratchBefore = new Set(readdirSync("/tmp").filter((name) => name.startsWith(SCRATCH_PREFIX)))
+  const scratchBefore = new Set(readdirSync(QA_TMP_ROOT).filter((name) => name.startsWith(SCRATCH_PREFIX)))
   const child = Bun.spawnSync([process.execPath, ...args], { env, stdout: "pipe", stderr: "pipe", timeout: CHILD_TIMEOUT_MS })
-  const scratchAfter = readdirSync("/tmp").filter((name) => name.startsWith(SCRATCH_PREFIX) && !scratchBefore.has(name))
+  const scratchAfter = readdirSync(QA_TMP_ROOT).filter((name) => name.startsWith(SCRATCH_PREFIX) && !scratchBefore.has(name))
   return { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString(), newScratch: scratchAfter }
 }
 
