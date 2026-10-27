@@ -14,7 +14,7 @@ import {
   type TelemetryOsProvider,
   type TelemetryTransportFactory,
 } from "@oh-my-opencode/telemetry-core/injected"
-import { createLazyPostHogTransportFactory } from "./lazy-posthog"
+import { createSenpiTelemetryTransportFactory } from "./otlp"
 import { isOmoTelemetryEnabled, type OmoConfig } from "@oh-my-opencode/omo-config-core"
 import { isPathInside, type PathContainmentOptions } from "@oh-my-opencode/utils/path-containment"
 
@@ -88,7 +88,9 @@ export function createOmoNativeSessionComponent(options: OmoNativeSessionOptions
           schemaVersion: OMO_NATIVE_SCHEMA_VERSION,
           setTimeoutFn: options.setTimeoutFn,
           source: SOURCE,
-          transportFactory: options.transportFactory ?? createLazyPostHogTransportFactory({
+          transportFactory: options.transportFactory ?? createSenpiTelemetryTransportFactory({
+            env,
+            consent: () => isOmoNativeTelemetryEnabled(options, eventCtx, env),
             diagnostics: options.diagnostics,
             source: SOURCE,
           }),
