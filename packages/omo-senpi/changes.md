@@ -1,8 +1,7 @@
 ## 2026-10-26 - Optional lazy OTLP dual-send (#11413)
 
-Fan out telemetry to PostHog and the consent-gated OTLP sender, using the collector's
-pinned schema-v4 event projection and explicit span allowlist. Missing collector
-credentials disable only OTLP; asynchronous failures never block the other sink.
+An optional second telemetry transport, inactive by default and consent-gated; it
+never blocks the existing sink.
 
 ## 2026-10-26 - Cover restored Stop admission through the real manager (#11401)
 
@@ -22,7 +21,7 @@ override replaces only `plugin/skills`; `plugin/skills-conditional` remains
 relative to the plugin. Absent or empty is unchanged. An invalid
 `OMO_BUNDLED_SKILLS_DIR` (relative, missing, not a directory, unreadable) now
 logs ONE error naming the variable and falls back to the plugin-relative
-bundled skills (lead ruling), plus one session notice; the report is once per
+bundled skills, plus one session notice; the report is once per
 process across both extension bundles. An explicit `skillsDir`
 option wins over a valid override.
 

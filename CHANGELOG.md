@@ -19,9 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Runs on senpi 2026.10.27-1, which tightens shell permission checks. ([#11364](https://github.com/code-yeongyu/oh-my-openagent/pull/11364))
 
-Marker deletion by a same-user process is NOT addressed yet. This is Part of
-#10238; the lead deferred that finding to protected-stop-record design issue #11340. ([#11333](https://github.com/code-yeongyu/oh-my-openagent/pull/11333)) ([#11363](https://github.com/code-yeongyu/oh-my-openagent/pull/11363))
-
 **Memory patches that move a file twice in one change no longer leave the memory repository blocked.** A chained move such as `a.md -> c.md -> d.md` listed the intermediate `c.md` as a path to commit even though it never existed, so git refused the commit and the next memory write found a dirty tree. The intermediate is now dropped when it never existed and kept when it was a real tracked file. Thanks to @MoerAI for the fix. ([#11305](https://github.com/code-yeongyu/oh-my-openagent/pull/11305), car [#11307](https://github.com/code-yeongyu/oh-my-openagent/pull/11307), part of [#10858](https://github.com/code-yeongyu/oh-my-openagent/issues/10858)) ([#11363](https://github.com/code-yeongyu/oh-my-openagent/pull/11363))
 
 **Memory notice warnings go through the memory logger, and a failed watermark rename keeps its own error.** Directory-sync warnings after a soul or agreement watermark is published are now reported through the memory component's logger instead of a direct `console.warn`, so the host decides where they go, and a temp-file cleanup failure no longer replaces the original rename error. ([#11284](https://github.com/code-yeongyu/oh-my-openagent/pull/11284), part of [#10707](https://github.com/code-yeongyu/oh-my-openagent/issues/10707)) ([#11363](https://github.com/code-yeongyu/oh-my-openagent/pull/11363))
@@ -56,19 +53,11 @@ Marker deletion by a same-user process is NOT addressed yet. This is Part of
 
 ### Added
 
-- Native telemetry also sends pinned product events to the OTLP collector when
-  `OMO_TELEMETRY_INGEST_KEY` is supplied at build time or in the runtime environment.
-  The collector defaults to `https://t.omo.dev`; `OMO_TELEMETRY_ENDPOINT` selects
-  another base URL. Both transports respect consent, initialize lazily, and fail
-  independently within the existing lifecycle bounds. The OTLP exporter and its
-  OpenTelemetry/protobuf dependencies live in a separate sidecar that is never
-  resolved without an ingest key. PostHog delivery and
-  injected transport factories retain precedence. (#11413) ([#11413](https://github.com/code-yeongyu/oh-my-openagent/pull/11413)) ([#11417](https://github.com/code-yeongyu/oh-my-openagent/pull/11417))
 - Set `OMO_BUNDLED_SKILLS_DIR` to an absolute directory to share bundled skills
   across runtime installations. Absent or empty is unchanged. An invalid
   `OMO_BUNDLED_SKILLS_DIR` (relative, missing, not a directory, unreadable) now
   logs ONE error naming the variable and falls back to the plugin-relative
-  bundled skills (lead ruling); task tools and the bare skill commands stay
+  bundled skills; task tools and the bare skill commands stay
   registered. Conditional, user, project, and memory skill roots keep their
   existing locations. ([#11332](https://github.com/code-yeongyu/oh-my-openagent/pull/11332)) ([#11417](https://github.com/code-yeongyu/oh-my-openagent/pull/11417))
 - An explicit `skillsDir` option now wins over a valid

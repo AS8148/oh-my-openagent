@@ -10,9 +10,8 @@ coverage and idempotent drain. Opaque activation proofs have no production
 constructor until the authenticated broker integration. Deterministic tests
 cover callback/activation interleavings, the real input gate, replay, coalescing,
 exhaustion and legacy reset compatibility. This does not yet select the new
-authority for O2 or address marker deletion by a same-user process (#10238).
-That MEDIUM finding is deferred by lead ruling to protected-stop-record
-design issue #11340.
+authority for O2 or address marker deletion by a same-user process (#10238);
+that is tracked in protected-stop-record design issue #11340.
 
 The Win32 callback and worker now share a host-testable pending-stop handoff.
 Its deterministic physical-chord simulation checks one committed generation,
