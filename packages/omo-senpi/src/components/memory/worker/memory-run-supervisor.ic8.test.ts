@@ -129,16 +129,18 @@ describe("memory run supervisor IC-8 containment", () => {
     // then: the deadline tree-kill terminated the model; no second, forced grace kill follows.
     expect(result).toEqual({ code: 0, signal: null })
     expect(outcome.timedOut).toBe(true)
+    // Real Windows ends the killed model with exit code 1; elsewhere the taskkill fixture SIGKILLs it.
     if (process.platform === "win32") expect(outcome.childExit).toEqual({ code: 1, signal: null })
-    else expect(outcome.childExit).toEqual({ code: 0, signal: null })
+    else expect(outcome.childExit).toEqual({ code: null, signal: "SIGKILL" })
     expect(invocationBeforeGrace.args.slice(-4)).toEqual(["/pid", expect.any(String), "/T", "/F"])
     expect((await stat(invocationPath)).mtimeMs).toBe(invocationMtimeBeforeGrace)
   }, 60_000)
 
-  test("#given a model with a live grandchild #when the hard deadline arrives on Windows #then the model's whole tree is terminated", async () => {
+  test("#given a model with a live grandchild #when the hard deadline arrives on injected Windows #then the model's whole tree is terminated", async () => {
     // Runtime regression for the parked reflection runs: child-exit recorded SIGTERM while the
     // agent's descendants kept working for another hour. Only the model CLI died before the fix.
-    if (process.platform !== "win32") return
+    // The injected win32 branch and taskkill fixture run on every host, so this guards Linux and
+    // macOS CI too.
     const { runDir, clockPath, childExited } = await makeRun("with-grandchild")
     const supervisor = launchSupervisor(runDir, clockPath, "win32")
     const exit = waitForExit(supervisor)
@@ -170,7 +172,6 @@ describe("memory run supervisor IC-8 containment", () => {
       await advanceClock(clockPath, 2_000)
       if (supervisor.pid === undefined) throw new Error("supervisor pid is required")
       await waitForPath(join(runDir, `${platform === "win32" ? "win32-graceful" : "posix-SIGTERM"}-${supervisor.pid}.json`))
-      expect(existsSync(join(runDir, "taskkill-invocation.json"))).toBe(false)
       if (nativeWindowsGraceWins) {
         await childExited
         await waitForPath(join(runDir, "outcome.json"))

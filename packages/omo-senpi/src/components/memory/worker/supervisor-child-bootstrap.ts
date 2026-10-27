@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import { writeSync } from "@oh-my-opencode/memory-core/fs"
 import { join } from "node:path"
 import { CHILD_EXIT_FILENAME, readRunJson, writeRunJsonAtomic, type RunChildExit, type RunLaunchManifest } from "./run-artifacts"
-import { getSupervisorRuntimePlatform, readSupervisorClockNow, recordSupervisorGracefulDeadline, scheduleSupervisorDeadline, signalSupervisorProcessGroup, terminateSupervisorChildHard, type SupervisorChildExit } from "./supervisor-process-identity"
+import { getSupervisorRuntimePlatform, readSupervisorClockNow, recordSupervisorGracefulDeadline, scheduleSupervisorDeadline, signalSupervisorProcessGroup, terminateSupervisorChildHard, terminateSupervisorWin32Tree, type SupervisorChildExit } from "./supervisor-process-identity"
 
 async function readRelease(): Promise<boolean> {
   for await (const chunk of process.stdin) {
@@ -33,10 +33,14 @@ export async function runChildBootstrap(runDir: string): Promise<void> {
     windowsHide: true,
   })
   writeBootstrapStatus({ code: child.pid ?? null, signal: "MODEL_PID" })
+  // TerminateProcess on the model alone leaves its descendants alive. Kill the model's whole tree
+  // so a terminated reflection cannot keep working after its worktree is reaped.
+  let treeKill: Promise<boolean> | undefined
+  const killModelTree = () => {
+    treeKill ??= terminateSupervisorWin32Tree(child.pid)
+  }
   const cascadeGraceful = () => {
-    // TerminateProcess on the model alone leaves its descendants alive. Kill the model's whole
-    // tree so a terminated reflection cannot keep working after its worktree is reaped.
-    if (platform === "win32" || process.platform === "win32") terminateSupervisorChildHard("win32", child.pid)
+    if (platform === "win32" || process.platform === "win32") killModelTree()
   }
   process.on("SIGTERM", cascadeGraceful)
   process.on("SIGINT", cascadeGraceful)
@@ -48,7 +52,7 @@ export async function runChildBootstrap(runDir: string): Promise<void> {
       // keep writing after the supervisor publishes timed_out. taskkill /T /F on the model kills
       // the entire tree at the deadline, while this bootstrap stays alive to record child-exit.
       recordSupervisorGracefulDeadline(child.pid)
-      terminateSupervisorChildHard(platform, child.pid)
+      killModelTree()
     } else signalSupervisorProcessGroup(process.pid, "SIGTERM")
   })
   const cancelKill = scheduleSupervisorDeadline(manifest.hardDeadlineAt + manifest.terminationGraceMs, () => {
@@ -67,10 +71,16 @@ export async function runChildBootstrap(runDir: string): Promise<void> {
       settled = true
       resolve({ code, signal })
     })
-  }).finally(() => {
-    cancelTerm()
+  }).finally(() => cancelTerm())
+  // The model can close while taskkill is still killing its descendants, so the tree kill must
+  // finish before child-exit is recorded. If it failed, record nothing: without a child exit the
+  // timed-out supervisor still runs its own forced tree kill at the grace deadline.
+  if (treeKill !== undefined && !(await treeKill)) {
     cancelKill()
-  })
+    process.exitCode = 1
+    return
+  }
+  cancelKill()
   // Durable before it is reported: a supervisor that dies after this point loses the pipe message,
   // and recovery may only trust a tip whose child is recorded as having finished cleanly in time.
   await writeRunJsonAtomic(join(runDir, CHILD_EXIT_FILENAME), {
