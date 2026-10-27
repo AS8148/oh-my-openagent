@@ -2,11 +2,12 @@ import type { ResolvedModelRecord, TaskRecord } from "../state"
 import { isParentModelRung } from "./parent-model-rung"
 
 // A provider answer that no other model on the SAME provider can fix: the stored credential is
-// rejected (401, an invalid key, a lapsed subscription) or can no longer be refreshed. Every
+// rejected (401, an invalid key, a lapsed subscription), has expired with only a fresh /login to renew it
+// ("Meta session expired (status 403). Run `/login meta` ..."), or can no longer be refreshed. Every
 // remaining rung on that provider would fail the same way, so runtime fallback moves on to another
 // provider.
 const CREDENTIAL_REJECTED =
-  /\b401\b|unauthori[sz]ed|invalid_grant|oauth refresh failed|subscription is required|invalid api key|incorrect api key|authentication (?:failed|error)|\btoken was rejected\b/i
+  /\b401\b|unauthori[sz]ed|invalid_grant|oauth refresh failed|subscription is required|invalid api key|incorrect api key|authentication (?:failed|error)|\btoken was rejected\b|\bsession expired\b[^.]*\.\s*run\s+\W?\/login\b/i
 // No credential at all for the provider (#10806): senpi refuses the request before it is sent ("No API key
 // found for openai.", "No API key for provider: openai") or a login-only lane says it has no account or token
 // ("no accounts: run /login cursor-cli-oauth", "Cursor access token is required"). The provider is signed out,

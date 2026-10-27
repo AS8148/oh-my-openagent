@@ -66,6 +66,16 @@ describe("isCredentialFailure", () => {
     expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(true)
   })
 
+  // Every wording senpi emits when a provider's stored credential has expired and only a fresh sign-in renews it.
+  test.each([
+    ["an expired Meta session answered with 403 (oauth/meta mintApiKey)", "Meta session expired (status 403). Run `/login meta` to sign in again."],
+    ["an expired Meta session answered with 401 (oauth/meta mintApiKey)", "Meta session expired (status 401). Run `/login meta` to sign in again."],
+    ["an OAuth provider whose credentials may have expired (agent-session)", `Authentication failed for "anthropic". Credentials may have expired or network is unavailable. Run '/login anthropic' to re-authenticate.`],
+    ["the goal stop on a 401 (continuation-recovery)", "Goal continuation blocked: provider rejected the request: HTTP 401 authentication failed for openai/gpt-6-luna-fast.\nRetrying would get the same rejection, so the goal stopped instead of retrying.\nRun /login openai to sign in again, or check the API key or token for openai, and check any proxy or gateway in front of it. Then send any message to resume."],
+  ])("#given an expired or rejected credential from %s #when classified #then it is a credential failure", (_label, message) => {
+    expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(true)
+  })
+
   // senpi names /login in guidance that is not about a missing or rejected credential; a /login hint alone
   // must not sign the provider out.
   test.each([
@@ -75,6 +85,21 @@ describe("isCredentialFailure", () => {
     ["Anthropic third-party billing (provider-failure-description)", 'Anthropic billed this request to your extra usage instead of your Claude plan limits, because a Claude subscription used directly through the Anthropic API counts as a third-party app. Run /login and choose "Anthropic Subscription (Claude Pro/Max)" so requests run through Claude Code and use your plan limits, add extra usage at https://claude.ai/settings/usage, or switch to another model with /model.'],
     ["the goal stop on a model-scoped 403 (continuation-recovery)", "Goal continuation blocked: provider rejected the request: HTTP 403 access denied for github-copilot/gpt-6-luna-fast.\nRetrying would get the same rejection, so the goal stopped instead of retrying.\nRun /login github-copilot to refresh the account, or check that gpt-6-luna-fast is enabled for your Copilot plan, and check any proxy or gateway in front of it. Then send any message to resume."],
   ])("#given /login guidance that is not about a missing credential (%s) #when classified #then it is not a credential failure", (_label, message) => {
+    expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(false)
+  })
+
+  // Other senpi texts that say "expired" or "sign in again" without a model request's credential having
+  // expired: a device-login flow timing out, an MCP server session, a prompt cache, a one-time migration notice.
+  test.each([
+    ["a Meta device login that timed out (oauth/meta)", "Meta device authorization expired. Please restart login."],
+    ["a Kimi Code device login that timed out (oauth/kimi-coding)", "Kimi Code device authorization expired. Please restart login."],
+    ["a Radius device login that timed out (oauth/radius)", "Device authorization expired."],
+    ["an xAI device login that timed out (oauth/xai)", "xAI device code expired"],
+    ["an expired MCP server session (mcp/health)", "MCP server docs session expired; reinitialize retry also expired; run /mcp reconnect docs"],
+    ["an expired MCP authorization code (mcp/auth/oauth)", "MCP server docs authorization code was rejected or expired; restart with /mcp auth-start docs."],
+    ["an expired prompt cache (handoff-hint)", "This session is 180k tokens and its cache has expired."],
+    ["the subscription login migration notice (auth-storage)", 'The Anthropic Claude subscription login in auth.json was not moved to Anthropic Subscription because a newer login exists. It was left unchanged; sign in again with /login and choose "Anthropic Subscription (Claude Pro/Max)".'],
+  ])("#given an expiry or sign-in text that is not a model credential failure (%s) #when classified #then it is not a credential failure", (_label, message) => {
     expect(isCredentialFailure(message, "gpt-6-luna-fast")).toBe(false)
   })
 
