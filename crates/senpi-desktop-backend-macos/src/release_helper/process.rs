@@ -81,9 +81,32 @@ pub(crate) fn closed_within(socket: &UnixStream, wait: Duration) -> bool {
     let mut bytes = [0u8; 16];
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() || reader.set_read_timeout(Some(left)).is_err() {
+        if left.is_zero() {
             return false;
         }
+        // macOS refuses a receive timeout (EINVAL) on a socket whose peer
+        // already hung up, so that refusal is answered by a read that cannot
+        // block.
+        if reader.set_read_timeout(Some(left)).is_err() {
+            return hung_up(socket);
+        }
+        match reader.read(&mut bytes) {
+            Ok(0) => return true,
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return false,
+        }
+    }
+}
+
+/// Whether the peer closed its end, read without blocking.
+fn hung_up(socket: &UnixStream) -> bool {
+    let mut reader = socket;
+    let mut bytes = [0u8; 16];
+    if reader.set_nonblocking(true).is_err() {
+        return false;
+    }
+    loop {
         match reader.read(&mut bytes) {
             Ok(0) => return true,
             Ok(_) => {}

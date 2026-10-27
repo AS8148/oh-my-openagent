@@ -42,10 +42,10 @@ fn unavailable() -> io::Result<Helper> {
     Err(io::Error::other("no helper"))
 }
 
-/// Everything the peer received, once the ledger's end of the stream closed.
+/// Everything the peer received; the ledger's end of the stream is already
+/// closed, so the read ends.
 fn received() -> Vec<Record> {
     let mut peer = PEER.take().expect("a helper was started");
-    peer.set_read_timeout(Some(Duration::from_secs(5))).expect("timeout");
     let mut bytes = Vec::new();
     peer.read_to_end(&mut bytes).expect("the stream ends");
     let mut records = Vec::new();

@@ -27,6 +27,8 @@ mod holds_tests;
 #[cfg(test)]
 mod plan_tests;
 #[cfg(test)]
+mod process_tests;
+#[cfg(test)]
 mod run_tests;
 #[cfg(test)]
 mod wire_tests;
