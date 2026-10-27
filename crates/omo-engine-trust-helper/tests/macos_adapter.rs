@@ -81,7 +81,7 @@ impl Fixtures {
             format!("{name}.csr"),
             days.to_string(),
         );
-        let subject = format!("/CN=omo adapter {name}");
+        let subject = format!("/CN=Example Trust Test adapter {name}");
         openssl(
             dir,
             &[

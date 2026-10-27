@@ -33,10 +33,10 @@ describe.skipIf(process.platform !== "darwin" || targetDirectory === undefined)(
   beforeAll(async () => {
     base = await mkdtemp(join(tmpdir(), "omo-macos-trust-helper-"))
     certificates = await issueCertificates(join(base, "certificates"), [
-      { name: "root", subject: "/CN=omo helper root", days: 3650, extensions: "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign" },
+      { name: "root", subject: "/CN=Example Trust Test helper root", days: 3650, extensions: "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign" },
       // Ten years, no EKU, no SCTs: the strict SSL policy rejects it (-67901), the BasicX509 chain step does not.
-      { name: "long-no-eku", subject: "/CN=omo helper long no-EKU intermediate", issuer: "root", days: 3650, extensions: "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign" },
-      { name: "client-only", subject: "/CN=omo helper client-auth intermediate", issuer: "root", days: 365, extensions: "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\nextendedKeyUsage=clientAuth" },
+      { name: "long-no-eku", subject: "/CN=Example Trust Test helper long no-EKU intermediate", issuer: "root", days: 3650, extensions: "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign" },
+      { name: "client-only", subject: "/CN=Example Trust Test helper client-auth intermediate", issuer: "root", days: 365, extensions: "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\nextendedKeyUsage=clientAuth" },
     ])
   })
   afterAll(async () => {

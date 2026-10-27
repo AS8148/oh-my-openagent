@@ -59,9 +59,9 @@ const malformed = (value: unknown) => {
 beforeAll(async () => {
   base = await mkdtemp(join(tmpdir(), "omo-macos-trust-helper-"))
   certificates = await issueCertificates(join(base, "certificates"), [
-    { name: "root", subject: "/CN=omo decoder root", days: 30, extensions: "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign" },
-    { name: "intermediate", subject: "/CN=omo decoder intermediate", issuer: "root", days: 30, extensions: `basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,digitalSignature,keyCertSign,cRLSign\nextendedKeyUsage=serverAuth` },
-    { name: "client", subject: "/CN=omo decoder client", issuer: "root", days: 30, extensions: "basicConstraints=critical,CA:FALSE\nextendedKeyUsage=clientAuth" },
+    { name: "root", subject: "/CN=Example Trust Test decoder root", days: 30, extensions: "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign" },
+    { name: "intermediate", subject: "/CN=Example Trust Test decoder intermediate", issuer: "root", days: 30, extensions: `basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,digitalSignature,keyCertSign,cRLSign\nextendedKeyUsage=serverAuth` },
+    { name: "client", subject: "/CN=Example Trust Test decoder client", issuer: "root", days: 30, extensions: "basicConstraints=critical,CA:FALSE\nextendedKeyUsage=clientAuth" },
   ])
 })
 afterAll(async () => {
