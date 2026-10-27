@@ -6,13 +6,17 @@ import { contrastRatio, readRootTokens, resolveColor } from "./design-tokens"
 
 const WEB_ROOT = join(import.meta.dir, "..")
 const INKS = ["--ink-0", "--ink-1", "--ink-2", "--ink-3"] as const
-// [group-|peer-][in-|has-|data-]focus[-visible|-within][/name], covering Tailwind v4 compound variants.
-const FOCUS_VARIANT =
-  /^(?:(?:group|peer)-)?(?:(?:in|has|data)-)?focus(?:-visible|-within)?(?:\/[\w-]+)?$/
-const FOCUS_DATA_VARIANT =
-  /^(?:(?:group|peer)-)?data-\[focus(?:-visible|-within)?(?:=[^\]]*)?\](?:\/[\w-]+)?$/
-// `_` is Tailwind's space inside arbitrary selectors, so it ends the pseudo-class like `]` or `)`.
-const FOCUS_IN_ARBITRARY_SELECTOR = /:focus(?:-visible|-within)?(?![a-zA-Z0-9-])/
+// A variant is read structurally: drop a `/name` or `/[name]` group suffix, drop any chain of compound
+// prefixes (`group-`, `peer-`, `in-`, `has-`), then the rest must name a focus state in one of three shapes.
+const VARIANT_NAME_SUFFIX = /\/(?:[\w-]+|\[[^\]]*\])$/
+const COMPOUND_PREFIX = /^(?:group|peer|in|has)-/
+const FOCUS_STATE = /^focus(?:-visible|-within)?$/
+// data-focus, data-[focus], data-[focus=true], data-[focus~=x], data-[focus_=_true], ...
+const FOCUS_DATA_ATTRIBUTE =
+  /^data-(?:focus(?:-visible|-within)?|\[_*focus(?:-visible|-within)?_*(?:[~|^$*]?=[^\]]*)?\])$/
+// Inside an arbitrary selector: a :focus pseudo-class (`_` is Tailwind's space) or a [data-focus...] attribute.
+const FOCUS_IN_ARBITRARY_SELECTOR =
+  /:focus(?:-visible|-within)?(?![a-zA-Z0-9-])|\[data-focus(?:-visible|-within)?(?![a-zA-Z0-9-])/
 const OUTLINE_UTILITY = /^-?outline(?:-|$)|^-?\[outline(?:-[a-z]+)?:/
 
 const CLOSER: Record<string, string> = { "[": "]", "(": ")" }
@@ -40,10 +44,12 @@ function splitOutsideBrackets(text: string, separator: RegExp, openers: string):
 }
 
 function isFocusVariant(variant: string): boolean {
+  let core = variant.replace(VARIANT_NAME_SUFFIX, "")
+  while (COMPOUND_PREFIX.test(core)) core = core.replace(COMPOUND_PREFIX, "")
   return (
-    FOCUS_VARIANT.test(variant) ||
-    FOCUS_DATA_VARIANT.test(variant) ||
-    (variant.includes("[") && FOCUS_IN_ARBITRARY_SELECTOR.test(variant))
+    FOCUS_STATE.test(core) ||
+    FOCUS_DATA_ATTRIBUTE.test(core) ||
+    (core.startsWith("[") && FOCUS_IN_ARBITRARY_SELECTOR.test(core))
   )
 }
 
@@ -157,6 +163,17 @@ describe("focus ring recipe, the DESIGN.md §8 one-recipe architecture contract"
     ["data-[focus=true]:outline-2"],
     ["group-data-[focus-visible]:outline-2"],
     ["focus:-[outline-offset:2px]"],
+    ["in-data-[focus]:outline-2"],
+    ["has-data-[focus]:outline-2"],
+    ["peer-has-data-[focus-visible]:outline-2"],
+    ["data-[focus~=x]:outline-2"],
+    ["data-[focus^=t]:outline-2"],
+    ["data-[focus*=a]:outline-2"],
+    ["data-[focus_=_true]:outline-2"],
+    ["in-[[data-focus]]:outline-2"],
+    ["group-[[data-focus-visible]]:outline-2"],
+    ["group-focus-visible/[item]:outline-2"],
+    ["peer-data-[focus]/[field]:outline-2"],
   ])(
     "#given the hand-rolled focus outline %s #when scanned #then the guard catches it",
     (source) => {
@@ -183,6 +200,9 @@ describe("focus ring recipe, the DESIGN.md §8 one-recipe architecture contract"
     ["[&:focusable]:outline-2"],
     ["data-[state=open]:outline-2"],
     ["data-[focused-item]:outline-2"],
+    ["in-data-[state=open]:outline-2"],
+    ["group-[[data-state=open]]:outline-2"],
+    ["group-hover/[item]:outline-2"],
   ])("#given the non-violation %s #when scanned #then the guard leaves it alone", (source) => {
     expect(hasHandRolledFocusOutline(source)).toBe(false)
   })
