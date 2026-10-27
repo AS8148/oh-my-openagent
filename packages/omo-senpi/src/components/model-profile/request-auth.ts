@@ -17,8 +17,10 @@
  *
  * A refresh that failed transiently (senpi's `OAuthRefreshUnavailableError`: connection refused,
  * timeout, 408/429/5xx) says nothing about the sign-in, and the first turn retries it, so it never
- * skips a candidate: skipping would move the whole session to the next provider (for a GPT rung,
- * the metered `openai` API lane) for its lifetime.
+ * skips the provider: skipping would move the whole session to the next provider (for a GPT rung,
+ * the metered `openai` API lane) for its lifetime. The model-scope check still runs on that slot, so
+ * a model whose own request configuration fails is skipped as before; only a model probe that is
+ * itself cut short by the transient refresh leaves the candidate kept unchecked.
  *
  * Limits: whether a rotating pool actually fails over on the first turn depends on how senpi's pool
  * classifier reads the rejection (a 401/unauthorized/invalid-key answer fails over; a plain
@@ -43,6 +45,16 @@ export type AuthFailure = {
   readonly errorKind: string
   /** The thrown value, kept for opt-in diagnostics; never serialized into notices or details. */
   readonly error: unknown
+}
+
+/** A candidate kept although its login refresh failed transiently during the probe. */
+export type RefreshUnavailableKeep = {
+  readonly provider: string
+  readonly model: string
+  /** Class and code of senpi's transient-refresh error (for example `OAuthRefreshUnavailableError/oauth`). */
+  readonly errorKind: string
+  /** Closed transport fact from its cause chain (`ECONNREFUSED`, `http_503`, `TimeoutError`), or `unknown`. */
+  readonly causeKind: string
 }
 
 type AuthOverrides = { readonly slotName?: string }
@@ -101,20 +113,38 @@ function providerFailureReason(error: unknown): AuthFailureReason {
 const REFRESH_UNAVAILABLE = Symbol.for("senpi.oauthRefreshUnavailable")
 const MAX_CAUSE_LINKS = 16
 
-function isRefreshUnavailable(error: unknown): boolean {
+function refreshUnavailableError(error: unknown): object | undefined {
   const seen = new Set<unknown>()
   let current = error
   while (isRecord(current) && !seen.has(current) && seen.size < MAX_CAUSE_LINKS) {
     seen.add(current)
-    if (Reflect.get(current, REFRESH_UNAVAILABLE) === true) return true
+    if (Reflect.get(current, REFRESH_UNAVAILABLE) === true) return current
     current = Reflect.get(current, "cause")
   }
-  return false
+  return undefined
+}
+
+// Only closed facts (an error code, an HTTP status, a timeout class) leave the cause chain; never a
+// message, URL or body.
+function transientCauseKind(marked: object): string {
+  const seen = new Set<unknown>()
+  let current: unknown = Reflect.get(marked, "cause")
+  while (isRecord(current) && !seen.has(current) && seen.size < MAX_CAUSE_LINKS) {
+    seen.add(current)
+    const code = Reflect.get(current, "code")
+    if (typeof code === "string" && /^[A-Za-z0-9_]{1,40}$/.test(code)) return code
+    const status = Reflect.get(current, "status")
+    if (typeof status === "number" && Number.isInteger(status)) return `http_${status}`
+    if (Reflect.get(current, "name") === "TimeoutError") return "TimeoutError"
+    current = Reflect.get(current, "cause")
+  }
+  return "unknown"
 }
 
 /**
  * Returns the failure that would stop the first turn on this candidate, or `undefined` when the
  * candidate is usable. `model` is the registry's model object for `provider`/`modelId`.
+ * `onRefreshUnavailable` hears about a candidate kept despite a transient refresh failure.
  */
 export async function probeRequestAuth(
   registry: ProbeRegistry,
@@ -123,6 +153,7 @@ export async function probeRequestAuth(
   provider: string,
   modelId: string,
   model: unknown,
+  onRefreshUnavailable?: (keep: RefreshUnavailableKeep) => void,
 ): Promise<AuthFailure | undefined> {
   const slots = credentialSlots(registry, provider)
   // The engine's selection: without rotation only the flat credential is used; with it, a pin is
@@ -137,7 +168,7 @@ export async function probeRequestAuth(
 
   let resolvedSlot: string | undefined
   let resolved = false
-  let unavailable = false
+  let unavailable: { readonly error: object; readonly slot: string | undefined } | undefined
   let lastError: unknown
   for (const slot of candidates) {
     try {
@@ -149,22 +180,32 @@ export async function probeRequestAuth(
       break
     } catch (error) {
       lastError = error
-      if (isRefreshUnavailable(error)) unavailable = true
+      const marked = refreshUnavailableError(error)
+      if (marked !== undefined && unavailable === undefined) unavailable = { error: marked, slot }
     }
   }
-  // A slot whose refresh is only temporarily unavailable may serve the first turn after its retry.
-  if (!resolved && unavailable) return undefined
-  if (!resolved) {
+  if (!resolved && unavailable === undefined) {
     return { provider, model: modelId, reason: providerFailureReason(lastError), errorKind: errorKind(lastError), error: lastError }
+  }
+  // A slot whose refresh is only temporarily unavailable may serve the first turn after its retry,
+  // so the provider stays eligible and the model-scope check runs on that slot.
+  const modelSlot = resolved ? resolvedSlot : unavailable?.slot
+  const keep = (marked: object): undefined => {
+    onRefreshUnavailable?.({ provider, model: modelId, errorKind: errorKind(marked), causeKind: transientCauseKind(marked) })
+    return undefined
   }
 
   try {
-    await runtime.getAuth(model, resolvedSlot === undefined ? {} : { slotName: resolvedSlot })
+    await runtime.getAuth(model, modelSlot === undefined ? {} : { slotName: modelSlot })
   } catch (error) {
-    if (isRefreshUnavailable(error)) return undefined
-    return { provider, model: modelId, reason: "request", errorKind: errorKind(error), error }
+    const marked = refreshUnavailableError(error)
+    if (marked !== undefined) return keep(marked)
+    // After a transient provider probe the model probe re-runs the refresh; a refusal there is still
+    // a provider-scope failure, anything else is this model's request configuration.
+    const reason = !resolved && providerFailureReason(error) === "refresh" ? "refresh" : "request"
+    return { provider, model: modelId, reason, errorKind: errorKind(error), error }
   }
-  return undefined
+  return unavailable === undefined || resolved ? undefined : keep(unavailable.error)
 }
 
 const DETAIL_MAX_LENGTH = 240

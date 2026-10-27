@@ -645,8 +645,17 @@ describe("createModelProfileComponent", () => {
       applied: API_ASTRA,
       authFailed: [{ provider: "chatgpt-subscription", model: "gpt-6-astra", reason: "refresh" }],
     },
-  ])("#given geeky-normal with the subscription and the OpenAI API lane and $kind #when the session starts #then the expected lane serves GPT-6 Astra", async ({ custom, applied, authFailed }) => {
-    const probe = authProbe({ custom })
+    {
+      // The provider stays eligible, but the model-scope check still runs: a model whose own header
+      // configuration fails would fail the first turn, so only that candidate is skipped.
+      kind: "a transient refresh failure on the provider probe and a failing model header",
+      custom: { targets: ["chatgpt-subscription"], throws: refreshUnavailable },
+      broken: ["chatgpt-subscription/gpt-6-astra"],
+      applied: API_ASTRA,
+      authFailed: [{ provider: "chatgpt-subscription", model: "gpt-6-astra", reason: "request" }],
+    },
+  ])("#given geeky-normal with the subscription and the OpenAI API lane and $kind #when the session starts #then the expected lane serves GPT-6 Astra", async ({ custom, broken, applied, authFailed }) => {
+    const probe = authProbe({ custom, broken })
     const { pi, start } = harness({ model_profile: "geeky-normal" }, [ASTRA, API_ASTRA], probe.getAuth)
 
     await start(STARTUP)
@@ -655,6 +664,24 @@ describe("createModelProfileComponent", () => {
     expect(pi.messages[0]?.message).toMatchObject({ customType: MODEL_PROFILE_APPLIED_TYPE })
     const details = pi.messages[0]?.message["details"] as Record<string, unknown>
     expect(details["authFailed"]).toEqual(authFailed)
+  })
+
+  test.each([
+    { probe: "provider", target: "chatgpt-subscription" },
+    { probe: "model", target: "chatgpt-subscription/gpt-6-astra" },
+  ])("#given a transient refresh failure on the $probe probe #when the session keeps the subscription #then one warn line names the kept candidate with only the error class and code", async ({ target }) => {
+    const probe = authProbe({ custom: { targets: [target], throws: refreshUnavailable } })
+    const { logs, start } = harness({ model_profile: "geeky-normal" }, [ASTRA, API_ASTRA], probe.getAuth)
+
+    await start(STARTUP)
+
+    // The diagnosable fingerprint is the contract (candidate + error class/code + transport code),
+    // not the sentence around it; the raw message must not leak.
+    const kept = logs.filter((line) => line.startsWith("warn:") && line.includes("chatgpt-subscription/gpt-6-astra"))
+    expect(kept).toHaveLength(1)
+    expect(kept[0]).toContain("OAuthRefreshUnavailableError/oauth")
+    expect(kept[0]).toContain("ECONNREFUSED")
+    expect(logs.some((line) => line.includes("connect failed"))).toBe(false)
   })
 
   test("#given a credential pool whose flat account is expired but a sibling account resolves #when the session starts #then the provider stays eligible through the healthy slot", async () => {

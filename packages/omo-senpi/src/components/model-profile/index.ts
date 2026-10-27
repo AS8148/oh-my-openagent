@@ -7,7 +7,14 @@ import { credentialRotationPolicy } from "./credential-policy"
 import { customModelProviders } from "./custom-providers"
 import { newProbeState, resolveDefaultModelProfile, type ProbeState } from "./default-profile"
 import { authFailedDetails, noticeContent } from "./notice"
-import { type AuthFailure, type ProbeRegistry, probeRequestAuth, probeRuntime, sanitizedAuthErrorDetail } from "./request-auth"
+import {
+  type AuthFailure,
+  type ProbeRegistry,
+  probeRequestAuth,
+  probeRuntime,
+  type RefreshUnavailableKeep,
+  sanitizedAuthErrorDetail,
+} from "./request-auth"
 import { resolveModelProfile, type ModelProfileResolution } from "./resolve"
 
 /**
@@ -151,6 +158,15 @@ function logSkippedCandidate(ctx: ComponentContext, failure: AuthFailure): void 
   }
 }
 
+// A kept candidate whose login refresh failed transiently may still fail on the first turn; this
+// line (class/code fingerprints only) is what makes that failure diagnosable afterwards.
+function logKeptOnTransientRefresh(ctx: ComponentContext, keep: RefreshUnavailableKeep): void {
+  ctx.logger.warn(
+    `omo-senpi: model profile kept ${keep.provider}/${keep.model}: its login refresh failed transiently at session start (${keep.errorKind}, ${keep.causeKind}); the first turn retries it`,
+    { provider: keep.provider, model: keep.model, errorKind: keep.errorKind, causeKind: keep.causeKind },
+  )
+}
+
 type ProbedResolution = { readonly resolution: ModelProfileResolution; readonly model: unknown; readonly failures: AuthFailure[] }
 
 // Each failed probe removes at least one selector (the whole provider for a credential failure,
@@ -186,7 +202,9 @@ async function resolveWithRequestAuth(
   while (resolution.kind === "resolved") {
     model = registry.find(resolution.provider, resolution.modelId)
     if (model === undefined || resolution.profile.source === "pin" || runtime === undefined) break
-    const failure = await probeRequestAuth(registry, runtime, mayRotate, resolution.provider, resolution.modelId, model)
+    const failure = await probeRequestAuth(registry, runtime, mayRotate, resolution.provider, resolution.modelId, model, (keep) =>
+      logKeptOnTransientRefresh(ctx, keep),
+    )
     if (failure === undefined) break
     failures.push(failure)
     logSkippedCandidate(ctx, failure)
