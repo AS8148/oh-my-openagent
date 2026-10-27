@@ -6,6 +6,8 @@ import { contrastRatio, readRootTokens, resolveColor } from "./design-tokens"
 
 const WEB_ROOT = join(import.meta.dir, "..")
 const INKS = ["--ink-0", "--ink-1", "--ink-2", "--ink-3"] as const
+const HAND_ROLLED_FOCUS_OUTLINE =
+  /(?:^|[\s"'`:])(?:focus|focus-visible|focus-within|\[&:focus(?:-visible|-within)?\]):-?outline-/
 
 function sourceFiles(directory: string): readonly string[] {
   return readdirSync(directory, { withFileTypes: true, recursive: true })
@@ -46,9 +48,20 @@ describe("focus ring recipe, the DESIGN.md §8 one-recipe architecture contract"
     expect(offendingLines(indicator)).toEqual([])
   })
 
-  test("#given the components #when scanned #then every focus outline comes from the focus-ring utilities", () => {
-    const handRolled = /focus-visible:-?outline-/
+  test.each([
+    "focus-visible:outline-2",
+    "focus:outline-accent",
+    "focus-within:-outline-offset-2",
+    "[&:focus-visible]:outline-2",
+    "[&:focus]:outline-ring",
+  ])(
+    "#given the hand-rolled focus outline %s #when matched #then the guard catches it",
+    (className) => {
+      expect(HAND_ROLLED_FOCUS_OUTLINE.test(className)).toBe(true)
+    },
+  )
 
-    expect(offendingLines(handRolled)).toEqual([])
+  test("#given the components #when scanned #then every focus outline comes from the focus-ring utilities", () => {
+    expect(offendingLines(HAND_ROLLED_FOCUS_OUTLINE)).toEqual([])
   })
 })

@@ -8,6 +8,7 @@ type FocusedRing = {
   readonly outlineStyle: string
   readonly outlineWidth: number
   readonly outlineColor: string
+  readonly opacity: number
 }
 
 for (const route of ["/", "/docs", "/manifesto"]) {
@@ -31,6 +32,13 @@ for (const route of ["/", "/docs", "/manifesto"]) {
           outlineStyle: style.outlineStyle,
           outlineWidth: Number.parseFloat(style.outlineWidth),
           outlineColor: style.outlineColor,
+          opacity: (() => {
+            let value = 1
+            for (let node: Element | null = element; node; node = node.parentElement) {
+              value *= Number(getComputedStyle(node).opacity)
+            }
+            return value
+          })(),
         }
       })
       if (ring === null) break
@@ -41,7 +49,10 @@ for (const route of ["/", "/docs", "/manifesto"]) {
     expect(stops.length).toBeGreaterThan(3)
     const missing = stops.filter(
       (stop) =>
-        stop.outlineStyle === "none" || stop.outlineWidth < 2 || stop.outlineColor !== RING_COLOR,
+        stop.outlineStyle === "none" ||
+        stop.outlineWidth < 2 ||
+        stop.outlineColor !== RING_COLOR ||
+        stop.opacity < 1,
     )
     expect(missing).toEqual([])
   })
