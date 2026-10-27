@@ -125,7 +125,7 @@ describe("decodeWindowsTrustHelperOutput", () => {
     ["an unreadable CTL", (document: Wire) => { document.ctl = "unreadable" }, "$.complete"],
     ["an undecodable CTL", (document: Wire) => { document.ctl = "undecodable" }, "$.complete"],
     ["a CTL with an unsupported subject algorithm", (document: Wire) => { document.ctl = "unsupported-subject-algorithm" }, "$.complete"],
-    ["a disallowedHash CTL with a certificate Crypt32 cannot hash", (document: Wire) => { document.ctl = "signature-hash-failed" }, "$.complete"],
+    ["a CTL that Crypt32 could not apply to a certificate", (document: Wire) => { document.ctl = "match-failed" }, "$.complete"],
   ])("#given %s with complete:true #when decoding #then the claim is rejected as inconsistent", (_case, mutate, path) => {
     const document = wire()
     mutate(document)
@@ -188,6 +188,10 @@ describe("decodeWindowsTrustHelperOutput", () => {
     ["a short CTL thumbprint", (document: Wire) => { document.ctlSha1 = ["abcd"] }, "invalid-value", "$.ctlSha1[0]"],
     ["a SHA-1 in a SHA-256 slot", (document: Wire) => { document.bundledRoots = [{ sha256: id(Q.der).sha1, sha1: id(Q.der).sha1 }] }, "invalid-value", "$.bundledRoots[0].sha256"],
     ["a null chain path entry", (document: Wire) => { document.certificates[1] = { ...document.certificates[1], chain: { anchor: null, path: [null], explicitDistrust: false } } }, "wrong-type", "$.certificates[1].chain.path[0]"],
+    // The policy denies by path member and anchor, so a chain must describe its own certificate (shared with the macOS decoder).
+    ["a chain whose path starts at another certificate", (document: Wire) => { document.certificates[1] = { ...document.certificates[1], chain: { anchor: id(R.der), path: [id(R.der)], explicitDistrust: false } } }, "invalid-value", "$.certificates[1].chain.path[0]"],
+    ["an anchor that is not the path's last member", (document: Wire) => { document.certificates[1] = { ...document.certificates[1], chain: { anchor: id(Q.der), path: [id(X.der), id(R.der)], explicitDistrust: false } } }, "invalid-value", "$.certificates[1].chain.anchor"],
+    ["an anchor with an empty path", (document: Wire) => { document.certificates[1] = { ...document.certificates[1], chain: { anchor: id(R.der), path: [], explicitDistrust: false } } }, "invalid-value", "$.certificates[1].chain.anchor"],
   ] as const)("#given %s #when decoding #then it is rejected", (_case, mutate, check, path) => {
     const document = wire()
     const replaced = mutate(document)

@@ -20,9 +20,9 @@ export type WindowsTrustSource = {
   /** The Win32 error the helper saw; 0 when read. */
   readonly status: number
 }
-/** `signature-hash-failed`: a disallowedHash CTL could not be applied to a certificate Crypt32 cannot hash. */
+/** `match-failed`: Crypt32's CertFindSubjectInCTL failed for a certificate with an error other than not-found. */
 export type WindowsCtlOutcome =
-  | "read" | "absent" | "unreadable" | "undecodable" | "unsupported-subject-algorithm" | "signature-hash-failed"
+  | "read" | "absent" | "unreadable" | "undecodable" | "unsupported-subject-algorithm" | "match-failed"
 export type WindowsTrustHelperDocument = {
   readonly facts: WindowsFacts
   /** Certificate bytes of every positive candidate, by DER SHA-256, for the generation writer. */
@@ -48,7 +48,7 @@ const POSITIVE_STORES = ["ROOT", "CA", "TrustedPeople"] as const
 const SOURCE_STORES: readonly WindowsSourceStore[] = [...POSITIVE_STORES, "Disallowed"]
 const OUTCOMES: readonly WindowsSourceOutcome[] = ["read", "absent", "access-denied", "enumeration-failed"]
 const CTL_OUTCOMES: readonly WindowsCtlOutcome[] = [
-  "read", "absent", "unreadable", "undecodable", "unsupported-subject-algorithm", "signature-hash-failed",
+  "read", "absent", "unreadable", "undecodable", "unsupported-subject-algorithm", "match-failed",
 ]
 const OID = /^[0-2](?:\.(?:0|[1-9][0-9]*))+$/
 const SHA256 = /^[0-9a-f]{64}$/
@@ -144,13 +144,16 @@ function eku(value: unknown, path: string): EnhancedKeyUsage {
   object(value, path, ["kind"])
   return { kind: oneOf(kind, `${path}.kind`, ["unrestricted", "none", "error"] as const) }
 }
-function chain(value: unknown, path: string): TrustChain {
+const same = (left: CertificateId | undefined, right: CertificateId): boolean =>
+  left !== undefined && left.sha256 === right.sha256 && left.sha1 === right.sha1
+/** A chain describes its own certificate: a non-empty path starts at `own`, and an anchor is the path's last member. */
+function chain(value: unknown, path: string, own: CertificateId): TrustChain {
   const record = object(value, path, ["anchor", "path", "explicitDistrust"])
-  return {
-    anchor: record.anchor === null ? null : identity(record.anchor, `${path}.anchor`),
-    path: array(record.path, `${path}.path`).map((entry, index) => identity(entry, `${path}.path[${index}]`)),
-    explicitDistrust: boolean(record.explicitDistrust, `${path}.explicitDistrust`),
-  }
+  const anchor = record.anchor === null ? null : identity(record.anchor, `${path}.anchor`)
+  const members = array(record.path, `${path}.path`).map((entry, index) => identity(entry, `${path}.path[${index}]`))
+  if (members.length > 0 && !same(members[0], own)) throw new Malformed("invalid-value", `${path}.path[0]`)
+  if (anchor !== null && !same(members.at(-1), anchor)) throw new Malformed("invalid-value", `${path}.anchor`)
+  return { anchor, path: members, explicitDistrust: boolean(record.explicitDistrust, `${path}.explicitDistrust`) }
 }
 
 function decode(document: unknown): WindowsTrustHelperDocument {
@@ -186,7 +189,7 @@ function decode(document: unknown): WindowsTrustHelperDocument {
       ca: boolean(record.ca, `${path}.ca`),
       eku: eku(record.eku, `${path}.eku`),
     }
-    return record.chain === undefined ? certificate : { ...certificate, chain: chain(record.chain, `${path}.chain`) }
+    return record.chain === undefined ? certificate : { ...certificate, chain: chain(record.chain, `${path}.chain`, id) }
   })
   const disallowed = array(root.disallowed, "$.disallowed").map((entry, index) => {
     const path = `$.disallowed[${index}]`

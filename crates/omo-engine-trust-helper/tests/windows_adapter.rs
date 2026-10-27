@@ -8,8 +8,7 @@ use std::process::Command;
 
 use omo_engine_trust_helper::document::{Chain, Identity, Outcome};
 use omo_engine_trust_helper::windows::{
-    collect, decode_disallowed_ctl, effective_eku, CertStore, CollectError, Context, CtlRead, DisallowedCtl, PhysicalRead,
-    SystemStores,
+    collect, decode_disallowed_ctl, effective_eku, CertStore, CollectError, Context, CtlRead, PhysicalRead, SystemStores,
 };
 use omo_engine_trust_helper::windows_document::{CtlOutcome, Eku, Location, SourceStore};
 use windows_sys::Win32::Security::Cryptography::{
@@ -336,29 +335,31 @@ fn certificate_identities_match_openssl() {
     assert_eq!(store.add_encoded(&root.der).unwrap().identity(), Some(pki.identity(&root)));
 }
 
+// Matching is Crypt32's: CertFindSubjectInCTL with CTL_CERT_SUBJECT_TYPE, positive and negative (design 9.2).
 #[test]
-fn a_synthetic_signed_disallowed_ctl_decodes_to_sha1_subjects() {
+fn a_synthetic_signed_sha1_ctl_names_certificates_through_crypt32() {
     let pki = Pki::new();
     let signer = pki.root("ctl-signer", "signer");
-    let first = [0x11u8; 20];
-    let second = [0xabu8; 20];
-    let ctl = pki.sign_ctl(&ctl_content(&[&first, &second], "1.3.14.3.2.26"), &signer);
-    assert_eq!(decode_disallowed_ctl(&ctl), Ok(DisallowedCtl::Sha1(vec!["11".repeat(20), "ab".repeat(20)])));
+    let listed = pki.root("ctl-listed", "root");
+    let kept = pki.root("ctl-kept", "root");
+    let thumbprint: Vec<u8> = (0..20).map(|index| u8::from_str_radix(&pki.identity(&listed).sha1[index * 2..index * 2 + 2], 16).unwrap()).collect();
+    let ctl = pki.sign_ctl(&ctl_content(&[&thumbprint, &[0xab; 20]], "1.3.14.3.2.26"), &signer);
+    let (stores, _) = MemoryStores::default().with(SourceStore::Root, Location::LocalMachine, &[&listed, &kept]);
+    let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..stores };
+    let output = collect(&mut stores, &[]).unwrap();
+    assert_eq!((output.ctl, output.complete, output.ctl_sha1), (CtlOutcome::Read, true, vec![pki.identity(&listed).sha1]));
+
     let sha256 = pki.sign_ctl(&ctl_content(&[&[0x22u8; 32]], "2.16.840.1.101.3.4.2.1"), &signer);
-    assert_eq!(decode_disallowed_ctl(&sha256), Err(CtlOutcome::UnsupportedSubjectAlgorithm));
-    let short = pki.sign_ctl(&ctl_content(&[&[0x33u8; 19]], "1.3.14.3.2.26"), &signer);
-    assert_eq!(decode_disallowed_ctl(&short), Err(CtlOutcome::Undecodable));
-    let oversize = pki.sign_ctl(&ctl_content(&[&[0x44u8; 65]], DISALLOWED_HASH), &signer);
-    assert_eq!(decode_disallowed_ctl(&oversize), Err(CtlOutcome::Undecodable), "longer than any digest CryptHashToBeSigned produces");
-    assert_eq!(decode_disallowed_ctl(&[0x30, 0x03, 0x02, 0x01, 0x00]), Err(CtlOutcome::Undecodable));
+    assert_eq!(decode_disallowed_ctl(&sha256).err(), Some(CtlOutcome::UnsupportedSubjectAlgorithm));
+    assert_eq!(decode_disallowed_ctl(&[0x30, 0x03, 0x02, 0x01, 0x00]).err(), Some(CtlOutcome::Undecodable));
 }
 
 const DISALLOWED_HASH: &str = "1.3.6.1.4.1.311.10.11.15";
 
-// The runner's real Disallowed CTL declares szOID_DISALLOWED_HASH (wincrypt.h: szOID_CERT_SIGNATURE_HASH_PROP_ID).
-// Measured against Microsoft's published disallowedcert.sst, its entries are of two kinds: the certificate's
-// CERT_SIGNATURE_HASH_PROP_ID, the digest of its TBSCertificate under its own signature algorithm, and the
-// MD5 of its subject public key (CERT_SUBJECT_PUBLIC_KEY_MD5_HASH_PROP_ID). The entries here come from OpenSSL.
+// The hosted runners' real Disallowed CTL declares szOID_DISALLOWED_HASH. Measured against Microsoft's published
+// disallowedcert.sst, its entries are of two kinds: the digest of a certificate's TBSCertificate under its own
+// signature algorithm (6 of 96, all SHA-384) and the MD5 of its subject public key (90 of 96). The entries here
+// come from OpenSSL; Crypt32's CertFindSubjectInCTL must recognise both kinds.
 #[test]
 fn a_disallowed_hash_ctl_names_certificates_by_signature_hash_or_public_key_md5() {
     let pki = Pki::new();
@@ -388,7 +389,7 @@ fn a_disallowed_hash_ctl_names_certificates_by_signature_hash_or_public_key_md5(
 }
 
 #[test]
-fn a_certificate_without_a_signature_hash_makes_a_disallowed_hash_scan_incomplete() {
+fn a_crypt32_match_error_makes_a_disallowed_hash_scan_incomplete() {
     let pki = Pki::new();
     let signer = pki.root("dh-fail-signer", "signer");
     let mut unknown = pki.root("dh-unknown", "root").der;
@@ -403,7 +404,7 @@ fn a_certificate_without_a_signature_hash_makes_a_disallowed_hash_scan_incomplet
     stores.stores.insert((SourceStore::Root, Location::CurrentUser), Ok(store));
 
     let output = collect(&mut stores, &[]).unwrap();
-    assert_eq!((serde_json::to_value(output.ctl).unwrap(), output.complete), (serde_json::json!("signature-hash-failed"), false));
+    assert_eq!((serde_json::to_value(output.ctl).unwrap(), output.complete), (serde_json::json!("match-failed"), false));
 }
 
 #[test]
