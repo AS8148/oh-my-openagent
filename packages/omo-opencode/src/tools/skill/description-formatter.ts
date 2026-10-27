@@ -1,10 +1,12 @@
+import { realpathSync } from "node:fs"
 import { TOOL_DESCRIPTION_NO_SKILLS, TOOL_DESCRIPTION_PREFIX } from "./constants"
 import { sortByScopePriority } from "./scope-priority"
-import type { SkillInfo } from "./types"
+import type { CoreListedSkill, SkillInfo } from "./types"
 import type { CommandInfo } from "../slashcommand/types"
 
 interface CombinedDescriptionOptions {
   includeSkills?: boolean
+  coreListedSkills?: readonly CoreListedSkill[]
 }
 
 function formatSkillCommand(skill: SkillInfo): string {
@@ -50,39 +52,33 @@ function normalizeSkillLocation(location: string): string {
   return location.replace(/\\/g, "/").replace(/\/+$/, "")
 }
 
-function isOmoBundledSkillLocation(location: string | undefined): boolean {
-  if (!location) return false
-  const normalized = normalizeSkillLocation(location)
-  if (normalized === "<builtin>" || normalized.startsWith("<builtin>/")) return true
-  return (
-    /(?:^|\/)dist\/skills(?:\/|$)/.test(normalized)
-    || /(?:^|\/)(?:packages\/)?shared-skills(?:\/skills)?(?:\/|$)/.test(normalized)
+// Core and OMO can reach one file through different roots (a symlinked skills dir), so a location is
+// compared as the file it resolves to; a path that does not resolve is compared as written.
+function skillFileIdentity(location: string): string {
+  try {
+    return normalizeSkillLocation(realpathSync.native(location))
+  } catch (error) {
+    if (!(error instanceof Error)) throw error
+    return normalizeSkillLocation(location)
+  }
+}
+
+function coreRenderedSkillKey(name: string, location: string): string {
+  return `${name}\u0000${skillFileIdentity(location)}`
+}
+
+// OpenCode core renders a skill in <available_skills> only when Skill.all() has it with a description
+// (Skill.fmt). A skill is left out here only when core lists that same name at that same file; with no
+// core list (unavailable or empty) nothing is left out, so no skill can end up in neither list.
+function createCoreRenderedSkillFilter(
+  coreListedSkills: readonly CoreListedSkill[] | undefined,
+): (skill: SkillInfo) => boolean {
+  const rendered = new Set(
+    (coreListedSkills ?? [])
+      .filter((entry) => (entry.description ?? "").trim() !== "")
+      .map((entry) => coreRenderedSkillKey(entry.name, entry.location)),
   )
-}
-
-function isOpenCodeCoreBuiltinLocation(location: string | undefined): boolean {
-  if (location === undefined) return false
-  const normalized = normalizeSkillLocation(location).trim()
-  return normalized === "" || normalized === "<built-in>"
-}
-
-const CORE_SCANNED_DIR_RE =
-  /(?:^|\/)(?:\.opencode\/skills?(?:\/|$)|(?:\.claude|\.agents)\/skills(?:\/|$)|(?:\.config\/opencode(?:\/profiles\/[^/]+)?\/skills?(?:\/|$)))/i
-
-function hasCoreScannedSkillLocation(location: string | undefined): boolean {
-  if (!location) return false
-  if (isOpenCodeCoreBuiltinLocation(location)) return true
-  const normalized = normalizeSkillLocation(location)
-  if (CORE_SCANNED_DIR_RE.test(normalized)) return true
-  return /ai\.opencode\.desktop(?:\.dev)?(?:\/.*)?\/skills?(?:\/|$)/i.test(normalized)
-}
-
-export function isDiscoverableByOpenCodeCore(skill: SkillInfo): boolean {
-  // OpenCode core already emits these in <available_skills>. OMO-bundled
-  // builtin/shared skills live under dist/skills and are invisible to that scan.
-  if (skill.scope === "builtin" || skill.scope === "shared") return false
-  if (isOmoBundledSkillLocation(skill.location)) return false
-  return hasCoreScannedSkillLocation(skill.location)
+  return (skill) => skill.location !== undefined && rendered.has(coreRenderedSkillKey(skill.name, skill.location))
 }
 
 export function deduplicatePathAliasedSkills(skills: SkillInfo[]): SkillInfo[] {
@@ -112,7 +108,8 @@ export function formatCombinedDescription(
   options: CombinedDescriptionOptions = {}
 ): string {
   const allSkills = options.includeSkills ? deduplicatePathAliasedSkills(skills ?? []) : []
-  const availableSkills = allSkills.filter((skill) => !isDiscoverableByOpenCodeCore(skill))
+  const isRenderedByCore = createCoreRenderedSkillFilter(options.coreListedSkills)
+  const availableSkills = allSkills.filter((skill) => !isRenderedByCore(skill))
   const availableCommands = deduplicateCommandsForPathAliasedSkills(commands ?? [], allSkills)
 
   if (availableSkills.length === 0 && availableCommands.length === 0) {

@@ -5,7 +5,7 @@ import type { LoadedSkill } from "../../../features/opencode-skill-loader/types"
 import { createMockSkill, createSkillTool, mockContext } from "./test-support"
 
 describe("skill tool - nativeSkills integration", () => {
-  it("includes native skills in the description even when skills are pre-seeded", async () => {
+  it("keeps pre-seeded skills listed and leaves skills from core's own list to core, still loadable", async () => {
     const tool = createSkillTool({
       skills: [createMockSkill("seeded-skill")],
       includeSkillsInDescription: true,
@@ -24,11 +24,12 @@ describe("skill tool - nativeSkills integration", () => {
     })
 
     expect(tool.description).toContain("seeded-skill")
-    expect(tool.description).toContain("native-visible-skill")
-    await tool.execute({ name: "native-visible-skill" }, mockContext)
+    expect(tool.description).not.toContain("native-visible-skill")
+    const result = await tool.execute({ name: "native-visible-skill" }, mockContext)
 
+    expect(result).toContain("Native visible skill body")
     expect(tool.description).toContain("seeded-skill")
-    expect(tool.description).toContain("native-visible-skill")
+    expect(tool.description).not.toContain("native-visible-skill")
   })
 
   it("omits OpenCode-injected native skills from available_items because core already lists them", () => {
