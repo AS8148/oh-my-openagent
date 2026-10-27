@@ -306,7 +306,11 @@ function isInsideTempDir(path: string, env: TelemetryEnv, deps: TempDirDeps): bo
       return false
     }
   }
-  const target = resolve(path)
+  // The install id is written under path.join(home, ...), which resolves `..` lexically, so every check below
+  // judges that lexically resolved path (the helper's contract for lexical openers), not the raw HOME. A lexical
+  // HOME that does not exist yet cannot hold a stable id either: it counts as ephemeral (telemetry OFF).
+  const lexical = paths.resolve(path)
+  const target = resolve(lexical)
   if (target === undefined) return true
   const trigger = (candidate: string): boolean =>
     !windows && isDarwinAutomountTriggerPath(candidate, { platform: deps.platform ?? process.platform, homeDir: path })
@@ -325,7 +329,7 @@ function isInsideTempDir(path: string, env: TelemetryEnv, deps: TempDirDeps): bo
     const root = resolve(candidate)
     if (root === undefined || paths.dirname(root) === root) return false
     try {
-      return isPathInside(path, candidate, options)
+      return isPathInside(lexical, candidate, options)
     } catch {
       return false
     }
