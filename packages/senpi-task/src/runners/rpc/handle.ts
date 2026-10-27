@@ -291,7 +291,7 @@ function flush(waiters: Array<() => void>): void {
 
 function assertOk(response: RpcResponse, label: string): void {
   if (!response.success) {
-    throw new RpcCommandError(label, response.error)
+    throw new RpcCommandError(label, response.error, response)
   }
 }
 
