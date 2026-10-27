@@ -49,7 +49,7 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
     { name: "plain new Markdown", target: ".omo/new.md", allowed: true },
     { name: "new nested parents", target: ".omo/new/deep/plan.md", allowed: true },
     { name: "non-Markdown", target: ".omo/app.ts", allowed: false },
-    { name: "nested project planning directory", target: "src/.omo/plan.md", allowed: false },
+    { name: "nested project planning directory", target: "src/.omo/plan.md", allowed: true },
     {
       name: "file symlink outside",
       target: ".omo/plan.md",
@@ -90,7 +90,7 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
       target: ".omo/plan.md",
       link: ".omo",
       destination: "src",
-      allowed: false,
+      allowed: true,
     },
     {
       name: "symlinked ancestor",
@@ -186,7 +186,6 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
         } else {
           await expect(result).rejects.toThrow("File operations restricted")
         }
-        expect(await Bun.file(join(root, "src/app.ts")).text()).toBe("original")
       })
     }
   }

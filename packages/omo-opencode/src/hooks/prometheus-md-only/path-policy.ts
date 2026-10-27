@@ -1,53 +1,37 @@
-import { lstatSync, realpathSync } from "node:fs"
-import { basename, dirname, relative, resolve, isAbsolute, sep } from "node:path"
+import { realpathSync } from "node:fs"
+import { relative, resolve, isAbsolute, sep } from "node:path"
 
 import { ALLOWED_EXTENSIONS } from "./constants"
-
-/** Missing components are appended only after an existing ancestor resolves successfully. */
-function canonicalDestination(path: string): string {
-  const missing: string[] = []
-  let ancestor = path
-  for (;;) {
-    try {
-      lstatSync(ancestor)
-    } catch (error) {
-      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error
-      const parent = dirname(ancestor)
-      if (parent === ancestor) throw error
-      missing.unshift(basename(ancestor))
-      ancestor = parent
-      continue
-    }
-    // Keep this outside the ENOENT handler: a dangling symlink is not a missing file.
-    return resolve(realpathSync.native(ancestor), ...missing)
-  }
-}
+import { resolveFileWritePath } from "../../shared/resolve-file-write-path"
 
 function isInside(path: string, root: string): boolean {
   const rel = relative(root, path)
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
 }
 
-/** Check normalized executors and executors that pass an absolute path through unchanged. */
-export function isAllowedFile(filePath: string, workspaceRoot: string): boolean {
+/** Return the authorized physical path; the hook passes this exact value to the tool. */
+export function resolveAllowedFile(filePath: string, workspaceRoot: string): string | undefined {
   try {
-    const resolved = resolve(workspaceRoot, filePath)
-    const lexicalRelative = relative(resolve(workspaceRoot), resolved)
-    if (lexicalRelative.split(sep)[0]?.toLowerCase() !== ".omo") return false
+    const input = filePath.replace(/\\/g, sep)
+    const planning = [...input.matchAll(/(?:^|[/\\])\.omo(?=[/\\]|$)/gi)].at(-1)
+    if (planning === undefined) return undefined
+    const prefix = input.slice(0, planning.index + planning[0].length)
+    if (!isInside(resolve(workspaceRoot, prefix), resolve(workspaceRoot))) return undefined
 
-    // Anchor to the real project root, not a potentially redirected `.omo` directory.
-    const allowedRoot = resolve(realpathSync.native(workspaceRoot), ".omo")
-    // write/edit may open an absolute path verbatim; patch executors normalize it.
-    // Check both: collapsing `link/..` before native realpath can hide a redirect.
-    const paths = isAbsolute(filePath) && filePath !== resolved ? [resolved, filePath] : [resolved]
-    return paths.every(path => {
-      const destination = canonicalDestination(path)
-      return isInside(destination, allowedRoot) && ALLOWED_EXTENSIONS.some(
-        ext => path.toLowerCase().endsWith(ext) && destination.toLowerCase().endsWith(ext),
-      )
-    })
+    const realRoot = realpathSync.native(workspaceRoot)
+    const planningRoot = resolveFileWritePath(prefix, workspaceRoot)
+    if (planningRoot !== realRoot && !isInside(planningRoot, realRoot)) return undefined
+    const destination = resolveFileWritePath(filePath, workspaceRoot)
+    if (!isInside(destination, planningRoot)) return undefined
+    return ALLOWED_EXTENSIONS.some(ext =>
+      input.toLowerCase().endsWith(ext) && destination.toLowerCase().endsWith(ext),
+    ) ? destination : undefined
   } catch {
     // Includes dangling links, loops, non-directory ancestors and inaccessible paths.
-    return false
+    return undefined
   }
+}
+
+export function isAllowedFile(filePath: string, workspaceRoot: string): boolean {
+  return resolveAllowedFile(filePath, workspaceRoot) !== undefined
 }

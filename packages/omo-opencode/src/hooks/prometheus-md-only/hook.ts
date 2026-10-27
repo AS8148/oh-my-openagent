@@ -5,36 +5,63 @@ import { replaceToolArgs } from "../../shared/replace-tool-args"
 import { getAgentDisplayName } from "../../shared/agent-display-names"
 import { getAgentFromSession } from "./agent-resolution"
 import { isPrometheusAgent } from "./agent-matcher"
-import { isAllowedFile } from "./path-policy"
+import { resolveAllowedFile } from "./path-policy"
 
 const TASK_TOOLS = ["task", "call_omo_agent"]
 
-// opencode's patch parser matches these headers with no trailing space and trims the rest
-// (`*** Add File:src/x` is a valid header), so the guard matches the same grammar (omo#11367).
-const PATCH_PATH_HEADER = /^\s*\*\*\* (?:Add File|Update File|Delete File|Move to):(.*)$/
+// Mirror OpenCode's LF splitting and prefix/slice/trim semantics, not JS regex line terminators:
+// https://github.com/anomalyco/opencode/blob/32f278b48f1a495611165d8a9f1ace0b512933e2/packages/opencode/src/patch/index.ts#L66-L96
+// parsePatch splits on "\n" at L187; CR, U+2028 and U+2029 remain part of the header remainder.
+const PATCH_PATH_HEADERS = ["*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"]
 
 /**
  * Every path an apply_patch body touches (added, updated, deleted and move targets), or undefined
- * when no patch body is found, which the caller treats as blocked.
+ * when a body or mutation header cannot be classified, which the caller treats as blocked.
  */
-function patchedPaths(args: Record<string, unknown>): string[] | undefined {
-  const patch = [args.patchText, args.input, args.patch].find((value): value is string => typeof value === "string")
-  if (patch === undefined) return undefined
-  const paths: string[] = []
-  for (const line of patch.split(/\r?\n/)) {
-    const match = PATCH_PATH_HEADER.exec(line)
-    if (match) paths.push((match[1] ?? "").trim())
+function patchedPaths(args: Record<string, unknown>) {
+  const field = ["patchText", "input", "patch"].find(key => typeof args[key] === "string")
+  if (field === undefined) return undefined
+  const paths: { path: string; line: number; prefix: string }[] = []
+  const lines = (args[field] as string).trim().split("\n")
+  let inUpdateBody = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // Only an unindented "***" ends executor Update chunks; leading spaces are context.
+    if (inUpdateBody && !line.startsWith("***")) continue
+    inUpdateBody = false
+    const header = PATCH_PATH_HEADERS.find((prefix) => line.startsWith(prefix))
+    if (header !== undefined) {
+      const path = line.slice(header.length).trim()
+      if (!path) return undefined
+      paths.push({ path, line: i, prefix: header })
+      if (header === "*** Update File:") {
+        inUpdateBody = true
+        if (lines[i + 1]?.startsWith("*** Move to:")) {
+          const destination = lines[++i].slice("*** Move to:".length).trim()
+          if (!destination) return undefined
+          paths.push({ path: destination, line: i, prefix: "*** Move to:" })
+        }
+      }
+    } else if (
+      line.trimStart().startsWith("***") &&
+      !["*** Begin Patch", "*** End Patch", "*** End of File"].includes(line.trim())
+    ) {
+      // Includes indented headers: the executor does not classify them, so fail closed.
+      return undefined
+    }
   }
-  return paths
+  return { field, lines, paths }
 }
 
 /** The file a write/edit-class call targets plus a hashline `rename` destination, or undefined. */
-function writeTargets(args: Record<string, unknown>): string[] | undefined {
-  const filePath = [args.filePath, args.file_path, args.path, args.file].find(
-    (value): value is string => typeof value === "string" && value.length > 0,
+function writeTargets(args: Record<string, unknown>) {
+  const field = ["filePath", "file_path", "path", "file"].find(
+    key => typeof args[key] === "string" && (args[key] as string).length > 0,
   )
-  if (filePath === undefined) return undefined
-  return typeof args.rename === "string" && args.rename.length > 0 ? [filePath, args.rename] : [filePath]
+  if (field === undefined) return undefined
+  const paths = [{ field, path: args[field] as string }]
+  if (typeof args.rename === "string" && args.rename.length > 0) paths.push({ field: "rename", path: args.rename })
+  return paths
 }
 
 function blockedWriteError(path: string): Error {
@@ -80,9 +107,14 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       }
 
       // Fail closed: a file-writing call whose target this guard cannot read is blocked, never let through.
-      const targets = isPatchTool ? patchedPaths(output.args) : writeTargets(output.args)
+      const patch = isPatchTool ? patchedPaths(output.args) : undefined
+      const targets = isPatchTool ? patch?.paths : writeTargets(output.args)
+      const resolved = targets?.map(target => ({
+        target,
+        path: resolveAllowedFile(target.path, ctx.directory),
+      }))
       const blockedPath =
-        targets === undefined ? "(unrecognized file argument)" : targets.find((path) => !isAllowedFile(path, ctx.directory))
+        resolved === undefined ? "(unrecognized file argument)" : resolved.find(entry => entry.path === undefined)?.target.path
       if (blockedPath !== undefined) {
         log(`[${HOOK_NAME}] Blocked: Prometheus can only write to .omo/*.md`, {
           sessionID: input.sessionID,
@@ -92,10 +124,19 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
         })
         throw blockedWriteError(blockedPath)
       }
-      if (isPatchTool || targets === undefined) {
-        return
+      const replacements: Record<string, string> = {}
+      for (const entry of resolved ?? []) {
+        if (entry.path === undefined) throw blockedWriteError(entry.target.path)
+        if ("line" in entry.target && patch) {
+          patch.lines[entry.target.line] = entry.target.prefix + entry.path
+        } else if ("field" in entry.target) {
+          replacements[entry.target.field] = entry.path
+        }
       }
-      const filePath = targets[0] ?? ""
+      if (patch) replacements[patch.field] = patch.lines.join("\n")
+      replaceToolArgs(output, replacements)
+      if (isPatchTool) return
+      const filePath = targets?.[0]?.path ?? ""
 
       const normalizedPath = filePath.toLowerCase().replace(/\\/g, "/")
       if (normalizedPath.includes(".omo/plans/") || normalizedPath.includes(".omo\\plans\\")) {

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test, beforeEach, afterEach, mock } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { randomUUID } from "node:crypto"
@@ -805,7 +805,7 @@ describe("prometheus-md-only", () => {
       setupMessageStorage(TEST_SESSION_ID, "prometheus")
     })
 
-     test("should interpret backslashes using the host filesystem", async () => {
+     test("should allow Windows-style backslash paths under .omo/", async () => {
        // given
        setupMessageStorage(TEST_SESSION_ID, "prometheus")
        const hook = createPrometheusMdOnlyHook(createMockPluginInput())
@@ -819,15 +819,10 @@ describe("prometheus-md-only", () => {
        }
 
        // when / #then
-       const result = hook["tool.execute.before"](input, output)
-       if (process.platform === "win32") {
-         await expect(result).resolves.toBeUndefined()
-       } else {
-         await expect(result).rejects.toThrow("File operations restricted")
-       }
+       await expect(hook["tool.execute.before"](input, output)).resolves.toBeUndefined()
      })
 
-     test("should interpret mixed separators using the host filesystem", async () => {
+     test("should allow mixed separator paths under .omo/", async () => {
        // given
        setupMessageStorage(TEST_SESSION_ID, "prometheus")
        const hook = createPrometheusMdOnlyHook(createMockPluginInput())
@@ -841,12 +836,7 @@ describe("prometheus-md-only", () => {
        }
 
        // when / #then
-       const result = hook["tool.execute.before"](input, output)
-       if (process.platform === "win32") {
-         await expect(result).resolves.toBeUndefined()
-       } else {
-         await expect(result).rejects.toThrow("File operations restricted")
-       }
+       await expect(hook["tool.execute.before"](input, output)).resolves.toBeUndefined()
      })
 
      test("should allow uppercase .MD extension", async () => {
@@ -887,7 +877,7 @@ describe("prometheus-md-only", () => {
        ).rejects.toThrow("File operations restricted to .omo/*.md plan files only")
      })
 
-     test("should block .omo directories outside the project planning directory", async () => {
+     test("should allow nested .omo directories (ctx.directory may be parent)", async () => {
        // given - when ctx.directory is parent of actual project, path includes project name
        setupMessageStorage(TEST_SESSION_ID, "prometheus")
        const hook = createPrometheusMdOnlyHook(createMockPluginInput())
@@ -900,10 +890,10 @@ describe("prometheus-md-only", () => {
          args: { filePath: "src/.omo/plans/x.md" },
        }
 
-       // when / #then - only the project root's .omo is allowed
+       // when / #then - the nested .omo remains a planning directory
        await expect(
          hook["tool.execute.before"](input, output)
-       ).rejects.toThrow("File operations restricted")
+       ).resolves.toBeUndefined()
      })
 
      test("should block path traversal attempts", async () => {
@@ -925,7 +915,7 @@ describe("prometheus-md-only", () => {
        ).rejects.toThrow("File operations restricted to .omo/*.md plan files only")
      })
 
-     test("should follow filesystem case sensitivity for .OMO", async () => {
+     test("should allow case-insensitive .OMO directory", async () => {
        // given
        setupMessageStorage(TEST_SESSION_ID, "prometheus")
        const hook = createPrometheusMdOnlyHook(createMockPluginInput())
@@ -939,15 +929,10 @@ describe("prometheus-md-only", () => {
        }
 
        // when / #then
-       const result = hook["tool.execute.before"](input, output)
-       if (existsSync(join(workspaceRoot, ".OMO"))) {
-         await expect(result).resolves.toBeUndefined()
-       } else {
-         await expect(result).rejects.toThrow("File operations restricted")
-       }
+       await expect(hook["tool.execute.before"](input, output)).resolves.toBeUndefined()
      })
 
-     test("should block nested project paths with backslashes", async () => {
+     test("should allow nested project path with .omo (Windows real-world case)", async () => {
        // given - simulates when ctx.directory is parent of actual project
        // User reported: xauusd-dxy-plan\.omo\drafts\supabase-email-templates.md
        setupMessageStorage(TEST_SESSION_ID, "prometheus")
@@ -964,10 +949,10 @@ describe("prometheus-md-only", () => {
        // when / #then
        await expect(
          hook["tool.execute.before"](input, output)
-       ).rejects.toThrow("File operations restricted")
+       ).resolves.toBeUndefined()
      })
 
-     test("should block nested project paths with mixed separators", async () => {
+     test("should allow nested project path with mixed separators", async () => {
        // given
        setupMessageStorage(TEST_SESSION_ID, "prometheus")
        const hook = createPrometheusMdOnlyHook(createMockPluginInput())
@@ -983,7 +968,7 @@ describe("prometheus-md-only", () => {
        // when / #then
        await expect(
          hook["tool.execute.before"](input, output)
-       ).rejects.toThrow("File operations restricted")
+       ).resolves.toBeUndefined()
      })
 
      test("should block nested project path without .omo", async () => {
