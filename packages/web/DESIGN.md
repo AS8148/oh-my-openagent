@@ -211,7 +211,7 @@ All primitives live in `components/ui/*` (existing shadcn shells re-tokened) or 
 
 ### Tooltip (`components/ui/tooltip.tsx`)
 
-- shadcn anatomy: one focusable trigger (Radix `Slot`, gains `aria-describedby`) and a `role="tooltip"` label, mono Meta text on `--ink-3` with a `--line` border. Every icon-only control carries one; `title=` is never used.
+- shadcn anatomy: one focusable trigger (Radix `Slot`, gains `aria-describedby`) and a `role="tooltip"` label, mono Meta text on `--ink-3` with a `--line` border. Toolbar icon controls (the DAG camera buttons) carry one; `title=` is never used. The mobile menu toggle is the exception: its Menu/X icon is named by its `aria-label` and its state by `aria-expanded`.
 - Shows on hover and on focus; WCAG 1.4.13: hoverable (an 8px transparent bridge between trigger and label keeps it open while the pointer crosses), persistent, and dismissed by Escape until both pointer and focus leave.
 - `side` is `left` (default) or `top`. No portal: the label renders inside the trigger's container, so pick the side that stays inside a clipping ancestor.
 
@@ -285,7 +285,7 @@ Grain is not used (omp.sh's canvas grain and factory's texture PNG would fight t
 - Contrast: `--text-hi` on `--ink-0` 17.8:1, `--text-mid` 11.5:1, `--text-lo` 5.9:1 (AA for 11px+ mono uppercase is met because eyebrows are ≥ 11px 500 with tracking; body never uses `--text-faint`), `--accent` on `--ink-0` 11.4:1, primary button `#09090b` on `--accent` 11.4:1.
 - Focus-visible ring on every interactive element (2px `--accent-32`, offset 2px); the canvas wrapper is focusable with arrow-key orbit and is `aria-hidden` for AT while the poster `<img alt>` describes the scene.
 - Touch targets ≥ 44px on mobile (nav items, COPY cell, bento cells are ≥ 44px tall).
-- Escape closes the open mobile nav sheet; focus returns to the toggle only when it was inside the sheet (or on the toggle), never pulled from elsewhere. Icon-only controls carry a `Tooltip` (§5), never `title=`.
+- Escape closes the open mobile nav sheet; focus returns to the toggle only when it was inside the sheet (or on the toggle), never pulled from elsewhere. Toolbar icon controls carry a `Tooltip` (§5), never `title=`; the mobile menu toggle is named by `aria-label` and `aria-expanded`.
 - Reduced motion honored everywhere (§6). Reduced data (`navigator.connection.saveData`) and low memory skip the 3D chunk (§9).
 - Reel and docs main announce as scroll regions (`role="region"` + `aria-label`, `tabindex=0`).
 - Personas: terminal power user (keyboard-first, copyable commands, dense reference), mobile evaluator (no horizontal overflow on `/`, `/manifesto`, `/docs` at 375), CJK reader (heading tracking reset, keep-all), motion-sensitive user (poster hero, static terminal).
