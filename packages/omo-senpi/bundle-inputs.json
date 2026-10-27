@@ -616,6 +616,7 @@
     "packages/omo-opencode/src/cli/service-auth/protocol.ts",
     "packages/omo-opencode/src/cli/service-auth/secret-service-lock.ts",
     "packages/omo-opencode/src/cli/service-auth/session.ts",
+    "packages/omo-opencode/src/cli/service-auth/signed-out-marker.ts",
     "packages/omo-opencode/src/cli/service-auth/terminal-text.ts",
     "packages/omo-opencode/src/config-migration/category-deep-split.ts",
     "packages/omo-opencode/src/config-migration/deep-diff.ts",

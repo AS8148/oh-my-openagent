@@ -19,6 +19,7 @@ import {
   SignInError,
   tokenSchema,
 } from "./protocol"
+import { clearSignedOutMarker, readSignedOutMarker, signedOutMarkerPath, writeSignedOutMarker } from "./signed-out-marker"
 
 // `code` is the service's terminal refusal code, never its message.
 export class SessionEnded extends SignInError {
@@ -41,6 +42,7 @@ export function createSession(options: { readonly api: string; readonly store: C
   const { store, signal } = options
   const directory = join(options.home ?? homedir(), ".omo", "session-locks")
   const lockPath = join(directory, `${credentialId(api)}.lock`)
+  const markerPath = signedOutMarkerPath(options.home ?? homedir(), credentialId(api))
   async function locked<T>(action: () => Promise<T>): Promise<T> {
     await mkdir(directory, { recursive: true, mode: 0o700 })
     signal?.throwIfAborted()
@@ -94,15 +96,22 @@ export function createSession(options: { readonly api: string; readonly store: C
       await store.read()
     },
     async save(value: Credentials) {
-      await locked(() => store.write(value))
+      await locked(async () => {
+        await store.write(value)
+        await clearSignedOutMarker(markerPath)
+      })
     },
+    /** The marker an explicit `omo logout` left, or null; only an empty store makes it meaningful. */
+    signedOutMarker: () => readSignedOutMarker(markerPath),
+    clearSignedOutMarker: () => clearSignedOutMarker(markerPath),
     async update<T>(action: (current: Credentials | null) => Promise<T>): Promise<T> {
       return locked(async () => action(await store.read()))
     },
     async logout(): Promise<boolean> {
       return locked(async () => {
+        let current: Credentials | null = null
         try {
-          const current = await store.read()
+          current = await store.read()
           if (current !== null) {
             if (current.refreshState === "uncertain") return false
             const access = Date.parse(current.accessTokenExpiresAt) <= Date.now() ? await refreshedAccess(current) : current.accessToken
@@ -118,6 +127,7 @@ export function createSession(options: { readonly api: string; readonly store: C
           throw error
         } finally {
           await store.clear()
+          await writeSignedOutMarker(markerPath, current?.device.id ?? null)
         }
       })
     },
