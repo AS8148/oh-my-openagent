@@ -31,6 +31,7 @@ describe("doctor Configured Models with canonical models chains (#11531)", () =>
   let originalHome: string | undefined
   let temporaryDirectory = ""
   const spies: Array<{ mockRestore: () => void }> = []
+  let providerModelsSpy: { mockReturnValue: (value: unknown) => void } | undefined
 
   beforeEach(() => {
     originalHome = process.env.HOME
@@ -39,9 +40,11 @@ describe("doctor Configured Models with canonical models chains (#11531)", () =>
     const path = join(temporaryDirectory, ".omo", "omo.jsonc")
     mkdirSync(join(path, ".."), { recursive: true })
     writeFileSync(path, JSON.stringify(ISSUE_CONFIG) + "\n")
+    const providerModels = spyOn(connectedProvidersCache, "readProviderModelsCache").mockReturnValue(null)
+    providerModelsSpy = providerModels
     spies.push(
       spyOn(connectedProvidersCache, "readConnectedProvidersCache").mockReturnValue(null),
-      spyOn(connectedProvidersCache, "readProviderModelsCache").mockReturnValue(null),
+      providerModels,
       spyOn(connectedProvidersCache, "hasConnectedProvidersCache").mockReturnValue(false),
       spyOn(connectedProvidersCache, "hasProviderModelsCache").mockReturnValue(false),
     )
@@ -100,5 +103,35 @@ describe("doctor Configured Models with canonical models chains (#11531)", () =>
       expect(runtime.categoryModel?.reasoning).toBe(reasoning)
       expect(details.some((line) => line.includes(`● ${category}: ${model} (${reasoning}) [`))).toBe(true)
     }
+  })
+
+  it("#given a category whose configured chain the runtime cannot resolve #when doctor renders #then it shows the runtime error instead of the builtin model", async () => {
+    //#given
+    providerModelsSpy?.mockReturnValue({ connected: ["openai"], models: { openai: ["gpt-5.4"] }, updatedAt: new Date().toISOString() })
+    const config = validatePluginConfig(process.cwd()).config
+    const runtime = await resolveCategoryExecution(
+      { category: "writing", prompt: "p", description: "d", run_in_background: false, load_skills: [] },
+      {
+        client: unsafeTestValue({}),
+        manager: unsafeTestValue({}),
+        directory: temporaryDirectory,
+        userCategories: config.categories,
+        sisyphusJuniorModel: undefined,
+      },
+      undefined,
+      undefined,
+    )
+    const runtimeError = runtime.error ?? ""
+    expect(runtimeError).toContain("anthropic/claude-opus-5-5")
+
+    //#when
+    const result = await checkModels()
+    const details = result.details ?? []
+
+    //#then
+    expect(details).toContain(`  ✗ writing: runtime error: ${runtimeError.split("\n")[0]}`)
+    expect(details.some((line) => /^ {2}[●○] writing:/.test(line))).toBe(false)
+    const issue = result.issues.find((entry) => entry.affects?.includes("writing"))
+    expect(issue?.description).toContain(runtimeError)
   })
 })

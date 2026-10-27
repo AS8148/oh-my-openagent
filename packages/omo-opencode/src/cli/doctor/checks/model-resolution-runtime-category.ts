@@ -4,8 +4,8 @@ import type { ExecutorContext } from "../../../tools/delegate-task/executor-type
 import type { OmoConfig, RuntimeCategoryResolution } from "./model-resolution-types"
 
 /**
- * Resolves every user-configured builtin category through the delegate-task runtime resolver,
- * so doctor shows exactly the model and reasoning a task() spawn would use.
+ * Resolves every user-configured, enabled builtin category through the delegate-task runtime resolver,
+ * so doctor shows exactly the model, reasoning or error a task() spawn would get.
  */
 export async function resolveConfiguredCategoriesAtRuntime(
   config: OmoConfig,
@@ -17,17 +17,23 @@ export async function resolveConfiguredCategoriesAtRuntime(
     userCategories: config.categories,
     sisyphusJuniorModel: undefined,
   } as unknown as ExecutorContext
-  const names = Object.keys(config.categories ?? {}).filter((name) => CATEGORY_MODEL_REQUIREMENTS[name] !== undefined)
-  const resolved = await Promise.all(names.map(async (name) => {
+  const names = Object.entries(config.categories ?? {})
+    .filter(([name, category]) => CATEGORY_MODEL_REQUIREMENTS[name] !== undefined && category?.disable !== true)
+    .map(([name]) => name)
+  const resolved = await Promise.all(names.map(async (name): Promise<[string, RuntimeCategoryResolution]> => {
     const result = await resolveCategoryExecution(
       { category: name, prompt: "", description: "omo doctor", run_in_background: false, load_skills: [] },
       executorCtx,
       undefined,
       undefined,
     )
-    if (result.error !== undefined || result.actualModel === undefined || result.modelInfo?.type !== "user-defined") return []
+    if (result.error !== undefined) return [name, { error: result.error }]
     const reasoning = result.categoryModel?.reasoning ?? result.categoryModel?.variant
-    return [[name, { model: result.actualModel, ...(reasoning === undefined ? {} : { reasoning }) }] as const]
+    return [name, {
+      ...(result.actualModel === undefined ? {} : { model: result.actualModel }),
+      ...(reasoning === undefined ? {} : { reasoning }),
+      userDefined: result.modelInfo?.type === "user-defined",
+    }]
   }))
-  return Object.fromEntries(resolved.flat())
+  return Object.fromEntries(resolved)
 }

@@ -20,6 +20,10 @@ export interface CategoryResolutionInfo {
   effectiveModel: string
   effectiveResolution: string
   capabilityDiagnostics?: ModelCapabilitiesDiagnostics
+  /** True when the delegate-task runtime resolved this category; userVariant is then its reasoning. */
+  runtimeResolved?: boolean
+  /** The runtime's error for this category: a task() spawn would fail with it. */
+  runtimeError?: string
 }
 
 export interface ModelResolutionInfo {
@@ -31,10 +35,9 @@ export interface ModelResolutionInfo {
 export type OmoConfig = Pick<OhMyOpenCodeConfig, "agents" | "categories">
 
 /** What the delegate-task runtime resolves for a user-configured category. */
-export interface RuntimeCategoryResolution {
-  model: string
-  reasoning?: string
-}
+export type RuntimeCategoryResolution =
+  | { model?: string; reasoning?: string; userDefined: boolean; error?: undefined }
+  | { error: string }
 
 export interface AvailableModelsInfo {
   providers: string[]

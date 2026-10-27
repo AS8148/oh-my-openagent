@@ -85,15 +85,29 @@ export function getModelResolutionInfoWithOverrides(
   const categories: CategoryResolutionInfo[] = Object.entries(CATEGORY_MODEL_REQUIREMENTS).map(
     ([name, requirement]) => {
       const runtime = runtimeCategories[name]
-      const userOverride = runtime?.model ?? config.categories?.[name]?.model
-      const userVariant = runtime ? runtime.reasoning : config.categories?.[name]?.variant
+      if (runtime?.error !== undefined) {
+        return attachCapabilityDiagnostics({
+          name,
+          requirement,
+          effectiveModel: getEffectiveModel(requirement),
+          effectiveResolution: `Runtime error: ${runtime.error}`,
+          runtimeError: runtime.error,
+        })
+      }
+      const runtimeModel = runtime?.model
+      const runtimeResolved = runtimeModel !== undefined
+      const userOverride = runtime === undefined
+        ? config.categories?.[name]?.model
+        : runtime.userDefined ? runtime.model : undefined
+      const userVariant = runtime === undefined ? config.categories?.[name]?.variant : runtime.reasoning
       return attachCapabilityDiagnostics({
         name,
         requirement,
         userOverride,
         userVariant,
-        effectiveModel: getEffectiveModel(requirement, userOverride),
+        effectiveModel: runtimeModel ?? getEffectiveModel(requirement, userOverride),
         effectiveResolution: buildEffectiveResolution(requirement, userOverride),
+        ...(runtimeResolved ? { runtimeResolved } : {}),
       })
     }
   )
@@ -144,6 +158,15 @@ export async function checkModels(): Promise<CheckResult> {
   }
 
   issues.push(...collectCapabilityResolutionIssues(info))
+  const failedCategories = info.categories.filter((category) => category.runtimeError !== undefined)
+  if (failedCategories.length > 0) {
+    issues.push({
+      title: "Configured categories fail to resolve at runtime",
+      description: failedCategories.map((category) => `${category.name}: ${category.runtimeError}`).join("; "),
+      severity: "warning",
+      affects: failedCategories.map((category) => category.name),
+    })
+  }
 
   const overrideCount =
     info.agents.filter((agent) => Boolean(agent.userOverride)).length +
