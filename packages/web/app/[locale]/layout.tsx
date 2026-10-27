@@ -11,8 +11,8 @@ import { routing } from "@/i18n/routing"
 
 export const revalidate = 3600
 // No `dynamicParams = false` here: on this root segment it would close every route below it, and on Cloudflare
-// (empty incremental cache) each cache miss would 404. Unknown locales still 404 through notFound() below, which
-// renders app/global-not-found.tsx.
+// (empty incremental cache) each cache miss would 404. Unknown locales 404 through notFound() below, which renders
+// Next's built-in 404 shell; app/global-not-found.tsx is not reached while [locale] matches every URL (#11528).
 export const viewport = siteViewport
 
 export function generateMetadata(): Promise<Metadata> {
