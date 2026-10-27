@@ -129,6 +129,7 @@ describe("date-run fold precision", () => {
     ["incident-20261027-503", "incident-20261028-404", "incident-20261029-500"],
     ["release-20261027-5.1.48", "release-20261028-5.1.49", "release-20261029-5.2.0"],
     ["build-20261027-v2", "build-20261028-v3", "build-20261029-v10"],
+    ["deploy-20261027-1200fix", "deploy-20261028-1300api", "deploy-20261029-1400bug"],
   ]
   const mustFold: ReadonlyArray<{ readonly names: readonly string[]; readonly item: string }> = [
     {
