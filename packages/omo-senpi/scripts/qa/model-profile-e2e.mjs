@@ -28,6 +28,8 @@
 //                    a stored login the fixture OAuth exchange refuses to refresh (offline, no real
 //                    identity endpoint): the walk skips it and the turn runs on the next rung, or
 //                    stays on the engine default; a pool whose sibling account is valid is kept.
+//   geeky-normal-transient-refresh-keeps-subscription  a subscription refresh that fails transiently at
+//                    session start keeps chatgpt-subscription over the openai API lane (#11432).
 // Isolation: SENPI_CODING_AGENT_DIR + XDG_CONFIG_HOME point at a throwaway sandbox; the real
 // ~/.senpi/agent credential files are digest-compared before/after and MUST stay identical.
 // The memory root is sandboxed too (isolatedChildEnv sets OMO_MEMORY_HOME): every scenario checks
