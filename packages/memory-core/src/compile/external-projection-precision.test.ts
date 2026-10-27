@@ -118,3 +118,67 @@ describe("generated-id fold precision", () => {
     })
   }
 })
+
+// Date runs: a number after a date is hint-free only as a clock time (HHMM, HHMMSS, optional zone) or a 1-2 digit
+// sequence number; any other number (a ticket, a PR, an HTTP code, a version) is the hint and keeps every name listed.
+describe("date-run fold precision", () => {
+  const mustList: ReadonlyArray<readonly string[]> = [
+    ["review-20261027-11486", "review-20261028-11453", "review-20261029-11501"],
+    ["review-20261027-4455", "review-20261028-9727", "review-20261029-3611"],
+    ["ticket-20261027-482", "ticket-20261028-517", "ticket-20261029-903"],
+    ["incident-20261027-503", "incident-20261028-404", "incident-20261029-500"],
+    ["release-20261027-5.1.48", "release-20261028-5.1.49", "release-20261029-5.2.0"],
+    ["build-20261027-v2", "build-20261028-v3", "build-20261029-v10"],
+  ]
+  const mustFold: ReadonlyArray<{ readonly names: readonly string[]; readonly item: string }> = [
+    {
+      names: ["standup-20261027-0930", "standup-20261028-1015", "standup-20261029-1745"],
+      item: "standup-20261027-0930 … standup-20261029-1745 (3 files)",
+    },
+    {
+      names: ["sync-20261027-093015z", "sync-20261028-101500z", "sync-20261029-235959z"],
+      item: "sync-20261027-093015z … sync-20261029-235959z (3 files)",
+    },
+    {
+      names: ["progress-20261027-0330KST", "progress-20261028-1508Z", "progress-20261029-2250z"],
+      item: "progress-20261027-0330KST … progress-20261029-2250z (3 files)",
+    },
+    {
+      names: ["notes-20261027-1", "notes-20261028-2", "notes-20261029-12"],
+      item: "notes-20261027-1 … notes-20261029-12 (3 files)",
+    },
+  ]
+
+  it("#given each MUST-LIST date run #when listed #then every name stays listed", () => {
+    // given
+    const runs = mustList
+
+    // when
+    const folded = runs.filter((names) => !Bun.deepEquals(itemsOf(names), [...names].sort(byName)))
+
+    // then
+    expect(folded).toEqual([])
+  })
+
+  it("#given each MUST-FOLD date run #when listed #then it folds into one range", () => {
+    // given
+    const runs = mustFold
+
+    // when
+    const wrong = runs.filter((run) => !Bun.deepEquals(itemsOf(run.names), [run.item]))
+
+    // then
+    expect(wrong).toEqual([])
+  })
+
+  it("#given a MUST-FOLD run beside a MUST-LIST name of the same prefix #when listed #then only the clock times fold", () => {
+    // given
+    const names = ["standup-20261027-0930", "standup-20261028-1015", "standup-20261029-1745", "standup-20261030-503"]
+
+    // when
+    const items = itemsOf(names)
+
+    // then
+    expect(items).toEqual(["standup-20261027-0930 … standup-20261029-1745 (3 files)", "standup-20261030-503"].sort(byName))
+  })
+})

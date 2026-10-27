@@ -28,8 +28,9 @@ const MARKDOWN = ".md"
 const DATE = /^(?:19|20)\d{6}$/
 const YEAR = /^(?:19|20)\d{2}$/
 const MONTH = /^(?:0[1-9]|1[0-2])$/
-// A token after a date that names no topic: a number or clock time (0004, 2250z) or a part (p3).
-const HINT_FREE = /^(?:\d+[a-z]?|p\d+)$/i
+// A token after a date that names no topic: a clock time (0930, 093015z, 0330KST), a one- or two-digit sequence
+// number, or a part (p3). Any other number (a ticket, a PR, an HTTP code) is the hint and keeps the name listed.
+const HINT_FREE = /^(?:(?:[01]\d|2[0-3])[0-5]\d(?:[0-5]\d)?(?:z|[a-z]{3})?|\d{1,2}|p\d+)$/i
 const DATE_SUFFIX = /^(.+)-((?:19|20)\d{6})$/
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
 const HEX_DIGEST = /^(?:[0-9a-f]{16,}|[0-9A-F]{16,})$/
