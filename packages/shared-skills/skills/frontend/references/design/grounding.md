@@ -18,7 +18,7 @@ For each journey step, write what the product does at its best: what the user se
 
 ## 4. Gap ledger
 
-Capture the surface under work through `/visual-qa` (every state at 390 and 1440, both themes) and list every difference from the ideal state. Do not rank the small ones away. Then read the rule sources in full and add every violation of each: `SKILL.md`'s build rules and draft guard (plus `check-draft-guard.ts` output), the `/visual-qa` checklist, every reference this request routed to, and the WCAG 2.2 AA items in `SKILL.md` Verify. Capture a screenshot for each row and keep the ledger in a durable record (the `/ulw-loop` ledger when it runs) so no finding lives only in context. One row per gap:
+Capture the surface under work through `/visual-qa` (on a new screen, the first draft, built after the brief; the ledger then grows as the draft is checked) (every state at 390 and 1440, both themes) and list every difference from the ideal state. Do not rank the small ones away. Then read the rule sources in full and add every violation of each: `SKILL.md`'s build rules and draft guard (plus `check-draft-guard.ts` output), the `/visual-qa` checklist, every reference this request routed to, and the WCAG 2.2 AA items in `SKILL.md` Verify. Capture a screenshot for each row and keep the ledger in a durable record (the `/ulw-loop` ledger when it runs) so no finding lives only in context. One row per gap:
 
 | ID | Screen / state | Gap | Principle or rule broken | Evidence | Fix | Proof | Status |
 |---|---|---|---|---|---|---|---|
