@@ -163,7 +163,7 @@ export function GraphHero({ className }: { readonly className?: string }) {
         tabIndex={0}
         role="region"
         aria-label={t("title")}
-        className="absolute inset-0 outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--accent-32)]"
+        className="focus-ring-inset absolute inset-0"
         style={{
           opacity: state === "live" ? 1 : 0,
           transition: "opacity 400ms var(--ease-standard)",
