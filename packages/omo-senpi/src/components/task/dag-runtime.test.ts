@@ -647,79 +647,82 @@ describe("assembled DAG runtime", () => {
       liveReclaimerTimers.delete(timer)
       realClearTimeout(timer)
     }) as unknown as typeof clearTimeout)
-    const cwd = fs.mkdtempSync(join(tmpdir(), "omo-senpi-dag-abort-boundary-"))
-    cleanupRoots.push(cwd)
-    const abortError = new DOMException("This operation was aborted", "AbortError")
-    const runner = new ScriptedRunner(abortError)
-    const taskAttached = deferred<void>()
-    const pi = Object.assign(new FakeExtensionAPI(), {
-      rpc: {
-        emit: (name: string, data: unknown) => {
-          if (name !== "omo.dag.event" || typeof data !== "object" || data === null) return
-          if ("type" in data && data.type === "dag.node.task-attached") taskAttached.resolve()
-        },
-        handle: () => undefined,
-      },
-    })
-    const engine = trackedEngine({
-      pi,
-      omoConfig: loadOmoConfig({ cwd }).config,
-      cwd,
-      sharedParentTools: () => [],
-      runnerFactories: { inProcess: () => runner, process: () => runner },
-    })
-    const sessionId = "session-abort-boundary"
-    engine.runtime.captureFrom({ modelRegistry: createTeamServiceTestModelRegistry(), sessionManager: { getSessionId: () => sessionId } })
-    const runtime = createDagRuntime({ pi, engine, logger: logger() })
-    await runtime.attach()
-    const started = await runtime.manager.start({
-      parentSessionId: sessionId,
-      rootSessionId: sessionId,
-      definition: {
-        key: "abort-boundary",
-        name: "abort boundary",
-        nodes: [{ id: "active", prompt: "active", subagent_type: "explore", model: "omo-mock/mock-1" }],
-      },
-    })
-    await within(runner.whenStarted(1), STEP_BUDGET_MS, "runner.whenStarted(1)")
-    await within(taskAttached.promise, STEP_BUDGET_MS, "dag.node.task-attached")
-    const unhandled: unknown[] = []
-    const onUnhandled = (reason: unknown): void => { unhandled.push(reason) }
-    process.on("unhandledRejection", onUnhandled)
-
     try {
-      // when
-      await runtime.cancel(started.snapshot.runId, "live cancel")
-      const cancelled = await runtime.wait(started.snapshot.runId, sessionId)
-      const survivor = await runtime.manager.start({
+      const cwd = fs.mkdtempSync(join(tmpdir(), "omo-senpi-dag-abort-boundary-"))
+      cleanupRoots.push(cwd)
+      const abortError = new DOMException("This operation was aborted", "AbortError")
+      const runner = new ScriptedRunner(abortError)
+      const taskAttached = deferred<void>()
+      const pi = Object.assign(new FakeExtensionAPI(), {
+        rpc: {
+          emit: (name: string, data: unknown) => {
+            if (name !== "omo.dag.event" || typeof data !== "object" || data === null) return
+            if ("type" in data && data.type === "dag.node.task-attached") taskAttached.resolve()
+          },
+          handle: () => undefined,
+        },
+      })
+      const engine = trackedEngine({
+        pi,
+        omoConfig: loadOmoConfig({ cwd }).config,
+        cwd,
+        sharedParentTools: () => [],
+        runnerFactories: { inProcess: () => runner, process: () => runner },
+      })
+      const sessionId = "session-abort-boundary"
+      engine.runtime.captureFrom({ modelRegistry: createTeamServiceTestModelRegistry(), sessionManager: { getSessionId: () => sessionId } })
+      const runtime = createDagRuntime({ pi, engine, logger: logger() })
+      await runtime.attach()
+      const started = await runtime.manager.start({
         parentSessionId: sessionId,
         rootSessionId: sessionId,
         definition: {
-          key: "after-abort-boundary",
-          name: "after abort boundary",
-          nodes: [{ id: "survivor", prompt: "survive", subagent_type: "explore", model: "omo-mock/mock-1" }],
+          key: "abort-boundary",
+          name: "abort boundary",
+          nodes: [{ id: "active", prompt: "active", subagent_type: "explore", model: "omo-mock/mock-1" }],
         },
       })
-      await within(runner.whenStarted(2), STEP_BUDGET_MS, "runner.whenStarted(2)")
-      runner.handles[1]?.settle("runtime survived")
-      const survived = await within(runtime.wait(survivor.snapshot.runId, sessionId))
+      await within(runner.whenStarted(1), STEP_BUDGET_MS, "runner.whenStarted(1)")
+      await within(taskAttached.promise, STEP_BUDGET_MS, "dag.node.task-attached")
+      const unhandled: unknown[] = []
+      const onUnhandled = (reason: unknown): void => { unhandled.push(reason) }
+      process.on("unhandledRejection", onUnhandled)
 
-      // then
-      expect(cancelled.status).toBe("cancelled")
-      expect(runner.abortCalls).toBe(0)
-      expect(runner.disposeCalls).toBe(0)
-      expect(survived.status).toBe("completed")
-      expect(survived.nodes.survivor).toEqual(expect.objectContaining({ output: "runtime survived" }))
-      expect(unhandled).toEqual([])
-      runner.handles[0]?.settle("cancelled child reached its natural boundary")
-      const disposed = runner.handles[0]?.disposed
-      if (disposed === undefined) throw new Error("cancelled child handle was not retained")
-      await within(disposed, STEP_BUDGET_MS, "cancelled child dispose")
-      expect(runner.disposeCalls).toBe(1)
+      try {
+        // when
+        await runtime.cancel(started.snapshot.runId, "live cancel")
+        const cancelled = await runtime.wait(started.snapshot.runId, sessionId)
+        const survivor = await runtime.manager.start({
+          parentSessionId: sessionId,
+          rootSessionId: sessionId,
+          definition: {
+            key: "after-abort-boundary",
+            name: "after abort boundary",
+            nodes: [{ id: "survivor", prompt: "survive", subagent_type: "explore", model: "omo-mock/mock-1" }],
+          },
+        })
+        await within(runner.whenStarted(2), STEP_BUDGET_MS, "runner.whenStarted(2)")
+        runner.handles[1]?.settle("runtime survived")
+        const survived = await within(runtime.wait(survivor.snapshot.runId, sessionId))
+
+        // then
+        expect(cancelled.status).toBe("cancelled")
+        expect(runner.abortCalls).toBe(0)
+        expect(runner.disposeCalls).toBe(0)
+        expect(survived.status).toBe("completed")
+        expect(survived.nodes.survivor).toEqual(expect.objectContaining({ output: "runtime survived" }))
+        expect(unhandled).toEqual([])
+        runner.handles[0]?.settle("cancelled child reached its natural boundary")
+        const disposed = runner.handles[0]?.disposed
+        if (disposed === undefined) throw new Error("cancelled child handle was not retained")
+        await within(disposed, STEP_BUDGET_MS, "cancelled child dispose")
+        expect(runner.disposeCalls).toBe(1)
+      } finally {
+        runtime.dispose()
+        disposeEngines()
+        process.off("unhandledRejection", onUnhandled)
+      }
     } finally {
-      runtime.dispose()
-      disposeEngines()
-      process.off("unhandledRejection", onUnhandled)
       setTimeoutSpy.mockRestore()
       clearTimeoutSpy.mockRestore()
     }
