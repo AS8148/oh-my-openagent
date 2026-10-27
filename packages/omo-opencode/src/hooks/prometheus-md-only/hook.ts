@@ -9,6 +9,11 @@ import { parsePatch } from "./vendor/opencode-patch-parser"
 
 const TASK_TOOLS = ["task", "call_omo_agent"]
 
+export interface PrometheusExecutionArguments {
+  readonly original: Record<string, unknown>
+  approved?: Record<string, string>
+}
+
 // Mirror OpenCode's LF splitting and prefix/slice/trim semantics, not JS regex line terminators:
 // https://github.com/anomalyco/opencode/blob/32f278b48f1a495611165d8a9f1ace0b512933e2/packages/opencode/src/patch/index.ts#L66-L96
 // parsePatch splits on "\n" at L187; CR, U+2028 and U+2029 remain part of the header remainder.
@@ -77,7 +82,8 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
   return {
     "tool.execute.before": async (
       input: { tool: string; sessionID: string; callID: string },
-      output: { args: Record<string, unknown>; message?: string }
+      output: { args: Record<string, unknown>; message?: string },
+      execution?: PrometheusExecutionArguments,
     ): Promise<void> => {
       const agentName = await getAgentFromSession(input.sessionID, ctx.directory, ctx.client)
 
@@ -170,9 +176,14 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
           throw blockedWriteError("(unrepresentable patch)")
         }
       }
-      const retainedArgs = output.args
+      const retainedArgs = execution?.original ?? output.args
+      if (retainedArgs !== output.args) {
+        throw blockedWriteError("(detached host execution arguments)")
+      }
       try {
-        replaceToolArgs(output, replacements)
+        if (Object.entries(replacements).some(([field, value]) => retainedArgs[field] !== value)) {
+          replaceToolArgs(output, replacements)
+        }
       } catch {
         throw blockedWriteError("(immutable tool arguments)")
       }
@@ -180,6 +191,7 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       if (Object.entries(replacements).some(([field, value]) => retainedArgs[field] !== value)) {
         throw blockedWriteError("(tool arguments did not reach execution)")
       }
+      if (execution) execution.approved = replacements
       if (isPatchTool) return
       const filePath = targets?.[0]?.path ?? ""
 

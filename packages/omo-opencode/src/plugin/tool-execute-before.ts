@@ -1,4 +1,5 @@
 import type { PluginContext } from "./types"
+import type { PrometheusExecutionArguments } from "../hooks/prometheus-md-only/hook"
 
 import { isTrackedBtwSideSession } from "../features/btw-side"
 import { getMainSessionID } from "../features/claude-code-session-state"
@@ -49,6 +50,7 @@ export function createToolExecuteBeforeHandler(args: {
   const { ctx, hooks, backgroundManager } = args
 
   return async (input, output): Promise<void> => {
+    const execution: PrometheusExecutionArguments = { original: output.args }
     // Strip mcp_ prefix from tool names — the model may emit mcp_background_output
     // but the runtime registry has it as background_output (fixes #2697)
     if (/^mcp_/i.test(input.tool)) {
@@ -103,7 +105,7 @@ export function createToolExecuteBeforeHandler(args: {
     await hooks.tasksTodowriteDisabler?.["tool.execute.before"]?.(input, output)
       await hooks.webfetchRedirectGuard?.["tool.execute.before"]?.(input, output)
       await hooks.fsyncSkipWarning?.["tool.execute.before"]?.(input, output)
-      await hooks.prometheusMdOnly?.["tool.execute.before"]?.(input, output)
+      await hooks.prometheusMdOnly?.["tool.execute.before"]?.(input, output, execution)
     await hooks.sisyphusJuniorNotepad?.["tool.execute.before"]?.(input, output)
     await hooks.atlasHook?.["tool.execute.before"]?.(input, output)
     await hooks.compactionTodoPreserver?.["tool.execute.before"]?.(input, output)
@@ -172,6 +174,12 @@ export function createToolExecuteBeforeHandler(args: {
           })
         }
       }
+    }
+    if (execution.approved && (
+      output.args !== execution.original ||
+      Object.entries(execution.approved).some(([field, value]) => execution.original[field] !== value)
+    )) {
+      throw new Error("Prometheus approved arguments no longer match the host execution reference")
     }
   }
 }

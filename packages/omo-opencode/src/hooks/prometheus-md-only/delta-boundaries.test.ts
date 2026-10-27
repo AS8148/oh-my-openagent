@@ -39,7 +39,7 @@ describe("planner delta serialization and physical boundaries", () => {
   let root: string
   let sessionID: string
   beforeEach(() => {
-    fixture = mkdtempSync(join(tmpdir(), "planner-delta-"))
+    fixture = realpathSync.native(mkdtempSync(join(tmpdir(), "planner-delta-")))
     root = join(fixture, "project")
     mkdirSync(root)
     sessionID = `ses_${randomUUID()}`
