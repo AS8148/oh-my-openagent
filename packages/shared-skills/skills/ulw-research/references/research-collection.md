@@ -23,7 +23,7 @@ This is `$SESSION_DIR`. The orchestrator owns the journal: you write every file 
 
 - `brief.md` — the analysis block, the axis list, the expected truths, and the `## Deliverable` record from the interview below (lane, state, formats, each field with `answered_by`).
 - `sources-ledger.md` — one line per source the moment it is read: `[S<n>] <url> — <what it is>`. The closing briefing counts sources and domains from this file.
-- `sources/` and `fact-ledger.json` — the source snapshots and the verbatim fact ledger ([references/fact-ledger.md](fact-ledger.md)). Every number and every direct quotation in the report comes from a ledger row through a `{{F<n>:label}}` or `{{Q<n>:label}}` placeholder; nobody types a value into a report or into `SYNTHESIS.md`.
+- `sources/` and `fact-ledger.json` — one directory per source snapshot and the ledger built from them. The snapshot and locator contract (raw bytes, converted-only sources, byte locators, `source refresh`) is defined once, in [fact-ledger.md](fact-ledger.md#snapshot-and-locator-contract); every number and quotation reaches the report through a ledger placeholder.
 - `wave-<N>-<kind>-<axis>.md` — your digest of each worker return: key findings, sources with URLs, and the worker's EXPAND markers verbatim.
 - `expansion-log.md` — per wave: workers spawned, markers gained, leads opened and closed.
 - `excursion-log.md` — one ENTER row and one EXIT row per excursion: `excursion_id`, parent claim or axis, ENTER trigger, depth, workers spent, the EXIT rule that closed it, what it changed in the top-level answer (`none` is a valid, required answer), and the ulw-loop steer/evidence id it was mirrored into.
@@ -107,3 +107,89 @@ Values carry no parentheses; `pending` goes only with `answered_by: pending`. Wh
 **Calibration.** `fact meaning-check` appends one line per flagged pair to `--calibration` (default `$SESSION_DIR/fidelity-calibration.jsonl`). After each run, also append that run's new lines to the workspace-level `.omo/ulw-research/fidelity-calibration.jsonl`; promotion of `meaning_drift_confirmed` is decided from that log.
 
 Phase 5 opens by turning the recorded fields into `design-spec.md`.
+
+## Phase 1 — Saturation wave
+
+**When the user asked for MASS research, the wave is sized by the topic's angles, not by the roster ceiling.** "mass ulw research", "mulw research", "ulw mass research" — in any language — order over-collection that a team of 8 cannot produce. Where the harness has a dependency-graph surface (the `mass-ulw` skill and its `references/planning.md`), run collection through it instead: 60+ angles covering every angle the topic has, routed across the whole difficulty ladder — mechanical sweeps and per-item harvest batches on the cheapest tier, judgment-shaped angles a step up, cross-territory angles a step above that, and the deepest tier reserved for genuinely hairy contradictions. Define each angle as a harvest -> expand -> verify chain before the run starts, each stage reading the previous stage's handoff file; open leads re-enter as new chains in each cluster of angles the moment that cluster settles, and the synthesis reduces through per-cluster architect-tier slice reducers into ONE architect-tier reducer (the strongest reasoning tier substitutes wherever no architect tier exists). Absent that surface, run the same per-angle chains with background workers, pasting each worker's reply into its angle's next-stage prompt the moment it reports. Everything else in this skill still binds: the deliverable interview, the journal, the claim graph, the convergence rules, and the delivery gates.
+
+Otherwise launch the entire first wave in one turn — every axis at once, as team members if you formed a team, else as background workers. Sequential launches and "start with one and see" defeat the mode.
+
+Scaling floor — more angles always justify more workers:
+
+| Query scope | explore | web | repo-dive | floor |
+|---|---|---|---|---|
+| Single topic, codebase only | 3 | 0 | 0 | 3 |
+| Single topic, web only | 0 | 5 | 1 | 6 |
+| Single topic, both | 2 | 4 | 1 | 7 |
+| Multi-faceted | 4 | 8 | 2 | 14 |
+| Full due diligence | 4 | 9 | 2 | 15 |
+
+**Disambiguate before you expand.** When the topic names something that could resolve several ways — a product, a person, a codename, a version — the first wave settles WHICH entity before any worker researches its history, benchmarks, or controversies: canonical name, first-party URL or account, whether it exists in the claimed category, and a confidence line. An unresolved entity never becomes a premise in a later wave's spawn message; that is exactly how a run starts inventing facts about something that does not exist.
+
+Role protocols — embed the relevant one in each spawn message; every worker gets a unique angle:
+
+- **Codebase (explore), 2-4 workers.** Grep with 3+ keyword variations; structural/AST search; LSP definitions and references; file-name globs; `git log --all -S '<keyword>'` and `--grep` for history including deleted code. Cross-validate hits across tools. Report absolute file paths, patterns with `file:line`, and how findings connect.
+- **Web, 3-9 workers, every one loaded with the `browser` skill.** Search with 10+ websearch queries per worker, each with a different operator or angle (see Search craft); a result is a candidate, not a source. Read every candidate in the user's browser through the `browser` skill's attached engine: one named session per worker, one tab per source, several tabs open side by side while sources are compared — `session.tabCreate` / `tabSelect` / `tabClose` where the harness has a JS eval kernel, `bsk tab create --url <url>` / `tab select <id>` / `tab close <id>` / `tab list` on the CLI — the page scrolled to its end, a full-page screenshot of each top source saved as provenance, the tab closed once reported. A browser on another machine is reached through the `browser` skill's remote reference or a user-level skill that bridges to it, never replaced by a local headless one. `webfetch` is for raw files only: PDF, JSON, feeds, sitemaps. A host the browser cannot open (WAF, bot score, 403) goes to `ultimate-browsing`, whose provenance travels with the claim: a `snapshot` result cites its `snapshot_timestamp` and is never stated as the live page; a `proxy` result is `untrusted` until a second independent route agrees. Context7 with 3+ queries per known library; grep.app and `gh search code|repos|issues` for real-world usage; official docs via sitemap discovery (`<base>/sitemap.xml`), then targeted pages. A worker whose sources are all fetched text has searched, not read.
+- **Repo deep-dive (librarian), 0-2 workers.** Shallow-clone the most relevant repos to `${TMPDIR:-/tmp}`, pin the HEAD SHA, read core modules, follow call chains, return SHA-pinned permalinks.
+
+Example spawn (codebase axis; web and repo-dive follow the same contract with their own protocol):
+
+```
+task(subagent_type="explore", run_in_background=true, prompt="TASK: act as a codebase researcher. AXIS: <specific angle>.
+This is an explicit exhaustive-research assignment. Your default retrieval budget and stop-when-answered rules do not apply — run the full protocol below and report every lead.
+SCOPE: find everything in this codebase related to <angle>: <what complete looks like>.
+PROTOCOL: grep 3+ keyword variations; structural search; LSP references; globs; git history (-S and --grep). Cross-validate across tools. Report absolute paths and file:line patterns.
+End your reply with the ## EXPAND tail: '- LEAD: <discovery> — WHY: <why> — ANGLE: <search>' per lead, or 'none — <reason>'.")
+```
+
+## Phase 2 — Expand until convergence
+
+This loop is what makes the mode research rather than search. Collect returns as they land — and in team mode, act on each lead the moment a member raises it, never waiting for the full wave or a member's final reply:
+
+1. Journal the return the moment it lands, never at the end of the wave: digest plus verbatim EXPAND markers into `wave-<N>-<kind>-<axis>.md`, appending each new source, quote, and number to the observation manifest in the same beat — after a compaction the journal, not your memory, is the state. Snapshot each source the moment it is read (`node "$SKILL_DIR/scripts/report-tools.mjs" source snapshot --id S<n> --url <url> --session-dir "$SESSION_DIR"`; a page read in the browser is saved and imported with `--html <file>`, recorded as lower-trust `model` extraction), then register every number and quote you will use from that snapshot: `fact add --source S<n> --find "<anchor text>" --label <label>` (or `--table <id> --row <label> --col <label>`, or `--page <n> --line <n>`) and `fact quote --source S<n> --match "<words>" --label <label>`. Read the printed row and its 60 characters of source context before using it; a wrong row is retracted (`fact retract F<n> --reason <why>`), never edited. The observation's quote or line anchor in the manifest is that fact id.
+2. Deduplicate new markers against `expansion-log.md` — every lead ever seen, not just confirmed ones, or rejected leads resurface each wave.
+3. Spawn an expansion worker immediately for each new unchecked lead:
+
+```
+task(category="deep-low", load_skills=["browser"], run_in_background=true, prompt="TASK: expansion wave <N> — investigate: <lead>.
+PARENT: <which return surfaced it>. This is an explicit exhaustive-research assignment; budgets do not apply.
+<role protocol for the lead's territory — web protocol for external leads, explore protocol for codebase leads>
+End your reply with the ## EXPAND tail.")
+```
+
+### Excursions — dive deep on a new find, then surface back out
+
+The Phase 0 core question is the fixed goal of the run and never drifts. An excursion is a BOUNDED detour off the wave plan to chase something a return surfaced — you go deep, settle it, and come back up to the question you were hired to answer.
+
+**ENTER (dive) only on a trigger.** One of these must hold, and you name which one:
+
+1. The find contradicts a claim already locked in `claim-graph.md`.
+2. It would change the final answer or a recommendation if it turned out to be true.
+3. It exposes a source territory no axis owns, so nobody else will ever reach it.
+4. The user's steering points at it — their words are the trigger, quoted verbatim.
+
+Interest alone is not a trigger. Anything without one stays a queued lead in `expansion-log.md`, and the wave plan continues.
+
+**Budget the dive before you take it.** State the worker count and the probe count for this level in the ENTER row. An excursion may spawn at most ONE nested sub-excursion; a third level means the thing has become its own research question — surface immediately and either promote it to a real axis with its own worker or record it as an out-of-scope gap in `SYNTHESIS.md`. When the `ulw-loop` skill is driving the run, a promotion is `omo-agent-toolkit ulw-loop steer --kind add_subgoal --title "<axis>" --objective "<what it must answer>" --evidence "<what surfaced it>" --rationale "<why the plan changes>"`.
+
+**EXIT (surface) the moment any of these holds** — you do not need all of them:
+
+- The ENTER trigger is resolved: the claim is confirmed, refuted, or its dependency is closed.
+- Two consecutive probes changed nothing in the parent answer.
+- The finding stops moving any claim's status — diminishing return is an exit, not a reason to push harder.
+- The level's stated budget is spent.
+
+**Fold back on the way out.** Every EXIT writes one line saying what the excursion changed in the top-level answer, and `none — <reason>` is a legitimate, required outcome; an excursion whose result is silently dropped is a lost run. Update the parent claim node or axis digest with the result, then mirror the whole excursion into the loop ledger — `omo-agent-toolkit ulw-loop steer --kind annotate_ledger --evidence "<what the excursion observed>" --rationale "<what it changed, or none>"`, and `omo-agent-toolkit ulw-loop record-evidence --goal-id <id> --criterion-id <id> --status pass|fail|blocked --evidence "<artifact>"` when it settled a criterion. After a compaction, `omo-agent-toolkit ulw-loop status --json` plus `excursion-log.md` tell you which excursions are still open.
+
+**Anti-drift.** After every EXIT, re-read the core question in the journal and confirm the run still answers it. Three consecutive excursions that changed nothing end excursions for the run: converge on what you have.
+
+4. Record the wave in `expansion-log.md`: spawned, markers gained, leads opened/closed.
+5. **Relay the user's steering to everyone.** When the user changes scope, cadence, target sources, language, or format mid-run, broadcast it to every live worker and member immediately and record the exact wording in `expansion-log.md`. Steering only you saw silently splits the swarm's assignment from the user's actual ask.
+
+**Convergence — the only stop rules while this mode is active.** Run at least 2 expansion waves on any multi-faceted query before claiming convergence; then stop only when one holds:
+
+- Zero unchecked leads remain — each investigated or closed as duplicate/dead end.
+- 3 consecutive waves produced no new actionable leads.
+- Expansion depth reached 5 waves — pause, show the open leads, and ask the user whether to extend.
+
+**Never end the run on a worker's completion.** Workers finishing is not the deliverable; your synthesis is. Reserve the last fifth of the run's context and time for Phases 4-5 and stop opening waves the moment that reserve is threatened. A converged answer with two open leads beats nine finished workers and no report.
