@@ -7,6 +7,12 @@ import { isParentModelRung } from "./parent-model-rung"
 // provider.
 const CREDENTIAL_REJECTED =
   /\b401\b|unauthori[sz]ed|invalid_grant|oauth refresh failed|subscription is required|invalid api key|incorrect api key|authentication (?:failed|error)/i
+// No credential at all for the provider (#10806): senpi refuses the request before it is sent ("No API key
+// found for openai.", "No API key for provider: openai") or a login-only lane has no account and names the
+// /login that would fix it. The provider is signed out, so its sibling models fail the same way. "Use /login"
+// alone is not enough: senpi's "No model selected" text carries it and names no provider.
+const CREDENTIAL_MISSING =
+  /\bno api key (?:found |provided )?for\b|\bnot logged in\b|\brun \/login\b|authentication[_ ](?:failed|required)/i
 // A 403 is ambiguous: a provider also answers it for ONE model the key may not use (tier, region,
 // preview access, an organization that must be verified for that model), which a sibling model on
 // the same provider does not share. A 403 counts as a credential rejection only when it names the
@@ -32,7 +38,7 @@ export function usageLimitScope(message: string): UsageLimitScope | undefined {
 }
 
 export function isCredentialFailure(message: string, modelId?: string): boolean {
-  if (CREDENTIAL_REJECTED.test(message)) return true
+  if (CREDENTIAL_REJECTED.test(message) || CREDENTIAL_MISSING.test(message)) return true
   if (!FORBIDDEN.test(message) || !ACCOUNT_SCOPED_403.test(message)) return false
   if (MODEL_SCOPED.test(message)) return false
   return modelId === undefined || !message.toLowerCase().includes(modelId.toLowerCase())
