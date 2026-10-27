@@ -9,8 +9,9 @@ on:
     paths:
       - "crates/omo-engine-trust-helper/**"
       - "packages/omo-native/engine-trust-policy.ts"
-      - "packages/omo-native/windows-trust-facts.ts"
-      - "packages/omo-native/test/windows-trust-*.ts"
+      - "packages/omo-native/windows-trust-helper.ts"
+      - "packages/omo-native/test/windows-trust-helper*.ts"
+      - "packages/omo-native/test/trust-certificate-fixtures.ts"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -20,8 +21,9 @@ on:
     paths:
       - "crates/omo-engine-trust-helper/**"
       - "packages/omo-native/engine-trust-policy.ts"
-      - "packages/omo-native/windows-trust-facts.ts"
-      - "packages/omo-native/test/windows-trust-*.ts"
+      - "packages/omo-native/windows-trust-helper.ts"
+      - "packages/omo-native/test/windows-trust-helper*.ts"
+      - "packages/omo-native/test/trust-certificate-fixtures.ts"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -84,9 +86,9 @@ jobs:
         shell: bash
         working-directory: packages/omo-native
         env:
-          OMO_WINDOWS_TRUST_HELPER: ${{ github.workspace }}\target\${{ matrix.rust_target }}\release\omo-engine-trust-helper.exe
-          OMO_WINDOWS_TRUST_HELPER_REQUIRED: "1"
-        run: bun test --timeout 60000 test/windows-trust-facts.test.ts test/windows-trust-helper.test.ts
+          OMO_ENGINE_TRUST_HELPER_TARGET_DIR: ${{ github.workspace }}\target\${{ matrix.rust_target }}\release
+          OMO_ENGINE_TRUST_HELPER_REQUIRED: "1"
+        run: bun test --timeout 60000 test/windows-trust-helper.test.ts test/windows-trust-helper.windows.test.ts
 
       - name: Write job summary
         if: always()

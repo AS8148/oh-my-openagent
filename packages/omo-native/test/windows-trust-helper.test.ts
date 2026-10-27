@@ -1,76 +1,249 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { selectEngineTrust } from "../engine-trust-policy"
-import { decodeWindowsHelperOutput, encodeBundledRootsForHelper, windowsTrustHelperEnvironment } from "../windows-trust-facts"
-import { SyntheticPki } from "./windows-trust-pki"
+import {
+  WINDOWS_TRUST_HELPER_MAX_OUTPUT_BYTES,
+  decodeWindowsTrustHelperOutput,
+  encodeBundledRootsForHelper,
+  windowsTrustHelperEnvironment,
+} from "../windows-trust-helper"
+import { issueCertificates } from "./trust-certificate-fixtures"
 
-// The built helper runs in the Windows job of .github/workflows/engine-trust-helper.yml, which sets both variables;
-// a required run without the binary fails instead of skipping.
-const helper = process.env.OMO_WINDOWS_TRUST_HELPER
-if (process.env.OMO_WINDOWS_TRUST_HELPER_REQUIRED === "1" && helper === undefined) {
-  throw new Error("OMO_WINDOWS_TRUST_HELPER_REQUIRED=1 but OMO_WINDOWS_TRUST_HELPER is unset")
+// A private PKI per run, made with the OpenSSL CLI in a test-owned directory.
+const CA = "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign"
+let base = ""
+const R = { der: new Uint8Array() }
+const X = { der: new Uint8Array() }
+const Q = { der: new Uint8Array() }
+const N = { der: new Uint8Array() }
+beforeAll(async () => {
+  base = await mkdtemp(join(tmpdir(), "omo-windows-trust-helper-"))
+  const issued = await issueCertificates(base, [
+    { name: "R", subject: "/CN=omo windows decoder R", days: 30, extensions: CA },
+    { name: "X", subject: "/CN=omo windows decoder X", issuer: "R", days: 30, extensions: `${CA}\nextendedKeyUsage=serverAuth` },
+    { name: "Q", subject: "/CN=omo windows decoder Q", days: 30, extensions: CA },
+    { name: "N", subject: "/CN=omo windows decoder N", days: 30, extensions: CA },
+  ])
+  for (const [name, target] of [["R", R], ["X", X], ["Q", Q], ["N", N]] as const) target.der = new Uint8Array(issued.get(name) ?? [])
+})
+afterAll(async () => {
+  if (base) await rm(base, { recursive: true, force: true })
+})
+
+const b64 = (der: Uint8Array) => Buffer.from(der).toString("base64")
+const id = (der: Uint8Array) => ({
+  sha256: createHash("sha256").update(der).digest("hex"),
+  sha1: createHash("sha1").update(der).digest("hex"),
+})
+const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
+const disallowedSources = ["CURRENT_USER", "LOCAL_MACHINE", "CURRENT_USER_GROUP_POLICY", "LOCAL_MACHINE_GROUP_POLICY", "LOCAL_MACHINE_ENTERPRISE"]
+  .map((location) => ({ store: "Disallowed", location, physicalStore: ".Default", outcome: "read", status: 0 }))
+
+type Wire = Record<string, unknown> & { certificates: Record<string, unknown>[]; sources: Record<string, unknown>[] }
+function wire(): Wire {
+  return {
+    schema: 1,
+    os: "windows",
+    complete: true,
+    sources: [{ store: "ROOT", location: "LOCAL_MACHINE", physicalStore: ".Default", outcome: "read", status: 0 }, ...disallowedSources],
+    ctl: "read",
+    certificates: [
+      { der: b64(R.der), store: "ROOT", location: "LOCAL_MACHINE", physicalStore: ".Default", selfSigned: true, ca: true, eku: { kind: "unrestricted" } },
+      {
+        der: b64(X.der), store: "CA", location: "CURRENT_USER", physicalStore: ".Default", selfSigned: false, ca: true,
+        eku: { kind: "oids", oids: ["1.3.6.1.5.5.7.3.1"] },
+        chain: { anchor: id(R.der), path: [id(X.der), id(R.der)], explicitDistrust: false },
+      },
+    ],
+    disallowed: [{ der: b64(N.der), location: "LOCAL_MACHINE", physicalStore: ".Default" }],
+    ctlSha1: [id(Q.der).sha1],
+    bundledRoots: [id(Q.der)],
+  }
 }
-const DEADLINE_MS = 30_000
 
-type Run = { readonly code: number | null; readonly stdout: Uint8Array; readonly stderr: string }
-function run(path: string, stdin: Uint8Array): Promise<Run> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(path, [], { env: windowsTrustHelperEnvironment(process.env), stdio: ["pipe", "pipe", "pipe"], windowsHide: true })
-    const stdout: Buffer[] = []
-    const stderr: Buffer[] = []
-    // A circuit breaker above the helper's own 20 s watchdog, never a synchronization point.
-    const deadline = setTimeout(() => {
-      child.kill()
-      reject(new Error(`the helper did not exit within ${DEADLINE_MS} ms`))
-    }, DEADLINE_MS)
-    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk))
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
-    child.on("error", (error) => {
-      clearTimeout(deadline)
-      reject(error)
-    })
-    child.on("close", (code) => {
-      clearTimeout(deadline)
-      resolve({ code, stdout: new Uint8Array(Buffer.concat(stdout)), stderr: Buffer.concat(stderr).toString("utf8") })
-    })
-    child.stdin.end(stdin)
-  })
+function failure(value: unknown) {
+  const result = decodeWindowsTrustHelperOutput(value instanceof Uint8Array ? value : bytes(value))
+  if (result.kind === "decoded") throw new Error("expected the decoder to reject the document")
+  return result
+}
+function decoded(value: unknown) {
+  const result = decodeWindowsTrustHelperOutput(bytes(value))
+  if (result.kind !== "decoded") throw new Error(`${result.check} at ${result.path}`)
+  return result.document
 }
 
-describe.skipIf(helper === undefined)("windows trust helper on real Crypt32", () => {
-  let pki: SyntheticPki | undefined
-  let bundled: Uint8Array = new Uint8Array()
-  beforeAll(() => {
-    pki = new SyntheticPki()
-    bundled = pki.root("B").der
+describe("decodeWindowsTrustHelperOutput", () => {
+  test("#given a complete helper document #when decoding #then it yields exactly the policy facts and DER by identity", () => {
+    const result = { output: decoded(wire()) }
+    expect(result.output.facts).toEqual({
+      os: "windows",
+      complete: true,
+      certificates: [
+        { ...id(R.der), store: "ROOT", location: "LOCAL_MACHINE", physicalStore: ".Default", selfSigned: true, ca: true, eku: { kind: "unrestricted" } },
+        {
+          ...id(X.der), store: "CA", location: "CURRENT_USER", physicalStore: ".Default", selfSigned: false, ca: true,
+          eku: { kind: "oids", oids: ["1.3.6.1.5.5.7.3.1"] },
+          chain: { anchor: id(R.der), path: [id(X.der), id(R.der)], explicitDistrust: false },
+        },
+      ],
+      disallowed: [{ ...id(N.der), location: "LOCAL_MACHINE", physicalStore: ".Default" }],
+      ctlSha1: [id(Q.der).sha1],
+      bundledRoots: [id(Q.der)],
+    })
+    expect([...result.output.der.keys()].sort()).toEqual([id(R.der).sha256, id(X.der).sha256].sort())
+    expect(result.output.der.get(id(X.der).sha256)).toEqual(X.der)
+    expect(result.output.ctl).toBe("read")
+    expect(result.output.sources).toHaveLength(6)
+    const selection = selectEngineTrust(result.output.facts)
+    expect(selection.status).toBe("selected")
+    expect(selection.S).toEqual([id(R.der).sha256])
+    expect(selection.I).toEqual([id(X.der).sha256])
+    expect(selection.D).toEqual({ sha256: [id(N.der).sha256], sha1: [id(Q.der).sha1] })
   })
-  afterAll(() => pki?.dispose())
 
-  test("#given Bun's bundled roots on stdin #when the helper reads this machine's stores #then its output decodes and the policy selects", async () => {
-    const result = await run(helper ?? "", encodeBundledRootsForHelper([bundled]))
-    expect({ code: result.code, stderr: result.stderr }).toEqual({ code: 0, stderr: "" })
-    const decoded = decodeWindowsHelperOutput(result.stdout)
-    if (decoded.kind !== "decoded") throw new Error(`${decoded.error} at ${decoded.path}`)
-    const { facts, sources } = decoded.output
-    expect(facts.bundledRoots).toEqual([{
-      sha256: createHash("sha256").update(bundled).digest("hex"),
-      sha1: createHash("sha1").update(bundled).digest("hex"),
-    }])
-    // Outcomes only: no store content is asserted.
-    const unread = sources.filter((source) => source.store === "Disallowed" && source.outcome !== "read" && source.outcome !== "absent")
-    expect({ complete: facts.complete, ctl: decoded.output.ctl, unread }).toEqual({ complete: true, ctl: expect.stringMatching(/^(read|absent)$/), unread: [] })
-    const attempted = new Set(sources.filter((source) => source.store === "Disallowed").map((source) => source.location))
-    for (const location of ["CURRENT_USER", "LOCAL_MACHINE", "CURRENT_USER_GROUP_POLICY", "LOCAL_MACHINE_GROUP_POLICY", "LOCAL_MACHINE_ENTERPRISE", "USER_SID"] as const) {
-      expect(attempted.has(location)).toBe(true)
-    }
-    expect(selectEngineTrust(facts).status).toBe("selected")
+  test.each([
+    ["access-denied"],
+    ["enumeration-failed"],
+  ])("#given a Disallowed source %s and complete:false #when decoding and selecting #then the import fails closed", (outcome) => {
+    const document = wire()
+    document.complete = false
+    document.sources = [...document.sources.slice(0, 2), { ...document.sources[2], outcome, status: 5 }, ...document.sources.slice(3)]
+    const result = { output: decoded(document) }
+    expect(result.output.facts.complete).toBe(false)
+    const selection = selectEngineTrust(result.output.facts)
+    expect(selection.status).toBe("failed")
+    expect(selection.diagnostics).toEqual(["negative-sources-incomplete"])
   })
 
-  test("#given stdin that is not a DER certificate list #when the helper runs #then it exits 65 with no stdout", async () => {
-    const result = await run(helper ?? "", new Uint8Array([0x30, 0x05, 0x00]))
-    expect({ code: result.code, stdout: result.stdout.length, stderr: result.stderr.trim() })
-      .toEqual({ code: 65, stdout: 0, stderr: "omo-engine-trust-helper: bad-stdin" })
+  test.each([
+    ["a Disallowed store access-denied", (document: Wire) => { document.sources = [{ ...document.sources[1], outcome: "access-denied" }] }, "$.complete"],
+    ["a Disallowed store enumeration-failed", (document: Wire) => { document.sources = [{ ...document.sources[1], outcome: "enumeration-failed" }] }, "$.complete"],
+    ["an unreadable CTL", (document: Wire) => { document.ctl = "unreadable" }, "$.complete"],
+    ["an undecodable CTL", (document: Wire) => { document.ctl = "undecodable" }, "$.complete"],
+    ["a CTL with an unsupported subject algorithm", (document: Wire) => { document.ctl = "unsupported-subject-algorithm" }, "$.complete"],
+  ])("#given %s with complete:true #when decoding #then the claim is rejected as inconsistent", (_case, mutate, path) => {
+    const document = wire()
+    mutate(document)
+    expect(failure(document)).toEqual({ kind: "helper-malformed-output", check: "inconsistent-complete", path })
+  })
+
+  test("#given absent, access-denied and failed positive stores #when decoding #then the outcomes stay distinct and complete holds", () => {
+    const document = wire()
+    document.sources = [
+      ...document.sources,
+      { store: "TrustedPeople", location: "LOCAL_MACHINE_ENTERPRISE", physicalStore: null, outcome: "absent", status: 2 },
+      { store: "CA", location: "LOCAL_MACHINE_GROUP_POLICY", physicalStore: ".GroupPolicy", outcome: "access-denied", status: 5 },
+      { store: "ROOT", location: "CURRENT_USER", physicalStore: ".SmartCard", outcome: "enumeration-failed", status: 0x80092004 },
+    ]
+    const result = decoded(document)
+    expect(result.sources.slice(-3).map((source) => [source.outcome, source.status]))
+      .toEqual([["absent", 2], ["access-denied", 5], ["enumeration-failed", 0x80092004]])
+    expect(result.facts.complete).toBe(true)
+  })
+
+  test.each([
+    ["a top-level field", (document: Wire) => { document.extra = 1 }, "$.extra"],
+    ["a certificate field", (document: Wire) => { document.certificates[0] = { ...document.certificates[0], subject: "CN=x" } }, "$.certificates[0].subject"],
+    ["a chain field", (document: Wire) => { document.certificates[1] = { ...document.certificates[1], chain: { ...(document.certificates[1]?.chain as object), score: 1 } } }, "$.certificates[1].chain.score"],
+    ["an EKU field", (document: Wire) => { document.certificates[0] = { ...document.certificates[0], eku: { kind: "unrestricted", oids: [] } } }, "$.certificates[0].eku.oids"],
+    ["a source field", (document: Wire) => { document.sources[0] = { ...document.sources[0], error: 5 } }, "$.sources[0].error"],
+  ])("#given an unknown %s #when decoding #then it is rejected", (_case, mutate, path) => {
+    const document = wire()
+    mutate(document)
+    expect(failure(document)).toEqual({ kind: "helper-malformed-output", check: "unknown-field", path })
+  })
+
+  test.each(["schema", "os", "complete", "sources", "ctl", "certificates", "disallowed", "ctlSha1", "bundledRoots"])(
+    "#given no %s #when decoding #then it is rejected as missing",
+    (field) => {
+      const document = wire()
+      delete document[field]
+      expect(failure(document)).toEqual({ kind: "helper-malformed-output", check: "missing-field", path: `$.${field}` })
+    },
+  )
+
+  test.each([
+    ["a string complete", (document: Wire) => { document.complete = "true" }, "wrong-type", "$.complete"],
+    ["a non-array certificates", (document: Wire) => { document.certificates = {} as never }, "wrong-type", "$.certificates"],
+    ["a numeric selfSigned", (document: Wire) => { document.certificates[0] = { ...document.certificates[0], selfSigned: 1 } }, "wrong-type", "$.certificates[0].selfSigned"],
+    ["a null document", () => null, "wrong-type", "$"],
+    ["another schema", (document: Wire) => { document.schema = 2 }, "invalid-value", "$.schema"],
+    ["a negative status", (document: Wire) => { document.sources[0] = { ...document.sources[0], status: -1 } }, "invalid-value", "$.sources[0].status"],
+    ["a fractional status", (document: Wire) => { document.sources[0] = { ...document.sources[0], status: 1.5 } }, "wrong-type", "$.sources[0].status"],
+    ["the macOS-only disabled outcome", (document: Wire) => { document.sources[0] = { ...document.sources[0], outcome: "disabled" } }, "invalid-value", "$.sources[0].outcome"],
+    ["another OS", (document: Wire) => { document.os = "macos" }, "invalid-value", "$.os"],
+    ["an unknown EKU kind", (document: Wire) => { document.certificates[0] = { ...document.certificates[0], eku: { kind: "maybe" } } }, "invalid-value", "$.certificates[0].eku.kind"],
+    ["a non-OID usage", (document: Wire) => { document.certificates[0] = { ...document.certificates[0], eku: { kind: "oids", oids: ["serverAuth"] } } }, "invalid-value", "$.certificates[0].eku.oids[0]"],
+    ["an unknown location", (document: Wire) => { document.certificates[0] = { ...document.certificates[0], location: "MOON" } }, "invalid-value", "$.certificates[0].location"],
+    ["a Disallowed positive store", (document: Wire) => { document.certificates[0] = { ...document.certificates[0], store: "Disallowed" } }, "invalid-value", "$.certificates[0].store"],
+    ["an empty physical store name", (document: Wire) => { document.certificates[0] = { ...document.certificates[0], physicalStore: "" } }, "invalid-value", "$.certificates[0].physicalStore"],
+    ["an unknown source outcome", (document: Wire) => { document.sources[0] = { ...document.sources[0], outcome: "maybe" } }, "invalid-value", "$.sources[0].outcome"],
+    ["an unknown CTL outcome", (document: Wire) => { document.ctl = "skipped" }, "invalid-value", "$.ctl"],
+    ["an upper-case CTL thumbprint", (document: Wire) => { document.ctlSha1 = [id(Q.der).sha1.toUpperCase()] }, "invalid-value", "$.ctlSha1[0]"],
+    ["a short CTL thumbprint", (document: Wire) => { document.ctlSha1 = ["abcd"] }, "invalid-value", "$.ctlSha1[0]"],
+    ["a SHA-1 in a SHA-256 slot", (document: Wire) => { document.bundledRoots = [{ sha256: id(Q.der).sha1, sha1: id(Q.der).sha1 }] }, "invalid-value", "$.bundledRoots[0].sha256"],
+    ["a null chain path entry", (document: Wire) => { document.certificates[1] = { ...document.certificates[1], chain: { anchor: null, path: [null], explicitDistrust: false } } }, "wrong-type", "$.certificates[1].chain.path[0]"],
+  ] as const)("#given %s #when decoding #then it is rejected", (_case, mutate, check, path) => {
+    const document = wire()
+    const replaced = mutate(document)
+    expect(failure(replaced === null ? null : document)).toEqual({ kind: "helper-malformed-output", check, path })
+  })
+
+  test.each([
+    ["non-canonical base64", (der: Uint8Array) => `${b64(der)}\n`],
+    ["base64 with a stray character", (der: Uint8Array) => `${b64(der).slice(0, -4)}!!!!`],
+    ["a truncated certificate", (der: Uint8Array) => b64(der.subarray(0, der.length - 1))],
+    ["a certificate with a trailing byte", (der: Uint8Array) => b64(new Uint8Array([...der, 0]))],
+    ["an empty value", () => ""],
+    ["a non-SEQUENCE value", () => b64(new Uint8Array([0x04, 0x00]))],
+  ])("#given %s #when decoding #then the DER is rejected", (_case, encode) => {
+    const document = wire()
+    document.certificates[0] = { ...document.certificates[0], der: encode(R.der) }
+    expect(failure(document)).toEqual({ kind: "helper-malformed-output", check: "unparseable-certificate", path: "$.certificates[0].der" })
+    const negative = wire()
+    negative.disallowed = [{ der: encode(N.der), location: "LOCAL_MACHINE", physicalStore: ".Default" }]
+    expect(failure(negative)).toEqual({ kind: "helper-malformed-output", check: "unparseable-certificate", path: "$.disallowed[0].der" })
+  })
+
+  test("#given output one byte over the bound #when decoding #then it is rejected before parsing", () => {
+    const over = new Uint8Array(WINDOWS_TRUST_HELPER_MAX_OUTPUT_BYTES + 1).fill(0x20)
+    expect(failure(over)).toEqual({ kind: "helper-malformed-output", check: "oversize", path: "$" })
+    const at = new Uint8Array(WINDOWS_TRUST_HELPER_MAX_OUTPUT_BYTES).fill(0x20)
+    expect(failure(at)).toEqual({ kind: "helper-malformed-output", check: "syntax", path: "$" })
+  })
+
+  test.each([
+    ["invalid UTF-8", () => new Uint8Array([0x7b, 0xff, 0x7d]), "encoding"],
+    ["truncated JSON", () => bytes(wire()).subarray(0, 40), "syntax"],
+    ["empty output", () => new Uint8Array(), "syntax"],
+  ] as const)("#given %s #when decoding #then it is malformed", (_case, output, check) => {
+    expect(failure(output())).toEqual({ kind: "helper-malformed-output", check, path: "$" })
+  })
+})
+
+describe("encodeBundledRootsForHelper", () => {
+  test("#given Bun's bundled roots as DER #when encoding stdin #then it is their plain concatenation in order", () => {
+    expect(encodeBundledRootsForHelper([R.der, Q.der])).toEqual(new Uint8Array([...R.der, ...Q.der]))
+    expect(encodeBundledRootsForHelper([])).toEqual(new Uint8Array())
+  })
+})
+
+describe("windowsTrustHelperEnvironment", () => {
+  test("#given an arrival environment with trust-steering variables #when building the helper environment #then only SystemRoot survives", () => {
+    expect(windowsTrustHelperEnvironment({
+      SYSTEMROOT: "C:\\Windows",
+      NODE_EXTRA_CA_CERTS: "C:\\extra.pem",
+      node_use_system_ca: "1",
+      SSL_CERT_FILE: "C:\\cert.pem",
+      SSL_CERT_DIR: "C:\\certs",
+      BUN_OPTIONS: "--use-system-ca",
+      Path: "C:\\Windows\\system32",
+      SENPI_ENGINE_TRUST: "{}",
+    })).toEqual({ SystemRoot: "C:\\Windows" })
+    expect(windowsTrustHelperEnvironment({ PATH: "/usr/bin" })).toEqual({})
   })
 })

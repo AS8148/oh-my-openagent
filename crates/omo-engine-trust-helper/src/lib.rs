@@ -1,26 +1,24 @@
-//! Windows native fact helper for the engine CA importer (omo#10762, design 4.1, 4.2 and 6.2).
+//! Native fact helper for the engine CA importer (omo#10762, design sections 4.1, 4.2 and 6.2).
 //!
-//! The helper reads Bun's bundled roots `B` from stdin as concatenated DER, collects the positive store
-//! candidates, the `Disallowed` stores and the Disallowed CTL with Crypt32, verifies intermediates on an
-//! exclusive-root chain engine, and writes one bounded JSON document. It makes no trust decision: the
-//! launcher decodes the document (`packages/omo-native/windows-trust-facts.ts`) and the pure policy
-//! (`engine-trust-policy.ts`) selects. Only `output`, `stdin` and `watchdog` are platform independent.
+//! The helper reads Windows Crypt32 in its own killable process and writes one bounded JSON document of
+//! facts to stdout. It makes no trust decision: `packages/omo-native/windows-trust-helper.ts` decodes the
+//! document and `packages/omo-native/engine-trust-policy.ts` decides.
 
-pub mod output;
+pub mod document;
 pub mod stdin;
 pub mod watchdog;
-#[cfg(windows)]
-pub mod win;
+#[cfg(target_os = "windows")]
+pub mod windows;
+pub mod windows_document;
 
-/// Process exit codes. A non-zero exit never writes stdout.
-pub mod exit {
-    pub const OK: u8 = 0;
-    pub const BAD_STDIN: u8 = 65;
-    pub const UNSUPPORTED_PLATFORM: u8 = 69;
-    pub const INTERNAL: u8 = 70;
-    pub const OVERSIZE_OUTPUT: u8 = 71;
-    pub const TIMEOUT: u8 = 75;
+/// Reads Bun's bundled roots from stdin and writes the Crypt32 facts (design 4.2).
+#[cfg(target_os = "windows")]
+pub fn run() -> i32 {
+    windows::run()
 }
 
-/// The helper's own hard cap (design 6.2); its owner also kills it at the owner's deadline.
-pub const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(20);
+/// The macOS helper is a separate change; Linux needs no helper (design 4.3).
+#[cfg(not(target_os = "windows"))]
+pub fn run() -> i32 {
+    document::EXIT_UNSUPPORTED
+}

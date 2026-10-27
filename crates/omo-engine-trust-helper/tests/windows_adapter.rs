@@ -1,15 +1,16 @@
 //! Real Crypt32 on CERT_STORE_PROV_MEMORY stores (design 9.2). Certificates come from the OpenSSL CLI in a
 //! test-owned directory; system-store enumeration is replaced through `SystemStores`. No real store is read.
-#![cfg(windows)]
+#![cfg(target_os = "windows")]
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 
-use omo_engine_trust_helper::output::{Chain, CtlOutcome, Eku, Identity, Location, SourceOutcome, SourceStore};
-use omo_engine_trust_helper::win::{
+use omo_engine_trust_helper::document::{Chain, Identity, Outcome};
+use omo_engine_trust_helper::windows::{
     collect, decode_disallowed_ctl, effective_eku, CertStore, CollectError, Context, CtlRead, PhysicalRead, SystemStores,
 };
+use omo_engine_trust_helper::windows_document::{CtlOutcome, Eku, Location, SourceStore};
 use windows_sys::Win32::Security::Cryptography::{
     CertSetCertificateContextProperty, CryptEncodeObjectEx, CERT_DISALLOWED_FILETIME_PROP_ID, CERT_ENHKEY_USAGE_PROP_ID,
     CRYPT_INTEGER_BLOB, CTL_USAGE, X509_ASN_ENCODING, X509_ENHANCED_KEY_USAGE,
@@ -208,7 +209,7 @@ fn set_eku_property(context: &Context, oids: &[&str]) {
 
 #[derive(Default)]
 struct MemoryStores {
-    stores: HashMap<(SourceStore, Location), Result<CertStore, SourceOutcome>>,
+    stores: HashMap<(SourceStore, Location), Result<CertStore, (Outcome, u32)>>,
     ctl: Option<CtlRead>,
     disallowed_locations: Vec<Location>,
     requested: Vec<(SourceStore, Location)>,
@@ -222,8 +223,14 @@ impl MemoryStores {
         (self, contexts)
     }
 
-    fn failing(mut self, store: SourceStore, location: Location, outcome: SourceOutcome) -> Self {
-        self.stores.insert((store, location), Err(outcome));
+    fn failing(mut self, store: SourceStore, location: Location, outcome: Outcome) -> Self {
+        // A representative Win32 error per outcome; the adapter reports it unchanged.
+        let status = match outcome {
+            Outcome::AccessDenied => 5,
+            Outcome::Absent => 2,
+            _ => 0x8009_2004,
+        };
+        self.stores.insert((store, location), Err((outcome, status)));
         self
     }
 }
@@ -232,9 +239,9 @@ impl SystemStores for MemoryStores {
     fn read(&mut self, store: SourceStore, location: Location) -> Vec<PhysicalRead> {
         self.requested.push((store, location));
         match self.stores.remove(&(store, location)) {
-            Some(Ok(memory)) => vec![PhysicalRead { physical_store: Some(".Default".into()), outcome: SourceOutcome::Read, store: Some(memory) }],
-            Some(Err(outcome)) => vec![PhysicalRead { physical_store: None, outcome, store: None }],
-            None => vec![PhysicalRead { physical_store: None, outcome: SourceOutcome::Absent, store: None }],
+            Some(Ok(memory)) => vec![PhysicalRead { physical_store: Some(".Default".into()), outcome: Outcome::Read, status: 0, store: Some(memory) }],
+            Some(Err((outcome, status))) => vec![PhysicalRead { physical_store: None, outcome, status, store: None }],
+            None => vec![PhysicalRead { physical_store: None, outcome: Outcome::Absent, status: 2, store: None }],
         }
     }
 
@@ -319,8 +326,7 @@ fn intermediates_are_verified_on_the_exclusive_root_engine() {
 
     let output = collect(&mut stores, &[&rb.der]).unwrap();
     let chain_of = |cert: &Cert| -> Option<Chain> {
-        let encoded = omo_engine_trust_helper::output::base64(&cert.der);
-        output.certificates.iter().find(|fact| fact.der == encoded).and_then(|fact| fact.chain.clone())
+        output.certificates.iter().find(|fact| fact.der == cert.der).and_then(|fact| fact.chain.clone())
     };
     let id = |cert: &Cert| pki.identity(cert);
     assert_eq!(chain_of(&x), Some(Chain { anchor: Some(id(&r)), path: vec![id(&x), id(&r)], explicit_distrust: false }));
@@ -332,9 +338,9 @@ fn intermediates_are_verified_on_the_exclusive_root_engine() {
     assert_eq!(chain_of(&xo).unwrap().anchor, None);
     assert_eq!(chain_of(&r), None, "a self-signed ROOT certificate is an anchor candidate, not an intermediate");
     assert_eq!(output.bundled_roots, vec![id(&rb)]);
-    let root_fact = output.certificates.iter().find(|fact| fact.der == omo_engine_trust_helper::output::base64(&r.der)).unwrap();
+    let root_fact = output.certificates.iter().find(|fact| fact.der == r.der).unwrap();
     assert_eq!((root_fact.self_signed, root_fact.ca, &root_fact.eku), (true, true, &Eku::Unrestricted));
-    let x_fact = output.certificates.iter().find(|fact| fact.der == omo_engine_trust_helper::output::base64(&x.der)).unwrap();
+    let x_fact = output.certificates.iter().find(|fact| fact.der == x.der).unwrap();
     assert_eq!((x_fact.self_signed, x_fact.ca, &x_fact.eku), (false, true, &Eku::Oids { oids: vec![SERVER_AUTH.into()] }));
     assert!(output.complete);
 }
@@ -345,24 +351,24 @@ fn store_outcomes_stay_distinct_and_unreadable_negatives_fail_closed() {
     let n = pki.root("N", "root");
     let (stores, _) = MemoryStores::default().with(SourceStore::Disallowed, Location::LocalMachine, &[&n]);
     let mut stores = stores
-        .failing(SourceStore::Root, Location::CurrentUserGroupPolicy, SourceOutcome::AccessDenied)
-        .failing(SourceStore::Ca, Location::LocalMachineEnterprise, SourceOutcome::EnumerationFailed);
+        .failing(SourceStore::Root, Location::CurrentUserGroupPolicy, Outcome::AccessDenied)
+        .failing(SourceStore::Ca, Location::LocalMachineEnterprise, Outcome::EnumerationFailed);
     let output = collect(&mut stores, &[]).unwrap();
     assert!(output.complete, "positive-store failures and absent Disallowed stores keep the negative scan complete");
     let outcome = |store, location| {
-        output.sources.iter().find(|source| source.store == store && source.location == location).map(|source| source.outcome)
+        output.sources.iter().find(|source| source.store == store && source.location == location).map(|source| (source.outcome, source.status))
     };
-    assert_eq!(outcome(SourceStore::Root, Location::CurrentUserGroupPolicy), Some(SourceOutcome::AccessDenied));
-    assert_eq!(outcome(SourceStore::Ca, Location::LocalMachineEnterprise), Some(SourceOutcome::EnumerationFailed));
-    assert_eq!(outcome(SourceStore::Disallowed, Location::CurrentUser), Some(SourceOutcome::Absent));
-    assert_eq!(outcome(SourceStore::Disallowed, Location::LocalMachine), Some(SourceOutcome::Read));
+    assert_eq!(outcome(SourceStore::Root, Location::CurrentUserGroupPolicy), Some((Outcome::AccessDenied, 5)));
+    assert_eq!(outcome(SourceStore::Ca, Location::LocalMachineEnterprise), Some((Outcome::EnumerationFailed, 0x8009_2004)));
+    assert_eq!(outcome(SourceStore::Disallowed, Location::CurrentUser), Some((Outcome::Absent, 2)));
+    assert_eq!(outcome(SourceStore::Disallowed, Location::LocalMachine), Some((Outcome::Read, 0)));
     assert_eq!(output.disallowed.len(), 1);
-    assert_eq!(output.disallowed[0].der, omo_engine_trust_helper::output::base64(&n.der));
+    assert_eq!(output.disallowed[0].der, n.der);
     assert_eq!(output.ctl, CtlOutcome::Absent);
     assert!(!stores.requested.contains(&(SourceStore::TrustedPeople, Location::CurrentUser)), "current-user TrustedPeople is not read");
     assert!(stores.requested.contains(&(SourceStore::TrustedPeople, Location::LocalMachineEnterprise)));
 
-    for outcome in [SourceOutcome::AccessDenied, SourceOutcome::EnumerationFailed] {
+    for outcome in [Outcome::AccessDenied, Outcome::EnumerationFailed] {
         let mut denied = MemoryStores::default().failing(SourceStore::Disallowed, Location::LocalMachineGroupPolicy, outcome);
         assert!(!collect(&mut denied, &[]).unwrap().complete, "{outcome:?}");
     }
@@ -376,7 +382,7 @@ fn store_outcomes_stay_distinct_and_unreadable_negatives_fail_closed() {
         disallowed_locations: vec![Location::CurrentService, Location::UserSid],
         ..MemoryStores::default()
     }
-    .failing(SourceStore::Disallowed, Location::UserSid, SourceOutcome::AccessDenied);
+    .failing(SourceStore::Disallowed, Location::UserSid, Outcome::AccessDenied);
     let output = collect(&mut service, &[]).unwrap();
     assert!(!output.complete);
     assert!(service.requested.contains(&(SourceStore::Disallowed, Location::CurrentService)));

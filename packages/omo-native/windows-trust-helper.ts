@@ -2,33 +2,41 @@ import { createHash } from "node:crypto"
 
 import type { CertificateId, EngineTrustFacts, EnhancedKeyUsage, TrustChain, WindowsCertificate, WindowsLocation } from "./engine-trust-policy"
 
-/** The helper writes one JSON document; anything larger is malformed output, never truncated input. */
-export const WINDOWS_TRUST_HELPER_STDOUT_LIMIT = 16 * 1024 * 1024
+/** Shared with the helper (`crates/omo-engine-trust-helper/src/document.rs`); anything larger is malformed output. */
+export const WINDOWS_TRUST_HELPER_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+/** Shared with `document.rs` and `windows_document.rs`. */
+export const WINDOWS_TRUST_HELPER_EXIT = { badStdin: 65, outputCap: 74, watchdog: 75 } as const
 
 export type WindowsFacts = Extract<EngineTrustFacts, { readonly os: "windows" }>
 export type WindowsSourceStore = "ROOT" | "CA" | "TrustedPeople" | "Disallowed"
-/** Distinct per-store outcomes (design 4.2 item 3). `disabled` is a physical store Windows marks open-disabled. */
-export type WindowsSourceOutcome = "read" | "absent" | "access-denied" | "enumeration-failed" | "disabled"
-export type WindowsSourceReport = {
+/** Distinct per-store outcomes (design 4.2 item 3), the same set as the macOS helper's. */
+export type WindowsSourceOutcome = "read" | "absent" | "access-denied" | "enumeration-failed"
+export type WindowsTrustSource = {
   readonly store: WindowsSourceStore
   readonly location: WindowsLocation
   /** null when the system store itself could not be opened or its physical stores listed. */
   readonly physicalStore: string | null
   readonly outcome: WindowsSourceOutcome
+  /** The Win32 error the helper saw; 0 when read. */
+  readonly status: number
 }
 export type WindowsCtlOutcome = "read" | "absent" | "unreadable" | "undecodable" | "unsupported-subject-algorithm"
-export type WindowsHelperOutput = {
+export type WindowsTrustHelperDocument = {
   readonly facts: WindowsFacts
-  /** Certificate bytes of every positive candidate, by DER SHA-256, for the generation file. */
+  /** Certificate bytes of every positive candidate, by DER SHA-256, for the generation writer. */
   readonly der: ReadonlyMap<string, Uint8Array>
-  readonly sources: readonly WindowsSourceReport[]
+  readonly sources: readonly WindowsTrustSource[]
   readonly ctl: WindowsCtlOutcome
 }
-export type WindowsHelperDecodeError =
-  | "oversize" | "not-json" | "wrong-type" | "missing-field" | "unknown-field" | "invalid-value" | "invalid-der" | "inconsistent-complete"
-export type WindowsHelperDecode =
-  | { readonly kind: "decoded"; readonly output: WindowsHelperOutput }
-  | { readonly kind: "helper-malformed-output"; readonly error: WindowsHelperDecodeError; readonly path: string }
+export type WindowsTrustMalformed = {
+  readonly kind: "helper-malformed-output"
+  readonly check:
+    | "oversize" | "encoding" | "syntax" | "unknown-field" | "missing-field" | "wrong-type" | "invalid-value"
+    | "unparseable-certificate" | "inconsistent-complete"
+  /** JSON path of the offending value. */
+  readonly path: string
+}
+export type WindowsTrustDecodeResult = { readonly kind: "decoded"; readonly document: WindowsTrustHelperDocument } | WindowsTrustMalformed
 
 const LOCATIONS: readonly WindowsLocation[] = [
   "CURRENT_USER", "LOCAL_MACHINE", "CURRENT_USER_GROUP_POLICY", "LOCAL_MACHINE_GROUP_POLICY",
@@ -36,7 +44,7 @@ const LOCATIONS: readonly WindowsLocation[] = [
 ]
 const POSITIVE_STORES = ["ROOT", "CA", "TrustedPeople"] as const
 const SOURCE_STORES: readonly WindowsSourceStore[] = [...POSITIVE_STORES, "Disallowed"]
-const OUTCOMES: readonly WindowsSourceOutcome[] = ["read", "absent", "access-denied", "enumeration-failed", "disabled"]
+const OUTCOMES: readonly WindowsSourceOutcome[] = ["read", "absent", "access-denied", "enumeration-failed"]
 const CTL_OUTCOMES: readonly WindowsCtlOutcome[] = ["read", "absent", "unreadable", "undecodable", "unsupported-subject-algorithm"]
 const OID = /^[0-2](?:\.(?:0|[1-9][0-9]*))+$/
 const SHA256 = /^[0-9a-f]{64}$/
@@ -44,8 +52,8 @@ const SHA1 = /^[0-9a-f]{40}$/
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
 
 class Malformed extends Error {
-  constructor(readonly code: WindowsHelperDecodeError, readonly path: string) {
-    super(code)
+  constructor(readonly check: WindowsTrustMalformed["check"], readonly path: string) {
+    super(`${check} at ${path}`)
   }
 }
 
@@ -87,24 +95,30 @@ function physicalStore(value: unknown, path: string): string {
   return text
 }
 
+function win32Status(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) throw new Malformed("wrong-type", path)
+  if (value < 0 || value > 0xffff_ffff) throw new Malformed("invalid-value", path)
+  return value
+}
+
 /** Canonical base64 of exactly one DER SEQUENCE with no trailing bytes. */
 function der(value: unknown, path: string): Uint8Array {
   const text = string(value, path)
-  if (text.length === 0 || !BASE64.test(text)) throw new Malformed("invalid-der", path)
+  if (text.length === 0 || !BASE64.test(text)) throw new Malformed("unparseable-certificate", path)
   const bytes = new Uint8Array(Buffer.from(text, "base64"))
-  if (bytes[0] !== 0x30 || bytes.length < 2) throw new Malformed("invalid-der", path)
+  if (bytes[0] !== 0x30 || bytes.length < 2) throw new Malformed("unparseable-certificate", path)
   const first = bytes[1] ?? 0
   let length = first
   let header = 2
   if (first >= 0x80) {
     const count = first & 0x7f
-    if (count === 0 || count > 4 || bytes.length < 2 + count) throw new Malformed("invalid-der", path)
+    if (count === 0 || count > 4 || bytes.length < 2 + count) throw new Malformed("unparseable-certificate", path)
     length = 0
     for (let index = 0; index < count; index++) length = length * 256 + (bytes[2 + index] ?? 0)
-    if (length < 0x80 || (count > 1 && bytes[2] === 0)) throw new Malformed("invalid-der", path)
+    if (length < 0x80 || (count > 1 && bytes[2] === 0)) throw new Malformed("unparseable-certificate", path)
     header = 2 + count
   }
-  if (header + length !== bytes.length) throw new Malformed("invalid-der", path)
+  if (header + length !== bytes.length) throw new Malformed("unparseable-certificate", path)
   return bytes
 }
 function identityOf(bytes: Uint8Array): CertificateId {
@@ -135,19 +149,20 @@ function chain(value: unknown, path: string): TrustChain {
   }
 }
 
-function decode(document: unknown): WindowsHelperOutput {
-  const root = object(document, "$", ["version", "os", "complete", "sources", "ctl", "certificates", "disallowed", "ctlSha1", "bundledRoots"])
-  if (root.version !== 1) throw new Malformed(typeof root.version === "number" ? "invalid-value" : "wrong-type", "$.version")
+function decode(document: unknown): WindowsTrustHelperDocument {
+  const root = object(document, "$", ["schema", "os", "complete", "sources", "ctl", "certificates", "disallowed", "ctlSha1", "bundledRoots"])
+  if (root.schema !== 1) throw new Malformed(typeof root.schema === "number" ? "invalid-value" : "wrong-type", "$.schema")
   oneOf(root.os, "$.os", ["windows"] as const)
   const complete = boolean(root.complete, "$.complete")
-  const sources = array(root.sources, "$.sources").map((entry, index): WindowsSourceReport => {
+  const sources = array(root.sources, "$.sources").map((entry, index): WindowsTrustSource => {
     const path = `$.sources[${index}]`
-    const record = object(entry, path, ["store", "location", "physicalStore", "outcome"])
+    const record = object(entry, path, ["store", "location", "physicalStore", "outcome", "status"])
     return {
       store: oneOf(record.store, `${path}.store`, SOURCE_STORES),
       location: oneOf(record.location, `${path}.location`, LOCATIONS),
       physicalStore: record.physicalStore === null ? null : physicalStore(record.physicalStore, `${path}.physicalStore`),
       outcome: oneOf(record.outcome, `${path}.outcome`, OUTCOMES),
+      status: win32Status(record.status, `${path}.status`),
     }
   })
   const ctl = oneOf(root.ctl, "$.ctl", CTL_OUTCOMES)
@@ -188,19 +203,26 @@ function decode(document: unknown): WindowsHelperOutput {
 }
 
 /** Strict, bounded decoder of the Windows fact helper's stdout into the policy's facts (design 4.1, 4.2). */
-export function decodeWindowsHelperOutput(stdout: Uint8Array): WindowsHelperDecode {
-  if (stdout.length > WINDOWS_TRUST_HELPER_STDOUT_LIMIT) return { kind: "helper-malformed-output", error: "oversize", path: "$" }
+export function decodeWindowsTrustHelperOutput(stdout: Uint8Array): WindowsTrustDecodeResult {
+  if (stdout.length > WINDOWS_TRUST_HELPER_MAX_OUTPUT_BYTES) return { kind: "helper-malformed-output", check: "oversize", path: "$" }
+  let text: string
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(stdout)
+  } catch (error) {
+    if (error instanceof TypeError) return { kind: "helper-malformed-output", check: "encoding", path: "$" }
+    throw error
+  }
   let document: unknown
   try {
-    document = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stdout))
+    document = JSON.parse(text)
   } catch (error) {
-    if (error instanceof Error) return { kind: "helper-malformed-output", error: "not-json", path: "$" }
+    if (error instanceof SyntaxError) return { kind: "helper-malformed-output", check: "syntax", path: "$" }
     throw error
   }
   try {
-    return { kind: "decoded", output: decode(document) }
+    return { kind: "decoded", document: decode(document) }
   } catch (error) {
-    if (error instanceof Malformed) return { kind: "helper-malformed-output", error: error.code, path: error.path }
+    if (error instanceof Malformed) return { kind: "helper-malformed-output", check: error.check, path: error.path }
     throw error
   }
 }

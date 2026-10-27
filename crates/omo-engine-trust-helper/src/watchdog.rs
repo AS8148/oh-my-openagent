@@ -1,66 +1,41 @@
-//! The helper's own hard cap (design 6.2): when the deadline passes before the work is done, `on_expire`
-//! runs on the watchdog thread. The binary passes a process exit, so a hung OS call cannot hold it.
+//! The helper's own hard cap (design 6.2). The owner also kills the helper at its deadline; this watchdog
+//! bounds the helper even when the owner is gone.
 
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::Duration;
 
-pub struct Watchdog {
-    cancel: Option<mpsc::Sender<()>>,
-    thread: Option<JoinHandle<()>>,
-}
+pub const HARD_CAP: Duration = Duration::from_secs(20);
 
-pub fn start(deadline: Duration, on_expire: impl FnOnce() + Send + 'static) -> Watchdog {
-    let (cancel, cancelled) = mpsc::channel::<()>();
-    let thread = thread::spawn(move || {
-        if let Err(RecvTimeoutError::Timeout) = cancelled.recv_timeout(deadline) {
-            on_expire();
-        }
+/// Runs `expire` on a separate thread once `wait` returns. The calling thread's work is never awaited,
+/// so an OS call that never returns cannot hold the process past the cap.
+pub fn arm(wait: impl FnOnce() + Send + 'static, expire: impl FnOnce() + Send + 'static) {
+    thread::spawn(move || {
+        wait();
+        expire();
     });
-    Watchdog { cancel: Some(cancel), thread: Some(thread) }
-}
-
-impl Watchdog {
-    /// Stops the watchdog and waits for its thread, so `on_expire` can no longer run afterwards.
-    pub fn disarm(mut self) {
-        self.stop();
-    }
-
-    fn stop(&mut self) {
-        drop(self.cancel.take());
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
-impl Drop for Watchdog {
-    fn drop(&mut self) {
-        self.stop();
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-
-    // Time is the behaviour under test here: the deadline itself is what fires.
-    #[test]
-    fn an_expired_deadline_runs_the_expiry_action() {
-        let (fired, observed) = mpsc::channel();
-        let watchdog = start(Duration::from_millis(10), move || fired.send(()).unwrap());
-        assert_eq!(observed.recv_timeout(Duration::from_secs(10)), Ok(()));
-        watchdog.disarm();
-    }
+    use std::sync::mpsc;
 
     #[test]
-    fn a_disarmed_watchdog_never_fires() {
-        let fired = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&fired);
-        let watchdog = start(Duration::from_secs(3600), move || flag.store(true, Ordering::SeqCst));
-        watchdog.disarm();
-        assert!(!fired.load(Ordering::SeqCst));
+    fn expires_when_its_clock_fires_and_not_before() {
+        let (tick, clock) = mpsc::channel::<()>();
+        let (expired, expiry) = mpsc::channel::<()>();
+        arm(
+            move || {
+                let _ = clock.recv();
+            },
+            move || {
+                let _ = expired.send(());
+            },
+        );
+        assert_eq!(expiry.try_recv(), Err(mpsc::TryRecvError::Empty));
+        tick.send(()).expect("the watchdog thread holds the clock");
+        expiry
+            .recv_timeout(Duration::from_secs(10))
+            .expect("waited 10s for the watchdog to expire after its clock fired");
     }
 }

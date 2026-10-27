@@ -1,4 +1,4 @@
-//! Crypt32 facts (design 4.2). Stores are opened read-only and existing-only under the helper's identity;
+//! Crypt32 facts (design 4.2), compiled only for Windows. Stores are opened read-only and existing-only under the helper's identity;
 //! system-store enumeration sits behind `SystemStores` so the adapter tests run on in-memory stores.
 
 use std::ffi::{c_void, CStr};
@@ -15,11 +15,14 @@ use windows_sys::Win32::Security::{
     CheckTokenMembership, CreateWellKnownSid, GetTokenInformation, TokenUser, WinServiceSid, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_BINARY};
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken, TerminateProcess};
 
-use crate::output::{
-    base64, hex, negatives_complete, CertificateFact, Chain, CtlOutcome, DisallowedFact, Eku, HelperOutput, Identity,
-    Location, SourceOutcome, SourceReport, SourceStore,
+use crate::document::{hex, Chain, Identity, Outcome, EXIT_INTERNAL, EXIT_WATCHDOG, SCHEMA};
+use crate::stdin::{read_bounded, split_der_list, STDIN_LIMIT};
+use crate::watchdog;
+use crate::windows_document::{
+    emit, negatives_complete, CtlOutcome, DisallowedCertificate, Eku, Location, SourceStore, WindowsCertificate,
+    WindowsDocument, WindowsSource, EXIT_BAD_STDIN,
 };
 
 const ENCODING: u32 = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
@@ -54,15 +57,15 @@ impl CertStore {
         unsafe { CertAddCertificateContextToStore(self.0, context.0, CERT_STORE_ADD_USE_EXISTING, null_mut()) != 0 }
     }
 
-    /// Every certificate, or `None` when enumeration ends with anything but the normal end.
-    fn certificates(&self) -> Option<Vec<Context>> {
+    /// Every certificate, or the error when enumeration ends with anything but the normal end.
+    fn certificates(&self) -> Result<Vec<Context>, u32> {
         let mut out = Vec::new();
         let mut previous: *const CERT_CONTEXT = null();
         loop {
             let next = unsafe { CertEnumCertificatesInStore(self.0, previous) };
             if next.is_null() {
                 let error = unsafe { GetLastError() };
-                return (error == CRYPT_E_NOT_FOUND as u32 || error == ERROR_NO_MORE_FILES).then_some(out);
+                return if error == CRYPT_E_NOT_FOUND as u32 || error == ERROR_NO_MORE_FILES { Ok(out) } else { Err(error) };
             }
             out.push(Context(unsafe { CertDuplicateCertificateContext(next) }));
             previous = next;
@@ -228,7 +231,9 @@ pub fn decode_disallowed_ctl(bytes: &[u8]) -> Result<Vec<String>, CtlOutcome> {
 /// One physical store of a system store, or the outcome for a system store that could not be listed.
 pub struct PhysicalRead {
     pub physical_store: Option<String>,
-    pub outcome: SourceOutcome,
+    pub outcome: Outcome,
+    /// The Win32 error behind the outcome; 0 when read.
+    pub status: u32,
     /// Present only when `outcome` is `Read`; enumeration can still fail.
     pub store: Option<CertStore>,
 }
@@ -265,27 +270,27 @@ fn read_store<S: SystemStores>(
     stores: &mut S,
     store: SourceStore,
     location: Location,
-    sources: &mut Vec<SourceReport>,
+    sources: &mut Vec<WindowsSource>,
 ) -> Vec<(Context, String)> {
     let mut out = Vec::new();
     for read in stores.read(store, location) {
-        let mut outcome = read.outcome;
-        if let (SourceOutcome::Read, Some(handle)) = (outcome, &read.store) {
+        let (mut outcome, mut status) = (read.outcome, read.status);
+        if let (Outcome::Read, Some(handle)) = (outcome, &read.store) {
             match handle.certificates() {
-                Some(contexts) => {
+                Ok(contexts) => {
                     let name = read.physical_store.clone().unwrap_or_default();
                     out.extend(contexts.into_iter().map(|context| (context, name.clone())));
                 }
-                None => outcome = SourceOutcome::EnumerationFailed,
+                Err(error) => (outcome, status) = (Outcome::EnumerationFailed, error),
             }
         }
-        sources.push(SourceReport { store, location, physical_store: read.physical_store, outcome });
+        sources.push(WindowsSource { store, location, physical_store: read.physical_store, outcome, status });
     }
     out
 }
 
 /// Collects every fact of design 4.1 for Windows. `bundled` is Bun's `B`, one DER certificate per entry.
-pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<HelperOutput, CollectError> {
+pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<WindowsDocument, CollectError> {
     let roots = CertStore::memory().map_err(|_| CollectError::Internal)?;
     let others = CertStore::memory().map_err(|_| CollectError::Internal)?;
     let mut bundled_roots = Vec::with_capacity(bundled.len());
@@ -311,7 +316,7 @@ pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<Hel
     let mut disallowed = Vec::new();
     for location in stores.disallowed_locations() {
         for (context, physical_store) in read_store(stores, SourceStore::Disallowed, location, &mut sources) {
-            disallowed.push(DisallowedFact { der: base64(context.der()), location, physical_store });
+            disallowed.push(DisallowedCertificate { der: context.der().to_vec(), location, physical_store });
         }
     }
     let (ctl, ctl_sha1) = match stores.disallowed_ctl() {
@@ -343,8 +348,8 @@ pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<Hel
                 SourceStore::TrustedPeople => !self_signed && ca,
                 SourceStore::Disallowed => false,
             };
-            CertificateFact {
-                der: base64(candidate.context.der()),
+            WindowsCertificate {
+                der: candidate.context.der().to_vec(),
                 store: candidate.store,
                 location: candidate.location,
                 physical_store: candidate.physical_store.clone(),
@@ -356,8 +361,8 @@ pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<Hel
         })
         .collect();
 
-    Ok(HelperOutput {
-        version: 1,
+    Ok(WindowsDocument {
+        schema: SCHEMA,
         os: "windows",
         complete: negatives_complete(&sources, ctl),
         sources,
@@ -448,15 +453,19 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-fn outcome_of(error: u32) -> SourceOutcome {
+fn outcome_of(error: u32) -> Outcome {
     const HRESULT_FILE_NOT_FOUND: u32 = 0x8007_0002;
     const HRESULT_PATH_NOT_FOUND: u32 = 0x8007_0003;
     match error {
-        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND | HRESULT_FILE_NOT_FOUND | HRESULT_PATH_NOT_FOUND => SourceOutcome::Absent,
-        ERROR_ACCESS_DENIED => SourceOutcome::AccessDenied,
-        error if error == E_ACCESSDENIED as u32 => SourceOutcome::AccessDenied,
-        _ => SourceOutcome::EnumerationFailed,
+        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND | HRESULT_FILE_NOT_FOUND | HRESULT_PATH_NOT_FOUND => Outcome::Absent,
+        ERROR_ACCESS_DENIED => Outcome::AccessDenied,
+        error if error == E_ACCESSDENIED as u32 => Outcome::AccessDenied,
+        _ => Outcome::EnumerationFailed,
     }
+}
+
+fn failed(status: u32) -> Vec<PhysicalRead> {
+    vec![PhysicalRead { physical_store: None, outcome: outcome_of(status), status, store: None }]
 }
 
 impl System {
@@ -501,9 +510,8 @@ unsafe extern "system" fn on_physical_store(
 
 impl SystemStores for System {
     fn read(&mut self, store: SourceStore, location: Location) -> Vec<PhysicalRead> {
-        let failed = |outcome| vec![PhysicalRead { physical_store: None, outcome, store: None }];
         let Some((flags, name)) = Self::system_store(store, location) else {
-            return failed(SourceOutcome::EnumerationFailed);
+            return vec![PhysicalRead { physical_store: None, outcome: Outcome::EnumerationFailed, status: 0, store: None }];
         };
         let open = |provider, name: &[u16]| unsafe {
             CertOpenStore(provider, 0, 0, flags | CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_READONLY_FLAG, name.as_ptr().cast())
@@ -511,7 +519,7 @@ impl SystemStores for System {
         // The system store itself first: absent, denied and failed are distinct before any physical store.
         let system = open(CERT_STORE_PROV_SYSTEM_W, &wide(&name));
         if system.is_null() {
-            return failed(outcome_of(unsafe { GetLastError() }));
+            return failed(unsafe { GetLastError() });
         }
         drop(CertStore(system));
         let mut physical: Vec<(String, bool)> = Vec::new();
@@ -519,20 +527,19 @@ impl SystemStores for System {
             CertEnumPhysicalStore(wide(&name).as_ptr().cast(), flags, (&mut physical as *mut Vec<(String, bool)>).cast(), Some(on_physical_store))
         };
         if listed == 0 {
-            return failed(outcome_of(unsafe { GetLastError() }));
+            return failed(unsafe { GetLastError() });
         }
+        // An open-disabled physical store is not part of the system store, so it is neither read nor reported.
         physical
             .into_iter()
-            .map(|(physical_name, disabled)| {
-                if disabled {
-                    return PhysicalRead { physical_store: Some(physical_name), outcome: SourceOutcome::Disabled, store: None };
-                }
+            .filter(|(_, disabled)| !disabled)
+            .map(|(physical_name, _)| {
                 let handle = open(CERT_STORE_PROV_PHYSICAL_W, &wide(&format!("{name}\\{physical_name}")));
                 if handle.is_null() {
-                    let outcome = outcome_of(unsafe { GetLastError() });
-                    return PhysicalRead { physical_store: Some(physical_name), outcome, store: None };
+                    let status = unsafe { GetLastError() };
+                    return PhysicalRead { physical_store: Some(physical_name), outcome: outcome_of(status), status, store: None };
                 }
-                PhysicalRead { physical_store: Some(physical_name), outcome: SourceOutcome::Read, store: Some(CertStore(handle)) }
+                PhysicalRead { physical_store: Some(physical_name), outcome: Outcome::Read, status: 0, store: Some(CertStore(handle)) }
             })
             .collect()
     }
@@ -613,5 +620,27 @@ fn is_service() -> Option<bool> {
         }
         let mut member: BOOL = 0;
         (CheckTokenMembership(null_mut(), sid.as_mut_ptr().cast(), &mut member) != 0).then_some(member != 0)
+    }
+}
+
+/// The Windows helper process: stdin is Bun's bundled roots as concatenated DER (design 4.2 item 5).
+pub fn run() -> i32 {
+    watchdog::arm(
+        || std::thread::sleep(watchdog::HARD_CAP),
+        // TerminateProcess: no DLL detach or atexit work while another thread may be inside Crypt32.
+        || unsafe {
+            TerminateProcess(GetCurrentProcess(), EXIT_WATCHDOG as u32);
+        },
+    );
+    let Ok(input) = read_bounded(&mut std::io::stdin().lock(), STDIN_LIMIT) else {
+        return EXIT_BAD_STDIN;
+    };
+    let Ok(bundled) = split_der_list(&input) else {
+        return EXIT_BAD_STDIN;
+    };
+    match collect(&mut System, &bundled) {
+        Ok(document) => emit(&document),
+        Err(CollectError::BundledRoot) => EXIT_BAD_STDIN,
+        Err(CollectError::Internal) => EXIT_INTERNAL,
     }
 }
