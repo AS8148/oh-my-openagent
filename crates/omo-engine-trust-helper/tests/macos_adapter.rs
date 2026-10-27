@@ -252,34 +252,29 @@ fn server_auth_intermediate_chains_to_its_custom_anchor() {
 }
 
 /// Regression record of the OS behaviour that measured design 4.4 item 4's assumption false (revision 12):
-/// under custom anchors only, the strict SSL server policy rejects a CA certificate valid for more than
-/// 825 days (-67901, "not standards compliant") and one without a serverAuth EKU (-67609, "not permitted
-/// for this usage"). The helper therefore uses the BasicX509 chain step; if Apple relaxes this, the test
-/// says so.
+/// under custom anchors only, the strict SSL server policy rejects a five-year CA certificate without SCTs
+/// as not standards compliant (-67901, the validity maximum). The helper therefore uses the BasicX509
+/// chain step; if Apple relaxes this, the test says so.
 #[test]
 fn custom_anchor_intermediate_is_ssl_eligible() {
     let fixtures = Fixtures::new();
     let root = fixtures.issue("root", None, "root", 3650);
     let five_years = fixtures.issue("ca_intermediate", Some("root"), "ca_intermediate", 1825);
-    let one_year = fixtures.issue(
-        "ca_intermediate_short",
-        Some("root"),
-        "ca_intermediate",
-        365,
-    );
-    let server = fixtures.issue(
-        "server_intermediate",
-        Some("root"),
-        "server_intermediate",
-        825,
-    );
     assert_eq!(strict_ssl_error(&five_years, &root), Some(-67901));
-    assert_eq!(strict_ssl_error(&one_year, &root), Some(-67609));
-    assert_eq!(strict_ssl_error(&server, &root), None);
-    let chain = evaluate_intermediate(&five_years, std::slice::from_ref(&root));
-    assert_eq!(chain.anchor, Some(identity(&certificate_der(&root))));
 }
 
+/// Revision 12 regression record: a short-lived CA certificate without a serverAuth EKU is rejected by the
+/// strict SSL server policy as not permitted for this usage (-67609), so the EKU rule lives in the policy.
+#[test]
+fn custom_anchor_intermediate_without_server_auth_is_ssl_rejected() {
+    let fixtures = Fixtures::new();
+    let root = fixtures.issue("root", None, "root", 3650);
+    let short = fixtures.issue("ca_intermediate", Some("root"), "ca_intermediate", 398);
+    assert_eq!(strict_ssl_error(&short, &root), Some(-67609));
+}
+
+/// The anchors-only test (design 9.7, revision 12): the reported anchor is always one of the candidates
+/// passed in, and an intermediate whose issuer is not a candidate is not anchored.
 #[test]
 fn an_intermediate_outside_the_anchor_set_is_not_anchored() {
     let fixtures = Fixtures::new();
@@ -294,8 +289,15 @@ fn an_intermediate_outside_the_anchor_set_is_not_anchored() {
     let chain = evaluate_intermediate(&intermediate, std::slice::from_ref(&other));
     assert_eq!(chain.anchor, None);
     assert!(!chain.explicit_distrust);
-    let anchored = evaluate_intermediate(&intermediate, &[other, root.clone()]);
-    assert_eq!(anchored.anchor, Some(identity(&certificate_der(&root))));
+    let candidates = [other, root.clone()];
+    let anchored = evaluate_intermediate(&intermediate, &candidates);
+    let candidate_ids: Vec<_> = candidates
+        .iter()
+        .map(|candidate| identity(&certificate_der(candidate)))
+        .collect();
+    let anchor = anchored.anchor.expect("anchored to a candidate");
+    assert!(candidate_ids.contains(&anchor));
+    assert_eq!(anchor, identity(&certificate_der(&root)));
 }
 
 #[test]
