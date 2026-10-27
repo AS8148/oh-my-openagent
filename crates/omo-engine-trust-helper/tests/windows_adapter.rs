@@ -104,6 +104,11 @@ impl Pki {
     }
 
     fn issued(&self, name: &str, issuer: &Cert, section: &str) -> Cert {
+        self.issued_with(name, issuer, section, "-sha256")
+    }
+
+    /// `digest` is the OpenSSL flag of the signature's digest, so the signature algorithm varies per certificate.
+    fn issued_with(&self, name: &str, issuer: &Cert, section: &str, digest: &str) -> Cert {
         let config = self.path("openssl.cnf");
         let (key, pem, csr, serial) = (
             self.path(&format!("{name}.key")),
@@ -118,9 +123,17 @@ impl Pki {
         ]);
         self.openssl(&[
             "x509", "-req", "-in", &csr, "-CA", issuer.pem.to_str().unwrap(), "-CAkey", issuer.key.to_str().unwrap(),
-            "-days", "30", "-set_serial", &serial, "-extfile", &config, "-extensions", section, "-out", &pem,
+            "-days", "30", "-set_serial", &serial, "-extfile", &config, "-extensions", section, digest, "-out", &pem,
         ]);
         self.load(name)
+    }
+
+    /// The digest of the certificate's TBSCertificate, computed by OpenSSL, independent of Crypt32.
+    fn to_be_signed_digest(&self, cert: &Cert, digest: &str) -> Vec<u8> {
+        let serial = self.next_serial();
+        let input = self.path(&format!("tbs-{serial}.der"));
+        std::fs::write(&input, to_be_signed(&cert.der)).unwrap();
+        self.openssl(&["dgst", digest, "-binary", &input])
     }
 
     /// CMS SignedData whose content type is szOID_CTL, signed by a throwaway signer.
@@ -145,6 +158,24 @@ impl Pki {
         };
         Identity { sha256: fingerprint("-sha256"), sha1: fingerprint("-sha1") }
     }
+}
+
+/// The header length and content length of the DER element at the start of `der`.
+fn header(der: &[u8]) -> (usize, usize) {
+    match der[1] {
+        short if short < 0x80 => (2, short as usize),
+        long => {
+            let count = (long & 0x7f) as usize;
+            (2 + count, der[2..2 + count].iter().fold(0, |size, byte| size * 256 + *byte as usize))
+        }
+    }
+}
+
+/// The TBSCertificate element: the first element inside the certificate SEQUENCE.
+fn to_be_signed(der: &[u8]) -> &[u8] {
+    let (outer, _) = header(der);
+    let (inner, length) = header(&der[outer..]);
+    &der[outer..outer + inner + length]
 }
 
 fn tlv(tag: u8, parts: &[&[u8]]) -> Vec<u8> {
@@ -301,6 +332,56 @@ fn a_synthetic_signed_disallowed_ctl_decodes_to_sha1_subjects() {
     let short = pki.sign_ctl(&ctl_content(&[&[0x33u8; 19]], "1.3.14.3.2.26"), &signer);
     assert_eq!(decode_disallowed_ctl(&short), Err(CtlOutcome::Undecodable));
     assert_eq!(decode_disallowed_ctl(&[0x30, 0x03, 0x02, 0x01, 0x00]), Err(CtlOutcome::Undecodable));
+}
+
+const DISALLOWED_HASH: &str = "1.3.6.1.4.1.311.10.11.15";
+
+// The runner's real Disallowed CTL declares szOID_DISALLOWED_HASH, which wincrypt.h defines as
+// szOID_CERT_SIGNATURE_HASH_PROP_ID: an entry is the certificate's CERT_SIGNATURE_HASH_PROP_ID, the digest of
+// its TBSCertificate under its own signature algorithm (CryptHashToBeSigned). The entries here come from OpenSSL.
+#[test]
+fn a_disallowed_hash_ctl_names_certificates_by_the_digest_of_their_to_be_signed_part() {
+    let pki = Pki::new();
+    let signer = pki.root("dh-signer", "signer");
+    let r = pki.root("dh-R", "root");
+    let x = pki.issued_with("dh-X", &r, "intermediate", "-sha384");
+    let kept = pki.root("dh-kept", "root");
+    let b = pki.root("dh-B", "root");
+    let entries = [
+        pki.to_be_signed_digest(&r, "-sha256"),
+        pki.to_be_signed_digest(&x, "-sha384"),
+        pki.to_be_signed_digest(&b, "-sha256"),
+        vec![0x5a; 20],
+    ];
+    let entries: Vec<&[u8]> = entries.iter().map(Vec::as_slice).collect();
+    let ctl = pki.sign_ctl(&ctl_content(&entries, DISALLOWED_HASH), &signer);
+    let (stores, _) = MemoryStores::default().with(SourceStore::Root, Location::LocalMachine, &[&r, &kept]);
+    let (stores, _) = stores.with(SourceStore::Ca, Location::CurrentUser, &[&x]);
+    let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..stores };
+
+    let output = collect(&mut stores, &[&b.der]).unwrap();
+    let mut matched = vec![pki.identity(&r).sha1, pki.identity(&x).sha1, pki.identity(&b).sha1];
+    matched.sort();
+    assert_eq!((output.ctl, output.complete, output.ctl_sha1), (CtlOutcome::Read, true, matched));
+}
+
+#[test]
+fn a_certificate_without_a_signature_hash_makes_a_disallowed_hash_scan_incomplete() {
+    let pki = Pki::new();
+    let signer = pki.root("dh-fail-signer", "signer");
+    let mut unknown = pki.root("dh-unknown", "root").der;
+    // Rewrite the outer signatureAlgorithm, ecdsa-with-SHA256, to an OID no hash algorithm is registered for.
+    let ecdsa_sha256 = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
+    let at = unknown.windows(ecdsa_sha256.len()).rposition(|window| window == ecdsa_sha256).unwrap();
+    unknown[at + ecdsa_sha256.len() - 1] = 0x7f;
+    let ctl = pki.sign_ctl(&ctl_content(&[&[0x5a; 32]], DISALLOWED_HASH), &signer);
+    let store = CertStore::memory().unwrap();
+    store.add_encoded(&unknown).expect("Crypt32 stores the certificate without checking its signature");
+    let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..MemoryStores::default() };
+    stores.stores.insert((SourceStore::Root, Location::CurrentUser), Ok(store));
+
+    let output = collect(&mut stores, &[]).unwrap();
+    assert_eq!((serde_json::to_value(output.ctl).unwrap(), output.complete), (serde_json::json!("signature-hash-failed"), false));
 }
 
 #[test]
