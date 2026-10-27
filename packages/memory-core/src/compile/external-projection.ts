@@ -45,6 +45,8 @@ interface DirectoryListing {
 
 interface Layout {
   readonly rootBare: boolean
+  /** Some line folds or groups names, so the block opens with the legend that maps them back. */
+  readonly legend: boolean
   readonly directories: readonly DirectoryListing[]
   readonly allowances: readonly number[]
 }
@@ -83,8 +85,9 @@ function layout(paths: readonly string[], input: ExternalProjectionInput | undef
   const cap = limits.maxEntriesPerDirectory
   const allowances = directories.map((directory) => cap > 0 ? Math.min(cap, directory.items.length) : directory.items.length)
   const rootBare = !groups.some((group) => group.label === `${MEMORY_DIR}/`)
-  if (limits.maxBytes > 0) fitToBudget(directories, allowances, limits.maxBytes, rootBare)
-  return { rootBare, directories, allowances }
+  const legend = groups.some((group) => group.grouped) || directories.some((directory) => directory.items.some((item) => item.files > 1))
+  if (limits.maxBytes > 0) fitToBudget(directories, allowances, limits.maxBytes, rootBare, legend)
+  return { rootBare, legend, directories, allowances }
 }
 
 function files(items: readonly ProjectionItem[]): number {
@@ -96,7 +99,7 @@ function files(items: readonly ProjectionItem[]): number {
  * names first and ties rotate in listing order. Never drops a directory line; when even the floor
  * (every allowance zero) is over budget, the caller reports the overflow.
  */
-function fitToBudget(directories: readonly DirectoryListing[], allowances: number[], maxBytes: number, rootBare: boolean): void {
+function fitToBudget(directories: readonly DirectoryListing[], allowances: number[], maxBytes: number, rootBare: boolean, legend: boolean): void {
   const lineBytes = (index: number, allowance = allowances[index] ?? 0): number => {
     const directory = directories[index]
     if (directory === undefined) return 0
@@ -108,8 +111,8 @@ function fitToBudget(directories: readonly DirectoryListing[], allowances: numbe
   }
   const start = [...allowances]
   const lines = directories.map((_, index) => lineBytes(index))
-  const fixedLines = 3 + (rootBare ? 1 : 0)
-  const fixedBytes = Buffer.byteLength(OPEN) + Buffer.byteLength(NAME_LEGEND) + Buffer.byteLength(CLOSE) + (rootBare ? Buffer.byteLength(`${MEMORY_DIR}/`) : 0)
+  const fixedLines = 2 + (legend ? 1 : 0) + (rootBare ? 1 : 0)
+  const fixedBytes = Buffer.byteLength(OPEN) + (legend ? Buffer.byteLength(NAME_LEGEND) : 0) + Buffer.byteLength(CLOSE) + (rootBare ? Buffer.byteLength(`${MEMORY_DIR}/`) : 0)
   let total = fixedBytes + lines.reduce((sum, size) => sum + size, 0) + (fixedLines + directories.length - 1)
   while (total > maxBytes) {
     let widest = -1
@@ -135,8 +138,8 @@ function fitToBudget(directories: readonly DirectoryListing[], allowances: numbe
   })
 }
 
-function render({ rootBare, directories, allowances }: Layout): string {
-  const lines = [OPEN, NAME_LEGEND]
+function render({ rootBare, legend, directories, allowances }: Layout): string {
+  const lines = legend ? [OPEN, NAME_LEGEND] : [OPEN]
   if (rootBare) lines.push(`${MEMORY_DIR}/`)
   directories.forEach((directory, index) => {
     const allowance = allowances[index] ?? directory.items.length

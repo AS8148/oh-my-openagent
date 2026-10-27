@@ -29,8 +29,16 @@ const MONTH = /^(?:0[1-9]|1[0-2])$/
 const HINT_FREE = /^(?:\d+[a-z]?|p\d+)$/i
 const DATE_SUFFIX = /^(.+)-((?:19|20)\d{6})$/
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
-const HEX_ID = /^(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}$/
-const GENERATED = /^[A-Za-z0-9]{10,}$/
+const HEX_DIGEST = /^(?:[0-9a-f]{16,}|[0-9A-F]{16,})$/
+// A digest flips between letters and digits often; a hex-letter word with a year (deadbeefcafe2026) flips once.
+const MIN_HEX_FLIPS = 4
+const MIXED_CASE_TOKEN = /^(?=.*[a-z])(?=.*[A-Z])[A-Za-z0-9]{12,}$/
+const WORDS = /[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+/g
+const VOWEL = /[aeiouy]/i
+// Noise marks per character: random base62 scores about 0.45, the most word-like real names stay under 0.34.
+const LONE_ID_NOISE = 0.35
+// A family member still needs this many marks, so a word-built name (ProjectPlan, readUInt16BE) never joins one.
+const MIN_MEMBER_MARKS = 3
 const MIN_FAMILY = 3
 const MIN_RUN = 3
 const ID = "<id>"
@@ -41,26 +49,55 @@ const newestFirst = (a: ProjectionItem, b: ProjectionItem): number => {
 }
 
 /**
- * The names in `names` that are generated ids: a UUID or a hex digest on their own, or a family of at least three
- * same-length letter-and-digit tokens (16-character random ids). A lone `iPhone15Pro` or `project2024` is never one.
+ * The names in `names` that are unmistakably machine ids; when unsure a name is shown, since the name is the hint.
+ * An id is a UUID, a hex digest of 16+ characters, or a mixed-case base62 token of 12+ characters with no readable
+ * words: alone when its noise reaches `LONE_ID_NOISE`, or in a family of at least three same-length tokens that each
+ * carry `MIN_MEMBER_MARKS` noise marks and whose median reaches `LONE_ID_NOISE` (a directory of 16-character routine ids).
  */
 export function generatedIds(names: readonly string[]): ReadonlySet<string> {
-  const ids = new Set(names.filter((name) => UUID.test(name) || HEX_ID.test(name)))
+  const ids = new Set(names.filter((name) => UUID.test(name) || isHexDigest(name) || noise(name) >= LONE_ID_NOISE))
   const byLength = new Map<number, string[]>()
   for (const name of names) {
-    if (!GENERATED.test(name) || !mixesClasses(name)) continue
+    if (noiseMarks(name) < MIN_MEMBER_MARKS) continue
     const family = byLength.get(name.length)
     if (family) family.push(name)
     else byLength.set(name.length, [name])
   }
   for (const family of byLength.values()) {
-    if (family.length >= MIN_FAMILY) family.forEach((name) => ids.add(name))
+    if (family.length >= MIN_FAMILY && median(family.map(noise)) >= LONE_ID_NOISE) family.forEach((name) => ids.add(name))
   }
   return ids
 }
 
-function mixesClasses(name: string): boolean {
-  return [/\d/, /[a-z]/, /[A-Z]/].filter((pattern) => pattern.test(name)).length >= 2
+function isHexDigest(name: string): boolean {
+  if (!HEX_DIGEST.test(name)) return false
+  let flips = 0
+  for (let index = 1; index < name.length; index++) {
+    if (/\d/.test(name[index] ?? "") !== /\d/.test(name[index - 1] ?? "")) flips++
+  }
+  return flips >= MIN_HEX_FLIPS
+}
+
+/**
+ * Marks of a mixed-case base62 token that a readable name lacks, from its camel-case words: a lone letter, a one- or
+ * two-digit chunk, or a word with no vowel (two marks from four letters up). Any other name has none.
+ */
+function noiseMarks(name: string): number {
+  if (!MIXED_CASE_TOKEN.test(name)) return 0
+  let marks = 0
+  for (const word of name.match(WORDS) ?? []) {
+    if (/^\d+$/.test(word)) marks += word.length <= 2 ? 1 : 0
+    else if (word.length === 1) marks += 1
+    else if (!VOWEL.test(word)) marks += word.length >= 4 ? 2 : 1
+  }
+  return marks
+}
+
+const noise = (name: string): number => noiseMarks(name) / name.length
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.floor((sorted.length - 1) / 2)] ?? 0
 }
 
 /** `a.md` lists as `a`; any other file keeps its exact name in quotes. Secret-like text is masked first. */

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "bun:test"
 import { groupDirectories } from "./external-projection-dirs"
 import { renderExternalProjection, renderExternalProjectionStats } from "./external-projection"
+import { NAME_LEGEND } from "./external-projection-names"
 
 const AWS_KEY_SHAPED = ["AKIA", "ABCDEFGHIJKLMNOP"].join("")
-const IDS = ["Run000000000001", "Run000000000002", "Run000000000003"]
+const IDS = ["Y2Gw9vTZ9pnH2K5a", "87U3F2ZseCw7bLMz", "wcjyAab9yeccko3U"]
 const labels = (paths: readonly string[]): string[] => groupDirectories(paths, undefined).map((group) => group.label)
 
 describe("groupDirectories directory classes", () => {
@@ -16,7 +17,7 @@ describe("groupDirectories directory classes", () => {
     {
       name: "two leaf siblings named by generated ids",
       paths: IDS.slice(0, 2).map((id) => `jobs/${id}/MEMORY.md`),
-      expected: ["jobs/Run000000000001/", "jobs/Run000000000002/"].sort((a, b) => a.localeCompare(b)),
+      expected: ["jobs/Y2Gw9vTZ9pnH2K5a/", "jobs/87U3F2ZseCw7bLMz/"].sort((a, b) => a.localeCompare(b)),
     },
     {
       name: "three leaf siblings holding the same file names",
@@ -31,7 +32,7 @@ describe("groupDirectories directory classes", () => {
     {
       name: "an id-named sibling with a directory below it",
       paths: [...IDS.map((id) => `jobs/${id}/MEMORY.md`), `jobs/${IDS[0]}/runs/log.md`],
-      expected: ["jobs/Run000000000001/", "jobs/Run000000000001/runs/", "jobs/Run000000000002/", "jobs/Run000000000003/"],
+      expected: ["jobs/87U3F2ZseCw7bLMz/", "jobs/wcjyAab9yeccko3U/", "jobs/Y2Gw9vTZ9pnH2K5a/", "jobs/Y2Gw9vTZ9pnH2K5a/runs/"],
     },
     {
       name: "a sibling whose name is masked",
@@ -58,7 +59,7 @@ describe("groupDirectories directory classes", () => {
     })
   }
 
-  it("#given id-named directories #when rendered and counted #then one line names the shared file and every file is shown", () => {
+  it("#given id-named directories #when rendered and counted #then the legend opens the block, one line names the shared file and every file is shown", () => {
     // given
     const paths = IDS.map((id) => `reference/jobs/${id}/MEMORY.md`)
     const input = { times: new Map<string, number>(), limits: { maxEntriesPerDirectory: 0, maxBytes: 40_960 } }
@@ -68,6 +69,7 @@ describe("groupDirectories directory classes", () => {
     const stats = renderExternalProjectionStats(paths, input)
 
     // then
+    expect(text.split("\n").slice(1, 2)).toEqual([NAME_LEGEND])
     expect(text.split("\n")).toContain("reference/jobs/<id>/ (3 dirs): MEMORY")
     expect(stats).toMatchObject({ shown: 3, omitted: 0 })
   })

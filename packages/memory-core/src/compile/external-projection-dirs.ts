@@ -10,6 +10,8 @@ export interface DirectoryGroup {
   /** Where the hidden names of this line can be listed. */
   readonly pointer: string
   readonly files: readonly NamedFile[]
+  /** Several sibling directories list as this one line. */
+  readonly grouped: boolean
 }
 
 /**
@@ -34,7 +36,7 @@ export function groupDirectories(paths: readonly string[], times: ReadonlyMap<st
   const grouped = new Set(groups.flatMap((group) => group.members))
   const lines: DirectoryGroup[] = [...byDirectory]
     .filter(([directory]) => !grouped.has(directory))
-    .map(([directory, files]) => ({ ...labelled(directory), files }))
+    .map(([directory, files]) => ({ ...labelled(directory), files, grouped: false }))
   for (const group of groups) lines.push(group.line)
   const root = lines.filter((line) => line.label === `${MEMORY_DIR}/`)
   return [...root, ...lines.filter((line) => line.label !== `${MEMORY_DIR}/`).sort((a, b) => a.label.localeCompare(b.label))]
@@ -45,7 +47,7 @@ interface SiblingGroup {
   readonly line: DirectoryGroup
 }
 
-function labelled(directory: string): Omit<DirectoryGroup, "files"> {
+function labelled(directory: string): Pick<DirectoryGroup, "label" | "pointer"> {
   if (directory === "") return { label: `${MEMORY_DIR}/`, pointer: `${MEMORY_DIR}/` }
   const parts = directory.split("/").filter(Boolean)
   const readable = parts.slice(0, firstRedacted(parts))
@@ -85,7 +87,7 @@ function idFamilies(byDirectory: ReadonlyMap<string, readonly NamedFile[]>, leav
     const { label, pointer } = labelled(parent)
     groups.push({
       members,
-      line: { label: `${parent === "" ? "" : label}<id>/ (${members.length} dirs)`, pointer, files: members.flatMap((directory) => byDirectory.get(directory) ?? []) },
+      line: { label: `${parent === "" ? "" : label}<id>/ (${members.length} dirs)`, pointer, files: members.flatMap((directory) => byDirectory.get(directory) ?? []), grouped: true },
     })
   }
   return groups
@@ -109,7 +111,7 @@ function uniformSiblings(byDirectory: ReadonlyMap<string, readonly NamedFile[]>,
       const names = members.map((directory) => segment(directory, parent)).sort((a, b) => a.localeCompare(b))
       groups.push({
         members,
-        line: { label: `${parent === "" ? "" : label}{${names.join(", ")}}/`, pointer, files: members.flatMap((directory) => byDirectory.get(directory) ?? []) },
+        line: { label: `${parent === "" ? "" : label}{${names.join(", ")}}/`, pointer, files: members.flatMap((directory) => byDirectory.get(directory) ?? []), grouped: true },
       })
     }
   }
