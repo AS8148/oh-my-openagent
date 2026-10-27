@@ -1,11 +1,13 @@
 import type { OtlpWireProjection, SpanAllowlist, WireAttributes } from "@oh-my-opencode/telemetry-core/otlp"
+import { isOtlpEvent, type OtlpEvent } from "./otlp-events"
+export { isOtlpEvent } from "./otlp-events"
 
 // Derived from omo-telemetry origin/main 13c6e61b40c49141868e7430e02a7b4b949d0c5d:
 // packages/schema-registry/artifacts/omo-senpi.json (schema v4, proto v1.7.0)
 // and packages/schema-registry/semconv-map.json. No unlisted event or attribute has a fallback.
 // For registered semconv keys, use the map's input name: omo.prompt.is_real_user comes from
 // is_real_user_prompt, although the pinned artifact still names its relay alias is_real_user.
-const EVENT_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+const EVENT_FIELDS: Readonly<Record<OtlpEvent, Readonly<Record<string, string>>>> = {
   "category_config": {
     "builtin_overridden_count": "omo.builtin_overridden_count",
     "cat_architect": "omo.cat_architect",
@@ -20,7 +22,7 @@ const EVENT_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     "cat_writing": "omo.cat_writing",
     "combo_fingerprint": "omo.combo_fingerprint",
     "config_generation": "omo.config_generation",
-    "custom_category_count": "omo.custom_category_count",
+    "user_category_count": "omo.custom_category_count",
     "machine_hash": "omo.machine_hash",
     "source": "omo.source",
     "$session_id": "session.id"
@@ -51,7 +53,7 @@ const EVENT_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> =
   "daily_active": {
     "day_utc": "omo.day_utc",
     "machine_hash": "omo.machine_hash",
-    "start_trigger": "omo.start_trigger",
+    "reason": "omo.start_trigger",
     "$session_id": "session.id"
   },
   "delegation_completed": {
@@ -76,7 +78,7 @@ const EVENT_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     "provider": "omo.provider",
     "reasoning_effort": "omo.reasoning_effort",
     "run_epoch": "omo.run_epoch",
-    "start_trigger": "omo.start_trigger",
+    "start_reason": "omo.start_trigger",
     "stats_status": "omo.stats_status",
     "status": "omo.status",
     "task_send_queued_count": "omo.task_send_queued_count",
@@ -200,7 +202,7 @@ const EVENT_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     "prompt_length_bucket": "omo.prompt_length_bucket",
     "queue_mode": "omo.queue_mode",
     "real_prompt_ordinal_bucket": "omo.real_prompt_ordinal_bucket",
-    "suppression_cause": "omo.suppression_cause",
+    "suppression_reason": "omo.suppression_cause",
     "$session_id": "session.id"
   },
   "session_started": {
@@ -214,7 +216,7 @@ const EVENT_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     "provider_count": "omo.provider_count",
     "session_role": "omo.session.role",
     "signed_in_provider_count": "omo.signed_in_provider_count",
-    "start_trigger": "omo.start_trigger",
+    "reason": "omo.start_trigger",
     "$session_id": "session.id"
   },
   "session_summary": {
@@ -271,8 +273,7 @@ const EVENT_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     "total_tokens_p95": "omo.total_tokens_p95",
     "turns": "omo.turns",
     "window_ms": "omo.window_ms",
-    "$session_id": "session.id",
-    "cost_1e4": "omo.cost.usd_1e4"
+    "$session_id": "session.id"
   },
   "skill_loaded": {
     "machine_hash": "omo.machine_hash",
@@ -344,17 +345,36 @@ const PROVIDER_VALUES: Readonly<Record<string, string>> = {
   "custom": "custom"
 }
 
-export function isOtlpEvent(event: string): boolean {
-  return Object.hasOwn(EVENT_FIELDS, event)
+// Optional aliases use the collector pin's closed vocabulary, not future client additions.
+const START_TRIGGERS: Readonly<Record<string, readonly string[]>> = {
+  daily_active: ["session_start"],
+  session_started: ["startup", "reload", "new", "resume", "fork"],
+  delegation_completed: [
+    "initial_spawn", "runtime_fallback", "session_resume", "dag_retry", "revive_after_completed",
+    "revive_after_error", "revive_after_cancelled", "revive_after_interrupted", "revive_after_lost", "unknown",
+  ],
 }
+const SUPPRESSION_CAUSES = [
+  "none", "no_keyword", "identifier_reference", "negated_mention", "extension_source",
+  "child_session", "embedded_directive", "skill_expansion", "skill_name_only",
+]
 
 export const projectOtlpEvent: OtlpWireProjection = (event, properties) => {
   if (!isOtlpEvent(event)) return {}
   const attributes: WireAttributes = {}
   for (const [property, wire] of Object.entries(EVENT_FIELDS[event] ?? {})) {
     const value = properties[property]
+    if (wire === "omo.start_trigger" && (typeof value !== "string" || !START_TRIGGERS[event]?.includes(value))) continue
+    if (wire === "omo.suppression_cause" && (typeof value !== "string" || !SUPPRESSION_CAUSES.includes(value))) continue
+    if (wire === "omo.custom_category_count" && (typeof value !== "number" || value < 0 || value > 1e9)) continue
     if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
       attributes[wire] = value
+    }
+  }
+  if (event === "session_summary") {
+    const usd = properties["cost_usd"]
+    if (typeof usd === "number" && Number.isFinite(usd) && usd >= 0 && usd <= 1e6) {
+      attributes["omo.cost.usd_1e4"] = Math.round(usd * 10_000)
     }
   }
   if (event === "turn_completed") {

@@ -3,6 +3,26 @@ import { isAbsolute, join, relative } from "node:path"
 
 import { isSpoolFileName, QUARANTINE_DIR } from "./otlp-spool-names"
 import type { TelemetryDiagnosticInput, TelemetrySpoolEntryKind } from "./types"
+import type { CreateOtlpTelemetryTransportInput } from "./otlp-transport-types"
+import { isOtlpTransportAllowed } from "./otlp-gate"
+
+/** Startup cleanup for lazy adapters: never imports the sender or creates a spool. */
+export function purgeOtlpSpoolOnOptOut(
+  input: Pick<CreateOtlpTelemetryTransportInput, "env" | "productEnvPrefix" | "consent" | "diagnostics" | "source" | "spoolDir" | "spoolRoot">,
+): void {
+  if (!isOtlpTransportAllowed(input)) purgeOnOptOut(input)
+}
+
+export function purgeOnOptOut(input: Pick<CreateOtlpTelemetryTransportInput, "diagnostics" | "source" | "spoolDir" | "spoolRoot">): void {
+  const source = input.source ?? "otlp"
+  try {
+    if (purgeSpool(input.spoolDir, input.spoolRoot, purgeReport(input.diagnostics, source)) === "refused") {
+      input.diagnostics?.({ event: "telemetry_spool_purge_refused", source })
+    }
+  } catch (error) {
+    input.diagnostics?.({ event: "telemetry_spool_sweep_failed", source, error, errorKind: error instanceof Error ? "error" : "non_error" })
+  }
+}
 
 /**
  * `refused`: the directory failed verification and nothing was deleted. `incomplete`: the sweep ran

@@ -1,6 +1,9 @@
 import { statSync } from "node:fs"
 import { join } from "node:path"
 import type { TelemetryDiagnosticInput } from "@oh-my-opencode/telemetry-core"
+import { purgeOtlpSpoolOnOptOut } from "@oh-my-opencode/telemetry-core/otlp-opt-out"
+import { resolveAgentHome } from "../agent-home/resolve-agent-home"
+import type { TransportInput } from "./otlp"
 
 import { CORRUPT, removeFile, renameIfPresent } from "./session-summary-files"
 import type { SummaryPublisher } from "./session-summary-publisher"
@@ -33,6 +36,13 @@ export { createImmediateSender } from "@oh-my-opencode/telemetry-core/immediate-
 export { createSessionSummaryRecorder } from "./omo-native-session-summary"
 export { createSummaryStorage } from "./session-summary-storage"
 export { currentProcessOwner } from "./session-summary-owner"
+// Startup privacy cleanup shares this existing lightweight sidecar, never the OTLP exporter.
+export function purgeSenpiOtlpSpoolOnOptOut(input: TransportInput): void {
+  const spoolRoot = resolveAgentHome({ env: input.env })
+  purgeOtlpSpoolOnOptOut({
+    ...input, productEnvPrefix: "OMO_SENPI", spoolRoot, spoolDir: join(spoolRoot, "omo-senpi", "otlp"),
+  })
+}
 
 /** At most this many events wait for delivery; past it the oldest are dropped and counted in `dropped_events`. */
 export const PENDING_CAP = 200

@@ -1,5 +1,40 @@
 import { expect, test } from "bun:test"
 import { isOtlpEvent, projectOtlpEvent, OTLP_SPANS } from "./otlp-projection"
+import { OMO_NATIVE_EVENT_SCHEMAS, type OmoNativePropertySchema } from "./event-schemas"
+import { addTurn, openWindow, summaryProperties } from "./session-summary-window"
+
+// Feed the client schema's actual property names and vocabulary, not relay aliases.
+function clientBag(schema: Readonly<Record<string, OmoNativePropertySchema>>): Record<string, string | number | boolean> {
+  return Object.fromEntries(Object.entries(schema).map(([key, value]) => [
+    key, value.type === "number" ? 1 : value.type === "boolean" ? false : value.values?.[0] ?? "a".repeat(64),
+  ]))
+}
+
+for (const [event, property, wire] of [
+  ["daily_active", "reason", "omo.start_trigger"],
+  ["session_started", "reason", "omo.start_trigger"],
+  ["prompt_submitted", "suppression_reason", "omo.suppression_cause"],
+  ["delegation_completed", "start_reason", "omo.start_trigger"],
+] as const) {
+  test(`OTLP maps real ${event} client vocabulary from ${property}`, () => {
+    const schema: Readonly<Record<string, OmoNativePropertySchema>> = OMO_NATIVE_EVENT_SCHEMAS[event]
+    for (const value of schema[property]?.values ?? []) {
+      const bag = { ...clientBag(schema), [property]: value }
+      expect(projectOtlpEvent(event, bag)[wire]).toBe(value)
+    }
+    for (const value of ["unrecognized", 1, true]) {
+      expect(projectOtlpEvent(event, { ...clientBag(schema), [property]: value })[wire]).toBeUndefined()
+    }
+  })
+}
+
+test("OTLP maps real category_config user_category_count within pinned bounds", () => {
+  const bag = clientBag(OMO_NATIVE_EVENT_SCHEMAS.category_config)
+  expect(projectOtlpEvent("category_config", bag)["omo.custom_category_count"]).toBe(bag["user_category_count"])
+  for (const value of [-1, 1e9 + 1, Infinity, "1", true]) {
+    expect(projectOtlpEvent("category_config", { ...bag, user_category_count: value })["omo.custom_category_count"]).toBeUndefined()
+  }
+})
 
 // Independent examples from omo-telemetry's pinned omo-senpi v4 artifact.
 for (const [event, property, wire] of [
@@ -56,8 +91,27 @@ test("OTLP turn projection includes cache tokens in input and maps cost and prov
   })
 })
 
-test("OTLP summary cost uses the pinned integer cost field and excludes non-finite attributes", () => {
-  expect(projectOtlpEvent("session_summary", { cost_1e4: 50, turns: NaN })).toEqual({ "omo.cost.usd_1e4": 50 })
+test("OTLP summary cost derives pinned integer units from the real summary USD property", () => {
+  const window = openWindow(0, 1)
+  addTurn(window, {
+    turnIndex: 1, provider: "google", modelId: "gemini-3.1-pro",
+    inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0,
+    reasoningTokens: 0, totalTokens: 2, cost1e4: 57, usageValid: true,
+    stopReason: "stop", toolResultCount: 0, toolErrorCount: 0,
+  }, 1)
+  const properties = summaryProperties("a".repeat(64), window, {
+    endedBy: "shutdown", epoch: "a".repeat(16), seq: 1, sampleRate: 1,
+    sampled: true, sessionRole: "main", droppedEvents: 0,
+  })
+  expect(properties["cost_usd"]).toBe(0.0057)
+  expect(projectOtlpEvent("session_summary", properties)["omo.cost.usd_1e4"]).toBe(57)
+  // Older client summaries and recovered bags need only the published USD property.
+  const { cost_1e4: _internalCost, ...usdSummary } = properties
+  expect(projectOtlpEvent("session_summary", usdSummary)["omo.cost.usd_1e4"]).toBe(57)
+  expect(projectOtlpEvent("session_summary", { ...usdSummary, cost_usd: 0.00015 })["omo.cost.usd_1e4"]).toBe(1)
+  for (const cost_usd of [-1, Infinity, NaN, 1e6 + 1, "1", true]) {
+    expect(projectOtlpEvent("session_summary", { ...usdSummary, cost_usd })["omo.cost.usd_1e4"]).toBeUndefined()
+  }
 })
 
 test("OTLP spans allow only the pinned turn attributes", () => {

@@ -143,9 +143,11 @@ export function createLazyPostHogTransportFactory(input: LazyPostHogOptions = {}
 function withOtlpTransport(posthog: TelemetryTransport, input: LazyPostHogOptions): TelemetryTransport {
   // The native client already bounds shutdown at one second; OTLP startup gets only half of it.
   const timeoutMs = input.timeoutMs ?? 1_000
+  const now = input.now ?? Date.now
   let target: TelemetryTransport | undefined
   let starting: Promise<TelemetryTransport | undefined> | undefined
-  let abandoned = false
+  let retryAt = 0
+  let attempt = 0
   let closed = false
   const queued: TelemetryCaptureMessage[] = []
   const report = (error: unknown): void => {
@@ -157,16 +159,13 @@ function withOtlpTransport(posthog: TelemetryTransport, input: LazyPostHogOption
   const allowed = (): boolean => {
     try { return input.consent?.() ?? true } catch { return false }
   }
-  const within = async <T>(operation: Promise<T>, fallback: T, rejectOnTimeout = false, boundMs = timeoutMs): Promise<T> => {
+  const within = async <T>(operation: Promise<T>, fallback: T, boundMs = timeoutMs): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       return await Promise.race([
         operation,
-        new Promise<T>((resolve, reject) => {
-          timer = setTimeout(() => {
-            if (rejectOnTimeout) reject(new Error("Telemetry operation timed out"))
-            else resolve(fallback)
-          }, boundMs)
+        new Promise<T>(resolve => {
+          timer = setTimeout(() => resolve(fallback), boundMs)
         }),
       ])
     } finally {
@@ -178,12 +177,15 @@ function withOtlpTransport(posthog: TelemetryTransport, input: LazyPostHogOption
     try { target?.capture(message) } catch (error) { report(error) }
   }
   const captureOtlp = (message: TelemetryCaptureMessage): void => {
-    if (closed || abandoned || !allowed()) return
+    if (closed || !allowed()) return
     if (target !== undefined) return forward(message)
+    if (now() < retryAt) return
     if (queued.length === MAX_PENDING_CAPTURES) queued.shift()
     queued.push(message)
-    starting ??= within(Promise.resolve().then(() => input.loadOtlp?.(message)).then(async value => {
-      if (abandoned) {
+    if (starting !== undefined) return
+    const currentAttempt = ++attempt
+    starting = within(Promise.resolve().then(() => input.loadOtlp?.(message)).then(async value => {
+      if (closed || currentAttempt !== attempt) {
         // A timed-out import may finish later. Dispose it instead of starting a sender after shutdown.
         await value?.shutdown()
         return undefined
@@ -191,15 +193,18 @@ function withOtlpTransport(posthog: TelemetryTransport, input: LazyPostHogOption
       target = value ?? undefined
       for (const pending of queued.splice(0)) forward(pending)
       return target
-    }).catch((error: unknown) => { report(error); return undefined }), undefined, false, input.timeoutMs ?? 500).then(value => {
-      abandoned = value === undefined
+    }).catch((error: unknown) => { report(error); return undefined }), undefined, input.timeoutMs ?? 500).then(value => {
+      if (value === undefined) {
+        retryAt = now() + IMPORT_BACKOFF_MS
+        attempt++
+      }
       queued.length = 0
       return value
-    })
+    }).finally(() => { starting = undefined })
   }
   const finish = async (method: "flush" | "shutdown"): Promise<void> => {
     const [posthogResult] = await Promise.allSettled([
-      within(Promise.resolve().then(() => posthog[method]?.()), undefined, method === "flush"),
+      Promise.resolve().then(() => posthog[method]?.()),
       within((async () => {
         await starting
         if (method === "shutdown") closed = true
@@ -218,7 +223,7 @@ function withOtlpTransport(posthog: TelemetryTransport, input: LazyPostHogOption
       captureOtlp(message)
       // Pending session-summary files retain the existing PostHog acknowledgment contract.
       if (posthog.captureImmediate === undefined) throw new Error("PostHog immediate capture is unavailable")
-      await within(posthog.captureImmediate(message), undefined, true)
+      await posthog.captureImmediate(message)
     },
     traces: { startTurn: start => target?.traces?.startTurn(start) },
     flush: () => finish("flush"),

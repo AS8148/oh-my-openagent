@@ -108,17 +108,6 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       if (isOmoNativeEventName(name)) state.capture?.(name, properties, captureOptions)
     },
   }
-  const transportFactory = sharedTransportFactory(
-    options.transportFactory ?? createSenpiTelemetryTransportFactory({
-      env,
-      consent: () => state.isSendAllowed?.() === true,
-      diagnostics: options.diagnostics,
-      source: "omo-native-component",
-    }),
-    state,
-    options,
-  )
-
   return {
     name: "telemetry",
     register(pi, ctx) {
@@ -179,6 +168,16 @@ export function createOmoNativeTelemetryComponent(options: OmoNativeTelemetryCom
       // stop its later events.
       state.isConsented = () => currentConsent(false)
       state.isSendAllowed = () => currentConsent(true)
+      const transportFactory = sharedTransportFactory(
+        options.transportFactory ?? createSenpiTelemetryTransportFactory({
+          env,
+          consent: () => state.isSendAllowed?.() === true,
+          diagnostics: options.diagnostics,
+          source: "omo-native-component",
+        }),
+        state,
+        options,
+      )
       const hashSession = (rawId: string): string =>
         currentConsent(false) ? (options.hashSessionId ?? hashSessionId)(rawId) : OPTED_OUT_SESSION_HASH
       // The span keeps the engine's own role name (dev's `omo.session.role`), separate from the closed event vocabulary above.
