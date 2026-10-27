@@ -1,5 +1,7 @@
 import type { OtlpWireProjection, SpanAllowlist, WireAttributes } from "@oh-my-opencode/telemetry-core/otlp"
 
+import { pinnedModelId } from "./pinned-model-ids"
+
 // Derived from omo-telemetry origin/main 13c6e61b40c49141868e7430e02a7b4b949d0c5d:
 // packages/schema-registry/artifacts/omo-senpi.json (schema v4, proto v1.7.0)
 // and packages/schema-registry/semconv-map.json. No unlisted event or attribute has a fallback.
@@ -313,7 +315,6 @@ export const OTLP_SPANS: SpanAllowlist = {
   ]
 }
 
-const PINNED_MODEL_ID_LIST = ["claude-fable-5", "claude-fable-5-1", "claude-haiku-4-5", "claude-haiku-5-5", "claude-opus-4-6", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "custom", "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "gemini-3.1-pro", "gemini-3.6-flash", "gemini-4-argon", "glm-5.2", "glm-5.3", "glm-5.3-flash", "gpt-5.6-luna-fast", "gpt-5.6-sol", "gpt-5.6-sol-fast", "gpt-5.6-terra", "gpt-6-astra", "gpt-6-luna", "gpt-6-luna-fast", "gpt-6-sol", "gpt-6-sol-fast", "gpt-6.1-sol", "gpt-6.1-sol-fast", "grok-4.20-0309-non-reasoning", "grok-4.6", "grok-4.7", "k3", "kimi-for-coding-highspeed", "kimi-k3", "mimo-v2.5-pro", "mimo-v2.6-flash", "mimo-v2.6-pro", "minimax-m2.7", "minimax-m3", "qwen3.6-flash", "qwen3.7-plus", "qwen3.8-max-preview"]
 const MODEL_WIRE_KEY_LIST = ["gen_ai.request.model", "gen_ai.response.model", "omo.cat_architect", "omo.cat_artistry", "omo.cat_deep_high", "omo.cat_deep_low", "omo.cat_quick", "omo.cat_ultrabrain", "omo.cat_unspecified_high", "omo.cat_unspecified_low", "omo.cat_visual_engineering", "omo.cat_writing", "omo.default_model", "omo.model_id", "omo.model_top"]
 
 const PROVIDER_VALUES: Readonly<Record<string, string>> = {
@@ -347,11 +348,10 @@ const PROVIDER_VALUES: Readonly<Record<string, string>> = {
   "custom": "custom"
 }
 
-// The pinned model vocabulary (omo-senpi.json enum shared by every key below). The client vocabulary can
-// run ahead of the pin, and the collector rejects a whole record for an unlisted enum value, so a model id
-// outside the pin leaves as "custom" (pinned; the client's own fallback for unknown models).
-const PINNED_MODEL_IDS: ReadonlySet<string> = new Set(PINNED_MODEL_ID_LIST)
+// Wire keys whose pinned enum is the model vocabulary (see pinned-model-ids.ts).
 const MODEL_WIRE_KEYS: ReadonlySet<string> = new Set(MODEL_WIRE_KEY_LIST)
+// session_summary's top-model keys use the same vocabulary plus "none" (no model in that rank).
+const RANKED_MODEL_WIRE_KEYS: ReadonlySet<string> = new Set(["omo.m1_model", "omo.m2_model", "omo.m3_model"])
 
 export function isOtlpEvent(event: string): boolean {
   return Object.hasOwn(EVENT_FIELDS, event)
@@ -363,7 +363,9 @@ export const projectOtlpEvent: OtlpWireProjection = (event, properties) => {
   for (const [property, wire] of Object.entries(EVENT_FIELDS[event] ?? {})) {
     const value = properties[property]
     if (typeof value === "string" && MODEL_WIRE_KEYS.has(wire)) {
-      attributes[wire] = PINNED_MODEL_IDS.has(value) ? value : "custom"
+      attributes[wire] = pinnedModelId(value)
+    } else if (typeof value === "string" && RANKED_MODEL_WIRE_KEYS.has(wire)) {
+      attributes[wire] = value === "none" ? value : pinnedModelId(value)
     } else if (typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) {
       attributes[wire] = value
     }
