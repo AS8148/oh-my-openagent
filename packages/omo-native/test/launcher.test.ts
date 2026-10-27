@@ -359,6 +359,11 @@ await runLauncher(["say", "hi"])
           changelogUrl: "https://github.com/code-yeongyu/oh-my-openagent/releases",
         })
         expect(capture(fixture).env.OMO_REINSTALL_COMMAND).toBe(brand.update.command)
+        // The provider sign-in result page shows this mark (senpi#4432).
+        const icon = readFileSync(join(SOURCE_ROOT, "..", "..", ".github", "assets", "omo-icon-light.svg"))
+        expect(typeof brand.logo).toBe("string")
+        expect(brand.logo.startsWith("data:image/svg+xml;base64,")).toBe(true)
+        expect(Buffer.from(brand.logo.slice("data:image/svg+xml;base64,".length), "base64").equals(icon)).toBe(true)
       })
 
       // The launcher may re-exec itself under bun; whichever runtime wins, the engine must be told
