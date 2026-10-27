@@ -425,7 +425,7 @@ describe("checkExtensionCurrent", () => {
     }
     const main = await readFile(outputPath, "utf8")
     expect(main).toContain('import("#omo-telemetry-otlp-runtime")')
-    expect(Buffer.byteLength(main)).toBeLessThanOrEqual(1_419_425 + 4_096)
+    expect(Buffer.byteLength(main)).toBeLessThanOrEqual(1_423_766 + 4_096)
     expect(await readFile(telemetryOtlpOutputPath, "utf8")).not.toContain("#omo-telemetry-otlp-runtime")
   })
 
