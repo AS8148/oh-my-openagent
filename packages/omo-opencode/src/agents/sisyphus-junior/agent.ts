@@ -4,6 +4,7 @@ import { isGlmModel, isGptModel, buildClaudeThinkingConfig } from "../types"
 import type { AgentOverrideConfig } from "../../config/schema"
 import { createAgentToolRestrictions, migrateAgentConfig, type PermissionValue } from "../../shared/permission-compat"
 import { buildNativeAgentPrompt, getNativePromptSource } from "../native-model-prompt"
+import { withRefusalRule } from "../refusal-rule"
 import { buildDefaultSisyphusJuniorPrompt } from "./default"
 import { resolvePromptAppend } from "../builtin-agents/resolve-file-uri"
 
@@ -18,7 +19,7 @@ export const getSisyphusJuniorPromptSource = getNativePromptSource
 export type SisyphusJuniorPromptSource = ReturnType<typeof getNativePromptSource>
 
 export function buildSisyphusJuniorPrompt(model: string | undefined, useTaskSystem: boolean, promptAppend?: string): string {
-  const prompt = buildNativeAgentPrompt(model, buildDefaultSisyphusJuniorPrompt(useTaskSystem), undefined, undefined, useTaskSystem)
+  const prompt = buildNativeAgentPrompt(model, withRefusalRule(buildDefaultSisyphusJuniorPrompt(useTaskSystem)), undefined, undefined, useTaskSystem)
   return promptAppend ? prompt + "\n\n" + resolvePromptAppend(promptAppend) : prompt
 }
 
