@@ -17,10 +17,11 @@ export async function resolveConfiguredCategoriesAtRuntime(
     userCategories: config.categories,
     sisyphusJuniorModel: undefined,
   } as unknown as ExecutorContext
-  const names = Object.entries(config.categories ?? {})
-    .filter(([name, category]) => CATEGORY_MODEL_REQUIREMENTS[name] !== undefined && category?.disable !== true)
-    .map(([name]) => name)
-  const resolved = await Promise.all(names.map(async (name): Promise<[string, RuntimeCategoryResolution]> => {
+  const configured = Object.entries(config.categories ?? {})
+    .filter(([name]) => CATEGORY_MODEL_REQUIREMENTS[name] !== undefined)
+  const resolved = await Promise.all(configured.map(async ([name, category]): Promise<[string, RuntimeCategoryResolution]> => {
+    // mergeCategories drops a disabled category, so the runtime has no model for it at all.
+    if (category?.disable === true) return [name, { disabled: true }]
     const result = await resolveCategoryExecution(
       { category: name, prompt: "", description: "omo doctor", run_in_background: false, load_skills: [] },
       executorCtx,

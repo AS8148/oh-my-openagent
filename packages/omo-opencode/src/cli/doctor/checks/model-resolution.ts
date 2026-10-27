@@ -85,6 +85,15 @@ export function getModelResolutionInfoWithOverrides(
   const categories: CategoryResolutionInfo[] = Object.entries(CATEGORY_MODEL_REQUIREMENTS).map(
     ([name, requirement]) => {
       const runtime = runtimeCategories[name]
+      if (runtime?.disabled === true || config.categories?.[name]?.disable === true) {
+        return {
+          name,
+          requirement,
+          effectiveModel: getEffectiveModel(requirement),
+          effectiveResolution: "Disabled",
+          disabled: true,
+        }
+      }
       if (runtime?.error !== undefined) {
         return attachCapabilityDiagnostics({
           name,

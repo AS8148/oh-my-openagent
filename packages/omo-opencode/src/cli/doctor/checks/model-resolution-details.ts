@@ -46,6 +46,10 @@ export function buildModelResolutionDetails(options: {
   details.push("")
   details.push("Categories:")
   for (const category of options.info.categories) {
+    if (category.disabled === true) {
+      details.push("  - " + category.name + ": disabled")
+      continue
+    }
     if (category.runtimeError !== undefined) {
       details.push(`  ✗ ${category.name}: runtime error: ${category.runtimeError.split("\n")[0]}`)
       continue
@@ -58,7 +62,7 @@ export function buildModelResolutionDetails(options: {
     details.push(`  ${marker} ${category.name}: ${display} [capabilities: ${formatCapabilityResolutionLabel(category.capabilityDiagnostics?.resolutionMode)}]`)
   }
   details.push("")
-  details.push("● = user override, ○ = provider fallback, ✗ = runtime error")
+  details.push("● = user override, ○ = provider fallback, ✗ = runtime error, - = disabled")
 
   return details
 }

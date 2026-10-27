@@ -24,6 +24,8 @@ export interface CategoryResolutionInfo {
   runtimeResolved?: boolean
   /** The runtime's error for this category: a task() spawn would fail with it. */
   runtimeError?: string
+  /** The user disabled this category; the runtime removes it, so task() cannot use it. */
+  disabled?: boolean
 }
 
 export interface ModelResolutionInfo {
@@ -36,8 +38,9 @@ export type OmoConfig = Pick<OhMyOpenCodeConfig, "agents" | "categories">
 
 /** What the delegate-task runtime resolves for a user-configured category. */
 export type RuntimeCategoryResolution =
-  | { model?: string; reasoning?: string; userDefined: boolean; error?: undefined }
-  | { error: string }
+  | { model?: string; reasoning?: string; userDefined: boolean; error?: undefined; disabled?: undefined }
+  | { error: string; disabled?: undefined }
+  | { disabled: true; error?: undefined }
 
 export interface AvailableModelsInfo {
   providers: string[]

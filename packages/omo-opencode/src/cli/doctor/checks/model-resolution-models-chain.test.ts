@@ -23,6 +23,7 @@ const ISSUE_CONFIG = {
     categories: {
       "visual-engineering": { models: [{ model: "anthropic/claude-fable-5-1", reasoning: "high" }] },
       writing: { models: ["anthropic/claude-opus-5-5"], reasoning: "low" },
+      ultrabrain: { models: [{ model: "openai/gpt-5.4", reasoning: "high" }], disable: true },
     },
   },
 }
@@ -133,5 +134,32 @@ describe("doctor Configured Models with canonical models chains (#11531)", () =>
     expect(details.some((line) => /^ {2}[●○] writing:/.test(line))).toBe(false)
     const issue = result.issues.find((entry) => entry.affects?.includes("writing"))
     expect(issue?.description).toContain(runtimeError)
+  })
+
+  it("#given a disabled category with a configured model #when doctor renders #then it shows the category as disabled, not as an active model", async () => {
+    //#given
+    const config = validatePluginConfig(process.cwd()).config
+    const runtime = await resolveCategoryExecution(
+      { category: "ultrabrain", prompt: "p", description: "d", run_in_background: false, load_skills: [] },
+      {
+        client: unsafeTestValue({}),
+        manager: unsafeTestValue({}),
+        directory: temporaryDirectory,
+        userCategories: config.categories,
+        sisyphusJuniorModel: undefined,
+      },
+      undefined,
+      undefined,
+    )
+    expect(runtime.error).toContain("Unknown category")
+
+    //#when
+    const result = await checkModels()
+    const details = result.details ?? []
+
+    //#then
+    expect(details).toContain("  - ultrabrain: disabled")
+    expect(details.some((line) => /^ {2}[●○✗] ultrabrain:/.test(line))).toBe(false)
+    expect(result.issues.some((issue) => issue.affects?.includes("ultrabrain"))).toBe(false)
   })
 })
