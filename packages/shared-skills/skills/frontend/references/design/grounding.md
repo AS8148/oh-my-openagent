@@ -22,7 +22,7 @@ For each journey step, write what the product does at its best: what the user se
 
 ## 5. Gap ledger
 
-Explore the product as it is: explore agents across the UI code, plus `/visual-qa` captures of every screen and state at 390 and 1440 in both themes. List every difference from the ideal state. Do not rank the small ones away. Add every draft-guard violation (`check-draft-guard.ts` output plus the unlinted tells in `SKILL.md`'s draft guard) and every WCAG 2.2 AA failure from `SKILL.md` Verify. One row per gap:
+Explore the product as it is: explore agents across the UI code, plus `/visual-qa` captures of every screen and state at 390 and 1440 in both themes. List every difference from the ideal state. Do not rank the small ones away. Then read the rule sources in full and add every violation of each: `SKILL.md`'s build rules and draft guard (plus `check-draft-guard.ts` output), the `/visual-qa` checklist, every reference this request routed to, and the WCAG 2.2 AA items in `SKILL.md` Verify. Capture a screenshot for each row and keep the ledger in a durable record (the `/ulw-loop` ledger when it runs) so no finding lives only in context. One row per gap:
 
 | ID | Screen / state | Gap | Principle or rule broken | Evidence | Fix | Proof | Status |
 |---|---|---|---|---|---|---|---|
@@ -30,4 +30,4 @@ Explore the product as it is: explore agents across the UI code, plus `/visual-q
 
 ## 6. Close the ledger
 
-Fix in scoped passes (`SKILL.md` Verify). A row closes only with its before/after pair and the `/visual-qa` item or probe that proves the fix. In a PR, the pairs go in the body. On a long run, report progress as closed/total ledger rows.
+Plan the fixes before the first edit (`/ulw-plan` for a large ledger): each row names its fix and, in advance, the `/visual-qa` item or probe that will prove it. Then execute without stopping to ask between rows: independent rows run in parallel (`/mass-ulw`, `/ulw-execute`), each fix is a scoped pass (`SKILL.md` Verify), and a large ledger ships as several PRs grouped by screen or rule. A row closes only with its before/after pair and the passing proof, and the pairs go in the PR body. Report progress often as closed/total ledger rows, naming what closed since the last report.
