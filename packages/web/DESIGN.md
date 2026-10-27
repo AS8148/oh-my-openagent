@@ -192,7 +192,7 @@ All primitives live in `components/ui/*` (existing shadcn shells re-tokened) or 
 
 ### LedgerRow (`components/ledger/ledger-row.tsx`)
 
-- Grid `[minmax(0,130px)] 1fr 1fr` at ≥ lg (index / explanation / evidence); `[54px] 1fr` below with evidence stacked under the explanation. Row padding 24px 0, hairline between rows, `--accent-4` fill on hover, index in Numeral style `--text-faint`. Used by the `/design` showcase; the landing page (v3) no longer renders ledger rows.
+- Grid `[minmax(0,130px)] 1fr 1fr` at ≥ lg (index / explanation / evidence); `[54px] 1fr` below with evidence stacked under the explanation. Row padding 24px 0, hairline between rows, `--accent-4` fill on hover, index in Numeral style `--text-lo`. Used by the `/design` showcase; the landing page (v3) no longer renders ledger rows.
 - States: default, hover, focus-within (index turns `--accent`), `data-active` (left 2px `--accent` rule) when linked from the graph.
 
 ### BentoCell (`components/ledger/bento-cell.tsx`)
