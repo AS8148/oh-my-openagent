@@ -105,8 +105,6 @@
       "packages/lsp-daemon/vitest.config.ts": ["default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
       "packages/lsp-tools-mcp/vitest.config.ts": ["default"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) setMcpClientLoggerForTesting
-      "packages/mcp-client-core/src/logger.ts": ["setMcpClientLoggerForTesting"],
       // pre-existing at origin dev 4686e425b5: unused export(s) buildAuthorizationUrl, generateCodeChallenge, generateCodeVerifier, runAuthorizationCodeRedirect
       "packages/mcp-client-core/src/mcp-oauth/index.ts": ["buildAuthorizationUrl", "generateCodeChallenge", "generateCodeVerifier", "runAuthorizationCodeRedirect"],
       // pre-existing at origin dev 4686e425b5: unused export(s) generateCodeVerifier, generateCodeChallenge, buildAuthorizationUrl
@@ -499,6 +497,8 @@
       "packages/omo-native/compiled-ca-trust.ts": ["ENGINE_EXTRA_CA_ENV"],
       // pre-existing at origin dev 4686e425b5: unused export(s) COMPILED_DIAGNOSTIC_RUNTIME
       "packages/omo-native/compiled-diagnostic-runtime.ts": ["COMPILED_DIAGNOSTIC_RUNTIME"],
+      // pre-existing at origin dev 4d3161eabd (#11430, 950c2dd65f): unused export(s) HashDirectoryRuntimeError
+      "packages/omo-native/openssl-hash-dir.ts": ["HashDirectoryRuntimeError"],
       // pre-existing at origin dev 4686e425b5: unused export(s) resolveDaemonTaskSettings
       "packages/omo-native/task-config-entry.ts": ["resolveDaemonTaskSettings"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SOURCE_ROOT
@@ -1689,6 +1689,8 @@
       "packages/shared-skills/skills/ulw-research/scripts/fact-ledger.mjs": ["exactFromDecimal", "FACT_KINDS", "FACT_STATUSES", "QUALIFIERS", "ROW_FIELDS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) FIDELITY_ANSWERED_BY
       "packages/shared-skills/skills/ulw-research/scripts/fidelity-brief.mjs": ["FIDELITY_ANSWERED_BY"],
+      // pre-existing at origin dev 4d3161eabd (#11310, 504f03da67): unused export(s) findRender
+      "packages/shared-skills/skills/ulw-research/scripts/fidelity-originals.mjs": ["findRender"],
       // pre-existing at origin dev 4686e425b5: unused export(s) STATE_FILENAME, STATE_SCHEMA_VERSION
       "packages/shared-skills/skills/ulw-research/scripts/fidelity-state.mjs": ["STATE_FILENAME", "STATE_SCHEMA_VERSION"],
       // pre-existing at origin dev 4686e425b5: unused export(s) selectQuote
@@ -1709,6 +1711,10 @@
       "packages/shared-skills/skills/ulw-research/scripts/html-markup.mjs": ["skeletonTokens"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SAMPLED_SELECTOR, EXCLUDED_ANCESTORS
       "packages/shared-skills/skills/ulw-research/scripts/layout-probe.mjs": ["SAMPLED_SELECTOR", "EXCLUDED_ANCESTORS"],
+      // pre-existing at origin dev 4d3161eabd (#11286, 70fd003fec): unused export(s) inlineTargetEnd
+      "packages/shared-skills/skills/ulw-research/scripts/markdown-closers.mjs": ["inlineTargetEnd"],
+      // pre-existing at origin dev 4d3161eabd (#11310, 8aa1567e29): unused export(s) GROUP_SEPARATORS
+      "packages/shared-skills/skills/ulw-research/scripts/number-grammar.mjs": ["GROUP_SEPARATORS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) ELLIPSIS
       "packages/shared-skills/skills/ulw-research/scripts/placeholder.mjs": ["ELLIPSIS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) numeralKeys, SLOT, termCounts, POLISH_MARKUP_CHARACTERS, touchesReference
