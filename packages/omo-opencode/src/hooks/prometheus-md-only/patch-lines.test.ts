@@ -7,6 +7,7 @@ import { createOpencodeClient } from "@opencode-ai/sdk"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
 import { createPrometheusMdOnlyHook } from "./hook"
 import { parsePatch } from "./fixtures/opencode-patch-parser"
+import { invokeBefore } from "./fixtures/invoke-before"
 
 const sessionID = "ses_prometheus_patch_lines"
 const source = ".omo/plans/source.md"
@@ -75,7 +76,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
           chunks: [{ old_lines: [context, "before"], new_lines: [context, "after"] }],
         })
 
-        await expect(hook["tool.execute.before"](input, { args: { patchText } })).resolves.toBeUndefined()
+        await expect(invokeBefore(hook, input, { args: { patchText } })).resolves.toBeUndefined()
       })
     }
   }
@@ -94,7 +95,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
           : { type: operation.name.toLowerCase(), path: outside },
       )
 
-      await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+      await expect(invokeBefore(hook, input, { args: { patchText } })).rejects.toThrow(
         "File operations restricted to .omo/*.md plan files only",
       )
     })
@@ -104,7 +105,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
     test(`Update context still rejects malformed directive ${JSON.stringify(header)}`, async () => {
       const patchText = patch(`*** Update File:${allowed}`, "@@", " ***", "-before", "+after", header)
 
-      await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+      await expect(invokeBefore(hook, input, { args: { patchText } })).rejects.toThrow(
         "File operations restricted to .omo/*.md plan files only",
       )
     })
@@ -129,7 +130,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
             expect(target).toMatchObject({ type: operation.name.toLowerCase(), path: outside })
           }
 
-          await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+          await expect(invokeBefore(hook, input, { args: { patchText } })).rejects.toThrow(
             "File operations restricted to .omo/*.md plan files only",
           )
         })
@@ -145,7 +146,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
             : { type: operation.name.toLowerCase(), path: allowed },
         )
 
-        await expect(hook["tool.execute.before"](input, { args: { patchText } })).resolves.toBeUndefined()
+        await expect(invokeBefore(hook, input, { args: { patchText } })).resolves.toBeUndefined()
       })
     }
   }
@@ -160,7 +161,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
     test(`unclassifiable or empty header ${JSON.stringify(header)} fails closed in a mixed patch`, async () => {
       const patchText = patch(`*** Add File:${allowed}`, "+# Plan", header)
 
-      await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+      await expect(invokeBefore(hook, input, { args: { patchText } })).rejects.toThrow(
         "File operations restricted to .omo/*.md plan files only",
       )
     })

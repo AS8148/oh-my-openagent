@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
 import { createPrometheusMdOnlyHook } from "./hook"
 import { isAllowedFile } from "./path-policy"
+import { invokeBefore } from "./fixtures/invoke-before"
 
 describe("Prometheus filesystem destinations (B2, #11367)", () => {
   let root: string
@@ -34,7 +35,7 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
       directory: join(root, "workspace-alias"),
       client: {},
     } as never)
-    await expect(hook["tool.execute.before"](
+    await expect(invokeBefore(hook,
       { tool: "write", sessionID, callID: "workspace-alias" },
       { args: { filePath: ".omo/allowed.md" } },
     )).resolves.toBeUndefined()
@@ -177,7 +178,7 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
           )
         }
         const hook = createPrometheusMdOnlyHook({ directory: root, client: {} } as never)
-        const result = hook["tool.execute.before"](
+        const result = invokeBefore(hook,
           { tool: call.tool, sessionID, callID: `call-${index}` },
           { args: call.args("absolute" in scenario && scenario.absolute ? `${root}/${scenario.target}` : scenario.target) },
         )

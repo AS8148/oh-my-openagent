@@ -94,3 +94,19 @@ for (const [name, addition] of [
     })).rejects.toThrow("no longer match the host execution reference")
   })
 }
+
+test("a later hook that changes a nested target value in place after approval is rejected", async () => {
+  const ctx = { directory: root, client: {} } as never
+  const handler = createToolExecuteBeforeHandler({
+    ctx,
+    hooks: {
+      prometheusMdOnly: createPrometheusMdOnlyHook(ctx),
+      atlasHook: { "tool.execute.before": async (_input: unknown, output: { args: Record<string, unknown> }) => {
+        (output.args.input as { path: string }).path = "../outside.md"
+      } },
+    } as never,
+  })
+  await expect(handler({ tool: "write", sessionID, callID: "late-nested" }, {
+    args: { filePath: ".omo/plan.md", input: { path: ".omo/plan.md" } },
+  })).rejects.toThrow("no longer match the host execution reference")
+})

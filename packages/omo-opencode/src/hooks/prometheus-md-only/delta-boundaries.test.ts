@@ -9,6 +9,7 @@ import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-s
 import { createPrometheusMdOnlyHook } from "./hook"
 import { resolveAllowedFile } from "./path-policy"
 import { parsePatch } from "./fixtures/opencode-patch-parser"
+import { invokeBefore } from "./fixtures/invoke-before"
 
 function patchText(header: string, path: string): string {
   return [
@@ -51,7 +52,7 @@ describe("planner delta serialization and physical boundaries", () => {
   })
 
   function invoke(tool: string, args: Record<string, unknown>, workspace = root) {
-    return createPrometheusMdOnlyHook({ directory: workspace, client: {} } as never)["tool.execute.before"](
+    return invokeBefore(createPrometheusMdOnlyHook({ directory: workspace, client: {} } as never),
       { tool, sessionID, callID: "delta" }, { args },
     )
   }
@@ -66,7 +67,7 @@ describe("planner delta serialization and physical boundaries", () => {
           writeFileSync(join(root, ".omo/source.md"), "before\n")
           symlinkSync(target, join(root, ".omo/alias.md"))
           const args = { [field]: patchText(header, ".omo/alias.md") }
-          await expect(invoke("apply_patch", args)).rejects.toThrow()
+          await expect(invoke("apply_patch", args)).rejects.toThrow("Attempted to modify: .omo/alias.md.")
         })
       }
     }
@@ -232,7 +233,7 @@ describe("planner delta serialization and physical boundaries", () => {
       mkdirSync(join(root, ".omo"))
       const args = { filePath: ".omo\\new.md" }
       if (frozen) Object.freeze(args)
-      if (frozen) await expect(invoke("write", args)).rejects.toThrow()
+      if (frozen) await expect(invoke("write", args)).rejects.toThrow("(tool arguments did not reach execution)")
       else {
         await invoke("write", args)
         expect(args.filePath).toBe(join(root, ".omo/new.md"))
@@ -260,7 +261,7 @@ describe("planner delta serialization and physical boundaries", () => {
   ]) {
     test(`SC-1 requires executable operations to match every authorized target (${text.includes("ignored") ? "post-End header" : "standalone Move"})`, async () => {
       mkdirSync(join(root, ".omo"))
-      await expect(invoke("apply_patch", { patchText: text })).rejects.toThrow()
+      await expect(invoke("apply_patch", { patchText: text })).rejects.toThrow("(patch target round trip)")
     })
   }
 

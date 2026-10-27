@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
 import { createPrometheusMdOnlyHook } from "./hook"
+import { invokeBefore } from "./fixtures/invoke-before"
 
 describe("physical planner destinations (B2-R)", () => {
   let fixture: string
@@ -30,7 +31,7 @@ describe("physical planner destinations (B2-R)", () => {
 
   function invoke(tool: string, args: Record<string, unknown>) {
     const hook = createPrometheusMdOnlyHook({ directory: root, client: {} } as never)
-    return hook["tool.execute.before"]({ tool, sessionID, callID: "physical" }, { args })
+    return invokeBefore(hook, { tool, sessionID, callID: "physical" }, { args })
   }
 
   const calls = [

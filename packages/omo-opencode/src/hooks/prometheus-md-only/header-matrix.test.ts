@@ -8,6 +8,7 @@ import { join, relative } from "node:path"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
 import { createPrometheusMdOnlyHook } from "./hook"
 import { parsePatch } from "./fixtures/opencode-patch-parser"
+import { invokeBefore } from "./fixtures/invoke-before"
 
 describe("B1 320 executor header combinations", () => {
   let root: string
@@ -57,7 +58,7 @@ describe("B1 320 executor header combinations", () => {
                 const hook = createPrometheusMdOnlyHook({ directory: root, client: {} } as never)
                 let permitted = false
                 try {
-                  await hook["tool.execute.before"]({ tool: "apply_patch", sessionID, callID: "matrix" }, output)
+                  await invokeBefore(hook, { tool: "apply_patch", sessionID, callID: "matrix" }, output)
                   permitted = true
                 } catch {
                   permitted = false
@@ -95,7 +96,7 @@ describe("B1 320 executor header combinations", () => {
         ].join("\n")
         expect(parsePatch(patchText).hunks).toHaveLength(2)
         const hook = createPrometheusMdOnlyHook({ directory: root, client: {} } as never)
-        await expect(hook["tool.execute.before"](
+        await expect(invokeBefore(hook,
           { tool: "apply_patch", sessionID, callID: "mixed-move" }, { args: { patchText } },
         )).rejects.toThrow("File operations restricted")
       })

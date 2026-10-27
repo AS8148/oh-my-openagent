@@ -14,7 +14,7 @@ async function execute() {
   setSessionAgent(sessionID, "prometheus")
   try {
     try {
-      await hook["tool.execute.before"]({ tool: "edit", sessionID, callID: "guarded" }, output)
+      await hook["tool.execute.before"]({ tool: "edit", sessionID, callID: "guarded" }, output, { original: args })
     } catch (error) {
       return { blocked: true, error: String(error) }
     }

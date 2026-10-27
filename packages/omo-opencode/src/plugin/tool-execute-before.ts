@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util"
+
 import type { PluginContext } from "./types"
 import type { PrometheusExecutionArguments } from "../hooks/prometheus-md-only/hook"
 
@@ -177,7 +179,7 @@ export function createToolExecuteBeforeHandler(args: {
     }
     if (execution.approved && (
       output.args !== execution.original ||
-      Object.entries(execution.approved).some(([field, value]) => execution.original[field] !== value)
+      Object.entries(execution.approved).some(([field, value]) => !isDeepStrictEqual(execution.original[field], value))
     )) {
       log("[prometheus-md-only] Blocked: approved arguments changed after authorization", {
         sessionID: input.sessionID,

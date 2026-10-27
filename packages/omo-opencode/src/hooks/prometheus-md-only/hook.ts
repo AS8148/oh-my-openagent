@@ -14,8 +14,10 @@ export interface PrometheusExecutionArguments {
   approved?: Record<string, unknown>
 }
 
+const WRITE_PATH_FIELDS = ["filePath", "file_path", "path", "file"]
+const PATCH_TEXT_FIELDS = ["patchText", "input", "patch"]
 // Every argument that selects or changes what a write, edit or patch touches; absent ones are recorded too.
-const TARGET_FIELDS = ["filePath", "file_path", "path", "file", "rename", "delete", "patchText", "input", "patch"]
+const TARGET_FIELDS = [...WRITE_PATH_FIELDS, "rename", "delete", ...PATCH_TEXT_FIELDS]
 
 // Mirror OpenCode's LF splitting and prefix/slice/trim semantics, not JS regex line terminators:
 // https://github.com/anomalyco/opencode/blob/32f278b48f1a495611165d8a9f1ace0b512933e2/packages/opencode/src/patch/index.ts#L66-L96
@@ -27,7 +29,7 @@ const PATCH_PATH_HEADERS = ["*** Add File:", "*** Update File:", "*** Delete Fil
  * when a body or mutation header cannot be classified, which the caller treats as blocked.
  */
 function patchedPaths(args: Record<string, unknown>) {
-  const field = ["patchText", "input", "patch"].find(key => typeof args[key] === "string")
+  const field = PATCH_TEXT_FIELDS.find(key => typeof args[key] === "string")
   if (field === undefined) return undefined
   const paths: { path: string; line: number; prefix: string }[] = []
   const lines = (args[field] as string).trim().split("\n")
@@ -63,7 +65,7 @@ function patchedPaths(args: Record<string, unknown>) {
 
 /** The file a write/edit-class call targets plus a hashline `rename` destination, or undefined. */
 function writeTargets(args: Record<string, unknown>) {
-  const field = ["filePath", "file_path", "path", "file"].find(
+  const field = WRITE_PATH_FIELDS.find(
     key => typeof args[key] === "string" && (args[key] as string).length > 0,
   )
   if (field === undefined) return undefined
@@ -86,7 +88,7 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
     "tool.execute.before": async (
       input: { tool: string; sessionID: string; callID: string },
       output: { args: Record<string, unknown>; message?: string },
-      execution?: PrometheusExecutionArguments,
+      execution: PrometheusExecutionArguments,
     ): Promise<void> => {
       const agentName = await getAgentFromSession(input.sessionID, ctx.directory, ctx.client)
 
@@ -128,28 +130,25 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       // Fail closed: a file-writing call whose target this guard cannot read is blocked, never let through.
       const patch = isPatchTool ? patchedPaths(output.args) : undefined
       const targets = isPatchTool ? patch?.paths : writeTargets(output.args)
-      const resolved = targets?.map(target => ({
-        target,
-        path: resolveAllowedFile(target.path, ctx.directory,
-          "prefix" in target
-            ? target.prefix === "*** Delete File:" ||
-              (target.prefix === "*** Update File:" && patch?.lines[target.line + 1]?.startsWith("*** Move to:"))
-              ? "entry" : "content"
-            : output.args.delete === true || typeof output.args.rename === "string" ? "entry" : "content",
-        ),
-      }))
+      const resolved = targets?.map(target => {
+        const mode: "entry" | "content" = "prefix" in target
+          ? target.prefix === "*** Delete File:" ||
+            (target.prefix === "*** Update File:" && patch?.lines[target.line + 1]?.startsWith("*** Move to:"))
+            ? "entry" : "content"
+          : output.args.delete === true || typeof output.args.rename === "string" ? "entry" : "content"
+        return { target, mode, path: resolveAllowedFile(target.path, ctx.directory, mode) }
+      })
+      if (resolved === undefined) throw deny("(unrecognized file argument)")
       // Preserve the existing target boundary for every operation, including deletion.
       // Entry operations must still unlink the named link, not its authorized content.
-      for (const entry of resolved ?? []) {
-        if (resolveAllowedFile(entry.target.path, ctx.directory) === undefined) {
+      for (const entry of resolved) {
+        if (entry.path === undefined ||
+            (entry.mode === "entry" && resolveAllowedFile(entry.target.path, ctx.directory) === undefined)) {
           throw deny(entry.target.path)
         }
       }
-      const blockedPath =
-        resolved === undefined ? "(unrecognized file argument)" : resolved.find(entry => entry.path === undefined)?.target.path
-      if (blockedPath !== undefined) throw deny(blockedPath)
       const replacements: Record<string, string> = {}
-      for (const entry of resolved ?? []) {
+      for (const entry of resolved) {
         if (entry.path === undefined) throw deny(entry.target.path)
         if ("line" in entry.target && patch) {
           // A filesystem filename is not necessarily one representable patch header.
@@ -176,8 +175,8 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
           throw deny("(unrepresentable patch)")
         }
         const matchesAuthorized = (executed: ReturnType<typeof executableTargets>) =>
-          executed.length === resolved?.length && executed.every((entry, index) => {
-            const allowed = resolved?.[index]
+          executed.length === resolved.length && executed.every((entry, index) => {
+            const allowed = resolved[index]
             return allowed && "prefix" in allowed.target &&
               entry.prefix === allowed.target.prefix && entry.path === allowed.path
           })
@@ -185,7 +184,7 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
         // Already canonical frozen calls need no change, including harmless header spacing.
         replacements[patch.field] = matchesAuthorized(executedOriginal) ? original : rewritten
       }
-      const retainedArgs = execution?.original ?? output.args
+      const retainedArgs = execution.original
       if (retainedArgs !== output.args) {
         throw deny("(detached host execution arguments)")
       }
@@ -200,7 +199,8 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       if (Object.entries(replacements).some(([field, value]) => retainedArgs[field] !== value)) {
         throw deny("(tool arguments did not reach execution)")
       }
-      if (execution) execution.approved = Object.fromEntries(TARGET_FIELDS.map(field => [field, retainedArgs[field]]))
+      // Snapshot by value so a later in-place change to a nested target value is still detected.
+      execution.approved = Object.fromEntries(TARGET_FIELDS.map(field => [field, structuredClone(retainedArgs[field])]))
       if (isPatchTool) return
       const filePath = targets?.[0]?.path ?? ""
 

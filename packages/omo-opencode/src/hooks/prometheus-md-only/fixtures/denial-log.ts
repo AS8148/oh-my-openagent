@@ -12,7 +12,7 @@ setSessionAgent(sessionID, "prometheus")
 let error: string | undefined
 try {
   await createPrometheusMdOnlyHook({ directory: process.cwd(), client: {} } as never)["tool.execute.before"](
-    { tool, sessionID, callID: "denial" }, { args },
+    { tool, sessionID, callID: "denial" }, { args }, { original: args },
   )
 } catch (caught) {
   error = String(caught)
