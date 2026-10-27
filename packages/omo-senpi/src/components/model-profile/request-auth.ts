@@ -101,6 +101,13 @@ function errorKind(error: unknown): string {
   return typeof code === "string" ? `${error.name}/${code}` : error.name
 }
 
+// senpi raises every credential-resolution failure as `ModelsError` (codes such as `auth`/`oauth`);
+// a model's configured header fails with a plain error. Matched by name, not `instanceof`, because
+// the host and this bundle can load different copies of the class.
+function isCredentialResolutionError(error: unknown): boolean {
+  return error instanceof Error && error.name === "ModelsError" && typeof (error as Error & { code?: unknown }).code === "string"
+}
+
 function providerFailureReason(error: unknown): AuthFailureReason {
   // senpi maps every OAuth refresh failure onto `ModelsError` code "oauth"; a transient one never
   // reaches here (see `isRefreshUnavailable`), so this is a refused refresh.
@@ -168,7 +175,7 @@ export async function probeRequestAuth(
 
   let resolvedSlot: string | undefined
   let resolved = false
-  let unavailable: { readonly error: object; readonly slot: string | undefined } | undefined
+  let unavailable: { readonly slot: string | undefined } | undefined
   let lastError: unknown
   for (const slot of candidates) {
     try {
@@ -181,7 +188,7 @@ export async function probeRequestAuth(
     } catch (error) {
       lastError = error
       const marked = refreshUnavailableError(error)
-      if (marked !== undefined && unavailable === undefined) unavailable = { error: marked, slot }
+      if (marked !== undefined && unavailable === undefined) unavailable = { slot }
     }
   }
   if (!resolved && unavailable === undefined) {
@@ -200,12 +207,15 @@ export async function probeRequestAuth(
   } catch (error) {
     const marked = refreshUnavailableError(error)
     if (marked !== undefined) return keep(marked)
-    // After a transient provider probe the model probe re-runs the refresh; a refusal there is still
-    // a provider-scope failure, anything else is this model's request configuration.
-    const reason = !resolved && providerFailureReason(error) === "refresh" ? "refresh" : "request"
+    // After a transient provider probe the model probe re-runs the credential resolution; a failure
+    // there is still provider-scope (`refresh` or `credentials`), anything else is this model's
+    // request configuration.
+    const reason = !resolved && isCredentialResolutionError(error) ? providerFailureReason(error) : "request"
     return { provider, model: modelId, reason, errorKind: errorKind(error), error }
   }
-  return unavailable === undefined || resolved ? undefined : keep(unavailable.error)
+  // The model probe resolved the credential itself, so a transient provider-probe refresh has since
+  // succeeded and nothing is left for the first turn to retry.
+  return undefined
 }
 
 const DETAIL_MAX_LENGTH = 240

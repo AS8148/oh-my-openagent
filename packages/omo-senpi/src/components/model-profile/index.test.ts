@@ -75,6 +75,13 @@ function requestConfigurationFailed(model: FakeModel): Error {
   return new Error(`Failed to resolve model "${model.provider}/${model.id}" header x-token from shell command: echo ${PRIVATE_MARKER} ${SHORT_SECRET}`)
 }
 
+// senpi's credential-resolution failure that is not a refresh (for example a failing `!command` key).
+function credentialsFailed(provider: string): Error {
+  const error = new Error(`API key auth failed for provider ${provider}`)
+  error.name = "ModelsError"
+  return Object.assign(error, { code: "auth" })
+}
+
 // senpi's own error for a refresh that failed transiently (connection refused, timeout, 408/429/5xx):
 // the real class, so the probe is tested against the marker senpi actually sets.
 function refreshUnavailable(provider: string): Error {
@@ -85,8 +92,12 @@ type ProbeFailures = {
   readonly dead?: readonly string[]
   readonly deadSlots?: readonly string[]
   readonly broken?: readonly string[]
-  /** Provider ids or `provider/model` selectors whose probe throws `throws(provider)`. */
-  readonly custom?: { readonly targets: readonly string[]; readonly throws: (provider: string) => unknown }
+  /** Provider ids or `provider/model` selectors whose probe throws `throws(provider)` (`modelThrows` for a model, when set). */
+  readonly custom?: {
+    readonly targets: readonly string[]
+    readonly throws: (provider: string) => unknown
+    readonly modelThrows?: (provider: string) => unknown
+  }
 }
 
 // `ModelRuntime.getAuth` as senpi implements it: a provider string resolves that credential (one
@@ -106,7 +117,7 @@ function authProbe(failures: ProbeFailures = {}) {
     }
     calls.push(`${target.provider}/${target.id}${slot}`)
     if (failures.broken?.includes(`${target.provider}/${target.id}`)) throw requestConfigurationFailed(target)
-    if (failures.custom?.targets.includes(`${target.provider}/${target.id}`)) throw failures.custom.throws(target.provider)
+    if (failures.custom?.targets.includes(`${target.provider}/${target.id}`)) throw (failures.custom.modelThrows ?? failures.custom.throws)(target.provider)
     return { auth: { apiKey: "resolved" } }
   }
   return { getAuth, calls }
@@ -654,6 +665,18 @@ describe("createModelProfileComponent", () => {
       applied: API_ASTRA,
       authFailed: [{ provider: "chatgpt-subscription", model: "gpt-6-astra", reason: "request" }],
     },
+    {
+      // The model probe re-runs the credential resolution after a transient provider probe; a
+      // credentials-class failure there is provider-scope, not this model's request configuration.
+      kind: "a transient refresh failure on the provider probe and a credentials failure on the model probe",
+      custom: {
+        targets: ["chatgpt-subscription", "chatgpt-subscription/gpt-6-astra"],
+        throws: refreshUnavailable,
+        modelThrows: credentialsFailed,
+      },
+      applied: API_ASTRA,
+      authFailed: [{ provider: "chatgpt-subscription", model: "gpt-6-astra", reason: "credentials" }],
+    },
   ])("#given geeky-normal with the subscription and the OpenAI API lane and $kind #when the session starts #then the expected lane serves GPT-6 Astra", async ({ custom, broken, applied, authFailed }) => {
     const probe = authProbe({ custom, broken })
     const { pi, start } = harness({ model_profile: "geeky-normal" }, [ASTRA, API_ASTRA], probe.getAuth)
@@ -666,11 +689,14 @@ describe("createModelProfileComponent", () => {
     expect(details["authFailed"]).toEqual(authFailed)
   })
 
+  // The line says the first turn retries the refresh, so it is logged only while the refresh is still
+  // unresolved: a model probe that resolves the credential itself means the retry already succeeded.
   test.each([
-    { probe: "provider", target: "chatgpt-subscription" },
-    { probe: "model", target: "chatgpt-subscription/gpt-6-astra" },
-  ])("#given a transient refresh failure on the $probe probe #when the session keeps the subscription #then one warn line names the kept candidate with only the error class and code", async ({ target }) => {
-    const probe = authProbe({ custom: { targets: [target], throws: refreshUnavailable } })
+    { probe: "provider probe only (the model probe's refresh succeeds)", targets: ["chatgpt-subscription"], lines: 0 },
+    { probe: "model probe", targets: ["chatgpt-subscription/gpt-6-astra"], lines: 1 },
+    { probe: "provider and model probes", targets: ["chatgpt-subscription", "chatgpt-subscription/gpt-6-astra"], lines: 1 },
+  ])("#given a transient refresh failure on the $probe #when the session keeps the subscription #then $lines warn line(s) name the kept candidate with only the error class and code", async ({ targets, lines }) => {
+    const probe = authProbe({ custom: { targets, throws: refreshUnavailable } })
     const { logs, start } = harness({ model_profile: "geeky-normal" }, [ASTRA, API_ASTRA], probe.getAuth)
 
     await start(STARTUP)
@@ -678,9 +704,11 @@ describe("createModelProfileComponent", () => {
     // The diagnosable fingerprint is the contract (candidate + error class/code + transport code),
     // not the sentence around it; the raw message must not leak.
     const kept = logs.filter((line) => line.startsWith("warn:") && line.includes("chatgpt-subscription/gpt-6-astra"))
-    expect(kept).toHaveLength(1)
-    expect(kept[0]).toContain("OAuthRefreshUnavailableError/oauth")
-    expect(kept[0]).toContain("ECONNREFUSED")
+    expect(kept).toHaveLength(lines)
+    for (const line of kept) {
+      expect(line).toContain("OAuthRefreshUnavailableError/oauth")
+      expect(line).toContain("ECONNREFUSED")
+    }
     expect(logs.some((line) => line.includes("connect failed"))).toBe(false)
   })
 
