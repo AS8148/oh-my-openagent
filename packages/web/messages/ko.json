@@ -208,6 +208,8 @@
   "docs": {
     "mobileHeader": "OmO 문서",
     "searchPlaceholder": "문서 검색...",
+    "searchLabel": "문서 섹션 필터",
+    "sectionsLabel": "문서 섹션",
     "install": {
       "title": "OmO 설치",
       "description": "macOS, Linux, WSL, Windows에서 명령 하나로 OmO를 설치합니다."

@@ -208,6 +208,8 @@
   "docs": {
     "mobileHeader": "OmO ドキュメント",
     "searchPlaceholder": "ドキュメントを検索...",
+    "searchLabel": "ドキュメントのセクションを絞り込む",
+    "sectionsLabel": "ドキュメントのセクション",
     "install": {
       "title": "OmO のインストール",
       "description": "macOS、Linux、WSL、Windows でコマンドひとつで OmO をインストールします。"
