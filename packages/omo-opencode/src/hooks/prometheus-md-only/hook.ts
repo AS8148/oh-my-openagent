@@ -112,6 +112,16 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
         return
       }
 
+      const deny = (path: string): Error => {
+        log(`[${HOOK_NAME}] Blocked: Prometheus can only write to .omo/*.md`, {
+          sessionID: input.sessionID,
+          tool: toolName,
+          filePath: path,
+          agent: agentName,
+        })
+        return blockedWriteError(path)
+      }
+
       // Fail closed: a file-writing call whose target this guard cannot read is blocked, never let through.
       const patch = isPatchTool ? patchedPaths(output.args) : undefined
       const targets = isPatchTool ? patch?.paths : writeTargets(output.args)
@@ -129,26 +139,18 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       // Entry operations must still unlink the named link, not its authorized content.
       for (const entry of resolved ?? []) {
         if (resolveAllowedFile(entry.target.path, ctx.directory) === undefined) {
-          throw blockedWriteError(entry.target.path)
+          throw deny(entry.target.path)
         }
       }
       const blockedPath =
         resolved === undefined ? "(unrecognized file argument)" : resolved.find(entry => entry.path === undefined)?.target.path
-      if (blockedPath !== undefined) {
-        log(`[${HOOK_NAME}] Blocked: Prometheus can only write to .omo/*.md`, {
-          sessionID: input.sessionID,
-          tool: toolName,
-          filePath: blockedPath,
-          agent: agentName,
-        })
-        throw blockedWriteError(blockedPath)
-      }
+      if (blockedPath !== undefined) throw deny(blockedPath)
       const replacements: Record<string, string> = {}
       for (const entry of resolved ?? []) {
-        if (entry.path === undefined) throw blockedWriteError(entry.target.path)
+        if (entry.path === undefined) throw deny(entry.target.path)
         if ("line" in entry.target && patch) {
           // A filesystem filename is not necessarily one representable patch header.
-          if (/[\r\n]/.test(entry.path) || entry.path.trim() !== entry.path) throw blockedWriteError(entry.target.path)
+          if (/[\r\n]/.test(entry.path) || entry.path.trim() !== entry.path) throw deny(entry.target.path)
           patch.lines[entry.target.line] = entry.target.prefix + entry.path
         } else if ("field" in entry.target) {
           replacements[entry.target.field] = entry.path
@@ -156,40 +158,44 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       }
       if (patch) {
         const rewritten = patch.lines.join("\n")
+        const original = output.args[patch.field] as string
+        const executableTargets = (text: string) => parsePatch(text).hunks.flatMap(hunk => [
+          { prefix: `*** ${hunk.type === "add" ? "Add" : hunk.type === "delete" ? "Delete" : "Update"} File:`, path: hunk.path },
+          ...(hunk.type === "update" && hunk.move_path !== undefined
+            ? [{ prefix: "*** Move to:", path: hunk.move_path }] : []),
+        ])
+        let executedRewritten: ReturnType<typeof executableTargets>
+        let executedOriginal: ReturnType<typeof executableTargets>
         try {
-          const executableTargets = (text: string) => parsePatch(text).hunks.flatMap(hunk => [
-            { prefix: `*** ${hunk.type === "add" ? "Add" : hunk.type === "delete" ? "Delete" : "Update"} File:`, path: hunk.path },
-            ...(hunk.type === "update" && hunk.move_path !== undefined
-              ? [{ prefix: "*** Move to:", path: hunk.move_path }] : []),
-          ])
-          const matchesAuthorized = (executed: ReturnType<typeof executableTargets>) =>
-            executed.length === resolved?.length && executed.every((entry, index) => {
-              const allowed = resolved?.[index]
-              return allowed && "prefix" in allowed.target &&
-                entry.prefix === allowed.target.prefix && entry.path === allowed.path
-            })
-          if (!matchesAuthorized(executableTargets(rewritten))) throw blockedWriteError("(patch target round trip)")
-          const original = output.args[patch.field] as string
-          // Already canonical frozen calls need no change, including harmless header spacing.
-          replacements[patch.field] = matchesAuthorized(executableTargets(original)) ? original : rewritten
+          executedRewritten = executableTargets(rewritten)
+          executedOriginal = executableTargets(original)
         } catch {
-          throw blockedWriteError("(unrepresentable patch)")
+          throw deny("(unrepresentable patch)")
         }
+        const matchesAuthorized = (executed: ReturnType<typeof executableTargets>) =>
+          executed.length === resolved?.length && executed.every((entry, index) => {
+            const allowed = resolved?.[index]
+            return allowed && "prefix" in allowed.target &&
+              entry.prefix === allowed.target.prefix && entry.path === allowed.path
+          })
+        if (!matchesAuthorized(executedRewritten)) throw deny("(patch target round trip)")
+        // Already canonical frozen calls need no change, including harmless header spacing.
+        replacements[patch.field] = matchesAuthorized(executedOriginal) ? original : rewritten
       }
       const retainedArgs = execution?.original ?? output.args
       if (retainedArgs !== output.args) {
-        throw blockedWriteError("(detached host execution arguments)")
+        throw deny("(detached host execution arguments)")
       }
       try {
         if (Object.entries(replacements).some(([field, value]) => retainedArgs[field] !== value)) {
           replaceToolArgs(output, replacements)
         }
       } catch {
-        throw blockedWriteError("(immutable tool arguments)")
+        throw deny("(immutable tool arguments)")
       }
       // OpenCode executes the retained args reference, not trigger's replacement wrapper.
       if (Object.entries(replacements).some(([field, value]) => retainedArgs[field] !== value)) {
-        throw blockedWriteError("(tool arguments did not reach execution)")
+        throw deny("(tool arguments did not reach execution)")
       }
       if (execution) execution.approved = replacements
       if (isPatchTool) return

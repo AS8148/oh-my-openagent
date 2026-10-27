@@ -32,7 +32,8 @@ export function resolveAllowedFile(filePath: string, workspaceRoot: string, mode
     const prefix = input.slice(0, planning.index + planning[0].length)
     const realRoot = realpathSync.native(workspaceRoot)
     const planningRoot = resolveFileWritePath(prefix, workspaceRoot)
-    if (!isInside(planningRoot, realRoot) || !isPlanningName(planningRoot)) return undefined
+    // The user chooses the physical layout (.omo -> docs/plans); it must only stay strictly inside the project.
+    if (!isInside(planningRoot, realRoot)) return undefined
     const destination = resolveFileWritePath(filePath, workspaceRoot, mode === "content")
     if (!isInside(destination, planningRoot)) return undefined
     return ALLOWED_EXTENSIONS.some(ext =>

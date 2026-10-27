@@ -179,6 +179,10 @@ export function createToolExecuteBeforeHandler(args: {
       output.args !== execution.original ||
       Object.entries(execution.approved).some(([field, value]) => execution.original[field] !== value)
     )) {
+      log("[prometheus-md-only] Blocked: approved arguments changed after authorization", {
+        sessionID: input.sessionID,
+        tool: input.tool,
+      })
       throw new Error("Prometheus approved arguments no longer match the host execution reference")
     }
   }
