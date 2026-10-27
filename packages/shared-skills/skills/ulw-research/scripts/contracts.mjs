@@ -63,7 +63,7 @@ export const DEFECT_CODES = deepFreeze({
 	derived_not_allowed: { severity: "blocker", integrity: true, hint: "The brief allows no derived or assumed numbers; cite a source row directly or change the brief with the requester." },
 	source_outside_floor: { severity: "blocker", integrity: true, hint: "The row's source is outside the source floor the brief records; use a source the brief allows or remove the fact." },
 	brief_changed: { severity: "blocker", integrity: true, hint: "The edition's fill map was not written under the current ## Fidelity block (it changed after fill, or the map predates the binding); re-run fact fill, then fact verify." },
-	snapshot_hash_mismatch: { severity: "blocker", integrity: true, hint: "The source snapshot changed after it was pinned; re-snapshot the source and re-register its rows." },
+	snapshot_hash_mismatch: { severity: "blocker", integrity: true, hint: "The source snapshot is unreadable or changed after it was pinned; restore or re-snapshot the source and re-register its rows." },
 	chart_value_untraceable: { severity: "blocker", integrity: true, hint: "A chart value, tick, or data file does not match its ledger-backed data source; re-render the chart from the exported data." },
 	quote_unbound: { severity: "blocker", integrity: true, hint: "A direct quotation has no ledger quote row; register it with fact quote and insert it through its placeholder." },
 	edition_unverified: { severity: "blocker", integrity: true, hint: "The delivered file has no matching fact verify record; run fact verify on that edition and record it with --verified-by." },
@@ -89,6 +89,7 @@ export const DEFECT_CODES = deepFreeze({
 	verification_claim_unmarked: { severity: "minor", integrity: false, hint: "The sentence reads as a check we ran but carries no verified mark; mark it {{V:F<n>:label}} on a recorded command-output row, or reword it." },
 	scope_widened_warn: { severity: "minor", integrity: false, hint: "The sentence uses a broader scope word than the quote; confirm the scope or narrow it." },
 	particle_unverified: { severity: "minor", integrity: false, hint: "The particle after this value could not be checked; read it aloud and fix it by hand if wrong." },
+	unit_unbound: { severity: "minor", integrity: false, hint: "Use the full fact placeholder, or write the unit right after :value (with or without a space; a Korean particle may follow), as its :unit element, or in the matching table column header." },
 	fallback_without_entity: { severity: "minor", integrity: false, hint: "The replacement quote has no entity for attribution; set one on the row." },
 	meaning_drift_warn: { severity: "minor", integrity: false, hint: "A separate reader found the sentence changes scope, subject, or certainty; rewrite from the quote." },
 	polish_edit_unlocated: { severity: "minor", integrity: false, hint: "The edit's before-text was not found exactly once; re-propose against the current text." },
@@ -98,6 +99,7 @@ export const DEFECT_CODES = deepFreeze({
 
 /** Codes only the fidelity verifier raises (fact ledger, fill, verify, meaning, polish). */
 export const FIDELITY_CODES = Object.freeze([
+	"unit_unbound",
 	"unresolved_placeholder", "value_mismatch", "unit_mismatch", "quote_not_verbatim", "claim_status_invalid",
 	"incompatible_operands", "pointer_label_mismatch", "quote_anchor_unresolved", "unit_duplicated", "polish_diff_fail",
 	"fidelity_interview_incomplete", "derived_not_allowed", "source_outside_floor", "brief_changed", "snapshot_hash_mismatch",
