@@ -77,17 +77,6 @@ jobs:
         shell: bash
         run: cargo build --release -p omo-engine-trust-helper --locked --target "${{ matrix.rust_target }}"
 
-      # TEMPORARY measurement (removed after the run): the subject algorithm of the runner's real Disallowed CTL. Read only.
-      - name: Probe the Disallowed CTL subject algorithm
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $value = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\SystemCertificates\AuthRoot\AutoUpdate' -Name DisallowedCertEncodedCtl -ErrorAction Stop).DisallowedCertEncodedCtl
-          $file = Join-Path $env:RUNNER_TEMP 'disallowed-ctl.stl'
-          [IO.File]::WriteAllBytes($file, $value)
-          "bytes=$($value.Length)"
-          certutil -dump $file | Select-String -Pattern 'Algorithm|Usage|Entries|Subject Identifier|Entry \[0\]|Entry \[1\]' | Select-Object -First 30
-
       - name: Install JavaScript dependencies
         run: bun install --frozen-lockfile --ignore-scripts
 
