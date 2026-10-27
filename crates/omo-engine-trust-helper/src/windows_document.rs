@@ -81,8 +81,9 @@ pub enum CtlOutcome {
     Unreadable,
     Undecodable,
     UnsupportedSubjectAlgorithm,
-    /// The CTL could not be applied: `CertFindSubjectInCTL` failed with an error other than not-found.
-    MatchFailed,
+    /// An entry's length is not one the subject algorithm defines: 20 bytes for certificate SHA-1, 16 or 48 for
+    /// disallowedHash (design 4.2 item 2).
+    UnsupportedEntryLength,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -188,7 +189,7 @@ mod tests {
         for outcome in [Outcome::Read, Outcome::Absent] {
             assert!(negatives_complete(&[source(SourceStore::Disallowed, outcome)], CtlOutcome::Absent));
         }
-        for ctl in [CtlOutcome::Unreadable, CtlOutcome::Undecodable, CtlOutcome::UnsupportedSubjectAlgorithm, CtlOutcome::MatchFailed] {
+        for ctl in [CtlOutcome::Unreadable, CtlOutcome::Undecodable, CtlOutcome::UnsupportedSubjectAlgorithm, CtlOutcome::UnsupportedEntryLength] {
             assert!(!negatives_complete(&[], ctl));
         }
     }

@@ -129,20 +129,35 @@ impl Pki {
         self.load(name)
     }
 
-    /// MD5 of the subjectPublicKey BIT STRING contents after the unused-bits byte, computed by OpenSSL.
-    fn public_key_md5(&self, cert: &Cert) -> Vec<u8> {
+    /// The certificate's SubjectPublicKeyInfo DER, as OpenSSL encodes it.
+    fn subject_public_key_info(&self, cert: &Cert) -> Vec<u8> {
         let spki = self.openssl(&["x509", "-in", cert.pem.to_str().unwrap(), "-noout", "-pubkey"]);
         let serial = self.next_serial();
-        let (pem, der, key) = (self.path(&format!("spki-{serial}.pem")), self.path(&format!("spki-{serial}.der")), self.path(&format!("key-{serial}.bin")));
+        let (pem, der) = (self.path(&format!("spki-{serial}.pem")), self.path(&format!("spki-{serial}.der")));
         std::fs::write(&pem, spki).unwrap();
         self.openssl(&["pkey", "-pubin", "-in", &pem, "-outform", "DER", "-out", &der]);
-        let spki = std::fs::read(&der).unwrap();
+        std::fs::read(&der).unwrap()
+    }
+
+    fn md5(&self, bytes: &[u8]) -> Vec<u8> {
+        let input = self.path(&format!("md5-{}.bin", self.next_serial()));
+        std::fs::write(&input, bytes).unwrap();
+        self.openssl(&["dgst", "-md5", "-binary", &input])
+    }
+
+    /// MD5 of the subjectPublicKey BIT STRING contents after the unused-bits byte, computed by OpenSSL.
+    fn public_key_md5(&self, cert: &Cert) -> Vec<u8> {
+        let spki = self.subject_public_key_info(cert);
         let (outer, _) = header(&spki);
         let (algorithm_header, algorithm_length) = header(&spki[outer..]);
         let bits = &spki[outer + algorithm_header + algorithm_length..];
         let (bits_header, bits_length) = header(bits);
-        std::fs::write(&key, &bits[bits_header + 1..bits_header + bits_length]).unwrap();
-        self.openssl(&["dgst", "-md5", "-binary", &key])
+        self.md5(&bits[bits_header + 1..bits_header + bits_length])
+    }
+
+    /// MD5 of the whole SubjectPublicKeyInfo DER: not a disallowedHash form.
+    fn subject_public_key_info_md5(&self, cert: &Cert) -> Vec<u8> {
+        self.md5(&self.subject_public_key_info(cert))
     }
 
     /// The digest of the certificate's TBSCertificate, computed by OpenSSL, independent of Crypt32.
@@ -345,59 +360,64 @@ fn certificate_identities_match_openssl() {
     assert_eq!(store.add_encoded(&root.der).unwrap().identity(), Some(pki.identity(&root)));
 }
 
-// Matching is Crypt32's: CertFindSubjectInCTL with CTL_CERT_SUBJECT_TYPE, positive and negative (design 9.2).
+// Certificate SHA-1 subject algorithm (design 4.2 item 2): an entry is the SHA-1 of a tested certificate's DER.
 #[test]
-fn a_synthetic_signed_sha1_ctl_names_certificates_through_crypt32() {
+fn a_synthetic_signed_sha1_ctl_names_certificates_by_thumbprint() {
     let pki = Pki::new();
     let signer = pki.root("ctl-signer", "signer");
     let listed = pki.root("ctl-listed", "root");
     let kept = pki.root("ctl-kept", "root");
     let thumbprint: Vec<u8> = (0..20).map(|index| u8::from_str_radix(&pki.identity(&listed).sha1[index * 2..index * 2 + 2], 16).unwrap()).collect();
-    let ctl = pki.sign_ctl(&ctl_content(&[&thumbprint, &[0xab; 20]], "1.3.14.3.2.26"), &signer);
-    let (stores, _) = MemoryStores::default().with(SourceStore::Root, Location::LocalMachine, &[&listed, &kept]);
-    let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..stores };
-    let output = collect(&mut stores, &[]).unwrap();
+    let ctl = pki.sign_ctl(&ctl_content(&[&thumbprint, &[0xab; 20]], SHA1), &signer);
+    let output = collect(&mut ctl_stores(ctl, &[&listed, &kept]), &[]).unwrap();
     assert_eq!((output.ctl, output.complete, output.ctl_sha1), (CtlOutcome::Read, true, vec![pki.identity(&listed).sha1]));
 
+    let wrong_length = pki.sign_ctl(&ctl_content(&[&thumbprint, &[0xab; 32]], SHA1), &signer);
+    let output = collect(&mut ctl_stores(wrong_length, &[&listed]), &[]).unwrap();
+    assert_eq!((output.ctl, output.complete, output.ctl_sha1), (CtlOutcome::UnsupportedEntryLength, false, vec![]));
+
     let sha256 = pki.sign_ctl(&ctl_content(&[&[0x22u8; 32]], "2.16.840.1.101.3.4.2.1"), &signer);
-    assert_eq!(decode_disallowed_ctl(&sha256).err(), Some(CtlOutcome::UnsupportedSubjectAlgorithm));
+    let output = collect(&mut ctl_stores(sha256, &[&listed]), &[]).unwrap();
+    assert_eq!((output.ctl, output.complete), (CtlOutcome::UnsupportedSubjectAlgorithm, false));
     assert_eq!(decode_disallowed_ctl(&[0x30, 0x03, 0x02, 0x01, 0x00]).err(), Some(CtlOutcome::Undecodable));
 }
 
+const SHA1: &str = "1.3.14.3.2.26";
 const DISALLOWED_HASH: &str = "1.3.6.1.4.1.311.10.11.15";
 
-// The hosted runners' real Disallowed CTL declares szOID_DISALLOWED_HASH. Measured against Microsoft's published
-// disallowedcert.sst, its entries are of two kinds: the digest of a certificate's TBSCertificate under its own
-// signature algorithm (6 of 96, all SHA-384) and the MD5 of its subject public key (90 of 96). The entries here
-// come from OpenSSL; Crypt32's CertFindSubjectInCTL must recognise both kinds.
+/// A store set whose LOCAL_MACHINE ROOT holds `roots`, with `ctl` as the registry value.
+fn ctl_stores(ctl: Vec<u8>, roots: &[&Cert]) -> MemoryStores {
+    let (stores, _) = MemoryStores::default().with(SourceStore::Root, Location::LocalMachine, roots);
+    MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..stores }
+}
+
+// disallowedHash (design 4.2 item 2): a 16-byte entry is the MD5 of the public key octets (the subjectPublicKey
+// BIT STRING contents) or, as add-only hardening, of the TBSCertificate; a 48-byte entry is the SHA-384 of the
+// TBSCertificate. Entries come from OpenSSL over the test's own slices of the DER, independent of the helper.
 #[test]
-fn a_disallowed_hash_ctl_names_certificates_by_signature_hash_or_public_key_md5() {
+fn a_disallowed_hash_ctl_names_certificates_by_public_key_md5_or_to_be_signed_digest() {
     let pki = Pki::new();
     let signer = pki.root("dh-signer", "signer");
     let r = pki.root("dh-R", "root");
     let x = pki.issued_with("dh-X", &r, "intermediate", "-sha384");
-    let kept = pki.root("dh-kept", "root");
     let b = pki.root("dh-B", "root");
     let k = pki.root("dh-K", "root");
+    let spki = pki.root("dh-spki", "root");
+    let kept = pki.root("dh-kept", "root");
     let entries = [
-        pki.to_be_signed_digest(&r, "-sha256"),
-        pki.to_be_signed_digest(&x, "-sha384"),
-        pki.to_be_signed_digest(&b, "-sha256"),
         pki.public_key_md5(&k),
-        vec![0x5a; 20],
+        pki.public_key_md5(&b),
+        pki.to_be_signed_digest(&x, "-sha384"),
+        // Hardening: MD5 of the TBSCertificate of an ecdsa-with-SHA256 certificate, so no signature hash is involved.
+        pki.to_be_signed_digest(&r, "-md5"),
+        // The MD5 of the whole SubjectPublicKeyInfo is not the 16-byte form (r13 review B1) and must not match.
+        pki.subject_public_key_info_md5(&spki),
+        vec![0x5a; 16],
+        vec![0x5a; 48],
     ];
     let entries: Vec<&[u8]> = entries.iter().map(Vec::as_slice).collect();
     let ctl = pki.sign_ctl(&ctl_content(&entries, DISALLOWED_HASH), &signer);
-    // Crypt32's own answer per certificate, with the Win32 error it reports when it neither finds nor rules out.
-    let decoded = decode_disallowed_ctl(&ctl).unwrap();
-    let answers: Vec<(&str, Result<bool, u32>)> =
-        [("R", &r), ("X", &x), ("B", &b), ("K", &k), ("kept", &kept)].map(|(name, cert)| (name, decoded.contains(&cert.der))).to_vec();
-    let expected: Vec<(&str, Result<bool, u32>)> = vec![("R", Ok(true)), ("X", Ok(true)), ("B", Ok(true)), ("K", Ok(true)), ("kept", Ok(false))];
-    assert_eq!(answers, expected, "CertFindSubjectInCTL per certificate (Err holds GetLastError)");
-    drop(decoded);
-    let (stores, _) = MemoryStores::default().with(SourceStore::Root, Location::LocalMachine, &[&r, &kept, &k]);
-    let (stores, _) = stores.with(SourceStore::Ca, Location::CurrentUser, &[&x]);
-    let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..stores };
+    let (mut stores, _) = ctl_stores(ctl, &[&r, &k, &spki, &kept]).with(SourceStore::Ca, Location::CurrentUser, &[&x]);
 
     let output = collect(&mut stores, &[&b.der]).unwrap();
     let mut matched = vec![pki.identity(&r).sha1, pki.identity(&x).sha1, pki.identity(&b).sha1, pki.identity(&k).sha1];
@@ -406,22 +426,38 @@ fn a_disallowed_hash_ctl_names_certificates_by_signature_hash_or_public_key_md5(
 }
 
 #[test]
-fn a_crypt32_match_error_makes_a_disallowed_hash_scan_incomplete() {
+fn a_disallowed_hash_entry_of_another_length_makes_the_scan_incomplete() {
     let pki = Pki::new();
-    let signer = pki.root("dh-fail-signer", "signer");
-    let mut unknown = pki.root("dh-unknown", "root").der;
+    let signer = pki.root("dh-length-signer", "signer");
+    let k = pki.root("dh-length-K", "root");
+    let listed = pki.public_key_md5(&k);
+    for length in [20, 32, 64] {
+        let ctl = pki.sign_ctl(&ctl_content(&[&listed, &vec![0x5a; length]], DISALLOWED_HASH), &signer);
+        let output = collect(&mut ctl_stores(ctl, &[&k]), &[]).unwrap();
+        assert_eq!((output.ctl, output.complete, output.ctl_sha1), (CtlOutcome::UnsupportedEntryLength, false, vec![]), "{length}-byte entry");
+    }
+}
+
+// No digest depends on the signature algorithm (design 4.2 item 2), so a certificate whose signature algorithm no
+// hash is registered for is still matched by its key and keeps the scan complete.
+#[test]
+fn a_certificate_whose_signature_algorithm_has_no_hash_keeps_the_scan_complete() {
+    let pki = Pki::new();
+    let signer = pki.root("dh-unknown-signer", "signer");
+    let original = pki.root("dh-unknown", "root");
+    let mut unknown = original.der.clone();
     // Rewrite the outer signatureAlgorithm, ecdsa-with-SHA256, to an OID no hash algorithm is registered for.
     let ecdsa_sha256 = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
     let at = unknown.windows(ecdsa_sha256.len()).rposition(|window| window == ecdsa_sha256).unwrap();
     unknown[at + ecdsa_sha256.len() - 1] = 0x7f;
-    let ctl = pki.sign_ctl(&ctl_content(&[&[0x5a; 32]], DISALLOWED_HASH), &signer);
+    let ctl = pki.sign_ctl(&ctl_content(&[&pki.public_key_md5(&original)], DISALLOWED_HASH), &signer);
     let store = CertStore::memory().unwrap();
-    store.add_encoded(&unknown).expect("Crypt32 stores the certificate without checking its signature");
+    let sha1 = store.add_encoded(&unknown).expect("Crypt32 stores the certificate without checking its signature").identity().unwrap().sha1;
     let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..MemoryStores::default() };
     stores.stores.insert((SourceStore::Root, Location::CurrentUser), Ok(store));
 
     let output = collect(&mut stores, &[]).unwrap();
-    assert_eq!((serde_json::to_value(output.ctl).unwrap(), output.complete), (serde_json::json!("match-failed"), false));
+    assert_eq!((output.ctl, output.complete, output.ctl_sha1), (CtlOutcome::Read, true, vec![sha1]));
 }
 
 #[test]

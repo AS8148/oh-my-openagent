@@ -125,7 +125,7 @@ describe("decodeWindowsTrustHelperOutput", () => {
     ["an unreadable CTL", (document: Wire) => { document.ctl = "unreadable" }, "$.complete"],
     ["an undecodable CTL", (document: Wire) => { document.ctl = "undecodable" }, "$.complete"],
     ["a CTL with an unsupported subject algorithm", (document: Wire) => { document.ctl = "unsupported-subject-algorithm" }, "$.complete"],
-    ["a CTL that Crypt32 could not apply to a certificate", (document: Wire) => { document.ctl = "match-failed" }, "$.complete"],
+    ["a CTL with an entry of an unsupported length", (document: Wire) => { document.ctl = "unsupported-entry-length" }, "$.complete"],
   ])("#given %s with complete:true #when decoding #then the claim is rejected as inconsistent", (_case, mutate, path) => {
     const document = wire()
     mutate(document)
