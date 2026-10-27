@@ -2,13 +2,27 @@ import { spyOn } from "bun:test"
 import * as nodeFs from "node:fs"
 import * as nodeFsPromises from "node:fs/promises"
 
+import { homedir } from "node:os"
+import { posix } from "node:path"
+
 import * as memoryFs from "@oh-my-opencode/memory-core/fs"
 
-export const AUTOMOUNT_TRIGGER_CASES = ["/home", "/home/qa-other/work/SKILL.md", "/net/host/share/note.md"] as const
+export const AUTOMOUNT_TRIGGER_CASES = [
+  "/home",
+  "/home/qa-other/work/SKILL.md",
+  "/net/host/share/note.md",
+  "/HOME/qa-other/work/note.md",
+  "/System/Volumes/Data/home/qa-other/work/note.md",
+] as const
 
 const isTrigger = (path: unknown): boolean => {
   const text = typeof path === "string" ? path : path instanceof URL ? path.pathname : ""
-  return ["/home", "/net"].some((trigger) => text === trigger || text.startsWith(`${trigger}/`))
+  if (!text.startsWith("/")) return false
+  const under = (path: string, root: string) => path === root || path.startsWith(`${root}/`)
+  const lexical = posix.resolve(text).toLowerCase()
+  const home = posix.resolve(homedir()).toLowerCase()
+  const roots = ["/home", "/net", "/system/volumes/data/home", "/system/volumes/data/net"]
+  return roots.some((root) => under(lexical, root)) && (home === "/" || !under(lexical, home))
 }
 
 type Restorable = { mockRestore(): void }
@@ -26,6 +40,7 @@ export async function withAutomountTrap(body: () => unknown): Promise<string[]> 
     throw Object.assign(new Error(`AUTOMOUNT_TRAP ${name} ${String(path)}`), { code: "EAUTOMOUNT_TRAP" })
   }
   const spies: Restorable[] = []
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")
   const wrapSync = (module: Record<string, unknown>, name: string, label: string): void => {
     const original = module[name]
     if (typeof original !== "function") return
@@ -44,13 +59,12 @@ export async function withAutomountTrap(body: () => unknown): Promise<string[]> 
     }
     spies.push(spy)
   }
-  for (const [module, label] of [[nodeFs, "fs"], [memoryFs, "memoryFs"]] as const) {
-    for (const name of ["realpathSync", "lstatSync", "statSync", "existsSync", "realpath"]) wrapSync(module as unknown as Record<string, unknown>, name, label)
-  }
-  for (const name of ["realpath", "lstat", "stat"]) wrapSync(nodeFsPromises as unknown as Record<string, unknown>, name, "fsp")
-  const platform = Object.getOwnPropertyDescriptor(process, "platform")
-  Object.defineProperty(process, "platform", { value: "darwin", configurable: true })
   try {
+    for (const [module, label] of [[nodeFs, "fs"], [memoryFs, "memoryFs"]] as const) {
+      for (const name of ["realpathSync", "lstatSync", "statSync", "existsSync", "readFileSync", "realpath"]) wrapSync(module as unknown as Record<string, unknown>, name, label)
+    }
+    for (const name of ["realpath", "lstat", "stat"]) wrapSync(nodeFsPromises as unknown as Record<string, unknown>, name, "fsp")
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true })
     await body()
   } finally {
     if (platform !== undefined) Object.defineProperty(process, "platform", platform)

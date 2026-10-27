@@ -2,8 +2,11 @@ import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import { posix, win32 } from "node:path"
 
-/** macOS autofs triggers (`auto_home`, `-hosts`); resolving a path through one opens it and can block forever (#11545). */
-const DARWIN_AUTOMOUNT_TRIGGERS = ["/home", "/net"]
+/**
+ * macOS autofs triggers (`auto_home`, `-hosts`) in every spelling that reaches the same mount: the root symlinks and their
+ * firmlinked data-volume paths. Compared lowercase because the default APFS volume is case-insensitive (#11545).
+ */
+const DARWIN_AUTOMOUNT_TRIGGERS = ["/home", "/net", "/system/volumes/data/home", "/system/volumes/data/net"]
 
 export interface AutomountTriggerOptions {
   readonly platform?: NodeJS.Platform
@@ -20,9 +23,9 @@ export interface AutomountTriggerOptions {
  */
 export function isDarwinAutomountTriggerPath(path: string, options: AutomountTriggerOptions = {}): boolean {
   if ((options.platform ?? process.platform) !== "darwin") return false
-  const lexical = posix.resolve(path)
+  const lexical = posix.resolve(path).toLowerCase()
   if (!DARWIN_AUTOMOUNT_TRIGGERS.some((trigger) => lexical === trigger || lexical.startsWith(`${trigger}/`))) return false
-  const home = posix.resolve(options.homeDir ?? homedir())
+  const home = posix.resolve(options.homeDir ?? homedir()).toLowerCase()
   return home === "/" || !(lexical === home || lexical.startsWith(`${home}/`))
 }
 
