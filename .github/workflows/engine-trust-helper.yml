@@ -81,6 +81,7 @@ jobs:
 
       # TEMPORARY measurement (removed after the run): the real Disallowed CTL's subject algorithm and match counts. Read only.
       - name: Measure the Disallowed CTL matching rule
+        if: always()
         continue-on-error: true
         shell: bash
         run: cargo run -p omo-engine-trust-helper --example ctl_probe --locked

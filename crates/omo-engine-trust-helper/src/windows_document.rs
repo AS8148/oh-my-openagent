@@ -81,6 +81,8 @@ pub enum CtlOutcome {
     Unreadable,
     Undecodable,
     UnsupportedSubjectAlgorithm,
+    /// A disallowedHash CTL could not be applied: Crypt32 could not hash a certificate the facts name.
+    SignatureHashFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -186,7 +188,7 @@ mod tests {
         for outcome in [Outcome::Read, Outcome::Absent] {
             assert!(negatives_complete(&[source(SourceStore::Disallowed, outcome)], CtlOutcome::Absent));
         }
-        for ctl in [CtlOutcome::Unreadable, CtlOutcome::Undecodable, CtlOutcome::UnsupportedSubjectAlgorithm] {
+        for ctl in [CtlOutcome::Unreadable, CtlOutcome::Undecodable, CtlOutcome::UnsupportedSubjectAlgorithm, CtlOutcome::SignatureHashFailed] {
             assert!(!negatives_complete(&[], ctl));
         }
     }

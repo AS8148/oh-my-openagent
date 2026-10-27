@@ -1,6 +1,7 @@
 //! Crypt32 facts (design 4.2), compiled only for Windows. Stores are opened read-only and existing-only under the helper's identity;
 //! system-store enumeration sits behind `SystemStores` so the adapter tests run on in-memory stores.
 
+use std::collections::{BTreeSet, HashSet};
 use std::ffi::{c_void, CStr};
 use std::ptr::{null, null_mut};
 
@@ -29,6 +30,11 @@ const ENCODING: u32 = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
 /// The Disallowed CTL is tens of kilobytes; anything near this bound is not a CTL Windows wrote.
 const CTL_LIMIT: u32 = 8 * 1024 * 1024;
 const SHA1_SUBJECT_ALGORITHM: &CStr = c"1.3.14.3.2.26";
+/// szOID_DISALLOWED_HASH, which wincrypt.h defines as szOID_CERT_SIGNATURE_HASH_PROP_ID: an entry is a certificate's
+/// CERT_SIGNATURE_HASH_PROP_ID, the digest of its TBSCertificate under its signature algorithm. Windows' own CTL uses it.
+const DISALLOWED_HASH_SUBJECT_ALGORITHM: &CStr = c"1.3.6.1.4.1.311.10.11.15";
+/// SHA-512, the longest digest CryptHashToBeSigned produces.
+const MAX_SIGNATURE_HASH: usize = 64;
 
 /// An open certificate store handle.
 pub struct CertStore(HCERTSTORE);
@@ -194,9 +200,19 @@ fn is_ca(context: &Context) -> bool {
     ok != 0 && decoded.fCA != 0
 }
 
+/// The entries of a decoded Disallowed CTL, by the subject algorithm it declares.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DisallowedCtl {
+    /// Certificate SHA-1 thumbprints, lower-case hex.
+    Sha1(Vec<String>),
+    /// Signature hashes; matched against each certificate the facts name (`CtlMatch`).
+    SignatureHash(HashSet<Vec<u8>>),
+}
+
 /// Decodes the Disallowed CTL with `CertCreateCTLContext`. The signature is not verified: the CTL can only
-/// remove trust. Only the certificate SHA-1 subject algorithm is implemented (design 4.2 item 2).
-pub fn decode_disallowed_ctl(bytes: &[u8]) -> Result<Vec<String>, CtlOutcome> {
+/// remove trust. The certificate SHA-1 and disallowedHash subject algorithms are implemented; any other
+/// subject algorithm makes the scan incomplete (design 4.2 item 2).
+pub fn decode_disallowed_ctl(bytes: &[u8]) -> Result<DisallowedCtl, CtlOutcome> {
     let length = u32::try_from(bytes.len()).map_err(|_| CtlOutcome::Undecodable)?;
     let ctl = unsafe { CertCreateCTLContext(ENCODING, bytes.as_ptr(), length) };
     if ctl.is_null() {
@@ -205,27 +221,75 @@ pub fn decode_disallowed_ctl(bytes: &[u8]) -> Result<Vec<String>, CtlOutcome> {
     let result = (|| {
         let info = unsafe { (*ctl).pCtlInfo.as_ref() }.ok_or(CtlOutcome::Undecodable)?;
         let algorithm = info.SubjectAlgorithm.pszObjId;
-        if algorithm.is_null() || unsafe { CStr::from_ptr(algorithm.cast_const().cast()) } != SHA1_SUBJECT_ALGORITHM {
+        if algorithm.is_null() {
             return Err(CtlOutcome::UnsupportedSubjectAlgorithm);
         }
+        let algorithm = unsafe { CStr::from_ptr(algorithm.cast_const().cast()) };
         let entries: &[CTL_ENTRY] = if info.cCTLEntry == 0 {
             &[]
         } else {
             unsafe { std::slice::from_raw_parts(info.rgCTLEntry, info.cCTLEntry as usize) }
         };
-        entries
-            .iter()
-            .map(|entry| {
-                let subject = &entry.SubjectIdentifier;
-                if subject.cbData != 20 || subject.pbData.is_null() {
-                    return Err(CtlOutcome::Undecodable);
-                }
-                Ok(hex(unsafe { std::slice::from_raw_parts(subject.pbData, 20) }))
-            })
-            .collect()
+        let subject = |entry: &CTL_ENTRY, valid: &dyn Fn(usize) -> bool| {
+            let subject = &entry.SubjectIdentifier;
+            if !valid(subject.cbData as usize) || subject.pbData.is_null() {
+                return Err(CtlOutcome::Undecodable);
+            }
+            Ok(unsafe { std::slice::from_raw_parts(subject.pbData, subject.cbData as usize) })
+        };
+        if algorithm == SHA1_SUBJECT_ALGORITHM {
+            let thumbprints = entries.iter().map(|entry| subject(entry, &|size| size == 20).map(hex));
+            return thumbprints.collect::<Result<_, _>>().map(DisallowedCtl::Sha1);
+        }
+        if algorithm == DISALLOWED_HASH_SUBJECT_ALGORITHM {
+            let hashes = entries.iter().map(|entry| subject(entry, &|size| (1..=MAX_SIGNATURE_HASH).contains(&size)).map(<[u8]>::to_vec));
+            return hashes.collect::<Result<_, _>>().map(DisallowedCtl::SignatureHash);
+        }
+        Err(CtlOutcome::UnsupportedSubjectAlgorithm)
     })();
     unsafe { CertFreeCTLContext(ctl) };
     result
+}
+
+/// CERT_SIGNATURE_HASH_PROP_ID computed from the DER with `CryptHashToBeSigned`, never read from a store, where a
+/// stored property could disagree with the certificate.
+fn signature_hash(der: &[u8]) -> Option<Vec<u8>> {
+    let mut out = vec![0u8; MAX_SIGNATURE_HASH];
+    let mut length = MAX_SIGNATURE_HASH as u32;
+    let ok = unsafe {
+        CryptHashToBeSigned(0, X509_ASN_ENCODING, der.as_ptr(), u32::try_from(der.len()).ok()?, out.as_mut_ptr(), &mut length)
+    };
+    if ok == 0 || length == 0 {
+        return None;
+    }
+    out.truncate(length as usize);
+    Some(out)
+}
+
+/// Applies a disallowedHash CTL to every certificate the facts name: positive candidates, `B` and every chain
+/// element. A match is reported by the certificate's SHA-1, which the policy denies like a SHA-1 CTL entry.
+/// A certificate Crypt32 cannot hash cannot be checked, so the scan becomes incomplete.
+#[derive(Default)]
+struct CtlMatch {
+    hashes: Option<HashSet<Vec<u8>>>,
+    matched: BTreeSet<String>,
+    failed: bool,
+}
+
+impl CtlMatch {
+    fn check(&mut self, der: &[u8]) {
+        let Some(hashes) = &self.hashes else { return };
+        match signature_hash(der) {
+            Some(hash) if hashes.contains(&hash) => match identity_of(der) {
+                Some(identity) => {
+                    self.matched.insert(identity.sha1);
+                }
+                None => self.failed = true,
+            },
+            Some(_) => {}
+            None => self.failed = true,
+        }
+    }
 }
 
 /// One physical store of a system store, or the outcome for a system store that could not be listed.
@@ -298,6 +362,20 @@ pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<Win
         let context = roots.add_encoded(der).ok_or(CollectError::BundledRoot)?;
         bundled_roots.push(context.identity().ok_or(CollectError::Internal)?);
     }
+    let (mut ctl, mut ctl_sha1, mut matcher) = match stores.disallowed_ctl() {
+        CtlRead::Absent => (CtlOutcome::Absent, Vec::new(), CtlMatch::default()),
+        CtlRead::Unreadable => (CtlOutcome::Unreadable, Vec::new(), CtlMatch::default()),
+        CtlRead::Bytes(bytes) => match decode_disallowed_ctl(&bytes) {
+            Ok(DisallowedCtl::Sha1(thumbprints)) => (CtlOutcome::Read, thumbprints, CtlMatch::default()),
+            Ok(DisallowedCtl::SignatureHash(hashes)) => {
+                (CtlOutcome::Read, Vec::new(), CtlMatch { hashes: Some(hashes), ..CtlMatch::default() })
+            }
+            Err(outcome) => (outcome, Vec::new(), CtlMatch::default()),
+        },
+    };
+    for der in bundled {
+        matcher.check(der);
+    }
 
     let mut sources = Vec::new();
     let mut candidates = Vec::new();
@@ -319,14 +397,6 @@ pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<Win
             disallowed.push(DisallowedCertificate { der: context.der().to_vec(), location, physical_store });
         }
     }
-    let (ctl, ctl_sha1) = match stores.disallowed_ctl() {
-        CtlRead::Absent => (CtlOutcome::Absent, Vec::new()),
-        CtlRead::Unreadable => (CtlOutcome::Unreadable, Vec::new()),
-        CtlRead::Bytes(bytes) => match decode_disallowed_ctl(&bytes) {
-            Ok(thumbprints) => (CtlOutcome::Read, thumbprints),
-            Err(outcome) => (outcome, Vec::new()),
-        },
-    };
 
     // Root candidates plus B are the exclusive anchors; every positive candidate can help build a path.
     for candidate in &candidates {
@@ -337,9 +407,10 @@ pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<Win
     }
     let engine = ChainEngine::exclusive(&roots).ok_or(CollectError::Internal)?;
 
-    let certificates = candidates
+    let certificates: Vec<WindowsCertificate> = candidates
         .iter()
         .map(|candidate| {
+            matcher.check(candidate.context.der());
             let self_signed = is_self_signed(&candidate.context);
             let ca = is_ca(&candidate.context);
             let intermediate = match candidate.store {
@@ -356,10 +427,15 @@ pub fn collect<S: SystemStores>(stores: &mut S, bundled: &[&[u8]]) -> Result<Win
                 self_signed,
                 ca,
                 eku: effective_eku(&candidate.context),
-                chain: if intermediate { engine.verify(&candidate.context, &others) } else { None },
+                chain: if intermediate { engine.verify(&candidate.context, &others, &mut matcher) } else { None },
             }
         })
         .collect();
+    if matcher.failed {
+        ctl = CtlOutcome::SignatureHashFailed;
+    } else if matcher.hashes.is_some() {
+        ctl_sha1 = matcher.matched.into_iter().collect();
+    }
 
     Ok(WindowsDocument {
         schema: SCHEMA,
@@ -388,7 +464,7 @@ impl ChainEngine {
     }
 
     /// The SSL-policy verdict for server authentication with no server name, ignoring revocation-unknown.
-    fn verify(&self, context: &Context, others: &CertStore) -> Option<Chain> {
+    fn verify(&self, context: &Context, others: &CertStore, ctl: &mut CtlMatch) -> Option<Chain> {
         let mut server_auth = *b"1.3.6.1.5.5.7.3.1\0";
         let mut usages: [PSTR; 1] = [server_auth.as_mut_ptr()];
         let mut para: CERT_CHAIN_PARA = unsafe { std::mem::zeroed() };
@@ -416,7 +492,9 @@ impl ChainEngine {
                 .iter()
                 .map(|element| {
                     let certificate = unsafe { &*(**element).pCertContext };
-                    identity_of(unsafe { std::slice::from_raw_parts(certificate.pbCertEncoded, certificate.cbCertEncoded as usize) })
+                    let der = unsafe { std::slice::from_raw_parts(certificate.pbCertEncoded, certificate.cbCertEncoded as usize) };
+                    ctl.check(der);
+                    identity_of(der)
                 })
                 .collect::<Option<Vec<Identity>>>()?;
             let mut https: HTTPSPolicyCallbackData = unsafe { std::mem::zeroed() };

@@ -8,7 +8,8 @@ use std::process::Command;
 
 use omo_engine_trust_helper::document::{Chain, Identity, Outcome};
 use omo_engine_trust_helper::windows::{
-    collect, decode_disallowed_ctl, effective_eku, CertStore, CollectError, Context, CtlRead, PhysicalRead, SystemStores,
+    collect, decode_disallowed_ctl, effective_eku, CertStore, CollectError, Context, CtlRead, DisallowedCtl, PhysicalRead,
+    SystemStores,
 };
 use omo_engine_trust_helper::windows_document::{CtlOutcome, Eku, Location, SourceStore};
 use windows_sys::Win32::Security::Cryptography::{
@@ -326,11 +327,13 @@ fn a_synthetic_signed_disallowed_ctl_decodes_to_sha1_subjects() {
     let first = [0x11u8; 20];
     let second = [0xabu8; 20];
     let ctl = pki.sign_ctl(&ctl_content(&[&first, &second], "1.3.14.3.2.26"), &signer);
-    assert_eq!(decode_disallowed_ctl(&ctl), Ok(vec!["11".repeat(20), "ab".repeat(20)]));
+    assert_eq!(decode_disallowed_ctl(&ctl), Ok(DisallowedCtl::Sha1(vec!["11".repeat(20), "ab".repeat(20)])));
     let sha256 = pki.sign_ctl(&ctl_content(&[&[0x22u8; 32]], "2.16.840.1.101.3.4.2.1"), &signer);
     assert_eq!(decode_disallowed_ctl(&sha256), Err(CtlOutcome::UnsupportedSubjectAlgorithm));
     let short = pki.sign_ctl(&ctl_content(&[&[0x33u8; 19]], "1.3.14.3.2.26"), &signer);
     assert_eq!(decode_disallowed_ctl(&short), Err(CtlOutcome::Undecodable));
+    let oversize = pki.sign_ctl(&ctl_content(&[&[0x44u8; 65]], DISALLOWED_HASH), &signer);
+    assert_eq!(decode_disallowed_ctl(&oversize), Err(CtlOutcome::Undecodable), "longer than any digest CryptHashToBeSigned produces");
     assert_eq!(decode_disallowed_ctl(&[0x30, 0x03, 0x02, 0x01, 0x00]), Err(CtlOutcome::Undecodable));
 }
 

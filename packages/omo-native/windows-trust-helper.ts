@@ -20,7 +20,9 @@ export type WindowsTrustSource = {
   /** The Win32 error the helper saw; 0 when read. */
   readonly status: number
 }
-export type WindowsCtlOutcome = "read" | "absent" | "unreadable" | "undecodable" | "unsupported-subject-algorithm"
+/** `signature-hash-failed`: a disallowedHash CTL could not be applied to a certificate Crypt32 cannot hash. */
+export type WindowsCtlOutcome =
+  | "read" | "absent" | "unreadable" | "undecodable" | "unsupported-subject-algorithm" | "signature-hash-failed"
 export type WindowsTrustHelperDocument = {
   readonly facts: WindowsFacts
   /** Certificate bytes of every positive candidate, by DER SHA-256, for the generation writer. */
@@ -45,7 +47,9 @@ const LOCATIONS: readonly WindowsLocation[] = [
 const POSITIVE_STORES = ["ROOT", "CA", "TrustedPeople"] as const
 const SOURCE_STORES: readonly WindowsSourceStore[] = [...POSITIVE_STORES, "Disallowed"]
 const OUTCOMES: readonly WindowsSourceOutcome[] = ["read", "absent", "access-denied", "enumeration-failed"]
-const CTL_OUTCOMES: readonly WindowsCtlOutcome[] = ["read", "absent", "unreadable", "undecodable", "unsupported-subject-algorithm"]
+const CTL_OUTCOMES: readonly WindowsCtlOutcome[] = [
+  "read", "absent", "unreadable", "undecodable", "unsupported-subject-algorithm", "signature-hash-failed",
+]
 const OID = /^[0-2](?:\.(?:0|[1-9][0-9]*))+$/
 const SHA256 = /^[0-9a-f]{64}$/
 const SHA1 = /^[0-9a-f]{40}$/
