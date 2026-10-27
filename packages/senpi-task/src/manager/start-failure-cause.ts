@@ -5,6 +5,7 @@
  * host error code leave this module.
  */
 import { RPC_RESPONSE_TIMEOUT_PREFIX as TIMEOUT_PREFIX } from "../runners/rpc-host/reattach"
+import { ERROR_CODE_SHAPE, PROVIDER_SHAPE } from "../runners/rpc/errors"
 
 export type StartCauseClass = "request_timeout" | "host_refused" | "transport_lost" | "credentials_missing"
 
@@ -16,12 +17,10 @@ export type StartCause = {
 }
 
 const TIMED_OUT_COMMANDS = new Set(["prompt", "switch_session", "open_session", "get_entries", "steer", "follow_up"])
-const ERROR_CODE_SHAPE = /^[a-z][a-z0-9_]{0,47}$/
 const TRANSPORT_LOSS_CODES = new Set(["rpc_transport_gone", "session_detached", "transport_recovery_expired"])
 // The engine's typed "this provider cannot authenticate" refusals. An expired login that could not be
 // refreshed is as provider-wide as a missing key, so both walk the chain the same way.
 const CREDENTIAL_CODES = new Set(["provider_credentials_missing", "provider_credentials_expired"])
-const PROVIDER_SHAPE = /^[a-z0-9][a-z0-9._-]{0,63}$/
 
 export function classifyStartCause(cause: unknown): StartCause | undefined {
   try {
