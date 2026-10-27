@@ -485,7 +485,8 @@
   @supports (animation-timeline: view()) {
     .reveal {
       animation: reveal-in var(--dur-reveal) var(--ease-out-quart) both;
-      animation-timeline: view();
+      /* Inset 0, not auto: auto adopts the root scroll-padding-top (--nav-h), which would shift every reveal. */
+      animation-timeline: view(block 0px);
       animation-range: entry 0% entry 40%;
     }
   }
@@ -914,6 +915,8 @@
   .lit-text {
     white-space: pre-line;
     view-timeline: --lit-body block;
+    /* Inset 0, not auto: auto adopts the root scroll-padding-top, which would move the reading sweep. */
+    view-timeline-inset: 0px;
   }
   @supports (animation-timeline: view()) {
     .lit-progress.lit-scroll {
