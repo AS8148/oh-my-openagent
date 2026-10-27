@@ -21,7 +21,7 @@ type FakeModel = { readonly provider: string; readonly id: string }
 
 const FABLE: FakeModel = { provider: "anthropic", id: "claude-fable-5-1" }
 const OPUS: FakeModel = { provider: "anthropic", id: "claude-opus-5-5" }
-const KIMI: FakeModel = { provider: "moonshotai", id: "kimi-k3" }
+const KIMI: FakeModel = { provider: "moonshotai", id: "kimi-k3.1-pro" }
 const GLM: FakeModel = { provider: "zai", id: "glm-5.3" }
 const SOL: FakeModel = { provider: "github-copilot", id: "gpt-6-sol" }
 const SOL_56_COPILOT: FakeModel = { provider: "github-copilot", id: "gpt-5.6-sol" }
@@ -32,7 +32,7 @@ const ASTRA: FakeModel = { provider: "chatgpt-subscription", id: "gpt-6-astra" }
 const UNRELATED: FakeModel = { provider: "example", id: "nothing-in-any-chain" }
 const SUBSCRIPTION_OPUS: FakeModel = { provider: "anthropic-subscription", id: "claude-opus-5-5" }
 const GATEWAY_OPUS: FakeModel = { provider: "opengateway", id: "anthropic/claude-opus-5-5" }
-const CODING_KIMI: FakeModel = { provider: "kimi-coding", id: "kimi-k3" }
+const CODING_KIMI: FakeModel = { provider: "kimi-coding", id: "kimi-k3.1-pro" }
 
 type FakeCredential = { readonly accounts?: readonly { readonly name: string }[]; readonly pinned?: string }
 type FakeGetAuth = (target: string | FakeModel, overrides?: { readonly slotName?: string }) => Promise<unknown>
@@ -187,7 +187,7 @@ describe("createModelProfileComponent", () => {
     expect(pi.sessionModels).toEqual([CODING_KIMI])
     expect(pi.sessionThinkingLevels).toEqual(["max"])
     expect(pi.messages[0]?.message).toMatchObject({
-      details: { profile: "daily-normal", model: "kimi-coding/kimi-k3", reasoning: "max" },
+      details: { profile: "daily-normal", model: "kimi-coding/kimi-k3.1-pro", reasoning: "max" },
     })
   })
 
@@ -296,12 +296,12 @@ describe("createModelProfileComponent", () => {
       display: true,
       details: {
         profile: "daily-normal",
-        model: "moonshotai/kimi-k3",
+        model: "moonshotai/kimi-k3.1-pro",
         reasoning: "max",
         skipped: ["anthropic-subscription/claude-opus-5-5"],
       },
     })
-    expect(appliedContent(pi)).toContain("moonshotai/kimi-k3 max")
+    expect(appliedContent(pi)).toContain("moonshotai/kimi-k3.1-pro max")
     expect(appliedContent(pi)).toContain("skipped: anthropic-subscription/claude-opus-5-5")
     expect(existsSync(join(agentDir, "settings.json"))).toBe(false)
   })
@@ -394,7 +394,7 @@ describe("createModelProfileComponent", () => {
     expect(appliedContent(pi)).toContain('"daily-normal" (Daily · Normal)')
     expect(appliedContent(pi)).toContain("model registry")
     expect(appliedContent(pi)).toContain("anthropic-subscription/claude-opus-5-5")
-    expect(appliedContent(pi)).toContain("kimi-k3")
+    expect(appliedContent(pi)).toContain("kimi-k3.1-pro")
     expect(appliedContent(pi).toLowerCase()).not.toContain("connected")
   })
 
@@ -448,7 +448,7 @@ describe("createModelProfileComponent", () => {
     const { pi, start } = harness(
       {
         model_profile: "night-shift",
-        model_profiles: { "night-shift": { display_name: "Night shift", models: ["moonshotai/kimi-k3"] } },
+        model_profiles: { "night-shift": { display_name: "Night shift", models: ["moonshotai/kimi-k3.1-pro"] } },
       },
       [KIMI],
     )
@@ -553,7 +553,7 @@ describe("createModelProfileComponent", () => {
       model: "zai/glm-5.3",
       authFailed: [
         { provider: "anthropic", model: "claude-opus-5-5", reason: "refresh" },
-        { provider: "moonshotai", model: "kimi-k3", reason: "refresh" },
+        { provider: "moonshotai", model: "kimi-k3.1-pro", reason: "refresh" },
       ],
     })
     expect(appliedContent(pi)).toContain("skipped anthropic:")
@@ -575,7 +575,7 @@ describe("createModelProfileComponent", () => {
       profile: "daily-normal",
       authFailed: [
         { provider: "anthropic", model: "claude-opus-5-5", reason: "refresh" },
-        { provider: "moonshotai", model: "kimi-k3", reason: "refresh" },
+        { provider: "moonshotai", model: "kimi-k3.1-pro", reason: "refresh" },
       ],
     })
     expect(appliedContent(pi)).toContain("no model whose credentials resolve")
@@ -740,7 +740,7 @@ describe("model profile diagnostics through the composed default logger", () => 
       const probe = authProbe({ dead: ["anthropic"], broken: ["zai/glm-5.3"] })
       const config: OmoConfig = {
         model_profile: "qa",
-        model_profiles: { qa: { models: ["anthropic/claude-opus-5-5", "zai/glm-5.3", "moonshotai/kimi-k3"] } },
+        model_profiles: { qa: { models: ["anthropic/claude-opus-5-5", "zai/glm-5.3", "moonshotai/kimi-k3.1-pro"] } },
       }
       await composeOmoSenpiExtension([
         createModelProfileComponent({ loadConfig: () => ({ config, diagnostics: [], layers: [], sources: [] }) }),

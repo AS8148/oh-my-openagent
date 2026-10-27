@@ -35,7 +35,7 @@ describe("AGENT_FALLBACK_CHAINS", () => {
     expect(lengths).toEqual({
       explore: 6,
       librarian: 6,
-      "plan-consultant": FABLE_55_RELEASED ? 4 : 3,
+      "plan-consultant": FABLE_55_RELEASED ? 5 : 4,
       "plan-reviewer": 7,
     })
   })
