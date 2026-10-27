@@ -378,6 +378,13 @@ fn a_disallowed_hash_ctl_names_certificates_by_signature_hash_or_public_key_md5(
     ];
     let entries: Vec<&[u8]> = entries.iter().map(Vec::as_slice).collect();
     let ctl = pki.sign_ctl(&ctl_content(&entries, DISALLOWED_HASH), &signer);
+    // Crypt32's own answer per certificate, with the Win32 error it reports when it neither finds nor rules out.
+    let decoded = decode_disallowed_ctl(&ctl).unwrap();
+    let answers: Vec<(&str, Result<bool, u32>)> =
+        [("R", &r), ("X", &x), ("B", &b), ("K", &k), ("kept", &kept)].map(|(name, cert)| (name, decoded.contains(&cert.der))).to_vec();
+    let expected: Vec<(&str, Result<bool, u32>)> = vec![("R", Ok(true)), ("X", Ok(true)), ("B", Ok(true)), ("K", Ok(true)), ("kept", Ok(false))];
+    assert_eq!(answers, expected, "CertFindSubjectInCTL per certificate (Err holds GetLastError)");
+    drop(decoded);
     let (stores, _) = MemoryStores::default().with(SourceStore::Root, Location::LocalMachine, &[&r, &kept, &k]);
     let (stores, _) = stores.with(SourceStore::Ca, Location::CurrentUser, &[&x]);
     let mut stores = MemoryStores { ctl: Some(CtlRead::Bytes(ctl)), ..stores };
