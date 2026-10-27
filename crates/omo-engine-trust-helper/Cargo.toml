@@ -1,0 +1,28 @@
+[package]
+name = "omo-engine-trust-helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The Windows native fact helper of the engine CA importer (omo#10762, design 4.1 and 4.2). It collects
+# certificate facts with Crypt32 and makes no trust decision; packages/omo-native/engine-trust-policy.ts does.
+[[bin]]
+name = "omo-engine-trust-helper"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(windows)'.dev-dependencies]
+tempfile.workspace = true
