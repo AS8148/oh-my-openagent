@@ -2,6 +2,11 @@ import { constants } from "node:fs"
 import * as fs from "node:fs/promises"
 import { join } from "node:path"
 
+import type { Diagnostic as PolicyDiagnostic } from "./engine-trust-policy"
+import type { LinuxBundleRead, LinuxBundleSelection } from "./linux-trust-bundle"
+import type { DropCause as DefaultFileDropCause } from "./openssl-default-file"
+import type { HashDirectoryDiagnostic } from "./openssl-hash-dir"
+
 /** 6.2: each fallback reason, mapped to its one 6.6 catalog action. */
 const FALLBACK_ACTIONS = {
   "helper-missing": "reinstall-omo",
@@ -37,7 +42,39 @@ const VERIFY_PATTERNS = [
 export type VerifyPattern = (typeof VERIFY_PATTERNS)[number]
 
 const REFUSAL_CODES = ["trust-load-mismatch", "trust-exec-loop", "trust-user-extras-unrecoverable", "trust-path-unrepresentable"] as const
-/** 5.3 codes that carry no field, plus the 6.2 reasons and the section 4 per-generation codes. */
+
+/** The section 4 importer modules own the codes they emit; their exported types are the source of truth. */
+type ModuleCode =
+  | PolicyDiagnostic
+  | Extract<LinuxBundleSelection["kind"] | LinuxBundleRead["kind"], `linux-bundle-${string}`>
+  | DefaultFileDropCause
+  | HashDirectoryDiagnostic["code"]
+/** The runtime allow-list for ModuleCode; the assertion below fails to compile when the two differ either way. */
+const MODULE_CODES = [
+  "negative-sources-incomplete",
+  "macos-policy-unreadable",
+  "scoped-deny-applied-globally",
+  "lower-priority-deny-applied",
+  "linux-bundle-absent",
+  "linux-bundle-unreadable",
+  "linux-bundle-too-large",
+  "linux-bundle-replaced",
+  "pem-noncanonical",
+  "pem-read-error",
+  "recognized-block-has-headers",
+  "aux-block-unverified",
+  "ordinary-block-not-indexable",
+  "ordinary-block-unparseable",
+  "openssl-default-dir-malformed",
+  "openssl-default-dir-not-regular",
+  "openssl-default-dir-unreadable",
+  "openssl-default-dir-cap",
+  "openssl-default-aux-dropped",
+] as const satisfies readonly ModuleCode[]
+type Assert<T extends true> = T
+type ModuleCodesListed = Assert<[Exclude<ModuleCode, (typeof MODULE_CODES)[number]>] extends [never] ? true : false>
+
+/** 5.3 codes that carry no field, plus the 6.2 reasons, the design-only default-file code and the module codes. */
 const PLAIN_CODES = [
   ...REFUSAL_CODES,
   "trust-marker-foreign",
@@ -45,14 +82,8 @@ const PLAIN_CODES = [
   "trust-lease-failed",
   "trust-generation-recognized",
   ...(Object.keys(FALLBACK_ACTIONS) as FallbackReason[]),
-  "linux-bundle-absent",
-  "macos-policy-unreadable",
-  "scoped-deny-applied-globally",
-  "lower-priority-deny-applied",
   "openssl-default-file-malformed",
-  "openssl-default-aux-dropped",
-  "openssl-default-dir-malformed",
-  "openssl-default-dir-cap",
+  ...MODULE_CODES,
 ] as const
 const KINDS = ["static", "long-lived", "short-host-cli", "one-shot-network"] as const
 const ACTIONS = ["adopt", "import-exec", "refuse", "ensure"] as const

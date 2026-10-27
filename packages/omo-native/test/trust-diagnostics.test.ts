@@ -3,6 +3,10 @@ import * as fs from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { selectEngineTrust } from "../engine-trust-policy"
+import { readLinuxBundle } from "../linux-trust-bundle"
+import { readDefaultFileCandidates } from "../openssl-default-file"
+import { selectOpenSslHashDirectory } from "../openssl-hash-dir"
 import {
   appendTrustDiagnostic,
   TRUST_DIAGNOSTICS_MAX_BYTES,
@@ -191,6 +195,35 @@ describe("closed code set", () => {
     ["a refusal code outside a refusal", { kind: "static", action: "import-exec", generation, codes: [{ code: "trust-load-mismatch" }] }],
   ])("#given %s #when appending #then rejects", async (_label, input) => {
     await reject(input)
+  })
+
+  test("#given one code emitted by each merged importer module #when appending #then reads each back", async () => {
+    const policy = selectEngineTrust({ os: "linux", complete: false, certificates: [] }).diagnostics[0]
+    const bundlePath = join(directory, "bundle.pem")
+    await fs.writeFile(bundlePath, "")
+    await fs.truncate(bundlePath, 8 * 1024 * 1024 + 1)
+    const bundle = await readLinuxBundle(bundlePath, { stat: (path) => fs.stat(path), open: (path, flags) => fs.open(path, flags) })
+    const defaultFile = readDefaultFileCandidates(new Uint8Array([0xff, 0x0a]), () => false)
+    const hashDir = (await selectOpenSslHashDirectory({
+      entries: async () => ["0123abcd.0"],
+      open: async () => ({
+        stat: async () => ({ size: 0, isFile: () => false }),
+        readFile: async () => new Uint8Array(),
+        close: async () => {},
+      }),
+    })).diagnostics[0]
+    if (policy === undefined || bundle.kind === "success" || defaultFile.kind !== "dropped" || hashDir === undefined) {
+      throw new Error("a merged module did not emit the fixture's code")
+    }
+    const codes: TrustDiagnosticInput["codes"] = [
+      { code: policy }, { code: bundle.kind }, { code: defaultFile.cause }, { code: hashDir.code },
+    ]
+    await appendTrustDiagnostic(directory, { kind: "long-lived", action: "import-exec", generation, codes }, clock)
+    const [record] = await lines(file()) as { codes: unknown }[]
+    expect(record?.codes).toEqual([
+      { code: "negative-sources-incomplete" }, { code: "linux-bundle-too-large" },
+      { code: "pem-noncanonical" }, { code: "openssl-default-dir-not-regular" },
+    ])
   })
 
   test("#given every field-carrying code #when appending #then writes exactly the catalog fields", async () => {
