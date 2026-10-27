@@ -25,6 +25,7 @@ export {
   getWorkForSession,
   getWorkResumeOptions,
   hashPlanContent,
+  isContainedPlanPath,
   isWorkStale,
   normalizeSessionId,
   readBoulderState,

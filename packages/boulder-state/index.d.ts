@@ -224,6 +224,7 @@ export interface MomusReviewArtifactInput {
 
 export declare function getPlanReviewsDir(directory: string, planPath: string): string
 export declare function hashPlanContent(content: string): string
+export declare function isContainedPlanPath(directory: string, planPath: string): boolean
 export declare function formatMomusReviewArtifact(input: {
   sequence: number
   planPath: string

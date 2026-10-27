@@ -257,6 +257,104 @@ describe("writeMomusReviewArtifact containment", () => {
   })
 })
 
+describe("writeMomusReviewArtifact plans root containment", () => {
+  const baseArtifact = {
+    verdict: "okay" as const,
+    reviewedAt: new Date("2026-04-01T00:00:00.000Z"),
+    reviewerOutput: "**[OKAY]**",
+  }
+
+  test("refuses to write when .omo is a symlink to a directory outside the project", () => {
+    // given
+    const directory = mkdtempSync(join(tmpdir(), "boulder-review-artifacts-"))
+    const outsideDir = mkdtempSync(join(tmpdir(), "boulder-review-outside-"))
+    mkdirSync(join(outsideDir, "plans"), { recursive: true })
+    writeFileSync(join(outsideDir, "plans", "demo.md"), "# Demo plan\n", "utf-8")
+    symlinkSync(outsideDir, join(directory, ".omo"), "dir")
+
+    try {
+      // when
+      const written = writeMomusReviewArtifact(directory, ".omo/plans/demo.md", baseArtifact)
+
+      // then
+      expect(written).toBeNull()
+      expect(existsSync(join(outsideDir, "plans", "demo.reviews"))).toBe(false)
+      expect(readdirSync(join(outsideDir, "plans"))).toEqual(["demo.md"])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+      rmSync(outsideDir, { recursive: true, force: true })
+    }
+  })
+
+  test("refuses to write when .omo/plans is a symlink to a directory outside the project", () => {
+    // given
+    const directory = mkdtempSync(join(tmpdir(), "boulder-review-artifacts-"))
+    mkdirSync(join(directory, ".omo"), { recursive: true })
+    const outsideDir = mkdtempSync(join(tmpdir(), "boulder-review-outside-"))
+    const outsidePlans = join(outsideDir, "plans")
+    mkdirSync(outsidePlans, { recursive: true })
+    writeFileSync(join(outsidePlans, "demo.md"), "# Demo plan\n", "utf-8")
+    symlinkSync(outsidePlans, join(directory, ".omo", "plans"), "dir")
+
+    try {
+      // when
+      const written = writeMomusReviewArtifact(directory, ".omo/plans/demo.md", baseArtifact)
+
+      // then
+      expect(written).toBeNull()
+      expect(existsSync(join(outsidePlans, "demo.reviews"))).toBe(false)
+      expect(readdirSync(outsidePlans)).toEqual(["demo.md"])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+      rmSync(outsideDir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("writeMomusReviewArtifact plans ignore file", () => {
+  test("writes a .gitignore next to the plans that covers the .reviews directories", () => {
+    // given
+    const directory = createTempProject()
+
+    try {
+      // when
+      const written = writeMomusReviewArtifact(directory, ".omo/plans/demo.md", {
+        verdict: "okay",
+        reviewedAt: new Date("2026-04-01T00:00:00.000Z"),
+        reviewerOutput: "**[OKAY]**",
+      })
+
+      // then
+      expect(written).not.toBeNull()
+      const gitignore = readFileSync(join(directory, ".omo", "plans", ".gitignore"), "utf-8")
+      expect(gitignore).toContain("*.reviews")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("keeps an existing plans .gitignore untouched", () => {
+    // given
+    const directory = createTempProject()
+    const gitignorePath = join(directory, ".omo", "plans", ".gitignore")
+    writeFileSync(gitignorePath, "custom-rule\n", "utf-8")
+
+    try {
+      // when
+      writeMomusReviewArtifact(directory, ".omo/plans/demo.md", {
+        verdict: "okay",
+        reviewedAt: new Date("2026-04-01T00:00:00.000Z"),
+        reviewerOutput: "**[OKAY]**",
+      })
+
+      // then
+      expect(readFileSync(gitignorePath, "utf-8")).toBe("custom-rule\n")
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("writeMomusReviewArtifact deduplication", () => {
   test("returns the existing artifact when the same reviewer session is persisted twice", () => {
     // given
@@ -287,6 +385,36 @@ describe("writeMomusReviewArtifact deduplication", () => {
       expect(first?.endsWith("001-okay.md")).toBe(true)
       expect(second).toBe(first)
       expect(third?.endsWith("002-okay.md")).toBe(true)
+      const entries = readdirSync(join(directory, ".omo", "plans", "demo.reviews")).sort()
+      expect(entries).toEqual(["001-okay.md", "002-okay.md"])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("does not treat a session id that prefixes an earlier one as a duplicate", () => {
+    // given
+    const directory = createTempProject()
+    const base = {
+      verdict: "okay" as const,
+      reviewedAt: new Date("2026-04-01T00:00:00.000Z"),
+      reviewerOutput: "**[OKAY]**",
+    }
+
+    try {
+      // when
+      const first = writeMomusReviewArtifact(directory, ".omo/plans/demo.md", {
+        ...base,
+        sessionId: "ses_review_1",
+      })
+      const second = writeMomusReviewArtifact(directory, ".omo/plans/demo.md", {
+        ...base,
+        sessionId: "ses_review",
+      })
+
+      // then
+      expect(first?.endsWith("001-okay.md")).toBe(true)
+      expect(second?.endsWith("002-okay.md")).toBe(true)
       const entries = readdirSync(join(directory, ".omo", "plans", "demo.reviews")).sort()
       expect(entries).toEqual(["001-okay.md", "002-okay.md"])
     } finally {

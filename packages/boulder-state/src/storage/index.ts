@@ -4,6 +4,7 @@ export {
   formatMomusReviewArtifact,
   getPlanReviewsDir,
   hashPlanContent,
+  isContainedPlanPath,
   writeMomusReviewArtifact,
 } from "./review-artifacts"
 export type { MomusReviewArtifactInput, MomusReviewVerdict } from "./review-artifacts"

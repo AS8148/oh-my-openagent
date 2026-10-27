@@ -109,11 +109,18 @@ function resolveContainedPlan(directory: string, planPath: string): ContainedPla
     return null
   }
   const realPlansRoot = realpathWithMissingTail(plansRoot)
+  if (!isInsideDirectory(realpathWithMissingTail(directory), realPlansRoot)) {
+    return null
+  }
   const realPlanFilePath = realpathWithMissingTail(planFilePath)
   if (!isInsideDirectory(realPlansRoot, realPlanFilePath)) {
     return null
   }
   return { plansRoot, reviewsDir: getPlanReviewsDir(directory, planPath) }
+}
+
+export function isContainedPlanPath(directory: string, planPath: string): boolean {
+  return resolveContainedPlan(directory, planPath) !== null
 }
 
 function findArtifactBySessionId(reviewsDir: string, sessionId: string): string | null {
@@ -128,7 +135,7 @@ function findArtifactBySessionId(reviewsDir: string, sessionId: string): string 
     } catch {
       continue
     }
-    if (content.includes(sessionLine)) {
+    if (content.split("\n").includes(sessionLine)) {
       return join(reviewsDir, entry)
     }
   }
@@ -191,6 +198,18 @@ function createArtifactFile(reviewsDir: string, planPath: string, artifact: Momu
   throw new Error(`Could not allocate a review artifact sequence in ${reviewsDir}`)
 }
 
+function ensurePlansGitignore(plansRoot: string): void {
+  const gitignorePath = join(plansRoot, ".gitignore")
+  if (existsSync(gitignorePath)) {
+    return
+  }
+  try {
+    writeFileSync(gitignorePath, "*.reviews\n", "utf-8")
+  } catch {
+    // Best effort only: a missing ignore file must never block the artifact write.
+  }
+}
+
 export function writeMomusReviewArtifact(
   directory: string,
   planPath: string,
@@ -204,6 +223,7 @@ export function writeMomusReviewArtifact(
   if (!existsSync(reviewsDir)) {
     mkdirSync(reviewsDir, { recursive: true })
   }
+  ensurePlansGitignore(plansRoot)
   if (!isInsideDirectory(realpathSync(plansRoot), realpathSync(reviewsDir))) {
     return null
   }
