@@ -34,6 +34,8 @@ impl Panics {
 pub(crate) struct PanickyFake {
     pub(crate) inner: FakeBackend,
     pub(crate) panics: Panics,
+    pub(crate) awake: super::AwakeHolds,
+    pub(crate) screen: super::FakeScreen,
 }
 
 impl Backend for PanickyFake {
@@ -143,5 +145,11 @@ impl Backend for PanickyFake {
     }
     fn screen_locked(&mut self) -> CoreResult<bool> {
         self.inner.screen_locked()
+    }
+    fn hold_display_awake(&mut self) -> Option<senpi_desktop_core::backend::DisplayAwakeHold> {
+        Some(self.awake.hold())
+    }
+    fn screen_probe(&self) -> Option<Arc<dyn senpi_desktop_core::backend::ScreenProbe>> {
+        Some(Arc::new(self.screen.clone()))
     }
 }

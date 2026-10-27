@@ -28,12 +28,14 @@ pub struct MacosBackend {
     input: MacInput,
     ax: MacAx,
     overlay: crate::overlay::Overlay,
+    screen: std::sync::Arc<crate::screen::MacScreen>,
 }
 
 impl MacosBackend {
     pub fn new(display: DisplaySelector) -> CoreResult<Self> {
         let overlay = crate::overlay::Overlay::default();
         Ok(Self {
+            screen: std::sync::Arc::new(crate::screen::MacScreen::new(display.clone())),
             capture: MacCapture::new(display, Screencapture::system()).with_overlay(overlay.clone()),
             input: MacInput::new(CanaryMode::Session)?.with_overlay(overlay.clone()),
             ax: MacAx::with_overlay(overlay.clone()),
@@ -284,5 +286,13 @@ impl Backend for MacosBackend {
 
     fn screen_locked(&mut self) -> CoreResult<bool> {
         crate::cursor::screen_locked()
+    }
+
+    fn hold_display_awake(&mut self) -> Option<senpi_desktop_core::backend::DisplayAwakeHold> {
+        crate::power::hold_display_awake()
+    }
+
+    fn screen_probe(&self) -> Option<std::sync::Arc<dyn senpi_desktop_core::backend::ScreenProbe>> {
+        Some(self.screen.clone())
     }
 }

@@ -64,6 +64,8 @@ export interface DesktopCapabilities {
 	/** Windows mandatory integrity level of the engine process. */
 	readonly integrityLevel?: string | null;
 	readonly screenLocked: boolean;
+	/** Every display the session can capture is asleep (macOS); absent from engines that predate it. */
+	readonly displayAsleep?: boolean;
 	/** Captures run through the legacy `screencapture` path, not the ScreenCaptureKit worker (B9). */
 	readonly legacyCapture?: boolean;
 }

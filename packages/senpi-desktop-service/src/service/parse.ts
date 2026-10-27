@@ -45,6 +45,7 @@ const CAPABILITIES: FieldSpec = {
 	stopReason: "string?",
 	integrityLevel: "string?",
 	screenLocked: "boolean",
+	displayAsleep: "boolean?",
 };
 
 const AUDIT_EVENT: FieldSpec = {

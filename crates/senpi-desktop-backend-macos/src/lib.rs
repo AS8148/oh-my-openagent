@@ -13,8 +13,10 @@ mod front_app;
 mod launch_gate;
 mod launch_services;
 mod overlay;
+mod power;
 mod responsible;
 mod input;
+mod screen;
 mod skylight;
 mod stop_path;
 

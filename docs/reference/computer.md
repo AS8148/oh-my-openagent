@@ -41,6 +41,8 @@ Input defaults to background delivery when supported. On macOS it leaves the fro
 
 Foreground delivery also needs this session's live control grant. The host asks the human to confirm, then calls `control.grant { reason, confirmationId }` (host-only); `control.revoke` releases it, `session.close` and a stop chord revoke it too, and `stopPath.resume` never restores it. At most one session of the process holds the grant; another session's grant is refused `InputBusy`, never stolen. `control.state` (public) reports `{ active, reason?, grantedAt? }`. An omitted delivery stays background, except that pointer and keyboard input on the `desktop` or a `display:*` target (click, moveMouse, drag, scroll, typeText, keyChord, holdKeys, holdMouse) always needs the grant: every backend posts it globally, onto the user's real pointer and frontmost app, so the engine admits it by its effect rather than the requested delivery (#10788). In full access the OmO host takes the grant itself, without a confirm and in non-interactive runs too, and revokes it once the session leaves full access. `raiseWindow` (`win.raise()`) always needs the grant, because raising a window always takes the user's foreground; this is deliberately stricter than upstream oh-my-pi, which gates only takeover input.
 
+On macOS the engine keeps the display awake while the agent operates: the first request other than `capabilities`, `control.state` and `stopPath.*` takes a `PreventUserIdleDisplaySleep` power assertion, listed by `pmset -g assertions` as "OmO computer use is operating the desktop", and it lasts until 60 seconds after the last such request finished. `session.close`, a disconnect and a stop release it at once. `capabilities.displayAsleep` is true when every display the session can capture is asleep; the screen lock still refuses input with `ScreenLocked`.
+
 ## Error codes
 
 A failed call carries one engine error code (`crates/senpi-desktop-core/src/error.rs`). The ones a user or model acts on:
@@ -59,7 +61,7 @@ A failed call carries one engine error code (`crates/senpi-desktop-core/src/erro
 | `WindowNotFound`, `InvalidTarget` | The window closed, or the filter matched nothing or several windows | List windows again and pick one |
 | `AxUnsupported`, `AxFailed` | The element or platform does not support that accessibility operation | Fall back to pointer input |
 | `FocusRestoreFailed`, `CursorRestoreFailed` | Foreground delivery could not put the previous window or cursor back | Tell the user; nothing is hidden |
-| `CaptureFailed`, `InputFailed`, `Timeout`, `Cancelled`, `Closed`, `TransactionFailed`, `Internal` | The platform call failed, took too long, was aborted, or the session ended | Observe again before retrying; stop after repeated failures |
+| `CaptureFailed`, `InputFailed`, `Timeout`, `Cancelled`, `Closed`, `TransactionFailed`, `Internal` | The platform call failed, took too long, was aborted, or the session ended. On macOS a `CaptureFailed`, `InputFailed` or `Timeout` message that ends `(the screen is locked)` or `(the display is asleep)` names the likely cause | Observe again before retrying; stop after repeated failures; for a lock or sleep note, ask the user to unlock or wake the Mac |
 
 Engine start failures are reported by `/computer status` as `engine: native-unavailable`, `quarantined` or `abi-mismatch`, and are described in [Troubleshooting](../guide/computer-use.md#troubleshooting).
 

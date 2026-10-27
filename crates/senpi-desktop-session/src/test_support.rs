@@ -2,10 +2,12 @@
 //! failure and panic injection, its clock, and every audit event it emitted.
 
 mod panicky;
+mod screen;
 
 use std::sync::Arc;
 
 pub(crate) use panicky::Panics;
+pub(crate) use screen::{AwakeHolds, FakeScreen};
 use parking_lot::Mutex;
 use senpi_desktop_backend_fake::{FakeBackend, FakeScenario, Faults, RecordingSink, SinkOp};
 use senpi_desktop_core::backend::{Backend, DeliveryMode, Modifiers, MouseButton, PointerEvent};
@@ -32,6 +34,8 @@ pub(crate) struct Harness {
     pub(crate) clock: Arc<FakeClock>,
     pub(crate) supervisor: Arc<Supervisor>,
     pub(crate) audits: Arc<Mutex<Vec<AuditEvent>>>,
+    pub(crate) awake: AwakeHolds,
+    pub(crate) screen: FakeScreen,
 }
 
 type Built = Arc<Mutex<Option<(RecordingSink, Faults)>>>;
@@ -40,6 +44,8 @@ struct Factory {
     scenario: FakeScenario,
     built: Built,
     panics: Panics,
+    awake: AwakeHolds,
+    screen: FakeScreen,
 }
 
 impl BackendFactory for Factory {
@@ -49,7 +55,29 @@ impl BackendFactory for Factory {
         Ok(Box::new(panicky::PanickyFake {
             inner: backend,
             panics: self.panics.clone(),
+            awake: self.awake.clone(),
+            screen: self.screen.clone(),
         }))
+    }
+}
+
+fn scenario(overlay: &Value) -> FakeScenario {
+    let mut json: Value = serde_json::from_str(FIXTURE).expect("fixture is JSON");
+    for (key, value) in overlay.as_object().expect("overlay is an object") {
+        json[key] = value.clone();
+    }
+    FakeScenario::from_json(&json.to_string()).expect("scenario parses")
+}
+
+/// The fixture's backend for a real [`crate::Session`], holding the display
+/// awake through `awake` and reading the screen from `screen`.
+pub(crate) fn session_factory(awake: &AwakeHolds, screen: &FakeScreen) -> impl BackendFactory {
+    Factory {
+        scenario: scenario(&json!({})),
+        built: Built::default(),
+        panics: Panics::default(),
+        awake: awake.clone(),
+        screen: screen.clone(),
     }
 }
 
@@ -62,11 +90,7 @@ pub(crate) fn harness(overlay: &Value) -> Harness {
 /// A harness whose session shares `slot` with other harnesses, as the
 /// engine's sessions share the process-wide slot.
 pub(crate) fn harness_with_slot(overlay: &Value, slot: Arc<crate::grant::ControlSlot>) -> Harness {
-    let mut json: Value = serde_json::from_str(FIXTURE).expect("fixture is JSON");
-    for (key, value) in overlay.as_object().expect("overlay is an object") {
-        json[key] = value.clone();
-    }
-    let scenario = FakeScenario::from_json(&json.to_string()).expect("scenario parses");
+    let scenario = scenario(overlay);
     let built = Built::default();
     let clock = Arc::new(FakeClock::new(0));
     let supervisor = Arc::new(Supervisor::new(Arc::clone(&clock) as Arc<dyn Clock>));
@@ -79,13 +103,17 @@ pub(crate) fn harness_with_slot(overlay: &Value, slot: Arc<crate::grant::Control
         control_slot: slot,
     };
     let panics = Panics::default();
+    let (awake, screen) = (AwakeHolds::default(), FakeScreen::default());
     let factory = Factory {
         scenario,
         built: Arc::clone(&built),
         panics: panics.clone(),
+        awake: awake.clone(),
+        screen: screen.clone(),
     };
     let capabilities = Arc::new(Mutex::new(DesktopCapabilities::unavailable()));
-    let mut worker = Worker::new(Box::new(factory), capabilities, safety);
+    let display = (Arc::default(), crate::screen_notes::ScreenNotes::default());
+    let mut worker = Worker::new(Box::new(factory), capabilities, safety, display);
     worker.open(DesktopSessionOptions::default());
     let (sink, faults) = built.lock().clone().expect("open built a backend");
     Harness {
@@ -96,6 +124,8 @@ pub(crate) fn harness_with_slot(overlay: &Value, slot: Arc<crate::grant::Control
         clock,
         supervisor,
         audits,
+        awake,
+        screen,
     }
 }
 
