@@ -90,7 +90,7 @@ describe("Prometheus filesystem destinations (B2, #11367)", () => {
       target: ".omo/plan.md",
       link: ".omo",
       destination: "src",
-      allowed: true,
+      allowed: false,
     },
     {
       name: "symlinked ancestor",

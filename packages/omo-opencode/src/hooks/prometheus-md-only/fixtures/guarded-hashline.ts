@@ -3,7 +3,7 @@ import { clearSessionAgent, setSessionAgent } from "../../../features/claude-cod
 import { createHashlineEditTool } from "../../../tools/hashline-edit/tools"
 import type { RawHashlineEdit } from "../../../tools/hashline-edit/normalize-edits"
 
-const args: { filePath: string; rename?: string; edits: RawHashlineEdit[] } = JSON.parse(process.argv[2])
+const args: { filePath: string; rename?: string; delete?: boolean; edits: RawHashlineEdit[] } = JSON.parse(process.argv[2])
 const sessionID = "ses_guarded_hashline_fixture"
 const root = process.cwd()
 const hook = createPrometheusMdOnlyHook({ directory: root, client: {} } as never)
@@ -18,11 +18,12 @@ async function execute() {
     } catch (error) {
       return { blocked: true, error: String(error) }
     }
-    const result = await createHashlineEditTool().execute(output.args, {
+    // OpenCode session/tools.ts:106-111 discards trigger's wrapper, retaining args.
+    const result = await createHashlineEditTool().execute(args, {
       sessionID, messageID: "guarded", agent: "prometheus", directory: root, worktree: root,
       abort: new AbortController().signal, metadata: () => {}, ask: async () => {},
     } as never)
-    return { blocked: false, result, filePath: output.args.filePath, rename: output.args.rename }
+    return { blocked: false, result, filePath: args.filePath, rename: args.rename }
   } finally {
     clearSessionAgent(sessionID)
   }

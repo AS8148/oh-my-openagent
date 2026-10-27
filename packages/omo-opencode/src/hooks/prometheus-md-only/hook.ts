@@ -2,10 +2,10 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import { HOOK_NAME, BLOCKED_TOOLS, PATCH_TOOLS, PLANNING_CONSULT_WARNING, PLANNING_CONTEXT_OPEN, PROMETHEUS_WORKFLOW_REMINDER } from "./constants"
 import { log } from "../../shared/logger"
 import { replaceToolArgs } from "../../shared/replace-tool-args"
-import { getAgentDisplayName } from "../../shared/agent-display-names"
 import { getAgentFromSession } from "./agent-resolution"
 import { isPrometheusAgent } from "./agent-matcher"
 import { resolveAllowedFile } from "./path-policy"
+import { parsePatch } from "./vendor/opencode-patch-parser"
 
 const TASK_TOOLS = ["task", "call_omo_agent"]
 
@@ -111,8 +111,21 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       const targets = isPatchTool ? patch?.paths : writeTargets(output.args)
       const resolved = targets?.map(target => ({
         target,
-        path: resolveAllowedFile(target.path, ctx.directory),
+        path: resolveAllowedFile(target.path, ctx.directory,
+          "prefix" in target
+            ? target.prefix === "*** Delete File:" ||
+              (target.prefix === "*** Update File:" && patch?.lines[target.line + 1]?.startsWith("*** Move to:"))
+              ? "entry" : "content"
+            : output.args.delete === true || typeof output.args.rename === "string" ? "entry" : "content",
+        ),
       }))
+      // Preserve the existing target boundary for every operation, including deletion.
+      // Entry operations must still unlink the named link, not its authorized content.
+      for (const entry of resolved ?? []) {
+        if (resolveAllowedFile(entry.target.path, ctx.directory) === undefined) {
+          throw blockedWriteError(entry.target.path)
+        }
+      }
       const blockedPath =
         resolved === undefined ? "(unrecognized file argument)" : resolved.find(entry => entry.path === undefined)?.target.path
       if (blockedPath !== undefined) {
@@ -128,13 +141,45 @@ export function createPrometheusMdOnlyHook(ctx: PluginInput) {
       for (const entry of resolved ?? []) {
         if (entry.path === undefined) throw blockedWriteError(entry.target.path)
         if ("line" in entry.target && patch) {
+          // A filesystem filename is not necessarily one representable patch header.
+          if (/[\r\n]/.test(entry.path) || entry.path.trim() !== entry.path) throw blockedWriteError(entry.target.path)
           patch.lines[entry.target.line] = entry.target.prefix + entry.path
         } else if ("field" in entry.target) {
           replacements[entry.target.field] = entry.path
         }
       }
-      if (patch) replacements[patch.field] = patch.lines.join("\n")
-      replaceToolArgs(output, replacements)
+      if (patch) {
+        const rewritten = patch.lines.join("\n")
+        try {
+          const executableTargets = (text: string) => parsePatch(text).hunks.flatMap(hunk => [
+            { prefix: `*** ${hunk.type === "add" ? "Add" : hunk.type === "delete" ? "Delete" : "Update"} File:`, path: hunk.path },
+            ...(hunk.type === "update" && hunk.move_path !== undefined
+              ? [{ prefix: "*** Move to:", path: hunk.move_path }] : []),
+          ])
+          const matchesAuthorized = (executed: ReturnType<typeof executableTargets>) =>
+            executed.length === resolved?.length && executed.every((entry, index) => {
+              const allowed = resolved?.[index]
+              return allowed && "prefix" in allowed.target &&
+                entry.prefix === allowed.target.prefix && entry.path === allowed.path
+            })
+          if (!matchesAuthorized(executableTargets(rewritten))) throw blockedWriteError("(patch target round trip)")
+          const original = output.args[patch.field] as string
+          // Already canonical frozen calls need no change, including harmless header spacing.
+          replacements[patch.field] = matchesAuthorized(executableTargets(original)) ? original : rewritten
+        } catch {
+          throw blockedWriteError("(unrepresentable patch)")
+        }
+      }
+      const retainedArgs = output.args
+      try {
+        replaceToolArgs(output, replacements)
+      } catch {
+        throw blockedWriteError("(immutable tool arguments)")
+      }
+      // OpenCode executes the retained args reference, not trigger's replacement wrapper.
+      if (Object.entries(replacements).some(([field, value]) => retainedArgs[field] !== value)) {
+        throw blockedWriteError("(tool arguments did not reach execution)")
+      }
       if (isPatchTool) return
       const filePath = targets?.[0]?.path ?? ""
 

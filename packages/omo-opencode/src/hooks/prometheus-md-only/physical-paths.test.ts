@@ -89,10 +89,10 @@ describe("physical planner destinations (B2-R)", () => {
       })
     }
 
-    test(`${planning} may alias a planning directory inside the project`, async () => {
-      mkdirSync(join(root, "plans"))
+    test(`${planning} may alias another real .omo directory inside the project`, async () => {
+      mkdirSync(join(root, "plans/.omo"), { recursive: true })
       mkdirSync(join(root, planning, ".."), { recursive: true })
-      symlinkSync(relative(join(root, planning, ".."), join(root, "plans")), join(root, planning), "dir")
+      symlinkSync(relative(join(root, planning, ".."), join(root, "plans/.omo")), join(root, planning), "dir")
       await expect(invoke("write", { filePath: `${planning}/new.md`, content: "plan" })).resolves.toBeUndefined()
     })
 

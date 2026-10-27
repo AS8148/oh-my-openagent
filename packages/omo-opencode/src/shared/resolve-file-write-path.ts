@@ -1,4 +1,5 @@
 import { lstatSync, realpathSync, statSync } from "node:fs"
+import type { Stats } from "node:fs"
 import { dirname, isAbsolute, join, parse, sep } from "node:path"
 
 /**
@@ -6,14 +7,16 @@ import { dirname, isAbsolute, join, parse, sep } from "node:path"
  * `link/..` textually: the parent is taken only after the link has been followed.
  * The returned absolute path must also be the path handed to the executor.
  */
-export function resolveFileWritePath(filePath: string, cwd: string): string {
+export function resolveFileWritePath(filePath: string, cwd: string, followFinalSymlink = true): string {
   const input = filePath.replace(/\\/g, sep)
   const absolute = isAbsolute(input) ? input : `${realpathSync.native(cwd)}${sep}${input}`
   const root = parse(absolute).root
   let current = realpathSync.native(root)
   let directory = true
 
-  for (const component of absolute.slice(root.length).split(sep).filter(Boolean)) {
+  const components = absolute.slice(root.length).split(sep).filter(Boolean)
+  for (let index = 0; index < components.length; index++) {
+    const component = components[index]
     if (!directory) throw new Error(`Not a directory: ${current}`)
     if (component === ".") continue
     if (component === "..") {
@@ -21,7 +24,9 @@ export function resolveFileWritePath(filePath: string, cwd: string): string {
       continue
     }
     const next = join(current, component)
-    let entry
+    // Unlink/rename acts on the named directory entry, not its symlink target.
+    if (!followFinalSymlink && index === components.length - 1) return next
+    let entry: Stats
     try {
       entry = lstatSync(next)
     } catch (error) {

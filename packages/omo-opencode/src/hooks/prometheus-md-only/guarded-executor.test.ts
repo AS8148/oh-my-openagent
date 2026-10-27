@@ -15,10 +15,10 @@ describe("real guarded hashline execution", () => {
   })
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-  async function execute(filePath: string, rename?: string, frozen = false) {
+  async function execute(filePath: string, rename?: string, frozen = false, deleteMode = false) {
     const child = Bun.spawn([
       process.execPath, "run", join(import.meta.dir, "fixtures/guarded-hashline.ts"),
-      JSON.stringify({ filePath, rename, edits: [{ op: "append", lines: ["probe"] }] }),
+      JSON.stringify({ filePath, rename, ...(deleteMode ? { delete: true, edits: [] } : { edits: [{ op: "append", lines: ["probe"] }] }) }),
       ...(frozen ? ["frozen"] : []),
     ], { cwd: root, stdout: "pipe", stderr: "pipe" })
     const [stdout, stderr, code] = await Promise.all([
@@ -59,9 +59,9 @@ describe("real guarded hashline execution", () => {
       })
     }
 
-    test(`${planning} creates missing parents with frozen hook arguments`, async () => {
+    test(`${planning} creates missing parents with canonical frozen hook arguments`, async () => {
       mkdirSync(join(root, planning), { recursive: true })
-      const result = await execute(`${planning}/new/deep/plan.md`, undefined, true)
+      const result = await execute(join(realpathSync.native(root), planning, "new/deep/plan.md"), undefined, true)
       expect(result.blocked).toBe(false)
       expect(result.result).toMatch(/^Updated /)
       expect(readFileSync(join(root, planning, "new/deep/plan.md"), "utf8")).toContain("probe")
@@ -78,4 +78,26 @@ describe("real guarded hashline execution", () => {
     expect(readFileSync(join(root, ".omo/real.md"), "utf8")).toContain("probe")
     expect(lstatSync(join(root, ".omo/alias.md")).isSymbolicLink()).toBe(true)
   })
+
+  test("the retained host reference cannot create a backslash filename outside .omo from frozen args", async () => {
+    mkdirSync(join(root, ".omo"))
+    const result = await execute(".omo\\escaped.md", undefined, true)
+    expect(result.blocked).toBe(true)
+    expect(existsSync(join(root, ".omo\\escaped.md"))).toBe(false)
+  })
+
+  for (const deletion of [false, true]) {
+    test(`real ${deletion ? "delete" : "rename"} removes the named link rather than its allowed target`, async () => {
+      mkdirSync(join(root, ".omo"))
+      writeFileSync(join(root, ".omo/real.md"), "before\n")
+      symlinkSync("real.md", join(root, ".omo/alias.md"))
+      const result = await execute(".omo/alias.md", deletion ? undefined : ".omo/moved.md", false, deletion)
+      expect(result.blocked).toBe(false)
+      expect(result.result).toMatch(deletion ? /^Successfully deleted / : /^Moved /)
+      expect(existsSync(join(root, ".omo/real.md"))).toBe(true)
+      expect(() => lstatSync(join(root, ".omo/alias.md"))).toThrow()
+      if (deletion) expect(readFileSync(join(root, ".omo/real.md"), "utf8")).toBe("before\n")
+      else expect(readFileSync(join(root, ".omo/moved.md"), "utf8")).toContain("probe")
+    })
+  }
 })

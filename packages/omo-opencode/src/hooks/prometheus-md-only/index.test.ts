@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test, beforeEach, afterEach, mock } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { randomUUID } from "node:crypto"
@@ -915,7 +915,7 @@ describe("prometheus-md-only", () => {
        ).rejects.toThrow("File operations restricted to .omo/*.md plan files only")
      })
 
-     test("should allow case-insensitive .OMO directory", async () => {
+     test("should allow .OMO only when the filesystem identifies it as .omo", async () => {
        // given
        setupMessageStorage(TEST_SESSION_ID, "prometheus")
        const hook = createPrometheusMdOnlyHook(createMockPluginInput())
@@ -928,8 +928,11 @@ describe("prometheus-md-only", () => {
          args: { filePath: ".OMO/plans/work-plan.md" },
        }
 
-       // when / #then
-       await expect(hook["tool.execute.before"](input, output)).resolves.toBeUndefined()
+       // when / #then - native aliases share an entry; separate case-sensitive dirs do not.
+       const alias = join(workspaceRoot, ".OMO")
+       const sameEntry = existsSync(alias) && lstatSync(alias).ino === lstatSync(join(workspaceRoot, ".omo")).ino
+       if (sameEntry) await expect(hook["tool.execute.before"](input, output)).resolves.toBeUndefined()
+       else await expect(hook["tool.execute.before"](input, output)).rejects.toThrow()
      })
 
      test("should allow nested project path with .omo (Windows real-world case)", async () => {
