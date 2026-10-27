@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { tmpdir } from "node:os"
-import { join, sep } from "node:path"
+import { join, parse, sep } from "node:path"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
 import { createPrometheusMdOnlyHook } from "./hook"
 import { resolveAllowedFile } from "./path-policy"
@@ -247,16 +247,19 @@ describe("Windows path identity: every alias form resolves to the executor's phy
     test.skipIf(form.skip)(`${form.name}: the guard returns the physical path and denies the escape`, async () => {
       const layout = form.build(project)
       const workspace = layout.workspace ?? project
-      console.log(`PATH_IDENTITY_FORM ${JSON.stringify({
+      // The CI job keeps only stderr, so the diagnosis travels in the assertion message.
+      const diagnosis = () => `PATH_IDENTITY_FORM ${JSON.stringify({
         form: form.name,
         workspace,
+        realRoot: attempt(() => realpathSync.native(parse(workspace).root)),
         realWorkspace: attempt(() => realpathSync.native(workspace)),
+        lstatWorkspace: attempt(() => String(lstatSync(workspace).isDirectory())),
         realPlanning: attempt(() => realpathSync.native(join(workspace, ".omo"))),
+        walkedPlanning: attempt(() => resolveFileWritePath(join(workspace, ".omo"), workspace)),
         walked: attempt(() => resolveFileWritePath(layout.spelling, workspace)),
-        decided: attempt(() => resolveAllowedFile(layout.spelling, workspace)),
         expected: layout.expected,
-      })}`)
-      expect(resolveAllowedFile(layout.spelling, workspace)).toBe(layout.expected)
+      })}`
+      expect(resolveAllowedFile(layout.spelling, workspace), diagnosis()).toBe(layout.expected)
       const args = { filePath: layout.spelling }
       if (layout.expected === undefined) {
         await expect(invoke(args, workspace)).rejects.toThrow("File operations restricted")
@@ -311,7 +314,7 @@ describe("Windows path identity: every alias form resolves to the executor's phy
     const executed = JSON.parse(stdout) as { blocked: boolean; result?: string; filePath?: string }
     const landed = readFileSync(physical, "utf8").includes("probe") ? "physical"
       : readFileSync(lexical, "utf8").includes("probe") ? "lexical" : "nowhere"
-    console.log(`PATH_IDENTITY_PROBE ${JSON.stringify({ platform: process.platform, spelling, raw, decided, executed: executed.filePath, landed })}`)
+    process.stderr.write(`PATH_IDENTITY_PROBE ${JSON.stringify({ platform: process.platform, spelling, raw, decided, executed: executed.filePath, landed })}\n`)
 
     expect(decided).toBe(join(realpathSync.native(project), ".omo", "inside", "escaped.md"))
     expect(executed.blocked).toBe(false)
