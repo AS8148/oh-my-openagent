@@ -32,7 +32,7 @@ Before the first edit, name the references the request routes to and one reason 
 
 ## 0. Ground: know the product and the bar before designing
 
-For a new screen or flow, a redesign, or design-system work, run `references/design/grounding.md` first. It inventories the target project's own existing surfaces (none on greenfield), reads the guideline source in full, defines the ideal state for the product's personas and journeys, and writes every gap into a ledger. The brief and the build close rows of that ledger. A small change reads the ledger when `DESIGN.md` has one.
+For a new screen or flow, a redesign, or design-system work, run `references/design/grounding.md` first. It reads the guideline source in full, defines the ideal state for the product's personas and journeys, and writes every gap into a ledger. The brief and the build close rows of that ledger. A small change reads the ledger when `DESIGN.md` has one.
 
 ## 1. Brief: decide what the screen is for before drawing it
 

@@ -215,7 +215,6 @@ New debt is recorded here at the moment it is accepted — never silently.
 
 ## 9. Ideal State & Gap Ledger (after grounding)
 
-- The project's own existing surfaces carried forward (or "none"): [surface → what it contributes]; departures and why: [one line each]
 - Sources read in full: [source → URL, reader count]
 - Personas and journey steps: [persona → steps]
 - Ideal state: [one checkable line per journey step]
@@ -226,7 +225,7 @@ New debt is recorded here at the moment it is accepted — never silently.
 
 ## Creation Workflow
 
-Both paths start with `grounding.md`: brand surfaces, the guideline source read in full, the ideal state, and the gap ledger in section 9.
+Both paths start with `grounding.md`: the guideline source read in full, the ideal state, and the gap ledger in section 9.
 
 ### For New Projects
 
