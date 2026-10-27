@@ -174,6 +174,24 @@ jobs:
           codesign -dv --verbose=2 "$HELPER" 2>&1 | grep -qx "Identifier=ai.sisyphuslabs.omo-engine-trust-helper" \
             || { echo "::error::the engine trust helper is not signed with its identifier" >&2; exit 1; }
 
+      # Runs the signed bytes under the hardened runtime and decodes what they print with the production decoder.
+      # The macOS helper takes no input; it reads the runner's own trust store.
+      - name: Smoke signed Darwin engine trust helper
+        if: startsWith(matrix.host, 'darwin-')
+        env:
+          HOST: ${{ matrix.host }}
+        run: |
+          set -euo pipefail
+          HELPER=".omo/desktop-engine-assets/engine-trust-helper-${HOST}/omo-engine-trust-helper"
+          OUTPUT="${RUNNER_TEMP}/engine-trust-helper-output.json"
+          if [ "$HOST" = darwin-x64 ]; then
+            arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license
+            arch -x86_64 "$HELPER" < /dev/null > "$OUTPUT"
+          else
+            "$HELPER" < /dev/null > "$OUTPUT"
+          fi
+          bun script/engine-trust-helper-smoke.ts < "$OUTPUT"
+
       - name: Sign and notarize Darwin desktop engine
         if: startsWith(matrix.host, 'darwin-')
         timeout-minutes: 75

@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -18,7 +18,9 @@ const engine = sliceWorkflowSection(workflow, "  desktop-engine:\n", "  build:\n
 const platformBuild = sliceWorkflowSection(workflow, "  build:\n", "  publish:\n")
 const buildMarker = "      - name: Build engine trust helper\n"
 const signMarker = "      - name: Sign Darwin engine trust helper\n"
-const afterSignMarker = "      - name: Sign and notarize Darwin desktop engine\n"
+const smokeMarker = "      - name: Smoke signed Darwin engine trust helper\n"
+const afterSmokeMarker = "      - name: Sign and notarize Darwin desktop engine\n"
+const afterSignMarker = smokeMarker
 const uploadMarker = "      - name: Upload desktop engine artifact\n"
 const resolveMarker = "      - name: Resolve engine trust helper availability\n"
 const afterResolveMarker = "      - name: Download desktop engine for compiled payload\n"
@@ -120,6 +122,69 @@ describe("Darwin engine trust helper signing", () => {
       }
     })
   }
+})
+
+describe("signed Darwin engine trust helper smoke", () => {
+  const sources = ["trust-settings-user", "trust-settings-admin", "trust-settings-system", "keychain-search-list"]
+  const minimalDocument = JSON.stringify({
+    schema: 1, os: "macos", complete: true, certificates: [],
+    sources: sources.map((name) => ({ name, outcome: "read", status: 0 })),
+  })
+
+  test("runs on Darwin hosts only, after signing and before the artifact upload", () => {
+    const step = sliceWorkflowSection(engine, smokeMarker, afterSmokeMarker)
+
+    expect(engine.indexOf(signMarker)).toBeLessThan(engine.indexOf(smokeMarker))
+    expect(engine.indexOf(smokeMarker)).toBeLessThan(engine.indexOf(uploadMarker))
+    expect(step).toContain("if: startsWith(matrix.host, 'darwin-')\n")
+  })
+
+  /** Runs the real step in a scratch root that sees the repo's decoder, with the helper (and `arch`) stubbed. */
+  function smoke(host: string, helperBody: string): { status: number | null; stderr: string; archCalls: string } {
+    const root = mkdtempSync(join(tmpdir(), "omo-trust-helper-smoke-"))
+    try {
+      const repo = new URL("..", import.meta.url).pathname
+      symlinkSync(join(repo, "script"), join(root, "script"))
+      symlinkSync(join(repo, "packages"), join(root, "packages"))
+      const helperDir = join(root, ".omo", "desktop-engine-assets", `engine-trust-helper-${host}`)
+      mkdirSync(helperDir, { recursive: true })
+      stub(helperDir, "omo-engine-trust-helper", helperBody)
+      const bin = join(root, "bin")
+      mkdirSync(bin)
+      const archLog = join(root, "arch-calls")
+      stub(bin, "arch", `echo "$*" >> "${archLog}"\nshift\nexec "$@"`)
+      const result = spawnSync("bash", ["-e", "-c", runBlock(engine, smokeMarker, afterSmokeMarker)], {
+        cwd: root,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, HOST: host, RUNNER_TEMP: root },
+        encoding: "utf8",
+        timeout: 20_000,
+      })
+      return { status: result.status, stderr: result.stderr, archCalls: existsSync(archLog) ? readFileSync(archLog, "utf8") : "" }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+
+  posixBashTest("passes output the strict decoder accepts, natively on arm64 and under Rosetta on x64", () => {
+    const helper = `cat > /dev/null\nprintf '%s' '${minimalDocument}'`
+
+    const arm64 = smoke("darwin-arm64", helper)
+    expect(arm64.status, arm64.stderr).toBe(0)
+    expect(arm64.archCalls).toBe("")
+
+    const x64 = smoke("darwin-x64", helper)
+    expect(x64.status, x64.stderr).toBe(0)
+    expect(x64.archCalls).toEndWith("-x86_64 .omo/desktop-engine-assets/engine-trust-helper-darwin-x64/omo-engine-trust-helper\n")
+  }, 60_000)
+
+  posixBashTest("fails on malformed output or a non-zero helper exit", () => {
+    const wrongSchema = smoke("darwin-arm64", `printf '%s' '${minimalDocument.replace('"schema":1', '"schema":2')}'`)
+    expect(wrongSchema.status).not.toBe(0)
+    expect(wrongSchema.stderr).toContain("invalid-value at $.schema")
+
+    expect(smoke("darwin-arm64", "printf 'not json'").status).not.toBe(0)
+    expect(smoke("darwin-arm64", `printf '%s' '${minimalDocument}'\nexit 75`).status).not.toBe(0)
+  }, 60_000)
 })
 
 describe("engine trust helper transport into the compiled payload", () => {
