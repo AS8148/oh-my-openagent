@@ -10,15 +10,19 @@ export type SignedOutMarker = z.infer<typeof markerSchema>
 export const signedOutMarkerPath = (home: string, credential: string): string =>
   join(home, ".omo", "account-state", `${credential}.signed-out.json`)
 
+// A marker that is missing, unreadable, not JSON or the wrong shape counts as no marker: the caller then answers
+// exit 4, the non-destructive code, and `show` keeps working.
 export async function readSignedOutMarker(path: string): Promise<SignedOutMarker | null> {
-  let text: string
+  const text = await readFile(path, "utf8").catch(() => null)
+  if (text === null) return null
+  let value: unknown
   try {
-    text = await readFile(path, "utf8")
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null
-    throw error
+    value = JSON.parse(text)
+  } catch {
+    return null
   }
-  return markerSchema.parse(JSON.parse(text))
+  const parsed = markerSchema.safeParse(value)
+  return parsed.success ? parsed.data : null
 }
 
 export async function writeSignedOutMarker(path: string, device: string | null): Promise<void> {

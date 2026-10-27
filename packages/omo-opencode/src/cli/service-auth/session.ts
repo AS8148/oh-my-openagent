@@ -126,8 +126,10 @@ export function createSession(options: { readonly api: string; readonly store: C
           if (error instanceof SignInError) return false
           throw error
         } finally {
-          await store.clear()
+          // Marker first: it only counts once the store is empty, so an unlocked reader never sees an empty store
+          // without it, and a failed marker write leaves the credentials in place instead of half-signing-out.
           await writeSignedOutMarker(markerPath, current?.device.id ?? null)
+          await store.clear()
         }
       })
     },
