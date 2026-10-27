@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import * as fs from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -24,13 +24,27 @@ import { IdleInjectionCoordinator } from "../../extension/idle-injection-coordin
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { createDagRuntime } from "./dag-runtime"
 import { runDagTool } from "./dag-tool"
-import { composeTaskEngine, type TaskRunnerFactories } from "./engine"
+import { composeTaskEngine, type TaskEngine, type TaskRunnerFactories } from "./engine"
 import type { CapturedUi } from "./runtime-context"
 import { createTeamServiceTestModelRegistry } from "./team-service-test-model-registry"
 
 const cleanupRoots: string[] = []
+// Every engine a test composes starts an idle reclaimer timer; its lifecycle is disposed when the
+// test ends, so no engine outlives its test and later suspends a child that test left resident (#11543).
+const engines: TaskEngine[] = []
+
+function trackedEngine(deps: Parameters<typeof composeTaskEngine>[0]): TaskEngine {
+  const engine = composeTaskEngine(deps)
+  engines.push(engine)
+  return engine
+}
+
+function disposeEngines(): void {
+  for (const engine of engines.splice(0)) engine.lifecycle.dispose?.()
+}
 
 afterEach(() => {
+  disposeEngines()
   for (const root of cleanupRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
 })
 
@@ -219,7 +233,7 @@ describe("assembled DAG runtime", () => {
         handle: () => undefined,
       },
     })
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -290,7 +304,7 @@ describe("assembled DAG runtime", () => {
     cleanupRoots.push(cwd)
     const runner = new ScriptedRunner()
     const pi = new FakeExtensionAPI()
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -340,7 +354,7 @@ describe("assembled DAG runtime", () => {
     const deliveries: string[] = []
     const coordinator = new IdleInjectionCoordinator((message) => { deliveries.push(message.content) })
     const pi = new FakeExtensionAPI()
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -398,7 +412,7 @@ describe("assembled DAG runtime", () => {
       lifecycle: { markRunCompleted: (run: { readonly runId: string }) => completedRuns.push(run.runId) },
     })
     const coordinator = new IdleInjectionCoordinator(() => undefined)
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -464,7 +478,7 @@ describe("assembled DAG runtime", () => {
     })
     const wakeDeliveries: string[] = []
     const coordinator = new IdleInjectionCoordinator((message) => { wakeDeliveries.push(message.content) })
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -612,6 +626,27 @@ describe("assembled DAG runtime", () => {
 
   test("#given a live-shaped in-process child whose abort rejects #when the assembled runtime cancels #then no unhandled rejection escapes and a later run still completes", async () => {
     // given
+    // The engine's idle reclaimer is a timer of the default resident_idle_timeout_ms (15 min). Left
+    // running past this test, it suspends the resident survivor through handle.abort(), and this
+    // runner's abort floats the AbortError below into whichever later file is running then (#11543).
+    // Record every reclaimer timer the engine starts so teardown can be shown to stop all of them.
+    const idleTimeoutMs = OmoTaskSettingsSchema.parse({}).resident_idle_timeout_ms
+    const liveReclaimerTimers = new Set<unknown>()
+    let reclaimerTimersStarted = 0
+    const realSetTimeout = globalThis.setTimeout
+    const realClearTimeout = globalThis.clearTimeout
+    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, delayMs?: number) => {
+      const timer = realSetTimeout(callback, delayMs)
+      if (delayMs === idleTimeoutMs) {
+        reclaimerTimersStarted += 1
+        liveReclaimerTimers.add(timer)
+      }
+      return timer
+    }) as unknown as typeof setTimeout)
+    const clearTimeoutSpy = spyOn(globalThis, "clearTimeout").mockImplementation(((timer?: ReturnType<typeof setTimeout>) => {
+      liveReclaimerTimers.delete(timer)
+      realClearTimeout(timer)
+    }) as unknown as typeof clearTimeout)
     const cwd = fs.mkdtempSync(join(tmpdir(), "omo-senpi-dag-abort-boundary-"))
     cleanupRoots.push(cwd)
     const abortError = new DOMException("This operation was aborted", "AbortError")
@@ -626,7 +661,7 @@ describe("assembled DAG runtime", () => {
         handle: () => undefined,
       },
     })
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -682,9 +717,14 @@ describe("assembled DAG runtime", () => {
       await within(disposed, STEP_BUDGET_MS, "cancelled child dispose")
       expect(runner.disposeCalls).toBe(1)
     } finally {
-      process.off("unhandledRejection", onUnhandled)
       runtime.dispose()
+      disposeEngines()
+      process.off("unhandledRejection", onUnhandled)
+      setTimeoutSpy.mockRestore()
+      clearTimeoutSpy.mockRestore()
     }
+    expect(reclaimerTimersStarted).toBeGreaterThan(0)
+    expect(liveReclaimerTimers.size).toBe(0)
     // Budget is stated, not inherited: this case drives two full runs plus a cancel and a dispose
     // (802ms idle, 1339ms on a PR runner, 9.3s on a saturated windows-latest runner). Bun's 5s
     // default was never chosen for it. Each awaited step stays bounded by STEP_BUDGET_MS, so a
@@ -697,7 +737,7 @@ describe("assembled DAG runtime", () => {
     cleanupRoots.push(cwd)
     const runner = new ScriptedRunner()
     const pi = new FakeExtensionAPI()
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -751,7 +791,7 @@ describe("assembled DAG runtime", () => {
         handle: () => undefined,
       },
     })
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -792,7 +832,7 @@ describe("assembled DAG runtime", () => {
     const sessionId = "session-recovery"
     await seedPendingRun(cwd, runId, sessionId)
     const firstPi = new FakeExtensionAPI()
-    const firstEngine = composeTaskEngine({
+    const firstEngine = trackedEngine({
       pi: firstPi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -820,7 +860,7 @@ describe("assembled DAG runtime", () => {
     pausedStore.writeCheckpoint(runId, { ...paused, previousLeaseHolderPid: 2_147_483_647 })
     const resumedRunner = new ScriptedRunner()
     const resumedPi = new FakeExtensionAPI()
-    const resumedEngine = composeTaskEngine({
+    const resumedEngine = trackedEngine({
       pi: resumedPi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -852,7 +892,7 @@ describe("assembled DAG runtime", () => {
     const sessionId = "session-recovery-mark"
     await seedPendingRun(cwd, runId, sessionId)
     const firstPi = new FakeExtensionAPI()
-    const firstEngine = composeTaskEngine({
+    const firstEngine = trackedEngine({
       pi: firstPi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -883,7 +923,7 @@ describe("assembled DAG runtime", () => {
     const resumedPi = Object.assign(new FakeExtensionAPI(), {
       lifecycle: { markRunCompleted: (run: { readonly runId: string }) => completedRuns.push(run.runId) },
     })
-    const resumedEngine = composeTaskEngine({
+    const resumedEngine = trackedEngine({
       pi: resumedPi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -939,7 +979,7 @@ describe("assembled DAG runtime", () => {
       },
     })
     const baseConfig = loadOmoConfig({ cwd }).config
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: {
         ...baseConfig,
@@ -979,7 +1019,7 @@ describe("assembled DAG runtime", () => {
     const sessionId = "session-live-lease"
     await seedPendingRun(cwd, runId, sessionId)
     const firstPi = new FakeExtensionAPI()
-    const firstEngine = composeTaskEngine({
+    const firstEngine = trackedEngine({
       pi: firstPi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -996,7 +1036,7 @@ describe("assembled DAG runtime", () => {
     if (paused === null) throw new Error("expected paused adapter run")
     pausedStore.writeCheckpoint(runId, { ...paused, previousLeaseHolderPid: 2_147_483_647 })
     const secondPi = new FakeExtensionAPI()
-    const secondEngine = composeTaskEngine({
+    const secondEngine = trackedEngine({
       pi: secondPi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -1031,7 +1071,7 @@ describe("dag runtime node spawn policy", () => {
       process: () => runner,
     }
     const pi = new FakeExtensionAPI()
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
@@ -1119,7 +1159,7 @@ describe("assembled DAG runtime control verbs", () => {
     const whenState = (nodeId: string, state: string) =>
       whenNode(nodeId, (event) => event.type === "dag.node.transitioned" && event.to === state)
     const sessionId = `session-${name}`
-    const engine = composeTaskEngine({
+    const engine = trackedEngine({
       pi,
       omoConfig: loadOmoConfig({ cwd }).config,
       cwd,
