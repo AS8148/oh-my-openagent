@@ -23,6 +23,7 @@ export interface FallbackArchitectNoticeDetails {
 const FRIENDLY_MODEL_NAMES: readonly (readonly [RegExp, string])[] = [
   [/kimi-k3/i, "Kimi K3 (max)"],
   [/claude-fable-5/i, "Fable 5"],
+  [/claude-opus-5[-.]5/i, "Opus 5.5"],
   [/claude-opus-5/i, "Opus 5"],
   [/glm-5/i, "GLM 5.2"],
 ]
@@ -40,7 +41,7 @@ export function buildFallbackArchitectNotice(input: FallbackArchitectNoticeDetai
   const to = friendlyModelName(input.to)
   return [
     `Model fallback engaged: ${input.from} -> ${input.to}.`,
-    `${from} declined that one, so ${to} now drives the session — and top-tier reasoning stays one consult away through task(category: "architect"), which still runs Fable 5 at xhigh.`,
+    `${from} declined that one, so ${to} now drives the session, and top-tier reasoning stays one consult away through task(category: "architect"), which still runs Fable 5 at xhigh.`,
     `${to} on execution + Fable 5 xhigh on deep reasoning: two frontier brains on one session.`,
   ].join("\n")
 }
@@ -64,9 +65,9 @@ export const renderFallbackArchitectNotice: MessageRenderer<FallbackArchitectNot
     {
       title: "⚡ Fallback upgrade engaged",
       tone: "accent",
-      why: `${from} declined that one — ${to} takes the wheel, zero downtime.`,
+      why: `${from} declined that one: ${to} takes the wheel, zero downtime.`,
       extra: [{ text: `Top-tier reasoning stays on call: task(category: "architect") still consults Fable 5 at xhigh.` }],
-      expandedLine: `${to} on execution + Fable 5 xhigh on hard thinking — two frontier brains, one session.`,
+      expandedLine: `${to} on execution + Fable 5 xhigh on hard thinking: two frontier brains, one session.`,
     },
     options,
     theme,

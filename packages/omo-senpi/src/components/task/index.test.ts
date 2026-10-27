@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -21,7 +21,7 @@ import * as taskComponentModule from "./index"
 import type { CapturedUi } from "./runtime-context"
 import { createSessionTransitionBridge } from "./session-transition-bridge"
 
-const TASK_TOOL_NAMES = ["task", "task_send", "task_cancel", "task_output", "workflow"]
+const TASK_TOOL_NAMES = ["task", "task_send", "task_cancel", "task_output", "workflow", "workpool"]
 const TEAM_TOOL_NAMES = [
   "team_create",
   "team_delete",
@@ -32,8 +32,11 @@ const TEAM_TOOL_NAMES = [
 ]
 const ALL_TOOL_NAMES = [...TASK_TOOL_NAMES, ...TEAM_TOOL_NAMES]
 const TASK_EVENTS = [
+  "context",
   "session_start",
+  "session_hold_changed",
   "session_before_reload",
+  "session_resumed",
   "session_before_switch",
   "session_before_compact",
   "session_compact",
@@ -42,7 +45,7 @@ const TASK_EVENTS = [
   "before_agent_start",
   "agent_end",
 ]
-const SKILL_INVOCATION_TRACKER_EVENTS = ["input", "tool_result", "session_shutdown"]
+const SKILL_INVOCATION_TRACKER_EVENTS = ["input", "tool_result", "session_start", "session_shutdown"]
 const DAG_LIFECYCLE_EVENTS = ["session_start", "session_shutdown", "session_shutdown"]
 const TASK_COMMANDS = ["dag", "task-kill", "tasks"]
 
@@ -91,7 +94,7 @@ function fakeUi(): CapturedUi {
   }
 }
 
-const noopStatusUi = { scheduleSync: () => {}, syncNow: () => {}, dispose: () => {} }
+const noopStatusUi = { scheduleSync: () => {}, syncNow: () => {}, observeRecord: () => {}, dispose: () => {} }
 const noopResumptionChannels = {
   emitSessionStart: () => Promise.resolve(),
   emitShutdown: () => Promise.resolve(),
@@ -169,6 +172,18 @@ function toolNames(pi: FakeExtensionAPI): string[] {
 }
 
 describe("omo-senpi task component wiring", () => {
+  it("#given an empty project #when the task component registers and the session starts without task activity #then no state directory is created", async () => {
+    const project = tempProject()
+    const pi = new FakeExtensionAPI()
+    const logger = createLogger()
+
+    await createTaskComponent({ resolveCwd: () => project }).register(pi, ctxFor(pi, logger))
+    expect(readdirSync(project)).toEqual([])
+
+    await pi.dispatch("session_start", { type: "session_start", reason: "startup" }, {})
+    expect(readdirSync(project)).toEqual([])
+  })
+
   it("#given an explicit team member process #when the task component registers #then no lead task surface is wired", async () => {
     // given
     const previousMember = process.env.SENPI_TASK_MEMBER
@@ -211,9 +226,14 @@ describe("omo-senpi task component wiring", () => {
     ])
     // exactly the task event handlers (session lifecycle + transition-buffer edges), the
     // skill-invocation tracker subscriptions feeding the plan-gated agent gate, plus the
-    // unconditional T16 hygiene sweep handler, which registers its own session_start listener
+    // unconditional T16 hygiene sweep handler, which registers its own session_start listener,
+    // plus the workpool aggregate attach-recovery listener (registerWorkpoolTool session_start
+    // → workpools.attach, which rolls back accepted-without-ack and flushes on boot), plus the
+    // host pre-warm's session_start (revival) plus its default `first-turn` edges (input, before_agent_start);
+    // the pre-warm registers nothing on win32, where task children never use a host
+    const prewarmEvents = process.platform === "win32" ? [] : ["session_start", "input", "before_agent_start"]
     expect(pi.handlers.map((handler) => handler.event).sort()).toEqual(
-      [...TASK_EVENTS, ...SKILL_INVOCATION_TRACKER_EVENTS, ...DAG_LIFECYCLE_EVENTS, "session_start"].sort(),
+      [...TASK_EVENTS, ...SKILL_INVOCATION_TRACKER_EVENTS, ...DAG_LIFECYCLE_EVENTS, "session_start", "session_shutdown", "session_start", ...prewarmEvents].sort(),
     )
   })
 

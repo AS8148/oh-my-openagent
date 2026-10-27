@@ -1,3 +1,17 @@
+import type { AgentSession } from "@code-yeongyu/senpi"
+import { reportedEffectiveModel, type CatalogModelIdentity, type EffectiveModel } from "../pinned-model-equivalence"
+
+import type { TaskInterruptCause } from "../../state/record-types"
+import type { NativeRunPause } from "../../pause/native-child-pause"
+import { createInProcessRunPause, type EngineTurnWatch, type RunHoldSession } from "./native-run-pause"
+import type { TaskStartFailureKind, TaskStartFailureReason } from "../../state/start-failure"
+
+/** How the engine settled a steer/follow-up: delivered to the running turn, or queued behind it. */
+export type QueuedInputDisposition = Awaited<ReturnType<AgentSession["steer"]>>
+
+// ChildHandle.steer settles with no value: the manager does not consume the engine disposition.
+const ignoreQueuedInputDisposition = (_disposition: QueuedInputDisposition): void => undefined
+
 export type ChildSessionEvent = {
   readonly type: string
   readonly message?: unknown
@@ -5,32 +19,49 @@ export type ChildSessionEvent = {
 
 export type ChildSessionListener = (event: ChildSessionEvent) => void
 
-// Structural subset of senpi's AgentSession that the handle drives. The default seam returns a
-// live AgentSession; fakes implement only these members.
-export type ChildSession = {
+/** The slice of senpi's ExtensionRunner that child teardown needs to run session_shutdown. */
+export type ChildExtensionRunner = {
+  hasHandlers(eventType: string): boolean
+  emit(event: { readonly type: "session_shutdown"; readonly reason: "quit" }): Promise<unknown>
+}
+
+/**
+ * Structural subset of senpi's AgentSession that the handle drives. The default seam returns a
+ * live AgentSession; fakes implement only these members. `model` is what the session actually
+ * started on, read by the runner's post-start pin check (#9722); fakes may omit it.
+ */
+export type ChildSession = RunHoldSession & {
   readonly sessionId: string
+  readonly model?: CatalogModelIdentity
+  readonly effectiveServiceTier?: string
   prompt(text: string): Promise<void>
-  steer(text: string): Promise<void>
-  followUp(text: string): Promise<void>
+  steer(text: string): Promise<QueuedInputDisposition>
+  followUp(text: string): Promise<QueuedInputDisposition>
   abort(): Promise<void>
   subscribe(listener: ChildSessionListener): () => void
   getLastAssistantText(): string | undefined
+  /** Absent on fakes that load no extensions; a live AgentSession always has one. */
+  readonly extensionRunner?: ChildExtensionRunner
   dispose(): void
 }
+
+/**
+ * A closed, PARENT-AUTHORED classification of why a runner refused. Unlike `message`, no member is
+ * ever derived from child output, so it is the one part of a failure that is safe to surface and
+ * persist verbatim - and `manager.ts` still treats it only as a lookup key, never as text to echo.
+ */
+export type RunnerFailureReason = TaskStartFailureReason
 
 export type RunnerFailure = {
   // The snake_case kinds map 1:1 onto the manager's respawn disposition codes (todo 12): a resume
   // rebuild failure is TYPED and retryable, never a silently weakened tool set or transcript.
-  readonly kind:
-    | "child-prompt-failed"
-    | "child-turn-failed"
-    | "session-create-failed"
-    | "depth-exceeded"
-    | "model_unavailable"
-    | "tools_unavailable"
-    | "session_unavailable"
+  readonly kind: TaskStartFailureKind
   readonly message: string
+  readonly reason?: RunnerFailureReason
   readonly cause?: unknown
+  // Set only with `launch_spec_insecure`: the refused spec path omo resolved itself, never child
+  // output, so the public start failure may name the file and its fix (#9208).
+  readonly launch_spec_path?: string
   /**
    * Structured exit facts for the internal event log, when the child actually reached a process exit.
    *
@@ -39,9 +70,15 @@ export type RunnerFailure = {
    * exactly that reason. These are closed enums and numbers, which cannot carry a credential, so they
    * can be persisted and finally answer WHY a child died instead of only THAT it died.
    *
+   * `rejected_while` is captured by the RPC runner before unstarted-handle cleanup: `alive` means
+   * the initial command rejected while the child was still live, while `exited` means the child had
+   * already produced the exit outcome. It is intentionally separate from `exit`, because cleanup
+   * terminates a still-live child and must never be mistaken for the rejection's cause.
+   *
    * Shape is inlined rather than imported from `../types`: that module imports RunnerOutcome from this
    * one, so importing back would close a cycle.
    */
+  readonly rejected_while?: "alive" | "exited"
   readonly exit?: {
     readonly kind: "clean" | "killed" | "crashed" | "spawn_error"
     readonly code: number | null
@@ -53,19 +90,31 @@ export type RunnerOutcome =
   | { readonly status: "completed"; readonly finalResponse: string; readonly model?: string }
   | { readonly status: "error"; readonly failure: RunnerFailure; readonly killed?: boolean; readonly model?: string }
   | { readonly status: "cancelled" }
+  // A run stopped for a reason the parent did not request: its session was replaced (cause, message), or
+  // another client's user abort took it (F10a: partial text kept, abortedBy). Resumable; never a failure.
+  | {
+      readonly status: "interrupted"
+      readonly cause?: TaskInterruptCause
+      readonly message?: string
+      readonly finalResponse?: string
+      readonly abortedBy?: string
+    }
 
 export type ChildCompletionPolicy = "final-text" | "turn"
 
 export type ChildHandle = {
   readonly task_id: string
   readonly sessionId: string
+  readonly runPause?: NativeRunPause
+  /** The model the child session is ACTUALLY on, read live - the post-start record's source (#9722). */
+  effectiveModel(): EffectiveModel | undefined
   steer(text: string): Promise<void>
   followUp(text: string): Promise<void>
   abort(): Promise<void>
   subscribe(listener: ChildSessionListener): () => void
   waitForIdle(): Promise<RunnerOutcome>
   lastAssistantText(): string | undefined
-  dispose(): void
+  dispose(): Promise<void> | void
 }
 
 export type CreateChildHandleInput = {
@@ -241,10 +290,38 @@ function createTrackedChildHandle(
     )
   }
 
+  // The engine starts a resumed turn itself: observe it from its agent_start to its agent_end.
+  const watchEngineTurn = (): EngineTurnWatch => {
+    const settled = Promise.withResolvers<RunnerOutcome>()
+    let started = false
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type === "agent_start" && !started) {
+        started = true
+        aborted = false
+        turnActive = true
+        observation.text = undefined
+        observation.stopReason = undefined
+        observation.errorMessage = undefined
+        observation.provider = undefined
+        observation.model = undefined
+        observation.baseline = session.getLastAssistantText()
+        running = settled.promise
+      } else if (event.type === "agent_end" && started) {
+        unsubscribe()
+        turnActive = false
+        settled.resolve(aborted ? { status: "cancelled" } : turnOutcome(session, observation, completion))
+      }
+    })
+    return { outcome: settled.promise, cancel: unsubscribe }
+  }
+  const runPause = createInProcessRunPause(session, watchEngineTurn)
+
   const handle: ChildHandle = {
     task_id: taskId,
     sessionId: session.sessionId,
-    steer: (text) => session.steer(text),
+    ...(runPause === undefined ? {} : { runPause }),
+    effectiveModel: () => reportedEffectiveModel(session.model, session.effectiveServiceTier),
+    steer: (text) => session.steer(text).then(ignoreQueuedInputDisposition),
     followUp: async (text) => {
       // While a turn is running, a follow-up is queued and delivered when the agent settles. Once
       // the child is idle/resident, a follow-up REVIVES it: drive a fresh turn and re-arm tracking.
@@ -261,20 +338,27 @@ function createTrackedChildHandle(
     subscribe: (listener) => session.subscribe(listener),
     waitForIdle: () => running,
     lastAssistantText: () => session.getLastAssistantText(),
-    dispose: () => {
+    dispose: async () => {
       if (disposed) return
       disposed = true
       unsubscribeObserver()
-      session.dispose()
+      await shutDownChildSession(session)
     },
   }
   return { handle, beginTurn }
 }
 
 export function createChildHandle(input: CreateChildHandleInput): ChildHandle {
+  const staged = createStagedChildHandle(input)
+  staged.begin()
+  return staged.handle
+}
+
+// A created child whose first prompt has not been sent: the launch decides, after creation, whether
+// to begin that turn or hold the prompt for the run's Resume.
+export function createStagedChildHandle(input: CreateChildHandleInput): { readonly handle: ChildHandle; begin(): void } {
   const tracked = createTrackedChildHandle(input.taskId, input.session, input.completion)
-  tracked.beginTurn(input.promptText)
-  return tracked.handle
+  return { handle: tracked.handle, begin: () => tracked.beginTurn(input.promptText) }
 }
 
 // A restored child is rebuilt from its persisted transcript: the original prompt is NEVER
@@ -289,6 +373,20 @@ export function createRestoredChildHandle(input: CreateRestoredChildHandleInput)
 // the manager nor the lifecycle destruction port can ever reach it. Discarding it here keeps that
 // teardown inside the handle-definition module that owns dispose delegation, so the single-writer
 // rule still holds: lifecycle remains the only INVOKER for admitted handles.
-export function discardUnstartedChildSession(session: ChildSession): void {
-  session.dispose()
+export async function discardUnstartedChildSession(session: ChildSession): Promise<void> {
+  await shutDownChildSession(session)
+}
+
+// #9413: a bare dispose() never emits session_shutdown; only senpi's AgentSessionRuntime does. An
+// in-process child loads the builtin extensions, and codemode closes its per-session bridge server
+// (like every other shutdown-scoped resource) only on session_shutdown, so without this the child
+// leaks a listening socket that keeps `omo -p` alive. The runner applies the host's per-handler
+// shutdown budget, so a hung handler cannot hold teardown, and dispose() runs either way.
+async function shutDownChildSession(session: ChildSession): Promise<void> {
+  try {
+    const runner = session.extensionRunner
+    if (runner?.hasHandlers("session_shutdown") === true) await runner.emit({ type: "session_shutdown", reason: "quit" })
+  } finally {
+    session.dispose()
+  }
 }
