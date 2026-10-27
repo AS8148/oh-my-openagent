@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:0b4300065bd1c2308c51d6b0ef2a13ff47dce19a2c3ae51ca5797906e45cec7d:6ff202003b121891543f235c9c84c47b4f0616cbed48c6d414ca28304a8d1c8c
+// omo-codex-install:f56f78806b4edebc1bca65d145f0bc0b6051fcfe6386d25eab6b617cbc79be4b:33db3e7a39b376081a8197eaa18fd81fdd6a5f43e36c356fa9dc3bba6426d99a
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -19801,8 +19801,8 @@ var OmoMemoryWriteNoticeLayerSchema = object({
   enabled: boolean2().optional()
 }).strict();
 var OmoMemoryProjectionSchema = object({
-  max_entries_per_directory: number2().int().min(0).default(40),
-  max_bytes: number2().int().min(0).default(24576)
+  max_entries_per_directory: number2().int().min(0).default(0),
+  max_bytes: number2().int().min(0).default(40960)
 }).strict();
 var OmoMemoryProjectionLayerSchema = object({
   max_entries_per_directory: number2().int().min(0).optional(),
@@ -19866,7 +19866,7 @@ var OmoMemorySettingsSchema = object({
     query_expansion: false
   }),
   project_scope: OmoMemoryProjectScopeSchema.default({ nudge: true, recall: true }),
-  projection: OmoMemoryProjectionSchema.default({ max_entries_per_directory: 40, max_bytes: 24576 }),
+  projection: OmoMemoryProjectionSchema.default({ max_entries_per_directory: 0, max_bytes: 40960 }),
   compile_warn_tokens: number2().int().positive().default(30000),
   agents: record(string2(), OmoMemoryAgentOverridesSchema).default({})
 }).strict();
