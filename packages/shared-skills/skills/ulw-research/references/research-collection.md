@@ -38,7 +38,7 @@ Append each digest the moment its worker returns, not in a batch at the end — 
 
 ### Run it as a loop, and journal in real time
 
-ulw-loop is ON by default for this mode: when the `ulw-loop` skill is available, register the research axes as loop goals so the run has durable state and survives a compaction. The session directory's timestamp is the run's start clock — the closing briefing is computed from it, so create it once and never rename it. From that point every finding, source, quote, number, and lead is written into `$SESSION_DIR` **the instant it lands** — never held in the conversation for an end-of-run dump. After any context loss, re-read the brief and the journal before doing anything else, then resume from the open wave.
+ulw-loop is ON by default for this mode: when the `ulw-loop` skill is available, register the research axes as loop goals so the run has durable state and survives a compaction. The run's start clock is `outcome.json` `startedAt`, which `outcome init` records once: from `--started-at <ISO>` when you pass it, else from this directory's timestamp name — the closing briefing is computed from it, so create the directory once and never rename it. From that point every finding, source, quote, number, and lead is written into `$SESSION_DIR` **the instant it lands** — never held in the conversation for an end-of-run dump. After any context loss, re-read the brief and the journal before doing anything else, then resume from the open wave.
 
 ### Deliverable lane, format, and the empty-info interview
 

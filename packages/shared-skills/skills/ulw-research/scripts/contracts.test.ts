@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-
 import {
 	ANSWERED_BY,
 	DEFECT_CODES,
@@ -15,95 +14,17 @@ import {
 	LINEAGE_MODES,
 	MANIFEST_CODES,
 	REPAIR_DEFAULTS,
+	SCHEMA_VERSION,
 	STATES,
 	STATIC_CODES,
+	normalizeManifest,
+	validateOutcomeManifest,
+	validateRepairState,
 } from "./contracts.mjs"
+import { SEVERITIES, STATIC_CODES_EXPECTED, LAYOUT_CODES_EXPECTED, FIDELITY_BLOCKERS, FIDELITY_MAJORS, FIDELITY_MINORS, FIDELITY_CODES_EXPECTED, fourGateManifest, sampleManifest } from "./tests/contracts-support"
 
-const SEVERITIES = new Set(["blocker", "major", "minor"])
-const STATIC_CODES_EXPECTED = [
-	"korean_no_keep_all",
-	"palette_off_token",
-	"emoji_in_prose",
-	"em_dash_in_prose",
-	"en_dash_in_prose",
-	"heading_too_long",
-	"heading_generic",
-	"unsourced_number",
-	"chart_without_figure",
-	"chart_svg_no_text",
-	"chart_svg_missing_labels",
-	"report_without_visual",
-	"image_missing_alt",
-	"korean_serif_font",
-	"section_without_citation",
-	"missing_closing_section",
-	"missing_citation_section",
-	"broken_asset_reference",
-	"missing_required_section",
-]
-const LAYOUT_CODES_EXPECTED = [
-	"layout_overflow",
-	"layout_text_clipped",
-	"layout_scroll_container",
-	"layout_image_distorted",
-	"layout_sibling_overlap",
-]
-// Fidelity vocabulary contract (#11009): severity and integrity per code are fixed here.
-const FIDELITY_BLOCKERS = [
-	"unresolved_placeholder",
-	"value_mismatch",
-	"unit_mismatch",
-	"quote_not_verbatim",
-	"claim_status_invalid",
-	"incompatible_operands",
-	"pointer_label_mismatch",
-	"quote_anchor_unresolved",
-	"unit_duplicated",
-	"polish_diff_fail",
-	"fidelity_interview_incomplete",
-	"derived_not_allowed",
-	"source_outside_floor",
-	"brief_changed",
-	"snapshot_hash_mismatch",
-	"snapshot_not_raw",
-	"chart_value_untraceable",
-	"quote_unbound",
-	"edition_unverified",
-]
-const FIDELITY_MAJORS = [
-	"untraceable_number",
-	"unsupported_verification",
-	"claim_kind_mismatch",
-	"conflicting_readings",
-	"hedge_dropped",
-	"direction_flipped",
-	"causality_added",
-	"qualifier_dropped",
-	"unbound_sentence",
-	"meaning_drift_confirmed",
-	"meaning_unverified",
-	"polish_edit_rejected",
-	"polish_hedging_decreased",
-	"polish_text_churn",
-	"snapshot_mismatch",
-	"join_integrity_fail",
-	"quote_stale_version",
-]
-const FIDELITY_MINORS = [
-	"quote_fuzzy_match",
-	"relocated",
-	"quote_converted_only",
-	"name_outside_quote",
-	"verification_claim_unmarked",
-	"scope_widened_warn",
-	"particle_unverified",
-	"fallback_without_entity",
-	"meaning_drift_warn",
-	"polish_edit_unlocated",
-	"polish_link_changed",
-	"polish_name_changed",
-]
-const FIDELITY_CODES_EXPECTED = [...FIDELITY_BLOCKERS, ...FIDELITY_MAJORS, ...FIDELITY_MINORS]
+
+
 describe("DEFECT_CODES", () => {
 	test("#given the code table #when every code is inspected #then it has a severity, a hint, and an integrity flag", () => {
 		expect(Object.keys(DEFECT_CODES).sort()).toEqual(
@@ -182,5 +103,59 @@ describe("enums", () => {
 		expect(REPAIR_DEFAULTS).toEqual({ maxAttempts: 3, plateauLimit: 2, wallClockMs: 900_000 })
 		expect(Object.isFrozen(LANES)).toBe(true)
 		expect(Object.isFrozen(REPAIR_DEFAULTS)).toBe(true)
+	})
+})
+
+describe("validateOutcomeManifest", () => {
+	test("#given an empty object #when validated #then it fails naming schemaVersion", () => {
+		const result = validateOutcomeManifest({})
+		expect(result.ok).toBe(false)
+		expect(result.errors.some((e) => e.includes("schemaVersion"))).toBe(true)
+	})
+
+	test("#given a well-formed manifest #when validated #then it passes", () => {
+		expect(validateOutcomeManifest(sampleManifest())).toEqual({ ok: true, errors: [] })
+	})
+
+	test("#given a deliverable with an unknown status #when validated #then the error names the row", () => {
+		const m = sampleManifest()
+		m.deliverables[0].status = "done"
+		const result = validateOutcomeManifest(m)
+		expect(result.ok).toBe(false)
+		expect(result.errors.join("\n")).toMatch(/deliverables\[0\]\.status/)
+	})
+
+	test("#given a manifest written before the fidelity gate #when validated raw and after normalizeManifest #then only the normalized copy passes, with fidelity not_run", () => {
+		const old = fourGateManifest()
+		expect(validateOutcomeManifest(old).ok).toBe(false)
+		const normalized = normalizeManifest(old)
+		expect(normalized.gates.fidelity).toBe("not_run")
+		expect(normalized.gates.static).toBe("not_run")
+		expect(validateOutcomeManifest(normalized)).toEqual({ ok: true, errors: [] })
+		expect(old.gates).not.toHaveProperty("fidelity")
+		const failed = { ...old, gates: { ...old.gates, visual: "fail" } }
+		expect(normalizeManifest(failed).gates.visual).toBe("fail")
+	})
+
+	test("#given a gate with an unknown value #when validated #then it fails", () => {
+		const m = sampleManifest()
+		m.gates.static = "ok"
+		expect(validateOutcomeManifest(m).ok).toBe(false)
+	})
+})
+
+describe("validateRepairState", () => {
+	test("#given a well-formed state #when validated #then it passes, and a bad measure fails", () => {
+		const good = {
+			schemaVersion: SCHEMA_VERSION,
+			startedAt: "2026-01-01T12:00:00.000Z",
+			budget: { maxAttempts: 3, plateauLimit: 2, wallClockMs: 900_000 },
+			attempts: [{ at: "2026-01-01T12:01:00.000Z", measure: [1, 2, 0], signature: "em_dash_in_prose|unsourced_number" }],
+			consecutiveNonProgress: 0,
+			seenSignatures: ["em_dash_in_prose|unsourced_number"],
+		}
+		expect(validateRepairState(good)).toEqual({ ok: true, errors: [] })
+		const bad = { ...good, attempts: [{ at: "x", measure: [1, 2], signature: "" }] }
+		expect(validateRepairState(bad).ok).toBe(false)
 	})
 })
