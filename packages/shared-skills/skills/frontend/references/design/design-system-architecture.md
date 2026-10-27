@@ -202,7 +202,7 @@ Surfaces use progressively lighter/darker shades. No borders, no shadows.
 
 ### Constraints
 - WCAG 2.2 AA at minimum ([AAA items the brief raises]): contrast 4.5:1 body / 3:1 large text, icons and
-  control edges; visible focus on every interactive element that nothing covers; pointer targets at least
+  control edges; visible focus on every interactive element, never entirely hidden by other content; pointer targets at least
   24x24 CSS px; full keyboard reachability; reflow at 320 CSS px; `prefers-reduced-motion` respected (Section 6).
   The per-criterion result is stated in every deliverable (`SKILL.md` Verify).
 

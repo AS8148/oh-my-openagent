@@ -72,7 +72,7 @@ Some tells regenerate by default, so they are kept out of the first draft rather
 - **No repeated formula.** A treatment that carries one heading (a serif line with an italic accent phrase, a gradient word, an eyebrow-headline-subtitle stack) becomes a template when every section repeats it; so does one image reused across sections. Use each once, where it means something.
 - **No subtitle under every heading.** A heading explains itself; a one-line description under each one is the generated rhythm. Keep a subtitle only where the heading alone would be misread.
 - **One fact, one place.** A conclusion banner and a callout that restates it, a summary card and a table row with the same figure, a label repeated as its placeholder: keep one.
-- **No dated or borrowed surface.** Glass and blur panels (they read as a clone of a popular open-source chat app), neumorphism, mesh-gradient heroes, heavy drop shadows, and 2019-era SaaS illustration date a draft on sight. Surfaces come from `DESIGN.md` section 7; a material ships only when the brief names it.
+- **No dated or borrowed surface.** Glass and blur panels (they read as a clone of a popular open-source chat app), neumorphism, mesh-gradient heroes, heavy drop shadows, and 2019-era SaaS illustration date a draft on sight. Surfaces come from `DESIGN.md` section 7; a material ships only when the brief or a concrete reference supplies it.
 - **No promotional copy.** Interface copy states what a thing is or does. "Seamlessly", "effortlessly", "smart", "powerful", "at a glance", "supercharge", and their Korean counterparts ("한눈에", "손쉽게", "스마트한", "효율적으로", "간편하게") are marketing, not interface: rewrite as the plain fact or delete.
 
 ## 3. Subtract
@@ -86,12 +86,13 @@ Done is the `/visual-qa` gate, not your own glance. It owns the visual checks; t
 Every UI or design-system deliverable states its WCAG 2.2 AA result. Probe the built surface in the real browser and put a table in the deliverable (PR body, change description, or reply): one row per item below, PASS / FAIL / N/A, with its evidence. A FAIL is fixed, or recorded as accepted debt in `DESIGN.md` section 8 with the user's sign-off.
 
 - **Contrast** (1.4.3, 1.4.11): text 4.5:1 (large 3:1), icons and control edges 3:1, both themes, placeholder text included.
-- **Focus** (2.4.7, 2.4.11): Tab through every control and screenshot each ring; none missing, none covered by a sticky bar or overlay.
-- **Target size** (2.5.8): every pointer target at least 24x24 CSS px, or spaced so a 24 px circle around it touches no other target.
+- **Focus** (2.4.7, 2.4.11): Tab through every control and screenshot each ring; none missing, none entirely hidden by a sticky bar or overlay (the AA line; the target is none covered at all).
+- **Target size** (2.5.8): every pointer target at least 24x24 CSS px, or an undersized one whose 24 px circle, centred on it, intersects no other target and no other undersized target's circle. Inline links in a sentence and targets the browser draws unstyled are exempt.
 - **Keyboard** (2.1.1, 2.1.2): every action works from the keyboard, and focus never gets trapped.
 - **Reflow and text spacing** (1.4.10, 1.4.12): at 320 CSS px no content scrolls sideways; with line-height 1.5, paragraph spacing 2em, letter spacing 0.12em, and word spacing 0.16em applied, nothing clips or overlaps.
 - **Dragging, authentication, help, entry** (2.5.7, 3.3.8, 3.2.6, 3.3.7): a single-pointer alternative for every drag, no cognitive test to sign in, help in the same place on every page, nothing asked twice in one flow. N/A only when the surface has none of these.
 - **State-stable controls** (build rule above): read each control's `getBoundingClientRect()` in every state (idle, hover, loading, success, disabled); width and height match across states.
+- **System and surfaces** (build rules above): colour roles exist in `DESIGN.md` before any component; each component names its shadcn/ui or project-kit source; a grep of the shipped styles finds no `backdrop-filter`, neumorphic double shadows, or mesh-gradient backgrounds unless the brief or a concrete reference supplies them.
 
 On the grounded path, close the gap ledger row by row: each fixed gap has its before/after pair and the check that proves it.
 
