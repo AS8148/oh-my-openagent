@@ -1472,6 +1472,7 @@
     "packages/senpi-desktop-protocol/src/engine-schema.generated.ts",
     "packages/senpi-desktop-protocol/src/index.ts",
     "packages/senpi-desktop-protocol/src/json-rpc.ts",
+    "packages/senpi-desktop-protocol/src/wire.ts",
     "packages/senpi-desktop-protocol/tsconfig.json",
     "packages/senpi-desktop-service/package.json",
     "packages/senpi-desktop-service/src/index.ts",

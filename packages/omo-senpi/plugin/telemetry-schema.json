@@ -800,6 +800,10 @@
           "InputBusy",
           "ControlRequired",
           "CaptureUnavailable",
+          "UserIntervened",
+          "AxUnconfirmed",
+          "SpaceUnsupported",
+          "SpaceMoveDenied",
           "native-unavailable",
           "quarantined",
           "abi-mismatch",
@@ -3876,5 +3880,5 @@
       }
     }
   },
-  "sha256": "f5662a46f83ddbf556ec73255a529fddee6ff983cfb85705f83218047965792f"
+  "sha256": "bea621ce3af5ebabc691d78f3c6bcac174198f101200d806ce0c8e0acee4ae77"
 }
