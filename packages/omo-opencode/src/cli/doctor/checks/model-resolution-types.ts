@@ -1,3 +1,4 @@
+import type { OhMyOpenCodeConfig } from "../../../config"
 import type { ModelCapabilitiesDiagnostics } from "../../../shared/model-capabilities"
 import type { ModelRequirement } from "../../../shared/model-requirements"
 
@@ -26,9 +27,13 @@ export interface ModelResolutionInfo {
   categories: CategoryResolutionInfo[]
 }
 
-export interface OmoConfig {
-  agents?: Record<string, { model?: string; variant?: string; category?: string }>
-  categories?: Record<string, { model?: string; variant?: string }>
+/** The agents/categories view of the validated plugin config the runtime resolves from. */
+export type OmoConfig = Pick<OhMyOpenCodeConfig, "agents" | "categories">
+
+/** What the delegate-task runtime resolves for a user-configured category. */
+export interface RuntimeCategoryResolution {
+  model: string
+  reasoning?: string
 }
 
 export interface AvailableModelsInfo {

@@ -49,7 +49,9 @@ export function buildModelResolutionDetails(options: {
     const marker = category.userOverride ? "●" : "○"
     const display = formatModelWithVariant(
       category.effectiveModel,
-      getCategoryEffectiveVariant(category.name, category.requirement, options.config)
+      category.userOverride
+        ? category.userVariant
+        : getCategoryEffectiveVariant(category.name, category.requirement, options.config)
     )
     details.push(`  ${marker} ${category.name}: ${display} [capabilities: ${formatCapabilityResolutionLabel(category.capabilityDiagnostics?.resolutionMode)}]`)
   }
