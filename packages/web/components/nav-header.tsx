@@ -1,7 +1,7 @@
 "use client"
 
 import type { JSX } from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { useTranslations } from "next-intl"
 import { Menu, Star, X } from "lucide-react"
@@ -55,6 +55,17 @@ export function NavHeader({ stars }: NavHeaderProps): JSX.Element {
   const pathname = usePathname()
   const scrolled = useScrolled(SCROLL_THRESHOLD)
   const [isOpen, setIsOpen] = useState(false)
+  const menuToggleRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (!isOpen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return
+      setIsOpen(false)
+      menuToggleRef.current?.focus()
+    }
+    document.addEventListener("keydown", closeOnEscape)
+    return () => document.removeEventListener("keydown", closeOnEscape)
+  }, [isOpen])
   const live = useLiveStats({
     stars,
     totalDownloads: "",
@@ -115,6 +126,7 @@ export function NavHeader({ stars }: NavHeaderProps): JSX.Element {
             <Link href="/docs/install">{t("install")}</Link>
           </Button>
           <Button
+            ref={menuToggleRef}
             variant="ghost"
             size="icon"
             className="md:hidden"
