@@ -295,8 +295,8 @@ export const SCENARIOS = {
       authFailed: [{ provider: "anthropic", model: "claude-opus-5-5", reason: "refresh" }],
     },
   },
-  // A ChatGPT subscription login whose refresh fails transiently at session start (the fixture's
-  // first exchange is ECONNREFUSED) beside an OpenAI API lane serving the same model (#11432): the
+  // A ChatGPT subscription login whose refresh fails transiently at session start (the fixture
+  // answers ECONNREFUSED to every exchange until the first turn starts) beside an OpenAI API lane serving the same model (#11432): the
   // subscription keeps the rung, and the first turn's own refresh succeeds on it. Before the fix the
   // session moved to openai/gpt-6-astra for its lifetime.
   "geeky-normal-transient-refresh-keeps-subscription": {

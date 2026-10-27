@@ -14,11 +14,13 @@ declare const process: {
 // `REJECTED_REFRESH_TOKEN` is refused by the (offline) exchange the way a revoked login is, any other
 // token renews. No network, no real identity endpoint.
 export const REJECTED_REFRESH_TOKEN = "rejected-refresh"
-// The first exchange of `FLAKY_REFRESH_TOKEN` fails at the transport (ECONNREFUSED, which senpi
-// classifies as a transient refresh failure); every later exchange in the same process renews, the
-// way a brief token-endpoint outage at session start ends before the first turn.
+// Every exchange of `FLAKY_REFRESH_TOKEN` fails at the transport (ECONNREFUSED, which senpi
+// classifies as a transient refresh failure) until the first turn starts (`agent_start`), the way a
+// token-endpoint outage that covers the whole session start ends before the first turn. Keying it to
+// the turn, not to a count of exchanges, keeps every session-start refresh (the model-profile probe
+// included, whatever senpi refreshes before it) on the failing side.
 export const FLAKY_REFRESH_TOKEN = "flaky-refresh"
-const flakyExchanges = new Set<string>()
+let firstTurnStarted = false
 
 type FixtureOAuthCredentials = { refresh: string; access: string; expires: number; [key: string]: unknown }
 
@@ -32,8 +34,7 @@ function fixtureOAuth(providerId: string) {
       if (credentials.refresh === REJECTED_REFRESH_TOKEN) {
         throw new Error(`Token exchange rejected for ${providerId}: 401 unauthorized; body={"error":"invalid_grant"}`)
       }
-      if (credentials.refresh === FLAKY_REFRESH_TOKEN && !flakyExchanges.has(providerId)) {
-        flakyExchanges.add(providerId)
+      if (credentials.refresh === FLAKY_REFRESH_TOKEN && !firstTurnStarted) {
         throw Object.assign(new Error(`connect to the ${providerId} token endpoint failed`), { code: "ECONNREFUSED" })
       }
       return { ...credentials, access: `${providerId}-renewed-access`, expires: Date.now() + 60 * 60 * 1000 }
@@ -132,6 +133,9 @@ function wrapStreamSimple(providerId: string, original: StreamSimple): StreamSim
 }
 
 export default function registerModelProfileMockProvider(pi: TaskE2EExtensionAPI): void {
+  pi.on?.("agent_start", () => {
+    firstTurnStarted = true
+  })
   const registerProvider: TaskE2EExtensionAPI["registerProvider"] = (id, provider) => {
     const wrapped: MockProvider = {
       ...provider,
