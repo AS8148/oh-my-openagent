@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test"
+import { ALL_KNOWN_MODEL_IDS } from "./model-vocabulary"
 import { isOtlpEvent, projectOtlpEvent, OTLP_SPANS } from "./otlp-projection"
+import { PINNED_MODEL_ID_LIST } from "./pinned-model-ids"
 
 // Independent examples from omo-telemetry's pinned omo-senpi v4 artifact.
 for (const [event, property, wire] of [
@@ -67,4 +69,38 @@ test("OTLP spans allow only the pinned turn attributes", () => {
       "omo.model_id", "omo.provider", "omo.session.role", "omo.turn.index", "session.id",
     ],
   })
+})
+
+// Collector pin 13c6e61b (omo-senpi.json): omo.model_id on omo.turn_completed is a REQUIRED enum of the
+// pinned model vocabulary, which lists custom. The client vocabulary can run ahead of the pin, and the
+// collector rejects the whole record for an unlisted value (invalid_enum), so such a value must leave as custom.
+const PIN_MODEL_IDS = new Set(PINNED_MODEL_ID_LIST)
+
+test("#given a client model id the collector pin does not list #when turn_completed is projected #then every model key carries a pinned value", () => {
+  const models = [...ALL_KNOWN_MODEL_IDS, "claude-fable-5-5", "custom"]
+  for (const model of models) {
+    const projected = projectOtlpEvent("turn_completed", {
+      provider: "anthropic", model_id: model, request_model_id: model, response_model_id: model,
+      input_tokens: 100, output_tokens: 20, cost_1e4: 1, session_role: "root",
+    })
+    for (const key of ["omo.model_id", "gen_ai.request.model", "gen_ai.response.model"]) {
+      const value = projected[key]
+      expect(typeof value === "string" && PIN_MODEL_IDS.has(value), `${key}=${String(value)} for ${model}`).toBe(true)
+    }
+  }
+  expect(projectOtlpEvent("turn_completed", { model_id: "claude-fable-5-5" })["omo.model_id"]).toBe("custom")
+  expect(projectOtlpEvent("turn_completed", { model_id: "claude-opus-5-5" })["omo.model_id"]).toBe("claude-opus-5-5")
+})
+
+test("#given an unpinned model id on another event #when it is projected #then it leaves as custom", () => {
+  expect(projectOtlpEvent("session_started", { default_model: "claude-fable-5-5" })["omo.default_model"]).toBe("custom")
+  expect(projectOtlpEvent("category_config", { cat_quick: "claude-fable-5-5" })["omo.cat_quick"]).toBe("custom")
+  expect(projectOtlpEvent("kibitzer_summary", { model_top: "claude-fable-5-5" })["omo.model_top"]).toBe("custom")
+})
+
+test("#given session_summary top-model ranks #when they are projected #then unpinned ids leave as custom and none stays none", () => {
+  const projected = projectOtlpEvent("session_summary", { m1_model: "claude-fable-5-5", m2_model: "claude-opus-5-5", m3_model: "none" })
+  expect(projected["omo.m1_model"]).toBe("custom")
+  expect(projected["omo.m2_model"]).toBe("claude-opus-5-5")
+  expect(projected["omo.m3_model"]).toBe("none")
 })
