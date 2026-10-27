@@ -10,7 +10,8 @@ function makeHome(): string {
   return mkdtempSync(join(tmpdir(), "omo-local-launcher-"))
 }
 
-const ICON = readFileSync(resolve(fileURLToPath(new URL("../../../..", import.meta.url)), ".github/assets/omo-icon-light.svg"))
+// Compared over LF: a Windows checkout may hand the asset back with CRLF.
+const ICON = readFileSync(resolve(fileURLToPath(new URL("../../../..", import.meta.url)), ".github/assets/omo-icon-light.svg"), "utf8").replaceAll("\r\n", "\n")
 const LOGO_PREFIX = "data:image/svg+xml;base64,"
 
 const BASE = { pluginPath: "/repo/packages/omo-senpi/plugin", senpiCliPath: "/repo/senpi/dist/cli.js", version: "9.9.9" }
@@ -25,7 +26,7 @@ describe("local omo launcher", () => {
         // The provider sign-in result page shows this mark (senpi#4432).
         expect(typeof brand.logo).toBe("string")
         expect(brand.logo.startsWith(LOGO_PREFIX)).toBe(true)
-        expect(Buffer.from(brand.logo.slice(LOGO_PREFIX.length), "base64").equals(ICON)).toBe(true)
+        expect(Buffer.from(brand.logo.slice(LOGO_PREFIX.length), "base64").toString("utf8")).toBe(ICON)
         expect(brand).toEqual({
           name: "OmO",
           logo: brand.logo,
