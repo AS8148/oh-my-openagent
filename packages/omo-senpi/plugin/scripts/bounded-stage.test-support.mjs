@@ -8,6 +8,8 @@ import { windowsTreeKillArgs } from "../../../memory-core/src/concurrency/window
 // child of a killed `cmd.exe` keeps files open so the scratch directory cannot be removed.
 export function runBoundedStage(stage, command, args, options, capMs) {
   return new Promise((resolve, reject) => {
+    // FILETIME lower bound captured before spawn, including when a short-lived launcher exits.
+    const rootStartedAt = BigInt(Date.now()) * 10_000n + 116_444_736_000_000_000n
     const child = spawn(command, args, { ...options, windowsHide: true })
     let stdout = ""
     let stderr = ""
@@ -17,7 +19,7 @@ export function runBoundedStage(stage, command, args, options, capMs) {
     const cap = setTimeout(() => {
       stalled = true
       if (process.platform === "win32" && child.pid !== undefined) {
-        const args = windowsTreeKillArgs(child.pid)
+        const args = windowsTreeKillArgs(child.pid, undefined, process.pid, rootStartedAt)
         if (args.length > 0) spawnSync("taskkill", args, { windowsHide: true })
       } else {
         child.kill("SIGKILL")
