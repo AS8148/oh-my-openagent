@@ -3979,6 +3979,7 @@
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
         "test/daemon-path-fixture.ts",
+        "test/bun-child.ts",
         "vitest.config.ts",
       ],
       "ignoreFiles": [
