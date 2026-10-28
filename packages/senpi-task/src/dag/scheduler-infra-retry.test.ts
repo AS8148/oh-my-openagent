@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test"
+import { existsSync, readdirSync } from "node:fs"
+import { join } from "node:path"
 import { dagNode, infraFixture, infrastructureFailure, success, RetryClock } from "./infra-retry-fixture"
 import { createDagScheduler } from "./scheduler"
 import { RunnerError } from "../runners/in-process/runner-error"
@@ -7,8 +9,22 @@ const fixtures: ReturnType<typeof infraFixture>[] = []
 // Every journal commit takes the run lock, appends the WAL, and rewrites the checkpoint on disk. Hosted
 // Windows runners measured ~110-160 ms per commit (#10711), so a case's commit count is its CI cost.
 const MAX_JOURNAL_COMMITS_PER_CASE = 150
+function journalFilesOnDisk(fixture: ReturnType<typeof infraFixture>): readonly string[] {
+  return ["events", "runs", "locks"].flatMap((directory) => {
+    const path = join(fixture.dagDirectory, directory)
+    return existsSync(path) ? readdirSync(path).map((entry) => `${directory}/${entry}`) : []
+  })
+}
+
 afterEach(() => {
+  // These cases assert retry semantics, never crash durability, so their journal stays in memory. A
+  // file-backed journal charges contended host I/O per commit - run lock, WAL append, WAL rescans and a
+  // checkpoint rewrite - which is what pushed two of them past the 5 s default under host load (#11621).
+  // Read the evidence before cleanup and assert after it, so a regression reports the disk journal
+  // instead of leaking the temp directory it failed on.
+  const journaled = fixtures.map(journalFilesOnDisk)
   for (const fixture of fixtures.splice(0)) fixture.cleanup()
+  for (const files of journaled) expect(files).toEqual([])
 })
 
 test("retries seven infrastructure-failed roots so all their fan-in dependents run", async () => {
