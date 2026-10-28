@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { connect, type Socket } from "node:net"
-import { PlantedProcesses, stopChildRun } from "./planted-processes"
+import { PlantedProcesses, stopChildRun, stopThenClose } from "./planted-processes"
 
 // The teardown of test-hermetic-home-teardown.test.ts must signal only its own planted processes, never a reused
 // pid, and must name every one it leaves behind (#11695). Each row drives one recorded pid through stop().
@@ -63,6 +63,28 @@ describe("PlantedProcesses.stop signals only planted processes it can prove are 
       expect(killed).toEqual(row.killed ? [FAKE_PID] : [])
     })
   }
+})
+
+describe("stopThenClose keeps the named stop error when a planted process survives SIGKILL (#11695)", () => {
+  test("#given a connected process that ignores the kill #when the teardown stops then closes #then it settles within its bound with the stop error", async () => {
+    const planted = await PlantedProcesses.listen()
+    const socket = connect(planted.port, "127.0.0.1")
+    socket.on("error", () => undefined)
+    socket.write(`${FAKE_PID}\n`)
+    try {
+      expect(await planted.announced([FAKE_PID], 5_000)).toBe(true)
+      const teardown = stopThenClose(planted, [FAKE_PID], { waitMs: 200, isAlive: () => true, kill: () => undefined })
+      let breaker: ReturnType<typeof setTimeout> | undefined
+      const hung = new Promise<"hung">((resolve) => {
+        breaker = setTimeout(() => resolve("hung"), 5_000)
+      })
+      const outcome = await Promise.race([teardown.then(() => "resolved", (error: unknown) => error), hung])
+        .finally(() => clearTimeout(breaker))
+      expect(String(outcome)).toContain(`pid ${FAKE_PID} did not exit within 200ms`)
+    } finally {
+      socket.destroy()
+    }
+  })
 })
 
 describe("stopChildRun leaves no child test run behind (#11695)", () => {

@@ -41,6 +41,7 @@ async function settledWithin(promise: Promise<unknown>, ms: number): Promise<boo
 export class PlantedProcesses {
   private readonly announcements = new Map<number, Announcement>()
   private readonly waiters = new Map<number, () => void>()
+  private readonly sockets = new Set<Socket>()
   private readonly server: Server
 
   private constructor(server: Server) {
@@ -94,13 +95,23 @@ export class PlantedProcesses {
     if (leftovers.length > 0) throw new Error(`planted processes were left behind (#11695):\n  ${leftovers.join("\n  ")}`)
   }
 
-  async close(): Promise<void> {
-    await new Promise<void>((resolve) => this.server.close(() => resolve()))
+  /**
+   * server.close() completes only once every connection has closed, and a planted process that survives SIGKILL
+   * keeps its connection open; so every remaining connection is destroyed first and the close is bounded.
+   */
+  async close(waitMs = EXIT_WAIT_MS): Promise<void> {
+    for (const socket of this.sockets) socket.destroy()
+    const closed = new Promise<void>((resolve) => this.server.close(() => resolve()))
+    if (!(await settledWithin(closed, waitMs))) {
+      throw new Error(`the planted-process server did not close within ${waitMs}ms (#11695)`)
+    }
   }
 
   private accept(socket: Socket): void {
     let text = ""
     let identified = false
+    this.sockets.add(socket)
+    socket.once("close", () => this.sockets.delete(socket))
     socket.setEncoding("utf8")
     socket.on("error", () => undefined)
     socket.on("data", (chunk: string) => {
@@ -119,6 +130,23 @@ export class PlantedProcesses {
       this.waiters.get(pid)?.()
     })
   }
+}
+
+/** The teardown order: stop, then close. A close failure never hides stop()'s error; it becomes its cause. */
+export async function stopThenClose(planted: PlantedProcesses, pids: readonly number[], options: StopOptions = {}): Promise<void> {
+  let stopFailure: { readonly error: unknown } | undefined
+  try {
+    await planted.stop(pids, options)
+  } catch (error) {
+    stopFailure = { error }
+  }
+  try {
+    await planted.close(options.waitMs)
+  } catch (closeError) {
+    if (stopFailure === undefined) throw closeError
+    if (stopFailure.error instanceof Error) stopFailure.error.cause = closeError
+  }
+  if (stopFailure !== undefined) throw stopFailure.error
 }
 
 export async function stopChildRun(child: ChildProcess | undefined, waitMs = EXIT_WAIT_MS): Promise<void> {

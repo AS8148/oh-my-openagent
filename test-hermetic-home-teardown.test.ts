@@ -3,7 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { PlantedProcesses, processAlive as alive, stopChildRun, TEARDOWN_HOOK_TIMEOUT_MS } from "./test-support/planted-processes"
+import { PlantedProcesses, processAlive as alive, stopChildRun, stopThenClose, TEARDOWN_HOOK_TIMEOUT_MS } from "./test-support/planted-processes"
 
 const PRELOAD = join(import.meta.dir, "test-support", "hermetic-home.preload.ts")
 
@@ -85,9 +85,8 @@ describe("hermetic-home teardown signals only the task hosts this run started (#
     // Read again here: if the child run failed after planting, beforeAll never got this far.
     const pids = dir === "" ? [] : readPlanted(join(dir, "planted.pids"))
     try {
-      await registry?.stop(pids)
+      if (registry !== undefined) await stopThenClose(registry, pids)
     } finally {
-      await registry?.close()
       if (dir !== "") rmSync(dir, { recursive: true, force: true })
     }
   }, TEARDOWN_HOOK_TIMEOUT_MS)
