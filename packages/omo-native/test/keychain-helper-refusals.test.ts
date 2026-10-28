@@ -39,6 +39,8 @@ describe.skipIf(!isDarwin)("omo-keychain helper refusals (#11262 design 1, Refus
     ["trailing bytes", `{"v":1,"verb":"read","account":"${ACCOUNT}"} x`, "malformed"],
     ["lone surrogate", `{"v":1,"verb":"write","account":"${ACCOUNT}","value":"\\udc00"}`, "malformed"],
     ["unknown verb", { v: 1, verb: "export", account: ACCOUNT }, "unknown-verb"],
+    ["a verb with an embedded NUL", { v: 1, verb: "write\u0000x", account: ACCOUNT, value: "x" }, "unknown-verb"],
+    ["a key with an embedded NUL", { v: 1, verb: "read", account: ACCOUNT, "value\u0000zz": "x" }, "unknown-key"],
     ["write without a value", { v: 1, verb: "write", account: ACCOUNT }, "missing-value"],
     ["read with a value", { v: 1, verb: "read", account: ACCOUNT, value: "x" }, "extra-value"],
     ["value over 64 KiB", { v: 1, verb: "write", account: ACCOUNT, value: "x".repeat(MAX_VALUE + 1) }, "too-large"],

@@ -4,8 +4,8 @@ import { join } from "node:path"
 import { buildKeychainHelper, type KeychainHelperBuild } from "../keychain-helper/build"
 
 export const ACCOUNT = "a".repeat(64)
-// createHarness compiles the helper and the keychain fixture with clang; Bun gives hooks its 5 s default, not the
-// --timeout flag, and on a busy machine the native build alone runs past that.
+// A backstop only: full-directory runs under load have failed intermittently with an unnamed hook timeout whose
+// cause is not yet identified (#11607). Remove this budget once #11607 finds and fixes the cause.
 export const NATIVE_BUILD_BUDGET_MS = 120_000
 export const isDarwin = process.platform === "darwin"
 const nativeArch = process.arch === "arm64" ? "arm64" : "x86_64"

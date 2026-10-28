@@ -57,8 +57,11 @@ async function main(reportPath: string): Promise<void> {
 
   try {
     await fx("create")
-    await step("partition-at-creation", "The fixture adds an item; the helper reads it. Expect a partition kind other than none.", async () =>
-      `${await fx("add", ACCOUNT, "dummy-gui")} | ${await helperCall({ v: 1, verb: "read", account: ACCOUNT }, ["--no-ui"])}`)
+    await fx("add", ACCOUNT, "dummy-gui")
+    const partition = await helperCall({ v: 1, verb: "read", account: ACCOUNT }, ["--no-ui"])
+    // Precondition (design 9): the claims below are only meaningful where items get a partition entry.
+    if (partition.includes('"partition":"none"')) throw new Error(`No partition entry was created in this session; stop: ${partition}`)
+    observations.push({ step: "partition-at-creation", automatic: partition, observed: "checked automatically" })
     await step("own-identity-with-partition", "The creator reads and deletes its own item. Expect no dialog.", async () =>
       `${await fx("read", ACCOUNT)} | ${await fx("delete", ACCOUNT)}`)
     await step("dialog-kind-foreign-team", "The helper approves an item another identity created. Record the dialog kind, then click Allow.", async () =>
@@ -76,8 +79,10 @@ async function main(reportPath: string): Promise<void> {
       child.stdin.end()
       return `exit=${await child.exited}`
     })
-    await step("untrusted-delete-interactive", "The helper deletes an item it does not own, with interaction allowed. Record prompt or refusal.", async () =>
-      helperCall({ v: 1, verb: "remove", account: "d".repeat(64) }))
+    await step("untrusted-delete-interactive", "Another identity (the fixture) deletes a helper-owned item with interaction allowed. Record prompt or refusal.", async () =>
+      `${await helperCall({ v: 1, verb: "write", account: "e".repeat(64), value: "dummy-owned" }, ["--no-ui"])} | ${await fx("delete-interactive", "e".repeat(64))}`)
+    await step("one-time-allow-cached-per-process", "Another identity reads a helper-owned item twice in ONE process. Click Allow (not Always Allow) once; record whether a second dialog appeared.", async () =>
+      `${await helperCall({ v: 1, verb: "write", account: "e".repeat(64), value: "dummy-owned" }, ["--no-ui"])} | ${await fx("read-twice-interactive", "e".repeat(64))}`)
     await step("approve-snapshot", "Approve an owned item; the reply's value and mdat must belong together (not load-bearing).", async () =>
       helperCall({ v: 1, verb: "approve", account: ACCOUNT }))
   } finally {
