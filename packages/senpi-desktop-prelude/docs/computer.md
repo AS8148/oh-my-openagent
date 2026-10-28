@@ -19,6 +19,7 @@ computer.zoom({ x, y, width, height }, { silent?, frameId? }?) / win.zoom(...) �
 computer.click(x, y, { button?, count?, modifiers?, delivery? }?) / win.click(...) → None
 computer.doubleClick(x, y, opts?) / computer.move(x, y) / computer.drag([[x, y], …], { modifiers?, delivery? }?) / computer.scroll(x, y, { dx?, dy?, delivery? }?) → None
     Same helpers on a window handle: win.doubleClick, win.move, win.drag, win.scroll.
+    macOS, background delivery: a left-button drag or holdMouse runs only when it starts on a control that tracks the drag itself (a slider, scroll bar, splitter or stepper); anywhere else a press can pick up an item for drag and drop, which macOS completes from the user's real pointer, so the call throws BackgroundUnavailable before sending anything (use the app's menu command, ax actions, or foreground delivery). A drag whose source still begins a drag-and-drop session is taken back to its start and released there, or reported with its drop unconfirmed, as InputFailed: read the target before retrying.
     dx/dy are pixels, the same unit on every OS; one mouse-wheel notch is about 40 px, so dy: 120 scrolls about three notches.
     Scroll direction is semantic and the same on every OS: positive dy moves the view toward the end of the content (negative toward the start), positive dx toward the right edge; the natural-scrolling setting does not change it.
 computer.type(text, { delivery? }?) / computer.press("cmd+shift+p" | keys[], { delivery? }?) → None

@@ -29,6 +29,8 @@ mod worker_clipboard;
 mod worker_input;
 mod worker_holds;
 mod worker_menus;
+#[cfg(test)]
+mod worker_drag_guard_tests;
 
 pub use grant::ControlSlot;
 pub use mutate::SessionSafety;
