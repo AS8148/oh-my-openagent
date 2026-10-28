@@ -45,6 +45,9 @@ function failure(reply: HelperReply): HelperReadError {
 }
 
 async function approveOnce(deps: DarwinReadDeps): Promise<ApprovalAnswer> {
+  // Rows 12, 13: a reader in this process attaches to the approve already running here, whichever backend started it.
+  const running = deps.cache.inFlight()
+  if (running !== null) return running
   const release = await deps.takePromptLock()
   if (release === null) throw new HelperReadError("pending", "Another omo process is waiting for your keychain approval.")
   try {

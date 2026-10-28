@@ -1,7 +1,7 @@
 import type { HelperCall, HelperLease, HelperReply } from "./client"
 import { type DarwinReadDeps, HelperReadError, readThroughHelper, type ReadResult } from "./darwin-read"
 import { migrate } from "./migration"
-import { namesFromRead, runRecovery } from "./recovery"
+import { deleteOldSlots, namesFromRead, OLD_SLOT_COUNT, runRecovery } from "./recovery"
 
 export type WriteIntent = "fresh-sign-in" | "update"
 
@@ -22,6 +22,14 @@ export type LockedDarwinStore = {
   readonly clear: () => Promise<void>
 }
 
+/** RULING-73: every retired slot holds a copy nothing here can remove; the user must delete them once. */
+export class HelperOldSlotsFull extends Error {}
+
+const OLD_SLOT_INDEXES = Array.from({ length: OLD_SLOT_COUNT }, (_, slot) => slot)
+
+const OLD_SLOTS_FULL_MESSAGE =
+  'The macOS keychain holds 8 earlier OmO sign-ins that cannot be removed automatically. Open Keychain Access, delete the items whose account name ends in ".old" or ".old.1" to ".old.7" for OmO, then sign in again.'
+
 const failed = (reply: HelperReply, verb: string) =>
   new HelperReadError(reply.error === "locked" ? "locked" : "store", `The keychain helper could not ${verb} the sign-in (${reply.error ?? "no answer"}).`)
 
@@ -32,7 +40,7 @@ const failed = (reply: HelperReply, verb: string) =>
  */
 export function lockedDarwinStore(deps: DarwinStoreDeps, lease: HelperLease): LockedDarwinStore {
   const helper = (call: HelperCall) => deps.access.call(call, lease)
-  const deleteOwnOld = () => deps.ownDelete(`${deps.account}.old`)
+  const deleteOwnOld = (name: string) => deps.ownDelete(name)
   let lastRead: Extract<ReadResult, { kind: "value" }> | null = null
 
   const read = async () => {
@@ -50,13 +58,17 @@ export function lockedDarwinStore(deps: DarwinStoreDeps, lease: HelperLease): Lo
     async settle() {
       if (lastRead === null) return
       const outcome = await migrate(deps.account, lastRead.value, lastRead.source, helper, deleteOwnOld)
+      if (outcome.kind === "skipped" && outcome.reason === "old-slots-full") deps.notice(`omo: ${OLD_SLOTS_FULL_MESSAGE}`)
       if (outcome.kind === "failed") deps.notice(`omo: the macOS keychain item could not be moved to OmO's keychain helper (${outcome.step}); it keeps working as before.`)
     },
     async write(value, intent) {
       const state = await deps.access.call({ verb: "read", account: deps.account })
       if (state.error !== undefined) throw failed(state, "check")
       if (state.owned === false) {
-        const readable = lastRead !== null || (await deps.ownSilentGet().catch(() => undefined)) !== undefined
+        // Row 8b applies only to an item nobody here can read: not one this process read, not one its own identity reads
+        // silently, and not one a still-valid approval in this process covers.
+        const approved = state.cdat !== undefined && state.mdat !== undefined && deps.cache.consume({ cdat: state.cdat, mdat: state.mdat }) !== null
+        const readable = lastRead !== null || approved || (await deps.ownSilentGet().catch(() => undefined)) !== undefined
         if (readable || intent !== "fresh-sign-in") {
           await deps.ownOverwrite(value)
           if (lastRead?.source === "approved")
@@ -69,6 +81,7 @@ export function lockedDarwinStore(deps: DarwinStoreDeps, lease: HelperLease): Lo
         // A completed, user-initiated sign-in over an item nobody here can read (row 8b, ruled 2026-10-28): move the old
         // item aside by rename (no approval needed, m10) so the fresh sign-in gets an item this machine can read.
         const retired = await helper({ verb: "retire", account: deps.account })
+        if (retired.reason === "old-slots-full") throw new HelperOldSlotsFull(OLD_SLOTS_FULL_MESSAGE)
         if (retired.ok !== true) throw failed(retired, "replace")
       }
       const written = await helper({ verb: "write", account: deps.account, value })
@@ -80,8 +93,7 @@ export function lockedDarwinStore(deps: DarwinStoreDeps, lease: HelperLease): Lo
       if (removed.error === "not-owned") await deps.ownDelete(deps.account)
       else if (removed.ok !== true) throw failed(removed, "remove")
       await helper({ verb: "remove", account: `${deps.account}.staging` })
-      const old = await helper({ verb: "remove", account: `${deps.account}.old` })
-      if (old.error === "not-owned") await deleteOwnOld().catch(() => false)
+      await deleteOldSlots(deps.account, OLD_SLOT_INDEXES, helper, deleteOwnOld)
       lastRead = null
     },
   }
