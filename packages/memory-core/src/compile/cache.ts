@@ -7,6 +7,7 @@ import {
   type CompileMemoryBlockOptions,
 } from "./compile"
 import { DEFAULT_EXTERNAL_PROJECTION_LIMITS } from "./external-projection"
+import { InFlightReads } from "./in-flight-reads"
 
 export const MEMORY_TEMPLATE_STRUCTURE_VERSION = "senpi-memory-v2"
 
@@ -61,7 +62,7 @@ export class MemoryBlockCache {
   private readonly options: MemoryBlockCacheOptions
   private module: Promise<CompiledBlockStoreModule | undefined> | undefined
   private readonly stores = new Map<string, CompiledBlockStore>()
-  private readonly computing = new Set<Promise<unknown>>()
+  private readonly reads = new InFlightReads()
 
   constructor(options: MemoryBlockCacheOptions = {}) {
     this.options = options
@@ -75,11 +76,20 @@ export class MemoryBlockCache {
    * Compile at `revision`, or at HEAD when it is omitted. A caller that pins a session to one commit
    * passes that commit so later memory commits cannot change the bytes it injects.
    */
-  async compile(
+  compile(
     repo: GitMemoryRepo,
     template: string,
     options: CompileMemoryBlockOptions,
     pinnedRevision?: string | null,
+  ): Promise<string> {
+    return this.track(() => this.compileAt(repo, template, options, pinnedRevision))
+  }
+
+  private async compileAt(
+    repo: GitMemoryRepo,
+    template: string,
+    options: CompileMemoryBlockOptions,
+    pinnedRevision: string | null | undefined,
   ): Promise<string> {
     const revision = pinnedRevision === undefined ? await repo.head() : pinnedRevision
     const limits = options.projection ?? DEFAULT_EXTERNAL_PROJECTION_LIMITS
@@ -111,7 +121,16 @@ export class MemoryBlockCache {
    * the value of that commit (`persist`), never a fallback produced by a failed read. Without a store this is
    * `compute()`.
    */
-  async remember(
+  remember(
+    repo: GitMemoryRepo,
+    name: string,
+    revision: string,
+    compute: () => Promise<{ readonly value: string; readonly persist: boolean }>,
+  ): Promise<string> {
+    return this.track(() => this.rememberAt(repo, name, revision, compute))
+  }
+
+  private async rememberAt(
     repo: GitMemoryRepo,
     name: string,
     revision: string,
@@ -122,20 +141,27 @@ export class MemoryBlockCache {
     const store = await this.storeWithin(repo.dir)
     const stored = store === undefined ? undefined : await store.get(key)
     if (stored !== undefined) return stored
-    const computed = compute()
-    this.computing.add(computed)
-    try {
-      const { value, persist } = await computed
-      if (persist) store?.put(key, value)
-      return value
-    } finally {
-      this.computing.delete(computed)
-    }
+    const { value, persist } = await compute()
+    if (persist) store?.put(key, value)
+    return value
   }
 
-  /** Settles once no compile that may store a value, and no store write this cache started, is running. */
+  /**
+   * Runs `work` as this cache's own: settled() waits for it. A caller that reads the repository before handing the
+   * result to compile() (a prebuild reading HEAD) runs that read through here, so no git read it starts outlives
+   * settled().
+   */
+  track<T>(work: () => Promise<T>): Promise<T> {
+    return this.reads.track(work)
+  }
+
+  /**
+   * Settles once nothing this cache started is running: no compile or remember() call from its first git read on
+   * (HEAD, the store load, the block compile), no track()ed work, and no store write. A session shutdown waits on
+   * this before the identity directory may be removed (#11135).
+   */
   async settled(): Promise<void> {
-    while (this.computing.size > 0) await Promise.allSettled([...this.computing])
+    await this.reads.settled()
     await Promise.all([...this.stores.values()].map((store) => store.settled()))
   }
 
