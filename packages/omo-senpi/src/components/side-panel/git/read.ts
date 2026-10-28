@@ -7,11 +7,11 @@ export interface PanelExecResult {
   readonly code: number
 }
 
-/** The host's `exec`, narrowed to what the git reads need. A requested `env` is merged over the inherited environment, never a replacement for it. */
+/** The host's `exec`, narrowed to what the git reads need. */
 export type PanelExec = (
   command: string,
   args: string[],
-  options?: { cwd?: string; timeout?: number; env?: Readonly<Record<string, string>> },
+  options?: { cwd?: string; timeout?: number },
 ) => Promise<PanelExecResult>
 
 /**

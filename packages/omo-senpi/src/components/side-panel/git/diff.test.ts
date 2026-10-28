@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -16,7 +16,7 @@ describe("gitDiffArgs", () => {
     const args = gitDiffArgs(file)
 
     // then
-    expect(args).toEqual(["--literal-pathspecs", "diff", "HEAD", "-M", "--", "tracked.txt"])
+    expect(args).toEqual(["diff", "HEAD", "-M", "--", ":(literal)tracked.txt"])
   })
 
   test("#given a rename #when built #then both paths are in the pathspec", () => {
@@ -27,7 +27,7 @@ describe("gitDiffArgs", () => {
     const args = gitDiffArgs(file)
 
     // then
-    expect(args).toEqual(["--literal-pathspecs", "diff", "HEAD", "-M", "--", "renamed.txt", "renamed-new.txt"])
+    expect(args).toEqual(["diff", "HEAD", "-M", "--", ":(literal)renamed.txt", ":(literal)renamed-new.txt"])
   })
 
   test("#given an untracked file #when built #then it is diffed against /dev/null", () => {
@@ -38,7 +38,7 @@ describe("gitDiffArgs", () => {
     const args = gitDiffArgs(file)
 
     // then
-    expect(args).toEqual(["--literal-pathspecs", "diff", "--no-index", "--", "/dev/null", "brand-new.txt"])
+    expect(args).toEqual(["diff", "--no-index", "--", "/dev/null", "brand-new.txt"])
   })
 
   test("#given a wildcard in a path #when built #then git treats it literally", () => {
@@ -49,7 +49,8 @@ describe("gitDiffArgs", () => {
     const args = gitDiffArgs(file)
 
     // then
-    expect(args[0]).toBe("--literal-pathspecs")
+    expect(args.at(-1)).toBe(":(literal)match*.txt")
+    expect(args).not.toContain("--literal-pathspecs")
   })
 })
 
@@ -172,7 +173,7 @@ describe("readGitDiff", () => {
     const rows = await readGitDiff(runner, "/repo", { xy: "A ", path: "new.txt" })
 
     // then
-    expect(calls[1]).toEqual(["--literal-pathspecs", "diff", "--no-index", "--", "/dev/null", "new.txt"])
+    expect(calls[1]).toEqual(["diff", "--no-index", "--", "/dev/null", "new.txt"])
     expect(rows.map((row) => row.text)).toEqual(["+++ b/new.txt", "+hello"])
   })
 
@@ -210,11 +211,16 @@ describe("readGitDiff pathspec environment", () => {
     }
   })
 
-  /** A PanelExec that really spawns the command, merging any requested env over the inherited one. */
+  /**
+   * A PanelExec that really spawns the command through the inherited environment
+   * only — the same shape the pinned host's `exec` has, which takes no `env`.
+   * A test through this runner fails on the old global `--literal-pathspecs`
+   * argv whenever a competing pathspec switch is exported (git exits 128).
+   */
   const realExec: PanelExec = async (command, args, options) => {
     const result = spawnSync(command, [...args], {
       cwd: options?.cwd,
-      env: { ...process.env, ...options?.env },
+      env: process.env,
       encoding: "utf8",
       timeout: options?.timeout,
       windowsHide: true,
@@ -238,11 +244,11 @@ describe("readGitDiff pathspec environment", () => {
     return root
   }
 
-  test("#given a tracked diff and its fallback #when read #then every spawn pins the competing pathspec switches off", async () => {
+  test("#given a tracked diff and its fallback #when read #then no spawn carries the global literal flag or an env override", async () => {
     // given
-    const seen: (Readonly<Record<string, string>> | undefined)[] = []
-    const runner: PanelExec = async (_command, _args, options) => {
-      seen.push(options?.env)
+    const seen: string[][] = []
+    const runner: PanelExec = async (_command, args) => {
+      seen.push([...args])
       return seen.length === 1 ? { stdout: "", code: 128 } : { stdout: "+hello", code: 1 }
     }
 
@@ -251,14 +257,16 @@ describe("readGitDiff pathspec environment", () => {
 
     // then
     expect(seen).toHaveLength(2)
-    for (const env of seen) expect(env).toEqual({ GIT_GLOB_PATHSPECS: "0", GIT_ICASE_PATHSPECS: "0" })
+    expect(seen[0]?.at(-1)).toBe(":(literal)new.txt")
+    expect(seen[1]).toEqual(["diff", "--no-index", "--", "/dev/null", "new.txt"])
+    for (const args of seen) expect(args).not.toContain("--literal-pathspecs")
   })
 
-  test("#given an untracked directory #when read #then the listing and every per-file diff pin the switches off", async () => {
+  test("#given an untracked directory #when read #then the listing uses per-pathspec literal magic and per-file diffs stay plain", async () => {
     // given
-    const seen: (Readonly<Record<string, string>> | undefined)[] = []
-    const runner: PanelExec = async (_command, args, options) => {
-      seen.push(options?.env)
+    const seen: string[][] = []
+    const runner: PanelExec = async (_command, args) => {
+      seen.push([...args])
       if (args.includes("ls-files")) return { stdout: "build/a.txt\0build/b.txt\0", code: 0 }
       return { stdout: "+content", code: 1 }
     }
@@ -268,7 +276,9 @@ describe("readGitDiff pathspec environment", () => {
 
     // then
     expect(seen).toHaveLength(3)
-    for (const env of seen) expect(env).toEqual({ GIT_GLOB_PATHSPECS: "0", GIT_ICASE_PATHSPECS: "0" })
+    expect(seen[0]?.at(-1)).toBe(":(literal)build/")
+    expect(seen[1]).toEqual(["diff", "--no-index", "--", "/dev/null", "build/a.txt"])
+    for (const args of seen) expect(args).not.toContain("--literal-pathspecs")
   })
 
   for (const variable of ["GIT_GLOB_PATHSPECS", "GIT_ICASE_PATHSPECS"] as const) {
@@ -291,6 +301,80 @@ describe("readGitDiff pathspec environment", () => {
       }
     })
   }
+
+  test("#given both competing switches exported #when a tracked diff is read through real git #then the diff is returned", async () => {
+    // given
+    const root = gitFixture()
+    const savedGlob = process.env.GIT_GLOB_PATHSPECS
+    const savedIcase = process.env.GIT_ICASE_PATHSPECS
+    try {
+      process.env.GIT_GLOB_PATHSPECS = "1"
+      process.env.GIT_ICASE_PATHSPECS = "1"
+
+      // when
+      const rows = await readGitDiff(realExec, root, { xy: " M", path: "tracked.txt" })
+
+      // then
+      expect(rows.map((row) => row.text)).toContain("+b")
+    } finally {
+      if (savedGlob === undefined) delete process.env.GIT_GLOB_PATHSPECS
+      else process.env.GIT_GLOB_PATHSPECS = savedGlob
+      if (savedIcase === undefined) delete process.env.GIT_ICASE_PATHSPECS
+      else process.env.GIT_ICASE_PATHSPECS = savedIcase
+    }
+  })
+
+  test("#given a glob character in a tracked name and GIT_GLOB_PATHSPECS=1 #when read through real git #then only the literal file is diffed", async () => {
+    // given
+    const root = mkdtempSync(join(tmpdir(), "omo-panel-diff-"))
+    roots.push(root)
+    const git = (args: string[]): void => {
+      spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true })
+    }
+    git(["init", "-q"])
+    git(["config", "user.email", "panel@test"])
+    git(["config", "user.name", "panel"])
+    writeFileSync(join(root, "star*file.txt"), "a\n")
+    writeFileSync(join(root, "starAfile.txt"), "a\n")
+    git(["add", "star*file.txt", "starAfile.txt"])
+    git(["commit", "-qm", "init"])
+    writeFileSync(join(root, "star*file.txt"), "a\nstar-only\n")
+    writeFileSync(join(root, "starAfile.txt"), "a\nstarA-only\n")
+    const saved = process.env.GIT_GLOB_PATHSPECS
+    try {
+      process.env.GIT_GLOB_PATHSPECS = "1"
+
+      // when
+      const rows = await readGitDiff(realExec, root, { xy: " M", path: "star*file.txt" })
+
+      // then
+      expect(rows.map((row) => row.text)).toContain("+star-only")
+      expect(rows.map((row) => row.text)).not.toContain("+starA-only")
+    } finally {
+      if (saved === undefined) delete process.env.GIT_GLOB_PATHSPECS
+      else process.env.GIT_GLOB_PATHSPECS = saved
+    }
+  })
+
+  test("#given an untracked directory and GIT_GLOB_PATHSPECS=1 #when read through real git #then the listing and per-file diffs are returned", async () => {
+    // given
+    const root = gitFixture()
+    mkdirSync(join(root, "build"))
+    writeFileSync(join(root, "build", "new.txt"), "hello\n")
+    const saved = process.env.GIT_GLOB_PATHSPECS
+    try {
+      process.env.GIT_GLOB_PATHSPECS = "1"
+
+      // when
+      const rows = await readGitDiff(realExec, root, { xy: "??", path: "build/" })
+
+      // then
+      expect(rows.map((row) => row.text)).toContain("+hello")
+    } finally {
+      if (saved === undefined) delete process.env.GIT_GLOB_PATHSPECS
+      else process.env.GIT_GLOB_PATHSPECS = saved
+    }
+  })
 })
 
 describe("readGitDiff untracked directory cap", () => {

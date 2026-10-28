@@ -123,7 +123,7 @@ export interface SenpiExtensionAPI {
   exec?(
     command: string,
     args: string[],
-    options?: { cwd?: string; timeout?: number; env?: Readonly<Record<string, string>> },
+    options?: { cwd?: string; timeout?: number },
   ): Promise<{ stdout: string; stderr: string; code: number }>
 }
 

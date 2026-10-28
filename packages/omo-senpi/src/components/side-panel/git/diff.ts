@@ -27,34 +27,37 @@ const HEADER_PREFIXES = [
  * unrelated new file and prints the whole content as additions. An untracked file has no
  * index side at all, so it is diffed against /dev/null, which exits 1 by design.
  */
+/**
+ * Per-pathspec literal magic, in place of the global `--literal-pathspecs` flag.
+ * The global flag is incompatible with any other global pathspec switch, so a shell
+ * that exports `GIT_GLOB_PATHSPECS=1` or `GIT_ICASE_PATHSPECS=1` makes git exit 128
+ * before any diff is produced (#11176) — and the pinned host's `exec` has no `env`
+ * field, so an env override never reaches git at all. Per-pathspec magic is not a
+ * global switch, so it does not trip that conflict, while a `*` or `[` in a file
+ * name is still matched literally. It cannot cancel a global `GIT_ICASE_PATHSPECS`
+ * (git ORs the global switch into each pathspec), but the panel only ever queries
+ * paths exactly as `git status` reported them, so case-insensitive matching of the
+ * exact path returns the same diff.
+ */
+const literalPathspec = (path: string): string => `:(literal)${path}`
+
 export function gitDiffArgs(file: PanelGitEntry): string[] {
-  if (file.xy === "??") return ["--literal-pathspecs", "diff", "--no-index", "--", "/dev/null", file.path]
+  // `--no-index` operands are plain filesystem paths, not pathspecs: no magic
+  // prefix, and no global flag to conflict with an exported pathspec switch.
+  if (file.xy === "??") return ["diff", "--no-index", "--", "/dev/null", file.path]
   const paths = file.from === undefined ? [file.path] : [file.from, file.path]
-  return ["--literal-pathspecs", "diff", "HEAD", "-M", "--", ...paths]
+  return ["diff", "HEAD", "-M", "--", ...paths.map(literalPathspec)]
 }
 
 /** Files of one untracked directory the viewer diffs; the rest are counted in a closing row. */
 export const UNTRACKED_DIRECTORY_FILE_CAP = 50
 
-/**
- * Environment for every spawn below. `--literal-pathspecs` is incompatible with the
- * other global pathspec switches, so a shell that exports `GIT_GLOB_PATHSPECS=1` or
- * `GIT_ICASE_PATHSPECS=1` makes git exit 128 before any diff is produced (#11176).
- * The child env pins both switches off, the same override memory-core applies to its
- * literal lookups (#11167); the host merges it over the inherited environment, so no
- * other variable is dropped. `GIT_NOGLOB_PATHSPECS` does not conflict and stays as is.
- */
-const LITERAL_PATHSPEC_ENV: Readonly<Record<string, string>> = {
-  GIT_GLOB_PATHSPECS: "0",
-  GIT_ICASE_PATHSPECS: "0",
-}
-
 export async function readGitDiff(exec: PanelExec, root: string, file: PanelGitEntry): Promise<readonly PanelRow[]> {
-  const options = { cwd: root, timeout: GIT_TIMEOUT_MS, env: LITERAL_PATHSPEC_ENV }
+  const options = { cwd: root, timeout: GIT_TIMEOUT_MS }
   if (file.xy === "??" && file.path.endsWith("/")) {
     const listed = await exec(
       "git",
-      ["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--", file.path],
+      ["ls-files", "--others", "--exclude-standard", "-z", "--", literalPathspec(file.path)],
       options,
     ).catch(() => undefined)
     if (listed === undefined || listed.code !== 0) return [{ text: "git diff could not be run", color: "error" }]
@@ -72,7 +75,7 @@ export async function readGitDiff(exec: PanelExec, root: string, file: PanelGitE
   }
   let result = await exec("git", gitDiffArgs(file), options).catch(() => undefined)
   if (result?.code === 128 && result.stdout === "" && file.xy[0] !== " ") {
-    result = await exec("git", ["--literal-pathspecs", "diff", "--no-index", "--", "/dev/null", file.path], options).catch(
+    result = await exec("git", ["diff", "--no-index", "--", "/dev/null", file.path], options).catch(
       () => undefined,
     )
   }
