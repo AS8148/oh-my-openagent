@@ -5,9 +5,20 @@ type Stage = { readonly stage: string; readonly elapsed_ms: number; readonly fac
 
 function stageName(stage: Stage | undefined): string {
   if (stage === undefined) return "start"
-  const { launch, event } = stage.facts as { launch?: unknown; event?: { stage?: unknown } }
-  const child = typeof event?.stage === "string" ? `:${event.stage}` : ""
+  const { launch, event, command } = stage.facts as { launch?: unknown; event?: { stage?: unknown }; command?: unknown }
+  const detail = typeof event?.stage === "string" ? event.stage : typeof command === "string" ? command : undefined
+  const child = detail === undefined ? "" : `:${detail}`
   return `${stage.stage}${child}${typeof launch === "number" ? ` (launch ${launch})` : ""}`
+}
+
+function requestType(chunk: unknown): string | undefined {
+  const line = typeof chunk === "string" ? chunk : Buffer.isBuffer(chunk) ? chunk.toString("utf8") : ""
+  try {
+    const { type } = JSON.parse(line) as { type?: unknown }
+    return typeof type === "string" ? type : undefined
+  } catch {
+    return undefined // not one protocol line; the stage still marks the send
+  }
 }
 
 /** Observation only: never advances the clock, releases a barrier, or changes an RPC deadline. */
@@ -53,6 +64,16 @@ export function createColdReviveTrace(collectModules = false) {
     child.once("spawn", () => mark("process_spawned", { launch }))
     child.once("error", error => mark("process_error", { launch, message: error.message }))
     child.once("close", (code, signal) => mark("process_closed", { launch, code, signal }))
+    // The protocol client arms a request's deadline and then writes it, so a stage marked on the write
+    // restarts the watchdog no earlier than the product's own clock for that request.
+    const stdin = child.stdin
+    if (stdin) {
+      const write = stdin.write.bind(stdin) as (chunk: unknown, ...rest: unknown[]) => boolean
+      stdin.write = ((chunk: unknown, ...rest: unknown[]) => {
+        mark("request_sent", { launch, command: requestType(chunk) })
+        return write(chunk, ...rest)
+      }) as typeof stdin.write
+    }
     if (child.stdout) createInterface({ input: child.stdout }).on("line", line => {
       let value: { type?: string; command?: string; success?: boolean }
       try { value = JSON.parse(line) } catch { return } // Protocol client reports malformed lines.
