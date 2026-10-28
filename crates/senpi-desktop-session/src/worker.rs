@@ -151,14 +151,7 @@ impl Worker {
             self.attach_user_input_feed();
             self.drain_user_input();
         }
-        // A read of a window that began now shows the user's input there once it
-        // reaches the caller (plan todo 17); the record is told after it succeeds.
-        let read = crate::intervention::window_read(&op).map(|target| (target.to_owned(), self.safety.supervisor.now_ms()));
-        let response = self.serve(op, cancelled);
-        if let (Ok(_), Some((target, started_ms))) = (&response, read) {
-            self.note_read(&target, started_ms);
-        }
-        response
+        self.serve(op, cancelled)
     }
 
     fn serve(&mut self, op: Op, cancelled: &dyn Fn() -> bool) -> CoreResult<Response> {

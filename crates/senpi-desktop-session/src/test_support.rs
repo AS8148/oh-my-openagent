@@ -131,8 +131,20 @@ impl Harness {
     }
 
     /// Serves `op` as a request whose waiter never gives up.
+    /// Serves `op` as the engine does, with the reply delivered to the caller.
     pub(crate) fn process(&mut self, op: Op) -> CoreResult<Response> {
-        self.worker.process(op, &|| false)
+        self.dispatch(op, true)
+    }
+
+    /// Serves `op` as the engine does; `delivered` says whether the reply
+    /// reached the caller (false: the waiter gave up before it did).
+    pub(crate) fn dispatch(&mut self, op: Op, delivered: bool) -> CoreResult<Response> {
+        let mut reply = None;
+        self.worker.dispatch(op, &|| false, |result| {
+            reply = Some(result);
+            delivered
+        });
+        reply.expect("dispatch delivers once")
     }
 
     /// Grants foreground control for this harness's session.

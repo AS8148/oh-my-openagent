@@ -1,6 +1,23 @@
 //! The per-app record of the user's own keys and clicks (ported from oh-my-pi
 //! `desktop/control/intervention.rs` at 0838d2ab44, MIT), in the session
 //! clock's milliseconds so a fake clock drives it in tests.
+//!
+//! Invariants (checked after every step by
+//! `tests::every_interleaving_of_presses_reads_and_time_keeps_the_invariants`):
+//!
+//! 1. An app's last press only moves forward: no later record of an earlier
+//!    press (a kept press, a dropped one stamped at the oldest kept, a press
+//!    learned late) moves it back.
+//! 2. A read clears the record only when it began at least `QUIET_MS` after
+//!    the last REAL press, and only once its reply reached the caller (the
+//!    session tells the record after delivery).
+//! 3. Dropped or unknown presses never clear anything: they count as a press
+//!    into every watched app, stamped no later than the oldest press kept.
+//! 4. Admission needs nothing the input does not use: no feed means no window
+//!    list and no wait; an unknown process start on either side is no evidence
+//!    of a new process, so the record stays.
+//! 5. Input into an app the session never touched, or before it touched it,
+//!    is the user's own and never refuses.
 
 use std::collections::HashMap;
 
@@ -60,9 +77,10 @@ impl UserInputs {
     /// on it is not the agent's concern, nor is a former process's under the
     /// same id.
     pub(crate) fn touch(&self, pid: u32, started: Option<u64>, name: impl FnOnce() -> String) {
-        // A start time the watch could not read this once (`None`) is no
-        // evidence of a new process: the record the session has stays.
-        if self.state.lock().apps.get(&pid).is_some_and(|app| started.is_none() || app.started == started) {
+        // A start time unknown on either side (`None`) is no evidence of a new
+        // process: the record the session has stays. Only two known, different
+        // start times name a process reusing the id.
+        if self.state.lock().apps.get(&pid).is_some_and(|app| started.is_none() || app.started.is_none() || app.started == started) {
             return;
         }
         let name = name();
