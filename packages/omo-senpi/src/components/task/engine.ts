@@ -46,6 +46,7 @@ import {
 } from "./engine-runners"
 import { registerTaskMemoryReporter } from "./memory-reporter"
 import { createParentNotifier } from "./parent-notifier"
+import { notifyHostLiveness } from "./host-liveness-notice"
 import type { ResolveModelRegistry } from "./planner"
 import type { TeamMemberLivenessNotifier } from "./member-liveness"
 import { createManagerResidencyRegistry } from "./residency-registry"
@@ -241,6 +242,9 @@ export function composeTaskEngine(deps: ComposeTaskEngineDeps): TaskEngine {
     generations: categoryConfigGenerations,
   })
   const manager = createTaskManager({
+    onChildLiveness: (record, status) => {
+      if (record.parent_session_id === runtime.sessionId()) notifyHostLiveness(deps.pi, deps.coordinator, record, status, () => runtime.parentState().kind === "streaming")
+    },
     onPausedChild: (record, owner, childSeq) => runPause.notePausedChild(record, owner, childSeq),
     admissionBarrier,
     childPausePort: deps.childPausePort ?? nativeChildPausePort,
