@@ -5,6 +5,7 @@ import { signInRoute } from "./accounts-gate"
 import { credentialSchema, type Credentials, serviceOrigin, SignInError } from "./protocol"
 import type { HelperLease } from "./keychain-helper/client"
 import { asKeystoreError, HelperMissingForOwnedItem, type KeychainHelperOptions } from "./keychain-helper/darwin-backend"
+import { HelperOldSlotsFull } from "./keychain-helper/darwin-store"
 import { bindKeychainHelper, type LockedStore, lockedStoreView } from "./keychain-helper/store-binding"
 import { probeSecretServiceLock, type SecretServiceLockProbe } from "./secret-service-lock"
 
@@ -222,6 +223,7 @@ export function createSealedStore<T>(
   }
   const lockedFailure = (error: unknown): unknown => {
     const mapped = asKeystoreError(error, message => new KeychainApprovalPendingError(message))
+    if (error instanceof HelperOldSlotsFull) return new CredentialStoreError(error.message)
     if (mapped instanceof KeychainApprovalPendingError || mapped instanceof SignInError) return mapped
     if (mapped instanceof Error && mapped.name === "LockLeaseLostError") return mapped
     return unavailable(mapped)

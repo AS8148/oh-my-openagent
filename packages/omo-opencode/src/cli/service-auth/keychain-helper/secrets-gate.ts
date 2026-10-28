@@ -3,32 +3,33 @@
 // interaction off would see -25308 and report "locked". So calls run one at a time, each to completion, and a silent
 // call turns interaction off only for its own duration.
 
-let queue: Promise<unknown> = Promise.resolve()
+import { keychainProcessState } from "./process-state"
 
 type InteractionSwitch = (allowed: boolean) => void
-let interactionSwitch: InteractionSwitch | null | undefined
 
 async function loadInteractionSwitch(): Promise<InteractionSwitch | null> {
-  if (interactionSwitch !== undefined) return interactionSwitch
-  if (process.platform !== "darwin") return (interactionSwitch = null)
+  const state = keychainProcessState()
+  if (state.interactionSwitch !== undefined) return state.interactionSwitch
+  if (process.platform !== "darwin") return (state.interactionSwitch = null)
   try {
     const { dlopen, FFIType } = await import("bun:ffi")
     const security = dlopen("/System/Library/Frameworks/Security.framework/Security", {
       SecKeychainSetUserInteractionAllowed: { args: [FFIType.u8], returns: FFIType.i32 },
     })
-    interactionSwitch = allowed => {
+    state.interactionSwitch = allowed => {
       security.symbols.SecKeychainSetUserInteractionAllowed(allowed ? 1 : 0)
     }
   } catch {
-    interactionSwitch = null
+    state.interactionSwitch = null
   }
-  return interactionSwitch
+  return state.interactionSwitch
 }
 
 /** Runs one Bun.secrets call after every earlier one has settled. */
 export function gatedSecrets<T>(run: () => Promise<T>): Promise<T> {
-  const next = queue.then(run, run)
-  queue = next.then(
+  const state = keychainProcessState()
+  const next = state.secretsQueue.then(run, run)
+  state.secretsQueue = next.then(
     () => undefined,
     () => undefined,
   )

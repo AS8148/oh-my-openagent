@@ -90,8 +90,13 @@ export function bindKeychainHelper(input: {
             handOff: options === undefined ? processHandOff() : (options.handOff ?? (async () => false)),
           }),
     )
-    if (options === undefined) backends.set(cacheKey, created)
-    else own = created
+    if (options === undefined) {
+      backends.set(cacheKey, created)
+      // No helper right now (none found, or a transient failure): the next call resolves again instead of keeping it.
+      void created.then(found => {
+        if (found === null && backends.get(cacheKey) === created) backends.delete(cacheKey)
+      })
+    } else own = created
     return created
   }
   const reader = (helper: DarwinBackend): SecretApi => {

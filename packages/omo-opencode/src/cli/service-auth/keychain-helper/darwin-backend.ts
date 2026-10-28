@@ -7,6 +7,7 @@ import { lockedDarwinStore, type LockedDarwinStore } from "./darwin-store"
 import type { HelperLease } from "./client"
 import { bundleCandidates, machineCandidates } from "./location"
 import { type MarkerProbe, probeOwnerMarker } from "./owner-marker"
+import { keychainProcessState } from "./process-state"
 import { promptLockAt } from "./prompt-lock"
 import { gatedSecrets, silentSecrets } from "./secrets-gate"
 
@@ -24,15 +25,26 @@ type Secrets = {
 export type Row9bChoice = "reinstall-notice" | "dialog"
 export const ROW_9B_DEFAULT: Row9bChoice = "reinstall-notice"
 
-const entryCandidates: string[] = []
 /** Entry points with their own layout (the compiled binary's `execDir`, the desktop runtime) register their copy first. */
 export function registerHelperCandidates(paths: readonly string[]): void {
+  const { entryCandidates } = keychainProcessState()
   entryCandidates.unshift(...paths.filter(path => !entryCandidates.includes(path)))
 }
 
-let resolved: Promise<HelperAccess> | undefined
-export const helperAccess = (): Promise<HelperAccess> =>
-  (resolved ??= resolveHelperAccess([...entryCandidates, ...bundleCandidates(import.meta.url), ...machineCandidates(homedir())]))
+/**
+ * One resolution per process, shared by every bundled copy. An `unavailable` result (a transient pin or copy failure)
+ * is not kept: the next resolve tries again, so a long-lived process does not stay on the helper-less path.
+ */
+export const helperAccess = (): Promise<HelperAccess> => {
+  const state = keychainProcessState()
+  if (state.helperAccess !== undefined) return state.helperAccess
+  const started = resolveHelperAccess([...state.entryCandidates, ...bundleCandidates(import.meta.url), ...machineCandidates(homedir())])
+  state.helperAccess = started
+  void started.then(access => {
+    if (access.kind === "unavailable" && state.helperAccess === started) state.helperAccess = undefined
+  })
+  return started
+}
 
 export class HelperMissingForOwnedItem extends Error {}
 

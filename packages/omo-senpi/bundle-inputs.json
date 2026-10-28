@@ -624,6 +624,7 @@
     "packages/omo-opencode/src/cli/service-auth/keychain-helper/migration.ts",
     "packages/omo-opencode/src/cli/service-auth/keychain-helper/owner-marker.ts",
     "packages/omo-opencode/src/cli/service-auth/keychain-helper/pin.ts",
+    "packages/omo-opencode/src/cli/service-auth/keychain-helper/process-state.ts",
     "packages/omo-opencode/src/cli/service-auth/keychain-helper/prompt-lock.ts",
     "packages/omo-opencode/src/cli/service-auth/keychain-helper/recovery.ts",
     "packages/omo-opencode/src/cli/service-auth/keychain-helper/secrets-gate.ts",

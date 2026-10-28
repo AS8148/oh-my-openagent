@@ -9,6 +9,7 @@ import { grant, privateKeys } from "../test-support"
 import type { HelperAccess } from "./access"
 import { createApprovalCache } from "./approval-cache"
 import type { HelperCall, HelperLease, HelperReply } from "./client"
+import { OLD_SLOT_COUNT, oldSlotName } from "./recovery"
 
 export type Owner = "helper" | "bun" | "runtime"
 type Item = { value: string; owner: Owner; partition: "ours" | "other" | "none"; marker: boolean; cdat: number; mdat: number }
@@ -51,7 +52,8 @@ export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "l
     },
   }
 
-  const present = (base: string) => ({ staging: items.has(`${base}.staging`), old: items.has(`${base}.old`) })
+  const slots = (base: string) => Array.from({ length: OLD_SLOT_COUNT }, (_, slot) => slot).filter(slot => items.has(oldSlotName(base, slot)))
+  const present = (base: string) => ({ staging: items.has(`${base}.staging`), old: slots(base).length > 0, oldSlots: slots(base) })
   const rename = (from: string, to: string): HelperReply => {
     const item = items.get(from)
     if (item === undefined) return { error: "missing" }
@@ -90,8 +92,11 @@ export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "l
         return existing === undefined ? { ok: true, created: true } : { ok: true }
       }
       case "retire": {
-        const renamed = rename(name, `${name}.old`)
-        return renamed.error === "exists" ? { ok: true, skipped: true } : renamed
+        for (let slot = 0; slot < OLD_SLOT_COUNT; slot++) {
+          const renamed = rename(name, oldSlotName(name, slot))
+          if (renamed.error !== "exists") return renamed.ok === true ? { ok: true, slot } : renamed
+        }
+        return { error: "exists", reason: "old-slots-full" }
       }
       case "promote":
         return rename(`${name}.staging`, name)
