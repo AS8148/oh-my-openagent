@@ -66,7 +66,7 @@ type SchedulerContention = {
   readonly owner: unknown
 }
 
-function callerSite(stack: string | undefined): string {
+export function callerSite(stack: string | undefined): string {
   // Windows stacks print backslash paths; both separators name the same worker frame.
   const frames = (stack ?? "").split("\n").filter((line) => /worker[\\/]run-[\w-]+\.ts:\d+/.test(line))
   return frames[0]?.trim() ?? "unknown site"
@@ -123,7 +123,8 @@ export async function staleLockFixture(seams?: ActiveHolderSeams, options: { rea
     async reconcile(): Promise<void> {
       reconciles.count += 1
       if (options.reconcileReleases === false) return
-      const pass = reconciles.count
+      // Passes are numbered from 1 (the count after this call); a mark holds the count before the step under test.
+  const pass = reconciles.count
       const reservation = observeContention(store, reconciles.contention, pass)
       try {
         reconciles.results.push(await reconcileReflectionRuns({ identity: memoryIdentity, reservation, launch, deferOnSchedulerContention: true }))
@@ -312,8 +313,8 @@ export async function staleRunDiagnosis(
   const host = `recorded host ${holder?.hostname ?? "unknown"}, current host ${hostname()}, boot ${bootId()}`
   const reconciled = item.reconciles.count - observed.mark.count
   const passes = item.reconciles.results.slice(observed.mark.results)
-  const contention = item.reconciles.contention.filter((entry) => entry.pass >= observed.mark.count)
-  const errors = item.reconciles.errors.filter((entry) => entry.pass >= observed.mark.count)
+  const contention = item.reconciles.contention.filter((entry) => entry.pass > observed.mark.count)
+  const errors = item.reconciles.errors.filter((entry) => entry.pass > observed.mark.count)
   const branch = observed.verdictBefore.state === "live"
     ? "A live: the holder looked alive, so nothing was reconciled"
     : observed.verdictBefore.state === "stuck"

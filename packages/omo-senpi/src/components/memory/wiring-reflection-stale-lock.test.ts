@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { FactsExtractorRunner } from "./facts-runner"
 import {
-  activeRunId, cleanupStaleLockFixtures, deadPid, diagnosisMark, holderVerdict, hostDiesMidPublish, runReflect, settleTurn, staleLockFixture,
+  activeRunId, callerSite, cleanupStaleLockFixtures, deadPid, diagnosisMark, holderVerdict, hostDiesMidPublish, runReflect, settleTurn, staleLockFixture,
   staleRunDiagnosis,
 } from "./wiring-reflection-stale-lock.test-support"
 
@@ -175,4 +175,19 @@ test("#given bind reconciliation is still pending #when the stale-lock fixture i
     await settleReconcile()
     await rm(item.root, { recursive: true, force: true })
   }
+})
+
+test("#given a Windows stack with backslash paths #when the stale-lock diagnosis names a contention site #then the worker frame is found (#11604)", () => {
+  // given
+  const stack = [
+    "Error",
+    "    at observeContention (C:\\a\\omo\\packages\\omo-senpi\\src\\components\\memory\\wiring-reflection-stale-lock.test-support.ts:84:38)",
+    "    at reconcilePrelaunch (C:\\a\\omo\\packages\\omo-senpi\\src\\components\\memory\\worker\\run-reconciliation-prelaunch.ts:30:45)",
+  ].join("\n")
+
+  // when
+  const site = callerSite(stack)
+
+  // then
+  expect(site).toBe("at reconcilePrelaunch (C:\\a\\omo\\packages\\omo-senpi\\src\\components\\memory\\worker\\run-reconciliation-prelaunch.ts:30:45)")
 })
