@@ -9,6 +9,10 @@ import * as connectedProvidersCache from "../../shared/connected-providers-cache
 import { CATEGORY_MODEL_REQUIREMENTS } from "../../shared/model-requirements"
 import { parseModelString } from "../../shared/model-string-parser"
 import { unsafeTestValue } from "../../../../../test-support/unsafe-test-value"
+import { MemberSchema } from "@oh-my-opencode/team-core"
+import { applyMemberSessionRouting } from "../../features/team-mode/member-session-routing"
+import { getRawFallbackModels } from "../../hooks/runtime-fallback/fallback-models"
+import { SessionCategoryRegistry } from "../../shared/session-category-registry"
 
 const PROMPT_INPUT_SENTINEL = "PROMPT_INPUT_SENTINEL"
 const USER_CONFIGURED_MODEL = "openai/gpt-5.5"
@@ -161,6 +165,32 @@ describe("retired category alias parity", () => {
 			// Downstream readers (session category registry, runtime fallback, task metadata, logs) read this
 			// value directly, so the canonical name has to be set here rather than at each reader.
 			expect(prepared.category).toBe(canonical)
+		})
+
+		test(`a team member spelled "${alias}" reaches runtime fallback as "${canonical}"`, () => {
+			//#given
+			// Team mode never goes through the task tool: the member is parsed, launched, stored in runtime
+			// state and registered for the session, and runtime fallback then reads categories[<name>].
+			const member = MemberSchema.parse({
+				kind: "category",
+				name: "member-a",
+				category: alias,
+				prompt: "Do the assigned work.",
+			})
+			const sessionID = `ses_alias_parity_${canonical}`
+			const pluginConfig = unsafeTestValue({
+				categories: { [canonical]: { model: USER_CONFIGURED_MODEL, fallback_models: ["anthropic/claude-opus-4-7"] } },
+			})
+
+			//#when
+			applyMemberSessionRouting(sessionID, unsafeTestValue({ name: "member-a", category: member.category }))
+			const fallbackModels = getRawFallbackModels(sessionID, undefined, pluginConfig)
+
+			//#then
+			expect(member.category).toBe(canonical)
+			expect(SessionCategoryRegistry.get(sessionID)).toBe(canonical)
+			expect(fallbackModels).toEqual(["anthropic/claude-opus-4-7"])
+			SessionCategoryRegistry.remove(sessionID)
 		})
 	}
 })

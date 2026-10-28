@@ -436,6 +436,7 @@
       "name": "@oh-my-opencode/team-core",
       "version": "0.1.0",
       "dependencies": {
+        "@oh-my-opencode/omo-config-core": "workspace:*",
         "@oh-my-opencode/tmux-core": "workspace:*",
         "@oh-my-opencode/utils": "workspace:*",
         "zod": "^4.6.5",

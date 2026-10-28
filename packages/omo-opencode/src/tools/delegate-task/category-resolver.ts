@@ -73,17 +73,17 @@ export async function resolveCategoryExecution(
   const { client, userCategories, sisyphusJuniorModel } = executorCtx
 
   // A retired builtin name resolves to its replacement so third-party skills and AGENTS.md text
-  // spawning the old category keep working; a user category of that name still wins over the alias.
+  // spawning the old category keep working. Callers canonicalize at their own boundary; this call is
+  // idempotent and covers a caller that passes a name straight through.
   const enabledCategories = mergeCategories(userCategories)
-  const requestedCategoryName = args.category!
-  const categoryName = enabledCategories[requestedCategoryName] !== undefined
-    ? requestedCategoryName
-    : canonicalCategoryName(requestedCategoryName)
+  const categoryName = canonicalCategoryName(args.category!)
+  // Errors name what the caller typed, not what it was canonicalized to.
+  const requestedCategoryName = args.requestedCategory ?? args.category!
   const categoryExists = enabledCategories[categoryName] !== undefined
 
   if (!categoryExists) {
     const allCategoryNames = Object.keys(enabledCategories).join(", ")
-    return categoryResolutionError(`Unknown category: "${categoryName}". Available: ${allCategoryNames}`)
+    return categoryResolutionError(`Unknown category: "${requestedCategoryName}". Available: ${allCategoryNames}`)
   }
 
   const availableModels = await getAvailableModelsForDelegateTask(client)
@@ -128,7 +128,7 @@ To use this category:
 Available categories: ${allCategoryNames}`)
     }
 
-    return categoryResolutionError(`Unknown category: "${categoryName}". Available: ${allCategoryNames}`)
+    return categoryResolutionError(`Unknown category: "${requestedCategoryName}". Available: ${allCategoryNames}`)
   }
 
   const requirement = CATEGORY_MODEL_REQUIREMENTS[categoryName]

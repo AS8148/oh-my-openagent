@@ -1,4 +1,5 @@
 import * as z from "zod"
+import { canonicalCategoryName } from "@oh-my-opencode/omo-config-core"
 import { createParseMember } from "./member-parser"
 
 export const MESSAGE_KINDS = [
@@ -36,7 +37,10 @@ const MemberBaseSchema = z.object({
 
 export const CategoryMemberSchema = MemberBaseSchema.extend({
   kind: z.literal("category"),
-  category: z.string().min(1),
+  // Canonicalized once, where a member is parsed: a retired builtin name (e.g. `deep` -> `deep-low`)
+  // is replaced here, so the launched task, the runtime state, the session category registry and the
+  // runtime fallback that reads `categories[<name>]` all use the key the config loader kept.
+  category: z.string().min(1).transform(canonicalCategoryName),
   prompt: z.string().min(1),
 })
 

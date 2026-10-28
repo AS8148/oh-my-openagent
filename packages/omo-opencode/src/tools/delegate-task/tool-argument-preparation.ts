@@ -8,7 +8,8 @@ export async function prepareDelegateTaskArgs(args: Record<string, unknown>, ctx
   // replaced here so the resolver, the session category registry, runtime fallback, task metadata and
   // the logs all read the name that actually runs. A user category keeping a retired name was already
   // renamed when the config was loaded, so only the canonical spelling can appear in user config.
-  const category = typeof args.category === "string" ? canonicalCategoryName(args.category) : undefined
+  const requestedCategory = typeof args.category === "string" ? args.category : undefined
+  const category = requestedCategory === undefined ? undefined : canonicalCategoryName(requestedCategory)
   const prompt = typeof args.prompt === "string" ? args.prompt : ""
   const originalSubagentType = typeof args.subagent_type === "string" ? args.subagent_type : undefined
   let subagentType = originalSubagentType
@@ -92,6 +93,7 @@ export async function prepareDelegateTaskArgs(args: Record<string, unknown>, ctx
 
   return {
     category,
+    ...(requestedCategory !== undefined && requestedCategory !== category ? { requestedCategory } : {}),
     subagent_type: subagentType,
     requested_subagent_type: originalSubagentType,
     description,
