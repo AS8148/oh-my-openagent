@@ -9,6 +9,7 @@ import type { ManagedClient, McpClient, McpTransport, SkillMcpClientConnectionPa
 import { createProtocolTransport } from "./protocol-transport"
 import { protocolHttpFetch } from "./protocol-http-fetch"
 import { connectWithPolicySignal, McpEnvironmentPolicyChangedError } from "./policy-connection"
+import { withConnectDeadline } from "./timeouts"
 
 type HttpClientFactory = (
   clientInfo: { name: string; version: string },
@@ -135,15 +136,12 @@ export async function createHttpClient(params: SkillMcpClientConnectionParams): 
     { name: `skill-mcp-${info.skillName}-${info.serverName}`, version: "1.0.0" },
     { capabilities: {} }
   )
-  const transport: McpTransport = httpClientDependencies.createTransport(
-    url,
-    transportOptions,
-    client,
-    config.type === "sse" ? "sse" : "streamable-http",
-  )
+  const transportKind: HttpTransportKind = config.type === "sse" ? "sse" : "streamable-http"
+  const transport: McpTransport = httpClientDependencies.createTransport(url, transportOptions, client, transportKind)
 
   try {
-    await connectWithPolicySignal(client, transport, params.policySignal)
+    const connecting = connectWithPolicySignal(client, transport, params.policySignal)
+    await (transportKind === "sse" ? withConnectDeadline(connecting) : connecting)
   } catch (error) {
     await closeHttpResourceIgnoringFailure(() => transport.close(), {
       resource: "transport",
