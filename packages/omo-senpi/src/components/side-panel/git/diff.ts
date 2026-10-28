@@ -36,21 +36,33 @@ export function gitDiffArgs(file: PanelGitEntry): string[] {
 /** Files of one untracked directory the viewer diffs; the rest are counted in a closing row. */
 export const UNTRACKED_DIRECTORY_FILE_CAP = 50
 
+/**
+ * Environment for every spawn below. `--literal-pathspecs` is incompatible with the
+ * other global pathspec switches, so a shell that exports `GIT_GLOB_PATHSPECS=1` or
+ * `GIT_ICASE_PATHSPECS=1` makes git exit 128 before any diff is produced (#11176).
+ * The child env pins both switches off, the same override memory-core applies to its
+ * literal lookups (#11167); the host merges it over the inherited environment, so no
+ * other variable is dropped. `GIT_NOGLOB_PATHSPECS` does not conflict and stays as is.
+ */
+const LITERAL_PATHSPEC_ENV: Readonly<Record<string, string>> = {
+  GIT_GLOB_PATHSPECS: "0",
+  GIT_ICASE_PATHSPECS: "0",
+}
+
 export async function readGitDiff(exec: PanelExec, root: string, file: PanelGitEntry): Promise<readonly PanelRow[]> {
+  const options = { cwd: root, timeout: GIT_TIMEOUT_MS, env: LITERAL_PATHSPEC_ENV }
   if (file.xy === "??" && file.path.endsWith("/")) {
     const listed = await exec(
       "git",
       ["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--", file.path],
-      { cwd: root, timeout: GIT_TIMEOUT_MS },
+      options,
     ).catch(() => undefined)
     if (listed === undefined || listed.code !== 0) return [{ text: "git diff could not be run", color: "error" }]
     const listedPaths = listed.stdout.split("\0").filter((path) => path !== "")
     // One process per file: an untracked build directory must not become thousands of spawns.
     const paths = listedPaths.slice(0, UNTRACKED_DIRECTORY_FILE_CAP)
     const results = await Promise.all(
-      paths.map((path) =>
-        exec("git", gitDiffArgs({ xy: "??", path }), { cwd: root, timeout: GIT_TIMEOUT_MS }).catch(() => undefined),
-      ),
+      paths.map((path) => exec("git", gitDiffArgs({ xy: "??", path }), options).catch(() => undefined)),
     )
     if (results.some((result) => result === undefined)) return [{ text: "git diff could not be run", color: "error" }]
     const rows = results.flatMap((result) => colorizeDiff(result?.stdout ?? ""))
@@ -58,13 +70,11 @@ export async function readGitDiff(exec: PanelExec, root: string, file: PanelGitE
     if (omitted > 0) rows.push({ text: `... ${omitted} more files in ${file.path}`, color: "muted" })
     return rows.length > 0 ? rows : [{ text: "no textual change", color: "muted" }]
   }
-  let result = await exec("git", gitDiffArgs(file), { cwd: root, timeout: GIT_TIMEOUT_MS }).catch(() => undefined)
+  let result = await exec("git", gitDiffArgs(file), options).catch(() => undefined)
   if (result?.code === 128 && result.stdout === "" && file.xy[0] !== " ") {
-    result = await exec(
-      "git",
-      ["--literal-pathspecs", "diff", "--no-index", "--", "/dev/null", file.path],
-      { cwd: root, timeout: GIT_TIMEOUT_MS },
-    ).catch(() => undefined)
+    result = await exec("git", ["--literal-pathspecs", "diff", "--no-index", "--", "/dev/null", file.path], options).catch(
+      () => undefined,
+    )
   }
   if (result === undefined) return [{ text: "git diff could not be run", color: "error" }]
   // `--no-index` exits 1 whenever the files differ, which is the normal case here.

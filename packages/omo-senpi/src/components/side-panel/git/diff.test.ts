@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { colorizeDiff, gitDiffArgs, readGitDiff, UNTRACKED_DIRECTORY_FILE_CAP } from "./diff"
 import type { PanelExec } from "./read"
@@ -194,6 +198,99 @@ describe("readGitDiff", () => {
       "+content",
     ])
   })
+})
+
+describe("readGitDiff pathspec environment", () => {
+  const roots: string[] = []
+
+  afterEach(() => {
+    while (roots.length > 0) {
+      const root = roots.pop()
+      if (root !== undefined) rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  /** A PanelExec that really spawns the command, merging any requested env over the inherited one. */
+  const realExec: PanelExec = async (command, args, options) => {
+    const result = spawnSync(command, [...args], {
+      cwd: options?.cwd,
+      env: { ...process.env, ...options?.env },
+      encoding: "utf8",
+      timeout: options?.timeout,
+      windowsHide: true,
+    })
+    return { stdout: result.stdout ?? "", code: result.status ?? 1 }
+  }
+
+  function gitFixture(): string {
+    const root = mkdtempSync(join(tmpdir(), "omo-panel-diff-"))
+    roots.push(root)
+    const git = (args: string[]): void => {
+      spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true })
+    }
+    git(["init", "-q"])
+    git(["config", "user.email", "panel@test"])
+    git(["config", "user.name", "panel"])
+    writeFileSync(join(root, "tracked.txt"), "a\n")
+    git(["add", "tracked.txt"])
+    git(["commit", "-qm", "init"])
+    writeFileSync(join(root, "tracked.txt"), "a\nb\n")
+    return root
+  }
+
+  test("#given a tracked diff and its fallback #when read #then every spawn pins the competing pathspec switches off", async () => {
+    // given
+    const seen: (Readonly<Record<string, string>> | undefined)[] = []
+    const runner: PanelExec = async (_command, _args, options) => {
+      seen.push(options?.env)
+      return seen.length === 1 ? { stdout: "", code: 128 } : { stdout: "+hello", code: 1 }
+    }
+
+    // when
+    await readGitDiff(runner, "/repo", { xy: "A ", path: "new.txt" })
+
+    // then
+    expect(seen).toHaveLength(2)
+    for (const env of seen) expect(env).toEqual({ GIT_GLOB_PATHSPECS: "0", GIT_ICASE_PATHSPECS: "0" })
+  })
+
+  test("#given an untracked directory #when read #then the listing and every per-file diff pin the switches off", async () => {
+    // given
+    const seen: (Readonly<Record<string, string>> | undefined)[] = []
+    const runner: PanelExec = async (_command, args, options) => {
+      seen.push(options?.env)
+      if (args.includes("ls-files")) return { stdout: "build/a.txt\0build/b.txt\0", code: 0 }
+      return { stdout: "+content", code: 1 }
+    }
+
+    // when
+    await readGitDiff(runner, "/repo", { xy: "??", path: "build/" })
+
+    // then
+    expect(seen).toHaveLength(3)
+    for (const env of seen) expect(env).toEqual({ GIT_GLOB_PATHSPECS: "0", GIT_ICASE_PATHSPECS: "0" })
+  })
+
+  for (const variable of ["GIT_GLOB_PATHSPECS", "GIT_ICASE_PATHSPECS"] as const) {
+    test(`#given inherited ${variable}=1 #when a tracked diff is read through real git #then the diff is returned and the host env is untouched`, async () => {
+      // given
+      const root = gitFixture()
+      const saved = process.env[variable]
+      try {
+        process.env[variable] = "1"
+
+        // when
+        const rows = await readGitDiff(realExec, root, { xy: " M", path: "tracked.txt" })
+
+        // then
+        expect(rows.map((row) => row.text)).toContain("+b")
+        expect(process.env[variable]).toBe("1")
+      } finally {
+        if (saved === undefined) delete process.env[variable]
+        else process.env[variable] = saved
+      }
+    })
+  }
 })
 
 describe("readGitDiff untracked directory cap", () => {
