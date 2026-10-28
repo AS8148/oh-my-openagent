@@ -207,6 +207,8 @@
   "docs": {
     "mobileHeader": "Docs di OmO",
     "searchPlaceholder": "Cerca nei docs...",
+    "searchLabel": "Filtra le sezioni della documentazione",
+    "sectionsLabel": "Sezioni della documentazione",
     "install": {
       "title": "Installa OmO",
       "description": "Installa OmO con un solo comando su macOS, Linux, WSL e Windows."
