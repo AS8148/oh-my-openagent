@@ -1,3 +1,4 @@
+import { homedir } from "node:os"
 import type { SecretApi } from "../keystore"
 import type { HelperLease } from "./client"
 import {
@@ -9,6 +10,7 @@ import {
   type KeychainHelperOptions,
 } from "./darwin-backend"
 import type { LockedDarwinStore, WriteIntent } from "./darwin-store"
+import { createCreatorHandOff, DESKTOP_RUNTIME_REQUIREMENT, desktopRuntimeCandidates } from "./creator-handoff"
 import { gatedSecrets } from "./secrets-gate"
 
 /** The session-lock view of a store (#11262 design 3.3, 3.4, 3.6): every keychain change inside one locked section. */
@@ -33,6 +35,13 @@ export type HelperBinding = {
 // One adapter per helper-backed account per process, so every store in the process shares the same pending read.
 const readers = new Map<DarwinBackend, SecretApi>()
 const backends = new Map<string, Promise<DarwinBackend | null>>()
+
+let handOffOnce: (() => Promise<boolean>) | undefined
+// Addendum change 1: one hand-off attempt per process, to the desktop app's runtime when it is installed and verified.
+function processHandOff(): () => Promise<boolean> {
+  handOffOnce ??= createCreatorHandOff({ candidates: desktopRuntimeCandidates(homedir()), requirement: DESKTOP_RUNTIME_REQUIREMENT })
+  return handOffOnce
+}
 
 /**
  * Only the real macOS store of the sign-in item gets the signed helper (or a store a test hands helper options to);
@@ -78,6 +87,7 @@ export function bindKeychainHelper(input: {
             ...(options?.row8b === undefined ? {} : { row8b: options.row8b }),
             ...(options?.silently === undefined ? {} : { silently: options.silently }),
             ...(options?.cache === undefined ? {} : { cache: options.cache }),
+            handOff: options === undefined ? processHandOff() : (options.handOff ?? (async () => false)),
           }),
     )
     if (options === undefined) backends.set(cacheKey, created)
