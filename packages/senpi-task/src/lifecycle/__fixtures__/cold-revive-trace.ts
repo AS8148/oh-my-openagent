@@ -3,20 +3,47 @@ import { createInterface } from "node:readline"
 
 type Stage = { readonly stage: string; readonly elapsed_ms: number; readonly facts: Readonly<Record<string, unknown>> }
 
+function stageName(stage: Stage | undefined): string {
+  if (stage === undefined) return "start"
+  const { launch, event } = stage.facts as { launch?: unknown; event?: { stage?: unknown } }
+  const child = typeof event?.stage === "string" ? `:${event.stage}` : ""
+  return `${stage.stage}${child}${typeof launch === "number" ? ` (launch ${launch})` : ""}`
+}
+
 /** Observation only: never advances the clock, releases a barrier, or changes an RPC deadline. */
 export function createColdReviveTrace(collectModules = false) {
   const started = performance.now()
   const stages: Stage[] = []
   const graphs: { launch: number; stage: string; elapsed_ms: number; modules: string[] }[] = []
   let launches = 0
+  const onStage = new Set<() => void>()
   const mark = (stage: string, facts: Readonly<Record<string, unknown>> = {}): void => {
     const entry = { stage, elapsed_ms: Math.round((performance.now() - started) * 1000) / 1000, facts }
     stages.push(entry)
     console.error(`COLD_REVIVE_STAGE ${JSON.stringify(entry)}`)
+    for (const listener of onStage) listener()
   }
   const failure = (reason: string, cause?: unknown): Error => new Error(
     `${reason}; cold-revive stages=${JSON.stringify(stages)}`, { cause },
   )
+  /** Rejects once no stage has been marked for `windowMs`, naming the last stage and the stall length. */
+  const watchProgress = (windowMs: number) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let reject: (error: Error) => void = () => undefined
+    const stalled = new Promise<never>((_, rejectStall) => { reject = rejectStall })
+    const arm = (): void => {
+      clearTimeout(timer)
+      const armedAt = performance.now()
+      timer = setTimeout(() => {
+        const last = stages.at(-1)
+        const stallMs = Math.round(performance.now() - armedAt)
+        reject(failure(`Cold revival stalled: no stage for ${stallMs} ms (liveness window ${windowMs} ms) after "${stageName(last)}" at ${last?.elapsed_ms ?? 0} ms`))
+      }, windowMs)
+    }
+    onStage.add(arm)
+    arm()
+    return { stalled, dispose: (): void => { onStage.delete(arm); clearTimeout(timer) } }
+  }
   const spawnProcess = (command: string, args: readonly string[], options: SpawnOptions): ChildProcess => {
     const launch = ++launches
     mark("connect", { launch })
@@ -33,7 +60,16 @@ export function createColdReviveTrace(collectModules = false) {
       if (value.type === "agent_start") mark("turn_start", { launch })
       if (value.type === "agent_end") mark("turn_settle", { launch })
     })
+    let timings: Record<string, number> | undefined
     if (child.stderr) createInterface({ input: child.stderr }).on("line", line => {
+      // senpi's phase timer (TIMING=1) prints one block per namespace; relay it as one stage.
+      if (/^--- Startup Timings: .+ ---$/.test(line)) { timings = {}; return }
+      const phase = /^\s+(.+): (\d+)ms$/.exec(line)
+      if (timings !== undefined && phase !== null) {
+        timings[phase[1] ?? ""] = Number(phase[2])
+        if (phase[1] === "TOTAL") { mark("child_timings", { launch, phases: timings }); timings = undefined }
+        return
+      }
       if (!line.startsWith("COLD_REVIVE_CHILD ")) return
       const { module_paths, ...event } = JSON.parse(line.slice(18))
       if (module_paths) graphs.push({ launch, stage: event.stage, elapsed_ms: event.elapsed_ms, modules: module_paths })
@@ -41,7 +77,7 @@ export function createColdReviveTrace(collectModules = false) {
     })
     return child
   }
-  return { mark, failure, spawnProcess, stages, graphs }
+  return { mark, failure, watchProgress, spawnProcess, stages, graphs }
 }
 
 export type ColdReviveTrace = ReturnType<typeof createColdReviveTrace>

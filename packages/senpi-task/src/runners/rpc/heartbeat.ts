@@ -1,6 +1,7 @@
 import { RpcRequestTimeout } from "./errors"
 
 export const HEARTBEAT_DEADLINE_MS = 10_000
+export const HEARTBEAT_MISSES_BEFORE_UNRESPONSIVE = 3
 
 export function unresponsiveMessage(taskId: string): string {
   return `ended: the child stopped answering for 30 s (3 heartbeats). Action: inspect task_output ${taskId}; run it again with task`
@@ -29,7 +30,7 @@ export function startHeartbeat<T>(input: {
       if (stopped || input.paused()) return
       input.onFailure(error)
       failures++
-      if (failures === 3) {
+      if (failures === HEARTBEAT_MISSES_BEFORE_UNRESPONSIVE) {
         stopped = true
         clearInterval(interval)
         clearTimeout(deadline)
