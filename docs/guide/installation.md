@@ -202,7 +202,10 @@ one is unset.
      providers     acme -> https://api.acme.example/v1, 2 models (acme-large, acme-small), key from opencode config apiKey - will be imported
      model choices default kimi-coding/k3; categories deep-low, quick; agents librarian - will be written
    ...
-   Anonymous telemetry is enabled by default. Disable it with OMO_SEND_ANONYMOUS_TELEMETRY=0 or OMO_DISABLE_POSTHOG=1.
+   OmO sends anonymous usage telemetry (no prompts, code, file paths, or account data) to improve the product.
+   The data goes to PostHog in the United States.
+   Turn it off with DO_NOT_TRACK=1 (or OMO_DISABLE_TELEMETRY=1).
+   Details: https://github.com/code-yeongyu/oh-my-openagent/blob/dev/docs/legal/privacy-policy.md
    Import all of the above into ~/.omo? [Y/n]
    ```
 
@@ -968,7 +971,7 @@ Postinstall validates both platform binary resolution and OpenCode version compa
 
 ## Telemetry & Privacy
 
-Anonymous telemetry is enabled by default to track active installations (DAU/WAU/MAU). For both products:
+Anonymous telemetry is enabled by default to track active installations (DAU/WAU/MAU). Every installer (`install.sh`, `install.ps1`, `bunx oh-my-openagent install`, `lazycodex-ai install`) and `omo setup` print a short notice when they finish: what is sent, that it goes to PostHog in the United States, how to turn it off, and a link to the [privacy policy](../legal/privacy-policy.md). OmO Native shows the same notice once, on its first session. For both products:
 
 - A single event is sent **at most once per UTC day per machine**
 - Uses a SHA256-hashed installation identifier — never the raw hostname
@@ -985,6 +988,11 @@ Per product:
 Opt-out:
 
 ```bash
+# Disable telemetry for every product
+export DO_NOT_TRACK=1
+# or
+export OMO_DISABLE_TELEMETRY=1
+
 # Disable the main plugin's telemetry
 export OMO_DISABLE_POSTHOG=1
 # or

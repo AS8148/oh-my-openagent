@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:7a225a15bf5b52abe494c71eb6ff547d63e87cecfbce995848c6e3d595efe115:42f3723b384006ea7f9cdbf96f2b0ca8ced4119534c95595ee64fbe2da25a63e
+// omo-codex-install:5a1293244d0238927844b25d791c3b1a3ff645d4f7894f61197e2856a90ae746:c446f603973a699994143f0e84262beea02989610af3ab51922752f3f4010dc6
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -10318,6 +10318,15 @@ var init_telemetry = __esm(() => {
 import { readFile as readFile26 } from "node:fs/promises";
 import { dirname as dirname13, join as join42, resolve as resolve11 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
+
+// packages/telemetry-core/src/install-disclosure.ts
+var TELEMETRY_PRIVACY_POLICY_URL = "https://github.com/code-yeongyu/oh-my-openagent/blob/dev/docs/legal/privacy-policy.md";
+var TELEMETRY_INSTALL_DISCLOSURE_LINES = [
+  "OmO sends anonymous usage telemetry (no prompts, code, file paths, or account data) to improve the product.",
+  "The data goes to PostHog in the United States.",
+  "Turn it off with DO_NOT_TRACK=1 (or OMO_DISABLE_TELEMETRY=1).",
+  `Details: ${TELEMETRY_PRIVACY_POLICY_URL}`
+];
 
 // packages/utils/src/runtime/spawn.ts
 import {
@@ -24560,7 +24569,7 @@ async function runLazyCodexInstallLocalCli(input) {
         env: input.env,
         log: logWarning
       });
-      input.log(`Installed ${result.installed.length} plugin(s) from ${result.marketplaceName}.`);
+      logInstalled(input.log, result);
       return 0;
     }
     return runLazyCodexManualUpdate({ env: input.env, dryRun: parsed.dryRun, log: input.log, invokedPath: input.invokedPath });
@@ -24572,8 +24581,14 @@ async function runLazyCodexInstallLocalCli(input) {
     env: input.env,
     log: logWarning
   });
-  input.log(`Installed ${result.installed.length} plugin(s) from ${result.marketplaceName}.`);
+  logInstalled(input.log, result);
   return 0;
+}
+function logInstalled(log, result) {
+  log(`Installed ${result.installed.length} plugin(s) from ${result.marketplaceName}.`);
+  log("");
+  for (const line of TELEMETRY_INSTALL_DISCLOSURE_LINES)
+    log(line);
 }
 export {
   PASSTHROUGH_COMMANDS,
