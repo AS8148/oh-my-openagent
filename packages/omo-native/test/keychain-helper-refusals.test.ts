@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
-import { ACCOUNT, createHarness, type Harness, isDarwin } from "./keychain-helper.test-support"
+import { ACCOUNT, createHarness, NATIVE_BUILD_BUDGET_MS, type Harness, isDarwin } from "./keychain-helper.test-support"
 
 const MAX_VALUE = 65_536
 const refused = (reason: string) => ({ error: "refused", reason })
@@ -16,11 +16,11 @@ describe.skipIf(!isDarwin)("omo-keychain helper refusals (#11262 design 1, Refus
 
   beforeAll(async () => {
     harness = await createHarness()
-  })
+  }, NATIVE_BUILD_BUDGET_MS)
 
   afterAll(async () => {
     await harness.dispose()
-  })
+  }, NATIVE_BUILD_BUDGET_MS)
 
   const cases: ReadonlyArray<readonly [string, object | string, string]> = [
     ["uppercase account", { v: 1, verb: "read", account: "A".repeat(64) }, "account"],
@@ -39,6 +39,8 @@ describe.skipIf(!isDarwin)("omo-keychain helper refusals (#11262 design 1, Refus
     ["trailing bytes", `{"v":1,"verb":"read","account":"${ACCOUNT}"} x`, "malformed"],
     ["lone surrogate", `{"v":1,"verb":"write","account":"${ACCOUNT}","value":"\\udc00"}`, "malformed"],
     ["unknown verb", { v: 1, verb: "export", account: ACCOUNT }, "unknown-verb"],
+    ["a verb with an embedded NUL", { v: 1, verb: "write\u0000x", account: ACCOUNT, value: "x" }, "unknown-verb"],
+    ["a key with an embedded NUL", { v: 1, verb: "read", account: ACCOUNT, "value\u0000zz": "x" }, "unknown-key"],
     ["write without a value", { v: 1, verb: "write", account: ACCOUNT }, "missing-value"],
     ["read with a value", { v: 1, verb: "read", account: ACCOUNT, value: "x" }, "extra-value"],
     ["value over 64 KiB", { v: 1, verb: "write", account: ACCOUNT, value: "x".repeat(MAX_VALUE + 1) }, "too-large"],

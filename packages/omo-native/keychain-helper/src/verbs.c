@@ -11,8 +11,9 @@ static void derived_name(char *out, const char *base, const char *suffix) {
 }
 
 // A locked keychain answers -25308 or, for some calls with interaction disabled, -25293: both are today's locked class.
-static const char *failure_code(OSStatus status) {
-  bool locked = status == errSecInteractionNotAllowed || (status == errSecAuthFailed && target_keychain_locked());
+// The lock state is the one of the keychain holding <account> (or receiving it, for an add).
+static const char *failure_code_for(const char *account, OSStatus status) {
+  bool locked = status == errSecInteractionNotAllowed || (status == errSecAuthFailed && item_keychain_locked(account));
   return locked ? "locked" : "store";
 }
 
@@ -70,7 +71,7 @@ static void read_original(const char *base, item_state *original) {
     buffer_field_string(&reply, "partition", partition_kind(original->item));
     put_presence(&reply, base);
     send_reply(&reply);
-  } else reply_error(failure_code(status), NULL, status);
+  } else reply_error(failure_code_for(base, status), NULL, status);
   free(reply.bytes);
   item_state_release(&data);
 }
@@ -86,7 +87,7 @@ static void read_staging(const char *base) {
     buffer_field_bool(&reply, "missing", true);
     put_presence(&reply, base);
     send_reply(&reply);
-  } else if (status != errSecSuccess) reply_error(failure_code(status), NULL, status);
+  } else if (status != errSecSuccess) reply_error(failure_code_for(base, status), NULL, status);
   else if (unlock_or_reply(staged.item)) {
     item_state data = {0};
     status = read_data(staging, &data);
@@ -98,7 +99,7 @@ static void read_staging(const char *base) {
       put_presence(&reply, base);
       send_reply(&reply);
     } else if (status == errSecAuthFailed) reply_error("not-owned", "staging", status);
-    else reply_error(failure_code(status), NULL, status);
+    else reply_error(failure_code_for(base, status), NULL, status);
     item_state_release(&data);
   }
   free(reply.bytes);
@@ -110,7 +111,7 @@ void verb_read(const char *base) {
   OSStatus status = lookup_attributes(base, &original);
   if (status == errSecSuccess) read_original(base, &original);
   else if (status == errSecItemNotFound) read_staging(base);
-  else reply_error(failure_code(status), NULL, status);
+  else reply_error(failure_code_for(base, status), NULL, status);
   item_state_release(&original);
 }
 
@@ -145,9 +146,12 @@ void verb_approve(const char *base) {
   } else if (status == errSecItemNotFound) {
     buffer_field_bool(&reply, "missing", true);
     send_reply(&reply);
-  } else if (status == errSecInteractionNotAllowed || holder_locked(base)) reply_error("locked", NULL, status);
+  } else if (status == errSecInteractionNotAllowed || holder_locked(base) || (status == errSecAuthFailed && !ui_available()))
+    // No dialog could be shown (--no-ui, or a session without graphic access such as SSH): today's locked class and
+    // exit 7, never a "denied" the user did not give (design 2 and 5, headless row).
+    reply_error("locked", NULL, status);
   else if (status == errSecUserCanceled || status == errSecAuthFailed) reply_error("denied", NULL, status);
-  else reply_error(failure_code(status), NULL, status);
+  else reply_error(failure_code_for(base, status), NULL, status);
   free(reply.bytes);
   item_state_release(&data);
 }
@@ -158,20 +162,24 @@ static void update_owned(const char *account, const buffer *value, const char *n
   item_state probe = {0};
   OSStatus status = read_data(account, &probe);
   item_state_release(&probe);
+  if (status == errSecAuthFailed && item_keychain_locked(account)) {
+    reply_error("locked", NULL, status);
+    return;
+  }
   if (status == errSecAuthFailed) {
     reply_error("not-owned", not_owned_reason, status);
     return;
   }
   if (status == errSecSuccess) status = update_data(account, value);
   if (status == errSecSuccess) reply_ok(NULL);
-  else reply_error(failure_code(status), NULL, status);
+  else reply_error(failure_code_for(account, status), NULL, status);
 }
 
 void verb_write(const char *account, const buffer *value, const char *not_owned_reason) {
   OSStatus status = add_owned(account, value);
   if (status == errSecSuccess) reply_ok("created");
   else if (status == errSecDuplicateItem) update_owned(account, value, not_owned_reason);
-  else reply_error(failure_code(status), NULL, status);
+  else reply_error(failure_code_for(account, status), NULL, status);
 }
 
 static void rename_verb(const char *from, const char *to, bool skip_on_existing) {
@@ -180,7 +188,7 @@ static void rename_verb(const char *from, const char *to, bool skip_on_existing)
   else if (status == errSecDuplicateItem && skip_on_existing) reply_ok("skipped");
   else if (status == errSecDuplicateItem) reply_error("exists", NULL, status);
   else if (status == errSecItemNotFound) reply_error("missing", NULL, status);
-  else reply_error(failure_code(status), NULL, status);
+  else reply_error(failure_code_for(from, status), NULL, status);
 }
 
 void verb_retire(const char *base) {
@@ -200,10 +208,11 @@ void verb_remove(const char *account) {
   OSStatus status = read_data(account, &probe);
   item_state_release(&probe);
   if (status == errSecItemNotFound) reply_ok("missing");
+  else if (status == errSecAuthFailed && item_keychain_locked(account)) reply_error("locked", NULL, status);
   else if (status == errSecAuthFailed) reply_error("not-owned", NULL, status);
   else {
     if (status == errSecSuccess) status = delete_item(account);
     if (status == errSecSuccess) reply_ok(NULL);
-    else reply_error(failure_code(status), NULL, status);
+    else reply_error(failure_code_for(account, status), NULL, status);
   }
 }

@@ -62,9 +62,9 @@ static bool running_as_root(void) {
   return geteuid() == 0;
 }
 
-static int find_verb(const char *name) {
+static int find_verb(const buffer *name) {
   for (size_t i = 0; i < sizeof VERBS / sizeof VERBS[0]; i++)
-    if (strcmp(name, VERBS[i].name) == 0) return (int)i;
+    if (buffer_is(name, VERBS[i].name)) return (int)i;
   return -1;
 }
 
@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
   }
   request req = {0};
   refusal = parse_request(line.bytes == NULL ? "" : line.bytes, line.length, &req);
-  int verb_index = refusal == NULL ? find_verb(req.verb.bytes) : -1;
+  int verb_index = refusal == NULL ? find_verb(&req.verb) : -1;
   if (refusal == NULL) refusal = validate(&req, verb_index);
 
   session_start(refusal == NULL && VERBS[verb_index].mutates);
