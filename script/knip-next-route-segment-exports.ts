@@ -10,7 +10,8 @@ import type { Preprocessor } from "knip";
 
 type Scope = { dir: string; files: Set<string>; names: Set<string> };
 
-const EXTENSIONS = ["js", "jsx", "ts", "tsx", "mjs", "cjs"];
+// Next.js's default pageExtensions; .mjs and .cjs are not among them, so a file with one is not a route file.
+const EXTENSIONS = ["js", "jsx", "ts", "tsx"];
 
 const stringList = (value: unknown, key: string): string[] => {
   if (!Array.isArray(value) || !value.every((item) => typeof item === "string"))
@@ -40,6 +41,10 @@ const scopes = (raw: string): Scope[] => {
   });
 };
 
+// A path segment starting with "_" is a Next.js private folder: it is opted out of routing, so a special file name
+// under it is an ordinary module and its exports stay checked. The path given here is relative to the scope's dir.
+const isPrivatePath = (path: string): boolean => path.split("/").slice(0, -1).some((segment) => segment.startsWith("_"));
+
 // "packages/web/app/design/layout.tsx" -> "layout" when the extension is one knip reads, else undefined.
 const specialFileName = (file: string): string | undefined => {
   const base = file.slice(file.lastIndexOf("/") + 1);
@@ -57,7 +62,7 @@ const preprocess: Preprocessor = (options) => {
     const name = specialFileName(file);
     if (name === undefined) continue;
     const names = configured
-      .filter((scope) => file.startsWith(scope.dir) && scope.files.has(name))
+      .filter((scope) => file.startsWith(scope.dir) && scope.files.has(name) && !isPrivatePath(file.slice(scope.dir.length)))
       .reduce<Set<string>>((all, scope) => {
         for (const allowed of scope.names) all.add(allowed);
         return all;
