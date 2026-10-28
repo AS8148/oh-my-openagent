@@ -145,12 +145,12 @@ function childPath(lspDir) {
 }
 
 /**
- * Stop what a case's plugin started on its own (the task host supervisor and its RPC host run from the sandbox's
- * provisioned runtime and outlive the CLI child). Only processes whose command line names this run's sandbox are
- * signalled.
+ * Stop what a case's plugin started on its own and detached (the task host supervisor and its RPC host, the LSP
+ * daemon): they outlive the CLI child. Only processes whose command line or environment (`ps e`: this user's own
+ * processes) names this run's sandbox are signalled; every such process inherited the sandbox HOME.
  */
 function stopSandboxProcesses(sandboxDir) {
-	const list = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).stdout ?? "";
+	const list = spawnSync("ps", ["axeww", "-o", "pid=,command="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).stdout ?? "";
 	const pids = list
 		.split("\n")
 		.map((line) => /^\s*(\d+)\s+(.*)$/.exec(line))
@@ -611,7 +611,8 @@ async function main() {
 					join(options.harness, "scenarios", "fused-equivalence", "cases", "support", "collectors.mjs"),
 				),
 			},
-			command,
+			// The committed manifest names the invocation without its machine-local paths; the local receipt keeps them.
+			command: `node packages/omo-senpi/scripts/qa/fused-equivalence-e2e.mjs --${options.mode}${options.repeat > 1 ? ` --repeat ${options.repeat}` : ""}`,
 		};
 		if (options.mode === "record" && results.every((r) => r.pass)) {
 			mkdirSync(dir, { recursive: true });
