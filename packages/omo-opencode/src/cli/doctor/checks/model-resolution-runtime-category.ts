@@ -23,7 +23,7 @@ export async function resolveConfiguredCategoriesAtRuntime(
     // mergeCategories drops a disabled category, so the runtime has no model for it at all.
     if (category?.disable === true) return [name, { disabled: true }]
     const result = await resolveCategoryExecution(
-      { category: name, prompt: "", description: "omo doctor", run_in_background: false, load_skills: [] },
+      { category: name, prompt: "", description: "doctor model resolution", run_in_background: false, load_skills: [] },
       executorCtx,
       undefined,
       undefined,
