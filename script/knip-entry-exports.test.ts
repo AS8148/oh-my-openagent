@@ -95,9 +95,10 @@ const scanRunByPath = async (): Promise<Map<string, string>> => {
 };
 
 const scratch: string[] = [];
+// Removing a repo-sized copy can take longer than bun's 5 s default hook bound on a loaded machine.
 afterAll(() => {
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+}, KNIP_TIMEOUT_MS);
 
 describe("knip export-checks every entry", () => {
   test(

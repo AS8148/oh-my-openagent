@@ -24,13 +24,16 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) AST_GREP_SERVER_NAME, AST_GREP_SERVER_VERSION, coerceToolArguments
       "packages/ast-grep-mcp/src/mcp.ts": ["AST_GREP_SERVER_NAME", "AST_GREP_SERVER_VERSION", "coerceToolArguments"],
       // pre-existing at origin dev 4686e425b5: unused export(s) BOULDER_DIR, BOULDER_FILE, BOULDER_STATE_PATH, NOTEPAD_DIR, NOTEPAD_BASE_PATH, PROMETHEUS_PLANS_DIR, readCurrentTopLevelTask, getPlanChecklist, parsePlanChecklist, isStructuredTaskRow and 33 more
-      "packages/boulder-state/index.d.ts": ["BOULDER_DIR", "BOULDER_FILE", "BOULDER_STATE_PATH", "NOTEPAD_DIR", "NOTEPAD_BASE_PATH", "PROMETHEUS_PLANS_DIR", "readCurrentTopLevelTask", "getPlanChecklist", "parsePlanChecklist", "isStructuredTaskRow", "addBoulderWork", "appendSessionId", "appendSessionIdForWork", "clearBoulderState", "completeBoulder", "createBoulderState", "endTaskTimer", "findPrometheusPlans", "generateWorkId", "getActiveWorks", "getBoulderFilePath", "getBoulderWorks", "getPlanName", "getPlanProgress", "getTaskSessionState", "getWorkById", "getWorkByPlanName", "getWorkForSession", "getWorkResumeOptions", "normalizeSessionId", "readBoulderState", "DEFAULT_STALE_WORK_THRESHOLD_MS", "STALE_WORK_THRESHOLD_ENV_KEY", "isWorkStale", "reconcileStaleWorks", "resolveStaleWorkThresholdMs", "resolveBoulderPlanPath", "resolveBoulderPlanPathForWork", "selectActiveWork", "startTaskTimer", "upsertTaskSessionState", "upsertTaskSessionStateForWork", "writeBoulderState"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) getPlanReviewsDir, hashPlanContent, isContainedPlanPath, formatMomusReviewArtifact, writeMomusReviewArtifact
+      "packages/boulder-state/index.d.ts": ["BOULDER_DIR", "BOULDER_FILE", "BOULDER_STATE_PATH", "NOTEPAD_DIR", "NOTEPAD_BASE_PATH", "PROMETHEUS_PLANS_DIR", "readCurrentTopLevelTask", "getPlanChecklist", "parsePlanChecklist", "isStructuredTaskRow", "addBoulderWork", "appendSessionId", "appendSessionIdForWork", "clearBoulderState", "completeBoulder", "createBoulderState", "endTaskTimer", "findPrometheusPlans", "generateWorkId", "getActiveWorks", "getBoulderFilePath", "getBoulderWorks", "getPlanName", "getPlanProgress", "getTaskSessionState", "getWorkById", "getWorkByPlanName", "getWorkForSession", "getWorkResumeOptions", "normalizeSessionId", "readBoulderState", "DEFAULT_STALE_WORK_THRESHOLD_MS", "STALE_WORK_THRESHOLD_ENV_KEY", "isWorkStale", "reconcileStaleWorks", "resolveStaleWorkThresholdMs", "resolveBoulderPlanPath", "resolveBoulderPlanPathForWork", "selectActiveWork", "startTaskTimer", "upsertTaskSessionState", "upsertTaskSessionStateForWork", "writeBoulderState", "getPlanReviewsDir", "hashPlanContent", "isContainedPlanPath", "formatMomusReviewArtifact", "writeMomusReviewArtifact"],
       // pre-existing at origin dev 4686e425b5: unused export(s) BOULDER_STATE_PATH, NOTEPAD_DIR, NOTEPAD_BASE_PATH
       "packages/boulder-state/src/constants.ts": ["BOULDER_STATE_PATH", "NOTEPAD_DIR", "NOTEPAD_BASE_PATH"],
       // pre-existing at origin dev 4686e425b5: unused export(s) BOULDER_DIR, BOULDER_FILE, BOULDER_STATE_PATH, NOTEPAD_BASE_PATH, NOTEPAD_DIR, PROMETHEUS_PLANS_DIR, parsePlanChecklist, generateWorkId
-      "packages/boulder-state/src/index.ts": ["BOULDER_DIR", "BOULDER_FILE", "BOULDER_STATE_PATH", "NOTEPAD_BASE_PATH", "NOTEPAD_DIR", "PROMETHEUS_PLANS_DIR", "parsePlanChecklist", "generateWorkId"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) formatMomusReviewArtifact, getPlanReviewsDir
+      "packages/boulder-state/src/index.ts": ["BOULDER_DIR", "BOULDER_FILE", "BOULDER_STATE_PATH", "NOTEPAD_BASE_PATH", "NOTEPAD_DIR", "PROMETHEUS_PLANS_DIR", "parsePlanChecklist", "generateWorkId", "formatMomusReviewArtifact", "getPlanReviewsDir"],
       // pre-existing at origin dev 4686e425b5: unused export(s) generateWorkId
-      "packages/boulder-state/src/storage/index.ts": ["generateWorkId"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) formatMomusReviewArtifact, getPlanReviewsDir
+      "packages/boulder-state/src/storage/index.ts": ["generateWorkId", "formatMomusReviewArtifact", "getPlanReviewsDir"],
       // pre-existing at origin dev 4686e425b5: unused export(s) findNewestSessionTranscriptMs
       "packages/boulder-state/src/storage/stale-work.ts": ["findNewestSessionTranscriptMs"],
       // pre-existing at origin dev 4686e425b5: unused export(s) generateWorkId
@@ -1519,8 +1522,6 @@
       "packages/senpi-task/src/lifecycle/reconcile-reclamation.ts": ["REVIVABLE_STATUSES"],
       // pre-existing at origin dev 4686e425b5: unused export(s) ACTIVE_REVIVE_DRIFT_POLICY
       "packages/senpi-task/src/lifecycle/revive-policy.ts": ["ACTIVE_REVIVE_DRIFT_POLICY"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) holdsClaim
-      "packages/senpi-task/src/lifecycle/revive-rollback.ts": ["holdsClaim"],
       // pre-existing at origin dev 4686e425b5: unused export(s) HOST_PID
       "packages/senpi-task/src/manager/__fixtures__/fallback-launch-fakes.ts": ["HOST_PID"],
       // pre-existing at origin dev 4686e425b5: unused export(s) QUOTA_ERROR
@@ -1867,6 +1868,8 @@
       "packages/utils/src/snake-case.ts": ["camelToSnake", "snakeToCamel", "transformObjectKeys", "objectToCamelCase"],
       // pre-existing at origin dev 4686e425b5: unused export(s) parseTarListingOutput
       "packages/utils/src/zip-entry-listing/tar-zip-entry-listing.ts": ["parseTarListingOutput"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) default
+      "packages/web/app/[locale]/[...rest]/page.tsx": ["default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) generateStaticParams, generateMetadata, default
       "packages/web/app/[locale]/docs/[slug]/page.tsx": ["generateStaticParams", "generateMetadata", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) generateMetadata, default
@@ -1878,7 +1881,8 @@
       // pre-existing at origin dev 4686e425b5: unused export(s) dynamic, generateMetadata, default
       "packages/web/app/[locale]/download/page.tsx": ["dynamic", "generateMetadata", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) generateMetadata, generateStaticParams, default
-      "packages/web/app/[locale]/layout.tsx": ["generateMetadata", "generateStaticParams", "default"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) revalidate, viewport
+      "packages/web/app/[locale]/layout.tsx": ["generateMetadata", "generateStaticParams", "default", "revalidate", "viewport"],
       // pre-existing at origin dev 4686e425b5: unused export(s) metadata, default
       "packages/web/app/[locale]/manifesto/2026-01/layout.tsx": ["metadata", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
@@ -1887,6 +1891,8 @@
       "packages/web/app/[locale]/manifesto/layout.tsx": ["metadata", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
       "packages/web/app/[locale]/manifesto/page.tsx": ["default"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) default
+      "packages/web/app/[locale]/not-found.tsx": ["default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) generateMetadata, default
       "packages/web/app/[locale]/page.tsx": ["generateMetadata", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) dynamic, generateMetadata, default
@@ -1901,14 +1907,16 @@
       "packages/web/app/api/stats/route.ts": ["GET"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
       "packages/web/app/design/graph/page.tsx": ["default"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) viewport, generateMetadata, default
+      "packages/web/app/design/layout.tsx": ["viewport", "generateMetadata", "default"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) default
+      "packages/web/app/design/not-found.tsx": ["default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) dynamic, metadata, default
       "packages/web/app/design/page.tsx": ["dynamic", "metadata", "default"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) revalidate, generateMetadata, default
-      "packages/web/app/layout.tsx": ["revalidate", "generateMetadata", "default"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) metadata, viewport, default
+      "packages/web/app/global-not-found.tsx": ["metadata", "viewport", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) alt, size, contentType, dynamic
       "packages/web/app/opengraph-image.tsx": ["alt", "size", "contentType", "dynamic"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) generateMetadata, default
-      "packages/web/app/page.tsx": ["generateMetadata", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
       "packages/web/app/robots.ts": ["default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
@@ -1949,8 +1957,6 @@
       "packages/web/lib/docs-sections.ts": ["DOC_SECTION_IDS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) INSTALLER_STATS_URL
       "packages/web/lib/installer-downloads.ts": ["INSTALLER_STATS_URL"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) ogPalette
-      "packages/web/lib/og/palette.ts": ["ogPalette"],
       // pre-existing at origin dev 4686e425b5: unused export(s) PngDecodeError
       "packages/web/lib/png-decode.ts": ["PngDecodeError"],
       // pre-existing at origin dev 4686e425b5: unused export(s) default
@@ -1963,8 +1969,8 @@
       "packages/web/postcss.config.mjs": ["default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) config
       "packages/web/proxy.ts": ["config"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) AGENT_COMMAND_RE, HUMAN_COMMAND_RE, BARE_BIN_RE, ALLOWLIST_RELATIVE_PATH, AUDIT_TEST_RELATIVE_PATH, SCAN_MODULE_RELATIVE_PATH, SCAN_TEST_RELATIVE_PATH, isExcluded, trackedSourceFiles
-      "script/agent-command-string-scan.ts": ["AGENT_COMMAND_RE", "HUMAN_COMMAND_RE", "BARE_BIN_RE", "ALLOWLIST_RELATIVE_PATH", "AUDIT_TEST_RELATIVE_PATH", "SCAN_MODULE_RELATIVE_PATH", "SCAN_TEST_RELATIVE_PATH", "isExcluded", "trackedSourceFiles"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) AGENT_COMMAND_RE, HUMAN_COMMAND_RE, BARE_BIN_RE, ALLOWLIST_RELATIVE_PATH, AUDIT_TEST_RELATIVE_PATH, SCAN_MODULE_RELATIVE_PATH, SCAN_TEST_RELATIVE_PATH, trackedSourceFiles
+      "script/agent-command-string-scan.ts": ["AGENT_COMMAND_RE", "HUMAN_COMMAND_RE", "BARE_BIN_RE", "ALLOWLIST_RELATIVE_PATH", "AUDIT_TEST_RELATIVE_PATH", "SCAN_MODULE_RELATIVE_PATH", "SCAN_TEST_RELATIVE_PATH", "trackedSourceFiles"],
       // pre-existing at origin dev 4686e425b5: unused export(s) generatedCodexInstallerPath, CODEX_INSTALL_BUILD_MARKER_PREFIX, buildCodexInstaller
       "script/build-codex-install.ts": ["generatedCodexInstallerPath", "CODEX_INSTALL_BUILD_MARKER_PREFIX", "buildCodexInstaller"],
       // pre-existing at origin dev 4686e425b5: unused export(s) buildReleaseBinary
@@ -2057,6 +2063,8 @@
       "script/root-test-serial-quarantine.ts": ["ROOT_TEST_SERIAL_QUARANTINE", "POSIX_TEST_TIMEOUT_MS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) runStats
       "script/stats.ts": ["runStats"],
+      // added on dev after the last merge (origin dev 2b5831715e): unused export(s) keyAssignments
+      "script/telemetry-ingest-key-gate.test.ts": ["keyAssignments"],
       // pre-existing at origin dev 4686e425b5: unused export(s) findTrackedEvidencePaths
       "script/tracked-evidence-paths-audit.test.ts": ["findTrackedEvidencePaths"],
       // pre-existing at origin dev 4686e425b5: unused export(s) checkFileEnvironment
@@ -3876,21 +3884,22 @@
         "scripts/retain-static-assets.mjs",
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
-        // Next.js route segment files at any depth (app/[locale]/**, app/design/**, app/api/**): the Next.js plugin adds them with
-        // exports unchecked, so they are listed here to be export-checked like the top-level ones.
+        // Every Next.js special file at any depth: these are the knip 6.43.0 Next.js plugin's own entry patterns
+        // (dist/plugins/next/index.js getEntryFilePatterns, this app has no src/ dir and the default pageExtensions), which it
+        // adds with exports unchecked, so they are listed here to be export-checked. Their framework-consumed exports (default,
+        // metadata, generateMetadata, GET, ...) are named per symbol in preExistingExports.
+        "app/{,[(]*[)]/}{manifest,robots}.{js,ts}",
+        "app/**/sitemap.{js,ts}",
+        "app/**/{icon,apple-icon,opengraph-image,twitter-image}.{js,jsx,ts,tsx}",
+        "{,src/}{instrumentation,instrumentation-client,middleware,proxy}.{js,jsx,ts,tsx}",
+        "app/global-{error,not-found}.{js,jsx,ts,tsx}",
+        "app/**/{default,error,forbidden,loading,not-found,unauthorized}.{js,jsx,ts,tsx}",
         "app/**/{layout,page,route,template}.{js,jsx,ts,tsx}",
-        "app/layout.tsx",
-        "app/manifest.ts",
-        "app/opengraph-image.tsx",
-        "app/page.tsx",
-        "app/robots.ts",
-        "app/sitemap.ts",
-        "app/twitter-image.tsx",
+        "pages/**/*.{js,jsx,ts,tsx}",
         "eslint.config.mjs",
         "i18n/request.ts",
         "next.config.ts",
         "postcss.config.mjs",
-        "proxy.ts",
         "scripts/check-graph-budget.mjs",
         "scripts/render-app-icons.mjs",
         "scripts/render-graph-poster.mjs",

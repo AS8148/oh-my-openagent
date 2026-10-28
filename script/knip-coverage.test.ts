@@ -25,9 +25,10 @@ const KNIP_TIMEOUT_MS = 600_000;
 const SHARED_PREPROCESSOR_SHA256 = "a92ddf4eaa74dcb54aacc5a3eb975d6c5f7ffec3897cd9ee31857bbd0ca19d22";
 
 const scratch: string[] = [];
+// Removing a repo-sized copy can take longer than bun's 5 s default hook bound on a loaded machine.
 afterAll(() => {
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+}, KNIP_TIMEOUT_MS);
 
 const preExistingRows = (config: Record<string, unknown>): string[] => {
   const options = config["preprocessorOptions"];
