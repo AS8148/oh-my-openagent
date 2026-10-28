@@ -146,7 +146,7 @@ export async function runCompiledLauncher(args: string[], execDir: string, engin
     return true
   }
   if (args[0] === "account") {
-    await runAccountCommand(args)
+    await runAccountCommand(args, { helperCandidates: [join(execDir, "bin", "darwin", "omo-keychain")] })
     return true
   }
   const packageJson = readJson(join(execDir, "package.json")) as { version: string; omoBuild?: unknown }
