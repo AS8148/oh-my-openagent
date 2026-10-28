@@ -653,6 +653,11 @@ jobs:
         if: needs.ci-mode.outputs.run_heavy == 'true'
         run: bun run lint:ratchet
 
+      # Unused files, exports and dependencies; pre-existing findings are scoped ignores in knip.jsonc.
+      - name: Dead-code check (knip)
+        if: needs.ci-mode.outputs.run_heavy == 'true'
+        run: bun run knip:check
+
       - name: Write job summary
         if: always()
         shell: bash
