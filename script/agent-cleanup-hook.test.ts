@@ -178,7 +178,10 @@ printf 'finished\\n' >&3
       closeSync(releaseFd)
       removeFixture(fixture)
     }
-  })
+    // Above both 30s ceilings on purpose: without it the runner's own limit (20s under CI, 5s
+    // for a bare `bun test <file>`) fires first and the ceilings never apply, so a slow but live
+    // worker failed instead of passing and a real hang never reported the named error.
+  }, 45_000)
 
   posixBashTest("#given a hostile cleanup log override #when the launcher runs #then it keeps logs in temp", () => {
     const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
@@ -330,6 +333,50 @@ printf 'finished\\n' >&3
       removeFixture(fixture)
     }
   })
+
+  test("#given the launcher script #when read #then it never calls mktemp, mkdir or rm by absolute path", () => {
+    // The PATH wrappers below can only observe tools resolved through PATH. An absolute call such
+    // as /bin/mkdir would bypass them entirely, so the script itself must not contain one.
+    const offenders = read(cleanupHook)
+      .split("\n")
+      .map((line, index) => ({ line: line.trim(), number: index + 1 }))
+      .filter(({ line }) => !line.startsWith("#"))
+      .filter(({ line }) => /(^|[\s="'`(|&;$])\/(usr\/)?(bin|sbin)\/(mktemp|mkdir|rm)\b/.test(line))
+      .map(({ line, number }) => `${number}: ${line}`)
+    expect(offenders, `cleanup-hook.sh must not call mktemp, mkdir or rm by absolute path: ${offenders.join(" | ")}`).toEqual([])
+  })
+
+  posixBashTest("#given repeated launches with a rejected TMPDIR #when the launcher actually runs cleanup #then every directory it creates is outside the project", () => {
+    const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
+    const insideProject = join(fixture.repo, "tmp")
+    mkdirSync(insideProject, { recursive: true })
+    const binDir = join(fixture.logDir, "bin")
+    const callLog = join(fixture.logDir, "launch-calls.log")
+    mkdirSync(binDir, { recursive: true })
+    for (const [tool, real] of [["mktemp", "/usr/bin/mktemp"], ["mkdir", "/bin/mkdir"]]) {
+      writeFileSync(join(binDir, tool as string), `#!/usr/bin/env bash\nprintf '%s %s\\n' ${tool} "$*" >> ${JSON.stringify(callLog)}\nexec ${real} "$@"\n`)
+      chmodSync(join(binDir, tool as string), 0o755)
+    }
+    try {
+      // Launch mode, not --print-log-file: this is the path that really creates the log directory.
+      for (let run = 0; run < 3; run++) {
+        const result = Bun.spawnSync({
+          cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe", timeout: 30_000,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}`, CLAUDE_PROJECT_DIR: fixture.repo, OMO_AGENT_CLEANUP_SYNC: "1", TMPDIR: insideProject } as HookEnv,
+        })
+        expect(result.exitCode).toBe(0)
+      }
+      const calls = existsSync(callLog) ? readFileSync(callLog, "utf8").split("\n").filter((line) => line.length > 0) : []
+      const projectRoot = realpathSync(fixture.repo)
+      const insideProjectCalls = calls.filter((call) => call.includes(projectRoot) || call.includes(fixture.repo))
+      expect(insideProjectCalls, `no directory may be created inside the project, saw: ${insideProjectCalls.join(" | ")}`).toEqual([])
+      expect(calls.filter((call) => call.startsWith("mktemp")), `the hook must never mint a temp directory: ${calls.join(" | ")}`).toEqual([])
+      expect(readdirSync(insideProject)).toEqual([])
+      expect(readdirSync(fixture.repo).filter((entry) => entry.startsWith("tmp."))).toEqual([])
+    } finally {
+      removeFixture(fixture)
+    }
+  }, 45_000)
 
   posixBashTest("#given a temp directory beside the project #when the launcher resolves its log #then it is accepted", () => {
     const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
