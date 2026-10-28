@@ -54,6 +54,15 @@ describe("sign-in through the signed keychain helper (#11262 design 3, addendum)
     await expect(session.accessToken()).rejects.toBeInstanceOf(KeychainLockedError)
   })
 
+  test("#given approve answers locked with no UI #when a background path reads again #then locked again, never a remembered Deny", async () => {
+    const keychain = fakeKeychain({ approve: "locked" })
+    keychain.put(A, stored, "runtime", "ours")
+    const background = await helperSession(keychain, true)
+    await expect(background.store.read()).rejects.toBeInstanceOf(KeychainLockedError)
+    await expect(background.store.read()).rejects.toBeInstanceOf(KeychainLockedError)
+    expect(keychain.stats.approves).toBe(2)
+  })
+
   test("#given a crashed migration (staging + .old, no original) #when any locked section runs #then recovery promotes it first", async () => {
     const keychain = fakeKeychain()
     keychain.put(`${A}.staging`, stored, "helper")
