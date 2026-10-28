@@ -213,7 +213,7 @@ describe("readGitDiff pathspec environment", () => {
 
   /**
    * A PanelExec that really spawns the command through the inherited environment
-   * only — the same shape the pinned host's `exec` has, which takes no `env`.
+   * only, the same shape the pinned host's `exec` has, which takes no `env`.
    * A test through this runner fails on the old global `--literal-pathspecs`
    * argv whenever a competing pathspec switch is exported (git exits 128).
    */
@@ -356,14 +356,50 @@ describe("readGitDiff pathspec environment", () => {
     }
   })
 
-  test("#given an untracked directory and GIT_GLOB_PATHSPECS=1 #when read through real git #then the listing and per-file diffs are returned", async () => {
+  test("#given GIT_LITERAL_PATHSPECS=1 #when built #then the pathspec stays bare because literal matching is already on", () => {
+    // given
+    const saved = process.env.GIT_LITERAL_PATHSPECS
+    try {
+      process.env.GIT_LITERAL_PATHSPECS = "1"
+      const file = { xy: " M", path: "tracked.txt" }
+
+      // when
+      const args = gitDiffArgs(file)
+
+      // then
+      expect(args).toEqual(["diff", "HEAD", "-M", "--", "tracked.txt"])
+    } finally {
+      if (saved === undefined) delete process.env.GIT_LITERAL_PATHSPECS
+      else process.env.GIT_LITERAL_PATHSPECS = saved
+    }
+  })
+
+  test("#given GIT_LITERAL_PATHSPECS=1 and a tracked diff #when read through real git #then the diff is returned instead of an empty match", async () => {
+    // given
+    const root = gitFixture()
+    const saved = process.env.GIT_LITERAL_PATHSPECS
+    try {
+      process.env.GIT_LITERAL_PATHSPECS = "1"
+
+      // when
+      const rows = await readGitDiff(realExec, root, { xy: " M", path: "tracked.txt" })
+
+      // then
+      expect(rows.map((row) => row.text)).toContain("+b")
+    } finally {
+      if (saved === undefined) delete process.env.GIT_LITERAL_PATHSPECS
+      else process.env.GIT_LITERAL_PATHSPECS = saved
+    }
+  })
+
+  test("#given GIT_LITERAL_PATHSPECS=1 and an untracked directory #when read through real git #then the listing and per-file diffs are returned", async () => {
     // given
     const root = gitFixture()
     mkdirSync(join(root, "build"))
     writeFileSync(join(root, "build", "new.txt"), "hello\n")
-    const saved = process.env.GIT_GLOB_PATHSPECS
+    const saved = process.env.GIT_LITERAL_PATHSPECS
     try {
-      process.env.GIT_GLOB_PATHSPECS = "1"
+      process.env.GIT_LITERAL_PATHSPECS = "1"
 
       // when
       const rows = await readGitDiff(realExec, root, { xy: "??", path: "build/" })
@@ -371,8 +407,8 @@ describe("readGitDiff pathspec environment", () => {
       // then
       expect(rows.map((row) => row.text)).toContain("+hello")
     } finally {
-      if (saved === undefined) delete process.env.GIT_GLOB_PATHSPECS
-      else process.env.GIT_GLOB_PATHSPECS = saved
+      if (saved === undefined) delete process.env.GIT_LITERAL_PATHSPECS
+      else process.env.GIT_LITERAL_PATHSPECS = saved
     }
   })
 })

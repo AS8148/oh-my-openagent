@@ -21,26 +21,38 @@ const HEADER_PREFIXES = [
 ]
 
 /**
+ * Per-pathspec literal magic, in place of the global `--literal-pathspecs` flag.
+ * The global flag is incompatible with any other global pathspec switch, so a shell
+ * that exports `GIT_GLOB_PATHSPECS=1` or `GIT_ICASE_PATHSPECS=1` makes git exit 128
+ * before any diff is produced (#11176), and the pinned host's `exec` has no `env`
+ * field, so an env override never reaches git at all. Per-pathspec magic is not a
+ * global switch, so it does not trip that conflict, while a `*` or `[` in a file
+ * name is still matched literally. It cannot cancel a global `GIT_ICASE_PATHSPECS`
+ * (git ORs the global switch into each pathspec), but the panel only ever queries
+ * paths exactly as `git status` reported them, so in practice the reported path's
+ * diff is still shown; only the extreme case of two same-directory files differing
+ * only by case could additionally match a case-variant sibling.
+ *
+ * The one switch per-pathspec magic cannot coexist with is `GIT_LITERAL_PATHSPECS`:
+ * with it exported, git reads `:(literal)` as part of the file name, so both the
+ * tracked diff and the untracked listing match nothing and exit 0. The panel runs
+ * in the host process, so it sees the same environment the spawned git inherits;
+ * when that switch is truthy, literal matching is already on and the paths stay bare.
+ */
+function literalPathspecsEnabled(): boolean {
+  const value = process.env.GIT_LITERAL_PATHSPECS?.trim().toLowerCase()
+  return value !== undefined && value !== "" && value !== "0" && value !== "false" && value !== "no" && value !== "off"
+}
+
+const literalPathspec = (path: string): string => (literalPathspecsEnabled() ? path : `:(literal)${path}`)
+
+/**
  * The diff git itself would print, coloured by line kind.
  *
  * A rename needs BOTH paths in the pathspec: given only the destination, git sees an
  * unrelated new file and prints the whole content as additions. An untracked file has no
  * index side at all, so it is diffed against /dev/null, which exits 1 by design.
  */
-/**
- * Per-pathspec literal magic, in place of the global `--literal-pathspecs` flag.
- * The global flag is incompatible with any other global pathspec switch, so a shell
- * that exports `GIT_GLOB_PATHSPECS=1` or `GIT_ICASE_PATHSPECS=1` makes git exit 128
- * before any diff is produced (#11176) — and the pinned host's `exec` has no `env`
- * field, so an env override never reaches git at all. Per-pathspec magic is not a
- * global switch, so it does not trip that conflict, while a `*` or `[` in a file
- * name is still matched literally. It cannot cancel a global `GIT_ICASE_PATHSPECS`
- * (git ORs the global switch into each pathspec), but the panel only ever queries
- * paths exactly as `git status` reported them, so case-insensitive matching of the
- * exact path returns the same diff.
- */
-const literalPathspec = (path: string): string => `:(literal)${path}`
-
 export function gitDiffArgs(file: PanelGitEntry): string[] {
   // `--no-index` operands are plain filesystem paths, not pathspecs: no magic
   // prefix, and no global flag to conflict with an exported pathspec switch.
