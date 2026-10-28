@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { chmodSync, closeSync, constants, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs"
+import { chmodSync, closeSync, constants, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 const AGENT_DIR = join(import.meta.dir, "agent")
 const cleanup = join(AGENT_DIR, "cleanup.sh")
@@ -111,7 +111,7 @@ printf 'worker-log\\n'
     const env = { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, OMO_AGENT_CLEANUP_SYNC: "1", TMPDIR: fixture.logDir } as HookEnv
     try {
       const logFile = resolveLogFile(fixture.agentDir, env)
-      expect(logFile).toBe(join(fixture.logDir, "oh-my-openagent-cleanup.log"))
+      expect(logFile).toBe(join(realpathSync(fixture.logDir), "oh-my-openagent-cleanup.log"))
       const result = Bun.spawnSync({
         cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
         env,
@@ -149,8 +149,8 @@ printf 'finished\\n' >&3
     const releaseFd = openSync(releasePath, constants.O_RDWR | constants.O_NONBLOCK)
     const [workerStarted, workerPublishing, workerFinished] = subscribeToExactLines(completionPath, ["started", "publishing", "finished"])
     const env = { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: fixture.logDir } as HookEnv
-    const logFile = resolveLogFile(fixture.agentDir, env)
     try {
+      const logFile = resolveLogFile(fixture.agentDir, env)
       const result = Bun.spawnSync({
         cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe", timeout: 3_000,
         env,
@@ -182,7 +182,7 @@ printf 'finished\\n' >&3
     const env = { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, OMO_AGENT_CLEANUP_LOG: hostileLog, OMO_AGENT_CLEANUP_SYNC: "1", TMPDIR: fixture.logDir } as HookEnv
     try {
       const logFile = resolveLogFile(fixture.agentDir, env)
-      expect(logFile).toBe(join(fixture.logDir, "oh-my-openagent-cleanup.log"))
+      expect(logFile).toBe(join(realpathSync(fixture.logDir), "oh-my-openagent-cleanup.log"))
       const result = Bun.spawnSync({
         cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
         env,
@@ -207,7 +207,54 @@ printf 'finished\\n' >&3
       expect(result.exitCode).toBe(0)
       expect(result.stdout.toString().trim()).toBe("/tmp/oh-my-openagent-cleanup.log")
       expect(result.stderr.toString()).toContain("[cleanup-hook] TMPDIR is inside the project directory")
+      // The string-prefix form of this check was bypassable; the cases below cover each bypass.
     } finally {
+      removeFixture(fixture)
+    }
+  })
+
+  // A string prefix test accepted each of these, putting the log inside the project tree.
+  const containmentBypasses: readonly { readonly name: string; readonly build: (repo: string, scratch: string) => { readonly projectDir: string; readonly tmpdir: string } }[] = [
+    { name: "a TMPDIR symlinked into the project", build: (repo: string, scratch: string) => { const inside = join(repo, "tmp"); mkdirSync(inside, { recursive: true }); const link = join(scratch, "link-into-project"); symlinkSync(inside, link); return { projectDir: repo, tmpdir: link } } },
+    { name: "a symlinked project path", build: (repo: string, scratch: string) => { const inside = join(repo, "tmp"); mkdirSync(inside, { recursive: true }); const projectLink = join(scratch, "project-link"); symlinkSync(repo, projectLink); return { projectDir: projectLink, tmpdir: inside } } },
+    // The doubled and dot segments sit BEFORE the project's own directory name, which is where a
+    // string prefix test stops matching: `<parent>//<repo>/tmp` is not prefixed by `<parent>/<repo>/`.
+    { name: "a TMPDIR written with '//'", build: (repo: string) => { mkdirSync(join(repo, "tmp"), { recursive: true }); return { projectDir: repo, tmpdir: `${dirname(repo)}//${basename(repo)}/tmp` } } },
+    { name: "a TMPDIR written with '/./'", build: (repo: string) => { mkdirSync(join(repo, "tmp"), { recursive: true }); return { projectDir: repo, tmpdir: `${dirname(repo)}/./${basename(repo)}/tmp` } } },
+  ]
+
+  for (const bypass of containmentBypasses) {
+    posixBashTest(`#given ${bypass.name} #when the launcher resolves its log #then it still refuses to log inside the project`, () => {
+      const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
+      try {
+        const { projectDir, tmpdir: hostileTmpdir } = bypass.build(fixture.repo, fixture.logDir)
+        const result = Bun.spawnSync({
+          cmd: ["bash", "./cleanup-hook.sh", "--print-log-file"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
+          env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir, TMPDIR: hostileTmpdir } as HookEnv,
+        })
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout.toString().trim()).toBe("/tmp/oh-my-openagent-cleanup.log")
+        expect(result.stderr.toString()).toContain("[cleanup-hook] TMPDIR is inside the project directory")
+      } finally {
+        removeFixture(fixture)
+      }
+    })
+  }
+
+  posixBashTest("#given a temp directory beside the project #when the launcher resolves its log #then it is accepted", () => {
+    const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
+    const sibling = `${fixture.repo}-sibling`
+    mkdirSync(sibling, { recursive: true })
+    try {
+      const result = Bun.spawnSync({
+        cmd: ["bash", "./cleanup-hook.sh", "--print-log-file"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
+        env: { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: sibling } as HookEnv,
+      })
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout.toString().trim()).toBe(join(realpathSync(sibling), "oh-my-openagent-cleanup.log"))
+      expect(result.stderr.toString()).toBe("")
+    } finally {
+      rmSync(sibling, { recursive: true, force: true })
       removeFixture(fixture)
     }
   })

@@ -13,6 +13,10 @@ CLEANUP_SCRIPT="$PROJECT_DIR/script/agent/cleanup.sh"
 # existing temp directory outside the project is accepted, so the hook works on
 # hosts whose TMPDIR lives outside /tmp. A rejected TMPDIR falls back to /tmp
 # and SAYS SO on stderr instead of substituting silently (#10735).
+physical_path() {
+  (cd -P "$1" 2>/dev/null && pwd -P) || return 1
+}
+
 resolve_log_dir() {
   candidate="${TMPDIR:-/tmp}"
   reason=""
@@ -25,9 +29,19 @@ resolve_log_dir() {
   if [ -z "$reason" ] && [ ! -d "$candidate" ]; then
     reason="TMPDIR is not an existing directory"
   fi
+  # Compare PHYSICAL paths: a string prefix test is bypassed by a symlinked
+  # TMPDIR, a symlinked project path, '//' or '/./' segments. Unresolvable
+  # paths fail closed.
   if [ -z "$reason" ]; then
-    case "${candidate%/}/" in
-      "${PROJECT_DIR%/}"/*) reason="TMPDIR is inside the project directory" ;;
+    physical_candidate="$(physical_path "$candidate")" || reason="TMPDIR cannot be resolved to a physical path"
+  fi
+  if [ -z "$reason" ]; then
+    physical_project="$(physical_path "$PROJECT_DIR")" || reason="the project directory cannot be resolved to a physical path"
+  fi
+  if [ -z "$reason" ]; then
+    # Trailing slashes on both sides so /proj2 is not treated as inside /proj.
+    case "${physical_candidate%/}/" in
+      "${physical_project%/}"/*) reason="TMPDIR is inside the project directory" ;;
     esac
   fi
   if [ -n "$reason" ]; then
@@ -35,7 +49,7 @@ resolve_log_dir() {
     printf '%s\n' "/tmp"
     return 0
   fi
-  printf '%s\n' "${candidate%/}"
+  printf '%s\n' "${physical_candidate%/}"
 }
 
 LOG_DIR="$(resolve_log_dir)"

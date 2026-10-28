@@ -1,13 +1,3 @@
-## 2026-10-28 - Script tests no longer assume a /tmp TMPDIR or a PCRE-enabled git (#10735)
-
-The SessionEnd cleanup launcher accepted only `/tmp`, `/private/tmp` and `/var/folders` as log
-directories and silently rewrote anything else to `/tmp`, so hosts whose `TMPDIR` lives elsewhere
-lost the log where the caller expected it. It now accepts any absolute, existing temp directory
-outside the project tree, reports a rejected `TMPDIR` on stderr instead of substituting silently,
-and exposes the resolved path through `--print-log-file` so callers read one shared resolution.
-The first-party source scans use POSIX extended regular expressions instead of `git grep -P`, which
-exits 128 on a git built without USE_LIBPCRE.
-
 ## 2026-10-26 - A failed paused-child restore cannot wedge parent admission (#11401)
 
 An acknowledged child could fail to restore after the parent quit and reopened. Its resume exception escaped before the parent installed its Resume and reopened admission, leaving subsequent task calls held even after the native Stop was released. Record that participant as lost with the restore failure, finish the parent transaction, and retain its acknowledged cutoff for retries when no live child handle exists yet.
