@@ -9,8 +9,8 @@ describe.skipIf(!isDarwin)("owner-marker probe without the helper (#11262 addend
   let harness: Harness
   let searchListBefore = ""
 
-  // The harness compiles the helper and the keychain fixture with clang, which can take far longer than a test's
-  // budget on a busy machine.
+  // The harness compiles the helper and the keychain fixture with clang; Bun gives hooks its 5 s default, not the
+  // --timeout flag, and on a busy machine the native build alone runs past that.
   const NATIVE_BUILD_BUDGET_MS = 120_000
 
   beforeAll(async () => {

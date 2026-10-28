@@ -17,7 +17,7 @@ describe("helper access: verified fall-through (#11262 addendum row 10, ruling 2
     const pinnedFrom: string[] = []
     const pin = async (source: string) => {
       pinnedFrom.push(source)
-      return `/pinned${source}`
+      return { kind: "pinned" as const, path: `/pinned${source}` }
     }
     verdicts["/pinned/later/omo-keychain"] = "valid"
     const access = await resolveHelperAccess(["/first/omo-keychain", "/later/omo-keychain"], { verify: async path => verdicts[path] ?? "missing", spawn, pin })

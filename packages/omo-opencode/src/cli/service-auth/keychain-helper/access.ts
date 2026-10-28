@@ -1,12 +1,13 @@
 import { callHelper, type HelperCall, type HelperLease, HelperProtocolError, type HelperReply, type HelperSpawner, spawnDetachedHelper } from "./client"
 import { locateHelper } from "./location"
-import { pinVerifiedCopy } from "./pin"
+import { type PinResult, pinVerifiedCopy } from "./pin"
 import { processSignatureChecker, type SignatureVerdict } from "./signature"
 
 export type HelperAccess =
   | { readonly kind: "ready"; readonly path: string; readonly call: (call: HelperCall, lease?: HelperLease) => Promise<HelperReply> }
   | { readonly kind: "missing" }
   | { readonly kind: "invalid"; readonly rejected: readonly string[] }
+  | { readonly kind: "unavailable"; readonly reason: string }
 
 /**
  * The only way the store reaches a helper process. The located copy is pinned (copied into this process's private
@@ -19,14 +20,16 @@ export async function resolveHelperAccess(
   options: {
     readonly verify?: (path: string) => Promise<SignatureVerdict>
     readonly spawn?: HelperSpawner
-    readonly pin?: (source: string, verify: (path: string) => Promise<SignatureVerdict>) => Promise<string | null>
+    readonly pin?: (source: string, verify: (path: string) => Promise<SignatureVerdict>) => Promise<PinResult>
   } = {},
 ): Promise<HelperAccess> {
   const verify = options.verify ?? processSignatureChecker()
   const location = await locateHelper(candidates, verify)
   if (location.kind !== "found") return location
-  const pinned = await (options.pin ?? pinVerifiedCopy)(location.path, verify)
-  if (pinned === null) return { kind: "invalid", rejected: [location.path] }
+  const pin = await (options.pin ?? pinVerifiedCopy)(location.path, verify)
+  if (pin.kind === "invalid") return { kind: "invalid", rejected: [location.path] }
+  if (pin.kind === "unavailable") return { kind: "unavailable", reason: pin.reason }
+  const pinned = pin.path
   const spawn = options.spawn ?? spawnDetachedHelper
   return {
     kind: "ready",

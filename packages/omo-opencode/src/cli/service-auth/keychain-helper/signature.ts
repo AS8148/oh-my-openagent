@@ -94,9 +94,14 @@ async function fileIdentity(path: string): Promise<string | null> {
  * back with utimes. The file is stat'ed before AND after the check, and a verdict is stored only when both agree, so it
  * is never recorded under the identity of a file that changed while it was being checked (that answers "invalid").
  */
-export function createSignatureChecker(check: RequirementCheck = verifyWithSecurityFramework, requirement = KEYCHAIN_HELPER_REQUIREMENT) {
+export type SignatureChecker = ((path: string) => Promise<SignatureVerdict>) & {
+  /** Whether a verdict for the file as it is now is already cached. */
+  readonly knows: (path: string) => Promise<boolean>
+}
+
+export function createSignatureChecker(check: RequirementCheck = verifyWithSecurityFramework, requirement = KEYCHAIN_HELPER_REQUIREMENT): SignatureChecker {
   const verdicts = new Map<string, SignatureVerdict>()
-  return async (path: string): Promise<SignatureVerdict> => {
+  const checker = async (path: string): Promise<SignatureVerdict> => {
     const before = await fileIdentity(path)
     if (before === null) return "missing"
     const known = verdicts.get(before)
@@ -107,8 +112,14 @@ export function createSignatureChecker(check: RequirementCheck = verifyWithSecur
     verdicts.set(before, verdict)
     return verdict
   }
+  return Object.assign(checker, {
+    knows: async (path: string) => {
+      const identity = await fileIdentity(path)
+      return identity !== null && verdicts.has(identity)
+    },
+  })
 }
 
-let processChecker: ((path: string) => Promise<SignatureVerdict>) | undefined
+let processChecker: SignatureChecker | undefined
 /** The one checker of this process: its verdict cache is shared by every resolution and every spawn. */
-export const processSignatureChecker = (): ((path: string) => Promise<SignatureVerdict>) => (processChecker ??= createSignatureChecker())
+export const processSignatureChecker = (): SignatureChecker => (processChecker ??= createSignatureChecker())
