@@ -5,8 +5,9 @@ import { join } from "node:path"
 
 import { FactsExtractorRunner } from "./facts-runner"
 import {
-  activeRunId, callerSite, cleanupStaleLockFixtures, deadPid, diagnosisMark, holderVerdict, hostDiesMidPublish, runReflect, settleTurn, staleLockFixture,
+  activeRunId, afterMark, callerSite, cleanupStaleLockFixtures, deadPid, diagnosisMark, holderVerdict, hostDiesMidPublish, runReflect, settleTurn, staleLockFixture,
   staleRunDiagnosis,
+  type DiagnosisMark,
 } from "./wiring-reflection-stale-lock.test-support"
 
 afterEach(cleanupStaleLockFixtures)
@@ -191,3 +192,23 @@ test("#given a Windows stack with backslash paths #when the stale-lock diagnosis
   // then
   expect(site).toBe("at reconcilePrelaunch (C:\\a\\omo\\packages\\omo-senpi\\src\\components\\memory\\worker\\run-reconciliation-prelaunch.ts:30:45)")
 })
+
+test("#given a reconcile pass in flight when the mark is taken #when the diagnosis cuts the evidence #then that pass belongs before the mark (#11604)", async () => {
+  // given: the mark is taken at the instant the bind-time pass starts, before it returns anything.
+  const item = await staleLockFixture()
+  const seen: { mark?: DiagnosisMark } = {}
+  item.reconciles.onStart = () => {
+    seen.mark ??= diagnosisMark(item)
+  }
+
+  // when
+  await settleTurn(item)
+
+  // then: the pass's result landed after the mark, but it started before it.
+  const mark = seen.mark
+  if (mark === undefined) throw new Error("expected a reconcile pass to start")
+  expect(item.reconciles.results.map((entry) => entry.pass)).toEqual([mark.count])
+  const after = afterMark(item, mark)
+  expect(after.reconciled).toBe(0)
+  expect(after.passes).toEqual([])
+}, 30_000)

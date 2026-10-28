@@ -109,7 +109,14 @@ export async function staleLockFixture(seams?: ActiveHolderSeams, options: { rea
     createRunId: () => `reflection-run-${nextRun++}`,
   })
   const launched: ReservedRun[] = []
-  const reconciles = { count: 0, results: [] as ReflectionRunReconcileResult[][], contention: [] as SchedulerContention[], errors: [] as Array<{ readonly pass: number; readonly error: string }> }
+  const reconciles = {
+    count: 0,
+    results: [] as Array<{ readonly pass: number; readonly results: ReflectionRunReconcileResult[] }>,
+    contention: [] as SchedulerContention[],
+    errors: [] as Array<{ readonly pass: number; readonly error: string }>,
+    // Called synchronously when a pass starts, after it took its number.
+    onStart: undefined as ((pass: number) => void) | undefined,
+  }
   const holders: Array<{ readonly runId: string; readonly pid: number; readonly hostname: string }> = []
   const launch = (run: ReservedRun): Promise<void> => {
     launched.push(run)
@@ -122,12 +129,13 @@ export async function staleLockFixture(seams?: ActiveHolderSeams, options: { rea
     launch,
     async reconcile(): Promise<void> {
       reconciles.count += 1
-      if (options.reconcileReleases === false) return
       // Passes are numbered from 1 (the count after this call); a mark holds the count before the step under test.
-  const pass = reconciles.count
+      const pass = reconciles.count
+      reconciles.onStart?.(pass)
+      if (options.reconcileReleases === false) return
       const reservation = observeContention(store, reconciles.contention, pass)
       try {
-        reconciles.results.push(await reconcileReflectionRuns({ identity: memoryIdentity, reservation, launch, deferOnSchedulerContention: true }))
+        reconciles.results.push({ pass, results: await reconcileReflectionRuns({ identity: memoryIdentity, reservation, launch, deferOnSchedulerContention: true }) })
       } catch (error) {
         // The wiring swallows a reconcile failure into its logger; keep it for the diagnosis, then rethrow unchanged.
         reconciles.errors.push({ pass, error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) })
@@ -270,10 +278,24 @@ function bootId(): string {
 }
 
 /** Where the reconcile bookkeeping stood before the step under test; the diagnosis reads only what came after. */
-export type DiagnosisMark = { readonly count: number; readonly results: number }
+export type DiagnosisMark = { readonly count: number }
 
 export function diagnosisMark(item: Fixture): DiagnosisMark {
-  return { count: item.reconciles.count, results: item.reconciles.results.length }
+  return { count: item.reconciles.count }
+}
+
+/**
+ * The reconcile evidence of passes that STARTED after the mark, all cut by pass number. A pass already
+ * running when the mark was taken belongs to the time before it, even if its result lands later.
+ */
+export function afterMark(item: Fixture, mark: DiagnosisMark) {
+  const after = (entry: { readonly pass: number }) => entry.pass > mark.count
+  return {
+    reconciled: item.reconciles.count - mark.count,
+    passes: item.reconciles.results.filter(after),
+    contention: item.reconciles.contention.filter(after),
+    errors: item.reconciles.errors.filter(after),
+  }
 }
 
 // Locks held right now, by file name and owner purpose/pid. A per-run finalize claim or the writer lock is
@@ -298,7 +320,8 @@ function heldLocks(locksDir: string): string {
 
 /**
  * "finalized" when the dead run settled; otherwise names the branch that skipped it (#11604):
- * A = recovery never reconciled (the holder verdict was not "dead", or the count did not move);
+ * A = the holder verdict was not "dead" (each label states only that verdict and how many reconcile
+ *     passes started after the mark), or the verdict was dead and no pass started;
  * B = reconciliation ran and deferred on reservation-port contention, or threw. Anything else is
  * "unclassified" with the raw evidence, never a claim that no lock was contended.
  */
@@ -311,18 +334,16 @@ export async function staleRunDiagnosis(
   const holder = item.holders.find((entry) => entry.runId === runId)
   const verdictAfter = await holderVerdict(item)
   const host = `recorded host ${holder?.hostname ?? "unknown"}, current host ${hostname()}, boot ${bootId()}`
-  const reconciled = item.reconciles.count - observed.mark.count
-  const passes = item.reconciles.results.slice(observed.mark.results)
-  const contention = item.reconciles.contention.filter((entry) => entry.pass > observed.mark.count)
-  const errors = item.reconciles.errors.filter((entry) => entry.pass > observed.mark.count)
+  const { reconciled, passes, contention, errors } = afterMark(item, observed.mark)
+  const ran = `reconcile ran ${reconciled} time(s) after the mark`
   const branch = observed.verdictBefore.state === "live"
-    ? "A live: the holder looked alive, so nothing was reconciled"
+    ? `A live: holder verdict live; ${ran}`
     : observed.verdictBefore.state === "stuck"
-      ? `A stuck: ${observed.verdictBefore.reason}`
+      ? `A stuck: ${observed.verdictBefore.reason}; ${ran}`
       : observed.verdictBefore.state === "none"
-        ? "A none: active.lock was gone before recovery"
+        ? `A none: active.lock was gone before recovery; ${ran}`
         : reconciled === 0
-          ? "A not reconciled: the verdict was dead but recovery never called reconcile"
+          ? `A not reconciled: holder verdict dead; ${ran}`
           : errors.length > 0
             ? `B threw: ${errors.map((entry) => `pass ${entry.pass}: ${entry.error}`).join("; ")}`
             : contention.length > 0
@@ -332,7 +353,7 @@ export async function staleRunDiagnosis(
     branch,
     `verdict before ${JSON.stringify(observed.verdictBefore)}, after ${JSON.stringify(verdictAfter)}`,
     `holder pid ${holder?.pid ?? "unknown"}; ${host}`,
-    `reconcile calls ${reconciled}, passes returned ${JSON.stringify(passes)}`,
+    `reconcile calls after the mark ${reconciled}, passes returned ${JSON.stringify(passes)}`,
     `locks held now: ${heldLocks(item.paths.locks)}`,
     `surface: ${observed.surface}`,
   ].join("\n")
