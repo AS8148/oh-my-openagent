@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path"
 import { load } from "js-yaml"
 import { KEYCHAIN_HELPER_IDENTIFIER } from "../packages/omo-native/keychain-helper/build"
-import { KEYCHAIN_HELPER_PAYLOAD, KEYCHAIN_HELPER_RELEASE_ASSET, KEYCHAIN_HELPER_SOURCE } from "./release-keychain-helper-target"
+import { KEYCHAIN_HELPER_RELEASE_ASSET, KEYCHAIN_HELPER_SOURCE } from "./release-keychain-helper-target"
 import { runBlock } from "./release-workflow-test-steps"
 import {
   SUBPROCESS_TEST_TIMEOUT_MS,
@@ -112,7 +112,7 @@ describe("keychain helper release workflows (#11262)", () => {
 
   test("the native darwin smoke checks the provisioned helper against its requirement", () => {
     const smoke = stepAt(jobSteps(platformWorkflow, "build"), "Smoke test release binary").value.run ?? ""
-    expect(smoke).toContain(`local helper="\${HOME}/.omo/binary-runtime/\${OMO_AI_VERSION}/${KEYCHAIN_HELPER_PAYLOAD}"`)
+    expect(smoke).toContain('local helper="${HOME}/.omo/binary-runtime/${OMO_AI_VERSION}/omo-keychain"')
     expect(smoke).toContain('bun script/keychain-helper-release.ts verify "$helper"')
     expect(smoke).toMatch(/darwin-arm64\)\n(?:.*\n)*?\s+assert_first_run_provisioned\n\s+assert_keychain_helper_provisioned\n/)
   })

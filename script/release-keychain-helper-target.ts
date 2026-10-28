@@ -1,14 +1,16 @@
 // script/release-keychain-helper-target.ts
 // Where the signed keychain helper (#11262) enters every darwin release output. The release
 // workflows place the signed universal helper at KEYCHAIN_HELPER_SOURCE (publish-platform.yml
-// "Stage keychain helper", publish.yml publish-main); build-omo-binary embeds it for darwin
-// targets at KEYCHAIN_HELPER_PAYLOAD, which is also its path inside the omo-ai tarball.
+// "Stage keychain helper", publish.yml publish-main), which is also its path inside the omo-ai
+// tarball. build-omo-binary embeds it for darwin targets at KEYCHAIN_HELPER_PAYLOAD, the payload
+// root, so the provisioned runtime finds it at execDir/omo-keychain: the one runtime layout the
+// desktop also uses (#11262 RULING-74).
 
 import { chmodSync, copyFileSync, mkdirSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
-export const KEYCHAIN_HELPER_PAYLOAD = "bin/darwin/omo-keychain"
-export const KEYCHAIN_HELPER_SOURCE = `packages/omo-native/${KEYCHAIN_HELPER_PAYLOAD}`
+export const KEYCHAIN_HELPER_PAYLOAD = "omo-keychain"
+export const KEYCHAIN_HELPER_SOURCE = "packages/omo-native/bin/darwin/omo-keychain"
 export const KEYCHAIN_HELPER_RELEASE_ASSET = "omo-keychain-darwin-universal"
 
 export function keychainHelperPayload(target: string): string | null {

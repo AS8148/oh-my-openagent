@@ -20,7 +20,8 @@ function withRoot(body: (root: string) => void | Promise<void>): () => Promise<v
 }
 
 describe("keychain helper in the compiled release payload (#11262)", () => {
-  test("every darwin target and no other target embeds the helper at bin/darwin/omo-keychain", () => {
+  test("every darwin target and no other target embeds the helper beside the runtime (execDir/omo-keychain, RULING-74)", () => {
+    expect(KEYCHAIN_HELPER_PAYLOAD).toBe("omo-keychain")
     for (const target of RELEASE_BINARY_TARGETS) {
       const darwin = target.target.startsWith("darwin-")
       expect(keychainHelperPayload(target.target), target.target).toBe(darwin ? KEYCHAIN_HELPER_PAYLOAD : null)

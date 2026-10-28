@@ -462,8 +462,9 @@ jobs:
           name: keychain-helper
           path: .omo/keychain-helper
 
-      # build-omo-binary embeds packages/omo-native/bin/darwin/omo-keychain into every darwin binary and
-      # fails without it; the platform package ships the same bytes as bin/omo-keychain.
+      # build-omo-binary embeds packages/omo-native/bin/darwin/omo-keychain into every darwin binary (at
+      # the payload root, so execDir/omo-keychain) and fails without it; the platform package ships the
+      # same bytes as bin/omo-keychain.
       - name: Stage keychain helper
         if: startsWith(matrix.platform, 'darwin-') && (steps.release-assets.outputs.binary_exists != 'true' || steps.check.outputs.skip != 'true')
         env:
@@ -572,7 +573,7 @@ jobs:
           }
 
           assert_keychain_helper_provisioned() {
-            local helper="${HOME}/.omo/binary-runtime/${OMO_AI_VERSION}/bin/darwin/omo-keychain"
+            local helper="${HOME}/.omo/binary-runtime/${OMO_AI_VERSION}/omo-keychain"
             if [ ! -x "$helper" ]; then
               echo "first-run provisioning did not materialize an executable ${helper}"
               return 1
