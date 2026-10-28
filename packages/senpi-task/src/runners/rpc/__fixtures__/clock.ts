@@ -1,23 +1,41 @@
 import { spyOn } from "bun:test"
+import { AsyncLocalStorage } from "node:async_hooks"
 
-/** Runs timer callbacks in registration order and drains their promise reactions at each boundary. */
+/**
+ * Runs timer callbacks in registration order and drains their promise reactions at each boundary.
+ * Only work the calling test starts after this call is faked, so create the clock before the objects under test.
+ * One bun process runs every test file: a timer armed by work an earlier test left running keeps the real clock and
+ * `pending()` never counts it (#11446).
+ */
 export function fakeClock() {
+  const real = { setTimeout, setInterval, clearTimeout, clearInterval, now: Date.now }
+  const owner = new AsyncLocalStorage<true>()
+  owner.enterWith(true)
+  const owned = () => owner.getStore() === true
   let now = 0
   const timers = new Map<object, { at: number; interval?: number; callback: () => void }>()
+  const fakeIds = new WeakSet<object>()
   const install = (callback: () => void, ms: number, interval?: number) => {
     const id = { unref() {} }
+    fakeIds.add(id)
     timers.set(id, { at: now + ms, interval, callback })
     return id
   }
+  const clear = (id: unknown, clearReal: (id: never) => void) => {
+    if (typeof id === "object" && id !== null && fakeIds.has(id)) timers.delete(id)
+    else Reflect.apply(clearReal, globalThis, [id])
+  }
   const timeout = spyOn(globalThis, "setTimeout").mockImplementation(
-    ((callback: () => void, ms = 0) => install(callback, ms)) as typeof setTimeout,
+    ((callback: () => void, ms = 0, ...args: unknown[]) =>
+      owned() ? install(callback, ms) : Reflect.apply(real.setTimeout, globalThis, [callback, ms, ...args])) as typeof setTimeout,
   )
   const interval = spyOn(globalThis, "setInterval").mockImplementation(
-    ((callback: () => void, ms = 0) => install(callback, ms, ms)) as typeof setInterval,
+    ((callback: () => void, ms = 0, ...args: unknown[]) =>
+      owned() ? install(callback, ms, ms) : Reflect.apply(real.setInterval, globalThis, [callback, ms, ...args])) as typeof setInterval,
   )
-  const clearTimeoutSpy = spyOn(globalThis, "clearTimeout").mockImplementation((id) => { timers.delete(id as object) })
-  const clearIntervalSpy = spyOn(globalThis, "clearInterval").mockImplementation((id) => { timers.delete(id as object) })
-  const date = spyOn(Date, "now").mockImplementation(() => now)
+  const clearTimeoutSpy = spyOn(globalThis, "clearTimeout").mockImplementation((id) => clear(id, real.clearTimeout))
+  const clearIntervalSpy = spyOn(globalThis, "clearInterval").mockImplementation((id) => clear(id, real.clearInterval))
+  const date = spyOn(Date, "now").mockImplementation(() => (owned() ? now : Reflect.apply(real.now, Date, [])))
   return {
     now: () => now,
     pending: () => timers.size,
@@ -42,6 +60,7 @@ export function fakeClock() {
       clearTimeoutSpy.mockRestore()
       clearIntervalSpy.mockRestore()
       date.mockRestore()
+      owner.disable()
     },
   }
 }
