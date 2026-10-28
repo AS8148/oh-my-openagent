@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { chmodSync, closeSync, constants, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
+// readdirSync is used by the no-temp-directory-leak case below.
+import { readdirSync } from "node:fs"
 
 const AGENT_DIR = join(import.meta.dir, "agent")
 // The hook reports the PHYSICAL fallback directory, which is /private/tmp on macOS.
@@ -257,7 +259,63 @@ printf 'finished\\n' >&3
       expect(result.exitCode).toBe(0)
       const resolved = result.stdout.toString().trim()
       expect(result.stderr.toString()).toContain("[cleanup-hook] TMPDIR is inside the project directory")
-      expect(resolved === "" || !resolved.startsWith(`${tempRoot}/`)).toBe(true)
+      // Either a real directory outside the project, or /dev/null when no such directory exists.
+      expect(resolved === "/dev/null" || !resolved.startsWith(`${tempRoot}/`)).toBe(true)
+      expect(resolved).not.toBe("")
+    } finally {
+      removeFixture(fixture)
+    }
+  })
+
+  // Every way `stat` can fail to produce an identity: the hook must fail CLOSED, never silently
+  // treat the project as unrelated to TMPDIR (GNU coreutils on PATH under macOS is the real case).
+  const brokenStats: readonly { readonly name: string; readonly body: string }[] = [
+    { name: "a stat that exits non-zero", body: "exit 1" },
+    { name: "a stat that prints a filesystem report and exits non-zero", body: `printf '  File: "/" ID: 1 Namelen: 255\\n'\nexit 1` },
+    { name: "a stat that prints something that is not an identity", body: `printf 'not-an-identity\\n'` },
+    { name: "a stat that prints nothing", body: "exit 0" },
+  ]
+
+  for (const brokenStat of brokenStats) {
+    posixBashTest(`#given ${brokenStat.name} #when the launcher resolves its log #then it refuses to guess and stops logging`, () => {
+      const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
+      const binDir = join(fixture.logDir, "bin")
+      mkdirSync(binDir, { recursive: true })
+      writeFileSync(join(binDir, "stat"), `#!/usr/bin/env bash\n${brokenStat.body}\n`)
+      chmodSync(join(binDir, "stat"), 0o755)
+      const insideProject = join(fixture.repo, "tmp")
+      mkdirSync(insideProject, { recursive: true })
+      try {
+        const result = Bun.spawnSync({
+          cmd: ["bash", "./cleanup-hook.sh", "--print-log-file"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}`, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: insideProject } as HookEnv,
+        })
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout.toString().trim()).toBe("/dev/null")
+        expect(result.stderr.toString()).toContain("[cleanup-hook] the project directory cannot be identified")
+      } finally {
+        removeFixture(fixture)
+      }
+    })
+  }
+
+  posixBashTest("#given repeated runs with a rejected TMPDIR #when the launcher falls back #then it creates no temp directories", () => {
+    const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
+    const insideProject = join(fixture.repo, "tmp")
+    mkdirSync(insideProject, { recursive: true })
+    const countTemp = (): number => readdirSync(realpathSync("/tmp")).length
+    try {
+      const before = countTemp()
+      for (let run = 0; run < 5; run++) {
+        const result = Bun.spawnSync({
+          cmd: ["bash", "./cleanup-hook.sh", "--print-log-file"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
+          env: { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: insideProject } as HookEnv,
+        })
+        expect(result.exitCode).toBe(0)
+      }
+      expect(countTemp()).toBe(before)
+      expect(readdirSync(fixture.repo).filter((entry) => entry.startsWith("tmp."))).toEqual([])
+      expect(readdirSync(insideProject)).toEqual([])
     } finally {
       removeFixture(fixture)
     }

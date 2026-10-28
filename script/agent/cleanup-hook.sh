@@ -19,19 +19,40 @@ physical_path() {
 
 # Directory identity, not its name: device+inode is immune to case-insensitive
 # filesystems, Unicode normalisation, symlinks and hard-linked directories.
-path_identity() {
-  case "$(uname -s)" in
-    Darwin | *BSD) stat -f '%d:%i' "$1" 2>/dev/null ;;
-    *) stat -c '%d:%i' "$1" 2>/dev/null ;;
+# The stat flavour is detected by TRYING it, never guessed from uname: GNU
+# coreutils on PATH under macOS makes `stat -f` print a filesystem report and
+# exit 1, which must never be mistaken for an identity.
+identity_shape_ok() {
+  case "$1" in
+    '' | *[!0-9:]* | :* | *: | *:*:*) return 1 ;;
+    *:*) return 0 ;;
+    *) return 1 ;;
   esac
+}
+
+stat_flavour=""
+for stat_option in -c -f; do
+  stat_probe="$(stat "$stat_option" '%d:%i' . 2>/dev/null)" || continue
+  if identity_shape_ok "$stat_probe"; then
+    stat_flavour="$stat_option"
+    break
+  fi
+done
+
+# Prints the identity and exits 0, or exits non-zero: an unreadable path, a
+# missing stat, an unknown flavour and unexpected output are all failures.
+path_identity() {
+  [ -n "$stat_flavour" ] || return 1
+  identity="$(stat "$stat_flavour" '%d:%i' "$1" 2>/dev/null)" || return 1
+  identity_shape_ok "$identity" || return 1
+  printf '%s\n' "$identity"
 }
 
 # 0 = inside the project, 1 = outside, 2 = undecidable (fail closed).
 is_inside_project() {
   walk="$1"
   while :; do
-    walk_identity="$(path_identity "$walk")"
-    [ -n "$walk_identity" ] || return 2
+    walk_identity="$(path_identity "$walk")" || return 2
     [ "$walk_identity" = "$project_identity" ] && return 0
     [ "$walk" = "/" ] && return 1
     walk_parent="$(dirname "$walk")"
@@ -40,11 +61,12 @@ is_inside_project() {
   done
 }
 
-# The first location that exists, resolves and is not inside the project.
-# Empty output means every candidate failed, so the hook stops logging.
+# The first existing directory that resolves and is outside the project. These
+# are existing system temp directories only: the hook CREATES NOTHING, so a
+# rejected TMPDIR cannot leave a trail of temp directories behind it.
 fallback_log_dir() {
-  for fallback in /tmp /private/tmp "$(mktemp -d 2>/dev/null)"; do
-    [ -n "$fallback" ] && [ -d "$fallback" ] || continue
+  for fallback in /tmp /private/tmp /var/tmp /private/var/tmp; do
+    [ -d "$fallback" ] || continue
     fallback_physical="$(physical_path "$fallback")" || continue
     is_inside_project "$fallback_physical"
     [ "$?" = "1" ] || continue
@@ -59,7 +81,9 @@ resolve_log_dir() {
   reason=""
   physical_project="$(physical_path "$PROJECT_DIR")" || physical_project=""
   project_identity=""
-  [ -n "$physical_project" ] && project_identity="$(path_identity "$physical_project")"
+  if [ -n "$physical_project" ]; then
+    project_identity="$(path_identity "$physical_project")" || project_identity=""
+  fi
   if [ -z "$project_identity" ]; then
     printf '[cleanup-hook] the project directory cannot be identified (%s); not logging\n' "$PROJECT_DIR" >&2
     return 0
