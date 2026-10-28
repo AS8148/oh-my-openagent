@@ -83,17 +83,23 @@ fn drain(inputs: &UserInputs, feed: Option<&Arc<dyn UserInputFeed>>, supervisor:
     let Some(feed) = feed else { return };
     let presses = feed.take();
     let now_ms = supervisor.now_ms();
-    let mut oldest_kept_ms = now_ms;
-    for press in presses.presses {
-        let age = u64::try_from(press.at.elapsed().as_millis()).unwrap_or(u64::MAX);
-        let at_ms = now_ms.saturating_sub(age);
-        oldest_kept_ms = oldest_kept_ms.min(at_ms);
-        inputs.record(press.pid, at_ms);
-    }
+    let stamped: Vec<(u32, u64)> = presses
+        .presses
+        .iter()
+        .map(|press| {
+            let age = u64::try_from(press.at.elapsed().as_millis()).unwrap_or(u64::MAX);
+            (press.pid, now_ms.saturating_sub(age))
+        })
+        .collect();
     // The bounded watch lets its OLDEST presses go, so every dropped press
-    // preceded the oldest one kept: stamp them there, never at the drain.
+    // preceded the oldest one kept: stamp them there, never at the drain, and
+    // record them first so a kept press stays the app's last one.
     if presses.dropped > 0 {
+        let oldest_kept_ms = stamped.iter().map(|(_, at_ms)| *at_ms).min().unwrap_or(now_ms);
         inputs.record_unknown(oldest_kept_ms);
+    }
+    for (pid, at_ms) in stamped {
+        inputs.record(pid, at_ms);
     }
 }
 
@@ -184,10 +190,13 @@ impl Worker {
         let Some(window) = window else {
             return Ok(unwatched());
         };
+        // Presses up to now are drained before the app is watched, so a press
+        // that landed during the window list is the user's own, not a reason to
+        // refuse an app the session had not touched yet.
+        self.drain_user_input();
         let Some(pid) = self.touch_app(&window) else {
             return Ok(unwatched());
         };
-        self.drain_user_input();
         let supervisor = Arc::clone(&self.safety.supervisor);
         let policy = self.stop_policy();
         let inputs = Arc::clone(&self.intervention.inputs);

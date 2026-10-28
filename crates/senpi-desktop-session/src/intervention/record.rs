@@ -98,7 +98,7 @@ impl UserInputs {
         };
         if let Some(app) = state.apps.get_mut(&pid) {
             app.inputs += 1;
-            app.unread = Some(at_ms);
+            app.unread = Some(app.unread.map_or(at_ms, |unread| unread.max(at_ms)));
         }
     }
 
@@ -107,7 +107,9 @@ impl UserInputs {
     pub(crate) fn record_unknown(&self, at_ms: u64) {
         for app in self.state.lock().apps.values_mut() {
             app.inputs += 1;
-            app.unread = Some(at_ms);
+            // The user's last press never moves backward: a later press the
+            // session already knows of stays the last one.
+            app.unread = Some(app.unread.map_or(at_ms, |unread| unread.max(at_ms)));
         }
     }
 
