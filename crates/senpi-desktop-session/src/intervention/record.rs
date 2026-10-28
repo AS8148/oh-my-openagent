@@ -18,6 +18,12 @@
 //!    of a new process, so the record stays.
 //! 5. Input into an app the session never touched, or before it touched it,
 //!    is the user's own and never refuses.
+//! 6. An app with an unread press is never admitted; an admitted input holds
+//!    a baseline of the app's press counter, which only grows, and any press
+//!    counted into the app after the baseline (kept, routed from a helper
+//!    process, or dropped/unknown) refuses the next check.
+//! 7. A process reusing a watched id with a different known start time starts
+//!    unwatched: the earlier process's presses are not held against it.
 
 use std::collections::HashMap;
 

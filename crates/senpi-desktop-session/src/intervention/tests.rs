@@ -494,13 +494,18 @@ fn a_start_time_first_learned_after_a_press_keeps_the_apps_record() {
     assert_eq!(inputs.admit(4242, None, || 10_000, no_wait).map_err(|error| error.code).err(), Some(ErrorCode::UserIntervened));
 }
 
-/// Invariants 1-5 of `record.rs` over random interleavings of presses, dropped
-/// presses, reads (delivered and not), clock advances and start-time changes,
-/// against a one-line model: each app's newest real press, cleared only by a
-/// delivered read that began a quiet period after it.
+/// Invariants 1-7 of `record.rs` over random interleavings of presses,
+/// dropped presses, routed helper presses, reads (delivered and not), clock
+/// advances, start-time changes and process restarts, against a model: each
+/// app's newest real press, cleared only by a delivered read that began a
+/// quiet period after it, plus a press counter and the baselines admitted
+/// inputs hold.
 #[test]
 fn every_interleaving_of_presses_reads_and_time_keeps_the_invariants() {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
     const APPS: [u32; 3] = [11, 22, 33];
+    const HELPER: u32 = 44;
     const STEPS: usize = 400;
     const RUNS: u64 = 64;
     struct Rng(u64);
@@ -516,23 +521,33 @@ fn every_interleaving_of_presses_reads_and_time_keeps_the_invariants() {
             self.next() % n
         }
     }
+    #[derive(Default, Clone, Copy)]
+    struct Model {
+        last_press: Option<u64>,
+        presses: u64,
+    }
     for run in 1..=RUNS {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ run);
-        let inputs = UserInputs::new(Box::new(|_| Some(1)));
-        // The model: per app, the newest real press not yet shown by a read.
-        let mut last_press: std::collections::HashMap<u32, Option<u64>> = std::collections::HashMap::new();
+        // The start time the watch reports per pid; the test restarts processes
+        let starts: Arc<HashMap<u32, AtomicU64>> =
+            Arc::new(APPS.iter().chain([&HELPER]).map(|pid| (*pid, AtomicU64::new(1))).collect());
+        let reported = Arc::clone(&starts);
+        let inputs = UserInputs::new(Box::new(move |pid| reported.get(&pid).map(|start| start.load(Ordering::SeqCst))));
+        let mut model: HashMap<u32, Model> = HashMap::new();
         let mut now_ms: u64 = 10_000;
-        let mut touched: Vec<u32> = Vec::new();
+        let mut routed_to: Option<u32> = None;
+        // Baselines held by admitted inputs: (app, baseline, presses at admission)
+        let mut held: Vec<(u32, Baseline, u64)> = Vec::new();
         let mut trace: Vec<String> = Vec::new();
+        let touched = |model: &HashMap<u32, Model>, app: u32| model.contains_key(&app);
         for step in 0..STEPS {
             let app = APPS[rng.below(3) as usize];
-            match rng.below(8) {
+            match rng.below(11) {
                 0 => {
                     // Touch (first read or act): earlier presses are the user's own
-                    if !touched.contains(&app) {
-                        inputs.touch(app, Some(1), || format!("app{app}"));
-                        touched.push(app);
-                        last_press.insert(app, None);
+                    if !touched(&model, app) {
+                        inputs.touch(app, Some(starts[&app].load(Ordering::SeqCst)), || format!("app{app}"));
+                        model.insert(app, Model::default());
                         trace.push(format!("touch {app}"));
                     }
                 }
@@ -540,9 +555,9 @@ fn every_interleaving_of_presses_reads_and_time_keeps_the_invariants() {
                     // A press the watch kept, stamped up to 2 s in the past
                     let at = now_ms - rng.below(2_000);
                     inputs.record(app, at);
-                    if touched.contains(&app) {
-                        let entry = last_press.entry(app).or_insert(None);
-                        *entry = Some(entry.map_or(at, |last| last.max(at)));
+                    if let Some(entry) = model.get_mut(&app) {
+                        entry.last_press = Some(entry.last_press.map_or(at, |last| last.max(at)));
+                        entry.presses += 1;
                     }
                     trace.push(format!("press {app} @{at}"));
                 }
@@ -550,9 +565,9 @@ fn every_interleaving_of_presses_reads_and_time_keeps_the_invariants() {
                     // Presses the bounded watch let go, stamped at the oldest kept
                     let at = now_ms - rng.below(3_000);
                     inputs.record_unknown(at);
-                    for watched in &touched {
-                        let entry = last_press.entry(*watched).or_insert(None);
-                        *entry = Some(entry.map_or(at, |last| last.max(at)));
+                    for entry in model.values_mut() {
+                        entry.last_press = Some(entry.last_press.map_or(at, |last| last.max(at)));
+                        entry.presses += 1;
                     }
                     trace.push(format!("unknown @{at}"));
                 }
@@ -562,9 +577,9 @@ fn every_interleaving_of_presses_reads_and_time_keeps_the_invariants() {
                     let delivered = rng.below(4) != 0;
                     if delivered {
                         inputs.read(app, began);
-                        if let Some(Some(last)) = last_press.get(&app).copied() {
-                            if began.saturating_sub(last) >= QUIET_MS {
-                                last_press.insert(app, None);
+                        if let Some(entry) = model.get_mut(&app) {
+                            if entry.last_press.is_some_and(|last| began.saturating_sub(last) >= QUIET_MS) {
+                                entry.last_press = None;
                             }
                         }
                     }
@@ -574,38 +589,81 @@ fn every_interleaving_of_presses_reads_and_time_keeps_the_invariants() {
                     now_ms += rng.below(QUIET_MS + 1);
                     trace.push(format!("clock -> {now_ms}"));
                 }
-                _ => {
+                7 => {
                     // A touch whose start time is unknown on one side: no evidence
-                    if touched.contains(&app) {
+                    if touched(&model, app) {
                         inputs.touch(app, None, || format!("app{app}"));
                         trace.push(format!("touch {app} start=None"));
                     }
                 }
+                8 => {
+                    // The helper process (an Open/Save panel service) routes to `app`
+                    if touched(&model, app) {
+                        inputs.route(HELPER, app);
+                        routed_to = Some(app);
+                        trace.push(format!("route helper -> {app}"));
+                    }
+                }
+                9 => {
+                    // A press into the helper counts for the app it draws for
+                    let at = now_ms - rng.below(1_000);
+                    inputs.record(HELPER, at);
+                    if let Some(entry) = routed_to.and_then(|target| model.get_mut(&target)) {
+                        entry.last_press = Some(entry.last_press.map_or(at, |last| last.max(at)));
+                        entry.presses += 1;
+                    }
+                    trace.push(format!("press helper @{at}"));
+                }
+                _ => {
+                    // The process restarts under the same id: the next touch sees a new
+                    // start time and the earlier presses are not held against it
+                    let next = starts[&app].fetch_add(1, Ordering::SeqCst) + 1;
+                    if touched(&model, app) {
+                        inputs.touch(app, Some(next), || format!("app{app}"));
+                        model.insert(app, Model::default());
+                        held.retain(|(held_app, _, _)| *held_app != app);
+                        // A helper routed to the earlier process draws for nobody now
+                        if routed_to == Some(app) {
+                            routed_to = None;
+                        }
+                    }
+                    trace.push(format!("restart {app} start={next}"));
+                }
             }
-            // Every invariant, after every step: the record refuses exactly when
-            // the model has an unshown press newer than one quiet period ago,
-            // and otherwise admits with no wait.
-            for watched in &touched {
-                let clock = || now_ms;
+            let context = |what: &str, app: u32| {
+                format!("{what}: run {run} step {step} app {app} now {now_ms} model {:?}\n{}", model.get(&app).map(|entry| (entry.last_press, entry.presses)), trace.join("\n"))
+            };
+            // Invariants 1-5: the record refuses exactly when the model has an
+            // unshown press, waits only while the user is still using the app, and
+            // otherwise admits with no wait.
+            for (app, entry) in &model {
                 let mut waited = false;
-                let outcome = inputs.admit(*watched, None, clock, |_| {
+                let outcome = inputs.admit(*app, None, || now_ms, |_| {
                     waited = true;
                     Ok(())
                 });
-                let last = last_press.get(watched).copied().flatten();
-                let context = || format!("run {run} step {step} app {watched} now {now_ms} model {last:?}\n{}", trace.join("\n"));
-                match last {
-                    None => assert!(outcome.is_ok() && !waited, "admit expected: {}", context()),
+                match entry.last_press {
+                    None => {
+                        let baseline = outcome.unwrap_or_else(|error| panic!("{}: {error:?}", context("admit expected", *app)));
+                        assert!(!waited, "{}", context("no wait expected", *app));
+                        held.push((*app, baseline, entry.presses));
+                    }
                     Some(last) => {
-                        assert!(outcome.is_err(), "refusal expected: {}", context());
+                        assert!(outcome.is_err(), "{}", context("refusal expected", *app));
                         let paused = now_ms.saturating_sub(last) >= QUIET_MS;
-                        assert_eq!(waited, !paused, "wait expected only while the user is still using it: {}", context());
+                        assert_eq!(waited, !paused, "{}", context("wait expected only while the user is still using it", *app));
                     }
                 }
             }
+            // Invariants 6-7: every held baseline refuses the check exactly when a
+            // press was counted into its app since admission
+            for (app, baseline, presses_at_admission) in &held {
+                let pressed_since = model.get(app).is_some_and(|entry| entry.presses != *presses_at_admission);
+                assert_eq!(inputs.check(*app, *baseline).is_err(), pressed_since, "{}", context("check follows the press counter", *app));
+            }
             // Invariant 5: an untouched app never refuses
-            for untouched in APPS.iter().filter(|app| !touched.contains(app)) {
-                assert!(inputs.admit(*untouched, None, || now_ms, no_wait).is_ok(), "untouched app refused at run {run} step {step}");
+            for untouched in APPS.iter().filter(|app| !touched(&model, **app)) {
+                assert!(inputs.admit(*untouched, None, || now_ms, no_wait).is_ok(), "{}", context("untouched app refused", *untouched));
             }
         }
     }

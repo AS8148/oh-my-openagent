@@ -157,6 +157,10 @@ impl Worker {
     /// A read of window `target` that began at `started_ms` reached the
     /// caller: the user's input there is shown if they had paused by then.
     pub(crate) fn note_read(&mut self, target: &str, started_ms: u64) {
+        // Without a feed nothing is watched: no window list for the record.
+        if self.intervention.feed.is_none() {
+            return;
+        }
         let Ok(window) = self.window(&Target::parse(target)) else { return };
         if let Some(pid) = self.touch_app(&window) {
             self.intervention.inputs.read(pid, started_ms);
