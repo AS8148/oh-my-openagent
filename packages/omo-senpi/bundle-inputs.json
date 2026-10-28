@@ -2109,6 +2109,7 @@
     "packages/telemetry-core/src/posthog-transport.ts",
     "packages/telemetry-core/src/record-daily-active.ts",
     "packages/telemetry-core/src/telemetry-delivery-error.ts",
+    "packages/telemetry-core/src/terminal-program.ts",
     "packages/telemetry-core/src/turn-trace-bridge.ts",
     "packages/telemetry-core/tsconfig.json",
     "packages/utils/bunfig.toml",

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:7a225a15bf5b52abe494c71eb6ff547d63e87cecfbce995848c6e3d595efe115:42f3723b384006ea7f9cdbf96f2b0ca8ced4119534c95595ee64fbe2da25a63e
+// omo-codex-install:0634de1a89c9254172c483635c26e43c1a5b471255dfaf21a0d31f7237b3ed59:89a7ccdc1c6ce85e55c6e4601ca58476234f84b2efa05f61170aed8c1209c94a
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -463,6 +463,37 @@ function getTelemetryDistinctId(machineIdPrefix, osProvider = getDefaultTelemetr
 }
 var init_machine_id = () => {};
 
+// packages/telemetry-core/src/terminal-program.ts
+function isKnownTerminalProgram(value) {
+  return KNOWN_TERMINAL_PROGRAMS.some((known) => known === value);
+}
+function toTelemetryTerminalProgram(termProgram) {
+  if (termProgram === undefined || termProgram === "")
+    return;
+  return isKnownTerminalProgram(termProgram) ? termProgram : "other";
+}
+var KNOWN_TERMINAL_PROGRAMS;
+var init_terminal_program = __esm(() => {
+  KNOWN_TERMINAL_PROGRAMS = [
+    "Apple_Terminal",
+    "iTerm.app",
+    "vscode",
+    "cursor",
+    "windsurf",
+    "zed",
+    "WezTerm",
+    "ghostty",
+    "tmux",
+    "Hyper",
+    "WarpTerminal",
+    "kitty",
+    "alacritty",
+    "Tabby",
+    "rio",
+    "mintty"
+  ];
+});
+
 // packages/telemetry-core/src/injected-client.ts
 function isTelemetryClientEnabled(input) {
   const env = input.env ?? process.env;
@@ -567,7 +598,7 @@ function getSharedProperties(input) {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     shell: process.env.SHELL,
     ci: Boolean(process.env.CI),
-    terminal: process.env.TERM_PROGRAM,
+    terminal: toTelemetryTerminalProgram(process.env.TERM_PROGRAM),
     ...input.product.additionalProperties
   };
 }
@@ -595,6 +626,7 @@ var NO_OP_CLIENT;
 var init_injected_client = __esm(() => {
   init_env();
   init_machine_id();
+  init_terminal_program();
   NO_OP_CLIENT = {
     enabled: false,
     trackActive: () => {

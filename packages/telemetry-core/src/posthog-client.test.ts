@@ -114,14 +114,23 @@ describe("posthog telemetry client", () => {
 
   test("#given codex product parameters #when daily active is captured #then payload shape matches current contract", async () => {
     // given
+    const savedTermProgram = process.env.TERM_PROGRAM
+    process.env.TERM_PROGRAM = "WezTerm"
     const capturedMessages: TelemetryCaptureMessage[] = []
-    const client = createTelemetryClient({
-      env: { POSTHOG_API_KEY: "test-key", POSTHOG_HOST: "https://posthog.test" },
-      osProvider: OS_PROVIDER,
-      product: PRODUCT,
-      source: "cli",
-      transportFactory: createCapturingFactory(capturedMessages),
-    })
+    const client = (() => {
+      try {
+        return createTelemetryClient({
+          env: { POSTHOG_API_KEY: "test-key", POSTHOG_HOST: "https://posthog.test" },
+          osProvider: OS_PROVIDER,
+          product: PRODUCT,
+          source: "cli",
+          transportFactory: createCapturingFactory(capturedMessages),
+        })
+      } finally {
+        if (savedTermProgram === undefined) delete process.env.TERM_PROGRAM
+        else process.env.TERM_PROGRAM = savedTermProgram
+      }
+    })()
 
     // when
     client.trackActive({
@@ -156,7 +165,7 @@ describe("posthog telemetry client", () => {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         shell: process.env.SHELL,
         ci: Boolean(process.env.CI),
-        terminal: process.env.TERM_PROGRAM,
+        terminal: "WezTerm",
         $process_person_profile: false,
         day_utc: "2026-05-25",
         reason: "cli_run",
