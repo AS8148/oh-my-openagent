@@ -1,4 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { log } from "../logger"
 import { registerProcessCleanup, startCleanupTimer } from "./cleanup"
@@ -14,10 +15,13 @@ type HttpClientFactory = (
   options: { capabilities: Record<string, never> }
 ) => McpClient
 
+type HttpTransportKind = "streamable-http" | "sse"
+
 type HttpTransportFactory = (
   url: URL,
   options: { requestInit?: RequestInit } | undefined,
   client: McpClient,
+  transportKind: HttpTransportKind,
 ) => McpTransport
 
 interface HttpClientDependencies {
@@ -28,10 +32,12 @@ interface HttpClientDependencies {
 
 const defaultHttpClientDependencies: HttpClientDependencies = {
   createClient: (clientInfo, options) => new Client(clientInfo, options),
-  createTransport: (url, options, client) => createProtocolTransport(new StreamableHTTPClientTransport(url, {
-    ...options,
-    fetch: protocolHttpFetch,
-  }), client instanceof Client ? client : undefined, `http:${url.toString()}`),
+  createTransport: (url, options, client, transportKind) => transportKind === "sse"
+    ? new SSEClientTransport(url, options)
+    : createProtocolTransport(new StreamableHTTPClientTransport(url, {
+      ...options,
+      fetch: protocolHttpFetch,
+    }), client instanceof Client ? client : undefined, `http:${url.toString()}`),
   log,
 }
 
@@ -129,7 +135,12 @@ export async function createHttpClient(params: SkillMcpClientConnectionParams): 
     { name: `skill-mcp-${info.skillName}-${info.serverName}`, version: "1.0.0" },
     { capabilities: {} }
   )
-  const transport: McpTransport = httpClientDependencies.createTransport(url, transportOptions, client)
+  const transport: McpTransport = httpClientDependencies.createTransport(
+    url,
+    transportOptions,
+    client,
+    config.type === "sse" ? "sse" : "streamable-http",
+  )
 
   try {
     await connectWithPolicySignal(client, transport, params.policySignal)
