@@ -29,13 +29,17 @@ describe("knip paths are one repo-relative POSIX form on every platform", () => 
     expect(debugEntryPaths(stdout)).toEqual([expected]);
   });
 
-  test("debugEntryPaths fails on a paths array it cannot read instead of dropping the rest", () => {
-    expect(() => debugEntryPaths("[w] Finding entry paths\n{\n  paths: [ '/r/a.ts', ... 3 more items ]\n}")).toThrow("no readable paths array");
-  });
-
-  test("debugEntryPaths never reads a later listing in place of the section's own unreadable array", () => {
-    const stdout = "[w] Finding entry paths\n{\n  paths: [ '/r/a.ts', ... 3 more items ]\n}\n[w] Finding project paths\n{ paths: [ '/r/other.ts' ] }";
-    expect(() => debugEntryPaths(stdout)).toThrow("no readable paths array");
+  // Every way an entry section can lack its own readable array, alone and followed by a later readable listing:
+  // each must fail rather than drop paths or borrow the later section's array.
+  test.each([
+    ["a truncated array", "{\n  paths: [ '/r/a.ts', ... 3 more items ]\n}"],
+    ["no paths key", "{ foo: 1 }"],
+    ["an unquoted entry", "{ paths: [ /r/a.ts ] }"],
+    ["no object at all", ""],
+  ])("debugEntryPaths fails on an entry section with %s", (_, body) => {
+    const section = `[w] Finding entry paths\n${body}`;
+    expect(() => debugEntryPaths(section)).toThrow("no readable paths array");
+    expect(() => debugEntryPaths(`${section}\n[w] Finding project paths\n{ paths: [ '/r/other.ts' ] }`)).toThrow("no readable paths array");
   });
 
   test("a reported path outside the knip cwd fails instead of silently missing", () => {

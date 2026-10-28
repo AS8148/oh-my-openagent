@@ -19,14 +19,17 @@ export const toRepoPath = (root: string, path: string): string => {
 // read as a run of quoted strings up to its own closing bracket; an array that is not one (a truncated or re-quoted listing)
 // fails instead of silently dropping the rest of the section. Returns one path list per section.
 const ENTRY_SECTION = /^\[[^\]\n]*\] Finding entry paths/m;
+const NEXT_SECTION = /^\[[^\]\n]*\] /m;
 const QUOTED = String.raw`'(?:[^'\\]|\\.)*'`;
 const PATHS_ARRAY = new RegExp(String.raw`paths: \[((?:\s*${QUOTED},?)*)\s*\]`, "y");
 export const debugEntryPaths = (stdout: string): string[][] =>
   stdout
     .split(ENTRY_SECTION)
     .slice(1)
-    .map((section) => {
-      // Read the section's own first array only: an unreadable one must not fall through to a later listing.
+    .map((chunk) => {
+      // Read only this section's own first array: a missing or unreadable one must not fall through to a later listing.
+      const end = chunk.search(NEXT_SECTION);
+      const section = end < 0 ? chunk : chunk.slice(0, end);
       const start = section.indexOf("paths: [");
       PATHS_ARRAY.lastIndex = start;
       const listing = start < 0 ? undefined : PATHS_ARRAY.exec(section)?.[1];
