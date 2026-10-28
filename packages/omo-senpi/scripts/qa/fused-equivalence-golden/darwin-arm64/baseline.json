@@ -1,0 +1,18 @@
+{
+ "repo": {
+  "head": "482f60e8c28840e89beb521ca82a816fa1090466",
+  "harness": "5ab795e3392325c961596d7944a1740f4d0a9e20"
+ },
+ "platform": "darwin-arm64",
+ "runtimes": {
+  "harness": "node@24.22.1",
+  "child": "bun@1.4.4 @code-yeongyu/senpi@2026.10.27-1 (pinned)"
+ },
+ "hashes": {
+  "driver": "sha256:abffd571112c073846c1778cb869da7d452a205517810fd7f8ea67c8673c772d",
+  "normalizer": "sha256:7d676cd57a4ba44323a5997bb81b7ffb7e70b0d1df7de05d08325c6901ca2dd9",
+  "fakeModelServer": "sha256:cab5b6866b7854287218de51d1fafcc242a8602b2c83fb85572abe332f9f6560",
+  "collectors": "sha256:f084a278fe05fa9e3603e95ab86bd3988e4a2c500a3174a2e72521a0d4038bdd"
+ },
+ "command": "node packages/omo-senpi/scripts/qa/fused-equivalence-e2e.mjs --record --repeat 2 --cases E23 --senpi-repo /Users/Shared/omo-runs/brain-hand-exec-p0/waves/p0impl7/tmp-P0-06f/senpi-eq --lsp-dir /Users/Shared/omo-runs/brain-hand-exec-p0/waves/p0impl7/tmp-P0-06f/eq-lsp/node_modules/.bin --evidence-dir /Users/Shared/omo-runs/brain-hand-exec-p0/waves/p0impl7/tmp-P0-06f/rec5-E23"
+}
