@@ -31,7 +31,7 @@ backend: &mut FakeBackend,
         if text.is_empty() {
             return Ok(ElementDelivery::Delivered(AxInputMethod::Inserted));
         }
-        backend.ax_tree.append_value(node, text)?;
+        backend.ax_tree.insert_text(node, text)?;
         backend.record(SinkOp::AxTypeText {
             node,
             text: text.to_owned(),
@@ -51,7 +51,7 @@ backend: &mut FakeBackend,
     for character in text.chars() {
         check_stop()?;
         typed.push(character);
-        backend.ax_tree.append_value(node, &character.to_string())?;
+        backend.ax_tree.insert_text(node, &character.to_string())?;
         delivered();
     }
     backend.record(SinkOp::AxTypeText {
