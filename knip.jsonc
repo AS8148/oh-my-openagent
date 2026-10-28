@@ -2102,6 +2102,7 @@
         "script/wait-registry-versions.mjs",
         "script/senpi-worker-compile.ts",
         "test-support/remove-tree.ts",
+        "test-support/test-deadline.ts",
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
         "script/build-binaries.ts",
