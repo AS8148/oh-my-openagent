@@ -18,7 +18,7 @@ OmO sends pseudonymous usage data so we can see which features people use and wh
 ## What is never sent
 
 - your prompts or the model's replies
-- code, diffs, file names, file paths or folder names
+- code, diffs, file names, file paths or folder names (the one exception is the login shell path from `SHELL`, listed above)
 - repository, branch or project names
 - commands you ran, logs, or error messages
 - account names, emails or keys

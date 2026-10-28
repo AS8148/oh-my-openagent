@@ -65,7 +65,7 @@ A feedback report (`/feedback` or `/bug`) is separate from telemetry, and the "N
 ### Never sent
 
 - Prompts, model replies, or any fragment of either
-- Code, diffs, file names, file or folder paths, repository, branch, or project names
+- Code, diffs, file names, file or folder paths (other than the login shell path from `SHELL`, listed above), repository, branch, or project names
 - Commands you ran, logs, error messages, or stack traces
 - Account names, emails, API keys, tokens, or environment variable values, other than the login shell, the terminal application name, and the CI flag listed above
 - Screenshots, window titles, or typed text from computer use
