@@ -3,6 +3,15 @@ import { RpcRequestTimeout } from "./errors"
 export const HEARTBEAT_DEADLINE_MS = 10_000
 export const HEARTBEAT_MISSES_BEFORE_UNRESPONSIVE = 3
 
+/** Request ids of liveness probes, so a reader of the wire can tell a probe from a request that carries work. */
+export const HEARTBEAT_REQUEST_ID_PREFIX = "senpi-task_heartbeat_"
+let heartbeatRequests = 0
+
+export function heartbeatRequestId(): string {
+  heartbeatRequests += 1
+  return `${HEARTBEAT_REQUEST_ID_PREFIX}${heartbeatRequests}`
+}
+
 export function unresponsiveMessage(taskId: string): string {
   return `ended: the child stopped answering for 30 s (3 heartbeats). Action: inspect task_output ${taskId}; run it again with task`
 }

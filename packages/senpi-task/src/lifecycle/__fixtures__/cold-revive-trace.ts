@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import { createInterface } from "node:readline"
 
+import { HEARTBEAT_REQUEST_ID_PREFIX } from "../../runners/rpc/heartbeat"
+
 type Stage = { readonly stage: string; readonly elapsed_ms: number; readonly facts: Readonly<Record<string, unknown>> }
 
 function stageName(stage: Stage | undefined): string {
@@ -11,15 +13,18 @@ function stageName(stage: Stage | undefined): string {
   return `${stage.stage}${child}${typeof launch === "number" ? ` (launch ${launch})` : ""}`
 }
 
-function requestType(chunk: unknown): string | undefined {
+function requestLine(chunk: unknown): { readonly type?: string; readonly id?: string } {
   const line = typeof chunk === "string" ? chunk : Buffer.isBuffer(chunk) ? chunk.toString("utf8") : ""
   try {
-    const { type } = JSON.parse(line) as { type?: unknown }
-    return typeof type === "string" ? type : undefined
+    const { type, id } = JSON.parse(line) as { type?: unknown; id?: unknown }
+    return { ...(typeof type === "string" ? { type } : {}), ...(typeof id === "string" ? { id } : {}) }
   } catch {
-    return undefined // not one protocol line; the stage still marks the send
+    return {} // not one protocol line; the stage still marks the send
   }
 }
+
+// Liveness probes are tagged by the heartbeat module that sends them, not recognised by command name.
+const HEARTBEAT_PROBE = "heartbeat_probe"
 
 /** Observation only: never advances the clock, releases a barrier, or changes an RPC deadline. */
 export function createColdReviveTrace(collectModules = false) {
@@ -27,12 +32,12 @@ export function createColdReviveTrace(collectModules = false) {
   const stages: Stage[] = []
   const graphs: { launch: number; stage: string; elapsed_ms: number; modules: string[] }[] = []
   let launches = 0
-  const onStage = new Set<() => void>()
+  const onStage = new Set<(stage: Stage) => void>()
   const mark = (stage: string, facts: Readonly<Record<string, unknown>> = {}): void => {
     const entry = { stage, elapsed_ms: Math.round((performance.now() - started) * 1000) / 1000, facts }
     stages.push(entry)
     console.error(`COLD_REVIVE_STAGE ${JSON.stringify(entry)}`)
-    for (const listener of onStage) listener()
+    for (const listener of onStage) listener(entry)
   }
   const failure = (reason: string, cause?: unknown): Error => new Error(
     `${reason}; cold-revive stages=${JSON.stringify(stages)}`, { cause },
@@ -42,11 +47,13 @@ export function createColdReviveTrace(collectModules = false) {
     let timer: ReturnType<typeof setTimeout> | undefined
     let reject: (error: Error) => void = () => undefined
     const stalled = new Promise<never>((_, rejectStall) => { reject = rejectStall })
-    const arm = (): void => {
+    // A heartbeat probe is the product checking liveness, not progress: it never restarts the clock.
+    const arm = (stage?: Stage): void => {
+      if (stage?.stage === HEARTBEAT_PROBE) return
       clearTimeout(timer)
       const armedAt = performance.now()
       timer = setTimeout(() => {
-        const last = stages.at(-1)
+        const last = stages.findLast((entry) => entry.stage !== HEARTBEAT_PROBE)
         const stallMs = Math.round(performance.now() - armedAt)
         reject(failure(`Cold revival stalled: no stage for ${stallMs} ms (liveness window ${windowMs} ms) after "${stageName(last)}" at ${last?.elapsed_ms ?? 0} ms`))
       }, windowMs)
@@ -70,7 +77,9 @@ export function createColdReviveTrace(collectModules = false) {
     if (stdin) {
       const write = stdin.write.bind(stdin) as (chunk: unknown, ...rest: unknown[]) => boolean
       stdin.write = ((chunk: unknown, ...rest: unknown[]) => {
-        mark("request_sent", { launch, command: requestType(chunk) })
+        const { type, id } = requestLine(chunk)
+        if (id?.startsWith(HEARTBEAT_REQUEST_ID_PREFIX)) mark(HEARTBEAT_PROBE, { launch, command: type })
+        else mark("request_sent", { launch, command: type })
         return write(chunk, ...rest)
       }) as typeof stdin.write
     }
