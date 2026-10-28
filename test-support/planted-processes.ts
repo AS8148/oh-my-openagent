@@ -2,8 +2,12 @@ import type { ChildProcess } from "node:child_process"
 import { createServer, type Server, type Socket } from "node:net"
 
 export const EXIT_WAIT_MS = 10_000
-/** The teardown hook's own budget: the child-run stop and the planted-process stop each wait at most EXIT_WAIT_MS. */
-export const TEARDOWN_HOOK_TIMEOUT_MS = 2 * EXIT_WAIT_MS + 5_000
+
+/** Each bounded wait runTeardown performs, in order. The hook budget is derived from this list, so a new wait added
+ * here raises the budget, and a wait runTeardown performs without a row here fails the budget test. */
+export const TEARDOWN_WAITS_MS = { childRun: EXIT_WAIT_MS, stop: EXIT_WAIT_MS, close: EXIT_WAIT_MS } as const
+const TEARDOWN_MARGIN_MS = 5_000
+export const TEARDOWN_HOOK_TIMEOUT_MS = Object.values(TEARDOWN_WAITS_MS).reduce((sum, ms) => sum + ms, 0) + TEARDOWN_MARGIN_MS
 
 export interface StopOptions {
   readonly waitMs?: number
@@ -132,21 +136,32 @@ export class PlantedProcesses {
   }
 }
 
-/** The teardown order: stop, then close. A close failure never hides stop()'s error; it becomes its cause. */
-export async function stopThenClose(planted: PlantedProcesses, pids: readonly number[], options: StopOptions = {}): Promise<void> {
-  let stopFailure: { readonly error: unknown } | undefined
-  try {
-    await planted.stop(pids, options)
-  } catch (error) {
-    stopFailure = { error }
+export interface TeardownSteps {
+  readonly stopChildRun: (waitMs: number) => Promise<void>
+  readonly stop: (waitMs: number) => Promise<void>
+  readonly close: (waitMs: number) => Promise<void>
+}
+
+/**
+ * The teardown order: the child run, then the planted processes, then the server. Every step runs even after an
+ * earlier one fails; the first failure is thrown and a later one is attached as its cause, never hiding it.
+ */
+export async function runTeardown(steps: TeardownSteps): Promise<void> {
+  const failures: unknown[] = []
+  const attempt = async (step: (waitMs: number) => Promise<void>, waitMs: number): Promise<void> => {
+    try {
+      await step(waitMs)
+    } catch (error) {
+      failures.push(error)
+    }
   }
-  try {
-    await planted.close(options.waitMs)
-  } catch (closeError) {
-    if (stopFailure === undefined) throw closeError
-    if (stopFailure.error instanceof Error) stopFailure.error.cause = closeError
-  }
-  if (stopFailure !== undefined) throw stopFailure.error
+  await attempt(steps.stopChildRun, TEARDOWN_WAITS_MS.childRun)
+  await attempt(steps.stop, TEARDOWN_WAITS_MS.stop)
+  await attempt(steps.close, TEARDOWN_WAITS_MS.close)
+  const [first, ...later] = failures
+  if (first === undefined) return
+  if (first instanceof Error && later.length > 0) first.cause = later.length === 1 ? later[0] : later
+  throw first
 }
 
 export async function stopChildRun(child: ChildProcess | undefined, waitMs = EXIT_WAIT_MS): Promise<void> {

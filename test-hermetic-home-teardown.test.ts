@@ -3,7 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { PlantedProcesses, processAlive as alive, stopChildRun, stopThenClose, TEARDOWN_HOOK_TIMEOUT_MS } from "./test-support/planted-processes"
+import { PlantedProcesses, processAlive as alive, runTeardown, stopChildRun, TEARDOWN_HOOK_TIMEOUT_MS } from "./test-support/planted-processes"
 
 const PRELOAD = join(import.meta.dir, "test-support", "hermetic-home.preload.ts")
 
@@ -80,12 +80,15 @@ describe("hermetic-home teardown signals only the task hosts this run started (#
   }, 60_000)
 
   afterAll(async () => {
-    // A child run that outlived beforeAll's budget still holds dir/run as its cwd: stop it before anything else.
-    await stopChildRun(childRun)
-    // Read again here: if the child run failed after planting, beforeAll never got this far.
+    // Read here, not in beforeAll: if the child run failed after planting, beforeAll never got this far.
     const pids = dir === "" ? [] : readPlanted(join(dir, "planted.pids"))
     try {
-      if (registry !== undefined) await stopThenClose(registry, pids)
+      await runTeardown({
+        // A child run that outlived beforeAll's budget still holds dir/run as its cwd: it is stopped first.
+        stopChildRun: (waitMs) => stopChildRun(childRun, waitMs),
+        stop: async (waitMs) => { await registry?.stop(pids, { waitMs }) },
+        close: async (waitMs) => { await registry?.close(waitMs) },
+      })
     } finally {
       if (dir !== "") rmSync(dir, { recursive: true, force: true })
     }

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { connect, type Socket } from "node:net"
-import { PlantedProcesses, stopChildRun, stopThenClose } from "./planted-processes"
+import { PlantedProcesses, runTeardown, stopChildRun, TEARDOWN_HOOK_TIMEOUT_MS } from "./planted-processes"
 
 // The teardown of test-hermetic-home-teardown.test.ts must signal only its own planted processes, never a reused
 // pid, and must name every one it leaves behind (#11695). Each row drives one recorded pid through stop().
@@ -65,7 +65,7 @@ describe("PlantedProcesses.stop signals only planted processes it can prove are 
   }
 })
 
-describe("stopThenClose keeps the named stop error when a planted process survives SIGKILL (#11695)", () => {
+describe("runTeardown keeps the named stop error when a planted process survives SIGKILL (#11695)", () => {
   test("#given a connected process that ignores the kill #when the teardown stops then closes #then it settles within its bound with the stop error", async () => {
     const planted = await PlantedProcesses.listen()
     const socket = connect(planted.port, "127.0.0.1")
@@ -73,7 +73,11 @@ describe("stopThenClose keeps the named stop error when a planted process surviv
     socket.write(`${FAKE_PID}\n`)
     try {
       expect(await planted.announced([FAKE_PID], 5_000)).toBe(true)
-      const teardown = stopThenClose(planted, [FAKE_PID], { waitMs: 200, isAlive: () => true, kill: () => undefined })
+      const teardown = runTeardown({
+        stopChildRun: async () => undefined,
+        stop: (waitMs) => planted.stop([FAKE_PID], { waitMs: Math.min(waitMs, 200), isAlive: () => true, kill: () => undefined }),
+        close: (waitMs) => planted.close(waitMs),
+      })
       let breaker: ReturnType<typeof setTimeout> | undefined
       const hung = new Promise<"hung">((resolve) => {
         breaker = setTimeout(() => resolve("hung"), 5_000)
@@ -84,6 +88,16 @@ describe("stopThenClose keeps the named stop error when a planted process surviv
     } finally {
       socket.destroy()
     }
+  })
+})
+
+describe("runTeardown fits in the hook budget it is given (#11695)", () => {
+  test("#given every teardown step waits its full bound #when summed #then the hook timeout still exceeds them", async () => {
+    const requested: number[] = []
+    const record = async (waitMs: number) => { requested.push(waitMs) }
+    await runTeardown({ stopChildRun: record, stop: record, close: record })
+    expect(requested.length).toBeGreaterThan(0)
+    expect(requested.reduce((sum, ms) => sum + ms, 0)).toBeLessThan(TEARDOWN_HOOK_TIMEOUT_MS)
   })
 })
 
