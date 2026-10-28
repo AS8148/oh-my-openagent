@@ -1,9 +1,14 @@
 import type { DelegateTaskArgs, ToolContextWithMetadata } from "./types"
 import { SISYPHUS_JUNIOR_AGENT } from "./sisyphus-junior-agent"
+import { canonicalCategoryName } from "@oh-my-opencode/omo-config-core"
 import { log } from "../../shared/logger"
 
 export async function prepareDelegateTaskArgs(args: Record<string, unknown>, ctx: ToolContextWithMetadata): Promise<DelegateTaskArgs> {
-  const category = typeof args.category === "string" ? args.category : undefined
+  // Canonicalized once, at the spawn boundary: a retired builtin name (e.g. `deep` -> `deep-low`) is
+  // replaced here so the resolver, the session category registry, runtime fallback, task metadata and
+  // the logs all read the name that actually runs. A user category keeping a retired name was already
+  // renamed when the config was loaded, so only the canonical spelling can appear in user config.
+  const category = typeof args.category === "string" ? canonicalCategoryName(args.category) : undefined
   const prompt = typeof args.prompt === "string" ? args.prompt : ""
   const originalSubagentType = typeof args.subagent_type === "string" ? args.subagent_type : undefined
   let subagentType = originalSubagentType
