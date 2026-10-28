@@ -7,7 +7,7 @@ import type { KernelToolGrant } from "../../kernel-tools/resolve"
 import { buildStartSpec } from "./execute-spec"
 import type { ForegroundWaitOptions } from "./foreground-wait"
 import { waitForForegroundTask } from "./foreground-wait"
-import { partialDetails, recordDetails, startedDetails, type SingleSpawnParams } from "./result-details"
+import { partialDetails, recordDetails, startedDetails, withLiveSpawnFacts, type SingleSpawnParams } from "./result-details"
 import { appendMissingSkills } from "./skill-result"
 import { evaluateSpawnPolicy } from "./spawn-policy"
 import { backgroundConversionText, backgroundStartText, type StartLabels } from "./start-presentation"
@@ -154,7 +154,7 @@ export async function runSpawn(
     emittedAt = Date.now()
     onUpdate({
       content: [{ type: "text", text: progress.contentText() }],
-      details: partialDetails(started, params, executionMode, progress.details(), spec.skills),
+      details: partialDetails(withLiveSpawnFacts(started, deps.manager.get(started.task_id)), params, executionMode, progress.details(), spec.skills),
     })
   }
   const schedule = (): void => {
@@ -181,7 +181,7 @@ export async function runSpawn(
   if (started.status === "pending") {
     onUpdate?.({
       content: [{ type: "text", text: "" }],
-      details: partialDetails(started, params, executionMode, {
+      details: partialDetails(withLiveSpawnFacts(started, deps.manager.get(started.task_id)), params, executionMode, {
         progress: { activity: "queued · waiting for slot", startedAt },
         childId: started.task_id,
         turns: 0,
@@ -190,6 +190,8 @@ export async function runSpawn(
   } else {
     emit()
   }
+  // A launch still in flight at the start report lands its outcome on the record; publish it then.
+  if (started.starting === true) void deps.manager.whenLaunched?.(started.task_id).then(emit)
   const parent = deps.manager.findTaskByChildSession?.(ctx.sessionManager.getSessionId())
   const parked = parent === undefined ? undefined : deps.manager.concurrency?.park(parent.task_id, parent.notification.run_epoch)
   let promoted = false

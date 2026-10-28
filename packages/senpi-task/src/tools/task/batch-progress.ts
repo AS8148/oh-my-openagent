@@ -4,6 +4,7 @@ import type { TaskManager } from "../../manager"
 import { createChildProgress, type ChildProgressTarget, type ToolProgressDetails } from "../../progress"
 import { composeStatusLine, formatStatusTarget, taskIdentityLabel } from "../../status-line"
 import { startedDetail, type StartedResult } from "./batch-item-details"
+import { withLiveSpawnFacts } from "./result-details"
 import type { ResolvedSpawnItem, TaskSkillSummary, TaskToolDetails } from "./types"
 
 const EMIT_INTERVAL_MS = 250
@@ -47,11 +48,12 @@ export function trackBatchProgress(input: BatchProgressInput): BatchProgressTrac
   const emit = (): void => {
     if (closed) return
     emittedAt = Date.now()
+    const results = input.live.map((start) => withLiveSpawnFacts(start.result, input.manager.get(start.result.task_id)))
     onUpdate({
       content: [{ type: "text", text: rows.map((row, index) => `${index + 1}. ${rowText(row, settled)}`).join("\n") }],
       details: {
-        task_id: input.live[0]?.result.task_id ?? "",
-        ...(input.live[0]?.result.run_epoch === undefined ? {} : { run_epoch: input.live[0].result.run_epoch }),
+        task_id: results[0]?.task_id ?? "",
+        ...(results[0]?.run_epoch === undefined ? {} : { run_epoch: results[0].run_epoch }),
         status: "running",
         mode: "spawn",
         run_in_background: false,
@@ -59,10 +61,10 @@ export function trackBatchProgress(input: BatchProgressInput): BatchProgressTrac
           activity: rows.map((row) => rowText(row, settled)).join("\n"),
           startedAt,
         },
-        items: input.live.map((start) => {
+        items: input.live.map((start, index) => {
           const status = settled.get(start.result.task_id)
           return {
-            ...startedDetail(start.item, start.result, start.skills),
+            ...startedDetail(start.item, results[index] ?? start.result, start.skills),
             ...(status === undefined ? {} : { status }),
           }
         }),
@@ -93,6 +95,10 @@ export function trackBatchProgress(input: BatchProgressInput): BatchProgressTrac
     }),
   )
   emit()
+  // A launch still in flight at the start report lands its outcome on the record; publish it then.
+  for (const start of input.live) {
+    if (start.result.starting === true) void input.manager.whenLaunched?.(start.result.task_id).then(emit)
+  }
   return {
     settle(taskId, status) {
       settled.set(taskId, status)
