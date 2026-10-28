@@ -267,6 +267,9 @@ impl Backend for FakeBackend {
     }
 
     fn user_input_feed(&mut self) -> Option<std::sync::Arc<dyn senpi_desktop_core::user_input::UserInputFeed>> {
+        if !self.user_input_feed {
+            return None;
+        }
         Some(self.user_input())
     }
 }

@@ -277,3 +277,15 @@ fn a_scripted_press_during_typing_is_stamped_when_it_landed_not_when_the_next_re
     // Then: the record knows the press is 1 s old
     assert!(refused.message.contains("last input 1.0 s ago"), "{}", refused.message);
 }
+
+#[test]
+fn without_a_feed_a_failing_window_list_does_not_fail_the_input() {
+    // Given: a backend with no user-input watch, whose next window list fails
+    let mut harness = harness(&json!({"user_input_feed": false}));
+    harness.faults.fail_next(FakeMethod::Windows, ErrorCode::Internal);
+    // When: input into a window
+    let typed = harness.process(type_into("101"));
+    // Then: nothing is watched, so nothing changes: the input goes through
+    typed.expect("typed without listing windows");
+    assert!(harness.sink.ops().iter().any(|op| matches!(op, SinkOp::TypeText { .. })), "{:?}", harness.sink.ops());
+}

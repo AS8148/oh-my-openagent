@@ -34,6 +34,7 @@ pub struct FakeBackend {
     pub(crate) menus: BTreeMap<String, Vec<FakeMenuNode>>,
     pub(crate) sink: RecordingSink,
     pub(crate) user_input: std::sync::Arc<crate::user_input_impl::FakeUserInput>,
+    pub(crate) user_input_feed: bool,
     faults: Faults,
 }
 
@@ -55,6 +56,7 @@ impl FakeBackend {
         user_input.script(scenario.user_presses);
         Self {
             user_input,
+            user_input_feed: scenario.user_input_feed,
             ax_tree: AxTree::build(&scenario.ax),
             ax_owner_unknown: scenario.ax_owner_unknown,
             menus: scenario.menus,

@@ -41,6 +41,9 @@ pub struct FakeScenario {
     pub fail_next: Vec<ScriptedFailure>,
     /// User presses that land right before the fake's next press of a method.
     pub user_presses: Vec<crate::user_input_impl::ScriptedUserPress>,
+    /// Whether the backend exposes a user-input feed (false: a backend with no
+    /// watch, as win32, x11 and wayland, or macOS while the watch is off).
+    pub user_input_feed: bool,
     /// AX writes left unanswered at load time, in order, as if
     /// `Faults::cannot_complete_next` had been called.
     pub ax_cannot_complete: Vec<AxWrite>,
@@ -58,6 +61,7 @@ impl Default for FakeScenario {
             ax: BTreeMap::new(),
             menus: BTreeMap::new(),
             ax_owner_unknown: false,
+            user_input_feed: true,
             cursor: default_cursor(),
             capture_color: DEFAULT_CAPTURE_COLOR,
             delay_ms: DelayMs::default(),
@@ -187,6 +191,8 @@ struct RawScenario {
     fail_next: Vec<ScriptedFailure>,
     #[serde(default)]
     user_presses: Vec<crate::user_input_impl::ScriptedUserPress>,
+    #[serde(default = "crate::scenario_nodes::enabled_by_default")]
+    user_input_feed: bool,
     #[serde(default)]
     ax_cannot_complete: Vec<AxWrite>,
     #[serde(default)]
@@ -221,6 +227,7 @@ impl TryFrom<RawScenario> for FakeScenario {
             resize_window: raw.resize_window,
             fail_next: raw.fail_next,
             user_presses: raw.user_presses,
+            user_input_feed: raw.user_input_feed,
             ax_cannot_complete: raw.ax_cannot_complete,
             legacy_capture: raw.legacy_capture,
         })

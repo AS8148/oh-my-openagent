@@ -163,7 +163,10 @@ impl Worker {
         cancelled: &dyn Fn() -> bool,
     ) -> CoreResult<AdmitWatch> {
         let unwatched = || AdmitWatch { previous: WATCH.with_borrow_mut(Option::take), _press: watch(check_press) };
-        if mutation.action == MutatingAction::ClipboardWrite {
+        // Without a feed (no watch on this backend, or the macOS watch Off or
+        // NotStarted) nothing is watched and nothing changes: no window list,
+        // no wait. The clipboard is never admitted against an app.
+        if mutation.action == MutatingAction::ClipboardWrite || self.intervention.feed.is_none() {
             return Ok(unwatched());
         }
         // A failing window list is the request's own failure; a target the list
