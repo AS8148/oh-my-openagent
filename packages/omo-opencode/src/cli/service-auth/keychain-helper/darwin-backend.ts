@@ -35,10 +35,16 @@ export function registerHelperCandidates(paths: readonly string[]): void {
  * One resolution per process, shared by every bundled copy. An `unavailable` result (a transient pin or copy failure)
  * is not kept: the next resolve tries again, so a long-lived process does not stay on the helper-less path.
  */
-export const helperAccess = (): Promise<HelperAccess> => {
+export const helperAccess = (): Promise<HelperAccess> =>
+  sharedHelperAccess(() => {
+    const { entryCandidates } = keychainProcessState()
+    return resolveHelperAccess([...entryCandidates, ...bundleCandidates(import.meta.url), ...machineCandidates(homedir())])
+  })
+
+export function sharedHelperAccess(resolve: () => Promise<HelperAccess>): Promise<HelperAccess> {
   const state = keychainProcessState()
   if (state.helperAccess !== undefined) return state.helperAccess
-  const started = resolveHelperAccess([...state.entryCandidates, ...bundleCandidates(import.meta.url), ...machineCandidates(homedir())])
+  const started = resolve()
   state.helperAccess = started
   void started.then(access => {
     if (access.kind === "unavailable" && state.helperAccess === started) state.helperAccess = undefined

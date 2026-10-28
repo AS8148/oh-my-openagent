@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promptLockAt } from "./prompt-lock"
@@ -33,6 +33,13 @@ describe("machine-wide prompt lock (#11262 design 3.6 R4; rows 12, 13)", () => {
     const release = await promptLockAt(path)()
     expect(release).not.toBeNull()
     await release?.()
+  })
+
+  test("#given a record carrying this process's pid that this process does not hold #when taking the lock #then it is refused, never reaped", async () => {
+    const path = lockPath()
+    writeFileSync(path, `keychain-prompt leftover\n${process.pid}\n${Date.now()}\nanother-copy\n`)
+    expect(await promptLockAt(path)()).toBeNull()
+    expect(readFileSync(path, "utf8")).toContain("another-copy")
   })
 
   test("#given this process holds it #when released and taken again #then the second take succeeds", async () => {
