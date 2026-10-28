@@ -47,7 +47,7 @@ export function stepAt(steps: readonly Step[], name: string): { readonly index: 
 }
 
 export function bash(script: string, cwd: string, env: Record<string, string>): ReturnType<typeof spawnSync> {
-  return spawnSync("bash", ["-e", "-c", script], {
+  return spawnSync("bash", ["-e", "-c", `umask 077\n${script}`], {
     cwd, env: { ...process.env, ...env }, encoding: "utf8", timeout: SUBPROCESS_SPAWN_TIMEOUT_MS,
   })
 }

@@ -70,7 +70,7 @@ describe("keychain helper release workflows (#11262)", () => {
 
       const extracted = join(root, "extracted")
       mkdirSync(extracted)
-      expect(spawnSync("tar", ["-xzf", join(root, ".omo/keychain-helper/omo-keychain.tar.gz"), "-C", extracted]).status).toBe(0)
+      expect(spawnSync("tar", ["-xzpf", join(root, ".omo/keychain-helper/omo-keychain.tar.gz"), "-C", extracted]).status).toBe(0)
       expect(mode(join(extracted, "omo-keychain"))).toBe(0o755)
       expect(readFileSync(join(root, ".omo/release-binaries", KEYCHAIN_HELPER_RELEASE_ASSET), "utf8")).toBe(HELPER_BYTES)
     })

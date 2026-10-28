@@ -964,7 +964,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p packages/omo-native/bin/darwin
-          tar -xzf .omo/keychain-helper/omo-keychain.tar.gz -C packages/omo-native/bin/darwin
+          tar -xzpf .omo/keychain-helper/omo-keychain.tar.gz -C packages/omo-native/bin/darwin
           test -x packages/omo-native/bin/darwin/omo-keychain
 
       # Digest-verified, not requirement-verified: this job runs on ubuntu, and the requirement gate ran

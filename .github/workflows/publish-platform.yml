@@ -473,7 +473,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p packages/omo-native/bin/darwin
-          tar -xzf .omo/keychain-helper/omo-keychain.tar.gz -C packages/omo-native/bin/darwin
+          tar -xzpf .omo/keychain-helper/omo-keychain.tar.gz -C packages/omo-native/bin/darwin
           test -x packages/omo-native/bin/darwin/omo-keychain
           if [ "$PACKAGE_SKIP" != "true" ]; then
             mkdir -p "packages/oh-my-opencode-${PLATFORM}/bin"
