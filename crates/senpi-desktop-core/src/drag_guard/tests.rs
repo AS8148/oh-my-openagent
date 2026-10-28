@@ -107,6 +107,35 @@ fn a_drag_that_picks_up_an_item_goes_back_to_its_start_and_is_released_there() {
 }
 
 #[test]
+fn a_picked_up_drag_whose_move_back_fails_is_still_released() {
+    use Stroke::{Down, Dragged, Up};
+    let path = [(1.0, 1.0), (5.0, 5.0), (9.0, 9.0)];
+    let checks = Cell::new(0);
+    let picked_up = || {
+        checks.set(checks.get() + 1);
+        checks.get() > 1
+    };
+    let mut posted = Vec::new();
+    let result = stroke_path(&path, picked_up, |stroke, at| {
+        posted.push((stroke, at.0));
+        if stroke == Dragged && at.0 == 1.0 {
+            return Err(DesktopError::input_failed("move back failed"));
+        }
+        Ok(())
+    });
+    // The release goes out where the stroke was last known to be: the move
+    // back was attempted, so at the start.
+    assert_eq!(
+        result.expect_err("the failed post").message,
+        "move back failed"
+    );
+    assert_eq!(
+        posted,
+        [(Down, 1.0), (Dragged, 5.0), (Dragged, 1.0), (Up, 1.0)]
+    );
+}
+
+#[test]
 fn a_drag_whose_post_fails_is_still_released_where_it_got_to() {
     use Stroke::{Down, Dragged, Up};
     let path = [(1.0, 1.0), (5.0, 5.0), (9.0, 9.0)];

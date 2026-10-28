@@ -10,7 +10,9 @@ use std::time::Duration;
 use core_graphics::event::{CGEventFlags, CGEventType, CGMouseButton};
 use core_graphics::event_source::CGEventSource;
 use senpi_desktop_core::backend::{Modifiers, MouseButton, PointerEvent};
-use senpi_desktop_core::drag_guard::{drag_session_outcome, picked_up_refusal, stroke_path, Stroke};
+use senpi_desktop_core::drag_guard::{
+    drag_session_outcome, picked_up_refusal, stroke_path, Stroke,
+};
 use senpi_desktop_core::error::{CoreResult, DesktopError};
 use senpi_desktop_core::types::DesktopWindow;
 
@@ -18,6 +20,10 @@ use super::cgevent::{button_types, click_group_id, modifier_flags};
 use super::drag_pasteboard;
 use super::held::{ButtonRoute, Held, HeldButton};
 use super::post::{local_point, post_mouse, scroll, ScrollTarget};
+
+/// The gap between a drag's events, which the source gets to handle the
+/// previous one (and write the drag pasteboard) before the next is decided.
+const DRAG_STEP_GAP: Duration = Duration::from_millis(16);
 
 pub(super) fn pointer(
     source: &CGEventSource,
@@ -29,7 +35,8 @@ pub(super) fn pointer(
     overlay: &crate::overlay::Overlay,
 ) -> CoreResult<()> {
     let start = match &event {
-        PointerEvent::Click { x, y, .. } | PointerEvent::Move { x, y }
+        PointerEvent::Click { x, y, .. }
+        | PointerEvent::Move { x, y }
         | PointerEvent::Scroll { x, y, .. } => Some((*x, *y)),
         PointerEvent::Drag { path, .. } => path.first().copied(),
     };
@@ -43,7 +50,9 @@ pub(super) fn pointer(
             button,
             count,
             modifiers,
-        } => click(source, held, pid, wid, window, x, y, button, count, modifiers),
+        } => click(
+            source, held, pid, wid, window, x, y, button, count, modifiers,
+        ),
         PointerEvent::Move { x, y } => post_mouse(
             source,
             pid,
@@ -63,7 +72,9 @@ pub(super) fn pointer(
             path,
             button,
             modifiers,
-        } => drag(source, held, pid, wid, window, &path, button, modifiers, overlay),
+        } => drag(
+            source, held, pid, wid, window, &path, button, modifiers, overlay,
+        ),
         PointerEvent::Scroll { x, y, dx, dy } => scroll(
             ScrollTarget {
                 source,
@@ -230,11 +241,15 @@ fn drag(
     prologue(source, pid, wid, window, start_x, start_y, group)?;
     // A drag source clears and writes the drag pasteboard as it begins a
     // drag-and-drop session, which macOS then completes from the user's real
-    // pointer: the stroke stops as soon as the count moves.
+    // pointer: the stroke stops as soon as the count moves. The step gap comes
+    // before each read, so the source has handled the previous event first.
     let sessions = drag_pasteboard::change_count();
     let session = stroke_path(
         path,
-        || drag_pasteboard::change_count() != sessions,
+        || {
+            thread::sleep(DRAG_STEP_GAP);
+            drag_pasteboard::change_count() != sessions
+        },
         |stroke, (x, y)| {
             let event_type = match stroke {
                 Stroke::Down => {
@@ -242,7 +257,6 @@ fn drag(
                     down
                 }
                 Stroke::Dragged => {
-                    thread::sleep(Duration::from_millis(16));
                     overlay.target(x, y);
                     held.button_moved(&route, button, local_point(window, x, y));
                     dragged
@@ -252,7 +266,9 @@ fn drag(
                     up
                 }
             };
-            post_mouse(source, pid, wid, window, event_type, cg_button, x, y, 3, 1, number, group, flags)?;
+            post_mouse(
+                source, pid, wid, window, event_type, cg_button, x, y, 3, 1, number, group, flags,
+            )?;
             if stroke == Stroke::Up {
                 held.button_up(&route, button);
             }
@@ -262,5 +278,7 @@ fn drag(
     if session {
         return Err(picked_up_refusal(window));
     }
-    drag_session_outcome(window, sessions, drag_pasteboard::change_count, || crate::ax::round_trip(pid))
+    drag_session_outcome(window, sessions, drag_pasteboard::change_count, || {
+        crate::ax::round_trip(pid)
+    })
 }

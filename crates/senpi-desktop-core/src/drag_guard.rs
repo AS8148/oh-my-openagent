@@ -80,8 +80,10 @@ pub enum Stroke {
 /// drag picked up an item. The release is posted whatever happens before it,
 /// at the last point attempted, since a failed post may still have been
 /// delivered. Before each later point, `picked_up` says whether the source
-/// has begun a drag-and-drop session; the stroke then goes no further, but
-/// back to its start, and is released there ([`drag_session_outcome`]).
+/// has begun a drag-and-drop session (it is the caller's step gap too, so the
+/// source has handled the previous event before the pasteboard is read); the
+/// stroke then goes no further, but back to its start, and is released there
+/// ([`drag_session_outcome`]).
 ///
 /// # Errors
 /// The first failed post, after the release was attempted.
@@ -110,12 +112,14 @@ pub fn stroke_path(
         Ok(())
     };
     let result = stroke();
-    if session && last != start {
+    let back = if session && last != start {
         last = start;
-        post(Stroke::Dragged, last)?;
-    }
+        post(Stroke::Dragged, last)
+    } else {
+        Ok(())
+    };
     let release = post(Stroke::Up, last);
-    result.and(release).map(|()| session)
+    result.and(back).and(release).map(|()| session)
 }
 
 /// [`stroke_path`]'s error for a drag whose source began a drag-and-drop
