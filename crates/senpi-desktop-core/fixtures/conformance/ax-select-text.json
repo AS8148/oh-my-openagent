@@ -360,10 +360,10 @@
               "description": null,
               "enabled": true,
               "focused": true,
-              "x": 110,
-              "y": 160,
-              "width": 780,
-              "height": 500,
+              "x": 110.0,
+              "y": 160.0,
+              "width": 780.0,
+              "height": 500.0,
               "actions": [
                 "focus"
               ],
