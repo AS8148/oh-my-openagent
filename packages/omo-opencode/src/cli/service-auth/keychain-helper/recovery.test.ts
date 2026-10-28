@@ -47,19 +47,31 @@ describe("recovery table (#11262 design 3.4)", () => {
 describe("migration (#11262 design 3.3)", () => {
   test("#given a migratable value #when migrated #then stage, retire, promote, then delete .old, in that order", async () => {
     const { calls, helper } = scriptedHelper({})
-    expect(await migrate(A, "value", helper, async () => false)).toEqual({ kind: "migrated", oldDeleted: true })
+    expect(await migrate(A, "value", "own-identity", helper, async () => false)).toEqual({ kind: "migrated", oldDeleted: true })
     expect(calls).toEqual(["stage <A>", "retire <A>", "promote <A>", "remove .old"])
   })
 
   test("#given an existing .old #when retire is skipped #then staging is removed and nothing is renamed", async () => {
     const { calls, helper } = scriptedHelper({ "retire <A>": { ok: true, skipped: true } })
-    expect(await migrate(A, "value", helper, async () => false)).toEqual({ kind: "skipped", reason: "old-exists" })
+    expect(await migrate(A, "value", "own-identity", helper, async () => false)).toEqual({ kind: "skipped", reason: "old-exists" })
     expect(calls).toEqual(["stage <A>", "retire <A>", "remove .staging"])
+  })
+
+  test.each(["owned", "missing", "", "something-else"])("#given a value whose source is %p #when migrate is asked #then nothing is called", async source => {
+    const { calls, helper } = scriptedHelper({})
+    expect(await migrate(A, "value", source, helper, async () => true)).toEqual({ kind: "skipped", reason: "not-migratable" })
+    expect(calls).toEqual([])
+  })
+
+  test.each(["own-identity", "owned-unmarked", "approved"])("#given a %s value #when migrated #then the full sequence runs", async source => {
+    const { calls, helper } = scriptedHelper({})
+    expect((await migrate(A, "value", source, helper, async () => false)).kind).toBe("migrated")
+    expect(calls[0]).toBe("stage <A>")
   })
 
   test.each(["stage", "retire", "promote"] as const)("#given %s fails #when migrating #then it stops there and reports the step", async step => {
     const { calls, helper } = scriptedHelper({ [`${step} <A>`]: { error: "store" } })
-    expect(await migrate(A, "value", helper, async () => false)).toEqual({ kind: "failed", step })
+    expect(await migrate(A, "value", "own-identity", helper, async () => false)).toEqual({ kind: "failed", step })
     expect(calls.at(-1)).toBe(`${step} <A>`)
   })
 })
