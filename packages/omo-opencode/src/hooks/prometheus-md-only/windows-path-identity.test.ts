@@ -24,8 +24,8 @@ function attempt(compute: () => string | undefined): string | undefined {
 function shortSpelling(directory: string): string | undefined {
   if (!win32) return undefined
   const result = Bun.spawnSync(["cmd.exe", "/d", "/c", `for %I in ("${directory}") do @echo %~sI`], { stdout: "pipe", stderr: "pipe" })
-  // %~sI keeps the quotes the input carried.
-  const short = result.stdout.toString().trim().replace(/^"+|"+$/g, "")
+  // %~sI keeps the quotes the input carried, and the spawn escapes them as \" on the way in.
+  const short = result.stdout.toString().trim().replace(/^[\\"]+|[\\"]+$/g, "")
   return result.success && short.length > 0 && short.toLowerCase() !== directory.toLowerCase() ? short : undefined
 }
 
