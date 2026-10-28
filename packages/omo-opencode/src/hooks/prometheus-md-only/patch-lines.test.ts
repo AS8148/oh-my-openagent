@@ -1,27 +1,32 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import { clearSessionAgent, setSessionAgent } from "../../features/claude-code-session-state"
 import { createPrometheusMdOnlyHook } from "./hook"
 import { parsePatch } from "./fixtures/opencode-patch-parser"
+import { invokeBefore } from "./fixtures/invoke-before"
 
 const sessionID = "ses_prometheus_patch_lines"
 const source = ".omo/plans/source.md"
 const allowed = ".omo/plans/allowed.md"
 const outside = "src/outside.ts"
 const patch = (...lines: string[]) => ["*** Begin Patch", ...lines, "*** End Patch"].join("\n")
-const pluginInput: PluginInput = {
+const pluginInput = (root: string): PluginInput => ({
   client: createOpencodeClient({
     fetch: async () => { throw new Error("Unexpected SDK request in patch-lines test") },
   }),
-  project: { id: "patch-lines", worktree: "/tmp/test", time: { created: 0 } },
-  directory: "/tmp/test",
-  worktree: "/tmp/test",
+  project: { id: "patch-lines", worktree: root, time: { created: 0 } },
+  directory: root,
+  worktree: root,
   experimental_workspace: { register: () => {} },
   serverUrl: new URL("http://localhost"),
   $: Bun.$,
-}
-const hook = createPrometheusMdOnlyHook(pluginInput)
+})
+let root: string
+let hook: ReturnType<typeof createPrometheusMdOnlyHook>
 const input = { tool: "apply_patch", sessionID, callID: "patch-lines" }
 
 const operations = [
@@ -39,8 +44,16 @@ const terminators = [
   { name: "U+2029", value: "\u2029" },
 ]
 
-beforeEach(() => setSessionAgent(sessionID, "prometheus"))
-afterEach(() => clearSessionAgent(sessionID))
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "prometheus-patch-lines-"))
+  mkdirSync(join(root, ".omo"))
+  hook = createPrometheusMdOnlyHook(pluginInput(root))
+  setSessionAgent(sessionID, "prometheus")
+})
+afterEach(() => {
+  clearSessionAgent(sessionID)
+  rmSync(root, { recursive: true, force: true })
+})
 
 describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
   for (const context of ["***", "***important***", "*** Add File:src/example.ts"]) {
@@ -63,7 +76,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
           chunks: [{ old_lines: [context, "before"], new_lines: [context, "after"] }],
         })
 
-        await expect(hook["tool.execute.before"](input, { args: { patchText } })).resolves.toBeUndefined()
+        await expect(invokeBefore(hook, input, { args: { patchText } })).resolves.toBeUndefined()
       })
     }
   }
@@ -82,7 +95,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
           : { type: operation.name.toLowerCase(), path: outside },
       )
 
-      await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+      await expect(invokeBefore(hook, input, { args: { patchText } })).rejects.toThrow(
         "File operations restricted to .omo/*.md plan files only",
       )
     })
@@ -92,7 +105,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
     test(`Update context still rejects malformed directive ${JSON.stringify(header)}`, async () => {
       const patchText = patch(`*** Update File:${allowed}`, "@@", " ***", "-before", "+after", header)
 
-      await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+      await expect(invokeBefore(hook, input, { args: { patchText } })).rejects.toThrow(
         "File operations restricted to .omo/*.md plan files only",
       )
     })
@@ -117,7 +130,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
             expect(target).toMatchObject({ type: operation.name.toLowerCase(), path: outside })
           }
 
-          await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+          await expect(invokeBefore(hook, input, { args: { patchText } })).rejects.toThrow(
             "File operations restricted to .omo/*.md plan files only",
           )
         })
@@ -133,7 +146,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
             : { type: operation.name.toLowerCase(), path: allowed },
         )
 
-        await expect(hook["tool.execute.before"](input, { args: { patchText } })).resolves.toBeUndefined()
+        await expect(invokeBefore(hook, input, { args: { patchText } })).resolves.toBeUndefined()
       })
     }
   }
@@ -148,7 +161,7 @@ describe("apply_patch executor / guard differential (omo#11367 B1)", () => {
     test(`unclassifiable or empty header ${JSON.stringify(header)} fails closed in a mixed patch`, async () => {
       const patchText = patch(`*** Add File:${allowed}`, "+# Plan", header)
 
-      await expect(hook["tool.execute.before"](input, { args: { patchText } })).rejects.toThrow(
+      await expect(invokeBefore(hook, input, { args: { patchText } })).rejects.toThrow(
         "File operations restricted to .omo/*.md plan files only",
       )
     })
