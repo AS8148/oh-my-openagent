@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**Skill MCP OAuth validates authorization-server issuers and preserves existing logins.** Authorization responses are checked against validated issuer metadata before code redemption. Stored tokens and client registrations carry the full issuer, legacy records gain it at their next discovery, and a changed issuer triggers fresh registration and login instead of reusing another server's credentials. Dynamic registration declares native application type for loopback and custom-scheme redirects, and web application type for remote web redirects. ([#11236](https://github.com/code-yeongyu/oh-my-openagent/pull/11236))
-
 ## [5.1.49] - 2026-10-27
 
 **Error messages name a step that works today.** While terminal sign-in is closed, every "run omo login" hint (sign-in, `omo sync`, expired or unreadable sign-ins, memory sync) points at the OmO desktop app instead, and keeps naming `omo login` once accounts open. A refused service request says whether to sign in again, wait, try later or update omo, instead of always blaming sign-in. A missing plugin file, `omo thread` and `omo update` on a broken current install print the exact reinstall command, and `/computer` says why computer use is unavailable. ([#11390](https://github.com/code-yeongyu/oh-my-openagent/pull/11390), part of [#11379](https://github.com/code-yeongyu/oh-my-openagent/issues/11379)) ([#11417](https://github.com/code-yeongyu/oh-my-openagent/pull/11417))
