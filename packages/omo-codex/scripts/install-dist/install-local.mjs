@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:f56f78806b4edebc1bca65d145f0bc0b6051fcfe6386d25eab6b617cbc79be4b:33db3e7a39b376081a8197eaa18fd81fdd6a5f43e36c356fa9dc3bba6426d99a
+// omo-codex-install:4237bb48d5490a90887b295e34f5fbb1e1cdcdee6c7f13ac210d808017411845:f3eee52b55b87803822a1de0d67514d8e174abfb44fbe01454455cd39e77cf16
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -463,6 +463,37 @@ function getTelemetryDistinctId(machineIdPrefix, osProvider = getDefaultTelemetr
 }
 var init_machine_id = () => {};
 
+// packages/telemetry-core/src/terminal-program.ts
+function isKnownTerminalProgram(value) {
+  return KNOWN_TERMINAL_PROGRAMS.some((known) => known === value);
+}
+function toTelemetryTerminalProgram(termProgram) {
+  if (termProgram === undefined || termProgram === "")
+    return;
+  return isKnownTerminalProgram(termProgram) ? termProgram : "other";
+}
+var KNOWN_TERMINAL_PROGRAMS;
+var init_terminal_program = __esm(() => {
+  KNOWN_TERMINAL_PROGRAMS = [
+    "Apple_Terminal",
+    "iTerm.app",
+    "vscode",
+    "cursor",
+    "windsurf",
+    "zed",
+    "WezTerm",
+    "ghostty",
+    "tmux",
+    "Hyper",
+    "WarpTerminal",
+    "kitty",
+    "alacritty",
+    "Tabby",
+    "rio",
+    "mintty"
+  ];
+});
+
 // packages/telemetry-core/src/injected-client.ts
 function isTelemetryClientEnabled(input) {
   const env = input.env ?? process.env;
@@ -567,7 +598,7 @@ function getSharedProperties(input) {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     shell: process.env.SHELL,
     ci: Boolean(process.env.CI),
-    terminal: process.env.TERM_PROGRAM,
+    terminal: toTelemetryTerminalProgram(process.env.TERM_PROGRAM),
     ...input.product.additionalProperties
   };
 }
@@ -595,6 +626,7 @@ var NO_OP_CLIENT;
 var init_injected_client = __esm(() => {
   init_env();
   init_machine_id();
+  init_terminal_program();
   NO_OP_CLIENT = {
     enabled: false,
     trackActive: () => {
@@ -10318,6 +10350,15 @@ var init_telemetry = __esm(() => {
 import { readFile as readFile26 } from "node:fs/promises";
 import { dirname as dirname13, join as join42, resolve as resolve11 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
+
+// packages/telemetry-core/src/install-disclosure.ts
+var TELEMETRY_PRIVACY_POLICY_URL = "https://github.com/code-yeongyu/oh-my-openagent/blob/dev/docs/legal/privacy-policy.md";
+var TELEMETRY_INSTALL_DISCLOSURE_LINES = [
+  "OmO sends anonymous usage telemetry (no prompts, code, file paths, or account data) to improve the product.",
+  "The data goes to PostHog in the United States.",
+  "Turn it off with DO_NOT_TRACK=1 (or OMO_DISABLE_TELEMETRY=1).",
+  `Details: ${TELEMETRY_PRIVACY_POLICY_URL}`
+];
 
 // packages/utils/src/runtime/spawn.ts
 import {
@@ -24576,7 +24617,7 @@ async function runLazyCodexInstallLocalCli(input) {
         env: input.env,
         log: logWarning
       });
-      input.log(`Installed ${result.installed.length} plugin(s) from ${result.marketplaceName}.`);
+      logInstalled(input.log, result);
       return 0;
     }
     return runLazyCodexManualUpdate({ env: input.env, dryRun: parsed.dryRun, log: input.log, invokedPath: input.invokedPath });
@@ -24588,8 +24629,14 @@ async function runLazyCodexInstallLocalCli(input) {
     env: input.env,
     log: logWarning
   });
-  input.log(`Installed ${result.installed.length} plugin(s) from ${result.marketplaceName}.`);
+  logInstalled(input.log, result);
   return 0;
+}
+function logInstalled(log, result) {
+  log(`Installed ${result.installed.length} plugin(s) from ${result.marketplaceName}.`);
+  log("");
+  for (const line of TELEMETRY_INSTALL_DISCLOSURE_LINES)
+    log(line);
 }
 export {
   PASSTHROUGH_COMMANDS,
