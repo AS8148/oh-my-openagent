@@ -40,10 +40,17 @@ export class FrontmatterError extends Error {
 const CONTRACT_KEYS: ReadonlySet<string> = new Set(["description", "read_only", "kind", "aliases", "limit"])
 const EXTRA_KEY_RE = /^[A-Za-z0-9_-]+$/
 
+const MISSING_FRONTMATTER_MESSAGE = "frontmatter: target file is missing required frontmatter"
+
+/** True only for the "no frontmatter block at all" failure, so callers can offer the one repair that adds it. */
+export function isMissingFrontmatterError(error: unknown): boolean {
+  return error instanceof FrontmatterError && error.message === MISSING_FRONTMATTER_MESSAGE
+}
+
 export function parseMemoryFile(content: string): ParsedMemoryFile {
   const match = content.match(FRONTMATTER_RE)
   if (!match) {
-    throw new FrontmatterError("frontmatter: target file is missing required frontmatter")
+    throw new FrontmatterError(MISSING_FRONTMATTER_MESSAGE)
   }
 
   const frontmatterText = match[1] ?? ""
