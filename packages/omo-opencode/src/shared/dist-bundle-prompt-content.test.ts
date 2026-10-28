@@ -109,7 +109,9 @@ describe("dist bundle prompt content", () => {
       }
       const expected = [getPrometheusPrompt(CONFIGURED_MODEL)]
       reconcileNativeModelPrompts(expected, CONFIGURED_MODEL, snippets, rules)
-      expect(runtimeAgent.prompt).toBe(expected[0])
+      // The ref is a hash of the bundle process's own frame context, so only the content after it is comparable.
+      const afterFrameHeader = (prompt: string) => prompt.slice(prompt.indexOf("\n") + 1)
+      expect(afterFrameHeader(runtimeAgent.prompt)).toBe(afterFrameHeader(expected[0]))
       expect(snippets.grep).toBeDefined()
       expect(runtimeAgent.prompt).toContain("- grep: " + snippets.grep)
       const frameEnd = "\n</omo-model-core>\n\n"
