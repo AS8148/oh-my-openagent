@@ -236,6 +236,7 @@ export class RpcProtocolClient {
   }
 
   private write(payload: string): void {
+    if (this.isDetached) return
     try {
       this.child.stdin?.write(payload, (error) => {
         if (error) this.writeFailed(error)

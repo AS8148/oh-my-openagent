@@ -88,6 +88,13 @@ const scenarios: ReadonlyArray<readonly [string, Scenario]> = [
     await clock.advance(0)
     return late()
   }],
+  ["an extension UI request the child sends after dispose", async () => {
+    const child = stdioChild()
+    const late = await child.disposed()
+    child.fake.emit({ type: "extension_ui_request", id: "ui-late", method: "confirm" })
+    await clock.advance(0)
+    return late()
+  }],
   ["a stdio heartbeat stopped between its tick and the probe launch", async () => {
     const probes: string[] = []
     let stop = (): void => {}
