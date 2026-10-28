@@ -35,9 +35,13 @@ async function fixture() {
 }
 
 async function seedFrontmatterless(setup: Awaited<ReturnType<typeof fixture>>) {
+  await seedBody(setup, NOTE_BODY)
+}
+
+async function seedBody(setup: Awaited<ReturnType<typeof fixture>>, body: string) {
   const fullPath = join(setup.repo.dir, NOTE_PATH)
   await mkdir(dirname(fullPath), { recursive: true })
-  await writeFile(fullPath, NOTE_BODY, "utf8")
+  await writeFile(fullPath, body, "utf8")
   await setup.repo.commitWrite([NOTE_PATH], `seed ${NOTE_PATH}`, AUTHOR)
 }
 
@@ -130,5 +134,92 @@ describe("memory tool update_description on a frontmatter-less note", () => {
     // #then
     await expect(attempt).rejects.toThrow(/missing required frontmatter; add frontmatter with update_description/)
     expect(await setup.repo.head()).toBe(head)
+  })
+
+  it("#given a frontmatter-less note with a CRLF body #when update_description runs #then it adds the header and keeps the body byte-for-byte", async () => {
+    // #given
+    const setup = await fixture()
+    const crlfBody = "# Title\r\n\r\nSome body text.\r\n"
+    await seedBody(setup, crlfBody)
+
+    // #when
+    const result = await run(setup, {
+      command: "update_description",
+      reason: "add the missing description",
+      file_path: NOTE_PATH,
+      description: "Notes about references",
+    })
+
+    // #then
+    const written = await readFile(join(setup.repo.dir, NOTE_PATH), "utf8")
+    expect(written).toBe(`---\ndescription: Notes about references\n---\n${crlfBody}`)
+    expect(describeFrontmatterViolation(written)).toBeNull()
+    expect(parseMemoryFile(written).frontmatter.description).toBe("Notes about references")
+    expect(result.commit?.affectedPaths).toEqual([NOTE_PATH])
+  })
+
+  it("#given a frontmatter-less note whose body opens with an unclosed --- line #when update_description runs #then it adds the header and keeps the body byte-for-byte", async () => {
+    // #given
+    const setup = await fixture()
+    const unclosedBody = "---\nA rule with no closing line.\n"
+    await seedBody(setup, unclosedBody)
+
+    // #when
+    const result = await run(setup, {
+      command: "update_description",
+      reason: "add the missing description",
+      file_path: NOTE_PATH,
+      description: "Notes about references",
+    })
+
+    // #then
+    const written = await readFile(join(setup.repo.dir, NOTE_PATH), "utf8")
+    expect(written).toBe(`---\ndescription: Notes about references\n---\n${unclosedBody}`)
+    expect(parseMemoryFile(written).body).toBe(unclosedBody)
+    expect(result.commit?.affectedPaths).toEqual([NOTE_PATH])
+  })
+
+  it("#given a note with a blank line before a real header #when update_description runs #then it refuses instead of burying the header", async () => {
+    // #given
+    const setup = await fixture()
+    const buried = "\n---\ndescription: old\n---\nBody text.\n"
+    await seedBody(setup, buried)
+    const head = await setup.repo.head()
+
+    // #when
+    const attempt = run(setup, {
+      command: "update_description",
+      reason: "fix the description",
+      file_path: NOTE_PATH,
+      description: "Notes about references",
+    })
+
+    // #then
+    await expect(attempt).rejects.toThrow(/blank lines before a --- line/)
+    await expect(attempt).rejects.toThrow(/Remove the leading blank lines/)
+    expect(await setup.repo.head()).toBe(head)
+    expect(await readFile(join(setup.repo.dir, NOTE_PATH), "utf8")).toBe(buried)
+  })
+
+  it("#given a note whose body starts with a --- rule, then text, then --- #when update_description runs #then it refuses with a suggestion", async () => {
+    // #given
+    const setup = await fixture()
+    const ruleBody = "---\nSome body text.\n---\nRest of the note.\n"
+    await seedBody(setup, ruleBody)
+    const head = await setup.repo.head()
+
+    // #when
+    const attempt = run(setup, {
+      command: "update_description",
+      reason: "add the missing description",
+      file_path: NOTE_PATH,
+      description: "Notes about references",
+    })
+
+    // #then
+    await expect(attempt).rejects.toThrow(/frontmatter is missing 'description'/)
+    await expect(attempt).rejects.toThrow(/suggestion: if this note has no frontmatter/)
+    expect(await setup.repo.head()).toBe(head)
+    expect(await readFile(join(setup.repo.dir, NOTE_PATH), "utf8")).toBe(ruleBody)
   })
 })

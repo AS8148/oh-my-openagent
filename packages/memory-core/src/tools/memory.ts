@@ -2,7 +2,7 @@ import { existsSync } from "../fs/resilient"
 import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "../fs/resilient"
 import { dirname, join, relative } from "node:path"
 import type { GitCommitAuthor, GitMemoryRepo } from "../git"
-import { isMissingFrontmatterError, parseMemoryFile, renderMemoryFile, type ParsedMemoryFile } from "../memfs/frontmatter"
+import { isMissingDescriptionError, isMissingFrontmatterError, parseMemoryFile, renderMemoryFile, type ParsedMemoryFile } from "../memfs/frontmatter"
 import { describeDescriptionViolation } from "../memfs/frontmatter-validation"
 import { validateMemoryPath, validateRepositoryPath } from "../memfs/paths"
 import { MemoryPatchHunkError, MemoryPatchParseError, applyMemoryPatch } from "./patch-apply"
@@ -185,7 +185,28 @@ async function updateDescription(root: string, params: MemoryToolParams): Promis
   try {
     parsed = parseMemoryFile(content)
   } catch (error) {
-    if (!isMissingFrontmatterError(error)) throw error
+    if (isMissingFrontmatterError(error)) {
+      // A header buried under leading blank lines is not "no frontmatter": adding
+      // another header in front would strand the real one as body text, so refuse
+      // and say what to fix instead of treating the whole file as the body. A note
+      // that starts directly with a --- line (an unclosed rule, not a buried header)
+      // is still frontmatter-less, so it keeps the add-a-header path below.
+      const stripped = content.replace(/^\s+/, "")
+      if (stripped !== content && /^---(\r?\n|$)/.test(stripped)) {
+        throw toolError(
+          `${source} has blank lines before a --- line, so a frontmatter header below them is not at the top of the file and cannot be trusted. Remove the leading blank lines so the file starts with --- (or, if that --- line is body text, move it below a real frontmatter header), then retry update_description`,
+        )
+      }
+    } else if (isMissingDescriptionError(error)) {
+      // The opening --- block may be body text, not frontmatter: a note whose body
+      // starts with a --- rule, then text, then --- parses exactly this way.
+      throw toolError(
+        `${errorMessage(error)} (suggestion: if this note has no frontmatter, its opening --- line is body text, such as a horizontal rule, that was read as a header. Move that opening --- line below a real frontmatter header, then retry update_description)`,
+        error,
+      )
+    } else {
+      throw error
+    }
   }
   if (parsed === undefined) {
     // A frontmatter-less note has no read_only key to protect, and the whole file is the body:
