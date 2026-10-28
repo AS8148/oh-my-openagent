@@ -26,7 +26,10 @@ function createFixture(workerBody: string): { readonly repo: string; readonly ag
   return { repo, agentDir, logDir }
 }
 
-function subscribeToExactLines(path: string, expectedLines: readonly string[], timeoutMs = 3_000): readonly Promise<void>[] {
+// The wait itself is event-driven (the FIFO wakes it); this is only the ceiling that turns a
+// hang into a failure. 3s was tight enough to expire on a loaded host while the worker was
+// still alive, which made this case flake 1 run in 10 (#11640 review).
+function subscribeToExactLines(path: string, expectedLines: readonly string[], timeoutMs = 30_000): readonly Promise<void>[] {
   const stream = createReadStream(path, { encoding: "utf8" })
   const pending = expectedLines.map(() => Promise.withResolvers<void>())
   let buffer = ""
@@ -154,7 +157,7 @@ printf 'finished\\n' >&3
     try {
       const logFile = resolveLogFile(fixture.agentDir, env)
       const result = Bun.spawnSync({
-        cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe", timeout: 3_000,
+        cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe", timeout: 30_000,
         env,
       })
       expect(result.exitCode).toBe(0)
