@@ -15,6 +15,9 @@ const testDirectory = fileURLToPath(new URL(".", import.meta.url));
  */
 const budgetPatterns = [/\btimeout:\s*([\d_]+)\b/g, /\bsetTimeout\([\s\S]*?,\s*([\d_]+)\s*\)/g] as const;
 
+/** Every `runBunChild(...)` call grants its child the package ceiling, `MAX_IN_TEST_BUDGET_MS`. */
+const bunChildCall = /\brunBunChild\(/g;
+
 interface Budget {
 	readonly file: string;
 	readonly milliseconds: number;
@@ -26,6 +29,7 @@ function declaredBudgets(): readonly Budget[] {
 		// This guard's own patterns would otherwise match themselves.
 		if (file === "test-timeout-budget.test.ts") continue;
 		const source = readFileSync(join(testDirectory, file), "utf8");
+		for (const _call of source.matchAll(bunChildCall)) budgets.push({ file, milliseconds: MAX_IN_TEST_BUDGET_MS });
 		for (const pattern of budgetPatterns) {
 			for (const match of source.matchAll(pattern)) {
 				const raw = match[1];
