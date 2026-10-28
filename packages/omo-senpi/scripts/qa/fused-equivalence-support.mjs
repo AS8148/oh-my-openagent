@@ -14,7 +14,7 @@ import { basename, dirname, join } from "node:path";
 const STATUS_EVENT = /^omo\.[a-z-]+\.updated$/;
 const STATUS_UI_METHODS = new Set(["setStatus", "setWidget"]);
 
-export function statusChannelOf(event) {
+function statusChannelOf(event) {
 	if (event?.type === "extension_event" && STATUS_EVENT.test(event.name ?? "")) return event.name;
 	if (event?.type === "extension_ui_request" && STATUS_UI_METHODS.has(event.method))
 		return `${event.method}:${event.statusKey ?? event.widgetKey ?? ""}`;
@@ -57,7 +57,7 @@ export function statusCounts(observations) {
  * a checkout-dependent path records a checkout-dependent golden. The driver therefore runs the engine from a copy at
  * this fixed path, whatever checkout or machine runs the case.
  */
-export const ENGINE_PIN_ROOT = "/tmp/omo-eq-engine";
+const ENGINE_PIN_ROOT = "/tmp/omo-eq-engine";
 
 const isAlive = (pid) => {
 	try {
@@ -134,7 +134,7 @@ export function pinEnginePackage(packageDir, { root = ENGINE_PIN_ROOT, mirrorSib
 }
 
 /** This user's processes with their command line and environment (`ps e`), as `{ pid, command }`. */
-export function listProcesses() {
+function listProcesses() {
 	const out = spawnSync("ps", ["axeww", "-o", "pid=,command="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 	if (out.error) throw out.error;
 	if (out.status !== 0) throw new Error(`ps exited ${out.status}: ${out.stderr}`);
