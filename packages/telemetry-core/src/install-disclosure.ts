@@ -1,4 +1,4 @@
-export const TELEMETRY_PRIVACY_POLICY_URL =
+const TELEMETRY_PRIVACY_POLICY_URL =
   "https://github.com/code-yeongyu/oh-my-openagent/blob/dev/docs/legal/privacy-policy.md"
 
 // Printed once when an installer finishes. install.sh, install.ps1 and omo setup

@@ -11,7 +11,6 @@ const PRODUCT = {
   defaultApiKey: DEFAULT_POSTHOG_API_KEY,
   defaultHost: DEFAULT_POSTHOG_HOST,
   eventName: "omo_codex_daily_active",
-  machineIdPrefix: "omo-codex:",
   packageName: "@oh-my-opencode/omo-codex",
   packageVersion: "4.9.2",
   platform: "omo-codex",

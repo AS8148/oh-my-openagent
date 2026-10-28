@@ -29,7 +29,7 @@ const TYPED_REFUSAL: ReadonlySet<string> = new Set(["release_session", "extensio
 
 type AttachRefusal = { readonly code: string; readonly errorData?: unknown; readonly frame: RpcObject }
 
-export class SessionAttachmentError extends Error {
+class SessionAttachmentError extends Error {
   constructor(readonly code: "unknown_session" | "session_identity_mismatch", sessionId: unknown) {
     super(`${code}:${String(sessionId)}`)
   }

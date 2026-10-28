@@ -108,7 +108,7 @@ function readsAsRandom(name: string): boolean {
 }
 
 /** `a.md` lists as `a`; any other file keeps its exact name in quotes. Secret-like text is masked first. */
-export function displayName(name: string): string {
+function displayName(name: string): string {
   const safe = redactSecretLikeMaterial(name)
   return safe.endsWith(MARKDOWN) ? safe.slice(0, -MARKDOWN.length) : `"${safe}"`
 }

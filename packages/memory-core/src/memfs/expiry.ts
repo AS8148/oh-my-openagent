@@ -25,7 +25,7 @@ export function isMemoryExpired(expiresAtMs: number | undefined, asOfMs: number)
   return expiresAtMs !== undefined && asOfMs >= expiresAtMs
 }
 
-export function parseExpiryInstant(value: string): number | undefined {
+function parseExpiryInstant(value: string): number | undefined {
   const match = EXPIRY_RE.exec(value)
   const date = match?.[1]
   if (date === undefined) return undefined
