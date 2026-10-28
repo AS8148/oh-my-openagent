@@ -3865,6 +3865,7 @@
         "test/fixtures/senpi-hooks-state-consumer.mjs",
         "test/packed-consumer.mjs",
         "test/teardown.test-support.ts",
+        "test/trust-certificate-fixtures.ts",
       ],
       "ignoreFiles": [
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
