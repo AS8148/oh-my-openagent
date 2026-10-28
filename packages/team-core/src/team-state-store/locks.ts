@@ -59,7 +59,7 @@ export async function withLock<T>(
   const record = await acquireLock(lockPath, ownerTag, staleAfterMs)
 
   try {
-    return await fn(createLockLease(lockPath, record, ownerTag))
+    return await fn(createLockLease(lockPath, record, ownerTag, { staleAfterMs }))
   } finally {
     // Once released, the record counts as stale for this process, so a failed unlink leaves a
     // leftover that the next acquire reclaims instead of a lock nobody can ever take again.
