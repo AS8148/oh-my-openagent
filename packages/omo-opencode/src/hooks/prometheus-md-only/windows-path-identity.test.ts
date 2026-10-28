@@ -24,7 +24,8 @@ function attempt(compute: () => string | undefined): string | undefined {
 function shortSpelling(directory: string): string | undefined {
   if (!win32) return undefined
   const result = Bun.spawnSync(["cmd.exe", "/d", "/c", `for %I in ("${directory}") do @echo %~sI`], { stdout: "pipe", stderr: "pipe" })
-  const short = result.stdout.toString().trim()
+  // %~sI keeps the quotes the input carried.
+  const short = result.stdout.toString().trim().replace(/^"+|"+$/g, "")
   return result.success && short.length > 0 && short.toLowerCase() !== directory.toLowerCase() ? short : undefined
 }
 
@@ -119,7 +120,7 @@ describe("Windows path identity: every alias form resolves to the executor's phy
   }
 
   function swapDriveCase(path: string): string {
-    return path.replace(/^([A-Za-z]):/, (_, letter: string) => letter === letter.toUpperCase() ? letter.toLowerCase() : letter.toUpperCase())
+    return path.replace(/^([A-Za-z]):/, (_, letter: string) => `${letter === letter.toUpperCase() ? letter.toLowerCase() : letter.toUpperCase()}:`)
   }
 
   const forms: AliasForm[] = [
