@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { chmodSync, closeSync, constants, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync } from "node:fs"
+import { chmodSync, closeSync, constants, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
-// readdirSync is used by the no-temp-directory-leak case below.
-import { readdirSync } from "node:fs"
 
 const AGENT_DIR = join(import.meta.dir, "agent")
 // The hook reports the PHYSICAL fallback directory, which is /private/tmp on macOS.
@@ -303,17 +301,26 @@ printf 'finished\\n' >&3
     const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
     const insideProject = join(fixture.repo, "tmp")
     mkdirSync(insideProject, { recursive: true })
-    const countTemp = (): number => readdirSync(realpathSync("/tmp")).length
+    // Observe what the HOOK does, never the shared /tmp: counting entries there is decided by
+    // whatever else runs on the machine. Wrapping the two directory-creating tools records every
+    // call the hook makes, so the assertion is about the hook alone and cannot flake.
+    const binDir = join(fixture.logDir, "bin")
+    const callLog = join(fixture.logDir, "creation-calls.log")
+    mkdirSync(binDir, { recursive: true })
+    for (const [tool, real] of [["mktemp", "/usr/bin/mktemp"], ["mkdir", "/bin/mkdir"]]) {
+      writeFileSync(join(binDir, tool as string), `#!/usr/bin/env bash\nprintf '%s %s\\n' ${tool} "$*" >> ${JSON.stringify(callLog)}\nexec ${real} "$@"\n`)
+      chmodSync(join(binDir, tool as string), 0o755)
+    }
     try {
-      const before = countTemp()
       for (let run = 0; run < 5; run++) {
         const result = Bun.spawnSync({
           cmd: ["bash", "./cleanup-hook.sh", "--print-log-file"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
-          env: { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: insideProject } as HookEnv,
+          env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}`, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: insideProject } as HookEnv,
         })
         expect(result.exitCode).toBe(0)
       }
-      expect(countTemp()).toBe(before)
+      const creationCalls = existsSync(callLog) ? readFileSync(callLog, "utf8").split("\n").filter((line) => line.length > 0) : []
+      expect(creationCalls, `the hook must create no directories, it called: ${creationCalls.join(" | ")}`).toEqual([])
       expect(readdirSync(fixture.repo).filter((entry) => entry.startsWith("tmp."))).toEqual([])
       expect(readdirSync(insideProject)).toEqual([])
     } finally {
