@@ -7,6 +7,7 @@ mod ax_impl;
 mod ax_tree;
 mod clock;
 mod desktop_impl;
+mod drag_guard_impl;
 mod fake;
 mod faults;
 mod frames_impl;
