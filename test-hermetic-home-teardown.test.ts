@@ -18,20 +18,25 @@ function alive(pid: number): boolean {
 // The planted processes name the child run's hermetic home on their command line, exactly as a task host's
 // socket argument would, but no task host registration in that home's agent dir names them: they stand for
 // a process of another run, or a test's own child, that the teardown must never signal (#11630).
+// The planted processes are started with the runtime itself (no shell, so the same fixture runs on Windows),
+// detached so they outlive the child run. Neither is a registered task host, so on every platform the teardown
+// must leave them alone; on Windows the teardown is report-only even for a registered host (test-hermetic-home.ts,
+// stopRunTaskHosts), and the reporting path is covered by the stopRunTaskHosts tests in test-hermetic-home.test.ts.
 const PLANTING_TEST = `import { test } from "bun:test"
-import { spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { writeFileSync } from "node:fs"
 
 function plant(script: string, name: string): number {
-  // The inner shell is backgrounded by an outer one that exits at once, so it is not this process's child.
-  const out = spawnSync("/bin/sh", ["-c", '/bin/sh -c "$1" "$2" </dev/null >/dev/null 2>&1 & echo $!', "plant", script, \`\${process.env.HOME}/\${name}\`], { encoding: "utf8" })
-  return Number.parseInt(out.stdout.trim(), 10)
+  const child = spawn(process.execPath, ["-e", script, \`\${process.env.HOME}/\${name}\`], { detached: true, stdio: "ignore" })
+  child.unref()
+  if (child.pid === undefined) throw new Error("planted process did not start")
+  return child.pid
 }
 
 test("plants processes that name this run's hermetic home", () => {
   const pids = [
-    plant("while :; do sleep 1; done", "foreign-process"),
-    plant("trap '' TERM; while :; do sleep 1; done", "term-ignoring-process"),
+    plant("setInterval(() => {}, 1000)", "foreign-process"),
+    plant("process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)", "term-ignoring-process"),
   ]
   writeFileSync(process.env.PLANTED_PIDS_FILE as string, JSON.stringify(pids))
 })

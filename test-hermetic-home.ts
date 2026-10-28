@@ -117,8 +117,8 @@ export type SocketState = "listening" | "gone" | "unknown"
 // Bun's hook budget is 5 s for every file after the first unless --timeout is passed. The engine gets its own
 // short wait (it was preloaded at setup, so it is normally ready), and only then does the stop deadline start,
 // so a slow import is never reported as a host that is "still stopping". Both together stay inside the budget.
-export const TASK_HOST_ENGINE_WAIT_MS = 1_000
-export const TASK_HOST_STOP_DEADLINE_MS = 3_000
+const TASK_HOST_ENGINE_WAIT_MS = 1_000
+const TASK_HOST_STOP_DEADLINE_MS = 3_000
 const ENGINE_CALL_TIMEOUT_MS = 1_000
 
 /**
@@ -274,7 +274,8 @@ async function loadTaskHostEngine(): Promise<TaskHostEngine> {
 /** Starts the engine import at setup; a failure surfaces only if teardown finds hosts to stop. */
 function preloadTaskHostEngine(): Promise<TaskHostEngine> {
   const engine = loadTaskHostEngine()
-  engine.catch(() => {})
+  // Marks the rejection handled here only; teardown awaits this same promise and reports the error then.
+  engine.catch(() => undefined)
   return engine
 }
 
