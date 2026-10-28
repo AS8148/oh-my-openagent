@@ -23,9 +23,12 @@ function attempt(compute: () => string | undefined): string | undefined {
 
 function shortSpelling(directory: string): string | undefined {
   if (!win32) return undefined
-  const result = Bun.spawnSync(["cmd.exe", "/d", "/c", `for %I in ("${directory}") do @echo %~sI`], { stdout: "pipe", stderr: "pipe" })
-  // %~sI keeps the quotes the input carried, and the spawn escapes them as \" on the way in.
-  const short = result.stdout.toString().trim().replace(/^[\\"]+|[\\"]+$/g, "")
+  // cmd's %~sI fully qualifies a \"-escaped argument against the cwd drive, so ask the FileSystemObject instead.
+  const result = Bun.spawnSync([
+    "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+    `(New-Object -ComObject Scripting.FileSystemObject).GetFolder('${directory.replace(/'/g, "''")}').ShortPath`,
+  ], { stdout: "pipe", stderr: "pipe" })
+  const short = result.stdout.toString().trim()
   return result.success && short.length > 0 && short.toLowerCase() !== directory.toLowerCase() ? short : undefined
 }
 
