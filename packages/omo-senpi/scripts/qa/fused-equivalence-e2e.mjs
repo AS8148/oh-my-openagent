@@ -26,6 +26,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(scriptDir, "..", "..");
@@ -92,7 +93,7 @@ function parseArgs(argv) {
 }
 
 function bunVersion() {
-	const out = spawnSync("bun", ["--version"], { encoding: "utf8" });
+	const out = spawnSync("bun", ["--version"], { encoding: "utf8", env: withTelemetryOptOut(process.env) });
 	if (out.status !== 0) throw new Error("the CLI child runs on Bun: no `bun` on PATH");
 	return out.stdout.trim();
 }
@@ -137,7 +138,7 @@ function resolveEngine(engine, workDir) {
 /** The executable dirs a case's CLI child may use (see the header): never the host's full PATH. */
 function childPath(lspDir) {
 	const which = (name) => {
-		const out = spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" });
+		const out = spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8", env: withTelemetryOptOut(process.env) });
 		return out.status === 0 ? dirname(out.stdout.trim()) : undefined;
 	};
 	const dirs = [lspDir && resolve(lspDir), which("bun"), dirname(process.execPath), which("git"), "/usr/bin", "/bin"];
