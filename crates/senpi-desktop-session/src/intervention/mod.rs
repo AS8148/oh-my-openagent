@@ -83,12 +83,17 @@ fn drain(inputs: &UserInputs, feed: Option<&Arc<dyn UserInputFeed>>, supervisor:
     let Some(feed) = feed else { return };
     let presses = feed.take();
     let now_ms = supervisor.now_ms();
+    let mut oldest_kept_ms = now_ms;
     for press in presses.presses {
         let age = u64::try_from(press.at.elapsed().as_millis()).unwrap_or(u64::MAX);
-        inputs.record(press.pid, now_ms.saturating_sub(age));
+        let at_ms = now_ms.saturating_sub(age);
+        oldest_kept_ms = oldest_kept_ms.min(at_ms);
+        inputs.record(press.pid, at_ms);
     }
+    // The bounded watch lets its OLDEST presses go, so every dropped press
+    // preceded the oldest one kept: stamp them there, never at the drain.
     if presses.dropped > 0 {
-        inputs.record_unknown(now_ms);
+        inputs.record_unknown(oldest_kept_ms);
     }
 }
 

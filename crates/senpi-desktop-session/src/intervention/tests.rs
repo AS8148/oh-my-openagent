@@ -11,7 +11,7 @@ use senpi_desktop_core::protocol_params::{AxSnapshotParams, CaptureParams, TypeT
 use senpi_desktop_core::user_input::UserPressKind;
 use serde_json::json;
 
-use super::{check_press, Baseline, UserInputs, QUIET_MS};
+use super::{check_press, drain, Baseline, UserInputs, QUIET_MS};
 use crate::request::Op;
 use crate::test_support::harness;
 
@@ -288,4 +288,53 @@ fn without_a_feed_a_failing_window_list_does_not_fail_the_input() {
     // Then: nothing is watched, so nothing changes: the input goes through
     typed.expect("typed without listing windows");
     assert!(harness.sink.ops().iter().any(|op| matches!(op, SinkOp::TypeText { .. })), "{:?}", harness.sink.ops());
+}
+
+/// A feed whose bounded log let the oldest presses go: `dropped` presses
+/// preceded the one press it kept, which the watch saw `age` ago.
+struct OverflowedFeed {
+    kept_age: std::time::Duration,
+    dropped: u64,
+}
+
+impl senpi_desktop_core::user_input::UserInputFeed for OverflowedFeed {
+    fn take(&self) -> senpi_desktop_core::user_input::UserPresses {
+        let press = senpi_desktop_core::user_input::UserPress {
+            pid: 9999,
+            kind: UserPressKind::Key,
+            at: std::time::Instant::now() - self.kept_age,
+        };
+        senpi_desktop_core::user_input::UserPresses { presses: vec![press], dropped: self.dropped }
+    }
+
+    fn process_started(&self, _pid: u32) -> Option<u64> {
+        None
+    }
+}
+
+#[test]
+fn presses_the_bounded_watch_let_go_are_no_newer_than_the_oldest_press_it_kept() {
+    // Given: the session watches Notes (4242); the user typed hundreds of keys into an
+    // unwatched app, so the watch kept only the last press, seen 60 s ago, and dropped the rest
+    let harness = harness(&json!({}));
+    let supervisor = Arc::clone(&harness.worker.safety.supervisor);
+    harness.pass_ms(120_000);
+    let inputs = UserInputs::new(Box::new(|_| Some(1)));
+    inputs.touch(4242, Some(1), || "Notes".to_owned());
+    let feed: Arc<dyn senpi_desktop_core::user_input::UserInputFeed> =
+        Arc::new(OverflowedFeed { kept_age: std::time::Duration::from_secs(60), dropped: 300 });
+    // When: the session drains the watch
+    drain(&inputs, Some(&feed), &supervisor);
+    // Then: Notes counts as used no later than 60 s ago, so input into it is refused without any
+    // wait and the message names that age, not "just now"
+    let waited = Cell::new(false);
+    let refused = inputs
+        .admit(4242, None, || supervisor.now_ms(), |_| {
+            waited.set(true);
+            Ok(())
+        })
+        .expect_err("refused until a read");
+    assert_eq!(refused.code, ErrorCode::UserIntervened);
+    assert!(!waited.get(), "no wait: the user paused long ago");
+    assert!(refused.message.contains("60.0 s ago"), "{}", refused.message);
 }
