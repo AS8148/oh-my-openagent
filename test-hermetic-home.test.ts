@@ -1,9 +1,10 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { spawn } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { isAbsolute, join, relative } from "node:path"
-import { runCheckThenTeardown, shardsCreatedBy, stopRunTaskHosts, type TaskHostEngine } from "./test-hermetic-home"
+import { probeSocket, runCheckThenTeardown, shardsCreatedBy, type SocketState, stopRunTaskHosts, type TaskHostEngine } from "./test-hermetic-home"
 
 describe("hermetic memory home (#9469)", () => {
   test("the preload pins memory inside the temporary home", () => {
@@ -133,7 +134,6 @@ describe("stopRunTaskHosts (#11630)", () => {
     return {
       listHostEndpoints: async () => [{ socket: "/run/a.sock", endpoint_kind: "rpc_host" }],
       stopHost: async () => ({ action: "refuse", reason: "unknown_owner" }),
-      probeHost: async () => undefined,
       ...overrides,
     }
   }
@@ -161,8 +161,10 @@ describe("stopRunTaskHosts (#11630)", () => {
     expect(stops).toEqual([expect.objectContaining({ socket: "/run/a.sock", force: true })])
   })
 
-  test("#given a host that was already gone #when the stop is refused and nothing answers #then teardown resolves", async () => {
-    await stopRunTaskHosts(agentDirWithHosts(), { loadEngine: async () => engine({}) })
+  const socketIs = (state: SocketState) => async () => state
+
+  test("#given a host that was already gone #when the stop is refused and nothing is at its socket #then teardown resolves", async () => {
+    await stopRunTaskHosts(agentDirWithHosts(), { loadEngine: async () => engine({}), probeSocket: socketIs("gone") })
   })
 
   test("#given a terminal endpoint #when torn down #then only rpc hosts are stopped", async () => {
@@ -190,12 +192,40 @@ describe("stopRunTaskHosts (#11630)", () => {
     expect(String(error)).toContain(`pid ${pid}`)
   })
 
-  test("#given a host the engine cannot prove #when it still answers #then a named error names the refusal", async () => {
+  test("#given a host the engine cannot prove #when it still listens #then a named error names the refusal", async () => {
     const error = await stopRunTaskHosts(agentDirWithHosts(), {
-      loadEngine: async () => engine({ probeHost: async () => ({ answered: true }) }),
+      loadEngine: async () => engine({}),
+      probeSocket: socketIs("listening"),
     }).catch((caught: unknown) => caught)
     expect(String(error)).toContain("/run/a.sock")
     expect(String(error)).toContain("unknown_owner")
+    expect(String(error)).toContain("still listens")
+  })
+
+  test("#given a host the engine cannot prove #when its socket gives no answer in time #then it is reported, never taken for gone", async () => {
+    const error = await stopRunTaskHosts(agentDirWithHosts(), {
+      loadEngine: async () => engine({}),
+      probeSocket: socketIs("unknown"),
+    }).catch((caught: unknown) => caught)
+    expect(String(error)).toContain("#11630")
+    expect(String(error)).toContain("/run/a.sock")
+    expect(String(error)).toContain("may still be running")
+  })
+
+  test("#given an engine that loads slowly #when it is ready #then the stop deadline starts only then", async () => {
+    const stopped: string[] = []
+    await stopRunTaskHosts(agentDirWithHosts(), {
+      deadlineMs: 200,
+      engineWaitMs: 5_000,
+      loadEngine: () => new Promise((resolve) => setTimeout(() => resolve(engine({
+        stopHost: async (options) => {
+          stopped.push(options.socket)
+          return { action: "refuse", reason: "unknown_owner" }
+        },
+      })), 400)),
+      probeSocket: socketIs("gone"),
+    })
+    expect(stopped).toEqual(["/run/a.sock"])
   })
 
   test("#given a stop that never settles #when the deadline passes #then teardown rejects within it, naming the host", async () => {
@@ -209,11 +239,55 @@ describe("stopRunTaskHosts (#11630)", () => {
     expect(String(error)).toContain("still stopping")
   })
 
-  test("#given an engine that never loads #when the deadline passes #then teardown rejects within it", async () => {
+  test("#given an engine that never loads #when its wait passes #then teardown rejects within it, by name", async () => {
+    const started = Date.now()
     const error = await stopRunTaskHosts(agentDirWithHosts(), {
-      deadlineMs: 200,
+      engineWaitMs: 200,
       loadEngine: () => new Promise(() => {}),
     }).catch((caught: unknown) => caught)
+    expect(Date.now() - started).toBeLessThan(2_000)
     expect(String(error)).toContain("#11630")
+    expect(String(error)).toContain("did not load within 200ms")
+  })
+})
+
+describe("probeSocket (#11630)", () => {
+  const dirs: string[] = []
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true })
+  })
+
+  function socketPath(): string {
+    const dir = mkdtempSync(join(tmpdir(), "omo-sock-"))
+    dirs.push(dir)
+    return join(dir, "h.sock")
+  }
+
+  test.skipIf(process.platform === "win32")("#given a listener #when probed #then it is listening", async () => {
+    const path = socketPath()
+    const server = createServer((connection) => connection.destroy())
+    await new Promise<void>((resolve) => server.listen(path, resolve))
+    try {
+      expect(await probeSocket(path, 1_000)).toBe("listening")
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  test.skipIf(process.platform === "win32")("#given no socket file #when probed #then it is gone", async () => {
+    expect(await probeSocket(socketPath(), 1_000)).toBe("gone")
+  })
+
+  test.skipIf(process.platform === "win32")("#given a socket file its listener left behind #when probed #then it is gone", async () => {
+    const path = socketPath()
+    // A host killed outright leaves its socket file with nothing listening on it.
+    const holder = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(${JSON.stringify(path)}, () => console.log("ready"))`], {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()))
+    const exited = new Promise((resolve) => holder.once("exit", resolve))
+    holder.kill("SIGKILL")
+    await exited
+    expect(await probeSocket(path, 1_000)).toBe("gone")
   })
 })

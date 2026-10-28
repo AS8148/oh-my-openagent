@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 import { afterAll } from "bun:test"
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
+import { createConnection } from "node:net"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { markTestInfrastructureDir, runTestTempRootTeardown } from "./test-temp-root"
@@ -35,13 +36,16 @@ export function installHermeticHome(): HermeticHome {
   delete process.env.OPENCODE_CONFIG_DIR
   delete process.env.CLAUDE_CONFIG_DIR
   installHermeticSecrets()
+  // Loaded now, not at teardown: a cold engine import costs about a second under load, which must not come out
+  // of the stop deadline (#11630).
+  const engine = preloadTaskHostEngine()
   afterAll(async () => {
     // The temp-root teardown reads and removes the directory these hosts write into, so it waits for them
     // to exit, and it runs even when the shard check throws: a later preload afterAll does not run
     // once an earlier one has failed (#9766).
     await runCheckThenTeardown(async () => {
       const failures: unknown[] = []
-      await stopRunTaskHosts(agentDir).catch((error: unknown) => failures.push(error))
+      await stopRunTaskHosts(agentDir, { loadEngine: () => engine }).catch((error: unknown) => failures.push(error))
       try {
         failOnShardsInRealAgentDir()
       } catch (error) {
@@ -105,11 +109,15 @@ export interface TaskHostEngine {
   stopHost(options: { readonly socket: string; readonly agentDir: string; readonly force: boolean; readonly timeoutMs: number }): Promise<
     { readonly action: string; readonly pid?: number; readonly reason?: string }
   >
-  probeHost(options: { readonly socket: string; readonly timeoutMs: number }): Promise<unknown>
 }
 
-// Bun's hook budget is 5 s for every file after the first unless --timeout is passed, so the whole host
-// stop, engine load included, ends inside it and reports what is left instead of timing the hook out.
+/** What a connect to a host's socket says: someone accepts, nothing can be there, or no answer either way. */
+export type SocketState = "listening" | "gone" | "unknown"
+
+// Bun's hook budget is 5 s for every file after the first unless --timeout is passed. The engine gets its own
+// short wait (it was preloaded at setup, so it is normally ready), and only then does the stop deadline start,
+// so a slow import is never reported as a host that is "still stopping". Both together stay inside the budget.
+export const TASK_HOST_ENGINE_WAIT_MS = 1_000
 export const TASK_HOST_STOP_DEADLINE_MS = 3_000
 const ENGINE_CALL_TIMEOUT_MS = 1_000
 
@@ -123,44 +131,52 @@ const ENGINE_CALL_TIMEOUT_MS = 1_000
  * names the live process, so nothing here decides from a process-table scan: a scan by path matched
  * processes this run never started, and its wait was unbounded under load.
  *
- * A host still running when the deadline passes, or one the engine cannot prove but that still answers on
- * its socket, fails the run by name rather than as an unnamed hook timeout.
+ * A stop the engine refuses (a host that already exited released its registration; on Windows the engine
+ * records no start time, so it never proves a host and the teardown can only report one) is settled by a
+ * connect to the host's socket: nothing there is "gone", and anything else, a listener or no answer in time,
+ * is reported. A host still running when the deadline passes fails the run by name too, never as an unnamed
+ * hook timeout.
  */
 export async function stopRunTaskHosts(
   agentDir: string,
-  options: { readonly deadlineMs?: number; readonly loadEngine?: () => Promise<TaskHostEngine> } = {},
+  options: {
+    readonly deadlineMs?: number
+    readonly engineWaitMs?: number
+    readonly loadEngine?: () => Promise<TaskHostEngine>
+    readonly probeSocket?: (socket: string, timeoutMs: number) => Promise<SocketState>
+  } = {},
 ): Promise<void> {
   if (!existsSync(join(agentDir, "rpc-host-daemon"))) return
   const deadlineMs = options.deadlineMs ?? TASK_HOST_STOP_DEADLINE_MS
-  const loadEngine = options.loadEngine ?? loadTaskHostEngine
+  const engineWaitMs = options.engineWaitMs ?? TASK_HOST_ENGINE_WAIT_MS
+  const probe = options.probeSocket ?? probeSocket
+  const engine = await within((options.loadEngine ?? loadTaskHostEngine)(), engineWaitMs).catch((error: unknown) => {
+    throw new Error(`The engine needed to stop this run's task hosts did not load (#11630): ${describeError(error)}`)
+  })
+  if (engine === undefined) {
+    throw new Error(`The engine needed to stop this run's task hosts did not load within ${engineWaitMs}ms (#11630); hosts registered in ${agentDir} were not stopped`)
+  }
   const deadline = Date.now() + deadlineMs
   const unsettled = new Map<string, string>()
   const leftovers: string[] = []
   const stopAll = async (): Promise<void> => {
-    const engine = await loadEngine()
     const sockets = (await engine.listHostEndpoints(agentDir))
       .filter((endpoint) => endpoint.endpoint_kind === "rpc_host")
       .flatMap((endpoint) => (endpoint.socket === null ? [] : [endpoint.socket]))
     for (const socket of sockets) unsettled.set(socket, "still stopping")
     await Promise.all(sockets.map(async (socket) => {
-      const leftover = await stopOne(engine, agentDir, socket, deadline, (state) => unsettled.set(socket, state))
+      const leftover = await stopOne(engine, probe, agentDir, socket, deadline, (state) => unsettled.set(socket, state))
       unsettled.delete(socket)
       if (leftover !== undefined) leftovers.push(leftover)
     }))
   }
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timedOut = await Promise.race([
-    stopAll().then(
-      () => false,
-      (error: unknown) => {
-        throw new Error(`Stopping the task hosts this run started failed (#11630): ${describeError(error)}`)
-      },
-    ),
-    new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(true), Math.max(0, deadline - Date.now()))
+  const finished = await within(
+    stopAll().catch((error: unknown) => {
+      throw new Error(`Stopping the task hosts this run started failed (#11630): ${describeError(error)}`)
     }),
-  ]).finally(() => clearTimeout(timer))
-  if (timedOut) {
+    Math.max(0, deadline - Date.now()),
+  )
+  if (finished === undefined) {
     leftovers.push(...[...unsettled].map(([socket, state]) => `${socket} (${state})`))
     if (unsettled.size === 0) leftovers.push(`the engine did not list the host registry in ${agentDir} in time`)
   }
@@ -171,8 +187,20 @@ export async function stopRunTaskHosts(
   )
 }
 
+/** Resolves with the work's value, or with undefined once `ms` has passed; a rejection passes through. */
+async function within<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return await Promise.race([
+    work,
+    new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), ms)
+    }),
+  ]).finally(() => clearTimeout(timer))
+}
+
 async function stopOne(
   engine: TaskHostEngine,
+  probe: (socket: string, timeoutMs: number) => Promise<SocketState>,
   agentDir: string,
   socket: string,
   deadline: number,
@@ -184,11 +212,35 @@ async function stopOne(
     if (await exitedBy(result.pid, deadline)) return undefined
     return `${socket} (pid ${result.pid} did not exit after SIGTERM)`
   }
-  // A host that already exited has released its registration, so its stop is refused as unproven; one that
-  // is still serving the socket is the leftover.
-  progress(`stop refused (${result.reason ?? result.action}), probing`)
-  const answer = await engine.probeHost({ socket, timeoutMs: ENGINE_CALL_TIMEOUT_MS })
-  return answer === undefined ? undefined : `${socket} (stop refused: ${result.reason ?? result.action}; the host still answers)`
+  const refusal = result.reason ?? result.action
+  progress(`stop refused (${refusal}), connecting to its socket`)
+  const state = await probe(socket, ENGINE_CALL_TIMEOUT_MS)
+  if (state === "gone") return undefined
+  return state === "listening"
+    ? `${socket} (stop refused: ${refusal}; a host still listens on the socket)`
+    : `${socket} (stop refused: ${refusal}; the socket did not answer a connect within ${ENGINE_CALL_TIMEOUT_MS}ms, so the host may still be running)`
+}
+
+/**
+ * Connects to a host socket without speaking its protocol: an accepted connection is a live listener; a
+ * missing path or a refused connect (a socket file its host left behind) means nothing is there. Anything
+ * else, a timeout included, is unknown, never taken for gone.
+ */
+export function probeSocket(socket: string, timeoutMs: number): Promise<SocketState> {
+  return new Promise((resolve) => {
+    const connection = createConnection(socket)
+    const settle = (state: SocketState): void => {
+      clearTimeout(timer)
+      connection.destroy()
+      resolve(state)
+    }
+    const timer = setTimeout(() => settle("unknown"), timeoutMs)
+    connection.once("connect", () => settle("listening"))
+    connection.once("error", (error) => {
+      const code = "code" in error ? error.code : undefined
+      settle(code === "ENOENT" || code === "ECONNREFUSED" ? "gone" : "unknown")
+    })
+  })
 }
 
 function processAlive(pid: number): boolean {
@@ -213,8 +265,14 @@ async function loadTaskHostEngine(): Promise<TaskHostEngine> {
   return {
     listHostEndpoints: (agentDir) => engine.listHostEndpoints(agentDir),
     stopHost: (options) => engine.stopHost(options),
-    probeHost: (options) => engine.probeHost(options),
   }
+}
+
+/** Starts the engine import at setup; a failure surfaces only if teardown finds hosts to stop. */
+function preloadTaskHostEngine(): Promise<TaskHostEngine> {
+  const engine = loadTaskHostEngine()
+  engine.catch(() => {})
+  return engine
 }
 
 const REAL_AGENT_DIRS = [join(homedir(), ".omo", "agent"), join(homedir(), ".senpi", "agent"), join(homedir(), ".omo")]
