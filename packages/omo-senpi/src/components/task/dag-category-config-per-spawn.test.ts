@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import type { ManagedChildHandle, ManagedRunner, ManagedStartSpec, RunnerOutcome } from "@oh-my-opencode/senpi-task"
 import * as dagEngine from "@oh-my-opencode/senpi-task/dag"
-import { createDagManager } from "../../../../senpi-task/src/dag/manager"
+import { createDagManager, type DagRunRecordV1 } from "../../../../senpi-task/src/dag/manager"
 import { createDagFileStore } from "../../../../senpi-task/src/dag/store"
 import type { DagRunId } from "../../../../senpi-task/src/dag/types"
 
@@ -25,8 +25,10 @@ const MODEL_A = "acme/model-a"
 const MODEL_B = "acme-b/model-b"
 const createFileStore = createDagFileStore
 const roots: string[] = []
+const runtimes: DagRuntime[] = []
 
 afterEach(() => {
+  for (const runtime of runtimes.splice(0)) runtime.dispose()
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
 })
 
@@ -44,8 +46,10 @@ function writeCategoryModel(project: string, model: string): void {
 class CapturingRunner implements ManagedRunner {
   readonly specs: ManagedStartSpec[] = []
   readonly #waiters = new Map<number, () => void>()
+  readonly #outcomes: ((outcome: RunnerOutcome) => void)[] = []
 
   start(spec: ManagedStartSpec): Promise<ManagedChildHandle> {
+    const outcome = new Promise<RunnerOutcome>((resolve) => this.#outcomes.push(resolve))
     this.specs.push(spec)
     this.#waiters.get(this.specs.length)?.()
     return Promise.resolve({
@@ -56,21 +60,26 @@ class CapturingRunner implements ManagedRunner {
       followUp: () => Promise.resolve(),
       abort: () => Promise.resolve(),
       subscribe: () => () => undefined,
-      // Children stay running: the test reads plans and records, never a completion.
-      waitForOutcome: () => new Promise<RunnerOutcome>(() => {}),
+      // Children stay running until a test completes one: most tests read plans and records only.
+      waitForOutcome: () => outcome,
       lastAssistantText: () => undefined,
       dispose: () => Promise.resolve(),
     })
   }
 
+  complete(index: number): void {
+    this.#outcomes[index]?.({ status: "completed", finalResponse: "done" })
+  }
+
   // Failure ceiling, not synchronization: the start signal is subscribed before it can fire.
   whenStarted(count: number): Promise<void> {
     if (this.specs.length >= count) return Promise.resolve()
+    let ceiling: ReturnType<typeof setTimeout> | undefined
     const started = new Promise<void>((resolve) => this.#waiters.set(count, resolve))
-    return Promise.race([
-      started,
-      new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error(`child ${count} did not start within 5000ms`)), 5_000)),
-    ])
+    const timedOut = new Promise<void>((_resolve, reject) => {
+      ceiling = setTimeout(() => reject(new Error(`child ${count} did not start within 5000ms`)), 5_000)
+    })
+    return Promise.race([started, timedOut]).finally(() => clearTimeout(ceiling))
   }
 }
 
@@ -102,6 +111,7 @@ function compose(project: string, home: string): Fixture {
     createFileStore(config, { ...storeOptions, fsync: false }))
   try {
     const runtime = createDagRuntime({ pi, engine, logger: { info: () => undefined, warn: () => undefined, error: () => undefined } })
+    runtimes.push(runtime)
     return { engine, runtime, runner }
   } finally {
     createStore.mockRestore()
@@ -159,7 +169,6 @@ describe("workflow nodes plan on the live omo config (#11539)", () => {
     expect(after.requested).toMatchObject({ provider: "acme-b", model_id: "model-b", source: "category" })
     expect(before.model).toBe(MODEL_A)
     expect(before.requested).toMatchObject({ provider: "acme", model_id: "model-a", source: "category" })
-    fixture.runtime.dispose()
   })
 
   test("#given a workflow child planned on generation 0 #when omo.json moves the category and a new run starts #then the new child record carries the next config generation", async () => {
@@ -169,22 +178,36 @@ describe("workflow nodes plan on the live omo config (#11539)", () => {
     // then
     expect(plannedRecord(fixture, 0).generation).toBe(0)
     expect(plannedRecord(fixture, 1).generation).toBe(1)
-    fixture.runtime.dispose()
   })
 
-  test("#given a pending workflow run persisted on disk #when omo.json moves its category to model B before the session claims the run #then the recovered node plans on B", async () => {
-    // given: the engine is composed at session start on model A, with a run a previous host left pending.
-    const project = tempDir("omo-dag-category-recover-")
-    writeCategoryModel(project, MODEL_A)
-    const fixture = compose(project, tempDir("omo-dag-category-home-"))
+  type SeedNode = { readonly id: string; readonly dependsOn?: readonly string[] }
+
+  async function seedPendingRun(project: string, runId: DagRunId, nodes: readonly SeedNode[] = [{ id: "resume" }]): Promise<void> {
     await createDagManager({
       store: createFileStore({ project_dir: project }, { fsync: false }),
-      newRunId: () => "dag-category-recover" as DagRunId,
+      newRunId: () => runId,
     }).start({
       parentSessionId: sessionId,
       rootSessionId: sessionId,
-      definition: { key: "recover", name: "recover", nodes: [{ id: "resume", prompt: "resume", category: "quick" }] },
+      definition: {
+        key: runId,
+        name: runId,
+        nodes: nodes.map((node) => ({
+          id: node.id,
+          prompt: `do ${node.id}`,
+          category: "quick",
+          ...(node.dependsOn === undefined ? {} : { dependsOn: [...node.dependsOn] }),
+        })),
+      },
     })
+  }
+
+  test("#given a pending workflow run on disk #when omo.json moves its category to model B before the session attaches #then the pending run loaded at attach plans on B", async () => {
+    // given: the engine is composed at session start on model A, with a run a previous host left pending.
+    const project = tempDir("omo-dag-category-pending-")
+    writeCategoryModel(project, MODEL_A)
+    const fixture = compose(project, tempDir("omo-dag-category-home-"))
+    await seedPendingRun(project, "dag-category-pending" as DagRunId)
 
     // when
     writeCategoryModel(project, MODEL_B)
@@ -193,7 +216,38 @@ describe("workflow nodes plan on the live omo config (#11539)", () => {
 
     // then
     expect(plannedRecord(fixture, 0).model).toBe(MODEL_B)
-    fixture.runtime.dispose()
+  })
+
+  test("#given a two-node run paused by a host shutdown and resumed by the next host on model A #when omo.json moves the category to model B before the second node starts #then the resumed run plans that node on B", async () => {
+    // given: the first host pauses the run on shutdown; its lease holder is gone when the next host starts.
+    const project = tempDir("omo-dag-category-paused-")
+    const home = tempDir("omo-dag-category-home-")
+    writeCategoryModel(project, MODEL_A)
+    const runId = "dag-category-paused" as DagRunId
+    await seedPendingRun(project, runId, [{ id: "first" }, { id: "second", dependsOn: ["first"] }])
+    const previousHost = compose(project, home)
+    await previousHost.runtime.pauseForShutdown()
+    previousHost.runtime.dispose()
+    runtimes.splice(runtimes.indexOf(previousHost.runtime), 1)
+    const store = createFileStore({ project_dir: project }, { fsync: false })
+    const paused = store.readCheckpoint<DagRunRecordV1 & { readonly previousLeaseHolderPid?: number }>(runId)
+    if (paused?.status !== "paused") throw new Error(`expected a paused checkpoint, got ${paused?.status}`)
+    store.writeCheckpoint(runId, { ...paused, previousLeaseHolderPid: 2_147_483_647 })
+    const nextHost = compose(project, home)
+
+    // when: recovery claims and resumes the run; attach returns once the resumed run settles.
+    const attached = nextHost.runtime.attach()
+    await nextHost.runner.whenStarted(1)
+    writeCategoryModel(project, MODEL_B)
+    nextHost.runner.complete(0)
+    await nextHost.runner.whenStarted(2)
+    nextHost.runner.complete(1)
+    await attached
+
+    // then
+    expect(store.readEvents(runId, 0, { limit: 256 }).events.map((event) => event.type)).toContain("dag.run.resumed")
+    expect(plannedRecord(nextHost, 0).model).toBe(MODEL_A)
+    expect(plannedRecord(nextHost, 1).model).toBe(MODEL_B)
   })
 })
 
