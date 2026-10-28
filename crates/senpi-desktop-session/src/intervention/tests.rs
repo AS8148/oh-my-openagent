@@ -338,3 +338,80 @@ fn presses_the_bounded_watch_let_go_are_no_newer_than_the_oldest_press_it_kept()
     assert!(!waited.get(), "no wait: the user paused long ago");
     assert!(refused.message.contains("60.0 s ago"), "{}", refused.message);
 }
+
+/// The class of run 2's MEDIUM and run 3's LOW: admission reading data the
+/// input does not need (the window list, the process start time). Every input
+/// kind against every feed state, in one table.
+#[test]
+fn every_input_kind_reads_only_what_its_feed_state_needs() {
+    use senpi_desktop_safety::MutatingAction;
+    use crate::mutate::tests::requests::request_for;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Feed {
+        /// No watch on this backend: admission lists no windows and waits for
+        /// nothing; the input goes through.
+        None,
+        /// A watch with no press since the last read: input goes through.
+        Quiet,
+        /// A watch that saw the user click in the app since the last read: input
+        /// into that app is refused; the clipboard is nobody's app.
+        Used,
+    }
+    let menus = json!({"menus": {"101": [{"title": "File", "children": [{"title": "Save"}]}]}});
+    for action in MutatingAction::ALL {
+        // Window-list calls the request makes on its own, measured with a quiet
+        // watch (which adds admission's one listing).
+        let mut quiet_listings = None;
+        for feed in [Feed::Quiet, Feed::None, Feed::Used] {
+            let mut overlay = menus.clone();
+            if feed == Feed::None {
+                overlay["user_input_feed"] = json!(false);
+            }
+            let mut harness = harness(&overlay);
+            harness.grant("class sweep");
+            harness.process(capture("101")).expect("captures");
+            // The request is built first: a frame-keyed kind captures its frame,
+            // and that read would clear a press that came before it.
+            let op = request_for(&mut harness, action);
+            if feed == Feed::Used {
+                harness.user_pressed(4242, UserPressKind::Click);
+                harness.pass_ms(QUIET_MS);
+            }
+            let before = harness.faults.calls(FakeMethod::Windows);
+            let reply = harness.process(op).map_err(|error| error.code);
+            let listings = harness.faults.calls(FakeMethod::Windows) - before;
+            let refused = feed == Feed::Used && action != MutatingAction::ClipboardWrite;
+            if refused {
+                assert_eq!(reply, Err(ErrorCode::UserIntervened), "{action:?} x {feed:?}");
+            } else {
+                assert!(reply.is_ok(), "{action:?} x {feed:?}: {reply:?}");
+            }
+            match feed {
+                Feed::Quiet => quiet_listings = Some(listings),
+                Feed::None => {
+                    let admitted = usize::from(action != MutatingAction::ClipboardWrite);
+                    assert_eq!(
+                        listings + admitted,
+                        quiet_listings.expect("quiet measured first"),
+                        "{action:?} x None: admission listed windows with no feed"
+                    );
+                }
+                Feed::Used => {}
+            }
+            assert!(check_press().is_ok(), "{action:?} x {feed:?}: no watch stays installed");
+        }
+    }
+}
+
+#[test]
+fn a_start_time_the_watch_cannot_read_this_once_keeps_the_apps_record() {
+    // Given: Notes (4242, started at 100) with a press the session has not read
+    let inputs = UserInputs::new(Box::new(|_| Some(100)));
+    inputs.touch(4242, Some(100), || "Notes".to_owned());
+    inputs.record(4242, 1_000);
+    // When: the next admission could not read the start time
+    inputs.touch(4242, None, || "Notes".to_owned());
+    // Then: the user's press is still pending (the record did not reset)
+    let refused = inputs.admit(4242, None, || 10_000, no_wait).expect_err("still refused");
+    assert_eq!(refused.code, ErrorCode::UserIntervened);
+}

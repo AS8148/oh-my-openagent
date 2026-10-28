@@ -60,7 +60,9 @@ impl UserInputs {
     /// on it is not the agent's concern, nor is a former process's under the
     /// same id.
     pub(crate) fn touch(&self, pid: u32, started: Option<u64>, name: impl FnOnce() -> String) {
-        if self.state.lock().apps.get(&pid).is_some_and(|app| app.started == started) {
+        // A start time the watch could not read this once (`None`) is no
+        // evidence of a new process: the record the session has stays.
+        if self.state.lock().apps.get(&pid).is_some_and(|app| started.is_none() || app.started == started) {
             return;
         }
         let name = name();
