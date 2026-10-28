@@ -23,7 +23,7 @@ export const A = credentialId(API)
  * overwrite keeps the item's owner (m5), a rename works for anyone (m10), a delete by a non-owner is refused (m6).
  * `secrets` is this process's own identity (`bun`); `access` is the signed helper, which counts every approve dialog.
  */
-export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "locked"; readonly approveGate?: Promise<void>; readonly onApprove?: () => void } = {}) {
+export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "locked"; readonly approveGate?: Promise<void>; readonly onApprove?: () => void; readonly failReadWhenMissing?: boolean } = {}) {
   const items = new Map<string, Item>()
   let clock = 1_000
   const events: string[] = []
@@ -71,6 +71,7 @@ export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "l
     const item = items.get(name)
     switch (request.verb) {
       case "read": {
+        if (options.failReadWhenMissing === true && item === undefined) return { error: "locked" }
         if (item !== undefined && item.owner === "helper") return { owned: true, value: item.value, marker: item.marker, cdat: item.cdat, mdat: item.mdat, present: present(name) }
         if (item !== undefined) return { owned: false, marker: false, cdat: item.cdat, mdat: item.mdat, partition: item.partition, present: present(name) }
         const staged = items.get(`${name}.staging`)
@@ -118,12 +119,12 @@ export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "l
   return { items, events, stats, secrets, secretsAs, access, put, cache }
 }
 
-export type SessionProcess = { readonly identity?: Owner; readonly noDialog?: boolean; readonly handOff?: () => Promise<boolean> }
+export type SessionProcess = { readonly identity?: Owner; readonly noDialog?: boolean; readonly handOff?: () => Promise<boolean>; readonly home?: string }
 
 /** One omo process on the fake machine; a process other than the default has its own approval cache, as a real one does. */
 export async function helperSession(keychain: ReturnType<typeof fakeKeychain>, background = false, proc: SessionProcess = {}) {
-  const home = await mkdtemp(join(tmpdir(), "omo-helper-session-"))
-  onTestFinished(() => rm(home, { recursive: true, force: true }))
+  const home = proc.home ?? (await mkdtemp(join(tmpdir(), "omo-helper-session-")))
+  if (proc.home === undefined) onTestFinished(() => rm(home, { recursive: true, force: true }))
   const store = createCredentialStore(API, {
     secrets: proc.identity === undefined ? keychain.secrets : keychain.secretsAs(proc.identity),
     platform: "darwin",
