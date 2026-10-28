@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process"
-import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
@@ -58,6 +58,7 @@ function createEventCtx() {
 // Diagnostics for #11604: a failed assertion names the branch that left the dead run unfinalized,
 // so one CI failure is enough evidence. Observation only: every call is forwarded unchanged.
 type SchedulerContention = {
+  readonly pass: number
   readonly read: "readState" | "complete"
   readonly waitTimeoutMs: number | undefined
   readonly site: string
@@ -66,16 +67,17 @@ type SchedulerContention = {
 }
 
 function callerSite(stack: string | undefined): string {
-  const frames = (stack ?? "").split("\n").filter((line) => /worker\/run-[\w-]+\.ts:\d+/.test(line))
+  // Windows stacks print backslash paths; both separators name the same worker frame.
+  const frames = (stack ?? "").split("\n").filter((line) => /worker[\\/]run-[\w-]+\.ts:\d+/.test(line))
   return frames[0]?.trim() ?? "unknown site"
 }
 
-function observeContention(store: ReservationStatePort, contention: SchedulerContention[]): ReservationStatePort {
+function observeContention(store: ReservationStatePort, contention: SchedulerContention[], pass: number): ReservationStatePort {
   async function observed<T>(read: SchedulerContention["read"], waitTimeoutMs: number | undefined, site: string, operation: () => Promise<T>): Promise<T> {
     try {
       return await operation()
     } catch (error) {
-      if (error instanceof LockContentionError) contention.push({ read, waitTimeoutMs, site, lockPath: error.lockPath, owner: error.owner })
+      if (error instanceof LockContentionError) contention.push({ pass, read, waitTimeoutMs, site, lockPath: error.lockPath, owner: error.owner })
       throw error
     }
   }
@@ -107,7 +109,7 @@ export async function staleLockFixture(seams?: ActiveHolderSeams, options: { rea
     createRunId: () => `reflection-run-${nextRun++}`,
   })
   const launched: ReservedRun[] = []
-  const reconciles = { count: 0, results: [] as ReflectionRunReconcileResult[][], contention: [] as SchedulerContention[] }
+  const reconciles = { count: 0, results: [] as ReflectionRunReconcileResult[][], contention: [] as SchedulerContention[], errors: [] as Array<{ readonly pass: number; readonly error: string }> }
   const holders: Array<{ readonly runId: string; readonly pid: number; readonly hostname: string }> = []
   const launch = (run: ReservedRun): Promise<void> => {
     launched.push(run)
@@ -121,8 +123,15 @@ export async function staleLockFixture(seams?: ActiveHolderSeams, options: { rea
     async reconcile(): Promise<void> {
       reconciles.count += 1
       if (options.reconcileReleases === false) return
-      const reservation = observeContention(store, reconciles.contention)
-      reconciles.results.push(await reconcileReflectionRuns({ identity: memoryIdentity, reservation, launch, deferOnSchedulerContention: true }))
+      const pass = reconciles.count
+      const reservation = observeContention(store, reconciles.contention, pass)
+      try {
+        reconciles.results.push(await reconcileReflectionRuns({ identity: memoryIdentity, reservation, launch, deferOnSchedulerContention: true }))
+      } catch (error) {
+        // The wiring swallows a reconcile failure into its logger; keep it for the diagnosis, then rethrow unchanged.
+        reconciles.errors.push({ pass, error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) })
+        throw error
+      }
     },
   } as unknown as MemoryIdentityRuntime
   const identity = createMemoryIdentityContext({
@@ -259,35 +268,71 @@ function bootId(): string {
   return "unavailable on this platform"
 }
 
+/** Where the reconcile bookkeeping stood before the step under test; the diagnosis reads only what came after. */
+export type DiagnosisMark = { readonly count: number; readonly results: number }
+
+export function diagnosisMark(item: Fixture): DiagnosisMark {
+  return { count: item.reconciles.count, results: item.reconciles.results.length }
+}
+
+// Locks held right now, by file name and owner purpose/pid. A per-run finalize claim or the writer lock is
+// taken inside reconciliation where the reservation port cannot see it; a holder still present shows here.
+function heldLocks(locksDir: string): string {
+  let names: string[]
+  try {
+    names = readdirSync(locksDir).filter((name) => name.endsWith(".lock")).sort()
+  } catch (error) {
+    return `unreadable (${error instanceof Error ? error.message : String(error)})`
+  }
+  if (names.length === 0) return "none"
+  return names.map((name) => {
+    try {
+      const owner = JSON.parse(readFileSync(join(locksDir, name), "utf8")) as { purpose?: unknown; pid?: unknown; hostname?: unknown }
+      return `${name} (${String(owner.purpose)} pid ${String(owner.pid)} on ${String(owner.hostname)})`
+    } catch (error) {
+      return `${name} (owner unreadable: ${error instanceof Error ? error.message : String(error)})`
+    }
+  }).join(", ")
+}
+
 /**
  * "finalized" when the dead run settled; otherwise names the branch that skipped it (#11604):
- * A = the holder verdict was not "dead", so recovery never reconciled; B = reconciliation ran and
- * deferred on scheduler-lock contention (the non-blocking read and its caller are listed).
+ * A = recovery never reconciled (the holder verdict was not "dead", or the count did not move);
+ * B = reconciliation ran and deferred on reservation-port contention, or threw. Anything else is
+ * "unclassified" with the raw evidence, never a claim that no lock was contended.
  */
 export async function staleRunDiagnosis(
   item: Fixture,
   runId: string,
-  observed: { readonly verdictBefore: ActiveHolderVerdict; readonly surface: string; readonly reconcilesBefore: number },
+  observed: { readonly verdictBefore: ActiveHolderVerdict; readonly surface: string; readonly mark: DiagnosisMark },
 ): Promise<string> {
   if (existsSync(join(item.paths.reflection, "runs", runId, "final.json"))) return "finalized"
   const holder = item.holders.find((entry) => entry.runId === runId)
   const verdictAfter = await holderVerdict(item)
   const host = `recorded host ${holder?.hostname ?? "unknown"}, current host ${hostname()}, boot ${bootId()}`
-  const passes = item.reconciles.results.slice(observed.reconcilesBefore)
+  const reconciled = item.reconciles.count - observed.mark.count
+  const passes = item.reconciles.results.slice(observed.mark.results)
+  const contention = item.reconciles.contention.filter((entry) => entry.pass >= observed.mark.count)
+  const errors = item.reconciles.errors.filter((entry) => entry.pass >= observed.mark.count)
   const branch = observed.verdictBefore.state === "live"
     ? "A live: the holder looked alive, so nothing was reconciled"
     : observed.verdictBefore.state === "stuck"
       ? `A stuck: ${observed.verdictBefore.reason}`
       : observed.verdictBefore.state === "none"
         ? "A none: active.lock was gone before recovery"
-        : item.reconciles.contention.length > 0
-          ? `B deferred: ${item.reconciles.contention.map((entry) => `${entry.read}(waitTimeoutMs=${String(entry.waitTimeoutMs)}) from ${entry.site.replace(/^at /, "")} on ${entry.lockPath} held by ${JSON.stringify(entry.owner)}`).join("; ")}`
-          : "B without contention: the verdict was dead but no pass settled the run"
+        : reconciled === 0
+          ? "A not reconciled: the verdict was dead but recovery never called reconcile"
+          : errors.length > 0
+            ? `B threw: ${errors.map((entry) => `pass ${entry.pass}: ${entry.error}`).join("; ")}`
+            : contention.length > 0
+              ? `B deferred: ${contention.map((entry) => `pass ${entry.pass} ${entry.read}(waitTimeoutMs=${String(entry.waitTimeoutMs)}) from ${entry.site.replace(/^at /, "")} on ${entry.lockPath} held by ${JSON.stringify(entry.owner)}`).join("; ")}`
+              : "unclassified: reconcile ran without settling the run and no reservation-port contention was observed (a finalize claim or writer lock held elsewhere is not visible to the port; see locks)"
   return [
     branch,
     `verdict before ${JSON.stringify(observed.verdictBefore)}, after ${JSON.stringify(verdictAfter)}`,
     `holder pid ${holder?.pid ?? "unknown"}; ${host}`,
-    `reconcile passes ${passes.length} returned ${JSON.stringify(passes)}`,
+    `reconcile calls ${reconciled}, passes returned ${JSON.stringify(passes)}`,
+    `locks held now: ${heldLocks(item.paths.locks)}`,
     `surface: ${observed.surface}`,
   ].join("\n")
 }

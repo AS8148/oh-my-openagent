@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { FactsExtractorRunner } from "./facts-runner"
 import {
-  activeRunId, cleanupStaleLockFixtures, deadPid, holderVerdict, hostDiesMidPublish, runReflect, settleTurn, staleLockFixture,
+  activeRunId, cleanupStaleLockFixtures, deadPid, diagnosisMark, holderVerdict, hostDiesMidPublish, runReflect, settleTurn, staleLockFixture,
   staleRunDiagnosis,
 } from "./wiring-reflection-stale-lock.test-support"
 
@@ -20,13 +20,13 @@ describe("memory reflection stale active lock (#10377)", () => {
     const pid = await deadPid()
     const runId = await hostDiesMidPublish(item, pid)
     const verdictBefore = await holderVerdict(item)
-    const reconcilesBefore = item.reconciles.results.length
+    const mark = diagnosisMark(item)
 
     // when
     const reply = await runReflect(item)
 
     // then: on failure the message names the branch that skipped the dead run (#11604)
-    expect(await staleRunDiagnosis(item, runId, { verdictBefore, surface: reply, reconcilesBefore })).toBe("finalized")
+    expect(await staleRunDiagnosis(item, runId, { verdictBefore, surface: reply, mark })).toBe("finalized")
     expect(await activeRunId(item)).not.toBe(runId)
     expect(reply).toContain(`the previous run ${runId} had stopped without releasing its lock`)
     const promoted = await activeRunId(item)
@@ -41,14 +41,14 @@ describe("memory reflection stale active lock (#10377)", () => {
     const pid = await deadPid()
     const runId = await hostDiesMidPublish(item, pid)
     const verdictBefore = await holderVerdict(item)
-    const reconcilesBefore = item.reconciles.results.length
+    const mark = diagnosisMark(item)
 
     // when
     await settleTurn(item)
 
     // then: on failure the message names the branch that skipped the dead run (#11604)
     const surface = item.eventCtx.notices.map((notice) => `${notice.level}: ${notice.message}`).join(" | ") || "no notices"
-    expect(await staleRunDiagnosis(item, runId, { verdictBefore, surface, reconcilesBefore })).toBe("finalized")
+    expect(await staleRunDiagnosis(item, runId, { verdictBefore, surface, mark })).toBe("finalized")
     expect(await activeRunId(item)).not.toBe(runId)
     expect(item.eventCtx.notices.filter((notice) => notice.message.includes("stale lock"))).toEqual([])
   }, 30_000)
