@@ -2125,6 +2125,7 @@
         "script/install-codex-dev.ts",
         "script/installer/channel-maintenance.ts",
         "script/installer/mirror-release-to-r2.ts",
+        "script/keychain-helper-release.ts",
         "script/lint-ratchet.ts",
         "script/oxlint/biome-ports.ts",
         "script/patch-node-require-shim.ts",
@@ -3855,6 +3856,7 @@
         "bin/senpi-patch.mjs",
         // the manual GUI-session QA runner for the keychain helper: a person runs it by path in a dedicated QA login session
         "keychain-helper/gui-session-runner.ts",
+        "keychain-helper/build.ts",
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
         "test/account-linux-no-gdbus.fixture.ts",
