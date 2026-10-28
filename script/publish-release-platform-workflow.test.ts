@@ -276,8 +276,10 @@ describe("release binary asset lane in the platform publish workflow", () => {
       }
       const workflow = readFileSync(publishWorkflowPath, "utf8")
       const verify = runBlock(workflow, "      - name: Verify uploaded assets\n", "      - name: Delete draft release\n")
+      const checkout = join(root, "checkout")
+      mkdirSync(checkout)
       const execute = () => spawnSync("bash", ["-e", "-c", verify], {
-        cwd: new URL("..", import.meta.url),
+        cwd: checkout,
         env: { ...process.env, PATH: `${root}:${process.env.PATH ?? ""}`, VERSION: "5.0.0", ASSET_SOURCE_DIR: assets },
         encoding: "utf8",
         timeout: SUBPROCESS_SPAWN_TIMEOUT_MS,
@@ -286,7 +288,7 @@ describe("release binary asset lane in the platform publish workflow", () => {
       // When every release asset exists, the actual workflow verification passes.
       const complete = execute()
       expect(complete.status, complete.stderr).toBe(0)
-      expect(complete.stdout).toContain("Verified 21/21 release assets")
+      expect(complete.stdout).toContain("Verified 21 release assets")
 
       // When the keychain helper asset is absent, the release cannot go green either.
       unlinkSync(join(assets, "omo-keychain-darwin-universal"))
