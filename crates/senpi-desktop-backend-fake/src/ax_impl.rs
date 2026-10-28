@@ -1,5 +1,6 @@
 use senpi_desktop_core::ax::{AxBackend, AxHandle, AxOwner, AxProps};
 use senpi_desktop_core::backend::MenuChoice;
+use senpi_desktop_core::protocol_results::MenuReport;
 use senpi_desktop_core::error::CoreResult;
 use senpi_desktop_core::types::DesktopWindow;
 
@@ -41,7 +42,7 @@ impl AxBackend for FakeBackend {
         reply.confirm(&format!("AX action '{action}'"))
     }
 
-    fn perform_menu(&mut self, h: &AxHandle, action: &str, choice: MenuChoice<'_>) -> CoreResult<()> {
+    fn perform_menu(&mut self, h: &AxHandle, action: &str, choice: MenuChoice<'_>) -> CoreResult<Option<MenuReport>> {
         self.perform_menu_impl(h, action, choice)
     }
 
