@@ -975,9 +975,8 @@ Postinstall validates both platform binary resolution and OpenCode version compa
 Anonymous telemetry is enabled by default to track active installations (DAU/WAU/MAU). Every installer (`install.sh`, `install.ps1`, `bunx oh-my-openagent install`, `lazycodex-ai install`) and `omo setup` print a short notice when they finish: what is sent, that it goes to PostHog in the United States, how to turn it off, and a link to the [privacy policy](../legal/privacy-policy.md). OmO Native shows the same notice once, on its first session. For both products:
 
 - A single event is sent **at most once per UTC day per machine**
-- Uses a SHA256-hashed installation identifier — never the raw hostname
+- Uses a SHA256 hash of a random install id created on your computer, never anything derived from the hostname or user name
 - PostHog person profiles are **not** created
-- The raw hostname is never transmitted
 
 Per product:
 
