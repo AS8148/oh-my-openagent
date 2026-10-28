@@ -3853,6 +3853,8 @@
         "{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "src/{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "bin/senpi-patch.mjs",
+        // the manual GUI-session QA runner for the keychain helper: a person runs it by path in a dedicated QA login session
+        "keychain-helper/gui-session-runner.ts",
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
         "test/account-linux-no-gdbus.fixture.ts",

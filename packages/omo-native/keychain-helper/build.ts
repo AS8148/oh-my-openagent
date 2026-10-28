@@ -1,13 +1,7 @@
 import { join } from "node:path"
 
-export const KEYCHAIN_HELPER_IDENTIFIER = "com.mengmota.omo-keychain-helper"
-export const KEYCHAIN_HELPER_TEAM = "523JNR86LZ"
-export const KEYCHAIN_HELPER_REQUIREMENT =
-  `identifier "${KEYCHAIN_HELPER_IDENTIFIER}" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] ` +
-  `and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = "${KEYCHAIN_HELPER_TEAM}"`
-
 /** Q5, decided 2026-10-28 (fewest prompts): the helper serves root. The refuse-root branch stays buildable behind this switch. */
-export const KEYCHAIN_HELPER_REFUSE_ROOT_DEFAULT = false
+const KEYCHAIN_HELPER_REFUSE_ROOT_DEFAULT = false
 
 const SOURCES = ["main.c", "buffer.c", "request.c", "store.c", "partition.c", "session.c", "verbs.c"] as const
 
@@ -21,9 +15,9 @@ export type KeychainHelperBuild = {
   readonly architectures?: readonly KeychainHelperArchitecture[]
 }
 
-export const UNIVERSAL: readonly KeychainHelperArchitecture[] = ["arm64", "x86_64"]
+const UNIVERSAL: readonly KeychainHelperArchitecture[] = ["arm64", "x86_64"]
 
-export function keychainHelperCompileArgs(build: KeychainHelperBuild): string[] {
+function keychainHelperCompileArgs(build: KeychainHelperBuild): string[] {
   const sourceDir = join(import.meta.dir, "src")
   const architectures = build.architectures ?? UNIVERSAL
   return [
