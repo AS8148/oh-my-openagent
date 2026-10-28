@@ -91,7 +91,7 @@ const cacheRows: readonly Row[] = [
   }),
 ]
 
-function registeredMemoryEvents(): readonly string[] {
+function registeredMemory(): { readonly events: readonly string[]; readonly tools: readonly string[] } {
   const pi = new MemoryFakeExtensionAPI()
   createMemoryComponent({
     env: { OMO_MEMORY_HOME: join("unused-memory-root", "memory") },
@@ -101,15 +101,31 @@ function registeredMemoryEvents(): readonly string[] {
     syncRunner: idleSyncRunner,
     createRuntime: launchlessRuntime,
   }).register(pi, componentContext())
-  return [...new Set(pi.handlers.map((registration) => registration.event))].filter((event) => event !== "session_shutdown").sort()
+  return {
+    events: [...new Set(pi.handlers.map((registration) => registration.event))].filter((event) => event !== "session_shutdown").sort(),
+    tools: pi.tools.map((tool) => String(tool.name)).sort(),
+  }
 }
 
-const hookRows: readonly Row[] = registeredMemoryEvents().map((event) => ({
+const registered = registeredMemory()
+
+const hookRows: readonly Row[] = registered.events.map((event) => ({
   name: `a memory ${event} hook`,
   async start(held, work) {
     const api = new FakeExtensionAPI()
     trackMemoryHooks(api, work).on(event, gatedStep(held).step)
     return { settle: () => work.settled(), finished: api.dispatch(event, {}, undefined) }
+  },
+}))
+
+const toolRows: readonly Row[] = registered.tools.map((name) => ({
+  name: `a ${name} tool call, which the host aborts only after the shutdown drain on quit`,
+  async start(held, work) {
+    const api = new FakeExtensionAPI()
+    trackMemoryHooks(api, work).registerTool({ name, execute: gatedStep(held).step })
+    const execute = api.tools.at(-1)?.execute
+    if (typeof execute !== "function") throw new Error(`the ${name} tool registered no execute`)
+    return { settle: () => work.settled(), finished: Promise.resolve(Reflect.apply(execute, undefined, [])) }
   },
 }))
 
@@ -162,7 +178,7 @@ const detachedRows: readonly Row[] = [
 ]
 
 describe("memory shutdown waits for in-flight reads", () => {
-  for (const row of [...cacheRows, ...hookRows, ...detachedRows]) {
+  for (const row of [...cacheRows, ...hookRows, ...toolRows, ...detachedRows]) {
     it(`#given ${row.name} #when the settle the shutdown drain awaits runs #then it resolves only after that work`, async () => {
       // given
       const held = gate()

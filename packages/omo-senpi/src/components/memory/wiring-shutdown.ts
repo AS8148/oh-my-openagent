@@ -55,17 +55,18 @@ export async function runMemorySessionShutdown(parts: MemorySessionShutdownParts
       await drain.raceDetached(input, "facts-cancel", async () => { await facts.cancelActive?.() })
     }
   }
-  // A hook (a prompt turn, a settle, a tool call) or a detached bind/dream request still reading the identity repo
-  // keeps a git child there past shutdown (#11135). It runs after the Kibitzer and facts cleanups, which release what
-  // such a hook may be waiting on, and settles again what that work may have started.
+  await drain.run(input, { journalFlushed })
+  // A reflection launch runs its child under the identity dir too. It is awaited on what budget is
+  // left: a run that outlives it keeps going detached (by design), and it never displaces the
+  // drain's own steps (#10154).
+  await drain.raceDetached(input, "reflection-launch-settle", () => parts.launches.settled())
+  // A hook (a prompt turn, a settle), a memory tool call or a detached bind/dream request still reading the identity
+  // repo keeps a git child there past shutdown (#11135). It is awaited last, after the Kibitzer and facts cleanups that
+  // release what such work may be waiting on, and only on the budget the steps above left: work that stalls cannot
+  // keep the drain's own steps from running. It then settles again what that work may have started.
   await drain.raceDetached(input, "memory-work-settle", async () => {
     await parts.work.settled()
     await Promise.all([parts.reflectionLive.settled(), parts.corpusCache.settled(), parts.promptCache.settled()])
   })
-  await drain.run(input, { journalFlushed })
-  // A reflection launch runs its child under the identity dir too. It is awaited last, on what
-  // budget is left: a run that outlives it keeps going detached (by design), and it never
-  // displaces the drain's own steps (#10154).
-  await drain.raceDetached(input, "reflection-launch-settle", () => parts.launches.settled())
   parts.resetSession(input.sessionId)
 }

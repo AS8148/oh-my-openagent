@@ -24,7 +24,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 describe("memory component shutdown composition", () => {
-  it("#given the real memory component #when it registers #then every hook but session_shutdown is a tracked memory hook", () => {
+  it("#given the real memory component #when it registers #then every hook but session_shutdown, and every tool execute, is tracked", () => {
     // given
     const pi = new MemoryFakeExtensionAPI()
 
@@ -43,8 +43,13 @@ describe("memory component shutdown composition", () => {
     const misrouted = pi.handlers
       .filter((registration) => (registration.handler.name === "trackedMemoryHook") !== tracked(registration.event))
       .map((registration) => registration.event)
+    const untrackedTools = pi.tools
+      .filter((tool) => typeof tool.execute !== "function" || tool.execute.name !== "trackedMemoryTool")
+      .map((tool) => String(tool.name))
     expect(pi.handlers.length).toBeGreaterThan(0)
+    expect(pi.tools.length).toBeGreaterThan(0)
     expect(misrouted).toEqual([])
+    expect(untrackedTools).toEqual([])
   })
 
   it("#given memory work still running #when the session shuts down #then the drain waits on it and reports it detached by step when its budget runs out", async () => {
