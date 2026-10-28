@@ -3,7 +3,7 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import { createPluginInterface } from "../plugin-interface"
 import { createSisyphusAgent } from "../agents/sisyphus"
 import { createOracleAgent } from "../agents/oracle"
-import { clearSisyphusRuntimePromptContext } from "../agents/sisyphus-runtime-prompt-reconciler"
+import { clearSisyphusRuntimePromptContext, setSisyphusRuntimePromptContext } from "../agents/sisyphus-runtime-prompt-reconciler"
 import { createGrepTools } from "../tools/grep/tools"
 import { createGlobTools } from "../tools/glob/tools"
 import { interactive_bash } from "../tools/interactive-bash/tools"
@@ -84,6 +84,42 @@ test("the system prompt sent to the model carries no frame metadata and one-line
     expect(sent).not.toContain(tools.interactive_bash.description)
     expect(sent).toContain("- interactive_bash: " + toolPromptSnippet(tools.interactive_bash.description))
   }
+})
+
+test("a registered Sisyphus follows a runtime model switch after the config hook rewrites its frame", async () => {
+  const configured = "openai/gpt-5.5"
+  const runtime = "anthropic/claude-opus-5-5"
+  const role = (prompt: string) => prompt.slice(prompt.indexOf("\n</omo-model-core>"))
+  const runtimeRole = role(createSisyphusAgent(runtime).prompt ?? "")
+  expect(role(createSisyphusAgent(configured).prompt ?? "")).not.toBe(runtimeRole)
+  const ctx = { directory: "/workspace", client: {} } as unknown as PluginInput
+  const api = createPluginInterface({
+    ctx,
+    pluginConfig: {},
+    hooks: {},
+    managers: {
+      configHandler: async (config: Record<string, unknown>) => {
+        const sisyphus = createSisyphusAgent(configured)
+        setSisyphusRuntimePromptContext({
+          configuredModel: configured,
+          bakedPrompt: sisyphus.prompt ?? "",
+          rebuildPromptForModel: (model) => createSisyphusAgent(model).prompt ?? "",
+        })
+        config.agent = { sisyphus }
+      },
+    },
+    tools: { ...createGrepTools(ctx), ...createGlobTools(ctx) },
+    firstMessageVariantGate: { shouldOverride: () => false, markApplied: () => {}, markSessionCreated: () => {}, clear: () => {} },
+  } as Parameters<typeof createPluginInterface>[0])
+  const config: Parameters<NonNullable<typeof api.config>>[0] = {}
+  await defined(api.config, "config hook")(config)
+  const output = { system: [defined(config.agent?.sisyphus?.prompt, "sisyphus prompt")] }
+  const [providerID, id] = runtime.split("/")
+  await defined(api["experimental.chat.system.transform"], "system transform hook")(
+    { model: { providerID, id } } as Parameters<NonNullable<typeof api["experimental.chat.system.transform"]>>[0],
+    output,
+  )
+  expect(role(output.system[0])).toBe(runtimeRole)
 })
 
 test("host definitions refresh the core without a model switch and retain agent restrictions", async () => {

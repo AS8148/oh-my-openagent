@@ -21,6 +21,7 @@ import { reconcileNativeModelPrompts } from "./agents/native-model-prompt"
 import type { NativePromptContext } from "./agents/native-prompt-frame"
 import { toolPromptSnippet } from "./agents/native-tool-snippet"
 import { createSessionToolPermissionLookup } from "./plugin/session-tool-permissions"
+import { rebaseSisyphusRuntimePrompt } from "./agents/sisyphus-runtime-prompt-reconciler"
 
 export function createPluginInterface(args: {
   ctx: PluginContext
@@ -124,9 +125,14 @@ export function createPluginInterface(args: {
           }
         }
         for (const pattern of pluginConfig.disabled_tools ?? []) rules.push({ pattern, permission: "deny" })
-        const system = [agent.prompt]
-        reconcileNativeModelPrompts(system, undefined, toolSnippets, rules)
-        agent.prompt = system[0]
+        const rewrite = (prompt: string): string => {
+          const system = [prompt]
+          reconcileNativeModelPrompts(system, undefined, toolSnippets, rules)
+          return system[0]
+        }
+        const rewritten = rewrite(agent.prompt)
+        rebaseSisyphusRuntimePrompt(agent.prompt, rewritten, rewrite)
+        agent.prompt = rewritten
       }
     },
 
