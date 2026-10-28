@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { createCredentialStore, KeychainApprovalPendingError, KeychainLockedError } from "../keystore"
 import { A, API, credentials, fakeKeychain, helperSession } from "./fake-keychain.test-support"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { onTestFinished } from "bun:test"
+import { createCreatorHandOff, desktopRuntimeCandidates } from "./creator-handoff"
 
 const stored = JSON.stringify(credentials)
 
@@ -152,6 +157,33 @@ describe("creator hand-off across two processes (#11262 addendum rows 7, 8)", ()
     expect(await store.read()).toBeNull()
     expect(creator.runs()).toBe(0)
     expect(keychain.stats.approves).toBe(0)
+  })
+
+  test("#given an already-shipped desktop runtime (no keychain helper in its bundle) #when the CLI needs the item #then it is never spawned and the CLI shows exactly one dialog", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "runtime", "ours")
+    const root = await mkdtemp(join(tmpdir(), "old-runtime-"))
+    onTestFinished(() => rm(root, { recursive: true, force: true }))
+    const [old] = desktopRuntimeCandidates(root, "arm64").slice(1)
+    if (old === undefined) throw new Error("no candidate")
+    await mkdir(dirname(old.runtime), { recursive: true })
+    await writeFile(old.runtime, "omo 5.1.48")
+    let spawned = 0
+    const handOff = createCreatorHandOff({
+      candidates: [old],
+      env: {},
+      checkBundle: async () => true,
+      checkRuntime: async () => true,
+      run: async () => {
+        spawned++
+        return 0
+      },
+      selfPath: "/x",
+    })
+    const { session } = await helperSession(keychain, false, { handOff })
+    expect(await session.accessToken()).toBe(credentials.accessToken)
+    expect(spawned).toBe(0)
+    expect(keychain.stats.approves).toBe(1)
   })
 
   test("#given a marked hand-off child with no helper #when it reads #then it refuses instead of today's interactive read", async () => {
