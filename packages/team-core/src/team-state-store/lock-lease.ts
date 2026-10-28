@@ -37,6 +37,10 @@ export type LockLeaseOptions = {
 
 const leaseTempPrefix = (lockPath: string) => `.${basename(lockPath)}.`
 const LEASE_TEMP_SUFFIX = ".lease"
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+// Exactly this lock's temp names: a sibling lock whose name starts with this one's (`lock` vs `lock.x`) never matches.
+const leaseTempPattern = (lockPath: string) => new RegExp(`^\\.${escapeRegExp(basename(lockPath))}\\.${UUID}\\.lease$`)
 
 async function replaceRecord(lockPath: string, content: string): Promise<void> {
   const temporary = join(dirname(lockPath), `${leaseTempPrefix(lockPath)}${randomUUID()}${LEASE_TEMP_SUFFIX}`)
@@ -57,7 +61,7 @@ async function replaceRecord(lockPath: string, content: string): Promise<void> {
 // Only the lock's holder ever writes these temp files, and this process holds the lock now, so every one left in the
 // directory for this lock is a leftover of a holder that crashed between its create and its rename.
 async function removeLeftoverTemps(lockPath: string): Promise<void> {
-  const prefix = leaseTempPrefix(lockPath)
+  const pattern = leaseTempPattern(lockPath)
   let entries: string[]
   try {
     entries = await readdir(dirname(lockPath))
@@ -66,7 +70,7 @@ async function removeLeftoverTemps(lockPath: string): Promise<void> {
     throw error
   }
   for (const entry of entries) {
-    if (entry.startsWith(prefix) && entry.endsWith(LEASE_TEMP_SUFFIX)) await rm(join(dirname(lockPath), entry), { force: true })
+    if (pattern.test(entry)) await rm(join(dirname(lockPath), entry), { force: true })
   }
 }
 

@@ -48,9 +48,8 @@ export function lockedDarwinStore(deps: DarwinStoreDeps, lease: HelperLease): Lo
     },
     read,
     async settle() {
-      const source = lastRead?.source
-      if (lastRead === null || (source !== "own-identity" && source !== "owned-unmarked" && source !== "approved")) return
-      const outcome = await migrate(deps.account, lastRead.value, helper, deleteOwnOld)
+      if (lastRead === null) return
+      const outcome = await migrate(deps.account, lastRead.value, lastRead.source, helper, deleteOwnOld)
       if (outcome.kind === "failed") deps.notice(`omo: the macOS keychain item could not be moved to OmO's keychain helper (${outcome.step}); it keeps working as before.`)
     },
     async write(value, intent) {
