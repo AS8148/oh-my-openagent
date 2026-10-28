@@ -19,6 +19,7 @@ import type { CreatedHooks } from "./create-hooks"
 import type { Managers } from "./create-managers"
 import { reconcileNativeModelPrompts } from "./agents/native-model-prompt"
 import type { NativePromptContext } from "./agents/native-prompt-frame"
+import { toolPromptSnippet } from "./agents/native-tool-snippet"
 import { createSessionToolPermissionLookup } from "./plugin/session-tool-permissions"
 
 export function createPluginInterface(args: {
@@ -37,7 +38,7 @@ export function createPluginInterface(args: {
   const { ctx, pluginConfig, firstMessageVariantGate, managers, hooks, tools } =
     args
   const toolSnippets = Object.fromEntries(
-    Object.entries(tools).map(([name, definition]) => [name, definition.description]),
+    Object.entries(tools).map(([name, definition]) => [name, toolPromptSnippet(definition.description)]),
   )
   const sessionToolPermissions = createSessionToolPermissionLookup(ctx)
   const handleEvent = createEventHandler({
@@ -138,7 +139,7 @@ export function createPluginInterface(args: {
       hooks,
       onDefinition: (name, description) => {
         // OpenCode defines this error handler but never exposes it as a model tool.
-        if (name !== "invalid") toolSnippets[name] = description
+        if (name !== "invalid") toolSnippets[name] = toolPromptSnippet(description)
       },
     }),
 

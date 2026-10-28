@@ -27,9 +27,14 @@ model-family text, whitespace, headings or calibration is normalized.
 The transformed core is followed by a JSON model identity containing the
 actual provider, full model ID and selected preset, then the existing OpenCode
 role append. The core and identity are enclosed in an `omo-model-core` frame
-whose JSON metadata stores the configured model, tool names and snippets, permission rules, task-system mode
-and optional Hephaestus restriction. The per-request system transform rebuilds just that
-frame for the actual runtime model, preserving role and user appends. This
+whose header carries only a short reference (`ref="<16 hex>"`). The frame's context (configured model,
+tool names and snippets, permission rules, task-system mode and optional Hephaestus restriction) stays in
+the plugin process, keyed by that reference, so none of it is sent to the model. The per-request system
+transform rebuilds just that frame for the actual runtime model, preserving role and user appends.
+
+Tool snippets are one line per tool, like Native's author-written `promptSnippet`: OpenCode tools only
+have a full description, which the model already gets in the tools array, so the snippet is the
+description's first paragraph, sentence by sentence until it is at least 40 characters, capped at 200. This
 also covers model changes after registration and model overrides applied by
 categories. Unframed custom prompts are left alone; malformed frames are not
 interpreted. An unsupported Hephaestus runtime model leaves the previous frame

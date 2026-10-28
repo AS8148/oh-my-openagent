@@ -7,6 +7,7 @@ import { clearSisyphusRuntimePromptContext } from "../agents/sisyphus-runtime-pr
 import { createGrepTools } from "../tools/grep/tools"
 import { createGlobTools } from "../tools/glob/tools"
 import { interactive_bash } from "../tools/interactive-bash/tools"
+import { toolPromptSnippet } from "../agents/native-tool-snippet"
 
 afterEach(clearSisyphusRuntimePromptContext)
 
@@ -56,13 +57,33 @@ test("production registration includes the real registered names and description
   const config: Parameters<NonNullable<typeof api.config>>[0] = {}
   await defined(api.config, "config hook")(config)
   for (const agent of Object.values(config.agent ?? {})) {
-    expect(agent.prompt).toContain("- interactive_bash: " + tools.interactive_bash.description)
+    expect(agent.prompt).toContain("- interactive_bash: " + toolPromptSnippet(tools.interactive_bash.description))
     expect(agent.prompt).not.toContain("## Available Tools\n\n(none)")
   }
-  expect(defined(config.agent?.oracle?.prompt, "oracle prompt")).toContain("- grep: " + tools.grep.description)
-  expect(defined(config.agent?.oracle?.prompt, "oracle prompt")).toContain("- glob: " + tools.glob.description)
-  expect(defined(config.agent?.sisyphus?.prompt, "sisyphus prompt")).not.toContain("- grep: " + tools.grep.description)
-  expect(defined(config.agent?.sisyphus?.prompt, "sisyphus prompt")).not.toContain("- glob: " + tools.glob.description)
+  expect(defined(config.agent?.oracle?.prompt, "oracle prompt")).toContain("- grep: " + toolPromptSnippet(tools.grep.description))
+  expect(defined(config.agent?.oracle?.prompt, "oracle prompt")).toContain("- glob: " + toolPromptSnippet(tools.glob.description))
+  expect(defined(config.agent?.sisyphus?.prompt, "sisyphus prompt")).not.toContain("- grep: " + toolPromptSnippet(tools.grep.description))
+  expect(defined(config.agent?.sisyphus?.prompt, "sisyphus prompt")).not.toContain("- glob: " + toolPromptSnippet(tools.glob.description))
+})
+
+test("the system prompt sent to the model carries no frame metadata and one-line tool snippets", async () => {
+  const { api, tools } = createHarness()
+  const config: Parameters<NonNullable<typeof api.config>>[0] = {}
+  await defined(api.config, "config hook")(config)
+  const transform = defined(api["experimental.chat.system.transform"], "system transform hook")
+  for (const name of ["sisyphus", "oracle"] as const) {
+    const output = { system: [defined(config.agent?.[name]?.prompt, name + " prompt")] }
+    await transform(
+      { sessionID: "ses_" + name, model: { providerID: "openai", id: "gpt-5.5" } } as Parameters<typeof transform>[0],
+      output,
+    )
+    const sent = output.system.join("\n")
+    const headers = sent.split("\n").filter((line) => line.startsWith("<omo-model-core"))
+    expect(headers.length).toBeGreaterThan(0)
+    for (const header of headers) expect(header).toMatch(/^<omo-model-core ref="[0-9a-f]{16}">$/)
+    expect(sent).not.toContain(tools.interactive_bash.description)
+    expect(sent).toContain("- interactive_bash: " + toolPromptSnippet(tools.interactive_bash.description))
+  }
 })
 
 test("host definitions refresh the core without a model switch and retain agent restrictions", async () => {

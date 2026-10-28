@@ -7,6 +7,8 @@ import { describe, expect, test } from "bun:test"
 import { getPrometheusPrompt } from "../agents/prometheus/system-prompt"
 import { getAgentListDisplayName } from "./agent-display-names"
 import { reconcileNativeModelPrompts } from "../agents/native-model-prompt"
+import type { NativePromptContext } from "../agents/native-prompt-frame"
+import { toolPromptSnippet } from "../agents/native-tool-snippet"
 
 const DIST_INDEX = "dist/index.js"
 const PROMETHEUS_SOURCE = "packages/prompts-core/prompts/prometheus/default.md"
@@ -94,12 +96,22 @@ describe("dist bundle prompt content", () => {
       expect(runtimeAgent, "Prometheus was not returned by the built plugin runtime").toBeDefined()
       if (!runtimeAgent) throw new Error("Missing bundled Prometheus agent")
       expect(runtimeAgent.model).toBe(CONFIGURED_MODEL)
-      const metadata = JSON.parse(runtimeAgent.prompt.slice("<omo-model-core>".length).split("\n")[0])
+      expect(runtimeAgent.prompt.split("\n")[0]).toMatch(/^<omo-model-core ref="[0-9a-f]{16}">$/)
+      const snippets = Object.fromEntries(Object.entries(toolSnippets).map(([name, description]) => [name, toolPromptSnippet(description)]))
+      const rules: NonNullable<NativePromptContext["toolPermissions"]> = []
+      for (const [pattern, permission] of Object.entries((runtimeAgent.permission ?? {}) as Record<string, unknown>)) {
+        if (permission === "allow" || permission === "ask" || permission === "deny") rules.push({ pattern, permission })
+        else if (typeof permission === "object" && permission !== null) {
+          for (const [scope, action] of Object.entries(permission)) {
+            if (action === "allow" || action === "ask" || action === "deny") rules.push({ pattern, permission: action, scope })
+          }
+        }
+      }
       const expected = [getPrometheusPrompt(CONFIGURED_MODEL)]
-      reconcileNativeModelPrompts(expected, CONFIGURED_MODEL, toolSnippets, metadata.toolPermissions)
+      reconcileNativeModelPrompts(expected, CONFIGURED_MODEL, snippets, rules)
       expect(runtimeAgent.prompt).toBe(expected[0])
-      expect(toolSnippets.grep).toBeDefined()
-      expect(runtimeAgent.prompt).toContain("- grep: " + toolSnippets.grep)
+      expect(snippets.grep).toBeDefined()
+      expect(runtimeAgent.prompt).toContain("- grep: " + snippets.grep)
       const frameEnd = "\n</omo-model-core>\n\n"
       const roleOffset = runtimeAgent.prompt.indexOf(frameEnd)
       expect(roleOffset).toBeGreaterThanOrEqual(0)
