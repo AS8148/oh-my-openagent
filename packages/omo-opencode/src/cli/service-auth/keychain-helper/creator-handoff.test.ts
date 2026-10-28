@@ -10,8 +10,13 @@ import {
   desktopRuntimeCandidates,
   HANDOFF_ENV,
   type HandOffRunner,
-  runtimeKeychainHelper,
 } from "./creator-handoff"
+import { runtimeDeclaresKeychainHandoff } from "./runtime-capabilities"
+
+// The desktop's installed layout, written out literally and shared with no product code (RULING-74; desktop#5057
+// keychain-helper.ts installs the runtime, its keychain helper and the capability file side by side here).
+const RUNTIME_DIR = "Applications/OmO.app/Contents/Resources/omo-runtime/darwin-arm64"
+const CAPABILITY_FILE = "omo-runtime-capabilities.json"
 
 const roots: string[] = []
 afterEach(() => {
@@ -22,12 +27,12 @@ function installedApps(...names: string[]): DesktopRuntime[] {
   const root = mkdtempSync(join(tmpdir(), "creator-handoff-"))
   roots.push(root)
   return names.map(name => {
-    const [candidate] = desktopRuntimeCandidates(join(root, name), "arm64").slice(1)
-    if (candidate === undefined) throw new Error("no candidate")
-    mkdirSync(dirname(runtimeKeychainHelper(candidate.runtime)), { recursive: true })
-    writeFileSync(candidate.runtime, name)
-    writeFileSync(runtimeKeychainHelper(candidate.runtime), "helper")
-    return candidate
+    const home = join(root, name)
+    mkdirSync(join(home, RUNTIME_DIR), { recursive: true })
+    writeFileSync(join(home, RUNTIME_DIR, "omo"), name)
+    writeFileSync(join(home, RUNTIME_DIR, "omo-keychain"), "helper")
+    writeFileSync(join(home, RUNTIME_DIR, CAPABILITY_FILE), '{"keychainHandoff":1}\n')
+    return { app: join(home, "Applications/OmO.app"), runtime: join(home, RUNTIME_DIR, "omo") }
   })
 }
 
@@ -117,14 +122,28 @@ describe("creator hand-off (#11262 addendum change 1, rows 7 and 8)", () => {
     expect(await createCreatorHandOff({ candidates, env: {}, checkBundle: valid, checkRuntime: valid, run: failing, selfPath: "/x" })()).toBe(false)
   })
 
-  test("#given an already-shipped runtime without the keychain helper beside it #when handing off #then it is never run", async () => {
+  test.each([
+    ["no capability file (omo-ai 5.1.48 and earlier)", null],
+    ["a capability file without the hand-off", '{"other":1}'],
+    ["an older hand-off level", '{"keychainHandoff":0}'],
+    ["an unreadable capability file", "not json"],
+  ] as const)("#given a runtime with %s #when handing off #then it is never run", async (_name, content) => {
     const [old] = installedApps("old")
-    rmSync(runtimeKeychainHelper(old?.runtime ?? ""))
+    const file = join(dirname(old?.runtime ?? ""), CAPABILITY_FILE)
+    if (content === null) rmSync(file)
+    else writeFileSync(file, content)
     const { runs, run } = recorder()
     const handOff = createCreatorHandOff({ candidates: [old ?? { app: "", runtime: "" }], env: {}, checkBundle: valid, checkRuntime: valid, run, selfPath: "/x" })
     expect(await handOff()).toBe(false)
     expect(runs).toEqual([])
   })
+
+  test("#given the desktop layout #when the capability is read #then it is the file directly beside the runtime binary", async () => {
+    const [app] = installedApps("one")
+    expect(await runtimeDeclaresKeychainHandoff(app?.runtime ?? "")).toBe(true)
+    expect(desktopRuntimeCandidates("/Users/someone", "arm64")[1]?.runtime).toBe(`/Users/someone/${RUNTIME_DIR}/omo`)
+  })
+
 
   test("#given a signature check that throws #when handing off #then false, never a rejection", async () => {
     const [app] = installedApps("one")

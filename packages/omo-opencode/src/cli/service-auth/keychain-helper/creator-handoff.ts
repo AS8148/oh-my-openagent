@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path"
 import type { RequirementCheck } from "./signature"
+import { runtimeDeclaresKeychainHandoff } from "./runtime-capabilities"
 import { verifyWithSecurityFramework } from "./signature"
 
 const DEVELOPER_ID_TEAM =
@@ -14,13 +15,6 @@ export const HANDOFF_ENV = "OMO_KEYCHAIN_HANDOFF"
 const HANDOFF_DEADLINE_MS = 45_000
 
 export type DesktopRuntime = { readonly app: string; readonly runtime: string }
-
-/**
- * Only a runtime whose bundle ships OmO's keychain helper beside it was built with the hand-off contract (it honours
- * `OMO_KEYCHAIN_HANDOFF` and can migrate). An already-shipped runtime without it would read with its own interactive
- * dialog, so it is never asked. The deep bundle seal covers this file too.
- */
-export const runtimeKeychainHelper = (runtime: string): string => join(dirname(runtime), "bin", "darwin", "omo-keychain")
 
 export function desktopRuntimeCandidates(home: string, arch: string = process.arch): readonly DesktopRuntime[] {
   const runtimeArch = arch === "arm64" ? "arm64" : "x64"
@@ -67,6 +61,7 @@ export function createCreatorHandOff(options: {
   readonly env?: NodeJS.ProcessEnv
   readonly checkRuntime?: RequirementCheck
   readonly checkBundle?: BundleCheck
+  readonly declaresHandOff?: (runtime: string) => Promise<boolean>
   readonly run?: HandOffRunner
   readonly selfPath?: string
 }): () => Promise<boolean> {
@@ -75,11 +70,19 @@ export function createCreatorHandOff(options: {
     if (env[HANDOFF_ENV] === "1") return false
     const checkRuntime = options.checkRuntime ?? verifyWithSecurityFramework
     const checkBundle = options.checkBundle ?? verifyBundle
+    const declaresHandOff = options.declaresHandOff ?? runtimeDeclaresKeychainHandoff
     const self = options.selfPath ?? process.execPath
     for (const { app, runtime } of options.candidates) {
-      if (runtime === self || !(await Bun.file(runtime).exists()) || !(await Bun.file(runtimeKeychainHelper(runtime)).exists())) continue
+      if (runtime === self || !(await Bun.file(runtime).exists())) continue
+      // RULING-74: only a runtime that declares the hand-off contract itself (its capability file, inside the sealed
+      // bundle) is asked; an already-shipped runtime would ignore the marker and show its own dialog.
       const verified = await Promise.resolve()
-        .then(async () => (await checkBundle(app, DESKTOP_APP_REQUIREMENT)) && (await checkRuntime(runtime, DESKTOP_RUNTIME_REQUIREMENT)))
+        .then(
+          async () =>
+            (await checkBundle(app, DESKTOP_APP_REQUIREMENT)) &&
+            (await checkRuntime(runtime, DESKTOP_RUNTIME_REQUIREMENT)) &&
+            (await declaresHandOff(runtime)),
+        )
         .catch(() => false)
       if (!verified) continue
       const childEnv: Record<string, string> = { [HANDOFF_ENV]: "1" }

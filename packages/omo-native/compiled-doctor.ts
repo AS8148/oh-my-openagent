@@ -97,7 +97,7 @@ export async function runCompiledDoctor(input: CompiledDoctorInput): Promise<voi
   const launchSpec = launchSpecDoctorLines(join(input.execDir, "plugin"))
   if (launchSpec.some((line) => line.startsWith("FAIL "))) failed = true
   lines.push(...launchSpec)
-  lines.push(...(input.options?.keychainHelperLines?.() ?? keychainHelperDoctorLines({ packageRoot: input.execDir })))
+  lines.push(...(input.options?.keychainHelperLines?.() ?? keychainHelperDoctorLines({ packageRoot: input.execDir, helperRelPath: "omo-keychain" })))
   if (input.engine !== undefined) {
     lines.push(...daemonReportLines({ engine: input.engine, pluginRoot: join(input.execDir, "plugin"), agentDir: canonicalAgentDir(), env: process.env, platform: process.platform }))
   }

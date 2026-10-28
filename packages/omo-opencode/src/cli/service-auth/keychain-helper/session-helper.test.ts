@@ -3,9 +3,9 @@ import { createCredentialStore, KeychainApprovalPendingError, KeychainLockedErro
 import { A, API, credentials, fakeKeychain, helperSession } from "./fake-keychain.test-support"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import { onTestFinished } from "bun:test"
-import { createCreatorHandOff, desktopRuntimeCandidates } from "./creator-handoff"
+import { createCreatorHandOff, HANDOFF_ENV } from "./creator-handoff"
 
 const stored = JSON.stringify(credentials)
 
@@ -164,10 +164,12 @@ describe("creator hand-off across two processes (#11262 addendum rows 7, 8)", ()
     keychain.put(A, stored, "runtime", "ours")
     const root = await mkdtemp(join(tmpdir(), "old-runtime-"))
     onTestFinished(() => rm(root, { recursive: true, force: true }))
-    const [old] = desktopRuntimeCandidates(root, "arm64").slice(1)
-    if (old === undefined) throw new Error("no candidate")
-    await mkdir(dirname(old.runtime), { recursive: true })
-    await writeFile(old.runtime, "omo 5.1.48")
+    // The desktop layout written out literally (desktop#5057); an omo-ai 5.1.48 runtime ships no capability file.
+    const runtimeDir = join(root, "Applications/OmO.app/Contents/Resources/omo-runtime/darwin-arm64")
+    await mkdir(runtimeDir, { recursive: true })
+    await writeFile(join(runtimeDir, "omo"), "omo 5.1.48")
+    await writeFile(join(runtimeDir, "omo-keychain"), "helper")
+    const old = { app: join(root, "Applications/OmO.app"), runtime: join(runtimeDir, "omo") }
     let spawned = 0
     const handOff = createCreatorHandOff({
       candidates: [old],
@@ -197,6 +199,21 @@ describe("creator hand-off across two processes (#11262 addendum rows 7, 8)", ()
       keychainHelper: { access: async () => ({ kind: "missing" }), noDialog: true, ownerMarker: async () => "absent" },
     })
     await expect(store.read()).rejects.toBeInstanceOf(KeychainApprovalPendingError)
+    expect(keychain.stats.approves).toBe(0)
+  })
+
+  test("#given only OMO_KEYCHAIN_HANDOFF=1 in the environment #when that process reads an item it cannot read silently #then no dialog", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "other-app", "ours")
+    const previous = process.env[HANDOFF_ENV]
+    process.env[HANDOFF_ENV] = "1"
+    try {
+      const { store } = await helperSession(keychain, false, { identity: "runtime" })
+      await expect(store.read()).rejects.toBeInstanceOf(KeychainApprovalPendingError)
+    } finally {
+      if (previous === undefined) delete process.env[HANDOFF_ENV]
+      else process.env[HANDOFF_ENV] = previous
+    }
     expect(keychain.stats.approves).toBe(0)
   })
 

@@ -18,6 +18,18 @@ describe("omo doctor: keychain helper line (#11262 addendum Q1, row 9)", () => {
     expect(lines.some(line => line.startsWith("FAIL"))).toBe(false)
   })
 
+  test("#given the compiled runtime layout #when doctor runs #then it checks omo-keychain directly beside the binary (RULING-74)", () => {
+    const seen: string[] = []
+    const lines = keychainHelperDoctorLines({ packageRoot: "/opt/omo", helperRelPath: "omo-keychain", platform: "darwin", exists: path => {
+        seen.push(String(path))
+        return false
+      },
+      verify: () => false,
+    })
+    expect(seen).toEqual(["/opt/omo/omo-keychain"])
+    expect(lines[0]).toContain("missing omo-keychain")
+  })
+
   test.each(["linux", "win32"] as const)("#given %s #when doctor runs #then no keychain helper line", platform => {
     expect(keychainHelperDoctorLines({ packageRoot: "/pkg", platform, exists: () => false, verify: () => false })).toEqual([])
   })

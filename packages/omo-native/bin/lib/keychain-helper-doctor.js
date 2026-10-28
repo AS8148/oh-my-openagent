@@ -15,12 +15,12 @@ const verifyWithCodesign = (path) =>
  * The one place a missing or damaged keychain helper is reported (#11262 addendum Q1/row 9): normal output stays silent
  * and sign-in takes the previous path, so this is a warning, never a failure. macOS only.
  */
-export function keychainHelperDoctorLines({ packageRoot, platform = process.platform, exists = existsSync, verify = verifyWithCodesign }) {
+export function keychainHelperDoctorLines({ packageRoot, helperRelPath = "bin/darwin/omo-keychain", platform = process.platform, exists = existsSync, verify = verifyWithCodesign }) {
   if (platform !== "darwin") return []
-  const helper = join(packageRoot, "bin", "darwin", "omo-keychain")
+  const helper = join(packageRoot, helperRelPath)
   if (!exists(helper))
-    return ["WARN keychain helper: missing bin/darwin/omo-keychain; macOS sign-in uses the previous keychain path and may ask for access again. Reinstall omo."]
+    return [`WARN keychain helper: missing ${helperRelPath}; macOS sign-in uses the previous keychain path and may ask for access again. Reinstall omo.`]
   if (!verify(helper))
-    return ["WARN keychain helper: bin/darwin/omo-keychain failed its signature check and is never run; reinstall omo."]
-  return ["PASS keychain helper: bin/darwin/omo-keychain (signed)"]
+    return [`WARN keychain helper: ${helperRelPath} failed its signature check and is never run; reinstall omo.`]
+  return [`PASS keychain helper: ${helperRelPath} (signed)`]
 }
