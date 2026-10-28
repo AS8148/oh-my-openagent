@@ -1395,6 +1395,11 @@ jobs:
           if [ ! -f .omo/release-binaries/omo-keychain-darwin-universal ]; then
             gh release download "v${VERSION}" --pattern omo-keychain-darwin-universal --dir .omo/release-binaries
           fi
+          # build-omo-binary writes omo-runtime-capabilities.json beside the binaries (#11262 RULING-74);
+          # the omo-* globs below checksum and upload it. Restore it only once this commit's builder writes it.
+          if [ ! -f .omo/release-binaries/omo-runtime-capabilities.json ] && grep -qF omo-runtime-capabilities.json script/build-omo-binary.ts; then
+            gh release download "v${VERSION}" --pattern omo-runtime-capabilities.json --dir .omo/release-binaries
+          fi
           ls -la .omo/release-binaries/
           # The release owns two checksum assets: one for 12 omo launchers plus the
           # keychain helper, and one for the six separately downloadable desktop engines.
@@ -1428,6 +1433,15 @@ jobs:
             touch "$EXPECTED_DIR/$NAME"
           done
           touch "$EXPECTED_DIR/omo-keychain-darwin-universal"
+          # The runtime capability file is required exactly when the released commit's builder writes it.
+          CAPABILITIES=omo-runtime-capabilities.json
+          SUMS_LINES=13
+          ASSET_COUNT=21
+          if grep -qF "$CAPABILITIES" script/build-omo-binary.ts; then
+            touch "$EXPECTED_DIR/$CAPABILITIES"
+            SUMS_LINES=14
+            ASSET_COUNT=22
+          fi
           for HOST in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             touch "$EXPECTED_DIR/senpi-desktop-engine-${HOST}"
           done
@@ -1437,12 +1451,16 @@ jobs:
             <(cd "$VERIFY_DIR" && printf '%s\n' * | sort)
           (
             cd "$VERIFY_DIR"
-            test "$(wc -l < SHA256SUMS)" -eq 13
+            test "$(wc -l < SHA256SUMS)" -eq "$SUMS_LINES"
+            if [ "$SUMS_LINES" -eq 14 ]; then
+              grep -q "  ${CAPABILITIES}\$" SHA256SUMS
+              printf '{"keychainHandoff":1}\n' | cmp - "$CAPABILITIES"
+            fi
             test "$(wc -l < senpi-desktop-engine-checksums.txt)" -eq 6
             shasum -a 256 -c SHA256SUMS
             shasum -a 256 -c senpi-desktop-engine-checksums.txt
           )
-          echo "Verified 21/21 release assets for v${VERSION}"
+          echo "Verified ${ASSET_COUNT}/${ASSET_COUNT} release assets for v${VERSION}"
 
       - name: Delete draft release
         if: inputs.lazycodex_only != true
