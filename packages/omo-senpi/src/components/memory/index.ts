@@ -1,5 +1,5 @@
 import type { OmoMemorySettings } from "@oh-my-opencode/omo-config-core"
-import { resolveMemoryRoot, syncPinDir } from "@oh-my-opencode/memory-core"
+import { InFlightReads, resolveMemoryRoot, syncPinDir } from "@oh-my-opencode/memory-core"
 
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { loadSenpiOmoConfig, type SenpiOmoConfigResult } from "../config-resolution"
@@ -15,6 +15,7 @@ import { finalizeIdentityRun } from "./transient-identity"
 import type { DeviceAccountSource } from "./device-session/account-source"
 import { lazyCliAccountSource } from "./device-session/account-runtime-loader"
 import { createDeviceSessionResolver } from "./device-session/resolver"
+import { trackMemoryHooks } from "./hook-work"
 import { createSyncRunner, type SyncRunner } from "./sync-runner"
 import { sweepTransientMemoryRuns, type TransientSweep } from "./transient-sweep"
 import { registerRecallMemoryReporter } from "./memory-reporter"
@@ -56,17 +57,20 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
 
   return {
     name: "memory",
-    register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
-      const resolveCwd = options.resolveCwd ?? (() => extensionCwd(pi))
+    register(hostPi: SenpiExtensionAPI, ctx: ComponentContext): void {
+      const resolveCwd = options.resolveCwd ?? (() => extensionCwd(hostPi))
       const cwd = resolveCwd()
       const bootConfig = resolveMemoryConfig(loadConfig({ cwd }))
       if (!isEnabled(bootConfig, ctx, env)) return
 
-      const missing = missingMemoryCapabilities(pi)
-      if (missing.length > 0 || !hasMemoryCapabilities(pi)) {
+      const missing = missingMemoryCapabilities(hostPi)
+      if (missing.length > 0 || !hasMemoryCapabilities(hostPi)) {
         ctx.logger.warn("omo-senpi memory component skipped: missing ExtensionAPI capabilities", { missing })
         return
       }
+      // Everything the session_shutdown drain must wait on before the identity directory is released (#11135).
+      const work = new InFlightReads()
+      const pi = trackMemoryHooks(hostPi, work)
 
       // The runner reports sync status transitions to the wiring, which exists only after the runner.
       const syncStatusChanged: { current?: (repo: string) => void } = {}
@@ -82,10 +86,10 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
       primeMemoryPersonaAssets({ logger: ctx.logger })
       // Reclaim runs an abnormal exit left behind (#7765). Detached from registration on purpose:
       // it is pure maintenance, and a slow or failing sweep must never delay or break binding.
-      void sweepTransientRuns({
+      void work.track(() => sweepTransientRuns({
         memoryRoot: resolveMemoryRoot(env, cwd),
         warn: (message, fields) => ctx.logger.warn(message, fields),
-      }).catch((error: unknown) => {
+      })).catch((error: unknown) => {
         ctx.logger.warn("omo-senpi memory transient sweep failed", { error: describeError(error) })
       })
 
@@ -98,6 +102,7 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
         logger: ctx.logger,
         deviceName: (principal) => syncRunner.deviceName(principal),
         syncStatus: (repo) => syncRunner.status(repo),
+        work,
         ...(options.createRuntime === undefined ? {} : { createRuntime: options.createRuntime }),
         ...(options.refreshStatus === undefined ? {} : { refreshStatus: options.refreshStatus }),
         // Reuse the boot snapshot: registration must not add a loadConfig() call, because the
@@ -113,11 +118,12 @@ export function createMemoryComponent(options: MemoryComponentOptions = {}): Omo
         sessions,
         wiring,
         syncRunner,
+        work,
         isEnabled: (config) => isEnabled(config, ctx, env),
         resolveConfig: resolveMemoryConfig,
       })
       syncStatusChanged.current = (repo) => {
-        void wiring.onSyncStatusChanged(repo).catch((error: unknown) => {
+        void work.track(() => wiring.onSyncStatusChanged(repo)).catch((error: unknown) => {
           ctx.logger.warn("memory sync status refresh failed", { error: describeError(error) })
         })
       }
