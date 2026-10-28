@@ -4,6 +4,7 @@ import type { ManagedChildEvent, TaskRecord, TaskStatus } from "@oh-my-opencode/
 
 import type { JobWidgetBriefText, JobWidgetSourceRegistration, JobWidgetTextChunk } from "./job-widget-host"
 import {
+  backgroundCommandWatch,
   createTaskJobWidgetFeed,
   TASK_TOOL_CALL_MARK,
   TASK_TOOLS_SOURCE_ID,
@@ -241,5 +242,81 @@ describe("task job widget sources", () => {
 
     // then
     expect(registry.registrations.map((entry) => entry.id)).toEqual(["st_bg"])
+  })
+})
+
+describe("task job widget watch hints from background commands", () => {
+  const text = (value: string) => ({ content: [{ type: "text", text: value }] })
+
+  it("#given a child that renders with blender in the background and reads its output #when the calls finish #then the watch names the command once and the tap holds the render lines", () => {
+    // given
+    const { registry, child, feed } = feedWith()
+    feed.observe({ taskId: "st_bg", record: record("running") })
+
+    // when
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "c1", toolName: "bash", args: { command: "blender -b scene.blend -a", run_in_background: true } })
+    child.emit("st_bg", { type: "tool_execution_end", toolCallId: "c1", toolName: "bash", result: text("bash_id: bash_1 (background)") })
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "c2", toolName: "bash_output", args: { bash_id: "bash_1" } })
+    child.emit("st_bg", { type: "tool_execution_end", toolCallId: "c2", toolName: "bash_output", result: text("Fra:1 Mem:120M | Rendering 1 / 250 samples\nFra:2 Mem:121M | Rendering 2 / 250 samples") })
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "c3", toolName: "bash_output", args: { bash_id: "bash_1" } })
+    child.emit("st_bg", { type: "tool_execution_end", toolCallId: "c3", toolName: "bash_output", result: text("Fra:3 Mem:121M | Rendering 3 / 250 samples") })
+
+    // then
+    expect(registry.handles[0]?.updates).toEqual([{
+      task: "Run bench.sh and report the p95 latency.",
+      intent: "Run the benchmark",
+      watch: "background command: blender -b scene.blend -a",
+    }])
+    const tap = registry.taps[0]?.text ?? ""
+    expect(tap).toContain(`${TASK_TOOL_CALL_MARK}bash_output bash_1\nFra:1 Mem:120M | Rendering 1 / 250 samples\nFra:2 Mem:121M | Rendering 2 / 250 samples\n`)
+    expect(tap).toContain("Fra:3 Mem:121M | Rendering 3 / 250 samples")
+    expect(tap).toContain(`${TASK_TOOL_CALL_MARK}bash blender -b scene.blend -a\n`)
+  })
+
+  it("#given a child that only reads, edits and runs foreground commands #when the calls finish #then no watch is set", () => {
+    // given
+    const { registry, child, feed } = feedWith()
+    feed.observe({ taskId: "st_bg", record: record("running") })
+
+    // when
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "r1", toolName: "read", args: { path: "src/a.ts" } })
+    child.emit("st_bg", { type: "tool_execution_end", toolCallId: "r1", toolName: "read", result: text("export const a = 1") })
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "e1", toolName: "edit", args: { path: "src/a.ts", run_in_background: true } })
+    child.emit("st_bg", { type: "tool_execution_end", toolCallId: "e1", toolName: "edit", result: text("edited") })
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "b1", toolName: "bash", args: { command: "bun test", run_in_background: false } })
+    child.emit("st_bg", { type: "tool_execution_end", toolCallId: "b1", toolName: "bash", result: text("3 pass") })
+
+    // then
+    expect(registry.handles[0]?.updates).toEqual([])
+    expect(registry.registrations[0]?.brief.watch).toBeUndefined()
+  })
+
+  it("#given two background commands #when the second starts and the first later finishes #then the newest command stays the watch", () => {
+    // given
+    const { registry, child, feed } = feedWith()
+    feed.observe({ taskId: "st_bg", record: record("running") })
+
+    // when
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "b1", toolName: "bash", args: { command: "./train.sh", run_in_background: true } })
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "b2", toolName: "bash", args: { command: "./eval.sh", run_in_background: true } })
+    child.emit("st_bg", { type: "tool_execution_start", toolCallId: "b3", toolName: "bash", args: { command: "./eval.sh", run_in_background: true } })
+    child.emit("st_bg", { type: "tool_execution_end", toolCallId: "b1", toolName: "bash", result: text("exit 0") })
+
+    // then
+    expect(registry.handles[0]?.updates.map((brief) => brief.watch)).toEqual([
+      "background command: ./train.sh",
+      "background command: ./eval.sh",
+    ])
+  })
+
+  it("#given a background command carrying secrets and a long tail #when it becomes the watch #then secrets are redacted before the 300-character cut", () => {
+    // when
+    const watch = backgroundCommandWatch(`OPENAI_API_KEY=sk-live-abcdefghijklmnopqrstuv ./run --token hunter2 --password 'p w' ${"x".repeat(400)}`)
+
+    // then
+    expect(watch.startsWith("background command: OPENAI_API_KEY=[REDACTED] ./run --token [REDACTED] --password [REDACTED] ")).toBe(true)
+    expect(watch).not.toContain("hunter2")
+    expect(watch).not.toContain("sk-live")
+    expect(watch.length).toBe("background command: ".length + 300)
   })
 })

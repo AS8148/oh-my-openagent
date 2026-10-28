@@ -1,6 +1,7 @@
 import { formatToolActivity, type ManagedChildEvent, type TaskRecord } from "@oh-my-opencode/senpi-task"
 
-import type { JobWidgetSourceHandle, JobWidgetSourcesApi, JobWidgetTextTap } from "./job-widget-host"
+import { redactSensitiveOutput } from "../memory/kibitzer/sensitive-output"
+import type { JobWidgetBriefText, JobWidgetSourceHandle, JobWidgetSourcesApi, JobWidgetTextTap } from "./job-widget-host"
 import { isTerminal } from "./status-row-format"
 import type { StoreMutation } from "./store-mutation-observer"
 
@@ -11,6 +12,7 @@ export const TASK_TOOL_CALL_MARK = "» "
 export const TASK_TOOLS_SOURCE_LABEL = `subagent tool calls: \`${TASK_TOOL_CALL_MARK}<tool> <intent>\` (omo's marker) then the result text`
 const MAX_TOOL_RESULT_CHARS = 64 * 1024
 const MAX_ASSIGNMENT_CHARS = 4 * 1024
+const MAX_WATCH_COMMAND_CHARS = 300
 
 export interface TaskJobWidgetManager {
   subscribeChild(taskId: string, listener: (event: ManagedChildEvent) => void): () => void
@@ -32,13 +34,14 @@ export interface TaskJobWidgetFeed {
 type TaskJob = {
   readonly handle: JobWidgetSourceHandle
   readonly tap: JobWidgetTextTap
+  readonly brief: JobWidgetBriefText
+  watch: string | undefined
   unsubscribe: (() => void) | undefined
 }
 
 // Offers each running background task of this session to senpi's job widgets: the child's finished
-// tool calls feed one `tools` tap, the task's terminal status settles the widget, and a removed record,
-// a session change or the feed's disposal forgets it. The task brief never carries a `watch` hint, so
-// senpi keeps these jobs unauthored (no model call) until a subagent can name what to watch.
+// tool calls feed one `tools` tap, its background commands set the `watch` hint, the task's terminal
+// status settles the widget, and a removed record, a session change or the feed's disposal forgets it.
 export function createTaskJobWidgetFeed(deps: TaskJobWidgetFeedDeps): TaskJobWidgetFeed {
   const jobs = new Map<string, TaskJob>()
   const settled = new Set<string>()
@@ -69,23 +72,32 @@ export function createTaskJobWidgetFeed(deps: TaskJobWidgetFeedDeps): TaskJobWid
   }
   const register = (sessionId: string, record: TaskRecord): void => {
     const tap = deps.sources.createTap(TASK_TOOLS_SOURCE_ID, TASK_TOOLS_SOURCE_LABEL)
+    const brief = taskBrief(record)
     const handle = deps.sources.register({
       sessionId,
       id: record.task_id,
       kind: "task",
       sources: [tap],
-      brief: taskBrief(record),
+      brief,
       startedAtMs: startedAtMs(record),
     })
     if (handle === undefined) {
       declined.add(record.task_id)
       return
     }
-    const job: TaskJob = { handle, tap, unsubscribe: undefined }
+    const job: TaskJob = { handle, tap, brief, watch: undefined, unsubscribe: undefined }
     jobs.set(record.task_id, job)
-    job.unsubscribe = subscribeToolResults(deps.manager, record.task_id, (entry) => {
-      tap.append(entry)
-      handle.notify()
+    job.unsubscribe = subscribeChildToolCalls(deps.manager, record.task_id, {
+      result: (entry) => {
+        tap.append(entry)
+        handle.notify()
+      },
+      backgroundCommand: (command) => {
+        const watch = backgroundCommandWatch(command)
+        if (watch === job.watch) return
+        job.watch = watch
+        handle.update({ ...job.brief, watch })
+      },
     })
   }
   const accept = (sessionId: string, record: TaskRecord): void => {
@@ -127,18 +139,51 @@ export function createTaskJobWidgetFeed(deps: TaskJobWidgetFeedDeps): TaskJobWid
   }
 }
 
-function subscribeToolResults(manager: TaskJobWidgetManager, taskId: string, append: (entry: string) => void): () => void {
+type ChildToolCallSinks = {
+  readonly result: (entry: string) => void
+  readonly backgroundCommand: (command: string) => void
+}
+
+// The subagent knows which of its own jobs shows progress; the one signal it gives without being
+// asked is starting a command in the background. The newest such command becomes the task's `watch`
+// hint, so senpi authors a widget for it; a task that only reads and edits stays unauthored.
+function subscribeChildToolCalls(manager: TaskJobWidgetManager, taskId: string, sinks: ChildToolCallSinks): () => void {
   const pendingArgs = new Map<string, unknown>()
   return manager.subscribeChild(taskId, (event) => {
-    if (event.type === "tool_execution_start" && event.toolCallId !== undefined) {
-      pendingArgs.set(event.toolCallId, event.args ?? event.input)
+    if (event.type === "tool_execution_start") {
+      const args = event.args ?? event.input
+      if (event.toolCallId !== undefined) pendingArgs.set(event.toolCallId, args)
+      const command = event.toolName === "bash" ? backgroundBashCommand(args) : undefined
+      if (command !== undefined) sinks.backgroundCommand(command)
       return
     }
     if (event.type !== "tool_execution_end" || typeof event.toolName !== "string") return
     const args = event.toolCallId === undefined ? undefined : pendingArgs.get(event.toolCallId)
     if (event.toolCallId !== undefined) pendingArgs.delete(event.toolCallId)
-    append(formatToolCallEntry(event.toolName, args, toolResultText(event.result)))
+    sinks.result(formatToolCallEntry(event.toolName, args, toolResultText(event.result)))
   })
+}
+
+function backgroundBashCommand(args: unknown): string | undefined {
+  if (typeof args !== "object" || args === null) return undefined
+  if (Reflect.get(args, "run_in_background") !== true) return undefined
+  const command: unknown = Reflect.get(args, "command")
+  return typeof command === "string" && command.trim().length > 0 ? command : undefined
+}
+
+// Redacted before the cut, so a secret straddling the 300-character limit is never half shown.
+export function backgroundCommandWatch(command: string): string {
+  const redacted = redactCommandSecrets(command.replace(/\s+/g, " ").trim())
+  const shown = redacted.length > MAX_WATCH_COMMAND_CHARS ? `${redacted.slice(0, MAX_WATCH_COMMAND_CHARS - 1)}…` : redacted
+  return `background command: ${shown}`
+}
+
+function redactCommandSecrets(text: string): string {
+  return redactSensitiveOutput(text)
+    .replace(/(--?(?:[a-z0-9]+[-_])*(?:token|password|passwd|secret|api[-_]?key|auth)(?:=|\s+))("[^"]*"|'[^']*'|\S+)/gi, "$1[REDACTED]")
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, "[REDACTED]")
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/g, "[REDACTED]")
 }
 
 export function formatToolCallEntry(toolName: string, args: unknown, resultText: string): string {
@@ -158,7 +203,7 @@ export function toolResultText(result: unknown): string {
     .join("\n")
 }
 
-function taskBrief(record: TaskRecord): { readonly task?: string; readonly intent?: string } {
+function taskBrief(record: TaskRecord): JobWidgetBriefText {
   const prompt = record.spawn_spec !== undefined && "prompt" in record.spawn_spec ? record.spawn_spec.prompt : undefined
   const intent = record.description ?? record.task_summary
   const task = prompt ?? intent
