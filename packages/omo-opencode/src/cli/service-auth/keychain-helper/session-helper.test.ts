@@ -154,6 +154,20 @@ describe("creator hand-off across two processes (#11262 addendum rows 7, 8)", ()
     expect(keychain.stats.approves).toBe(0)
   })
 
+  test("#given a marked hand-off child with no helper #when it reads #then it refuses instead of today's interactive read", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "other-app", "ours")
+    const store = createCredentialStore(API, {
+      secrets: keychain.secretsAs("runtime"),
+      platform: "darwin",
+      lockProbe: async () => "unlocked",
+      notice: () => {},
+      keychainHelper: { access: async () => ({ kind: "missing" }), noDialog: true, ownerMarker: async () => "absent" },
+    })
+    await expect(store.read()).rejects.toBeInstanceOf(KeychainApprovalPendingError)
+    expect(keychain.stats.approves).toBe(0)
+  })
+
   test("#given a hand-off whose spawn fails #when the CLI needs the item #then it falls through to exactly one dialog", async () => {
     const keychain = fakeKeychain()
     keychain.put(A, stored, "other-app", "ours")

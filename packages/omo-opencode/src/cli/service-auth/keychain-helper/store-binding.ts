@@ -132,7 +132,10 @@ export function bindKeychainHelper(input: {
     reader,
     isHelperReader: api => [...readers.values()].includes(api),
     guardHelperless: async () => {
-      if (eligible) await guardHelperlessRead(key.service, key.name, options?.row9b, options?.ownerMarker)
+      if (!eligible) return
+      // A hand-off child never shows a dialog, not even on today's helper-less read (#11613 review).
+      if ((options?.noDialog ?? process.env[HANDOFF_ENV] === "1") === true) throw input.pending("The keychain hand-off cannot show a dialog.")
+      await guardHelperlessRead(key.service, key.name, options?.row9b, options?.ownerMarker)
     },
   }
 }

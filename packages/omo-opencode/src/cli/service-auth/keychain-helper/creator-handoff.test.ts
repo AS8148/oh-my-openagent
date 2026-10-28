@@ -10,6 +10,7 @@ import {
   desktopRuntimeCandidates,
   HANDOFF_ENV,
   type HandOffRunner,
+  runtimeKeychainHelper,
 } from "./creator-handoff"
 
 const roots: string[] = []
@@ -23,8 +24,9 @@ function installedApps(...names: string[]): DesktopRuntime[] {
   return names.map(name => {
     const [candidate] = desktopRuntimeCandidates(join(root, name), "arm64").slice(1)
     if (candidate === undefined) throw new Error("no candidate")
-    mkdirSync(dirname(candidate.runtime), { recursive: true })
+    mkdirSync(dirname(runtimeKeychainHelper(candidate.runtime)), { recursive: true })
     writeFileSync(candidate.runtime, name)
+    writeFileSync(runtimeKeychainHelper(candidate.runtime), "helper")
     return candidate
   })
 }
@@ -113,6 +115,27 @@ describe("creator hand-off (#11262 addendum change 1, rows 7 and 8)", () => {
       throw new Error("EACCES")
     }
     expect(await createCreatorHandOff({ candidates, env: {}, checkBundle: valid, checkRuntime: valid, run: failing, selfPath: "/x" })()).toBe(false)
+  })
+
+  test("#given an already-shipped runtime without the keychain helper beside it #when handing off #then it is never run", async () => {
+    const [old] = installedApps("old")
+    rmSync(runtimeKeychainHelper(old?.runtime ?? ""))
+    const { runs, run } = recorder()
+    const handOff = createCreatorHandOff({ candidates: [old ?? { app: "", runtime: "" }], env: {}, checkBundle: valid, checkRuntime: valid, run, selfPath: "/x" })
+    expect(await handOff()).toBe(false)
+    expect(runs).toEqual([])
+  })
+
+  test("#given a signature check that throws #when handing off #then false, never a rejection", async () => {
+    const [app] = installedApps("one")
+    const { runs, run } = recorder()
+    const throwing = async (): Promise<boolean> => {
+      throw new Error("spawn codesign failed")
+    }
+    const candidates = [app ?? { app: "", runtime: "" }]
+    expect(await createCreatorHandOff({ candidates, env: {}, checkBundle: throwing, checkRuntime: valid, run, selfPath: "/x" })()).toBe(false)
+    expect(await createCreatorHandOff({ candidates, env: {}, checkBundle: valid, checkRuntime: throwing, run, selfPath: "/x" })()).toBe(false)
+    expect(runs).toEqual([])
   })
 
   test("#given no app installed #when handing off #then nothing runs", async () => {

@@ -15,6 +15,13 @@ const HANDOFF_DEADLINE_MS = 45_000
 
 export type DesktopRuntime = { readonly app: string; readonly runtime: string }
 
+/**
+ * Only a runtime whose bundle ships OmO's keychain helper beside it was built with the hand-off contract (it honours
+ * `OMO_KEYCHAIN_HANDOFF` and can migrate). An already-shipped runtime without it would read with its own interactive
+ * dialog, so it is never asked. The deep bundle seal covers this file too.
+ */
+export const runtimeKeychainHelper = (runtime: string): string => join(dirname(runtime), "bin", "darwin", "omo-keychain")
+
 export function desktopRuntimeCandidates(home: string, arch: string = process.arch): readonly DesktopRuntime[] {
   const runtimeArch = arch === "arm64" ? "arm64" : "x64"
   return ["/Applications/OmO.app", join(home, "Applications", "OmO.app")].map(app => ({
@@ -70,8 +77,11 @@ export function createCreatorHandOff(options: {
     const checkBundle = options.checkBundle ?? verifyBundle
     const self = options.selfPath ?? process.execPath
     for (const { app, runtime } of options.candidates) {
-      if (runtime === self || !(await Bun.file(runtime).exists())) continue
-      if (!(await checkBundle(app, DESKTOP_APP_REQUIREMENT)) || !(await checkRuntime(runtime, DESKTOP_RUNTIME_REQUIREMENT))) continue
+      if (runtime === self || !(await Bun.file(runtime).exists()) || !(await Bun.file(runtimeKeychainHelper(runtime)).exists())) continue
+      const verified = await Promise.resolve()
+        .then(async () => (await checkBundle(app, DESKTOP_APP_REQUIREMENT)) && (await checkRuntime(runtime, DESKTOP_RUNTIME_REQUIREMENT)))
+        .catch(() => false)
+      if (!verified) continue
       const childEnv: Record<string, string> = { [HANDOFF_ENV]: "1" }
       if (env.HOME !== undefined) childEnv.HOME = env.HOME
       const origin = options.origin ?? env.OMO_SERVICE_API_URL
