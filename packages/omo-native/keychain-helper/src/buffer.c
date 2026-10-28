@@ -38,6 +38,12 @@ void buffer_json_string(buffer *out, const unsigned char *bytes, size_t length) 
 
 void buffer_open_object(buffer *out) { buffer_text(out, "{"); }
 
+// Length and bytes: a decoded string may hold an embedded NUL, which strcmp would stop at.
+bool buffer_is(const buffer *value, const char *text) {
+  size_t length = strlen(text);
+  return value->bytes != NULL && value->length == length && memcmp(value->bytes, text, length) == 0;
+}
+
 static void field_name(buffer *out, const char *name) {
   if (out->length > 1) buffer_text(out, ",");
   buffer_json_string(out, (const unsigned char *)name, strlen(name));

@@ -114,10 +114,10 @@ static const char *parse_member(cursor *c, request *req) {
     skip_space(c);
     bool *seen = NULL;
     buffer *target = NULL;
-    if (strcmp(key.bytes, "v") == 0) seen = &req->has_v;
-    else if (strcmp(key.bytes, "verb") == 0) seen = &req->has_verb, target = &req->verb;
-    else if (strcmp(key.bytes, "account") == 0) seen = &req->has_account, target = &req->account;
-    else if (strcmp(key.bytes, "value") == 0) seen = &req->has_value, target = &req->value;
+    if (buffer_is(&key, "v")) seen = &req->has_v;
+    else if (buffer_is(&key, "verb")) seen = &req->has_verb, target = &req->verb;
+    else if (buffer_is(&key, "account")) seen = &req->has_account, target = &req->account;
+    else if (buffer_is(&key, "value")) seen = &req->has_value, target = &req->value;
     if (seen == NULL) refusal = "unknown-key";
     else if (*seen) refusal = "duplicate-key";
     else {

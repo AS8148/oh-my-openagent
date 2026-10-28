@@ -71,6 +71,19 @@ int main(int argc, char **argv) {
     if (status == errSecSuccess)
       printf("value %.*s\n", (int)CFDataGetLength(data), (const char *)CFDataGetBytePtr(data));
   } else if (strcmp(op, "delete") == 0) status = SecItemDelete(item_query(keychain, account, 1));
+  else if (strcmp(op, "delete-interactive") == 0) {
+    SecKeychainSetUserInteractionAllowed(true);
+    status = SecItemDelete(item_query(keychain, account, 1));
+  } else if (strcmp(op, "read-twice-interactive") == 0) {
+    SecKeychainSetUserInteractionAllowed(true);
+    for (int round = 0; round < 2; round++) {
+      CFMutableDictionaryRef query = item_query(keychain, account, 1);
+      CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
+      CFTypeRef data = NULL;
+      status = SecItemCopyMatching(query, &data);
+      printf("round %d status %d\n", round + 1, (int)status);
+    }
+  }
   else if (strcmp(op, "decrypt-apps") == 0) return decrypt_apps(keychain, account);
   else return fprintf(stderr, "unknown op %s\n", op), 2;
   printf("status %d\n", (int)status);

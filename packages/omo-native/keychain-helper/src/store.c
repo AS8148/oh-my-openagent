@@ -1,5 +1,6 @@
 #include "omo-keychain.h"
 
+#include <Security/AuthSession.h>
 #include <string.h>
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -88,6 +89,45 @@ bool target_keychain_locked(void) {
   return locked;
 }
 
+static SecKeychainRef copy_holder(const char *account) {
+  item_state found = {0};
+  SecKeychainRef holder = NULL;
+  if (lookup_attributes(account, &found) == errSecSuccess && found.item != NULL) SecKeychainItemCopyKeychain(found.item, &holder);
+  item_state_release(&found);
+  return holder;
+}
+
+// Locked state of the keychain that holds <account>; for an item that does not exist yet, the one it would be added to.
+bool item_keychain_locked(const char *account) {
+  SecKeychainRef holder = copy_holder(account);
+  if (holder == NULL) return target_keychain_locked();
+  SecKeychainStatus status = 0;
+  bool locked = SecKeychainGetStatus(holder, &status) == errSecSuccess && (status & kSecUnlockStateStatus) == 0;
+  CFRelease(holder);
+  return locked;
+}
+
+// Whether a dialog could be shown at all: not under --no-ui, and only in a security session with graphic access
+// (an SSH or launchd-background session has none).
+bool ui_available(void) {
+  if (store.no_ui) return false;
+  SecuritySessionId session = 0;
+  SessionAttributeBits attributes = 0;
+  return SessionGetInfo(callerSecuritySession, &session, &attributes) == errSecSuccess && (attributes & sessionHasGraphicAccess) != 0;
+}
+
+// (service, account) is unique within one keychain (-25299), so limiting the search list to the keychain that holds the
+// probed item makes an update or delete act on exactly that item, never on a same-named item in another keychain.
+static void scope_to_holder(CFMutableDictionaryRef query, const char *account) {
+  if (store.keychain != NULL) return;
+  SecKeychainRef holder = copy_holder(account);
+  if (holder == NULL) return;
+  CFArrayRef list = CFArrayCreate(NULL, (const void **)&holder, 1, &kCFTypeArrayCallBacks);
+  CFDictionarySetValue(query, kSecMatchSearchList, list);
+  CFRelease(list);
+  CFRelease(holder);
+}
+
 void set_interaction(bool allowed) { SecKeychainSetUserInteractionAllowed(allowed && !store.no_ui); }
 
 // `read` may show the unlock dialog of the keychain that holds the item, and nothing else: interaction is allowed only
@@ -149,6 +189,7 @@ OSStatus add_owned(const char *account, const buffer *value) {
 
 static OSStatus update_item(const char *account, CFStringRef key, CFTypeRef value) {
   CFMutableDictionaryRef query = item_query(account, true);
+  scope_to_holder(query, account);
   CFMutableDictionaryRef changes =
       CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   CFDictionarySetValue(changes, key, value);
@@ -175,6 +216,7 @@ OSStatus rename_item(const char *from, const char *to) {
 
 OSStatus delete_item(const char *account) {
   CFMutableDictionaryRef query = item_query(account, true);
+  scope_to_holder(query, account);
   OSStatus status = SecItemDelete(query);
   CFRelease(query);
   return status;
