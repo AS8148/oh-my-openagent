@@ -181,11 +181,14 @@ function prepare(run, omoConfig) {
 	run.env.PI_CODING_AGENT_DIR = run.box.agentDir;
 	run.env.OMO_MEMORY_HOME = join(root, "memory");
 	writeFileSync(join(run.box.agentDir, "trust.json"), `${JSON.stringify({ [run.box.cwd]: true }, null, 2)}\n`);
-	// The plugin's two remote MCP servers would reach the network; the user mcp.json switch the plugin documents turns
-	// them off, so a case never depends on whether a remote host answered in time.
+	// The plugin's two remote MCP servers would reach the network, and its local `_ast_grep` server connects on its own
+	// schedule: whether that connect lands before or after the host records the session's first loaded-surfaces digest
+	// decides whether a `loaded_surfaces_changed` is announced at all (both seen in B0 runs on darwin and linux). The user
+	// mcp.json switch the plugin documents turns all three off, so no case depends on a connect race; none of E21-E24
+	// exercises an MCP tool.
 	writeFileSync(
 		join(run.box.agentDir, "mcp.json"),
-		`${JSON.stringify({ mcpServers: { context7: { enabled: false }, grep_app: { enabled: false } } }, null, 2)}\n`,
+		`${JSON.stringify({ mcpServers: { context7: { enabled: false }, grep_app: { enabled: false }, _ast_grep: { enabled: false } } }, null, 2)}\n`,
 	);
 	mkdirSync(join(run.box.cwd, ".omo"), { recursive: true });
 	writeFileSync(join(run.box.cwd, ".omo", "omo.json"), `${JSON.stringify(omoConfig, null, 2)}\n`);
@@ -240,7 +243,7 @@ const cases = [
 							name: "computer",
 							args: {
 								action: "run",
-								code: "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })",
+								code: "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })",
 							},
 						},
 					],

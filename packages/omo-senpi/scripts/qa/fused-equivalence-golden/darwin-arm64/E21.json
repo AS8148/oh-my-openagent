@@ -1474,7 +1474,7 @@
          "type": "function",
          "function": {
           "name": "computer",
-          "arguments": "{\"action\":\"run\",\"code\":\"const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })\"}"
+          "arguments": "{\"action\":\"run\",\"code\":\"const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })\"}"
          }
         }
        ]
@@ -6074,9 +6074,9 @@
          "name": "computer",
          "arguments": {
           "action": "run",
-          "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
+          "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
          },
-         "partialArgs": "{\"action\":\"run\",\"code\":\"const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })\"}",
+         "partialArgs": "{\"action\":\"run\",\"code\":\"const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })\"}",
          "streamIndex": 0
         }
        ],
@@ -6145,7 +6145,7 @@
       "assistantMessageEvent": {
        "type": "toolcall_delta",
        "contentIndex": 0,
-       "delta": "{\"action\":\"run\",\"code\":\"const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })\"}"
+       "delta": "{\"action\":\"run\",\"code\":\"const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })\"}"
       }
      },
      {
@@ -6173,7 +6173,7 @@
         "name": "computer",
         "arguments": {
          "action": "run",
-         "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
+         "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
         }
        }
       },
@@ -6190,7 +6190,7 @@
          "name": "computer",
          "arguments": {
           "action": "run",
-          "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
+          "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
          }
         }
        ],
@@ -6240,7 +6240,7 @@
           "name": "computer",
           "arguments": {
            "action": "run",
-           "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
+           "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
           }
          }
         ],
@@ -6281,7 +6281,7 @@
       "toolName": "computer",
       "args": {
        "action": "run",
-       "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
+       "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
       }
      },
      {
@@ -7170,7 +7170,7 @@
          "name": "computer",
          "arguments": {
           "action": "run",
-          "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
+          "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
          }
         }
        ],
@@ -7526,7 +7526,7 @@
           "name": "computer",
           "arguments": {
            "action": "run",
-           "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
+           "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
           }
          }
         ],
@@ -7765,10 +7765,8 @@
      }
     ],
     "surfaces": {
-     "announced": true,
-     "first": {
-      "type": "loaded_surfaces_changed"
-     }
+     "announced": false,
+     "first": null
     },
     "status": {
      "setWidget:todo-sidebar": {
@@ -8402,7 +8400,7 @@
         "name": "computer",
         "arguments": {
          "action": "run",
-         "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
+         "code": "const all = await desktop.display('all'); const two = await desktop.display('2'); const a = await all.screenshot({ silent: true }); const b = await two.screenshot({ silent: true }); await two.click(20, 10); await two.screenshot({ silent: true }); return JSON.stringify({ all: [a.width, a.height], two: [b.width, b.height] })"
         }
        }
       ],
