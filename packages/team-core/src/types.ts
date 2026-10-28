@@ -143,7 +143,9 @@ const RuntimeStateMemberSchema = z.object({
   tmuxGridPaneId: z.string().optional(),
   agentType: z.enum(["leader", "general-purpose"]),
   subagent_type: z.string().optional(),
-  category: z.string().optional(),
+  // Canonicalized on read as well: a state.json written before the rename still holds the retired
+  // name, and a resumed run registers this value for its session (idle wake, live delivery).
+  category: z.string().transform(canonicalCategoryName).optional(),
   model: RuntimeStateMemberModelSchema.optional(),
   status: z.enum(["pending", "running", "idle", "errored", "completed", "shutdown_approved"]),
   color: z.string().optional(),

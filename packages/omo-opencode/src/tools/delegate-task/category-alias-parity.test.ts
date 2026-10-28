@@ -9,7 +9,7 @@ import * as connectedProvidersCache from "../../shared/connected-providers-cache
 import { CATEGORY_MODEL_REQUIREMENTS } from "../../shared/model-requirements"
 import { parseModelString } from "../../shared/model-string-parser"
 import { unsafeTestValue } from "../../../../../test-support/unsafe-test-value"
-import { MemberSchema } from "@oh-my-opencode/team-core"
+import { MemberSchema, RuntimeStateSchema } from "@oh-my-opencode/team-core"
 import { applyMemberSessionRouting } from "../../features/team-mode/member-session-routing"
 import { getRawFallbackModels } from "../../hooks/runtime-fallback/fallback-models"
 import { SessionCategoryRegistry } from "../../shared/session-category-registry"
@@ -191,6 +191,55 @@ describe("retired category alias parity", () => {
 			expect(SessionCategoryRegistry.get(sessionID)).toBe(canonical)
 			expect(fallbackModels).toEqual(["anthropic/claude-opus-4-7"])
 			SessionCategoryRegistry.remove(sessionID)
+		})
+
+		test(`a team state persisted with "${alias}" resumes as "${canonical}"`, () => {
+			//#given
+			// A run whose state.json was written before this change still holds the retired name; the value
+			// is registered for the session on idle wake and live delivery, so it is canonicalized on read.
+			const state = RuntimeStateSchema.parse({
+				version: 1,
+				teamRunId: "6f1a4c62-0b61-4a5f-9f4a-1a6d8a0d7f21",
+				teamName: "alias-parity",
+				specSource: "project",
+				status: "active",
+				createdAt: 1,
+				members: [{ name: "member-a", agentType: "general-purpose", category: alias, status: "idle" }],
+				bounds: {},
+			})
+			const sessionID = `ses_alias_parity_state_${canonical}`
+			const pluginConfig = unsafeTestValue({
+				categories: { [canonical]: { model: USER_CONFIGURED_MODEL, fallback_models: ["anthropic/claude-opus-4-7"] } },
+			})
+
+			//#when
+			applyMemberSessionRouting(sessionID, unsafeTestValue(state.members[0]))
+			const fallbackModels = getRawFallbackModels(sessionID, undefined, pluginConfig)
+
+			//#then
+			expect(state.members[0]?.category).toBe(canonical)
+			expect(SessionCategoryRegistry.get(sessionID)).toBe(canonical)
+			expect(fallbackModels).toEqual(["anthropic/claude-opus-4-7"])
+			SessionCategoryRegistry.remove(sessionID)
+		})
+
+		test(`an error names "${alias}" when that is what the caller typed`, async () => {
+			//#given
+			// The boundary canonicalizes before the resolver sees the name, so it carries the typed spelling
+			// separately; a disabled canonical lane is the reachable error for a retired name.
+			const prepared = await prepareDelegateTaskArgs(
+				{ category: alias, prompt: PROMPT_INPUT_SENTINEL, run_in_background: false, load_skills: [] },
+				unsafeTestValue({ metadata: async () => {} }),
+			)
+			const ctx = executorContext({ userCategories: { [canonical]: { disable: true } } })
+
+			//#when
+			const result = await resolveCategoryExecution(unsafeTestValue(prepared), ctx, undefined, SYSTEM_DEFAULT_MODEL)
+
+			//#then
+			expect(prepared.requestedCategory).toBe(alias)
+			expect(result.error).toContain(`Unknown category: "${alias}"`)
+			expect(result.error).not.toContain(`Unknown category: "${canonical}"`)
 		})
 	}
 })
