@@ -68,6 +68,22 @@ function subscribeToExactLines(path: string, expectedLines: readonly string[], t
   return pending.map(({ promise }) => promise)
 }
 
+type HookEnv = Record<string, string>
+
+// Ask the hook itself where it logs, so the test never re-implements its rules
+// and passes under any TMPDIR (#10735).
+function resolveLogFile(agentDir: string, env: HookEnv): string {
+  const result = Bun.spawnSync({
+    cmd: ["bash", "./cleanup-hook.sh", "--print-log-file"],
+    cwd: agentDir,
+    stdout: "pipe",
+    stderr: "pipe",
+    env,
+  })
+  expect(result.exitCode, result.stderr.toString()).toBe(0)
+  return result.stdout.toString().trim()
+}
+
 function removeFixture(fixture: { readonly repo: string; readonly logDir: string }): void {
   rmSync(fixture.repo, { recursive: true, force: true })
   rmSync(fixture.logDir, { recursive: true, force: true })
@@ -92,14 +108,17 @@ describe("agent cleanup and SessionEnd launcher", () => {
 printf 'worker-ran\\n' > "$CLAUDE_PROJECT_DIR/worker.marker"
 printf 'worker-log\\n'
 `)
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, OMO_AGENT_CLEANUP_SYNC: "1", TMPDIR: fixture.logDir } as HookEnv
     try {
+      const logFile = resolveLogFile(fixture.agentDir, env)
+      expect(logFile).toBe(join(fixture.logDir, "oh-my-openagent-cleanup.log"))
       const result = Bun.spawnSync({
         cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
-        env: { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, OMO_AGENT_CLEANUP_SYNC: "1", TMPDIR: fixture.logDir },
+        env,
       })
       expect(result.exitCode).toBe(0)
       expect(read(join(fixture.repo, "worker.marker"))).toBe("worker-ran\n")
-      expect(read(join(fixture.logDir, "oh-my-openagent-cleanup.log"))).toContain("worker-log")
+      expect(read(logFile)).toContain("worker-log")
     } finally {
       removeFixture(fixture)
     }
@@ -129,10 +148,12 @@ printf 'finished\\n' >&3
     expect(Bun.spawnSync(["mkfifo", releasePath, completionPath]).exitCode).toBe(0)
     const releaseFd = openSync(releasePath, constants.O_RDWR | constants.O_NONBLOCK)
     const [workerStarted, workerPublishing, workerFinished] = subscribeToExactLines(completionPath, ["started", "publishing", "finished"])
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: fixture.logDir } as HookEnv
+    const logFile = resolveLogFile(fixture.agentDir, env)
     try {
       const result = Bun.spawnSync({
         cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe", timeout: 3_000,
-        env: { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: fixture.logDir },
+        env,
       })
       expect(result.exitCode).toBe(0)
       await workerStarted
@@ -147,7 +168,7 @@ printf 'finished\\n' >&3
       writeSync(releaseFd, "publish\n")
       await workerFinished
       expect(read(finishedPath)).toBe("worker-finished\n")
-      expect(read(join(fixture.logDir, "oh-my-openagent-cleanup.log"))).toBe("")
+      expect(read(logFile)).toBe("")
     } finally {
       closeSync(releaseFd)
       removeFixture(fixture)
@@ -158,14 +179,34 @@ printf 'finished\\n' >&3
     const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
     const hostileLog = join(fixture.repo, "host-config.toml")
     writeFileSync(hostileLog, "preserve-me\n")
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, OMO_AGENT_CLEANUP_LOG: hostileLog, OMO_AGENT_CLEANUP_SYNC: "1", TMPDIR: fixture.logDir } as HookEnv
     try {
+      const logFile = resolveLogFile(fixture.agentDir, env)
+      expect(logFile).toBe(join(fixture.logDir, "oh-my-openagent-cleanup.log"))
       const result = Bun.spawnSync({
         cmd: ["bash", "./cleanup-hook.sh"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
-        env: { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, OMO_AGENT_CLEANUP_LOG: hostileLog, OMO_AGENT_CLEANUP_SYNC: "1", TMPDIR: fixture.logDir },
+        env,
       })
       expect(result.exitCode).toBe(0)
       expect(read(hostileLog)).toBe("preserve-me\n")
-      expect(read(join(fixture.logDir, "oh-my-openagent-cleanup.log"))).toContain("safe-log")
+      expect(read(logFile)).toContain("safe-log")
+    } finally {
+      removeFixture(fixture)
+    }
+  })
+
+  posixBashTest("#given a TMPDIR inside the project #when the launcher resolves its log #then it falls back to temp and reports the fallback", () => {
+    const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
+    const insideProject = join(fixture.repo, "tmp")
+    mkdirSync(insideProject, { recursive: true })
+    try {
+      const result = Bun.spawnSync({
+        cmd: ["bash", "./cleanup-hook.sh", "--print-log-file"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
+        env: { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: insideProject } as HookEnv,
+      })
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout.toString().trim()).toBe("/tmp/oh-my-openagent-cleanup.log")
+      expect(result.stderr.toString()).toContain("[cleanup-hook] TMPDIR is inside the project directory")
     } finally {
       removeFixture(fixture)
     }

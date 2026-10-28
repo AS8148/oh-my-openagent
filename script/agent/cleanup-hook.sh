@@ -8,20 +8,45 @@ set -u
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 CLEANUP_SCRIPT="$PROJECT_DIR/script/agent/cleanup.sh"
-LOG_DIR="${TMPDIR:-/tmp}"
+# The log must never land inside the project tree: cleanup.sh prunes transient
+# files there and a log write could clobber a tracked file. Any absolute,
+# existing temp directory outside the project is accepted, so the hook works on
+# hosts whose TMPDIR lives outside /tmp. A rejected TMPDIR falls back to /tmp
+# and SAYS SO on stderr instead of substituting silently (#10735).
+resolve_log_dir() {
+  candidate="${TMPDIR:-/tmp}"
+  reason=""
+  case "$candidate" in
+    "") reason="TMPDIR is empty" ;;
+    *..*) reason="TMPDIR contains '..'" ;;
+    /*) ;;
+    *) reason="TMPDIR is not an absolute path" ;;
+  esac
+  if [ -z "$reason" ] && [ ! -d "$candidate" ]; then
+    reason="TMPDIR is not an existing directory"
+  fi
+  if [ -z "$reason" ]; then
+    case "${candidate%/}/" in
+      "${PROJECT_DIR%/}"/*) reason="TMPDIR is inside the project directory" ;;
+    esac
+  fi
+  if [ -n "$reason" ]; then
+    printf '[cleanup-hook] %s (%s); logging under /tmp instead\n' "$reason" "$candidate" >&2
+    printf '%s\n' "/tmp"
+    return 0
+  fi
+  printf '%s\n' "${candidate%/}"
+}
 
-case "$LOG_DIR" in
-  *..* | "")
-    LOG_DIR="/tmp"
-    ;;
-  /tmp | /tmp/* | /private/tmp | /private/tmp/* | /var/folders/*)
-    ;;
-  *)
-    LOG_DIR="/tmp"
-    ;;
-esac
-
+LOG_DIR="$(resolve_log_dir)"
 LOG_FILE="${LOG_DIR%/}/oh-my-openagent-cleanup.log"
+
+# Single source of truth for the resolved log path, so callers (tests included)
+# read the path this hook actually uses instead of re-implementing the rules.
+if [ "${1:-}" = "--print-log-file" ]; then
+  printf '%s\n' "$LOG_FILE"
+  exit 0
+fi
 
 if [ ! -f "$CLEANUP_SCRIPT" ]; then
   printf '[cleanup-hook] missing cleanup script: %s\n' "$CLEANUP_SCRIPT" >&2
