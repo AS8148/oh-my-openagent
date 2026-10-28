@@ -197,17 +197,22 @@ pub(super) fn space_spi_or_unsupported(spi: Option<&SpaceSpi>) -> CoreResult<&Sp
 /// `None`. The connection prefers SkyLight's name and falls back to the
 /// CoreGraphics alias, as oh-my-pi does.
 pub(super) fn resolve_spaces(lookup: impl Fn(&CStr) -> Option<NonNull<c_void>>) -> Option<SpaceSpi> {
-    let get = |name: &CStr| lookup(name).map(|raw| cast_symbol(raw.as_ptr()));
+    // A closure cannot be generic, so it would pin every field to the first
+    // field's type; this fn takes each field's own fn-pointer type instead.
+    fn get<T: Copy>(lookup: &dyn Fn(&CStr) -> Option<NonNull<c_void>>, name: &CStr) -> Option<T> {
+        lookup(name).map(|raw| cast_symbol(raw.as_ptr()))
+    }
+    let lookup: &dyn Fn(&CStr) -> Option<NonNull<c_void>> = &lookup;
     Some(SpaceSpi {
-        connection: get(c"SLSMainConnectionID").or_else(|| get(c"CGSMainConnectionID"))?,
-        active: get(c"SLSGetActiveSpace").or_else(|| get(c"CGSGetActiveSpace"))?,
-        copy_spaces: get(c"SLSCopySpacesForWindows")?,
-        move_windows: get(c"SLSMoveWindowsToManagedSpace")?,
-        window_owner: get(c"SLSGetWindowOwner")?,
-        connection_pid: get(c"SLSConnectionGetPID")?,
-        space_type: get(c"SLSSpaceGetType")?,
-        copy_displays: get(c"SLSCopyManagedDisplays")?,
-        display_space: get(c"SLSManagedDisplayGetCurrentSpace")?,
+        connection: get(lookup, c"SLSMainConnectionID").or_else(|| get(lookup, c"CGSMainConnectionID"))?,
+        active: get(lookup, c"SLSGetActiveSpace").or_else(|| get(lookup, c"CGSGetActiveSpace"))?,
+        copy_spaces: get(lookup, c"SLSCopySpacesForWindows")?,
+        move_windows: get(lookup, c"SLSMoveWindowsToManagedSpace")?,
+        window_owner: get(lookup, c"SLSGetWindowOwner")?,
+        connection_pid: get(lookup, c"SLSConnectionGetPID")?,
+        space_type: get(lookup, c"SLSSpaceGetType")?,
+        copy_displays: get(lookup, c"SLSCopyManagedDisplays")?,
+        display_space: get(lookup, c"SLSManagedDisplayGetCurrentSpace")?,
     })
 }
 

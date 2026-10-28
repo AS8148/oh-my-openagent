@@ -4,7 +4,8 @@
 
 use senpi_desktop_core::error::CoreResult;
 
-use super::{bring_to_current_space, window_on_another_space};
+use super::bring_to_current_space;
+use super::native::window_on_another_space;
 
 fn never_stopped() -> CoreResult<()> {
     Ok(())

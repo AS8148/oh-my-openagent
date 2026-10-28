@@ -26,14 +26,14 @@ pub(super) fn with_background_guard(pid: libc::pid_t, action: &mut dyn FnMut() -
     if !sends_back(previous_pid, pid, front_app::current_front_pid()) {
         return result;
     }
-    focus::restore_front_window(&previous).map_or_else(
-        |restore| {
+    match focus::restore_front_window(&previous) {
+        Ok(()) => result,
+        Err(restore) => {
             let after = result.err().map_or_else(String::new, |error| format!(" after: {error}"));
             Err(DesktopError::new(
                 ErrorCode::FocusRestoreFailed,
                 format!("the moved window's application came forward and {} could not be put back ({restore}){after}", previous.app),
             ))
-        },
-        |()| result,
-    )
+        }
+    }
 }

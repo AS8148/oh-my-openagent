@@ -53,7 +53,50 @@ fn any_missing_space_symbol_is_space_unsupported() {
 #[test]
 fn the_coregraphics_connection_aliases_stand_in_for_skylights() {
     // Given: only the CGS names of the connection and active-Space functions
-    let lookup = |name: &CStr| (name != c"SLSMainConnectionID" && name != c"SLSGetActiveSpace").then(resolved);
-    // When / Then
-    assert!(resolve_spaces(lookup).is_some());
+    let lookup =
+        |name: &CStr| distinct_symbol(name).filter(|_| name != c"SLSMainConnectionID" && name != c"SLSGetActiveSpace");
+    // When
+    let spi = resolve_spaces(lookup).expect("the CGS aliases complete the set");
+    // Then: the two fields hold the CGS symbols
+    assert_eq!(spi.connection as *const (), distinct(c"CGSMainConnectionID"));
+    assert_eq!(spi.active as *const (), distinct(c"CGSGetActiveSpace"));
+}
+
+const CGS_ALIASES: [&CStr; 2] = [c"CGSMainConnectionID", c"CGSGetActiveSpace"];
+
+/// One distinct address per Space symbol name (and per CGS alias).
+static DISTINCT: [u8; 11] = [0; 11];
+
+fn distinct_symbol(name: &CStr) -> Option<NonNull<c_void>> {
+    SPACE_SYMBOLS
+        .iter()
+        .chain(&CGS_ALIASES)
+        .position(|known| *known == name)
+        .map(|index| NonNull::from(&DISTINCT[index]).cast())
+}
+
+fn distinct(name: &CStr) -> *const () {
+    distinct_symbol(name).expect("a known symbol").as_ptr().cast_const().cast()
+}
+
+#[test]
+fn each_space_field_holds_the_symbol_resolved_under_its_own_name() {
+    // Given: every name, SkyLight and CGS alike, resolves to its own address
+    // When
+    let spi = resolve_spaces(distinct_symbol).expect("every symbol resolved");
+    // Then: each field is the symbol named for it, SkyLight's name preferred
+    let fields: [(*const (), &CStr); 9] = [
+        (spi.connection as *const (), c"SLSMainConnectionID"),
+        (spi.active as *const (), c"SLSGetActiveSpace"),
+        (spi.copy_spaces as *const (), c"SLSCopySpacesForWindows"),
+        (spi.move_windows as *const (), c"SLSMoveWindowsToManagedSpace"),
+        (spi.window_owner as *const (), c"SLSGetWindowOwner"),
+        (spi.connection_pid as *const (), c"SLSConnectionGetPID"),
+        (spi.space_type as *const (), c"SLSSpaceGetType"),
+        (spi.copy_displays as *const (), c"SLSCopyManagedDisplays"),
+        (spi.display_space as *const (), c"SLSManagedDisplayGetCurrentSpace"),
+    ];
+    for (field, name) in fields {
+        assert_eq!(field, distinct(name), "{name:?}");
+    }
 }
