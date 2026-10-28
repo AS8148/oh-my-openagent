@@ -842,6 +842,7 @@ jobs:
       - name: Run omo fused-path equivalence (EQ.omo E21-E24)
         if: needs.ci-mode.outputs.run_heavy == 'true' && matrix.os == 'ubuntu-latest'
         shell: bash
+        timeout-minutes: 45
         env:
           SENPI_EQ_HARNESS_SHA: 5ab795e3392325c961596d7944a1740f4d0a9e20
         run: |

@@ -14,6 +14,8 @@
 // The CLI child sees a fixed PATH: the dirs of bun, node and git, /usr/bin and /bin, plus `--lsp-dir` (or
 // EQ_LSP_DIR), which must hold the pinned `typescript-language-server` E24 needs. A host's own language servers never
 // reach a case, so what E24 observes does not depend on what the recording machine happens to have installed.
+// No host path reaches a golden either: the child's TMPDIR is pinned inside the case sandbox, and a CLI script engine
+// runs from a copy of its package at the fixed ENGINE_PIN_ROOT (one driver process at a time owns that path).
 //
 // The collectors, normalizer, fake model server and case runner are the senpi EQ harness
 // (senpi .agents/skills/senpi-qa, plan node P0-05b), read from a senpi checkout: `--senpi-repo` or SENPI_QA_REPO.
@@ -26,6 +28,12 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+	pinEnginePackage,
+	splitStatusChannels,
+	statusCounts,
+	stopSandboxProcesses,
+} from "./fused-equivalence-support.mjs";
 import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -100,7 +108,9 @@ function bunVersion() {
 
 /**
  * The engine the cases run, as the harness's `--child binary:<path>` plus the receipt's `child_runtime`. A senpi CLI
- * script (the pinned package or a tarball's) runs on Bun through a launcher; a compiled binary runs as itself.
+ * script (the pinned package or a tarball's) runs on Bun through a launcher, from a copy of its package at the fixed
+ * ENGINE_PIN_ROOT (see pinEnginePackage: the engine's runtime snapshot directory hashes its package path); `release`
+ * removes that copy. A compiled binary runs as itself.
  */
 function resolveEngine(engine, workDir) {
 	let cli;
@@ -122,17 +132,26 @@ function resolveEngine(engine, workDir) {
 			manifestPath = join(unpacked, "package", "package.json");
 		}
 		const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-		cli = join(dirname(manifestPath), manifest.bin?.senpi ?? "dist/bundle/cli.js");
-		if (!existsSync(cli)) throw new Error(`the senpi package at ${dirname(manifestPath)} has no CLI ${cli}`);
+		const pin = pinEnginePackage(dirname(manifestPath), { mirrorSiblings: engine === undefined });
+		cli = join(pin.packageDir, manifest.bin?.senpi ?? "dist/bundle/cli.js");
+		if (!existsSync(cli)) {
+			pin.release();
+			throw new Error(`the senpi package at ${dirname(manifestPath)} has no CLI ${cli}`);
+		}
 		const bun = bunVersion();
 		const launcher = join(workDir, "senpi-on-bun.sh");
 		writeFileSync(launcher, `#!/bin/sh\nexec bun ${JSON.stringify(cli)} "$@"\n`);
 		chmodSync(launcher, 0o755);
 		identity = `bun@${bun} ${manifest.name}@${manifest.version}${engine === undefined ? " (pinned)" : " (tarball)"}`;
-		return { child: launcher, cliDir: dirname(manifestPath), childRuntime: identity };
+		return { child: launcher, cliDir: pin.packageDir, childRuntime: identity, release: pin.release };
 	}
 	if (!existsSync(engine)) throw new Error(`--engine: no file at ${engine}`);
-	return { child: resolve(engine), cliDir: dirname(resolve(engine)), childRuntime: `binary:${resolve(engine)}` };
+	return {
+		child: resolve(engine),
+		cliDir: dirname(resolve(engine)),
+		childRuntime: `binary:${resolve(engine)}`,
+		release: () => {},
+	};
 }
 
 /** The executable dirs a case's CLI child may use (see the header): never the host's full PATH. */
@@ -143,26 +162,6 @@ function childPath(lspDir) {
 	};
 	const dirs = [lspDir && resolve(lspDir), which("bun"), dirname(process.execPath), which("git"), "/usr/bin", "/bin"];
 	return [...new Set(dirs.filter(Boolean))].join(":");
-}
-
-/**
- * Stop what a case's plugin started on its own and detached (the task host supervisor and its RPC host, the LSP
- * daemon): they outlive the CLI child. Only processes whose command line or environment (`ps e`: this user's own
- * processes) names this run's sandbox are signalled; every such process inherited the sandbox HOME.
- */
-function stopSandboxProcesses(sandboxDir) {
-	const list = spawnSync("ps", ["axeww", "-o", "pid=,command="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).stdout ?? "";
-	const pids = list
-		.split("\n")
-		.map((line) => /^\s*(\d+)\s+(.*)$/.exec(line))
-		.filter((match) => match && match[2].includes(sandboxDir) && Number(match[1]) !== process.pid)
-		.map((match) => Number(match[1]));
-	for (const pid of pids) {
-		try {
-			process.kill(pid, "SIGKILL");
-		} catch {}
-	}
-	return pids.length;
 }
 
 /** Sandbox wiring every case shares: the built plugin, trust, and every config/state root inside the sandbox. */
@@ -181,6 +180,12 @@ function prepare(run, omoConfig) {
 	run.env.OMO_CODING_AGENT_DIR = run.box.agentDir;
 	run.env.PI_CODING_AGENT_DIR = run.box.agentDir;
 	run.env.OMO_MEMORY_HOME = join(root, "memory");
+	// The child's os.tmpdir() reaches the observations (the computer skill is materialized under it and listed as a
+	// skill root: senpi-desktop-tool/src/skill.ts materializeComputerSkill), so it is pinned inside the sandbox and the
+	// recording host's TMPDIR never reaches a golden.
+	const tmp = join(root, "tmp");
+	mkdirSync(tmp, { recursive: true });
+	for (const name of ["TMPDIR", "TMP", "TEMP"]) run.env[name] = tmp;
 	writeFileSync(join(run.box.agentDir, "trust.json"), `${JSON.stringify({ [run.box.cwd]: true }, null, 2)}\n`);
 	// The plugin's two remote MCP servers would reach the network, and its local `_ast_grep` server connects on its own
 	// schedule: whether that connect lands before or after the host records the session's first loaded-surfaces digest
@@ -196,6 +201,17 @@ function prepare(run, omoConfig) {
 }
 
 const SETTINGS = { packages: [pluginRoot], defaultProjectTrust: "ask" };
+const E24_WARM_BARRIER = "eq-e24-lsp-warm";
+
+/** E21: a successful `computer` run's result must carry the click's audit record (see E21's comment). */
+function assertClickAudited(run) {
+	const end = run.client.events.find((event) => event.type === "tool_execution_end" && event.toolName === "computer");
+	if (!end) throw new Error("E21: the computer tool never finished");
+	if (end.isError) return;
+	const audit = end.result?.details?.audit ?? [];
+	if (!audit.some((record) => record.action === "click"))
+		throw new Error(`E21: the computer run's audit has no click record: ${JSON.stringify(audit).slice(0, 400)}`);
+}
 /** The fake provider's model, as a category model reference. */
 const FAKE_MODEL = "mock/mock-model";
 
@@ -234,6 +250,10 @@ const cases = [
 		title: "computer-use per-call marker",
 		observables: ALL_OBSERVABLES,
 		needsDesktopEngine: true,
+		// The run ends with a screenshot after the click. The engine writes a request's audit notification right after that
+		// request's reply and before any later reply (senpi-desktop-engine/src/outbox.rs:1-7), and the run's audit list is
+		// copied when its code settles (senpi-desktop-service/src/run/runtime.ts:186-191). The trailing screenshot's reply is
+		// therefore the protocol event after which the click's audit has been delivered; drive() asserts it was.
 		spec: () => ({
 			settings: SETTINGS,
 			turns: [
@@ -260,6 +280,7 @@ const cases = [
 			await run.open();
 			answerUiRequests(run);
 			await run.prompt("drive display 2 with one per-call display handle");
+			assertClickAudited(run);
 			await run.close();
 			await run.reopenState();
 		},
@@ -338,10 +359,16 @@ const cases = [
 		spec: () => ({
 			settings: SETTINGS,
 			turns: [
-				// The first write starts the TypeScript server; the checked write follows it, so its diagnostics come from a
-				// running server inside the plugin's freshness window instead of racing the server's cold start.
-				{ toolCalls: [{ id: "call_warm", name: "write", args: { path: "eq-warm.ts", content: "export const eqWarm = 1\n" } }] },
+				// The first write starts the TypeScript server and carries a type error of its own. The checked write's turn is
+				// held at the fake model server until drive() has seen the warm write's result carry that error: the event
+				// that proves the server answers inside the plugin's diagnostics freshness window (lsp-core client.ts:26).
 				{
+					toolCalls: [
+						{ id: "call_warm", name: "write", args: { path: "eq-warm.ts", content: "export const eqWarm: string = 1\n" } },
+					],
+				},
+				{
+					holdUntil: E24_WARM_BARRIER,
 					toolCalls: [
 						{
 							id: "call_write",
@@ -363,7 +390,18 @@ const cases = [
 			if (options.commentChecker) run.env.OMO_COMMENT_CHECKER_BIN = options.commentChecker;
 			await run.open();
 			answerUiRequests(run);
-			await run.prompt("write eq-sample.ts");
+			const warmEnd = run.nextEvent((event) => event.type === "tool_execution_end" && event.toolCallId === "call_warm");
+			const settled = run.prompt("write eq-sample.ts");
+			settled.catch(() => {});
+			const warm = await warmEnd;
+			// A freshness timeout is rendered under the same "LSP errors detected" header, so the proof is the diagnostic itself.
+			const warmText = JSON.stringify(warm.result?.content ?? []);
+			if (!warmText.includes("error[typescript] (2322)"))
+				throw new Error(
+					`E24: the warm write got no TypeScript diagnostic inside the freshness window: ${warmText.slice(0, 400)}`,
+				);
+			run.server.releaseBarrier(E24_WARM_BARRIER);
+			await settled;
 			await run.close();
 		},
 	},
@@ -390,45 +428,6 @@ function pluginIdRoots(raw) {
 			roots.push({ prefix: value.slice(0, 7), token: `<${namespace}:${index}:short>` });
 	}
 	return roots;
-}
-
-/**
- * The plugin's status publishers (`omo.<component>.updated` extension events: task, dag, memory) and the host's
- * loaded-surface announcements re-publish a whole snapshot on their own coalescing schedule: how many snapshots land, and
- * where they fall between two turn events, is a race in today's code (a sub-agent that finishes inside one publish
- * window yields one snapshot fewer, and a snapshot queued at exit may or may not flush). Each such channel is therefore
- * compared as "announced at least once" plus its FIRST snapshot (the session-start state), exactly; the work those later
- * snapshots describe is compared through the tool results and the transcript. Every other event stays in the turn list
- * in emitted order.
- */
-const STATUS_EVENT = /^omo\.[a-z-]+\.updated$/;
-/** Fire-and-forget footer/widget updates: the same coalescing publishers, keyed by their status or widget key. */
-const STATUS_UI_METHODS = new Set(["setStatus", "setWidget"]);
-const statusChannelOf = (event) => {
-	if (event?.type === "extension_event" && STATUS_EVENT.test(event.name ?? "")) return event.name;
-	if (event?.type === "extension_ui_request" && STATUS_UI_METHODS.has(event.method))
-		return `${event.method}:${event.statusKey ?? event.widgetKey ?? ""}`;
-	return undefined;
-};
-const isStatusEvent = (event) => statusChannelOf(event) !== undefined;
-
-function settledChannel(events) {
-	return { announced: events.length > 0, first: events[0] ?? null };
-}
-
-function splitStatusChannels(client) {
-	const listKey = Array.isArray(client.turn) ? "turn" : "events";
-	const events = client[listKey];
-	if (!Array.isArray(events)) throw new Error(`unexpected O6 shape from the harness: ${Object.keys(client).join(",")}`);
-	const names = [...new Set(events.filter(isStatusEvent).map(statusChannelOf))];
-	return {
-		...client,
-		[listKey]: events.filter((event) => !isStatusEvent(event)),
-		status: Object.fromEntries(
-			names.map((name) => [name, settledChannel(events.filter((event) => statusChannelOf(event) === name))]),
-		),
-		surfaces: Array.isArray(client.surfaces) ? settledChannel(client.surfaces) : client.surfaces,
-	};
 }
 
 /**
@@ -499,8 +498,9 @@ async function main() {
 	if (!existsSync(join(pluginRoot, "runtime", "lsp-daemon", "dist", "cli.js")))
 		throw new Error("the plugin is not built: run `bun run build:senpi-plugin` first");
 	const workDir = mkdtempSync(join(tmpdir(), "omo-eq-"));
+	let engine;
 	try {
-		const engine = resolveEngine(options.engine, workDir);
+		engine = resolveEngine(options.engine, workDir);
 		// The harness reads its child runtime from argv once, on first use.
 		process.argv.push("--child", `binary:${engine.child}`);
 		const load = (rel) => import(pathToFileURL(join(options.harness, rel)).href);
@@ -527,7 +527,14 @@ async function main() {
 		const witnessWanted = expectedWitness("default");
 		const results = [];
 		for (const testCase of selected) {
-			const result = { id: testCase.id, title: testCase.title, observables: testCase.observables, runs: 0 };
+			const result = {
+				id: testCase.id,
+				title: testCase.title,
+				observables: testCase.observables,
+				runs: 0,
+				statusCounts: [],
+				cleanup: [],
+			};
 			const runs = [];
 			try {
 				if (testCase.needsDesktopEngine && !existsSync(options.desktopEngine))
@@ -549,19 +556,22 @@ async function main() {
 							if (error instanceof Error) error.message = `${error.message}\n${tails.join("\n")}`;
 							throw error;
 						}
-						runs.push({
-							observations: observeOmo(run, testCase.observables, harness),
-							witness: readWitness(run.sessionFile),
-						});
+						const observations = observeOmo(run, testCase.observables, harness);
+						result.statusCounts.push(statusCounts(observations));
+						runs.push({ observations, witness: readWitness(run.sessionFile) });
 					} finally {
 						await run.stop();
-						stopSandboxProcesses(run.box.dir);
+						result.cleanup.push(stopSandboxProcesses(run.box.dir));
 						run.box.cleanup();
 					}
 				}
 			} catch (caught) {
 				result.error = caught instanceof Error ? `${caught.message}\n${caught.stack ?? ""}` : String(caught);
 			}
+			// A detached process that survived its SIGKILL, or a signal that failed, fails the case: the next run would share it.
+			const leftovers = result.cleanup.filter((stop) => stop.survivors.length > 0 || stop.errors.length > 0);
+			if (leftovers.length > 0 && !result.error)
+				result.error = `sandbox processes not stopped: ${JSON.stringify(leftovers)}`;
 			result.runs = runs.length;
 			const goldenPath = join(dir, `${testCase.id}.json`);
 			if (!result.error) {
@@ -640,6 +650,7 @@ async function main() {
 		}
 		process.exitCode = passed === results.length && results.length > 0 ? 0 : 1;
 	} finally {
+		engine?.release();
 		rmSync(workDir, { recursive: true, force: true });
 	}
 }
