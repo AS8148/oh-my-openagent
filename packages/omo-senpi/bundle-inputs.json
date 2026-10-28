@@ -699,6 +699,7 @@
     "packages/omo-senpi/src/components/builtin-mcps/index.ts",
     "packages/omo-senpi/src/components/bundled-skills/contributed-skill.ts",
     "packages/omo-senpi/src/components/bundled-skills/index.ts",
+    "packages/omo-senpi/src/components/bundled-skills/override.ts",
     "packages/omo-senpi/src/components/claim-receipt/cell-commands.ts",
     "packages/omo-senpi/src/components/claim-receipt/classify.ts",
     "packages/omo-senpi/src/components/claim-receipt/evidence.ts",
