@@ -98,7 +98,8 @@ describe("#11589 review folds", () => {
     const approveStarted = new Promise<void>(resolve => (started = resolve))
     const keychain = fakeKeychain({ approveGate: new Promise<void>(resolve => (open = resolve)), onApprove: () => started() })
     keychain.put(A, stored, "runtime", "ours")
-    // One home: both backends contend for the same machine-wide prompt lock, so only the in-flight attach avoids a refusal.
+    // One home shared by both backends: one dialog in total. (The attach inside approveOnce is pinned directly in
+    // darwin-read-attach.test.ts; here the second read is already deduplicated before it reaches approveOnce.)
     const home = await mkdtemp(join(tmpdir(), "omo-shared-home-"))
     onTestFinished(() => rm(home, { recursive: true, force: true }))
     const interactive = await helperSession(keychain, false, { home })
