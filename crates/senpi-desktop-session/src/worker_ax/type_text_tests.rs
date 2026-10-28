@@ -140,6 +140,34 @@ fn foreground_element_typing_needs_the_grant() {
 }
 
 #[test]
+fn an_element_that_never_takes_focus_gets_no_keys_and_the_refusal_names_the_focus() {
+    // Given: the Save button never takes focus; the text area holds it.
+    let mut harness = harness(&json!({}));
+    let reference = element_ref(&mut harness, "button");
+    harness.faults.refuse_focus_next();
+    // When: background, then foreground under the grant.
+    let refused = harness.process(type_into(&reference, "ok", None)).expect_err("refused");
+    harness.grant("retry in front");
+    harness.faults.refuse_focus_next();
+    let front = harness
+        .process(type_into(&reference, "ok", delivery("foreground")))
+        .expect_err("refused");
+    // Then: nothing typed, rerunnable in the background, not in the foreground,
+    // and the message names the window and the focused element with a ref.
+    assert!(typed(&harness).is_empty(), "{:?}", harness.sink.ops());
+    assert_eq!(refused.code, ErrorCode::BackgroundUnavailable);
+    assert_eq!(front.code, ErrorCode::InputFailed);
+    for error in [&refused, &front] {
+        assert!(error.message.contains("no keys were sent"), "{}", error.message);
+        assert!(error.message.contains("window 101"), "{}", error.message);
+        assert!(error.message.contains("textarea") && error.message.contains("[ref=e"), "{}", error.message);
+    }
+    let audits = harness.audits();
+    assert_eq!(audits[0].code, Some(ErrorCode::BackgroundUnavailable));
+    assert_eq!(audits.last().expect("an audit").code, Some(ErrorCode::InputFailed));
+}
+
+#[test]
 fn an_unanswered_insertion_is_unconfirmed_after_it_landed() {
     // Given: the app never answers the write.
     let mut harness = harness(&json!({}));

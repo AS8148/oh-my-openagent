@@ -42,7 +42,7 @@ computer.elementAt(x, y) / computer.focusedElement() → ComputerElement | null
 el.value() / el.bounds() / el.attributes() / el.actions() / el.parent() / el.children() → reads
 el.setValue(text) / el.perform(action) / el.press() / el.click({ delivery? }?) / el.focus() → mutations
 el.type(text, { delivery? }?) → { method: "inserted" | "keys" }
-    Types into THAT element without taking the user's focus (macOS). A native text field takes the text through its own selection and the value is read back exactly (`inserted`: no key sent, no focus moved, works in a multi-window app); any other element is given app-local focus and takes keys only once the app confirms it has focus (`keys`). An element that never takes focus throws `BackgroundUnavailable` naming where the focus is, with a ref; nothing was typed. A secure field's text never appears in an error. Foreground delivery raises the window first and needs the grant.
+    Types into THAT element without taking the user's focus (macOS). A native text field takes the text through its own selection and the value is read back exactly (`inserted`: no key sent, no focus moved, works in a multi-window app); any other element is given app-local focus and takes keys only once the app confirms it has focus (`keys`). An element that never takes focus throws `BackgroundUnavailable` (`InputFailed` in the foreground) naming where the focus is, with a ref; nothing was typed. A secure field's text never appears in an error. Foreground delivery raises the window first and needs the grant.
     Element fields: ref, role, nativeRole, title, description, enabled, focused, childCount. AX actions need no screenshot.
 computer.clipboard.read() → str
 computer.clipboard.write(text) → None
