@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { KEYCHAIN_HELPER_REQUIREMENT as BUILT_REQUIREMENT } from "../../../../../omo-native/keychain-helper/build"
@@ -26,6 +26,37 @@ describe("keychain helper signature check (#11262 design 1, Checking the helper)
     utimesSync(path, new Date(), new Date(Date.now() + 5_000))
     expect(await check(path)).toBe("valid")
     expect(asked).toEqual([`${path} true`, `${path} true`])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("#given a same-size rewrite with its mtime put back #when checked again #then ctime catches it and the framework is asked again", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "helper-signature-"))
+    const path = join(dir, "omo-keychain")
+    writeFileSync(path, "aaaa")
+    const { atime, mtime } = statSync(path)
+    let asked = 0
+    const check = createSignatureChecker(async () => ++asked > 0)
+    expect(await check(path)).toBe("valid")
+    writeFileSync(path, "bbbb")
+    utimesSync(path, atime, mtime)
+    expect(await check(path)).toBe("valid")
+    expect(asked).toBe(2)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("#given the file changes while it is being checked #when the check finishes #then the answer is invalid and nothing is cached", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "helper-signature-"))
+    const path = join(dir, "omo-keychain")
+    writeFileSync(path, "signed")
+    let asked = 0
+    const check = createSignatureChecker(async file => {
+      asked++
+      if (asked === 1) writeFileSync(file, "swapped during the check")
+      return true
+    })
+    expect(await check(path)).toBe("invalid")
+    expect(await check(path)).toBe("valid")
+    expect(asked).toBe(2)
     rmSync(dir, { recursive: true, force: true })
   })
 

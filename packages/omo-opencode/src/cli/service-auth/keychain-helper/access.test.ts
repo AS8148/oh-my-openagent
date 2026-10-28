@@ -14,11 +14,17 @@ describe("helper access: verified fall-through (#11262 addendum row 10, ruling 2
       return { pid: 4242, send: () => {}, reply: Promise.resolve('{"missing":true,"present":{"staging":false,"old":false}}'), close: () => {} }
     }
 
-    const access = await resolveHelperAccess(["/first/omo-keychain", "/later/omo-keychain"], { verify: async path => verdicts[path] ?? "missing", spawn })
+    const pinnedFrom: string[] = []
+    const pin = async (source: string) => {
+      pinnedFrom.push(source)
+      return `/pinned${source}`
+    }
+    verdicts["/pinned/later/omo-keychain"] = "valid"
+    const access = await resolveHelperAccess(["/first/omo-keychain", "/later/omo-keychain"], { verify: async path => verdicts[path] ?? "missing", spawn, pin })
     if (access.kind !== "ready") throw new Error(`expected a ready helper, got ${access.kind}`)
     await access.call({ verb: "read", account: A })
 
-    expect(access.path).toBe("/later/omo-keychain")
-    expect(spawned).toEqual(["/later/omo-keychain"])
+    expect(pinnedFrom).toEqual(["/later/omo-keychain"])
+    expect(spawned).toEqual(["/pinned/later/omo-keychain"])
   })
 })

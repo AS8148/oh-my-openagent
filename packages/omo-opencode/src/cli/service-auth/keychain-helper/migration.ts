@@ -2,10 +2,11 @@ import { deleteOld, type HelperCaller } from "./recovery"
 
 /** Where the value about to be migrated came from; anything else is never migrated (3.3 table, addendum row 22). */
 export type MigrationSource = "own-identity" | "owned-unmarked" | "approved"
+const MIGRATABLE: ReadonlySet<string> = new Set<MigrationSource>(["own-identity", "owned-unmarked", "approved"])
 
 export type MigrationOutcome =
   | { readonly kind: "migrated"; readonly oldDeleted: boolean }
-  | { readonly kind: "skipped"; readonly reason: "old-exists" }
+  | { readonly kind: "skipped"; readonly reason: "old-exists" | "not-migratable" }
   | { readonly kind: "failed"; readonly step: "stage" | "retire" | "promote" }
 
 /**
@@ -17,9 +18,11 @@ export type MigrationOutcome =
 export async function migrate(
   account: string,
   value: string,
+  source: string,
   helper: HelperCaller,
   deleteOwnOld: () => Promise<boolean>,
 ): Promise<MigrationOutcome> {
+  if (!MIGRATABLE.has(source)) return { kind: "skipped", reason: "not-migratable" }
   if ((await helper({ verb: "stage", account, value })).ok !== true) return { kind: "failed", step: "stage" }
   const retired = await helper({ verb: "retire", account })
   if (retired.skipped === true) {

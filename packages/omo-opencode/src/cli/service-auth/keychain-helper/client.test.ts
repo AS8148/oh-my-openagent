@@ -64,6 +64,11 @@ describe("keychain helper client (#11262 design 2 and 3.6 R2)", () => {
     expect(events.at(-1)).toBe("close")
   })
 
+  test("#given a reply line that is not JSON #when parsed #then it is a HelperProtocolError, never a raw SyntaxError", async () => {
+    const { spawn } = fake("helper crashed: segmentation fault")
+    await expect(callHelper("/helper", { verb: "read", account: A }, { spawn })).rejects.toBeInstanceOf(HelperProtocolError)
+  })
+
   test("#given an unexpected reply shape #when parsed #then it is refused, never trusted", async () => {
     const { spawn } = fake('{"owned":true,"value":"v","extra":1}')
     await expect(callHelper("/helper", { verb: "read", account: A }, { spawn })).rejects.toBeInstanceOf(HelperProtocolError)

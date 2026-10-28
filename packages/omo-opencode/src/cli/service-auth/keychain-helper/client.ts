@@ -102,7 +102,13 @@ export async function callHelper(
       await options.lease.restore()
     }
     if (line === null) throw new HelperProtocolError(`The keychain helper exited without answering ${call.verb}.`)
-    const parsed = helperReplySchema.safeParse(JSON.parse(line))
+    let json: unknown
+    try {
+      json = JSON.parse(line)
+    } catch {
+      throw new HelperProtocolError(`The keychain helper sent a ${call.verb} reply that is not JSON.`)
+    }
+    const parsed = helperReplySchema.safeParse(json)
     if (!parsed.success) throw new HelperProtocolError(`The keychain helper sent an unexpected ${call.verb} reply.`)
     return parsed.data
   } catch (error) {
