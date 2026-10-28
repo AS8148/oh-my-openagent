@@ -1,17 +1,9 @@
-import type { Metadata } from "next"
-import type { JSX, ReactNode } from "react"
-import { GeistSans } from "geist/font/sans"
-import { GeistMono } from "geist/font/mono"
-import Script from "next/script"
-import { installDetectScript } from "@/lib/install-targets"
+import type { Metadata, Viewport } from "next"
 import { getStats, FALLBACK_DESCRIPTION } from "@/lib/stats"
-import "./globals.css"
 
 const primarySiteUrl = "https://omo.dev"
 
-export const revalidate = 3600
-
-export async function generateMetadata(): Promise<Metadata> {
+export async function generateSiteMetadata(): Promise<Metadata> {
   let description = FALLBACK_DESCRIPTION
   try {
     description = (await getStats()).description
@@ -89,7 +81,7 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 }
 
-const jsonLd = {
+export const jsonLd = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   name: "OmO",
@@ -110,59 +102,8 @@ const jsonLd = {
   },
 }
 
-const gaMeasurementId = "G-S0QJFKT46Q"
-const gaTrackedDomain = "omo.dev"
+export const gaMeasurementId = "G-S0QJFKT46Q"
+export const gaTrackedDomain = "omo.dev"
 
-export default function RootLayout({ children }: { readonly children: ReactNode }): JSX.Element {
-  return (
-    <html
-      lang="en"
-      className={`dark ${GeistSans.variable} ${GeistMono.variable}`}
-      data-omo-build={process.env.OMO_WEB_BUILD_ID || undefined}
-      suppressHydrationWarning
-    >
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: installDetectScript }} />
-        <link rel="preconnect" href="https://cdn.jsdelivr.net" crossOrigin="anonymous" />
-        <link
-          rel="stylesheet"
-          href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
-          crossOrigin="anonymous"
-        />
-      </head>
-      <body className="flex min-h-screen flex-col bg-[#0a0a0a] text-[#ededed] antialiased">
-        {process.env.NODE_ENV === "development" && (
-          <>
-            <Script
-              src="//unpkg.com/react-grab/dist/index.global.js"
-              crossOrigin="anonymous"
-              strategy="beforeInteractive"
-            />
-            <Script
-              src="//unpkg.com/react-scan/dist/auto.global.js"
-              crossOrigin="anonymous"
-              strategy="beforeInteractive"
-            />
-          </>
-        )}
-        <Script id="google-analytics-loader" strategy="lazyOnload">
-          {`if (typeof window !== 'undefined' && window.location.hostname === '${gaTrackedDomain}') {
-  var s = document.createElement('script');
-  s.async = true;
-  s.src = 'https://www.googletagmanager.com/gtag/js?id=${gaMeasurementId}';
-  document.head.appendChild(s);
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', '${gaMeasurementId}', { cookie_domain: '${gaTrackedDomain}' });
-}`}
-        </Script>
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-        />
-        {children}
-      </body>
-    </html>
-  )
-}
+/** The site is dark-only (DESIGN.md §2): form controls, scrollbars and autofill follow it before CSS loads. */
+export const siteViewport: Viewport = { colorScheme: "dark" }
