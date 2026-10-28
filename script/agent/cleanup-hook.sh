@@ -17,9 +17,53 @@ physical_path() {
   (cd -P "$1" 2>/dev/null && pwd -P) || return 1
 }
 
+# Directory identity, not its name: device+inode is immune to case-insensitive
+# filesystems, Unicode normalisation, symlinks and hard-linked directories.
+path_identity() {
+  case "$(uname -s)" in
+    Darwin | *BSD) stat -f '%d:%i' "$1" 2>/dev/null ;;
+    *) stat -c '%d:%i' "$1" 2>/dev/null ;;
+  esac
+}
+
+# 0 = inside the project, 1 = outside, 2 = undecidable (fail closed).
+is_inside_project() {
+  walk="$1"
+  while :; do
+    walk_identity="$(path_identity "$walk")"
+    [ -n "$walk_identity" ] || return 2
+    [ "$walk_identity" = "$project_identity" ] && return 0
+    [ "$walk" = "/" ] && return 1
+    walk_parent="$(dirname "$walk")"
+    [ "$walk_parent" = "$walk" ] && return 1
+    walk="$walk_parent"
+  done
+}
+
+# The first location that exists, resolves and is not inside the project.
+# Empty output means every candidate failed, so the hook stops logging.
+fallback_log_dir() {
+  for fallback in /tmp /private/tmp "$(mktemp -d 2>/dev/null)"; do
+    [ -n "$fallback" ] && [ -d "$fallback" ] || continue
+    fallback_physical="$(physical_path "$fallback")" || continue
+    is_inside_project "$fallback_physical"
+    [ "$?" = "1" ] || continue
+    printf '%s\n' "${fallback_physical%/}"
+    return 0
+  done
+  return 1
+}
+
 resolve_log_dir() {
   candidate="${TMPDIR:-/tmp}"
   reason=""
+  physical_project="$(physical_path "$PROJECT_DIR")" || physical_project=""
+  project_identity=""
+  [ -n "$physical_project" ] && project_identity="$(path_identity "$physical_project")"
+  if [ -z "$project_identity" ]; then
+    printf '[cleanup-hook] the project directory cannot be identified (%s); not logging\n' "$PROJECT_DIR" >&2
+    return 0
+  fi
   case "$candidate" in
     "") reason="TMPDIR is empty" ;;
     *..*) reason="TMPDIR contains '..'" ;;
@@ -36,24 +80,31 @@ resolve_log_dir() {
     physical_candidate="$(physical_path "$candidate")" || reason="TMPDIR cannot be resolved to a physical path"
   fi
   if [ -z "$reason" ]; then
-    physical_project="$(physical_path "$PROJECT_DIR")" || reason="the project directory cannot be resolved to a physical path"
-  fi
-  if [ -z "$reason" ]; then
-    # Trailing slashes on both sides so /proj2 is not treated as inside /proj.
-    case "${physical_candidate%/}/" in
-      "${physical_project%/}"/*) reason="TMPDIR is inside the project directory" ;;
+    is_inside_project "$physical_candidate"
+    case "$?" in
+      0) reason="TMPDIR is inside the project directory" ;;
+      2) reason="TMPDIR could not be compared with the project directory" ;;
     esac
   fi
   if [ -n "$reason" ]; then
-    printf '[cleanup-hook] %s (%s); logging under /tmp instead\n' "$reason" "$candidate" >&2
-    printf '%s\n' "/tmp"
+    fallback="$(fallback_log_dir)" || fallback=""
+    if [ -z "$fallback" ]; then
+      printf '[cleanup-hook] %s (%s) and no temp directory outside the project is available; not logging\n' "$reason" "$candidate" >&2
+      return 0
+    fi
+    printf '[cleanup-hook] %s (%s); logging under %s instead\n' "$reason" "$candidate" "$fallback" >&2
+    printf '%s\n' "$fallback"
     return 0
   fi
   printf '%s\n' "${physical_candidate%/}"
 }
 
 LOG_DIR="$(resolve_log_dir)"
-LOG_FILE="${LOG_DIR%/}/oh-my-openagent-cleanup.log"
+if [ -n "$LOG_DIR" ]; then
+  LOG_FILE="${LOG_DIR%/}/oh-my-openagent-cleanup.log"
+else
+  LOG_FILE="/dev/null"
+fi
 
 # Single source of truth for the resolved log path, so callers (tests included)
 # read the path this hook actually uses instead of re-implementing the rules.

@@ -4,6 +4,8 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 const AGENT_DIR = join(import.meta.dir, "agent")
+// The hook reports the PHYSICAL fallback directory, which is /private/tmp on macOS.
+const FALLBACK_LOG_FILE = join(realpathSync("/tmp"), "oh-my-openagent-cleanup.log")
 const cleanup = join(AGENT_DIR, "cleanup.sh")
 const cleanupHook = join(AGENT_DIR, "cleanup-hook.sh")
 const posixBashTest = test.skipIf(process.platform === "win32")
@@ -205,9 +207,9 @@ printf 'finished\\n' >&3
         env: { ...process.env, CLAUDE_PROJECT_DIR: fixture.repo, TMPDIR: insideProject } as HookEnv,
       })
       expect(result.exitCode).toBe(0)
-      expect(result.stdout.toString().trim()).toBe("/tmp/oh-my-openagent-cleanup.log")
+      expect(result.stdout.toString().trim()).toBe(FALLBACK_LOG_FILE)
       expect(result.stderr.toString()).toContain("[cleanup-hook] TMPDIR is inside the project directory")
-      // The string-prefix form of this check was bypassable; the cases below cover each bypass.
+      // Comparing path strings was bypassable; the cases below cover each bypass of that class.
     } finally {
       removeFixture(fixture)
     }
@@ -215,6 +217,9 @@ printf 'finished\\n' >&3
 
   // A string prefix test accepted each of these, putting the log inside the project tree.
   const containmentBypasses: readonly { readonly name: string; readonly build: (repo: string, scratch: string) => { readonly projectDir: string; readonly tmpdir: string } }[] = [
+    // A case-variant name: the project's own directory spelled differently, which a case-insensitive
+    // filesystem resolves to the same directory while the two strings differ.
+    { name: "a case-variant TMPDIR on a case-insensitive filesystem", build: (repo: string) => { const inside = join(repo, "tmp"); mkdirSync(inside, { recursive: true }); const variant = join(dirname(repo), basename(repo).toUpperCase(), "tmp"); return existsSync(variant) ? { projectDir: repo, tmpdir: variant } : { projectDir: repo, tmpdir: inside } } },
     { name: "a TMPDIR symlinked into the project", build: (repo: string, scratch: string) => { const inside = join(repo, "tmp"); mkdirSync(inside, { recursive: true }); const link = join(scratch, "link-into-project"); symlinkSync(inside, link); return { projectDir: repo, tmpdir: link } } },
     { name: "a symlinked project path", build: (repo: string, scratch: string) => { const inside = join(repo, "tmp"); mkdirSync(inside, { recursive: true }); const projectLink = join(scratch, "project-link"); symlinkSync(repo, projectLink); return { projectDir: projectLink, tmpdir: inside } } },
     // The doubled and dot segments sit BEFORE the project's own directory name, which is where a
@@ -233,13 +238,30 @@ printf 'finished\\n' >&3
           env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir, TMPDIR: hostileTmpdir } as HookEnv,
         })
         expect(result.exitCode).toBe(0)
-        expect(result.stdout.toString().trim()).toBe("/tmp/oh-my-openagent-cleanup.log")
+        expect(result.stdout.toString().trim()).toBe(FALLBACK_LOG_FILE)
         expect(result.stderr.toString()).toContain("[cleanup-hook] TMPDIR is inside the project directory")
       } finally {
         removeFixture(fixture)
       }
     })
   }
+
+  posixBashTest("#given the project is the temp directory itself #when the launcher falls back #then the fallback is still outside the project", () => {
+    const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
+    const tempRoot = realpathSync("/tmp")
+    try {
+      const result = Bun.spawnSync({
+        cmd: ["bash", "./cleanup-hook.sh", "--print-log-file"], cwd: fixture.agentDir, stdout: "pipe", stderr: "pipe",
+        env: { ...process.env, CLAUDE_PROJECT_DIR: tempRoot, TMPDIR: tempRoot } as HookEnv,
+      })
+      expect(result.exitCode).toBe(0)
+      const resolved = result.stdout.toString().trim()
+      expect(result.stderr.toString()).toContain("[cleanup-hook] TMPDIR is inside the project directory")
+      expect(resolved === "" || !resolved.startsWith(`${tempRoot}/`)).toBe(true)
+    } finally {
+      removeFixture(fixture)
+    }
+  })
 
   posixBashTest("#given a temp directory beside the project #when the launcher resolves its log #then it is accepted", () => {
     const fixture = createFixture("#!/usr/bin/env bash\nprintf 'safe-log\\n'\n")
