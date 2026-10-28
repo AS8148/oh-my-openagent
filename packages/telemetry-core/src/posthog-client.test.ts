@@ -151,7 +151,7 @@ describe("posthog telemetry client", () => {
         total_memory_gb: 16,
         locale: Intl.DateTimeFormat().resolvedOptions().locale,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        shell: process.env.SHELL,
+        shell: process.env.SHELL?.split(/[\\/]/).pop()?.replace(/\.exe$/i, "") || undefined,
         ci: Boolean(process.env.CI),
         terminal: process.env.TERM_PROGRAM,
         $process_person_profile: false,
