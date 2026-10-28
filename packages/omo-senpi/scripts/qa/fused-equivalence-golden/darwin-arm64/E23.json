@@ -7751,10 +7751,8 @@
      }
     ],
     "surfaces": {
-     "announced": true,
-     "first": {
-      "type": "loaded_surfaces_changed"
-     }
+     "announced": false,
+     "first": null
     },
     "status": {
      "setWidget:todo-sidebar": {
