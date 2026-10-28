@@ -949,9 +949,44 @@ jobs:
         if: needs.release-metadata.outputs.already_published != 'true' && inputs.lazycodex_only != true
         run: bun run build:omo-native
 
+      # omo-ai ships the signed keychain helper (#11262) as bin/darwin/omo-keychain. A normal run takes
+      # it from this run's keychain-helper job (the tarball keeps its mode); a skip_platform run has no
+      # such job and restores the same asset from the existing release by digest instead.
+      - name: Download keychain helper
+        if: inputs.skip_platform != true && inputs.lazycodex_only != true && needs.release-metadata.outputs.already_published != 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: keychain-helper
+          path: .omo/keychain-helper
+
+      - name: Stage keychain helper into the omo-ai payload
+        if: inputs.skip_platform != true && inputs.lazycodex_only != true && needs.release-metadata.outputs.already_published != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p packages/omo-native/bin/darwin
+          tar -xzpf .omo/keychain-helper/omo-keychain.tar.gz -C packages/omo-native/bin/darwin
+          test -x packages/omo-native/bin/darwin/omo-keychain
+
+      # Digest-verified, not requirement-verified: this job runs on ubuntu, and the requirement gate ran
+      # in the keychain-helper job that produced the asset. A release without the asset fails here.
+      - name: Restore keychain helper from the existing release
+        if: inputs.skip_platform == true && inputs.lazycodex_only != true && needs.release-metadata.outputs.already_published != 'true'
+        env:
+          VERSION: ${{ needs.release-metadata.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dir="$(mktemp -d)"
+          trap 'rm -rf "$dir"' EXIT
+          gh release download "v${VERSION}" --pattern omo-keychain-darwin-universal --pattern SHA256SUMS --dir "$dir"
+          test -f "$dir/omo-keychain-darwin-universal"
+          (cd "$dir" && shasum -a 256 -c --ignore-missing SHA256SUMS)
+          mkdir -p packages/omo-native/bin/darwin
+          install -m 0755 "$dir/omo-keychain-darwin-universal" packages/omo-native/bin/darwin/omo-keychain
+
       - name: Verify omo-ai payload
         if: needs.release-metadata.outputs.already_published != 'true' && inputs.lazycodex_only != true
-        run: node script/verify-omo-ai-payload.mjs
+        run: node script/verify-omo-ai-payload.mjs --release
 
       - name: Strip token auth from .npmrc to force OIDC
         if: >-
@@ -1357,9 +1392,17 @@ jobs:
               gh release download "v${VERSION}" --pattern "$NAME" --dir .omo/release-binaries
             fi
           done
+          if [ ! -f .omo/release-binaries/omo-keychain-darwin-universal ]; then
+            gh release download "v${VERSION}" --pattern omo-keychain-darwin-universal --dir .omo/release-binaries
+          fi
+          # build-omo-binary writes omo-runtime-capabilities.json beside the binaries (#11262 RULING-74);
+          # the omo-* globs below checksum and upload it. Restore it only once this commit's builder writes it.
+          if [ ! -f .omo/release-binaries/omo-runtime-capabilities.json ] && grep -qF omo-runtime-capabilities.json script/build-omo-binary.ts; then
+            gh release download "v${VERSION}" --pattern omo-runtime-capabilities.json --dir .omo/release-binaries
+          fi
           ls -la .omo/release-binaries/
-          # The release owns two checksum assets: one for 12 omo launchers,
-          # and one for the six separately downloadable desktop engines.
+          # The release owns two checksum assets: one for 12 omo launchers plus the
+          # keychain helper, and one for the six separately downloadable desktop engines.
           (cd .omo/release-binaries && shasum -a 256 omo-* > SHA256SUMS)
           bun script/desktop-engine-release.ts checksums .omo/release-binaries
           gh release upload "v${VERSION}" .omo/release-binaries/omo-* \
@@ -1389,6 +1432,16 @@ jobs:
             if [[ "$TARGET" == windows-* ]]; then NAME="${NAME}.exe"; fi
             touch "$EXPECTED_DIR/$NAME"
           done
+          touch "$EXPECTED_DIR/omo-keychain-darwin-universal"
+          # The runtime capability file is required exactly when the released commit's builder writes it.
+          CAPABILITIES=omo-runtime-capabilities.json
+          SUMS_LINES=13
+          ASSET_COUNT=21
+          if grep -qF "$CAPABILITIES" script/build-omo-binary.ts; then
+            touch "$EXPECTED_DIR/$CAPABILITIES"
+            SUMS_LINES=14
+            ASSET_COUNT=22
+          fi
           for HOST in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             touch "$EXPECTED_DIR/senpi-desktop-engine-${HOST}"
           done
@@ -1398,12 +1451,16 @@ jobs:
             <(cd "$VERIFY_DIR" && printf '%s\n' * | sort)
           (
             cd "$VERIFY_DIR"
-            test "$(wc -l < SHA256SUMS)" -eq 12
+            test "$(wc -l < SHA256SUMS)" -eq "$SUMS_LINES"
+            if [ "$SUMS_LINES" -eq 14 ]; then
+              grep -q "  ${CAPABILITIES}\$" SHA256SUMS
+              printf '{"keychainHandoff":1}\n' | cmp - "$CAPABILITIES"
+            fi
             test "$(wc -l < senpi-desktop-engine-checksums.txt)" -eq 6
             shasum -a 256 -c SHA256SUMS
             shasum -a 256 -c senpi-desktop-engine-checksums.txt
           )
-          echo "Verified 20/20 release assets for v${VERSION}"
+          echo "Verified ${ASSET_COUNT}/${ASSET_COUNT} release assets for v${VERSION}"
 
       - name: Delete draft release
         if: inputs.lazycodex_only != true
