@@ -23,7 +23,7 @@ export const A = credentialId(API)
  * overwrite keeps the item's owner (m5), a rename works for anyone (m10), a delete by a non-owner is refused (m6).
  * `secrets` is this process's own identity (`bun`); `access` is the signed helper, which counts every approve dialog.
  */
-export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "locked" } = {}) {
+export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "locked"; readonly approveGate?: Promise<void>; readonly onApprove?: () => void } = {}) {
   const items = new Map<string, Item>()
   let clock = 1_000
   const events: string[] = []
@@ -77,6 +77,8 @@ export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "l
       }
       case "approve": {
         stats.approves++
+        options.onApprove?.()
+        await options.approveGate
         if (item === undefined) return { missing: true }
         if (options.approve === "deny") return { error: "denied" }
         if (options.approve === "locked") return { error: "locked" }

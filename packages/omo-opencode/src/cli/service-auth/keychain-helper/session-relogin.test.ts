@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { CredentialStoreError } from "../keystore"
 import { A, credentials, fakeKeychain, helperSession } from "./fake-keychain.test-support"
 
 const stored = JSON.stringify(credentials)
@@ -54,7 +55,9 @@ describe("re-login over an item nobody here can read (#11262 addendum row 8b)", 
     keychain.put(A, stored, "runtime", "other")
     for (const suffix of [".old", ".old.1", ".old.2", ".old.3", ".old.4", ".old.5", ".old.6", ".old.7"]) keychain.put(`${A}${suffix}`, stored, "runtime", "other")
     const { session } = await helperSession(keychain)
-    await expect(session.save(fresh)).rejects.toThrow("Open Keychain Access")
+    const failure = session.save(fresh)
+    await expect(failure).rejects.toBeInstanceOf(CredentialStoreError)
+    await expect(failure).rejects.toThrow("Open Keychain Access")
     expect(keychain.events.filter(event => event.startsWith("retire"))).toHaveLength(1)
     expect(keychain.stats.approves).toBe(0)
     expect(keychain.items.get(A)?.owner).toBe("runtime")
@@ -71,5 +74,45 @@ describe("migration with a leftover .old (#11262 RULING-73)", () => {
     expect(keychain.items.get(A)?.owner).toBe("helper")
     expect(keychain.items.get(`${A}.old`)?.owner).toBe("runtime")
     expect(keychain.stats).toEqual({ approves: 1, unleasedMutations: 0 })
+  })
+})
+
+describe("#11589 review folds", () => {
+  test("#given an approvable item already approved in this process #when the user signs in again #then it is overwritten, never retired (8b)", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "runtime", "ours")
+    const { store, session } = await helperSession(keychain)
+    expect(await store.read()).toEqual(credentials)
+    await session.save(fresh)
+    expect(keychain.events.some(event => event.startsWith("retire"))).toBe(false)
+    expect(keychain.items.has(`${A}.old`)).toBe(false)
+    expect(keychain.stats.approves).toBe(1)
+  })
+
+  test("#given an approve already running for one backend #when another backend in this process reads #then it attaches, with one dialog and no refusal", async () => {
+    let open = () => {}
+    let started = () => {}
+    const approveStarted = new Promise<void>(resolve => (started = resolve))
+    const keychain = fakeKeychain({ approveGate: new Promise<void>(resolve => (open = resolve)), onApprove: () => started() })
+    keychain.put(A, stored, "runtime", "ours")
+    const interactive = await helperSession(keychain)
+    const bounded = await helperSession(keychain, true)
+    const first = interactive.store.read()
+    await approveStarted
+    const second = bounded.store.read()
+    open()
+    expect(await Promise.all([first, second])).toEqual([credentials, credentials])
+    expect(keychain.stats.approves).toBe(1)
+  })
+
+  test("#given retired copies in slots 0 and 2 only #when signing out #then only those two are removed", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "helper", "none")
+    keychain.put(`${A}.old`, stored, "helper", "none")
+    keychain.put(`${A}.old.2`, stored, "helper", "none")
+    const { session } = await helperSession(keychain)
+    await session.update(async (_current, view) => view.clear())
+    expect(keychain.events.filter(event => event.startsWith("remove .old"))).toEqual(["remove .old", "remove .old.2"])
+    expect([...keychain.items.keys()]).toEqual([])
   })
 })
