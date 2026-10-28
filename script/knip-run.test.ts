@@ -33,6 +33,11 @@ describe("knip paths are one repo-relative POSIX form on every platform", () => 
     expect(() => debugEntryPaths("[w] Finding entry paths\n{\n  paths: [ '/r/a.ts', ... 3 more items ]\n}")).toThrow("no readable paths array");
   });
 
+  test("debugEntryPaths never reads a later listing in place of the section's own unreadable array", () => {
+    const stdout = "[w] Finding entry paths\n{\n  paths: [ '/r/a.ts', ... 3 more items ]\n}\n[w] Finding project paths\n{ paths: [ '/r/other.ts' ] }";
+    expect(() => debugEntryPaths(stdout)).toThrow("no readable paths array");
+  });
+
   test("a reported path outside the knip cwd fails instead of silently missing", () => {
     // An 8.3 short cwd against a long-form file path: the two forms of one directory must not pass unnoticed.
     expect(() => unusedExports("C:\\Users\\RUNNER~1\\t", report("C:\\Users\\runneradmin\\t\\x.ts"), "")).toThrow(
