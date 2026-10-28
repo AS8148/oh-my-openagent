@@ -9,15 +9,19 @@ describe.skipIf(!isDarwin)("owner-marker probe without the helper (#11262 addend
   let harness: Harness
   let searchListBefore = ""
 
+  // The harness compiles the helper and the keychain fixture with clang, which can take far longer than a test's
+  // budget on a busy machine.
+  const NATIVE_BUILD_BUDGET_MS = 120_000
+
   beforeAll(async () => {
     searchListBefore = await userSearchList()
     harness = await createHarness()
-  })
+  }, NATIVE_BUILD_BUDGET_MS)
 
   afterAll(async () => {
     await harness.dispose()
     expect(await userSearchList()).toBe(searchListBefore)
-  })
+  }, NATIVE_BUILD_BUDGET_MS)
 
   test("#given a helper-owned item, a foreign item and no item #when probed by attributes only #then each is told apart and no secret is read", async () => {
     expect((await harness.run({ v: 1, verb: "write", account: OWNED, value: "dummy-owned" })).reply).toEqual({ ok: true, created: true })
