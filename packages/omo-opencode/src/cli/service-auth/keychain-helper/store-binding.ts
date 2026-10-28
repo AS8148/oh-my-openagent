@@ -10,7 +10,8 @@ import {
   type KeychainHelperOptions,
 } from "./darwin-backend"
 import type { LockedDarwinStore, WriteIntent } from "./darwin-store"
-import { createCreatorHandOff, DESKTOP_RUNTIME_REQUIREMENT, desktopRuntimeCandidates } from "./creator-handoff"
+import { createCreatorHandOff, desktopRuntimeCandidates, HANDOFF_ENV } from "./creator-handoff"
+import { keychainProcessState } from "./process-state"
 import { gatedSecrets } from "./secrets-gate"
 
 /** The session-lock view of a store (#11262 design 3.3, 3.4, 3.6): every keychain change inside one locked section. */
@@ -36,11 +37,14 @@ export type HelperBinding = {
 const readers = new Map<DarwinBackend, SecretApi>()
 const backends = new Map<string, Promise<DarwinBackend | null>>()
 
-let handOffOnce: (() => Promise<boolean>) | undefined
-// Addendum change 1: one hand-off attempt per process, to the desktop app's runtime when it is installed and verified.
-function processHandOff(): () => Promise<boolean> {
-  handOffOnce ??= createCreatorHandOff({ candidates: desktopRuntimeCandidates(homedir()), requirement: DESKTOP_RUNTIME_REQUIREMENT })
-  return handOffOnce
+// Addendum change 1: at most one hand-off attempt per process (shared by every bundled copy), to the installed and
+// verified desktop app, for the origin this store serves.
+function processHandOff(origin: string): () => Promise<boolean> {
+  return () => {
+    const state = keychainProcessState()
+    state.handOff ??= createCreatorHandOff({ candidates: desktopRuntimeCandidates(homedir()), origin })()
+    return state.handOff
+  }
 }
 
 /**
@@ -53,6 +57,7 @@ export function bindKeychainHelper(input: {
   readonly secrets: SecretApi
   readonly key: { readonly service: string; readonly name: string }
   readonly background: boolean
+  readonly origin: string
   readonly notice: (message: string) => void
   readonly pending: (message: string) => Error
   readonly options?: KeychainHelperOptions
@@ -82,12 +87,13 @@ export function bindKeychainHelper(input: {
             service: key.service,
             account: key.name,
             background: input.background,
+            noDialog: options?.noDialog ?? process.env[HANDOFF_ENV] === "1",
             notice: input.notice,
             ...(options?.home === undefined ? {} : { home: options.home }),
             ...(options?.row8b === undefined ? {} : { row8b: options.row8b }),
             ...(options?.silently === undefined ? {} : { silently: options.silently }),
             ...(options?.cache === undefined ? {} : { cache: options.cache }),
-            handOff: options === undefined ? processHandOff() : (options.handOff ?? (async () => false)),
+            handOff: options === undefined ? processHandOff(input.origin) : (options.handOff ?? (async () => false)),
           }),
     )
     if (options === undefined) {

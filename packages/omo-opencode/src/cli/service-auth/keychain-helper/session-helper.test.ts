@@ -106,3 +106,59 @@ describe("sign-in through the signed keychain helper (#11262 design 3, addendum)
     expect(keychain.events).toEqual([])
   })
 })
+
+// Addendum change 1 with the #11613 review: the hand-off runs only where this process would show its one dialog, and the
+// hand-off child (the desktop runtime, marked) never shows one. Dialogs are counted across BOTH processes.
+describe("creator hand-off across two processes (#11262 addendum rows 7, 8)", () => {
+  function handOffTo(keychain: ReturnType<typeof fakeKeychain>) {
+    let ran = 0
+    const handOff = async () => {
+      ran++
+      const creator = await helperSession(keychain, false, { identity: "runtime", noDialog: true })
+      return creator.session.accessToken().then(
+        () => true,
+        () => false,
+      )
+    }
+    return { handOff, runs: () => ran }
+  }
+
+  test("#given an item the desktop runtime created #when the CLI needs it #then the runtime moves it silently and there is no dialog at all", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "runtime", "ours")
+    const creator = handOffTo(keychain)
+    const { session } = await helperSession(keychain, false, { handOff: creator.handOff })
+    expect(await session.accessToken()).toBe(credentials.accessToken)
+    expect(creator.runs()).toBe(1)
+    expect(keychain.items.get(A)?.owner).toBe("helper")
+    expect(keychain.stats.approves).toBe(0)
+  })
+
+  test("#given an item neither side can read silently #when the CLI needs it #then the marked child shows nothing and the CLI shows exactly one dialog", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "other-app", "ours")
+    const creator = handOffTo(keychain)
+    const { session } = await helperSession(keychain, false, { handOff: creator.handOff })
+    expect(await session.accessToken()).toBe(credentials.accessToken)
+    expect(creator.runs()).toBe(1)
+    expect(keychain.stats.approves).toBe(1)
+  })
+
+  test("#given an item for the row 8b re-login path #when read #then no hand-off runs and no dialog shows", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "runtime", "other")
+    const creator = handOffTo(keychain)
+    const { store } = await helperSession(keychain, false, { handOff: creator.handOff })
+    expect(await store.read()).toBeNull()
+    expect(creator.runs()).toBe(0)
+    expect(keychain.stats.approves).toBe(0)
+  })
+
+  test("#given a hand-off whose spawn fails #when the CLI needs the item #then it falls through to exactly one dialog", async () => {
+    const keychain = fakeKeychain()
+    keychain.put(A, stored, "other-app", "ours")
+    const { session } = await helperSession(keychain, false, { handOff: async () => false })
+    expect(await session.accessToken()).toBe(credentials.accessToken)
+    expect(keychain.stats.approves).toBe(1)
+  })
+})

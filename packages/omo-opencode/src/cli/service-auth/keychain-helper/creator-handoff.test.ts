@@ -1,21 +1,31 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { createCreatorHandOff, DESKTOP_RUNTIME_REQUIREMENT, desktopRuntimeCandidates, HANDOFF_ENV, type HandOffRunner } from "./creator-handoff"
+import { dirname, join } from "node:path"
+import {
+  createCreatorHandOff,
+  DESKTOP_APP_REQUIREMENT,
+  DESKTOP_RUNTIME_REQUIREMENT,
+  type DesktopRuntime,
+  desktopRuntimeCandidates,
+  HANDOFF_ENV,
+  type HandOffRunner,
+} from "./creator-handoff"
 
 const roots: string[] = []
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-function runtimes(...names: string[]) {
+function installedApps(...names: string[]): DesktopRuntime[] {
   const root = mkdtempSync(join(tmpdir(), "creator-handoff-"))
   roots.push(root)
   return names.map(name => {
-    const path = join(root, name)
-    writeFileSync(path, name)
-    return path
+    const [candidate] = desktopRuntimeCandidates(join(root, name), "arm64").slice(1)
+    if (candidate === undefined) throw new Error("no candidate")
+    mkdirSync(dirname(candidate.runtime), { recursive: true })
+    writeFileSync(candidate.runtime, name)
+    return candidate
   })
 }
 
@@ -28,70 +38,95 @@ function recorder(code: number | null = 0) {
   return { runs, run }
 }
 
+const valid = async () => true
+
 describe("creator hand-off (#11262 addendum change 1, rows 7 and 8)", () => {
-  test("#given a verified desktop runtime #when the CLI hands off #then it runs `account token` once, marked so it never hands off again", async () => {
-    const [runtime] = runtimes("omo")
+  test("#given a verified app #when handing off #then its in-bundle runtime runs `account token` with the store's origin and the no-dialog marker", async () => {
+    const [app] = installedApps("one")
     const { runs, run } = recorder()
+    const checked: string[] = []
     const handOff = createCreatorHandOff({
-      candidates: [runtime ?? ""],
-      requirement: DESKTOP_RUNTIME_REQUIREMENT,
-      env: { HOME: "/Users/someone", SECRET: "not passed" },
-      check: async (_path, requirement) => requirement === DESKTOP_RUNTIME_REQUIREMENT,
+      candidates: [app ?? { app: "", runtime: "" }],
+      origin: "https://api.example.test",
+      env: { HOME: "/Users/someone", OMO_SERVICE_API_URL: "https://other.example.test", SECRET: "not passed" },
+      checkBundle: async (path, requirement) => {
+        checked.push(`bundle ${path === app?.app} ${requirement === DESKTOP_APP_REQUIREMENT}`)
+        return true
+      },
+      checkRuntime: async (path, requirement) => {
+        checked.push(`runtime ${path === app?.runtime} ${requirement === DESKTOP_RUNTIME_REQUIREMENT}`)
+        return true
+      },
       run,
       selfPath: "/other/bun",
     })
     expect(await handOff()).toBe(true)
-    expect(await handOff()).toBe(true)
-    expect(runs).toEqual([{ path: runtime, args: ["account", "token"], env: { [HANDOFF_ENV]: "1", HOME: "/Users/someone" } }])
-  })
-
-  test("#given a runtime failing its signature check #when handing off #then it is never run and a later verified one is", async () => {
-    const [forged, real] = runtimes("forged", "real")
-    const { runs, run } = recorder()
-    const handOff = createCreatorHandOff({ candidates: [forged ?? "", real ?? ""], requirement: DESKTOP_RUNTIME_REQUIREMENT, env: {}, check: async path => path === real, run })
-    expect(await handOff()).toBe(true)
-    expect(runs.map(entry => entry.path)).toEqual([real])
+    expect(checked).toEqual(["bundle true true", "runtime true true"])
+    expect(runs).toEqual([
+      { path: app?.runtime, args: ["account", "token"], env: { [HANDOFF_ENV]: "1", HOME: "/Users/someone", OMO_SERVICE_API_URL: "https://api.example.test" } },
+    ])
   })
 
   test.each([
-    ["the process is itself a hand-off child", { [HANDOFF_ENV]: "1" }, undefined],
-    ["the only candidate is this process", {}, "SELF"],
-  ] as const)("#given %s #when handing off #then nothing runs", async (_name, env, self) => {
-    const [runtime] = runtimes("omo")
+    ["the bundle seal fails", false, true],
+    ["the runtime requirement fails", true, false],
+  ] as const)("#given %s #when handing off #then that runtime never runs and a later verified one does", async (_name, bundleOk, runtimeOk) => {
+    const [forged, real] = installedApps("forged", "real")
     const { runs, run } = recorder()
     const handOff = createCreatorHandOff({
-      candidates: [runtime ?? ""],
-      requirement: DESKTOP_RUNTIME_REQUIREMENT,
-      env,
-      check: async () => true,
+      candidates: [forged ?? { app: "", runtime: "" }, real ?? { app: "", runtime: "" }],
+      env: {},
+      checkBundle: async app => app !== forged?.app || bundleOk,
+      checkRuntime: async runtime => runtime !== forged?.runtime || runtimeOk,
       run,
-      selfPath: self === "SELF" ? runtime : "/other/bun",
+    })
+    expect(await handOff()).toBe(true)
+    expect(runs.map(entry => entry.path)).toEqual([real?.runtime])
+  })
+
+  test.each([
+    ["the process is itself a hand-off child", { [HANDOFF_ENV]: "1" }, false],
+    ["the only candidate is this process", {}, true],
+  ] as const)("#given %s #when handing off #then nothing runs", async (_name, env, self) => {
+    const [app] = installedApps("one")
+    const { runs, run } = recorder()
+    const handOff = createCreatorHandOff({
+      candidates: [app ?? { app: "", runtime: "" }],
+      env,
+      checkBundle: valid,
+      checkRuntime: valid,
+      run,
+      selfPath: self ? app?.runtime : "/other/bun",
     })
     expect(await handOff()).toBe(false)
     expect(runs).toEqual([])
   })
 
-  test("#given a creator that fails or is killed at the deadline #when handing off #then it reports false", async () => {
-    const [runtime] = runtimes("omo")
+  test("#given a creator that fails, is killed at the deadline, or cannot be spawned #when handing off #then false, never a rejection", async () => {
+    const [app] = installedApps("one")
+    const candidates = [app ?? { app: "", runtime: "" }]
     for (const code of [1, null]) {
       const { run } = recorder(code)
-      const handOff = createCreatorHandOff({ candidates: [runtime ?? ""], requirement: DESKTOP_RUNTIME_REQUIREMENT, env: {}, check: async () => true, run, selfPath: "/x" })
-      expect(await handOff()).toBe(false)
+      expect(await createCreatorHandOff({ candidates, env: {}, checkBundle: valid, checkRuntime: valid, run, selfPath: "/x" })()).toBe(false)
     }
+    const failing: HandOffRunner = async () => {
+      throw new Error("EACCES")
+    }
+    expect(await createCreatorHandOff({ candidates, env: {}, checkBundle: valid, checkRuntime: valid, run: failing, selfPath: "/x" })()).toBe(false)
   })
 
   test("#given no app installed #when handing off #then nothing runs", async () => {
     const { runs, run } = recorder()
-    const handOff = createCreatorHandOff({ candidates: ["/nonexistent/OmO.app/omo"], requirement: DESKTOP_RUNTIME_REQUIREMENT, env: {}, check: async () => true, run })
+    const handOff = createCreatorHandOff({ candidates: [{ app: "/nonexistent/OmO.app", runtime: "/nonexistent/OmO.app/omo" }], env: {}, checkBundle: valid, checkRuntime: valid, run })
     expect(await handOff()).toBe(false)
     expect(runs).toEqual([])
   })
 
   test("#given the machine #when listing app runtimes #then the system and the user Applications folders, per arch", () => {
     expect(desktopRuntimeCandidates("/Users/someone", "arm64")).toEqual([
-      "/Applications/OmO.app/Contents/Resources/omo-runtime/darwin-arm64/omo",
-      "/Users/someone/Applications/OmO.app/Contents/Resources/omo-runtime/darwin-arm64/omo",
+      { app: "/Applications/OmO.app", runtime: "/Applications/OmO.app/Contents/Resources/omo-runtime/darwin-arm64/omo" },
+      { app: "/Users/someone/Applications/OmO.app", runtime: "/Users/someone/Applications/OmO.app/Contents/Resources/omo-runtime/darwin-arm64/omo" },
     ])
-    expect(desktopRuntimeCandidates("/Users/someone", "x64")[0]).toContain("darwin-x64")
+    expect(desktopRuntimeCandidates("/Users/someone", "x64")[0]?.runtime).toContain("darwin-x64")
   })
 })

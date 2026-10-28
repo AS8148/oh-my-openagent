@@ -11,7 +11,7 @@ import { createApprovalCache } from "./approval-cache"
 import type { HelperCall, HelperLease, HelperReply } from "./client"
 import { OLD_SLOT_COUNT, oldSlotName } from "./recovery"
 
-export type Owner = "helper" | "bun" | "runtime"
+export type Owner = "helper" | "bun" | "runtime" | "other-app"
 type Item = { value: string; owner: Owner; partition: "ours" | "other" | "none"; marker: boolean; cdat: number; mdat: number }
 
 export const credentials: Credentials = { ...grant, ...privateKeys }
@@ -31,26 +31,28 @@ export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "l
   const put = (name: string, value: string, owner: Owner, partition: Item["partition"] = "none") =>
     items.set(name, { value, owner, partition, marker: owner === "helper", cdat: ++clock, mdat: clock })
 
-  const secrets: SecretApi = {
+  // Bun.secrets as one code identity: "bun" is the CLI process, "runtime" the desktop app's.
+  const secretsAs = (identity: Owner): SecretApi => ({
     get: async ({ name }) => {
       const item = items.get(name)
       if (item === undefined) return null
-      if (item.owner !== "bun") throw new Error("SecKeychainSearchCopyNext: -25293")
+      if (item.owner !== identity) throw new Error("SecKeychainSearchCopyNext: -25293")
       return item.value
     },
     set: async ({ name, value }) => {
       const item = items.get(name)
-      if (item === undefined) put(name, value, "bun", "other")
+      if (item === undefined) put(name, value, identity, "other")
       else items.set(name, { ...item, value, mdat: ++clock })
     },
     delete: async ({ name }) => {
       const item = items.get(name)
       if (item === undefined) return false
-      if (item.owner !== "bun") throw new Error("-25244")
+      if (item.owner !== identity) throw new Error("-25244")
       items.delete(name)
       return true
     },
-  }
+  })
+  const secrets = secretsAs("bun")
 
   const slots = (base: string) => Array.from({ length: OLD_SLOT_COUNT }, (_, slot) => slot).filter(slot => items.has(oldSlotName(base, slot)))
   const present = (base: string) => ({ staging: items.has(`${base}.staging`), old: slots(base).length > 0, oldSlots: slots(base) })
@@ -111,19 +113,30 @@ export function fakeKeychain(options: { readonly approve?: "allow" | "deny" | "l
   const access: HelperAccess = { kind: "ready", path: "/fake/omo-keychain", call }
   // One process's approval cache per fake machine, so one test's approval never serves another test.
   const cache = createApprovalCache()
-  return { items, events, stats, secrets, access, put, cache }
+  return { items, events, stats, secrets, secretsAs, access, put, cache }
 }
 
-export async function helperSession(keychain: ReturnType<typeof fakeKeychain>, background = false) {
+export type SessionProcess = { readonly identity?: Owner; readonly noDialog?: boolean; readonly handOff?: () => Promise<boolean> }
+
+/** One omo process on the fake machine; a process other than the default has its own approval cache, as a real one does. */
+export async function helperSession(keychain: ReturnType<typeof fakeKeychain>, background = false, proc: SessionProcess = {}) {
   const home = await mkdtemp(join(tmpdir(), "omo-helper-session-"))
   onTestFinished(() => rm(home, { recursive: true, force: true }))
   const store = createCredentialStore(API, {
-    secrets: keychain.secrets,
+    secrets: proc.identity === undefined ? keychain.secrets : keychain.secretsAs(proc.identity),
     platform: "darwin",
     lockProbe: async () => "unlocked",
     notice: () => {},
     wait: background ? SESSION_READ_WAIT : INTERACTIVE_READ_WAIT,
-    keychainHelper: { access: async () => keychain.access, home, silently: run => run(), ownerMarker: async () => "absent", cache: keychain.cache },
+    keychainHelper: {
+      access: async () => keychain.access,
+      home,
+      silently: run => run(),
+      ownerMarker: async () => "absent",
+      cache: proc.identity === undefined ? keychain.cache : createApprovalCache(),
+      ...(proc.noDialog === undefined ? {} : { noDialog: proc.noDialog }),
+      ...(proc.handOff === undefined ? {} : { handOff: proc.handOff }),
+    },
   })
   return { store, session: createSession({ api: API, store, home }), home }
 }
