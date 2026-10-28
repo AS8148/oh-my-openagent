@@ -3861,6 +3861,7 @@
         "test/bun-bin-shim.fixture.ts",
         "test/bun-bin-shim.test-support.ts",
         "test/daemon-test-support.ts",
+        "test/keychain-helper.test-support.ts",
         "test/fixtures/compiled-setup/entry.ts",
         "test/fixtures/provisioned-handoff/entry.ts",
         "test/fixtures/senpi-hooks-state-child.mjs",
