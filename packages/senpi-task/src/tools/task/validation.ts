@@ -92,7 +92,9 @@ const EMPTY_TASKS_MESSAGE = "tasks must contain at least one item."
 const RUN_IN_BACKGROUND_CONFLICT_MESSAGE =
   "run_in_background is batch-wide: every value in one task call must agree. Set it once at the top level (true returns every task id immediately; false waits for every result) and drop the disagreeing item-level values."
 
-const DEFAULT_ISOLATION_MERGE = "patch"
+// The merge strategy an isolated child gets when neither the call nor task.isolation names one.
+// Exported so buildStartSpec and the no-op rule below cannot drift to different defaults.
+export const DEFAULT_ISOLATION_MERGE = "patch"
 
 function present(value: string | undefined): value is string {
   return value !== undefined && value.trim().length > 0

@@ -1,7 +1,3 @@
-## 2026-10-28 - Accept no-op isolation fields on non-isolated task calls (#11628)
-
-Without isolation, `apply: false` and a `merge` equal to the effective default are no-ops: accepted and ignored. Only a behaviour-changing value (`apply: true`, or a different `merge`) is refused, with a message naming the field, its value, and that isolation must be enabled. Batch items follow the same shared rule, including values inherited from the top level, and the refusal names the item. Thanks to @bkutasi (bazsi1__ on Discord) for the report.
-
 ## 2026-10-26 - Keep parent Resume independent of a failed child restore (#11401)
 
 The run controller records resume-effect failures for acknowledged participants as well as participants already outside custody. A persisted acknowledgement supplies the retry cutoff when the failed child's engine is unavailable. A newer Stop still supersedes the failed old Resume.
