@@ -31,6 +31,8 @@ struct ScriptedField {
     focus_reply: AXError,
     select_reply: AXError,
     calls: RefCell<Vec<&'static str>>,
+    /// What the insertion answers.
+    insert_reply: Option<ErrorCode>,
     /// The user types into the field's app while the selection write blocks:
     /// the press check installed for the request refuses from then on.
     types_on_select: Cell<bool>,
@@ -59,6 +61,7 @@ impl ScriptedField {
             focus_reply: AXError::Success,
             select_reply: AXError::Success,
             calls: RefCell::default(),
+            insert_reply: None,
             types_on_select: Cell::new(false),
         }
     }
@@ -122,7 +125,10 @@ impl TextField for ScriptedField {
 
     fn insert(&self, _: &str) -> CoreResult<()> {
         self.calls.borrow_mut().push("insert");
-        Ok(())
+        match self.insert_reply {
+            None => Ok(()),
+            Some(code) => Err(DesktopError::new(code, "injected insertion refusal")),
+        }
     }
 }
 
@@ -214,4 +220,24 @@ fn a_user_typing_during_the_selection_write_gets_the_field_handed_back_and_nothi
     USER_TYPED.with(|typed| typed.set(false));
     drop(_watch);
     assert!(check_press().is_ok(), "the watch is uninstalled after the call");
+}
+
+#[test]
+fn a_refused_insertion_hands_a_borrowed_focus_back() {
+    let field = ScriptedField {
+        insert_reply: Some(ErrorCode::AxFailed),
+        ..ScriptedField::new(false, false)
+    };
+    let error = replace_whole_value(&field, "abc").unwrap_err();
+    assert_eq!(error.code, ErrorCode::AxFailed);
+    assert_eq!(field.calls(), ["focus", "select", "insert", "hand back"]);
+    assert!(!field.focused.get());
+    // A field that already held the focus keeps it.
+    let own = ScriptedField {
+        focused: Cell::new(true),
+        insert_reply: Some(ErrorCode::AxFailed),
+        ..ScriptedField::new(false, false)
+    };
+    assert!(replace_whole_value(&own, "abc").is_err());
+    assert_eq!(own.calls(), ["select", "insert"]);
 }

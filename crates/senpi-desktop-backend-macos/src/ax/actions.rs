@@ -113,7 +113,13 @@ pub(super) fn set_value(element: &AXUIElement, value: &str) -> CoreResult<()> {
         if replace_native_text(element, pid, started_in_background, value)? {
             return Ok(());
         }
+        // A control whose value is not text (a slider, stepper or checkbox)
+        // cannot be read back as the string that was written.
+        let textual = element::copy_string(element, "AXValue").is_some();
         set_string_value(element, value)?;
+        if !textual {
+            return Ok(());
+        }
         text_readback(value, value, element::copy_string(element, "AXValue").as_deref(), is_secure(element))
     })
 }
