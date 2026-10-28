@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:7a225a15bf5b52abe494c71eb6ff547d63e87cecfbce995848c6e3d595efe115:42f3723b384006ea7f9cdbf96f2b0ca8ced4119534c95595ee64fbe2da25a63e
+// omo-codex-install:1a1b408410fc60ed3e660b31fde06aad3588bd67edbf7acbcdd528f15de2c471:270813471cfece9c7fcc5d4609956dfda278c646a49db1080321618fe980f2fe
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -13073,7 +13073,8 @@ var LATEST_MODEL_BY_FAMILY = {
   gptLunaFast: "gpt-6-luna-fast",
   glm: "glm-5.3",
   glmFlash: "glm-5.3-flash",
-  kimi: "kimi-k3",
+  kimi: "kimi-k3.1-pro",
+  kimiK3: "kimi-k3",
   geminiPro: "gemini-4-argon"
 };
 
