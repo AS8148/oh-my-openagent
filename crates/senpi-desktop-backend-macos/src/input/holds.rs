@@ -61,8 +61,12 @@ impl MacInput {
                         guard::guard(&window, if mouse.is_some() { "click" } else { "keyboard" },
                             mouse.map(|hold| hold.button))?;
                         if mouse.is_none_or(|hold| !hold.keys.is_empty()) {
-                            guard::prepare_keys(&window, pid, wid, capture)?;
+                            // A hold presses once up front: the route is proven here and the
+                            // press runs under the same per-press recheck as typed keys.
+                            let prepared = super::background_keys::prepare(pid, wid)?;
                             this.last_activated = Some((pid, wid));
+                            prepared.recheck()?;
+                            return action(this, KeyRoute::Process(prepared.process()), Some(&window));
                         } else if !window.focused {
                             skylight::activate_without_raise(pid, wid)?;
                             this.last_activated = Some((pid, wid));
