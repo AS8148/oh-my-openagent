@@ -171,9 +171,12 @@ export async function stopRunTaskHosts(
     }))
   }
   const finished = await within(
-    stopAll().catch((error: unknown) => {
-      throw new Error(`Stopping the task hosts this run started failed (#11630): ${describeError(error)}`)
-    }),
+    stopAll().then(
+      () => true,
+      (error: unknown) => {
+        throw new Error(`Stopping the task hosts this run started failed (#11630): ${describeError(error)}`)
+      },
+    ),
     Math.max(0, deadline - Date.now()),
   )
   if (finished === undefined) {
