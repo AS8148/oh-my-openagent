@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { appendFileSync, rmSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import { Glob } from "bun";
@@ -94,11 +94,16 @@ const scanRunByPath = async (): Promise<Map<string, string>> => {
   return found;
 };
 
-const scratch: string[] = [];
-// Removing a repo-sized copy can take longer than bun's 5 s default hook bound on a loaded machine.
-afterAll(() => {
-  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
-}, KNIP_TIMEOUT_MS);
+// A repo-sized copy is removed inside the test that made it, under that test's KNIP_TIMEOUT_MS bound: bun 1.4.4
+// applies the preload's setDefaultTimeout (20 s) to an afterAll hook even when a timeout argument is passed.
+const withRepoCopy = async <T>(use: (copy: string) => Promise<T>): Promise<T> => {
+  const copy = await copyRepo();
+  try {
+    return await use(copy);
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
+};
 
 describe("knip export-checks every entry", () => {
   test(
@@ -119,30 +124,30 @@ describe("knip export-checks every entry", () => {
       const entries = await knipEntries();
       expect(entries.length).toBeGreaterThan(0);
 
-      const copy = await copyRepo();
-      scratch.push(copy);
-      const probes = entries.map((file, n) => ({ file, name: `zzKnipProbe_${n}` }));
-      for (const probe of probes) appendFileSync(join(copy, probe.file), `\nexport const ${probe.name} = 1;\n`);
+      await withRepoCopy(async (copy) => {
+        const probes = entries.map((file, n) => ({ file, name: `zzKnipProbe_${n}` }));
+        for (const probe of probes) appendFileSync(join(copy, probe.file), `\nexport const ${probe.name} = 1;\n`);
 
-      // The exact CI knip.jsonc: per-symbol pre-existing rows cannot hide a new probe name.
-      const { stdout, stderr } = await runKnip(copy, ["--reporter", "json"]);
-      const unused = unusedExports(copy, stdout, stderr);
-      // A config knip cannot load (e.g. a vitest.config.ts whose `vitest/config` import does not resolve in the copy) drops that
-      // plugin's inputs, so the copy would be analyzed differently from the repo.
-      const loadErrors = stderr.split(/\r?\n/).filter((line) => line.startsWith("ERROR:"));
-      const missed = probes.filter((probe) => !unused.has(`${probe.file}#${probe.name}`)).map((probe) => probe.file);
-      const forced: unknown = await Bun.file(FORCED_UNCHECKED_FILE).json();
-      const forcedFiles = new Set(isObject(forced) && Array.isArray(forced["files"]) ? forced["files"] : []);
-      const unexpected = missed.filter((file) => !forcedFiles.has(file));
-      const stale = [...forcedFiles].filter((file) => typeof file !== "string" || !missed.includes(file));
-      console.log(
-        `knip-entry-probe: ${probes.length} entries probed, ${probes.length - missed.length} reported, ${missed.length - unexpected.length} knip-forced unchecked, ${unexpected.length} missed`,
-      );
-      expect({ unexpected, stale, loadErrors, stderr: unexpected.length > 0 ? stderr.slice(0, 4000) : "" }).toEqual({
-        unexpected: [],
-        stale: [],
-        loadErrors: [],
-        stderr: "",
+        // The exact CI knip.jsonc: per-symbol pre-existing rows cannot hide a new probe name.
+        const { stdout, stderr } = await runKnip(copy, ["--reporter", "json"]);
+        const unused = unusedExports(copy, stdout, stderr);
+        // A config knip cannot load (e.g. a vitest.config.ts whose `vitest/config` import does not resolve in the copy) drops that
+        // plugin's inputs, so the copy would be analyzed differently from the repo.
+        const loadErrors = stderr.split(/\r?\n/).filter((line) => line.startsWith("ERROR:"));
+        const missed = probes.filter((probe) => !unused.has(`${probe.file}#${probe.name}`)).map((probe) => probe.file);
+        const forced: unknown = await Bun.file(FORCED_UNCHECKED_FILE).json();
+        const forcedFiles = new Set(isObject(forced) && Array.isArray(forced["files"]) ? forced["files"] : []);
+        const unexpected = missed.filter((file) => !forcedFiles.has(file));
+        const stale = [...forcedFiles].filter((file) => typeof file !== "string" || !missed.includes(file));
+        console.log(
+          `knip-entry-probe: ${probes.length} entries probed, ${probes.length - missed.length} reported, ${missed.length - unexpected.length} knip-forced unchecked, ${unexpected.length} missed`,
+        );
+        expect({ unexpected, stale, loadErrors, stderr: unexpected.length > 0 ? stderr.slice(0, 4000) : "" }).toEqual({
+          unexpected: [],
+          stale: [],
+          loadErrors: [],
+          stderr: "",
+        });
       });
     },
     KNIP_TIMEOUT_MS,

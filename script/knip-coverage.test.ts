@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { copyRepo, isObject, knipConfig, REPO_ROOT, repoFiles, runKnip, unusedExports } from "./knip-run.ts";
@@ -24,11 +24,16 @@ const KNIP_TIMEOUT_MS = 600_000;
 // sha256 of scripts/knip-preexisting-exports.ts at omo-relay-daemon main 398f750f73 (also omo-service's copy).
 const SHARED_PREPROCESSOR_SHA256 = "a92ddf4eaa74dcb54aacc5a3eb975d6c5f7ffec3897cd9ee31857bbd0ca19d22";
 
-const scratch: string[] = [];
-// Removing a repo-sized copy can take longer than bun's 5 s default hook bound on a loaded machine.
-afterAll(() => {
-  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
-}, KNIP_TIMEOUT_MS);
+// A repo-sized copy is removed inside the test that made it, under that test's KNIP_TIMEOUT_MS bound: bun 1.4.4
+// applies the preload's setDefaultTimeout (20 s) to an afterAll hook even when a timeout argument is passed.
+const withRepoCopy = async <T>(use: (copy: string) => Promise<T>): Promise<T> => {
+  const copy = await copyRepo();
+  try {
+    return await use(copy);
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
+};
 
 const preExistingRows = (config: Record<string, unknown>): string[] => {
   const options = config["preprocessorOptions"];
@@ -65,25 +70,25 @@ describe("knip coverage never shrinks", () => {
     async () => {
       const files = repoFiles().filter((file) => SOURCE.test(file) && !DECLARATION.test(file));
       expect(files.length).toBeGreaterThan(0);
-      const copy = await copyRepo();
-      scratch.push(copy);
-      files.forEach((file, n) => appendFileSync(join(copy, file), `\nexport const zzCov_${n} = 1;\n`));
-      const baseline: unknown = Bun.JSONC.parse(await Bun.file(join(REPO_ROOT, "script/knip-coverage-baseline.jsonc")).text());
-      await Bun.write(join(copy, "knip.coverage-baseline.json"), JSON.stringify(baseline));
+      await withRepoCopy(async (copy) => {
+        files.forEach((file, n) => appendFileSync(join(copy, file), `\nexport const zzCov_${n} = 1;\n`));
+        const baseline: unknown = Bun.JSONC.parse(await Bun.file(join(REPO_ROOT, "script/knip-coverage-baseline.jsonc")).text());
+        await Bun.write(join(copy, "knip.coverage-baseline.json"), JSON.stringify(baseline));
 
-      const checked = async (args: string[]): Promise<string[]> => {
-        const { stdout, stderr } = await runKnip(copy, [...args, "--reporter", "json"]);
-        const unused = unusedExports(copy, stdout, stderr);
-        return files.filter((file, n) => unused.has(`${file}#zzCov_${n}`));
-      };
-      const base = await checked(["--config", "knip.coverage-baseline.json"]);
-      const head = new Set(await checked([]));
-      const lost = base.filter((file) => !head.has(file));
-      console.log(
-        `knip-coverage: ${files.length} files probed, baseline checks ${base.length}, knip.jsonc checks ${head.size}, lost ${lost.length}, gained ${head.size - (base.length - lost.length)}`,
-      );
-      expect(base.length).toBeGreaterThan(0);
-      expect(lost.map((file) => `${file} (export-checked by the baseline config, not by knip.jsonc)`)).toEqual([]);
+        const checked = async (args: string[]): Promise<string[]> => {
+          const { stdout, stderr } = await runKnip(copy, [...args, "--reporter", "json"]);
+          const unused = unusedExports(copy, stdout, stderr);
+          return files.filter((file, n) => unused.has(`${file}#zzCov_${n}`));
+        };
+        const base = await checked(["--config", "knip.coverage-baseline.json"]);
+        const head = new Set(await checked([]));
+        const lost = base.filter((file) => !head.has(file));
+        console.log(
+          `knip-coverage: ${files.length} files probed, baseline checks ${base.length}, knip.jsonc checks ${head.size}, lost ${lost.length}, gained ${head.size - (base.length - lost.length)}`,
+        );
+        expect(base.length).toBeGreaterThan(0);
+        expect(lost.map((file) => `${file} (export-checked by the baseline config, not by knip.jsonc)`)).toEqual([]);
+      });
     },
     KNIP_TIMEOUT_MS,
   );
@@ -96,12 +101,12 @@ describe("knip coverage never shrinks", () => {
       expect(rows.length).toBeGreaterThan(0);
       delete config["preprocessor"];
       delete config["preprocessorOptions"];
-      const copy = await copyRepo();
-      scratch.push(copy);
-      await Bun.write(join(copy, "knip.no-preprocessor.json"), JSON.stringify(config));
-      const { stdout, stderr } = await runKnip(copy, ["--config", "knip.no-preprocessor.json", "--reporter", "json"]);
-      const unused = unusedExports(copy, stdout, stderr);
-      expect(rows.filter((row) => !unused.has(row))).toEqual([]);
+      await withRepoCopy(async (copy) => {
+        await Bun.write(join(copy, "knip.no-preprocessor.json"), JSON.stringify(config));
+        const { stdout, stderr } = await runKnip(copy, ["--config", "knip.no-preprocessor.json", "--reporter", "json"]);
+        const unused = unusedExports(copy, stdout, stderr);
+        expect(rows.filter((row) => !unused.has(row))).toEqual([]);
+      });
     },
     KNIP_TIMEOUT_MS,
   );
