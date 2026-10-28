@@ -8,6 +8,7 @@ import { buildHttpRequestInit } from "./oauth-handler"
 import type { ManagedClient, McpClient, McpTransport, SkillMcpClientConnectionParams } from "./types"
 import { createProtocolTransport } from "./protocol-transport"
 import { protocolHttpFetch } from "./protocol-http-fetch"
+import { createRequestAbortFetch } from "./request-abort-fetch"
 import { connectWithPolicySignal, McpEnvironmentPolicyChangedError } from "./policy-connection"
 import { withConnectDeadline } from "./timeouts"
 
@@ -37,7 +38,7 @@ const defaultHttpClientDependencies: HttpClientDependencies = {
     ? new SSEClientTransport(url, options)
     : createProtocolTransport(new StreamableHTTPClientTransport(url, {
       ...options,
-      fetch: protocolHttpFetch,
+      fetch: createRequestAbortFetch(protocolHttpFetch),
     }), client instanceof Client ? client : undefined, `http:${url.toString()}`),
   log,
 }
