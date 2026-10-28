@@ -1867,6 +1867,42 @@
       "packages/utils/src/snake-case.ts": ["camelToSnake", "snakeToCamel", "transformObjectKeys", "objectToCamelCase"],
       // pre-existing at origin dev 4686e425b5: unused export(s) parseTarListingOutput
       "packages/utils/src/zip-entry-listing/tar-zip-entry-listing.ts": ["parseTarListingOutput"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) generateStaticParams, generateMetadata, default
+      "packages/web/app/[locale]/docs/[slug]/page.tsx": ["generateStaticParams", "generateMetadata", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) generateMetadata, default
+      "packages/web/app/[locale]/docs/install/page.tsx": ["generateMetadata", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) metadata, default
+      "packages/web/app/[locale]/docs/layout.tsx": ["metadata", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) default
+      "packages/web/app/[locale]/docs/page.tsx": ["default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) dynamic, generateMetadata, default
+      "packages/web/app/[locale]/download/page.tsx": ["dynamic", "generateMetadata", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) generateMetadata, generateStaticParams, default
+      "packages/web/app/[locale]/layout.tsx": ["generateMetadata", "generateStaticParams", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) metadata, default
+      "packages/web/app/[locale]/manifesto/2026-01/layout.tsx": ["metadata", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) default
+      "packages/web/app/[locale]/manifesto/2026-01/page.tsx": ["default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) metadata, default
+      "packages/web/app/[locale]/manifesto/layout.tsx": ["metadata", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) default
+      "packages/web/app/[locale]/manifesto/page.tsx": ["default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) generateMetadata, default
+      "packages/web/app/[locale]/page.tsx": ["generateMetadata", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) dynamic, generateMetadata, default
+      "packages/web/app/[locale]/support/page.tsx": ["dynamic", "generateMetadata", "default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) generateLandingMetadata
+      "packages/web/app/_components/landing-page.tsx": ["generateLandingMetadata"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) GET
+      "packages/web/app/api/downloads/route.ts": ["GET"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) GET
+      "packages/web/app/api/npm-downloads/route.ts": ["GET"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) GET
+      "packages/web/app/api/stats/route.ts": ["GET"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) default
+      "packages/web/app/design/graph/page.tsx": ["default"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) dynamic, metadata, default
+      "packages/web/app/design/page.tsx": ["dynamic", "metadata", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) revalidate, generateMetadata, default
       "packages/web/app/layout.tsx": ["revalidate", "generateMetadata", "default"],
       // pre-existing at origin dev 4686e425b5: unused export(s) alt, size, contentType, dynamic
@@ -3840,6 +3876,9 @@
         "scripts/retain-static-assets.mjs",
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
+        // Next.js route segment files at any depth (app/[locale]/**, app/design/**, app/api/**): the Next.js plugin adds them with
+        // exports unchecked, so they are listed here to be export-checked like the top-level ones.
+        "app/**/{layout,page,route,template}.{js,jsx,ts,tsx}",
         "app/layout.tsx",
         "app/manifest.ts",
         "app/opengraph-image.tsx",

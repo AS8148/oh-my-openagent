@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toRepoPath, unusedExports } from "./knip-run.ts";
+import { debugEntryPaths, toRepoPath, unusedExports } from "./knip-run.ts";
 
 const report = (file: string) => JSON.stringify({ issues: [{ file, exports: [{ name: "probe" }] }] });
 
@@ -17,6 +17,20 @@ describe("knip paths are one repo-relative POSIX form on every platform", () => 
   test("unusedExports keys Windows-form report paths in POSIX form", () => {
     expect([...unusedExports("C:\\r", report("C:\\r\\x\\y.ts"), "")]).toEqual(["x/y.ts#probe"]);
     expect([...unusedExports("C:\\r", report("x\\y.ts"), "")]).toEqual(["x/y.ts#probe"]);
+  });
+
+  test.each([
+    ["one path per line, a ']' inside a path", "paths: [\n    '/r/app/[locale]/layout.tsx',\n    '/r/app/design/page.tsx'\n  ]", ["/r/app/[locale]/layout.tsx", "/r/app/design/page.tsx"]],
+    ["inline", "paths: [ '/r/a.ts', '/r/[id]/b.ts' ]", ["/r/a.ts", "/r/[id]/b.ts"]],
+    ["empty", "paths: []", []],
+    ["escaped Windows separators", "paths: [ 'C:\\\\r\\\\[id]\\\\x.ts' ]", ["C:\\r\\[id]\\x.ts"]],
+  ])("debugEntryPaths reads every path of a knip --debug entry section: %s", (_, listing, expected) => {
+    const stdout = `[w] Finding entry paths from plugins\n{\n  patterns: [ 'app/**/page.tsx' ],\n  ${listing}\n}\n[w] Finding project paths\n{ paths: [ '/r/other.ts' ] }`;
+    expect(debugEntryPaths(stdout)).toEqual([expected]);
+  });
+
+  test("debugEntryPaths fails on a paths array it cannot read instead of dropping the rest", () => {
+    expect(() => debugEntryPaths("[w] Finding entry paths\n{\n  paths: [ '/r/a.ts', ... 3 more items ]\n}")).toThrow("no readable paths array");
   });
 
   test("a reported path outside the knip cwd fails instead of silently missing", () => {

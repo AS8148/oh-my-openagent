@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { appendFileSync, rmSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import { Glob } from "bun";
-import { copyRepo, isObject, packageDirs, REPO_ROOT, repoFiles, runKnip, toRepoPath, unusedExports } from "./knip-run.ts";
+import { copyRepo, debugEntryPaths, isObject, packageDirs, REPO_ROOT, repoFiles, runKnip, toRepoPath, unusedExports } from "./knip-run.ts";
 
 // Every knip entry must have its exports checked (includeEntryExports), so an unused export added to
 // an entry fails `knip:check`.
@@ -26,17 +26,13 @@ const knipEntries = (): Promise<string[]> => {
     const { stdout } = await runKnip(REPO_ROOT, ["--debug"]);
     const visible = new Set(repoFiles());
     const entries = new Set<string>();
-    let sections = 0;
-    for (const section of stdout.split(/^\[[^\]\n]*\] Finding entry paths/m).slice(1)) {
-      sections += 1;
-      const paths = /paths: \[([\s\S]*?)\]/.exec(section)?.[1] ?? "";
-      for (const [, path] of paths.matchAll(/'([^']+)'/g)) {
-        if (path === undefined || !SOURCE_EXT.test(path)) continue;
-        const rel = toRepoPath(REPO_ROOT, path);
-        if (visible.has(rel)) entries.add(rel);
-      }
+    const sections = debugEntryPaths(stdout);
+    for (const path of sections.flat()) {
+      if (!SOURCE_EXT.test(path)) continue;
+      const rel = toRepoPath(REPO_ROOT, path);
+      if (visible.has(rel)) entries.add(rel);
     }
-    if (sections === 0) throw new Error(`knip --debug printed no "Finding entry paths" section:\n${stdout.slice(0, 2000)}`);
+    if (sections.length === 0) throw new Error(`knip --debug printed no "Finding entry paths" section:\n${stdout.slice(0, 2000)}`);
     return [...entries].sort();
   })();
   return entriesOnce;
@@ -130,6 +126,9 @@ describe("knip export-checks every entry", () => {
       // The exact CI knip.jsonc: per-symbol pre-existing rows cannot hide a new probe name.
       const { stdout, stderr } = await runKnip(copy, ["--reporter", "json"]);
       const unused = unusedExports(copy, stdout, stderr);
+      // A config knip cannot load (e.g. a vitest.config.ts whose `vitest/config` import does not resolve in the copy) drops that
+      // plugin's inputs, so the copy would be analyzed differently from the repo.
+      const loadErrors = stderr.split(/\r?\n/).filter((line) => line.startsWith("ERROR:"));
       const missed = probes.filter((probe) => !unused.has(`${probe.file}#${probe.name}`)).map((probe) => probe.file);
       const forced: unknown = await Bun.file(FORCED_UNCHECKED_FILE).json();
       const forcedFiles = new Set(isObject(forced) && Array.isArray(forced["files"]) ? forced["files"] : []);
@@ -138,9 +137,10 @@ describe("knip export-checks every entry", () => {
       console.log(
         `knip-entry-probe: ${probes.length} entries probed, ${probes.length - missed.length} reported, ${missed.length - unexpected.length} knip-forced unchecked, ${unexpected.length} missed`,
       );
-      expect({ unexpected, stale, stderr: unexpected.length > 0 ? stderr.slice(0, 4000) : "" }).toEqual({
+      expect({ unexpected, stale, loadErrors, stderr: unexpected.length > 0 ? stderr.slice(0, 4000) : "" }).toEqual({
         unexpected: [],
         stale: [],
+        loadErrors: [],
         stderr: "",
       });
     },

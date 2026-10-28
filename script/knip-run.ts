@@ -14,6 +14,23 @@ export const toRepoPath = (root: string, path: string): string => {
   return (style.isAbsolute(path) ? style.relative(root, path) : path).split(win32.sep).join(posix.sep);
 };
 
+// knip --debug logs each glob it expands as util.inspect output: a "[<workspace>] Finding entry paths ..." line, then an object
+// whose `paths` array lists the resolved files. A path can itself contain "]" (Next.js app/[locale]/page.tsx), so the array is
+// read as a run of quoted strings up to its own closing bracket; an array that is not one (a truncated or re-quoted listing)
+// fails instead of silently dropping the rest of the section. Returns one path list per section.
+const ENTRY_SECTION = /^\[[^\]\n]*\] Finding entry paths/m;
+const QUOTED = String.raw`'(?:[^'\\]|\\.)*'`;
+const PATHS_ARRAY = new RegExp(String.raw`paths: \[((?:\s*${QUOTED},?)*)\s*\]`);
+export const debugEntryPaths = (stdout: string): string[][] =>
+  stdout
+    .split(ENTRY_SECTION)
+    .slice(1)
+    .map((section) => {
+      const listing = PATHS_ARRAY.exec(section)?.[1];
+      if (listing === undefined) throw new Error(`knip --debug printed an entry section with no readable paths array:\n${section.slice(0, 2000)}`);
+      return [...listing.matchAll(new RegExp(QUOTED, "g"))].map(([quoted]) => quoted.slice(1, -1).replace(/\\(.)/g, "$1"));
+    });
+
 export const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -49,7 +66,10 @@ export const packageDirs = async (): Promise<string[]> => {
   const dirs = new Set(["."]);
   for (const pattern of [...patterns, ...configured])
     if (typeof pattern === "string" && pattern !== ".")
-      for await (const pkg of new Glob(`${pattern}/package.json`).scan({ cwd: REPO_ROOT })) dirs.add(posix.dirname(pkg));
+      // Glob.scan yields native separators (packages\x\package.json on Windows); posix.dirname of that is ".", which would
+      // drop every package dir and leave the probe copies without their isolated node_modules links.
+      for await (const pkg of new Glob(`${pattern}/package.json`).scan({ cwd: REPO_ROOT }))
+        dirs.add(posix.dirname(toRepoPath(REPO_ROOT, pkg)));
   return [...dirs];
 };
 
