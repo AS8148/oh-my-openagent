@@ -6,10 +6,16 @@ import { windowsTreeKillArgs } from "../../../memory-core/src/concurrency/window
 // One external stage of a packaging test, run without blocking the test process (#10911): it either
 // settles with its output or, past `capMs`, has its whole process tree killed and awaited, and fails
 // naming the stage. A `spawnSync` stage that stalls gives no clue which step hung, and a shell-launched
-// child of a killed `cmd.exe` keeps files open so the scratch directory cannot be removed.
-export function runBoundedStage(stage, command, args, options, capMs) {
+// child of a killed `cmd.exe` keeps files open so the scratch directory cannot be removed. The last argument swaps
+// the process seams so a test can play out the Windows kill path on any OS.
+export function runBoundedStage(stage, command, args, options, capMs, {
+  platform = process.platform,
+  spawnChild = spawn,
+  treeKillArgs = windowsTreeKillArgs,
+  runSync = spawnSync,
+} = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { ...options, windowsHide: true })
+    const child = spawnChild(command, args, { ...options, windowsHide: true })
     let stdout = ""
     let stderr = ""
     child.stdout?.setEncoding("utf8").on("data", (chunk) => { stdout += chunk })
@@ -17,9 +23,9 @@ export function runBoundedStage(stage, command, args, options, capMs) {
     let stalled = false
     const cap = setTimeout(() => {
       stalled = true
-      if (process.platform === "win32" && child.pid !== undefined) {
-        const args = windowsTreeKillArgs(child.pid)
-        if (args.length > 0) spawnSync("taskkill", args, { windowsHide: true })
+      if (platform === "win32" && child.pid !== undefined) {
+        const args = treeKillArgs(child.pid)
+        if (args.length > 0) runSync("taskkill", args, { windowsHide: true })
       } else {
         child.kill("SIGKILL")
       }
@@ -50,38 +56,49 @@ function isFile(path) {
   }
 }
 
-// The JavaScript entry of the npm on PATH: on Windows the npm-cli.js beside the first npm.cmd, elsewhere the real
-// path of the first npm, which an npm installed with Node links to npm-cli.js.
-export function npmCliPath({ platform = process.platform, pathValue = process.env.PATH ?? process.env.Path ?? "", isFile: exists = isFile, realpath = realpathSync } = {}) {
+// npm's JavaScript entry and the node that owns it, or null when neither step finds one:
+// 1. the npm on PATH, when it is npm's JavaScript entry: on Windows the npm-cli.js beside the first npm.cmd, run by the
+//    node.exe beside it as npm.cmd would; elsewhere the real path of the first npm, run by the node of that install
+//    (or, without one, the node on PATH, which npm's shebang would pick);
+// 2. otherwise (a version-manager shim or wrapper script) the npm bundled with the node on PATH, run by that node.
+export function resolveNpm({ platform = process.platform, pathValue = process.env.PATH ?? process.env.Path ?? "", isFile: exists = isFile, realpath = realpathSync } = {}) {
   const path = platform === "win32" ? win32 : posix
-  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
-    if (platform === "win32") {
-      if (!exists(path.join(dir, "npm.cmd"))) continue
-      const cli = path.join(dir, "node_modules", "npm", "bin", "npm-cli.js")
-      if (exists(cli)) return cli
-      throw new Error(`npm.cmd in ${dir} has no node_modules\\npm\\bin\\npm-cli.js beside it`)
-    }
-    const npm = path.join(dir, "npm")
-    if (!exists(npm)) continue
+  const dirs = pathValue.split(path.delimiter).filter(Boolean)
+  const onPath = (name) => dirs.map((dir) => path.join(dir, name)).find((candidate) => exists(candidate))
+  const node = onPath(platform === "win32" ? "node.exe" : "node")
+  const owner = (beside) => exists(beside) ? beside : node ?? "node"
+  const npm = onPath(platform === "win32" ? "npm.cmd" : "npm")
+  if (npm !== undefined && platform === "win32") {
+    const cli = path.join(path.dirname(npm), "node_modules", "npm", "bin", "npm-cli.js")
+    if (exists(cli)) return { node: owner(path.join(path.dirname(npm), "node.exe")), cli }
+  } else if (npm !== undefined) {
     const cli = realpath(npm)
-    if (/\.[cm]?js$/.test(cli)) return cli
-    throw new Error(`${npm} is not npm's JavaScript entry (it resolves to ${cli})`)
+    if (/\.[cm]?js$/.test(cli)) return { node: owner(path.join(path.dirname(cli), "..", "..", "..", "..", "bin", "node")), cli }
   }
-  throw new Error("no npm on PATH")
+  if (node === undefined) return null
+  const realNode = realpath(node)
+  const bundled = platform === "win32"
+    ? path.join(path.dirname(realNode), "node_modules", "npm", "bin", "npm-cli.js")
+    : path.join(path.dirname(realNode), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")
+  return exists(bundled) ? { node: realNode, cli: bundled } : null
 }
 
 // npm 11 ends every command with process.exit(). On Node 24 that call joins V8's platform workers while one can be
 // parked waiting for a GC that only the main thread runs, so npm can hang after printing its result
 // (nodejs/node#64274, fix pending in nodejs/node#66171): the npm pack stall of #10911. --single-threaded turns V8's
 // background tasks off; NODE_OPTIONS refuses it, so npm's JavaScript entry runs under node directly. Started that
-// way npm pack is one process, not cmd.exe -> npm.cmd -> node, so the stage's tree kill always reaches it, and it
-// runs from the filesystem root: Windows cannot remove a directory that is a live process's current directory.
-export function npmPackStage(pkg, destination, { npmCli = npmCliPath(), cwd = parse(process.cwd()).root } = {}) {
-  return {
-    command: "node",
-    args: ["--single-threaded", npmCli, "pack", pkg, "--silent", "--pack-destination", destination],
-    options: { cwd },
-  }
+// way npm pack is one process, not cmd.exe -> npm.cmd -> node, so the stage's tree kill always reaches it. When no
+// JavaScript entry is found, npm is started by name as before (through cmd.exe on Windows, where npm.cmd needs it).
+// Either way it runs from the filesystem root: Windows cannot remove a directory that is a live process's current
+// directory.
+export function npmPackStage(pkg, destination, {
+  platform = process.platform,
+  npm = resolveNpm({ platform }),
+  cwd = parse(process.cwd()).root,
+} = {}) {
+  const pack = ["pack", pkg, "--silent", "--pack-destination", destination]
+  if (npm === null) return { command: "npm", args: pack, options: { cwd, ...(platform === "win32" && { shell: true }) } }
+  return { command: npm.node, args: ["--single-threaded", npm.cli, ...pack], options: { cwd } }
 }
 
 // The Windows `tar`, independent of PATH: under Git Bash's PATH `tar` is GNU tar, which reads `C:\...`
