@@ -1,7 +1,6 @@
 /// <reference types="bun-types" />
 import { afterAll } from "bun:test"
-import { spawnSync } from "node:child_process"
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { markTestInfrastructureDir, runTestTempRootTeardown } from "./test-temp-root"
@@ -41,8 +40,15 @@ export function installHermeticHome(): HermeticHome {
     // to exit, and it runs even when the shard check throws: a later preload afterAll does not run
     // once an earlier one has failed (#9766).
     await runCheckThenTeardown(async () => {
-      await stopHostsUnder(home)
-      failOnShardsInRealAgentDir()
+      const failures: unknown[] = []
+      await stopRunTaskHosts(agentDir).catch((error: unknown) => failures.push(error))
+      try {
+        failOnShardsInRealAgentDir()
+      } catch (error) {
+        failures.push(error)
+      }
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) throw new AggregateError(failures, failures.map(describeError).join("\n"))
     }, runTestTempRootTeardown)
   })
   return { home, agentDir }
@@ -93,7 +99,97 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-const HOST_EXIT_WAIT_MS = 10_000
+/** The part of the engine's host API the teardown uses; tests pass their own. */
+export interface TaskHostEngine {
+  listHostEndpoints(agentDir: string): Promise<readonly { readonly socket: string | null; readonly endpoint_kind: string }[]>
+  stopHost(options: { readonly socket: string; readonly agentDir: string; readonly force: boolean; readonly timeoutMs: number }): Promise<
+    { readonly action: string; readonly pid?: number; readonly reason?: string }
+  >
+  probeHost(options: { readonly socket: string; readonly timeoutMs: number }): Promise<unknown>
+}
+
+// Bun's hook budget is 5 s for every file after the first unless --timeout is passed, so the whole host
+// stop, engine load included, ends inside it and reports what is left instead of timing the hook out.
+export const TASK_HOST_STOP_DEADLINE_MS = 3_000
+const ENGINE_CALL_TIMEOUT_MS = 1_000
+
+/**
+ * Stops the task hosts this run started, within a deadline (#11630).
+ *
+ * A test that boots the packaged extension can start a real task host. The engine registers every host it
+ * spawns in the agent dir it was given, with the host's pid and start time, and this run's agent dir is a
+ * mkdtemp of its own: the hosts registered there are exactly the ones this run (or a child that inherited
+ * its environment) started. The engine's own stop signals a host only after proving that its registration
+ * names the live process, so nothing here decides from a process-table scan: a scan by path matched
+ * processes this run never started, and its wait was unbounded under load.
+ *
+ * A host still running when the deadline passes, or one the engine cannot prove but that still answers on
+ * its socket, fails the run by name rather than as an unnamed hook timeout.
+ */
+export async function stopRunTaskHosts(
+  agentDir: string,
+  options: { readonly deadlineMs?: number; readonly loadEngine?: () => Promise<TaskHostEngine> } = {},
+): Promise<void> {
+  if (!existsSync(join(agentDir, "rpc-host-daemon"))) return
+  const deadlineMs = options.deadlineMs ?? TASK_HOST_STOP_DEADLINE_MS
+  const loadEngine = options.loadEngine ?? loadTaskHostEngine
+  const deadline = Date.now() + deadlineMs
+  const unsettled = new Map<string, string>()
+  const leftovers: string[] = []
+  const stopAll = async (): Promise<void> => {
+    const engine = await loadEngine()
+    const sockets = (await engine.listHostEndpoints(agentDir))
+      .filter((endpoint) => endpoint.endpoint_kind === "rpc_host")
+      .flatMap((endpoint) => (endpoint.socket === null ? [] : [endpoint.socket]))
+    for (const socket of sockets) unsettled.set(socket, "still stopping")
+    await Promise.all(sockets.map(async (socket) => {
+      const leftover = await stopOne(engine, agentDir, socket, deadline, (state) => unsettled.set(socket, state))
+      unsettled.delete(socket)
+      if (leftover !== undefined) leftovers.push(leftover)
+    }))
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = await Promise.race([
+    stopAll().then(
+      () => false,
+      (error: unknown) => {
+        throw new Error(`Stopping the task hosts this run started failed (#11630): ${describeError(error)}`)
+      },
+    ),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(true), Math.max(0, deadline - Date.now()))
+    }),
+  ]).finally(() => clearTimeout(timer))
+  if (timedOut) {
+    leftovers.push(...[...unsettled].map(([socket, state]) => `${socket} (${state})`))
+    if (unsettled.size === 0) leftovers.push(`the engine did not list the host registry in ${agentDir} in time`)
+  }
+  if (leftovers.length === 0) return
+  throw new Error(
+    `Task hosts this run started were still running ${deadlineMs}ms into the end-of-run teardown (#11630):\n`
+      + leftovers.map((leftover) => `  ${leftover}`).join("\n"),
+  )
+}
+
+async function stopOne(
+  engine: TaskHostEngine,
+  agentDir: string,
+  socket: string,
+  deadline: number,
+  progress: (state: string) => void,
+): Promise<string | undefined> {
+  const result = await engine.stopHost({ socket, agentDir, force: true, timeoutMs: ENGINE_CALL_TIMEOUT_MS })
+  if (result.action === "stopped" && result.pid !== undefined) {
+    progress(`pid ${result.pid} signalled, not exited`)
+    if (await exitedBy(result.pid, deadline)) return undefined
+    return `${socket} (pid ${result.pid} did not exit after SIGTERM)`
+  }
+  // A host that already exited has released its registration, so its stop is refused as unproven; one that
+  // is still serving the socket is the leftover.
+  progress(`stop refused (${result.reason ?? result.action}), probing`)
+  const answer = await engine.probeHost({ socket, timeoutMs: ENGINE_CALL_TIMEOUT_MS })
+  return answer === undefined ? undefined : `${socket} (stop refused: ${result.reason ?? result.action}; the host still answers)`
+}
 
 function processAlive(pid: number): boolean {
   try {
@@ -104,34 +200,21 @@ function processAlive(pid: number): boolean {
   }
 }
 
-async function waitForExit(pids: readonly number[], timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  let remaining = pids.filter(processAlive)
-  while (remaining.length > 0 && Date.now() < deadline) {
+async function exitedBy(pid: number, deadline: number): Promise<boolean> {
+  while (processAlive(pid)) {
+    if (Date.now() >= deadline) return false
     await Bun.sleep(25)
-    remaining = remaining.filter(processAlive)
   }
+  return true
 }
 
-// A test that boots the packaged extension can warm a real task host. With the agent dir pinned above,
-// that host's socket lives under this process's own temp home, which is how it is attributed here: no
-// other process can own a path inside a mkdtemp dir created by this one.
-async function stopHostsUnder(home: string): Promise<void> {
-  if (process.platform === "win32") return
-  const listing = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).stdout ?? ""
-  const signalled: number[] = []
-  for (const line of listing.split("\n")) {
-    if (!line.includes(`${home}/`)) continue
-    const pid = Number.parseInt(line.trim(), 10)
-    if (!Number.isInteger(pid) || pid === process.pid) continue
-    try {
-      process.kill(pid, "SIGTERM")
-      signalled.push(pid)
-    } catch {
-      // Already gone between the listing and the signal.
-    }
+async function loadTaskHostEngine(): Promise<TaskHostEngine> {
+  const engine = await import("@code-yeongyu/senpi")
+  return {
+    listHostEndpoints: (agentDir) => engine.listHostEndpoints(agentDir),
+    stopHost: (options) => engine.stopHost(options),
+    probeHost: (options) => engine.probeHost(options),
   }
-  await waitForExit(signalled, HOST_EXIT_WAIT_MS)
 }
 
 const REAL_AGENT_DIRS = [join(homedir(), ".omo", "agent"), join(homedir(), ".senpi", "agent"), join(homedir(), ".omo")]
