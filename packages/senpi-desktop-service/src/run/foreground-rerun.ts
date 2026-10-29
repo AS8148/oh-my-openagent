@@ -13,11 +13,11 @@ import type { EngineCall, RunOutput } from "./context";
  * 1. At most one rerun per facade call; the rerun's own failure is final.
  * 2. A rerun happens only while foreground remains allowed, including after awaiting a grant.
  * 3. Only `BackgroundUnavailable` (nothing sent) on a foreground-capable input method, or `ControlRequired`
- *    at admission on `raiseWindow` / `apps.open`, triggers it; `InputFailed`, `AxUnconfirmed`, `UserIntervened`,
+ *    at admission on `raiseWindow` / activating or revealing `apps.open`, triggers it; `InputFailed`, `AxUnconfirmed`, `UserIntervened`,
  *    `Cancelled`, `Suspended` and every other code never do, nor does a cancelled run.
  * 4. A call whose delivery the caller set explicitly is never rerun.
- * 5. The grant is sent (automatic: fenced when full access ends) iff a rerun happens and no grant may be
- *    live; a live human grant is reused and no grant is sent.
+ * 5. An eligible plan requests an automatic grant only when no grant may be live. A later cancellation
+ *    or permission loss can still prevent the rerun; a live human grant is reused without a new grant.
  * 6. `ax.perform`, `ax.setValue`, `ax.focus` and `ax.selectText` are never rerun.
  */
 
