@@ -17,7 +17,7 @@ Use the private form or email, never a public issue, for anything that contains 
 
 ## 2. What telemetry sends
 
-While OmO runs, it sends product telemetry to PostHog (section 5). OmO Native events (the CLI and Desktop) are a fixed set of fields, and each field is a boolean, a number, a size bucket, or a value from a published list. The once-a-day activity events described under "About your computer" also carry a few strings exactly as your system reports them (CPU model, terminal application, login shell, locale). The complete, machine-checked list of events and fields is in the [telemetry reference](../reference/senpi-telemetry.md); the Codex adapter's single event is in the [Codex telemetry reference](../reference/codex-telemetry.md). If this notice and those lists ever differ, the lists are authoritative and this notice is wrong.
+While OmO runs, it sends product telemetry to PostHog (section 5). OmO Native events (the CLI and Desktop) are a fixed set of fields, and each field is a boolean, a number, a size bucket, or a value from a published list. The once-a-day activity events described under "About your computer" also carry a few strings as your system reports them (CPU model, terminal application, locale) and the name of your login shell program, cut from its path. The complete, machine-checked list of events and fields is in the [telemetry reference](../reference/senpi-telemetry.md); the Codex adapter's single event is in the [Codex telemetry reference](../reference/codex-telemetry.md). If this notice and those lists ever differ, the lists are authoritative and this notice is wrong.
 
 ### Identifiers
 
@@ -31,7 +31,7 @@ Versions of OmO before this release also sent a one-way hash of your computer's 
 
 - OmO version, which surface ran (CLI or Desktop), and whether the run was in CI
 - Operating system and version, CPU architecture and core count, memory size as a bucket, and time zone
-- Once a day, each product (OmO Native, the OpenCode plugin, the Codex adapter) also sends an activity event with: package name and version, runtime and its version, operating system name, release, type and architecture, CPU core count and CPU model name as reported by the operating system, total memory in GB, locale, time zone, your login shell as set in the `SHELL` variable (for example `/bin/zsh`), the terminal application name (`TERM_PROGRAM`, for example `iTerm.app`), and whether the run was in CI
+- Once a day, each product (OmO Native, the OpenCode plugin, the Codex adapter) also sends an activity event with: package name and version, runtime and its version, operating system name, release, type and architecture, CPU core count and CPU model name as reported by the operating system, total memory in GB, locale, time zone, the name of your login shell program (for example `zsh`, never its path), the terminal application name (`TERM_PROGRAM`, for example `iTerm.app`), and whether the run was in CI
 
 ### About your configuration
 
@@ -65,9 +65,9 @@ A feedback report (`/feedback` or `/bug`) is separate from telemetry, and the "N
 ### Never sent
 
 - Prompts, model replies, or any fragment of either
-- Code, diffs, file names, file or folder paths (other than the login shell path from `SHELL`, listed above), repository, branch, or project names
+- Code, diffs, file names, file or folder paths, repository, branch, or project names
 - Commands you ran, logs, error messages, or stack traces
-- Account names, emails, API keys, tokens, or environment variable values, other than the login shell, the terminal application name, and the CI flag listed above
+- Account names, emails, API keys, tokens, or environment variable values, other than the login shell program name, the terminal application name, and the CI flag listed above
 - Screenshots, window titles, or typed text from computer use
 - The names of your own skills, providers, models, or gateways
 - Your hostname, IP address, or any hardware serial
@@ -149,8 +149,8 @@ Nobody else receives raw events. We publish only aggregates, such as how many in
 
 ## 6. Retention and deletion
 
-- **Events in PostHog** are kept for 24 months from the day they are received, then deleted with PostHog's deletion tools.
-- **Deletion method.** Events are deleted from PostHog's event store by install hash (on request, section 8) or by age (at the end of the period); PostHog then removes them from its storage.
+- **Events in PostHog.** We have not set a retention period yet, and events are not yet deleted automatically by age. When we set one, this section will say how long events are kept and the deletion will run on that schedule.
+- **Deletion method.** Today, events are deleted from PostHog's event store by install hash, on request (section 8); PostHog then removes them from its storage.
 - **On your computer.** The install id file, your configuration, and daily-deduplication state stay until you delete them. Session-summary and pending-event files under OmO's state directory are deleted once sent, or after 14 days at the latest. OmO keeps no local history of what it sent.
 
 ## 7. Files OmO stores on your computer for telemetry
