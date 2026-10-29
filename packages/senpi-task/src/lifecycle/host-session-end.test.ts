@@ -75,6 +75,46 @@ describe("endHostSessionChild confirms an end once and the cancel reuses it", ()
     expect(eventsOf(harness, "destroyed")).toEqual([])
   })
 
+  test("#given a confirmed end retained for an earlier run #when a later run of the task on another generation is asked about #then the cached end is not reused and a fresh pass decides", async () => {
+    // given
+    const harness = cancelHarness({ taskId: "st_0c000006" })
+    const port = harness.lifecycle.hostSessionCancel
+    if (port === undefined) throw new Error("the lifecycle exposes no host-session cancel")
+    harness.view.present = false
+    expect(await port.end(harness.record)).toEqual({ kind: "ended", via: "generation_exited" })
+    const identity = harness.record.host_session ?? hostSession("st_0c000006")
+    const laterRun = {
+      ...harness.record,
+      host_session: { ...identity, instance_id: "instance-new" },
+      notification: { ...harness.record.notification, run_epoch: harness.record.notification.run_epoch + 1 },
+    }
+    harness.view.present = true
+
+    // when
+    const end = await port.end(laterRun)
+
+    // then
+    expect(end).toEqual({ kind: "not_ended", reason: "generation_cannot_cancel" })
+  })
+
+  test("#given another writer ends the record while the end pass runs #when task_cancel confirms the end #then it answers noop instead of cancelled", async () => {
+    // given
+    const harness = cancelHarness({ taskId: "st_0c000007" })
+    harness.view.present = false
+    harness.view.generationPresent = () => {
+      harness.store.transition("st_0c000007", { type: "cancel", timestamp: "2026-10-29T00:00:00.000Z" })
+      return Promise.resolve(false)
+    }
+
+    // when
+    const outcome = await harness.engine.cancelTask("st_0c000007")
+
+    // then
+    expect(outcome).toMatchObject({ kind: "noop", task_id: "st_0c000007", status: "cancelled" })
+    expect(eventsOf(harness, "cancelled")).toEqual([])
+    expect(harness.stopSettlements).toEqual(["st_0c000007"])
+  })
+
   for (const [answered, listings] of [[true, 0], [false, 1]] as const) {
     test(`#given a resident child whose host ${answered ? "answered" : "did not answer"} its close #when the destruction port cancels it #then the daemon is listed ${listings} time(s)`, async () => {
       // given
