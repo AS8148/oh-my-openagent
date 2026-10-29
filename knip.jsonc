@@ -1123,8 +1123,6 @@
       "packages/omo-senpi/src/components/config-watch/paths.ts": ["PLAN9_FILE_SYSTEM_TYPE", "OMO_CONFIG_FILE_FILTER_GLOBS", "OMO_CONFIG_DIRECTORY_FILTER_GLOBS"],
       // pre-existing at origin dev 4686e425b5: unused export(s) MERGED_OMO_CONFIG_DIAGNOSTIC_PATH
       "packages/omo-senpi/src/components/config-watch/validate.ts": ["MERGED_OMO_CONFIG_DIAGNOSTIC_PATH"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) TOOLKITS_CONTEXT_KEY
-      "packages/omo-senpi/src/components/desktop-toolkit/index.ts": ["TOOLKITS_CONTEXT_KEY"],
       // pre-existing at origin dev 4686e425b5: unused export(s) FABLE_FIVE_ID_PREFIX, isDemotedEmptyToolUse
       "packages/omo-senpi/src/components/fallback-architect/detection.ts": ["FABLE_FIVE_ID_PREFIX", "isDemotedEmptyToolUse"],
       // pre-existing at origin dev 4686e425b5: unused export(s) TRANSCRIPT_MESSAGE_LIMIT, LOG_WINDOW_MS
@@ -3473,6 +3471,7 @@
         "test/refusal-child.ts",
         "test/support/engine.ts",
         "test/support/error-code-cases.ts",
+        "test/support/input-calls.ts",
       ],
       "ignoreFiles": [
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
@@ -4182,6 +4181,7 @@
         "**/*.test-d.ts",
         "extensions/omo-claim-receipt.js",
         "extensions/omo-computer-use.js",
+        "extensions/omo-desktop-toolkit.js",
         "extensions/omo-device-account.js",
         "extensions/omo-feedback.js",
         "extensions/omo-memory-commands.js",
