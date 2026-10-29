@@ -10,7 +10,7 @@ Generated command:
 git ls-files packages/omo-opencode/src packages/omo-codex/src | grep '\.ts$' | sort | xargs awk 'FNR==1 && /^export (\*|\{).*from ["'"'"']@oh-my-opencode\// { print FILENAME }'
 ```
 
-Snapshot date: 2026-08-31. Total shim exports found: 241.
+Snapshot date: 2026-08-31. Total shim exports found: 239.
 
 ## Aggregate By Target Package
 
@@ -27,7 +27,7 @@ Snapshot date: 2026-08-31. Total shim exports found: 241.
 | `@oh-my-opencode/openclaw-core` | 22 |
 | `@oh-my-opencode/rules-engine` | 4 |
 | `@oh-my-opencode/skills-loader-core` | 65 |
-| `@oh-my-opencode/team-core` | 39 |
+| `@oh-my-opencode/team-core` | 37 |
 | `@oh-my-opencode/tmux-core` | 3 |
 | `@oh-my-opencode/utils` | 53 |
 
@@ -151,7 +151,6 @@ Snapshot date: 2026-08-31. Total shim exports found: 241.
 | `packages/omo-opencode/src/features/team-mode/team-layout-tmux/index.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-layout-tmux/layout.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-layout-tmux/rebalance-team-window.ts` | `@oh-my-opencode/team-core` |
-| `packages/omo-opencode/src/features/team-mode/team-layout-tmux/resolve-caller-tmux-session.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-layout-tmux/sweep-stale-team-sessions.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-mailbox/ack.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-mailbox/inbox.ts` | `@oh-my-opencode/team-core` |
@@ -163,7 +162,6 @@ Snapshot date: 2026-08-31. Total shim exports found: 241.
 | `packages/omo-opencode/src/features/team-mode/team-registry/index.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-registry/loader.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-registry/paths.ts` | `@oh-my-opencode/team-core` |
-| `packages/omo-opencode/src/features/team-mode/team-registry/team-spec-input-normalizer.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-registry/validator.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-state-store/active-resume.ts` | `@oh-my-opencode/team-core` |
 | `packages/omo-opencode/src/features/team-mode/team-state-store/creating-resume.ts` | `@oh-my-opencode/team-core` |
