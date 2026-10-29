@@ -113,13 +113,22 @@ describe("automatic foreground rerun (D2)", () => {
 	test("full access ending between the decision and the grant returns the engine's own refusal", async () => {
 		const preset: Preset = { value: true };
 		const desktop = await openGated(preset, GATE);
-		// The first typeText is refused; full access ends before the wrapper grants
-		const unsubscribe = desktop.service.onAudit((event) => {
-			if (event.action === "typeText") preset.value = false;
-		});
-		const result = runCode(desktop.service, TYPE);
+		// The decision has read foregroundAllowed() = true; full access ends right before the grant is written
+		const service = desktop.service;
+		const host = {
+			call: service.call.bind(service),
+			onAudit: service.onAudit.bind(service),
+			revokeControl: service.revokeControl.bind(service),
+			reportError: service.reportError.bind(service),
+			foregroundAllowed: () => service.foregroundAllowed(),
+			possiblyLive: () => service.possiblyLive(),
+			grantForFullAccess: (signal: AbortSignal) => {
+				preset.value = false;
+				return service.grantForFullAccess(signal);
+			},
+		};
+		const result = runComputerCode({ code: TYPE, snapshot: snapshot(false), timeoutMs: 15_000 }, { service: host, executeTool: noTools });
 		await expect(result).rejects.toMatchObject({ data: { code: "BackgroundUnavailable" } });
-		unsubscribe();
 		expect(requested(desktop.log, "control.grant")).toBe(0);
 		expect(requested(desktop.log, "typeText")).toBe(1);
 	});
