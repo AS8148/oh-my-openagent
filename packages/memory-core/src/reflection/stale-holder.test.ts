@@ -20,15 +20,62 @@ describe("reflection lock holder decision (#10377)", () => {
     expect(await classifyReflectionLockHolder(REFLECTION_DIR, probe)).toEqual({ state: "live", runId: "reflection-run-64" })
   })
 
-  describe("macOS dynamic DHCP hostname churn (#10377)", () => {
-    test("#given DHCP reverse-DNS hostnames on Darwin #when checked #then they are recognized as local", () => {
-      expect(isLocalHost("Mac-765", "Mac-424", "darwin")).toBe(true)
-      expect(isLocalHost("Mac-108", "Mac-108", "darwin")).toBe(true)
-      expect(isLocalHost("remote-server.corp", "Mac-424", "darwin")).toBe(false)
-      expect(isLocalHost("Mac-765", "Mac-424", "linux")).toBe(false)
+  describe("stable host identity across roaming and multi-device sync (#11818)", () => {
+    test("#given two different Mac-NNN hosts with different ids #when checked #then they stay foreign", () => {
+      expect(
+        isLocalHost(
+          { hostname: "Mac-765", hostId: "mac-a" },
+          { hostname: "Mac-424", hostId: "mac-b" },
+        ),
+      ).toBe(false)
     })
 
-    test("#given an interrupted reflection run under previous DHCP hostname on Darwin #when classified #then it reclaims as dead", async () => {
+    test("#given another machine's record whose pid is alive there #when classified #then it stays stuck and is never cleared", async () => {
+      const baseScenario = SCENARIOS.find((s) => s.rule === undefined)
+      if (!baseScenario) throw new Error("missing base scenario")
+      const facts = {
+        ...baseScenario.facts,
+        files: {
+          ...baseScenario.facts.files,
+          [`${REFLECTION_DIR}/active.lock`]: JSON.stringify({
+            runId: "reflection-run-64",
+            launcherPid: 11096,
+            launcherHostname: "remote-mac",
+            launcherHostId: "host-remote-123",
+          }),
+        },
+        pids: {
+          11096: "alive" as const,
+        },
+      }
+      const probe = {
+        ...probeFor(facts),
+        hostname: () => "Mac-424",
+        hostId: () => "host-local-456",
+      }
+      expect(await classifyReflectionLockHolder(REFLECTION_DIR, probe)).toEqual({
+        state: "stuck",
+        runId: "reflection-run-64",
+        reason: "it is owned by host remote-mac, which cannot be checked from here",
+      })
+    })
+
+    test("#given a legacy record with only the old hostname field #when checked #then it matches only when equal to os.hostname()", () => {
+      expect(
+        isLocalHost(
+          { hostname: "my-workstation" },
+          { hostname: "my-workstation", hostId: "host-123" },
+        ),
+      ).toBe(true)
+      expect(
+        isLocalHost(
+          { hostname: "old-hostname" },
+          { hostname: "new-hostname", hostId: "host-123" },
+        ),
+      ).toBe(false)
+    })
+
+    test("#given the DHCP-rename case from #11818 with same hostId and different hostname #when classified #then it is reclaimed as dead", async () => {
       const baseScenario = SCENARIOS.find((s) => s.rule === undefined)
       if (!baseScenario) throw new Error("missing base scenario")
       const facts = {
@@ -39,32 +86,18 @@ describe("reflection lock holder decision (#10377)", () => {
             runId: "reflection-run-64",
             launcherPid: 11096,
             launcherHostname: "Mac-765",
+            launcherHostId: "MacBook-Pro",
           }),
         },
       }
       const probe = {
         ...probeFor(facts),
         hostname: () => "Mac-424",
-        isLocalHost: (target: string, current: string) => isLocalHost(target, current, "darwin"),
+        hostId: () => "MacBook-Pro",
       }
       expect(await classifyReflectionLockHolder(REFLECTION_DIR, probe)).toEqual({
         state: "dead",
         runId: "reflection-run-64",
-      })
-    })
-
-    test("#given a truly remote host #when classified #then it stays safely stuck", async () => {
-      const otherHostScenario = SCENARIOS.find((s) => s.rule === "other-host")
-      if (!otherHostScenario) throw new Error("missing other-host scenario")
-      const probe = {
-        ...probeFor(otherHostScenario.facts),
-        hostname: () => "Mac-424",
-        isLocalHost: (target: string, current: string) => isLocalHost(target, current, "darwin"),
-      }
-      expect(await classifyReflectionLockHolder(REFLECTION_DIR, probe)).toEqual({
-        state: "stuck",
-        runId: "reflection-run-64",
-        reason: "it is owned by host other-host, which cannot be checked from here",
       })
     })
   })

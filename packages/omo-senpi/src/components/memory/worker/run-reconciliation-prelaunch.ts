@@ -4,6 +4,7 @@ import { join } from "node:path"
 
 import {
   discardReflectionWorktree,
+  getStableLocalHostId,
   GitMemoryRepo,
   isLocalHost,
   RESERVATION_EVIDENCE_FILENAME,
@@ -21,6 +22,14 @@ import { parseReservationRunLedger, type ReservationRunLedger } from "./reservat
 
 const LAUNCH_WINDOW_MS = 60_000
 
+function isReservationLocal(active: ReservedRun, context: ReconcileContext): boolean {
+  if (active.launcherHostname === undefined) return false
+  return isLocalHost(
+    { hostname: active.launcherHostname, hostId: active.launcherHostId },
+    { hostname: context.hostname(), hostId: getStableLocalHostId() },
+  )
+}
+
 export interface PrelaunchReconcile {
   readonly result?: ReflectionRunReconcileResult
   readonly retiredRunId?: string
@@ -37,7 +46,7 @@ export async function reconcilePrelaunch(context: ReconcileContext): Promise<Pre
   context.signal?.throwIfAborted()
   if (ghost.ghost && ghost.reason === "missing-identity") {
     if (active.launcherPid !== undefined && active.launcherHostname !== undefined) {
-      if (!isLocalHost(active.launcherHostname, context.hostname())) return {}
+      if (!isReservationLocal(active, context)) return {}
       if (!(await isLauncherDead(active.launcherPid, active.launcherProcessStart, context))) return {}
     }
     return { result: await releaseReservationAsFailed(context, active.runId), retiredRunId: active.runId }
@@ -79,7 +88,7 @@ export async function reconcilePrelaunch(context: ReconcileContext): Promise<Pre
     if (context.now() - createdAt <= LAUNCH_WINDOW_MS) return {}
     return quarantineUnderDeadLauncher(context, active, runDir, "prelaunch_missing_after_deadline")
   }
-  if (context.now() - Date.parse(active.reservedAt) <= LAUNCH_WINDOW_MS || !isLocalHost(active.launcherHostname, context.hostname())) {
+  if (context.now() - Date.parse(active.reservedAt) <= LAUNCH_WINDOW_MS || !isReservationLocal(active, context)) {
     return retiredGeneration ? { retiredRunId: active.runId } : {}
   }
   if (!(await isLauncherDead(active.launcherPid, active.launcherProcessStart, context))) {
@@ -132,7 +141,7 @@ async function recordInterruptedLaunch(context: ReconcileContext, runDir: string
  * touching the run dir, so a later backfill sees exactly one terminal state.
  */
 async function releaseFinishedUnderDeadLauncher(context: ReconcileContext, active: ReservedRun): Promise<PrelaunchReconcile> {
-  if (active.launcherPid === undefined || !isLocalHost(active.launcherHostname, context.hostname())) return {}
+  if (active.launcherPid === undefined || !isReservationLocal(active, context)) return {}
   if (!(await isLauncherDead(active.launcherPid, active.launcherProcessStart, context))) return {}
   return { result: await releaseReservationAsFailed(context, active.runId), retiredRunId: active.runId }
 }
@@ -167,7 +176,7 @@ async function quarantineUnderDeadLauncher(
   reason: QuarantineReason,
   ledger?: ReservationRunLedger,
 ): Promise<PrelaunchReconcile> {
-  if (active.launcherPid === undefined || !isLocalHost(active.launcherHostname, context.hostname())) return {}
+  if (active.launcherPid === undefined || !isReservationLocal(active, context)) return {}
   if (!(await isLauncherDead(active.launcherPid, active.launcherProcessStart, context))) return {}
   return { result: await quarantineRun(context, runDir, active.runId, reason, ledger, active), retiredRunId: active.runId }
 }
