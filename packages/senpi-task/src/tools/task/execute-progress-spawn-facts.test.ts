@@ -23,6 +23,12 @@ function withinBudget<T>(promise: Promise<T>, reason: string, budgetMs = 2_000):
   return Promise.race([promise, deadline]).finally(() => { if (timer !== undefined) clearTimeout(timer) })
 }
 
+function latestDetails(updates: readonly AgentToolResult<TaskToolDetails>[]): TaskToolDetails {
+  const latest = updates.at(-1)
+  if (latest === undefined) throw new Error("no progress partial was published")
+  return latest.details
+}
+
 const TASK_ID = "st_spawn_facts_1"
 const PLANNED: ResolvedModelRecord = { provider: "anthropic", model_id: "claude-plan", display: "anthropic/claude-plan", source: "category" }
 // A start-time chain fallback moved the route (and the epoch) after the start report went out.
@@ -101,19 +107,19 @@ describe("progress partials carry the spawn facts once the launch settles, howev
         if (row.facts(update.details).run_epoch === row.expected.run_epoch) published.resolve()
       }, CTX)
       await withinBudget(subscribed.promise, "the foreground spawn never subscribed to its child")
-      expect(row.facts(updates.at(-1)!.details).effective_model).toBeUndefined()
+      expect(row.facts(latestDetails(updates)).effective_model).toBeUndefined()
 
       // when: the launch settles after the start report went out
       current = { ...current, notification: { ...current.notification, run_epoch: 2 }, resolved_model: FALLBACK, effective_model: EFFECTIVE }
       launch.resolve()
       if (row.started.kind === "started" && row.started.starting === true) {
         await withinBudget(published.promise, "no partial carried the launched spawn facts after the launch settled")
-        expect(row.facts(updates.at(-1)!.details)).toEqual(row.expected)
+        expect(row.facts(latestDetails(updates))).toEqual(row.expected)
       }
       listener?.({ type: "tool_execution_start", toolName: "read", args: { path: "src/foo.ts" } })
 
       // then
-      expect(row.facts(updates.at(-1)!.details)).toEqual(row.expected)
+      expect(row.facts(latestDetails(updates))).toEqual(row.expected)
       completion.resolve({ ...current, status: "completed", final_response: "done" })
       await execution
     })
