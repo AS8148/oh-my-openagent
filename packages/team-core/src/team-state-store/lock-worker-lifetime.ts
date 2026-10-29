@@ -84,6 +84,10 @@ function createState(): LifetimeState {
         }
         return
       }
+      default: {
+        const unexpected: never = message
+        throw new Error(`Unexpected lock lifetime message: ${unexpected}`)
+      }
     }
   }
   return state
