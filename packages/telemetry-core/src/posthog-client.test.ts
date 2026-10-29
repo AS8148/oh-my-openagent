@@ -111,6 +111,8 @@ describe("posthog telemetry client", () => {
 
   test("#given codex product parameters #when daily active is captured #then payload shape matches current contract", async () => {
     // given
+    const previousShell = process.env.SHELL
+    process.env.SHELL = "/home/contract-user/.nix-profile/bin/zsh"
     const capturedMessages: TelemetryCaptureMessage[] = []
     const client = createTelemetryClient({
       env: { POSTHOG_API_KEY: "test-key", POSTHOG_HOST: "https://posthog.test" },
@@ -128,6 +130,8 @@ describe("posthog telemetry client", () => {
     })
     await client.flush()
     await client.shutdown()
+    if (previousShell === undefined) delete process.env.SHELL
+    else process.env.SHELL = previousShell
 
     // then
     expect(capturedMessages).toHaveLength(1)
@@ -151,7 +155,7 @@ describe("posthog telemetry client", () => {
         total_memory_gb: 16,
         locale: Intl.DateTimeFormat().resolvedOptions().locale,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        shell: process.env.SHELL,
+        shell: "zsh",
         ci: Boolean(process.env.CI),
         terminal: process.env.TERM_PROGRAM,
         $process_person_profile: false,
