@@ -162,7 +162,8 @@ function createServerFromEntry(id: string, entry: LspEntry, source: ConfigSource
 		source,
 	});
 	applyOptionalServerFields(server, entry);
-	const initialization = mergeInitialization(builtin.initialization, entry.initialization);
+	const builtinInitialization = entry.command === undefined ? builtin.initialization : undefined;
+	const initialization = mergeInitialization(builtinInitialization, entry.initialization);
 	if (initialization !== undefined) {
 		server.initialization = initialization;
 	}

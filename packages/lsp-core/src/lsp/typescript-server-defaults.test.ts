@@ -68,6 +68,12 @@ describe("TypeScript language server defaults", () => {
 		});
 	});
 
+	it("#given a user entry with only a custom command #then no builtin defaults are injected", () => {
+		const server = mergedTypescript({ user: { lsp: { typescript: { command: ["vtsls", "--stdio"] } } } });
+		expect(server?.command).toEqual(["vtsls", "--stdio"]);
+		expect(server?.initialization).toBeUndefined();
+	});
+
 	it("#given a user entry with a custom command #then no builtin defaults are injected", () => {
 		const server = mergedTypescript({
 			user: { lsp: { typescript: { command: ["custom-ts-ls", "--stdio"], extensions: [".ts"] } } },
