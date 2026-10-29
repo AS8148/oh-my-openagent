@@ -143,16 +143,16 @@ describe("omo account", () => {
   })
 
   test.each([
-    ["--device"],
-    ["--device", ""],
-    ["--device", "--replace"],
-    ["--device=dev_b"],
-    ["--devcie", "dev_b"],
-    ["--unknown"],
-    ["dev_b"],
-    ["--device", "dev_b", "--device", "dev_a"],
-    ["--device", "dev_a", "--unknown"],
-  ])("#given malformed forget arguments %j #when forgetting #then the store is not touched", async (...args) => {
+    { args: ["--device"] },
+    { args: ["--device", ""] },
+    { args: ["--device", "--replace"] },
+    { args: ["--device=dev_b"] },
+    { args: ["--devcie", "dev_b"] },
+    { args: ["--unknown"] },
+    { args: ["dev_b"] },
+    { args: ["--device", "dev_b", "--device", "dev_a"] },
+    { args: ["--device", "dev_a", "--unknown"] },
+  ])("#given malformed forget arguments %j #when forgetting #then the store is not touched", async ({ args }) => {
     const held = credential("dev_a", 3_600_000)
     const calls: string[] = []
     const store: CredentialStore = {
