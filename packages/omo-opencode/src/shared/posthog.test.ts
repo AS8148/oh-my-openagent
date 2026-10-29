@@ -294,6 +294,7 @@ describe("posthog disable env var parsing", () => {
 
     // then
     expect(captured).toHaveLength(0)
+    expect(installIdFileCount()).toBe(0)
   })
 })
 

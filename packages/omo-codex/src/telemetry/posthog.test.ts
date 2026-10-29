@@ -170,6 +170,7 @@ describe("omo-codex posthog telemetry", () => {
 
     // then
     expect(capturedMessages).toHaveLength(0)
+    expect(installIdFileCount()).toBe(0)
   })
 
   it("matrix row 5 enabled when all vars unset", async () => {

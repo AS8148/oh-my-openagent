@@ -185,6 +185,7 @@ describe("telemetry CLI session-start hook (subprocess)", () => {
 			expect(result.exitCode).toBe(0);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toBe("");
+			expect(installIdFileCount(dataDir)).toBe(0);
 		});
 	});
 
@@ -217,6 +218,7 @@ describe("telemetry CLI session-start hook (subprocess)", () => {
 
 			expect(result.exitCode).toBe(0);
 			expect(result.stdout).toBe("");
+			expect(installIdFileCount(dataDir)).toBe(0);
 		});
 	});
 
@@ -232,6 +234,7 @@ describe("telemetry CLI session-start hook (subprocess)", () => {
 
 			expect(result.exitCode).toBe(0);
 			expect(result.stdout).toBe("");
+			expect(installIdFileCount(dataDir)).toBe(0);
 		});
 	});
 
