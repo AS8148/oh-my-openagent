@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use senpi_desktop_core::backend::DeliveryMode;
-use senpi_desktop_core::error::CoreResult;
+use senpi_desktop_core::error::{CoreResult, ErrorCode, TccPermission};
 use senpi_desktop_core::escape::EscapeOperation;
 
 use crate::mutate::Mutation;
@@ -33,7 +33,11 @@ impl Worker {
         // that may be unavailable. Acquiring a grant alone is not input.
         if let Some(refused) = crate::mutate::interruption(&self.safety.supervisor, &self.stop_policy()) {
             self.release_control();
-            return Err(refused);
+            return Err(if refused.code == ErrorCode::PermissionDenied {
+                self.backend()?.permission_denied(TccPermission::Accessibility)
+            } else {
+                refused
+            });
         }
         if let Err(error) = self.prepare_escape() {
             self.release_control();

@@ -1,7 +1,7 @@
 use senpi_desktop_core::backend::DeliveryMode;
-use senpi_desktop_core::error::{DesktopError, ErrorCode};
+use senpi_desktop_core::error::{DesktopError, ErrorCode, TccPermission};
 use senpi_desktop_core::protocol_params::ControlGrantParams;
-use senpi_desktop_safety::MutatingAction;
+use senpi_desktop_safety::{MutatingAction, StopPathFailure, StopPathId};
 use serde_json::json;
 
 use crate::mutate::Mutation;
@@ -94,4 +94,27 @@ fn an_unavailable_watch_refuses_before_the_backend_action() {
     assert_eq!(result.unwrap_err().code, ErrorCode::StopPathUnavailable);
     assert!(h.worker.control.is_none());
     assert_eq!(h.worker.escape.stops(), 0);
+}
+
+#[test]
+fn takeover_preflight_preserves_the_actionable_accessibility_refusal() {
+    for (target, delivery, action, raise) in [
+        ("101", DeliveryMode::Background, MutatingAction::TypeText, false),
+        ("101", DeliveryMode::Foreground, MutatingAction::TypeText, false),
+        ("desktop", DeliveryMode::Background, MutatingAction::TypeText, false),
+        ("display:1", DeliveryMode::Background, MutatingAction::TypeText, false),
+        ("101", DeliveryMode::Background, MutatingAction::AxPerform, true),
+    ] {
+        let mut h = harness(&json!({}));
+        h.supervisor.set_live(StopPathId::Global, false);
+        h.supervisor.note_global_failure(Some(StopPathFailure::AccessibilityDenied));
+        h.supervisor.set_live(StopPathId::HostRelay, true);
+        let mut mutation = Mutation::new(action, target.into(), delivery);
+        mutation.takes_over = raise;
+        let error = h.worker.mutate::<()>(&mutation, &|| false, |_| panic!("input must not run"))
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::PermissionDenied);
+        assert_eq!(error.permission.expect("backend permission payload").permission, TccPermission::Accessibility);
+        assert!(h.sink.ops().is_empty());
+    }
 }
