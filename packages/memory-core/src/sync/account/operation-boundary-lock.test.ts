@@ -11,14 +11,14 @@ import { ACCOUNT, fixture } from "./testing/genesis-enable.test-support.ts"
 const cleanup: (() => void | Promise<void>)[] = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
-for (const change of ["replacement", "aba", "refresh"] as const) {
+for (const change of ["replacement", "aba", "refresh", "signing", "sealing"] as const) {
   test(`pin boundary serializes a sibling credential ${change} without notification`, async () => {
     const f = await fixture()
     cleanup.push(f.close)
     const verified = await walk(f.built.request, f.keyring)
     if (!verified.ok || verified.state.pin === null) throw new Error("fixture pin")
     const credentials = join(f.input.pinDir, "synthetic-credentials.json")
-    writeFileSync(credentials, JSON.stringify({ identity: "A", generation: 1, token: 1 }))
+    writeFileSync(credentials, JSON.stringify({ identity: "A", generation: 1, token: 1, signingKey: "signing-1", sealingKey: "sealing-1" }))
     const locked = Promise.withResolvers<void>()
     const child = Bun.spawn([process.execPath, join(import.meta.dir, "testing/credential-writer.test-support.ts"), credentials, change], {
       stdout: "inherit", stderr: "inherit",
