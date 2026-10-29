@@ -14,8 +14,8 @@ import { openAccountChain } from "./account-chain.ts"
 import type { AccountHttp } from "./http.ts"
 import { type CeremonyClock, POLL_MS, principalOf } from "./join.ts"
 import { approvalCode, approvalCommitment, newPairingNonce } from "./pairing.ts"
-import type { PairingHttp } from "./pairing-http.ts"
-import { checkSyncOperation, dispatchSyncEffect, type SyncOperationAuthority } from "../operation.ts"
+import type { PairingHttp, PendingApproval } from "./pairing-http.ts"
+import { checkSyncOperation, admitSyncOperation, waitSyncOperation, type SyncOperationOptions } from "../operation-authority.ts"
 import { accountOperation, pairingOperation } from "./operation-ports.ts"
 
 export type ApproveOutcome =
@@ -33,9 +33,10 @@ export async function approveDevice(input: {
   readonly clock: CeremonyClock
   readonly pendingId: string
   readonly confirmCode: (code: string) => Promise<boolean>
-  readonly operation?: SyncOperationAuthority
-}): Promise<ApproveOutcome> {
-  const { account, keyring, clock, operation } = input
+  readonly onAnswered?: (pending: PendingApproval) => void
+} & SyncOperationOptions): Promise<ApproveOutcome> {
+  const { account, keyring, clock } = input
+  const operation = input
   const chain = accountOperation(input.chain, operation)
   const pairing = pairingOperation(input.pairing, operation)
   const pin = await loadTrustAnchor(input.pinDir, account)
@@ -43,10 +44,12 @@ export async function approveDevice(input: {
   const self = principalOf(keyring)
   const nonce = newPairingNonce()
   const answered = await pairing.answerPending(input.pendingId, self, nonce)
+  checkSyncOperation(operation)
+  admitSyncOperation(operation, () => input.onAnswered?.(answered))
   let row = answered
   while (row.reveal === null) {
     if (clock.now() >= answered.expires_at) return { kind: "expired" }
-    await clock.sleep(POLL_MS)
+    await waitSyncOperation(operation, clock.sleep(POLL_MS))
     const next = await pairing.readPending(input.pendingId)
     if (next === null) return { kind: "expired" }
     row = next
@@ -56,8 +59,8 @@ export async function approveDevice(input: {
     return { kind: "refused", reason: "the joining device revealed keys its commitment did not name" }
   }
   const code = await approvalCode(account, [{ principal: self, nonce }, { principal: joining.principal, nonce: joining.joining_nonce }])
-  const confirmed = await dispatchSyncEffect(operation, () => input.confirmCode(code))
-  await checkSyncOperation(operation)
+  const confirmed = await waitSyncOperation(operation, admitSyncOperation(operation, () => input.confirmCode(code)))
+  checkSyncOperation(operation)
   if (!confirmed) {
     return { kind: "declined" }
   }
@@ -81,7 +84,7 @@ export async function approveDevice(input: {
       pairing: { commitment: answered.commitment, joining_nonce: joining.joining_nonce, approver_nonce: nonce },
     }
     const appended = await chain.appendKeys(await signedAppend(keyring, state.head, body, wraps, operation))
-    await checkSyncOperation(operation)
+    checkSyncOperation(operation)
     if (appended.ok) return { kind: "approved", seq: appended.seq }
     if (appended.reason !== "stale_base") return { kind: "refused", reason: `the service refused the approval (${appended.reason})` }
   }

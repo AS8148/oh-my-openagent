@@ -2,7 +2,7 @@ import { frozenCopy } from "../crypto/frozen.ts"
 import { verifyRecordSig } from "../crypto/signatures.ts"
 import { jcsBytes, sha256B64 } from "../crypto/vendor/sync-format/jcs.ts"
 import type { DeviceKeyring } from "../keyring-port.ts"
-import type { SyncOperationAuthority } from "../operation.ts"
+import type { SyncOperationOptions } from "../operation-authority.ts"
 import { signedAppend } from "../recovery/keyring-append.ts"
 import { GenesisBuildError, type GenesisAppend, type GenesisPrepared } from "./types.ts"
 import { validatePrepared } from "./validate.ts"
@@ -15,7 +15,7 @@ export const buildGenesis = async (
   account: string,
   keyring: DeviceKeyring,
   input: GenesisPrepared,
-  operation?: SyncOperationAuthority,
+  operation: SyncOperationOptions = {},
 ): Promise<{ readonly request: GenesisAppend; readonly digest: string }> => {
   const prepared = frozenCopy(input, () => false)
   const { body, wraps } = prepared

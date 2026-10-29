@@ -1,7 +1,7 @@
 import { loadTrustAnchor, TrustPinError } from "../crypto/trust-pin.ts"
 import { creatorAnchor } from "../crypto/anchor.ts"
 import type { DeviceKeyring } from "../keyring-port.ts"
-import { checkSyncOperation, dispatchSyncEffect, type SyncOperationAuthority } from "../operation.ts"
+import { checkSyncOperation, admitSyncOperation, syncOperationSignal, type SyncOperationOptions } from "../operation-authority.ts"
 import { type GenesisBridge, GenesisEnableError } from "../genesis/bridge.ts"
 import { buildGenesis } from "../genesis/build.ts"
 import { completeAccountChain, completeGenesis } from "../genesis/complete.ts"
@@ -17,7 +17,7 @@ export type EnableOutcome =
   | { readonly kind: "join_required" }
   | { readonly kind: "needs_first_device" }
 
-export interface EnableSyncInput {
+export interface EnableSyncInput extends SyncOperationOptions {
   readonly account: string
   readonly serviceDeviceId: string
   readonly keyring: DeviceKeyring
@@ -29,15 +29,14 @@ export interface EnableSyncInput {
   readonly userName?: string
   readonly roaming?: boolean
   readonly genesis?: GenesisBridge
-  readonly operation?: SyncOperationAuthority
 }
 
 export async function enableSync(input: EnableSyncInput): Promise<EnableOutcome> {
-  const chain = accountOperation(input.chain, input.operation)
-  const pairing = pairingOperation(input.pairing, input.operation)
+  const chain = accountOperation(input.chain, input)
+  const pairing = pairingOperation(input.pairing, input)
   const captured = { ...input, chain, pairing }
   return withGenesisLock(captured, async () => {
-    await checkSyncOperation(input.operation)
+    checkSyncOperation(input)
     const pin = await loadTrustAnchor(input.pinDir, input.account)
     if (!pin.ok && pin.reason === "corrupt_pin") throw new TrustPinError("corrupt_pin")
     let intent = await loadGenesisIntent(captured)
@@ -55,22 +54,22 @@ export async function enableSync(input: EnableSyncInput): Promise<EnableOutcome>
     // Bootstrap readability is not consent. Every proceeding path restores both switches.
     await pairing.setAccountSync(true)
     await pairing.setDeviceSync(input.serviceDeviceId, true)
-    await checkSyncOperation(input.operation)
+    checkSyncOperation(input)
     if (intent === null && (pin.ok || keys.length > 0)) return { kind: member ? "joined" : "join_required" }
     if (intent === null) {
       const { genesis, serviceOrigin, rpId, userName } = input
       if (!genesis?.prfSupported || !serviceOrigin || !rpId || !userName) throw new GenesisEnableError("missing_configuration")
-      const operation = input.operation ?? {
-        signal: new AbortController().signal,
-        dispatch: async <T>(begin: () => T): Promise<Awaited<T>> => await begin(),
+      const operation = {
+        signal: syncOperationSignal(input) ?? new AbortController().signal,
+        admit: <T>(begin: () => T): T => admitSyncOperation(input, begin),
       }
-      const result = await dispatchSyncEffect(operation, () => genesis.createGenesis({
+      const result = await admitSyncOperation(input, () => genesis.createGenesis({
         account: input.account, rpId, userName, roaming: input.roaming ?? false, firstDevice: principalOf(input.keyring),
       }, { operation }))
-      await checkSyncOperation(operation)
+      checkSyncOperation(input)
       if (!result.ok) throw new GenesisEnableError("bridge_refused", { cause: result.reason })
       if (result.prepared.body.bootstrap.recovery_key.rp_id !== rpId) throw new GenesisEnableError("intent_mismatch")
-      const built = await buildGenesis(input.account, input.keyring, result.prepared, operation)
+      const built = await buildGenesis(input.account, input.keyring, result.prepared, input)
       await verifyGenesisRequest(input.account, input.keyring, built.request)
       intent = {
         version: 1, account: input.account, serviceOrigin, serviceDeviceId: input.serviceDeviceId,
@@ -79,7 +78,7 @@ export async function enableSync(input: EnableSyncInput): Promise<EnableOutcome>
       await storeGenesisIntent(captured, intent)
     }
     const result = await completeGenesis(captured, intent)
-    await checkSyncOperation(input.operation)
+    checkSyncOperation(input)
     return result === "created" ? { kind: "joined", created: true } : { kind: "join_required" }
   })
 }
