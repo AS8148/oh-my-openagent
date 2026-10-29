@@ -1,24 +1,33 @@
 import { randomBytes } from "node:crypto"
 import { arch, platform, release } from "node:os"
 import { join } from "node:path"
-import { createOtlpTelemetryTransport } from "@oh-my-opencode/telemetry-core/otlp"
+import { createOtlpTelemetryTransport, isOtlpTelemetryEnabled } from "@oh-my-opencode/telemetry-core/otlp"
 import type { TelemetryCaptureMessage, TelemetryTransport } from "@oh-my-opencode/telemetry-core"
 import { resolveAgentHome } from "../agent-home/resolve-agent-home"
 import { isOtlpEvent, OTLP_SPANS, projectOtlpEvent } from "./otlp-projection"
 import type { TransportInput } from "./otlp"
+import { invalidateInstallIngestKey, resolveInstallIngestKey } from "./ingest-key"
 
-/** No key means no collector sender, spool or network activity; PostHog is independent. */
+/** Registration and the sender are both behind the same consent gate; PostHog is independent. */
 export async function createSenpiOtlpTransport(
-  input: TransportInput & { readonly ingestKey: string },
+  input: TransportInput,
   message: TelemetryCaptureMessage,
 ): Promise<TelemetryTransport | null> {
-  const { ingestKey } = input
-  if (ingestKey.length === 0 || !isOtlpEvent(message.event)) return null
+  const allowed = (): boolean => {
+    try { return isOtlpTelemetryEnabled({ env: input.env, productEnvPrefix: "OMO_SENPI" }) && input.consent() }
+    catch { return false }
+  }
+  if (!isOtlpEvent(message.event) || !allowed()) return null
+  const spoolRoot = resolveAgentHome({ env: input.env })
+  const explicitKey = input.env["OMO_TELEMETRY_INGEST_KEY"]?.trim()
+  const ingestKey = explicitKey || await resolveInstallIngestKey({
+    root: spoolRoot, env: input.env, hash: message.distinctId, consent: allowed,
+  })
+  if (!ingestKey || !allowed()) return null
   const properties = message.properties ?? {}
   const version = typeof properties["package_version"] === "string" ? properties["package_version"] : "0.0.0"
   const os = platform()
   const machineArch = arch()
-  const spoolRoot = resolveAgentHome({ env: input.env })
   const transport = await createOtlpTelemetryTransport({
     productEnvPrefix: "OMO_SENPI",
     ingestKey,
@@ -28,6 +37,13 @@ export async function createSenpiOtlpTransport(
     consent: input.consent,
     diagnostics: input.diagnostics,
     source: input.source,
+    ...(explicitKey ? {} : {
+      fetch: async (url: string, init: RequestInit) => {
+        const response = await fetch(url, init)
+        if (response.status === 401) invalidateInstallIngestKey(spoolRoot, ingestKey)
+        return response
+      },
+    }),
     project: projectOtlpEvent,
     spans: OTLP_SPANS,
     resource: {

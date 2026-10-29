@@ -1281,6 +1281,7 @@
     "packages/omo-senpi/src/components/telemetry/eval-classifier.ts",
     "packages/omo-senpi/src/components/telemetry/event-schemas.ts",
     "packages/omo-senpi/src/components/telemetry/index.ts",
+    "packages/omo-senpi/src/components/telemetry/ingest-key.ts",
     "packages/omo-senpi/src/components/telemetry/kibitzer-schema.ts",
     "packages/omo-senpi/src/components/telemetry/lazy-posthog.ts",
     "packages/omo-senpi/src/components/telemetry/model-vocabulary.ts",
