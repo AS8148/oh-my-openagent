@@ -4,10 +4,11 @@ function skipBlankAndComments(html: string, from: number): number {
 	let i = from
 	for (;;) {
 		while (i < html.length && /\s/.test(html.charAt(i))) i++
-		if (!html.startsWith("<!--", i)) return i
-		const end = html.indexOf("-->", i + 4)
+		const [open, close] = html.startsWith("<!--", i) ? ["<!--", "-->"] : html.startsWith("<?", i) ? ["<?", "?>"] : ["", ""]
+		if (open === "") return i
+		const end = html.indexOf(close, i + open.length)
 		if (end === -1) return html.length
-		i = end + 3
+		i = end + close.length
 	}
 }
 
@@ -31,7 +32,7 @@ function openingAt(html: string, at: number, name: string): boolean {
 
 /**
  * Inserts `snippet` right after the document prolog (doctype, then the `<html>` and `<head>` openings, in that order,
- * with whitespace and comments between them), so it runs before any page script and never lands before the doctype,
+ * with whitespace, comments and processing instructions such as `<?xml ...?>` between them), so it runs before any page script and never lands before the doctype,
  * inside a comment, inside an attribute value, or inside a later script. With no prolog it goes first.
  */
 export function insertAfterProlog(html: string, snippet: string): string {

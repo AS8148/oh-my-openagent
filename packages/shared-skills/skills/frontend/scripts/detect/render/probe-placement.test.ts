@@ -12,6 +12,7 @@ test.each([
 	["a <head> inside a later script string", "<!doctype html><body><script>var s = \"<head>\"</script>", `<!doctype html>${P}<body><script>var s = \"<head>\"</script>`],
 	["a > inside a quoted attribute", '<!doctype html><html><head data-x="a>b"><title>t</title>', `<!doctype html><html><head data-x="a>b">${P}<title>t</title>`],
 	["a <header> where the head would be", "<html><header>h</header>", `<html>${P}<header>h</header>`],
+	["a leading XML declaration", '<?xml version="1.0"?>\n<!DOCTYPE html><html><head>', `<?xml version="1.0"?>\n<!DOCTYPE html><html><head>${P}`],
 	["comments and whitespace between prolog tags", "<!doctype html>\n<!-- c -->\n<html>\n<head>", `<!doctype html>\n<!-- c -->\n<html>\n<head>${P}`],
 ])("#given %s #then the probe lands right after the prolog", (_name, html, expected) => {
 	expect(insertAfterProlog(html, P)).toBe(expected)
