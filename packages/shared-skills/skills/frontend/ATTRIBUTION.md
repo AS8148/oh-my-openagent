@@ -190,7 +190,8 @@ SOFTWARE.
 
 ## 5. Project-original files
 
-`frontend/SKILL.md`, `frontend/references/design/README.md`, `_INDEX.md`, `aside.md`,
+`frontend/SKILL.md` (apart from the browser-surface, type-and-spacing-floor, and generated-scaffold
+rules adapted from Impeccable, section 6), `frontend/references/design/README.md`, `_INDEX.md`, `aside.md`,
 `design-system-architecture.md`, `grounding.md`, `react-dev-tooling-skill.md`,
 `frontend/references/perfection/README.md`, `react-perf-tooling.md`, and
 `frontend/scripts/perfection/lighthouse-audit.py` are original to this project and require
@@ -245,3 +246,36 @@ MIT-licensed `JCodesMore/ai-website-cloner-template` clone-website workflow that
 cites; no source from that template is copied. It carries no third-party attribution beyond
 that lineage note, and it grants no license to copy any target site's trademarks, brand
 assets, or proprietary copy.
+
+---
+
+## 6. Impeccable (Paul Bakaus) — craft-floor rules
+
+`frontend/references/perfection/craft-floor.md`, the "Browser surfaces", "Type and spacing
+floor" and "No generated scaffold" rules in `frontend/SKILL.md`, and the matching
+`visual-qa/SKILL.md` checklist items (A3 measure, A13, B8, E7, F8, F9) are adapted from
+`skill/reference/craft-floor.md` of the Impeccable project. Unlike sections 1-4 these files
+are committed: they are a rewrite in this project's words, not verbatim copies.
+
+- Source: https://github.com/pbakaus/impeccable
+- Adapted from upstream commit: 5e745ace7e151feb2a93d360d0281fe39448b857
+- Copyright 2025 Paul Bakaus
+- Licensed under the Apache License, Version 2.0 (the "License"); you may not use these
+  files except in compliance with the License. You may obtain a copy of the License at:
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software distributed under
+  the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+  KIND, either express or implied. See the License for the specific language governing
+  permissions and limitations under the License. A full copy of the Apache-2.0 license
+  text is provided in `LICENSE-Apache-2.0.txt` alongside this notice.
+
+- **Changes (Apache-2.0 §4(b)):** the rules were selected and rewritten, not copied. Kept:
+  the browser-surface list, the numeric type and spacing floors, and the scaffold and
+  shadow bans listed above. Added: a property per browser surface, the phone measure
+  floor, and the `/visual-qa` item mapping. Dropped because they conflict with this
+  skill: blur and `backdrop-filter` animation, choosing one theme per product category,
+  decorative custom scrollbars, a blanket bounce-easing ban, and the common-typeface ban.
+  The upstream `NOTICE.md` names only the MIT-licensed `platform-design-skills` origin of
+  its iOS and Android references, none of which is used here.
