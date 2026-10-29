@@ -5,20 +5,31 @@
 mod actions;
 mod date;
 mod foreground;
+mod key_focus;
 pub(crate) mod menus;
 mod point_owner;
 mod popup;
 pub(crate) mod element;
 mod props;
+mod replace_value;
+mod selection;
+mod text_input;
 mod tree;
 
 use senpi_desktop_core::ax::{AxBackend, AxHandle, AxOwner, AxProps};
 use senpi_desktop_core::error::CoreResult;
+use senpi_desktop_core::protocol_results::AxTextSelection;
+use senpi_desktop_core::text_range::TextSelectRequest;
 use senpi_desktop_core::types::DesktopWindow;
 
 pub use self::element::is_trusted;
 pub(crate) use self::foreground::{make_frontmost, prepare_foreground_input};
 pub(crate) use self::point_owner::ensure_points_owned;
+pub(crate) use self::key_focus::{
+    focused_window_id, key_focus, window_content, window_records, AxWindowRecord, FocusedWindow, KeyDestination, KeyFocus,
+    WindowContent,
+};
+pub(crate) use self::text_input::insert_into_element;
 use self::element::{element, handle};
 
 #[derive(Debug, Default)]
@@ -35,7 +46,7 @@ impl MacAx {
         Self { overlay }
     }
 
-    fn show_target(&self, h: &AxHandle) {
+    pub(crate) fn show_target(&self, h: &AxHandle) {
         if !self.overlay.available() {
             return;
         }
@@ -148,7 +159,10 @@ impl AxBackend for MacAx {
 
     fn perform(&mut self, h: &AxHandle, action: &str) -> CoreResult<()> {
         self.show_target(h);
-        actions::perform_requested(element(h)?, action)
+        let element = element(h)?;
+        actions::perform_requested(element, action, || {
+            element::element_pid(element).is_ok_and(crate::process::is_uikit)
+        })
     }
 
     fn set_value(&mut self, h: &AxHandle, value: &str) -> CoreResult<()> {
@@ -173,6 +187,11 @@ impl AxBackend for MacAx {
         tree::attributes(element(h)?)
     }
 
+    fn select_text(&mut self, h: &AxHandle, request: &TextSelectRequest) -> CoreResult<AxTextSelection> {
+        self.show_target(h);
+        selection::select(element(h)?, request)
+    }
+
     /// `AXWindow`'s CGWindowID: the id `windows()` lists.
     fn owner(&mut self, h: &AxHandle, _windows: &[DesktopWindow]) -> CoreResult<AxOwner> {
         Ok(element::owner_window_id(element(h)?)
@@ -182,6 +201,15 @@ impl AxBackend for MacAx {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod selection_tests;
+
+#[cfg(test)]
+mod replace_value_tests;
+
+#[cfg(test)]
+mod text_input_tests;
 
 #[cfg(test)]
 mod live_tests;

@@ -7,7 +7,7 @@ use std::ptr::{self, NonNull};
 use std::sync::LazyLock;
 
 use objc2_application_services::{AXError, AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
-use objc2_core_foundation::{CFArray, CFBoolean, CFDate, CFRetained, CFString, CFType, CGPoint, CGSize};
+use objc2_core_foundation::{CFArray, CFBoolean, CFDate, CFRange, CFRetained, CFString, CFType, CGPoint, CGSize};
 use senpi_desktop_core::ax::{AxBounds, AxHandle};
 use senpi_desktop_core::error::{CoreResult, DesktopError, TccPermission};
 
@@ -53,7 +53,7 @@ pub(super) fn handle(element: CFRetained<AXUIElement>) -> AxHandle {
 }
 
 /// The AXUIElement behind a handle this backend produced.
-pub(super) fn element(handle: &AxHandle) -> CoreResult<&AXUIElement> {
+pub(crate) fn element(handle: &AxHandle) -> CoreResult<&AXUIElement> {
     handle
         .downcast_native::<CFRetained<AXUIElement>>()
         .map(|element| &**element)
@@ -92,12 +92,31 @@ pub(crate) fn window_id(element: &AXUIElement) -> Option<u32> {
 }
 
 /// The CGWindowID of the window owning `element`: the element itself when
-/// it is a window, else its `AXWindow`.
-pub(super) fn owner_window_id(element: &AXUIElement) -> Option<u32> {
+/// it is a window, else its `AXWindow`, else the element when it is one of
+/// its application's `AXWindows` without being an `AXWindow`
+/// ([`listed_window_id`]).
+pub(crate) fn owner_window_id(element: &AXUIElement) -> Option<u32> {
     if copy_string(element, "AXRole").as_deref() == Some("AXWindow") {
         return window_id(element);
     }
-    window_id(&*copy_element(element, "AXWindow")?)
+    match copy_element(element, "AXWindow") {
+        Some(window) => window_id(&window),
+        None => listed_window_id(element),
+    }
+}
+
+/// The window id of `element` when it is itself one of its application's
+/// `AXWindows` though not an `AXWindow`, as Finder's inline rename field
+/// is: such an element has no window above it and stands for its own
+/// (ported from oh-my-pi 0838d2ab44 `listed_window_id`).
+fn listed_window_id(element: &AXUIElement) -> Option<u32> {
+    let app = create_application(element_pid(element).ok()?).ok()?;
+    let _ = set_timeout(&app);
+    copy_elements(&app, "AXWindows")?
+        .iter()
+        .any(|window| **window == *element)
+        .then(|| window_id(element))
+        .flatten()
 }
 
 pub(super) fn copy_attribute_result(
@@ -122,6 +141,40 @@ pub(super) fn copy_attribute_result(
 
 pub(crate) fn copy_attribute(element: &AXUIElement, attribute: &str) -> Option<CFRetained<CFType>> {
     copy_attribute_result(element, attribute).ok().flatten()
+}
+
+/// Reads an optional attribute of an element a ref names: a destroyed element
+/// is a stale ref, any other failure reads as no value.
+pub(crate) fn copy_held_attribute(element: &AXUIElement, attribute: &str) -> CoreResult<Option<CFRetained<CFType>>> {
+    match copy_attribute_result(element, attribute) {
+        Err(AXError::InvalidUIElement) => Err(element_gone()),
+        result => Ok(result.ok().flatten()),
+    }
+}
+
+/// `InvalidUIElement` means the element itself is gone (its view was removed
+/// or its window closed), so the ref that named it is stale.
+pub(super) fn element_gone() -> DesktopError {
+    DesktopError::stale_ref("the element no longer exists; re-run ax()/find()")
+}
+
+/// Whether the app reports `name` as settable on `element`.
+pub(super) fn attribute_settable(element: &AXUIElement, name: &str) -> bool {
+    let attribute = CFString::from_str(name);
+    let mut settable = 0;
+    // SAFETY: The Boolean out parameter is writable and all CF objects outlive
+    // the synchronous AX query.
+    (unsafe { element.is_attribute_settable(&attribute, NonNull::from(&mut settable)) } == AXError::Success)
+        && settable != 0
+}
+
+/// The attribute's value as a `CFRange`, when it is one (`AXSelectedTextRange`).
+pub(super) fn copy_range(element: &AXUIElement, attribute: &str) -> Option<CFRange> {
+    let value = copy_attribute(element, attribute)?.downcast::<AXValue>().ok()?;
+    let mut range = CFRange { location: 0, length: 0 };
+    // SAFETY: The output is a live CFRange and the AXValue accessor validates
+    // the requested type before writing it.
+    unsafe { value.value(AXValueType::CFRange, NonNull::from(&mut range).cast()) }.then_some(range)
 }
 
 pub(crate) fn copy_string(element: &AXUIElement, attribute: &str) -> Option<String> {
@@ -181,6 +234,13 @@ pub(super) fn copy_name_array(
         .collect())
 }
 
+/// The actions `element` lists (`AXActionNames`), or why it could not answer.
+pub(crate) fn action_names(element: &AXUIElement) -> Result<Vec<String>, AXError> {
+    // SAFETY: The retained element and the writable out slot stay valid for
+    // the synchronous copy.
+    copy_name_array(|slot| unsafe { element.copy_action_names(slot) })
+}
+
 pub(crate) fn bounds(element: &AXUIElement) -> Option<AxBounds> {
     let position = copy_attribute(element, "AXPosition")?
         .downcast::<AXValue>()
@@ -211,6 +271,18 @@ pub(super) fn retained_element(pointer: *const AXUIElement) -> CoreResult<CFReta
     // SAFETY: Successful AX copy operations return their output element at +1
     // retain count.
     Ok(unsafe { CFRetained::from_raw(pointer) })
+}
+
+/// The process owning `element`; a destroyed element is a stale ref.
+pub(crate) fn element_pid(element: &AXUIElement) -> CoreResult<libc::pid_t> {
+    let mut pid: libc::pid_t = 0;
+    // SAFETY: `pid` is a live out parameter for the synchronous query.
+    let error = unsafe { element.pid(NonNull::from(&mut pid)) };
+    match error {
+        AXError::Success => Ok(pid),
+        AXError::InvalidUIElement => Err(element_gone()),
+        error => Err(DesktopError::ax_failed(format!("reading the element's process failed ({error:?})"))),
+    }
 }
 
 pub(super) fn ax_result(error: AXError, context: impl Into<String>) -> CoreResult<()> {

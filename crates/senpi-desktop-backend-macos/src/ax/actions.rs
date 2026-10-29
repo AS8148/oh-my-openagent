@@ -10,8 +10,11 @@ use senpi_desktop_core::error::{CoreResult, DesktopError};
 use senpi_desktop_core::intervention::check_press;
 
 use super::date;
-use super::element::{self, ax_result, copy_date};
+use super::element::{self, ax_result, copy_date, element_pid};
+use super::element::action_names;
 use super::popup;
+use super::replace_value::{may_borrow_focus, replace_native_text};
+use super::text_input::{ensure_native_text_target, is_secure, text_readback};
 use crate::skylight::{mark_sent, reporting_partial};
 
 pub(crate) fn perform(element: &AXUIElement, action: &str) -> CoreResult<()> {
@@ -35,12 +38,18 @@ fn sent(error: AXError) -> AXError {
 /// The AX requests an element write sends, each answered by the app's
 /// `AXError` reply: the seam tests script replies through.
 pub(super) trait AxRequests {
+    /// The actions the element lists (`AXActionNames`), or why it could not answer.
+    fn action_names(&self) -> Result<Vec<String>, AXError>;
     fn send_action(&self, action: &CFString) -> AXError;
     fn write_attribute(&self, attribute: &CFString, value: &CFType) -> AXError;
     fn read_date(&self, attribute: &str) -> Option<f64>;
 }
 
 impl AxRequests for AXUIElement {
+    fn action_names(&self) -> Result<Vec<String>, AXError> {
+        action_names(self)
+    }
+
     fn send_action(&self, action: &CFString) -> AXError {
         // SAFETY: The retained element and action CFString stay valid for the
         // synchronous AX request.
@@ -75,36 +84,110 @@ pub(super) fn request_result(error: AXError, request: &str, failed: impl Into<St
     ax_result(error, failed)
 }
 
-/// Performs a model-requested action (`ax.perform`, presses): a request the
-/// app got but did not answer is `AxUnconfirmed`.
-pub(super) fn perform_requested(element: &(impl AxRequests + ?Sized), action: &str) -> CoreResult<()> {
+/// The action that scrolls an element into its view.
+const SCROLL_TO_VISIBLE: &str = "AXScrollToVisible";
+
+/// Performs a model-requested action (`ax.perform`, presses): an action the
+/// element does not list is refused with nothing sent (a press points at
+/// `click()`); a `UIKit` press scrolls the element into view first
+/// ([`scrolls_before_press`]); a request the app got but did not answer is
+/// `AxUnconfirmed`. `uikit` classifies the element's app, read only when a
+/// press could scroll.
+pub(super) fn perform_requested(
+    element: &(impl AxRequests + ?Sized),
+    action: &str,
+    uikit: impl FnOnce() -> bool,
+) -> CoreResult<()> {
     reporting_partial(|| {
         check_press()?;
         let native = action_name(action);
+        // A destroyed element or an app that does not answer is its own
+        // refusal, not an element with no actions.
+        let actions = element.action_names().map_err(|error| {
+            request_result(error, "reading the element's actions", "the element's actions could not be read; nothing was sent")
+                .err()
+                .unwrap_or_else(|| DesktopError::ax_failed("the element's actions could not be read; nothing was sent"))
+        })?;
+        if !actions.contains(&native) {
+            return Err(unsupported_action(&native, &actions));
+        }
+        if scrolls_before_press(&native, &actions, uikit) {
+            // A failed scroll leaves the press to report its own outcome.
+            let _ = element.send_action(&CFString::from_str(SCROLL_TO_VISIBLE));
+        }
         let error = sent(element.send_action(&CFString::from_str(&native)));
         request_result(error, &format!("AX action '{native}'"), format!("AX action '{native}' failed"))
     })
 }
 
+/// The refusal of `native`, an action the element does not list among
+/// `actions`; nothing was sent. A control without a press action still takes
+/// a click (ported from oh-my-pi 0838d2ab44 `unsupported_action`).
+pub(super) fn unsupported_action(native: &str, actions: &[String]) -> DesktopError {
+    let instead = if native == "AXPress" {
+        "; nothing was sent: if this is the control you meant, click() it instead"
+    } else {
+        ""
+    };
+    DesktopError::ax_failed(format!(
+        "AX action '{native}' is not supported by this element; available actions: {}{instead}",
+        actions.join(", "),
+    ))
+}
+
+/// `UIKit` (Mac Catalyst, iPhone and iPad apps) answers `AXPress` by tapping
+/// the element where it is drawn, so pressing a row scrolled out of its view
+/// reports success and does nothing. Scrolling it into view first lets the
+/// tap land; for an element already in view the scroll changes nothing
+/// (ported from oh-my-pi 0838d2ab44 `scrolls_before_press`).
+pub(super) fn scrolls_before_press(native: &str, actions: &[String], uikit: impl FnOnce() -> bool) -> bool {
+    native == "AXPress" && actions.iter().any(|action| action == SCROLL_TO_VISIBLE) && uikit()
+}
+
+/// `ax.setValue`: a popup's value is chosen from its menu; otherwise the
+/// element must be a verifiable native text target with a settable `AXValue`.
+/// A date control takes a `CFDate`. A native text field is replaced through
+/// `AXSelectedText` over its whole value ([`replace_native_text`]: several
+/// apps echo an `AXValue` write without ever taking it); anything else takes
+/// the `AXValue` write, read back exactly ([`text_readback`]).
 pub(super) fn set_value(element: &AXUIElement, value: &str) -> CoreResult<()> {
     reporting_partial(|| {
         if element::copy_string(element, "AXRole").as_deref() == Some("AXPopUpButton") {
             return popup::choose(element, value);
         }
-        write_value(element, value)
+        ensure_native_text_target(element)?;
+        if !element::attribute_settable(element, "AXValue") {
+            return Err(DesktopError::ax_failed("AXValue is not settable; no typing fallback was attempted"));
+        }
+        if let Some(current) = element.read_date("AXValue") {
+            return set_date_value(element, value, current);
+        }
+        let pid = element_pid(element)?;
+        // Focus is borrowed only from an app already in the background as the
+        // call starts: in the front app it would move the user's caret.
+        let started_in_background = may_borrow_focus(crate::front_app::current_front_pid(), pid);
+        if replace_native_text(element, pid, started_in_background, value)? {
+            return Ok(());
+        }
+        let textual = element::copy_string(element, "AXValue").is_some();
+        set_string_value(element, value)?;
+        value_readback(value, textual, element::copy_string(element, "AXValue").as_deref(), is_secure(element))
     })
 }
 
-/// Writes `AXValue` as the control publishes it: a `CFDate` for date and time
-/// controls, else a `CFString`.
-pub(super) fn write_value(element: &(impl AxRequests + ?Sized), value: &str) -> CoreResult<()> {
-    match element.read_date("AXValue") {
-        Some(current) => set_date_value(element, value, current),
-        None => set_string_value(element, value),
+/// The read-back after an `AXValue` write: a control whose value was not
+/// text before the write (a slider, stepper or checkbox) and still is not
+/// cannot be read back as the string that was written; one that reads as a
+/// string now, even if it read as none before (some empty fields report no
+/// value), must read back exactly.
+pub(super) fn value_readback(sent: &str, textual_before: bool, after: Option<&str>, secure: bool) -> CoreResult<()> {
+    if !textual_before && after.is_none() {
+        return Ok(());
     }
+    text_readback(sent, sent, after, secure)
 }
 
-fn set_string_value(element: &(impl AxRequests + ?Sized), value: &str) -> CoreResult<()> {
+pub(super) fn set_string_value(element: &(impl AxRequests + ?Sized), value: &str) -> CoreResult<()> {
     check_press()?;
     let value = CFString::from_str(value);
     let error = sent(element.write_attribute(&CFString::from_str("AXValue"), &value));
@@ -118,7 +201,7 @@ fn set_string_value(element: &(impl AxRequests + ?Sized), value: &str) -> CoreRe
 /// Date and time controls publish `AXValue` as a `CFDate` and refuse the same
 /// date written as a `CFString`, so an ISO-8601 value is written as a `CFDate`
 /// in the system time zone the control displays, then read back as one.
-fn set_date_value(element: &(impl AxRequests + ?Sized), text: &str, current: f64) -> CoreResult<()> {
+pub(super) fn set_date_value(element: &(impl AxRequests + ?Sized), text: &str, current: f64) -> CoreResult<()> {
     // CF caches the system zone per process; the target app follows changes to it.
     CFTimeZone::reset_system();
     let zone = CFTimeZone::system().ok_or_else(|| DesktopError::ax_failed("the system time zone is unavailable"))?;
