@@ -5,6 +5,7 @@ import { dirname, join } from "node:path"
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "../fs/resilient"
 import { getProcessStartIdentity } from "../locks"
 import type { ReflectionRequest, ReservedRun } from "./machine"
+import { getStableLocalHostName } from "./stale-holder"
 
 export interface ReflectionLauncherIdentity {
   readonly pid: number
@@ -74,7 +75,7 @@ export async function writeOptionalRun(path: string, run: ReservedRun | undefine
 export async function currentLauncherIdentity(): Promise<ReflectionLauncherIdentity> {
   return {
     pid: process.pid,
-    hostname: hostname(),
+    hostname: getStableLocalHostName() ?? hostname(),
     processStart: await getProcessStartIdentity(process.pid),
   }
 }

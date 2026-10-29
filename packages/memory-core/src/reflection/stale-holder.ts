@@ -6,6 +6,7 @@
 // the publish claimant, if any, is gone, and the run recorded a valid outcome. Anything that cannot be
 // proven is "stuck", never "dead". Each rule carries a `rule:` tag named by its test.
 
+import { execFileSync } from "node:child_process"
 import { hostname as readHostname } from "node:os"
 import { join } from "node:path"
 
@@ -21,6 +22,7 @@ export type ReflectionLockVerdict =
 export interface ReflectionLockProbe {
   readonly readText?: (path: string) => Promise<string>
   readonly hostname?: () => string
+  readonly isLocalHost?: (target: string, current: string) => boolean
   readonly getPidLiveness?: (pid: number) => ProcessLiveness
   readonly getProcessStartIdentity?: (pid: number) => Promise<string | null>
 }
@@ -69,6 +71,49 @@ function isRunOutcome(value: unknown, runId: string): boolean {
     && typeof fields.timedOut === "boolean"
 }
 
+let cachedLocalHostName: string | null | undefined
+
+/**
+ * Resolves the stable host identity on macOS (scutil --get LocalHostName),
+ * avoiding dynamic DHCP hostname turnover (e.g. Mac-765, Mac-424) on roaming networks.
+ * Cached in memory for zero subsequent overhead.
+ */
+export function getStableLocalHostName(): string | null {
+  if (cachedLocalHostName !== undefined) return cachedLocalHostName
+  if (process.platform === "darwin") {
+    try {
+      const name = execFileSync("scutil", ["--get", "LocalHostName"], { encoding: "utf8", timeout: 500 }).trim()
+      if (name.length > 0) {
+        cachedLocalHostName = name
+        return cachedLocalHostName
+      }
+    } catch {
+      // scutil unavailable or sandboxed
+    }
+  }
+  cachedLocalHostName = null
+  return cachedLocalHostName
+}
+
+/**
+ * Checks if a target hostname matches the current machine, taking into account
+ * macOS dynamic DHCP hostnames and Bonjour LocalHostName.
+ */
+export function isLocalHost(
+  targetHostname: string | undefined,
+  currentHostname: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (!targetHostname) return false
+  if (targetHostname === currentHostname) return true
+  if (platform === "darwin") {
+    const stable = getStableLocalHostName()
+    if (stable !== null && (targetHostname === stable || currentHostname === stable)) return true
+    if (/^Mac-\d+$/i.test(targetHostname) && /^Mac-\d+$/i.test(currentHostname)) return true
+  }
+  return false
+}
+
 function stuck(runId: string, reason: string): ReflectionLockVerdict {
   return { state: "stuck", runId, reason }
 }
@@ -97,7 +142,9 @@ export async function classifyReflectionLockHolder(
   const launcherPid = typeof fields.launcherPid === "number" ? fields.launcherPid : undefined
   const launcherHostname = typeof fields.launcherHostname === "string" ? fields.launcherHostname : undefined
   if (launcherPid === undefined || launcherHostname === undefined) return stuck(runId, "its launcher identity is missing") // rule:launcher-identity
-  if (launcherHostname !== (probe.hostname ?? readHostname)()) return stuck(runId, `it is owned by host ${launcherHostname}, which cannot be checked from here`) // rule:other-host
+  const currentHost = (probe.hostname ?? (() => getStableLocalHostName() ?? readHostname()))()
+  const localCheck = probe.isLocalHost ?? isLocalHost
+  if (!localCheck(launcherHostname, currentHost)) return stuck(runId, `it is owned by host ${launcherHostname}, which cannot be checked from here`) // rule:other-host
   const launcher = await launcherLiveness(launcherPid, fields.launcherProcessStart, probe)
   if (launcher === "alive") return { state: "live", runId } // rule:launcher-alive
   if (launcher === "unknown") return stuck(runId, `launcher pid ${launcherPid} could not be checked`) // rule:launcher-unknown

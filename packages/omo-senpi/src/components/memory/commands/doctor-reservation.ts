@@ -2,6 +2,7 @@
 // gone (the post-#7095 repair state reconcile now reclaims automatically at session start).
 
 import { existsSync, readFile } from "@oh-my-opencode/memory-core/fs"
+import { isLocalHost } from "@oh-my-opencode/memory-core"
 import { hostname } from "node:os"
 import { join } from "node:path"
 
@@ -34,7 +35,7 @@ export async function checkGhostReservation(
     return { name: "reservation", level: "warn", detail: `ghost active reservation ${runId}: launcher identity missing (pre-stamping legacy); ${GHOST_REMEDIATION}` }
   }
   if (Date.now() - reservedAtMs <= 60_000) return { name: "reservation", level: "ok", detail: `reservation ${runId} is recent` }
-  if (launcherHostname !== hostname()) return { name: "reservation", level: "ok", detail: `reservation ${runId} is owned by ${launcherHostname}` }
+  if (!isLocalHost(launcherHostname, hostname())) return { name: "reservation", level: "ok", detail: `reservation ${runId} is owned by ${launcherHostname}` }
   const alive = (deps.isProcessAlive ?? defaultIsProcessAlive)(launcherPid)
   if (alive) return { name: "reservation", level: "ok", detail: `reservation ${runId} launcher pid ${launcherPid} is alive` }
   return {
