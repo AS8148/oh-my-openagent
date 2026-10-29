@@ -1,3 +1,5 @@
+import { jsPunctuation } from "./js-punctuation"
+
 export function tagAt(text: string, index: number): string {
 	for (const m of text.matchAll(/<[a-z][\w:.-]*(?:[^"'`{}>]|"[^"]*"|'[^']*'|`[^`]*`|\{(?:[^{}]|\{[^{}]*\})*\})*>/gi)) {
 		if ((m.index ?? 0) <= index && index <= (m.index ?? 0) + m[0].length) return m[0]
@@ -6,41 +8,29 @@ export function tagAt(text: string, index: number): string {
 }
 
 export function exclusiveScopes(text: string): readonly string[] {
-	let quote = ""
-	let depth = 0
 	let question = -1
-	let targetDepth = 0
+	let paren = 0
+	let brace = 0
+	let colon = -1
 	let nested = 0
-	for (let i = 0; i < text.length; i++) {
-		const ch = text[i]
-		if (quote) {
-			if (ch === "\\") i++
-			else if (ch === quote) quote = ""
-		} else if (ch === '"' || ch === "'" || ch === "`") quote = ch
-		else if (ch === "{" || ch === "(") depth++
-		else if (ch === "}" || ch === ")") depth--
-		else if (ch === "?" && !/[?.]/.test(text[i - 1] ?? "") && !/[?.]/.test(text[i + 1] ?? "")) {
-			if (question < 0) { question = i; targetDepth = depth }
-			else if (depth === targetDepth) nested++
-		} else if (ch === ":" && question >= 0 && depth === targetDepth) {
-			if (nested > 0) { nested--; continue }
-			let end = i + 1
-			let innerDepth = depth
-			let innerQuote = ""
-			for (; end < text.length; end++) {
-				const c = text[end]
-				if (innerQuote) {
-					if (c === "\\") end++
-					else if (c === innerQuote) innerQuote = ""
-				} else if (c === '"' || c === "'" || c === "`") innerQuote = c
-				else if (c === "{" || c === "(") innerDepth++
-				else if (c === "}" || c === ")") innerDepth--
-				else if (c === "," && innerDepth === targetDepth) break
-			}
-			return [text.slice(question + 1, i), text.slice(i + 1, end)].flatMap((part) => exclusiveScopes(part).map((arm) => text.slice(0, question) + arm + text.slice(end)))
+	let end = text.length
+	for (const token of jsPunctuation(text)) {
+		const sameDepth = token.paren === paren && token.brace === brace
+		const isQuestion = token.ch === "?" && !/[?.]/.test(text[token.at - 1] ?? "") && !/[?.]/.test(text[token.at + 1] ?? "")
+		if (colon >= 0) {
+			if (token.ch === "," && sameDepth) { end = token.at; break }
+		} else if (question < 0 && isQuestion) {
+			question = token.at
+			paren = token.paren
+			brace = token.brace
+		} else if (question >= 0 && isQuestion && sameDepth) nested++
+		else if (question >= 0 && token.ch === ":" && sameDepth) {
+			if (nested > 0) nested--
+			else colon = token.at
 		}
 	}
-	return [text]
+	if (question < 0 || colon < 0) return [text]
+	return [text.slice(question + 1, colon), text.slice(colon + 1, end)].flatMap((part) => exclusiveScopes(part).map((arm) => text.slice(0, question) + arm + text.slice(end)))
 }
 
 export function solidBackground(scope: string, gray = false): string | null {

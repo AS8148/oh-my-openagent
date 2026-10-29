@@ -1,8 +1,9 @@
 import { descendants, fontSizePx, shortSnippet, styleOf } from "../../core/page"
 import type { PageRule } from "../../rule"
 import { visibleText } from "./support/text-context"
+import { primaryFont } from "./support/font-family"
 
-const serifNames = ["georgia", "times new roman", "times", "palatino", "garamond", "baskerville", "fraunces", "recoleta", "playfair display", "newsreader", "instrument serif", "lora", "merriweather", "libre baskerville", "cormorant garamond", "dm serif display", "dm serif text", "eb garamond", "source serif pro", "source serif 4"]
+const serifNames = ["fraunces", "recoleta", "newsreader", "playfair display", "playfair", "cormorant", "cormorant garamond", "garamond", "eb garamond", "tiempos", "tiempos headline", "tiempos text", "lora", "vollkorn", "spectral", "source serif pro", "source serif 4", "source serif", "ibm plex serif", "merriweather", "libre caslon", "libre baskerville", "baskerville", "georgia", "times new roman", "times", "dm serif display", "dm serif text", "instrument serif", "gt sectra", "ogg", "canela", "freight display", "freight text"]
 
 export const italicSerifDisplay: PageRule = {
 	meta: {
@@ -14,9 +15,9 @@ export const italicSerifDisplay: PageRule = {
 		if (["h1", "h2"].includes(element.tag) === false || visibleText(snapshot, element) === false) return []
 		const italic = [element, ...descendants(snapshot, element)].some(n => {
 			const families = styleOf(n, "font-family").toLowerCase().split(",").map(f => f.trim().replace(/^['"]|['"]$/g, ""))
-			const primary = families.find(f => ["serif", "sans-serif", "system-ui", "monospace", "inherit", "initial"].includes(f) === false)
+			const primary = primaryFont(styleOf(n, "font-family"), true)
 			return visibleText(snapshot, n) && n.ownText.trim() !== "" && styleOf(n, "font-style") === "italic" &&
-				fontSizePx(n) >= 48 && primary !== undefined && (serifNames.includes(primary) || families.includes("serif"))
+				fontSizePx(n) >= 48 && primary !== "" && (serifNames.includes(primary) || families.includes("serif"))
 		})
 		return italic ? [{ element, message: "Italic serif heading at 48px or larger", snippet: shortSnippet(element) }] : []
 	}),

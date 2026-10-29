@@ -11,9 +11,10 @@ export const numberedSectionLabels: PageRule = {
 	check: ({ snapshot }) => {
 		const seen = new Set<number>()
 		const candidates = snapshot.elements.flatMap((heading) => {
-			if (!["h2", "h3", "h4"].includes(heading.tag) || heading.text.length < 3 || !labelContext(snapshot, heading)) return []
+			if (!["h2", "h3", "h4"].includes(heading.tag) || heading.text.length < 3) return []
 			const label = labelBefore(snapshot, heading)
-			if (!label || seen.has(label.index) || !labelContext(snapshot, label) || !["span", "p", "div", "small", "em", "strong", "b"].includes(label.tag)) return []
+			if (!label || seen.has(label.index) || !labelContext(snapshot, heading, label) || !labelContext(snapshot, label, heading)
+				|| !["span", "p", "div", "small", "em", "strong", "b"].includes(label.tag)) return []
 			const text = (label.ownText || label.text).replace(/\s+/g, " ").trim()
 			const index = parsedIndex(text)
 			if (index === null || !styledLabel(labelType(snapshot, label), heading)) return []

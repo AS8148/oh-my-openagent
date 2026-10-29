@@ -69,7 +69,9 @@ export function sourcePasses(context: SourceContext): readonly SourcePass[] {
 			passes.push({ text: stripComments(body, false), offset: (m.index ?? 0) + m[0].indexOf("`") + 1, css: true, sass: false })
 		}
 	}
-	return passes
+	let source = text
+	for (const pass of passes.slice(1)) source = source.slice(0, pass.offset) + pass.text + source.slice(pass.offset + pass.text.length)
+	return [{ text: source, offset: 0, css, sass: ext === "sass" }, ...passes.slice(1)]
 }
 
 export function sourceHit(text: string, offset: number, message: string, snippet = lineAt(text, offset)): SourceHit {
@@ -102,7 +104,7 @@ export function lineCheck(patterns: readonly RegExp[], test: (match: LineMatch) 
 
 export function pageSource(context: SourceContext): string | null {
 	if (!componentExtensions.includes(extensionOf(context.file.path))) return null
-	return /<!doctype\s+html\b|<html\b|<body\b/i.test(context.file.text) ? context.file.text : null
+	return /<!doctype\s|<html[\s>]|<head[\s>]/i.test(context.file.text.replace(/<!--[\s\S]*?-->/g, "")) ? context.file.text : null
 }
 
 export const bodyText = (text: string): string => text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")

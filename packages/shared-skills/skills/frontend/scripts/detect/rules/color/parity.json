@@ -1,0 +1,1114 @@
+{
+  "backend": "chrome",
+  "rows": [
+    {
+      "fixture": "ai-color-palette-brand-hue-headings-only.html",
+      "rule": "ai-color-palette",
+      "golden": 2,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "ai-color-palette-brand-hue.html",
+      "rule": "ai-color-palette",
+      "golden": 2,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "ai-color-palette-category-colours.html",
+      "rule": "ai-color-palette",
+      "golden": 4,
+      "ours": 7,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "ai-color-palette-code-tokens.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 4,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "ai-color-palette-muted-violet.html",
+      "rule": "ai-color-palette",
+      "golden": 3,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "ai-color-palette.html",
+      "rule": "ai-color-palette",
+      "golden": 1,
+      "ours": 15,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "ai-color-palette.html",
+      "rule": "radial-halo",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "buried-raster.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "color.html",
+      "rule": "low-contrast",
+      "golden": 15,
+      "ours": 17,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "color.html",
+      "rule": "gray-on-color",
+      "golden": 7,
+      "ours": 6,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "color.html",
+      "rule": "ai-color-palette",
+      "golden": 4,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "color.html",
+      "rule": "gradient-text",
+      "golden": 3,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "computed-forms.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "computed-forms.html",
+      "rule": "gray-on-color",
+      "golden": 3,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "computed-forms.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "contrast-surfaces.html",
+      "rule": "low-contrast",
+      "golden": 2,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "contrast-surfaces.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "contrast-surfaces.html",
+      "rule": "gradient-text",
+      "golden": 6,
+      "ours": 5,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "contrast-surfaces.html",
+      "rule": "dark-glow",
+      "golden": 2,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "covered-text-contrast.html",
+      "rule": "low-contrast",
+      "golden": 7,
+      "ours": 5,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "cramped-padding.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "cream-palette-tailwind.html",
+      "rule": "cream-palette",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "cream-palette.html",
+      "rule": "cream-palette",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "css-in-prose-should-flag.html",
+      "rule": "ai-color-palette",
+      "golden": 2,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "css-in-prose-should-flag.html",
+      "rule": "gradient-text",
+      "golden": 5,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "dark-gradient-ground.html",
+      "rule": "low-contrast",
+      "golden": 3,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "dark-theme-modern-color.html",
+      "rule": "low-contrast",
+      "golden": 7,
+      "ours": 6,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "declared-mockups.html",
+      "rule": "low-contrast",
+      "golden": 20,
+      "ours": 16,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "design-system.html",
+      "rule": "low-contrast",
+      "golden": 3,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "evidence-after-scan.html",
+      "rule": "low-contrast",
+      "golden": 6,
+      "ours": 6,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "evidence-after-scan.html",
+      "rule": "radial-halo",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "evidence-duplicate-id.html",
+      "rule": "low-contrast",
+      "golden": 3,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "fullpage-screenshot-frame.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "fullpage-screenshot-rtl.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "fullpage-screenshot-scroller.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "fullpage-screenshot-virtual.html",
+      "rule": "low-contrast",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "fullpage-screenshot.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "glow.html",
+      "rule": "dark-glow",
+      "golden": 17,
+      "ours": 15,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "gpt-tells.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "gradient-surface-contrast.html",
+      "rule": "low-contrast",
+      "golden": 14,
+      "ours": 15,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "gradient-text-one-colour.html",
+      "rule": "ai-color-palette",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "gradient-text-one-colour.html",
+      "rule": "gradient-text",
+      "golden": 2,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "gradient-text-states.html",
+      "rule": "ai-color-palette",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "gradient-text-states.html",
+      "rule": "gradient-text",
+      "golden": 6,
+      "ours": 3,
+      "flagMissed": [
+        "flag-paused-shimmer"
+      ],
+      "passHit": []
+    },
+    {
+      "fixture": "gray-on-color.html",
+      "rule": "gray-on-color",
+      "golden": 6,
+      "ours": 6,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "hero-eyebrow-chip.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "icon-tile-stack.html",
+      "rule": "ai-color-palette",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "kicker-above-heading-beside.html",
+      "rule": "cream-palette",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "kicker-above-heading.html",
+      "rule": "cream-palette",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "link-text-contrast.html",
+      "rule": "low-contrast",
+      "golden": 16,
+      "ours": 19,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "link-text-contrast.html",
+      "rule": "gradient-text",
+      "golden": 2,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "linked-url-patterns.html",
+      "rule": "low-contrast",
+      "golden": 3,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "linked-url-patterns.html",
+      "rule": "gradient-text",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "linked-url-patterns.html",
+      "rule": "radial-halo",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-borrowed-grounds.html",
+      "rule": "low-contrast",
+      "golden": 14,
+      "ours": 17,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-counted-pairs.html",
+      "rule": "low-contrast",
+      "golden": 14,
+      "ours": 16,
+      "flagMissed": [
+        "flag-name-second",
+        "flag-name-third",
+        "flag-share-second",
+        "flag-share-third",
+        "flag-shop-name",
+        "flag-note-third",
+        "flag-tag-second",
+        "flag-hand-second",
+        "flag-hand-outlined",
+        "flag-grad-second",
+        "flag-grad-third"
+      ],
+      "passHit": [
+        "pass-vend-word"
+      ]
+    },
+    {
+      "fixture": "low-contrast-covered-and-masked.html",
+      "rule": "low-contrast",
+      "golden": 4,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-decorative.html",
+      "rule": "low-contrast",
+      "golden": 26,
+      "ours": 20,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-disabled-control.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-heavy-faces.html",
+      "rule": "low-contrast",
+      "golden": 6,
+      "ours": 6,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-labelled-placeholders.html",
+      "rule": "low-contrast",
+      "golden": 13,
+      "ours": 0,
+      "flagMissed": [
+        "flag-hidden-label",
+        "flag-sr-only",
+        "flag-first-of-two"
+      ],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-near-bar.html",
+      "rule": "low-contrast",
+      "golden": 12,
+      "ours": 12,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-near-threshold.html",
+      "rule": "low-contrast",
+      "golden": 4,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-paint-grounds.html",
+      "rule": "low-contrast",
+      "golden": 8,
+      "ours": 9,
+      "flagMissed": [
+        "flag-grey-over-parked-fill"
+      ],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-paint-grounds.html",
+      "rule": "gradient-text",
+      "golden": 2,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-pixel-reads.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [
+        "flag-halo-copy-on-pale-photo",
+        "flag-link-on-near-opaque-glass"
+      ],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-pixel-reads.html",
+      "rule": "dark-glow",
+      "golden": 2,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-resting-states.html",
+      "rule": "low-contrast",
+      "golden": 18,
+      "ours": 20,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-settled-states.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 5,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-settled-states.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-title-wordmark.html",
+      "rule": "low-contrast",
+      "golden": 2,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "low-contrast-unread-pixels.html",
+      "rule": "low-contrast",
+      "golden": 3,
+      "ours": 2,
+      "flagMissed": [
+        "flag-outlined-copy-under-backdrop-filter"
+      ],
+      "passHit": [
+        "pass-white-under-half-wash"
+      ]
+    },
+    {
+      "fixture": "low-contrast-unread-scrim.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "mockup-structure.html",
+      "rule": "low-contrast",
+      "golden": 2,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "modern-color-borders.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "named-color-borders.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "nav-cta-constructions.html",
+      "rule": "low-contrast",
+      "golden": 8,
+      "ours": 8,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "never-painted.html",
+      "rule": "low-contrast",
+      "golden": 14,
+      "ours": 12,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "never-painted.html",
+      "rule": "ai-color-palette",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "never-painted.html",
+      "rule": "gradient-text",
+      "golden": 3,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "not-at-rest-timed.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "not-at-rest.html",
+      "rule": "dark-glow",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "not-shown-at-capture.html",
+      "rule": "low-contrast",
+      "golden": 12,
+      "ours": 10,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "not-visible-at-capture.html",
+      "rule": "low-contrast",
+      "golden": 5,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "oklch-neon-text.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "on-screen.html",
+      "rule": "low-contrast",
+      "golden": 7,
+      "ours": 7,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "organic-clip-path.html",
+      "rule": "low-contrast",
+      "golden": 4,
+      "ours": 4,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "overlay-positioning.html",
+      "rule": "low-contrast",
+      "golden": 2,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "overlay-positioning.html",
+      "rule": "ai-color-palette",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "own-box-surface-and-ink-contrast.html",
+      "rule": "low-contrast",
+      "golden": 11,
+      "ours": 10,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "own-box-surface-and-ink-contrast.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark-contents.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark-contents.html",
+      "rule": "dark-glow",
+      "golden": 2,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark-meta.html",
+      "rule": "dark-glow",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark-pseudo.html",
+      "rule": "low-contrast",
+      "golden": 0,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark-pseudo.html",
+      "rule": "dark-glow",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark-root.html",
+      "rule": "dark-glow",
+      "golden": 2,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark.html",
+      "rule": "dark-glow",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-dark.html",
+      "rule": "radial-halo",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms-white-canvas.html",
+      "rule": "dark-glow",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms.html",
+      "rule": "gradient-text",
+      "golden": 4,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms.html",
+      "rule": "dark-glow",
+      "golden": 3,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "page-level-forms.html",
+      "rule": "radial-halo",
+      "golden": 1,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "paint-that-shows.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "paint-that-shows.html",
+      "rule": "ai-color-palette",
+      "golden": 1,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "paint-that-shows.html",
+      "rule": "gradient-text",
+      "golden": 4,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "paint-that-shows.html",
+      "rule": "dark-glow",
+      "golden": 3,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "painted-at-capture.html",
+      "rule": "low-contrast",
+      "golden": 3,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "painted-gate-coverage.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "painted-gate-coverage.html",
+      "rule": "dark-glow",
+      "golden": 4,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "pattern-walk-inactive-at-rules.html",
+      "rule": "dark-glow",
+      "golden": 3,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "pattern-walk-inactive-at-rules.html",
+      "rule": "radial-halo",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "placeholder-contrast.html",
+      "rule": "low-contrast",
+      "golden": 4,
+      "ours": 0,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "radial-spotlight-glow.html",
+      "rule": "low-contrast",
+      "golden": 0,
+      "ours": 4,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "radial-spotlight-glow.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 8,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "radial-spotlight-glow.html",
+      "rule": "radial-halo",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "radial-spotlight-glow.html",
+      "rule": "radial-spotlight-glow",
+      "golden": 11,
+      "ours": 11,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "scoped-ignore.html",
+      "rule": "cream-palette",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "small-text-labels.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "surface-resolution-contrast.html",
+      "rule": "low-contrast",
+      "golden": 11,
+      "ours": 14,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "third-party-widgets-carousels.html",
+      "rule": "low-contrast",
+      "golden": 2,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "transient-opacity-contrast.html",
+      "rule": "low-contrast",
+      "golden": 6,
+      "ours": 8,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "unread-surface-contrast.html",
+      "rule": "low-contrast",
+      "golden": 11,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "unread-surface-contrast.html",
+      "rule": "gray-on-color",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "unread-surface-contrast.html",
+      "rule": "dark-glow",
+      "golden": 3,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "visual-contrast-gates.html",
+      "rule": "low-contrast",
+      "golden": 3,
+      "ours": 4,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "visual-contrast-sampling.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 3,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "visual-contrast-sampling.html",
+      "rule": "ai-color-palette",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "visual-contrast-sampling.html",
+      "rule": "gradient-text",
+      "golden": 2,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "visual-contrast-sampling.html",
+      "rule": "radial-halo",
+      "golden": 0,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "visual-contrast.html",
+      "rule": "low-contrast",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "visual-contrast.html",
+      "rule": "cream-palette",
+      "golden": 1,
+      "ours": 1,
+      "flagMissed": [],
+      "passHit": []
+    },
+    {
+      "fixture": "wide-page-contrast.html",
+      "rule": "low-contrast",
+      "golden": 2,
+      "ours": 2,
+      "flagMissed": [],
+      "passHit": []
+    }
+  ]
+}

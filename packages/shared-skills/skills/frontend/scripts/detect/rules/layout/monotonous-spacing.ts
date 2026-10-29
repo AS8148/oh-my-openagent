@@ -8,14 +8,14 @@ export const monotonousSpacing: PageRule = {
 	},
 	check: ({ snapshot }) => {
 		const values: number[] = []
-		const css = snapshot.cssText.join("\n")
+		const css = [...snapshot.cssText, ...snapshot.elements.map((el) => el.attributes["style"] ?? "")].join("\n")
 		for (const m of css.matchAll(/(?:padding|margin)(?:-(?:top|right|bottom|left))?\s*:\s*(\d+)px/gi)) {
 			const v = Number(m[1])
 			if (v > 0 && v < 200) values.push(v)
 		}
 		for (const m of css.matchAll(/(?:gap|row-gap|column-gap)\s*:\s*(\d+)px/gi)) values.push(Number(m[1]))
 		for (const el of snapshot.elements) {
-			for (const m of (el.attributes["class"] ?? "").matchAll(/(?:^|[\s:])(?:p[trblxy]?|m[trblxy]?|gap(?:-[xy])?|space-[xy])-(\d+)(?=\s|$)/g)) values.push(Number(m[1]) * 4)
+			for (const m of (el.attributes["class"] ?? "").matchAll(/\b(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap)-(\d+)\b/g)) values.push(Number(m[1]) * 4)
 		}
 		for (const m of css.matchAll(/(?:padding|margin)(?:-(?:top|right|bottom|left))?\s*:\s*(\d*\.?\d+)rem/gi)) {
 			const v = Math.round(Number(m[1]) * 16)

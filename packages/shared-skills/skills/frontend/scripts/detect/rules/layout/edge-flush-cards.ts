@@ -1,4 +1,4 @@
-import { ancestors, descendants, shortSnippet, styleOf } from "../../core/page"
+import { ancestors, descendants, isRendered, shortSnippet, styleOf } from "../../core/page"
 import type { PageRule } from "../../rule"
 import { alpha, borders, length, painted, right, scrollsX } from "./support/geometry"
 
@@ -13,7 +13,7 @@ export const edgeFlushCards: PageRule = {
 			scroller.scroll.scrollWidth <= scroller.scroll.clientWidth + 8 ||
 			scroller.rect.width < 120 || scroller.rect.height < 60 || scroller.rect.y > snapshot.viewport.height * 2) return []
 		const cards = [...descendants(snapshot, scroller)].filter((el) => {
-			if (!painted(snapshot, el) || el.rect.width < 80 || el.rect.height < 40 ||
+			if (!isRendered(snapshot, el) || el.rect.width < 80 || el.rect.height < 40 ||
 				/^(table|thead|tbody|tfoot|tr|td|th|col|colgroup)$/.test(el.tag) ||
 				/^(row|cell|gridcell|rowgroup|columnheader|rowheader)$/.test(el.attributes["role"] ?? "")) return false
 			if (alpha(el, "background-color") <= 0.5 && borders(el).filter(Boolean).length < 2) return false

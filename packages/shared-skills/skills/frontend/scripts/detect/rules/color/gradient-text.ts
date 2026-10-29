@@ -4,6 +4,7 @@ import type { PageRule } from "../../rule"
 import type { ElementSnapshot, PageSnapshot } from "../../types"
 import { effectiveOpacity, gradientStops, sameColor } from "./support/gradients"
 import { clipsText } from "./support/text-colors"
+import { textPainted } from "./support/painted-text"
 
 function shimmer(snapshot: PageSnapshot, el: ElementSnapshot): boolean {
 	const stops = gradientStops(styleOf(el, "background-image"))
@@ -22,7 +23,15 @@ function shimmer(snapshot: PageSnapshot, el: ElementSnapshot): boolean {
 	return styleOf(el, "animation-iteration-count").includes("infinite") && styleOf(el, "animation-name").split(",").some((name) =>
 		name.trim() !== "none" && snapshot.cssText.some((css) => {
 			const start = css.indexOf(`@keyframes ${name.trim()}`)
-			return start >= 0 && /background-position/.test(css.slice(start, css.indexOf("}}", start) + 2 || undefined))
+			if (start < 0) return false
+			const open = css.indexOf("{", start)
+			let depth = 0
+			for (let i = open; i < css.length; i++) {
+				if (css[i] === "{") depth++
+				if (css[i] === "}") depth--
+				if (depth === 0) return /background-position/.test(css.slice(open, i))
+			}
+			return false
 		}))
 }
 
@@ -33,7 +42,7 @@ export const gradientText: PageRule = {
 		fixHint: "Use a solid text color to keep the emphasis readable.",
 	},
 	check: ({ snapshot }) => snapshot.elements.flatMap((el) => {
-		if (!isRendered(snapshot, el) || el.text.trim() === "" || !clipsText(el)) return []
+		if (!isRendered(snapshot, el) || !textPainted(snapshot, el) || el.text.trim() === "" || !clipsText(el)) return []
 		const image = styleOf(el, "background-image")
 		const stops = gradientStops(image)
 		const first = stops[0]

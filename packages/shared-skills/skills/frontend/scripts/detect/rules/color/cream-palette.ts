@@ -3,7 +3,7 @@ import { isRendered, styleOf } from "../../core/page"
 import type { PageRule } from "../../rule"
 
 const cream = (c: Rgba | null): boolean => c !== null && Math.min(c.r, c.g, c.b) >= 209 && c.r >= c.g && c.g >= c.b && c.r - c.b >= 6 && c.r - c.b <= 48
-const CREAM_CLASSES = ["bg-amber-50", "bg-orange-50", "bg-yellow-50", "bg-amber-100", "bg-orange-100", "bg-stone-100"] as const
+const CREAM_CLASSES = ["bg-amber-50", "bg-orange-50", "bg-yellow-50", "bg-orange-100"] as const
 
 export const creamPalette: PageRule = {
 	meta: {

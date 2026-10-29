@@ -1,5 +1,6 @@
-import { childrenOf, descendants, fontSizePx, parentOf, px, styleOf } from "../../../core/page"
+import { childrenOf, descendants, effectiveBackground, fontSizePx, parentOf, px, styleOf } from "../../../core/page"
 import { parseColor } from "../../../core/color"
+import { parseShadow } from "../../../core/shadow"
 import type { ElementSnapshot, PageSnapshot } from "../../../types"
 import { displayed, lineage } from "./page-text"
 
@@ -43,29 +44,39 @@ export const labelType = (snapshot: PageSnapshot, label: ElementSnapshot): Eleme
 	return el
 }
 
-const drawsBox = (el: ElementSnapshot): boolean => {
-	const color = parseColor(styleOf(el, "background-color"))
-	return (color?.a ?? 0) > 0.1 || !["", "none"].includes(styleOf(el, "box-shadow"))
-		|| ["top", "right", "bottom", "left"].filter((side) => (px(styleOf(el, `border-${side}-width`)) ?? 0) >= 1).length >= 3
+const drawsBox = (snapshot: PageSnapshot, el: ElementSnapshot): boolean => {
+	const parent = parentOf(snapshot, el)
+	const under = parent ? effectiveBackground(snapshot, parent) : { r: 255, g: 255, b: 255 }
+	const fill = effectiveBackground(snapshot, el)
+	const image = styleOf(el, "background-image")
+	const border = ["top", "right", "bottom", "left"].filter((side) =>
+		(px(styleOf(el, `border-${side}-width`)) ?? 0) >= 0.5
+		&& !["none", "hidden", ""].includes(styleOf(el, `border-${side}-style`))
+		&& (parseColor(styleOf(el, `border-${side}-color`))?.a ?? 0) > 0).length >= 3
+	return Math.max(Math.abs(fill.r - under.r), Math.abs(fill.g - under.g), Math.abs(fill.b - under.b)) > 3
+		|| image !== "" && image !== "none" || border
+		|| parseShadow(styleOf(el, "box-shadow")).some((layer) => layer.color.a >= 0.03
+			&& (layer.x !== 0 || layer.y !== 0 || layer.blur > 0 || layer.spread !== 0))
 }
 
-export const labelContext = (snapshot: PageSnapshot, el: ElementSnapshot): boolean => {
+export const labelContext = (snapshot: PageSnapshot, el: ElementSnapshot, partner: ElementSnapshot = el): boolean => {
 	const path = lineage(snapshot, el)
 	if (!displayed(snapshot, el) || path.some((a) => ["nav", "form", "table", "thead", "tbody", "tfoot", "figure", "figcaption", "ol", "ul", "li"].includes(a.tag)
 		|| a.attributes["role"] === "navigation" || a.attributes["aria-hidden"] === "true"
 		|| a.attributes["data-impeccable-allow-kickers"] !== undefined
 		|| /breadcrumb/i.test(`${a.attributes["class"] ?? ""} ${a.attributes["aria-label"] ?? ""}`))) return false
 	const context = path.find((a) => ["article", "button", "a", "li"].includes(a.tag) || ["listitem", "option"].includes(a.attributes["role"] ?? ""))
-	if (!context) return true
+	if (!context || context.rect.height > snapshot.viewport.height * 2 || !lineage(snapshot, partner).includes(context)) return true
 	if (context.tag !== "article") return false
 	const above = lineage(snapshot, context).slice(1)
 	if (above.some((a) => ["a", "button", "li"].includes(a.tag) || ["listitem", "option"].includes(a.attributes["role"] ?? ""))) return false
-	if (path.slice(0, path.findIndex((a) => a.index === context.index) + 1).some(drawsBox)) return false
+	if (path.slice(1, path.findIndex((a) => a.index === context.index) + 1).some((a) =>
+		lineage(snapshot, partner).includes(a) && drawsBox(snapshot, a))) return false
 	let below = context
 	for (const up of above.slice(0, 3)) {
 		if (up.tag === "body") break
 		const otherArticle = [...descendants(snapshot, up)].some((a) => a.tag === "article" && a.index !== context.index)
-		if (!otherArticle && drawsBox(up)) return false
+		if (!otherArticle && drawsBox(snapshot, up)) return false
 		if (up.children.length !== 1 || up.children[0] !== below.index) break
 		below = up
 	}

@@ -23,5 +23,5 @@ export const radialHalo: PageRule = {
 			return first.color.a >= 0.7 && spread(first.color) >= 24 && last.color.a <= 0.05
 		}))
 		return halo ? [{ element: el, message: "Chromatic radial halo on a dark surface", snippet: shortSnippet(el) }] : []
-	}),
+	}).slice(0, 1),
 }
