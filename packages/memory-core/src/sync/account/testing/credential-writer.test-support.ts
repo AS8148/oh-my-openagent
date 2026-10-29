@@ -7,6 +7,7 @@ const mode = process.argv[3]
 if (path === undefined || mode === undefined) throw new Error("missing writer fixture arguments")
 const release = Promise.withResolvers<void>()
 process.on("message", (message) => { if (message === "write") release.resolve() })
+process.send?.("trying")
 await withLock(`${path}.lock`, await createLockRecord("credential-test-writer"), async () => {
   process.send?.("locked")
   await release.promise
@@ -17,6 +18,6 @@ await withLock(`${path}.lock`, await createLockRecord("credential-test-writer"),
   } else {
     writeFileSync(path, JSON.stringify({ ...state, token: 2 }))
   }
-})
+}, { waitTimeoutMs: 10_000 })
 process.send?.("written")
 process.disconnect?.()
