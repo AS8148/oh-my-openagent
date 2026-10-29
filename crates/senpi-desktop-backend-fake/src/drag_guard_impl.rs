@@ -7,7 +7,7 @@ use std::cell::Cell;
 
 use senpi_desktop_core::backend::{DeliveryMode, MouseButton, PointerEvent};
 use senpi_desktop_core::drag_guard::{
-    picked_up_refusal, refuse_drag_source, stroke_path, LeftPress, Stroke,
+    picked_up_refusal, refuse_drag_source, stroke_path, LeftPress, StartPoint, Stroke,
 };
 use senpi_desktop_core::error::{CoreResult, DesktopError};
 use senpi_desktop_core::holds::MouseHold;
@@ -60,7 +60,7 @@ impl FakeBackend {
             window,
             start,
         };
-        refuse_drag_source(press, |x, y| self.role_at(x, y))?;
+        refuse_drag_source(press, |x, y| self.start_point(id, x, y))?;
         let picks_up = self.drag_picks_up.iter().any(|picked| picked == id);
         let dragged = Cell::new(0usize);
         let mut recorded = Vec::with_capacity(path.len());
@@ -108,11 +108,24 @@ impl FakeBackend {
             window: self.window(id)?,
             start: (hold.x, hold.y),
         };
-        refuse_drag_source(press, |x, y| self.role_at(x, y))
+        refuse_drag_source(press, |x, y| self.start_point(id, x, y))
     }
 
-    fn role_at(&self, x: f64, y: f64) -> Option<String> {
-        let node = self.ax_tree.element_at(x, y)?;
-        self.ax_tree.props(node).ok().map(|props| props.native_role)
+    /// The scripted element under the point, as the application-wide
+    /// hit-test finds it: one scripted for another window covers the target.
+    fn start_point(&self, window_id: &str, x: f64, y: f64) -> StartPoint {
+        let Some(node) = self.ax_tree.element_at(x, y) else {
+            return StartPoint::Unread;
+        };
+        match self.ax_tree.window_of(node) {
+            Ok(Some(owner)) if owner == window_id => self
+                .ax_tree
+                .props(node)
+                .map_or(StartPoint::Unread, |props| {
+                    StartPoint::Role(props.native_role)
+                }),
+            Ok(Some(_)) => StartPoint::Covered,
+            _ => StartPoint::Unread,
+        }
     }
 }

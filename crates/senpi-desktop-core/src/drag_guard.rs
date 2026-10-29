@@ -41,24 +41,36 @@ pub struct LeftPress<'a> {
 /// nothing was sent, so the host may rerun the gesture in the foreground
 /// where the session already allows it.
 ///
+/// What accessibility says is under a press's start point, read through the
+/// application's own tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartPoint {
+    /// The role of the target window's element there.
+    Role(String),
+    /// Nothing readable there.
+    Unread,
+    /// The element there belongs to another window of the same application,
+    /// which covers the start point: it says nothing about the target window,
+    /// where the press is routed.
+    Covered,
+}
+
 /// # Errors
 /// `BackgroundUnavailable` naming the role and the window.
 pub fn refuse_drag_source(
     press: LeftPress<'_>,
-    role_at: impl FnOnce(f64, f64) -> Option<String>,
+    start_point: impl FnOnce(f64, f64) -> StartPoint,
 ) -> CoreResult<()> {
     let (x, y) = press.start;
-    let role = role_at(x, y);
-    if role
-        .as_deref()
-        .is_some_and(|role| DRAG_TRACKING_ROLES.contains(&role))
-    {
-        return Ok(());
-    }
-    let element = role.map_or_else(
-        || "an element accessibility does not identify".to_string(),
-        |role| format!("an {role}"),
-    );
+    let element = match start_point(x, y) {
+        StartPoint::Role(role) if DRAG_TRACKING_ROLES.contains(&role.as_str()) => return Ok(()),
+        StartPoint::Role(role) => format!("an {role}"),
+        StartPoint::Unread => "an element accessibility does not identify".to_string(),
+        StartPoint::Covered => {
+            "an element of another window of the application, which covers the start point"
+                .to_string()
+        }
+    };
     Err(DesktopError::background_unavailable(format!(
         "the {} on window {} ({}) starts on {element}, where a press can pick up an item for drag and drop, \
          which macOS completes from the user's real pointer and could drop into the user's own window; \

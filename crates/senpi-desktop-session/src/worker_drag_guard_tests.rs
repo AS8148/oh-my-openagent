@@ -90,6 +90,52 @@ fn a_background_drag_from_a_row_is_refused_before_anything_is_sent() {
     assert!(drags(&harness).is_empty());
 }
 
+/// Window `100` of the same application covers window `101`'s start point
+/// with a slider; it comes first in the fake's app-wide hit-test, as the
+/// covering window does on macOS.
+fn covered_by_a_sibling_window() -> Value {
+    let mut scenario = guarded(false);
+    scenario["windows"]
+        .as_array_mut()
+        .expect("windows")
+        .push(json!(
+            {"id": "100", "title": "Preview", "app": "Font Book", "pid": 7, "x": 100, "y": 200,
+             "width": 300, "height": 100, "focused": false, "elevated": null}
+        ));
+    scenario["ax"]["100"] = json!({
+        "role": "window", "native_role": "AXWindow", "title": "Preview",
+        "bounds": {"x": 100, "y": 200, "width": 300, "height": 100},
+        "children": [
+            {"role": "slider", "native_role": "AXSlider", "title": "Zoom",
+             "bounds": {"x": 100, "y": 200, "width": 300, "height": 100}}
+        ]
+    });
+    scenario
+}
+
+#[test]
+fn a_background_drag_whose_start_is_covered_by_a_sibling_windows_slider_is_refused() {
+    let mut harness = harness(&covered_by_a_sibling_window());
+    let frame = harness.capture("101");
+    // The drag is routed to 101, where the start point is the Serif row; the
+    // slider the hit-test finds belongs to 100, so it says nothing about 101.
+    let error = harness
+        .process(drag(&frame, 100.0, None))
+        .expect_err("refused");
+    assert_eq!(error.code, ErrorCode::BackgroundUnavailable);
+    assert!(
+        error.message.contains("another window of the application"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.message.ends_with("nothing was sent"),
+        "{}",
+        error.message
+    );
+    assert!(drags(&harness).is_empty());
+}
+
 #[test]
 fn a_background_drag_from_a_slider_is_delivered() {
     let mut harness = harness(&guarded(false));
