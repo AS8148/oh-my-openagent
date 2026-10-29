@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { recordPayload, verifyRecordSig } from "../crypto/signatures.ts"
+import { describe, expect, mock, test } from "bun:test"
+import { recordPayload, taggedHash, verifyRecordSig } from "../crypto/signatures.ts"
 import { b64urlDecode, b64urlEncode, jcsBytes, sha256B64 } from "../crypto/vendor/sync-format/jcs.ts"
 import { signFramed } from "../crypto/vendor/sync-format/keys.ts"
 import { signedAppend } from "../recovery/keyring-append.ts"
@@ -73,40 +73,51 @@ describe("isolated genesis rejection vectors", () => {
     if (!result.ok) expect(result.reason).toBe("bad_signature")
   })
 
-  test.each(["account", "sealing key", "signing key", "device id", "nonce length", "extra bootstrap", "extra recovery", "non-NFC RP"] as const)(
+  test.each([
+    ["account", "account_mismatch"],
+    ["sealing key", "principal_mismatch"],
+    ["signing key", "principal_mismatch"],
+    ["device id", "principal_mismatch"],
+    ["nonce length", "bad_bootstrap"],
+    ["extra bootstrap", "bad_record"],
+    ["extra recovery", "bad_record"],
+    ["non-NFC RP", "bad_bootstrap"],
+  ] as const)(
     "refuses prepared %s mismatch before device signing",
-    async (mutation) => {
+    async (mutation, reason) => {
       const v = await vector()
       const bootstrap = v.prepared.body.bootstrap
       const first = bootstrap.first_device
       const recovery = bootstrap.recovery_key
-      const prepared = {
-        ...v.prepared,
-        body: {
-          ...v.prepared.body,
-          bootstrap: {
-            ...bootstrap,
-            ...(mutation === "account" ? { account: "another-account" } : {}),
-            ...(mutation === "nonce length" ? { custody_nonce: b64urlEncode(bytes(32, 5)) } : {}),
-            ...(mutation === "extra bootstrap" ? { extra: true } : {}),
-            first_device: {
-              ...first,
-              ...(mutation === "device id" ? { id: b64urlEncode(bytes(16, 99)) } : {}),
-              ...(mutation === "sealing key" ? { sealing_public_key: recovery.sealing_public_key } : {}),
-              ...(mutation === "signing key" ? { signing_public_key: recovery.signing_public_key } : {}),
-            },
-            recovery_key: {
-              ...recovery,
-              ...(mutation === "extra recovery" ? { extra: true } : {}),
-              ...(mutation === "non-NFC RP" ? { rp_id: "e\u0301.test" } : {}),
-            },
-          },
+      const changed = {
+        ...bootstrap,
+        ...(mutation === "account" ? { account: "another-account" } : {}),
+        ...(mutation === "nonce length" ? { custody_nonce: b64urlEncode(bytes(32, 5)) } : {}),
+        ...(mutation === "extra bootstrap" ? { extra: true } : {}),
+        first_device: {
+          ...first,
+          ...(mutation === "device id" ? { id: b64urlEncode(bytes(16, 99)) } : {}),
+          ...(mutation === "sealing key" ? { sealing_public_key: recovery.sealing_public_key } : {}),
+          ...(mutation === "signing key" ? { signing_public_key: recovery.signing_public_key } : {}),
+        },
+        recovery_key: {
+          ...recovery,
+          ...(mutation === "extra recovery" ? { extra: true } : {}),
+          ...(mutation === "non-NFC RP" ? { rp_id: "e\u0301.test" } : {}),
         },
       }
-      let calls = 0
-      const keyring = { ...v.keyring, sign: async () => { calls += 1; throw new Error("must not sign") } }
-      await expect(buildGenesis(ACCOUNT, keyring, prepared)).rejects.toHaveProperty("name", "GenesisBuildError")
-      expect(calls).toBe(0)
+      const custody_root = await taggedHash("omo-sync/v1/custody-root", changed)
+      const countersign = await v.capabilities.countersign({
+        t: "omo-sync/v1/recovery-countersign", account: ACCOUNT, custody_root,
+        predecessor: "", wraps_digest: v.prepared.body.wraps_digest,
+      })
+      const prepared = {
+        ...v.prepared,
+        body: { ...v.prepared.body, bootstrap: changed, custody_root, countersign },
+      }
+      const sign = mock(v.keyring.sign)
+      await expect(buildGenesis(ACCOUNT, { ...v.keyring, sign }, prepared)).rejects.toMatchObject({ reason })
+      expect(sign).toHaveBeenCalledTimes(0)
     },
   )
 })
