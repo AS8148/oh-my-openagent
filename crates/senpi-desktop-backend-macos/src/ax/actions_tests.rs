@@ -293,10 +293,13 @@ fn an_unreadable_action_list_is_its_own_refusal_with_nothing_sent() {
     assert!(error.message.contains("could not be read"), "{}", error.message);
     assert!(!error.message.contains("available actions: ;"), "{}", error.message);
     assert!(gone.requests().is_empty());
-    // An app that does not answer in time is unconfirmed, like its other requests.
+    // An app that does not answer the read in time still sent nothing: a
+    // failed read, never an outcome that may have taken effect.
     let slow = ScriptedElement::replying(AXError::CannotComplete);
     slow.actions_unreadable.set(true);
-    assert_eq!(perform_requested(&slow, "press", || false).unwrap_err().code, ErrorCode::AxUnconfirmed);
+    let error = perform_requested(&slow, "press", || false).unwrap_err();
+    assert_eq!(error.code, ErrorCode::AxFailed);
+    assert!(slow.requests().is_empty());
 }
 
 #[test]
