@@ -24,7 +24,7 @@ const PERCENT_WINDOW = 64
 
 export const isDigit = (c: number): boolean => c >= 48 && c <= 57
 export const isUpper = (c: number): boolean => c >= 65 && c <= 90
-export const isLower = (c: number): boolean => c >= 97 && c <= 122
+const isLower = (c: number): boolean => c >= 97 && c <= 122
 export const isAlnum = (c: number): boolean => isDigit(c) || isUpper(c) || isLower(c)
 export const isBase64Url = (c: number): boolean => isAlnum(c) || c === 95 || c === 45
 const isNameChar = (c: number): boolean => isBase64Url(c) || c === 46
