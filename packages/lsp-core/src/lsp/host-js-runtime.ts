@@ -15,7 +15,7 @@ export interface HostJsRuntime {
 }
 
 function currentHostJsRuntime(): HostJsRuntime {
-	return { bunExecPath: process.versions.bun === undefined ? undefined : process.execPath };
+	return { bunExecPath: process.versions["bun"] === undefined ? undefined : process.execPath };
 }
 
 export function withHostJsRuntime(
