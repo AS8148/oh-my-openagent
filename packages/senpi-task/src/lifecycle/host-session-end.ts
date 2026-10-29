@@ -61,8 +61,10 @@ export function endHostSessionChild(context: LifecycleContext, record: TaskRecor
   return entry.promise
 }
 
-export function inFlightHostSessionEnd(context: LifecycleContext, taskId: string): Promise<HostSessionEnd> | undefined {
-  return flights.get(context.store)?.get(taskId)?.promise
+export function inFlightHostSessionEnd(context: LifecycleContext, record: TaskRecord): Promise<HostSessionEnd> | undefined {
+  if (!isHostSessionRecord(record)) return undefined
+  const entry = flights.get(context.store)?.get(record.task_id)
+  return entry?.owner === ownerOf(record) ? entry.promise : undefined
 }
 
 export function clearHostSessionEnd(context: LifecycleContext, taskId: string): void {

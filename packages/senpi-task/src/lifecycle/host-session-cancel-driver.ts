@@ -23,7 +23,7 @@ async function runDriver(context: LifecycleContext, record: TaskRecord, sink: Ho
   let settleOnExit = true
   try {
     // The caller just ran a pass: start by waiting, joining only a close it left in flight.
-    let end = (await inFlightHostSessionEnd(context, record.task_id)?.catch(() => NOT_STARTED)) ?? NOT_STARTED
+    let end = (await inFlightHostSessionEnd(context, record)?.catch(() => NOT_STARTED)) ?? NOT_STARTED
     for (const backoffMs of context.hostRetry.deferredRetryBackoffMs) {
       if (end.kind === "ended") return await sink.ended()
       if (end.kind === "pending" && (await settledFirst(end.settled, context.hostRetry.wait(backoffMs)))) return await sink.ended()
