@@ -37,6 +37,18 @@ test("#given an approval #when a foreign owner confirms #then its promise is not
   expect(f.counts().approvals).toBe(1)
 })
 
+test("#given a live approval #when its connection retires and a new connection reuses the same ownerId #then it cannot confirm the old approval", async () => {
+  const f = await setup()
+  const first = owner("a")
+  await f.call("approve", first.context, { action: "begin", pendingId: "p" })
+  await f.showApprovalCode()
+  first.retire()
+  const reconnect = owner("a")
+  expect(await f.call("approve", reconnect.context, { action: "confirm", pendingId: "p", code: "012345" })).toMatchObject({ kind: "refused" })
+  expect(await f.call("status", reconnect.context)).toMatchObject({ enable: null, approvals: [] })
+  expect(f.counts().approvals).toBe(1)
+})
+
 test("#given a displayed code #when a different six digit code is submitted #then approval declines once", async () => {
   const f = await setup()
   const a = owner("a")
