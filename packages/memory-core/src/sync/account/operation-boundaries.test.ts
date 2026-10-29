@@ -7,6 +7,7 @@ import { pinTrustAnchor, loadTrustAnchor } from "../crypto/trust-pin.ts"
 import { walk, EMPTY_HEAD } from "../genesis/vector.test-support.ts"
 import { createAccountHttp } from "./http.ts"
 import { createPairingHttp } from "./pairing-http.ts"
+import { enableSync } from "./enable.ts"
 import { ACCOUNT, fixture, operationScope } from "./testing/genesis-enable.test-support.ts"
 
 const cleanup: (() => void | Promise<void>)[] = []
@@ -121,4 +122,48 @@ test("Windows contention retries re-admit the raw rename after suspension", asyn
   release.resolve()
   await expect(pending).rejects.toThrow()
   expect(calls).toBe(1)
+})
+
+test("late bridge completion after cancellation cannot sign or publish genesis", async () => {
+  const f = await setup()
+  const { controller, operation } = operationScope()
+  const entered = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let signs = 0
+  const pending = enableSync({
+    ...f.input, operation,
+    keyring: { ...f.keyring, sign: async (request) => { signs++; return f.keyring.sign(request) } },
+    genesis: {
+      prfSupported: true,
+      createGenesis: async () => { entered.resolve(); await release.promise; return { ok: true, prepared: f.prepared } },
+    },
+  })
+  await entered.promise
+  controller.abort()
+  release.resolve()
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+  expect(signs).toBe(0)
+  expect(f.entries).toHaveLength(0)
+  expect(f.server.switches.every((line) => !line.includes("false"))).toBe(true)
+})
+
+test("published intent finishes durability after cancellation and resumes without another ceremony", async () => {
+  const f = await setup()
+  const { controller, operation } = operationScope()
+  const original = fs.rename
+  const renamed = spyOn(fs, "rename").mockImplementation(async (from, to) => {
+    await original(from, to)
+    if (String(to).includes("/genesis-intent/")) controller.abort()
+  })
+  cleanup.push(() => renamed.mockRestore())
+  const synced: string[] = []
+  const sync = journal.syncJournalDirectory
+  const syncSpy = spyOn(journal, "syncJournalDirectory").mockImplementation(async (path) => { synced.push(path); await sync(path) })
+  cleanup.push(() => syncSpy.mockRestore())
+  await expect(enableSync({ ...f.input, operation })).rejects.toMatchObject({ name: "AbortError" })
+  expect(synced.some((path) => path.endsWith("/genesis-intent"))).toBe(true)
+  expect(f.entries).toHaveLength(0)
+  renamed.mockRestore()
+  expect(await enableSync(f.input)).toEqual({ kind: "joined", created: true })
+  expect(f.ceremonies()).toBe(1)
 })

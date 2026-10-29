@@ -142,10 +142,11 @@ export function startChainWireServer(account: string, chain: SyncEntry[], option
       }
       if (req.method === "PUT" && path === "/v1/sync/keys") {
         const request = (await req.json()) as KeyringAppendRequest
+        const digest = await sha256B64(jcsBytes(request.record))
         if (request.base_seq !== chain.length) return refusal(409, "stale_base")
         const entry: KeyringEntry = {
           seq: chain.length + 1, base_seq: request.base_seq, kind: "keyring", account, epoch: request.record.epoch, author,
-          body: request.record, digest: await sha256B64(jcsBytes(request.record)), link: request.link,
+          body: request.record, digest, link: request.link,
           keyring_link: request.keyring_link, record_sig: request.record_sig, wraps: request.wraps,
         }
         chain.push(entry)
@@ -168,7 +169,7 @@ export function startChainWireServer(account: string, chain: SyncEntry[], option
     get onWrite() { return onWrite },
     set onWrite(fn) { onWrite = fn },
     enabled: (deviceId) => accountConsent && deviceConsent.get(deviceId) === true,
-    tokenFor(author, serviceDeviceId = author.id) {
+    tokenFor(author, serviceDeviceId = author.kind === "device" ? author.id : author.credential_id) {
       const token = randomBytes(12).toString("base64url")
       authors.set(token, author)
       devices.set(token, serviceDeviceId)
