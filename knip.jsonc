@@ -2793,6 +2793,10 @@
         "src/{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
+        "skills/frontend/scripts/detect/cli.ts",
+        "scripts/detect-parity.ts",
+        "scripts/detect-parity-oracle.ts",
+        "scripts/detect-source-parity.ts",
       ],
       "ignoreFiles": [
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
@@ -2919,6 +2923,7 @@
         "src/{index,cli,main}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.{test,spec}.{js,cjs,mjs,jsx,ts,cts,mts,tsx}",
         "**/*.test-d.ts",
+        "scripts/qa/fused-equivalence-e2e.mjs",
         "src/components/claim-receipt/runtime.ts",
         "src/components/computer-use/runtime.ts",
         "src/components/feedback/runtime.ts",
