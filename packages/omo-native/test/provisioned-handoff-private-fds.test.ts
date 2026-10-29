@@ -42,4 +42,35 @@ describe.skipIf(process.platform === "win32")("provisioned runtime handoff with 
       rmSync(root, { recursive: true, force: true })
     }
   }, 60_000)
+
+  test("closes a named socket it cannot forward, so its peer sees EOF while the runtime still runs", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omo-handoff-discard-"))
+    try {
+      // given: a runtime that stays up until fd 5's peer goes away, and a named socket at 24 (above 5..15)
+      const runtime = join(root, "omo")
+      writeFileSync(runtime, `#!/bin/sh\ncat <&5 >/dev/null\n`, { mode: 0o755 })
+      const probe = join(root, "probe.ts")
+      writeFileSync(probe, `import { reexecProvisionedRuntime } from ${JSON.stringify(HANDOFF)}\nawait reexecProvisionedRuntime(${JSON.stringify(runtime)}, { argv: [] })\n`)
+      const stdio: ("ignore" | "pipe")[] = ["ignore", "ignore", "pipe"]
+      for (let fd = 3; fd <= 24; fd++) stdio.push(fd === 5 || fd === 24 ? "pipe" : "ignore")
+      const child = spawn(process.execPath, [probe], {
+        env: { ...process.env, SENPI_PRIVATE_FDS: '{"memory-sync":5,"high":24}' },
+        stdio,
+      })
+      const slots: readonly unknown[] = child.stdio
+      const [channel, high] = [slots[5], slots[24]]
+      if (!(channel instanceof Socket) || !(high instanceof Socket)) throw new Error("no private sockets")
+      high.resume()
+      const exited = once(child, "exit", { signal: AbortSignal.timeout(20_000) })
+      // when: the handoff is running
+      await once(high, "end", { signal: AbortSignal.timeout(20_000) })
+      // then: fd 24 reached EOF while the parent still waits on the runtime; ending fd 5 lets it finish
+      expect(child.exitCode).toBeNull()
+      channel.end()
+      const [code] = await exited
+      expect(code).toBe(0)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 60_000)
 })
