@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { readFile, stat } from "node:fs/promises"
 import { getPidLiveness, getProcessStartIdentity, startIdentitiesConflict } from "@oh-my-opencode/memory-core/process-identity"
 
-import { isWorkerLockReleased, lockOwnerInstanceId } from "./lock-worker-lifetime"
+import { isWorkerLockReleased, lockOwnerInstanceId, registerLockWorker } from "./lock-worker-lifetime"
 export { lockOwnerInstanceId, markLockRecordHeld, markLockRecordReleased, forgetLockRecord } from "./lock-worker-lifetime"
 
 export type ObservedLockRecord = {
@@ -18,6 +18,7 @@ type LockOwner = {
 }
 
 export async function buildLockRecord(ownerTag: string): Promise<string> {
+  await registerLockWorker()
   const processStart = await getProcessStartIdentity(process.pid)
   return `${ownerTag} ${randomUUID()}\n${process.pid}\n${Date.now()}\n${lockOwnerInstanceId}\n${processStart ?? "unavailable"}\n`
 }
