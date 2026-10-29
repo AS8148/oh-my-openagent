@@ -3,6 +3,8 @@ export interface SyncOperationAuthority {
   readonly signal: AbortSignal
   /** Immediately invoke the effect, or throw if its captured owner has retired. */
   readonly admit: <T>(dispatch: () => T) => T
+  /** Hold the credential-writer lock through a generation check and synchronous raw dispatch. */
+  readonly boundary?: <T>(dispatch: () => T) => Promise<T>
 }
 
 export interface SyncOperationOptions {

@@ -2,6 +2,8 @@ import type { DeviceKeyring } from "../keyring-port"
 import type { Transport } from "../engine/ports"
 import type { AccountHttp } from "./http"
 import type { PairingHttp } from "./pairing-http"
+import type { SyncOperationAuthority } from "../operation-authority"
+export type { SyncOperationAuthority } from "../operation-authority"
 
 /** Public selected-account identity. Credentials and private key material have no fields here. */
 export interface DesktopSyncDescriptor {
@@ -28,13 +30,6 @@ export interface SyncDevice {
   readonly syncing: boolean
   readonly revokedAt: string | null
   readonly syncPrincipal: string | null
-}
-
-export interface SyncOperationAuthority {
-  readonly signal: AbortSignal
-  admit<T>(effect: () => T): T
-  /** Re-read identity while holding the credential-writer lock through synchronous dispatch. */
-  boundary?<T>(dispatch: () => T): Promise<T>
 }
 
 export interface DesktopSyncOperation {
