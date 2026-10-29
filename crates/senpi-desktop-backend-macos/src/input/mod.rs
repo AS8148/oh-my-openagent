@@ -272,7 +272,7 @@ impl MacInput {
                     check_stop()?;
                     crate::focus::require_front_window(pid, wid)
                 };
-                let mut send = || keys::post_bare_keys(&self.source, &mut self.held, &transitions, gap, &mut before_press, delivered);
+                let mut send = || keys::post_bare_keys(&mut self.held, &transitions, gap, &mut before_press, delivered);
                 match element {
                     Some(element) => element::element_keys(pid, element, send),
                     None => send().map(|()| ElementDelivery::Delivered(AxInputMethod::Keys)),

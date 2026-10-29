@@ -245,12 +245,15 @@ pub(super) fn type_layout_keys(
     result.and(release)
 }
 
-/// Posts bare key `transitions` `(code, down)` at the HID tap with no flag or
-/// text override, so CoreGraphics derives modifier state from the
-/// transitions exactly as for a hardware keyboard. `before_press` runs before
-/// every press; a release always goes out so held keys do not leak.
+/// Posts bare key `transitions` `(code, down)` at the HID tap from a null
+/// event source, with no flag or text override, so CoreGraphics derives the
+/// modifier state from the transitions exactly as for a hardware keyboard.
+/// `before_press` runs before every press; once a press is refused or fails
+/// nothing more is pressed, and every key this call pressed and did not yet
+/// release is released in reverse order, so no key leaks to the front app
+/// and no release goes out for a key that was never pressed. The first error
+/// wins.
 pub(super) fn post_bare_keys(
-    source: &CGEventSource,
     held: &mut Held,
     transitions: &[(u16, bool)],
     gap: Duration,
@@ -258,31 +261,46 @@ pub(super) fn post_bare_keys(
     delivered: &mut dyn FnMut(),
 ) -> CoreResult<()> {
     let is_modifier = |code: u16| code == super::remote::SHIFT_CODE || code == super::remote::OPTION_CODE;
-    let mut result = Ok(());
-    for &(code, down) in transitions {
-        if down {
-            if result.is_err() {
-                // After a failed press nothing more is pressed; releases still go out.
-                continue;
+    let mut pressed: Vec<u16> = Vec::new();
+    let result = (|| {
+        for &(code, down) in transitions {
+            if down {
+                before_press()?;
+                check_press()?;
+                held.key_down(HeldKey { route: KeyRoute::Global, code, text: None });
+                pressed.push(code);
+                post_bare(code, true)?;
+            } else {
+                post_bare(code, false)?;
+                held.key_up(KeyRoute::Global, code);
+                pressed.retain(|&held_code| held_code != code);
+                if !is_modifier(code) {
+                    delivered();
+                }
             }
-            if let Err(error) = before_press() {
-                result = Err(error);
-                continue;
-            }
-            check_press()?;
-            held.key_down(HeldKey { route: KeyRoute::Global, code, text: None });
+            thread::sleep(gap);
         }
-        let event = keyboard_event(source, code, down)?;
-        event.post(CGEventTapLocation::HID);
-        if !down {
+        Ok(())
+    })();
+    let mut release = Ok(());
+    for code in pressed.into_iter().rev() {
+        let posted = post_bare(code, false);
+        if posted.is_ok() {
             held.key_up(KeyRoute::Global, code);
-            if !is_modifier(code) && result.is_ok() {
-                delivered();
-            }
+        } else if release.is_ok() {
+            release = posted;
         }
-        thread::sleep(gap);
     }
-    result
+    result.and(release)
+}
+
+/// One bare key transition at the HID tap: a null source and no flag or
+/// Unicode overrides (`CGEventCreateKeyboardEvent(NULL, ...)`), so the
+/// event carries no engine tag and no overridden flags.
+fn post_bare(code: u16, down: bool) -> CoreResult<()> {
+    let event = super::cgevent::bare_keyboard_event(code, down)?;
+    event.post(CGEventTapLocation::HID);
+    Ok(())
 }
 
 /// Types `text` one character at a time through `route`.

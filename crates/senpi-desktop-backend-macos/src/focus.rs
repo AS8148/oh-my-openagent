@@ -48,7 +48,7 @@ pub(crate) fn require_front_window(pid: libc::pid_t, wid: u32) -> CoreResult<()>
         return Ok(());
     }
     Err(DesktopError::input_failed(format!(
-        "window {wid} is no longer in front; keys sent before this may already have landed, and no further          input was sent; read the window again before retrying"
+        "window {wid} is no longer in front; keys sent before this may already have landed, and no further input was sent; read the window again before retrying"
     )))
 }
 
