@@ -15,7 +15,7 @@ export type LineMatch = {
 	readonly context: SourceContext
 }
 
-export const blank = (text: string): string => text.replace(/[^\n\r]/g, " ")
+const blank = (text: string): string => text.replace(/[^\n\r]/g, " ")
 
 export function stripComments(text: string, script: boolean): string {
 	let out = ""

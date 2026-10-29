@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { crampedPadding } from "./cramped-padding"
-import { border, lines, marked } from "./support/test-cases"
+import { border, lines, marked } from "./support/layout-cases"
 
 const card = {
 	id: "card", text: "Substantial text that needs space beside its container boundary.",

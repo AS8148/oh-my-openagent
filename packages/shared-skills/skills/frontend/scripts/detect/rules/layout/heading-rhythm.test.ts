@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { NodeSpec } from "../../testing/build-snapshot"
 import { headingRhythm } from "./heading-rhythm"
-import { lines, marked } from "./support/test-cases"
+import { lines, marked } from "./support/layout-cases"
 
 const group = (id: string, y: number, above = 0, below = 40): NodeSpec => ({
 	style: { "border-top-width": "1px", "border-top-style": "solid", "border-top-color": "#333" },

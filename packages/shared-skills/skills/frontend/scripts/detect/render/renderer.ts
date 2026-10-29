@@ -24,7 +24,7 @@ export class RenderError extends Error {
 	}
 }
 
-export const STRESS_TOKEN = "Unbrokencontentstresstoken".repeat(12)
+const STRESS_TOKEN = "Unbrokencontentstresstoken".repeat(12)
 
 export const CONTENT_STRESS_SCRIPT = `(() => {
 	const token = ${JSON.stringify(STRESS_TOKEN)};

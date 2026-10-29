@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { NodeSpec } from "../../testing/build-snapshot"
 import { bodyTextViewportEdge } from "./body-text-viewport-edge"
-import { lines, marked } from "./support/test-cases"
+import { lines, marked } from "./support/layout-cases"
 
 const prose = "This paragraph contains substantial reading text that needs a gutter at either side of the page."
 

@@ -1,5 +1,6 @@
 import type { Finding, Severity } from "./types"
 
+/** @public */
 export function summarize(findings: readonly Finding[]): Readonly<Record<Severity, number>> {
 	const counts: Record<Severity, number> = { error: 0, warning: 0, advisory: 0 }
 	for (const f of findings) counts[f.severity]++

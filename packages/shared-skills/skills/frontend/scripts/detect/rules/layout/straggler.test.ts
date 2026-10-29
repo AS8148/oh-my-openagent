@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { straggler } from "./straggler"
-import { lines, marked } from "./support/test-cases"
+import { lines, marked } from "./support/layout-cases"
 
 const text = "Line breaks decide how a block of text sits on the page, and one word alone on the last line leaves a hole under the text."
 const paragraph = { id: "copy", tag: "p", text, rect: { x: 24, y: 24, width: 390, height: 96 }, lineRects: lines([390, 390, 350, 50]) }

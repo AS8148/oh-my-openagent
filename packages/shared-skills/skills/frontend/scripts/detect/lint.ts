@@ -12,7 +12,7 @@ export type LintOptions = {
 	readonly file?: string
 }
 
-/** Severity after the project's override, or null when the rule is switched off. */
+/** Severity after the project's override, or null when the rule is switched off. @public */
 export function effectiveSeverity(meta: RuleMeta, config: DetectConfig | undefined): Severity | null {
 	const setting = config?.rules?.[meta.id]
 	if (setting === "off") return null

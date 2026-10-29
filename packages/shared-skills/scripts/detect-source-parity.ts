@@ -17,7 +17,7 @@ function goldenRows(value: unknown): readonly GoldenFinding[] {
 	})
 }
 
-export async function fixtureParity(upstream: string): Promise<readonly object[]> {
+async function fixtureParity(upstream: string): Promise<readonly object[]> {
 	const root = `${upstream}/tests/fixtures/antipatterns`
 	const paths = [...new Bun.Glob("**/*").scanSync(root)].filter((p) => /\.(css|scss|sass|less|tsx|jsx|vue|svelte|astro|js|ts|mjs|cjs)$/.test(p)).sort()
 	const files = await Promise.all(paths.map(async (path) => ({ path, text: await Bun.file(`${root}/${path}`).text() })))

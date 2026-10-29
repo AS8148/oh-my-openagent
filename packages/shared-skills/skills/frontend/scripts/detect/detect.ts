@@ -7,12 +7,13 @@ import type { RenderTarget, Renderer } from "./render/renderer"
 import { createWebViewRenderer } from "./render/webview"
 import type { DetectConfig, Finding, Viewport } from "./types"
 
+/** @public */
 export const DEFAULT_VIEWPORTS: readonly Viewport[] = [
 	{ width: 1440, height: 900 },
 	{ width: 390, height: 844 },
 ]
 
-/** StyleGallery's reflow matrix: every width, with an unbroken stress token added at the narrowest one. */
+/** StyleGallery's reflow matrix: every width, with an unbroken stress token added at the narrowest one. @public */
 export const REFLOW_VIEWPORTS: readonly Viewport[] = [320, 375, 768, 1024, 1440].map((width) => ({ width, height: 800 }))
 
 export type DetectPageOptions = LintOptions & {

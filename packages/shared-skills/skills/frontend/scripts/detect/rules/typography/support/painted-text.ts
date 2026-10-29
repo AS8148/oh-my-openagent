@@ -18,7 +18,7 @@ const parkedParts = new Set(("clone clones cloned copy duplicate dup carousel em
 	"marquee ticker menu submenu dropdown popup popover modal drawer dialog tooltip toast offcanvas overlay nav navbar navigation panel tab " +
 	"tabpanel accordion collapse collapsible intro splash loader preloader loading banner cookie cookies consent sidebar sidenav toc").split(" "))
 
-export function declaredMockup(s: PageSnapshot, e: ElementSnapshot): boolean {
+function declaredMockup(s: PageSnapshot, e: ElementSnapshot): boolean {
 	return [e, ...ancestors(s, e)].some(root => {
 		if (!hidden(root) || root.rect.width < 120 || root.rect.height < 80 || structuralTags.includes(root.tag) ||
 			["fixed", "sticky"].includes(styleOf(root, "position")) || root.attributes["aria-modal"] !== undefined ||

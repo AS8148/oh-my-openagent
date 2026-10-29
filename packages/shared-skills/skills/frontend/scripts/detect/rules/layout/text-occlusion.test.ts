@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { NodeSpec } from "../../testing/build-snapshot"
 import { textOcclusion } from "./text-occlusion"
-import { lines, marked } from "./support/test-cases"
+import { lines, marked } from "./support/layout-cases"
 
 const text: NodeSpec = { id: "text", tag: "p", text: "Root cause identified in four minutes", style: { position: "absolute" }, rect: { x: 40, y: 40, width: 300, height: 24 }, lineRects: lines([300], 40, 40) }
 const cover: NodeSpec = { id: "cover", style: { position: "absolute", "z-index": "5", "background-color": "#222" }, rect: { x: 40, y: 40, width: 240, height: 60 } }

@@ -72,17 +72,7 @@ export function effectiveBackground(snap: PageSnapshot, el: ElementSnapshot): Rg
 	return layers.reduceRight<Rgba>((under, top) => blend(top, under), WHITE)
 }
 
-/** True when the element or an ancestor paints a background-image (gradient or url) that the color math cannot see. */
-export function hasImageBackground(snap: PageSnapshot, el: ElementSnapshot): boolean {
-	for (const e of [el, ...ancestors(snap, el)]) {
-		if (styleOf(e, "background-image") !== "none" && styleOf(e, "background-image") !== "") return true
-		const c = parseColor(styleOf(e, "background-color"))
-		if (c && c.a >= 1) return false
-	}
-	return false
-}
-
-export const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const
+const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const
 export const isHeading = (el: ElementSnapshot): boolean => HEADING_TAGS.some((tag) => tag === el.tag)
 export const headingLevel = (el: ElementSnapshot): number | null => (isHeading(el) ? Number(el.tag.slice(1)) : null)
 
@@ -90,8 +80,5 @@ export const textElements = (snap: PageSnapshot): readonly ElementSnapshot[] =>
 	snap.elements.filter((el) => el.ownText !== "" && isRendered(snap, el))
 
 export const fontSizePx = (el: ElementSnapshot): number => px(styleOf(el, "font-size")) ?? 16
-
-export const firstFamily = (el: ElementSnapshot): string =>
-	(styleOf(el, "font-family").split(",")[0] ?? "").trim().replace(/^["']|["']$/g, "").toLowerCase()
 
 export const shortSnippet = (el: ElementSnapshot): string => (el.text === "" ? `<${el.tag}>` : `<${el.tag}> ${el.text.slice(0, 80)}`)

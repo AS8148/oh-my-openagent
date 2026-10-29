@@ -2,7 +2,7 @@ import { ancestors, childrenOf, descendants, fontSizePx, isHeading, parentOf, st
 import { parseColor } from "../../../core/color"
 import type { ElementSnapshot, PageSnapshot } from "../../../types"
 import { chroma, context, length, radii, visible } from "./appearance"
-export function previous(s: PageSnapshot, e: ElementSnapshot): ElementSnapshot | null {
+function previous(s: PageSnapshot, e: ElementSnapshot): ElementSnapshot | null {
 	const p = parentOf(s, e)
 	if (!p) return null
 	const siblings = childrenOf(s, p),

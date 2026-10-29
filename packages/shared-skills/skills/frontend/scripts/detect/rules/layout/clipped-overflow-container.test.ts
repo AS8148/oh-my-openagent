@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { NodeSpec } from "../../testing/build-snapshot"
 import { clippedOverflowContainer } from "./clipped-overflow-container"
-import { marked } from "./support/test-cases"
+import { marked } from "./support/layout-cases"
 
 const popup: NodeSpec = { id: "popup", attributes: { role: "menu" }, style: { position: "absolute" }, rect: { x: 30, y: 160, width: 200, height: 80 }, text: "Menu contents" }
 const host = (child: NodeSpec, style = "hidden"): NodeSpec => ({

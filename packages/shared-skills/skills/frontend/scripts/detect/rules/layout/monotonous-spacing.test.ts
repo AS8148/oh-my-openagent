@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { monotonousSpacing } from "./monotonous-spacing"
-import { marked } from "./support/test-cases"
+import { marked } from "./support/layout-cases"
 
 test("#given ten repeated utility gaps and varied controls #then only the repeated scale reports", () => {
 	expect(marked(monotonousSpacing, Array.from({ length: 10 }, () => ({ attributes: { class: "p-4" } })))).toEqual(["page"])

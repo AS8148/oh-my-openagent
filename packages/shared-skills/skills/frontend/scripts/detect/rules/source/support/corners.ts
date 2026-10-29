@@ -33,7 +33,7 @@ export function applyRadii(base: Corners, body: string): Corners {
 	return corners
 }
 
-export function utilityCorners(text: string): Corners {
+function utilityCorners(text: string): Corners {
 	const entries = [...text.matchAll(/(?:^|[\s"'`{}])((?:[\w-]+:)*)(rounded(?:-(tl|tr|br|bl|ss|se|ee|es|t|r|b|l|s|e))?(?:-([a-z0-9-]+|\[[^\]]*\]|\([^)]*\)))?)(?=$|[\s"'`{}])/g)]
 	let corners = zero()
 	const scale: Readonly<Record<string, number>> = { none: 0, xs: 2, sm: 4, "": 4, md: 6, lg: 8, xl: 12, "2xl": 16, "3xl": 24, "4xl": 32, full: 9999 }

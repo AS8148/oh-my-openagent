@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { NodeSpec } from "../../testing/build-snapshot"
 import { firstViewportColumnOverflow } from "./first-viewport-column-overflow"
-import { marked } from "./support/test-cases"
+import { marked } from "./support/layout-cases"
 
 const opening = (short: Partial<NodeSpec> = {}, tall: Partial<NodeSpec> = {}): NodeSpec => ({
 	id: "opening", style: { display: "grid" }, rect: { x: 20, y: 20, width: 1200, height: 1600 }, children: [

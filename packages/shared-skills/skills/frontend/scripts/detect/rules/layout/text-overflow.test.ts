@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { NodeSpec } from "../../testing/build-snapshot"
 import { textOverflow } from "./text-overflow"
-import { lines, marked } from "./support/test-cases"
+import { lines, marked } from "./support/layout-cases"
 
 const spill: NodeSpec = { id: "spill", tag: "p", text: "A long unbroken line of text spills outside this box.", rect: { x: 40, y: 40, width: 120, height: 40 }, scroll: { clientWidth: 120, scrollWidth: 300 }, lineRects: lines([300], 40, 40) }
 const clip = (node: NodeSpec): NodeSpec => ({ style: { "overflow-x": "hidden" }, rect: { x: 20, y: 20, width: 200, height: 200 }, children: [node] })

@@ -59,7 +59,7 @@ export function borderAccent(value: string): boolean {
 	if (name === "hwb") return 1 - Math.min(100, n(1, 100) + n(2, 100)) / 100 >= 0.1
 	return n(1, 100) >= 10
 }
-export const radius = (el: ElementSnapshot, corner: string): number => {
+const radius = (el: ElementSnapshot, corner: string): number => {
 	const parts = styleOf(el, "border-" + corner + "-radius").split(/\s+/)
 	const values = parts.map((v) => (v.endsWith("%") ? (Number.parseFloat(v) * Math.min(el.rect.width, el.rect.height)) / 100 : length(v)))
 	return Math.min(...values)

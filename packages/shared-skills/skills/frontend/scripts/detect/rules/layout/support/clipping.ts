@@ -17,7 +17,7 @@ export function trackCuts(s: PageSnapshot, el: ElementSnapshot, text: Rect): boo
 	})
 }
 
-export const viewportTrack = (el: ElementSnapshot): boolean =>
+const viewportTrack = (el: ElementSnapshot): boolean =>
 	/(?:^|[\s_-])(?:carousel|comparison|compare|fisheye|flickity|marquee|owl|preview|reel|rolling|scroller|slick|slider|slideshow|splide|split|swiper|tempwrap|ticker|viewport)(?:$|[\s_-])/.test(
 		`${el.attributes["class"] ?? ""} ${el.attributes["id"] ?? ""}`.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase()) ||
 	/\b(?:carousel|slider)\b/i.test(el.attributes["aria-roledescription"] ?? "") ||
@@ -26,7 +26,7 @@ export const viewportTrack = (el: ElementSnapshot): boolean =>
 export const shell = (s: PageSnapshot, el: ElementSnapshot): boolean =>
 	el.tag === "body" || el.rect.x <= 1 && el.rect.y <= 1 && el.rect.width >= s.viewport.width * 0.98 && el.rect.height >= s.document.scrollHeight * 0.98
 
-export function clippedAxes(el: ElementSnapshot): readonly [boolean, boolean] | null {
+function clippedAxes(el: ElementSnapshot): readonly [boolean, boolean] | null {
 	if (["contents", "none"].includes(styleOf(el, "display")) || el.rect.width <= 0 || el.rect.height <= 0 ||
 		scrollsX(el) || /^(auto|scroll)$/.test(styleOf(el, "overflow-y"))) return null
 	const x = /^(hidden|clip)$/.test(styleOf(el, "overflow-x"))
@@ -34,7 +34,7 @@ export function clippedAxes(el: ElementSnapshot): readonly [boolean, boolean] | 
 	return x || y ? [x, y] : null
 }
 
-export function traps(s: PageSnapshot, clip: ElementSnapshot, el: ElementSnapshot): boolean {
+function traps(s: PageSnapshot, clip: ElementSnapshot, el: ElementSnapshot): boolean {
 	if (el.modal) return false
 	const axes = clippedAxes(clip)
 	if (!axes) return false
@@ -51,7 +51,7 @@ export function traps(s: PageSnapshot, clip: ElementSnapshot, el: ElementSnapsho
 		axes[1] && (el.rect.y < clip.rect.y - 2 || bottom(el.rect) > bottom(clip.rect) + 2)
 }
 
-export const popover = (el: ElementSnapshot): boolean =>
+const popover = (el: ElementSnapshot): boolean =>
 	hasRole(el, ["menu", "menubar", "listbox", "tooltip", "dialog"]) ||
 	el.tag === "dialog" && el.attributes["open"] !== undefined || el.attributes["popover"] !== undefined
 

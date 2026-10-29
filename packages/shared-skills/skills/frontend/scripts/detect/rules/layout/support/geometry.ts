@@ -29,7 +29,7 @@ export const borders = (el: ElementSnapshot): readonly boolean[] =>
 		length(el, `border-${side}-width`) >= 0.5 &&
 		!/^(none|hidden)$/.test(styleOf(el, `border-${side}-style`)) &&
 		alpha(el, `border-${side}-color`) >= 0.05)
-export const screenReaderOnly = (el: ElementSnapshot): boolean =>
+const screenReaderOnly = (el: ElementSnapshot): boolean =>
 	styleOf(el, "clip-path") === "inset(50%)" ||
 	(el.rect.width <= 1 && el.rect.height <= 1 && (clipsX(el) || clipsY(el)))
 

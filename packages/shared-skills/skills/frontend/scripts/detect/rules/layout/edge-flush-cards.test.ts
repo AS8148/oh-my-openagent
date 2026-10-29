@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { NodeSpec } from "../../testing/build-snapshot"
 import { edgeFlushCards } from "./edge-flush-cards"
-import { marked } from "./support/test-cases"
+import { marked } from "./support/layout-cases"
 
 const row = (end = 604, extra: Partial<NodeSpec> = {}): NodeSpec => ({
 	id: "row", style: { "overflow-x": "auto", "background-color": "#ddd" }, rect: { x: 24, y: 24, width: 600, height: 160 },

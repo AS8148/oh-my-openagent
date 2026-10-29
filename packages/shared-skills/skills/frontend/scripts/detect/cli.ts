@@ -4,12 +4,7 @@
 // Exit 0 no error or warning findings, 1 findings that fail the gate, 2 usage or render failure.
 import { readFileSync } from "node:fs"
 import { collectFiles } from "../perfection/collect-files"
-import { parseConfig } from "./config"
-import { detectFiles, detectPage } from "./detect"
-import { hasFailures, sortFindings } from "./lint"
-import { RenderError } from "./render/renderer"
-import { formatFindingsText } from "./report"
-import type { DetectConfig, Finding } from "./types"
+import { type DetectConfig, detectFiles, detectPage, type Finding, formatFindingsText, hasFailures, parseConfig, RenderError, sortFindings } from "./index"
 
 type Args = { readonly json: boolean; readonly reflow: boolean; readonly config: DetectConfig; readonly targets: readonly string[] }
 

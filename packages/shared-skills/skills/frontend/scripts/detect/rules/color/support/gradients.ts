@@ -47,7 +47,7 @@ export const opacity = (el: ElementSnapshot): number => {
 export const effectiveOpacity = (snapshot: PageSnapshot, el: ElementSnapshot): number =>
 	[el, ...ancestors(snapshot, el)].reduce((v, node) => v * opacity(node), 1)
 
-export function meanGradient(value: string): Rgba | null {
+function meanGradient(value: string): Rgba | null {
 	const stops = gradientStops(value)
 	const total = stops.reduce((n, s) => n + s.color.a, 0)
 	if (stops.length === 0) return null

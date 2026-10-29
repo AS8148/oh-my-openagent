@@ -20,7 +20,7 @@ export function textRect(el: ElementSnapshot): Rect {
 
 const zIndex = (el: ElementSnapshot): number => Number.parseFloat(styleOf(el, "z-index")) || 0
 
-export function coveredBySibling(snapshot: PageSnapshot, el: ElementSnapshot): boolean {
+function coveredBySibling(snapshot: PageSnapshot, el: ElementSnapshot): boolean {
 	const rect = textRect(el)
 	for (const node of [el, ...ancestors(snapshot, el)]) {
 		const parent = node.parent === null ? undefined : snapshot.elements[node.parent]

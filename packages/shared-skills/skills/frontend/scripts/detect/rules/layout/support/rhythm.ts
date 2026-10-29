@@ -20,7 +20,7 @@ const spacer = (s: PageSnapshot, el: ElementSnapshot): boolean =>
 	![el, ...descendants(s, el)].some((n) =>
 		/^(img|video|canvas|iframe|svg|input|button)$/.test(n.tag) || n !== el && separates(s, n))
 
-export const flow = (s: PageSnapshot, el: ElementSnapshot): boolean =>
+const flow = (s: PageSnapshot, el: ElementSnapshot): boolean =>
 	painted(s, el) && !outOfFlow(el) && styleOf(el, "position") !== "sticky" &&
 	Number.parseFloat(styleOf(el, "opacity")) > 0.05 && !["inline", "none"].includes(styleOf(el, "display"))
 

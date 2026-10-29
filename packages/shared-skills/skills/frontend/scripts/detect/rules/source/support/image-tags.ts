@@ -1,4 +1,4 @@
-export function closingBrace(text: string, start: number): number {
+function closingBrace(text: string, start: number): number {
 	let depth = 0
 	let quote = ""
 	for (let i = start; i < text.length; i++) {

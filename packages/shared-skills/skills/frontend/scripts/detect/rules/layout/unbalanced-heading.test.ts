@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { unbalancedHeading } from "./unbalanced-heading"
-import { lines, marked } from "./support/test-cases"
+import { lines, marked } from "./support/layout-cases"
 
 const heading = { id: "heading", tag: "h2", text: "Design that holds up under real content and real people", rect: { x: 24, y: 24, width: 500, height: 60 }, lineRects: lines([500, 80]) }
 

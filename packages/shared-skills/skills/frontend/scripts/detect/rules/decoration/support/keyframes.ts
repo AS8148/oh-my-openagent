@@ -132,11 +132,3 @@ export function dotPulse(frames: readonly Frame[]): boolean {
 export const toggles = (frames: readonly Frame[]): boolean =>
 	frames.some((f) => Number(f["opacity"] ?? 1) <= 0.15 || f["visibility"] === "hidden") &&
 	frames.every((f) => Object.keys(f).every((p) => ["opacity", "visibility", "animation-timing-function"].includes(p)))
-export const horizontalLoop = (frames: readonly Frame[]): boolean =>
-	frames.some((f) =>
-		Object.entries(f).some(
-			([p, v]) =>
-				(p === "transform" && /translate(?:X|3d)?\(/i.test(v) && /(?:[1-9][\d.]*%|[4-9]\d*px)/.test(v)) ||
-				(["left", "margin-left"].includes(p) && v !== "0" && v !== "0px"),
-		),
-	)

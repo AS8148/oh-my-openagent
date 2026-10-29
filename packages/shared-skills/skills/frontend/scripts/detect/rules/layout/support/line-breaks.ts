@@ -2,7 +2,7 @@ import { descendants, fontSizePx, styleOf } from "../../../core/page"
 import type { ElementSnapshot, PageSnapshot, Rect } from "../../../types"
 import { bottom, chain, length, painted, right, textLines } from "./geometry"
 
-export function authoredBreak(s: PageSnapshot, el: ElementSnapshot): boolean {
+function authoredBreak(s: PageSnapshot, el: ElementSnapshot): boolean {
 	if (/^(pre|pre-wrap|pre-line|break-spaces)$/.test(styleOf(el, "white-space"))) return true
 	return [...descendants(s, el)].some((n) => n.tag === "br" || !["inline", "contents", "none"].includes(styleOf(n, "display")))
 }

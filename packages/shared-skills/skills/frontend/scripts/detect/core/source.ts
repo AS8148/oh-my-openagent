@@ -21,18 +21,6 @@ export function lineAt(text: string, offset: number): string {
 	return text.slice(start, end === -1 ? text.length : end).trim().slice(0, 160)
 }
 
-/** Every match of `pattern` (must be global) as a hit at its start offset. */
-export function hitsFor(text: string, pattern: RegExp, message: (m: RegExpMatchArray) => string | null): readonly SourceHit[] {
-	const hits: SourceHit[] = []
-	for (const m of text.matchAll(pattern)) {
-		const msg = message(m)
-		if (msg === null || m.index === undefined) continue
-		const { line, column } = positionAt(text, m.index)
-		hits.push({ line, column, message: msg, snippet: lineAt(text, m.index) })
-	}
-	return hits
-}
-
 /** CSS declaration blocks of a stylesheet-like text: selector plus raw body, with the body's start offset. */
 export function cssBlocks(text: string): readonly { readonly selector: string; readonly body: string; readonly offset: number }[] {
 	const stripped = text.replace(/\/\*[\s\S]*?\*\//g, (c) => " ".repeat(c.length))

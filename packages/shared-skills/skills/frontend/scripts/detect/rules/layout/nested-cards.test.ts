@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { NodeSpec } from "../../testing/build-snapshot"
 import { nestedCards } from "./nested-cards"
-import { border, marked, rounded } from "./support/test-cases"
+import { border, marked, rounded } from "./support/layout-cases"
 
 const inner: NodeSpec = { id: "inner", style: { ...border, ...rounded }, rect: { x: 40, y: 40, width: 240, height: 140 }, children: [
 	{ tag: "p", text: "An inner group with a paragraph of copy." }, { tag: "p", text: "A second paragraph makes this a content surface." },

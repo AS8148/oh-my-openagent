@@ -76,5 +76,3 @@ export function buildSnapshot(body: readonly NodeSpec[], options: { readonly vie
 		elements, cssText: options.cssText ?? [], scriptErrors: options.scriptErrors ?? [], scriptErrorsCaptured: options.scriptErrorsCaptured ?? true,
 	}
 }
-
-export const byId = (snap: PageSnapshot, id: string): ElementSnapshot | undefined => snap.elements.find((e) => e.attributes["id"] === id)

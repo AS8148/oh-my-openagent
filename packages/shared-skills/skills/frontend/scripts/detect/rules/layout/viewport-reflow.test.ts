@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { buildSnapshot } from "../../testing/build-snapshot"
 import { viewportReflow } from "./viewport-reflow"
-import { selectors } from "./support/test-cases"
+import { selectors } from "./support/layout-cases"
 
 for (const width of [320, 375, 768, 1024, 1440]) {
 	test(`#given an overflowing document at ${width}px #then a page finding names the furthest element`, () => {

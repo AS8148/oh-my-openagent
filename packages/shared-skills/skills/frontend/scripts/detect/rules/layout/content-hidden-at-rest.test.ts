@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { contentHiddenAtRest } from "./content-hidden-at-rest"
-import { marked } from "./support/test-cases"
+import { marked } from "./support/layout-cases"
 
 const hidden = { id: "reveal", style: { opacity: "0" }, text: "Invisible main content. ".repeat(10) }
 const visible = { tag: "p", text: "Visible copy. ".repeat(10) }
