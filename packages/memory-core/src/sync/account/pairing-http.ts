@@ -4,7 +4,7 @@
 
 import type { Principal } from "../crypto/parse.ts"
 import { AccountHttpError, type AccountHttpOptions } from "./http.ts"
-import { dispatchSyncEffect, type SyncOperationAuthority } from "../operation.ts"
+import { admitSyncOperation, syncOperationSignal, type SyncOperationOptions } from "../operation-authority.ts"
 
 export interface PendingApproval {
   readonly id: string
@@ -16,13 +16,13 @@ export interface PendingApproval {
 }
 
 export interface PairingHttp {
-  openPending(account: string, commitment: string, operation?: SyncOperationAuthority): Promise<PendingApproval>
-  readPending(id: string, operation?: SyncOperationAuthority): Promise<PendingApproval | null>
-  listPending(operation?: SyncOperationAuthority): Promise<ReadonlyArray<PendingApproval>>
-  answerPending(id: string, principal: Principal, approverNonce: string, operation?: SyncOperationAuthority): Promise<PendingApproval>
-  revealPending(id: string, principal: Principal, joiningNonce: string, operation?: SyncOperationAuthority): Promise<PendingApproval>
-  setAccountSync(enabled: boolean, operation?: SyncOperationAuthority): Promise<void>
-  setDeviceSync(deviceId: string, enabled: boolean, operation?: SyncOperationAuthority): Promise<void>
+  openPending(account: string, commitment: string, operation?: SyncOperationOptions): Promise<PendingApproval>
+  readPending(id: string, operation?: SyncOperationOptions): Promise<PendingApproval | null>
+  listPending(operation?: SyncOperationOptions): Promise<ReadonlyArray<PendingApproval>>
+  answerPending(id: string, principal: Principal, approverNonce: string, operation?: SyncOperationOptions): Promise<PendingApproval>
+  revealPending(id: string, principal: Principal, joiningNonce: string, operation?: SyncOperationOptions): Promise<PendingApproval>
+  setAccountSync(enabled: boolean, operation?: SyncOperationOptions): Promise<void>
+  setDeviceSync(deviceId: string, enabled: boolean, operation?: SyncOperationOptions): Promise<void>
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -42,12 +42,13 @@ function parsePending(value: unknown): PendingApproval | null {
 
 export function createPairingHttp(options: AccountHttpOptions): PairingHttp {
   const doFetch = options.fetch ?? fetch
-  const send = async (method: string, path: string, body: unknown, operation = options.operation): Promise<unknown> => {
+  const send = async (method: string, path: string, body: unknown, operation: SyncOperationOptions = options): Promise<unknown> => {
     const headers: Record<string, string> = { authorization: `Bearer ${await options.token()}` }
     if (body !== undefined) headers["content-type"] = "application/json"
-    const response = await dispatchSyncEffect(operation, () => doFetch(`${options.baseUrl}${path}`, {
+    const signal = syncOperationSignal(operation)
+    const response = await admitSyncOperation(operation, () => doFetch(`${options.baseUrl}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      ...(operation === undefined ? {} : { signal: operation.signal }),
+      ...(signal === undefined ? {} : { signal }),
     }))
     if (!response.ok) {
       const code = await response.json().then(
@@ -58,7 +59,7 @@ export function createPairingHttp(options: AccountHttpOptions): PairingHttp {
     }
     return response.status === 204 ? null : response.json()
   }
-  const pending = async (method: string, path: string, body: unknown, operation?: SyncOperationAuthority): Promise<PendingApproval> => {
+  const pending = async (method: string, path: string, body: unknown, operation?: SyncOperationOptions): Promise<PendingApproval> => {
     const parsed = parsePending(await send(method, path, body, operation))
     if (parsed === null) throw new AccountHttpError("malformed_reply", 200)
     return parsed

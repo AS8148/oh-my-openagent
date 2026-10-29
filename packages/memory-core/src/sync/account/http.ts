@@ -5,15 +5,14 @@
 // verify what they read through the client chain before using it.
 
 import type { KeyringEntry } from "../crypto/entry.ts"
-import { dispatchSyncEffect, type SyncOperationAuthority } from "../operation.ts"
+import { admitSyncOperation, syncOperationSignal, type SyncOperationOptions } from "../operation-authority.ts"
 import type { AppendResult, ChainRow, KeyringAppendRequest, RecoveryTransport, RecoveryWrapRow, TransportRefusal } from "../recovery/ports.ts"
 
-export interface AccountHttpOptions {
+export interface AccountHttpOptions extends SyncOperationOptions {
   readonly baseUrl: string
   /** The device's bearer token, read per request so a refresh takes effect. */
   readonly token: () => string | Promise<string>
   readonly fetch?: typeof fetch
-  readonly operation?: SyncOperationAuthority
 }
 
 export interface AccountState {
@@ -23,8 +22,8 @@ export interface AccountState {
 }
 
 export interface AccountHttp extends RecoveryTransport {
-  listEntriesAfter(after: number, operation?: SyncOperationAuthority): Promise<ReadonlyArray<ChainRow> | null>
-  state(operation?: SyncOperationAuthority): Promise<AccountState | null>
+  listEntriesAfter(after: number, operation?: SyncOperationOptions): Promise<ReadonlyArray<ChainRow> | null>
+  state(operation?: SyncOperationOptions): Promise<AccountState | null>
 }
 
 export class AccountHttpError extends Error {
@@ -49,12 +48,13 @@ const listOf = (value: unknown, key: string): ReadonlyArray<unknown> | null => {
 
 export function createAccountHttp(options: AccountHttpOptions): AccountHttp {
   const doFetch = options.fetch ?? fetch
-  const send = async (method: string, path: string, body: unknown, operation = options.operation): Promise<Response> => {
+  const send = async (method: string, path: string, body: unknown, operation: SyncOperationOptions = options): Promise<Response> => {
     const headers: Record<string, string> = { authorization: `Bearer ${await options.token()}` }
     if (body !== undefined) headers["content-type"] = "application/json"
-    return dispatchSyncEffect(operation, () => doFetch(`${options.baseUrl}${path}`, {
+    const signal = syncOperationSignal(operation)
+    return admitSyncOperation(operation, () => doFetch(`${options.baseUrl}${path}`, {
       method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      ...(operation === undefined ? {} : { signal: operation.signal }),
+      ...(signal === undefined ? {} : { signal }),
     }))
   }
   const codeOf = async (response: Response): Promise<string> =>
@@ -65,12 +65,13 @@ export function createAccountHttp(options: AccountHttpOptions): AccountHttp {
       },
       () => "unknown",
     )
-  const read = async (path: string, operation?: SyncOperationAuthority): Promise<unknown> => {
+  const read = async (path: string, operation?: SyncOperationOptions): Promise<unknown> => {
     const response = await send("GET", path, undefined, operation)
+    if (!response.ok) console.error("HTTP_DIAG", options.baseUrl, path, response.status, [...response.headers], await response.clone().text())
     if (!response.ok) throw new AccountHttpError(response.status >= 500 ? "unavailable" : await codeOf(response), response.status)
     return response.json()
   }
-  const append = async (path: string, method: "PUT" | "POST", request: KeyringAppendRequest, operation?: SyncOperationAuthority): Promise<AppendResult> => {
+  const append = async (path: string, method: "PUT" | "POST", request: KeyringAppendRequest, operation?: SyncOperationOptions): Promise<AppendResult> => {
     const response = await send(method, path, request, operation)
     if (response.ok) {
       const body: unknown = await response.json()
@@ -82,7 +83,7 @@ export function createAccountHttp(options: AccountHttpOptions): AccountHttp {
     const code = await codeOf(response)
     return { ok: false, reason: REFUSALS.has(code) ? (code as TransportRefusal) : "refused" }
   }
-  const entriesAfter = async (after: number, operation?: SyncOperationAuthority): Promise<ReadonlyArray<ChainRow> | null> =>
+  const entriesAfter = async (after: number, operation?: SyncOperationOptions): Promise<ReadonlyArray<ChainRow> | null> =>
     listOf(await read(`/v1/sync/entries?after=${after}`, operation), "entries") as ReadonlyArray<ChainRow> | null
   return {
     listEntriesAfter: entriesAfter,

@@ -11,8 +11,8 @@ import type { DeviceKeyring } from "../keyring-port.ts"
 import { openAccountChain } from "./account-chain.ts"
 import type { AccountHttp } from "./http.ts"
 import { approvalCode, approvalCommitment, newPairingNonce } from "./pairing.ts"
-import type { PairingHttp } from "./pairing-http.ts"
-import { checkSyncOperation, dispatchSyncEffect, type SyncOperationAuthority } from "../operation.ts"
+import type { PairingHttp, PendingApproval } from "./pairing-http.ts"
+import { checkSyncOperation, admitSyncOperation, waitSyncOperation, type SyncOperationOptions } from "../operation-authority.ts"
 import { accountOperation, pairingOperation } from "./operation-ports.ts"
 
 export interface CeremonyClock {
@@ -42,19 +42,22 @@ export async function joinAccount(input: {
   readonly pairing: PairingHttp
   readonly clock: CeremonyClock
   readonly showCode: (code: string) => void | Promise<void>
-  readonly operation?: SyncOperationAuthority
-}): Promise<JoinOutcome> {
-  const { account, keyring, clock, operation } = input
+  readonly onPending?: (pending: PendingApproval) => void
+} & SyncOperationOptions): Promise<JoinOutcome> {
+  const { account, keyring, clock } = input
+  const operation = input
   const chain = accountOperation(input.chain, operation)
   const pairing = pairingOperation(input.pairing, operation)
   const self = principalOf(keyring)
   const nonce = newPairingNonce()
   const commitment = await approvalCommitment(account, { principal: self, nonce })
   const opened = await pairing.openPending(account, commitment)
+  checkSyncOperation(operation)
+  admitSyncOperation(operation, () => input.onPending?.(opened))
   let row = opened
   while (row.answer === null) {
     if (clock.now() >= opened.expires_at) return { kind: "expired" }
-    await clock.sleep(POLL_MS)
+    await waitSyncOperation(operation, clock.sleep(POLL_MS))
     const next = await pairing.readPending(opened.id)
     if (next === null) return { kind: "expired" }
     row = next
@@ -62,7 +65,7 @@ export async function joinAccount(input: {
   const answer = row.answer
   await pairing.revealPending(opened.id, self, nonce)
   const code = await approvalCode(account, [{ principal: self, nonce }, { principal: answer.principal, nonce: answer.approver_nonce }])
-  await dispatchSyncEffect(operation, () => input.showCode(code))
+  await waitSyncOperation(operation, admitSyncOperation(operation, async () => input.showCode(code)))
   const anchor = pairingAnchor({ account, keyring, approver: answer.principal, joiningNonce: nonce, approverNonce: answer.approver_nonce })
   for (;;) {
     const keys = await chain.listKeys()
@@ -78,10 +81,10 @@ export async function joinAccount(input: {
         return { kind: "refused", reason: "the approval admits this device without a key it can open" }
       }
       await pinTrustAnchor(input.pinDir, account, pin, operation)
-      await checkSyncOperation(operation)
+      checkSyncOperation(operation)
       return { kind: "joined" }
     }
     if (clock.now() >= opened.expires_at) return { kind: "expired" }
-    await clock.sleep(POLL_MS)
+    await waitSyncOperation(operation, clock.sleep(POLL_MS))
   }
 }

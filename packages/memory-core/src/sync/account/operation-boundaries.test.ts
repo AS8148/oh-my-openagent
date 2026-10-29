@@ -33,7 +33,7 @@ for (const port of ["chain", "pairing"] as const) {
     const token = Promise.withResolvers<string>()
     let dispatched = 0
     const options = {
-      baseUrl: f.server.url, operation,
+      baseUrl: f.server.url, ...operation,
       token: () => { entered.resolve(); return token.promise },
       fetch: Object.assign(async () => { dispatched++; return Response.json({ seq: 1 }) }, { preconnect: fetch.preconnect }),
     }
@@ -99,7 +99,7 @@ test("raw rename EINTR retry cannot bypass retired authority", async () => {
       throw Object.assign(new Error("interrupted"), { code: "EINTR" })
     }
   }
-  const pending = renameWithContentionRetry("staging", "target", { platform: "darwin", rename: raw, admit: operation.dispatch })
+  const pending = renameWithContentionRetry("staging", "target", { platform: "darwin", rename: raw, admit: operation.authority.admit })
   await entered.promise
   controller.abort()
   release.resolve()
@@ -113,7 +113,7 @@ test("Windows contention retries re-admit the raw rename after suspension", asyn
   const release = Promise.withResolvers<void>()
   let calls = 0
   const pending = renameWithContentionRetry("staging", "target", {
-    platform: "win32", admit: operation.dispatch,
+    platform: "win32", admit: operation.authority.admit,
     rename: async () => { calls++; if (calls === 1) throw Object.assign(new Error("busy"), { code: "EPERM" }) },
     sleep: async () => { waiting.resolve(); await release.promise },
   })
@@ -131,7 +131,7 @@ test("late bridge completion after cancellation cannot sign or publish genesis",
   const release = Promise.withResolvers<void>()
   let signs = 0
   const pending = enableSync({
-    ...f.input, operation,
+    ...f.input, ...operation,
     keyring: { ...f.keyring, sign: async (request) => { signs++; return f.keyring.sign(request) } },
     genesis: {
       prfSupported: true,
@@ -160,7 +160,7 @@ test("published intent finishes durability after cancellation and resumes withou
   const sync = journal.syncJournalDirectory
   const syncSpy = spyOn(journal, "syncJournalDirectory").mockImplementation(async (path) => { synced.push(path); await sync(path) })
   cleanup.push(() => syncSpy.mockRestore())
-  await expect(enableSync({ ...f.input, operation })).rejects.toMatchObject({ name: "AbortError" })
+  await expect(enableSync({ ...f.input, ...operation })).rejects.toMatchObject({ name: "AbortError" })
   expect(synced.some((path) => path.endsWith("/genesis-intent"))).toBe(true)
   expect(f.entries).toHaveLength(0)
   renamed.mockRestore()

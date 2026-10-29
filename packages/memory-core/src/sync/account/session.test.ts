@@ -30,7 +30,8 @@ async function pinnedDir(world: World): Promise<string> {
 
 async function setup() {
   const world = await createWorld("acct-session")
-  const server = startChainWireServer(world.account, world.server.chain(world.account))
+  const requests: string[] = []
+  const server = startChainWireServer(world.account, world.server.chain(world.account), { onRequest: req => requests.push(`${req.method} ${req.url}`) })
   servers.push(server)
   const open = (device: Device, pinDir: string, spaceId = SPACE): Promise<AccountSessionOutcome> => {
     const token = server.tokenFor({ ...device.principal })

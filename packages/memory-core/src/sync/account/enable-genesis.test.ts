@@ -79,7 +79,7 @@ test("cancellation after PUT leaves the exact intent for a successor, without st
       return result
     },
   }
-  await expect(enableSync({ ...f.input, chain, operation })).rejects.toThrow()
+  await expect(enableSync({ ...f.input, chain, ...operation })).rejects.toThrow()
   expect((await loadTrustAnchor(f.input.pinDir, ACCOUNT)).ok).toBe(false)
   expect(await enableSync(f.input)).toEqual({ kind: "joined", created: true })
   expect(f.ceremonies()).toBe(1)

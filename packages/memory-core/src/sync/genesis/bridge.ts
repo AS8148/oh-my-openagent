@@ -1,5 +1,5 @@
 import type { Principal } from "../crypto/parse.ts"
-import type { SyncOperationAuthority } from "../operation.ts"
+import type { SyncOperationAuthority } from "../operation-authority.ts"
 import type { GenesisPrepared } from "./types.ts"
 
 export type GenesisBridgeRequest = {

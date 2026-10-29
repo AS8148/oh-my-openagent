@@ -4,7 +4,7 @@ import { creatorAnchor, type ChainAnchor } from "../crypto/anchor.ts"
 import { createRejectionCounter } from "../crypto/rejection.ts"
 import { pinTrustAnchor } from "../crypto/trust-pin.ts"
 import type { DeviceKeyring } from "../keyring-port.ts"
-import { checkSyncOperation, type SyncOperationAuthority } from "../operation.ts"
+import { checkSyncOperation, type SyncOperationOptions } from "../operation-authority.ts"
 import { GenesisEnableError } from "./bridge.ts"
 import { retireGenesisIntent } from "./intent-store.ts"
 import { type GenesisIntent, verifyCompetingGenesis } from "./intent-verify.ts"
@@ -27,13 +27,12 @@ export const completeAccountChain = async (input: {
 export const completeGenesis = async (input: {
   readonly account: string; readonly serviceOrigin?: string; readonly serviceDeviceId: string
   readonly keyring: DeviceKeyring; readonly pinDir: string; readonly chain: AccountHttp
-  readonly operation?: SyncOperationAuthority
-}, intent: GenesisIntent): Promise<"created" | "join_required"> => {
+} & SyncOperationOptions, intent: GenesisIntent): Promise<"created" | "join_required"> => {
   const before = await input.chain.listKeys()
   if (before === null) throw new GenesisEnableError("malformed_reply")
   if (before[0]?.digest !== intent.genesisDigest) {
     const appended = await input.chain.appendKeys(intent.request)
-    await checkSyncOperation(input.operation)
+    checkSyncOperation(input)
     if (!appended.ok) {
       if (appended.reason !== "stale_base") throw new GenesisEnableError("append_refused")
       const current = await input.chain.listKeys()
@@ -58,8 +57,8 @@ export const completeGenesis = async (input: {
   if (state.genesisDigest !== intent.genesisDigest || state.pin === null || !walked.isMember()) {
     throw new GenesisEnableError("intent_mismatch")
   }
-  await pinTrustAnchor(input.pinDir, input.account, state.pin, input.operation)
+  await pinTrustAnchor(input.pinDir, input.account, state.pin, input)
   await retireGenesisIntent(input)
-  await checkSyncOperation(input.operation)
+  checkSyncOperation(input)
   return "created"
 }

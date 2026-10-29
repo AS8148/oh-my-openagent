@@ -43,10 +43,12 @@ export const operationScope = () => {
   return {
     controller,
     operation: {
-      signal: controller.signal,
-      async dispatch<T>(begin: () => T): Promise<Awaited<T>> {
-        controller.signal.throwIfAborted()
-        return await begin()
+      authority: {
+        signal: controller.signal,
+        admit<T>(begin: () => T): T {
+          controller.signal.throwIfAborted()
+          return begin()
+        },
       },
     },
   }

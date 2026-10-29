@@ -6,7 +6,7 @@ import type {
 	WrapEntry,
 } from "../crypto/entry.ts";
 import type { Principal, RecoveryKey } from "../crypto/parse.ts";
-import type { SyncOperationAuthority } from "../operation.ts";
+import type { SyncOperationOptions } from "../operation-authority.ts";
 
 /**
  * The platform passkey API the native bridge drives (macOS AuthenticationServices, the Windows
@@ -247,11 +247,11 @@ export type AppendResult =
 
 /** The signed-in account's sync routes this module uses (contract 1.17.0 bootstrap reads and appends). */
 export interface RecoveryTransport {
-	listKeys(operation?: SyncOperationAuthority): Promise<ReadonlyArray<KeyringEntry> | null>;
-	listEntries(operation?: SyncOperationAuthority): Promise<ReadonlyArray<ChainRow> | null>;
-	listRecoveryWraps(operation?: SyncOperationAuthority): Promise<ReadonlyArray<RecoveryWrapRow> | null>;
-	appendKeys(request: KeyringAppendRequest, operation?: SyncOperationAuthority): Promise<AppendResult>;
-	recoveryJoin(request: KeyringAppendRequest, operation?: SyncOperationAuthority): Promise<AppendResult>;
+	listKeys(operation?: SyncOperationOptions): Promise<ReadonlyArray<KeyringEntry> | null>;
+	listEntries(operation?: SyncOperationOptions): Promise<ReadonlyArray<ChainRow> | null>;
+	listRecoveryWraps(operation?: SyncOperationOptions): Promise<ReadonlyArray<RecoveryWrapRow> | null>;
+	appendKeys(request: KeyringAppendRequest, operation?: SyncOperationOptions): Promise<AppendResult>;
+	recoveryJoin(request: KeyringAppendRequest, operation?: SyncOperationOptions): Promise<AppendResult>;
 }
 
 export type RecoveryEvent =
