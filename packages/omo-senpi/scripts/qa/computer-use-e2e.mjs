@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url"
 
 import { createSandbox, seedSandbox } from "./drive.mjs"
 import { isolatedChildEnv } from "./sandbox-child-env.mjs"
+import { withTelemetryOptOut } from "./telemetry-opt-out-env.mjs"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(scriptDir, "..", "..", "..", "..")
@@ -339,7 +340,7 @@ if (!senpiBin) {
   console.log(JSON.stringify({ verdict: "SKIP", reason: "SENPI_BIN is unset; this is not a pass" }))
   process.exit(1)
 }
-const bunVersion = senpiRunsOnBun ? spawnSync("bun", ["--version"], { encoding: "utf8" }).stdout?.trim() : undefined
+const bunVersion = senpiRunsOnBun ? spawnSync("bun", ["--version"], { encoding: "utf8", env: withTelemetryOptOut(process.env) }).stdout?.trim() : undefined
 if (senpiRunsOnBun && !bunVersion) {
   console.log(JSON.stringify({ verdict: "FAIL", reason: `SENPI_BIN ${senpiBin} is a CLI script, but no bun is on PATH to run it` }))
   process.exit(1)
