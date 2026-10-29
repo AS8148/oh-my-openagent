@@ -16,6 +16,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "../../fs/
 import { syncJournalDirectory, syncJournalFile } from "../../journal/fsync"
 import { ANCHOR_NEXT_STEP, isPinCandidate, mintTrustAnchor, type PinCandidate, type TrustAnchor } from "./anchor.ts"
 import { decodeB64 } from "./signatures.ts"
+import { checkSyncOperation, dispatchSyncEffect, type SyncOperationAuthority } from "../operation.ts"
 
 export type PinLoad =
   | { readonly ok: true; readonly anchor: TrustAnchor }
@@ -113,11 +114,14 @@ export const loadTrustAnchor = async (stateDir: string, account: string): Promis
  * pin; a different root, or a pin file that does not parse, throws and changes nothing. Losing the
  * publishing rename to a concurrent writer is decided the same way, by the pin that writer published.
  */
-export const pinTrustAnchor = async (stateDir: string, account: string, candidate: PinCandidate): Promise<TrustAnchor> => {
+export const pinTrustAnchor = async (stateDir: string, account: string, candidate: PinCandidate, operation?: SyncOperationAuthority): Promise<TrustAnchor> => {
   if (!isPinCandidate(candidate) || candidate.account !== account) throw new TrustPinError("not_verified")
   const existing = await loadTrustAnchor(stateDir, account)
   if (existing.ok) {
-    if (existing.anchor.genesisDigest === candidate.genesisDigest) return existing.anchor
+    if (existing.anchor.genesisDigest === candidate.genesisDigest) {
+      await checkSyncOperation(operation)
+      return existing.anchor
+    }
     throw new TrustPinError("pin_conflict")
   }
   if (existing.reason === "corrupt_pin") throw new TrustPinError("corrupt_pin")
@@ -131,8 +135,9 @@ export const pinTrustAnchor = async (stateDir: string, account: string, candidat
     await syncJournalFile(join(staging, PIN_FILE))
     await syncJournalDirectory(staging)
     try {
-      await rename(staging, target)
+      await rename(staging, target, (begin) => dispatchSyncEffect(operation, begin))
     } catch (error) {
+      await checkSyncOperation(operation)
       if (!(await loadTrustAnchor(stateDir, account)).ok) throw error
     }
   } finally {
@@ -141,6 +146,7 @@ export const pinTrustAnchor = async (stateDir: string, account: string, candidat
   await syncJournalDirectory(rootDir(stateDir))
   const written = await loadTrustAnchor(stateDir, account)
   if (!written.ok || written.anchor.genesisDigest !== candidate.genesisDigest) throw new TrustPinError("pin_conflict")
+  await checkSyncOperation(operation)
   return written.anchor
 }
 

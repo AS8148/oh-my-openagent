@@ -12,6 +12,8 @@ import { openAccountChain } from "./account-chain.ts"
 import type { AccountHttp } from "./http.ts"
 import { approvalCode, approvalCommitment, newPairingNonce } from "./pairing.ts"
 import type { PairingHttp } from "./pairing-http.ts"
+import { checkSyncOperation, dispatchSyncEffect, type SyncOperationAuthority } from "../operation.ts"
+import { accountOperation, pairingOperation } from "./operation-ports.ts"
 
 export interface CeremonyClock {
   readonly now: () => number
@@ -40,8 +42,11 @@ export async function joinAccount(input: {
   readonly pairing: PairingHttp
   readonly clock: CeremonyClock
   readonly showCode: (code: string) => void | Promise<void>
+  readonly operation?: SyncOperationAuthority
 }): Promise<JoinOutcome> {
-  const { account, keyring, chain, pairing, clock } = input
+  const { account, keyring, clock, operation } = input
+  const chain = accountOperation(input.chain, operation)
+  const pairing = pairingOperation(input.pairing, operation)
   const self = principalOf(keyring)
   const nonce = newPairingNonce()
   const commitment = await approvalCommitment(account, { principal: self, nonce })
@@ -56,7 +61,8 @@ export async function joinAccount(input: {
   }
   const answer = row.answer
   await pairing.revealPending(opened.id, self, nonce)
-  await input.showCode(await approvalCode(account, [{ principal: self, nonce }, { principal: answer.principal, nonce: answer.approver_nonce }]))
+  const code = await approvalCode(account, [{ principal: self, nonce }, { principal: answer.principal, nonce: answer.approver_nonce }])
+  await dispatchSyncEffect(operation, () => input.showCode(code))
   const anchor = pairingAnchor({ account, keyring, approver: answer.principal, joiningNonce: nonce, approverNonce: answer.approver_nonce })
   for (;;) {
     const keys = await chain.listKeys()
@@ -71,7 +77,8 @@ export async function joinAccount(input: {
       if (!walked.isMember() || (await walked.epochKey(walked.state().authority?.epoch ?? 0)) === null) {
         return { kind: "refused", reason: "the approval admits this device without a key it can open" }
       }
-      await pinTrustAnchor(input.pinDir, account, pin)
+      await pinTrustAnchor(input.pinDir, account, pin, operation)
+      await checkSyncOperation(operation)
       return { kind: "joined" }
     }
     if (clock.now() >= opened.expires_at) return { kind: "expired" }
