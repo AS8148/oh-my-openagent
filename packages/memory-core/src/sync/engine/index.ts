@@ -4,6 +4,8 @@ export { type EngineStatus, type SyncFailure, type SyncFailureKind, SyncEngine }
 export { loadLoroRuntime } from "../../crdt/loro-runtime"
 export { caseFold } from "../item/casefold"
 export { type AccountSessionIdle, type AccountSessionOptions, type AccountSessionOutcome, openAccountSession } from "../account/session"
+export type { ApproveOutcome } from "../account/approve"
+export { type SyncOperationAuthority, type SyncOperationOptions, admitSyncOperation } from "../operation-authority"
 export { type DeviceSync, openDeviceSync, type OpenDeviceSyncOptions, type SyncSession } from "./open"
 export type { RefusalCode, Sealer, Transport, Verifier } from "./ports"
 export { deviceKeyringFromMaterial } from "../account/device-keyring"
