@@ -10,7 +10,7 @@ Generated command:
 git ls-files packages/omo-opencode/src packages/omo-codex/src | grep '\.ts$' | sort | xargs awk 'FNR==1 && /^export (\*|\{).*from ["'"'"']@oh-my-opencode\// { print FILENAME }'
 ```
 
-Snapshot date: 2026-08-31. Total shim exports found: 239.
+Snapshot date: 2026-08-31. Total shim exports found: 233.
 
 ## Aggregate By Target Package
 
@@ -29,7 +29,7 @@ Snapshot date: 2026-08-31. Total shim exports found: 239.
 | `@oh-my-opencode/skills-loader-core` | 65 |
 | `@oh-my-opencode/team-core` | 37 |
 | `@oh-my-opencode/tmux-core` | 3 |
-| `@oh-my-opencode/utils` | 53 |
+| `@oh-my-opencode/utils` | 47 |
 
 ## Exhaustive Shim Paths
 
@@ -232,17 +232,13 @@ Snapshot date: 2026-08-31. Total shim exports found: 239.
 | `packages/omo-opencode/src/shared/extract-semver.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/file-utils.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/frontmatter.ts` | `@oh-my-opencode/utils` |
-| `packages/omo-opencode/src/shared/git-worktree/collect-git-diff-stats.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/git-worktree/format-file-changes.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/git-worktree/index.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/git-worktree/parse-diff-numstat.ts` | `@oh-my-opencode/utils` |
-| `packages/omo-opencode/src/shared/git-worktree/parse-status-porcelain-line.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/git-worktree/parse-status-porcelain.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/git-worktree/types.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/internal-initiator-marker.ts` | `@oh-my-opencode/utils` |
-| `packages/omo-opencode/src/shared/migration/agent-names.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/migration/hook-names.ts` | `@oh-my-opencode/utils` |
-| `packages/omo-opencode/src/shared/migration/migrations-sidecar.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/migration/model-versions.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/model-format-normalizer.ts` | `@oh-my-opencode/model-core` |
 | `packages/omo-opencode/src/shared/model-normalization.ts` | `@oh-my-opencode/model-core` |
@@ -261,11 +257,9 @@ Snapshot date: 2026-08-31. Total shim exports found: 239.
 | `packages/omo-opencode/src/shared/tmux/tmux-utils/spawn-process.ts` | `@oh-my-opencode/tmux-core` |
 | `packages/omo-opencode/src/shared/tool-name.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/zip-entry-listing.ts` | `@oh-my-opencode/utils` |
-| `packages/omo-opencode/src/shared/zip-entry-listing/powershell-zip-entry-listing.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/zip-entry-listing/python-zip-entry-listing.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/zip-entry-listing/read-zip-symlink-target.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/shared/zip-entry-listing/tar-zip-entry-listing.ts` | `@oh-my-opencode/utils` |
-| `packages/omo-opencode/src/shared/zip-entry-listing/zipinfo-zip-entry-listing.ts` | `@oh-my-opencode/utils` |
 | `packages/omo-opencode/src/tools/hashline-edit/edit-deduplication.ts` | `@oh-my-opencode/hashline-core` |
 | `packages/omo-opencode/src/tools/hashline-edit/edit-ordering.ts` | `@oh-my-opencode/hashline-core` |
 | `packages/omo-opencode/src/tools/hashline-edit/file-text-canonicalization.ts` | `@oh-my-opencode/hashline-core` |
