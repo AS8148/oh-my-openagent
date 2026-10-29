@@ -167,10 +167,11 @@ pub(super) fn set_value(element: &AXUIElement, value: &str) -> CoreResult<()> {
         // cannot be read back as the string that was written.
         let textual = element::copy_string(element, "AXValue").is_some();
         set_string_value(element, value)?;
-        if !textual {
+        let after = element::copy_string(element, "AXValue");
+        if !textual && after.is_none() {
             return Ok(());
         }
-        text_readback(value, value, element::copy_string(element, "AXValue").as_deref(), is_secure(element))
+        text_readback(value, value, after.as_deref(), is_secure(element))
     })
 }
 
