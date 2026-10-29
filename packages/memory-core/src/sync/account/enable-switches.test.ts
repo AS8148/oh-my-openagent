@@ -46,6 +46,25 @@ for (const member of ["pinned", "joiner", "resume", "creator"] as const) {
   })
 }
 
+for (const missing of ["serviceOrigin", "rpId", "userName"] as const) {
+  test(`a genesis-capable first device missing ${missing} is refused with both switches left off`, async () => {
+    const f = await fixture()
+    cleanups.push(f.close)
+    await expect(enableSync({ ...f.input, [missing]: undefined })).rejects.toMatchObject({ reason: "missing_configuration" })
+    expect(f.server.switches).toEqual([])
+    expect(f.server.enabled("service-first")).toBe(false)
+    expect(f.ceremonies()).toBe(0)
+  })
+}
+
+test("a first device without the genesis bridge needs a first device and leaves both switches off", async () => {
+  const f = await fixture()
+  cleanups.push(f.close)
+  expect(await enableSync({ ...f.input, genesis: { ...f.input.genesis, prfSupported: false } })).toEqual({ kind: "needs_first_device" })
+  expect(f.server.switches).toEqual([])
+  expect(f.ceremonies()).toBe(0)
+})
+
 test("a failed device switch never disables the account or reports success", async () => {
   const f = await fixture()
   cleanups.push(f.close)

@@ -50,14 +50,17 @@ export async function enableSync(input: EnableSyncInput): Promise<EnableOutcome>
       if (resumed.state().genesisDigest !== intent.genesisDigest || !resumed.isMember()) throw new GenesisEnableError("intent_mismatch")
     }
     if (keys.length === 0 && intent === null && !input.genesis?.prfSupported) return { kind: "needs_first_device" }
+    const creating = intent === null && !pin.ok && keys.length === 0
+    const { genesis, serviceOrigin, rpId, userName } = input
+    if (creating && (!genesis?.prfSupported || !serviceOrigin || !rpId || !userName)) throw new GenesisEnableError("missing_configuration")
 
-    // Bootstrap readability is not consent. Every proceeding path restores both switches.
+    // Bootstrap readability is not consent. Joining, resuming and creating all turn both switches on here, before any key
+    // or root is written; needs_first_device and a refused configuration return above with both switches untouched.
     await pairing.setAccountSync(true)
     await pairing.setDeviceSync(input.serviceDeviceId, true)
     checkSyncOperation(input)
     if (intent === null && (pin.ok || keys.length > 0)) return { kind: member ? "joined" : "join_required" }
     if (intent === null) {
-      const { genesis, serviceOrigin, rpId, userName } = input
       if (!genesis?.prfSupported || !serviceOrigin || !rpId || !userName) throw new GenesisEnableError("missing_configuration")
       const operation = {
         signal: syncOperationSignal(input) ?? new AbortController().signal,
