@@ -246,6 +246,7 @@ describe("root test CI partition", () => {
     expect(windowsStep).toContain('-Invocation "senpi-compatibility"')
     expect(windowsStep).toContain('-TestArguments @("test", "packages/omo-senpi")')
     expect(windowsStep).toContain("exit $LASTEXITCODE")
+    expect(windowsStep, "#11815: the hang-prone step needs its own budget below the job's 60 minutes").toContain("timeout-minutes: 40")
     expect(uploadStep).toContain("if: always() && runner.os == 'Windows'")
     expect(uploadStep).toContain("continue-on-error: true")
     expect(uploadStep).toContain("uses: actions/upload-artifact@v6")
