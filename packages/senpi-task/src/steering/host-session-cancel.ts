@@ -38,7 +38,7 @@ export function createUnhandledHostSessionCancel(deps: UnhandledHostSessionCance
     const cancel = port.destruction.hostSessionCancel
     if (cancel === undefined) return deps.cancelPending(record)
     port.stopRequested?.(record.task_id)
-    const finish = async (): Promise<void> => {
+    const finish = async (): Promise<boolean> => {
       const runStats = port.runStatsSnapshot(record.task_id)
       const result = port.store.transition(record.task_id, {
         type: "cancel",
@@ -46,23 +46,30 @@ export function createUnhandledHostSessionCancel(deps: UnhandledHostSessionCance
         ...(errorMessage !== undefined ? { error_message: errorMessage } : {}),
         ...(runStats !== undefined ? { run_stats: runStats } : {}),
       })
-      if (!result.applied) return
+      if (!result.applied) return false
       deps.clearPersistedQueue(record.task_id)
       port.store.appendEvent(record.task_id, { type: "cancelled", payload: { previous_status: record.status, ...(reason !== undefined ? { reason } : {}) } })
       await port.destruction.destroyResidentTask(record.task_id, "cancel")
+      return true
     }
     const settle = (): void => port.stopSettled?.(record.task_id)
     const end = await firstEnd(cancel.end(record), record.task_id)
     if (end.kind === "ended") {
+      let applied = false
       try {
-        await finish()
+        applied = await finish()
       } finally {
         settle()
+      }
+      // Another writer ended the record first: this cancel changed nothing, as the with-handle path reports it.
+      if (!applied) {
+        const status = port.store.load(record.task_id)?.status ?? record.status
+        return { kind: "noop", task_id: record.task_id, status, reason: `Task ${record.task_id} is ${status}, not running.` }
       }
       return { kind: "cancelled", task_id: record.task_id, previous_status: record.status,
         ...((record.pending_steering?.length ?? 0) > 0 ? { undelivered_messages: record.pending_steering?.length } : {}) }
     }
-    cancel.drive(record, { ended: finish, settle })
+    cancel.drive(record, { ended: async () => { await finish() }, settle })
     return deps.cancelPending(record, end.kind === "pending" ? "close_pending" : end.reason)
   }
 }

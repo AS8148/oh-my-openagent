@@ -21,7 +21,8 @@ import { closeHostSession, type HostSessionCloseOutcome } from "./host-session-c
  * destruction that consumes it clears it.
  */
 
-type FlightEntry = { readonly promise: Promise<HostSessionEnd>; done: boolean }
+// `owner` names the run and session a pass judged: a confirmed end proves nothing about a later run of the task.
+type FlightEntry = { readonly promise: Promise<HostSessionEnd>; readonly owner: string; done: boolean }
 
 const flights = new WeakMap<TaskRecordStore, Map<string, FlightEntry>>()
 
@@ -36,9 +37,11 @@ function flightsOf(context: LifecycleContext): Map<string, FlightEntry> {
 export function endHostSessionChild(context: LifecycleContext, record: TaskRecord): Promise<HostSessionEnd> {
   if (!isHostSessionRecord(record)) return Promise.resolve({ kind: "not_ended", reason: "not_host_session" })
   const table = flightsOf(context)
+  const owner = ownerOf(record)
   const existing = table.get(record.task_id)
-  if (existing !== undefined) return existing.promise
-  const entry: FlightEntry = { promise: runPass(context, record), done: false }
+  if (existing !== undefined && existing.owner === owner) return existing.promise
+  if (existing !== undefined && !existing.done) return Promise.resolve({ kind: "not_ended", reason: "earlier_run_in_flight" })
+  const entry: FlightEntry = { promise: runPass(context, record), owner, done: false }
   table.set(record.task_id, entry)
   const drop = (): void => {
     if (table.get(record.task_id) === entry) table.delete(record.task_id)
@@ -52,7 +55,7 @@ export function endHostSessionChild(context: LifecycleContext, record: TaskRecor
     void end.settled.then((closed) => {
       if (!closed) return drop()
       if (table.get(record.task_id) !== entry) return
-      table.set(record.task_id, { promise: Promise.resolve({ kind: "ended", via: "close_session" }), done: true })
+      table.set(record.task_id, { promise: Promise.resolve({ kind: "ended", via: "close_session" }), owner, done: true })
     }, drop)
   }, drop)
   return entry.promise
@@ -65,6 +68,11 @@ export function inFlightHostSessionEnd(context: LifecycleContext, taskId: string
 export function clearHostSessionEnd(context: LifecycleContext, taskId: string): void {
   const table = flights.get(context.store)
   if (table?.get(taskId)?.done === true) table.delete(taskId)
+}
+
+function ownerOf(record: HostSessionRecord): string {
+  const { socket, instance_id, session_path, routing_id } = record.host_session
+  return JSON.stringify([record.notification.run_epoch, socket, instance_id, session_path, routing_id])
 }
 
 async function runPass(context: LifecycleContext, record: HostSessionRecord): Promise<HostSessionEnd> {
