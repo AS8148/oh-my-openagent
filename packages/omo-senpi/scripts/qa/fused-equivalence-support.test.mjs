@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pinEnginePackage, splitStatusChannels, statusCounts, stopSandboxProcesses } from "./fused-equivalence-support.mjs";
+import {
+	dropTimestampOffsets,
+	pinEnginePackage,
+	splitStatusChannels,
+	statusCounts,
+	stopSandboxProcesses,
+} from "./fused-equivalence-support.mjs";
 
 const status = (key, text) => ({ type: "extension_ui_request", method: "setStatus", statusKey: key, statusText: text });
 const turnEvent = (type) => ({ type });
@@ -86,6 +92,25 @@ describe("stopSandboxProcesses", () => {
 	});
 });
 
+describe("dropTimestampOffsets", () => {
+	test("#given one ranked commit time rendered as Z, +00:00 and +09:00 #when offsets are dropped #then all three compare equal and other text keeps its offset", () => {
+		// git renders a commit's own zone with %cI: +09:00 on a KST host, +00:00 from git < 2.45 in UTC, Z from git >= 2.45.
+		// The harness normalizer ranks the date and time but leaves a numeric offset behind the rank token.
+		const observed = (suffix) => ({
+			timeline: { previousEntryAtISO: `<ts:timeline.previousEntryAtISO:1>${suffix}` },
+			list: [`at <ts:entry.timestamp:2>${suffix} and later`],
+			note: "meet at 10:00+09:00",
+		});
+
+		const utcZ = dropTimestampOffsets(observed(""));
+
+		expect(dropTimestampOffsets(observed("+00:00"))).toEqual(utcZ);
+		expect(dropTimestampOffsets(observed("+09:00"))).toEqual(utcZ);
+		expect(dropTimestampOffsets(observed("-05:30"))).toEqual(utcZ);
+		expect(utcZ.note).toBe("meet at 10:00+09:00");
+	});
+});
+
 describe("pinEnginePackage", () => {
 	const fixture = () => {
 		const base = mkdtempSync(join(tmpdir(), "eq-pin-test-"));
@@ -104,7 +129,7 @@ describe("pinEnginePackage", () => {
 
 			expect(pin.packageDir).toBe(join(root, "node_modules/@code-yeongyu/senpi"));
 			expect(lstatSync(pin.packageDir).isDirectory()).toBe(true);
-			expect(realpathSync(pin.packageDir)).toBe(realpathSync(root) + "/node_modules/@code-yeongyu/senpi");
+			expect(realpathSync(pin.packageDir)).toBe(join(realpathSync(root), "node_modules/@code-yeongyu/senpi"));
 			expect(readlinkSync(join(root, "node_modules/chalk"))).toBe(realpathSync(join(modules, "chalk")));
 			expect(readlinkSync(join(root, "node_modules/@code-yeongyu/senpi-codemode"))).toBe(
 				realpathSync(join(modules, "@code-yeongyu/senpi-codemode")),

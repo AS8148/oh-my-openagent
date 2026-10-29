@@ -6957,7 +6957,7 @@
          },
          "timeline": {
           "entriesToday": 2,
-          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:1>+00:00"
+          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:1>"
          }
         }
        }
@@ -6996,7 +6996,7 @@
          },
          "timeline": {
           "entriesToday": 2,
-          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:2>+00:00"
+          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:2>"
          }
         }
        },
@@ -7036,7 +7036,7 @@
          },
          "timeline": {
           "entriesToday": 2,
-          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:3>+00:00"
+          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:3>"
          }
         }
        },
@@ -7081,7 +7081,7 @@
           },
           "timeline": {
            "entriesToday": 2,
-           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:4>+00:00"
+           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:4>"
           }
          }
         },
@@ -7168,7 +7168,7 @@
           },
           "timeline": {
            "entriesToday": 2,
-           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:5>+00:00"
+           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:5>"
           }
          }
         },
@@ -7532,7 +7532,7 @@
           },
           "timeline": {
            "entriesToday": 2,
-           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:6>+00:00"
+           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:6>"
           }
          }
         },
@@ -8236,7 +8236,7 @@
         },
         "timeline": {
          "entriesToday": 2,
-         "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:1>+00:00"
+         "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:1>"
         }
        }
       },

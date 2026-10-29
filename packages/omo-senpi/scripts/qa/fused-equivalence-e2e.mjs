@@ -29,6 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+	dropTimestampOffsets,
 	pinEnginePackage,
 	splitStatusChannels,
 	statusCounts,
@@ -450,8 +451,8 @@ function dropMeasurements(node) {
 
 /**
  * The harness's observe() (fused-equivalence/cases/support/observe.mjs) with the plugin's own rules added: the status
- * channels split out, plugin measurements dropped, and the plugin id namespaces token-mapped. The run-scoped roots and
- * host facts are the harness's, unchanged.
+ * channels split out, plugin measurements dropped, the plugin id namespaces token-mapped, and a ranked timestamp's zone
+ * offset dropped with it. The run-scoped roots and host facts are the harness's, unchanged.
  */
 function observeOmo(run, observables, harness) {
 	const raw = Object.fromEntries(observables.map((id) => [id, dropMeasurements(harness.collectors[id](run))]));
@@ -468,7 +469,7 @@ function observeOmo(run, observables, harness) {
 		],
 		hostFacts: [...harness.hostFacts(), ...harness.childRuntimeFacts(run.childRuntime)],
 	});
-	return Object.fromEntries(observables.map((id) => [id, normalize(raw[id])]));
+	return Object.fromEntries(observables.map((id) => [id, dropTimestampOffsets(normalize(raw[id]))]));
 }
 
 function resolveCommentChecker() {

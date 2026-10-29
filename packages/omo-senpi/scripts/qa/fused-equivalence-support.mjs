@@ -1,4 +1,5 @@
-// EQ.omo (P0-06f) driver support: the status-channel split, the fixed-path engine install and the sandbox process stop.
+// EQ.omo (P0-06f) driver support: the status-channel split, the ranked-timestamp offset, the fixed-path engine install
+// and the sandbox process stop.
 // Kept apart from fused-equivalence-e2e.mjs so each rule has its own unit test (fused-equivalence-support.test.mjs).
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -47,6 +48,24 @@ export function splitStatusChannels(client) {
 export function statusCounts(observations) {
 	return (observations?.O6 ?? []).map((client) =>
 		Object.fromEntries(Object.entries(client.status ?? {}).map(([name, channel]) => [name, channel.count])),
+	);
+}
+
+/**
+ * A ranked timestamp's zone designator, left behind by the harness normalizer: its DATETIME rule absorbs a trailing `Z`
+ * but not a numeric offset, so one commit time (git `%cI`, e.g. `previousEntryAtISO`) normalizes as `<ts:...:1>` from
+ * git >= 2.45 in UTC, `<ts:...:1>+00:00` from older git, and `<ts:...:1>+09:00` on a KST host. The offset is part of the
+ * timestamp the rank already replaced (plan §6.2: wall-clock values are never compared), so it goes with it. Only an
+ * offset directly after a rank token is dropped; any other text keeps its offset.
+ */
+const RANKED_TIMESTAMP_OFFSET = /(<ts:[^>]+>)[+-]\d{2}:\d{2}/g;
+
+export function dropTimestampOffsets(node) {
+	if (typeof node === "string") return node.replace(RANKED_TIMESTAMP_OFFSET, "$1");
+	if (Array.isArray(node)) return node.map(dropTimestampOffsets);
+	if (!node || typeof node !== "object") return node;
+	return Object.fromEntries(
+		Object.entries(node).map(([key, value]) => [dropTimestampOffsets(key), dropTimestampOffsets(value)]),
 	);
 }
 

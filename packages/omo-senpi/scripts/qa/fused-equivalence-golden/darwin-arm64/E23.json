@@ -6974,7 +6974,7 @@
          },
          "timeline": {
           "entriesToday": 2,
-          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:1>+09:00"
+          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:1>"
          }
         }
        }
@@ -7013,7 +7013,7 @@
          },
          "timeline": {
           "entriesToday": 2,
-          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:2>+09:00"
+          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:2>"
          }
         }
        },
@@ -7053,7 +7053,7 @@
          },
          "timeline": {
           "entriesToday": 2,
-          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:3>+09:00"
+          "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:3>"
          }
         }
        },
@@ -7098,7 +7098,7 @@
           },
           "timeline": {
            "entriesToday": 2,
-           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:4>+09:00"
+           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:4>"
           }
          }
         },
@@ -7185,7 +7185,7 @@
           },
           "timeline": {
            "entriesToday": 2,
-           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:5>+09:00"
+           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:5>"
           }
          }
         },
@@ -7559,7 +7559,7 @@
           },
           "timeline": {
            "entriesToday": 2,
-           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:6>+09:00"
+           "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:6>"
           }
          }
         },
@@ -8092,7 +8092,7 @@
           "systemBytes": 3432,
           "fileCount": 7,
           "entriesToday": 2,
-          "previousEntryAtISO": "<ts:repo.previousEntryAtISO:1>+09:00"
+          "previousEntryAtISO": "<ts:repo.previousEntryAtISO:1>"
          },
          "reflection": {
           "backlogSteps": 0,
@@ -8123,7 +8123,7 @@
           "systemBytes": 3432,
           "fileCount": 7,
           "entriesToday": 2,
-          "previousEntryAtISO": "<ts:repo.previousEntryAtISO:2>+09:00"
+          "previousEntryAtISO": "<ts:repo.previousEntryAtISO:2>"
          },
          "reflection": {
           "backlogSteps": 1,
@@ -8379,7 +8379,7 @@
         },
         "timeline": {
          "entriesToday": 2,
-         "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:1>+09:00"
+         "previousEntryAtISO": "<ts:timeline.previousEntryAtISO:1>"
         }
        }
       },
