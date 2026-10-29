@@ -69,6 +69,7 @@ async function setup(empty = false) {
     const account: SyncRpcAccount = {
       descriptor: {
         genesis: "unsupported", rpId: null, userName: null,
+        incarnation: "test-incarnation",
         serviceOrigin: server.url, accountId: world.account, serviceDeviceId: `service-${device.principal.id}`,
         syncPrincipalId: device.principal.id, publicKeys: device.keyring.publicKeys(), generation: "g1",
       },

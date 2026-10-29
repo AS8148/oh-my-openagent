@@ -19,6 +19,7 @@ const controller = new AbortController()
 const account: SyncRpcAccount = {
   descriptor: {
     genesis: "unsupported", rpId: null, userName: null,
+    incarnation: "test-incarnation",
     serviceOrigin: data.api, accountId: "worker-pairing", serviceDeviceId: "shared-device",
     syncPrincipalId: data.principalId, publicKeys: keyring.publicKeys(), generation: "g1",
   },

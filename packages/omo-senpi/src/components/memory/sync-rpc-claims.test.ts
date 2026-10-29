@@ -16,6 +16,7 @@ afterEach(async () => {
 })
 const identity: SyncRpcIdentity = {
   genesis: "unsupported", rpId: null, userName: null,
+  incarnation: "test-incarnation",
   serviceOrigin: "https://service.invalid", accountId: "account", serviceDeviceId: "device",
   syncPrincipalId: "principal", publicKeys: { signing: "public-signing", sealing: "public-sealing" }, generation: "g",
 }

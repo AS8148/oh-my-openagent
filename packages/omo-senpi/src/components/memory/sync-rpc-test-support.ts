@@ -58,7 +58,7 @@ export async function setup() {
   }
   const http = { baseUrl: "https://unused.invalid", token: () => { throw new Error("unexpected HTTP request") } }
   const account: SyncRpcAccount = {
-    descriptor: { genesis: "unsupported", rpId: null, userName: null, serviceOrigin: http.baseUrl, accountId: "account", serviceDeviceId: "service-device", syncPrincipalId: device.keyring.principal().id, publicKeys: device.keyring.publicKeys(), generation: "generation-1" },
+    descriptor: { genesis: "unsupported", rpId: null, userName: null, incarnation: "test-incarnation", serviceOrigin: http.baseUrl, accountId: "account", serviceDeviceId: "service-device", syncPrincipalId: device.keyring.principal().id, publicKeys: device.keyring.publicKeys(), generation: "generation-1" },
     signal: accountAbort.signal,
     isCurrent: async () => !accountAbort.signal.aborted,
     boundary: async (dispatch) => { accountAbort.signal.throwIfAborted(); return dispatch() },
