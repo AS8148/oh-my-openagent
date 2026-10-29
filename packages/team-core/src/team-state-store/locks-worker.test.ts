@@ -28,6 +28,11 @@ function reply(worker: Worker, event: string): Promise<z.infer<typeof Reply>> {
     const onError = (error: Error) => done(error)
     const onExit = (code: number) => done(new Error(`worker exited ${code} before ${event}`))
     const onMessage = (message: unknown) => {
+      if (event === "registered" && typeof message === "object" && message !== null &&
+        "kind" in message && message.kind === "omo-team-lock-register-v1") {
+        done(undefined, { event: "registered" })
+        return
+      }
       const parsed = Reply.safeParse(message)
       if (parsed.success && parsed.data.event === event) done(undefined, parsed.data)
     }
@@ -58,7 +63,9 @@ async function fixture() {
         workerData: { lockPath, counters },
       })
       workers.push(worker)
-      await reply(worker, "ready")
+      const ready = reply(worker, "ready")
+      if (supervised) await ready
+      else await Promise.all([ready, reply(worker, "registered")])
       return worker
     },
     async close() {
@@ -224,6 +231,8 @@ test("lock observation does not keep a finished worker alive", async () => {
   const owner = new Worker(new URL("./lock-worker-exit.fixture.ts", import.meta.url), { workerData: f.lockPath })
   try {
     const exited = once(owner, "exit", { signal: AbortSignal.timeout(10_000) })
+    await Promise.all([reply(owner, "ready"), reply(owner, "registered")])
+    owner.postMessage("finish")
     expect(await exited).toEqual([0])
     expect(await detectStaleLock(f.lockPath, Infinity)).toBe(true)
     expect(await reapStaleLock(f.lockPath, Infinity)).toBe("removed")
