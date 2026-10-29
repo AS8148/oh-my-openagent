@@ -77,7 +77,7 @@ rather than borders, creating layers you feel more than see."
 | Body | 16px / 1rem | 400 | 1.6 | 0 | Default text |
 | Body/sm | 14px / 0.875rem | 400 | 1.5 | 0 | Secondary info, in the secondary ink |
 | Caption | 12px / 0.75rem | 500 | 1.4 | 0.02em | Labels, metadata |
-| Overline | 11px / 0.6875rem | 600 | 1.3 | 0.08em | Field, table and metadata labels, uppercase; never a label above a heading (`references/perfection/craft-floor.md`) |
+| Overline | 11px / 0.6875rem | 600 | 1.3 | 0.08em | Field, table and metadata labels, uppercase; by default not a label above a heading, unless the chosen route asks for one (`references/perfection/craft-floor.md`) |
 
 ### Font Stack
 - Primary: [specify — e.g. "Inter, system-ui, -apple-system, sans-serif"]
