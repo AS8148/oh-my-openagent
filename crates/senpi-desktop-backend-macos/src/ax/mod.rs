@@ -90,6 +90,23 @@ impl MacAx {
     }
 }
 
+/// The accessibility role of the element of `pid` at global point `(x, y)`,
+/// or `None` when it cannot be read.
+pub(crate) fn role_at(pid: libc::pid_t, x: f64, y: f64) -> Option<String> {
+    let found = tree::element_at_in(pid, x, y).ok()??;
+    element::copy_string(&found, "AXRole")
+}
+
+/// One accessibility round trip to `pid`, which the application answers from
+/// its run loop once it has handled the events posted before it.
+pub(crate) fn round_trip(pid: libc::pid_t) {
+    if let Ok(app) = element::create_application(pid) {
+        if element::set_timeout(&app).is_ok() {
+            drop(element::copy_string(&app, "AXRole"));
+        }
+    }
+}
+
 /// Marks `window` main and focused through AX: the belt-and-braces half of
 /// `restore_key_focus`.
 pub(crate) fn focus_key_window(window: &DesktopWindow) -> CoreResult<()> {
