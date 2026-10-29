@@ -10,7 +10,7 @@ import type { DesktopSyncEngineWire } from "./desktopSyncAccount"
 import { DesktopSyncEvent, DesktopSyncRefused, DesktopSyncRequest, decodeSyncHandle } from "./desktopSyncProtocol"
 
 const MEMORY_SYNC_CHANNEL = "memory-sync"
-export type UnavailableReason = "private_channel_unavailable" | "platform_not_supported" | "port_absent" | "selection_failed"
+export type UnavailableReason = "private_channel_unavailable" | "platform_not_supported" | "port_absent" | "selection_failed" | "host_bootstrap_absent"
 
 export interface InheritedPrivateChannels {
   declared(name: string): boolean
@@ -40,7 +40,7 @@ export function memorySyncWorkerData(host: HostMemorySync): () => { value: Messa
   }
 }
 
-const reason = z.enum(["private_channel_unavailable", "platform_not_supported", "port_absent", "selection_failed"])
+const reason = z.enum(["private_channel_unavailable", "platform_not_supported", "port_absent", "selection_failed", "host_bootstrap_absent"])
 const HostToWorker = z.union([
   z.strictObject({ kind: z.literal("outcome"), outcome: z.union([z.literal("cli"), z.literal("desktop"), reason]) }),
   z.strictObject({ kind: z.literal("reply"), id: z.number().int().positive(), ok: z.boolean(), value: z.unknown().optional() }),
@@ -139,6 +139,8 @@ function serveWorker(selection: Promise<MemorySyncSelection>, port: MessagePort)
 
 /** A session Worker's view of the host selection through its own port; no port or a bad answer is unavailable. */
 export function workerMemorySyncSource(value: unknown): Promise<MemorySyncSelection> {
+  // No value: this Worker runtime has no host bootstrap to select for it. A non-port value is a broken handoff.
+  if (value === undefined) return Promise.resolve({ kind: "unavailable", reason: "host_bootstrap_absent" })
   if (!(value instanceof MessagePort)) return Promise.resolve({ kind: "unavailable", reason: "port_absent" })
   const port = value
   const lifetime = new AbortController()

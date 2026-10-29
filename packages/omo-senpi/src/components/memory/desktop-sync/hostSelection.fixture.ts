@@ -10,7 +10,7 @@ import {
 
 // An engine process in miniature, wired the way senpi provideSessionWorkerData hands each session Worker its value:
 // the main thread selects once; each Worker gets workerData.extensionData[name] plus its transfers; dispose on exit.
-// Usage: bun hostSelection.fixture.ts <desktop|declared-null|unparseable|cli|no-port|throwing|malformed|late|hang>
+// Usage: bun hostSelection.fixture.ts <desktop|declared-null|unparseable|cli|no-port|throwing|malformed|late|hang|in-process>
 
 type Report = {
   readonly source: string
@@ -70,9 +70,9 @@ async function inMain(scenario: string): Promise<void> {
   const attachGate = new Promise<void>(resolve => { releaseAttach = resolve })
   const host = scenario === "no-port" || scenario === "malformed" ? undefined : selectHostMemorySyncSource({
     inherited: {
-      declared: name => { if (scenario === "throwing") throw new Error("stub failure"); return name === "memory-sync" && ["desktop", "declared-null", "late", "hang"].includes(scenario) },
+      declared: name => { if (scenario === "throwing") throw new Error("stub failure"); return name === "memory-sync" && ["desktop", "declared-null", "late", "hang", "in-process"].includes(scenario) },
       tablePresent: () => scenario !== "cli",
-      take: name => { claims += 1; return ["desktop", "late", "hang"].includes(scenario) && name === "memory-sync" ? new PassThrough() : undefined },
+      take: name => { claims += 1; return ["desktop", "late", "hang", "in-process"].includes(scenario) && name === "memory-sync" ? new PassThrough() : undefined },
     },
     ...(scenario === "hang" ? { attachDeadlineMs: 500 } : {}),
     attach: async (stream): Promise<DesktopSyncAttachment> => {
@@ -81,6 +81,14 @@ async function inMain(scenario: string): Promise<void> {
       return stream === undefined ? { kind: "unavailable", reason: "private_channel_unavailable" } : { kind: "connected", channel }
     },
   })
+  if (scenario === "in-process" && host !== undefined) {
+    // An in-process host: memory registers on the main thread itself and reads the host selection directly.
+    let cliBuilt = false
+    const source = accountSourceFromSelection({ selection: () => host.selection, cli: () => { cliBuilt = true; return async () => null }, openAccount: async () => ({ kind: "desktop", isCurrent: async () => true }) as unknown as DesktopSyncAccount })
+    const account = await source()
+    process.stdout.write(`${JSON.stringify({ scenario, claims, ends, reports: [{ source: account?.kind ?? "null", cliBuilt }] })}\n`)
+    process.exit(0)
+  }
   const workers: Worker[] = []
   const spawn = () => {
     let entry: { value: unknown; transfer: readonly MessagePort[]; dispose(): void } | undefined

@@ -111,6 +111,12 @@ describe("session Workers in a shared-worker engine", () => {
     }, 30_000)
   }
 
+  test("an in-process host: the main-thread registration reads the one selection and gets the desktop source", async () => {
+    const result = await engine("in-process")
+    expect(result.claims).toBe(1)
+    expect(result.reports).toEqual([{ source: "desktop", cliBuilt: false }])
+  }, 30_000)
+
   test("an undeclared launch: Workers get the CLI selection and nothing is claimed", async () => {
     const result = await engine("cli")
     expect(result.claims).toBe(0)
@@ -118,7 +124,7 @@ describe("session Workers in a shared-worker engine", () => {
   }, 30_000)
 
   const failClosed: readonly [string, string][] = [
-    ["no-port", "unavailable:port_absent"],
+    ["no-port", "unavailable:host_bootstrap_absent"],
     ["throwing", "unavailable:selection_failed"],
     ["malformed", "unavailable:selection_failed"],
     ["hang", "unavailable:private_channel_unavailable"],
