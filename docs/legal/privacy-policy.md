@@ -17,7 +17,7 @@ Use the private form or email, never a public issue, for anything that contains 
 
 ## 2. What telemetry sends
 
-While OmO runs, it sends product telemetry to PostHog (section 5). OmO Native events (the CLI and Desktop) are a fixed set of fields, and each field is a boolean, a number, a size bucket, or a value from a published list. The once-a-day activity events described under "About your computer" also carry a few strings exactly as your system reports them (CPU model, terminal application, shell program name, locale). The complete, machine-checked list of events and fields is in the [telemetry reference](../reference/senpi-telemetry.md); the Codex adapter's single event is in the [Codex telemetry reference](../reference/codex-telemetry.md). If this notice and those lists ever differ, the lists are authoritative and this notice is wrong.
+While OmO runs, it sends product telemetry to PostHog (section 5). OmO Native events (the CLI and Desktop) are a fixed set of fields, and each field is a boolean, a number, a size bucket, or a value from a published list. The once-a-day activity events described under "About your computer" also carry a few strings as your system reports them (CPU model, terminal application, locale) and the name of your login shell program, cut from its path. The complete, machine-checked list of events and fields is in the [telemetry reference](../reference/senpi-telemetry.md); the Codex adapter's single event is in the [Codex telemetry reference](../reference/codex-telemetry.md). If this notice and those lists ever differ, the lists are authoritative and this notice is wrong.
 
 ### Identifiers
 
