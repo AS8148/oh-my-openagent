@@ -13,6 +13,11 @@ function withResolvedCommand(command: string[], binaryPath: string): string[] {
 	return [binaryPath, ...command.slice(1)];
 }
 
+function usesBuiltinCommand(id: string, command: string[]): boolean {
+	const builtin = BUILTIN_SERVERS[id]?.command;
+	return builtin !== undefined && builtin.length === command.length && builtin.every((part, index) => part === command[index]);
+}
+
 export function findServerForExtension(ext: string): ServerLookupResult {
 	const servers = getMergedServers();
 	const workingDirectory = contextCwd();
@@ -23,7 +28,9 @@ export function findServerForExtension(ext: string): ServerLookupResult {
 		if (binaryPath !== null) {
 			const resolvedServer = {
 				id: server.id,
-				command: withHostJsRuntime(server.id, withResolvedCommand(server.command, binaryPath)),
+				command: usesBuiltinCommand(server.id, server.command)
+					? withHostJsRuntime(server.id, withResolvedCommand(server.command, binaryPath))
+					: withResolvedCommand(server.command, binaryPath),
 				extensions: server.extensions,
 				priority: server.priority,
 			};

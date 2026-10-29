@@ -83,7 +83,49 @@ describe("withHostJsRuntime", () => {
 	});
 });
 
+describe("withHostJsRuntime fallbacks", () => {
+	test("#given a bare command that is not on PATH #then the command is unchanged instead of throwing", () => {
+		expect(withHostJsRuntime("typescript", ["node", "/x/cli.mjs", "--stdio"], { bunExecPath: BUN })).toEqual([
+			"node",
+			"/x/cli.mjs",
+			"--stdio",
+		]);
+	});
+
+	test("#given a resolved path that no longer exists #then the command is unchanged instead of throwing", () => {
+		const missing = join(makeTempRoot(), "gone", "typescript-language-server");
+
+		expect(withHostJsRuntime("typescript", [missing, "--stdio"], { bunExecPath: BUN })).toEqual([missing, "--stdio"]);
+	});
+});
+
 describe("findServerForExtension on a Bun host", () => {
+	test("#given a user typescript entry with its own command #then the command is not moved to Bun", () => {
+		const root = makeTempRoot();
+		const { bin } = installTypescriptLanguageServer(root);
+		process.env["PATH"] = join(root, "definitely-empty");
+		mkdirSync(join(root, "home-config"), { recursive: true });
+		writeFileSync(
+			join(root, "home-config", "lsp-client.json"),
+			JSON.stringify({ lsp: { typescript: { command: [bin, "--stdio"], extensions: [".ts"] } } }),
+		);
+
+		const result = runWithRequestContext(
+			{
+				cwd: root,
+				projectConfigPaths: [join(root, ".codex", "lsp-client.json")],
+				userConfigPath: join(root, "home-config", "lsp-client.json"),
+				installDecisionsPath: join(root, "home-config", "lsp-install-decisions.json"),
+				capabilities: { installDecisionTool: false },
+			},
+			() => findServerForExtension(".ts"),
+		);
+
+		expect(result.status).toBe("found");
+		if (result.status !== "found") throw new Error("expected a found server");
+		expect(result.server.command).toEqual([bin, "--stdio"]);
+	});
+
 	test("#given a repo-local typescript-language-server #when a .ts file is looked up #then the server is spawned by this Bun", () => {
 		const root = makeTempRoot();
 		const { cli } = installTypescriptLanguageServer(root);

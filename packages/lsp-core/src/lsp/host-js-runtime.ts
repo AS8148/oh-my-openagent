@@ -31,9 +31,18 @@ export function withHostJsRuntime(
 }
 
 function nodeScriptPath(binary: string): string | undefined {
-	const real = realpathSync(binary);
+	let real: string;
+	try {
+		real = realpathSync(binary);
+	} catch {
+		return undefined;
+	}
 	if (JS_ENTRY.test(real)) return real;
-	return NODE_SHEBANG.test(readHead(real)) ? real : undefined;
+	try {
+		return NODE_SHEBANG.test(readHead(real)) ? real : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function readHead(path: string): string {
