@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { createAccountHttp, createPairingHttp } from "@oh-my-opencode/memory-core/sync-engine"
+import { createAccountHttp, createPairingHttp } from "@oh-my-opencode/memory-core/sync-account-ports"
 import type { DeviceKeyring } from "@oh-my-opencode/memory-core/keyring"
 import type { DesktopSyncDescriptor, DesktopSyncOperation, SyncOperationAuthority } from "./account-source"
 

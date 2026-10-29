@@ -16,7 +16,7 @@ import {
   SignInError,
 } from "@oh-my-opencode/omo-opencode/service-auth"
 import { randomUUID } from "node:crypto"
-import { deviceKeyringFromMaterial } from "@oh-my-opencode/memory-core/sync-engine"
+import { deviceKeyringFromMaterial } from "@oh-my-opencode/memory-core/sync-account-ports"
 import { cliAccountOperation, scopedCliKeyring } from "./cli-account-operation"
 
 import type { DeviceKeyMaterial, DeviceKeyring } from "@oh-my-opencode/memory-core/keyring"
