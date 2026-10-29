@@ -123,7 +123,7 @@ export class SyncEngine {
         this.announceIfChanged(shownBefore)
         for (const w of waiters) w.resolve(report)
         if (this.running === run) this.running = null
-        if (this.rerun && this.eventHead > this.appliedMirror) {
+        if (this.rerun) {
           this.rerun = false
           this.request()
         }
