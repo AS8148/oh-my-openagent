@@ -32,7 +32,7 @@ const chainRow = ({ seq, base_seq, kind, account, epoch, author, digest, link, k
   seq, base_seq, kind, account, epoch, author, digest, link, keyring_link, record_sig,
 })
 
-export function startChainWireServer(account: string, chain: SyncEntry[], options: { readonly requireConsent?: boolean; readonly onRequest?: (req: Request) => void } = {}): ChainWireServer {
+export function startChainWireServer(account: string, chain: SyncEntry[], options: { readonly requireConsent?: boolean } = {}): ChainWireServer {
   const authors = new Map<string, SyncAuthor>()
   const devices = new Map<string, string>()
   const deviceConsent = new Map<string, boolean>()
@@ -45,10 +45,12 @@ export function startChainWireServer(account: string, chain: SyncEntry[], option
   const hooks: { tamperReveal: ((reveal: Record<string, unknown>) => Record<string, unknown>) | null } = { tamperReveal: null }
   let onWrite: (() => void) | null = null
   const server = Bun.serve({
+    // Bound to the exact address the client dials: on a wildcard bind another process may bind
+    // 127.0.0.1 on the same port and answer this fixture's requests.
+    hostname: "127.0.0.1",
     port: 0,
     idleTimeout: 0,
     async fetch(req) {
-      options.onRequest?.(req)
       const url = new URL(req.url)
       const author = authors.get((req.headers.get("authorization") ?? "").replace(/^Bearer /, ""))
       if (author === undefined) return refusal(401, "unauthorized")
@@ -154,7 +156,6 @@ export function startChainWireServer(account: string, chain: SyncEntry[], option
         onWrite?.()
         return Response.json(entry)
       }
-      console.error("WIRE_UNEXPECTED_ROUTE", req.method, url.href)
       return refusal(404, "not_found")
     },
   })

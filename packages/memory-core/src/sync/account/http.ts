@@ -67,7 +67,6 @@ export function createAccountHttp(options: AccountHttpOptions): AccountHttp {
     )
   const read = async (path: string, operation?: SyncOperationOptions): Promise<unknown> => {
     const response = await send("GET", path, undefined, operation)
-    if (!response.ok) console.error("HTTP_DIAG", options.baseUrl, path, response.status, [...response.headers], await response.clone().text())
     if (!response.ok) throw new AccountHttpError(response.status >= 500 ? "unavailable" : await codeOf(response), response.status)
     return response.json()
   }
