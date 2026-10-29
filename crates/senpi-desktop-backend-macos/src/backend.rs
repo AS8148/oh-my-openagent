@@ -115,6 +115,9 @@ impl Backend for MacosBackend {
         let Target::Window(id) = target else {
             return Ok(None);
         };
+        // A yielded lease can skip post-action restoration. Its old activation
+        // must not authorize restoration during this different request.
+        let _ = self.input.take_last_activated();
         let Some(pid) = self
             .capture
             .windows()?
