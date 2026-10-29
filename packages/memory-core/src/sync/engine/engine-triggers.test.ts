@@ -85,6 +85,52 @@ test("a local commit starts a cycle after a 2 s debounce, once for a burst", asy
   expect([await b.read("x.md"), await b.read("y.md")]).toEqual(["x\n", "y\n"])
 }, GIT_TEST_TIMEOUT)
 
+test.each([false, true])("a local commit queued during a successful cycle reruns unless stopped=%s (omo #11057)", async (stop) => {
+  // given: hold a successful push after its capture, with no stream or poll subscribed
+  const { server, a, b } = await started()
+  const entered = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  server.beforeNextAppend = async () => {
+    entered.resolve()
+    await release.promise
+  }
+  await a.write("first.md", "first\n")
+  const first = a.engine.runCycle()
+  let stopped: Promise<void> | null = null
+  try {
+    await entered.promise
+
+    // when: another local commit requests a cycle while the first push is in flight
+    await a.write("later.md", "later\n")
+    await a.repo.commit(["later.md"], "local edit during sync")
+    a.engine.notifyLocalCommit()
+    a.clock.advance(LOCAL_DEBOUNCE_MS)
+    if (stop) stopped = a.engine.stop()
+  } finally {
+    release.resolve()
+  }
+  expect((await first).pushed).toBe(true)
+
+  // then: the queued cycle pushes the later commit without another trigger, unless stopped
+  if (stopped !== null) {
+    await stopped
+    expect(a.engine.cyclesRun).toBe(1)
+    expect(server.head).toBe(1)
+  } else {
+    const completion = Promise.withResolvers<void>()
+    const deadline = setTimeout(() => completion.reject(new Error("queued successful cycle did not rerun")), GIT_TEST_TIMEOUT)
+    try {
+      await Promise.race([a.engine.nextCycle(), completion.promise])
+    } finally {
+      clearTimeout(deadline)
+    }
+    expect(a.engine.cyclesRun).toBe(2)
+    expect(server.head).toBe(2)
+    await b.engine.runCycle()
+    expect(await b.read("later.md")).toBe("later\n")
+  }
+}, GIT_TEST_TIMEOUT * 2)
+
 test("a cycle that fails settles nextCycle() with that failure, and a request queued while it ran still gets its cycle (omo #10637)", async () => {
   const { b } = await started()
   await b.restart()
