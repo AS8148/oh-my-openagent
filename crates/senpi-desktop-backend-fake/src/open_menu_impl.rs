@@ -172,7 +172,7 @@ impl FakeBackend {
         )
     }
 
-    fn presses_menu_control(&self, ev: &PointerEvent) -> bool {
+    pub(crate) fn presses_menu_control(&self, ev: &PointerEvent) -> bool {
         let (x, y) = match ev {
             PointerEvent::Click {
                 x,

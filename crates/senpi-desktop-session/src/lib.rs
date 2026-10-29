@@ -32,6 +32,8 @@ mod worker_menus;
 #[cfg(test)]
 mod worker_menu_background_tests;
 #[cfg(test)]
+mod worker_menu_hold_tests;
+#[cfg(test)]
 mod worker_open_menu_tests;
 
 pub use grant::ControlSlot;

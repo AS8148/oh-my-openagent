@@ -1,6 +1,6 @@
 //! Bounded holds keep the selected native route through their cleanup.
 
-use senpi_desktop_core::backend::{DeliveryMode, Modifiers, MouseButton};
+use senpi_desktop_core::backend::{DeliveryMode, Modifiers};
 use senpi_desktop_core::error::CoreResult;
 use senpi_desktop_core::holds::{with_held, HoldControl, MouseHold};
 use senpi_desktop_core::keys::KeyName;
@@ -59,8 +59,8 @@ impl MacInput {
                 let (pid, wid) = window_identity(&window)?;
                 match mode {
                     DeliveryMode::Background => self.background(|this| {
-                        if let Some(hold) = mouse.filter(|hold| hold.button == MouseButton::Left) {
-                            if this.hold_as_menu_press(&window, (hold.x, hold.y), capture, check_stop)?.is_some() {
+                        if let Some(hold) = mouse {
+                            if this.hold_as_menu_press(&window, hold, capture, check_stop)?.is_some() {
                                 return Ok(());
                             }
                         }

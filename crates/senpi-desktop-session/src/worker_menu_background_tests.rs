@@ -14,7 +14,7 @@ use crate::test_support::{harness, Harness};
 
 /// Window `101` with a context menu, a plain Save button and a Kind popup
 /// button; `focused` says whether it is the user's front window.
-fn fixture(focused: bool) -> Value {
+pub(super) fn fixture(focused: bool) -> Value {
     json!({
         "windows": [
             {"id": "101", "title": "Fonts", "app": "Font Book", "pid": 7, "x": 100, "y": 120,
@@ -74,7 +74,7 @@ fn ref_titled(harness: &mut Harness, title: &str) -> String {
     }
 }
 
-fn menu_ops(harness: &Harness) -> Vec<SinkOp> {
+pub(super) fn menu_ops(harness: &Harness) -> Vec<SinkOp> {
     harness
         .sink
         .ops()

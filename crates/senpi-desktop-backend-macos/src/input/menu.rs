@@ -7,8 +7,9 @@
 //! the one press that opens the menu.
 
 use core_graphics::event::CGEventFlags;
-use senpi_desktop_core::backend::{DeliveryMode, MenuChoice, Modifiers, MouseButton, PointerEvent};
+use senpi_desktop_core::backend::{DeliveryMode, MenuChoice, MouseButton, PointerEvent};
 use senpi_desktop_core::error::{CoreResult, DesktopError};
+use senpi_desktop_core::holds::MouseHold;
 use senpi_desktop_core::keys::KeyName;
 use senpi_desktop_core::menus::open_menu::{
     guard, menu_watch, settle_with, Press, PressChecks, Watch,
@@ -190,26 +191,25 @@ impl MacInput {
         }
     }
 
-    /// A background mouse hold that starts on a menu button or popup button:
+    /// A background mouse hold that would open a menu (a secondary button, a
+    /// Control-left press, or a left press on a menu button or popup button):
     /// the menu would open on the press and take the user's keyboard for the
-    /// whole hold, so the hold is delivered as one press whose menu is read
-    /// and closed (D1). `Some` when it was.
+    /// whole hold, so the hold is delivered as the one press that opens it,
+    /// with the hold's modifiers, and the menu is read and closed (D1).
+    /// `Some` when it was.
     pub(super) fn hold_as_menu_press(
         &mut self,
         window: &DesktopWindow,
-        at: (f64, f64),
+        hold: &MouseHold<'_>,
         capture: &MacCapture,
         check_stop: &dyn Fn() -> CoreResult<()>,
     ) -> CoreResult<Option<()>> {
         let (pid, _) = window_identity(window)?;
-        let press = PointerEvent::Click {
-            x: at.0,
-            y: at.1,
-            button: MouseButton::Left,
-            count: 1,
-            modifiers: Modifiers::default(),
+        let Some(press) = hold.menu_press() else {
+            return Ok(None);
         };
-        if front_app::current_front_pid() == Some(pid) || !on_menu_control(&press, pid) {
+        let background = front_app::current_front_pid() != Some(pid);
+        if menu_watch(&press, background, false, || on_menu_control(&press, pid)).is_none() {
             return Ok(None);
         }
         let choice = MenuChoice {
