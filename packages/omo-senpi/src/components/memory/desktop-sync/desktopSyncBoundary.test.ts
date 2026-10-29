@@ -48,6 +48,7 @@ describe("the desktop engine pin boundary", () => {
     ["a restarted main's incarnation", { ...active, incarnation: "incarnation-2" }],
     ["another device", { ...active, serviceDeviceId: "device-2" }],
     ["rotated signing key", { ...active, publicKeys: { signing: "signing-2", sealing: "sealing-1" } }],
+    ["rotated sealing key", { ...active, publicKeys: { signing: "signing-1", sealing: "sealing-2" } }],
     ["an unknown field", { ...active, token: "x" }],
   ]
   for (const [name, record] of refused) {
