@@ -196,3 +196,55 @@ test("#given a cached key #when the collector rejects it with 401 bad_key #then 
     expect(await createSenpiOtlpTransport(input, message)).toBeNull()
   } finally { await f.close() }
 })
+
+test("#given concurrent first starts #when no key is cached #then exactly one registration runs", async () => {
+  const f = fixture(async () => { await Bun.sleep(20); return Response.json({ key }) })
+  try {
+    const input = { env: f.env, consent: () => true }
+    const transports = await Promise.all([1, 2, 3].map(() => createSenpiOtlpTransport(input, message)))
+    expect(transports.every(transport => transport !== null)).toBe(true)
+    await Promise.all(transports.map(transport => transport?.shutdown()))
+    expect(f.requests.filter(row => row.path === "/v1/register")).toHaveLength(1)
+  } finally { await f.close() }
+})
+
+test("#given an explicitly empty env key #when OTLP starts #then it stays off and never registers", async () => {
+  const f = fixture()
+  try {
+    const transport = await createSenpiOtlpTransport({ env: { ...f.env, OMO_TELEMETRY_INGEST_KEY: " " }, consent: () => true }, message)
+    expect(transport).toBeNull()
+    expect(f.requests).toHaveLength(0)
+  } finally { await f.close() }
+})
+
+test("#given a huge Retry-After #when registration is throttled #then the backoff is capped at 24 hours", async () => {
+  const f = fixture(() => new Response(null, { status: 429, headers: { "retry-after": String(365 * 24 * 3600) } }))
+  try {
+    const before = Date.now()
+    expect(await createSenpiOtlpTransport({ env: f.env, consent: () => true }, message)).toBeNull()
+    expect(f.read().notBefore).toBeLessThanOrEqual(before + 24 * 3600 * 1000 + 5_000)
+  } finally { await f.close() }
+})
+
+test("#given a path-prefixed endpoint #when registering #then register uses the same base path as logs", async () => {
+  const f = fixture()
+  try {
+    const env = { ...f.env, OMO_TELEMETRY_ENDPOINT: `${f.origin}/prefix` }
+    await (await createSenpiOtlpTransport({ env, consent: () => true }, message))?.shutdown()
+    expect(f.requests[0]?.path).toBe("/prefix/v1/register")
+  } finally { await f.close() }
+})
+
+test("#given the collector rejects the key with 401 #when more batches follow #then later batches are not sent", async () => {
+  const f = fixture(undefined, 401)
+  f.seed({ endpoint: f.origin, key })
+  try {
+    const transport = await createSenpiOtlpTransport({ env: f.env, consent: () => true }, message)
+    transport?.capture(message)
+    await transport?.flush?.()
+    transport?.capture(message)
+    await transport?.flush?.()
+    await transport?.shutdown()
+    expect(f.requests.filter(row => row.path === "/v1/logs")).toHaveLength(1)
+  } finally { await f.close() }
+})

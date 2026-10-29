@@ -6,8 +6,10 @@ import type { TelemetryEnv } from "@oh-my-opencode/telemetry-core"
 
 // A settled refusal, including invalidation, lasts until process exit. Parallel starts share one request.
 const keys = new Map<string, { readonly endpoint: string; readonly pending: Promise<string | null> }>()
-const REGISTRATION_TIMEOUT_MS = 250
+// Fits inside the adapter's 500 ms OTLP start budget.
+const REGISTRATION_TIMEOUT_MS = 400
 const DEFAULT_BACKOFF_MS = 60_000
+const MAX_BACKOFF_MS = 24 * 60 * 60 * 1_000
 
 function cachePath(root: string): string {
   return join(root, "omo-senpi", "otlp-ingest-key.json")
@@ -48,7 +50,10 @@ export async function resolveInstallIngestKey(input: {
   const path = cachePath(input.root)
   if (!/^[a-f0-9]{64}$/u.test(input.hash)) return null
   let endpoint: string
-  try { endpoint = new URL(resolveOtlpEndpoint(input.env)).origin } catch { return null }
+  try {
+    const base = new URL(resolveOtlpEndpoint(input.env))
+    endpoint = `${base.origin}${base.pathname.replace(/\/+$/u, "")}`
+  } catch { return null }
   let entry = keys.get(path)
   if (entry === undefined) {
     const pending = (async () => {
@@ -72,7 +77,9 @@ export async function resolveInstallIngestKey(input: {
         const retryAfter = response.headers.get("retry-after")
         const seconds = retryAfter === null || retryAfter.trim() === "" ? NaN : Number(retryAfter)
         const at = Number.isFinite(seconds) ? Date.now() + seconds * 1_000 : Date.parse(retryAfter ?? "")
-        writeCache(path, { endpoint, notBefore: Math.max(Date.now() + DEFAULT_BACKOFF_MS, Number.isFinite(at) ? at : 0) })
+        const now = Date.now()
+        const notBefore = Math.min(now + MAX_BACKOFF_MS, Math.max(now + DEFAULT_BACKOFF_MS, Number.isFinite(at) ? at : 0))
+        writeCache(path, { endpoint, notBefore })
         return null
       }
       if (response.status !== 200) return null

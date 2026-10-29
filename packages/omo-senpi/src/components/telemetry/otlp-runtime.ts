@@ -20,6 +20,8 @@ export async function createSenpiOtlpTransport(
   if (!isOtlpEvent(message.event) || !allowed()) return null
   const spoolRoot = resolveAgentHome({ env: input.env })
   const explicitKey = input.env["OMO_TELEMETRY_INGEST_KEY"]?.trim()
+  // An explicitly empty key is an off switch, as in the desktop sender.
+  if (explicitKey === "") return null
   const ingestKey = explicitKey || await resolveInstallIngestKey({
     root: spoolRoot, env: input.env, hash: message.distinctId, consent: allowed,
   })
@@ -37,13 +39,21 @@ export async function createSenpiOtlpTransport(
     consent: input.consent,
     diagnostics: input.diagnostics,
     source: input.source,
-    ...(explicitKey ? {} : {
-      fetch: async (url: string, init: RequestInit) => {
-        const response = await fetch(url, init)
-        if (response.status === 401) invalidateInstallIngestKey(spoolRoot, ingestKey)
-        return response
-      },
-    }),
+    ...(explicitKey ? {} : (() => {
+      // After a 401 the key is dead for this process: answer later batches locally instead of resending them.
+      let rejected = false
+      return {
+        fetch: async (url: string, init: RequestInit) => {
+          if (rejected) return new Response(null, { status: 401 })
+          const response = await fetch(url, init)
+          if (response.status === 401) {
+            rejected = true
+            invalidateInstallIngestKey(spoolRoot, ingestKey)
+          }
+          return response
+        },
+      }
+    })()),
     project: projectOtlpEvent,
     spans: OTLP_SPANS,
     resource: {

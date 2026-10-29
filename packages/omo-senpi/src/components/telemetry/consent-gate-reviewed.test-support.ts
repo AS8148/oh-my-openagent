@@ -58,14 +58,14 @@ export const REVIEWED_WRITERS: readonly ReviewedWriter[] = [
   },
   {
     file: "otlp-runtime.ts", fn: "createSenpiOtlpTransport",
-    guard: "unless(!isOtlpEvent(message.event) || !allowed()) unless(!ingestKey || !allowed())",
+    guard: 'unless(!isOtlpEvent(message.event) || !allowed()) unless(explicitKey === "") unless(!ingestKey || !allowed())',
     call: 'createOtlpTelemetryTransport({ productEnvPrefix: "OMO_SENPI", ingestKey, spoolRoot, spool)',
     reason: "the core constructor checks every environment opt-out and this same consent callback before loading a sender or creating spool files",
   },
   {
-    file: "otlp-runtime.ts", fn: "createSenpiOtlpTransport>fetch", guard: "",
+    file: "otlp-runtime.ts", fn: "createSenpiOtlpTransport>=>>fetch", guard: "unless(rejected)",
     call: "fetch(url)",
-    reason: "the core sender checks the same consent before every attempt; this wrapper only observes 401 to invalidate an automatic install key",
+    reason: "the core sender checks the same consent before every attempt; this wrapper only observes 401 to invalidate an automatic install key and stops sending after it",
   },
   {
     file: "lazy-posthog.ts", fn: "withOtlpTransport>forward",
