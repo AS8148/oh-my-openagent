@@ -309,3 +309,5 @@ mod stop_tests;
 mod tests;
 #[cfg(test)]
 mod typing_tests;
+#[cfg(test)]
+mod remote_typing_tests;

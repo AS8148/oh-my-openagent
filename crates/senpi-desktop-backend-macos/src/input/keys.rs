@@ -178,6 +178,113 @@ pub(super) fn post_key(
     posted
 }
 
+/// Types layout `keys` (a remote screen's) through `route`, pressing Shift
+/// and Option as modifier KEYS only while a key needs them: a client that
+/// forwards input to another machine sends modifier keys, not event flags.
+/// `before_press` runs before every press, modifier presses included; when
+/// it fails nothing more is pressed. Modifiers still held when a post fails
+/// are released.
+pub(super) fn type_layout_keys(
+    source: &CGEventSource,
+    held: &mut Held,
+    keys: &[super::remote::TypedKey<'_>],
+    gap: Duration,
+    route: KeyRoute,
+    before_press: &mut dyn FnMut() -> CoreResult<()>,
+    delivered: &mut dyn FnMut(),
+) -> CoreResult<()> {
+    let mut modifiers = Modifiers::default();
+    let result = (|| {
+        for key in keys {
+            let wanted = Modifiers { shift: key.stroke.shift, alt: key.stroke.option, ..Modifiers::default() };
+            for (code, held_now, want) in [
+                (super::remote::SHIFT_CODE, modifiers.shift, wanted.shift),
+                (super::remote::OPTION_CODE, modifiers.alt, wanted.alt),
+            ] {
+                if held_now == want {
+                    continue;
+                }
+                if want {
+                    before_press()?;
+                }
+                let mut next = modifiers;
+                if code == super::remote::SHIFT_CODE {
+                    next.shift = want;
+                } else {
+                    next.alt = want;
+                }
+                post_key(source, held, code, None, want, super::cgevent::modifier_flags(next), route)?;
+                modifiers = next;
+                thread::sleep(gap);
+            }
+            before_press()?;
+            let flags = super::cgevent::modifier_flags(modifiers);
+            post_key(source, held, key.stroke.code, None, true, flags, route)?;
+            thread::sleep(gap);
+            post_key(source, held, key.stroke.code, None, false, flags, route)?;
+            thread::sleep(gap);
+            delivered();
+        }
+        Ok(())
+    })();
+    // Release in reverse, even after a failure; the first error wins.
+    let mut release = Ok(());
+    for (code, held_now) in [(super::remote::OPTION_CODE, modifiers.alt), (super::remote::SHIFT_CODE, modifiers.shift)] {
+        if held_now {
+            if code == super::remote::SHIFT_CODE {
+                modifiers.shift = false;
+            } else {
+                modifiers.alt = false;
+            }
+            let posted = post_key(source, held, code, None, false, super::cgevent::modifier_flags(modifiers), route);
+            if release.is_ok() {
+                release = posted;
+            }
+        }
+    }
+    result.and(release)
+}
+
+/// Posts bare key `transitions` `(code, down)` at the HID tap with no flag or
+/// text override, so CoreGraphics derives modifier state from the
+/// transitions exactly as for a hardware keyboard. `before_press` runs before
+/// every press; a release always goes out so held keys do not leak.
+pub(super) fn post_bare_keys(
+    source: &CGEventSource,
+    held: &mut Held,
+    transitions: &[(u16, bool)],
+    gap: Duration,
+    before_press: &mut dyn FnMut() -> CoreResult<()>,
+    delivered: &mut dyn FnMut(),
+) -> CoreResult<()> {
+    let is_modifier = |code: u16| code == super::remote::SHIFT_CODE || code == super::remote::OPTION_CODE;
+    let mut result = Ok(());
+    for &(code, down) in transitions {
+        if down {
+            if result.is_err() {
+                // After a failed press nothing more is pressed; releases still go out.
+                continue;
+            }
+            if let Err(error) = before_press() {
+                result = Err(error);
+                continue;
+            }
+            check_press()?;
+            held.key_down(HeldKey { route: KeyRoute::Global, code, text: None });
+        }
+        let event = keyboard_event(source, code, down)?;
+        event.post(CGEventTapLocation::HID);
+        if !down {
+            held.key_up(KeyRoute::Global, code);
+            if !is_modifier(code) && result.is_ok() {
+                delivered();
+            }
+        }
+        thread::sleep(gap);
+    }
+    result
+}
+
 /// Types `text` one character at a time through `route`.
 pub(super) fn type_text(
     source: &CGEventSource,
