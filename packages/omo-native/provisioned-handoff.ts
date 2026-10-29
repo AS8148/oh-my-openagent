@@ -1,5 +1,6 @@
 import { dirname } from "node:path"
 import { propagateResult, runChild } from "./bin/lib/child-process.js"
+import { PRIVATE_FDS_ENV, privateFdHandoffFor } from "./bin/lib/private-fd-table.js"
 import { isProvisionedExecutable } from "./compile-runtime"
 
 // Set on the child a launch hands off to, naming the provisioned executable the parent spawned. The
@@ -41,7 +42,10 @@ export async function reexecProvisionedRuntime(expected: string, options: Reexec
   const run = options.run ?? runChild
   const propagate = options.propagate ?? propagateResult
   const execve = options.execve === undefined ? process.execve : options.execve
-  if ((options.platform ?? process.platform) !== "win32" && typeof execve === "function") {
+  const platform = options.platform ?? process.platform
+  // execve would drop the launch's private descriptors (senpi#4749), so that launch takes the child path.
+  const handoff = privateFdHandoffFor(env, env[PRIVATE_FDS_ENV], platform)
+  if (handoff === undefined && platform !== "win32" && typeof execve === "function") {
     try {
       execve(expected, [expected, ...argv], env)
       return
@@ -49,7 +53,7 @@ export async function reexecProvisionedRuntime(expected: string, options: Reexec
       // A provisioned binary that cannot replace this image still uses the async fallback.
     }
   }
-  const result = await run(expected, argv, { env })
+  const result = await run(expected, argv, handoff ?? { env })
   propagate(result)
 }
 
