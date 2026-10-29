@@ -1493,8 +1493,6 @@
       "packages/senpi-desktop-tool/src/permission.ts": ["computerTier"],
       // pre-existing at origin dev 4686e425b5: unused export(s) defaultStopHotkey, COMPUTER_PERMISSION, computerTier, ComputerSettingsError, ComputerSettingsSchema, computerSkillMarkdown
       "packages/senpi-desktop-tool/src/registration.ts": ["defaultStopHotkey", "COMPUTER_PERMISSION", "computerTier", "ComputerSettingsError", "ComputerSettingsSchema", "computerSkillMarkdown"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) usesCoordinateSafeImageSizing
-      "packages/senpi-desktop-tool/src/session.ts": ["usesCoordinateSafeImageSizing"],
       // pre-existing at origin dev 4686e425b5: unused export(s) ComputerSettingsSchema
       "packages/senpi-desktop-tool/src/settings.ts": ["ComputerSettingsSchema"],
       // pre-existing at origin dev 4686e425b5: unused export(s) computerSkillMarkdown
