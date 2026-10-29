@@ -15,7 +15,6 @@ export const SISYPHUS_JUNIOR_DEFAULTS = {
   temperature: 0.1,
 } as const
 
-export const getSisyphusJuniorPromptSource = getNativePromptSource
 export type SisyphusJuniorPromptSource = ReturnType<typeof getNativePromptSource>
 
 export function buildSisyphusJuniorPrompt(model: string | undefined, useTaskSystem: boolean, promptAppend?: string): string {

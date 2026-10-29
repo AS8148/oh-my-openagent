@@ -569,38 +569,8 @@
       "packages/omo-opencode/src/agents/momus.ts": ["MOMUS_SYSTEM_PROMPT"],
       // pre-existing at origin dev 4686e425b5: unused export(s) PROMETHEUS_SYSTEM_PROMPT
       "packages/omo-opencode/src/agents/prometheus/index.ts": ["PROMETHEUS_SYSTEM_PROMPT"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) PROMETHEUS_SYSTEM_PROMPT
-      "packages/omo-opencode/src/agents/prometheus/system-prompt.ts": ["PROMETHEUS_SYSTEM_PROMPT"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) buildDynamicSisyphusPrompt
-      "packages/omo-opencode/src/agents/sisyphus-dynamic-prompt.ts": ["buildDynamicSisyphusPrompt"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) buildDefaultSisyphusJuniorPrompt, buildKimiK26SisyphusJuniorPrompt, buildKimiK27SisyphusJuniorPrompt, buildKimiK3SisyphusJuniorPrompt, buildKimiK31SisyphusJuniorPrompt, buildGptSisyphusJuniorPrompt, buildGpt54SisyphusJuniorPrompt, buildGpt55SisyphusJuniorPrompt, buildGeminiSisyphusJuniorPrompt, buildGlm52SisyphusJuniorPrompt
-      "packages/omo-opencode/src/agents/sisyphus-junior/index.ts": ["buildDefaultSisyphusJuniorPrompt", "buildKimiK26SisyphusJuniorPrompt", "buildKimiK27SisyphusJuniorPrompt", "buildKimiK3SisyphusJuniorPrompt", "buildKimiK31SisyphusJuniorPrompt", "buildGptSisyphusJuniorPrompt", "buildGpt54SisyphusJuniorPrompt", "buildGpt55SisyphusJuniorPrompt", "buildGeminiSisyphusJuniorPrompt", "buildGlm52SisyphusJuniorPrompt"],
       // pre-existing at origin dev 4686e425b5: unused export(s) SISYPHUS_PROMPT_METADATA
       "packages/omo-opencode/src/agents/sisyphus.ts": ["SISYPHUS_PROMPT_METADATA"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/claude-fable-5.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/claude-opus-4-7.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/claude-opus-4-8.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/claude-opus-5.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) buildDefaultSisyphusPrompt, categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/default.ts": ["buildDefaultSisyphusPrompt", "categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/glm-5-2.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/gpt-5-4.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/grok-4.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/kimi-k2-6.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/kimi-k2-7.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/kimi-k3-1.ts": ["categorizeTools"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) categorizeTools
-      "packages/omo-opencode/src/agents/sisyphus/kimi-k3.ts": ["categorizeTools"],
       // pre-existing at origin dev 4686e425b5: unused export(s) isClaudeFableOrMythosModel, isClaudeOpus46Model, isKimiK27Model, isKimiK28Model
       "packages/omo-opencode/src/agents/types.ts": ["isClaudeFableOrMythosModel", "isClaudeOpus46Model", "isKimiK27Model", "isKimiK28Model"],
       // pre-existing at origin dev 4686e425b5: unused export(s) ACCOUNT_KEYS_RECORD_NAME, runAccountKeysCommand
@@ -821,8 +791,8 @@
       "packages/omo-opencode/src/hooks/model-fallback/hook.ts": ["getSessionFallbackChain", "getNextFallback", "hasPendingModelFallback", "getFallbackState"],
       // pre-existing at origin dev 4686e425b5: unused export(s) snoozedState, decidedState
       "packages/omo-opencode/src/hooks/native-edition-nudge/decide.ts": ["snoozedState", "decidedState"],
-      // pre-existing at origin dev 4686e425b5: unused export(s) detectNativeEdition, snoozeNativeEditionNudge
-      "packages/omo-opencode/src/hooks/native-edition-nudge/hook.ts": ["detectNativeEdition", "snoozeNativeEditionNudge"],
+      // pre-existing at origin dev 4686e425b5: unused export(s) detectNativeEdition
+      "packages/omo-opencode/src/hooks/native-edition-nudge/hook.ts": ["detectNativeEdition"],
       // pre-existing at origin dev 4686e425b5: unused export(s) decideNativeEditionNudge, detectNativeEdition, NATIVE_NUDGE_TOAST_MESSAGE, NATIVE_NUDGE_TOAST_TITLE, NUDGE_STATE_FILE, parseNudgeState
       "packages/omo-opencode/src/hooks/native-edition-nudge/index.ts": ["decideNativeEditionNudge", "detectNativeEdition", "NATIVE_NUDGE_TOAST_MESSAGE", "NATIVE_NUDGE_TOAST_TITLE", "NUDGE_STATE_FILE", "parseNudgeState"],
       // pre-existing at origin dev 4686e425b5: unused export(s) HephaestusRequiresGptError
@@ -3589,8 +3559,6 @@
         "src/__tests__/perf/fixtures/in-tree/src/lib/file-14.ts",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "src/__tests__/perf/fixtures/in-tree/src/lib/file-15.ts",
-        // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
-        "src/agents/sisyphus/index.ts",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs
         "src/cli/install-codex/codex-cache-bins.ts",
         // pre-existing at origin dev 4686e425b5: a file nothing imports or runs

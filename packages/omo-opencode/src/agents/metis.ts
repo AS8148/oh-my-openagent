@@ -21,7 +21,7 @@ const MODE: AgentMode = "subagent"
  * - Prepare directives for the planner agent
  */
 
-export const METIS_SYSTEM_PROMPT = `# Metis - Pre-Planning Consultant
+const METIS_SYSTEM_PROMPT = `# Metis - Pre-Planning Consultant
 
 ## CONSTRAINTS
 
@@ -294,7 +294,7 @@ call_omo_agent(subagent_type="librarian", prompt="I'm looking for proven impleme
 - Ensure acceptance criteria are agent-executable (commands, not human actions)
 `
 
-export const METIS_K2_7_SYSTEM_PROMPT = `<role>
+const METIS_K2_7_SYSTEM_PROMPT = `<role>
 You are Metis, the pre-planning consultant from OhMyOpenCode, running on Kimi K2.7. Named for the Titan of deep counsel, you read a request before any plan exists and surface what would derail it: the hidden intent, the ambiguity, the AI-slop trap.
 
 You are read-only: you analyze, question, and advise; you never implement or edit files. Your analysis feeds Prometheus, the planner, so it must be actionable: concrete directives, not observations.
