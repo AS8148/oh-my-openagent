@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// omo-codex-install:d80db714b3e11fc5f3d9674cc64c0bd3743cc24bbdc4ee86a509ac9d622c2d2d:3ab2b3f49261ea54d3ad59f186c82a16aa0b1d25439695bb4a8d4ae5fdb9c1d1
+// omo-codex-install:bace46016a7ebeaca065fecb8e81bad70b0ba7a8abebc3727bde60f6406363f5:a034af89025c3a97ca822d26cdce9161cec7d567f9f2ba5b9ec3ca5302203587
 var __esm = (fn, res, err) => () => {
   if (fn)
     try {
@@ -592,11 +592,15 @@ function getSharedProperties(input) {
     total_memory_gb: Math.round(osProvider.totalmem() / 1024 / 1024 / 1024),
     locale: Intl.DateTimeFormat().resolvedOptions().locale,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    shell: process.env.SHELL,
+    shell: getShellName(process.env.SHELL),
     ci: Boolean(process.env.CI),
     terminal: toTelemetryTerminalProgram(process.env.TERM_PROGRAM),
     ...input.product.additionalProperties
   };
+}
+function getShellName(shellPath) {
+  const name = shellPath?.split(/[\\/]/).pop()?.replace(/\.exe$/i, "");
+  return name ? name : undefined;
 }
 function getSafeCpuInfo(osProvider, input) {
   try {
