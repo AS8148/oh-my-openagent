@@ -39,7 +39,7 @@ describe("endHostSessionChild confirms an end once and the cancel reuses it", ()
 
     // then
     expect(outcome.kind).toBe("cancelled")
-    expect(harness.fixture.daemon.closed).toEqual([harness.record.host_session?.session_path])
+    expect(harness.fixture.daemon.closed).toEqual([harness.record.host_session?.session_path ?? "missing session path"])
     expect(eventsOf(harness, "host_session_closed").map((event) => (event.payload as { via: string }).via)).toEqual(["close_session"])
     expect(harness.view.presentCalls).toBe(0)
   })

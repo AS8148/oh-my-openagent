@@ -11,7 +11,7 @@ import { seedRecord, tempStore } from "./lifecycle-fakes"
 
 export type RecordedEvent = { readonly taskId: string; readonly type: string; readonly payload: unknown }
 
-export class FakeGenerationView implements HostGenerationView {
+class FakeGenerationView implements HostGenerationView {
   present = true
   parked = false
   presentCalls = 0
