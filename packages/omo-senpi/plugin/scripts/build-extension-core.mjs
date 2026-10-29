@@ -138,6 +138,8 @@ const externalSpecifiers = [
   "#omo-memory-commands-runtime",
   "#omo-session-history-runtime",
   "#omo-recall-store-runtime",
+  // memory-core's lazy <external_projection> renderer; the plugin manifest maps it to the recall-store sidecar.
+  "#memory-external-projection",
   "#omo-telemetry-posthog-runtime",
   "#omo-telemetry-otlp-runtime",
   "#omo-memory-sync-runtime",
