@@ -52,8 +52,13 @@ port.on("message", (message: unknown) => {
   if (message === "hold") void hold()
   if (message === "contend") void contend()
   if (message === "release") release?.()
-  if (message === "probe") {
-    void detectStaleLock(lockPath, Infinity).then((stale) => port.postMessage({ event: "probe", stale }))
+  if (message === "strand") {
+    void (async () => {
+      const strandedRecord = await buildLockRecord("failed-unlink")
+      if (!await publishLockRecord(lockPath, strandedRecord)) throw new Error("fixture lock already held")
+      markLockRecordReleased(strandedRecord)
+      port.postMessage({ event: "stranded" })
+    })()
   }
 })
 port.postMessage({ event: "ready" })

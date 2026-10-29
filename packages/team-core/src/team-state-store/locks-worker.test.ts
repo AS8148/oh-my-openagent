@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { once } from "node:events"
 import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -9,6 +10,9 @@ import { getProcessStartIdentity } from "../../../memory-core/src/locks/process-
 import { removeLockRecordIfUnchanged } from "./lock-reclaim"
 import { buildLockRecord, markLockRecordHeld, markLockRecordReleased } from "./lock-record"
 import { detectStaleLock, reapStaleLock, withLock } from "./locks"
+import { installLockWorkerObserver } from "./lock-worker-lifetime"
+
+installLockWorkerObserver()
 
 const Reply = z.object({
   event: z.string(),
@@ -49,8 +53,8 @@ async function fixture() {
   return {
     lockPath,
     state: new Int32Array(counters),
-    async worker() {
-      const worker = new Worker(new URL("./lock-worker.fixture.ts", import.meta.url), {
+    async worker(supervised = false) {
+      const worker = new Worker(new URL(supervised ? "./lock-worker-host.fixture.ts" : "./lock-worker.fixture.ts", import.meta.url), {
         workerData: { lockPath, counters },
       })
       workers.push(worker)
@@ -133,6 +137,30 @@ test("a legacy module UUID mismatch is not evidence of PID reuse", async () => {
   }
 })
 
+for (const observed of [false, true]) {
+  test(`an exited worker with ${observed ? "late" : "no"} host registration ${observed ? "can" : "cannot"} be reclaimed`, async () => {
+    const f = await fixture()
+    try {
+      const host = await f.worker(true)
+      const held = reply(host, "held")
+      host.postMessage("hold")
+      await held
+      if (observed) {
+        const registered = reply(host, "observed")
+        host.postMessage("observe")
+        await registered
+      }
+      const terminated = reply(host, "terminated")
+      host.postMessage("terminate")
+      await terminated
+      expect(await detectStaleLock(f.lockPath, Infinity)).toBe(observed)
+      expect(await reapStaleLock(f.lockPath, Infinity)).toBe(observed ? "removed" : "changed")
+    } finally {
+      await f.close()
+    }
+  }, 30_000)
+}
+
 test("a delayed old release cannot delete a replacement record", async () => {
   const f = await fixture()
   try {
@@ -172,6 +200,35 @@ test("unknown worker and incomparable process identity retain ownership", async 
     expect(await detectStaleLock(f.lockPath, Infinity)).toBe(false)
     expect(await reapStaleLock(f.lockPath, Infinity)).toBe("changed")
   } finally {
+    await f.close()
+  }
+})
+
+test("an exact release in a live worker permits reclaim after a failed unlink", async () => {
+  const f = await fixture()
+  try {
+    const owner = await f.worker()
+    const stranded = reply(owner, "stranded")
+    owner.postMessage("strand")
+    await stranded
+    expect(owner.threadId).toBeGreaterThan(0)
+    expect(await detectStaleLock(f.lockPath, Infinity)).toBe(true)
+    expect(await reapStaleLock(f.lockPath, Infinity)).toBe("removed")
+  } finally {
+    await f.close()
+  }
+})
+
+test("lock observation does not keep a finished worker alive", async () => {
+  const f = await fixture()
+  const owner = new Worker(new URL("./lock-worker-exit.fixture.ts", import.meta.url), { workerData: f.lockPath })
+  try {
+    const exited = once(owner, "exit", { signal: AbortSignal.timeout(10_000) })
+    expect(await exited).toEqual([0])
+    expect(await detectStaleLock(f.lockPath, Infinity)).toBe(true)
+    expect(await reapStaleLock(f.lockPath, Infinity)).toBe("removed")
+  } finally {
+    await owner.terminate()
     await f.close()
   }
 })
