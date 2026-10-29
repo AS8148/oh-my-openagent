@@ -1,5 +1,5 @@
 // Public types of the frontend detect SDK: rules, findings, snapshots, options.
-// Rule semantics are adapted from Impeccable's detector (Apache-2.0, Copyright 2025 Paul Bakaus); see ATTRIBUTION.md section 7.
+// Rule semantics are adapted from Impeccable's detector (Apache-2.0, Copyright 2025 Paul Bakaus); see ATTRIBUTION.md sections 6-7.
 
 export type Severity = "error" | "warning" | "advisory"
 export type RuleCategory = "slop" | "quality"

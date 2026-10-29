@@ -292,7 +292,7 @@ close to the source.
 
 `frontend/scripts/detect/` (the SDK, its rules under `rules/`, the CLI, and their tests),
 `frontend/references/perfection/detect.md`, and the development parity scripts
-`packages/shared-skills/scripts/detect-parity.ts` and `detect-parity-oracle.ts` reimplement in TypeScript the rule logic of
+`packages/shared-skills/scripts/detect-parity.ts`, `detect-source-parity.ts` and `detect-parity-oracle.ts` reimplement in TypeScript the rule logic of
 the Impeccable detector (`crates/core`, `crates/detect`, `crates/foundation/src/registry.rs`)
 at the upstream commit named in section 6. No Rust or JavaScript source is copied; the rule
 ids, thresholds, exemptions and the `data-impeccable-ignore` waiver attribute follow

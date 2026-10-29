@@ -12,7 +12,7 @@ const SETTLE_FRAMES = "new Promise((resolve) => requestAnimationFrame(() => requ
 
 function withProbe(html: string, baseHref?: string): string {
 	const probe = `${baseHref ? `<base href="${baseHref}">` : ""}<script>${SCRIPT_ERROR_PROBE}</script>`
-	if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${probe}`)
+	if (/<head(\s[^>]*)?>/i.test(html)) return html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}${probe}`)
 	return `${probe}${html}`
 }
 

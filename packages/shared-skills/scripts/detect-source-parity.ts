@@ -1,5 +1,8 @@
-import { lintSources } from "../../lint"
-import { SOURCE_RULES } from "./index"
+#!/usr/bin/env bun
+// Source-engine parity check of the frontend detect SDK against Impeccable's fixtures and static goldens (Apache-2.0, Copyright 2025 Paul Bakaus).
+// Development tool, not shipped: needs a local checkout of https://github.com/pbakaus/impeccable.
+import { lintSources } from "../skills/frontend/scripts/detect/lint"
+import { SOURCE_RULES } from "../skills/frontend/scripts/detect/rules/source"
 
 type GoldenFinding = { readonly antipattern: string; readonly snippet: string; readonly file: string; readonly line: number }
 
