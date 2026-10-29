@@ -3,7 +3,6 @@
 
 use std::time::{Duration, Instant};
 
-use core_graphics::event::CGEvent;
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use parking_lot::Mutex;
 use senpi_desktop_core::background_focus::SwitchSignals;
@@ -85,7 +84,7 @@ impl ClickPlacer {
 
 fn pointer_owner() -> Option<libc::pid_t> {
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
-    let point = CGEvent::new(source).ok()?.location();
+    let point = crate::input::probe_event(&source).ok()?.location();
     crate::ax::point_owner(point.x, point.y)
         .ok()
         .flatten()
