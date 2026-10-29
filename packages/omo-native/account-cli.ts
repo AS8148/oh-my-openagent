@@ -88,7 +88,7 @@ async function adopt(dependencies: AccountCommandDependencies, replace: boolean)
     if (!keepCurrent) await dependencies.store.write(incoming)
     await session.clearSignedOutMarker()
     return reply(dependencies, { adopted: true, device: deviceOf(incoming) })
-  })
+  }, { replaceInvalid: replace })
 }
 
 async function token(dependencies: AccountCommandDependencies): Promise<number> {
@@ -151,11 +151,26 @@ async function runVerb(dependencies: AccountCommandDependencies, args: readonly 
     }
     case "forget": {
       const session = sessionOf(dependencies)
-      await session.update(async () => dependencies.store.clear())
+      const deviceAt = flags.indexOf("--device")
+      if (deviceAt !== -1) {
+        const device = flags[deviceAt + 1]
+        if (device === undefined || device === "" || device.startsWith("--")) {
+          dependencies.error("omo account forget: --device needs a device id")
+          return ACCOUNT_EXIT.invalid
+        }
+        return session.update(async current => {
+          if (current !== null && current.device.id !== device) {
+            return reply(dependencies, { forgotten: false, device: deviceOf(current) }, ACCOUNT_EXIT.conflict)
+          }
+          await dependencies.store.clear()
+          return reply(dependencies, { forgotten: true })
+        })
+      }
+      await session.forget()
       return reply(dependencies, { forgotten: true })
     }
     default:
-      dependencies.error("usage: omo account show [--account <id>]|adopt [--replace]|token|export|forget")
+      dependencies.error("usage: omo account show [--account <id>]|adopt [--replace]|token|export|forget [--device <id>]")
       return ACCOUNT_EXIT.invalid
   }
 }
