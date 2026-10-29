@@ -36,7 +36,7 @@ export async function checkGhostReservation(
     return { name: "reservation", level: "warn", detail: `ghost active reservation ${runId}: launcher identity missing (pre-stamping legacy); ${GHOST_REMEDIATION}` }
   }
   if (Date.now() - reservedAtMs <= 60_000) return { name: "reservation", level: "ok", detail: `reservation ${runId} is recent` }
-  if (!isLocalHost({ hostname: launcherHostname, hostId: launcherHostId }, { hostname: hostname(), hostId: getStableLocalHostId() })) {
+  if (!isLocalHost({ hostname: launcherHostname, hostId: launcherHostId }, { hostname: hostname(), hostId: await getStableLocalHostId() })) {
     return { name: "reservation", level: "ok", detail: `reservation ${runId} is owned by ${launcherHostname}` }
   }
   const alive = (deps.isProcessAlive ?? defaultIsProcessAlive)(launcherPid)

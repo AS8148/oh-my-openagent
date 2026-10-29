@@ -74,7 +74,7 @@ export async function writeOptionalRun(path: string, run: ReservedRun | undefine
 }
 
 export async function currentLauncherIdentity(): Promise<ReflectionLauncherIdentity> {
-  const hostId = getStableLocalHostId()
+  const hostId = await getStableLocalHostId()
   return {
     pid: process.pid,
     hostname: hostname(),

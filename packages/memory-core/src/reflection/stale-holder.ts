@@ -6,7 +6,7 @@
 // the publish claimant, if any, is gone, and the run recorded a valid outcome. Anything that cannot be
 // proven is "stuck", never "dead". Each rule carries a `rule:` tag named by its test.
 
-import { execFileSync } from "node:child_process"
+import { execFile } from "node:child_process"
 import { hostname as readHostname } from "node:os"
 import { join } from "node:path"
 
@@ -22,7 +22,7 @@ export type ReflectionLockVerdict =
 export interface ReflectionLockProbe {
   readonly readText?: (path: string) => Promise<string>
   readonly hostname?: () => string
-  readonly hostId?: () => string | null
+  readonly hostId?: () => string | null | Promise<string | null>
   readonly isLocalHost?: (
     recorded: { readonly hostname: string; readonly hostId?: string },
     current: { readonly hostname: string; readonly hostId?: string | null },
@@ -75,34 +75,42 @@ function isRunOutcome(value: unknown, runId: string): boolean {
     && typeof fields.timedOut === "boolean"
 }
 
-let cachedLocalHostId: string | null | undefined
+let cachedLocalHostId: Promise<string | null> | undefined
 
 /**
- * Resolves a stable host identifier that persists across DHCP network churn.
- * On Darwin, reads LocalHostName via scutil.
- * Caches in memory for 0ms overhead on subsequent calls.
+ * Reads the Bonjour local host name, which macOS keeps across DHCP leases while
+ * `os.hostname()` follows the network's reverse-DNS name.
  */
-export function getStableLocalHostId(): string | null {
-  if (cachedLocalHostId !== undefined) return cachedLocalHostId
-  if (process.platform === "darwin") {
-    try {
-      const name = execFileSync("scutil", ["--get", "LocalHostName"], { encoding: "utf8", timeout: 500 }).trim()
-      if (name.length > 0) {
-        cachedLocalHostId = name
-        return cachedLocalHostId
+async function readDarwinLocalHostName(): Promise<string | null> {
+  return await new Promise((resolve) => {
+    // `scutil` answers in milliseconds, but the spawn must never hold the event loop: every
+    // session turn and `/doctor` call reaches this path.
+    execFile("scutil", ["--get", "LocalHostName"], { encoding: "utf8", timeout: 500, windowsHide: true }, (error, stdout) => {
+      if (error !== null) {
+        resolve(null)
+        return
       }
-    } catch {
-      // scutil unavailable or sandboxed
-    }
-  }
-  cachedLocalHostId = null
+      const value = stdout.trim()
+      resolve(value.length > 0 ? value : null)
+    })
+  })
+}
+
+/**
+ * Stable per-machine identity, resolved once per process (single flight, so concurrent callers
+ * share one spawn). Non-macOS platforms report `null` and fall back to the hostname rule.
+ */
+export function getStableLocalHostId(): Promise<string | null> {
+  cachedLocalHostId ??= process.platform === "darwin" ? readDarwinLocalHostName() : Promise.resolve(null)
   return cachedLocalHostId
 }
 
 /**
- * Checks whether a recorded lock holder matches the current host.
- * If the record carries a stable hostId, it must match our hostId exactly.
- * For legacy records without hostId, falls back to exact hostname match.
+ * Decides whether a lock's recorded launcher is this machine.
+ *
+ * A record carrying a host id matches only that exact id, so two machines that happen to share a
+ * hostname (or two Macs behind one DHCP server) stay distinct while a single machine that was
+ * renamed by DHCP still matches. Legacy records carry no id and keep the exact hostname rule.
  */
 export function isLocalHost(
   recorded: { readonly hostname: string; readonly hostId?: string },
@@ -146,7 +154,7 @@ export async function classifyReflectionLockHolder(
 
   const currentHost = {
     hostname: (probe.hostname ?? readHostname)(),
-    hostId: (probe.hostId ?? getStableLocalHostId)(),
+    hostId: await (probe.hostId ?? getStableLocalHostId)(),
   }
   const localCheck = probe.isLocalHost ?? isLocalHost
   if (!localCheck({ hostname: launcherHostname, hostId: launcherHostId }, currentHost)) {

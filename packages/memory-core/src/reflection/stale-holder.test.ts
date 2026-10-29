@@ -100,5 +100,43 @@ describe("reflection lock holder decision (#10377)", () => {
         runId: "reflection-run-64",
       })
     })
+
+    // No `hostname` and no `isLocalHost`: only the scutil result is injected, so the production
+    // hostname read and the production comparison both run. A record from another machine must stay
+    // foreign even when its pid happens to be alive in this process table.
+    test("#given the production comparison over an injected scutil result #when the lock belongs to another machine #then it stays stuck", async () => {
+      const facts = {
+        files: {
+          [`${REFLECTION_DIR}/active.lock`]: JSON.stringify({
+            runId: "reflection-run-64",
+            launcherPid: 11096,
+            launcherHostname: "their-mac",
+            launcherHostId: "their-machine",
+          }),
+          [`${REFLECTION_DIR}/runs/reflection-run-64/outcome.json`]: JSON.stringify({
+            version: 1,
+            runId: "reflection-run-64",
+            attempt: 1,
+            finishedAt: "2026-10-17T00:00:00.000Z",
+            childExit: { code: 0, signal: null },
+            timedOut: false,
+          }),
+        },
+        pids: { 11096: "alive" as const },
+        starts: {},
+      }
+      const fixtures = probeFor(facts)
+      const probe = {
+        readText: fixtures.readText,
+        getPidLiveness: fixtures.getPidLiveness,
+        getProcessStartIdentity: fixtures.getProcessStartIdentity,
+        hostId: () => "our-machine",
+      }
+      expect(await classifyReflectionLockHolder(REFLECTION_DIR, probe)).toEqual({
+        state: "stuck",
+        runId: "reflection-run-64",
+        reason: "it is owned by host their-mac, which cannot be checked from here",
+      })
+    })
   })
 })
