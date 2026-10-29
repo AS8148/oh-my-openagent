@@ -35,7 +35,10 @@ const FOREGROUND_INPUT: ReadonlySet<string> = new Set([
 	"ax.keyChord",
 ]);
 
-/** Trigger (ii, Q5): methods that take the foreground themselves and need the grant at admission; rerun unchanged. */
+/**
+ * Trigger (ii, Q5): methods that take the foreground themselves and need the grant at admission; rerun unchanged.
+ * `apps.open` (activate/reveal) is W2's method (#11717/#11719, plan todo 11): listed so it reruns once that stack merges.
+ */
 const TAKES_FOREGROUND: ReadonlySet<string> = new Set(["raiseWindow", "apps.open"]);
 
 export type RerunTrigger = "backgroundUnavailable" | "controlRequired";
@@ -83,7 +86,8 @@ export function planRerun(method: EngineMethod, params: object, error: unknown, 
 export interface ForegroundRerunHost {
 	foregroundAllowed(): boolean;
 	possiblyLive(): boolean;
-	grantForFullAccess(signal: AbortSignal): Promise<void>;
+	/** The automatic full-access grant; false (nothing granted) once the session left full access. */
+	grantForFullAccess(signal: AbortSignal): Promise<boolean>;
 }
 
 const REASON: Record<RerunTrigger, string> = {
@@ -107,7 +111,9 @@ export function withForegroundRerun(call: EngineCall, host: ForegroundRerunHost,
 				cancelled: signal.aborted,
 			});
 			if (plan === undefined) throw error;
-			if (plan.grantFirst) await host.grantForFullAccess(signal);
+			// A session that left full access between the decision and the grant no longer allows
+			// the foreground: it gets the engine's own refusal, unchanged (nothing granted or sent).
+			if (plan.grantFirst && !(await host.grantForFullAccess(signal))) throw error;
 			const result = await call(method, plan.params);
 			output.text(`ran in foreground: ${REASON[plan.trigger]} (the session allows foreground control)`);
 			return result;

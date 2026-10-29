@@ -102,6 +102,28 @@ describe("automatic foreground rerun (D2)", () => {
 		expect(sends.map((request) => (request.params as { opts?: { deliveryMode?: string } }).opts?.deliveryMode)).toEqual([undefined, "foreground"]);
 	});
 
+	test("a rerun whose own refusal is final is not rerun again and adds no line", async () => {
+		// FAKE_ENGINE_CONTROL_BUSY: the automatic grant is refused InputBusy, so the rerun never goes out
+		const desktop = await openGated({ value: true }, { ...GATE, FAKE_ENGINE_CONTROL_BUSY: "1" });
+		await expect(runCode(desktop.service, TYPE)).rejects.toMatchObject({ data: { code: "InputBusy" } });
+		expect(requested(desktop.log, "typeText")).toBe(1);
+		expect(requested(desktop.log, "control.grant")).toBe(1);
+	});
+
+	test("full access ending between the decision and the grant returns the engine's own refusal", async () => {
+		const preset: Preset = { value: true };
+		const desktop = await openGated(preset, GATE);
+		// The first typeText is refused; full access ends before the wrapper grants
+		const unsubscribe = desktop.service.onAudit((event) => {
+			if (event.action === "typeText") preset.value = false;
+		});
+		const result = runCode(desktop.service, TYPE);
+		await expect(result).rejects.toMatchObject({ data: { code: "BackgroundUnavailable" } });
+		unsubscribe();
+		expect(requested(desktop.log, "control.grant")).toBe(0);
+		expect(requested(desktop.log, "typeText")).toBe(1);
+	});
+
 	test("after full access ends the automatic grant is fenced and nothing reruns", async () => {
 		const preset: Preset = { value: true };
 		const desktop = await openGated(preset, GATE);
