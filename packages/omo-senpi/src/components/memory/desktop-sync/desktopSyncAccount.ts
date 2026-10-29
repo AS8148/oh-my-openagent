@@ -1,5 +1,5 @@
 import { z } from "zod"
-import type { DesktopSyncAccount, DesktopSyncDescriptor, DesktopSyncOperation, SyncOperationAuthority } from "@oh-my-opencode/memory-core/sync-engine"
+import type { DesktopSyncAccount, DesktopSyncDescriptor, DesktopSyncOperation, GenesisBridge, GenesisBridgeResult, SyncOperationAuthority } from "@oh-my-opencode/memory-core/sync-engine"
 import type { DeviceKeyring } from "@oh-my-opencode/memory-core/keyring"
 import { desktopSyncAccountPorts } from "./desktopSyncAccountPorts"
 import { desktopSyncBoundary } from "./desktopSyncBoundary"
@@ -17,6 +17,12 @@ export type DesktopSyncEngineWire = DesktopSyncWire & {
 const signature = z.strictObject({ op: z.literal("sign"), signature: z.string() })
 const unsealed = z.strictObject({ op: z.literal("unseal"), plaintext: z.string() })
 const signedAccount = z.object({ account: z.string() })
+const capability = z.object({ prfSupported: z.boolean(), genesisSupported: z.boolean() })
+// Shape only: memory-core's enable path re-validates the prepared genesis exactly before anything is signed.
+const genesisResult = z.union([
+  z.object({ ok: z.literal(true), prepared: z.object({ body: z.object({ kind: z.literal("genesis"), account: z.string() }).passthrough(), wraps: z.tuple([z.unknown(), z.unknown()]) }) }),
+  z.object({ ok: z.literal(false), reason: z.enum(["cancelled", "no-prf", "no-user-verification", "not-survivable", "credential-reused", "rp-mismatch", "key-mismatch", "unavailable"]) }),
+])
 const bytes = (value: string, length?: number) => {
   const decoded = Buffer.from(value, "base64url")
   if (decoded.toString("base64url") !== value || (length !== undefined && decoded.length !== length)) {
@@ -71,7 +77,7 @@ export async function openDesktopSyncAccount(wire: DesktopSyncEngineWire, home?:
         return bytes(reply.plaintext)
       },
     }
-    return { ...desktopSyncAccountPorts(call, descriptor), handle: operation.handle, call, close: operation.close, keyring }
+    return { ...desktopSyncAccountPorts(call, descriptor), handle: operation.handle, call, request: operation.request, close: operation.close, keyring }
   }
   const background = await open(accountAuthority)
   const transport = desktopSyncReplicationPort(background.call, handlers => {
@@ -100,7 +106,23 @@ export async function openDesktopSyncAccount(wire: DesktopSyncEngineWire, home?:
   })
   const forOperation = async (authority: SyncOperationAuthority): Promise<DesktopSyncOperation> => {
     const operation = await open(authority)
-    return { keyring: operation.keyring, chain: operation.chain, pairing: operation.pairing, devices: operation.devices, close: operation.close }
+    const ports = { keyring: operation.keyring, chain: operation.chain, pairing: operation.pairing, devices: operation.devices, close: operation.close }
+    if (descriptor.genesis !== "supported") return ports
+    try {
+      const offered = capability.parse(await authority.admit(() => wire.request({ op: "capability" })))
+      // Bound to this operation's main-issued handle; never the background account ports.
+      const genesis: GenesisBridge = {
+        prfSupported: offered.prfSupported && offered.genesisSupported,
+        async createGenesis(request, options) {
+          const reply = await options.operation.admit(() => operation.request({ op: "genesisRun", data: request }))
+          return genesisResult.parse(reply) as GenesisBridgeResult
+        },
+      }
+      return { ...ports, genesis }
+    } catch (error) {
+      await operation.close()
+      throw error
+    }
   }
   return {
     kind: "desktop",
