@@ -58,6 +58,10 @@ export function endHostSessionChild(context: LifecycleContext, record: TaskRecor
   return entry.promise
 }
 
+export function inFlightHostSessionEnd(context: LifecycleContext, taskId: string): Promise<HostSessionEnd> | undefined {
+  return flights.get(context.store)?.get(taskId)?.promise
+}
+
 export function clearHostSessionEnd(context: LifecycleContext, taskId: string): void {
   const table = flights.get(context.store)
   if (table?.get(taskId)?.done === true) table.delete(taskId)

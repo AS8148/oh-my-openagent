@@ -4,7 +4,7 @@ import type { TaskRecord } from "../state"
 import { TERMINAL_STATUSES, type LifecycleContext } from "./context"
 import { retriesDisposed, retriesStopped } from "./deferred-revival"
 import type { HostSessionCancelSink, HostSessionEnd } from "./host-session"
-import { endHostSessionChild } from "./host-session-end"
+import { endHostSessionChild, inFlightHostSessionEnd } from "./host-session-end"
 
 /**
  * Re-drives a no-handle host-session cancel that did not end on its first pass (omo#11765): nothing else
@@ -22,7 +22,8 @@ export function driveHostSessionCancel(context: LifecycleContext, record: TaskRe
 async function runDriver(context: LifecycleContext, record: TaskRecord, sink: HostSessionCancelSink): Promise<void> {
   let settleOnExit = true
   try {
-    let end = await endOnce(context, record)
+    // The caller just ran a pass: start by waiting, joining only a close it left in flight.
+    let end = (await inFlightHostSessionEnd(context, record.task_id)?.catch(() => NOT_STARTED)) ?? NOT_STARTED
     for (const backoffMs of context.hostRetry.deferredRetryBackoffMs) {
       if (end.kind === "ended") return await sink.ended()
       if (end.kind === "pending" && (await settledFirst(end.settled, context.hostRetry.wait(backoffMs)))) return await sink.ended()
@@ -40,6 +41,8 @@ async function runDriver(context: LifecycleContext, record: TaskRecord, sink: Ho
     if (settleOnExit) sink.settle()
   }
 }
+
+const NOT_STARTED: HostSessionEnd = { kind: "not_ended", reason: "driver_start" }
 
 async function endOnce(context: LifecycleContext, record: TaskRecord): Promise<HostSessionEnd> {
   try {
