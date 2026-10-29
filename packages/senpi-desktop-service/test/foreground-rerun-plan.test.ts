@@ -9,7 +9,8 @@ import { DesktopEngineRpcError } from "../src/service/rpc-client";
 // model says what the plan must be; the decision is compared with it cell by cell.
 
 const INPUT = new Set(["click", "drag", "scroll", "typeText", "keyChord", "holdKeys", "holdMouse", "ax.click", "ax.typeText", "ax.keyChord"]);
-const TAKES_FOREGROUND = new Set(["raiseWindow", "apps.open"]);
+// apps.open requires activate/reveal; its parameter cases are covered by foreground-rerun-state.test.ts.
+const TAKES_FOREGROUND = new Set(["raiseWindow"]);
 const CODES = [
 	"BackgroundUnavailable",
 	"ControlRequired",

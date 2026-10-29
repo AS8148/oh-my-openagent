@@ -11,7 +11,7 @@ import type { EngineCall, RunOutput } from "./context";
  *
  * Invariants (checked exhaustively by `test/foreground-rerun-plan.test.ts`):
  * 1. At most one rerun per facade call; the rerun's own failure is final.
- * 2. A rerun happens only when `foregroundAllowed` read true at the decision.
+ * 2. A rerun happens only while foreground remains allowed, including after awaiting a grant.
  * 3. Only `BackgroundUnavailable` (nothing sent) on a foreground-capable input method, or `ControlRequired`
  *    at admission on `raiseWindow` / `apps.open`, triggers it; `InputFailed`, `AxUnconfirmed`, `UserIntervened`,
  *    `Cancelled`, `Suspended` and every other code never do, nor does a cancelled run.
@@ -76,7 +76,8 @@ export function planRerun(method: EngineMethod, params: object, error: unknown, 
 	if (code === "BackgroundUnavailable" && FOREGROUND_INPUT.has(method) && !deliverySetExplicitly(params)) {
 		return { trigger: "backgroundUnavailable", grantFirst: !state.possiblyLive, params: withForegroundDelivery(params) };
 	}
-	if (code === "ControlRequired" && TAKES_FOREGROUND.has(method)) {
+	if (code === "ControlRequired" && TAKES_FOREGROUND.has(method)
+		&& (method === "raiseWindow" || Reflect.get(params, "activate") === true || Reflect.get(params, "reveal") === true)) {
 		return { trigger: "controlRequired", grantFirst: !state.possiblyLive, params };
 	}
 	return undefined;
@@ -114,6 +115,7 @@ export function withForegroundRerun(call: EngineCall, host: ForegroundRerunHost,
 			// A session that left full access between the decision and the grant no longer allows
 			// the foreground: it gets the engine's own refusal, unchanged (nothing granted or sent).
 			if (plan.grantFirst && !(await host.grantForFullAccess(signal))) throw error;
+			if (signal.aborted || !host.foregroundAllowed()) throw error;
 			const result = await call(method, plan.params);
 			output.text(`ran in foreground: ${REASON[plan.trigger]} (the session allows foreground control)`);
 			return result;

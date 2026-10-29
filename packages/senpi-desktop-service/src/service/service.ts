@@ -39,6 +39,7 @@ export class DesktopService {
 	readonly #hub = new NotificationHub();
 	#lifecycle: Promise<unknown> = Promise.resolve();
 	#connection: Connection | undefined;
+	#backend: DesktopCapabilities["backend"] | undefined;
 	#desired: DesiredSession | undefined;
 	readonly #grants = new ControlGrants();
 	readonly #consent: FullAccessConsent;
@@ -106,12 +107,13 @@ export class DesktopService {
 	}
 
 	/**
-	 * Whether the session already allows foreground control (D2, #11464 todo 24): full access, or a grant a
+	 * Whether this live, unstopped macOS session allows the D2 foreground rerun: full access, or a grant a
 	 * human approved that may still be live. An automatic (full-access) grant never counts on its own: once
 	 * full access ends it is fenced, and this reads false.
 	 */
 	foregroundAllowed(): boolean {
-		return this.#fullAccess() || (this.#grants.possiblyLive && !this.#grants.automaticLive);
+		return this.#connection?.rpc.alive === true && this.#backend === "quartz" && !this.#stopLatched
+			&& (this.#fullAccess() || (this.#grants.possiblyLive && !this.#grants.automaticLive));
 	}
 
 	/** A grant this service sent may still hold (human-approved or automatic). */
@@ -280,6 +282,7 @@ export class DesktopService {
 		if (opened === undefined) throw malformed("session.open");
 		// The token stays inside the service: only `resume()` sends it back.
 		connection.resumeToken = opened.resumeToken;
+		this.#backend = opened.capabilities.backend;
 		return opened.capabilities;
 	}
 
@@ -304,7 +307,10 @@ export class DesktopService {
 
 	#drop(connection: Connection): void {
 		clearInterval(connection.heartbeat);
-		if (this.#connection === connection) this.#connection = undefined;
+		if (this.#connection === connection) {
+			this.#connection = undefined;
+			this.#backend = undefined;
+		}
 	}
 }
 

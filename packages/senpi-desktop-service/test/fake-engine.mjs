@@ -30,7 +30,7 @@ if (!process.argv.includes("--stdio")) {
 }
 
 const capabilities = {
-	backend: "fake",
+	backend: process.env.FAKE_ENGINE_BACKEND ?? "fake",
 	displayServer: null,
 	capture: true,
 	input: true,

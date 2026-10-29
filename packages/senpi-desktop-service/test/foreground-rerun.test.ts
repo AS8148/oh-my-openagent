@@ -10,7 +10,7 @@ import type { DesktopService } from "../src/service/service";
 
 afterEach(closeServices);
 
-const GATE = { FAKE_ENGINE_BACKGROUND_GATE: "1" };
+const GATE = { FAKE_ENGINE_BACKGROUND_GATE: "1", FAKE_ENGINE_BACKEND: "quartz" };
 
 function runCode(service: DesktopService, code: string, options: { confirmControl?: ConfirmControl; headless?: boolean } = {}) {
 	return runComputerCode(
@@ -29,6 +29,20 @@ function texts(result: Awaited<ReturnType<typeof runComputerCode>>): string[] {
 }
 
 describe("automatic foreground rerun (D2)", () => {
+	test.each(["x11", "wayland", "windows"])("does not change %s fallback behavior", async (backend) => {
+		const desktop = await openGated({ value: true }, { ...GATE, FAKE_ENGINE_BACKEND: backend });
+		await expect(runCode(desktop.service, TYPE)).rejects.toMatchObject({ data: { code: "BackgroundUnavailable" } });
+		expect(requested(desktop.log, "typeText")).toBe(1);
+		expect(requested(desktop.log, "control.grant")).toBe(0);
+	});
+
+	test("a stopped session is not eligible for an automatic foreground rerun", async () => {
+		const desktop = await openGated({ value: true }, GATE);
+		expect(desktop.service.foregroundAllowed()).toBe(true);
+		await desktop.service.stop();
+		expect(desktop.service.foregroundAllowed()).toBe(false);
+	});
+
 	test("full access: one foreground rerun, no prompt, the run output says so", async () => {
 		const preset: Preset = { value: true };
 		const desktop = await openGated(preset, GATE);
