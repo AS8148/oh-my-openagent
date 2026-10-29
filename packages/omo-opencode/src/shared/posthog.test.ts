@@ -3,6 +3,7 @@
 // allow: SIZE_OK - PostHog telemetry tests share one client/env fixture; this release adds telemetry config regressions and future additions should split by capture path.
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { isolateTelemetryEnv } from "../../../../test-support/telemetry-env.test-helpers"
 import type {
   TelemetryCaptureMessage,
   TelemetryTransportFactory,
@@ -13,6 +14,7 @@ type CapturedPostHogMessage = TelemetryCaptureMessage
 type PostHogModule = Awaited<ReturnType<typeof importPostHogModule>>
 
 let activePostHogModule: PostHogModule | null = null
+let restoreTelemetryEnv: () => void
 
 async function importPostHogModule(): Promise<typeof import("./posthog")> {
   return import(`./posthog?test=${Date.now()}-${Math.random()}`)
@@ -60,12 +62,14 @@ function createCapturingTransportFactory(
 
 describe("posthog client creation", () => {
   beforeEach(() => {
+    restoreTelemetryEnv = isolateTelemetryEnv()
     clearTelemetryEnv()
   })
 
   afterEach(() => {
     resetPostHogModuleTestSeams()
     clearTelemetryEnv()
+    restoreTelemetryEnv()
   })
 
   it("returns a no-op client when PostHog construction throws", async () => {
@@ -82,10 +86,10 @@ describe("posthog client creation", () => {
     const pluginPostHog = posthogModule.createPluginPostHog()
 
     // then
-    expect(() => cliPostHog.trackActive("cli", "run_started")).not.toThrow()
+    expect(() => cliPostHog.trackActive("run_started")).not.toThrow()
     expect(await cliPostHog.shutdown()).toBeUndefined()
 
-    expect(() => pluginPostHog.trackActive("plugin", "run_started")).not.toThrow()
+    expect(() => pluginPostHog.trackActive("run_started")).not.toThrow()
     expect(await pluginPostHog.shutdown()).toBeUndefined()
   })
 
@@ -113,7 +117,7 @@ describe("posthog client creation", () => {
     const pluginPostHog = posthogModule.createPluginPostHog()
 
     // then
-    expect(() => pluginPostHog.trackActive("plugin", "run_started")).not.toThrow()
+    expect(() => pluginPostHog.trackActive("run_started")).not.toThrow()
     expect(await pluginPostHog.shutdown()).toBeUndefined()
   })
 
@@ -167,12 +171,14 @@ describe("posthog client creation", () => {
 
 describe("posthog disable env var parsing", () => {
   beforeEach(() => {
+    restoreTelemetryEnv = isolateTelemetryEnv()
     clearTelemetryEnv()
   })
 
   afterEach(() => {
     resetPostHogModuleTestSeams()
     clearTelemetryEnv()
+    restoreTelemetryEnv()
   })
 
   const disableValues = ["TRUE", "True", "Yes", "YES", " 1 ", " true "]
@@ -192,7 +198,7 @@ describe("posthog disable env var parsing", () => {
       const client = posthogModule.createCliPostHog()
 
       // when
-      client.trackActive("distinct-cli", "run_started")
+      client.trackActive("run_started")
 
       // then
       expect(captured).toHaveLength(0)
@@ -216,7 +222,7 @@ describe("posthog disable env var parsing", () => {
       const client = posthogModule.createCliPostHog()
 
       // when
-      client.trackActive("distinct-cli", "run_started")
+      client.trackActive("run_started")
 
       // then
       expect(captured).toHaveLength(0)
@@ -237,7 +243,7 @@ describe("posthog disable env var parsing", () => {
     const client = posthogModule.createCliPostHog()
 
     // when
-    client.trackActive("distinct-cli", "run_started")
+    client.trackActive("run_started")
 
     // then
     expect(captured).toHaveLength(1)
@@ -256,7 +262,7 @@ describe("posthog disable env var parsing", () => {
     const client = posthogModule.createCliPostHog({ configEnabled: false })
 
     // when
-    client.trackActive("distinct-cli", "run_started")
+    client.trackActive("run_started")
 
     // then
     expect(captured).toHaveLength(0)
@@ -265,12 +271,14 @@ describe("posthog disable env var parsing", () => {
 
 describe("posthog trackActive emission contract", () => {
   beforeEach(() => {
+    restoreTelemetryEnv = isolateTelemetryEnv()
     clearTelemetryEnv()
   })
 
   afterEach(() => {
     resetPostHogModuleTestSeams()
     clearTelemetryEnv()
+    restoreTelemetryEnv()
   })
 
   it("emits exactly one omo_daily_active and never omo_hourly_active when captureDaily is true", async () => {
@@ -295,7 +303,7 @@ describe("posthog trackActive emission contract", () => {
     const client = posthogModule.createCliPostHog()
 
     // when
-    client.trackActive("distinct-cli", "run_started")
+    client.trackActive("run_started")
 
     // then
     expect(captured).toHaveLength(1)
@@ -306,7 +314,7 @@ describe("posthog trackActive emission contract", () => {
       throw new Error("Expected daily event")
     }
     expect(dailyEvent?.event).toBe("omo_daily_active")
-    expect(dailyEvent?.distinctId).toBe("distinct-cli")
+    expect(dailyEvent?.distinctId).toMatch(/^[0-9a-f]{64}$/)
     const properties = dailyEvent.properties ?? {}
     const expectedPropertyKeys = ["$os", "$os_version", "$process_person_profile", "ci", "cpu_count", "cpu_model", "day_utc", "locale", "os_arch", "os_type", "package_name", "package_version", "platform", "plugin_name", "product_name", "reason", "runtime", "runtime_version", "shell", "source", "terminal", "timezone", "total_memory_gb"]
     expect(Object.keys(properties).sort()).toEqual(expectedPropertyKeys.sort())
@@ -342,7 +350,7 @@ describe("posthog trackActive emission contract", () => {
     const client = posthogModule.createPluginPostHog()
 
     // when
-    client.trackActive("distinct-plugin", "run_started")
+    client.trackActive("run_started")
 
     // then
     expect(captured).toHaveLength(0)

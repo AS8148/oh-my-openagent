@@ -71,7 +71,7 @@ function projectWithPlans(names: readonly string[]): string {
   return root
 }
 
-describe("buildTaskExecute plan-review contract explicit path (#10837)", () => {
+describe("buildTaskExecute plan-review contract explicit path (#10837, #11728)", () => {
   test("#given an explicit plan that exists in the project but was never touched and another plan that was touched #when spawning plan-reviewer #then the explicit plan is reviewed, not the touched one", async () => {
     // given
     const project = projectWithPlans(["untouched-plan.md"])

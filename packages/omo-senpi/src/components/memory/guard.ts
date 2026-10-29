@@ -5,6 +5,8 @@ import type { ToolCallEventResult } from "@code-yeongyu/senpi"
 
 import type { ComponentContext, SenpiExtensionAPI } from "../../extension/types"
 import type { MemoryIdentityContext } from "./context"
+import { registerReceiptReadGuard } from "./receipt-read-guard"
+import { isGrantedProjectMemoryRead } from "./project-memory-grants"
 import { TRANSIENT_DIRNAME } from "./transient-identity"
 
 const FILE_TOOL_NAMES = ["read", "write", "edit", "ls", "find", "grep", "glob"] as const
@@ -42,6 +44,7 @@ export function registerMemoryGuard(
 ): void {
   const resolveCwd = options.resolveCwd ?? (() => process.cwd())
   const warnedBashSessions = new Set<string>()
+  registerReceiptReadGuard(pi)
 
   pi.on("tool_call", (payload, eventContext): ToolCallEventResult | undefined => {
     const context = options.getContext(eventContext)
@@ -61,7 +64,14 @@ export function registerMemoryGuard(
 
     const recursive = ENUMERATION_TOOL_NAMES.has(operation)
     for (const rawPath of extractTargetPaths(event.input, operation === "patch")) {
-      if (!isForbiddenTarget(rawPath, resolveCwd(), roots, recursive)) continue
+      const cwd = resolveCwd()
+      // Built-ins open path.resolve()d targets; suffix-classified external tools may open raw strings.
+      const name = normalizeToolName(event.toolName)
+      const target = name === operation || name === "apply_patch"
+        ? resolve(cwd, rawPath)
+        : isAbsolute(rawPath) ? rawPath : `${cwd}/${rawPath}`
+      if (operation === "read" && isGrantedProjectMemoryRead(context, target)) continue
+      if (!isForbiddenTarget(target, cwd, roots, recursive)) continue
       return {
         block: true,
         reason: `cross-identity memory access denied: ${event.toolName} to ${rawPath} belongs to another memory identity`,
@@ -166,7 +176,7 @@ function resolveGuardRoots(context: MemoryIdentityContext): GuardRoots {
 function isForbiddenTarget(rawPath: string, cwd: string, roots: GuardRoots, recursive: boolean): boolean {
   if (rawPath.includes("\0")) return false
   const lexical = resolve(cwd, rawPath)
-  const candidates = uniquePaths([lexical, canonicalizeFromNearestExisting(lexical)])
+  const candidates = uniquePaths([lexical, canonicalizeFromNearestExisting(rawPath)])
   const deniedRoots = uniquePaths(roots.deniedRoots.flatMap((root) => [root, canonicalizeFromNearestExisting(root)]))
   const ownRoots = uniquePaths([roots.ownRoot, canonicalizeFromNearestExisting(roots.ownRoot)])
 
@@ -184,7 +194,7 @@ function canonicalizeFromNearestExisting(target: string): string | undefined {
   while (true) {
     try {
       lstatSync(candidate)
-      return resolve(realpathSync(candidate), ...missingSegments.reverse())
+      return resolve(realpathSync.native(candidate), ...missingSegments.reverse())
     } catch (error) {
       if (!isMissingPathError(error)) return undefined
       const parent = dirname(candidate)

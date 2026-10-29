@@ -191,7 +191,7 @@ SOFTWARE.
 ## 5. Project-original files
 
 `frontend/SKILL.md`, `frontend/references/design/README.md`, `_INDEX.md`, `aside.md`,
-`design-system-architecture.md`, `react-dev-tooling-skill.md`,
+`design-system-architecture.md`, `grounding.md`, `react-dev-tooling-skill.md`,
 `frontend/references/perfection/README.md`, `react-perf-tooling.md`, and
 `frontend/scripts/perfection/lighthouse-audit.py` are original to this project and require
 no third-party attribution. The perfection docs and script only invoke third-party tools
@@ -215,7 +215,7 @@ operating guide for consulting the beui.dev animated-component registry during i
 and motion work, written from live endpoint verification; no beui.dev source code,
 documentation text, or component implementations are vendored. beui.dev names remain the
 property of their owner, and the guide instructs reading component source for mechanism
-extraction only, not vendoring it into references or projects.
+extraction only, not copying it into references or projects.
 
 `frontend/references/design/ambience-skill.md` is a project-original, curl-only operating
 guide for consulting the react-bits (reactbits.dev) animated-component registry during hero
@@ -223,7 +223,7 @@ atmosphere, background, typographic-motion, and card-surface work, written from 
 verification; no react-bits source code, documentation text, or component implementations are
 vendored. react-bits is distributed under MIT plus the Commons Clause, which permits use inside
 applications but forbids redistributing or porting the components themselves; the guide
-therefore instructs reading component source for mechanism extraction only and never vendoring
+therefore instructs reading component source for mechanism extraction only and never copying
 it into references, design documents, or this repository. React Bits names remain the property
 of their owner.
 
