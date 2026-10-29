@@ -61,7 +61,7 @@ async function inMain(scenario: string): Promise<void> {
     onEvent: listener => { listeners.add(listener); return () => listeners.delete(listener) },
     request: async (request: DesktopSyncRequest) => {
       if (request.op === "operationBegin") { handles += 1; issued.push(`h-${handles}`); return { handle: `h-${handles}` } }
-      if (request.op === "operationEnd") { ends += 1; if (ends === handles) allEnded(); return {} }
+      if (request.op === "operationEnd") { ends += 1; if (ends >= handles) allEnded(); return {} }
       for (const handle of issued) for (const listener of listeners) listener({ event: "advanced", child: "c", handle, head: 1 })
       return {}
     },
@@ -130,8 +130,10 @@ async function inMain(scenario: string): Promise<void> {
   const reports = await Promise.all([next<Report>(a, "report"), next<Report>(b, "report")])
   await Promise.all(workers.map(worker => worker.terminate()))
   // Worker exit closes each port; the host must then cancel and end the handles that port opened.
-  if (desktop) await Promise.race([ended, new Promise(resolve => setTimeout(resolve, 10_000))])
-  process.stdout.write(`${JSON.stringify({ scenario, claims, ends, reports })}\n`)
+  if (desktop) await ended
+  channel.close()
+  const open = process.getActiveResourcesInfo().filter(kind => kind !== "TTYWrap" && kind !== "FSReqCallback")
+  process.stdout.write(`${JSON.stringify({ scenario, claims, ends, reports, open })}\n`)
   process.exit(0)
 }
 
