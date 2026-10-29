@@ -6,6 +6,7 @@ import {
   type CredentialStore,
   CredentialStoreError,
   INTERACTIVE_READ_WAIT,
+  InvalidCredentialState,
   KeychainLockedError,
   SecretServiceUnavailableError,
 } from "../omo-opencode/src/cli/service-auth/keystore"
@@ -151,20 +152,25 @@ async function runVerb(dependencies: AccountCommandDependencies, args: readonly 
     }
     case "forget": {
       const session = sessionOf(dependencies)
-      const deviceAt = flags.indexOf("--device")
-      if (deviceAt !== -1) {
-        const device = flags[deviceAt + 1]
-        if (device === undefined || device === "" || device.startsWith("--")) {
-          dependencies.error("omo account forget: --device needs a device id")
+      if (flags.length > 0) {
+        const device = flags[1]
+        if (flags.length !== 2 || flags[0] !== "--device" || device === undefined || device === "" || device.startsWith("--")) {
+          dependencies.error("omo account forget: use forget or forget --device <id>")
           return ACCOUNT_EXIT.invalid
         }
-        return session.update(async current => {
-          if (current !== null && current.device.id !== device) {
-            return reply(dependencies, { forgotten: false, device: deviceOf(current) }, ACCOUNT_EXIT.conflict)
-          }
-          await dependencies.store.clear()
-          return reply(dependencies, { forgotten: true })
-        })
+        try {
+          return await session.update(async current => {
+            if (current !== null && current.device.id !== device) {
+              return reply(dependencies, { forgotten: false, device: deviceOf(current) }, ACCOUNT_EXIT.conflict)
+            }
+            await dependencies.store.clear()
+            return reply(dependencies, { forgotten: true })
+          })
+        } catch (error) {
+          if (!(error instanceof InvalidCredentialState)) throw error
+          dependencies.error(error.message)
+          return reply(dependencies, { forgotten: false, error: "unreadable-credential" }, ACCOUNT_EXIT.failed)
+        }
       }
       await session.forget()
       return reply(dependencies, { forgotten: true })

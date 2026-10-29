@@ -137,15 +137,32 @@ describe("omo account", () => {
       delete: async () => { calls.push("delete"); return true },
     } })
     const result = await run(store, ["forget", "--device", "dev_a"])
-    expect({ code: result.code, out: result.out, calls }).toEqual({ code: ACCOUNT_EXIT.failed, out: [], calls: ["get"] })
+    expect({ code: result.code, out: result.out, calls }).toEqual({
+      code: ACCOUNT_EXIT.failed, out: [{ forgotten: false, error: "unreadable-credential" }], calls: ["get"],
+    })
   })
 
-  test("#given a missing device flag value #when forgetting #then the store is not touched", async () => {
+  test.each([
+    ["--device"],
+    ["--device", ""],
+    ["--device", "--replace"],
+    ["--device=dev_b"],
+    ["--devcie", "dev_b"],
+    ["--unknown"],
+    ["dev_b"],
+    ["--device", "dev_b", "--device", "dev_a"],
+    ["--device", "dev_a", "--unknown"],
+  ])("#given malformed forget arguments %j #when forgetting #then the store is not touched", async (...args) => {
     const held = credential("dev_a", 3_600_000)
-    const { store, current } = memoryStore(held)
-    const result = await run(store, ["forget", "--device"])
+    const calls: string[] = []
+    const store: CredentialStore = {
+      read: async () => { calls.push("get"); return held },
+      write: async () => { calls.push("set") },
+      clear: async () => { calls.push("delete") },
+    }
+    const result = await run(store, ["forget", ...args])
     expect(result.code).toBe(ACCOUNT_EXIT.invalid)
-    expect(current()).toEqual(held)
+    expect(calls).toEqual([])
   })
 
   test("adopt stores the credential and show reports the device without any secret", async () => {
