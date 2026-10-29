@@ -7,6 +7,14 @@ export const scriptError: PageRule = {
 		fixHint: "Fix the failing script or handle its rejected promise, then verify the page loads without uncaught errors.",
 	},
 	check: ({ snapshot }) => {
+		if (!snapshot.scriptErrorsCaptured) {
+			return [{
+				element: null,
+				message: "Script errors were not captured: this renderer could not install its error probe before the page's scripts",
+				snippet: snapshot.url,
+				severity: "advisory",
+			}]
+		}
 		const counts = new Map<string, number>()
 		const hits: PageHit[] = []
 		for (const error of new Set(snapshot.scriptErrors)) {

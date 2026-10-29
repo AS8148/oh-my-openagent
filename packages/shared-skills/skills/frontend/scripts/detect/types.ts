@@ -1,5 +1,5 @@
 // Public types of the frontend detect SDK: rules, findings, snapshots, options.
-// Rule semantics are adapted from Impeccable's detector (Apache-2.0, Copyright 2025 Paul Bakaus); see ATTRIBUTION.md section 6.
+// Rule semantics are adapted from Impeccable's detector (Apache-2.0, Copyright 2025 Paul Bakaus); see ATTRIBUTION.md section 7.
 
 export type Severity = "error" | "warning" | "advisory"
 export type RuleCategory = "slop" | "quality"
@@ -96,6 +96,8 @@ export type PageSnapshot = {
 	readonly cssText: readonly string[]
 	/** Errors thrown by page scripts while the snapshot was taken. */
 	readonly scriptErrors: readonly string[]
+	/** False when the renderer could not install the error probe before page scripts (WebKit on an http(s) URL), so scriptErrors is not evidence of a clean load. */
+	readonly scriptErrorsCaptured: boolean
 }
 
 export type SourceFile = { readonly path: string; readonly text: string }

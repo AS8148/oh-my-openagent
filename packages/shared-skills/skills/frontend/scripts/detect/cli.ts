@@ -13,6 +13,18 @@ import type { DetectConfig, Finding } from "./types"
 
 type Args = { readonly json: boolean; readonly reflow: boolean; readonly config: DetectConfig; readonly targets: readonly string[] }
 
+function readConfig(path: string): DetectConfig | string {
+	let raw: unknown
+	try {
+		raw = JSON.parse(readFileSync(path, "utf8"))
+	} catch (error) {
+		// no-excuse-ok: catch (CLI boundary: an unreadable or malformed config file is a usage error reported as exit 2)
+		if (error instanceof Error) return error.message
+		throw error
+	}
+	return parseConfig(raw)
+}
+
 function parseArgs(argv: readonly string[]): Args | string {
 	let json = false
 	let reflow = false
@@ -25,7 +37,7 @@ function parseArgs(argv: readonly string[]): Args | string {
 		else if (a === "--config") {
 			const path = argv[++i]
 			if (!path) return "--config needs a file"
-			const parsed = parseConfig(JSON.parse(readFileSync(path, "utf8")))
+			const parsed = readConfig(path)
 			if (typeof parsed === "string") return `${path}: ${parsed}`
 			config = parsed
 		} else targets.push(a)

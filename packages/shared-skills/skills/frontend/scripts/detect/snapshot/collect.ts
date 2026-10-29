@@ -146,6 +146,7 @@ export function collectPageSnapshot(props: readonly string[], maxElements: numbe
 		elements,
 		cssText,
 		scriptErrors: Array.isArray(errors) ? errors.filter((e): e is string => typeof e === "string") : [],
+		scriptErrorsCaptured: Array.isArray(errors),
 	}
 }
 

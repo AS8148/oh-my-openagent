@@ -34,3 +34,9 @@ test("#given recoverable errors before application crashes #then each class reta
 	])
 	expect(scriptError.check({ snapshot: buildSnapshot([]), config: {} })).toHaveLength(0)
 })
+
+test("#given a renderer that could not install the error probe #then one advisory says errors were not captured", () => {
+	const snapshot = buildSnapshot([], { scriptErrorsCaptured: false })
+	expect(lintSnapshot(snapshot, { rules: [scriptError] }).map((f) => [f.severity, f.location.kind])).toEqual([["advisory", "page"]])
+	expect(lintSnapshot(buildSnapshot([]), { rules: [scriptError] })).toHaveLength(0)
+})

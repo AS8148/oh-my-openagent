@@ -44,7 +44,7 @@ const pseudo = (style: Readonly<Record<string, string>> | undefined): PseudoSnap
 	style ? { style: { ...DEFAULT_STYLE, content: '""', ...style }, rect: null } : null
 
 /** Builds a PageSnapshot from a tree of node specs under <body>, filling Chromium's default computed values. */
-export function buildSnapshot(body: readonly NodeSpec[], options: { readonly viewport?: Viewport; readonly cssText?: readonly string[]; readonly scriptErrors?: readonly string[] } = {}): PageSnapshot {
+export function buildSnapshot(body: readonly NodeSpec[], options: { readonly viewport?: Viewport; readonly cssText?: readonly string[]; readonly scriptErrors?: readonly string[]; readonly scriptErrorsCaptured?: boolean } = {}): PageSnapshot {
 	const viewport = options.viewport ?? { width: 1280, height: 800 }
 	const elements: ElementSnapshot[] = []
 	const add = (spec: NodeSpec, parent: number | null, path: string): number => {
@@ -73,7 +73,7 @@ export function buildSnapshot(body: readonly NodeSpec[], options: { readonly vie
 	return {
 		viewport, url: "about:blank", title: "", lang: "en",
 		document: { scrollWidth: viewport.width, clientWidth: viewport.width, scrollHeight: viewport.height },
-		elements, cssText: options.cssText ?? [], scriptErrors: options.scriptErrors ?? [],
+		elements, cssText: options.cssText ?? [], scriptErrors: options.scriptErrors ?? [], scriptErrorsCaptured: options.scriptErrorsCaptured ?? true,
 	}
 }
 
