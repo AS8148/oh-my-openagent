@@ -10,8 +10,11 @@ export class EscapeStops {
 	#native = 0;
 	#epoch = 0;
 	readonly #listeners = new Set<Listener<EscapeStopped>>();
+	readonly #stopped: () => void;
 
-	constructor(readonly stopped: () => void) {}
+	constructor(stopped: () => void) {
+		this.#stopped = stopped;
+	}
 
 	get count(): number {
 		return this.#epoch;
@@ -30,7 +33,7 @@ export class EscapeStops {
 		if (stops <= this.#native) return;
 		this.#epoch += stops - this.#native;
 		this.#native = stops;
-		this.stopped();
+		this.#stopped();
 		for (const listener of this.#listeners) listener({ escapeStops: this.#epoch });
 	}
 
