@@ -5,7 +5,7 @@ OmO sends pseudonymous usage data so we can see which features people use and wh
 ## What is sent
 
 - the app version, operating system and its version, CPU type and core count, and time zone
-- once a day per product, an activity event that also carries the CPU model name, total memory, locale, your login shell as set in the `SHELL` variable (for example `/bin/zsh`), and the terminal application name
+- once a day per product, an activity event that also carries the CPU model name, total memory, locale, the name of your login shell program (for example `zsh`, never its path), and the terminal application name
 - whether a session ran in OmO Desktop or the command line
 - which provider and model ran, when they are ones OmO ships; anything else is sent as `custom`
 - which of OmO's built-in providers you have signed in to or configured, and how many accounts each has, as counts capped at "10 or more"; never an account name, email or key
@@ -18,7 +18,7 @@ OmO sends pseudonymous usage data so we can see which features people use and wh
 ## What is never sent
 
 - your prompts or the model's replies
-- code, diffs, file names, file paths or folder names (the one exception is the login shell path from `SHELL`, listed above)
+- code, diffs, file names, file paths or folder names
 - repository, branch or project names
 - commands you ran, logs, or error messages
 - account names, emails or keys
