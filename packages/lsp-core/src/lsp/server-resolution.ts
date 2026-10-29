@@ -1,5 +1,6 @@
 import { contextCwd } from "../request-context.js";
 import { getDisabledServerIds, getMergedServers } from "./config-loader.js";
+import { withHostJsRuntime } from "./host-js-runtime.js";
 import { BUILTIN_SERVERS, LSP_INSTALL_HINTS } from "./server-definitions.js";
 import { isServerInstalled, resolveServerBinary } from "./server-installation.js";
 import type { ServerLookupResult } from "./types.js";
@@ -22,7 +23,7 @@ export function findServerForExtension(ext: string): ServerLookupResult {
 		if (binaryPath !== null) {
 			const resolvedServer = {
 				id: server.id,
-				command: withResolvedCommand(server.command, binaryPath),
+				command: withHostJsRuntime(server.id, withResolvedCommand(server.command, binaryPath)),
 				extensions: server.extensions,
 				priority: server.priority,
 			};
