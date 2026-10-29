@@ -136,7 +136,7 @@ This is the platform baseline, distilled from Apple's Human Interface Guidelines
 - B5 One or two accents per screen; toolbars and tab bars stay monochrome over colourful content; nothing decorative carries accent.
 - B6 Type hierarchy comes from weight, size and colour, holds in both themes, and uses at most two typefaces.
 - B7 (web and app screens; N/A for a TUI, a printed page, or a figure) The screen matches its brief (the `frontend` skill's Brief step): the named primary action is the single prominent control, priorities 1-3 appear in that order in reading order on the first viewport, and nothing listed under "left out on purpose" is on the screen. A screen built or changed in this session with no brief is a FAIL; a pre-existing screen under audit with no brief is N/A.
-- B8 Type scale floor, read from computed values: adjacent type roles in use differ by at least 1.25x in size (or also by weight or colour where two must sit closer), a display heading stays at or under 6rem, and letter spacing never goes below -0.04em, unless the brief's chosen style route sets its own display scale or tracking (then that value is the check).
+- B8 Type scale floor, read from computed values: each heading step in use (display to h3, and the smallest heading to body) differs by at least 1.25x in size, and body-family roles (lead, body, small, caption, label) that sit closer also differ by weight, colour or case, a display heading stays at or under 6rem, and letter spacing never goes below -0.04em, unless the brief's chosen style route sets its own display scale or tracking (then that value is the check).
 
 **C. Text and copy**
 - C1 Body text is at least 17 pt-equivalent at 390 (15 pt for secondary text) and 14 px on desktop; no thin weights at small sizes.

@@ -249,7 +249,7 @@ assets, or proprietary copy.
 
 ---
 
-## 6. Impeccable (Paul Bakaus) — craft-floor rules
+## 6. Impeccable (Paul Bakaus): craft-floor rules
 
 `frontend/references/perfection/craft-floor.md`, the "Browser surfaces", "Type and spacing
 floor" and "No generated scaffold" rules in `frontend/SKILL.md`, and the matching

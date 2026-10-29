@@ -26,7 +26,7 @@ Exempt: a surface with no instance of the element (no inputs means no caret), an
 
 | Rule | Floor | Read from |
 |---|---|---|
-| Type scale steps (*floor*) | Adjacent type roles (display, h1, h2, h3, body, small) differ by at least 1.25x in size. When two roles must sit closer, separate them by weight or colour as well, never size alone. | computed `font-size` of each role in use |
+| Type scale steps (*floor*) | Each step of the heading ladder (display, h1, h2, h3) and the step from the smallest heading to body differ by at least 1.25x in size. The body-family roles (lead, body, small, caption, overline or label) may sit closer, but each also differs from its neighbour by weight, colour or case, never by size alone. | computed `font-size` of each role in use |
 | Space around a heading | The space above a section heading is at least 1.5x the space below it, so the heading belongs to the content it introduces. | computed margin/padding plus the parent gap |
 | Group separation | The gap between groups is at least 2x the gap inside a group. | computed `gap` / margins of siblings |
 | Body measure (*floor*) | Body text runs 65-75 characters per line on desktop; 45 is the lower bound on a phone. | rendered line length at 1440 and 390 |
