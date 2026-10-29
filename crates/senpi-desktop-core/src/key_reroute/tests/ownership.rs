@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn superseded_workers_retire_while_the_new_worker_keeps_press_ownership() {
+    for moved in [false, true] {
+        let mut rig = Rig::new();
+        if moved {
+            rig.steal();
+        }
+        let destination = if moved { MOVED } else { KEPT };
+        assert_eq!(rig.key(Q, Stroke::Press), destination);
+        if !moved {
+            rig.steal();
+        }
+        rig.theft.publish(&mut rig.registry);
+        let mut newer = Theft::new(OTHER_USER, TARGET, BUTTONS, 2);
+        newer.register(&mut rig.registry, Some((USER, Some(TARGET))), quiet(), Instant::now());
+        rig.theft.end();
+        assert!(rig.theft.settled(&rig.registry),
+            "an observer that cannot route any more keys must release its ports");
+        rig.theft.publish(&mut rig.registry);
+        for stroke in [Stroke::Repeat, Stroke::Release] {
+            assert_eq!(newer.route(&mut rig.registry, Key {
+                physical: true, code: Q, stroke: Some(stroke),
+            }, false, BUTTONS), destination);
+        }
+        newer.end();
+        assert!(newer.settled(&rig.registry));
+    }
+}
+
+#[test]
 fn a_switch_modifier_counts_while_held_and_when_released() {
     const COMMAND: u64 = 0x0010_0108;
     const CONTROL: u64 = 0x0004_0101;

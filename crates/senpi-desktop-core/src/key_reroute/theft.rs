@@ -255,9 +255,15 @@ impl Theft {
     /// Whether the taps can go: the target no longer holds the keyboard
     /// uninvited, and every key pressed through it into a user's app has come
     /// up.
-    pub fn settled(&self, held: &[Held]) -> bool {
+    pub fn settled(&self, registry: &Registry) -> bool {
+        // A superseding tap on this target owns its held-key records. This worker
+        // already passes every key through, so retaining its ports cannot
+        // help deliver a release and would leak a thread per later action.
+        if registry.latest.0 != self.generation && registry.latest.1 == self.target {
+            return true;
+        }
         !self.stolen()
-            && !held
+            && !registry.held
                 .iter()
                 .any(|held| held.target == self.target && held.to.is_some())
     }

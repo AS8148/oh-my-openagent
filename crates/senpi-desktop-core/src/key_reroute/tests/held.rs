@@ -120,7 +120,7 @@ fn a_newer_action_on_the_same_target_takes_over_the_held_keys() {
         quiet(),
         Instant::now(),
     );
-    assert!(newer.settled(&registry.held));
+    assert!(newer.settled(&registry));
 }
 
 #[test]

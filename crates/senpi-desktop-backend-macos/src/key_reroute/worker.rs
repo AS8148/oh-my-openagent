@@ -199,7 +199,7 @@ pub(super) fn run(
             context.theft.end();
         }
         context.theft.publish(&mut registry);
-        if ended_at.is_some() && context.theft.settled(&registry.held) {
+        if ended_at.is_some() && context.theft.settled(&registry) {
             break;
         }
     }

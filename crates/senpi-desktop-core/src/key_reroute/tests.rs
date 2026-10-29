@@ -95,7 +95,7 @@ impl Rig {
     }
 
     fn settled(&self) -> bool {
-        self.theft.settled(&self.registry.held)
+        self.theft.settled(&self.registry)
     }
 }
 
