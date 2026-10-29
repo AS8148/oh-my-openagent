@@ -356,6 +356,7 @@
     "packages/memory-core/src/sync/item/transplant.ts",
     "packages/memory-core/src/sync/keyring-port.ts",
     "packages/memory-core/src/sync/mirror.ts",
+    "packages/memory-core/src/sync/operation.ts",
     "packages/memory-core/src/sync/pin-dir.ts",
     "packages/memory-core/src/sync/recovery/hpke-seal.ts",
     "packages/memory-core/src/sync/recovery/key-material.ts",
