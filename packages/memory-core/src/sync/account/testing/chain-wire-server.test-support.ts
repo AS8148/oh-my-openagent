@@ -18,7 +18,9 @@ export interface ChainWireServer {
   /** Rewrites a reveal before it is stored: a relay substituting the joining device's keys. */
   tamperReveal: ((reveal: Record<string, unknown>) => Record<string, unknown>) | null
   pending(): ReadonlyArray<Pending>
-  tokenFor(author: SyncAuthor): string
+  tokenFor(author: SyncAuthor, serviceDeviceId?: string): string
+  enabled(serviceDeviceId: string): boolean
+  onWrite: (() => void) | null
   objectOf(seq: number): Uint8Array | undefined
   replaceObject(seq: number, bytes: Uint8Array): void
   stop(): Promise<void>
@@ -30,14 +32,18 @@ const chainRow = ({ seq, base_seq, kind, account, epoch, author, digest, link, k
   seq, base_seq, kind, account, epoch, author, digest, link, keyring_link, record_sig,
 })
 
-export function startChainWireServer(account: string, chain: SyncEntry[]): ChainWireServer {
+export function startChainWireServer(account: string, chain: SyncEntry[], options: { readonly requireConsent?: boolean } = {}): ChainWireServer {
   const authors = new Map<string, SyncAuthor>()
+  const devices = new Map<string, string>()
+  const deviceConsent = new Map<string, boolean>()
+  let accountConsent = false
   const objects = new Map<number, { id: string; batchId: string; bytes: Uint8Array }>()
   const uploads = new Map<string, { size: number; sha256: string; data: Uint8Array | null }>()
   const head = () => chain.at(-1)
   const pairings = new Map<string, Pending>()
   const switches: string[] = []
   const hooks: { tamperReveal: ((reveal: Record<string, unknown>) => Record<string, unknown>) | null } = { tamperReveal: null }
+  let onWrite: (() => void) | null = null
   const server = Bun.serve({
     port: 0,
     idleTimeout: 0,
@@ -46,6 +52,10 @@ export function startChainWireServer(account: string, chain: SyncEntry[]): Chain
       const author = authors.get((req.headers.get("authorization") ?? "").replace(/^Bearer /, ""))
       if (author === undefined) return refusal(401, "unauthorized")
       const path = url.pathname
+      const token = (req.headers.get("authorization") ?? "").replace(/^Bearer /, "")
+      const device = devices.get(token) ?? ""
+      if (options.requireConsent && (path.includes("/batches") || path.includes("/uploads") || path.includes("/objects") || (path === "/v1/sync/keys" && req.method === "PUT")) &&
+          !(accountConsent && deviceConsent.get(device) === true)) return refusal(403, "sync_disabled")
       const after = Number(url.searchParams.get("after") ?? "0")
       if (req.method === "GET" && path === "/v1/sync/state") {
         const last = head()
@@ -107,6 +117,7 @@ export function startChainWireServer(account: string, chain: SyncEntry[]): Chain
         const body = (await req.json()) as { account: string; commitment: string }
         const row: Pending = { id: randomBytes(9).toString("base64url"), account: body.account, commitment: body.commitment, answer: null, reveal: null, expires_at: Date.now() + 600_000 }
         pairings.set(row.id, row)
+        onWrite?.()
         return Response.json(row)
       }
       if (req.method === "GET" && path === "/v1/sync/pending") return Response.json({ pending: [...pairings.values()] })
@@ -118,10 +129,15 @@ export function startChainWireServer(account: string, chain: SyncEntry[]): Chain
         const body = (await req.json()) as Record<string, unknown>
         if (pendingMatch[2] === "answer") row.answer = body
         if (pendingMatch[2] === "reveal") row.reveal = hooks.tamperReveal === null ? body : hooks.tamperReveal(body)
+        onWrite?.()
         return Response.json(row)
       }
       if (req.method === "PUT" && (path === "/v1/account/sync" || /^\/v1\/devices\/[^/]+\/sync$/.test(path))) {
-        switches.push(`${path} ${JSON.stringify(await req.json())}`)
+        const body = await req.json()
+        switches.push(`${path} ${JSON.stringify(body)}`)
+        const enabled = typeof body === "object" && body !== null && "enabled" in body && body.enabled === true
+        if (path === "/v1/account/sync") accountConsent = enabled
+        else deviceConsent.set(decodeURIComponent(path.split("/")[3] ?? ""), enabled)
         return Response.json({ enabled: true })
       }
       if (req.method === "PUT" && path === "/v1/sync/keys") {
@@ -133,6 +149,7 @@ export function startChainWireServer(account: string, chain: SyncEntry[]): Chain
           keyring_link: request.keyring_link, record_sig: request.record_sig, wraps: request.wraps,
         }
         chain.push(entry)
+        onWrite?.()
         return Response.json(entry)
       }
       return refusal(404, "not_found")
@@ -148,9 +165,13 @@ export function startChainWireServer(account: string, chain: SyncEntry[]): Chain
       hooks.tamperReveal = fn
     },
     pending: () => [...pairings.values()],
-    tokenFor(author) {
+    get onWrite() { return onWrite },
+    set onWrite(fn) { onWrite = fn },
+    enabled: (deviceId) => accountConsent && deviceConsent.get(deviceId) === true,
+    tokenFor(author, serviceDeviceId = author.id) {
       const token = randomBytes(12).toString("base64url")
       authors.set(token, author)
+      devices.set(token, serviceDeviceId)
       return token
     },
     objectOf: (seq) => objects.get(seq)?.bytes,
