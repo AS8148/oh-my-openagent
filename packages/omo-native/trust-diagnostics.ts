@@ -124,7 +124,7 @@ export interface TrustDiagnosticsFs {
 export class TrustDiagnosticRecordError extends TypeError {
   override readonly name = "TrustDiagnosticRecordError"
 }
-export class TrustDiagnosticsFileError extends Error {
+class TrustDiagnosticsFileError extends Error {
   override readonly name = "TrustDiagnosticsFileError"
 }
 
