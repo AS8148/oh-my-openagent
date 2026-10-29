@@ -3,6 +3,7 @@ import type { Transport } from "../engine/ports"
 import type { AccountHttp } from "./http"
 import type { PairingHttp } from "./pairing-http"
 import type { SyncOperationAuthority } from "../operation-authority"
+import type { GenesisBridge } from "../genesis/bridge.ts"
 export type { SyncOperationAuthority } from "../operation-authority"
 
 /** Public selected-account identity. Credentials and private key material have no fields here. */
@@ -16,6 +17,8 @@ export interface DesktopSyncDescriptor {
   readonly syncPrincipalId: string
   readonly publicKeys: { readonly signing: string; readonly sealing: string }
   readonly generation: string
+  /** The issuing main incarnation for a desktop account; the CLI reports "cli". */
+  readonly incarnation: string
 }
 
 export interface SyncDevice {
@@ -36,11 +39,13 @@ export interface DesktopSyncOperation {
   readonly keyring: DeviceKeyring
   readonly chain: AccountHttp
   readonly pairing: PairingHttp
+  /** Bound to this operation's main-issued handle; absent for the CLI source, never on background ports. */
+  readonly genesis?: GenesisBridge
   devices(): Promise<readonly SyncDevice[]>
   close(): Promise<void>
 }
 
-export interface DesktopSyncAccount extends Omit<DesktopSyncOperation, "close"> {
+export interface DesktopSyncAccount extends Omit<DesktopSyncOperation, "close" | "genesis"> {
   readonly kind: "desktop"
   readonly descriptor: DesktopSyncDescriptor
   readonly signal: AbortSignal
