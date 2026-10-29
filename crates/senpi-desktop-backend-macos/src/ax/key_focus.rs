@@ -229,17 +229,30 @@ const MAX_ATTACHED_SEARCH_DEPTH: usize = 4;
 /// Window `wid` among `app`'s `AXWindows`, or attached to one of them as a
 /// sheet or popover (`AXSheets`, `AXPopovers`), which `AXWindows` omits.
 fn find_window(app: &AXUIElement, wid: u32) -> Option<CFRetained<AXUIElement>> {
-    let windows = copy_elements(app, "AXWindows")?;
-    if let Some(window) = windows.iter().find(|window| window_id(window) == Some(wid)) {
+    find_window_in(
+        wid,
+        copy_elements(app, "AXWindows")?,
+        |window| window_id(window),
+        |window, attribute| copy_elements(window, attribute),
+    )
+}
+
+fn find_window_in<E: Clone>(
+    wid: u32,
+    windows: Vec<E>,
+    id_of: impl Fn(&E) -> Option<u32>,
+    attachments: impl Fn(&E, &str) -> Option<Vec<E>>,
+) -> Option<E> {
+    if let Some(window) = windows.iter().find(|window| id_of(window) == Some(wid)) {
         return Some(window.clone());
     }
-    let mut level: Vec<CFRetained<AXUIElement>> = windows;
+    let mut level = windows;
     for _ in 0..MAX_ATTACHED_SEARCH_DEPTH {
         let mut next = Vec::new();
         for window in &level {
             for attribute in ["AXSheets", "AXPopovers"] {
-                for attached in copy_elements(window, attribute).unwrap_or_default() {
-                    if window_id(&attached) == Some(wid) {
+                for attached in attachments(window, attribute).unwrap_or_default() {
+                    if id_of(&attached) == Some(wid) {
                         return Some(attached);
                     }
                     next.push(attached);
@@ -287,3 +300,7 @@ pub(crate) fn content_owner(
 #[cfg(test)]
 #[path = "key_focus_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "key_window_lookup_tests.rs"]
+mod lookup_tests;
