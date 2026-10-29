@@ -8,8 +8,14 @@ import { prepareGenesis } from "./prepare.ts"
 import { buildGenesis } from "./build.ts"
 import { bytes } from "./seal.test-support.ts"
 import { ACCOUNT, entryOf, vector, walk } from "./vector.test-support.ts"
+import golden from "./fixtures/genesis.json"
 
 describe("genesis builder conformance", () => {
+  test("recreates every wire byte of the builder-produced golden vector", async () => {
+    const { built } = await vector()
+    expect(jcsBytes(built)).toEqual(jcsBytes(golden))
+  })
+
   test("builds a closed, linked genesis from local device and recovery keys", async () => {
     // Given real locally derived keys and test-owned deterministic sealing.
     const { built, bootstrap, keyring } = await vector()
