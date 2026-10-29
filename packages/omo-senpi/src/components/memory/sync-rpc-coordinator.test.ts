@@ -1,106 +1,8 @@
 import { afterEach, expect, test } from "bun:test"
-import { registerSyncRpc } from "./sync-rpc-registration"
-import type { SyncRpcAccount, SyncRpcContext, SyncRpcOptions, SyncRpcRegistration, SyncRpcRuntime } from "./sync-rpc-ports"
-import { newDevice, removeWorldStateDirs } from "../../../../../memory-core/src/sync/recovery/testing/world.test-support"
-import { createAccountHttp } from "../../../../../memory-core/src/sync/account/http"
-import { createPairingHttp } from "../../../../../memory-core/src/sync/account/pairing-http"
-
-type Handler = Parameters<SyncRpcRegistration["handle"]>[1]
-const cleanups: (() => Promise<void>)[] = []
-afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); await removeWorldStateDirs() })
+import { disposeSyncRpcFixtures, owner, setup } from "./sync-rpc-test-support"
+import { AccountHttpError } from "../../../../memory-core/src/sync/account/http"
 const deferred = <T>() => Promise.withResolvers<T>()
-
-function owner(id: string) {
-  const abort = new AbortController()
-  let retired = false
-  const context: SyncRpcContext = {
-    ownerId: id,
-    disconnectSignal: abort.signal,
-    admit: (dispatch) => { if (retired) throw new Error("retired"); return dispatch() },
-  }
-  return { context, retire: () => { retired = true; abort.abort() } }
-}
-
-async function setup() {
-  const device = await newDevice()
-  const accountAbort = new AbortController()
-  const hostAbort = new AbortController()
-  const sourceBarrier = deferred<void>()
-  let holdSource = false
-  let begins = 0
-  let closes = 0
-  let joins = 0
-  let approvals = 0
-  const joinDone = deferred<{ readonly kind: "joined" }>()
-  const approvalCode = deferred<void>()
-  const joinCode = deferred<void>()
-  let claimHeld = false
-  const runtime: SyncRpcRuntime = {
-    enableSync: async () => ({ kind: "join_required" }),
-    joinAccount: async (input) => {
-      joins += 1
-      input.onPendingCreated({ id: "p", expires_at: Date.now() + 60_000 })
-      await joinCode.promise
-      input.showCode("012345")
-      return joinDone.promise
-    },
-    approveDevice: async (input) => {
-      approvals += 1
-      input.onAnswered({ id: input.pendingId, expires_at: Date.now() + 60_000 })
-      await approvalCode.promise
-      return await input.confirmCode("012345") ? { kind: "approved", seq: 2 } : { kind: "declined" }
-    },
-  }
-  const http = { baseUrl: "https://unused.invalid", token: () => { throw new Error("unexpected HTTP request") } }
-  const account: SyncRpcAccount = {
-    descriptor: { serviceOrigin: http.baseUrl, accountId: "account", serviceDeviceId: "service-device", syncPrincipalId: device.keyring.principal().id, publicKeys: device.keyring.publicKeys(), generation: "generation-1" },
-    signal: accountAbort.signal,
-    isCurrent: async () => !accountAbort.signal.aborted,
-    forOperation: async (authority) => {
-      authority.admit(() => { begins += 1 })
-      return {
-        keyring: device.keyring,
-        chain: createAccountHttp(http),
-        pairing: createPairingHttp(http),
-        devices: async () => [],
-        close: async () => { closes += 1 },
-      }
-    },
-  }
-  const handlers = new Map<string, Handler>()
-  const options: SyncRpcOptions = {
-    source: async () => { if (holdSource) await sourceBarrier.promise; return account },
-    runtime,
-    claims: { acquire: async () => {
-      if (claimHeld) return null
-      claimHeld = true
-      return { expiresAt: async () => undefined, release: async () => { claimHeld = false } }
-    } },
-    pinDir: "/unused",
-    signal: hostAbort.signal,
-    syncStatus: async () => ({ state: "paused" }),
-  }
-  const coordinator = registerSyncRpc({ handle: (name, handler) => { handlers.set(name, handler) } }, options)
-  const call = async (verb: string, context: SyncRpcContext, data: unknown = {}): Promise<unknown> => {
-    const handler = handlers.get(`omo.memory.sync.${verb}`)
-    if (handler === undefined) throw new Error("missing method")
-    return handler(data, context)
-  }
-  cleanups.push(async () => {
-    sourceBarrier.resolve()
-    joinCode.resolve()
-    approvalCode.resolve()
-    joinDone.resolve({ kind: "joined" })
-    await coordinator.dispose()
-  })
-  return {
-    call, runtime, account, accountAbort, hostAbort, coordinator,
-    hold: () => { holdSource = true }, release: () => sourceBarrier.resolve(),
-    showJoinCode: () => joinCode.resolve(), showApprovalCode: () => approvalCode.resolve(),
-    finishJoin: () => joinDone.resolve({ kind: "joined" }),
-    counts: () => ({ begins, closes, joins, approvals }),
-  }
-}
+afterEach(disposeSyncRpcFixtures)
 
 test("#given source resolution is held #when two enables race #then only one join opens", async () => {
   const f = await setup()
@@ -129,7 +31,7 @@ test("#given an approval #when a foreign owner confirms #then its promise is not
   const a = owner("a")
   const b = owner("b")
   await f.call("approve", a.context, { action: "begin", pendingId: "p" })
-  f.showApprovalCode()
+  await f.showApprovalCode()
   expect(await f.call("approve", b.context, { action: "confirm", pendingId: "p", code: "012345" })).toMatchObject({ kind: "refused" })
   expect(await f.call("approve", a.context, { action: "confirm", pendingId: "p", code: "012345" })).toMatchObject({ outcome: { kind: "approved", seq: 2 }, code: null })
   expect(f.counts().approvals).toBe(1)
@@ -139,7 +41,7 @@ test("#given a displayed code #when a different six digit code is submitted #the
   const f = await setup()
   const a = owner("a")
   await f.call("approve", a.context, { action: "begin", pendingId: "p" })
-  f.showApprovalCode()
+  await f.showApprovalCode()
   expect(await f.call("approve", a.context, { action: "confirm", pendingId: "p", code: "999999" })).toMatchObject({ outcome: { kind: "declined" }, code: null })
   expect(await f.call("approve", a.context, { action: "confirm", pendingId: "p", code: "012345" })).toMatchObject({ outcome: { kind: "declined" } })
   expect(f.counts().approvals).toBe(1)
@@ -160,7 +62,7 @@ test("#given approval waits for confirmation #when the account retires #then con
   const f = await setup()
   const a = owner("a")
   await f.call("approve", a.context, { action: "begin", pendingId: "p" })
-  f.showApprovalCode()
+  await f.showApprovalCode()
   f.accountAbort.abort()
   expect(await f.call("status", a.context)).toMatchObject({ kind: "unavailable" })
   expect(await f.call("approve", a.context, { action: "confirm", pendingId: "p", code: "012345" })).toMatchObject({ kind: "refused" })
@@ -170,10 +72,142 @@ test("#given a terminal approval #when status is pulled repeatedly #then the out
   const f = await setup()
   const a = owner("a")
   await f.call("approve", a.context, { action: "begin", pendingId: "p" })
-  f.showApprovalCode()
+  await f.showApprovalCode()
   await f.call("approve", a.context, { action: "decline", pendingId: "p" })
   const expected = { sync: { state: "paused" }, enable: null, approvals: [{ pendingId: "p", expiresAt: expect.any(Number), code: null, outcome: { kind: "declined" } }] }
   expect(await f.call("status", a.context)).toEqual(expected)
   expect(await f.call("status", a.context)).toEqual(expected)
   expect(f.counts().closes).toBe(1)
 })
+
+test("#given an expired pending result #when status is read #then expiry remains recoverable", async () => {
+  const f = await setup()
+  const a = owner("a")
+  f.runtime.joinAccount = async (input) => {
+    input.onPending({ id: "p", expires_at: Date.now() - 1 })
+    return { kind: "expired" }
+  }
+  expect(await f.call("enable", a.context)).toEqual({ kind: "expired" })
+  expect(await f.call("status", a.context)).toMatchObject({ enable: { kind: "expired" } })
+})
+
+test("#given an operation begin held in the selected source #when pending owner disconnects #then listPending never dispatches", async () => {
+  const f = await setup()
+  const a = owner("a")
+  const entered = deferred<void>()
+  const release = deferred<void>()
+  const original = f.account.forOperation
+  let lists = 0
+  f.account.forOperation = async (authority) => {
+    const ports = await original(authority)
+    entered.resolve()
+    await release.promise
+    return { ...ports, pairing: { ...ports.pairing, listPending: async () => { lists += 1; return [] } } }
+  }
+  const result = f.call("pending", a.context)
+  await entered.promise
+  a.retire()
+  release.resolve()
+  expect(await result).toMatchObject({ kind: "unavailable" })
+  expect(lists).toBe(0)
+  expect(f.counts().closes).toBe(1)
+  expect(await f.call("pending", owner("b").context)).toEqual({ pending: [] })
+})
+
+test("#given public pending rows #when pending is read #then nonces and commitments never leave the handler", async () => {
+  const f = await setup()
+  const original = f.account.forOperation
+  f.account.forOperation = async (authority) => {
+    const ports = await original(authority)
+    return { ...ports, pairing: { ...ports.pairing, listPending: async () => [{
+      id: "p", account: "account", commitment: "private-commitment",
+      answer: { principal: { kind: "device", id: "principal", signing_public_key: "public", sealing_public_key: "public" }, approver_nonce: "private-nonce" },
+      reveal: null, expires_at: 10,
+    }] } }
+  }
+  expect(await f.call("pending", owner("a").context)).toEqual({ pending: [{ id: "p", expiresAt: 10, answered: true, revealed: false }] })
+  expect(f.counts()).toEqual({ begins: 1, closes: 1, joins: 0, approvals: 0 })
+})
+
+test("#given devices read fails #when devices is requested #then it is not an empty success or raw exception", async () => {
+  const f = await setup()
+  const original = f.account.forOperation
+  f.account.forOperation = async (authority) => {
+    const ports = await original(authority)
+    return { ...ports, devices: async () => { throw new Error("secret service trace") } }
+  }
+  const result = await f.call("devices", owner("a").context)
+  expect(result).toMatchObject({ kind: "unavailable" })
+  expect(JSON.stringify(result)).not.toContain("secret service trace")
+  expect(f.counts().closes).toBe(1)
+})
+
+test("#given a malformed device timestamp #when devices is requested #then schema rejection is unavailable", async () => {
+  const f = await setup()
+  const original = f.account.forOperation
+  f.account.forOperation = async (authority) => {
+    const ports = await original(authority)
+    return { ...ports, devices: async () => [{
+      id: "service-device", name: "device", kind: "cli", platform: "macos",
+      createdAt: "invalid", lastSeenAt: "invalid", current: true, syncing: true,
+      revokedAt: null, syncPrincipal: "different-principal",
+    }] }
+  }
+  expect(await f.call("devices", owner("a").context)).toMatchObject({ kind: "unavailable" })
+})
+
+test("#given distinct service and sync IDs #when devices is requested #then original service fields are retained", async () => {
+  const f = await setup()
+  const original = f.account.forOperation
+  const device = {
+    id: "service-device", name: "device", kind: "cli" as const, platform: "macos" as const,
+    createdAt: "2026-10-29T00:00:00Z", lastSeenAt: "2026-10-29T00:01:00Z", current: true, syncing: true,
+    revokedAt: null, syncPrincipal: "different-principal",
+  }
+  f.account.forOperation = async (authority) => ({ ...await original(authority), devices: async () => [device] })
+  expect(await f.call("devices", owner("a").context)).toEqual({ devices: [device] })
+})
+
+test("#given an old bound ceremony #when the engine binding changes #then codes cannot survive into the replacement", async () => {
+  const f = await setup()
+  const a = owner("a")
+  await f.call("approve", a.context, { action: "begin", pendingId: "p" })
+  await f.showApprovalCode()
+  f.coordinator.retireBinding()
+  expect(await f.call("status", a.context)).toEqual({ sync: { state: "paused" }, enable: null, approvals: [] })
+  expect(await f.call("approve", a.context, { action: "confirm", pendingId: "p", code: "012345" })).toMatchObject({ kind: "refused" })
+})
+
+for (const field of ["principal", "signing", "sealing"] as const) {
+  test(`#given the same service device but changed ${field} #when enable resolves its keyring #then no core effect starts`, async () => {
+    const f = await setup()
+    const original = f.account.forOperation
+    let effects = 0
+    f.runtime.enableSync = async () => { effects += 1; return { kind: "joined" } }
+    f.account.forOperation = async (authority) => {
+      const ports = await original(authority)
+      return {
+        ...ports,
+        keyring: {
+          ...ports.keyring,
+          principal: () => ({ ...ports.keyring.principal(), ...(field === "principal" ? { id: "changed" } : {}) }),
+          publicKeys: () => ({ ...ports.keyring.publicKeys(), ...(field === "principal" ? {} : { [field]: "changed" }) }),
+        },
+      }
+    }
+    expect(await f.call("enable", owner("a").context)).toMatchObject({ kind: "unavailable" })
+    expect(effects).toBe(0)
+    expect(f.counts().closes).toBe(1)
+  })
+}
+
+for (const [status, kind] of [[403, "refused"], [503, "unavailable"]] as const) {
+  test(`#given service status ${status} #when approval fails before its observer #then begin returns ${kind} without hanging`, async () => {
+    const f = await setup()
+    f.runtime.approveDevice = async () => { throw new AccountHttpError("private-detail", status) }
+    const result = await f.call("approve", owner("a").context, { action: "begin", pendingId: "p" })
+    expect(result).toMatchObject({ kind })
+    expect(JSON.stringify(result)).not.toContain("private-detail")
+    expect(f.counts().closes).toBe(1)
+  })
+}

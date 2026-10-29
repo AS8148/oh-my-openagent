@@ -1,7 +1,6 @@
 import type { DeviceKeyring } from "@oh-my-opencode/memory-core/keyring"
-import type { AccountHttp, PairingHttp, CeremonyClock, ApproveOutcome, JoinOutcome, EnableOutcome } from "@oh-my-opencode/memory-core/sync-engine"
+import type { AccountHttp, PairingHttp, CeremonyClock, ApproveOutcome, JoinOutcome, EnableOutcome, DesktopSyncAccount, DesktopSyncDescriptor, DesktopSyncOperation } from "@oh-my-opencode/memory-core/sync-engine"
 import type { MemoryRpcSync } from "./memory-rpc-sync"
-import type { SyncDevice } from "./sync-rpc-contract"
 
 /** The permanent upstream interface, including undefined on internal calls. */
 export interface SyncRpcContext {
@@ -11,7 +10,7 @@ export interface SyncRpcContext {
 }
 
 export interface SyncRpcRegistration {
-  handle(name: string, handler: (data: unknown, context: SyncRpcContext | undefined) => unknown | Promise<unknown>): void
+  handle(name: string, handler: (data: unknown, context?: SyncRpcContext) => unknown | Promise<unknown>): void
 }
 
 export interface SyncRpcAuthority {
@@ -20,30 +19,12 @@ export interface SyncRpcAuthority {
   boundary<T>(dispatch: () => T): Promise<T>
 }
 
-export interface SyncRpcIdentity {
-  readonly serviceOrigin: string
-  readonly accountId: string
-  readonly serviceDeviceId: string
-  readonly syncPrincipalId: string
-  readonly publicKeys: { readonly signing: string; readonly sealing: string }
-  readonly generation: string
-}
+export type SyncRpcIdentity = DesktopSyncDescriptor
 
 /** Selected source only: this port never reconstructs or falls back to CLI credentials. */
-export interface SyncRpcAccount {
-  readonly descriptor: SyncRpcIdentity
-  readonly signal: AbortSignal
-  isCurrent(): Promise<boolean>
-  forOperation(authority: Pick<SyncRpcAuthority, "signal" | "admit">): Promise<SyncRpcOperation>
-}
+export type SyncRpcAccount = Pick<DesktopSyncAccount, "descriptor" | "signal" | "isCurrent" | "boundary" | "forOperation">
 
-export interface SyncRpcOperation {
-  readonly keyring: DeviceKeyring
-  readonly chain: AccountHttp
-  readonly pairing: PairingHttp
-  devices(): Promise<readonly SyncDevice[]>
-  close(): Promise<void>
-}
+export type SyncRpcOperation = DesktopSyncOperation
 
 export interface SyncRpcCeremonyInput {
   readonly account: string
@@ -56,11 +37,16 @@ export interface SyncRpcCeremonyInput {
 }
 
 export interface SyncRpcRuntime {
-  enableSync(input: SyncRpcCeremonyInput & { readonly serviceDeviceId: string }): Promise<EnableOutcome & { readonly firstDeviceCreated?: boolean }>
+  enableSync(input: SyncRpcCeremonyInput & {
+    readonly serviceDeviceId: string
+    readonly serviceOrigin: string
+    readonly rpId?: string
+    readonly userName?: string
+  }): Promise<EnableOutcome & { readonly created?: true }>
   joinAccount(input: SyncRpcCeremonyInput & {
     readonly clock: CeremonyClock
     readonly showCode: (code: string) => void
-    readonly onPendingCreated: (row: { readonly id: string; readonly expires_at: number }) => void
+    readonly onPending: (row: { readonly id: string; readonly expires_at: number }) => void
   }): Promise<JoinOutcome>
   approveDevice(input: SyncRpcCeremonyInput & {
     readonly clock: CeremonyClock
