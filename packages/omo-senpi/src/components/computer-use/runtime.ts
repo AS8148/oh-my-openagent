@@ -9,7 +9,6 @@ import {
 
 import type { ComputerUseEngineErrorCode } from "../telemetry/omo-native-computer-use"
 import { createEscapeStopGate } from "./escape-stop-gate"
-export { createEscapeStopGate } from "./escape-stop-gate"
 
 import { confirmComputerControl } from "./control-confirm"
 import { defaultEngineChild, describeEngineSource } from "./engine-source"

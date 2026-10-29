@@ -12,6 +12,11 @@ use crate::worker::Worker;
 
 impl Worker {
     pub(crate) fn prepare_escape(&mut self) -> CoreResult<()> {
+        // Preserve the existing stop-path refusal before probing a backend
+        // that may itself be unavailable; no input may precede either check.
+        if let Some(refused) = crate::mutate::interruption(&self.safety.supervisor, &self.stop_policy()) {
+            return Err(refused);
+        }
         self.watch_user_input();
         let stop = Arc::clone(&self.escape);
         self.backend()?.watch_escape(stop)?;
