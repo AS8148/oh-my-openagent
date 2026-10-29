@@ -17,7 +17,7 @@ export class RecoveryPending extends SignInError {
   }
 }
 
-export class OwnedSessionEnded extends SignInError {
+class OwnedSessionEnded extends SignInError {
   constructor(readonly code: string, readonly deviceRevoked: boolean) {
     super("Sign in again with omo login.")
   }

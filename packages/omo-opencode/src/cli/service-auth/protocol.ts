@@ -14,7 +14,7 @@ export class RequestFailure extends SignInError {
   }
 }
 
-export class InvalidApiResponse extends SignInError {
+class InvalidApiResponse extends SignInError {
   constructor(readonly status: number) { super("The service returned an invalid error response.") }
 }
 

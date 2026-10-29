@@ -11,7 +11,7 @@ const clockSchema = z.object({
   continuousTimeMs: z.number().finite().nonnegative(),
   bootId: z.string().min(1),
 })
-export const refreshAttemptSchema = z.object({
+const refreshAttemptSchema = z.object({
   writerProtocol: z.literal(2),
   origin: z.string().url(),
   owner: ownerSchema,
@@ -23,7 +23,7 @@ export const refreshAttemptSchema = z.object({
 })
 export type RefreshAttempt = z.infer<typeof refreshAttemptSchema>
 
-export const refreshTokenHash = (token: string): string => createHash("sha256").update(token).digest("hex")
+const refreshTokenHash = (token: string): string => createHash("sha256").update(token).digest("hex")
 export const sameOwner = sameStableOwner
 
 export function newRefreshAttempt(
