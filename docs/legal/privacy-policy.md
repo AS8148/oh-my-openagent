@@ -149,8 +149,8 @@ Nobody else receives raw events. We publish only aggregates, such as how many in
 
 ## 6. Retention and deletion
 
-- **Events in PostHog** are kept for 24 months from the day they are received, then deleted with PostHog's deletion tools.
-- **Deletion method.** Events are deleted from PostHog's event store by install hash (on request, section 8) or by age (at the end of the period); PostHog then removes them from its storage.
+- **Events in PostHog.** We have not set a retention period yet, and events are not yet deleted automatically by age. When we set one, this section will say how long events are kept and the deletion will run on that schedule.
+- **Deletion method.** Today, events are deleted from PostHog's event store by install hash, on request (section 8); PostHog then removes them from its storage.
 - **On your computer.** The install id file, your configuration, and daily-deduplication state stay until you delete them. Session-summary and pending-event files under OmO's state directory are deleted once sent, or after 14 days at the latest. OmO keeps no local history of what it sent.
 
 ## 7. Files OmO stores on your computer for telemetry
