@@ -10,7 +10,7 @@ Generated command:
 git ls-files packages/omo-opencode/src packages/omo-codex/src | grep '\.ts$' | sort | xargs awk 'FNR==1 && /^export (\*|\{).*from ["'"'"']@oh-my-opencode\// { print FILENAME }'
 ```
 
-Snapshot date: 2026-08-31. Total shim exports found: 229.
+Snapshot date: 2026-08-31. Total shim exports found: 226.
 
 ## Aggregate By Target Package
 
@@ -18,7 +18,7 @@ Snapshot date: 2026-08-31. Total shim exports found: 229.
 |---|---:|
 | `@oh-my-opencode/agents-md-core` | 2 |
 | `@oh-my-opencode/boulder-state` | 1 |
-| `@oh-my-opencode/claude-code-compat-core` | 36 |
+| `@oh-my-opencode/claude-code-compat-core` | 33 |
 | `@oh-my-opencode/delegate-core` | 1 |
 | `@oh-my-opencode/hashline-core` | 6 |
 | `@oh-my-opencode/mcp-client-core` | 21 |
@@ -87,11 +87,8 @@ Snapshot date: 2026-08-31. Total shim exports found: 229.
 | `packages/omo-opencode/src/features/claude-code-agent-loader/index.ts` | `@oh-my-opencode/claude-code-compat-core` |
 | `packages/omo-opencode/src/features/claude-code-agent-loader/json-agent-loader.ts` | `@oh-my-opencode/claude-code-compat-core` |
 | `packages/omo-opencode/src/features/claude-code-agent-loader/loader.ts` | `@oh-my-opencode/claude-code-compat-core` |
-| `packages/omo-opencode/src/features/claude-code-agent-loader/opencode-config-agents-reader.ts` | `@oh-my-opencode/claude-code-compat-core` |
 | `packages/omo-opencode/src/features/claude-code-agent-loader/types.ts` | `@oh-my-opencode/claude-code-compat-core` |
 | `packages/omo-opencode/src/features/claude-code-command-loader/index.ts` | `@oh-my-opencode/claude-code-compat-core` |
-| `packages/omo-opencode/src/features/claude-code-command-loader/loader-cache.ts` | `@oh-my-opencode/claude-code-compat-core` |
-| `packages/omo-opencode/src/features/claude-code-command-loader/loader.ts` | `@oh-my-opencode/claude-code-compat-core` |
 | `packages/omo-opencode/src/features/claude-code-command-loader/types.ts` | `@oh-my-opencode/claude-code-compat-core` |
 | `packages/omo-opencode/src/features/claude-code-mcp-loader/configure-allowed-env-vars.ts` | `@oh-my-opencode/claude-code-compat-core` |
 | `packages/omo-opencode/src/features/claude-code-mcp-loader/index.ts` | `@oh-my-opencode/claude-code-compat-core` |
