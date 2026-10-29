@@ -73,7 +73,7 @@ unsafe extern "C" {
 /// Whether any process has Secure Event Input on. While it is, the window
 /// server hides key events from every event tap (Apple TN2150), so the tap
 /// stays enabled and beating but cannot hear the stop chord.
-pub(super) fn secure_input_enabled() -> bool {
+pub(crate) fn secure_input_enabled() -> bool {
     // SAFETY: [FFI] takes no arguments and only reads session state.
     unsafe { IsSecureEventInputEnabled() != 0 }
 }

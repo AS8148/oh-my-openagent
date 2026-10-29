@@ -30,6 +30,7 @@ pub struct MacosBackend {
     ax: MacAx,
     overlay: crate::overlay::Overlay,
     user_input: UserInputWatch,
+    reroute: crate::key_reroute::RerouteOwner,
 }
 
 impl MacosBackend {
@@ -41,6 +42,7 @@ impl MacosBackend {
             ax: MacAx::with_overlay(overlay.clone()),
             overlay,
             user_input: UserInputWatch::default(),
+            reroute: crate::key_reroute::RerouteOwner::default(),
         })
     }
 
@@ -110,6 +112,7 @@ impl Backend for MacosBackend {
     fn begin_background_action(
         &mut self,
         target: &Target,
+        audit: senpi_desktop_core::key_reroute::audit::AuditSink,
     ) -> CoreResult<Option<Box<dyn senpi_desktop_core::background_action::BackgroundActionWatch>>>
     {
         let Target::Window(id) = target else {
@@ -127,7 +130,7 @@ impl Backend for MacosBackend {
         else {
             return Ok(None);
         };
-        crate::skylight::background::begin(pid)
+        crate::skylight::background::begin(pid, &self.reroute, audit)
     }
 
     fn emergency_release(&self) -> Option<std::sync::Arc<dyn senpi_desktop_core::backend::EmergencyRelease>> {

@@ -111,6 +111,7 @@ pub trait Backend: Send {
     fn begin_background_action(
         &mut self,
         _target: &Target,
+        _audit: crate::key_reroute::audit::AuditSink,
     ) -> CoreResult<Option<Box<dyn crate::background_action::BackgroundActionWatch>>> {
         Ok(None)
     }
