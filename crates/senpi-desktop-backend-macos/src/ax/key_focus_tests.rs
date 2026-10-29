@@ -2,7 +2,9 @@
 
 use objc2_application_services::AXError;
 
-use super::{content_owner, focused_window, FocusedWindow, KeyDestination, KeyFocus, WindowContent};
+use std::cell::Cell;
+
+use super::{content_owner, focused_window, target_window, FocusedWindow, KeyDestination, KeyFocus, WindowContent};
 
 #[test]
 fn a_focused_sheet_is_not_the_window_it_is_attached_to() {
@@ -99,5 +101,27 @@ fn a_system_panel_is_drawn_by_the_process_its_children_map_to() {
     // read, or no mapped child at all shows no other process.
     assert_eq!(content_owner(7581, 561, [Some(554), Some(559)], owners), WindowContent::Own);
     assert_eq!(content_owner(7581, 554, [Some(999)], owners), WindowContent::Own);
+    // An unreadable owner beside a remote child still shows the window's own
+    // content: the read did not prove another process.
+    assert_eq!(content_owner(7581, 554, [Some(999), Some(556)], owners), WindowContent::Own);
     assert_eq!(content_owner(7581, 554, [None, None], owners), WindowContent::Own);
+}
+
+#[test]
+fn a_panel_behind_another_window_is_read_from_its_own_window() {
+    // TextEdit's document window 543 is focused while its Open panel 554
+    // is not: the panel's content still comes from window 554.
+    let found = Cell::new(false);
+    let find = || {
+        found.set(true);
+        Some(554)
+    };
+    assert_eq!(target_window(554, Some(543), |&id| Some(id), find), Some(554));
+    assert!(found.get());
+    // The focused window answers for itself without a search.
+    found.set(false);
+    assert_eq!(target_window(554, Some(554), |&id| Some(id), find), Some(554));
+    assert!(!found.get());
+    // Neither the focused window nor a search shows the window.
+    assert_eq!(target_window(554, Some(543), |&id| Some(id), || None::<u32>), None);
 }

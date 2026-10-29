@@ -104,9 +104,9 @@ pub(super) fn perform_requested(
         // A destroyed element or an app that does not answer is its own
         // refusal, not an element with no actions.
         let actions = element.action_names().map_err(|error| {
-            request_result(error, "reading the element's actions", "the element's actions could not be read; nothing was sent")
-                .err()
-                .unwrap_or_else(|| DesktopError::ax_failed("the element's actions could not be read; nothing was sent"))
+            DesktopError::ax_failed(format!(
+                "the element's actions could not be read ({error:?}), so the press was not sent; nothing was sent"
+            ))
         })?;
         if !actions.contains(&native) {
             return Err(unsupported_action(&native, &actions));

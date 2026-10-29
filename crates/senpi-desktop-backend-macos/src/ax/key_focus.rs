@@ -194,20 +194,64 @@ pub(crate) enum WindowContent {
     Remote { pid: libc::pid_t, window: u32 },
 }
 
-/// Who draws window `wid` of process `pid`, from the window ids its
-/// accessibility window's children map to and WindowServer's owner of each.
+/// Who draws window `wid` of process `pid`, read from its accessibility
+/// window whether or not it is the focused one, so that a system panel
+/// behind another window of its application still shows its drawing process;
+/// [`WindowContent::Own`] when that window cannot be found or read. A sheet
+/// or popover, which `AXWindows` omits, is found attached to a listed window.
 pub(crate) fn window_content(pid: libc::pid_t, wid: u32) -> WindowContent {
     let Some(app) = probe_application(pid) else {
         return WindowContent::Own;
     };
-    let Some(windows) = copy_elements(&app, "AXWindows") else {
+    let focused = copy_element(&app, "AXFocusedWindow");
+    let Some(window) = target_window(wid, focused, |focused| window_id(focused), || find_window(&app, wid)) else {
         return WindowContent::Own;
     };
-    let Some(window) = windows.iter().find(|window| window_id(window) == Some(wid)) else {
-        return WindowContent::Own;
-    };
-    let children = copy_elements(window, "AXChildren").unwrap_or_default();
+    let children = copy_elements(&window, "AXChildren").unwrap_or_default();
     content_owner(pid, wid, children.iter().map(|child| window_id(child)), crate::skylight::window_owner_pid)
+}
+
+/// Window `wid`'s accessibility element: the application's `focused` window
+/// when that is `wid`, which spares the search through its windows and
+/// sheets, else what `find` finds (oh-my-pi 0838d2ab44 `target_window`).
+pub(crate) fn target_window<E>(
+    wid: u32,
+    focused: Option<E>,
+    id_of: impl Fn(&E) -> Option<u32>,
+    find: impl FnOnce() -> Option<E>,
+) -> Option<E> {
+    focused.filter(|focused| id_of(focused) == Some(wid)).or_else(find)
+}
+
+/// Most windows a search for an attached sheet or popover descends through.
+const MAX_ATTACHED_SEARCH_DEPTH: usize = 4;
+
+/// Window `wid` among `app`'s `AXWindows`, or attached to one of them as a
+/// sheet or popover (`AXSheets`, `AXPopovers`), which `AXWindows` omits.
+fn find_window(app: &AXUIElement, wid: u32) -> Option<CFRetained<AXUIElement>> {
+    let windows = copy_elements(app, "AXWindows")?;
+    if let Some(window) = windows.iter().find(|window| window_id(window) == Some(wid)) {
+        return Some(window.clone());
+    }
+    let mut level: Vec<CFRetained<AXUIElement>> = windows;
+    for _ in 0..MAX_ATTACHED_SEARCH_DEPTH {
+        let mut next = Vec::new();
+        for window in &level {
+            for attribute in ["AXSheets", "AXPopovers"] {
+                for attached in copy_elements(window, attribute).unwrap_or_default() {
+                    if window_id(&attached) == Some(wid) {
+                        return Some(attached);
+                    }
+                    next.push(attached);
+                }
+            }
+        }
+        if next.is_empty() {
+            return None;
+        }
+        level = next;
+    }
+    None
 }
 
 /// [`window_content`]'s decision from the window ids the window's children
@@ -234,8 +278,7 @@ pub(crate) fn content_owner(
             Some(owner) if owner != pid => {
                 remote.get_or_insert(WindowContent::Remote { pid: owner, window: id });
             }
-            Some(_) => return WindowContent::Own,
-            None => {}
+            _ => return WindowContent::Own,
         }
     }
     remote.unwrap_or(WindowContent::Own)
