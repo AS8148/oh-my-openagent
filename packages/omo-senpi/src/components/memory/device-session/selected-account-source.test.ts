@@ -75,7 +75,7 @@ describe("the account source built from the engine's one selection", () => {
 })
 
 type EngineReport = { readonly source: string; readonly cliBuilt: boolean; readonly handle?: string; readonly foreignEnd?: string; readonly events?: readonly string[] }
-async function engine(scenario: string): Promise<{ readonly claims: number; readonly ends: number; readonly reports: readonly EngineReport[] }> {
+async function engine(scenario: string): Promise<{ readonly claims: number; readonly ends: number; readonly reports: readonly EngineReport[]; readonly open?: readonly string[] }> {
   const child = Bun.spawn([process.execPath, join(import.meta.dirname, "../desktop-sync/hostSelection.fixture.ts"), scenario], { stdout: "pipe", stderr: "pipe" })
   const deadline = new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`the ${scenario} engine fixture did not exit within 20s`)), 20_000))
   const code = await Promise.race([child.exited, deadline])
@@ -90,6 +90,8 @@ describe("session Workers in a shared-worker engine", () => {
       const result = await engine(scenario)
       expect(result.claims).toBe(1)
       expect(result.ends).toBe(2)
+      // The engine exits by lifecycle: every port, channel and proxy handle is closed, nothing keeps it alive.
+      expect(result.open).toEqual([])
       const [a, b] = result.reports
       if (a === undefined || b === undefined) throw new Error("missing Worker report")
       expect(new Set([a.handle, b.handle]).size).toBe(2)
