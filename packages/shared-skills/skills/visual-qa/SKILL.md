@@ -136,7 +136,7 @@ This is the platform baseline, distilled from Apple's Human Interface Guidelines
 - B5 One or two accents per screen; toolbars and tab bars stay monochrome over colourful content; nothing decorative carries accent.
 - B6 Type hierarchy comes from weight, size and colour, holds in both themes, and uses at most two typefaces.
 - B7 (web and app screens; N/A for a TUI, a printed page, or a figure) The screen matches its brief (the `frontend` skill's Brief step): the named primary action is the single prominent control, priorities 1-3 appear in that order in reading order on the first viewport, and nothing listed under "left out on purpose" is on the screen. A screen built or changed in this session with no brief is a FAIL; a pre-existing screen under audit with no brief is N/A.
-- B8 Type scale floor, read from computed values: adjacent type roles in use differ by at least 1.25x in size (or also by weight or colour where two must sit closer), a display heading stays at or under 6rem, and letter spacing never goes below -0.04em.
+- B8 Type scale floor, read from computed values: adjacent type roles in use differ by at least 1.25x in size (or also by weight or colour where two must sit closer), a display heading stays at or under 6rem, and letter spacing never goes below -0.04em, unless the brief's chosen style route sets its own display scale or tracking (then that value is the check).
 
 **C. Text and copy**
 - C1 Body text is at least 17 pt-equivalent at 390 (15 pt for secondary text) and 14 px on desktop; no thin weights at small sizes.
@@ -161,7 +161,7 @@ This is the platform baseline, distilled from Apple's Human Interface Guidelines
 - E4 One colour never means two things; status colours are consistent across the surface.
 - E5 Translucent surfaces keep text legible over any scrolled content: blur or vibrancy, not a plain alpha fill.
 - E6 The theme follows the system; an in-app theme control also offers "system".
-- E7 Secondary text on a tinted or coloured surface is a shade of that hue or the foreground at reduced alpha, never neutral gray; a shadow carries a y-offset and a soft blur, never a zero-offset coloured glow.
+- E7 Secondary text on a tinted or coloured surface is a shade of that hue or the foreground at reduced alpha, never neutral gray; a shadow carries a y-offset and a soft blur, never a zero-offset coloured glow unless the brief asked for glowing-border cards (the `frontend` skill's ambience route).
 
 **F. Consistency and brand**
 - F1 One icon set with one stroke, weight and size; icon weight matches adjacent text; no emoji used as an icon.
@@ -172,7 +172,9 @@ This is the platform baseline, distilled from Apple's Human Interface Guidelines
 - F6 Standard glyphs for standard actions (share, close, back, search, more) in their standard places.
 - F7 Windows, sheets and popovers use system shapes; one sheet or popover at a time; a popover's arrow points at its source; only an alert may appear over a popover.
 - F8 Browser surfaces carry the palette in both themes: text selection, caret, visible scrollbars, focus ring, link underline offset, and tabular numerals in changing or aligned numbers; none shows the browser default (select text and focus a field in the capture to prove it).
-- F9 None of the generated scaffolds: a kicker label above a heading, an icon tile stacked over a heading in a grid of same-size cards, a hero metric with no decision behind it, a card nested in a card, monospace used as a "technical" costume.
+- F9 None of the generated scaffolds: a kicker label above a heading, an icon tile stacked over a heading in a grid of same-size cards, a hero metric with no decision behind it, a card nested in a card, monospace used as a "technical" costume. One the brief or its chosen route asked for, recorded as such, passes.
+
+A13, B8, E7, F8 and F9 are adapted from the craft floor of [pbakaus/impeccable](https://github.com/pbakaus/impeccable) (Apache-2.0, Copyright 2025 Paul Bakaus); the license and the list of changes are in the `frontend` skill's `ATTRIBUTION.md` section 6.
 
 **G. Motion and feedback**
 - G1 Every animation has a cause - an interaction, a state change, an arrival; no motion on non-interactive elements, no hover that changes nothing, no permanent loop.

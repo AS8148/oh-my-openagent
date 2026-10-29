@@ -255,7 +255,8 @@ assets, or proprietary copy.
 floor" and "No generated scaffold" rules in `frontend/SKILL.md`, and the matching
 `visual-qa/SKILL.md` checklist items (A3 measure, A13, B8, E7, F8, F9) are adapted from
 `skill/reference/craft-floor.md` of the Impeccable project. Unlike sections 1-4 these files
-are committed: they are a rewrite in this project's words, not verbatim copies.
+are committed: they are rewritten in this project's words, with a few short phrases kept
+close to the source.
 
 - Source: https://github.com/pbakaus/impeccable
 - Adapted from upstream commit: 5e745ace7e151feb2a93d360d0281fe39448b857
@@ -271,11 +272,16 @@ are committed: they are a rewrite in this project's words, not verbatim copies.
   permissions and limitations under the License. A full copy of the Apache-2.0 license
   text is provided in `LICENSE-Apache-2.0.txt` alongside this notice.
 
-- **Changes (Apache-2.0 §4(b)):** the rules were selected and rewritten, not copied. Kept:
-  the browser-surface list, the numeric type and spacing floors, and the scaffold and
-  shadow bans listed above. Added: a property per browser surface, the phone measure
-  floor, and the `/visual-qa` item mapping. Dropped because they conflict with this
-  skill: blur and `backdrop-filter` animation, choosing one theme per product category,
-  decorative custom scrollbars, a blanket bounce-easing ban, and the common-typeface ban.
+- **Changes (Apache-2.0 §4(b)):** the rules were selected and rewritten. Kept: the
+  browser-surface list, more space above a heading than below it, the 65-75ch body
+  measure, the 6rem display cap, the -0.04em tracking floor, and the scaffold and shadow
+  patterns listed above. Added: a property per browser surface, the 1.25x type-scale step,
+  the 1.5x above-versus-below heading ratio, the 2x between-versus-within group gap, the
+  phone measure floor, the split into floors and route-overridable defaults (the kicker is a
+  default here, not upstream's absolute ban), and the `/visual-qa` item mapping. Dropped
+  because they conflict with this skill: blur and `backdrop-filter` as general motion
+  materials (here they animate only in an ambience reveal the brief asked for), choosing
+  one theme per product category, decorative custom scrollbars, a blanket bounce-easing
+  ban, and the common-typeface ban.
   The upstream `NOTICE.md` names only the MIT-licensed `platform-design-skills` origin of
   its iOS and Android references, none of which is used here.
