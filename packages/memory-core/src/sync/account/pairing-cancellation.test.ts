@@ -4,6 +4,7 @@ import { creatorAnchor } from "../crypto/anchor.ts"
 import { appendEntries, emptyChain } from "../crypto/chain.ts"
 import { createRejectionCounter } from "../crypto/rejection.ts"
 import { pinTrustAnchor } from "../crypto/trust-pin.ts"
+import type { DeviceKeyring } from "../keyring-port.ts"
 import { createWorld, freshStateDir, newDevice, removeWorldStateDirs } from "../recovery/testing/world.test-support.ts"
 import { approveDevice } from "./approve.ts"
 import { createAccountHttp } from "./http.ts"
@@ -63,9 +64,19 @@ test("disconnect at confirmation prevents approval signing and append", async ()
   await pairing.revealPending(pending.id, joining.principal, nonce)
   const controller = new AbortController()
   const before = rows.length
+  let signatures = 0
+  const keyring: DeviceKeyring = {
+    principal: () => world.owner.keyring.principal(),
+    publicKeys: () => world.owner.keyring.publicKeys(),
+    unseal: (wrap, binding) => world.owner.keyring.unseal(wrap, binding),
+    sign: (request) => {
+      signatures++
+      return world.owner.keyring.sign(request)
+    },
+  }
   const input = {
     account: world.account,
-    keyring: world.owner.keyring,
+    keyring,
     pinDir,
     chain: createAccountHttp(options),
     pairing,
@@ -82,6 +93,7 @@ test("disconnect at confirmation prevents approval signing and append", async ()
   const outcome = await approveDevice(input)
 
   // Then: no approval is appended for the retired owner.
+  expect(signatures).toBe(0)
   expect(outcome.kind).toBe("refused")
   expect(rows).toHaveLength(before)
 })
