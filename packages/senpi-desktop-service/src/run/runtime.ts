@@ -147,11 +147,7 @@ export async function runComputerCode(request: ComputerRunRequest, host: Compute
 		{
 			foregroundAllowed: () => host.service.foregroundAllowed(),
 			possiblyLive: () => host.service.possiblyLive(),
-			grantForFullAccess: async (abort) => {
-				if (!(await host.service.grantForFullAccess(abort))) {
-					throw new ComputerRunError("unavailable", "the session no longer allows foreground control");
-				}
-			},
+			grantForFullAccess: (abort) => host.service.grantForFullAccess(abort),
 		},
 		context.output,
 		signal,

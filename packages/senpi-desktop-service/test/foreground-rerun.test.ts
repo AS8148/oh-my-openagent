@@ -102,6 +102,37 @@ describe("automatic foreground rerun (D2)", () => {
 		expect(sends.map((request) => (request.params as { opts?: { deliveryMode?: string } }).opts?.deliveryMode)).toEqual([undefined, "foreground"]);
 	});
 
+	test("a rerun whose own refusal is final is not rerun again and adds no line", async () => {
+		// FAKE_ENGINE_CONTROL_BUSY: the automatic grant is refused InputBusy, so the rerun never goes out
+		const desktop = await openGated({ value: true }, { ...GATE, FAKE_ENGINE_CONTROL_BUSY: "1" });
+		await expect(runCode(desktop.service, TYPE)).rejects.toMatchObject({ data: { code: "InputBusy" } });
+		expect(requested(desktop.log, "typeText")).toBe(1);
+		expect(requested(desktop.log, "control.grant")).toBe(1);
+	});
+
+	test("full access ending between the decision and the grant returns the engine's own refusal", async () => {
+		const preset: Preset = { value: true };
+		const desktop = await openGated(preset, GATE);
+		// The decision has read foregroundAllowed() = true; full access ends right before the grant is written
+		const service = desktop.service;
+		const host = {
+			call: service.call.bind(service),
+			onAudit: service.onAudit.bind(service),
+			revokeControl: service.revokeControl.bind(service),
+			reportError: service.reportError.bind(service),
+			foregroundAllowed: () => service.foregroundAllowed(),
+			possiblyLive: () => service.possiblyLive(),
+			grantForFullAccess: (signal: AbortSignal) => {
+				preset.value = false;
+				return service.grantForFullAccess(signal);
+			},
+		};
+		const result = runComputerCode({ code: TYPE, snapshot: snapshot(false), timeoutMs: 15_000 }, { service: host, executeTool: noTools });
+		await expect(result).rejects.toMatchObject({ data: { code: "BackgroundUnavailable" } });
+		expect(requested(desktop.log, "control.grant")).toBe(0);
+		expect(requested(desktop.log, "typeText")).toBe(1);
+	});
+
 	test("after full access ends the automatic grant is fenced and nothing reruns", async () => {
 		const preset: Preset = { value: true };
 		const desktop = await openGated(preset, GATE);
