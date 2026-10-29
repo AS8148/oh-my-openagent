@@ -83,6 +83,7 @@ export async function runSyncRpcOperation(
       serviceOrigin: captured.serviceOrigin,
       ...(captured.genesis === "supported" && captured.rpId !== null && captured.userName !== null
         ? { rpId: captured.rpId, userName: captured.userName } : {}),
+      ...(captured.genesis === "supported" && ports.genesis !== undefined ? { genesis: ports.genesis } : {}),
       keyring: ports.keyring, chain: ports.chain, pairing: ports.pairing,
       pinDir: options.pinDir, authority: auth, signal: auth.signal,
     }
