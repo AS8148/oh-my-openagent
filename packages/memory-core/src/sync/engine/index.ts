@@ -7,5 +7,6 @@ export { type AccountSessionIdle, type AccountSessionOptions, type AccountSessio
 export { type DeviceSync, openDeviceSync, type OpenDeviceSyncOptions, type SyncSession } from "./open"
 export type { RefusalCode, Sealer, Transport, Verifier } from "./ports"
 export { deviceKeyringFromMaterial } from "../account/device-keyring"
+export type { DesktopSyncDescriptor, SyncDevice, SyncOperationAuthority, DesktopSyncOperation, DesktopSyncAccount } from "../account/source-types"
 export type { DeviceKeyMaterial } from "../keyring-port"
 export { GitSpaceConfig, listRemotes, resolveSpace } from "../space/space"
