@@ -107,6 +107,26 @@ impl MacosBackend {
 }
 
 impl Backend for MacosBackend {
+    fn begin_background_action(
+        &mut self,
+        target: &Target,
+    ) -> CoreResult<Option<Box<dyn senpi_desktop_core::background_action::BackgroundActionWatch>>>
+    {
+        let Target::Window(id) = target else {
+            return Ok(None);
+        };
+        let Some(pid) = self
+            .capture
+            .windows()?
+            .into_iter()
+            .find(|window| window.id == *id)
+            .and_then(|window| window.pid)
+        else {
+            return Ok(None);
+        };
+        crate::skylight::background::begin(pid)
+    }
+
     fn emergency_release(&self) -> Option<std::sync::Arc<dyn senpi_desktop_core::backend::EmergencyRelease>> {
         Some(self.input.emergency_release())
     }
