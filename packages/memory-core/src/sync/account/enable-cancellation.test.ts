@@ -17,10 +17,10 @@ test.each(["before_enable", "after_account_switch", "during_token"] as const)(
   async (boundary) => {
     // Given: real service routes and an owner retired at a controlled dispatch boundary.
     const controller = new AbortController()
-    const { keyring } = await newDevice()
+    const { keyring, principal } = await newDevice()
     const server = startChainWireServer("retired-enable", [])
     servers.push(server)
-    const token = server.tokenFor(keyring.principal())
+    const token = server.tokenFor(principal)
     const dispatched: string[] = []
     const doFetch: typeof fetch = Object.assign(
       async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
