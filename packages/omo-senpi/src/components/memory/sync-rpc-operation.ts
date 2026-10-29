@@ -37,7 +37,7 @@ export interface Operation {
 
 export function identityOf(account: SyncRpcAccount): string {
   const d = account.descriptor
-  return JSON.stringify([d.serviceOrigin, d.accountId, d.serviceDeviceId, d.syncPrincipalId, d.publicKeys.signing, d.publicKeys.sealing, d.generation])
+  return JSON.stringify([d.serviceOrigin, d.accountId, d.serviceDeviceId, d.syncPrincipalId, d.publicKeys.signing, d.publicKeys.sealing, d.generation, d.incarnation])
 }
 
 export async function runSyncRpcOperation(

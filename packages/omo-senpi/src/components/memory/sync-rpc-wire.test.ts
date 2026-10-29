@@ -70,7 +70,7 @@ async function setup(empty = false) {
       descriptor: {
         genesis: "unsupported", rpId: null, userName: null,
         serviceOrigin: server.url, accountId: world.account, serviceDeviceId: `service-${device.principal.id}`,
-        syncPrincipalId: device.principal.id, publicKeys: device.keyring.publicKeys(), generation: "g1",
+        syncPrincipalId: device.principal.id, publicKeys: device.keyring.publicKeys(), generation: "g1", incarnation: "main-1",
       },
       signal: controller.signal,
       isCurrent: async () => !controller.signal.aborted,

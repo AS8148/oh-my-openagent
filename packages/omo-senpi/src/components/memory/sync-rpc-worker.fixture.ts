@@ -20,7 +20,7 @@ const account: SyncRpcAccount = {
   descriptor: {
     genesis: "unsupported", rpId: null, userName: null,
     serviceOrigin: data.api, accountId: "worker-pairing", serviceDeviceId: "shared-device",
-    syncPrincipalId: data.principalId, publicKeys: keyring.publicKeys(), generation: "g1",
+    syncPrincipalId: data.principalId, publicKeys: keyring.publicKeys(), generation: "g1", incarnation: "main-1",
   },
   signal: controller.signal, isCurrent: async () => !controller.signal.aborted,
   boundary: async (dispatch) => { controller.signal.throwIfAborted(); return dispatch() },

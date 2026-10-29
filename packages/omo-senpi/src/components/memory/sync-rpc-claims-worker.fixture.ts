@@ -8,7 +8,7 @@ const data = z.object({
   identity: z.object({
     genesis: z.enum(["supported", "unsupported"]), rpId: z.string().nullable(), userName: z.string().nullable(),
     serviceOrigin: z.string(), accountId: z.string(), serviceDeviceId: z.string(), syncPrincipalId: z.string(),
-    publicKeys: z.object({ signing: z.string(), sealing: z.string() }), generation: z.string(),
+    publicKeys: z.object({ signing: z.string(), sealing: z.string() }), generation: z.string(), incarnation: z.string(),
   }),
 }).parse(workerData)
 const claims = createSyncRpcClaims(data.root)
