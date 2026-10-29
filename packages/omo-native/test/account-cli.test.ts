@@ -31,6 +31,7 @@ function memoryStore(initial: Credentials | null) {
   let value = initial
   const store: CredentialStore = {
     read: async () => value,
+    readAuthoritative: async () => value,
     write: async next => {
       value = next
     },
@@ -403,6 +404,7 @@ describe("omo account on Linux, where a locked Secret Service read looks empty (
     let reads = 0
     const store: CredentialStore = {
       read: async () => (reads++ === 0 ? credential("dev_r", -60_000) : null),
+      readAuthoritative: async () => (reads++ === 0 ? credential("dev_r", -60_000) : null),
       write: async () => {},
       clear: async () => {},
     }
@@ -413,6 +415,7 @@ describe("omo account on Linux, where a locked Secret Service read looks empty (
   test("a keychain that locks mid-refresh keeps its own outcome (7), even when the read after it succeeds", async () => {
     const store: CredentialStore = {
       read: async () => credential("dev_k", -60_000),
+      readAuthoritative: async () => credential("dev_k", -60_000),
       write: async () => {
         throw new KeychainLockedError("macOS Keychain is locked.")
       },
